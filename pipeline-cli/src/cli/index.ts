@@ -45,6 +45,15 @@ import {
 } from '../dor/comment-loop.js';
 import { computePrViolations } from '../dor/pr-violations.js';
 import type { RefinementVerdict } from '../dor/types.js';
+import {
+  checkReviewerCache,
+  DEFAULT_CACHE_TTL_HOURS,
+  resolveBlobShasForPaths,
+  saveReviewerCache,
+  type CacheFileEntry,
+  type ReviewerName as CacheReviewerName,
+} from '../orchestrator/reviewer-cache.js';
+import { runReconcile, type RunReconcileOptions } from '../orchestrator/reconcile.js';
 import { readFileSync } from 'node:fs';
 import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
@@ -103,6 +112,218 @@ export function buildCli(): Argv {
       // appears at the top of `--help` (yargs lists subcommands in
       // registration order). Composes Steps 0-13 via `executePipeline()`.
       .command(executeCommand())
+      // AISDLC-418 — reconcile sub-tick (orchestrator-tick Steps 3.3-3.8).
+      // Single bash call that wraps salvage transcripts + emit leaves +
+      // sign attestation + force-push chore + flip draft→ready + arm
+      // auto-merge + clean verdict. Reviewer fan-out remains in the
+      // slash command body (Agent is only available there); reconcile is
+      // invoked AFTER the slash body has written the aggregated reviewer
+      // verdicts to `.ai-sdlc/verdicts/<task-id-lower>.json`.
+      .command(
+        'reconcile <task-id>',
+        'AISDLC-418 — reconcile sub-tick (Steps 3.3-3.8): salvage transcripts, emit leaves, sign attestation, force-push, flip draft→ready, arm auto-merge.',
+        (y) =>
+          y
+            .positional('task-id', { type: 'string', demandOption: true })
+            .option('worktree-path', {
+              type: 'string',
+              describe:
+                'Override the worktree path (defaults to <work-dir>/.worktrees/<task-id-lower>).',
+            })
+            .option('board-dir', {
+              type: 'string',
+              describe:
+                'Override the Dispatch Board dir (defaults to <work-dir>/.ai-sdlc/dispatch).',
+            })
+            .option('reviewer-agent-ids', {
+              type: 'string',
+              describe:
+                'JSON map of {reviewer-name: agent-id} for /private/tmp transcript salvage (AC #3). Reviewer agent IDs are returned by the slash command body when it fires the parallel Agent calls.',
+            })
+            .option('skip-push', { type: 'boolean', default: false })
+            .option('skip-flip-ready', { type: 'boolean', default: false })
+            .option('skip-arm-auto-merge', { type: 'boolean', default: false })
+            .option('schema-version', {
+              type: 'string',
+              choices: ['v5', 'v6'] as const,
+              describe: 'Override the attestation schema version (default: v6 per AISDLC-409).',
+            })
+            .option('reviewer-model', {
+              type: 'string',
+              describe:
+                "Override the model passed to `cli-attestation emit-leaf` (default: 'claude-sonnet-4-6').",
+            })
+            .option('harness', {
+              type: 'string',
+              describe: "Override the harness label (default: 'claude-code').",
+            }),
+        async (argv) => {
+          const opts: RunReconcileOptions = {
+            workDir: argv['work-dir'] as string,
+            taskId: argv['task-id'] as string,
+            skipPush: argv['skip-push'] as boolean,
+            skipFlipReady: argv['skip-flip-ready'] as boolean,
+            skipArmAutoMerge: argv['skip-arm-auto-merge'] as boolean,
+          };
+          if (argv['worktree-path']) opts.worktreePath = argv['worktree-path'] as string;
+          if (argv['board-dir']) opts.boardDir = argv['board-dir'] as string;
+          if (argv['schema-version']) {
+            opts.schemaVersion = argv['schema-version'] as 'v5' | 'v6';
+          }
+          if (argv['reviewer-model']) opts.reviewerModel = argv['reviewer-model'] as string;
+          if (argv['harness']) opts.harness = argv['harness'] as string;
+          if (argv['reviewer-agent-ids']) {
+            opts.reviewerAgentIds = parseJsonOption(
+              argv['reviewer-agent-ids'],
+              'reviewer-agent-ids',
+            );
+          }
+          const result = runReconcile(opts);
+          emit(result);
+          if (result.outcome === 'failed') process.exit(1);
+        },
+      )
+      // AISDLC-418 — reviewer-pass cache. Two subcommands:
+      //   reviewer-cache check <task-id> --reviewer <name> --files <json> --head-sha <sha>
+      //   reviewer-cache save  <task-id> --reviewer <name> --files <json> --head-sha <sha> --verdict <json>
+      // The slash body's iterate-needed branch invokes `check` before
+      // firing each reviewer Agent; cache HIT → reuse the prior verdict.
+      // `save` is invoked after every reviewer Agent completes.
+      //
+      // Iter-2 — `--files` is interpreted as a JSON array of file paths
+      // (workdir-relative); the CLI resolves each path's git blob SHA via
+      // `git ls-tree HEAD` so callers don't have to compute blobs in bash.
+      // Callers may also pass the richer `[{path, blobSha}, ...]` form
+      // when they already have blobs in hand. `--head-sha` is the dev
+      // commit SHA the cache binds to (iter-2 trust anchor). `--reviewer`
+      // is constrained to the three known reviewer names so typos fail
+      // loud (iter-2 SUGGESTION #6).
+      .command(
+        'reviewer-cache <action> <task-id>',
+        'AISDLC-418 — reviewer-pass cache: check (probe for a reusable verdict) or save (persist this iteration).',
+        (y) =>
+          y
+            .positional('action', {
+              type: 'string',
+              choices: ['check', 'save'] as const,
+              demandOption: true,
+            })
+            .positional('task-id', { type: 'string', demandOption: true })
+            .option('reviewer', {
+              type: 'string',
+              demandOption: true,
+              choices: ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const,
+            })
+            .option('files', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'JSON array of file paths (workdir-relative) OR JSON array of {path, blobSha} entries. When path-only, the CLI resolves blob SHAs via `git ls-tree HEAD`.',
+            })
+            .option('head-sha', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'Dev commit SHA the cache entry binds to. The cache MISSES on read if this differs from the current HEAD (iter-2 trust anchor).',
+            })
+            .option('agent-file', {
+              type: 'string',
+              describe:
+                "Path to the reviewer's .md agent definition. Defaults to ai-sdlc-plugin/agents/<reviewer>.md inside --work-dir.",
+            })
+            .option('ttl-hours', { type: 'number', default: DEFAULT_CACHE_TTL_HOURS })
+            .option('verdict', {
+              type: 'string',
+              describe:
+                "(save only) JSON object of the reviewer verdict, OR '@<path>' to read it from disk.",
+            })
+            .option('verdict-path', {
+              type: 'string',
+              describe:
+                '(save only) Path-on-disk to record alongside the cached verdict (workdir-relative).',
+            })
+            .option('transcript-path', {
+              type: 'string',
+              describe:
+                "(save only) Path to the reviewer's transcript .jsonl. When present, it's copied alongside the cache entry so HIT consumers can restore it for v6 emit-leaf (iter-2 MAJOR #3).",
+            }),
+        async (argv) => {
+          const action = String(argv.action) as 'check' | 'save';
+          const taskId = String(argv['task-id']);
+          const reviewer = String(argv.reviewer) as CacheReviewerName;
+          const workDir = argv['work-dir'] as string;
+          const headSha = String(argv['head-sha']);
+          const filesRaw = parseJsonOption<unknown>(argv.files, 'files');
+          let files: CacheFileEntry[];
+          if (Array.isArray(filesRaw) && filesRaw.every((v) => typeof v === 'string')) {
+            // path-only form — resolve blob SHAs via git.
+            files = resolveBlobShasForPaths(workDir, filesRaw as string[]);
+          } else if (
+            Array.isArray(filesRaw) &&
+            filesRaw.every(
+              (v) =>
+                v &&
+                typeof v === 'object' &&
+                typeof (v as { path: unknown }).path === 'string' &&
+                typeof (v as { blobSha: unknown }).blobSha === 'string',
+            )
+          ) {
+            files = filesRaw as CacheFileEntry[];
+          } else {
+            fail('--files must be a JSON string[] OR JSON {path, blobSha}[]');
+          }
+          const agentFile =
+            (argv['agent-file'] as string | undefined) ??
+            `${workDir}/ai-sdlc-plugin/agents/${reviewer}.md`;
+          if (action === 'check') {
+            const result = checkReviewerCache({
+              workDir,
+              taskId,
+              reviewer,
+              currentFiles: files,
+              agentFilePath: agentFile,
+              headSha,
+              ttlHours: argv['ttl-hours'] as number,
+            });
+            emit(result);
+            return;
+          }
+          // save
+          const verdictRaw = argv.verdict as string | undefined;
+          if (!verdictRaw) fail('--verdict is required for reviewer-cache save');
+          let verdictObj: Record<string, unknown>;
+          if (verdictRaw.startsWith('@')) {
+            try {
+              verdictObj = JSON.parse(readFileSync(verdictRaw.slice(1), 'utf8')) as Record<
+                string,
+                unknown
+              >;
+            } catch (err) {
+              fail(`failed to read --verdict file: ${(err as Error).message}`);
+            }
+          } else {
+            verdictObj = parseJsonOption<Record<string, unknown>>(verdictRaw, 'verdict');
+          }
+          const verdictPath =
+            (argv['verdict-path'] as string | undefined) ??
+            (verdictRaw.startsWith('@') ? verdictRaw.slice(1) : '');
+          const saveOpts: Parameters<typeof saveReviewerCache>[0] = {
+            workDir,
+            taskId,
+            reviewer,
+            files,
+            agentFilePath: agentFile,
+            headSha,
+            verdict: verdictObj as Parameters<typeof saveReviewerCache>[0]['verdict'],
+          };
+          if (verdictPath) saveOpts.verdictPath = verdictPath;
+          if (argv['transcript-path']) {
+            saveOpts.transcriptPath = String(argv['transcript-path']);
+          }
+          const target = saveReviewerCache(saveOpts);
+          emit({ ok: true, path: target });
+        },
+      )
       // Step 0
       .command(
         'sweep-worktrees',
