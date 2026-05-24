@@ -1033,6 +1033,22 @@ export {
   type TierMultipliers,
 } from './signal-ingestion/index.js';
 
+// RFC-0030 Phase 5 — D1 formula reformulation + RFC-0008 PPA integration
+export {
+  aggregateD1FromClusters,
+  composeD1Inputs,
+  computeClusterD1,
+  enrichDemandSignalFromClusters,
+  type AggregatedD1Result,
+  type ClusterD1Score,
+  type ClusterMatcher,
+  type ComposeD1InputsArgs,
+  type ComposedD1Result,
+  type D1CompositionWeights,
+  type EnrichDemandSignalArgs,
+  type EnrichDemandSignalResult,
+} from './signal-ingestion/index.js';
+
 // RFC-0010 artifacts (heartbeat + event stream + atomic JSON + state listing)
 export {
   StateWriter,

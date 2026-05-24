@@ -67,6 +67,32 @@ export interface ClusteringConfig {
   similarityThreshold: number;
 }
 
+/**
+ * Phase 5 — non-replacement weighting between signal-pipeline-derived demand
+ * and human-authored backlog-item demand when both feed D1 (RFC-0030 §10).
+ *
+ * **Backward compat (AC #4)**: when `enabled: false` at the top level, only
+ * `backlogItemWeight` is in effect — `signalPipelineWeight` is irrelevant
+ * because no pipeline-derived demand exists. When `enabled: true`, both
+ * weights blend the two demand streams; default 50/50 keeps neither stream
+ * dominant out of the box.
+ *
+ * The weights are normalised to sum to 1 inside `composeD1Inputs()` so any
+ * positive pair is meaningful (e.g. `{1, 3}` becomes `{0.25, 0.75}`).
+ */
+export interface D1CompositionWeights {
+  /**
+   * Weight applied to the signal-pipeline-derived (cluster-aggregate) D1
+   * input. Default 0.5 — even blend with backlog-derived demand.
+   */
+  signalPipelineWeight: number;
+  /**
+   * Weight applied to the human-authored backlog-item demand input.
+   * Default 0.5 — even blend with signal-pipeline demand.
+   */
+  backlogItemWeight: number;
+}
+
 /** Fully-resolved signal ingestion configuration. */
 export interface SignalIngestionConfig {
   enabled: boolean;
@@ -76,6 +102,7 @@ export interface SignalIngestionConfig {
   tier2SignificanceThreshold: Tier2SignificanceThreshold;
   saResonanceThresholds: SaResonanceThresholds;
   clustering: ClusteringConfig;
+  d1Composition: D1CompositionWeights;
   adapters: string[];
   /**
    * Per-org list of accepted BCP-47 language tags. Default: `['en']`.
@@ -116,6 +143,10 @@ export const DEFAULT_SIGNAL_INGESTION_CONFIG: SignalIngestionConfig = {
   clustering: {
     algorithm: 'bm25',
     similarityThreshold: 0.6,
+  },
+  d1Composition: {
+    signalPipelineWeight: 0.5,
+    backlogItemWeight: 0.5,
   },
   adapters: ['signal-source-support-ticket', 'signal-source-community-thread'],
   acceptedLanguages: ['en'],
@@ -209,6 +240,7 @@ function resolveConfig(raw: unknown, filePath: string): SignalIngestionConfig {
     tier2SignificanceThreshold: resolveTier2Threshold(spec['tier2SignificanceThreshold']),
     saResonanceThresholds: resolveSaThresholds(spec['saResonanceThresholds']),
     clustering: resolveClusteringConfig(spec['clustering']),
+    d1Composition: resolveD1Composition(spec['d1Composition']),
     adapters: resolveStringArray(spec['adapters'], DEFAULT_SIGNAL_INGESTION_CONFIG.adapters),
     acceptedLanguages: resolveLanguageList(spec['acceptedLanguages']),
   };
@@ -314,6 +346,27 @@ function resolveSaThresholds(value: unknown): SaResonanceThresholds {
     fullWeight: resolveNonNegativeNumber(obj['fullWeight'], defaults.fullWeight, 'fullWeight'),
     discounted: resolveNonNegativeNumber(obj['discounted'], defaults.discounted, 'discounted'),
     excluded: resolveNonNegativeNumber(obj['excluded'], defaults.excluded, 'excluded'),
+  };
+}
+
+function resolveD1Composition(value: unknown): D1CompositionWeights {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.d1Composition;
+  if (value === undefined || value === null) return { ...defaults };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('d1Composition must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  return {
+    signalPipelineWeight: resolveNonNegativeNumber(
+      obj['signalPipelineWeight'],
+      defaults.signalPipelineWeight,
+      'signalPipelineWeight',
+    ),
+    backlogItemWeight: resolveNonNegativeNumber(
+      obj['backlogItemWeight'],
+      defaults.backlogItemWeight,
+      'backlogItemWeight',
+    ),
   };
 }
 

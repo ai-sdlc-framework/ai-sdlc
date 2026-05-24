@@ -55,6 +55,7 @@ export {
   DEFAULT_SIGNAL_INGESTION_CONFIG_PATH,
   SignalIngestionConfigError,
   type ClusteringConfig,
+  type D1CompositionWeights,
   type IcpResonanceWeights,
   type LoadSignalIngestionConfigOptions,
   type SaResonanceThresholds,
@@ -102,6 +103,21 @@ export {
   type Tier2SignificanceReasons,
   type Tier2SignificanceState,
 } from './significance.js';
+
+// RFC-0030 Phase 5 — D1 formula reformulation + RFC-0008 PPA integration
+export {
+  aggregateD1FromClusters,
+  composeD1Inputs,
+  computeClusterD1,
+  enrichDemandSignalFromClusters,
+  type AggregatedD1Result,
+  type ClusterD1Score,
+  type ClusterMatcher,
+  type ComposeD1InputsArgs,
+  type ComposedD1Result,
+  type EnrichDemandSignalArgs,
+  type EnrichDemandSignalResult,
+} from './d1.js';
 
 import { CommunityThreadSignalSourceAdapter } from './adapters/community-thread.js';
 import { ManualSignalSourceAdapter } from './adapters/manual.js';
