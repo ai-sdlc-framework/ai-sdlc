@@ -437,6 +437,182 @@ describe('consumerLabel propagation (OQ-6 re-walkthrough)', () => {
   });
 });
 
+// ── OpenAI adapter: embedBatch() ─────────────────────────────────────────────
+
+describe('OpenAITextEmbedding3Small — embedBatch()', () => {
+  const originalEnv = process.env.OPENAI_API_KEY;
+
+  beforeEach(() => {
+    process.env.OPENAI_API_KEY = 'sk-test-key';
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalEnv;
+    }
+    vi.restoreAllMocks();
+  });
+
+  // AC-1: empty-array fast-path
+  it('returns [] immediately for empty input array', async () => {
+    const adapter = new OpenAITextEmbedding3Small();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const result = await adapter.embedBatch([]);
+    expect(result).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // AC-2: empty-string-in-batch rejection
+  it('throws EmbeddingProviderError for empty string in batch', async () => {
+    const adapter = new OpenAITextEmbedding3Small();
+    await expect(adapter.embedBatch(['valid', ''])).rejects.toThrow(
+      /empty string in input array rejected/,
+    );
+  });
+
+  // AC-3: no OPENAI_API_KEY guard
+  it('throws EmbeddingProviderError when OPENAI_API_KEY is not set', async () => {
+    delete process.env.OPENAI_API_KEY;
+    const adapter = new OpenAITextEmbedding3Small();
+    await expect(adapter.embedBatch(['x'])).rejects.toThrow(/OPENAI_API_KEY is not set/);
+  });
+
+  // AC-4: successful multi-text batch — correct request body + parsed response
+  it('sends correct request body and returns parsed vectors', async () => {
+    const adapter = new OpenAITextEmbedding3Small();
+    const vec1 = new Array(1536).fill(0.1) as number[];
+    const vec2 = new Array(1536).fill(0.2) as number[];
+    let capturedBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        capturedBody = JSON.parse(init.body as string);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: [
+              { embedding: vec1, index: 0 },
+              { embedding: vec2, index: 1 },
+            ],
+            usage: { prompt_tokens: 10, total_tokens: 10 },
+          }),
+        });
+      }),
+    );
+
+    const result = await adapter.embedBatch(['hello', 'world']);
+
+    expect(capturedBody).toMatchObject({
+      model: 'text-embedding-3-small',
+      input: ['hello', 'world'],
+      encoding_format: 'float',
+    });
+    expect(result).toHaveLength(2);
+    expect(result[0]).toHaveLength(1536);
+    expect(result[1]).toHaveLength(1536);
+  });
+
+  // AC-5: batch HTTP error throws EmbeddingProviderError
+  it('throws EmbeddingProviderError on 4xx/5xx response', async () => {
+    const adapter = new OpenAITextEmbedding3Small();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: async () => 'service unavailable',
+      }),
+    );
+    await expect(adapter.embedBatch(['some text'])).rejects.toThrow(/HTTP 503/);
+  });
+
+  // AC-6: batch dimension-mismatch throws EmbeddingDimensionMismatch
+  it('throws EmbeddingDimensionMismatch when a batch item has wrong vector length', async () => {
+    const adapter = new OpenAITextEmbedding3Small();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [{ embedding: new Array(512).fill(0.1), index: 0 }], // wrong: 512 vs 1536
+          usage: { prompt_tokens: 5, total_tokens: 5 },
+        }),
+      }),
+    );
+    await expect(adapter.embedBatch(['test'])).rejects.toThrow(EmbeddingDimensionMismatch);
+  });
+
+  // AC-7: consumerLabel propagation via embedBatch()
+  it('propagates consumerLabel to cost-tracker callback', async () => {
+    const capturedRecords: EmbeddingCostRecord[] = [];
+    const adapter = new OpenAITextEmbedding3Small((record) => capturedRecords.push(record));
+    const fakeVec = new Array(1536).fill(0.5) as number[];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [{ embedding: fakeVec, index: 0 }],
+          usage: { prompt_tokens: 8, total_tokens: 8 },
+        }),
+      }),
+    );
+
+    await adapter.embedBatch(['batch text'], 'rfc-0009-batch-drift');
+
+    expect(capturedRecords).toHaveLength(1);
+    expect(capturedRecords[0].consumerLabel).toBe('rfc-0009-batch-drift');
+  });
+});
+
+// ── OpenAI adapter: setCostCallback() ────────────────────────────────────────
+
+describe('OpenAITextEmbedding3Small — setCostCallback()', () => {
+  const originalEnv = process.env.OPENAI_API_KEY;
+
+  beforeEach(() => {
+    process.env.OPENAI_API_KEY = 'sk-test-key';
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalEnv;
+    }
+    vi.restoreAllMocks();
+  });
+
+  // AC-9: instantiate without callback, call setCostCallback, verify records flow
+  it('records cost after setCostCallback is called post-construction', async () => {
+    const adapter = new OpenAITextEmbedding3Small(); // no callback at construction
+
+    const capturedRecords: EmbeddingCostRecord[] = [];
+    adapter.setCostCallback((record) => capturedRecords.push(record));
+
+    const fakeVec = new Array(1536).fill(0.7) as number[];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [{ embedding: fakeVec, index: 0 }],
+          usage: { prompt_tokens: 20, total_tokens: 20 },
+        }),
+      }),
+    );
+
+    await adapter.embed('test after wiring');
+
+    expect(capturedRecords).toHaveLength(1);
+    expect(capturedRecords[0].tokens).toBe(20);
+    expect(capturedRecords[0].provider).toBe('openai-text-embedding-3-small');
+  });
+});
+
 // ── billingModel field is correctly read by framework (AC#8, OQ-7) ────────────
 
 describe('billingModel field (OQ-7 re-walkthrough)', () => {
