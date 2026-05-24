@@ -1,5 +1,7 @@
 /**
  * RFC-0025 §13.1 quality-monitoring.yaml config loader.
+ * Phase 2 (AISDLC-303): classifier.confidenceThresholds (OQ-1) —
+ * confidence-bucketed three-tier classifier per-org configuration.
  * Phase 3 (AISDLC-304): recurrence-windows.
  * Phase 5 (AISDLC-306): coverage-gap (OQ-6) + determinism-detection (OQ-7)
  * + operator-time-cost (OQ-9) per-org configuration.
@@ -93,6 +95,24 @@ export const DEFAULT_DETERMINISM_ALWAYS_ON_REQUIRES = true;
  */
 export const DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES = 30;
 
+/**
+ * Default high-confidence threshold for the OQ-1 confidence-bucketed
+ * classifier (Phase 2 / AISDLC-303). Confidence at-or-above this threshold
+ * auto-classifies into `operator-under-decided` or `framework-misbehaved`.
+ * Matches §13.1 shipping default + the framework's standard 0.7 threshold
+ * shared with the AISDLC-321 classifier substrate.
+ */
+export const DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD = 0.7;
+
+/**
+ * Default mid/low boundary for the OQ-1 confidence-bucketed classifier.
+ * Confidence at-or-above this threshold (but below `autoClassify`) maps to
+ * `ambiguous` (operator triages). Confidence strictly below this threshold
+ * is treated as `unclassified` — logged only, no operator-facing surface
+ * per the task brief's three-tier model.
+ */
+export const DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD = 0.3;
+
 // ── Config types ──────────────────────────────────────────────────────
 
 export interface UpstreamReportingConfig {
@@ -183,7 +203,53 @@ export interface OperatorTimeCostConfig {
   afkInactivityMinutes: number;
 }
 
+/**
+ * RFC-0025 §13.1 OQ-1 — confidence-bucketed classifier thresholds.
+ *
+ * Phase 2 (AISDLC-303). Controls the three-tier confidence-bucketed
+ * classifier:
+ *   - confidence ≥ `autoClassify` → auto-classify into the resolved class
+ *     (`operator-under-decided` / `framework-misbehaved` / `external-dependency-failed`).
+ *   - confidence in `[ambiguous, autoClassify)` → `ambiguous` (operator
+ *     triages via the standard RFC-0024 rubric).
+ *   - confidence < `ambiguous` → `unclassified`, log-only (no operator-
+ *     facing surface — preserves operator attention per the task brief).
+ *
+ * Defaults match §13.1 (`autoClassify: 0.7`, `ambiguous: 0.3`) which are
+ * the operator-affirmed OQ-1 resolution values. Per-org override via
+ * `quality.classifier.confidenceThresholds.{autoClassify, ambiguous}`.
+ *
+ * Invariants enforced by the loader:
+ *   - both values clamped to `[0, 1]`.
+ *   - `ambiguous` ≤ `autoClassify` (the loader silently swaps if reversed
+ *     to keep the classifier's bucket logic monotonic; the schema
+ *     validator in CI catches the misconfiguration upstream).
+ */
+export interface ClassifierConfidenceConfig {
+  /**
+   * High-confidence boundary. Confidence ≥ this auto-classifies into the
+   * resolved class. Default `0.7` per §13.1 / OQ-1 resolution.
+   */
+  autoClassify: number;
+  /**
+   * Mid/low boundary. Confidence ≥ this AND below `autoClassify` maps to
+   * `ambiguous`; strictly below maps to `unclassified` (log-only). Default
+   * `0.3` per §13.1 / OQ-1 resolution.
+   */
+  ambiguous: number;
+}
+
+/** Aggregated classifier config — currently only confidence thresholds. */
+export interface ClassifierConfig {
+  confidenceThresholds: ClassifierConfidenceConfig;
+}
+
 export interface QualityMonitoringConfig {
+  /**
+   * Confidence-bucketed classifier thresholds (OQ-1 / Phase 2). See
+   * `ClassifierConfig`.
+   */
+  classifier: ClassifierConfig;
   /**
    * Recurrence windows to compute simultaneously (OQ-3).
    *
@@ -228,6 +294,12 @@ export interface QualityMonitoringConfig {
 }
 
 export const QUALITY_MONITORING_CONFIG_DEFAULTS: Readonly<QualityMonitoringConfig> = Object.freeze({
+  classifier: {
+    confidenceThresholds: {
+      autoClassify: DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD,
+      ambiguous: DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD,
+    },
+  },
   recurrenceWindows: [...DEFAULT_RECURRENCE_WINDOWS],
   upstreamReporting: {
     repoUrl: '',
@@ -289,6 +361,12 @@ function unquote(s: string): string {
  * Supported YAML shape (each block independent / optional):
  * ```yaml
  * quality:
+ *   classifier:                # OQ-1 / Phase 2 (AISDLC-303)
+ *     confidenceThresholds:
+ *       autoClassify: 0.7      # ≥ this → auto-classify
+ *       ambiguous: 0.3         # ≥ this and < autoClassify → ambiguous;
+ *                              # < this → unclassified, log-only
+ *
  *   recurrence-windows:        # OQ-3
  *     - 7d
  *     - 30d
@@ -325,6 +403,11 @@ function unquote(s: string): string {
  */
 export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoringConfig {
   const out: QualityMonitoringConfig = {
+    classifier: {
+      confidenceThresholds: {
+        ...QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds,
+      },
+    },
     recurrenceWindows: [...DEFAULT_RECURRENCE_WINDOWS],
     upstreamReporting: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.upstreamReporting },
     vendorNamespace: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.vendorNamespace },
@@ -339,7 +422,14 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
   // Track the active block; resets when we hit a non-list line at a
   // shallower indent. The line-oriented parser is intentionally minimal —
   // see the module docstring for rationale.
+  //
+  // `classifier-confidence-thresholds` represents the two-level path
+  // `classifier.confidenceThresholds` — the parser flattens it because the
+  // shape of the YAML matters more than internal node depth for our
+  // line-oriented reader.
   type Block =
+    | 'classifier'
+    | 'classifier-confidence-thresholds'
     | 'recurrence-windows'
     | 'upstream-reporting'
     | 'vendor-namespace'
@@ -376,6 +466,22 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     if (!trimmed || trimmed.startsWith('#')) continue;
 
     // ── Block headers (level-agnostic key match) ──────────────────────
+    if (/^classifier\s*:\s*$/.test(trimmed)) {
+      if (block === 'recurrence-windows') flushWindows();
+      if (block === 'customSubclasses') flushSubclasses();
+      block = 'classifier';
+      continue;
+    }
+    if (/^confidenceThresholds\s*:\s*$/.test(trimmed)) {
+      if (block === 'recurrence-windows') flushWindows();
+      if (block === 'customSubclasses') flushSubclasses();
+      // Nested header — only valid inside the `classifier:` block.
+      // Outside it, we still accept the header to be lenient (operators may
+      // hoist the sub-block one level), since the substrate's classifier
+      // currently only exposes this one sub-block.
+      block = 'classifier-confidence-thresholds';
+      continue;
+    }
     if (/^recurrence-windows\s*:\s*$/.test(trimmed)) {
       if (block === 'recurrence-windows') flushWindows();
       if (block === 'customSubclasses') flushSubclasses();
@@ -428,6 +534,38 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     }
 
     // ── Block body parsing ────────────────────────────────────────────
+    if (block === 'classifier-confidence-thresholds') {
+      const kvMatch = /^([a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(.+)$/.exec(trimmed);
+      if (kvMatch && kvMatch[1] && kvMatch[2]) {
+        const key = kvMatch[1];
+        const val = unquote(kvMatch[2]);
+        const parsed = Number(val);
+        // Accept only finite values in [0, 1]. Out-of-range silently falls
+        // through to defaults to avoid surprising the operator with a
+        // negative threshold or a > 1 confidence.
+        if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+          if (key === 'autoClassify') {
+            out.classifier.confidenceThresholds.autoClassify = parsed;
+          } else if (key === 'ambiguous') {
+            out.classifier.confidenceThresholds.ambiguous = parsed;
+          }
+        }
+        continue;
+      }
+      // Non-kv line — exit. Note: we do NOT also exit the parent
+      // `classifier` block; that block has no scalars of its own so we
+      // simply let the next header reset state.
+      block = 'classifier';
+    }
+
+    if (block === 'classifier') {
+      // `classifier:` itself currently holds only the nested
+      // `confidenceThresholds:` header — any other line at this level
+      // signals the operator drifted into something unrecognised. Exit so
+      // the next iteration re-tests the line as a header.
+      block = null;
+    }
+
     if (block === 'recurrence-windows') {
       const listMatch = /^-\s*(.+)$/.exec(trimmed);
       if (listMatch && listMatch[1]) {
@@ -545,6 +683,20 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
   if (block === 'recurrence-windows') flushWindows();
   if (block === 'customSubclasses') flushSubclasses();
 
+  // Normalise classifier thresholds: keep `ambiguous` ≤ `autoClassify` so
+  // the bucket logic in classifier.ts stays monotonic even when the
+  // operator wrote them reversed. Silent swap mirrors how the rest of this
+  // parser handles benign drift; the schema validator in CI catches the
+  // upstream misconfiguration.
+  if (
+    out.classifier.confidenceThresholds.ambiguous > out.classifier.confidenceThresholds.autoClassify
+  ) {
+    const tmp = out.classifier.confidenceThresholds.ambiguous;
+    out.classifier.confidenceThresholds.ambiguous =
+      out.classifier.confidenceThresholds.autoClassify;
+    out.classifier.confidenceThresholds.autoClassify = tmp;
+  }
+
   return out;
 }
 
@@ -635,6 +787,11 @@ export function loadQualityMonitoringConfig(
     opts.filePath ?? join(opts.workDir ?? process.cwd(), '.ai-sdlc', 'quality-monitoring.yaml');
 
   const fallback = (): QualityMonitoringConfig => ({
+    classifier: {
+      confidenceThresholds: {
+        ...QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds,
+      },
+    },
     recurrenceWindows: [...DEFAULT_RECURRENCE_WINDOWS],
     upstreamReporting: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.upstreamReporting },
     vendorNamespace: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.vendorNamespace },
@@ -656,4 +813,34 @@ export function loadQualityMonitoringConfig(
   const cfg = parseQualityMonitoringConfigYaml(raw);
   enforceVendorNamespaceConfig(cfg, { logger: opts.logger });
   return cfg;
+}
+
+/**
+ * Convenience helper for the OQ-1 confidence-bucketed classifier
+ * (`quality-classifier.ts`). Returns the resolved
+ * `ClassifierConfidenceConfig` from `quality-monitoring.yaml`, falling
+ * back to defaults when the file is missing / unreadable. Never throws on
+ * threshold-shape issues — `loadQualityMonitoringConfig()` only throws on
+ * OQ-10 violations, which are unrelated to classifier thresholds.
+ *
+ * Resolution mirrors `loadQualityMonitoringConfig()`:
+ *   1. explicit `opts.filePath` override
+ *   2. `<opts.workDir>/.ai-sdlc/quality-monitoring.yaml`
+ *   3. `<process.cwd()>/.ai-sdlc/quality-monitoring.yaml`
+ *
+ * Defaults: `autoClassify: 0.7`, `ambiguous: 0.3` per §13.1 / OQ-1.
+ */
+export function resolveClassifierConfidenceThresholds(
+  opts: LoadQualityMonitoringConfigOpts = {},
+): ClassifierConfidenceConfig {
+  try {
+    const cfg = loadQualityMonitoringConfig(opts);
+    return { ...cfg.classifier.confidenceThresholds };
+  } catch {
+    // Shielded fallback: a malformed config (e.g. vendor-namespace violation)
+    // would otherwise propagate, but the classifier MUST remain available
+    // even when other config sections are broken. Operator surfaces the
+    // upstream error via the regular loader call paths.
+    return { ...QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds };
+  }
 }

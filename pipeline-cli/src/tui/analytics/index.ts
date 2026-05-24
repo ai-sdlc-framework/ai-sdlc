@@ -70,6 +70,9 @@ export {
 // Phase 1: Salvaged from closed PR #481 (AISDLC-270). Misaligned
 // implementations are marked with TODO stubs; later Refit phases
 // (AISDLC-303..307) will reshape each accordingly.
+// Phase 2 (AISDLC-303): confidence-bucketed three-tier classifier per
+// OQ-1, with per-org thresholds + calibration loop composing with the
+// AISDLC-321 substrate.
 // Phase 3 (AISDLC-304): multi-window recurrence (OQ-3), first-capture
 // MTTR label (OQ-8), v2 MTTD substrate, per-org config loader.
 
@@ -79,6 +82,7 @@ export {
   validateVendorNamespace,
   ClassificationError,
   BUILTIN_FRAMEWORK_SUBCLASSES,
+  DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLDS,
   type FailureClass,
   type FailureSignal,
   type FrameworkSubclass,
@@ -88,7 +92,31 @@ export {
   type SeverityScore,
   type CompositeSeverity,
   type ClassificationContext,
+  type ConfidenceBucket,
 } from './quality-classifier.js';
+
+// ── RFC-0025 OQ-1 calibration loop — Phase 2 (AISDLC-303) ────────────
+// Composes with the AISDLC-321 substrate's polarity model (pending →
+// positive | negative). Operator overrides emit negative exemplars;
+// silence emits positive. Corpus segregated to
+// `.ai-sdlc/classifier-corpus-quality/` to avoid mixing with substrate
+// per-task-type exemplars.
+
+export {
+  QUALITY_CLASSIFICATION_TASK_TYPE,
+  QUALITY_CLASSIFICATION_CORPUS_DIR_NAME,
+  recordClassification,
+  recordClassificationOverride,
+  resolveClassificationSilence,
+  resolveQualityCalibrationCorpusDir,
+  type ClassificationOverrideOpts,
+  type ClassificationOverrideReason,
+  type ClassificationOverrideResult,
+  type RecordClassificationOpts,
+  type RecordClassificationResult,
+  type ResolveClassificationSilenceOpts,
+  type ResolveClassificationSilenceResult,
+} from './classification-calibration.js';
 
 export {
   appendFrameworkCapture,
@@ -123,6 +151,7 @@ export {
   parseQualityMonitoringConfigYaml,
   parseDurationDays,
   enforceVendorNamespaceConfig,
+  resolveClassifierConfidenceThresholds,
   QualityMonitoringConfigError,
   DEFAULT_RECURRENCE_WINDOWS,
   DEFAULT_UPSTREAM_TEMPLATE_PATH,
@@ -133,6 +162,8 @@ export {
   DEFAULT_DETERMINISM_ALWAYS_ON_REQUIRES,
   DEFAULT_DETERMINISM_ALWAYS_ON_TOP_BLAST_DECILE,
   DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
+  DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD,
+  DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD,
   QUALITY_MONITORING_CONFIG_DEFAULTS,
   type QualityMonitoringConfig,
   type LoadQualityMonitoringConfigOpts,
@@ -142,6 +173,8 @@ export {
   type CoverageGapConfig,
   type DeterminismDetectionConfig,
   type OperatorTimeCostConfig,
+  type ClassifierConfig,
+  type ClassifierConfidenceConfig,
 } from './quality-monitoring-config.js';
 
 // ── RFC-0025 §13 OQ-5 Upstream Reporting — Phase 6 (AISDLC-307) ─────

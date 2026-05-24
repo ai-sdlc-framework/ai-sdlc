@@ -1,6 +1,9 @@
 /**
  * Tests for RFC-0025 §13.1 quality-monitoring.yaml config loader.
- * Phase 3 (AISDLC-304 / OQ-3).
+ * Phase 2 (AISDLC-303 / OQ-1): classifier.confidenceThresholds.
+ * Phase 3 (AISDLC-304 / OQ-3): recurrence-windows.
+ * Phase 5 (AISDLC-306 / OQ-6/7/9).
+ * Phase 6 (AISDLC-307 / OQ-5/10).
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,6 +12,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD,
+  DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD,
   DEFAULT_RECURRENCE_WINDOWS,
   DEFAULT_UPSTREAM_TEMPLATE_PATH,
   DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE,
@@ -21,6 +26,7 @@ import {
   loadQualityMonitoringConfig,
   parseDurationDays,
   parseQualityMonitoringConfigYaml,
+  resolveClassifierConfidenceThresholds,
   type QualityMonitoringConfig,
   type VendorNamespaceEnforce,
 } from './quality-monitoring-config.js';
@@ -34,6 +40,11 @@ function baseConfig(
   customSubclasses: string[] = [],
 ): QualityMonitoringConfig {
   return {
+    classifier: {
+      confidenceThresholds: {
+        ...QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds,
+      },
+    },
     recurrenceWindows: [],
     upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
     vendorNamespace: { enforce },
@@ -413,6 +424,133 @@ describe('parseQualityMonitoringConfigYaml — Phase 5 blocks', () => {
     expect(cfg.determinismDetection.defaultSampleRate).toBeCloseTo(0.05);
     expect(cfg.operatorTimeCost.afkInactivityMinutes).toBe(45);
     expect(cfg.vendorNamespace.enforce).toBe('warn');
+  });
+});
+
+// ── Phase 2 (AISDLC-303) — OQ-1 confidence-bucketed classifier ────────
+
+describe('Phase 2 defaults (AISDLC-303 / OQ-1 classifier thresholds)', () => {
+  it('exposes shipping defaults from QUALITY_MONITORING_CONFIG_DEFAULTS', () => {
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds.autoClassify).toBe(
+      DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD,
+    );
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds.ambiguous).toBe(
+      DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD,
+    );
+  });
+
+  it('shipping defaults match §13.1 (0.7 / 0.3)', () => {
+    expect(DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD).toBe(0.7);
+    expect(DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD).toBe(0.3);
+  });
+});
+
+describe('parseQualityMonitoringConfigYaml — classifier block (OQ-1)', () => {
+  it('parses nested classifier.confidenceThresholds', () => {
+    const yaml = [
+      'quality:',
+      '  classifier:',
+      '    confidenceThresholds:',
+      '      autoClassify: 0.85',
+      '      ambiguous: 0.4',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.classifier.confidenceThresholds.autoClassify).toBeCloseTo(0.85);
+    expect(cfg.classifier.confidenceThresholds.ambiguous).toBeCloseTo(0.4);
+  });
+
+  it('preserves the other threshold when only one is overridden', () => {
+    const yaml = ['classifier:', '  confidenceThresholds:', '    autoClassify: 0.9'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.classifier.confidenceThresholds.autoClassify).toBeCloseTo(0.9);
+    expect(cfg.classifier.confidenceThresholds.ambiguous).toBe(
+      DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD,
+    );
+  });
+
+  it('rejects out-of-range threshold values (falls back to default)', () => {
+    const yaml = [
+      'classifier:',
+      '  confidenceThresholds:',
+      '    autoClassify: 1.5',
+      '    ambiguous: -0.2',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.classifier.confidenceThresholds.autoClassify).toBe(
+      DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD,
+    );
+    expect(cfg.classifier.confidenceThresholds.ambiguous).toBe(
+      DEFAULT_CLASSIFIER_AMBIGUOUS_THRESHOLD,
+    );
+  });
+
+  it('silently swaps reversed thresholds (ambiguous > autoClassify)', () => {
+    const yaml = [
+      'classifier:',
+      '  confidenceThresholds:',
+      '    autoClassify: 0.3',
+      '    ambiguous: 0.7',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.classifier.confidenceThresholds.autoClassify).toBeCloseTo(0.7);
+    expect(cfg.classifier.confidenceThresholds.ambiguous).toBeCloseTo(0.3);
+  });
+
+  it('accepts boundary values (0 and 1)', () => {
+    const yaml = [
+      'classifier:',
+      '  confidenceThresholds:',
+      '    autoClassify: 1',
+      '    ambiguous: 0',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.classifier.confidenceThresholds.autoClassify).toBe(1);
+    expect(cfg.classifier.confidenceThresholds.ambiguous).toBe(0);
+  });
+
+  it('returns defaults when classifier block is absent', () => {
+    const cfg = parseQualityMonitoringConfigYaml('');
+    expect(cfg.classifier.confidenceThresholds).toEqual(
+      QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds,
+    );
+  });
+});
+
+describe('resolveClassifierConfidenceThresholds', () => {
+  it('returns shipping defaults when config file is missing', () => {
+    const thresholds = resolveClassifierConfidenceThresholds({ workDir: workdir });
+    expect(thresholds).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds);
+  });
+
+  it('returns per-org thresholds from quality-monitoring.yaml on disk', () => {
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      [
+        'classifier:',
+        '  confidenceThresholds:',
+        '    autoClassify: 0.85',
+        '    ambiguous: 0.4',
+      ].join('\n'),
+    );
+    const thresholds = resolveClassifierConfidenceThresholds({ workDir: workdir });
+    expect(thresholds.autoClassify).toBeCloseTo(0.85);
+    expect(thresholds.ambiguous).toBeCloseTo(0.4);
+  });
+
+  it('returns defaults even when an unrelated block (vendor-namespace) is malformed', () => {
+    // Force a quality-monitoring.yaml that would throw via OQ-10
+    // enforcement; the classifier-resolver helper shields the consumer
+    // from that.
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      ['customSubclasses:', '  - un-namespaced-bad'].join('\n'),
+    );
+    const thresholds = resolveClassifierConfidenceThresholds({ workDir: workdir });
+    expect(thresholds).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS.classifier.confidenceThresholds);
   });
 });
 

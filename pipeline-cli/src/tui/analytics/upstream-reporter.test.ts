@@ -58,6 +58,9 @@ function makeRecord(overrides: Partial<FrameworkBugCaptureRecord> = {}): Framewo
         },
         captureRecord: null,
         rationale: 'developer subagent returned prose instead of JSON envelope',
+        confidence: 0.8,
+        bucket: 'auto-classify',
+        effectiveThresholds: { autoClassify: 0.7, ambiguous: 0.3 },
       },
       originalFailure: {
         stderr:
@@ -264,6 +267,9 @@ describe('renderIssueBody', () => {
           severity: makeRecord().severity,
           captureRecord: null,
           rationale: 'rationale ref /Users/secret/proj/x.ts',
+          confidence: 0.8,
+          bucket: 'auto-classify',
+          effectiveThresholds: { autoClassify: 0.7, ambiguous: 0.3 },
         },
         originalFailure: {
           stderr: 'fail at /Users/secret/proj/x.ts',
