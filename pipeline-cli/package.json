@@ -45,7 +45,8 @@
     "cli-dispatch": "bin/cli-dispatch.mjs",
     "cli-dispatch-supervisor": "bin/cli-dispatch-supervisor.mjs",
     "cli-attestation": "bin/cli-attestation.mjs",
-    "cli-compliance-audit": "bin/cli-compliance-audit.mjs"
+    "cli-compliance-audit": "bin/cli-compliance-audit.mjs",
+    "cli-import-spec": "bin/cli-import-spec.mjs"
   },
   "exports": {
     ".": {
@@ -103,6 +104,10 @@
     "./attestation": {
       "types": "./dist/attestation/merkle.d.ts",
       "import": "./dist/attestation/merkle.js"
+    },
+    "./import-spec": {
+      "types": "./dist/import-spec/index.d.ts",
+      "import": "./dist/import-spec/index.js"
     }
   },
   "publishConfig": {
