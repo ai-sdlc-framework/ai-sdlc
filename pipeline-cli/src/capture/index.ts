@@ -12,3 +12,5 @@ export * from './incode-linter.js';
 export * from './pr-comment-parser.js';
 export * from './pr-comment-classifier.js';
 export * from './triage-rubric.js';
+export * from './auto-triage.js';
+export * from './invoker-loader.js';

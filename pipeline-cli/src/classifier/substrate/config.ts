@@ -92,6 +92,18 @@ interface ClassifierConfigBlock {
     perTaskType?: Partial<
       Record<ClassifierTaskType, { threshold?: number; model?: string; dailyTokenCap?: number }>
     >;
+    /**
+     * Per-agent-role threshold overrides (RFC-0024 OQ-2 / OQ-5
+     * resolution). The 2026-05-15 walkthrough explicitly calls out that
+     * different reviewer roles need different strictness: a
+     * `security-reviewer` finding warrants a stricter bar than a
+     * `code-reviewer` style nit. This block accepts a free-form
+     * agent-role key (matches `AgentRole` in the capture record) and a
+     * threshold override. Resolution order: per-call `opts.threshold` >
+     * per-agent-role `perAgentRole[role].threshold` > per-task-type
+     * `perTaskType[task].threshold` > global `threshold` > default 0.7.
+     */
+    perAgentRole?: Record<string, { threshold?: number }>;
   };
 }
 
@@ -104,12 +116,18 @@ interface ClassifierConfigBlock {
  * missing or the block is absent. Never throws — schema drift falls
  * through to defaults so a typo doesn't break the classifier.
  *
- * @param taskType The task type whose config to resolve.
- * @param repoRoot Project root containing `.ai-sdlc/`.
+ * @param taskType  The task type whose config to resolve.
+ * @param repoRoot  Project root containing `.ai-sdlc/`.
+ * @param agentRole Optional agent-role identifier (RFC-0024 OQ-2 / OQ-5
+ *                  per-agent threshold override; AISDLC-275 AC-4). When
+ *                  supplied AND `perAgentRole[<role>].threshold` is
+ *                  configured, that takes precedence over the per-task
+ *                  override.
  */
 export function loadSubstrateConfig(
   taskType: ClassifierTaskType,
   repoRoot: string,
+  agentRole?: string,
 ): SubstrateConfig {
   const sourceFile =
     taskType === 'decision-recommendation' ? 'decisions-config.yaml' : 'capture-config.yaml';
@@ -117,11 +135,14 @@ export function loadSubstrateConfig(
   const block = readClassifierBlock(configPath);
 
   const perTask = block?.perTaskType?.[taskType];
+  const perAgent = agentRole && block?.perAgentRole ? block.perAgentRole[agentRole] : undefined;
+
+  // Resolution order for threshold: per-agent > per-task > global > default.
+  const thresholdCandidate =
+    perAgent?.threshold ?? perTask?.threshold ?? block?.threshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
 
   return {
-    threshold: clampThreshold(
-      perTask?.threshold ?? block?.threshold ?? DEFAULT_CONFIDENCE_THRESHOLD,
-    ),
+    threshold: clampThreshold(thresholdCandidate),
     model:
       typeof (perTask?.model ?? block?.model) === 'string' &&
       (perTask?.model ?? block?.model)!.length > 0

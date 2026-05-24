@@ -67,7 +67,11 @@ export async function classify(
   opts: ClassifyOpts = {},
 ): Promise<ClassifierDecision> {
   const repoRoot = opts.repoRoot ?? process.cwd();
-  const config = loadSubstrateConfig(taskType, repoRoot);
+  // AISDLC-275 AC-4: pass `agentRole` so per-agent threshold overrides
+  // apply ahead of per-task / global config. The per-call `opts.threshold`
+  // (set below) still wins overall — that's the substrate's documented
+  // resolution order.
+  const config = loadSubstrateConfig(taskType, repoRoot, opts.agentRole);
   const effectiveThreshold = opts.threshold ?? config.threshold;
   const model = opts.model ?? config.model;
 

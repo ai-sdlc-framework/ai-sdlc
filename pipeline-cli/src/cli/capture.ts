@@ -42,12 +42,19 @@ import {
   isTerminalTriage,
   validateCaptureRecord,
   type AgentRole,
+  type AuditEntry,
   type CaptureRecord,
   type CaptureSeverity,
   type CaptureTriageValue,
 } from '../capture/capture-record.js';
 import { loadCaptures } from '../capture/capture-reader.js';
 import { applyTriageUpdate, redactCapture } from '../capture/capture-writer.js';
+import {
+  autoTriageCapture,
+  autoInferSeverity,
+  decorateCapturedAuditEntry,
+} from '../capture/auto-triage.js';
+import { loadConfiguredInvoker } from '../capture/invoker-loader.js';
 import {
   writeDraftCaptureFile,
   writeSubmittedCaptureFile,
@@ -442,7 +449,9 @@ export function buildCaptureCli(): Argv {
               describe:
                 'Machine-readable JSON input for AI-agent direct-capture path (AC#4). ' +
                 'Pass a JSON string with the same fields. Other flags are ignored when this is set. ' +
-                'Include "confidence" (0–1) for OQ-2 auto-submit gate.',
+                'Include "confidence" (0–1) for OQ-2 auto-submit gate. ' +
+                'Set "autoClassify": true to invoke the classifier substrate for missing triage/severity ' +
+                '(AISDLC-275; requires AI_SDLC_CLASSIFIER_INVOKER_MODULE).',
             })
             .option('operator', {
               type: 'string',
@@ -475,18 +484,112 @@ export function buildCaptureCli(): Argv {
             const now = new Date();
             const id = generateCaptureId(now);
             const timestamp = now.toISOString();
-            const triageVal = (parsed.triage as CaptureTriageValue) ?? 'tbd';
+            const explicitTriage = parsed.triage as CaptureTriageValue | undefined;
+            const explicitSeverity = parsed.severity as CaptureSeverity | undefined;
+            const agentRoleVal = (parsed.agentRole as AgentRole) ?? null;
+
+            // AISDLC-275 (RFC-0024 Refit Phase 3) — threshold-gated
+            // auto-triage + auto-severity. Only fires when (a) the
+            // caller opted in via `autoClassify: true`, (b) the field
+            // wasn't already supplied, and (c) the substrate's invoker
+            // module is resolvable. Each step falls open gracefully
+            // (silent no-op) so this never breaks the existing CLI
+            // contract.
+            let autoTriageVal: CaptureTriageValue | null = null;
+            let autoSeverityVal: CaptureSeverity | null = null;
+            let triageCorpusEntryId: string | null = null;
+            let severityCorpusEntryId: string | null = null;
+            let triageConfidence: number | null = null;
+            let severityConfidence: number | null = null;
+
+            if (parsed.autoClassify === true) {
+              const invoker = await loadConfiguredInvoker({ repoRoot });
+              if (invoker) {
+                // Triage arc: only run when no explicit triage was supplied.
+                if (!explicitTriage) {
+                  try {
+                    const triageResult = await autoTriageCapture({
+                      finding,
+                      agentRole: agentRoleVal,
+                      repoRoot,
+                      invoker,
+                      context:
+                        typeof parsed.context === 'string'
+                          ? { sourceContext: parsed.context }
+                          : undefined,
+                    });
+                    triageCorpusEntryId = triageResult.corpusEntryId;
+                    triageConfidence = triageResult.confidence;
+                    if (triageResult.metBehindThreshold && triageResult.recommendedTriage) {
+                      autoTriageVal = triageResult.recommendedTriage;
+                    }
+                  } catch (err) {
+                    // autoTriageCapture never throws in practice (substrate
+                    // falls open), but defensively swallow here so a bug in
+                    // a future invoker doesn't break capture filing.
+                    process.stderr.write(
+                      `[cli-capture] auto-triage skipped: ${(err as Error).message}\n`,
+                    );
+                  }
+                }
+                // Severity arc: only run when severity is unset or 'unknown'.
+                if (!explicitSeverity || explicitSeverity === 'unknown') {
+                  try {
+                    const sevResult = await autoInferSeverity({
+                      finding,
+                      agentRole: agentRoleVal,
+                      repoRoot,
+                      invoker,
+                      context:
+                        typeof parsed.context === 'string'
+                          ? { sourceContext: parsed.context }
+                          : undefined,
+                    });
+                    severityCorpusEntryId = sevResult.corpusEntryId;
+                    severityConfidence = sevResult.confidence;
+                    if (sevResult.metBehindThreshold && sevResult.recommendedSeverity) {
+                      autoSeverityVal = sevResult.recommendedSeverity;
+                    }
+                  } catch (err) {
+                    process.stderr.write(
+                      `[cli-capture] auto-severity skipped: ${(err as Error).message}\n`,
+                    );
+                  }
+                }
+              }
+            }
+
+            const triageVal: CaptureTriageValue = explicitTriage ?? autoTriageVal ?? 'tbd';
+            const severityVal: CaptureSeverity = explicitSeverity ?? autoSeverityVal ?? 'unknown';
+
+            const capturedEntry: AuditEntry = {
+              action: 'captured',
+              by: (parsed.agentRole as string) ?? 'unknown',
+              at: timestamp,
+            };
+            decorateCapturedAuditEntry(capturedEntry, {
+              triageCorpusEntryId,
+              severityCorpusEntryId,
+            });
+            if (triageConfidence !== null) {
+              capturedEntry.triageConfidence = triageConfidence;
+            }
+            if (severityConfidence !== null) {
+              capturedEntry.severityConfidence = severityConfidence;
+            }
+            if (autoTriageVal) capturedEntry.triageAutoApplied = true;
+            if (autoSeverityVal) capturedEntry.severityAutoApplied = true;
 
             const record: CaptureRecord = {
               id,
               schemaVersion: 'v1',
               timestamp,
               finding,
-              severity: (parsed.severity as CaptureSeverity) ?? 'unknown',
+              severity: severityVal,
               triage: triageVal,
               source: {
                 type: 'ai-agent',
-                agentRole: (parsed.agentRole as AgentRole) ?? null,
+                agentRole: agentRoleVal,
                 operator: null,
                 context: typeof parsed.context === 'string' ? parsed.context : undefined,
               },
@@ -510,13 +613,7 @@ export function buildCaptureCli(): Argv {
               resolvedBy: isTerminalTriage(triageVal)
                 ? ((parsed.agentRole as string) ?? 'unknown')
                 : null,
-              auditTrail: [
-                {
-                  action: 'captured',
-                  by: (parsed.agentRole as string) ?? 'unknown',
-                  at: timestamp,
-                },
-              ],
+              auditTrail: [capturedEntry],
             };
 
             const validErr = validateCaptureRecord(record);
@@ -525,11 +622,20 @@ export function buildCaptureCli(): Argv {
               process.exit(1);
             }
 
-            // OQ-2 gate: confidence >= threshold → auto-submit; else draft.
-            const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : null;
+            // OQ-2 gate (legacy `confidence` field): if the caller
+            // supplied an explicit numeric confidence, that drives
+            // auto-submit. When auto-classify is on AND the triage
+            // recommendation cleared the threshold, we also auto-submit
+            // — the explicit `confidence` field is the legacy contract
+            // and the auto-triage path is its successor.
+            const explicitConfidence =
+              typeof parsed.confidence === 'number' ? parsed.confidence : null;
             const threshold = getAutoSubmitThreshold(repoRoot);
+            const autoSubmitOnClassify = autoTriageVal !== null || autoSeverityVal !== null;
+            const autoSubmitOnConfidence =
+              explicitConfidence !== null && explicitConfidence >= threshold;
 
-            if (confidence !== null && confidence >= threshold) {
+            if (autoSubmitOnClassify || autoSubmitOnConfidence) {
               writeSubmittedCaptureFile(record, repoRoot);
             } else {
               writeDraftCaptureFile(record, repoRoot);

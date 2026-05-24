@@ -121,6 +121,17 @@ export interface ClassifyOpts {
    * Default: false (corpus capture is on).
    */
   skipCorpus?: boolean;
+  /**
+   * Optional agent-role identifier used for per-agent threshold lookup
+   * (RFC-0024 OQ-2 / OQ-5 — AISDLC-275 AC-4). When the config block
+   * defines `classifier.perAgentRole[<role>].threshold`, that value takes
+   * precedence over per-task / global thresholds (but per-call
+   * `opts.threshold` still wins overall). Free-form string so the
+   * substrate doesn't pin to capture-side `AgentRole`; callers from
+   * other surfaces (RFC-0035 Stage C) can pass their own role
+   * identifiers.
+   */
+  agentRole?: string;
 }
 
 /**

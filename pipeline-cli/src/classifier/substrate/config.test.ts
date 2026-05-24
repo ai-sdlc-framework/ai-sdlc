@@ -173,3 +173,92 @@ describe('loadSubstrateConfig — clamping', () => {
     }
   });
 });
+
+// ── AISDLC-275 AC-4: per-agent threshold overrides ──────────────────────────
+
+describe('loadSubstrateConfig — per-agent overrides (AISDLC-275 AC-4)', () => {
+  it('per-agent threshold trumps per-task + global', () => {
+    const repoRoot = makeRepoRoot();
+    try {
+      writeYaml(
+        repoRoot,
+        'capture-config.yaml',
+        [
+          'classifier:',
+          '  threshold: 0.7',
+          '  perTaskType:',
+          '    capture-triage:',
+          '      threshold: 0.6',
+          '  perAgentRole:',
+          '    security-reviewer:',
+          '      threshold: 0.9',
+          '    code-reviewer:',
+          '      threshold: 0.5',
+          '',
+        ].join('\n'),
+      );
+      // No agentRole → falls back to per-task (0.6).
+      expect(loadSubstrateConfig('capture-triage', repoRoot).threshold).toBe(0.6);
+      // security-reviewer → per-agent override wins.
+      expect(loadSubstrateConfig('capture-triage', repoRoot, 'security-reviewer').threshold).toBe(
+        0.9,
+      );
+      // code-reviewer → per-agent override wins (looser).
+      expect(loadSubstrateConfig('capture-triage', repoRoot, 'code-reviewer').threshold).toBe(0.5);
+      // Unknown agentRole → falls back to per-task.
+      expect(loadSubstrateConfig('capture-triage', repoRoot, 'never-heard-of').threshold).toBe(0.6);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('per-agent threshold falls back to global when per-task is absent', () => {
+    const repoRoot = makeRepoRoot();
+    try {
+      writeYaml(
+        repoRoot,
+        'capture-config.yaml',
+        [
+          'classifier:',
+          '  threshold: 0.7',
+          '  perAgentRole:',
+          '    security-reviewer:',
+          '      threshold: 0.85',
+          '',
+        ].join('\n'),
+      );
+      expect(loadSubstrateConfig('capture-severity', repoRoot).threshold).toBe(0.7);
+      expect(loadSubstrateConfig('capture-severity', repoRoot, 'security-reviewer').threshold).toBe(
+        0.85,
+      );
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('clamps per-agent threshold to [0, 1]', () => {
+    const repoRoot = makeRepoRoot();
+    try {
+      writeYaml(
+        repoRoot,
+        'capture-config.yaml',
+        ['classifier:', '  perAgentRole:', '    rogue: { threshold: 5 }', ''].join('\n'),
+      );
+      expect(loadSubstrateConfig('capture-triage', repoRoot, 'rogue').threshold).toBe(1);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('missing perAgentRole block falls back without throwing', () => {
+    const repoRoot = makeRepoRoot();
+    try {
+      writeYaml(repoRoot, 'capture-config.yaml', 'classifier:\n  threshold: 0.7\n');
+      expect(loadSubstrateConfig('capture-triage', repoRoot, 'security-reviewer').threshold).toBe(
+        0.7,
+      );
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+});
