@@ -24,7 +24,8 @@ let input;
 try {
   const raw = readFileSync('/dev/stdin', 'utf-8');
   input = JSON.parse(raw);
-} catch {
+} catch (e) {
+  process.stderr.write(`[hook-diag] stdin parse failed: ${e && e.message ? e.message : String(e)}\n`);
   process.exit(0);
 }
 
@@ -52,9 +53,15 @@ try {
   const yaml = readFileSync(agentRolePath, 'utf-8');
   blockedActions = parseListField(yaml, 'blockedActions');
   blockedPaths = parseListField(yaml, 'blockedPaths');
-} catch {
+} catch (e) {
+  process.stderr.write(
+    `[hook-diag] agent-role.yaml read failed: path=${agentRolePath} projectDir=${projectDir} cwd=${process.cwd()} err=${e && e.message ? e.message : String(e)}\n`,
+  );
   process.exit(0);
 }
+process.stderr.write(
+  `[hook-diag] reached dispatch: tool=${toolName} cwd-in=${toolCwd} projectDir=${projectDir} active-task-env=${process.env.AI_SDLC_ACTIVE_TASK_ID || '<unset>'}\n`,
+);
 
 // ── Dispatch by tool ─────────────────────────────────────────────────
 
@@ -120,9 +127,13 @@ function enforceWriteEdit(filePath) {
   // sit OUTSIDE `.worktrees/<id>/`, so file_path can never contain a
   // worktree ancestor. The cwd of the subagent always does.
   const allowed = loadPermittedExternalPaths(projectAbs, toolCwd || process.cwd());
+  process.stderr.write(
+    `[hook-diag] enforceWriteEdit: absPath=${absPath} projectAbs=${projectAbs} insideProject=${insideProject} allowed=${JSON.stringify(allowed)}\n`,
+  );
   for (const ext of allowed) {
     const extAbs = resolve(projectAbs, ext);
     if (absPath === extAbs || absPath.startsWith(extAbs + sep)) {
+      process.stderr.write(`[hook-diag] explicit allow: matched ${ext} → ${extAbs}\n`);
       return; // explicit allow
     }
   }
