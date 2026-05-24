@@ -62,6 +62,18 @@ export {
   type TierMultipliers,
 } from './config.js';
 
+// RFC-0030 Phase 3 — clustering
+export {
+  clusterSignals,
+  computeClusterId,
+  cosineSimilarity,
+  type ClusterSignalsOptions,
+  type ClusteredSignalInput,
+  type ClusteringAlgorithmUsed,
+  type ClusteringResult,
+  type DemandCluster,
+} from './clustering.js';
+
 import { CommunityThreadSignalSourceAdapter } from './adapters/community-thread.js';
 import { ManualSignalSourceAdapter } from './adapters/manual.js';
 import { SupportTicketSignalSourceAdapter } from './adapters/support-ticket.js';
