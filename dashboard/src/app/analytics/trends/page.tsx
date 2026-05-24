@@ -5,7 +5,8 @@ import { getStateStore } from '@/lib/state';
 export default async function TrendAnalysisPage() {
   try {
     const mod = await import('@ai-sdlc-enterprise/dashboard');
-    const { TrendAnalysisPage: Page } = mod;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { TrendAnalysisPage: Page } = mod as any;
     const store = getStateStore();
     return <Page db={store.getDatabase()} />;
   } catch {
