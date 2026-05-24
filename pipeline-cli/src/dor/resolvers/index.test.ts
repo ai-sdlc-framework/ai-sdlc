@@ -42,8 +42,25 @@ describe('extractReferences', () => {
     expect(raws).toContain('AISDLC-115.1');
   });
 
-  it('extracts backtick-quoted file paths', () => {
-    const refs = extractReferences('change `pipeline-cli/src/foo.ts` and `spec/schemas/x.json`');
+  it('does NOT extract backtick-quoted file paths from body prose (narrowed 2026-05-23)', () => {
+    // Body-prose backtick paths often appear as hypothetical examples in AC
+    // descriptions (e.g. "a changed file at `pkg/bin/cli-foo.mjs`"). The old
+    // extractor flagged these as references that must resolve, dumbing down
+    // task wording. Narrowed: file references go in frontmatter `references:`
+    // or markdown links. See header comment on extractReferences.
+    const refs = extractReferences(
+      'change `pipeline-cli/src/foo.ts` and `spec/schemas/x.json` and a hypothetical `pkg/bin/cli-foo.mjs`',
+    );
+    const raws = refs.map((r) => r.raw);
+    expect(raws).not.toContain('pipeline-cli/src/foo.ts');
+    expect(raws).not.toContain('spec/schemas/x.json');
+    expect(raws).not.toContain('pkg/bin/cli-foo.mjs');
+  });
+
+  it('still extracts file refs from markdown links (intentional reference shape)', () => {
+    const refs = extractReferences(
+      'see [the helper](pipeline-cli/src/foo.ts) and [the schema](spec/schemas/x.json)',
+    );
     const raws = refs.map((r) => r.raw);
     expect(raws).toContain('pipeline-cli/src/foo.ts');
     expect(raws).toContain('spec/schemas/x.json');

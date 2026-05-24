@@ -63,7 +63,9 @@ describe('evaluateGate3', () => {
       supports: () => true,
       resolve: async (ref) => ({ ref, resolved: false, reason: 'forced' }),
     };
-    const v = await evaluateGate3(input('See `pipeline-cli/src/x.ts`.'), {
+    // Use a markdown link — body-prose backtick paths are no longer
+    // extracted post-2026-05-23 narrowing (see extractReferences header).
+    const v = await evaluateGate3(input('See [the helper](pipeline-cli/src/x.ts).'), {
       resolvers: [failer],
     });
     expect(v.verdict).toBe('fail');

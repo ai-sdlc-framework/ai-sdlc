@@ -66,9 +66,18 @@ export async function resolveReference(
  *   - GitHub issue refs `#42`, `gh#42`, `owner/repo#42`
  *   - RFC IDs `RFC-NNNN`
  *   - AISDLC backlog IDs `AISDLC-NN`
- *   - Backtick-quoted repo paths (`pipeline-cli/src/foo.ts`) — file kind
  *
  * Returns a stable, deduped list of tagged references.
+ *
+ * **Body-prose backtick-quoted file paths are intentionally NOT extracted.**
+ * The original behavior (extracting `pkg/path/file.ts` shapes from prose) was
+ * too aggressive — it caught hypothetical examples in AC bodies (e.g. "a
+ * changed file at `pkg/bin/cli-foo.mjs`") and dumbed down task wording to
+ * satisfy the parser. File references belong in frontmatter `references:`
+ * (validated as explicit file-existence refs) or in markdown links
+ * `[label](path/to/file.ts)` if the author wants link-style validation.
+ * This narrowing keeps the gate honest about INTENTIONAL references without
+ * flagging narrative prose. Operator-acknowledged 2026-05-23.
  */
 export function extractReferences(body: string): Reference[] {
   const seen = new Set<string>();
@@ -116,10 +125,9 @@ export function extractReferences(body: string): Reference[] {
     add(m[1], 'file-existence');
   }
 
-  // 6. Backtick-quoted repo paths.
-  for (const m of body.matchAll(/`([\w./-]+\/[\w./-]+\.[a-zA-Z0-9]+)`/g)) {
-    add(m[1], 'file-existence');
-  }
+  // (Rule #6 — backtick-quoted body paths — was removed 2026-05-23 per the
+  // header comment. Frontmatter `references:` and markdown links remain the
+  // canonical ways to declare intentional file references.)
 
   return out;
 }

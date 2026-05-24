@@ -8,8 +8,6 @@ references:
   - scripts/verify-attestation.test.mjs
 priority: high
 permittedExternalPaths: []
-blocked:
-  reason: "DoR Gate 3 over-reach: parser flags bare PR-number references in body prose as unresolvable. Beneficiary PR list preserved deliberately (operator needs to know which downstream PRs unblock). Gate-parser narrowing tracked as follow-up to AISDLC-379. Operator acknowledged 2026-05-23."
 ---
 
 ## Description
