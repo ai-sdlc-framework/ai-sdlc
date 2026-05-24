@@ -980,7 +980,7 @@ export {
   type MigrationDivergedEvent,
 } from './database/index.js';
 
-// RFC-0030 signal ingestion source adapters
+// RFC-0030 Phase 1 — signal ingestion source adapters
 export {
   AdapterCredentialInvalid,
   CommunityThreadSignalSourceAdapter,
@@ -1004,6 +1004,33 @@ export {
   type SignalSourceName,
   type SignalTier,
   type SupportTicketAdapterOptions,
+} from './signal-ingestion/index.js';
+
+// RFC-0030 Phase 2 — classification (tier + ICP resonance + recency + language gate)
+export {
+  classifySignals,
+  computeRecencyDecay,
+  computeSignalWeight,
+  resolveCustomerTier,
+  resolveIcpResonance,
+  tokenize as tokenizeSignalPayload,
+  DEFAULT_SIGNAL_INGESTION_CONFIG,
+  DEFAULT_SIGNAL_INGESTION_CONFIG_PATH,
+  SignalIngestionConfigError,
+  loadSignalIngestionConfig,
+  type ClassificationResult,
+  type ClassifiedSignal,
+  type ClassifySignalsOptions,
+  type ClusteringConfig,
+  type CustomerTierRegistry,
+  type ICPResonance,
+  type IcpResonanceWeights,
+  type LoadSignalIngestionConfigOptions,
+  type SaResonanceThresholds,
+  type SignalIngestionConfig,
+  type SignalLanguageUnsupportedDecision,
+  type Tier2SignificanceThreshold,
+  type TierMultipliers,
 } from './signal-ingestion/index.js';
 
 // RFC-0010 artifacts (heartbeat + event stream + atomic JSON + state listing)

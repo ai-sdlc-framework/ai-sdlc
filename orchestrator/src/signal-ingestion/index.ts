@@ -32,6 +32,36 @@ export {
 } from './adapters/community-thread.js';
 export { ManualSignalSourceAdapter, type ManualSignalInput } from './adapters/manual.js';
 
+// RFC-0030 Phase 2 — classification
+export {
+  classifySignals,
+  computeRecencyDecay,
+  computeSignalWeight,
+  resolveCustomerTier,
+  resolveIcpResonance,
+  tokenize,
+  type ClassificationResult,
+  type ClassifiedSignal,
+  type ClassifySignalsOptions,
+  type CustomerTierRegistry,
+  type ICPResonance,
+  type SignalLanguageUnsupportedDecision,
+} from './classifier.js';
+
+export {
+  loadSignalIngestionConfig,
+  DEFAULT_SIGNAL_INGESTION_CONFIG,
+  DEFAULT_SIGNAL_INGESTION_CONFIG_PATH,
+  SignalIngestionConfigError,
+  type ClusteringConfig,
+  type IcpResonanceWeights,
+  type LoadSignalIngestionConfigOptions,
+  type SaResonanceThresholds,
+  type SignalIngestionConfig,
+  type Tier2SignificanceThreshold,
+  type TierMultipliers,
+} from './config.js';
+
 import { CommunityThreadSignalSourceAdapter } from './adapters/community-thread.js';
 import { ManualSignalSourceAdapter } from './adapters/manual.js';
 import { SupportTicketSignalSourceAdapter } from './adapters/support-ticket.js';

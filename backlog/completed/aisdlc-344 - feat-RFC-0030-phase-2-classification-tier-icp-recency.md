@@ -1,7 +1,7 @@
 ---
 id: AISDLC-344
 title: 'feat: RFC-0030 Phase 2 — classification (tier + ICP resonance + recency) + language gate'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -33,10 +33,10 @@ Phase 2 of RFC-0030 §6. Classifies signals on three deterministic axes + applie
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Tier classification: enterprise / mid / smb / free / churned (metadata-driven)
-- [ ] #2 ICP resonance classification: strong / partial / weak (BM25 default; embedding when RFC-0019 available)
-- [ ] #3 Recency decay applied per `recencyHalfLifeDays` config
-- [ ] #4 Non-English signals dropped + logged as `Decision: signal-language-unsupported`
-- [ ] #5 Per-org `acceptedLanguages` config respected (default `[en]`)
-- [ ] #6 Tier multipliers + ICP resonance weights read from `.ai-sdlc/signal-ingestion.yaml`
+- [x] #1 Tier classification: enterprise / mid / smb / free / churned (metadata-driven)
+- [x] #2 ICP resonance classification: strong / partial / weak (BM25 default; embedding when RFC-0019 available)
+- [x] #3 Recency decay applied per `recencyHalfLifeDays` config
+- [x] #4 Non-English signals dropped + logged as `Decision: signal-language-unsupported`
+- [x] #5 Per-org `acceptedLanguages` config respected (default `[en]`)
+- [x] #6 Tier multipliers + ICP resonance weights read from `.ai-sdlc/signal-ingestion.yaml`
 <!-- AC:END -->
