@@ -1,7 +1,7 @@
 ---
 id: AISDLC-419
 title: 'fix(verify-attestation): v6 verifier rejects envelopes whose subject.sha1 is an ancestor of HEAD via attestation-only chore commits'
-status: To Do
+status: Done
 labels:
   - bug
   - attestation
