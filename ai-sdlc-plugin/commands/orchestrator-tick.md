@@ -326,66 +326,79 @@ For each verdict in the array with `outcome === 'success'`:
    are populated in the verdict. The Conductor's role here is the
    **after-the-fact reconcile**: add the attestation chore commit on top
    of the dev's branch and flip the draft PR to ready-for-review.
-2. **Spawn 3 reviewer subagents in parallel** via foreground `Agent` calls:
+
+2. **(Optional, AISDLC-418 AC #4) Reviewer-pass cache probe.** Before
+   firing the reviewer Agents, check the cache for each reviewer. On a
+   cache HIT, reuse the prior verdict and skip the Agent call entirely:
+   ```bash
+   # Compute the iteration's file list from the dev's verdict (or
+   # `git diff --name-only origin/main...HEAD` inside the worktree).
+   FILES_JSON='["src/foo.ts","src/bar.ts"]'  # build from verdict.filesChanged
+   for REVIEWER in code-reviewer test-reviewer security-reviewer; do
+     CHECK_JSON=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reviewer-cache check "<task-id>" \
+       --reviewer "$REVIEWER" \
+       --files "$FILES_JSON")
+     HIT=$(echo "$CHECK_JSON" | node -e "
+       const d=[];process.stdin.on('data',c=>d.push(c));
+       process.stdin.on('end',()=>{const r=JSON.parse(d.join(''));process.stdout.write(r.hit?'yes':'no');});
+     ")
+     if [ "$HIT" = "yes" ]; then
+       echo "[orchestrator-tick] reviewer-cache HIT for $REVIEWER — reusing prior verdict"
+       # Pull the cached verdict from the .entry field and write it as the
+       # reviewer's verdict file so the rest of the flow is unchanged.
+     fi
+   done
+   ```
+
+3. **Spawn the missed reviewer subagents in parallel** via ONE foreground
+   `Agent` operation (AISDLC-418 AC #2 — single fan-out call, not 3
+   sequential ones). Only reviewers whose cache MISSed need to run.
    - `code-reviewer` — `Read`/`Bash`/`Grep` tools, reviews the diff
    - `test-reviewer` — same toolset, focuses on test coverage + ACs
    - `security-reviewer` — same toolset, security audit
    Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
    Foreground `Agent` calls are well-suited regardless of duration.
-3. Aggregate the 3 verdicts, write them to `.ai-sdlc/verdicts/<task-id>.json`.
-3a. **Emit transcript leaves (RFC-0042 Phase 3 / AISDLC-383.8)** — after aggregating verdicts, emit one Merkle leaf per reviewer before signing. Required for v6 signing; harmless in v5 mode:
+
+4. Aggregate the verdicts and write them to
+   `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json`. **Save each
+   reviewer's verdict to the cache for next iteration:**
    ```bash
-   HEAD_SHA_FOR_NONCE="<PR head SHA from verdict>"
-   TASK_ID_LOWER="$(echo '<task-id>' | tr '[:upper:]' '[:lower:]')"
-   WORKTREE_PATH=".worktrees/${TASK_ID_LOWER}"
-   EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-claude-sonnet-4-6}"
-   for AGENT_NAME in code-reviewer test-reviewer security-reviewer; do
-     TRANSCRIPT_FILE="${WORKTREE_PATH}/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl"
-     VERDICT_FILE="${WORKTREE_PATH}/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json"
-     [ -f "$TRANSCRIPT_FILE" ] || { echo "[orchestrator-tick] transcript missing for $AGENT_NAME — skipping leaf" >&2; continue; }
-     [ -f "$VERDICT_FILE" ] || { echo "[orchestrator-tick] verdict missing for $AGENT_NAME — skipping leaf" >&2; continue; }
-     node "$PIPELINE_CLI_BIN/cli-attestation.mjs" emit-leaf \
-       --repo-root "$WORKTREE_PATH" \
-       --task-id "<task-id>" \
-       --reviewer "$AGENT_NAME" \
-       --transcript-path "$TRANSCRIPT_FILE" \
-       --verdict-path "$VERDICT_FILE" \
-       --head-sha "$HEAD_SHA_FOR_NONCE" \
-       --harness "claude-code" \
-       --model "$EMIT_MODEL" \
-       || echo "[orchestrator-tick] emit-leaf for $AGENT_NAME exited non-zero (non-fatal in v5 mode)"
+   for REVIEWER in code-reviewer test-reviewer security-reviewer; do
+     node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reviewer-cache save "<task-id>" \
+       --reviewer "$REVIEWER" \
+       --files "$FILES_JSON" \
+       --verdict "@<worktree>/.ai-sdlc/verdicts/${REVIEWER}-<task-id-lower>.json"
    done
    ```
-4. Sign the attestation:
+
+5. **Invoke `ai-sdlc-pipeline reconcile`** (AISDLC-418 AC #1) — one bash
+   call wraps Steps 3.3-3.8: transcript salvage + emit leaves + sign
+   attestation + force-push chore + flip draft→ready + arm auto-merge +
+   verdict cleanup. The slash command body's only remaining mechanical
+   work after the Agent fan-out is this single invocation:
    ```bash
-   node "$PLUGIN_SCRIPTS_DIR/sign-attestation.mjs" \
-     --review-verdicts ".ai-sdlc/verdicts/<task-id>.json" \
-     --task-id <task-id>
+   # Build the reviewer Agent ID map from the Agent tool's return value
+   # so reconcile can salvage transcripts from /private/tmp (AC #3) when
+   # the worktree's .ai-sdlc/transcripts/ dir is missing them. The Agent
+   # tool returns an agentId per call; capture them into a JSON map.
+   AGENT_IDS_JSON='{"code-reviewer":"<id>","test-reviewer":"<id>","security-reviewer":"<id>"}'
+   node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reconcile "<task-id>" \
+     --reviewer-agent-ids "$AGENT_IDS_JSON" \
+     | tee /tmp/reconcile-<task-id>.json
    ```
-5. **Force-push the attestation chore commit on top of the dev's branch**
-   (Pattern X v2 reconcile). The dev already pushed its work commit + opened
-   the PR in step 2.5 Phase B; this push adds the attestation chore commit
-   on top. Run from the dev's worktree:
-   ```bash
-   cd "${WORKTREE_PATH}"
-   git fetch origin main
-   git rebase origin/main
-   git push --force-with-lease
-   ```
-6. **Flip the draft PR to ready-for-review** via:
-   ```bash
-   gh pr ready "<PR#>"
-   ```
-   This is the load-bearing flip — it triggers CI exactly once on the
-   fully-attested HEAD. The dev opened the PR as draft per Pattern X v2
-   contract specifically to defer this CI trigger until attestation
-   landed.
-7. Arm auto-merge: `gh pr merge --auto <PR#>`.
-8. Remove the consumed verdict:
-   ```bash
-   node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" remove-verdict \
-     --board-dir "$BOARD_DIR" --task-id <task-id> --from done
-   ```
+
+   The single command emits a JSON envelope `{taskId, outcome, prUrl,
+   prNumber, steps:[{name,status,output}]}`. Render `steps` as one
+   progress line each. `outcome === 'success'` means CI is now firing
+   on the fully-attested HEAD; `'partial'` means some step failed (read
+   `steps[]` for which one) and the operator must intervene.
+
+   This replaces the previous 6-step Bash recipe (per-reviewer emit-leaf
+   loops, sign-attestation, `git fetch && rebase && push`, `gh pr ready`,
+   `gh pr merge --auto`, `cli-dispatch remove-verdict`). The composite
+   command is hermetic: spawn shim makes it unit-testable, and a partial
+   failure stops at the failing step without orphaning leaves or
+   skipping cleanup of a successful path.
 
 For verdicts with `outcome === 'iterate-needed'` (Phase 1.5 / AISDLC-377.2),
 the Conductor runs the **iteration trigger protocol** (RFC-0041 OQ-4):
