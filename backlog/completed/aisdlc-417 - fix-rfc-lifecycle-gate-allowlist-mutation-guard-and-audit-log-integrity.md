@@ -1,7 +1,7 @@
 ---
 id: AISDLC-417
 title: 'fix(rfc-lifecycle-gate): allowlist same-PR mutation guard + audit-log append-only enforcement (AISDLC-350 follow-up)'
-status: To Do
+status: Done
 labels: [fix, security, follow-up-aisdlc-350]
 dependencies:
   - AISDLC-350

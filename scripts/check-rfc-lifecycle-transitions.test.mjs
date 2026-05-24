@@ -30,6 +30,8 @@ import {
   checkLifecycleTransition,
   checkAllTransitions,
   reportTransitionsAndExit,
+  checkAllowlistMutationGuard,
+  checkAuditLogIntegrity,
 } from './check-rfc-lifecycle-transitions.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -715,6 +717,165 @@ describe('reportTransitionsAndExit', () => {
   });
 });
 
+// -------------------------------------------------------------------- CLI — new test: fromIdx === -1 fix (AISDLC-417)
+
+describe('checkLifecycleTransition — unknown fromLifecycle fails closed (AISDLC-417)', () => {
+  it('fails when fromLifecycle is an unknown value and toLifecycle is a known ladder state', () => {
+    const r = checkLifecycleTransition({
+      fromLifecycle: 'CustomState',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-9999',
+    });
+    assert.ok(!r.ok);
+    assert.match(r.violation, /CustomState->Implemented/);
+    assert.match(r.diagnostic, /not a recognised ladder state/);
+    assert.match(r.diagnostic, /RFC-9999/);
+  });
+
+  it('fails when fromLifecycle is unknown and toLifecycle is Signed Off', () => {
+    const r = checkLifecycleTransition({
+      fromLifecycle: 'UnknownPhase',
+      toLifecycle: 'Signed Off',
+      rfcId: 'RFC-1234',
+    });
+    assert.ok(!r.ok);
+    assert.match(r.violation, /UnknownPhase->Signed Off/);
+    assert.match(r.diagnostic, /not a recognised ladder state/);
+  });
+
+  it('passes regressions (toIdx <= fromIdx) as before when both are known states', () => {
+    const r = checkLifecycleTransition({
+      fromLifecycle: 'Implemented',
+      toLifecycle: 'Draft',
+      rfcId: 'RFC-9999',
+    });
+    assert.ok(r.ok);
+  });
+});
+
+// ---------------------------------- checkAllowlistMutationGuard (AISDLC-417)
+
+describe('checkAllowlistMutationGuard', () => {
+  it('returns ok:true when allowlistDiff is empty (no change)', () => {
+    const r = checkAllowlistMutationGuard({ allowlistDiff: '', prBody: 'some PR body' });
+    assert.ok(r.ok);
+  });
+
+  it('returns ok:true when allowlistDiff is present but no override marker in PR body', () => {
+    const diff =
+      'diff --git a/.ai-sdlc/lifecycle-approvers.yaml b/.ai-sdlc/lifecycle-approvers.yaml\n+  - identity: newuser';
+    const r = checkAllowlistMutationGuard({
+      allowlistDiff: diff,
+      prBody: 'No override marker here.',
+    });
+    assert.ok(r.ok);
+  });
+
+  it('returns ok:false when allowlistDiff is non-empty AND override marker is present', () => {
+    const diff =
+      'diff --git a/.ai-sdlc/lifecycle-approvers.yaml b/.ai-sdlc/lifecycle-approvers.yaml\n+  - identity: newuser';
+    const prBody = '## PR\n\n<!-- ai-sdlc:lifecycle-jump-approved-by:newuser reason:testing -->\n';
+    const r = checkAllowlistMutationGuard({ allowlistDiff: diff, prBody });
+    assert.ok(!r.ok);
+    assert.match(r.diagnostic, /privilege-escalation vector/);
+    assert.match(r.diagnostic, /Split into two PRs/);
+    assert.match(r.diagnostic, /AISDLC-417/);
+  });
+
+  it('returns ok:true when prBody is empty even with allowlist changes', () => {
+    const diff =
+      'diff --git a/.ai-sdlc/lifecycle-approvers.yaml b/.ai-sdlc/lifecycle-approvers.yaml\n+  - identity: newuser';
+    const r = checkAllowlistMutationGuard({ allowlistDiff: diff, prBody: '' });
+    assert.ok(r.ok);
+  });
+
+  it('returns ok:true when prBody is null even with allowlist changes', () => {
+    const diff = '+  - identity: newuser';
+    const r = checkAllowlistMutationGuard({ allowlistDiff: diff, prBody: null });
+    assert.ok(r.ok);
+  });
+
+  it('diagnostic mentions allowlist file path', () => {
+    const diff = '+identity: evil';
+    const prBody = '<!-- ai-sdlc:lifecycle-jump-approved-by:evil reason:bypass -->';
+    const r = checkAllowlistMutationGuard({ allowlistDiff: diff, prBody });
+    assert.ok(!r.ok);
+    assert.match(r.diagnostic, /lifecycle-approvers\.yaml/);
+  });
+});
+
+// ---------------------------------- checkAuditLogIntegrity (AISDLC-417)
+
+describe('checkAuditLogIntegrity', () => {
+  it('returns ok:true when auditLogDiff is empty (no change)', () => {
+    const r = checkAuditLogIntegrity({ auditLogDiff: '' });
+    assert.ok(r.ok);
+  });
+
+  it('returns ok:true when auditLogDiff is null', () => {
+    const r = checkAuditLogIntegrity({ auditLogDiff: null });
+    assert.ok(r.ok);
+  });
+
+  it('returns ok:true for a diff that only adds lines', () => {
+    const diff = [
+      'diff --git a/.ai-sdlc/_audit/lifecycle-overrides.jsonl b/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      'index abc..def 100644',
+      '--- a/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '+++ b/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '@@ -1,2 +1,3 @@',
+      ' {"ts":"2026-01-01","rfc":"RFC-0001"}',
+      ' {"ts":"2026-01-02","rfc":"RFC-0002"}',
+      '+{"ts":"2026-01-03","rfc":"RFC-0003"}',
+    ].join('\n');
+    const r = checkAuditLogIntegrity({ auditLogDiff: diff });
+    assert.ok(r.ok);
+  });
+
+  it('returns ok:false when a line is removed from the audit log', () => {
+    const diff = [
+      'diff --git a/.ai-sdlc/_audit/lifecycle-overrides.jsonl b/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '--- a/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '+++ b/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '@@ -1,3 +1,2 @@',
+      ' {"ts":"2026-01-01","rfc":"RFC-0001"}',
+      '-{"ts":"2026-01-02","rfc":"RFC-0002"}',
+      ' {"ts":"2026-01-03","rfc":"RFC-0003"}',
+    ].join('\n');
+    const r = checkAuditLogIntegrity({ auditLogDiff: diff });
+    assert.ok(!r.ok);
+    assert.ok(Array.isArray(r.removedLines));
+    assert.equal(r.removedLines.length, 1);
+    assert.match(r.removedLines[0], /RFC-0002/);
+    assert.match(r.diagnostic, /append-only/);
+    assert.match(r.diagnostic, /AISDLC-417/);
+  });
+
+  it('returns ok:false and counts all removed lines when multiple lines are removed', () => {
+    const diff = [
+      '--- a/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '+++ b/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '-{"ts":"2026-01-01","rfc":"RFC-0001"}',
+      '-{"ts":"2026-01-02","rfc":"RFC-0002"}',
+      ' {"ts":"2026-01-03","rfc":"RFC-0003"}',
+    ].join('\n');
+    const r = checkAuditLogIntegrity({ auditLogDiff: diff });
+    assert.ok(!r.ok);
+    assert.equal(r.removedLines.length, 2);
+    assert.match(r.diagnostic, /2 line/);
+  });
+
+  it('does NOT treat diff header lines (---) as removed content lines', () => {
+    const diff = [
+      '--- a/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '+++ b/.ai-sdlc/_audit/lifecycle-overrides.jsonl',
+      '+{"ts":"2026-01-04","rfc":"RFC-0004"}',
+    ].join('\n');
+    const r = checkAuditLogIntegrity({ auditLogDiff: diff });
+    assert.ok(r.ok);
+  });
+});
+
 // -------------------------------------------------------------------- CLI
 
 describe('CLI', () => {
@@ -850,6 +1011,121 @@ describe('CLI', () => {
     }
   });
 
+  it('exits 1 when fromLifecycle is unknown (fails closed — AISDLC-417)', () => {
+    // File has a lifecycle value not in the ladder.
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    const beforePath = join(dir, 'rfc-before.md');
+    const afterPath = join(dir, 'rfc-after.md');
+    writeFileSync(beforePath, '---\nid: RFC-9999\nlifecycle: CustomState\n---\n# Body\n');
+    writeFileSync(afterPath, rfcWithLifecycle('Implemented'));
+    try {
+      const r = spawnSync(
+        'node',
+        [SCRIPT, '--before', beforePath, '--after', afterPath, '--rfc-id', 'RFC-9999'],
+        { encoding: 'utf-8' },
+      );
+      assert.equal(r.status, 1, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stderr, /not a recognised ladder state/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('--pr-body-file reads PR body from file instead of command-line arg', () => {
+    // AISDLC-417: --pr-body-file avoids command-substitution injection.
+    const before = makeTempRfcFile('Draft');
+    const marker = overrideMarker('deefactorial', 'emergency-hotfix');
+
+    // After RFC contains the marker in its body.
+    const afterDir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    const afterPath = join(afterDir, 'RFC-9999-test.md');
+    writeFileSync(afterPath, rfcWithLifecycle('Implemented') + `\n${marker}\n`);
+
+    // Write PR body to a temp file.
+    const prBodyDir = mkdtempSync(join(tmpdir(), 'pr-body-'));
+    const prBodyFile = join(prBodyDir, 'pr-body.txt');
+    writeFileSync(prBodyFile, marker);
+
+    const repoRootDir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-repo-'));
+
+    try {
+      const r = spawnSync(
+        'node',
+        [
+          SCRIPT,
+          '--before',
+          before.path,
+          '--after',
+          afterPath,
+          '--rfc-id',
+          'RFC-9999',
+          '--pr-body-file',
+          prBodyFile,
+          '--repo-root',
+          repoRootDir,
+        ],
+        { encoding: 'utf-8' },
+      );
+      assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stdout, /OVERRIDE/);
+    } finally {
+      rmSync(before.dir, { recursive: true, force: true });
+      rmSync(afterDir, { recursive: true, force: true });
+      rmSync(prBodyDir, { recursive: true, force: true });
+      rmSync(repoRootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('--pr-body-file takes precedence over --pr-body', () => {
+    // When both are passed, --pr-body-file wins.
+    const before = makeTempRfcFile('Draft');
+    const after = makeTempRfcFile('Implemented'); // forbidden transition
+
+    // PR body via file has the override marker; --pr-body does NOT.
+    const prBodyDir = mkdtempSync(join(tmpdir(), 'pr-body-'));
+    const prBodyFile = join(prBodyDir, 'pr-body.txt');
+    const marker = overrideMarker('deefactorial', 'testing-file-precedence');
+
+    // We use an RFC-after that embeds the marker too (dual-location requirement).
+    const afterDir2 = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    const afterPath2 = join(afterDir2, 'RFC-9999.md');
+    writeFileSync(afterPath2, rfcWithLifecycle('Implemented') + `\n${marker}\n`);
+    writeFileSync(prBodyFile, marker);
+
+    const repoRootDir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-repo-'));
+
+    try {
+      const r = spawnSync(
+        'node',
+        [
+          SCRIPT,
+          '--before',
+          before.path,
+          '--after',
+          afterPath2,
+          '--rfc-id',
+          'RFC-9999',
+          '--pr-body',
+          'no marker here',
+          '--pr-body-file',
+          prBodyFile,
+          '--repo-root',
+          repoRootDir,
+        ],
+        { encoding: 'utf-8' },
+      );
+      // Should succeed because --pr-body-file (which has the marker) overrides --pr-body.
+      assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stdout, /OVERRIDE/);
+    } finally {
+      rmSync(before.dir, { recursive: true, force: true });
+      rmSync(after.dir, { recursive: true, force: true });
+      rmSync(afterDir2, { recursive: true, force: true });
+      rmSync(prBodyDir, { recursive: true, force: true });
+      rmSync(repoRootDir, { recursive: true, force: true });
+    }
+  });
+
   it('exits 2 on unknown argument', () => {
     const r = spawnSync('node', [SCRIPT, '--bogus'], { encoding: 'utf-8' });
     assert.equal(r.status, 2);
@@ -895,5 +1171,13 @@ describe('module exports', () => {
 
   it('exports appendAuditEntry', () => {
     assert.equal(typeof appendAuditEntry, 'function');
+  });
+
+  it('exports checkAllowlistMutationGuard (AISDLC-417)', () => {
+    assert.equal(typeof checkAllowlistMutationGuard, 'function');
+  });
+
+  it('exports checkAuditLogIntegrity (AISDLC-417)', () => {
+    assert.equal(typeof checkAuditLogIntegrity, 'function');
   });
 });

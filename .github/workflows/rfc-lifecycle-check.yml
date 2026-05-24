@@ -127,6 +127,73 @@ jobs:
           printf '%s' "$pr_body" > /tmp/pr-body.txt
           echo "[rfc-lifecycle] Fetched PR body (${#pr_body} chars)."
 
+      # AISDLC-417 guard 1: allowlist same-PR mutation
+      # A PR that modifies lifecycle-approvers.yaml AND uses an override marker
+      # can self-approve a bypass. Fail if both are true simultaneously.
+      - name: Guard — allowlist same-PR mutation (AISDLC-417)
+        id: allowlist-mutation-guard
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.rfc-changes.outputs.base_sha }}"
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+
+          ALLOWLIST_DIFF="$(git diff "$BASE_SHA" "$HEAD_SHA" -- \
+            .ai-sdlc/lifecycle-approvers.yaml 2>/dev/null || true)"
+
+          if [ -z "$ALLOWLIST_DIFF" ]; then
+            echo "[rfc-lifecycle] allowlist-mutation-guard: no allowlist changes — skip."
+            exit 0
+          fi
+
+          echo "[rfc-lifecycle] allowlist-mutation-guard: lifecycle-approvers.yaml changed."
+
+          # Check for an override marker in the PR body.
+          PR_BODY_FILE="/tmp/pr-body.txt"
+          if [ ! -f "$PR_BODY_FILE" ]; then
+            echo "[rfc-lifecycle] allowlist-mutation-guard: no PR body file — skip marker check."
+            exit 0
+          fi
+
+          if grep -qP '<!--\s*ai-sdlc:lifecycle-jump-approved-by:[a-zA-Z0-9_-]{1,32}\s+reason:.+-->' \
+              "$PR_BODY_FILE" 2>/dev/null; then
+            echo "::error::[rfc-lifecycle] FAIL: This PR modifies .ai-sdlc/lifecycle-approvers.yaml AND contains an override marker. Allowing a PR to both expand the approvers allowlist and use that allowlist to bypass the lifecycle ladder in the same diff is a privilege-escalation vector. Split into two PRs: one that adds the approver, and a separate PR (after the first merges) that uses the override marker. (AISDLC-417)"
+            exit 1
+          fi
+
+          echo "[rfc-lifecycle] allowlist-mutation-guard: allowlist changed but no override marker — OK."
+
+      # AISDLC-417 guard 2: audit log append-only integrity
+      # The lifecycle-overrides.jsonl audit log is append-only by contract.
+      # Any line removal in a PR diff is a policy violation.
+      - name: Guard — audit log append-only integrity (AISDLC-417)
+        id: audit-log-integrity-guard
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.rfc-changes.outputs.base_sha }}"
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+
+          AUDIT_DIFF="$(git diff "$BASE_SHA" "$HEAD_SHA" -- \
+            .ai-sdlc/_audit/lifecycle-overrides.jsonl 2>/dev/null || true)"
+
+          if [ -z "$AUDIT_DIFF" ]; then
+            echo "[rfc-lifecycle] audit-log-integrity-guard: no audit log changes — skip."
+            exit 0
+          fi
+
+          # Look for removed content lines (starts with '-' but not '---' diff header).
+          REMOVED="$(printf '%s\n' "$AUDIT_DIFF" | grep -E '^-[^-]' || true)"
+
+          if [ -z "$REMOVED" ]; then
+            echo "[rfc-lifecycle] audit-log-integrity-guard: only additions — OK."
+            exit 0
+          fi
+
+          REMOVED_COUNT="$(printf '%s\n' "$REMOVED" | wc -l | tr -d ' ')"
+          echo "::error::[rfc-lifecycle] FAIL: The audit log .ai-sdlc/_audit/lifecycle-overrides.jsonl is append-only — existing entries must never be removed. This PR removes ${REMOVED_COUNT} line(s). Audit log tampering undermines the governance trail. Restore the removed entries and re-push. (AISDLC-417)"
+          exit 1
+
       - name: Check RFC lifecycle transitions
         id: lifecycle-check
         if: steps.rfc-changes.outputs.has_rfcs == 'true'
@@ -139,13 +206,6 @@ jobs:
           PR_NUMBER="${{ github.event.pull_request.number || '' }}"
           HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
           REPO_ROOT="$(pwd)"
-
-          # Read PR body (written to file in previous step; empty for merge_group).
-          if [ -f /tmp/pr-body.txt ]; then
-            PR_BODY="$(cat /tmp/pr-body.txt)"
-          else
-            PR_BODY=""
-          fi
 
           # GH review-based override path was REMOVED 2026-05-23 (security review
           # PR #652). The implementation had multiple critical gaps:
@@ -208,14 +268,18 @@ jobs:
             fi
             CHECK_ARGS="$CHECK_ARGS --commit-sha $HEAD_SHA"
 
-            # Write PR body to a temp arg file to avoid shell injection.
-            printf '%s' "$PR_BODY" > /tmp/pr-body-arg.txt
+            # Use --pr-body-file to avoid command-substitution injection with
+            # multi-line / special-char PR bodies (AISDLC-417).
+            PR_BODY_FILE_ARG=""
+            if [ -f /tmp/pr-body.txt ]; then
+              PR_BODY_FILE_ARG="--pr-body-file /tmp/pr-body.txt"
+            fi
 
             # Run the lifecycle checker.
             # shellcheck disable=SC2086
             if ! node scripts/check-rfc-lifecycle-transitions.mjs \
               $CHECK_ARGS \
-              --pr-body "$(cat /tmp/pr-body-arg.txt)"; then
+              $PR_BODY_FILE_ARG; then
               EXIT_CODE=1
               echo "::error file=${rfc_file}::RFC lifecycle transition violation detected for ${rfc_id}. See job log for details."
             fi

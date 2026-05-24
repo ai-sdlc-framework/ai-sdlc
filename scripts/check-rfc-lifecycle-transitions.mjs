@@ -367,9 +367,21 @@ export function checkLifecycleTransition({
     return { ok: true };
   }
 
+  if (fromIdx === -1) {
+    // Unknown source lifecycle with a known, non-terminal target — fail closed.
+    // We cannot validate whether the transition skips steps; treating unknown
+    // sources as allowed is a bypass vector (AISDLC-417).
+    const diagnostic =
+      `[rfc-lifecycle] FAIL ${rfcId}: lifecycle field '${fromLifecycle}' is not a recognised ` +
+      `ladder state. Cannot validate whether the transition to '${toLifecycle}' is permitted. ` +
+      `Valid lifecycle states: ${LIFECYCLE_STATES.join(', ')}, Superseded. ` +
+      `Correct the 'lifecycle:' frontmatter field to a recognised value.`;
+    return { ok: false, violation: `${fromLifecycle}->${toLifecycle}`, diagnostic };
+  }
+
   // Regressions (e.g. Implemented → Draft) are not forbidden by this gate.
   // They may be intentional reverts; a separate gate can enforce that.
-  if (fromIdx === -1 || toIdx <= fromIdx) {
+  if (toIdx <= fromIdx) {
     return { ok: true };
   }
 
@@ -538,15 +550,93 @@ export function reportTransitionsAndExit({ failures, overrides, clean }) {
 }
 
 /**
+ * Check whether a PR simultaneously modifies the lifecycle approvers allowlist
+ * AND uses an override marker. A PR that does both can self-approve a bypass —
+ * the allowlist change takes effect in the same diff as the override it enables.
+ *
+ * This is a workflow-level guard (AISDLC-417): the caller supplies the git diff
+ * output for `.ai-sdlc/lifecycle-approvers.yaml` and the PR body text.
+ *
+ * @param {object} params
+ * @param {string} params.allowlistDiff - Output of `git diff BASE HEAD -- .ai-sdlc/lifecycle-approvers.yaml` (empty = no change).
+ * @param {string} params.prBody        - PR body text to check for override markers.
+ * @returns {{ ok: boolean, diagnostic?: string }}
+ */
+export function checkAllowlistMutationGuard({ allowlistDiff, prBody }) {
+  const allowlistChanged = allowlistDiff && allowlistDiff.trim().length > 0;
+  if (!allowlistChanged) {
+    return { ok: true };
+  }
+  const hasOverrideMarker = OVERRIDE_MARKER_REGEX.test(prBody ?? '');
+  if (!hasOverrideMarker) {
+    return { ok: true };
+  }
+  const diagnostic =
+    '[rfc-lifecycle] FAIL: This PR modifies .ai-sdlc/lifecycle-approvers.yaml AND contains ' +
+    'an override marker (<!-- ai-sdlc:lifecycle-jump-approved-by:... -->). ' +
+    'Allowing a PR to both expand the approvers allowlist and use that allowlist to bypass the ' +
+    'lifecycle ladder in the same diff is a privilege-escalation vector. ' +
+    'Split into two PRs: one that adds the approver, and a separate PR (after the first merges) ' +
+    'that uses the override marker. (AISDLC-417)';
+  return { ok: false, diagnostic };
+}
+
+/**
+ * Check that the audit log `.ai-sdlc/_audit/lifecycle-overrides.jsonl` is
+ * append-only — the diff must not contain any removed lines (lines starting
+ * with `-` that are not file-header lines starting with `---`).
+ *
+ * The caller supplies the raw output of:
+ *   `git diff BASE HEAD -- .ai-sdlc/_audit/lifecycle-overrides.jsonl`
+ *
+ * Returns ok:true when the diff is empty (no change) or only additions.
+ * Returns ok:false with diagnostic when any existing lines are removed.
+ *
+ * @param {object} params
+ * @param {string} params.auditLogDiff - git diff output for the audit log file (may be empty).
+ * @returns {{ ok: boolean, removedLines?: string[], diagnostic?: string }}
+ */
+export function checkAuditLogIntegrity({ auditLogDiff }) {
+  if (!auditLogDiff || auditLogDiff.trim().length === 0) {
+    return { ok: true };
+  }
+
+  // Find lines starting with `-` that are actual content removals (not diff headers).
+  // Diff headers: `--- a/...`, `--- /dev/null`.  Content removal: `^-` followed by non-`-`.
+  const removedLines = auditLogDiff
+    .split('\n')
+    .filter((line) => line.startsWith('-') && !line.startsWith('---'));
+
+  if (removedLines.length === 0) {
+    return { ok: true };
+  }
+
+  const diagnostic =
+    `[rfc-lifecycle] FAIL: The audit log .ai-sdlc/_audit/lifecycle-overrides.jsonl ` +
+    `is append-only — existing entries must never be removed. ` +
+    `This PR removes ${removedLines.length} line(s). ` +
+    `Audit log tampering undermines the governance trail. ` +
+    `Restore the removed entries and re-push. (AISDLC-417)`;
+
+  return { ok: false, removedLines, diagnostic };
+}
+
+/**
  * Minimal CLI for local / pipeline use. Accepts two required flags:
  *   --before <file-path>   Path to the "before" version of the RFC file
  *   --after  <file-path>   Path to the "after" version of the RFC file
  *   --rfc-id <RFC-NNNN>    RFC id for error messages (optional; inferred from filename)
  *   --pr-body <text>       PR body text to scan for override marker (optional)
+ *   --pr-body-file <path>  Path to a file containing the PR body (avoids shell injection)
  *   --repo-root <path>     Repository root for allowlist + audit log (optional)
  *   --pr-number <n>        PR number for audit log (optional)
  *   --commit-sha <sha>     Commit SHA for audit log (optional)
  *   --help                 Print usage
+ *
+ * In CI, prefer --pr-body-file over --pr-body to avoid command-substitution
+ * injection when the PR body contains shell metacharacters. Write the body to
+ * a temp file with `printf '%s' "$PR_BODY" > /tmp/pr-body.txt` and pass
+ * `--pr-body-file /tmp/pr-body.txt` (AISDLC-417).
  *
  * In CI, prefer the library interface (import + call checkAllTransitions)
  * since you can pass in-memory content rather than temp files.
@@ -559,6 +649,7 @@ function parseArgs(argv) {
     after: null,
     rfcId: null,
     prBody: '',
+    prBodyFile: null,
     repoRoot: null,
     prNumber: null,
     commitSha: null,
@@ -569,13 +660,15 @@ function parseArgs(argv) {
     else if (a === '--after') args.after = argv[++i];
     else if (a === '--rfc-id') args.rfcId = argv[++i];
     else if (a === '--pr-body') args.prBody = argv[++i];
+    else if (a === '--pr-body-file') args.prBodyFile = argv[++i];
     else if (a === '--repo-root') args.repoRoot = argv[++i];
     else if (a === '--pr-number') args.prNumber = argv[++i];
     else if (a === '--commit-sha') args.commitSha = argv[++i];
     else if (a === '--help' || a === '-h') {
       console.log(
         'Usage: node scripts/check-rfc-lifecycle-transitions.mjs --before <path> --after <path> ' +
-          '[--rfc-id <id>] [--pr-body <text>] [--repo-root <path>] [--pr-number <n>] [--commit-sha <sha>]',
+          '[--rfc-id <id>] [--pr-body <text>] [--pr-body-file <path>] [--repo-root <path>] ' +
+          '[--pr-number <n>] [--commit-sha <sha>]',
       );
       process.exit(0);
     } else {
@@ -596,12 +689,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const afterContent = args.after ? readFileSync(args.after, 'utf-8') : null;
   const rfcId = args.rfcId ?? 'RFC-unknown';
 
+  // --pr-body-file takes precedence over --pr-body (avoids shell injection).
+  const prBody = args.prBodyFile ? readFileSync(args.prBodyFile, 'utf-8') : args.prBody;
+
   const report = checkAllTransitions([
     {
       rfcId,
       fromContent: beforeContent,
       toContent: afterContent,
-      prBody: args.prBody,
+      prBody,
       approvers,
       repoRoot,
       prNumber: args.prNumber,
