@@ -62,6 +62,29 @@ export const adapterBindingSchema = {
           description: 'Adapter-specific configuration. This field permits additional properties.',
           additionalProperties: true,
         },
+        soulOverrides: {
+          type: 'array',
+          description:
+            'Per-soul adapter configuration overrides per RFC-0009 §8.2. Allows the same AdapterBinding to read from different concrete sources per soul (e.g., per-soul issue tracker channel, per-soul customer-signal source). Omission preserves single-DID behavior (platform-wide config only).',
+          items: {
+            type: 'object',
+            required: ['soul', 'config'],
+            properties: {
+              soul: {
+                type: 'string',
+                description:
+                  'Soul DID URI this override applies to (e.g., `did:platform-x:soul:soul-a`).',
+              },
+              config: {
+                type: 'object',
+                description:
+                  'Soul-specific adapter configuration. Merges over the top-level `config` field at resolution time.',
+                additionalProperties: true,
+              },
+            },
+            additionalProperties: false,
+          },
+        },
         healthCheck: {
           type: 'object',
           description: 'Health check configuration.',
@@ -332,6 +355,18 @@ export const agentRoleSchema = {
             },
           },
           additionalProperties: false,
+        },
+        scope: {
+          type: 'string',
+          enum: ['platform', 'soul', 'tenant'],
+          description:
+            'Soul-scoping per RFC-0009 §8.1. `platform` agents operate across all souls (substrate-scoped roles; default when omitted). `soul` agents are bound to specific Soul DIDs via `soulBindings` (soul-specific specialists). `tenant` agents are bound to tenant boundaries (orthogonal to soul scoping). Omission preserves single-DID behavior (platform-wide).',
+        },
+        soulBindings: {
+          type: 'array',
+          description:
+            'Soul DID URIs the agent is bound to when `scope: soul` (RFC-0009 §8.1). Each entry is a Soul DID URI (e.g., `did:platform-x:soul:soul-a`). Empty array or omission with `scope: soul` is treated as platform-wide (no soul-specific binding declared).',
+          items: { type: 'string' },
         },
       },
       additionalProperties: false,
@@ -5289,6 +5324,11 @@ export const qualityGateSchema = {
       type: 'object',
       required: ['gates'],
       properties: {
+        soulScope: {
+          type: 'string',
+          description:
+            'Soul DID URI per RFC-0009 §8.4. When present, the gate applies only to work targeting this soul (e.g., a soul-specific voice-coherence gate). Omission preserves single-DID behavior (platform-wide gate applying to all souls).',
+        },
         scope: {
           type: 'object',
           description: 'Targeting criteria for the gate.',

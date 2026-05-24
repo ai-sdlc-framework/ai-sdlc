@@ -59,6 +59,26 @@
           "description": "Adapter-specific configuration. This field permits additional properties.",
           "additionalProperties": true
         },
+        "soulOverrides": {
+          "type": "array",
+          "description": "Per-soul adapter configuration overrides per RFC-0009 §8.2. Allows the same AdapterBinding to read from different concrete sources per soul (e.g., per-soul issue tracker channel, per-soul customer-signal source). Omission preserves single-DID behavior (platform-wide config only).",
+          "items": {
+            "type": "object",
+            "required": ["soul", "config"],
+            "properties": {
+              "soul": {
+                "type": "string",
+                "description": "Soul DID URI this override applies to (e.g., `did:platform-x:soul:soul-a`)."
+              },
+              "config": {
+                "type": "object",
+                "description": "Soul-specific adapter configuration. Merges over the top-level `config` field at resolution time.",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
         "healthCheck": {
           "type": "object",
           "description": "Health check configuration.",

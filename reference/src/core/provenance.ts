@@ -22,6 +22,27 @@ export interface ProvenanceRecord {
   humanReviewer?: string;
   reviewDecision: ReviewDecision;
   cost?: CostReceipt;
+  /**
+   * Soul DID URIs this work targeted, per RFC-0009 §8.3. Closes the
+   * per-soul Cκ calibration loop: outcomes can be attributed to the
+   * correct soul's calibration cells. Omission = platform-wide (no
+   * specific souls targeted; existing behavior preserved).
+   */
+  targetedSouls?: string[];
+  /**
+   * True when the work is substrate-scoped (cross-soul / platform
+   * substrate work) rather than targeting one or more specific souls.
+   * May coexist with `targetedSouls` when substrate work transitively
+   * affects specific downstream souls (mixed-scope).
+   */
+  substrateScoped?: boolean;
+  /**
+   * URI of the parent Tessellated DID this provenance record belongs to
+   * (e.g., `did:platform-x:platform`). Provides cross-reference up the
+   * fractal hierarchy for cross-soul provenance audits (RFC-0009 §7.2
+   * detection rule #3, §8.3).
+   */
+  tessellatedSoulRef?: string;
 }
 
 export const PROVENANCE_ANNOTATION_PREFIX = 'ai-sdlc.io/provenance-';
@@ -52,6 +73,9 @@ export function createProvenance(
     humanReviewer: partial.humanReviewer,
     reviewDecision: partial.reviewDecision ?? 'pending',
     cost: partial.cost,
+    targetedSouls: partial.targetedSouls,
+    substrateScoped: partial.substrateScoped,
+    tessellatedSoulRef: partial.tessellatedSoulRef,
   };
 }
 
@@ -84,6 +108,22 @@ export function provenanceToAnnotations(provenance: ProvenanceRecord): Record<st
         );
       }
     }
+  }
+  // RFC-0009 §8.3 soul-scoping fields. Annotation values are strings, so
+  // array + boolean fields are encoded as JSON for round-trip safety.
+  if (provenance.targetedSouls && provenance.targetedSouls.length > 0) {
+    annotations[`${PROVENANCE_ANNOTATION_PREFIX}targetedSouls`] = JSON.stringify(
+      provenance.targetedSouls,
+    );
+  }
+  if (provenance.substrateScoped != null) {
+    annotations[`${PROVENANCE_ANNOTATION_PREFIX}substrateScoped`] = String(
+      provenance.substrateScoped,
+    );
+  }
+  if (provenance.tessellatedSoulRef) {
+    annotations[`${PROVENANCE_ANNOTATION_PREFIX}tessellatedSoulRef`] =
+      provenance.tessellatedSoulRef;
   }
   return annotations;
 }
@@ -129,6 +169,31 @@ export function provenanceFromAnnotations(
     };
   }
 
+  // RFC-0009 §8.3 soul-scoping fields. Parse defensively — malformed
+  // JSON for `targetedSouls` is treated as absent rather than throwing.
+  let targetedSouls: string[] | undefined;
+  const targetedSoulsRaw = get('targetedSouls');
+  if (targetedSoulsRaw) {
+    try {
+      const parsed = JSON.parse(targetedSoulsRaw);
+      if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string')) {
+        targetedSouls = parsed;
+      }
+    } catch {
+      // ignore malformed annotation; treat as absent
+    }
+  }
+
+  let substrateScoped: boolean | undefined;
+  const substrateScopedRaw = get('substrateScoped');
+  if (substrateScopedRaw === 'true') {
+    substrateScoped = true;
+  } else if (substrateScopedRaw === 'false') {
+    substrateScoped = false;
+  }
+
+  const tessellatedSoulRef = get('tessellatedSoulRef');
+
   return {
     model,
     tool,
@@ -137,6 +202,9 @@ export function provenanceFromAnnotations(
     humanReviewer: get('humanReviewer'),
     reviewDecision,
     cost,
+    targetedSouls,
+    substrateScoped,
+    tessellatedSoulRef,
   };
 }
 

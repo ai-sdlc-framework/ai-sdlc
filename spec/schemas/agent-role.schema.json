@@ -215,6 +215,16 @@
             }
           },
           "additionalProperties": false
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["platform", "soul", "tenant"],
+          "description": "Soul-scoping per RFC-0009 §8.1. `platform` agents operate across all souls (substrate-scoped roles; default when omitted). `soul` agents are bound to specific Soul DIDs via `soulBindings` (soul-specific specialists). `tenant` agents are bound to tenant boundaries (orthogonal to soul scoping). Omission preserves single-DID behavior (platform-wide)."
+        },
+        "soulBindings": {
+          "type": "array",
+          "description": "Soul DID URIs the agent is bound to when `scope: soul` (RFC-0009 §8.1). Each entry is a Soul DID URI (e.g., `did:platform-x:soul:soul-a`). Empty array or omission with `scope: soul` is treated as platform-wide (no soul-specific binding declared).",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false

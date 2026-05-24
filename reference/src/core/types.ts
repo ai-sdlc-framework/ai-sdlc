@@ -507,6 +507,19 @@ export interface AgentDesignSystemConfig {
   componentCreationPolicy?: ComponentCreationPolicy;
 }
 
+/**
+ * Soul-scoping per RFC-0009 §8.1. Identifies which souls (if any) an
+ * AgentRole is bound to within a Tessellated Platform.
+ *
+ * - `platform`: substrate-wide agent operating across all souls (default
+ *   when `scope` is omitted).
+ * - `soul`: agent bound to one or more Soul DIDs via `soulBindings`
+ *   (soul-specific specialists).
+ * - `tenant`: agent bound to tenant boundaries (orthogonal to soul
+ *   scoping).
+ */
+export type AgentRoleScope = 'platform' | 'soul' | 'tenant';
+
 export interface AgentRoleSpec {
   role: string;
   goal: string;
@@ -519,6 +532,17 @@ export interface AgentRoleSpec {
   modelSelection?: ModelSelection;
   /** Design system context for frontend agents (RFC-0006 §7). */
   designSystem?: AgentDesignSystemConfig;
+  /**
+   * Soul-scoping per RFC-0009 §8.1. Omission = `platform` (substrate-wide,
+   * existing single-DID behavior preserved).
+   */
+  scope?: AgentRoleScope;
+  /**
+   * Soul DID URIs this agent is bound to when `scope: 'soul'`
+   * (RFC-0009 §8.1). Each entry is a Soul DID URI (e.g.,
+   * `did:platform-x:soul:soul-a`).
+   */
+  soulBindings?: string[];
 }
 
 export interface AgentRoleStatus {
@@ -688,6 +712,12 @@ export interface Gate {
 }
 
 export interface QualityGateSpec {
+  /**
+   * Soul DID URI per RFC-0009 §8.4. When present, the gate applies only
+   * to work targeting this soul. Omission preserves single-DID behavior
+   * (platform-wide gate).
+   */
+  soulScope?: string;
   scope?: GateScope;
   gates: Gate[];
   evaluation?: Evaluation;
@@ -816,12 +846,28 @@ export interface HealthCheck {
   timeout?: Duration;
 }
 
+/**
+ * Per-soul adapter configuration override per RFC-0009 §8.2. Allows the
+ * same AdapterBinding to read from different concrete sources per soul.
+ */
+export interface AdapterSoulOverride {
+  /** Soul DID URI this override applies to (e.g., `did:platform-x:soul:soul-a`). */
+  soul: string;
+  /** Soul-specific adapter configuration; merges over the top-level `config` at resolution time. */
+  config: Record<string, unknown>;
+}
+
 export interface AdapterBindingSpec {
   interface: AdapterInterface;
   type: string;
   version: string;
   source?: string;
   config?: Record<string, unknown>;
+  /**
+   * Per-soul configuration overrides per RFC-0009 §8.2. Omission
+   * preserves single-DID behavior (platform-wide config only).
+   */
+  soulOverrides?: AdapterSoulOverride[];
   healthCheck?: HealthCheck;
 }
 
