@@ -1,7 +1,7 @@
 ---
 id: AISDLC-416
 title: 'fix(compliance-audit): manifest self-sha two-pass + AC-8 integration test fixups + path validation (AISDLC-325 follow-up)'
-status: To Do
+status: Done
 labels: [fix, compliance, follow-up-aisdlc-325]
 dependencies:
   - AISDLC-325
@@ -24,10 +24,10 @@ AISDLC-325 shipped the RFC-0022 Phase 4 cli-compliance-audit export CLI. Three r
 
 ## Acceptance criteria
 
-- [ ] AC-1: manifest self-sha fix — two-pass approach: build final manifest without self-sha (set to empty string with comment), serialize, hash, inject. OR omit self-entry from `files[]` entirely (manifest references itself implicitly by being in the archive). Pick the approach that round-trips cleanly through `validateManifest`.
-- [ ] AC-2: AC-8 integration test fixup — either extend period to include today (e.g. `2026-01-01..2099-12-31`), initialize a git repo in tmpDir for trusted-reviewers/access-control-changes collectors, OR downgrade the test description + assertions to accurately reflect which 2 of 5 kinds are tested.
-- [ ] AC-3: `--regime` validation — assert `/^[A-Za-z0-9._-]+$/` at the yargs handler. Same regex for `manifestFilename`.
-- [ ] AC-4: full test suite passes; coverage holds ≥80% on changed lines.
+- [x] AC-1: manifest self-sha fix — two-pass approach: build final manifest without self-sha (set to empty string with comment), serialize, hash, inject. OR omit self-entry from `files[]` entirely (manifest references itself implicitly by being in the archive). Pick the approach that round-trips cleanly through `validateManifest`.
+- [x] AC-2: AC-8 integration test fixup — either extend period to include today (e.g. `2026-01-01..2099-12-31`), initialize a git repo in tmpDir for trusted-reviewers/access-control-changes collectors, OR downgrade the test description + assertions to accurately reflect which 2 of 5 kinds are tested.
+- [x] AC-3: `--regime` validation — assert `/^[A-Za-z0-9._-]+$/` at the yargs handler. Same regex for `manifestFilename`.
+- [x] AC-4: full test suite passes; coverage holds ≥80% on changed lines.
 
 ## Out of scope
 

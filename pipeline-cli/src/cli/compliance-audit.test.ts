@@ -24,6 +24,7 @@ import {
   exportBundle,
   dryRun,
   validateManifest,
+  validateSafeIdentifier,
   type EvidenceFile,
   type BundleManifest,
 } from './compliance-audit.js';
@@ -519,14 +520,34 @@ describe('exportBundle (AC #3, #5, #6)', () => {
       outputDir,
     });
 
-    // Manually recompute bundleHash from evidence files only (excludes manifest.json itself —
-    // the hash covers the corpus, not the self-referencing manifest entry).
+    // Manually recompute bundleHash from manifest.files (AISDLC-416: post-fix
+    // manifests no longer include a self-referencing manifest.json entry, so
+    // files[] is already the evidence-only set; filter remains as a no-op
+    // defense against accidental future regressions).
     const { createHash } = await import('node:crypto');
     const evidenceFiles = result.manifest.files.filter((f) => f.path !== 'manifest.json');
     const sorted = [...evidenceFiles].sort((a, b) => a.path.localeCompare(b.path));
     const concatenated = sorted.map((e) => e.sha256).join('');
     const recomputed = createHash('sha256').update(concatenated).digest('hex');
     expect(result.manifest.bundleHash).toBe(recomputed);
+  });
+
+  it('manifest does NOT contain a self-referencing manifest.json entry (AISDLC-416)', async () => {
+    buildFixtureCorpus(tmpDir, { calibrationCount: 5 });
+    const outputDir = join(tmpDir, 'output');
+
+    const result = await exportBundle({
+      workDir: tmpDir,
+      period: '2026-Q1',
+      regime: 'all',
+      outputDir,
+    });
+
+    // Post-fix manifests omit the self-entry to avoid the stale-sha bug where
+    // files[manifest.json].sha256 was computed from an intermediate manifest
+    // form and never matched the actual bytes inside the tarball.
+    const selfEntry = result.manifest.files.find((f) => f.path === 'manifest.json');
+    expect(selfEntry).toBeUndefined();
   });
 
   it('two consecutive exports of unchanged corpus produce byte-identical bundles (AC #4 + #5)', async () => {
@@ -612,19 +633,33 @@ describe('validateManifest (AC #6)', () => {
 
 // ── Integration test: fixture corpus with 200 envelopes, 1K calibration entries (AC #8) ──
 
-describe('Integration test — fixture corpus with all 5 kinds (AC #8)', () => {
+describe('Integration test — large fixture corpus (AC #8)', () => {
   /**
-   * This is the primary integration test for AC #8.
-   * Uses 200 DSSE envelopes + 1K calibration entries to prove the export
-   * handles realistic corpus sizes and produces a valid bundle with all
-   * 5 evidence kinds.
+   * Primary integration test for AC #8.
    *
-   * Note: DSSE envelope filtering is mtime-based. In the test environment,
-   * files are written in-period by default (we can't easily control mtime
-   * without elevated privileges), so we work with the actual counts produced
-   * by the fixture to verify the bundle is non-empty and internally consistent.
+   * Scope (AISDLC-416 honesty fix): of the 5 evidence kinds, only the 2 below
+   * are actually exercised by this fixture:
+   *
+   *   ✓ dor-calibration   — fixture writes _dor/calibration.jsonl with N lines
+   *                          tagged in the fixture's `period.start` day, so the
+   *                          dateInPeriod filter admits them.
+   *   ✓ enforcement-events — fixture writes .ai-sdlc/enforcement/events.jsonl
+   *                          with N lines, same in-period dating.
+   *
+   * The other 3 kinds are NOT exercised here because:
+   *
+   *   ✗ dsse-envelope   — collectDsseEnvelopes filters by file mtime, but tmpDir
+   *                       is freshly created so file mtimes are "now" (well outside
+   *                       the 2026-Q1 fixture period). A future enhancement could
+   *                       explicitly utimesSync() each envelope to backdate it.
+   *   ✗ trusted-reviewers / access-control-changes — both run `git log` against
+   *                       tmpDir, which has no git history, so both collectors
+   *                       return [].
+   *
+   * In addition to the 2 evidence kinds above, posture.yaml is always included
+   * when present.
    */
-  it('produces a valid .tar.gz with manifest for a 200-envelope + 1K-calibration corpus', async () => {
+  it('produces a valid .tar.gz with manifest containing posture + dor-calibration + enforcement-events', async () => {
     // Build large fixture corpus
     buildFixtureCorpus(tmpDir, {
       envelopeCount: 200,
@@ -646,15 +681,21 @@ describe('Integration test — fixture corpus with all 5 kinds (AC #8)', () => {
     expect(existsSync(result.bundlePath)).toBe(true);
     expect(result.bundleSizeBytes).toBeGreaterThan(100); // compressed bundle
 
-    // Manifest must have non-zero file entries
+    // Manifest must have non-zero file entries (evidence kinds only — manifest
+    // no longer self-references per AISDLC-416)
     expect(result.manifest.files.length).toBeGreaterThan(0);
 
-    // All expected kinds present (posture + manifest + at minimum dor-calibration)
+    // Posture is included
     const paths = result.manifest.files.map((f) => f.path);
-    expect(paths).toContain('manifest.json');
     expect(paths).toContain('posture.yaml');
+
+    // dor-calibration is the primary evidence kind exercised
     const dorPaths = paths.filter((p) => p.startsWith('dor-calibration/'));
     expect(dorPaths.length).toBeGreaterThan(0);
+
+    // enforcement-events is the second evidence kind exercised
+    const enforcementPaths = paths.filter((p) => p.startsWith('enforcement-events/'));
+    expect(enforcementPaths.length).toBeGreaterThan(0);
 
     // Calibration JSONL contains 1000 entries
     const dorEntry = result.manifest.files.find((f) => f.path.startsWith('dor-calibration/'));
@@ -662,7 +703,8 @@ describe('Integration test — fixture corpus with all 5 kinds (AC #8)', () => {
     // Size should be substantial (1000 JSON objects)
     expect(dorEntry!.size).toBeGreaterThan(1000);
 
-    // Bundle hash covers evidence files only (excludes manifest.json itself)
+    // Bundle hash covers evidence files (post-AISDLC-416: manifest.json no
+    // longer in files[], so filter is a no-op kept for symmetry)
     const { createHash } = await import('node:crypto');
     const evidenceFiles = result.manifest.files.filter((f) => f.path !== 'manifest.json');
     const sorted = [...evidenceFiles].sort((a, b) => a.path.localeCompare(b.path));
@@ -690,4 +732,56 @@ describe('Integration test — fixture corpus with all 5 kinds (AC #8)', () => {
     const gz2 = readFileSync(r2.bundlePath);
     expect(gz1.toString('hex')).toBe(gz2.toString('hex'));
   }, 30_000);
+});
+
+// ── validateSafeIdentifier (AC #3 — path-traversal hardening) ─────────────
+
+describe('validateSafeIdentifier (AISDLC-416 AC-3)', () => {
+  it('accepts simple alphanumeric identifiers', () => {
+    expect(() => validateSafeIdentifier('regime', 'SOC2')).not.toThrow();
+    expect(() => validateSafeIdentifier('regime', 'all')).not.toThrow();
+    expect(() => validateSafeIdentifier('regime', 'HIPAA')).not.toThrow();
+  });
+
+  it('accepts identifiers with dot, underscore, hyphen', () => {
+    expect(() => validateSafeIdentifier('regime', 'SOC2-T2')).not.toThrow();
+    expect(() => validateSafeIdentifier('regime', 'SOC_2.T-2')).not.toThrow();
+    expect(() =>
+      validateSafeIdentifier('regime', 'compliance-audit-SOC2-T2-2026-03-31'),
+    ).not.toThrow();
+  });
+
+  it('rejects path-separator characters', () => {
+    expect(() => validateSafeIdentifier('regime', '../etc/passwd')).toThrow(/Invalid --regime/);
+    expect(() => validateSafeIdentifier('regime', 'a/b')).toThrow(/Invalid --regime/);
+    expect(() => validateSafeIdentifier('regime', 'a\\b')).toThrow(/Invalid --regime/);
+  });
+
+  it('rejects null bytes and whitespace', () => {
+    expect(() => validateSafeIdentifier('regime', 'a\0b')).toThrow(/Invalid --regime/);
+    expect(() => validateSafeIdentifier('regime', 'a b')).toThrow(/Invalid --regime/);
+    expect(() => validateSafeIdentifier('regime', 'a\nb')).toThrow(/Invalid --regime/);
+  });
+
+  it('rejects empty values', () => {
+    expect(() => validateSafeIdentifier('regime', '')).toThrow(/Invalid --regime/);
+  });
+
+  it('uses the label argument in the error message', () => {
+    expect(() => validateSafeIdentifier('manifestFilename', '../escape')).toThrow(
+      /Invalid --manifestFilename/,
+    );
+  });
+
+  it('exportBundle propagates the regime validation error', async () => {
+    buildFixtureCorpus(tmpDir, { calibrationCount: 1 });
+    await expect(
+      exportBundle({
+        workDir: tmpDir,
+        period: '2026-Q1',
+        regime: '../escape',
+        outputDir: join(tmpDir, 'output'),
+      }),
+    ).rejects.toThrow(/Invalid --regime/);
+  });
 });
