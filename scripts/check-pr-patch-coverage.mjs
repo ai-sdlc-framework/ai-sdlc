@@ -124,6 +124,11 @@ const NON_INSTRUMENTED_PATTERNS = [
   // shims themselves are exercised via subprocess invocation which istanbul
   // can't instrument. Same rationale as `src/cli-*.ts` above.
   /(^|\/)bin\/.+\.mjs$/,
+  // ai-sdlc-plugin/hooks/*.js — Node hook scripts spawned by Claude Code
+  // (PreToolUse, etc.). Exercised end-to-end via subprocess invocation in
+  // hermetic + integration tests (e.g. AC-2 real-hook test). Vitest can't
+  // instrument them. Same rationale as bin/*.mjs above.
+  /(^|\/)ai-sdlc-plugin\/hooks\/.+\.(?:js|mjs|cjs)$/,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────
