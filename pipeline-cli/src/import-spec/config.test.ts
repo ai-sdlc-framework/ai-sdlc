@@ -106,4 +106,68 @@ describe('loadAdopterAuthoringConfig', () => {
       expect(cfg.import.artifactGranularity).toBe('tasks-md-only');
     });
   });
+
+  describe('drift-handling slice (RFC-0036 Phase 6 / AISDLC-331)', () => {
+    it('defaults to auto-sync for typoCosmetic + defer-24h-window for semanticScope', () => {
+      withTmp((dir) => {
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.driftHandling.typoCosmetic).toBe('auto-sync');
+        expect(cfg.driftHandling.semanticScope).toBe('defer-24h-window');
+      });
+    });
+
+    it('reads the nested adopter-authoring: drift-handling: severityThresholds: block', () => {
+      withTmp((dir) => {
+        mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(dir, '.ai-sdlc', 'adopter-authoring.yaml'),
+          [
+            'adopter-authoring:',
+            '  drift-handling:',
+            '    severityThresholds:',
+            '      typoCosmetic: defer-24h-window',
+            '      semanticScope: defer-24h-window',
+          ].join('\n'),
+          'utf8',
+        );
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.driftHandling.typoCosmetic).toBe('defer-24h-window');
+        expect(cfg.driftHandling.semanticScope).toBe('defer-24h-window');
+      });
+    });
+
+    it('accepts the flat top-level drift-handling: block (convenience form)', () => {
+      withTmp((dir) => {
+        mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(dir, '.ai-sdlc', 'adopter-authoring.yaml'),
+          ['drift-handling:', '  typoCosmetic: defer-24h-window'].join('\n'),
+          'utf8',
+        );
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.driftHandling.typoCosmetic).toBe('defer-24h-window');
+        // unset field still falls through to default
+        expect(cfg.driftHandling.semanticScope).toBe('defer-24h-window');
+      });
+    });
+
+    it('rejects unknown drift action values by falling back to defaults', () => {
+      withTmp((dir) => {
+        mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(dir, '.ai-sdlc', 'adopter-authoring.yaml'),
+          [
+            'drift-handling:',
+            '  severityThresholds:',
+            '    typoCosmetic: yolo',
+            '    semanticScope: wat',
+          ].join('\n'),
+          'utf8',
+        );
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.driftHandling.typoCosmetic).toBe('auto-sync');
+        expect(cfg.driftHandling.semanticScope).toBe('defer-24h-window');
+      });
+    });
+  });
 });

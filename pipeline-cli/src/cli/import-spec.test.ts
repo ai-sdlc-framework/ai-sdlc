@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderTextOutcome } from './import-spec.js';
+import { renderReconcileOutcome, renderTextOutcome } from './import-spec.js';
 
 describe('renderTextOutcome', () => {
   it('renders an imported outcome as a summary + per-task line', () => {
@@ -195,3 +195,54 @@ function stubVerdict(overall: 'admit' | 'needs-clarification') {
     evaluatorVersion: 'test-stub',
   };
 }
+
+describe('renderReconcileOutcome', () => {
+  it('renders an empty result with a "nothing to reconcile" hint', () => {
+    const text = renderReconcileOutcome({
+      workDir: '/tmp/x',
+      perTask: [],
+      unknownFilterIds: [],
+    });
+    expect(text).toContain('Reconciled 0 imported task(s)');
+    expect(text).toContain('nothing to reconcile');
+  });
+
+  it('renders auto-sync entries with their Decision id', () => {
+    const text = renderReconcileOutcome({
+      workDir: '/tmp/x',
+      perTask: [
+        {
+          importedTaskId: 'IMP-1',
+          upstreamTaskId: 'T-001',
+          filePath: '/tmp/x/backlog/tasks/imp-1 - foo.md',
+          severity: 'cosmetic',
+          action: 'auto-sync-applied',
+          decisionId: 'DEC-0042',
+        },
+      ],
+      unknownFilterIds: [],
+    });
+    expect(text).toContain('IMP-1 (upstream T-001): cosmetic → auto-sync-applied');
+    expect(text).toContain('DEC-0042');
+  });
+
+  it('renders defer entries and unknown filter ids', () => {
+    const text = renderReconcileOutcome({
+      workDir: '/tmp/x',
+      perTask: [
+        {
+          importedTaskId: 'IMP-7',
+          upstreamTaskId: 'T-007',
+          filePath: '/tmp/x/backlog/tasks/imp-7 - bar.md',
+          severity: 'semantic',
+          action: 'defer-24h-window-opened',
+          decisionId: 'DEC-0099',
+        },
+      ],
+      unknownFilterIds: ['IMP-99'],
+    });
+    expect(text).toContain('IMP-7 (upstream T-007): semantic → defer-24h-window-opened');
+    expect(text).toContain('Unknown --task ids');
+    expect(text).toContain('IMP-99');
+  });
+});

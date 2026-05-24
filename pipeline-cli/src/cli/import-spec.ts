@@ -1,7 +1,9 @@
 /**
- * `cli-import-spec` — RFC-0036 Phase 4/5 spec-kit import CLI.
+ * `cli-import-spec` — RFC-0036 Phase 4/5/6 spec-kit import + reconcile CLI.
  *
- * Usage: `cli-import-spec --from <path> [options]`
+ * Usage:
+ *   cli-import-spec --from <path> [options]
+ *   cli-import-spec --reconcile [--task <id>] [options]
  *
  * Reads spec-kit `tasks.md`, runs the RFC-0011 DoR Gate against each
  * generated task (Phase 5, AISDLC-330), and produces one backlog task
@@ -9,6 +11,11 @@
  * back-reference to the upstream artifact. Failure modes (missing
  * tasks.md, unknown schema, DoR-failed tasks under strict mode) route
  * through the Decision Catalog per OQ-1 / OQ-11 / OQ-10.
+ *
+ * Phase 6 (AISDLC-331) adds the `--reconcile` mode for drift handling
+ * per OQ-2: scans imported tasks, compares to current upstream content,
+ * auto-syncs low-severity drift, defers high-severity drift with a 24h
+ * override window — and never halts in-progress tasks.
  *
  * @module cli/import-spec
  */
@@ -19,6 +26,7 @@ import { hideBin } from 'yargs/helpers';
 import { importSpec, type ImportSpecResult } from '../import-spec/import.js';
 import type { DorStrictness } from '../import-spec/config.js';
 import { describeFailedGates } from '../import-spec/dor-at-import.js';
+import { reconcileSpec, type ReconcileResult } from '../import-spec/reconcile.js';
 
 function emit(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
@@ -100,26 +108,73 @@ export function renderTextOutcome(result: ImportSpecResult): string {
   return lines.join('\n') + '\n';
 }
 
+/**
+ * Render a `--reconcile` outcome as human-readable text. Per-task line
+ * with severity + action, plus a tail summary of unknown filter ids.
+ */
+export function renderReconcileOutcome(result: ReconcileResult): string {
+  const lines: string[] = [];
+  lines.push(`Reconciled ${result.perTask.length} imported task(s) in ${result.workDir}`);
+
+  if (result.perTask.length === 0 && result.unknownFilterIds.length === 0) {
+    lines.push('  (no imported tasks found — nothing to reconcile)');
+  }
+
+  for (const t of result.perTask) {
+    const decisionStr = t.decisionId ? ` [${t.decisionId}]` : '';
+    lines.push(
+      `  - ${t.importedTaskId} (upstream ${t.upstreamTaskId}): ${t.severity} → ${t.action}${decisionStr}`,
+    );
+  }
+
+  if (result.unknownFilterIds.length > 0) {
+    lines.push('');
+    lines.push(`Unknown --task ids (no matching imported task found):`);
+    for (const id of result.unknownFilterIds) lines.push(`  - ${id}`);
+  }
+
+  return lines.join('\n') + '\n';
+}
+
 export function buildImportSpecCli(): Argv {
   return yargs(hideBin(process.argv))
     .scriptName('cli-import-spec')
     .usage(
-      'Usage: $0 --from <path> [options]\n\n' +
-        'RFC-0036 Phase 4-5 spec-kit import. Reads spec-kit `tasks.md` and writes\n' +
-        'one backlog task per upstream task entry with `specRef:` back-references.\n' +
-        'Phase 5 (AISDLC-330) wires the DoR Gate at import time:\n' +
+      'Usage:\n' +
+        '  $0 --from <path> [options]\n' +
+        '  $0 --reconcile [--task <id>] [options]\n\n' +
+        'RFC-0036 Phase 4-6 spec-kit bridge.\n\n' +
+        'Phase 4-5 (--from): reads spec-kit `tasks.md` and writes one backlog\n' +
+        'task per upstream task entry with `specRef:` back-references. The DoR\n' +
+        'Gate runs at import time:\n' +
         '  - strict (default): failing tasks REFUSE import; clarification task\n' +
         '    emitted back to spec-kit per OQ-10.\n' +
         '  - warn (--rubric warn): failing tasks admit with warnings surfaced.\n' +
         '  - .specify/analyze.json auto-resolves matching gates via the Decision\n' +
         '    Catalog per OQ-7 — only NEW gaps reach the operator.\n\n' +
-        'No drift / reconcile yet — that ships in Phase 6 (AISDLC-331).',
+        'Phase 6 (--reconcile, AISDLC-331): scans imported tasks for drift\n' +
+        'against the current upstream `tasks.md`. Per OQ-2 + RFC-0035 G0:\n' +
+        '  - low-severity (typo/cosmetic) → auto-sync the task body\n' +
+        '  - high-severity (semantic/scope) → defer with 24h override window;\n' +
+        '    in-progress tasks NEVER halt, continue against dispatched version\n' +
+        '  - removed-upstream → mark superseded; never auto-delete',
     )
     .option('from', {
       type: 'string',
       describe:
         'Path to the spec-kit feature directory (containing `tasks.md`) or the `tasks.md` file directly.',
-      demandOption: true,
+    })
+    .option('reconcile', {
+      type: 'boolean',
+      describe:
+        'RFC-0036 Phase 6 (OQ-2) drift handling. Scans imported tasks, classifies drift via ' +
+        'RFC-0035 Stage A, auto-syncs low severity, defers high severity with a 24h window.',
+      default: false,
+    })
+    .option('task', {
+      type: 'string',
+      describe:
+        'With --reconcile, narrow to a single imported task by id (e.g. IMP-12). Omit to reconcile all.',
     })
     .option('work-dir', {
       alias: 'w',
@@ -146,14 +201,50 @@ export function buildImportSpecCli(): Argv {
       default: 'text' as const,
       describe: 'Output mode.',
     })
+    .check((argv) => {
+      const hasFrom = typeof argv.from === 'string' && argv.from.trim().length > 0;
+      const hasReconcile = Boolean(argv.reconcile);
+      if (hasFrom && hasReconcile) {
+        throw new Error('--from and --reconcile are mutually exclusive');
+      }
+      if (!hasFrom && !hasReconcile) {
+        throw new Error('one of --from <path> or --reconcile is required');
+      }
+      if (typeof argv.task === 'string' && argv.task.length > 0 && !hasReconcile) {
+        throw new Error('--task is only valid with --reconcile');
+      }
+      return true;
+    })
     .help()
     .strict();
 }
 
 export async function runImportSpecCli(): Promise<void> {
   const argv = await buildImportSpecCli().parseAsync();
-  const from = String(argv.from);
   const workDir = String(argv['work-dir']);
+  const formatJson = String(argv.format) === 'json';
+
+  if (argv.reconcile) {
+    let reconcileResult: ReconcileResult;
+    try {
+      const opts: Parameters<typeof reconcileSpec>[0] = { workDir };
+      if (typeof argv.task === 'string' && argv.task.length > 0) opts.taskFilter = argv.task;
+      reconcileResult = reconcileSpec(opts);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      fail(msg);
+    }
+
+    if (formatJson) {
+      emit({ ok: true, mode: 'reconcile', ...reconcileResult });
+    } else {
+      emitText(renderReconcileOutcome(reconcileResult));
+    }
+    // Non-blocking per G0 — every drift Decision is filed, no exit-code gate.
+    return;
+  }
+
+  const from = String(argv.from);
   const strictness = argv.rubric as DorStrictness | undefined;
   const analyzeMetadataPath = argv['analyze-metadata'] as string | undefined;
 
@@ -170,7 +261,7 @@ export async function runImportSpecCli(): Promise<void> {
     fail(msg);
   }
 
-  if (String(argv.format) === 'json') {
+  if (formatJson) {
     emit({ ok: true, ...result });
   } else {
     emitText(renderTextOutcome(result));

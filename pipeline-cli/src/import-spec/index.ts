@@ -10,3 +10,4 @@ export * from './task-writer.js';
 export * from './decisions.js';
 export * from './dor-at-import.js';
 export * from './import.js';
+export * from './reconcile.js';

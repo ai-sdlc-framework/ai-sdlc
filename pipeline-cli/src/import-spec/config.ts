@@ -20,6 +20,18 @@ export type ArtifactGranularity = 'tasks-md-only';
 export type DorStrictness = 'strict' | 'warn';
 export type DorRejection = 'refuse-emit-clarification';
 
+/**
+ * OQ-2 / RFC §14.1 drift-handling severity policies. Per-severity action.
+ *
+ * - `auto-sync`: the catalog auto-applies the upstream change to the
+ *   imported task body (low-severity tier — typo / cosmetic).
+ * - `defer-24h-window`: emit `Decision: spec-drift-detected` with a 24h
+ *   operator-override window per RFC-0024 §15.1 default-on-silence; the
+ *   in-progress task continues against its dispatched version (high-
+ *   severity tier — semantic / scope).
+ */
+export type DriftSeverityAction = 'auto-sync' | 'defer-24h-window';
+
 export interface ImportConfig {
   /** OQ-1 — tasks.md only (no fallback). */
   artifactGranularity: ArtifactGranularity;
@@ -32,8 +44,22 @@ export interface ImportConfig {
   dorRejection: DorRejection;
 }
 
+/**
+ * Per-org overrides for the spec-drift severity policy (RFC-0036 OQ-2 /
+ * Phase 6 / AISDLC-331). The classifier maps a parsed drift between an
+ * in-progress task's snapshot and the current upstream `tasks.md` entry
+ * to a tier; the tier maps to one of these actions.
+ */
+export interface DriftHandlingConfig {
+  /** Low-severity tier action (typo / cosmetic changes). */
+  typoCosmetic: DriftSeverityAction;
+  /** High-severity tier action (semantic / scope changes). */
+  semanticScope: DriftSeverityAction;
+}
+
 export interface AdopterAuthoringConfig {
   import: ImportConfig;
+  driftHandling: DriftHandlingConfig;
 }
 
 const DEFAULTS: AdopterAuthoringConfig = {
@@ -41,6 +67,10 @@ const DEFAULTS: AdopterAuthoringConfig = {
     artifactGranularity: 'tasks-md-only',
     dorStrictness: 'strict',
     dorRejection: 'refuse-emit-clarification',
+  },
+  driftHandling: {
+    typoCosmetic: 'auto-sync',
+    semanticScope: 'defer-24h-window',
   },
 };
 
@@ -87,15 +117,25 @@ export function loadAdopterAuthoringConfig(
   const source = (nested && typeof nested === 'object' ? nested : root) as Record<string, unknown>;
 
   const importSlice = source.import;
-  if (!importSlice || typeof importSlice !== 'object') return cloneDefaults();
+  const driftSlice = source['drift-handling'];
 
-  return {
-    import: mergeImport(importSlice as Record<string, unknown>),
-  };
+  const importCfg =
+    importSlice && typeof importSlice === 'object'
+      ? mergeImport(importSlice as Record<string, unknown>)
+      : { ...DEFAULTS.import };
+  const driftCfg =
+    driftSlice && typeof driftSlice === 'object'
+      ? mergeDriftHandling(driftSlice as Record<string, unknown>)
+      : { ...DEFAULTS.driftHandling };
+
+  return { import: importCfg, driftHandling: driftCfg };
 }
 
 function cloneDefaults(): AdopterAuthoringConfig {
-  return { import: { ...DEFAULTS.import } };
+  return {
+    import: { ...DEFAULTS.import },
+    driftHandling: { ...DEFAULTS.driftHandling },
+  };
 }
 
 function mergeImport(slice: Record<string, unknown>): ImportConfig {
@@ -114,4 +154,24 @@ function mergeImport(slice: Record<string, unknown>): ImportConfig {
         ? 'refuse-emit-clarification'
         : DEFAULTS.import.dorRejection,
   };
+}
+
+function mergeDriftHandling(slice: Record<string, unknown>): DriftHandlingConfig {
+  // RFC §14.1 nests these under `severityThresholds:` — accept that nested
+  // form AND a flat form so simple adopter setups don't need the extra
+  // indent (mirrors the import: convention above).
+  const thresholds =
+    slice.severityThresholds && typeof slice.severityThresholds === 'object'
+      ? (slice.severityThresholds as Record<string, unknown>)
+      : slice;
+  return {
+    typoCosmetic: parseDriftAction(thresholds.typoCosmetic, DEFAULTS.driftHandling.typoCosmetic),
+    semanticScope: parseDriftAction(thresholds.semanticScope, DEFAULTS.driftHandling.semanticScope),
+  };
+}
+
+function parseDriftAction(value: unknown, fallback: DriftSeverityAction): DriftSeverityAction {
+  return value === 'auto-sync' || value === 'defer-24h-window'
+    ? (value as DriftSeverityAction)
+    : fallback;
 }
