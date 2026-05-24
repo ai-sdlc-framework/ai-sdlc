@@ -103,6 +103,74 @@ function computePatchIdForVerifier(base, head, repoRoot) {
   const match = result.stdout.trim().match(/^([0-9a-f]{40})/i);
   return match ? match[1].toLowerCase() : null;
 }
+
+/**
+ * AISDLC-419: detect "attestation-only descendant" relationship.
+ *
+ * Returns true iff `subjectSha` is an ancestor of `headSha` AND the only
+ * changes between them are inside `.ai-sdlc/attestations/` or
+ * `.ai-sdlc/transcript-leaves.jsonl` (i.e. no source-code diff).
+ *
+ * Use case: the `/ai-sdlc execute` and pre-push `check-attestation-sign.sh`
+ * paths each commit envelope files as their own chore commits. When two such
+ * chore commits stack (Step 10 sign + pre-push fixup sign), HEAD shifts past
+ * the commit that the envelope's `subject.digest.sha1` was bound to, even
+ * though no real code changed. The strict head-binding check then rejects a
+ * structurally valid envelope.
+ *
+ * Security: the relaxation is bounded — any source-code diff inside the
+ * `<subjectSha>..<headSha>` range produces non-empty `git diff-tree` output
+ * (after excluding the two attestation paths), and the function returns false.
+ * Cross-PR replay is still impossible because `subjectSha` MUST be an ancestor
+ * of HEAD, which only holds inside the same branch.
+ *
+ * Exported for hermetic tests.
+ */
+export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
+  if (!/^[0-9a-f]{40}$/i.test(subjectSha) || !/^[0-9a-f]{40}$/i.test(headSha)) {
+    return false;
+  }
+  if (subjectSha.toLowerCase() === headSha.toLowerCase()) {
+    // Same commit — caller should never reach the relaxation path, but be safe.
+    return true;
+  }
+  // 1. Ancestor check (cheap; runs first).
+  const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', subjectSha, headSha], {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+  });
+  if (ancestor.status !== 0) {
+    // Non-zero exit means NOT an ancestor (git's documented semantics) OR
+    // git failure. Either way, reject.
+    return false;
+  }
+  // 2. Non-attestation diff content between subjectSha and headSha must be empty.
+  let diffOutput;
+  try {
+    diffOutput = execFileSync(
+      'git',
+      [
+        'diff-tree',
+        '--no-color',
+        '-p',
+        `${subjectSha}..${headSha}`,
+        '--',
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves.jsonl',
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        maxBuffer: 128 * 1024 * 1024,
+      },
+    );
+  } catch {
+    // git failure (e.g. shallow clone, unreachable SHA). Conservative: reject.
+    return false;
+  }
+  return !diffOutput || diffOutput.trim().length === 0;
+}
+
 import {
   ACCEPTED_SCHEMA_VERSIONS,
   verifyAttestation,
@@ -564,20 +632,58 @@ export function verifyV6Envelope({
   //   (a) the file path  `.ai-sdlc/attestations/<headSha>.v6.dsse.json`
   //   (b) the envelope-internal `subject.digest.sha1` field
   // If either disagrees with `headSha`, an attacker may be replaying or
-  // mis-binding an envelope. Requiring both removes the single point of
-  // failure of relying on filename alone.
+  // mis-binding an envelope.
+  //
+  // AISDLC-419: relax (a)+(b) when the divergence is the result of one or
+  // more attestation-only chore commits sitting on top of the signed commit
+  // (the Step 10 sign + pre-push `check-attestation-sign.sh` chain creates
+  // exactly this shape). The relaxation requires:
+  //   - subject.digest.sha1 is an ancestor of headSha (git merge-base --is-ancestor)
+  //   - `git diff-tree <subject>..<head> -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves.jsonl'`
+  //     produces no output
+  // Both conditions together preserve replay protection: cross-PR replay
+  // fails the ancestor check, and tampering with non-attestation files
+  // between sign and push fails the empty-diff check.
   const expectedFileName = `${headSha.toLowerCase()}.v6.dsse.json`;
-  if (envelopeFileName.toLowerCase() !== expectedFileName) {
+  const fileNameMismatch = envelopeFileName.toLowerCase() !== expectedFileName;
+  const subjectMismatch = envelopeSubjectSha.toLowerCase() !== headSha.toLowerCase();
+  // Filename-only mismatch (subject still matches headSha) means the envelope
+  // file was renamed away from its bound commit — that is real tampering, the
+  // AISDLC-419 relaxation MUST NOT apply. Reject early to preserve the test
+  // contract from AISDLC-398's "rejects when filename does not match headSha".
+  if (fileNameMismatch && !subjectMismatch) {
     return {
       status: 'invalid',
       reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}`,
     };
   }
-  if (envelopeSubjectSha.toLowerCase() !== headSha.toLowerCase()) {
-    return {
-      status: 'invalid',
-      reason: `v6: envelope.subject.digest.sha1 '${envelopeSubjectSha.slice(0, 7)}' does not match head SHA '${headSha.slice(0, 7)}' (possible replay)`,
-    };
+  if (subjectMismatch) {
+    // AISDLC-419: the divergence may be the result of one or more
+    // attestation-only chore commits sitting on top of the signed commit
+    // (the Step 10 sign + pre-push `check-attestation-sign.sh` chain
+    // creates exactly this shape). Relax iff:
+    //   - subject.digest.sha1 is an ancestor of headSha (git merge-base --is-ancestor)
+    //   - `git diff-tree <subject>..<head> -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves.jsonl'`
+    //     is empty
+    // Both checks together preserve replay protection: cross-PR replay
+    // fails the ancestor check; tampering with non-attestation files
+    // between sign and push fails the empty-diff check.
+    if (isAttestationOnlyDescendant(envelopeSubjectSha, headSha, repoRoot)) {
+      process.stderr.write(
+        `[v6-verifier] AISDLC-419: accepting envelope (subject=${envelopeSubjectSha.slice(0, 7)}) as attestation-only ancestor of HEAD=${headSha.slice(0, 7)} — no source diff between them.\n`,
+      );
+      // Fall through to transcript / Merkle / signature verification.
+    } else if (fileNameMismatch) {
+      return {
+        status: 'invalid',
+        reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}`,
+      };
+    } else {
+      return {
+        status: 'invalid',
+        reason: `v6: envelope.subject.digest.sha1 '${envelopeSubjectSha.slice(0, 7)}' does not match head SHA '${headSha.slice(0, 7)}' (possible replay)`,
+      };
+    }
   }
 
   // ── 3. Load on-disk transcript leaves ──────────────────────────────────
