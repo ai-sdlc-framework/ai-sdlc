@@ -147,42 +147,20 @@ jobs:
             PR_BODY=""
           fi
 
-          # Check for GH review approval override (alternative override path).
-          # We scan approving review comments for the override marker.
-          GH_REVIEW_OVERRIDE=""
-          if [ -n "$PR_NUMBER" ] && [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
-            GH_REVIEW_OVERRIDE="$(gh api \
-              "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-              --jq '
-                .[] |
-                select(.state == "APPROVED") |
-                .body |
-                select(. != null) |
-                select(test("ai-sdlc:lifecycle-jump-approved-by:"))
-              ' 2>/dev/null | head -1 || true)"
-            if [ -n "$GH_REVIEW_OVERRIDE" ]; then
-              echo "[rfc-lifecycle] Found override marker in approving GH review."
-              # Validate reviewer login against allowlist.
-              REVIEW_LOGIN="$(gh api \
-                "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-                --jq '
-                  .[] |
-                  select(.state == "APPROVED") |
-                  select(.body != null) |
-                  select(.body | test("ai-sdlc:lifecycle-jump-approved-by:")) |
-                  .user.login
-                ' 2>/dev/null | head -1 || true)"
-              # Check allowlist.
-              ALLOWLIST="$(node -e "
-                import('/tmp/lccheck.mjs').then(() => {}).catch(() => {});
-              " 2>/dev/null || true)"
-              # Use the review body as the PR body override for marker parsing.
-              if [ -n "$REVIEW_LOGIN" ]; then
-                PR_BODY="$GH_REVIEW_OVERRIDE"
-                echo "[rfc-lifecycle] Using review approval from: $REVIEW_LOGIN"
-              fi
-            fi
-          fi
+          # GH review-based override path was REMOVED 2026-05-23 (security review
+          # PR #652). The implementation had multiple critical gaps:
+          #   - ALLOWLIST check was a dead no-op (imported non-existent
+          #     /tmp/lccheck.mjs, silently swallowed via .catch(() => {})).
+          #   - REVIEW_LOGIN was fetched but never compared to the allowlist.
+          #   - parseOverrideMarker read the operator NAME from the marker text
+          #     (which the reviewer wrote) — not from review.user.login. So any
+          #     user with approve-permission could paste an allowlisted name and
+          #     bypass the gate.
+          #   - PR_BODY="$GH_REVIEW_OVERRIDE" silently transformed the
+          #     dual-location requirement into (review-body AND RFC-body),
+          #     contradicting the AC.
+          # The PR body + RFC body dual-location path remains and works
+          # correctly. Operators wanting to override should use that path.
 
           EXIT_CODE=0
 
