@@ -25,7 +25,9 @@ try {
   const raw = readFileSync('/dev/stdin', 'utf-8');
   input = JSON.parse(raw);
 } catch (e) {
-  process.stderr.write(`[hook-diag] stdin parse failed: ${e && e.message ? e.message : String(e)}\n`);
+  process.stderr.write(
+    `[hook-diag] stdin parse failed: ${e && e.message ? e.message : String(e)}\n`,
+  );
   process.exit(0);
 }
 
