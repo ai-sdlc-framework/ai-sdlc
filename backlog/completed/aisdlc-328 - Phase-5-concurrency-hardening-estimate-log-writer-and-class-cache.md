@@ -12,6 +12,8 @@ labels:
 dependencies:
   - AISDLC-280
 priority: high
+blocked:
+  reason: "RFC-0016 is Ready for Review (not yet Signed Off); operator-authorized Phase-5 prerequisite hardening per PR #498 round-1 review decision (2026-05-16). No OQs are blocked by or constrain this work — the concurrency contract is documented in §10.1."
 references:
   - pipeline-cli/src/estimation/log-writer.ts
   - pipeline-cli/src/estimation/cache.ts
@@ -20,7 +22,7 @@ references:
 
 ## Bug
 
-PR #498 (AISDLC-280, RFC-0016 Phase 2) round-1 code review identified two concurrency races in the estimate log writer + class cache. Both are LATENT today (cli-orchestrator runs `maxConcurrent: 1`) but WILL activate in Phase 5 when the orchestrator raises concurrency or when a scripted parallel-estimation sweep is added. Filed as a Phase-5 prerequisite so the hardening lands before the activation surface.
+PR #498 (AISDLC-280, RFC-0016 Phase 2) round-1 code review identified two concurrency races in the estimate log writer + class cache. Both are LATENT today (cli-orchestrator runs `maxConcurrent: 1`) but WILL activate in Phase 5 when the orchestrator raises concurrency or when a scripted parallel-estimation sweep is added. Filed as a Phase-5 prerequisite (RFC-0016 Phase 5 per §13 Implementation Plan, RFC-0016) so the hardening lands before the activation surface.
 
 ## Race 1: `captureEstimate` runIndex TOCTOU (log-writer.ts:173)
 
