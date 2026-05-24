@@ -208,6 +208,19 @@ describe('classifySignals — language gate', () => {
     expect(result.classified).toHaveLength(1);
   });
 
+  it('accepts short email-formatted English payloads with many newlines (regression: control chars treated as script-neutral)', () => {
+    // Pre-fix: control chars (newlines, tabs) below U+0020 fell through detectScript and
+    // were counted toward the non-Latin ratio. A 29-char payload with 5 newlines (17.2%)
+    // got tagged as non-English and dropped. Post-fix: ASCII control chars return 'common'
+    // and are excluded from the script-ratio calculation entirely.
+    const s = signal('en-email', {
+      payload: 'Hi,\n\nFix needed.\n\nThanks,\nBob',
+    });
+    const result = classifySignals([s], opts);
+    expect(result.classified).toHaveLength(1);
+    expect(result.languageDecisions).toHaveLength(0);
+  });
+
   it('emits Decision with correct acceptedLanguages from config', () => {
     const s = signal('cjk2', {
       payload: '产品需要更好的企业功能支持团队协作和工作流程管理提高效率',

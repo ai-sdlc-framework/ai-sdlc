@@ -65,10 +65,11 @@ export interface ClassifiedSignal {
   /**
    * Signal-level base weight.
    *   - Tier 1 sources: 1.0
-   *   - Tier 2 sources (above significance threshold): 0.3
-   *   - Tier 2 sources (below threshold): 0.0 (excluded from D1 scoring)
-   * Phase 2 does not evaluate the significance threshold (that is Phase 4);
-   * base weight defaults to the source's adapter defaultTier mapping.
+   *   - Tier 2 sources: 0.3 in Phase 2 (significance-threshold evaluation
+   *     is Phase 4's job; Phase 4 will downgrade to 0.0 for Tier 2 sources
+   *     below threshold, excluding them from D1 scoring).
+   * Phase 4/5 consumers MUST NOT rely on `baseWeight === 0` to detect
+   * exclusions until Phase 4 ships — Phase 2 never emits 0.0.
    */
   baseWeight: number;
 }
@@ -480,6 +481,12 @@ function detectDominantNonLatinScript(text: string): string | null {
  * Classify a Unicode code point into a broad script category.
  */
 function detectScript(cp: number): string {
+  // ASCII control chars (U+0000-U+001F: newlines, tabs, CR, etc.) are
+  // script-neutral whitespace/formatting — counting them as non-Latin would
+  // false-drop short multi-newline English payloads (e.g. email-formatted
+  // tickets like "Hi,\n\nFix needed.\n\nThanks,\nBob") whose newlines
+  // would tip the non-Latin ratio above the language-gate threshold.
+  if (cp < 0x0020) return 'common';
   // Basic Latin (U+0020-U+007F) + Latin-1 Supplement (U+00A0-U+00FF)
   // + Latin Extended-A/B (U+0100-U+024F)
   if (cp >= 0x0020 && cp <= 0x024f) return 'latin';
