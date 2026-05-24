@@ -129,6 +129,12 @@ const NON_INSTRUMENTED_PATTERNS = [
   // hermetic + integration tests (e.g. AC-2 real-hook test). Vitest can't
   // instrument them. Same rationale as bin/*.mjs above.
   /(^|\/)ai-sdlc-plugin\/hooks\/.+\.(?:js|mjs|cjs)$/,
+  // Build/test config files — vitest.config, tsconfig, eslint config, etc.
+  // These define how tests run; they are not themselves testable units.
+  // Same rationale as bin shims and hooks above.
+  /(^|\/)vitest\.config\.(?:ts|mjs|js)$/,
+  /(^|\/)tsconfig.*\.json$/,
+  /(^|\/)eslint\.config\.(?:ts|mjs|js)$/,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────
