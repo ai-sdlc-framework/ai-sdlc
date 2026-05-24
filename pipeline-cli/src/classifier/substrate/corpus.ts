@@ -110,11 +110,59 @@ function isCalibrationEntry(v: unknown): v is CalibrationCorpusEntry {
 // ── Append (atomic) ──────────────────────────────────────────────────────────
 
 /**
+ * Quarantine a corpus file that `readCorpus()` could not parse — rename to
+ * `<path>.corrupt-<iso>.yaml` so the operator can recover before we start
+ * fresh. Prevents the data-loss footgun where `appendCorpusEntry()` /
+ * `setCorpusEntryPolarity()` would silently truncate a non-empty-but-unreadable
+ * corpus to a single new entry.
+ *
+ * Returns true when a quarantine happened (caller should treat existing as
+ * empty for the subsequent write), false when the file is genuinely empty or
+ * absent (caller proceeds normally).
+ */
+function quarantineCorpusIfUnreadable(path: string): boolean {
+  if (!existsSync(path)) return false;
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return false; // can't read; let downstream handle / surface
+  }
+  if (raw.trim() === '') return false; // genuinely empty
+  // File has content but readCorpus returned [] — the YAML is corrupt or the
+  // entries failed isCalibrationEntry. Move it aside so we don't overwrite.
+  let parsed: unknown;
+  try {
+    parsed = yamlLoad(raw);
+  } catch {
+    // YAML parse failure — definitely corrupt.
+    const corruptPath = `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.yaml`;
+    renameSync(path, corruptPath);
+    return true;
+  }
+  // YAML parsed but content is not a non-empty array of valid entries — also
+  // suspect. Conservative: quarantine to preserve the operator's data.
+  if (!Array.isArray(parsed) || parsed.filter(isCalibrationEntry).length === 0) {
+    const corruptPath = `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.yaml`;
+    renameSync(path, corruptPath);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Append one entry to the per-task-type corpus file. Atomic via
  * rename-after-write. Creates the corpus dir + file when missing.
  *
  * Per AC-4. Used by the substrate after every `classify()` call (unless
  * the caller passes `skipCorpus: true`).
+ *
+ * Data-loss guard: if the existing file is non-empty but unreadable
+ * (corrupt YAML or no entries pass the schema check), quarantines it to
+ * `<path>.corrupt-<iso>.yaml` so the operator can recover, then writes a
+ * fresh file containing only the new entry. Prevents the silent-truncation
+ * footgun where an external editor's half-written save would wipe the
+ * corpus on the next classify() call.
  */
 export function appendCorpusEntry(
   repoRoot: string,
@@ -124,6 +172,7 @@ export function appendCorpusEntry(
   const dir = resolveCorpusDir(repoRoot, corpusDir);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const path = resolveCorpusFilePath(repoRoot, entry.taskType, corpusDir);
+  quarantineCorpusIfUnreadable(path);
   const existing = readCorpus(repoRoot, entry.taskType, corpusDir);
   const next = [...existing, entry];
   const tmp = `${path}.tmp`;

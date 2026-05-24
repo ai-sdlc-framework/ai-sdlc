@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -116,6 +116,33 @@ describe('appendCorpusEntry', () => {
       const severity = readCorpus(repo, 'capture-severity');
       expect(triage.map((e) => e.id)).toEqual(['t1']);
       expect(severity.map((e) => e.id)).toEqual(['s1']);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('quarantines a corrupt non-empty corpus file instead of silently truncating (AISDLC-321 iter-2 fix)', () => {
+    const repo = makeRepo();
+    try {
+      // Plant an existing valid corpus
+      appendCorpusEntry(repo, fakeEntry({ id: 'real-1' }));
+      appendCorpusEntry(repo, fakeEntry({ id: 'real-2' }));
+      // Simulate an external editor saving an unparseable half-write
+      const corpusPath = resolveCorpusFilePath(repo, 'capture-triage');
+      writeFileSync(corpusPath, '- id: real-1\n  bad-yaml: [unclosed', { encoding: 'utf8' });
+      // Now append — must NOT silently truncate; should quarantine the bad file
+      // and proceed with a fresh write containing only the new entry.
+      appendCorpusEntry(repo, fakeEntry({ id: 'real-3' }));
+      const after = readCorpus(repo, 'capture-triage');
+      expect(after.map((e) => e.id)).toEqual(['real-3']);
+      // The corrupt file must have been quarantined alongside, NOT deleted.
+      const dir = resolveCorpusDir(repo);
+      const files = readdirSync(dir);
+      const quarantined = files.filter((f) => f.startsWith('capture-triage.yaml.corrupt-'));
+      expect(quarantined).toHaveLength(1);
+      // And the quarantined file still contains the bad bytes (operator recovery).
+      const quarantinedBody = readFileSync(join(dir, quarantined[0]), 'utf8');
+      expect(quarantinedBody).toContain('unclosed');
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
