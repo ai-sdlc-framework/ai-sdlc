@@ -1,24 +1,28 @@
 /**
  * RFC-0025 §6 / OQ-7 — framework-determinism-violated detection.
  * SUBSTRATE (AISDLC-302 Phase 1 / salvaged from PR #481).
+ * Composite sampling (AISDLC-306 Phase 5).
  *
  * The `framework-determinism-violated` subclass detects when the same
  * task input produces different outputs across two dispatches. The
  * detection mechanism is sampled to control cost.
  *
  * ─────────────────────────────────────────────────────────────────────
- * PHASE 1 SUBSTRATE NOTES (AISDLC-302)
+ * PHASE 5 COMPOSITE SAMPLING (AISDLC-306 / OQ-7)
  * ─────────────────────────────────────────────────────────────────────
- * Types, baseline record/storage logic (`recordDeterminismBaseline`,
- * `readDeterminismBaseline`), and `checkDeterminismViolation()` are
- * fully aligned with operator-affirmed resolutions and are kept intact.
+ * The operator-affirmed OQ-7 resolution (2026-05-15) requires composite
+ * sampling: flat baseline rate (default 1-in-50) + always-on for tasks
+ * marked `requires-determinism: true` + always-on for tasks in the
+ * top-decile blast-radius cohort (composes with RFC-0014 dep-graph
+ * snapshot's `effectivePriority`).
  *
- * ⚠️  TODO(AISDLC-306 / Phase 5 / OQ-7): `shouldSampleDeterminism()`
- * uses flat 1-in-50 sampling. The operator-affirmed OQ-7 resolution
- * requires a COMPOSITE approach: flat sampling PLUS always-on for tasks
- * with high blast-radius (composes with RFC-0014 blast-radius scores).
- * Phase 5 will extend this function to accept a blast-radius score and
- * apply risk-based escalation on top of the base sampling rate.
+ * Two entry points:
+ *   - `shouldSampleDeterminism(dispatchCount, requiresDeterminism)` — the
+ *     Phase 1 substrate entry point. Backward-compatible flat 1-in-50.
+ *     Preserved for callers that don't yet have blast-radius context.
+ *   - `shouldSampleDeterminismComposite(opts)` — the Phase 5 entry point.
+ *     Accepts a blast-radius signal + per-org config and applies the full
+ *     composite policy. Recommended for new callers.
  * ─────────────────────────────────────────────────────────────────────
  *
  * The detector compares two structured outputs for the same `taskId`:
@@ -92,15 +96,15 @@ export interface DeterminismCheckResult {
 // ── Sampling logic ────────────────────────────────────────────────────
 
 /**
- * Decide whether to sample determinism for this dispatch.
+ * Decide whether to sample determinism for this dispatch using the flat
+ * 1-in-50 baseline policy (the Phase 1 substrate behavior).
  *
  * @param dispatchCount - Monotonically increasing counter from the
  *   orchestrator loop. 1-indexed.
  * @param requiresDeterminism - Whether the task explicitly opts in.
  *
- * ⚠️  TODO(AISDLC-306 / Phase 5 / OQ-7): Phase 5 adds a `blastRadiusScore`
- * parameter from RFC-0014 so high-blast-radius tasks are always sampled
- * (composite approach per operator-affirmed OQ-7 resolution).
+ * For Phase 5 composite sampling (always-on for top-decile blast-radius
+ * tasks per OQ-7), use {@link shouldSampleDeterminismComposite}.
  */
 export function shouldSampleDeterminism(
   dispatchCount: number,
@@ -108,6 +112,148 @@ export function shouldSampleDeterminism(
 ): boolean {
   if (requiresDeterminism) return true;
   return dispatchCount % DETERMINISM_SAMPLE_RATE === 0;
+}
+
+/**
+ * Composite sampling input — combines per-dispatch counter, task opt-in,
+ * and blast-radius signal from RFC-0014 dep-graph snapshot.
+ *
+ * `blastRadiusEffectivePriority` is the `effectivePriority` field from the
+ * latest deps snapshot record for the task being dispatched. When the
+ * value falls in the top-decile of the corpus (as reported by
+ * `isTopDecileBlastRadius()`), the dispatch is always sampled.
+ *
+ * `defaultSampleRate` is the configured sample rate as a fraction (0..1).
+ * Defaults to {@link DETERMINISM_SAMPLE_FRACTION} (0.02 = 1-in-50). A rate
+ * of 0 disables flat sampling entirely (only the always-on rules fire).
+ *
+ * `alwaysOnRequiresDeterminism` honors the `requires-determinism: true`
+ * task opt-in. `alwaysOnTopBlastRadiusDecile` enables the blast-radius
+ * always-on rule (composes with RFC-0014). Both default to `true` per
+ * §13.1 / OQ-7.
+ */
+export interface ShouldSampleDeterminismCompositeOpts {
+  /** 1-indexed monotonic dispatch counter from the orchestrator loop. */
+  dispatchCount: number;
+  /** Whether the task has `requires-determinism: true` in its frontmatter. */
+  requiresDeterminism: boolean;
+  /**
+   * RFC-0014 effectivePriority for this task, or null when no snapshot is
+   * available (composition layer disabled / task not yet in graph).
+   */
+  blastRadiusEffectivePriority: number | null;
+  /**
+   * Whether this task's effectivePriority places it in the top-decile of
+   * the corpus per `isTopDecileBlastRadius()`. Callers compute this once
+   * per tick (or once per snapshot read) and pass in.
+   */
+  isTopBlastRadiusDecile: boolean;
+  /**
+   * Configured sample rate as a fraction (0..1). Defaults to
+   * `DETERMINISM_SAMPLE_FRACTION` (0.02 = 1-in-50). 0 disables flat
+   * sampling (only always-on rules fire).
+   */
+  defaultSampleRate?: number;
+  /** Whether the `requires-determinism: true` always-on rule is enabled. Default true. */
+  alwaysOnRequiresDeterminism?: boolean;
+  /** Whether the top-decile blast-radius always-on rule is enabled. Default true. */
+  alwaysOnTopBlastRadiusDecile?: boolean;
+}
+
+/**
+ * Reason a composite-sampling decision returned `true` — useful for the
+ * orchestrator's events.jsonl audit trail.
+ */
+export type DeterminismSampleReason =
+  | 'requires-determinism-flag'
+  | 'top-decile-blast-radius'
+  | 'flat-sample-rate'
+  | 'not-sampled';
+
+export interface DeterminismCompositeDecision {
+  sample: boolean;
+  reason: DeterminismSampleReason;
+}
+
+/**
+ * Phase 5 (AISDLC-306) — composite sampling per OQ-7. Returns `true` when
+ * ANY of these gates fire:
+ *
+ *   1. `requires-determinism: true` task opt-in (alwaysOn).
+ *   2. Top-decile blast-radius (alwaysOn, composes with RFC-0014).
+ *   3. Flat sample rate (default 1-in-50 / 0.02 fraction).
+ *
+ * The returned `reason` reflects the first gate that fired so callers can
+ * surface the audit trail to events.jsonl + cli-status.
+ */
+export function shouldSampleDeterminismComposite(
+  opts: ShouldSampleDeterminismCompositeOpts,
+): DeterminismCompositeDecision {
+  const alwaysOnRequires = opts.alwaysOnRequiresDeterminism ?? true;
+  const alwaysOnTopDecile = opts.alwaysOnTopBlastRadiusDecile ?? true;
+  const sampleRate = opts.defaultSampleRate ?? DETERMINISM_SAMPLE_FRACTION;
+
+  if (alwaysOnRequires && opts.requiresDeterminism) {
+    return { sample: true, reason: 'requires-determinism-flag' };
+  }
+  if (alwaysOnTopDecile && opts.isTopBlastRadiusDecile) {
+    return { sample: true, reason: 'top-decile-blast-radius' };
+  }
+  // Flat sampling — treat the rate as 1-in-N where N = round(1/rate). Use
+  // the integer divisor so the existing 1-in-50 callers see identical
+  // behavior (50 % 50 === 0). Rate of 0 disables flat sampling entirely.
+  if (sampleRate > 0) {
+    const divisor = Math.max(1, Math.round(1 / sampleRate));
+    if (opts.dispatchCount > 0 && opts.dispatchCount % divisor === 0) {
+      return { sample: true, reason: 'flat-sample-rate' };
+    }
+  }
+  return { sample: false, reason: 'not-sampled' };
+}
+
+/**
+ * Default sample rate as a fraction (0..1). Matches the `1 / DETERMINISM_SAMPLE_RATE`
+ * convention from the Phase 1 substrate (1-in-50 = 0.02).
+ */
+export const DETERMINISM_SAMPLE_FRACTION = 1 / DETERMINISM_SAMPLE_RATE;
+
+/**
+ * Compute the top-decile cutoff for blast-radius `effectivePriority` values
+ * across a corpus of dependency-graph snapshot records, and return whether
+ * a given task's effectivePriority falls in that cohort.
+ *
+ * Implementation: take the 90th-percentile value (nearest-rank method) of
+ * the sorted-ascending `effectivePriority` distribution; a task is in the
+ * top decile iff its value is `>= cutoff`. Ties at the cutoff are
+ * included in the top decile (the OQ-7 resolution favors over-sampling at
+ * the boundary; missing a top-decile task is worse than over-sampling).
+ *
+ * @param corpusPriorities - All `effectivePriority` values from the
+ *   current snapshot. Empty / null / NaN entries are filtered.
+ * @param candidatePriority - The candidate task's effectivePriority, or
+ *   `null` if the task is not in the snapshot.
+ * @returns `false` when the corpus is empty, `candidatePriority` is null,
+ *   or when the candidate falls below the 90th-percentile cutoff.
+ */
+export function isTopDecileBlastRadius(
+  corpusPriorities: readonly (number | null | undefined)[],
+  candidatePriority: number | null | undefined,
+): boolean {
+  if (candidatePriority === null || candidatePriority === undefined) return false;
+  if (!Number.isFinite(candidatePriority)) return false;
+
+  const valid: number[] = [];
+  for (const p of corpusPriorities) {
+    if (typeof p === 'number' && Number.isFinite(p)) valid.push(p);
+  }
+  if (valid.length === 0) return false;
+
+  // Nearest-rank 90th percentile.
+  const sorted = valid.slice().sort((a, b) => a - b);
+  const rank = Math.ceil(0.9 * sorted.length) - 1;
+  const cutoff = sorted[Math.max(0, Math.min(rank, sorted.length - 1))] ?? sorted[0] ?? 0;
+
+  return candidatePriority >= cutoff;
 }
 
 // ── Baseline storage ──────────────────────────────────────────────────

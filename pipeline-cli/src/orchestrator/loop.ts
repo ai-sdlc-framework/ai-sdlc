@@ -107,6 +107,12 @@ import {
   type WorkerContext,
 } from './playbook/index.js';
 import { rollbackDispatch, type RollbackResult } from './rollback.js';
+// RFC-0025 §13 OQ-6 / Phase 5 (AISDLC-306) — when the playbook falls through
+// to UnknownFailureMode, the framework has hit a `framework-coverage-gap`.
+// Record an RFC-0024 capture (`triage: tbd`) so the operator triages via the
+// standard RFC-0024 rubric; auto-quarantine is delegated to `maybeRollback()`.
+import { recordFrameworkCoverageGap } from '../tui/analytics/coverage-gap.js';
+import { loadQualityMonitoringConfig } from '../tui/analytics/quality-monitoring-config.js';
 import {
   countCheckpointCommits,
   countCommitsBeyondMain,
@@ -1246,8 +1252,19 @@ export async function runOrchestratorTick(
         reason: value.error,
         prUrl: null,
       });
+      // RFC-0025 §13 OQ-6 — UnknownFailureMode IS a framework-coverage-gap.
+      // File an RFC-0024 capture so the operator triages via the standard
+      // rubric. Capture failures are swallowed inside the helper.
+      maybeRecordCoverageGap({
+        taskId: value.taskId,
+        reason: value.error,
+        sourceHint: 'orchestrator-loop:no-handler',
+        config,
+        ...(adapters.artifactsDir !== undefined ? { artifactsDir: adapters.artifactsDir } : {}),
+        logger,
+      });
       // AISDLC-177 — uncatalogued failure; same sweep as the escalated
-      // branch above.
+      // branch above (auto-quarantine per OQ-6 resolution).
       await maybeRollback({
         taskId: value.taskId,
         outcome: 'unknown-failure',
@@ -1283,6 +1300,17 @@ export async function runOrchestratorTick(
         mode: 'UnknownFailureMode',
         reason: record.reason,
         prUrl: null,
+      });
+      // RFC-0025 §13 OQ-6 — UnknownFailureMode IS a framework-coverage-gap.
+      // File an RFC-0024 capture so the operator triages via the standard
+      // rubric. Capture failures are swallowed inside the helper.
+      maybeRecordCoverageGap({
+        taskId: value.taskId,
+        reason: record.reason,
+        sourceHint: 'orchestrator-loop:no-result',
+        config,
+        ...(adapters.artifactsDir !== undefined ? { artifactsDir: adapters.artifactsDir } : {}),
+        logger,
       });
       // AISDLC-177 — pathological no-result branch still left Step 4's
       // side-effects on disk. Roll them back.
@@ -1442,6 +1470,56 @@ interface MaybeRollbackArgs {
   branch?: string;
   /** Worktree path from the dispatcher's result (when available). */
   worktreePath?: string;
+}
+
+/**
+ * RFC-0025 §13 OQ-6 / Phase 5 (AISDLC-306) — record a `framework-coverage-gap`
+ * capture for an UnknownFailureMode escalation.
+ *
+ * Best-effort by design (matches `maybeRollback()`): any failure inside
+ * `recordFrameworkCoverageGap()` is swallowed by that module's internal
+ * try/catch and a `warn` line is emitted via the supplied logger. The
+ * orchestrator hot loop continues regardless of capture outcome.
+ *
+ * Returns the operator-configured `shouldQuarantine` signal so the caller
+ * can decide whether to invoke `maybeRollback()` — under default config
+ * (autoQuarantine: true) this is always true and preserves the existing
+ * AISDLC-177 sweep behavior.
+ */
+function maybeRecordCoverageGap(args: {
+  taskId: string;
+  reason: string;
+  prUrl?: string | null;
+  sourceHint?: string;
+  config: OrchestratorConfig;
+  artifactsDir?: string;
+  logger: PipelineLogger;
+}): boolean {
+  // Load the per-org config; if the config file is malformed (throws
+  // QualityMonitoringConfigError) fall back to the shipping defaults so
+  // the orchestrator never crashes on a yaml typo.
+  let coverageGapConfig;
+  try {
+    coverageGapConfig = loadQualityMonitoringConfig({ workDir: args.config.workDir }).coverageGap;
+  } catch (err) {
+    args.logger.warn(
+      `[coverage-gap] failed to load quality-monitoring.yaml (using defaults): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    coverageGapConfig = undefined;
+  }
+
+  const result = recordFrameworkCoverageGap({
+    taskId: args.taskId,
+    reason: args.reason,
+    prUrl: args.prUrl ?? null,
+    sourceHint: args.sourceHint,
+    artifactsDir: args.artifactsDir,
+    config: coverageGapConfig,
+    logger: args.logger,
+  });
+  return result.shouldQuarantine;
 }
 
 /**

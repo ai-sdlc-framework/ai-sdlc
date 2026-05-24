@@ -1,6 +1,8 @@
 /**
  * RFC-0025 §13.1 quality-monitoring.yaml config loader.
  * Phase 3 (AISDLC-304): recurrence-windows.
+ * Phase 5 (AISDLC-306): coverage-gap (OQ-6) + determinism-detection (OQ-7)
+ * + operator-time-cost (OQ-9) per-org configuration.
  * Phase 6 (AISDLC-307): upstream-reporting (OQ-5) + vendor-namespace
  * (OQ-10) — strict enforcement on resource load for custom subclasses.
  *
@@ -49,6 +51,48 @@ export type VendorNamespaceEnforce = 'reject' | 'warn' | 'none';
 
 export const DEFAULT_VENDOR_NAMESPACE_ENFORCE: VendorNamespaceEnforce = 'reject';
 
+/**
+ * Default coverage-gap auto-quarantine flag per OQ-6 §13.1 (2026-05-15).
+ * When true, an unmatched failure mode (`framework-coverage-gap`) auto-
+ * quarantines the affected dispatch alongside the capture record.
+ */
+export const DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE = true;
+
+/**
+ * Default coverage-gap file-capture flag per OQ-6 §13.1 (2026-05-15).
+ * When true, an unmatched failure mode writes an RFC-0024 capture record
+ * with `source: framework-coverage-gap` + `triage: tbd`.
+ */
+export const DEFAULT_COVERAGE_GAP_FILE_CAPTURE = true;
+
+/**
+ * Default determinism-detection sample rate per OQ-7 §13.1 (2026-05-15).
+ * 1-in-50 baseline sampling for tasks without `requires-determinism: true`
+ * and outside the top-decile blast-radius cohort.
+ */
+export const DEFAULT_DETERMINISM_SAMPLE_RATE = 0.02;
+
+/**
+ * Default top-decile blast-radius always-on flag per OQ-7. When true,
+ * tasks whose `effectivePriority` puts them in the top-decile of the
+ * RFC-0014 dep-graph snapshot are always sampled for determinism, on top
+ * of the flat sample rate.
+ */
+export const DEFAULT_DETERMINISM_ALWAYS_ON_TOP_BLAST_DECILE = true;
+
+/**
+ * Default always-on for `requires-determinism: true` tasks per OQ-7.
+ * Always true — the explicit task opt-in must always sample.
+ */
+export const DEFAULT_DETERMINISM_ALWAYS_ON_REQUIRES = true;
+
+/**
+ * Default AFK inactivity threshold in minutes for operator-time-cost per
+ * OQ-9 §13.1. Gaps between events within a blocked span that exceed this
+ * threshold are zeroed out as "operator walked away" noise.
+ */
+export const DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES = 30;
+
 // ── Config types ──────────────────────────────────────────────────────
 
 export interface UpstreamReportingConfig {
@@ -72,6 +116,71 @@ export interface VendorNamespaceConfig {
    * for custom failure-mode subclasses. Default `reject` (strict).
    */
   enforce: VendorNamespaceEnforce;
+}
+
+/**
+ * RFC-0025 §13.1 OQ-6 — coverage-gap response.
+ *
+ * Phase 5 (AISDLC-306). Controls the framework-coverage-gap auto-quarantine
+ * + capture-write behavior when an uncatalogued failure-mode escapes the
+ * playbook (i.e. `UnknownFailureMode` fall-through).
+ */
+export interface CoverageGapConfig {
+  /**
+   * When true (default), an uncatalogued failure mode auto-quarantines the
+   * affected dispatch (rollback's existing quarantine path is honored).
+   * When false, the operator is responsible for triggering remediation.
+   */
+  autoQuarantine: boolean;
+  /**
+   * When true (default), an uncatalogued failure mode writes an RFC-0024
+   * capture record (`source: framework-coverage-gap`, `triage: tbd`).
+   * Operator triages via the existing RFC-0024 rubric (§7).
+   */
+  fileCapture: boolean;
+}
+
+/**
+ * RFC-0025 §13.1 OQ-7 — composite determinism-detection.
+ *
+ * Phase 5 (AISDLC-306). Controls the composite sampling for
+ * `framework-determinism-violated` detection — flat sample rate, always-on
+ * for `requires-determinism: true` tasks, always-on for top-decile blast-
+ * radius tasks (composes with RFC-0014 dep-graph snapshot).
+ */
+export interface DeterminismDetectionConfig {
+  /**
+   * Default sample rate as a fraction (0..1). `0.02` = 1-in-50 dispatches
+   * per the OQ-7 baseline. Operators override per-org for noisier corpora.
+   */
+  defaultSampleRate: number;
+  /**
+   * Always sample tasks with `requires-determinism: true` in their
+   * frontmatter. True by default (explicit opt-in must always sample).
+   */
+  alwaysOnRequiresDeterminism: boolean;
+  /**
+   * Always sample tasks in the top-decile blast-radius cohort (composes
+   * with RFC-0014 dep-graph snapshot's `effectivePriority`). True by
+   * default — risk-based concentration matches the framework's
+   * deterministic-first preflight ladder (RFC-0035 §5).
+   */
+  alwaysOnTopBlastRadiusDecile: boolean;
+}
+
+/**
+ * RFC-0025 §13.1 OQ-9 — operator-time-cost instrumentation.
+ *
+ * Phase 5 (AISDLC-306). Controls the AFK noise filter applied when
+ * computing active-cost from RFC-0015 `events.jsonl`.
+ */
+export interface OperatorTimeCostConfig {
+  /**
+   * AFK inactivity threshold in minutes. Gaps between consecutive events
+   * within a blocked span that exceed this threshold are excluded from the
+   * active-cost computation. Default `30` per §13.1 / OQ-9 resolution.
+   */
+  afkInactivityMinutes: number;
 }
 
 export interface QualityMonitoringConfig {
@@ -102,6 +211,20 @@ export interface QualityMonitoringConfig {
    * loader rejects illegal names at load time. Empty by default.
    */
   customSubclasses: string[];
+  /**
+   * Coverage-gap response (OQ-6 / Phase 5). See `CoverageGapConfig`.
+   */
+  coverageGap: CoverageGapConfig;
+  /**
+   * Composite determinism-detection sampling (OQ-7 / Phase 5). See
+   * `DeterminismDetectionConfig`.
+   */
+  determinismDetection: DeterminismDetectionConfig;
+  /**
+   * Operator-time-cost instrumentation (OQ-9 / Phase 5). See
+   * `OperatorTimeCostConfig`.
+   */
+  operatorTimeCost: OperatorTimeCostConfig;
 }
 
 export const QUALITY_MONITORING_CONFIG_DEFAULTS: Readonly<QualityMonitoringConfig> = Object.freeze({
@@ -114,6 +237,18 @@ export const QUALITY_MONITORING_CONFIG_DEFAULTS: Readonly<QualityMonitoringConfi
     enforce: DEFAULT_VENDOR_NAMESPACE_ENFORCE,
   },
   customSubclasses: [],
+  coverageGap: {
+    autoQuarantine: DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE,
+    fileCapture: DEFAULT_COVERAGE_GAP_FILE_CAPTURE,
+  },
+  determinismDetection: {
+    defaultSampleRate: DEFAULT_DETERMINISM_SAMPLE_RATE,
+    alwaysOnRequiresDeterminism: DEFAULT_DETERMINISM_ALWAYS_ON_REQUIRES,
+    alwaysOnTopBlastRadiusDecile: DEFAULT_DETERMINISM_ALWAYS_ON_TOP_BLAST_DECILE,
+  },
+  operatorTimeCost: {
+    afkInactivityMinutes: DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
+  },
 });
 
 // ── Errors ────────────────────────────────────────────────────────────
@@ -149,7 +284,7 @@ function unquote(s: string): string {
 }
 
 /**
- * Parse the subset of `quality-monitoring.yaml` relevant to Phases 3+6.
+ * Parse the subset of `quality-monitoring.yaml` relevant to Phases 3+5+6.
  *
  * Supported YAML shape (each block independent / optional):
  * ```yaml
@@ -162,6 +297,18 @@ function unquote(s: string): string {
  *   upstream-reporting:        # OQ-5
  *     repoUrl: "https://github.com/org/repo"
  *     prefilledIssueTemplate: ".ai-sdlc/templates/framework-bug-report.md"
+ *
+ *   coverage-gap:              # OQ-6 / Phase 5 (AISDLC-306)
+ *     autoQuarantine: true
+ *     fileCapture: true
+ *
+ *   determinism-detection:     # OQ-7 / Phase 5 (AISDLC-306)
+ *     defaultSampleRate: 0.02
+ *     alwaysOnRequiresDeterminism: true
+ *     alwaysOnTopBlastRadiusDecile: true
+ *
+ *   operator-time-cost:        # OQ-9 / Phase 5 (AISDLC-306)
+ *     afkInactivityMinutes: 30
  *
  *   vendor-namespace:          # OQ-10
  *     enforce: reject          # or warn / none (deprecated)
@@ -182,6 +329,9 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     upstreamReporting: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.upstreamReporting },
     vendorNamespace: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.vendorNamespace },
     customSubclasses: [],
+    coverageGap: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap },
+    determinismDetection: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection },
+    operatorTimeCost: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost },
   };
 
   const lines = raw.split('\n');
@@ -194,6 +344,9 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     | 'upstream-reporting'
     | 'vendor-namespace'
     | 'customSubclasses'
+    | 'coverage-gap'
+    | 'determinism-detection'
+    | 'operator-time-cost'
     | null;
   let block: Block = null;
   let parsedWindows: string[] = [];
@@ -206,6 +359,15 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
   const flushSubclasses = (): void => {
     out.customSubclasses = parsedSubclasses;
     parsedSubclasses = [];
+  };
+
+  // Parse a YAML scalar as a boolean per common YAML truthiness rules.
+  // Returns null when the scalar is not boolean-shaped.
+  const parseBool = (val: string): boolean | null => {
+    const lower = val.trim().toLowerCase();
+    if (lower === 'true' || lower === 'yes' || lower === 'on') return true;
+    if (lower === 'false' || lower === 'no' || lower === 'off') return false;
+    return null;
   };
 
   for (const rawLine of lines) {
@@ -231,6 +393,24 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
       if (block === 'recurrence-windows') flushWindows();
       if (block === 'customSubclasses') flushSubclasses();
       block = 'vendor-namespace';
+      continue;
+    }
+    if (/^coverage-gap\s*:\s*$/.test(trimmed)) {
+      if (block === 'recurrence-windows') flushWindows();
+      if (block === 'customSubclasses') flushSubclasses();
+      block = 'coverage-gap';
+      continue;
+    }
+    if (/^determinism-detection\s*:\s*$/.test(trimmed)) {
+      if (block === 'recurrence-windows') flushWindows();
+      if (block === 'customSubclasses') flushSubclasses();
+      block = 'determinism-detection';
+      continue;
+    }
+    if (/^operator-time-cost\s*:\s*$/.test(trimmed)) {
+      if (block === 'recurrence-windows') flushWindows();
+      if (block === 'customSubclasses') flushSubclasses();
+      block = 'operator-time-cost';
       continue;
     }
     if (/^customSubclasses\s*:\s*$/.test(trimmed)) {
@@ -295,6 +475,64 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
           const lower = val.toLowerCase();
           if (lower === 'reject' || lower === 'warn' || lower === 'none') {
             out.vendorNamespace.enforce = lower;
+          }
+        }
+        continue;
+      }
+      block = null;
+    }
+
+    if (block === 'coverage-gap') {
+      const kvMatch = /^([a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(.+)$/.exec(trimmed);
+      if (kvMatch && kvMatch[1] && kvMatch[2]) {
+        const key = kvMatch[1];
+        const val = unquote(kvMatch[2]);
+        const b = parseBool(val);
+        if (b !== null) {
+          if (key === 'autoQuarantine') out.coverageGap.autoQuarantine = b;
+          else if (key === 'fileCapture') out.coverageGap.fileCapture = b;
+        }
+        continue;
+      }
+      block = null;
+    }
+
+    if (block === 'determinism-detection') {
+      const kvMatch = /^([a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(.+)$/.exec(trimmed);
+      if (kvMatch && kvMatch[1] && kvMatch[2]) {
+        const key = kvMatch[1];
+        const val = unquote(kvMatch[2]);
+        if (key === 'defaultSampleRate') {
+          const parsed = Number(val);
+          // Accept only finite rates in [0, 1]. Reject NaN / out-of-range
+          // silently to avoid surprising the operator with a 200% sample rate.
+          if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+            out.determinismDetection.defaultSampleRate = parsed;
+          }
+        } else {
+          const b = parseBool(val);
+          if (b !== null) {
+            if (key === 'alwaysOnRequiresDeterminism')
+              out.determinismDetection.alwaysOnRequiresDeterminism = b;
+            else if (key === 'alwaysOnTopBlastRadiusDecile')
+              out.determinismDetection.alwaysOnTopBlastRadiusDecile = b;
+          }
+        }
+        continue;
+      }
+      block = null;
+    }
+
+    if (block === 'operator-time-cost') {
+      const kvMatch = /^([a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(.+)$/.exec(trimmed);
+      if (kvMatch && kvMatch[1] && kvMatch[2]) {
+        const key = kvMatch[1];
+        const val = unquote(kvMatch[2]);
+        if (key === 'afkInactivityMinutes') {
+          const parsed = Number(val);
+          // Accept only non-negative finite minutes.
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            out.operatorTimeCost.afkInactivityMinutes = parsed;
           }
         }
         continue;
@@ -401,6 +639,9 @@ export function loadQualityMonitoringConfig(
     upstreamReporting: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.upstreamReporting },
     vendorNamespace: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.vendorNamespace },
     customSubclasses: [],
+    coverageGap: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap },
+    determinismDetection: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection },
+    operatorTimeCost: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost },
   });
 
   if (!existsSync(filePath)) return fallback();
