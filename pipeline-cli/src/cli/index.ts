@@ -48,7 +48,9 @@ import type { RefinementVerdict } from '../dor/types.js';
 import {
   checkReviewerCache,
   DEFAULT_CACHE_TTL_HOURS,
+  resolveBlobShasForPaths,
   saveReviewerCache,
+  type CacheFileEntry,
   type ReviewerName as CacheReviewerName,
 } from '../orchestrator/reviewer-cache.js';
 import { runReconcile, type RunReconcileOptions } from '../orchestrator/reconcile.js';
@@ -182,11 +184,20 @@ export function buildCli(): Argv {
         },
       )
       // AISDLC-418 — reviewer-pass cache. Two subcommands:
-      //   reviewer-cache check <task-id> --reviewer <name> --files <json>
-      //   reviewer-cache save  <task-id> --reviewer <name> --files <json> --verdict <json>
+      //   reviewer-cache check <task-id> --reviewer <name> --files <json> --head-sha <sha>
+      //   reviewer-cache save  <task-id> --reviewer <name> --files <json> --head-sha <sha> --verdict <json>
       // The slash body's iterate-needed branch invokes `check` before
       // firing each reviewer Agent; cache HIT → reuse the prior verdict.
       // `save` is invoked after every reviewer Agent completes.
+      //
+      // Iter-2 — `--files` is interpreted as a JSON array of file paths
+      // (workdir-relative); the CLI resolves each path's git blob SHA via
+      // `git ls-tree HEAD` so callers don't have to compute blobs in bash.
+      // Callers may also pass the richer `[{path, blobSha}, ...]` form
+      // when they already have blobs in hand. `--head-sha` is the dev
+      // commit SHA the cache binds to (iter-2 trust anchor). `--reviewer`
+      // is constrained to the three known reviewer names so typos fail
+      // loud (iter-2 SUGGESTION #6).
       .command(
         'reviewer-cache <action> <task-id>',
         'AISDLC-418 — reviewer-pass cache: check (probe for a reusable verdict) or save (persist this iteration).',
@@ -198,12 +209,22 @@ export function buildCli(): Argv {
               demandOption: true,
             })
             .positional('task-id', { type: 'string', demandOption: true })
-            .option('reviewer', { type: 'string', demandOption: true })
+            .option('reviewer', {
+              type: 'string',
+              demandOption: true,
+              choices: ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const,
+            })
             .option('files', {
               type: 'string',
               demandOption: true,
               describe:
-                "JSON array of file paths in this iteration's diff (paths relative to workdir).",
+                'JSON array of file paths (workdir-relative) OR JSON array of {path, blobSha} entries. When path-only, the CLI resolves blob SHAs via `git ls-tree HEAD`.',
+            })
+            .option('head-sha', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'Dev commit SHA the cache entry binds to. The cache MISSES on read if this differs from the current HEAD (iter-2 trust anchor).',
             })
             .option('agent-file', {
               type: 'string',
@@ -220,13 +241,37 @@ export function buildCli(): Argv {
               type: 'string',
               describe:
                 '(save only) Path-on-disk to record alongside the cached verdict (workdir-relative).',
+            })
+            .option('transcript-path', {
+              type: 'string',
+              describe:
+                "(save only) Path to the reviewer's transcript .jsonl. When present, it's copied alongside the cache entry so HIT consumers can restore it for v6 emit-leaf (iter-2 MAJOR #3).",
             }),
         async (argv) => {
           const action = String(argv.action) as 'check' | 'save';
           const taskId = String(argv['task-id']);
           const reviewer = String(argv.reviewer) as CacheReviewerName;
           const workDir = argv['work-dir'] as string;
-          const files = parseJsonOption<string[]>(argv.files, 'files');
+          const headSha = String(argv['head-sha']);
+          const filesRaw = parseJsonOption<unknown>(argv.files, 'files');
+          let files: CacheFileEntry[];
+          if (Array.isArray(filesRaw) && filesRaw.every((v) => typeof v === 'string')) {
+            // path-only form — resolve blob SHAs via git.
+            files = resolveBlobShasForPaths(workDir, filesRaw as string[]);
+          } else if (
+            Array.isArray(filesRaw) &&
+            filesRaw.every(
+              (v) =>
+                v &&
+                typeof v === 'object' &&
+                typeof (v as { path: unknown }).path === 'string' &&
+                typeof (v as { blobSha: unknown }).blobSha === 'string',
+            )
+          ) {
+            files = filesRaw as CacheFileEntry[];
+          } else {
+            fail('--files must be a JSON string[] OR JSON {path, blobSha}[]');
+          }
           const agentFile =
             (argv['agent-file'] as string | undefined) ??
             `${workDir}/ai-sdlc-plugin/agents/${reviewer}.md`;
@@ -237,6 +282,7 @@ export function buildCli(): Argv {
               reviewer,
               currentFiles: files,
               agentFilePath: agentFile,
+              headSha,
               ttlHours: argv['ttl-hours'] as number,
             });
             emit(result);
@@ -267,9 +313,13 @@ export function buildCli(): Argv {
             reviewer,
             files,
             agentFilePath: agentFile,
+            headSha,
             verdict: verdictObj as Parameters<typeof saveReviewerCache>[0]['verdict'],
           };
           if (verdictPath) saveOpts.verdictPath = verdictPath;
+          if (argv['transcript-path']) {
+            saveOpts.transcriptPath = String(argv['transcript-path']);
+          }
           const target = saveReviewerCache(saveOpts);
           emit({ ok: true, path: target });
         },

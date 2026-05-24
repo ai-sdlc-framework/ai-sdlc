@@ -12,7 +12,7 @@ description: >-
   for end-to-end autonomous drain. The legacy Pattern Z fallback (sibling
   /ai-sdlc dispatch-worker sessions) is still supported when N>4 parallel
   is needed. See RFC-0041 §4.6 + docs/operations/billing-and-cost-optimization.md §1b.
-argument-hint: "[--once]"
+argument-hint: '[--once]'
 allowed-tools:
   - Read
   - Bash
@@ -46,7 +46,7 @@ baseline.
 2. **Never force-push.** Use `--force-with-lease` only after the mandatory rebase.
 3. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 4. **Never delete branches.** No `git branch -D` / `-d`.
-5. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.**
+5. **Never edit `.ai-sdlc/**`or`.github/workflows/**`.**
 6. **Never run destructive git operations.** No `git reset --hard`.
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 
@@ -292,7 +292,7 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" remove-bg-agent-request \
 > (Agent fired, sentinel written) and Phase A (notification arrives), the
 > sentinel persists; the operator's manual recovery uses `gh pr view` to
 > inspect the dev's pushed branch + PR and runs `cli-dispatch
-> write-verdict` to land the verdict. If a request's inflight manifest
+write-verdict` to land the verdict. If a request's inflight manifest
 > has gone stale during the gap, the stale-heartbeat sweeper reaps the
 > manifest and `prune-orphaned-bg-agent-requests` deletes the orphaned
 > request — no double-dispatch risk.
@@ -327,25 +327,50 @@ For each verdict in the array with `outcome === 'success'`:
    **after-the-fact reconcile**: add the attestation chore commit on top
    of the dev's branch and flip the draft PR to ready-for-review.
 
-2. **(Optional, AISDLC-418 AC #4) Reviewer-pass cache probe.** Before
-   firing the reviewer Agents, check the cache for each reviewer. On a
-   cache HIT, reuse the prior verdict and skip the Agent call entirely:
+2. **(Optional, AISDLC-418 AC #4 — iter-2 redesign) Reviewer-pass cache probe.**
+   Before firing the reviewer Agents, check the cache for each reviewer.
+   On a cache HIT, reuse the prior verdict + restore the persisted
+   transcript so v6 `emit-leaf` continuity is preserved.
+
    ```bash
-   # Compute the iteration's file list from the dev's verdict (or
-   # `git diff --name-only origin/main...HEAD` inside the worktree).
-   FILES_JSON='["src/foo.ts","src/bar.ts"]'  # build from verdict.filesChanged
+   # 1. Compute the iteration's file list from `git diff --name-only
+   #    origin/main...HEAD` inside the worktree. The CLI accepts a JSON
+   #    string[] (and resolves blob SHAs via `git ls-tree HEAD` per file)
+   #    OR a richer {path,blobSha}[] form when the caller already has
+   #    blobs in hand.
+   cd "<worktree>"
+   FILES_JSON=$(git diff --name-only origin/main...HEAD | jq -R . | jq -s .)
+   # 2. The cache is bound to the dev HEAD SHA (iter-2 CRITICAL #1 trust
+   #    anchor). Resolve it once.
+   DEV_HEAD_SHA=$(git rev-parse HEAD)
    for REVIEWER in code-reviewer test-reviewer security-reviewer; do
      CHECK_JSON=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reviewer-cache check "<task-id>" \
        --reviewer "$REVIEWER" \
-       --files "$FILES_JSON")
+       --files "$FILES_JSON" \
+       --head-sha "$DEV_HEAD_SHA")
      HIT=$(echo "$CHECK_JSON" | node -e "
        const d=[];process.stdin.on('data',c=>d.push(c));
        process.stdin.on('end',()=>{const r=JSON.parse(d.join(''));process.stdout.write(r.hit?'yes':'no');});
      ")
      if [ "$HIT" = "yes" ]; then
        echo "[orchestrator-tick] reviewer-cache HIT for $REVIEWER — reusing prior verdict"
-       # Pull the cached verdict from the .entry field and write it as the
-       # reviewer's verdict file so the rest of the flow is unchanged.
+       # Restore the persisted transcript so v6 emit-leaf finds it (iter-2
+       # MAJOR #3 — without the transcript, the Merkle chain rejects the
+       # cached iteration).
+       CACHED_TRANSCRIPT=$(echo "$CHECK_JSON" | node -e "
+         const d=[];process.stdin.on('data',c=>d.push(c));
+         process.stdin.on('end',()=>{const r=JSON.parse(d.join(''));process.stdout.write(r.transcriptPath||'');});
+       ")
+       if [ -n "$CACHED_TRANSCRIPT" ] && [ -f "$CACHED_TRANSCRIPT" ]; then
+         mkdir -p "<worktree>/.ai-sdlc/transcripts/<task-id-lower>"
+         cp "$CACHED_TRANSCRIPT" "<worktree>/.ai-sdlc/transcripts/<task-id-lower>/${REVIEWER}.jsonl"
+       fi
+       # Write the cached verdict to its conventional path so the rest of
+       # the pipeline (emit-leaf, sign) finds it unchanged.
+       echo "$CHECK_JSON" | node -e "
+         const d=[];process.stdin.on('data',c=>d.push(c));
+         process.stdin.on('end',()=>{const r=JSON.parse(d.join(''));process.stdout.write(JSON.stringify(r.entry.verdict));});
+       " > "<worktree>/.ai-sdlc/verdicts/${REVIEWER}-<task-id-lower>.json"
      fi
    done
    ```
@@ -356,26 +381,43 @@ For each verdict in the array with `outcome === 'success'`:
    - `code-reviewer` — `Read`/`Bash`/`Grep` tools, reviews the diff
    - `test-reviewer` — same toolset, focuses on test coverage + ACs
    - `security-reviewer` — same toolset, security audit
-   Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
-   Foreground `Agent` calls are well-suited regardless of duration.
+     Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
+     Foreground `Agent` calls are well-suited regardless of duration.
 
-4. Aggregate the verdicts and write them to
-   `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json`. **Save each
-   reviewer's verdict to the cache for next iteration:**
+   **Iter-2 MAJOR #4 fix — per-reviewer save runs PER-REVIEWER after each
+   Agent return, NOT once at end-of-aggregation under the success
+   branch.** Save each reviewer's verdict to the cache as soon as it
+   completes if `approved === true`, regardless of the aggregate
+   iterate-needed/success outcome. This is the only way the next
+   iteration's cache probe finds anything:
+
    ```bash
    for REVIEWER in code-reviewer test-reviewer security-reviewer; do
-     node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reviewer-cache save "<task-id>" \
-       --reviewer "$REVIEWER" \
-       --files "$FILES_JSON" \
-       --verdict "@<worktree>/.ai-sdlc/verdicts/${REVIEWER}-<task-id-lower>.json"
+     # Extract approved from the reviewer's verdict file.
+     APPROVED=$(node -e "
+       const r=require('<worktree>/.ai-sdlc/verdicts/${REVIEWER}-<task-id-lower>.json');
+       process.stdout.write(r.approved?'true':'false');
+     ")
+     if [ "$APPROVED" = "true" ]; then
+       node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reviewer-cache save "<task-id>" \
+         --reviewer "$REVIEWER" \
+         --files "$FILES_JSON" \
+         --head-sha "$DEV_HEAD_SHA" \
+         --verdict "@<worktree>/.ai-sdlc/verdicts/${REVIEWER}-<task-id-lower>.json" \
+         --transcript-path "<worktree>/.ai-sdlc/transcripts/<task-id-lower>/${REVIEWER}.jsonl"
+     fi
    done
    ```
+
+4. Aggregate the verdicts and write them to
+   `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json`.
 
 5. **Invoke `ai-sdlc-pipeline reconcile`** (AISDLC-418 AC #1) — one bash
    call wraps Steps 3.3-3.8: transcript salvage + emit leaves + sign
    attestation + force-push chore + flip draft→ready + arm auto-merge +
    verdict cleanup. The slash command body's only remaining mechanical
    work after the Agent fan-out is this single invocation:
+
    ```bash
    # Build the reviewer Agent ID map from the Agent tool's return value
    # so reconcile can salvage transcripts from /private/tmp (AC #3) when
@@ -388,7 +430,7 @@ For each verdict in the array with `outcome === 'success'`:
    ```
 
    The single command emits a JSON envelope `{taskId, outcome, prUrl,
-   prNumber, steps:[{name,status,output}]}`. Render `steps` as one
+prNumber, steps:[{name,status,output}]}`. Render `steps` as one
    progress line each. `outcome === 'success'` means CI is now firing
    on the fully-attested HEAD; `'partial'` means some step failed (read
    `steps[]` for which one) and the operator must intervene.
@@ -514,7 +556,8 @@ Remove the consumed diagnostic from `failed/` after handling.
 claimed AT MOST one manifest per tick. With a 30s wakeup loop and 4-task
 cap, the worst case took 4 ticks (~2 min) to saturate from empty — a
 needless throttle on autonomous drain throughput. Round 2 loops the claim
-+ dispatch until the cap is hit OR the frontier has no more ready tasks.
+
+- dispatch until the cap is hit OR the frontier has no more ready tasks.
 
 ```bash
 # Resolve the cap from yaml (AISDLC-396 round-2 MAJOR-3) with fallback to
@@ -631,11 +674,11 @@ Each manifest declares `workerKind: in-session-agent` (the default per
 
 ### Operator escalation X → Y → Z
 
-| Trigger | Switch to |
-|---|---|
-| Default | Pattern X (this command alone, single session, in-session Agent dispatch) |
-| Subscription quota exhausted mid-drain | Pattern Y (`cli-orchestrator tick --spawner claude` — shells out to `claude -p`, draws Agent SDK credit pool) |
-| N>4 parallel devs needed (large backlog burst) | Pattern Z (open N sibling sessions running `/ai-sdlc dispatch-worker`) |
+| Trigger                                        | Switch to                                                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Default                                        | Pattern X (this command alone, single session, in-session Agent dispatch)                                     |
+| Subscription quota exhausted mid-drain         | Pattern Y (`cli-orchestrator tick --spawner claude` — shells out to `claude -p`, draws Agent SDK credit pool) |
+| N>4 parallel devs needed (large backlog burst) | Pattern Z (open N sibling sessions running `/ai-sdlc dispatch-worker`)                                        |
 
 Patterns coexist — the same Dispatch Board accepts manifests from any
 mix of Workers. The `bg-agent-request/` subdir only governs Pattern X

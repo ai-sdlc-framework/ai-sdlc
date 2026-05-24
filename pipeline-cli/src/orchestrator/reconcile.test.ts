@@ -24,10 +24,14 @@ import { ensureBoardDirs, writeVerdict } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 
 import {
+  AGENT_ID_PATTERN,
+  defaultHomeDir,
   encodeWorktreePathForClaudeTmp,
   extractPrNumberFromUrl,
+  readVerdictJson,
   RECONCILE_REVIEWERS,
   runReconcile,
+  safeExistsFile,
   salvageReviewerTranscript,
 } from './reconcile.js';
 
@@ -159,7 +163,7 @@ describe('salvageReviewerTranscript', () => {
       worktreePath,
       'AISDLC-418',
       'code-reviewer',
-      'agent-xyz',
+      'agentxyz1',
       { tmpRoot },
     );
     expect(result.status).toBe('already-present');
@@ -170,26 +174,62 @@ describe('salvageReviewerTranscript', () => {
       worktreePath,
       'AISDLC-418',
       'code-reviewer',
-      'agent-xyz',
+      'agentxyz1',
       { tmpRoot },
     );
     expect(result.status).toBe('not-found');
+  });
+
+  it('rejects path-traversal agentIds (iter-2 MAJOR #5)', () => {
+    // Set up a real file at the would-be-traversed location to prove the
+    // rejection is the agentId validator, not just an absent file.
+    const trickyDir = path.join(
+      tmpRoot,
+      'claude-501',
+      encodeWorktreePathForClaudeTmp(worktreePath),
+    );
+    mkdirSync(path.join(trickyDir, 'session-a', 'tasks'), { recursive: true });
+    writeFileSync(
+      path.join(trickyDir, 'session-a', 'tasks', 'whatever.output'),
+      'should-not-leak\n',
+      'utf8',
+    );
+    const cases = [
+      '../../../etc/passwd',
+      'session-uuid/../tasks/agent',
+      'AGENT-WITH-CAPS',
+      'short',
+      '',
+      'a'.repeat(64),
+      './foo',
+    ];
+    for (const bad of cases) {
+      expect(AGENT_ID_PATTERN.test(bad)).toBe(false);
+      const result = salvageReviewerTranscript(worktreePath, 'AISDLC-418', 'code-reviewer', bad, {
+        tmpRoot,
+      });
+      expect(result.status).toBe('not-found');
+    }
+    // And ensure a well-formed agentId pattern still accepts valid inputs.
+    for (const good of ['b0d3ltjxv', 'abc123', 'agent42xyz']) {
+      expect(AGENT_ID_PATTERN.test(good)).toBe(true);
+    }
   });
 
   it('salvages a transcript from a matching claude-<uid>/<encoded>/<session>/tasks/ entry', () => {
     const encoded = encodeWorktreePathForClaudeTmp(worktreePath);
     const sessionDir = path.join(tmpRoot, 'claude-501', encoded, 'session-uuid', 'tasks');
     mkdirSync(sessionDir, { recursive: true });
-    writeFileSync(path.join(sessionDir, 'agent-xyz.output'), 'salvaged content\n', 'utf8');
+    writeFileSync(path.join(sessionDir, 'agentxyz1.output'), 'salvaged content\n', 'utf8');
     const result = salvageReviewerTranscript(
       worktreePath,
       'AISDLC-418',
       'code-reviewer',
-      'agent-xyz',
+      'agentxyz1',
       { tmpRoot },
     );
     expect(result.status).toBe('salvaged');
-    expect(result.source).toContain('agent-xyz.output');
+    expect(result.source).toContain('agentxyz1.output');
     expect(
       readFileSync(
         path.join(worktreePath, '.ai-sdlc', 'transcripts', 'aisdlc-418', 'code-reviewer.jsonl'),
@@ -447,7 +487,7 @@ describe('runReconcile — orchestration', () => {
       taskId,
       boardDir,
       worktreePath,
-      reviewerAgentIds: { 'code-reviewer': 'nonexistent-agent' },
+      reviewerAgentIds: { 'code-reviewer': 'nonexistent00' },
       spawn,
     });
     expect(result.steps.find((s) => s.name === 'salvage-transcript:code-reviewer')?.status).toBe(
@@ -458,5 +498,314 @@ describe('runReconcile — orchestration', () => {
     expect(result.steps.find((s) => s.name === 'emit-leaf:code-reviewer')).toBeUndefined();
     expect(result.steps.find((s) => s.name === 'emit-leaf:test-reviewer')?.status).toBe('success');
     expect(result.outcome).toBe('success');
+  });
+
+  it('outcome=failed when devVerdict.commitSha is empty', () => {
+    writeDevVerdict(boardDir, { commitSha: '' });
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+    });
+    expect(result.outcome).toBe('failed');
+    expect(result.steps.find((s) => s.name === 'verify-head-sha')?.status).toBe('failed');
+  });
+
+  it('outcome=partial when aggregated verdict is missing', () => {
+    writeDevVerdict(boardDir);
+    rmSync(path.join(worktreePath, '.ai-sdlc', 'verdicts', `${taskIdLower}.json`));
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+    });
+    expect(result.outcome).toBe('partial');
+    expect(result.steps.find((s) => s.name === 'sign-attestation')?.status).toBe('failed');
+  });
+
+  it('outcome=partial when individual reviewer verdict is missing (emit-leaf skipped)', () => {
+    writeDevVerdict(boardDir);
+    rmSync(path.join(worktreePath, '.ai-sdlc', 'verdicts', `code-reviewer-${taskIdLower}.json`));
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+    });
+    expect(result.steps.find((s) => s.name === 'emit-leaf:code-reviewer')?.status).toBe('skipped');
+    expect(result.outcome).toBe('success');
+  });
+
+  it('outcome=partial when git fetch fails', () => {
+    writeDevVerdict(boardDir);
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'git' && args[0] === 'fetch') {
+        return { status: 128, stdout: '', stderr: 'no remote' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: customSpawn,
+    });
+    expect(result.outcome).toBe('partial');
+    expect(result.steps.find((s) => s.name === 'git-fetch')?.status).toBe('failed');
+    expect(result.steps.find((s) => s.name === 'git-rebase')).toBeUndefined();
+  });
+
+  it('outcome=partial when git rebase fails', () => {
+    writeDevVerdict(boardDir);
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'git' && args[0] === 'rebase') {
+        return { status: 1, stdout: '', stderr: 'conflict' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: customSpawn,
+    });
+    expect(result.outcome).toBe('partial');
+    expect(result.steps.find((s) => s.name === 'git-rebase')?.status).toBe('failed');
+    expect(result.steps.find((s) => s.name === 'git-push')).toBeUndefined();
+  });
+
+  it('outcome=partial when gh pr ready fails after a successful push', () => {
+    writeDevVerdict(boardDir);
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'gh' && args[0] === 'pr' && args[1] === 'ready') {
+        return { status: 1, stdout: '', stderr: 'pr already ready' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: customSpawn,
+    });
+    expect(result.outcome).toBe('partial');
+    expect(result.steps.find((s) => s.name === 'gh-pr-ready')?.status).toBe('failed');
+    expect(result.steps.find((s) => s.name === 'gh-pr-merge-auto')).toBeUndefined();
+  });
+
+  it('skipArmAutoMerge=true bypasses gh pr merge but flips ready', () => {
+    writeDevVerdict(boardDir);
+    const { spawn, calls } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      skipArmAutoMerge: true,
+      spawn,
+    });
+    expect(result.outcome).toBe('success');
+    expect(result.steps.find((s) => s.name === 'gh-pr-merge-auto')?.status).toBe('skipped');
+    expect(calls.some((c) => c.file === 'gh' && c.args[1] === 'merge')).toBe(false);
+  });
+
+  it('schema-version v5 is forwarded to sign-attestation', () => {
+    writeDevVerdict(boardDir);
+    const seen: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('sign-attestation.mjs')) {
+        seen.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      schemaVersion: 'v5',
+      spawn: customSpawn,
+    });
+    expect(result.outcome).toBe('success');
+    expect(seen[0]).toEqual(expect.arrayContaining(['--schema-version', 'v5']));
+  });
+
+  it('reviewerModel + harness overrides reach the emit-leaf invocation', () => {
+    writeDevVerdict(boardDir);
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      reviewerModel: 'claude-opus-4-7',
+      harness: 'custom-harness',
+      spawn: customSpawn,
+    });
+    expect(emitCalls.length).toBe(3);
+    for (const call of emitCalls) {
+      expect(call).toEqual(expect.arrayContaining(['--model', 'claude-opus-4-7']));
+      expect(call).toEqual(expect.arrayContaining(['--harness', 'custom-harness']));
+    }
+  });
+
+  it('caller-supplied transcript + verdict overrides reach the emit-leaf args', () => {
+    writeDevVerdict(boardDir);
+    const explicitTranscript = path.join(workDir, 'tx', 'override.jsonl');
+    const explicitVerdict = path.join(workDir, 'tx', 'verdict.json');
+    mkdirSync(path.join(workDir, 'tx'), { recursive: true });
+    writeFileSync(explicitTranscript, 'override\n', 'utf8');
+    writeFileSync(explicitVerdict, '{"approved":true}', 'utf8');
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      reviewerTranscripts: { 'code-reviewer': explicitTranscript },
+      reviewerVerdicts: { 'code-reviewer': explicitVerdict },
+      spawn: customSpawn,
+    });
+    const codeCall = emitCalls.find((args) => args.includes('code-reviewer'));
+    expect(codeCall).toEqual(expect.arrayContaining(['--transcript-path', explicitTranscript]));
+    expect(codeCall).toEqual(expect.arrayContaining(['--verdict-path', explicitVerdict]));
+  });
+
+  it('outcome=partial when neither verdict.prUrl nor branch probe yields a PR number', () => {
+    writeDevVerdict(boardDir, { prUrl: null });
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+        return { status: 1, stdout: '', stderr: 'no pr' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: customSpawn,
+    });
+    expect(result.outcome).toBe('partial');
+    expect(result.steps.find((s) => s.name === 'gh-pr-ready')?.status).toBe('failed');
+  });
+});
+
+describe('reconcile — small exported utilities', () => {
+  it('defaultHomeDir returns a non-empty string (matches os.homedir())', () => {
+    const home = defaultHomeDir();
+    expect(typeof home).toBe('string');
+    expect(home.length).toBeGreaterThan(0);
+  });
+
+  it('safeExistsFile is true for an existing regular file', () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), 'safe-exists-'));
+    const f = path.join(tmpDir, 'x.txt');
+    writeFileSync(f, 'hi', 'utf8');
+    expect(safeExistsFile(f)).toBe(true);
+    expect(safeExistsFile(path.join(tmpDir, 'nope'))).toBe(false);
+    expect(safeExistsFile(tmpDir)).toBe(false); // directory, not file
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('readVerdictJson parses good JSON + returns null on bad input', () => {
+    const tmpDir = mkdtempSync(path.join(tmpdir(), 'read-verdict-'));
+    const good = path.join(tmpDir, 'g.json');
+    const bad = path.join(tmpDir, 'b.json');
+    writeFileSync(good, '{"approved":true}', 'utf8');
+    writeFileSync(bad, '{not-json', 'utf8');
+    expect(readVerdictJson(good)).toEqual({ approved: true });
+    expect(readVerdictJson(bad)).toBeNull();
+    expect(readVerdictJson(path.join(tmpDir, 'nope.json'))).toBeNull();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+});
+
+describe('salvageReviewerTranscript — edge paths', () => {
+  it('returns not-found when tmpRoot itself does not exist (readdirSync throws)', () => {
+    const wt = mkdtempSync(path.join(tmpdir(), 'salvage-edge-wt-'));
+    try {
+      const result = salvageReviewerTranscript(wt, 'AISDLC-418', 'code-reviewer', 'b0d3ltjxv', {
+        tmpRoot: '/this/path/definitely/does/not/exist/abcxyz',
+      });
+      expect(result.status).toBe('not-found');
+    } finally {
+      rmSync(wt, { recursive: true, force: true });
+    }
+  });
+
+  it('skips a claude-<uid> entry whose <encoded> dir is not readable / not a dir', () => {
+    const tmpRoot = mkdtempSync(path.join(tmpdir(), 'salvage-edge-tmp-'));
+    const wt = mkdtempSync(path.join(tmpdir(), 'salvage-edge-wt-'));
+    try {
+      // Create a claude-501/ dir with no <encoded> subdir — the loop should
+      // skip it via the `if (!existsSync(cwdDir)) continue` branch.
+      mkdirSync(path.join(tmpRoot, 'claude-501'), { recursive: true });
+      // Add a second claude-uid where <encoded> exists but the session dir
+      // listing would race away — emulate via a FILE at the encoded path
+      // (readdirSync throws ENOTDIR → catch path triggers).
+      const encoded = encodeWorktreePathForClaudeTmp(wt);
+      writeFileSync(path.join(tmpRoot, 'claude-502'), 'not-a-dir', 'utf8');
+      // Note: claude-502 starts with claude- so it matches; but it's a file
+      // → path.join(tmpRoot, 'claude-502', encoded) doesn't exist → continue.
+      // Add a third claude-uid where the encoded dir IS a dir but the session
+      // dir scan throws because the session "dir" is a file under encoded.
+      const goodEncoded = path.join(tmpRoot, 'claude-503', encoded);
+      mkdirSync(goodEncoded, { recursive: true });
+      // Add a file as a "session" — readdirSync on encoded gives ['session-file'];
+      // path.join(encoded, 'session-file', 'tasks', 'agent.output') existsSync = false.
+      writeFileSync(path.join(goodEncoded, 'session-file'), 'x', 'utf8');
+      const result = salvageReviewerTranscript(wt, 'AISDLC-418', 'code-reviewer', 'agent42x1', {
+        tmpRoot,
+      });
+      expect(result.status).toBe('not-found');
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+      rmSync(wt, { recursive: true, force: true });
+    }
   });
 });

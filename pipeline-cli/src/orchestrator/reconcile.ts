@@ -199,6 +199,15 @@ export interface SalvageResult {
  * that's a hard failure (v6 mode rejects missing leaves) or soft (v5
  * mode tolerates it).
  */
+/**
+ * Validator for Claude Code `agentId` strings — defense-in-depth against a
+ * malicious caller-supplied agentId that path-traverses out of the tasks/
+ * directory (iter-2 MAJOR #5). Claude Code IDs are short lowercase
+ * alphanumerics (observed: 6-10 chars in the wild, e.g. `b0d3ltjxv`); we
+ * accept up to 32 to leave headroom without admitting `/`, `.`, etc.
+ */
+export const AGENT_ID_PATTERN = /^[a-z0-9]{6,32}$/;
+
 export function salvageReviewerTranscript(
   worktreePath: string,
   taskId: string,
@@ -211,6 +220,11 @@ export function salvageReviewerTranscript(
 ): SalvageResult {
   const destDir = path.join(worktreePath, '.ai-sdlc', 'transcripts', taskId.toLowerCase());
   const destination = path.join(destDir, `${reviewerName}.jsonl`);
+  // Reject obviously-bad agentIds before they reach `path.join` — defense-
+  // in-depth against caller-supplied path traversal (iter-2 MAJOR #5).
+  if (!AGENT_ID_PATTERN.test(agentId)) {
+    return { status: 'not-found', destination };
+  }
   if (existsSync(destination)) {
     return { status: 'already-present', destination };
   }
