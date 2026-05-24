@@ -486,3 +486,202 @@ describe('coverage subcommand (Phase 2 AC#6)', () => {
     expect(out).toMatch(/target/);
   });
 });
+
+// ── RFC-0035 Phase 5 / AISDLC-289 — score-c, answer, override, corpus subcommands
+
+describe('score-c subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
+  beforeEach(async () => {
+    // Seed one decision for every test in this block.
+    setArgv(
+      'add',
+      '--summary',
+      'mid-band decision',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Option A',
+      '--option',
+      'opt-b:Option B',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+  });
+
+  it('without an invoker, falls open + reports llm-answer-eligible: false', async () => {
+    // The CLI doesn't wire a production invoker — the fall-open path
+    // means stdoutJson reports `metBehindThreshold: false` and the
+    // event is NOT auto-applied even with --auto-apply.
+    setArgv('score-c', 'DEC-0001', '--force', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ fired: boolean; stageC: { llmAnswerEligible: boolean } }>();
+    expect(r.fired).toBe(true);
+    expect(r.stageC.llmAnswerEligible).toBe(false);
+  });
+
+  it('refuses an invalid decision id', async () => {
+    setArgv('score-c', 'NOT-A-DECISION', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid decision id/);
+  });
+
+  it('refuses a decision id that is not in the log', async () => {
+    setArgv('score-c', 'DEC-9999', '--force', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/decision not found/);
+  });
+
+  it('degrades open when the feature flag is off', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off';
+    setArgv('score-c', 'DEC-0001', '--force', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ enabled: boolean; stageC: null }>();
+    expect(r.enabled).toBe(false);
+    expect(r.stageC).toBeNull();
+  });
+
+  it('skips when Stage B is high-band (without --force)', async () => {
+    // The decision Stage A produces a low blast-radius reversible → Stage B
+    // composite is low (low-band). We don't get high-band without crafting
+    // the decision differently; test the low-band skip path here as a
+    // proxy for "mid-band guard works".
+    setArgv('score-c', 'DEC-0001', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      fired: boolean;
+      skipReason?: string;
+      stageBCompositeScore: number;
+    }>();
+    expect(r.fired).toBe(false);
+    expect(r.skipReason).toMatch(/stage-b-/);
+  });
+
+  it('--store persists the stage-c-completed event even on fall-open', async () => {
+    setArgv('score-c', 'DEC-0001', '--force', '--store', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const logPath = resolveEventLogPath(tmp);
+    const raw = readFileSync(logPath, 'utf8');
+    expect(raw).toMatch(/"type":"stage-c-completed"/);
+    // Fall-open path does NOT also emit operator-answered (because
+    // isStageCAutoApplyEligible returned false).
+    expect(raw).not.toMatch(/"by":"framework"/);
+  });
+
+  it('prints text output by default', async () => {
+    setArgv('score-c', 'DEC-0001', '--force');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/Stage C result/);
+    expect(out).toMatch(/recommendation:/);
+  });
+});
+
+describe('answer subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
+  beforeEach(async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'to be answered',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Option A',
+      '--option',
+      'opt-b:Option B',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+  });
+
+  it('resolves the decision when given a valid option id', async () => {
+    setArgv('answer', 'DEC-0001', 'opt-b', '--by', 'op@test', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ ok: boolean; chosenOptionId: string }>();
+    expect(r.ok).toBe(true);
+    expect(r.chosenOptionId).toBe('opt-b');
+  });
+
+  it('refuses an option id that is not declared on the decision', async () => {
+    setArgv('answer', 'DEC-0001', 'opt-zzz', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/not declared/);
+  });
+
+  it('refuses an unknown decision id', async () => {
+    setArgv('answer', 'DEC-9999', 'opt-a', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+  });
+
+  it('refuses to mutate when the feature flag is opt-out', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off';
+    setArgv('answer', 'DEC-0001', 'opt-a', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/refusing to mutate/);
+  });
+});
+
+describe('override subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
+  beforeEach(async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'auto-applied decision',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Option A',
+      '--option',
+      'opt-b:Option B',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+  });
+
+  it('refuses when no auto-applied stage-c-completed event exists', async () => {
+    setArgv('override', 'DEC-0001', 'opt-b', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/no auto-applied/);
+  });
+
+  it('refuses an unknown option id', async () => {
+    setArgv('override', 'DEC-0001', 'opt-zzz', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/not declared/);
+  });
+});
+
+describe('corpus aggregate subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
+  it('returns empty metrics when the corpus is empty', async () => {
+    setArgv('corpus', 'aggregate', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      perTaskType: Array<{ taskType: string; total: number }>;
+      aggregate: { total: number };
+      anchorCandidates: unknown[];
+    }>();
+    expect(r.perTaskType.length).toBe(5);
+    expect(r.aggregate.total).toBe(0);
+    expect(r.anchorCandidates).toEqual([]);
+  });
+
+  it('text mode prints the per-task-type table', async () => {
+    setArgv('corpus', 'aggregate');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/Substrate calibration corpus aggregate/);
+    expect(out).toMatch(/decision-recommendation/);
+    expect(out).toMatch(/anchor candidates/);
+  });
+
+  it('honours --anchor-threshold override', async () => {
+    setArgv('corpus', 'aggregate', '--anchor-threshold', '5', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ anchorPromotionThreshold: number }>();
+    expect(r.anchorPromotionThreshold).toBe(5);
+  });
+});

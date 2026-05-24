@@ -22,6 +22,8 @@ import type {
   DecisionOpenedEvent,
   RecommendationIssuedEvent,
   OperatorAnsweredEvent,
+  OverriddenEvent,
+  StageCCompletedEvent,
 } from './decision-record.js';
 
 /**
@@ -89,6 +91,48 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
         evaluation: evaluationUpdate,
         priority: rec.prioritySignal,
         ...(rec.routing !== undefined ? { routing: rec.routing } : {}),
+      },
+      decisionLog: [...current.decisionLog, event],
+    };
+  }
+
+  if (event.type === 'stage-c-completed') {
+    // RFC-0035 Phase 5 / AISDLC-289 — fold Stage C output onto the Decision
+    // record. The companion `operator-answered` event (when `autoApplied: true`)
+    // is folded separately below.
+    if (current === null) return null;
+    const sc = event as StageCCompletedEvent;
+    const evaluationUpdate: Record<string, unknown> = {
+      ...(current.status.evaluation ?? {}),
+      stageC: sc.stageC,
+    };
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: {
+        ...current.status,
+        evaluation: evaluationUpdate,
+      },
+      decisionLog: [...current.decisionLog, event],
+    };
+  }
+
+  if (event.type === 'overridden') {
+    // RFC-0035 Phase 5 / AISDLC-289 — fold operator override of a
+    // framework auto-applied recommendation. The decision lifecycle
+    // resolves to 'answered' with the override's chosen option as the
+    // canonical answer; `answeredBy` records the operator.
+    if (current === null) return null;
+    const ovr = event as OverriddenEvent;
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: {
+        ...current.status,
+        lifecycle: 'answered',
+        answeredOptionId: ovr.chosenOptionId,
+        answeredBy: event.by ?? null,
+        answeredAt: event.ts,
       },
       decisionLog: [...current.decisionLog, event],
     };

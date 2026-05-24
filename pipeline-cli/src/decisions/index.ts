@@ -5,6 +5,9 @@
  * Phase 3 adds the Stage B rubric scorer + actor routing (`stage-b`).
  * Phase 4 adds the DoR-to-Decision bridge (`dor-bridge`) that wires
  * RFC-0011 clarification rounds into the catalog (AISDLC-288).
+ * Phase 5 (AISDLC-289) adds the Stage C LLM evaluation runner
+ * (`stage-c`) which composes with the RFC-0024 shared classifier
+ * substrate, plus the shared corpus aggregator (`corpus-aggregator`).
  *
  * @module decisions
  */
@@ -15,6 +18,8 @@ export * from './feature-flag.js';
 export * from './projection.js';
 export * from './stage-a.js';
 export * from './stage-b.js';
+export * from './stage-c.js';
+export * from './corpus-aggregator.js';
 export * from './dor-bridge.js';
 export * from './decisions-config.js';
 export * from './notification.js';

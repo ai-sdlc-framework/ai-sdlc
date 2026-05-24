@@ -94,6 +94,16 @@ export interface DecisionsConfig {
    * before it is considered "settled" (RFC-0035 OQ-3).  Default: 24.
    */
   overrideWindowHours?: number;
+  /**
+   * RFC-0035 §5.3 Stage C LLM confidence threshold (AISDLC-289 / AC#3).
+   * Stage C auto-applies when the LLM's self-reported confidence on the
+   * `decision-recommendation` task meets or exceeds this value AND the
+   * decision is reversible. Default: 0.7. Per-org configurable here.
+   * Independent of the substrate's global `capture-config.yaml:
+   * classifier.confidenceThreshold` so operators can tune Decision-Catalog
+   * caution separately from capture-triage caution.
+   */
+  stageCConfidenceThreshold?: number;
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────
