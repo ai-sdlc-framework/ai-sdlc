@@ -78,6 +78,13 @@ import {
 } from '../types.js';
 import { writeEvent, type OrchestratorEvent } from './events.js';
 import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-flag.js';
+import {
+  applyHcCost,
+  extractMaxBudgetUsd,
+  formatHcCostAdmissionLine,
+  loadHcCostConfig,
+  type HcCostConfig,
+} from './hc-cost.js';
 import { formatFilterTrace, runFilterChain } from './filters/index.js';
 import { readLatestVerdictForTask } from './filters/dor-readiness.js';
 import { emitDorDecisions } from '../decisions/dor-bridge.js';
@@ -450,6 +457,23 @@ export interface OrchestratorAdapters {
    * autonomous frontier scan path (no `--task-from-file`) is unchanged.
    */
   bypassFilters?: boolean;
+  /**
+   * AISDLC-318 (RFC-0009 §7.4) — pre-resolved HC_cost config override.
+   * When provided, the tick skips the disk + env reads and uses this
+   * config directly. Tests inject a synthetic config to drive the
+   * HC_cost channel without filesystem or env side effects.
+   */
+  hcCostConfig?: HcCostConfig;
+  /**
+   * AISDLC-318 (RFC-0009 §7.4) — `maxBudgetUsd` frontmatter loader for
+   * the HC_cost channel. When provided, the loop calls this per admitted
+   * candidate to determine cost-sensitivity. Tests inject a pure map
+   * so they don't have to materialise backlog files.
+   *
+   * Returns the numeric `maxBudgetUsd` value when present, or `undefined`
+   * when the task is not cost-sensitive (no budget cap declared).
+   */
+  maxBudgetUsdLoader?: (taskId: string) => number | undefined;
 }
 
 /**
@@ -714,6 +738,16 @@ export async function runOrchestratorTick(
   const blockedLoader = adapters.taskBlockedLoader ?? buildDefaultBlockedLoader(config.workDir);
   const dispatchableLoader =
     adapters.taskDispatchableLoader ?? buildDefaultDispatchableLoader(config.workDir);
+
+  // ── HC_cost channel (RFC-0009 §7.4 / AISDLC-318) ──────────────────────
+  // Load the config once per tick — env reads + calibration.yaml disk read are
+  // cheap but we don't want N reads per candidate. Tests inject `hcCostConfig`
+  // directly to stay hermetic. The maxBudgetUsdLoader is per-candidate.
+  const hcCostConfig =
+    adapters.hcCostConfig ??
+    loadHcCostConfig({ workDir: config.workDir, artifactsDir: adapters.artifactsDir });
+  const maxBudgetUsdLoader =
+    adapters.maxBudgetUsdLoader ?? buildDefaultMaxBudgetUsdLoader(config.workDir);
   const graph = graphLoader();
   const filterEvents: OrchestratorFilterEvent[] = [];
   const alreadyInFlightEvents: OrchestratorTaskAlreadyInFlightEvent[] = [];
@@ -947,6 +981,59 @@ export async function runOrchestratorTick(
       nextSleepSec: cadenceState.currentIntervalSec,
       alreadyInFlight: alreadyInFlightEvents,
     };
+  }
+
+  // ── HC_cost channel post-filter application (RFC-0009 §7.4 / AISDLC-318)
+  // Apply the HC_cost multiplier to admitted candidates' effective priority and
+  // re-sort `picks` so cost-sensitive tasks are de-prioritized when HC_cost < 1.0.
+  // Tracks how many cost-sensitive candidates were affected for the event payload.
+  {
+    let hcCostAffectedCount = 0;
+    let hcCostTotalPriorityDelta = 0;
+
+    if (hcCostConfig.enabled && hcCostConfig.weight !== 1.0) {
+      // Annotate each pick with its HC_cost-adjusted priority, then re-sort.
+      const annotated = picks.map((taskId) => {
+        const maxBudgetUsd = maxBudgetUsdLoader(taskId);
+        const application = applyHcCost(
+          /* base priority 1.0 — we only need relative ranking between picks */
+          1.0,
+          maxBudgetUsd,
+          hcCostConfig,
+        );
+        if (application.isCostSensitive && application.priorityDelta !== 0) {
+          hcCostAffectedCount++;
+          hcCostTotalPriorityDelta += application.priorityDelta;
+        }
+        return { taskId, adjustedPriority: application.adjustedPriority };
+      });
+      // Sort: higher adjustedPriority first (non-cost-sensitive tasks with
+      // adjustedPriority=1.0 stay at the front; cost-sensitive tasks with
+      // adjustedPriority=hcCostWeight sink to the back within the budget window).
+      annotated.sort((a, b) => b.adjustedPriority - a.adjustedPriority);
+      picks.length = 0;
+      for (const { taskId } of annotated) picks.push(taskId);
+    } else {
+      // Even when weight === 1.0, count affected candidates for the admission line.
+      for (const taskId of picks) {
+        const maxBudgetUsd = maxBudgetUsdLoader(taskId);
+        if (maxBudgetUsd !== undefined) hcCostAffectedCount++;
+      }
+    }
+
+    // Emit OrchestratorCostPolicyApplied when HC_cost ≠ 1.0 and channel enabled.
+    if (hcCostConfig.enabled && hcCostConfig.weight !== 1.0 && hcCostAffectedCount > 0) {
+      emit({
+        type: 'OrchestratorCostPolicyApplied',
+        hcCostWeight: hcCostConfig.weight,
+        affectedCount: hcCostAffectedCount,
+        totalPriorityDelta: hcCostTotalPriorityDelta,
+        calibrationTier: hcCostConfig.calibrationTier,
+      });
+    }
+
+    // Always emit the admission line so operators can see HC_cost status.
+    logger.info(formatHcCostAdmissionLine(hcCostConfig, hcCostAffectedCount));
   }
 
   const outcomes: TaskDispatchOutcome[] = [];
@@ -2363,6 +2450,32 @@ function buildDefaultDispatchableLoader(workDir: string): (taskId: string) => {
       return { dispatchable, dispatchableReason };
     } catch {
       return { dispatchable: undefined, dispatchableReason: undefined };
+    }
+  };
+}
+
+/**
+ * AISDLC-318 (RFC-0009 §7.4) — default `maxBudgetUsd` frontmatter loader
+ * for the HC_cost channel. Reads the on-disk task file and returns the
+ * `maxBudgetUsd` field when present. Returns `undefined` when the field is
+ * absent (task is NOT cost-sensitive — HC_cost is a no-op for it).
+ *
+ * Degrade-open: any read / parse error → `undefined` (task treated as
+ * not cost-sensitive, preserving backward-compat with tasks that predate
+ * this field).
+ */
+function buildDefaultMaxBudgetUsdLoader(workDir: string): (taskId: string) => number | undefined {
+  return (taskId) => {
+    try {
+      const path = findTaskFile(taskId, workDir);
+      if (!path || !existsSync(path)) return undefined;
+      const raw = readFileSync(path, 'utf8');
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) return undefined;
+      const fm = parseSimpleYaml(fmMatch[1]);
+      return extractMaxBudgetUsd(fm as Record<string, unknown>);
+    } catch {
+      return undefined;
     }
   };
 }

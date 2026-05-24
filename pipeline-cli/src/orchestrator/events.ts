@@ -245,7 +245,21 @@ export type OrchestratorEventType =
    * includes an `originatingPrompt` field; silent on manifests that predate
    * this field (backward-compatible).
    */
-  | 'SubagentDispatchedWithChainedScope';
+  | 'SubagentDispatchedWithChainedScope'
+  /**
+   * AISDLC-318 (RFC-0009 §7.4) — emitted once per tick when `HC_cost ≠ 1.0`
+   * is in effect and at least one cost-sensitive task (carrying `maxBudgetUsd`)
+   * was evaluated. Per RFC-0009 §7.4 observability spec. Per-event fields:
+   *  - `hcCostWeight` — the active HC_cost multiplier (e.g. 0.5).
+   *  - `affectedCount` — number of cost-sensitive candidates evaluated this tick.
+   *  - `totalPriorityDelta` — sum of priority deltas across affected candidates
+   *    (negative = de-prioritized). Lets operators measure the lever's impact.
+   *  - `calibrationTier` — RFC-0016 data quality tier (`crude`/`moderate`/`high`).
+   *
+   * NOT emitted when `HC_cost === 1.0` (neutral) or `AI_SDLC_HC_COST_ENABLED`
+   * is off (degrade-open; no-op when the channel is disabled).
+   */
+  | 'OrchestratorCostPolicyApplied';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

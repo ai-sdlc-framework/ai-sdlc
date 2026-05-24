@@ -114,6 +114,21 @@ export type {
   UmbrellaDispatchFn,
 } from './types.js';
 
+// RFC-0009 §7.4 Phase 4.3 — HC_cost channel (AISDLC-318).
+export {
+  applyHcCost,
+  extractMaxBudgetUsd,
+  formatHcCostAdmissionLine,
+  HC_COST_DEFAULT_WEIGHT,
+  HC_COST_ENABLED_ENV,
+  HC_COST_WEIGHT_ENV,
+  loadHcCostConfig,
+  readCalibrationTier,
+  type HcCostCalibrationTier,
+  type HcCostApplication,
+  type HcCostConfig,
+} from './hc-cost.js';
+
 // RFC-0015 Phase 2 — failure playbook (AISDLC-169.2).
 export {
   CATALOGUED_MODES,

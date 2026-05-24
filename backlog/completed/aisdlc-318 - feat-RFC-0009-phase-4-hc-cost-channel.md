@@ -1,7 +1,7 @@
 ---
 id: AISDLC-318
 title: 'feat: RFC-0009 Phase 4.3 — HC_cost channel (OQ-12, composes with RFC-0016 calibration)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -37,10 +37,10 @@ Phase 4.3 of RFC-0009. HC_cost channel ships per §7.4 + OQ-12 resolution. Opera
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 HC_cost channel ships in admission composite per §7.4
-- [ ] #2 Operator-tunable weight via `.ai-sdlc/calibration.yaml` (default 1.0)
-- [ ] #3 Reads RFC-0016 calibration tier (crude/moderate/high) from estimate substrate
-- [ ] #4 Cost-quality tier surfaced to operator in `cli-admission` output
-- [ ] #5 Adopter opt-in gate (default off)
-- [ ] #6 Test coverage: each calibration tier produces sensible cost weights; opt-out short-circuits
+- [x] #1 HC_cost channel ships in admission composite per §7.4
+- [x] #2 Operator-tunable weight via `.ai-sdlc/calibration.yaml` (default 1.0)
+- [x] #3 Reads RFC-0016 calibration tier (crude/moderate/high) from estimate substrate
+- [x] #4 Cost-quality tier surfaced to operator in `cli-admission` output
+- [x] #5 Adopter opt-in gate (default off)
+- [x] #6 Test coverage: each calibration tier produces sensible cost weights; opt-out short-circuits
 <!-- AC:END -->
