@@ -13,7 +13,7 @@
  * Until then, assignees are written directly when resolved from CODEOWNERS.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -92,15 +92,30 @@ describe('appendFrameworkCapture', () => {
   });
 
   it('does not throw on write failure (best-effort)', () => {
-    // Pass a read-only path that will fail
+    // Create a read-only directory so mkdirSync inside _quality fails with EACCES.
+    // We use chmodSync (0o444 = r--r--r--) to make it unwritable on all POSIX
+    // platforms. The /proc approach used previously could block indefinitely on
+    // Linux CI where /proc has special kernel-level semantics (AISDLC-375 fix).
+    const readonlyDir = mkdtempSync(join(tmpdir(), 'quality-router-ro-'));
+    chmodSync(readonlyDir, 0o444);
     const warnings: string[] = [];
-    expect(() =>
-      appendFrameworkCapture(MOCK_RECORD, {
-        artifactsDir: '/proc/read-only-nonexistent-path',
-        logger: { warn: (m) => warnings.push(m) },
-      }),
-    ).not.toThrow();
-    expect(warnings.some((w) => w.includes('non-fatal'))).toBe(true);
+    try {
+      expect(() =>
+        appendFrameworkCapture(MOCK_RECORD, {
+          artifactsDir: readonlyDir,
+          logger: { warn: (m) => warnings.push(m) },
+        }),
+      ).not.toThrow();
+      expect(warnings.some((w) => w.includes('non-fatal'))).toBe(true);
+    } finally {
+      // Restore write permissions so rmSync in afterEach can clean up.
+      try {
+        chmodSync(readonlyDir, 0o755);
+      } catch {
+        // best-effort; ignore if already removed
+      }
+      rmSync(readonlyDir, { recursive: true, force: true });
+    }
   });
 });
 

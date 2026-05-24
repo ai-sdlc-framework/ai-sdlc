@@ -42,9 +42,13 @@ jobs:
         id: run_flaky
         # Run each package's flaky tests independently so a hang in one
         # package doesn't prevent the others from completing. Each vitest
-        # invocation targets *.flaky.test.ts explicitly so only those files
-        # are collected (the config exclude is irrelevant here since we
-        # override the include pattern directly).
+        # invocation targets *.flaky.test.ts explicitly by passing the glob
+        # as a positional filter argument (vitest 3.x syntax — --include is
+        # not a valid flag and causes an immediate CACError, AISDLC-375 fix).
+        #
+        # --no-file-parallelism: run flaky tests sequentially within each
+        # package. Flaky tests are typically I/O-heavy or timer-sensitive and
+        # may deadlock under the parallel worker pool.
         #
         # `|| true` after each vitest call keeps the step alive even if
         # a package's flaky tests fail — all output lands in the step log.
@@ -56,15 +60,20 @@ jobs:
           fail=0
 
           for pkg in orchestrator pipeline-cli reference dogfood ai-sdlc-plugin/mcp-server; do
-            if compgen -G "$pkg/src/**/*.flaky.test.ts" > /dev/null 2>&1 || \
-               find "$pkg/src" -name "*.flaky.test.ts" 2>/dev/null | grep -q .; then
+            # Collect *.flaky.test.ts files for this package (bash glob doesn't
+            # recurse, so use find; the compgen check avoids an empty-find false
+            # positive on the || grep -q pattern in older bash).
+            flaky_files="$(find "$pkg/src" -name "*.flaky.test.ts" 2>/dev/null || true)"
+            if [ -n "$flaky_files" ]; then
               echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
-              # --no-file-parallelism: run flaky tests sequentially to dodge
-              # the parallel-pool hang that motivated the rename (AISDLC-375).
-              if pnpm --filter "@ai-sdlc/$(basename $pkg)" exec vitest run \
+              # Pass the glob as a positional filter so vitest collects only the
+              # flaky files. The package's vitest.config.ts exclude list is
+              # irrelevant because we are passing an explicit file pattern that
+              # vitest matches before applying the config's include/exclude logic.
+              if pnpm --filter "@ai-sdlc/$(basename "$pkg")" exec vitest run \
                   --reporter=verbose \
                   --no-file-parallelism \
-                  --include='**/*.flaky.test.ts' 2>&1; then
+                  '**/*.flaky.test.ts' 2>&1; then
                 echo "- Result: PASS" >> "$GITHUB_STEP_SUMMARY"
                 pass=$((pass + 1))
               else
