@@ -265,7 +265,8 @@ export function formatHcCostAdmissionLine(config: HcCostConfig, affectedCount: n
  * @param artifactsDir override for `$ARTIFACTS_DIR`
  */
 export function readCalibrationTier(artifactsDir?: string): HcCostCalibrationTier {
-  const resolvedArtifacts = artifactsDir ?? process.env['ARTIFACTS_DIR'] ?? '.artifacts';
+  const resolvedArtifacts =
+    artifactsDir ?? process.env['ARTIFACTS_DIR'] ?? join(process.cwd(), 'artifacts');
   const estimatesDir = join(resolvedArtifacts, '_estimates');
 
   try {
