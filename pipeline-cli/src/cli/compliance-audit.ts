@@ -662,12 +662,40 @@ export interface ExportResult {
 }
 
 /**
+ * Validate `regime` / `manifestFilename` style identifiers.
+ *
+ * These values flow into bundle filenames (`compliance-audit-<regime>-<end>.tar.gz`)
+ * and manifest filenames, so we restrict them to `[A-Za-z0-9._-]+` to prevent
+ * path-traversal vectors (e.g. `../etc/passwd`) if the input is sourced from
+ * an untrusted CLI invocation. Empty values are rejected. (AISDLC-416 AC-3.)
+ */
+const SAFE_IDENTIFIER_REGEX = /^[A-Za-z0-9._-]+$/;
+
+export function validateSafeIdentifier(label: string, value: string): void {
+  if (!SAFE_IDENTIFIER_REGEX.test(value)) {
+    throw new Error(
+      `Invalid --${label} value "${value}": must match /^[A-Za-z0-9._-]+$/ ` +
+        '(letters, digits, dot, underscore, hyphen). Path-traversal characters are rejected.',
+    );
+  }
+}
+
+/**
  * Build and write the .tar.gz bundle + manifest.json for the given period.
  *
  * OQ-4: deterministic bundle via sorted filenames + fixed mtime (period-end).
+ *
+ * AISDLC-416 manifest-self-sha fix: the manifest.json entry is intentionally
+ * OMITTED from `files[]` to avoid the prior chicken-and-egg bug where the
+ * recorded sha256 was computed from an intermediate manifest form and never
+ * matched the actual bytes inside the tarball. The manifest references itself
+ * implicitly by being present in the archive; the bundleHash covers all
+ * evidence files (which by definition excludes the manifest itself), giving
+ * tamper-evidence at the archive level without the round-trip mismatch.
  */
 export async function exportBundle(opts: ExportOptions): Promise<ExportResult> {
   const { workDir, period, regime, outputDir } = opts;
+  validateSafeIdentifier('regime', regime);
   const { start, end } = parsePeriod(period);
 
   // Collect evidence
@@ -683,6 +711,10 @@ export async function exportBundle(opts: ExportOptions): Promise<ExportResult> {
 
   const bundleFilename = `compliance-audit-${regime}-${end}.tar.gz`;
   const manifestFilename = `compliance-audit-${regime}-${end}.manifest.json`;
+  // Defense-in-depth: filenames must also pass the safe-identifier check.
+  // (Already guaranteed by validation of `regime` + the format of `end`, but
+  // we re-assert here to catch any future code path that bypasses it.)
+  validateSafeIdentifier('manifestFilename', manifestFilename);
 
   // Build evidence-file manifest entries
   const evidenceEntries: ManifestEntry[] = files.map((f) => ({
@@ -696,9 +728,11 @@ export async function exportBundle(opts: ExportOptions): Promise<ExportResult> {
   // from manifest.files and compares — tamper-detection at the archive level.
   const bundleHash = computeBundleHash(evidenceEntries);
 
-  // Compose manifest WITHOUT the manifest.json entry first so we can compute
-  // its content, then add it back for full self-describing completeness.
-  const manifestWithoutSelf: BundleManifest = {
+  // Build the manifest with evidence-file entries only (no self-entry — see
+  // AISDLC-416 fix note in the docstring). This makes the manifest's recorded
+  // sha256 in `files[]` always match the bytes inside the tarball, eliminating
+  // the false-mismatch failure mode for downstream consumers.
+  const manifest: BundleManifest = {
     schemaVersion: 'v1',
     bundleFile: bundleFilename,
     period: { start, end },
@@ -709,31 +743,7 @@ export async function exportBundle(opts: ExportOptions): Promise<ExportResult> {
     bundleHash,
   };
 
-  // Serialize manifest once without manifest.json entry, compute its sha256,
-  // then rebuild with manifest.json added to files[] for self-documentation.
-  const manifestContentWithoutSelf = Buffer.from(
-    JSON.stringify(manifestWithoutSelf, null, 2) + '\n',
-    'utf8',
-  );
-  const manifestSha256 = sha256Hex(manifestContentWithoutSelf);
-  const manifestSize = manifestContentWithoutSelf.length;
-
-  // Add manifest.json to files[] list (self-describing bundle)
-  const manifestSelfEntry: ManifestEntry = {
-    path: 'manifest.json',
-    sha256: manifestSha256,
-    size: manifestSize,
-  };
-  const allEntries: ManifestEntry[] = [manifestSelfEntry, ...manifestWithoutSelf.files].sort(
-    (a, b) => a.path.localeCompare(b.path),
-  );
-
-  const manifest: BundleManifest = {
-    ...manifestWithoutSelf,
-    files: allEntries,
-  };
-
-  // Final manifest content (with self-referencing entry)
+  // Final manifest content (no self-referencing entry)
   const manifestContent = Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
   const manifestFile: EvidenceFile = {
@@ -865,8 +875,11 @@ export function validateManifest(opts: ValidateManifestOptions): ValidateManifes
     };
   }
 
-  // Re-compute bundle hash from evidence files (excludes manifest.json itself —
-  // the hash covers the evidence corpus, not the self-referencing manifest entry).
+  // Re-compute bundle hash from evidence files. As of AISDLC-416, post-fix
+  // manifests no longer include a self-referencing `manifest.json` entry in
+  // `files[]` (the prior self-sha was stale relative to actual tarball bytes).
+  // We still filter manifest.json defensively so this verifier can read pre-fix
+  // manifests produced by AISDLC-325-era code without false negatives.
   const evidenceFiles = manifest.files.filter((f) => f.path !== 'manifest.json');
   const recomputed = computeBundleHash(evidenceFiles);
   const bundleHashValid = recomputed === manifest.bundleHash;
@@ -972,6 +985,15 @@ export function buildComplianceAuditCli(): Argv {
         const outputDir = resolve(String(argv['output-dir']));
         const isJson = String(argv.format) === 'json';
 
+        // AISDLC-416 AC-3: reject path-traversal-prone --regime values at the
+        // CLI boundary before they flow into bundle filenames. (exportBundle
+        // re-validates for library callers, so this is defense in depth.)
+        try {
+          validateSafeIdentifier('regime', regime);
+        } catch (err) {
+          fail((err as Error).message);
+        }
+
         if (!isJson) {
           emitText(`[1/5] Reading CompliancePosture from ${workDir}/.ai-sdlc/compliance.yaml...`);
           const postureExists = existsSync(join(workDir, '.ai-sdlc', 'compliance.yaml'));
@@ -1034,6 +1056,13 @@ export function buildComplianceAuditCli(): Argv {
         const period = String(argv.period);
         const regime = String(argv.regime);
         const isJson = String(argv.format) === 'json';
+
+        // AISDLC-416 AC-3: same regime validation as export.
+        try {
+          validateSafeIdentifier('regime', regime);
+        } catch (err) {
+          fail((err as Error).message);
+        }
 
         let result: DryRunResult;
         try {
