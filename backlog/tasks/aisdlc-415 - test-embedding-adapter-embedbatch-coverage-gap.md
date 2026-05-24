@@ -3,11 +3,13 @@ id: AISDLC-415
 title: 'test(embedding): close embedBatch coverage gap (AISDLC-337 follow-up)'
 status: To Do
 labels: [test, embedding, follow-up-aisdlc-337]
-references:
-  - orchestrator/src/embedding/adapters/openai-text-embedding-3-small.ts
-  - orchestrator/src/embedding/embedding.test.ts
+dependencies:
+  - AISDLC-337
+references: []
 priority: high
 permittedExternalPaths: []
+blocked:
+  reason: "Referenced files (openai-text-embedding-3-small.ts, embedding.test.ts) ship via AISDLC-337 PR #650 — references will resolve after that merges. This task is the follow-up to fix the embedBatch coverage gap flagged by code-reviewer."
 ---
 
 ## Description

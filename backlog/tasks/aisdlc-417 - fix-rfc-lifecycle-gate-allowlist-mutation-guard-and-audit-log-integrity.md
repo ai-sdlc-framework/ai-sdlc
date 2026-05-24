@@ -3,11 +3,14 @@ id: AISDLC-417
 title: 'fix(rfc-lifecycle-gate): allowlist same-PR mutation guard + audit-log append-only enforcement (AISDLC-350 follow-up)'
 status: To Do
 labels: [fix, security, follow-up-aisdlc-350]
+dependencies:
+  - AISDLC-350
 references:
-  - .github/workflows/rfc-lifecycle-check.yml
   - scripts/check-rfc-lifecycle-transitions.mjs
 priority: high
 permittedExternalPaths: []
+blocked:
+  reason: "Referenced workflow (rfc-lifecycle-check.yml) ships via AISDLC-350 PR #652 — reference will resolve after that merges. The companion script reference is already on main from AISDLC-297. This is the follow-up to add allowlist same-PR mutation guard + audit-log integrity protection."
 ---
 
 ## Description

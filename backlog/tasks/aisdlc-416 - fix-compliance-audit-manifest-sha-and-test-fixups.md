@@ -3,11 +3,13 @@ id: AISDLC-416
 title: 'fix(compliance-audit): manifest self-sha two-pass + AC-8 integration test fixups + path validation (AISDLC-325 follow-up)'
 status: To Do
 labels: [fix, compliance, follow-up-aisdlc-325]
-references:
-  - pipeline-cli/src/cli/compliance-audit.ts
-  - pipeline-cli/src/cli/compliance-audit.test.ts
+dependencies:
+  - AISDLC-325
+references: []
 priority: high
 permittedExternalPaths: []
+blocked:
+  reason: "Referenced files (compliance-audit.ts + .test.ts) ship via AISDLC-325 PR #651 — references will resolve after that merges. This is the follow-up to fix manifest self-sha + AC-8 integration test flagged by review."
 ---
 
 ## Description
