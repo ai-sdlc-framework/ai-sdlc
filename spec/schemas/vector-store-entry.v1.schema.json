@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ai-sdlc.dev/schemas/vector-store-entry.v1.schema.json",
   "title": "VectorStoreEntry",
   "description": "JSON Schema for the VectorStoreEntry shape per RFC-0019 §8.1. Defines the format of each line in the JSONL embedding storage backend files at <artifactsDir>/_embeddings/<provider>-<modelVersion>.jsonl.",

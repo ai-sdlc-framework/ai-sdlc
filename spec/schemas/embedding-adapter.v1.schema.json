@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ai-sdlc.dev/schemas/embedding-adapter.v1.schema.json",
   "title": "EmbeddingAdapter",
   "description": "JSON Schema for the EmbeddingAdapter interface per RFC-0019 §5 and §6.2. Used by adopter adapters that want machine-checkable conformance with the embedding provider adapter framework.",
