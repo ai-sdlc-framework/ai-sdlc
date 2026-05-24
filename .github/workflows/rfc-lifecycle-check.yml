@@ -300,11 +300,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           STEP_RESULT: ${{ steps.lifecycle-check.outcome }}
+          ALLOWLIST_GUARD: ${{ steps.allowlist-mutation-guard.outcome }}
+          AUDIT_LOG_GUARD: ${{ steps.audit-log-integrity-guard.outcome }}
           HEAD_SHA: ${{ steps.rfc-changes.outputs.head_sha }}
         run: |
           set -euo pipefail
 
-          if [ "$STEP_RESULT" = "success" ]; then
+          # Guard-step failures must propagate to commit status BEFORE
+          # falling through to lifecycle-check outcome. When a guard step
+          # exits 1, lifecycle-check is skipped (outcome="skipped") which
+          # would otherwise map to success below — a security-relevant
+          # bypass once ai-sdlc/rfc-lifecycle is added to required checks
+          # (AISDLC-417 code-review MAJOR).
+          if [ "$ALLOWLIST_GUARD" = "failure" ]; then
+            STATUS="failure"
+            DESCRIPTION="Same-PR allowlist mutation + override marker blocked (AISDLC-417 guard)"
+          elif [ "$AUDIT_LOG_GUARD" = "failure" ]; then
+            STATUS="failure"
+            DESCRIPTION="Audit log line removal blocked — append-only contract (AISDLC-417 guard)"
+          elif [ "$STEP_RESULT" = "success" ]; then
             STATUS="success"
             DESCRIPTION="RFC lifecycle transitions are valid"
           elif [ "$STEP_RESULT" = "skipped" ]; then
