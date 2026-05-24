@@ -1,0 +1,40 @@
+# .ai-sdlc/lifecycle-approvers.yaml
+#
+# Allowlist of operator identities permitted to approve RFC lifecycle-jump
+# overrides via the `ai-sdlc:lifecycle-jump-approved-by:<operator>` marker.
+#
+# HOW OVERRIDES WORK (post-AISDLC-350 hardening):
+#   The lifecycle gate requires an operator in THIS allowlist to appear in
+#   the override marker. Any name not listed here causes the override to be
+#   IGNORED and the lifecycle ladder is enforced normally.
+#
+#   Two approval paths are accepted; BOTH require the operator to be in this
+#   file:
+#
+#   1. IN-MARKER OVERRIDE — marker must appear in BOTH the PR body AND the
+#      RFC body (defense-in-depth, single-source bypass is no longer accepted):
+#
+#        <!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> -->
+#
+#   2. GH REVIEW SIGNATURE — operator submits an approving GitHub review
+#      comment containing the marker. CI validates `review.user.login`
+#      against this allowlist.
+#
+# ADDING A NEW OPERATOR:
+#   1. Open a PR adding the entry below.
+#   2. A maintainer reviews + merges (standard PR review process).
+#   3. After merge, the operator name is valid in override markers.
+#
+# REVOKING AN OPERATOR:
+#   Remove the entry and open a PR. After merge, existing un-merged PRs
+#   that carry that operator's override marker will be rejected at gate.
+#
+# FORMAT:
+#   - identity: GitHub handle (used in the marker and GH review validation)
+#     addedAt:  ISO 8601 date
+#     addedBy:  GitHub handle of the maintainer who approved this entry
+
+operators:
+  - identity: deefactorial
+    addedAt: '2026-05-23'
+    addedBy: deefactorial

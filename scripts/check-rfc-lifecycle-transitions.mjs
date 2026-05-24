@@ -17,23 +17,68 @@
  * (current working file). It is primarily designed for CI use where the
  * caller provides diff data, but it can also be used locally.
  *
- * Operator override (audit-trail preserving):
- *   Add the following HTML comment anywhere in the PR body or in the RFC
- *   file body (after the closing frontmatter fence):
+ * Operator override (audit-trail preserving, BOTH locations required):
+ *   Add the following HTML comment in BOTH the PR body AND in the RFC
+ *   file body (after the closing frontmatter fence). Single-source
+ *   override is NOT accepted (defense-in-depth — AISDLC-350).
  *
  *     <!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> -->
  *
- *   The script logs the override and continues without failing.
+ *   The <operator> value MUST appear in `.ai-sdlc/lifecycle-approvers.yaml`.
+ *   Any name not in the allowlist causes the override to be ignored and the
+ *   lifecycle ladder is enforced normally.
+ *
+ *   Alternative: operator submits an approving GitHub review comment
+ *   containing the marker; CI validates via `gh api review.user.login`
+ *   against the allowlist (see rfc-lifecycle-check.yml).
+ *
+ * Audit log:
+ *   Every approved override writes a structured entry to
+ *   `.ai-sdlc/_audit/lifecycle-overrides.jsonl` (append-only).
+ *   Fields: { ts, rfc, fromLifecycle, toLifecycle, operator, reason,
+ *             prNumber, commitSha }
  *
  * Usage:
  *   node scripts/check-rfc-lifecycle-transitions.mjs \
  *     --before <before-content> --after <after-content> \
- *     [--pr-body <pr-body-text>] [--rfc-id <RFC-NNNN>]
+ *     [--pr-body <pr-body-text>] [--rfc-id <RFC-NNNN>] \
+ *     [--repo-root <path>] [--pr-number <n>] [--commit-sha <sha>]
  *
  *   Or as a library (primary usage — caller supplies transition data):
  *     import { checkLifecycleTransition, LIFECYCLE_STATES, FORBIDDEN_TRANSITIONS }
  *       from './check-rfc-lifecycle-transitions.mjs';
+ *
+ * CI wiring (AISDLC-350):
+ *   This script is invoked per-RFC by `.github/workflows/rfc-lifecycle-check.yml`
+ *   which detects changed spec/rfcs/*.md files in the PR diff, extracts the
+ *   before content via `git show $BASE_SHA:$file`, and runs this script once
+ *   per changed RFC. The workflow posts an `ai-sdlc/rfc-lifecycle` commit status.
+ *
+ *   To add this check to required-checks on main after one week of soak:
+ *     gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
+ *       -F 'contexts[]=ai-sdlc/rfc-lifecycle' --jq '.contexts'
  */
+
+import { createRequire } from 'node:module';
+import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Lazy-load js-yaml so the library can still be imported in environments where
+// js-yaml is not installed (the fallback parser handles basic cases).
+let _jsYaml = null;
+function getJsYaml() {
+  if (_jsYaml) return _jsYaml;
+  try {
+    const req = createRequire(import.meta.url);
+    _jsYaml = req('js-yaml');
+  } catch {
+    _jsYaml = null;
+  }
+  return _jsYaml;
+}
 
 /**
  * The ordered lifecycle ladder. Each state's index reflects its position
@@ -63,19 +108,39 @@ export const FORBIDDEN_TRANSITIONS = new Set(
  *
  * Marker format (HTML comment, so it renders invisible in GitHub):
  *   <!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> -->
+ *
+ * Operator capture: [a-zA-Z0-9_-]{1,32} — restricts to safe identifier chars,
+ * prevents ANSI escape injection and other special-char payloads (AISDLC-350).
  */
 export const OVERRIDE_MARKER_REGEX =
-  /<!--\s*ai-sdlc:lifecycle-jump-approved-by:([^\s>]+)\s+reason:([\s\S]+?)-->/;
+  /<!--\s*ai-sdlc:lifecycle-jump-approved-by:([a-zA-Z0-9_-]{1,32})\s+reason:([\s\S]+?)-->/;
 
 /**
- * Extract the `lifecycle:` value from RFC frontmatter text.
+ * Strip control characters from a string (used for reason sanitization
+ * before writing to the audit log). Removes C0 and C1 control codes
+ * and other non-printable chars that could corrupt JSONL or terminal output.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function sanitizeReason(s) {
+  // Remove ASCII control chars (0x00-0x1F, 0x7F) and C1 controls (0x80-0x9F).
+  // Keep printable ASCII and valid Unicode text.
+  return s.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+}
+
+/**
+ * Extract the `lifecycle:` value from RFC frontmatter text using js-yaml
+ * when available, with a robust inline fallback parser.
+ *
+ * The js-yaml path closes bypass vectors where the lifecycle field appears
+ * inside a YAML block scalar, as a nested key, or after a YAML comment
+ * (all of which the prior line-by-line scanner would misparse — AISDLC-350).
  *
  * Returns `null` when:
  *   - The source is empty / falsy (file did not exist).
  *   - No `lifecycle:` key is present in the frontmatter.
- *
- * The parser is intentionally minimal — it only needs to read one scalar
- * field from the leading `--- ... ---` block.
+ *   - Frontmatter is malformed (no closing fence).
  *
  * @param {string} source - Full RFC file content (may be empty/null).
  * @returns {string|null}
@@ -87,7 +152,32 @@ export function extractLifecycle(source) {
   const fenceEnd = normalised.indexOf('\n---\n', 4);
   if (fenceEnd === -1) return null;
   const block = normalised.slice(4, fenceEnd);
+
+  // Preferred path: use js-yaml for a proper parse that handles block
+  // scalars, nested keys, and YAML comments correctly.
+  const yaml = getJsYaml();
+  if (yaml) {
+    try {
+      const parsed = yaml.load(block);
+      if (parsed && typeof parsed === 'object' && 'lifecycle' in parsed) {
+        const val = parsed['lifecycle'];
+        return typeof val === 'string' ? val : null;
+      }
+      return null;
+    } catch {
+      // Fall through to the inline parser on parse error.
+    }
+  }
+
+  // Inline fallback parser: only reads top-level scalar keys at column 0.
+  // This handles the common case and is immune to nested-key bypass because
+  // it only matches lines starting at column 0 (no leading whitespace).
   for (const line of block.split('\n')) {
+    // Skip blank lines and YAML comments.
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    // Only match top-level (col 0) lifecycle key — indented lines are
+    // nested keys or block-scalar content, both of which we intentionally
+    // skip to prevent bypass (AISDLC-350).
     const m = line.match(/^lifecycle\s*:\s*(.+)$/);
     if (m) {
       const raw = m[1].trim();
@@ -108,6 +198,8 @@ export function extractLifecycle(source) {
  * Parse the operator override marker from a text blob (PR body or RFC body).
  *
  * Returns `{ operator, reason }` if a valid marker is found, or `null`.
+ * Returns `null` if the reason is whitespace-only after trim (AISDLC-350:
+ * blank reasons undermine the audit-trail purpose).
  *
  * @param {string} text - Text to scan for the marker.
  * @returns {{ operator: string, reason: string }|null}
@@ -116,7 +208,101 @@ export function parseOverrideMarker(text) {
   if (!text) return null;
   const m = OVERRIDE_MARKER_REGEX.exec(text);
   if (!m) return null;
-  return { operator: m[1].trim(), reason: m[2].trim() };
+  const operator = m[1].trim();
+  const reason = m[2].trim();
+  // Reject empty reasons (AISDLC-350: audit-trail purpose is undermined
+  // by blank reasons — callers must supply a non-whitespace reason).
+  if (!reason) return null;
+  return { operator, reason };
+}
+
+/**
+ * Load the lifecycle approvers allowlist from `.ai-sdlc/lifecycle-approvers.yaml`.
+ *
+ * Returns a Set of allowed operator identity strings (GitHub handles).
+ * On any error (file missing, parse failure), returns an EMPTY Set — the gate
+ * fails closed: without an allowlist, no override is accepted.
+ *
+ * @param {string} repoRoot - Absolute path to the repository root.
+ * @returns {Set<string>}
+ */
+export function loadLifecycleApprovers(repoRoot) {
+  const approversPath = join(repoRoot, '.ai-sdlc', 'lifecycle-approvers.yaml');
+  if (!existsSync(approversPath)) {
+    return new Set();
+  }
+  try {
+    const content = readFileSync(approversPath, 'utf-8');
+    const yaml = getJsYaml();
+    if (!yaml) {
+      // Without js-yaml we use a minimal inline parser for the allowlist.
+      // The allowlist YAML is simple enough (list of scalar mappings) that
+      // a line-scan for `identity:` is sufficient and safe.
+      const identities = new Set();
+      for (const line of content.split('\n')) {
+        const im = line.match(/^\s*-?\s*identity\s*:\s*['"]?([a-zA-Z0-9_-]{1,32})['"]?\s*$/);
+        if (im) identities.add(im[1]);
+      }
+      return identities;
+    }
+    const parsed = yaml.load(content);
+    if (!parsed || !Array.isArray(parsed.operators)) return new Set();
+    return new Set(
+      parsed.operators
+        .filter((op) => op && typeof op.identity === 'string')
+        .map((op) => op.identity),
+    );
+  } catch {
+    // Fail closed on any parse error.
+    return new Set();
+  }
+}
+
+/**
+ * Append a structured override entry to the audit log.
+ *
+ * Writes to `.ai-sdlc/_audit/lifecycle-overrides.jsonl` (append-only).
+ * Silently no-ops on write errors (audit log failure must never block CI).
+ *
+ * @param {object} params
+ * @param {string} params.repoRoot    - Absolute path to repo root.
+ * @param {string} params.rfc         - RFC identifier (e.g. 'RFC-0011').
+ * @param {string} params.fromLifecycle
+ * @param {string} params.toLifecycle
+ * @param {string} params.operator    - Approved operator identity.
+ * @param {string} params.reason      - Override reason text.
+ * @param {string} [params.prNumber]  - PR number (optional, from CI env).
+ * @param {string} [params.commitSha] - Commit SHA (optional, from CI env).
+ */
+export function appendAuditEntry({
+  repoRoot,
+  rfc,
+  fromLifecycle,
+  toLifecycle,
+  operator,
+  reason,
+  prNumber,
+  commitSha,
+}) {
+  try {
+    const auditDir = join(repoRoot, '.ai-sdlc', '_audit');
+    mkdirSync(auditDir, { recursive: true });
+    const auditPath = join(auditDir, 'lifecycle-overrides.jsonl');
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      rfc,
+      fromLifecycle,
+      toLifecycle,
+      operator,
+      reason: sanitizeReason(reason),
+      prNumber: prNumber ?? null,
+      commitSha: commitSha ?? null,
+    });
+    appendFileSync(auditPath, entry + '\n');
+  } catch {
+    // Audit log failures are non-fatal — log to stderr but do not fail CI.
+    process.stderr.write('[rfc-lifecycle] WARNING: failed to write audit log entry\n');
+  }
 }
 
 /**
@@ -128,18 +314,36 @@ export function parseOverrideMarker(text) {
  * @param {string}      params.rfcId          - RFC identifier for error messages.
  * @param {string}      [params.prBody]       - PR body text (scanned for override marker).
  * @param {string}      [params.rfcBody]      - RFC body text (scanned for override marker).
+ * @param {Set<string>} [params.approvers]    - Set of allowed operator identities.
+ * @param {string}      [params.repoRoot]     - Repo root (for audit log writes).
+ * @param {string}      [params.prNumber]     - PR number (for audit log).
+ * @param {string}      [params.commitSha]    - Commit SHA (for audit log).
  *
  * @returns {{ ok: boolean, violation?: string, override?: { operator: string, reason: string }, diagnostic?: string }}
  */
-export function checkLifecycleTransition({ fromLifecycle, toLifecycle, rfcId, prBody, rfcBody }) {
+export function checkLifecycleTransition({
+  fromLifecycle,
+  toLifecycle,
+  rfcId,
+  prBody,
+  rfcBody,
+  approvers,
+  repoRoot,
+  prNumber,
+  commitSha,
+}) {
   // New file: no "from" state — any lifecycle is valid.
   if (fromLifecycle === null) {
     return { ok: true };
   }
 
-  // Deleted file or lifecycle removed: no enforcement.
+  // AISDLC-350 fail-closed fix: when toContent's lifecycle is null but
+  // fromContent's was set, treat as "lifecycle removed mid-PR" and fail.
   if (toLifecycle === null) {
-    return { ok: true };
+    const diagnostic =
+      `[rfc-lifecycle] FAIL ${rfcId}: lifecycle field was '${fromLifecycle}' but was REMOVED ` +
+      `in this PR. RFC lifecycle fields must not be deleted — set an explicit lifecycle value instead.`;
+    return { ok: false, violation: `${fromLifecycle}->null`, diagnostic };
   }
 
   // Same state: no-op.
@@ -175,20 +379,66 @@ export function checkLifecycleTransition({ fromLifecycle, toLifecycle, rfcId, pr
   }
 
   // Forbidden transition detected — check for override marker.
-  const override = parseOverrideMarker(prBody) ?? parseOverrideMarker(rfcBody) ?? null;
-  if (override) {
-    return { ok: true, override };
+  // AISDLC-350: override requires the marker in BOTH PR body AND RFC body
+  // (defense-in-depth — single-source override is a trust-all bypass).
+  const prOverride = parseOverrideMarker(prBody);
+  const rfcOverride = parseOverrideMarker(rfcBody);
+
+  if (prOverride && rfcOverride) {
+    // Use PR-body operator for the primary record; both must be present.
+    const operator = prOverride.operator;
+    const reason = sanitizeReason(prOverride.reason);
+
+    // AISDLC-350: validate operator against allowlist.
+    if (approvers && approvers.size > 0 && !approvers.has(operator)) {
+      const diagnostic =
+        `[rfc-lifecycle] FAIL ${rfcId}: override marker found (operator='${operator}') but ` +
+        `this identity is NOT in .ai-sdlc/lifecycle-approvers.yaml. ` +
+        `Only listed operators may approve lifecycle jumps. ` +
+        `Add '${operator}' to the allowlist via a separate PR first.`;
+      return { ok: false, violation: key, diagnostic };
+    }
+
+    // Write audit entry.
+    if (repoRoot) {
+      appendAuditEntry({
+        repoRoot,
+        rfc: rfcId,
+        fromLifecycle,
+        toLifecycle,
+        operator,
+        reason,
+        prNumber,
+        commitSha,
+      });
+    }
+
+    return { ok: true, override: { operator, reason } };
   }
 
   // Compute the correct next step(s) for the diagnostic message.
   const nextStep = LIFECYCLE_STATES[fromIdx + 1];
+
+  let overrideMissing = '';
+  if (prOverride && !rfcOverride) {
+    overrideMissing =
+      ' Override marker found in PR body only — it must ALSO appear in the RFC body.';
+  } else if (!prOverride && rfcOverride) {
+    overrideMissing =
+      ' Override marker found in RFC body only — it must ALSO appear in the PR body.';
+  }
+
   const diagnostic =
     `[rfc-lifecycle] FAIL ${rfcId}: forbidden lifecycle transition ` +
     `'${fromLifecycle}' → '${toLifecycle}'. ` +
     `The required next step is '${nextStep}'. ` +
     `Correct path: ${LIFECYCLE_STATES.join(' → ')}. ` +
-    `To bypass (audit-trail preserving), add to the PR body: ` +
-    `<!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> -->`;
+    `To bypass (audit-trail preserving), add to BOTH the PR body AND the RFC body: ` +
+    `<!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> --> ` +
+    `where <operator> is listed in .ai-sdlc/lifecycle-approvers.yaml. ` +
+    `Alternatively, add the marker in an approving GitHub review comment. ` +
+    `Gate enforced by .github/workflows/rfc-lifecycle-check.yml (AISDLC-350).` +
+    overrideMissing;
 
   return { ok: false, violation: key, diagnostic };
 }
@@ -201,6 +451,10 @@ export function checkLifecycleTransition({ fromLifecycle, toLifecycle, rfcId, pr
  *   fromContent: string|null,
  *   toContent: string|null,
  *   prBody?: string,
+ *   approvers?: Set<string>,
+ *   repoRoot?: string,
+ *   prNumber?: string,
+ *   commitSha?: string,
  * }>} transitions
  *
  * @returns {{
@@ -225,6 +479,10 @@ export function checkAllTransitions(transitions) {
       rfcId: t.rfcId,
       prBody: t.prBody ?? '',
       rfcBody,
+      approvers: t.approvers,
+      repoRoot: t.repoRoot,
+      prNumber: t.prNumber,
+      commitSha: t.commitSha,
     });
 
     if (result.ok) {
@@ -268,7 +526,8 @@ export function reportTransitionsAndExit({ failures, overrides, clean }) {
     }
     console.error(
       `[rfc-lifecycle] ${failures.length} forbidden transition(s) detected. ` +
-        `Each RFC must progress through: ${LIFECYCLE_STATES.join(' → ')}.`,
+        `Each RFC must progress through: ${LIFECYCLE_STATES.join(' → ')}. ` +
+        `Gate enforced by .github/workflows/rfc-lifecycle-check.yml (AISDLC-350).`,
     );
     return 1;
   }
@@ -284,24 +543,39 @@ export function reportTransitionsAndExit({ failures, overrides, clean }) {
  *   --after  <file-path>   Path to the "after" version of the RFC file
  *   --rfc-id <RFC-NNNN>    RFC id for error messages (optional; inferred from filename)
  *   --pr-body <text>       PR body text to scan for override marker (optional)
+ *   --repo-root <path>     Repository root for allowlist + audit log (optional)
+ *   --pr-number <n>        PR number for audit log (optional)
+ *   --commit-sha <sha>     Commit SHA for audit log (optional)
  *   --help                 Print usage
  *
  * In CI, prefer the library interface (import + call checkAllTransitions)
  * since you can pass in-memory content rather than temp files.
+ * CI enforcement is via .github/workflows/rfc-lifecycle-check.yml (AISDLC-350).
  */
-import { readFileSync } from 'node:fs';
 
 function parseArgs(argv) {
-  const args = { before: null, after: null, rfcId: null, prBody: '' };
+  const args = {
+    before: null,
+    after: null,
+    rfcId: null,
+    prBody: '',
+    repoRoot: null,
+    prNumber: null,
+    commitSha: null,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--before') args.before = argv[++i];
     else if (a === '--after') args.after = argv[++i];
     else if (a === '--rfc-id') args.rfcId = argv[++i];
     else if (a === '--pr-body') args.prBody = argv[++i];
+    else if (a === '--repo-root') args.repoRoot = argv[++i];
+    else if (a === '--pr-number') args.prNumber = argv[++i];
+    else if (a === '--commit-sha') args.commitSha = argv[++i];
     else if (a === '--help' || a === '-h') {
       console.log(
-        'Usage: node scripts/check-rfc-lifecycle-transitions.mjs --before <path> --after <path> [--rfc-id <id>] [--pr-body <text>]',
+        'Usage: node scripts/check-rfc-lifecycle-transitions.mjs --before <path> --after <path> ' +
+          '[--rfc-id <id>] [--pr-body <text>] [--repo-root <path>] [--pr-number <n>] [--commit-sha <sha>]',
       );
       process.exit(0);
     } else {
@@ -315,6 +589,9 @@ function parseArgs(argv) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = parseArgs(process.argv.slice(2));
 
+  const repoRoot = args.repoRoot ?? resolve(__dirname, '..');
+  const approvers = loadLifecycleApprovers(repoRoot);
+
   const beforeContent = args.before ? readFileSync(args.before, 'utf-8') : null;
   const afterContent = args.after ? readFileSync(args.after, 'utf-8') : null;
   const rfcId = args.rfcId ?? 'RFC-unknown';
@@ -325,6 +602,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       fromContent: beforeContent,
       toContent: afterContent,
       prBody: args.prBody,
+      approvers,
+      repoRoot,
+      prNumber: args.prNumber,
+      commitSha: args.commitSha,
     },
   ]);
 

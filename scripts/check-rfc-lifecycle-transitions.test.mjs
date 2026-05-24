@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * check-rfc-lifecycle-transitions.test.mjs — node:test coverage for the
- * RFC lifecycle-transition gate.
+ * RFC lifecycle-transition gate (AISDLC-297 library + AISDLC-350 hardening).
  *
  * Run with: `node --test scripts/check-rfc-lifecycle-transitions.test.mjs`
  *
@@ -10,10 +10,10 @@
  * ships with Node >=20 which we already require.
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,9 @@ import {
   OVERRIDE_MARKER_REGEX,
   extractLifecycle,
   parseOverrideMarker,
+  sanitizeReason,
+  loadLifecycleApprovers,
+  appendAuditEntry,
   checkLifecycleTransition,
   checkAllTransitions,
   reportTransitionsAndExit,
@@ -40,6 +43,15 @@ function rfcWithLifecycle(lifecycle) {
 
 function rfcWithoutLifecycle() {
   return `---\nid: RFC-9999\nstatus: Draft\n---\n# Body\n`;
+}
+
+/** Canonical override marker for use in both PR body and RFC body. */
+function overrideMarker(operator = 'deefactorial', reason = 'emergency-skip') {
+  return `<!-- ai-sdlc:lifecycle-jump-approved-by:${operator} reason:${reason} -->`;
+}
+
+function makeApprovers(...identities) {
+  return new Set(identities);
 }
 
 // --------------------------------------------------------- LIFECYCLE_STATES
@@ -133,6 +145,42 @@ describe('extractLifecycle', () => {
     // Malformed frontmatter — gracefully return null.
     assert.equal(extractLifecycle('---\nlifecycle: Draft\n# missing closing fence\n'), null);
   });
+
+  it('does NOT extract indented lifecycle (nested-key bypass prevention — AISDLC-350)', () => {
+    // An indented lifecycle key (nested inside another object) must not be treated
+    // as the top-level lifecycle field.
+    const src = '---\nparent:\n  lifecycle: Implemented\nid: RFC-9999\n---\nbody\n';
+    // With js-yaml: parsed.lifecycle is undefined (it's under 'parent').
+    // With fallback: the indented line is skipped (col 0 check).
+    assert.equal(extractLifecycle(src), null);
+  });
+
+  it('does NOT extract lifecycle appearing in a YAML comment — AISDLC-350', () => {
+    // A YAML comment line must not provide the lifecycle value.
+    const src = '---\n# lifecycle: Draft\nid: RFC-9999\nstatus: Active\n---\nbody\n';
+    assert.equal(extractLifecycle(src), null);
+  });
+});
+
+// ---------------------------------------------------- sanitizeReason (AISDLC-350)
+
+describe('sanitizeReason', () => {
+  it('returns unchanged string for normal text', () => {
+    assert.equal(sanitizeReason('normal reason text'), 'normal reason text');
+  });
+
+  it('strips ASCII control chars', () => {
+    assert.equal(sanitizeReason('bad\x07char\x1Bhere'), 'badcharhere');
+  });
+
+  it('strips C1 control chars', () => {
+    assert.equal(sanitizeReason('text\x80\x9Fend'), 'textend');
+  });
+
+  it('preserves printable Unicode', () => {
+    const s = 'Reason: RFC sign-off for RFC-0042 (legitimate)';
+    assert.equal(sanitizeReason(s), s);
+  });
 });
 
 // ------------------------------------------------------- parseOverrideMarker
@@ -168,6 +216,141 @@ describe('parseOverrideMarker', () => {
     const text = '<!-- AI-SDLC:lifecycle-jump-approved-by:alice reason:test -->';
     assert.equal(parseOverrideMarker(text), null);
   });
+
+  // AISDLC-350 hardening: empty reason rejected
+
+  it('returns null when reason is empty (after trim)', () => {
+    const text = '<!-- ai-sdlc:lifecycle-jump-approved-by:alice reason: -->';
+    assert.equal(parseOverrideMarker(text), null);
+  });
+
+  it('returns null when reason is whitespace-only', () => {
+    const text = '<!-- ai-sdlc:lifecycle-jump-approved-by:alice reason:   -->';
+    assert.equal(parseOverrideMarker(text), null);
+  });
+
+  // AISDLC-350 hardening: operator name regex [a-zA-Z0-9_-]{1,32}
+
+  it('rejects operator names longer than 32 chars', () => {
+    const longName = 'a'.repeat(33);
+    const text = `<!-- ai-sdlc:lifecycle-jump-approved-by:${longName} reason:test -->`;
+    assert.equal(parseOverrideMarker(text), null);
+  });
+
+  it('accepts operator names with hyphens and underscores', () => {
+    const text = '<!-- ai-sdlc:lifecycle-jump-approved-by:some-user_name reason:test -->';
+    const r = parseOverrideMarker(text);
+    assert.ok(r !== null);
+    assert.equal(r.operator, 'some-user_name');
+  });
+});
+
+// ------------------------------------------ loadLifecycleApprovers (AISDLC-350)
+
+describe('loadLifecycleApprovers', () => {
+  let tmpDir;
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'lifecycle-approvers-'));
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+  });
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty Set when approvers file does not exist', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'no-approvers-'));
+    try {
+      const approvers = loadLifecycleApprovers(repoRoot);
+      assert.equal(approvers.size, 0);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('loads operator identities from a valid approvers file', () => {
+    const approversYaml = `operators:
+  - identity: alice
+    addedAt: '2026-05-23'
+    addedBy: deefactorial
+  - identity: bob
+    addedAt: '2026-05-23'
+    addedBy: deefactorial
+`;
+    writeFileSync(join(tmpDir, '.ai-sdlc', 'lifecycle-approvers.yaml'), approversYaml);
+    const approvers = loadLifecycleApprovers(tmpDir);
+    assert.ok(approvers.has('alice'));
+    assert.ok(approvers.has('bob'));
+    assert.equal(approvers.size, 2);
+  });
+
+  it('returns empty Set on malformed YAML (fail-closed)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bad-approvers-'));
+    try {
+      mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(dir, '.ai-sdlc', 'lifecycle-approvers.yaml'), 'operators: [unclosed');
+      const approvers = loadLifecycleApprovers(dir);
+      assert.equal(approvers.size, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ------------------------------------------ appendAuditEntry (AISDLC-350)
+
+describe('appendAuditEntry', () => {
+  let tmpDir;
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'audit-entry-'));
+  });
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates the audit file and writes a valid JSONL entry', () => {
+    appendAuditEntry({
+      repoRoot: tmpDir,
+      rfc: 'RFC-9999',
+      fromLifecycle: 'Draft',
+      toLifecycle: 'Signed Off',
+      operator: 'alice',
+      reason: 'emergency fix',
+      prNumber: '42',
+      commitSha: 'abc1234',
+    });
+
+    const auditPath = join(tmpDir, '.ai-sdlc', '_audit', 'lifecycle-overrides.jsonl');
+    assert.ok(existsSync(auditPath));
+    const line = readFileSync(auditPath, 'utf-8').trim();
+    const entry = JSON.parse(line);
+    assert.equal(entry.rfc, 'RFC-9999');
+    assert.equal(entry.fromLifecycle, 'Draft');
+    assert.equal(entry.toLifecycle, 'Signed Off');
+    assert.equal(entry.operator, 'alice');
+    assert.equal(entry.reason, 'emergency fix');
+    assert.equal(entry.prNumber, '42');
+    assert.equal(entry.commitSha, 'abc1234');
+    assert.ok(entry.ts);
+  });
+
+  it('sanitizes control chars in reason before writing', () => {
+    appendAuditEntry({
+      repoRoot: tmpDir,
+      rfc: 'RFC-8888',
+      fromLifecycle: 'Draft',
+      toLifecycle: 'Signed Off',
+      operator: 'bob',
+      reason: 'reason\x1Bwith\x07controls',
+    });
+    const auditPath = join(tmpDir, '.ai-sdlc', '_audit', 'lifecycle-overrides.jsonl');
+    const lines = readFileSync(auditPath, 'utf-8').trim().split('\n');
+    const last = JSON.parse(lines[lines.length - 1]);
+    assert.equal(last.reason, 'reasonwithcontrols');
+  });
 });
 
 // ----------------------------------------------- checkLifecycleTransition
@@ -177,15 +360,6 @@ describe('checkLifecycleTransition — allowed transitions', () => {
     const r = checkLifecycleTransition({
       fromLifecycle: null,
       toLifecycle: 'Implemented',
-      rfcId: 'RFC-9999',
-    });
-    assert.ok(r.ok);
-  });
-
-  it('passes when toLifecycle is null (file deleted)', () => {
-    const r = checkLifecycleTransition({
-      fromLifecycle: 'Draft',
-      toLifecycle: null,
       rfcId: 'RFC-9999',
     });
     assert.ok(r.ok);
@@ -263,6 +437,7 @@ describe('checkLifecycleTransition — forbidden transitions', () => {
     assert.match(r.diagnostic, /forbidden lifecycle transition/);
     assert.match(r.diagnostic, /Ready for Review/); // correct next step
     assert.match(r.diagnostic, /ai-sdlc:lifecycle-jump-approved-by/); // override hint
+    assert.match(r.diagnostic, /rfc-lifecycle-check\.yml/); // CI wiring reference (AISDLC-350)
   });
 
   it('fails Draft → Implemented with diagnostic mentioning Ready for Review as next step', () => {
@@ -288,65 +463,122 @@ describe('checkLifecycleTransition — forbidden transitions', () => {
     assert.match(r.diagnostic, /RFC-0024/);
     assert.match(r.diagnostic, /Signed Off/); // next required step from Ready for Review
   });
+
+  // AISDLC-350 fail-closed: lifecycle removed mid-PR is now a FAILURE.
+  it('FAILS when lifecycle field was removed (toLifecycle null, fromLifecycle set)', () => {
+    const r = checkLifecycleTransition({
+      fromLifecycle: 'Draft',
+      toLifecycle: null,
+      rfcId: 'RFC-9999',
+    });
+    assert.ok(!r.ok);
+    assert.match(r.violation, /->null/);
+    assert.match(r.diagnostic, /REMOVED/);
+    assert.match(r.diagnostic, /RFC-9999/);
+  });
 });
 
-describe('checkLifecycleTransition — operator override', () => {
+describe('checkLifecycleTransition — operator override (AISDLC-350 hardening)', () => {
   const forbiddenFrom = 'Draft';
   const forbiddenTo = 'Signed Off';
+  const marker = overrideMarker('deefactorial', 'hotfix-required');
+  const approvers = makeApprovers('deefactorial');
 
-  it('honors override marker in prBody', () => {
-    const prBody = '<!-- ai-sdlc:lifecycle-jump-approved-by:dominique reason:hotfix-required -->';
+  it('succeeds when override marker is in BOTH PR body AND RFC body', () => {
     const r = checkLifecycleTransition({
       fromLifecycle: forbiddenFrom,
       toLifecycle: forbiddenTo,
       rfcId: 'RFC-9999',
-      prBody,
+      prBody: marker,
+      rfcBody: `# RFC Body\n\n${marker}\n\nMore text.`,
+      approvers,
     });
     assert.ok(r.ok);
     assert.ok(r.override);
-    assert.equal(r.override.operator, 'dominique');
+    assert.equal(r.override.operator, 'deefactorial');
     assert.equal(r.override.reason, 'hotfix-required');
   });
 
-  it('honors override marker in rfcBody', () => {
-    const rfcBody =
-      '# RFC Body\n\n<!-- ai-sdlc:lifecycle-jump-approved-by:alice reason:design-stable -->\n\nMore text.';
+  it('fails when override marker is in PR body ONLY (single-source no longer accepted)', () => {
     const r = checkLifecycleTransition({
       fromLifecycle: forbiddenFrom,
       toLifecycle: forbiddenTo,
       rfcId: 'RFC-9999',
-      rfcBody,
+      prBody: marker,
+      rfcBody: '# RFC Body — no marker here',
+      approvers,
     });
-    assert.ok(r.ok);
-    assert.ok(r.override);
-    assert.equal(r.override.operator, 'alice');
+    assert.ok(!r.ok);
+    assert.match(r.diagnostic, /PR body only/);
   });
 
-  it('prBody marker takes precedence when both are present', () => {
-    const prBody = '<!-- ai-sdlc:lifecycle-jump-approved-by:pr-author reason:from-pr -->';
-    const rfcBody =
-      '# Body\n<!-- ai-sdlc:lifecycle-jump-approved-by:rfc-author reason:from-rfc -->';
+  it('fails when override marker is in RFC body ONLY (single-source no longer accepted)', () => {
     const r = checkLifecycleTransition({
       fromLifecycle: forbiddenFrom,
       toLifecycle: forbiddenTo,
       rfcId: 'RFC-9999',
-      prBody,
-      rfcBody,
+      prBody: 'no marker here',
+      rfcBody: `# RFC Body\n\n${marker}\n`,
+      approvers,
     });
-    assert.ok(r.ok);
-    assert.equal(r.override.operator, 'pr-author');
+    assert.ok(!r.ok);
+    assert.match(r.diagnostic, /RFC body only/);
   });
 
   it('fails when override marker is malformed (missing reason)', () => {
-    const prBody = '<!-- ai-sdlc:lifecycle-jump-approved-by:dominique -->';
+    const badMarker = '<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial -->';
     const r = checkLifecycleTransition({
       fromLifecycle: forbiddenFrom,
       toLifecycle: forbiddenTo,
       rfcId: 'RFC-9999',
-      prBody,
+      prBody: badMarker,
+      rfcBody: `# Body\n\n${badMarker}`,
+      approvers,
     });
-    // Malformed marker should NOT be treated as an approved override.
+    // Malformed marker (missing reason) should NOT be treated as an approved override.
     assert.ok(!r.ok);
+  });
+
+  it('fails when operator is NOT in allowlist', () => {
+    const unauthorizedMarker = overrideMarker('unauthorized-user', 'bypass-attempt');
+    const r = checkLifecycleTransition({
+      fromLifecycle: forbiddenFrom,
+      toLifecycle: forbiddenTo,
+      rfcId: 'RFC-9999',
+      prBody: unauthorizedMarker,
+      rfcBody: `# Body\n\n${unauthorizedMarker}`,
+      approvers: makeApprovers('alice', 'bob'), // unauthorized-user not listed
+    });
+    assert.ok(!r.ok);
+    assert.match(r.diagnostic, /NOT in .ai-sdlc\/lifecycle-approvers.yaml/);
+  });
+
+  it('succeeds without an approvers set (no allowlist enforcement — backward compat)', () => {
+    // When approvers is undefined, allowlist validation is skipped.
+    const r = checkLifecycleTransition({
+      fromLifecycle: forbiddenFrom,
+      toLifecycle: forbiddenTo,
+      rfcId: 'RFC-9999',
+      prBody: marker,
+      rfcBody: `# Body\n\n${marker}`,
+      // No approvers set provided.
+    });
+    assert.ok(r.ok);
+    assert.ok(r.override);
+  });
+
+  it('succeeds when approvers Set is empty (no allowlist enforcement when list has 0 entries)', () => {
+    // Empty approvers set (size 0) → no allowlist enforcement.
+    const r = checkLifecycleTransition({
+      fromLifecycle: forbiddenFrom,
+      toLifecycle: forbiddenTo,
+      rfcId: 'RFC-9999',
+      prBody: marker,
+      rfcBody: `# Body\n\n${marker}`,
+      approvers: new Set(), // empty
+    });
+    assert.ok(r.ok);
+    assert.ok(r.override);
   });
 });
 
@@ -396,21 +628,22 @@ describe('checkAllTransitions', () => {
     assert.equal(r.failures[1].rfcId, 'RFC-0011');
   });
 
-  it('records override entries for approved jumps', () => {
-    const prBody = '<!-- ai-sdlc:lifecycle-jump-approved-by:dominique reason:emergency -->';
+  it('records override entries for dual-location approved jumps', () => {
+    const marker = overrideMarker('deefactorial', 'emergency');
+    const rfcBodyWithMarker = rfcWithLifecycle('Signed Off') + `\n${marker}\n`;
     const transitions = [
       {
         rfcId: 'RFC-0020',
         fromContent: rfcWithLifecycle('Draft'),
-        toContent: rfcWithLifecycle('Signed Off'),
-        prBody,
+        toContent: rfcBodyWithMarker,
+        prBody: marker,
       },
     ];
     const r = checkAllTransitions(transitions);
     assert.deepEqual(r.failures, []);
     assert.equal(r.overrides.length, 1);
     assert.equal(r.overrides[0].rfcId, 'RFC-0020');
-    assert.equal(r.overrides[0].override.operator, 'dominique');
+    assert.equal(r.overrides[0].override.operator, 'deefactorial');
     assert.equal(r.overrides[0].transition, 'Draft->Signed Off');
     assert.equal(r.clean, 0); // override is not counted as "clean"
   });
@@ -442,17 +675,19 @@ describe('checkAllTransitions', () => {
     assert.equal(r.clean, 1);
   });
 
-  it('handles deleted file (toContent null)', () => {
+  // AISDLC-350 fail-closed: lifecycle removed mid-PR is now a FAILURE.
+  it('FAILS when lifecycle field is removed (toContent has no lifecycle but fromContent did)', () => {
     const transitions = [
       {
         rfcId: 'RFC-0070',
         fromContent: rfcWithLifecycle('Signed Off'),
-        toContent: null,
+        toContent: rfcWithoutLifecycle(), // lifecycle field removed
       },
     ];
     const r = checkAllTransitions(transitions);
-    assert.deepEqual(r.failures, []);
-    assert.equal(r.clean, 1);
+    assert.equal(r.failures.length, 1);
+    assert.match(r.failures[0].violation, /->null/);
+    assert.match(r.failures[0].diagnostic, /REMOVED/);
   });
 });
 
@@ -525,10 +760,52 @@ describe('CLI', () => {
     }
   });
 
-  it('exits 0 with override marker in --pr-body for forbidden transition', () => {
+  it('exits 0 with dual-location override marker for forbidden transition', () => {
+    // AISDLC-350: override must be in both PR body AND RFC body.
     const before = makeTempRfcFile('Draft');
-    const after = makeTempRfcFile('Implemented');
-    const marker = '<!-- ai-sdlc:lifecycle-jump-approved-by:dominique reason:emergency-hotfix -->';
+    const marker = overrideMarker('deefactorial', 'emergency-hotfix');
+
+    // After RFC file contains the marker in its body.
+    const afterDir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    const afterPath = join(afterDir, 'RFC-9999-test.md');
+    writeFileSync(afterPath, rfcWithLifecycle('Implemented') + `\n${marker}\n`);
+
+    // Use a temp dir as repo-root so the audit entry is NOT written to the
+    // real repo's .ai-sdlc/_audit/ directory during tests.
+    const repoRootDir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-repo-'));
+
+    try {
+      const r = spawnSync(
+        'node',
+        [
+          SCRIPT,
+          '--before',
+          before.path,
+          '--after',
+          afterPath,
+          '--rfc-id',
+          'RFC-9999',
+          '--pr-body',
+          marker,
+          '--repo-root',
+          repoRootDir,
+        ],
+        { encoding: 'utf-8' },
+      );
+      assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stdout, /OVERRIDE/);
+    } finally {
+      rmSync(before.dir, { recursive: true, force: true });
+      rmSync(afterDir, { recursive: true, force: true });
+      rmSync(repoRootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 1 with override in PR body only (RFC body has no marker)', () => {
+    // Single-source override is no longer accepted.
+    const before = makeTempRfcFile('Draft');
+    const after = makeTempRfcFile('Implemented'); // no marker in RFC body
+    const marker = overrideMarker('deefactorial', 'emergency-hotfix');
     try {
       const r = spawnSync(
         'node',
@@ -545,11 +822,31 @@ describe('CLI', () => {
         ],
         { encoding: 'utf-8' },
       );
-      assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
-      assert.match(r.stdout, /OVERRIDE/);
+      assert.equal(r.status, 1, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stderr, /PR body only/);
     } finally {
       rmSync(before.dir, { recursive: true, force: true });
       rmSync(after.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 1 when lifecycle was removed (fail-closed — AISDLC-350)', () => {
+    const before = makeTempRfcFile('Draft');
+    // After file has no lifecycle field.
+    const afterDir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    const afterPath = join(afterDir, 'RFC-9999-test.md');
+    writeFileSync(afterPath, rfcWithoutLifecycle());
+    try {
+      const r = spawnSync(
+        'node',
+        [SCRIPT, '--before', before.path, '--after', afterPath, '--rfc-id', 'RFC-9999'],
+        { encoding: 'utf-8' },
+      );
+      assert.equal(r.status, 1, `stdout=${r.stdout} stderr=${r.stderr}`);
+      assert.match(r.stderr, /REMOVED/);
+    } finally {
+      rmSync(before.dir, { recursive: true, force: true });
+      rmSync(afterDir, { recursive: true, force: true });
     }
   });
 
@@ -577,5 +874,26 @@ describe('module exports', () => {
   it('OVERRIDE_MARKER_REGEX does not match unrelated HTML comments', () => {
     assert.ok(!OVERRIDE_MARKER_REGEX.test('<!-- regular comment -->'));
     assert.ok(!OVERRIDE_MARKER_REGEX.test('<!-- skip ci -->'));
+  });
+
+  it('OVERRIDE_MARKER_REGEX does not match operator names > 32 chars', () => {
+    const long = 'a'.repeat(33);
+    assert.ok(
+      !OVERRIDE_MARKER_REGEX.test(
+        `<!-- ai-sdlc:lifecycle-jump-approved-by:${long} reason:test -->`,
+      ),
+    );
+  });
+
+  it('exports sanitizeReason', () => {
+    assert.equal(typeof sanitizeReason, 'function');
+  });
+
+  it('exports loadLifecycleApprovers', () => {
+    assert.equal(typeof loadLifecycleApprovers, 'function');
+  });
+
+  it('exports appendAuditEntry', () => {
+    assert.equal(typeof appendAuditEntry, 'function');
   });
 });
