@@ -528,6 +528,34 @@ The state token (Q6 resolution, §7.3) renders identically to the CLI / dashboar
 - New `.ai-sdlc/estimate-buckets.yaml` — operator-tunable bucket boundaries per Q1; **whole-replace** semantics (no merge with §4.1 defaults)
 - Extension to RFC-0015 `events.jsonl`: new event types `EstimateCaptured`, `EstimateInputChanged`, `EstimateBiasApplied`, `EstimateBiasOverCorrected`
 
+### 10.1 Concurrency contract for log + cache writers (AISDLC-328)
+
+PR #498 (AISDLC-280, Phase 2) round-1 review surfaced two latent race conditions in the writers below. Both are dormant when `cli-orchestrator` runs at `maxConcurrent: 1` (the Phase 1-4 default) but **activate in Phase 5** when the orchestrator raises concurrency or when a scripted parallel-estimation sweep fires. The hardening contract is documented here so Phase 5 implementers don't have to re-derive it.
+
+#### Estimate-log writer — append-only with per-row discriminator
+
+`captureEstimate()` writes one JSONL line per call to `_estimates/log.jsonl` via `fs.appendFileSync`. The contract:
+
+- **Atomic append**: `appendFileSync` uses POSIX `O_APPEND` semantics. Sub-PIPE_BUF writes (4 KiB on macOS/Linux) are syscall-atomic — concurrent appends never interleave, so the file is always parseable as one JSON object per line. Typical estimate rows are well under 4 KiB.
+- **Per-row uniqueness via `runDiscriminator`**: the writer mints a strictly-monotonic `${epochMs}-${pid}-${seq}` string on every call. The combination of pid (separates processes), epoch-ms (separates seconds-scale events) and a process-local sequence counter (separates sub-millisecond events within one process) guarantees uniqueness even under heavy concurrent capture. Phase 3+ ensemble aggregation MUST key on `runDiscriminator` (not `runIndex`) when distinguishing physical rows.
+- **`runIndex` is now a best-effort display ordinal**: the legacy `runIndex` field is derived from a lock-free scan-and-count; concurrent same-hash captures CAN produce duplicate `runIndex` values. Use `(taskId, estimateInputHash)` for ensemble grouping (the existing `computeEnsembleVarianceForHash()` already does this) and `runDiscriminator` for per-row identity.
+
+#### Class-assignment cache — file lock + atomic-rename writes
+
+`assignClassCached()` reads `_estimates/class-assignments.json`, mutates the in-memory map, and writes the full file back. The contract:
+
+- **Cross-process file lock**: a sibling `class-assignments.json.lock` is acquired via `open(path, 'wx')` (O_CREAT | O_EXCL) before the read-mutate-write critical section. First caller wins; concurrent attempts retry until the lock is released or the deadline (5s default) expires. Stale locks (>30s old) are forcibly cleared so a crashed estimator can't deadlock the cache.
+- **Atomic rename for tear-free reads**: `writeCache()` writes the JSON to a sibling `<file>.tmp.<pid>.<epochMs>` first, then `rename(2)`s onto the target. Readers see either the old or the new file — never a partially-written one.
+- **Fast-path lock-free read**: when the cache already has a fresh-`contentHash` entry for the requested `taskId`, the function returns without acquiring the lock (the common case stays cheap).
+- **Best-effort fallback**: if the lock cannot be acquired within the deadline, the writer degrades to lock-free last-writer-wins rather than throwing. This protects the pipeline against a degraded filesystem at the cost of accepting a rare lost-entry under extreme contention (operators detect this via re-classification frequency in the calibration log).
+
+#### Out of scope (Phase 6+)
+
+- Cross-machine coordination (NFS-safe locks, etcd, etc.). Dogfood runs every estimator on one machine; the single-machine lock is sufficient.
+- Migration to a real KV store (sqlite, etc.). The JSONL log + JSON cache file model is sufficient at dogfood-scale parallel-dispatch volumes.
+
+The hardening lives in `pipeline-cli/src/estimation/{log-writer,cache,fs-lock}.ts` with hermetic concurrency tests under `pipeline-cli/src/estimation/concurrency.test.ts` (N=50-100 parallel calls via `Promise.all`).
+
 ## 11. Backward Compatibility
 
 - Opt-in via feature flag `AI_SDLC_ESTIMATION_CALIBRATION=experimental`. Default off.

@@ -109,8 +109,28 @@ export interface EstimateLogRecord {
   stageB?: EstimateLogStageBRecord;
   /** RFC §8.4 content hash. `sha256:<hex>`. */
   estimateInputHash: string;
-  /** RFC §8.4 ensemble run index (1, 2, 3 for repeated runs against the same hash). */
+  /**
+   * RFC §8.4 ensemble run index — 1, 2, 3 for repeated runs against the
+   * same hash. **Best-effort, scan-derived ordinal**: under concurrent
+   * captures of the same hash (Phase 5+) two writers can both observe
+   * the same prior count and assign the same `runIndex`. Use this field
+   * for display ordering only; for true per-row uniqueness rely on
+   * `runDiscriminator` (RFC-0016 §10.1, AISDLC-328).
+   */
   runIndex: number;
+  /**
+   * Strictly-monotonic per-row identity — `${epochMs}-${pid}-${seq}` —
+   * guaranteed unique even under concurrent captures of the same hash.
+   * Phase 3+ ensemble aggregation MUST key on this field (not
+   * `runIndex`) when distinguishing physical rows. The `(taskId,
+   * estimateInputHash)` tuple still groups rows into an ensemble; this
+   * field is the within-ensemble identity. RFC-0016 §10.1 race-1
+   * resolution (AISDLC-328).
+   *
+   * Optional on the type for back-compat with pre-AISDLC-328 log rows;
+   * the writer ALWAYS emits it on new rows.
+   */
+  runDiscriminator?: string;
   /** RFC §7.1 — free-text scope description. */
   context?: string;
   /** RFC §7.1 — optional structured scope factors the agent considered. */
@@ -191,7 +211,8 @@ export function captureEstimate(opts: CaptureEstimateOpts): CaptureEstimateResul
   const artifactsDir = resolveArtifactsDir(opts.artifactsDir);
   const logPath = estimateLogPath(artifactsDir);
   const now = opts.now ?? ((): Date => new Date());
-  const ts = now().toISOString();
+  const tsDate = now();
+  const ts = tsDate.toISOString();
 
   const estimateInputHash = computeEstimateInputHash({
     taskTitle: opts.taskTitle,
@@ -200,9 +221,16 @@ export function captureEstimate(opts: CaptureEstimateOpts): CaptureEstimateResul
     taskClass: opts.stageA.taskClass,
   });
 
-  // Existing log scan — for runIndex + hash-transition detection.
+  // Existing log scan — for runIndex + hash-transition detection. Per
+  // RFC-0016 §10.1 (AISDLC-328) this scan is intentionally lock-free:
+  // `runIndex` is a best-effort display ordinal and `runDiscriminator`
+  // (below) is the source of truth for per-row uniqueness. The log file
+  // itself is append-only via `appendFileSync`, whose write is atomic at
+  // the POSIX syscall level for sub-PIPE_BUF payloads — and JSONL rows
+  // are well under 4 KiB — so concurrent appends never interleave.
   const existing = readExistingLog(logPath);
   const runIndex = countRunsForHash(existing, opts.stageA.taskId, estimateInputHash) + 1;
+  const runDiscriminator = mintRunDiscriminator(tsDate);
   const previousHash = mostRecentHashForTask(existing, opts.stageA.taskId);
   const hashTransitioned = previousHash !== undefined && previousHash !== estimateInputHash;
 
@@ -234,6 +262,7 @@ export function captureEstimate(opts: CaptureEstimateOpts): CaptureEstimateResul
     ...(opts.stageB !== undefined ? { stageB: opts.stageB } : {}),
     estimateInputHash,
     runIndex,
+    runDiscriminator,
     ...(opts.context !== undefined ? { context: opts.context } : {}),
     ...(opts.scopeFactors !== undefined ? { scopeFactors: opts.scopeFactors } : {}),
     classSource: opts.classSource ?? (opts.stageA.classSource as EstimateLogRecord['classSource']),
@@ -382,4 +411,22 @@ function mostRecentHashForTask(
     if (rows[i]?.taskId === taskId) return rows[i]?.estimateInputHash;
   }
   return undefined;
+}
+
+// Process-local monotonic sequence so two captures inside the same
+// millisecond on the same pid still produce distinct discriminators.
+// Module-level state is fine: each process gets its own counter and the
+// pid component of the discriminator separates concurrent processes.
+let runDiscriminatorSeq = 0;
+
+/**
+ * Mint a strictly-monotonic per-row identifier: `${epochMs}-${pid}-${seq}`.
+ * The combination of pid (separates processes), epoch-ms (separates
+ * seconds-scale events) and a process-local sequence (separates
+ * sub-millisecond events within the same process) guarantees uniqueness
+ * even under heavy concurrent capture (RFC-0016 §10.1, AISDLC-328).
+ */
+function mintRunDiscriminator(now: Date): string {
+  runDiscriminatorSeq += 1;
+  return `${now.getTime()}-${process.pid}-${runDiscriminatorSeq}`;
 }

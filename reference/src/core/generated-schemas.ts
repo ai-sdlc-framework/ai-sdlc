@@ -3796,7 +3796,7 @@ export const dorConfigV1Schema = {
 } as const;
 
 export const embeddingAdapterV1Schema = {
-  $schema: 'http://json-schema.org/draft-07/schema#',
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.dev/schemas/embedding-adapter.v1.schema.json',
   title: 'EmbeddingAdapter',
   description:
@@ -6209,7 +6209,7 @@ export const subscriptionPlanSchema = {
 } as const;
 
 export const vectorStoreEntryV1Schema = {
-  $schema: 'http://json-schema.org/draft-07/schema#',
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.dev/schemas/vector-store-entry.v1.schema.json',
   title: 'VectorStoreEntry',
   description:
