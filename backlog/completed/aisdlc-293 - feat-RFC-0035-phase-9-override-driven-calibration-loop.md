@@ -17,6 +17,8 @@ dependencies:
 references:
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
 priority: high
+blocked:
+  reason: "RFC-0035 OQs acknowledged (14/14 resolved 2026-05-15 operator walkthrough); precedent set by AISDLC-289 (Phase 5) which shipped under the same lifecycle 2026-05-23"
 ---
 
 ## Description
