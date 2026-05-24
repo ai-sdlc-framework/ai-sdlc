@@ -1,7 +1,7 @@
 {
   "name": "@ai-sdlc/pipeline-cli",
   "version": "0.10.0",
-  "description": "AI-SDLC pipeline shared core library — RFC-0012 Phase 1 (Step 0-13 pure functions + CLI router + composite executePipeline)",
+  "description": "AI-SDLC pipeline shared core library \u2014 RFC-0012 Phase 1 (Step 0-13 pure functions + CLI router + composite executePipeline)",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -47,7 +47,8 @@
     "cli-dispatch-supervisor": "bin/cli-dispatch-supervisor.mjs",
     "cli-attestation": "bin/cli-attestation.mjs",
     "cli-compliance-audit": "bin/cli-compliance-audit.mjs",
-    "cli-import-spec": "bin/cli-import-spec.mjs"
+    "cli-import-spec": "bin/cli-import-spec.mjs",
+    "cli-embedding-gc": "bin/cli-embedding-gc.mjs"
   },
   "exports": {
     ".": {
