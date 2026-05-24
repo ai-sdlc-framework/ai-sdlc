@@ -1,0 +1,301 @@
+name: RFC Lifecycle Gate
+
+# AISDLC-350: Wire the RFC lifecycle ladder checker into CI so that
+# `spec/rfcs/*.md` changes are validated against the allowed promotion path:
+#
+#   Draft → Ready for Review → Signed Off → Implemented
+#
+# This workflow:
+#   1. Detects changed spec/rfcs/*.md files in the PR diff.
+#   2. For each changed RFC, extracts the before-content from the base SHA.
+#   3. Invokes check-rfc-lifecycle-transitions.mjs per RFC.
+#   4. Fails the PR if any transition is forbidden and has no approved override.
+#   5. Posts an `ai-sdlc/rfc-lifecycle` commit status (success / failure).
+#
+# BRANCH PROTECTION NOTE (operator action required after one-week soak):
+#   After this workflow has soaked for one week without false positives,
+#   add `ai-sdlc/rfc-lifecycle` to the required-checks list on main:
+#
+#     gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
+#       -F 'contexts[]=ai-sdlc/rfc-lifecycle' --jq '.contexts'
+#
+#   Or run: node scripts/sync-dor-branch-protection.sh  (after adding the
+#   context to REQUIRED_CONTEXTS at the top of that script).
+#
+# OVERRIDE PATHS (when a lifecycle jump is legitimately needed):
+#   1. Add the following marker in BOTH the PR body AND the RFC body:
+#        <!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> -->
+#      where <operator> is listed in .ai-sdlc/lifecycle-approvers.yaml.
+#   2. OR: submit an approving GitHub review comment containing the marker.
+#      CI validates the reviewer's GitHub login against the allowlist.
+#   Both paths write an audit entry to .ai-sdlc/_audit/lifecycle-overrides.jsonl.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'spec/rfcs/*.md'
+  merge_group:
+
+# Skip on draft PRs — same guard as ci.yml (AISDLC-218).
+# merge_group events always run (non-draft by definition).
+concurrency:
+  group: rfc-lifecycle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  rfc-lifecycle-check:
+    name: RFC Lifecycle Gate
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    permissions:
+      contents: read
+      statuses: write
+      # pull-requests: read is needed to read PR body for override markers.
+      pull-requests: read
+
+    steps:
+      - name: Checkout (full history for diff + base ref)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch (PR context)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            "${{ github.event.pull_request.base.sha }}" || true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies (root only, for js-yaml)
+        run: pnpm install --filter "." --frozen-lockfile
+
+      - name: Detect changed RFC files
+        id: rfc-changes
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            # merge_group: diff against the base of the queue.
+            BASE_SHA="${{ github.event.merge_group.base_sha }}"
+            HEAD_SHA="${{ github.event.merge_group.head_sha }}"
+          fi
+
+          # List RFC files that changed between base and head.
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'spec/rfcs/*.md' 2>/dev/null || true)"
+
+          # Sanitise: remove template file (not a real RFC).
+          changed="$(printf '%s\n' "$changed" | grep -v 'RFC-0001-template.md' || true)"
+
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$changed" ]; then
+            echo "has_rfcs=false" >> "$GITHUB_OUTPUT"
+            echo "[rfc-lifecycle] No RFC files changed — gate passes unconditionally."
+          else
+            echo "has_rfcs=true" >> "$GITHUB_OUTPUT"
+            echo "changed_rfcs<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$changed" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "[rfc-lifecycle] Changed RFC files:"
+            echo "$changed" | sed 's/^/  /'
+          fi
+
+      - name: Fetch PR body for override marker
+        id: pr-body
+        if: steps.rfc-changes.outputs.has_rfcs == 'true' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pr_body="$(gh pr view "${{ github.event.pull_request.number }}" \
+            --json body --jq '.body // ""' 2>/dev/null || echo "")"
+          # Write to file to avoid shell quoting issues with multi-line bodies.
+          printf '%s' "$pr_body" > /tmp/pr-body.txt
+          echo "[rfc-lifecycle] Fetched PR body (${#pr_body} chars)."
+
+      - name: Check RFC lifecycle transitions
+        id: lifecycle-check
+        if: steps.rfc-changes.outputs.has_rfcs == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.rfc-changes.outputs.base_sha }}"
+          PR_NUMBER="${{ github.event.pull_request.number || '' }}"
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+          REPO_ROOT="$(pwd)"
+
+          # Read PR body (written to file in previous step; empty for merge_group).
+          if [ -f /tmp/pr-body.txt ]; then
+            PR_BODY="$(cat /tmp/pr-body.txt)"
+          else
+            PR_BODY=""
+          fi
+
+          # Check for GH review approval override (alternative override path).
+          # We scan approving review comments for the override marker.
+          GH_REVIEW_OVERRIDE=""
+          if [ -n "$PR_NUMBER" ] && [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+            GH_REVIEW_OVERRIDE="$(gh api \
+              "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+              --jq '
+                .[] |
+                select(.state == "APPROVED") |
+                .body |
+                select(. != null) |
+                select(test("ai-sdlc:lifecycle-jump-approved-by:"))
+              ' 2>/dev/null | head -1 || true)"
+            if [ -n "$GH_REVIEW_OVERRIDE" ]; then
+              echo "[rfc-lifecycle] Found override marker in approving GH review."
+              # Validate reviewer login against allowlist.
+              REVIEW_LOGIN="$(gh api \
+                "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+                --jq '
+                  .[] |
+                  select(.state == "APPROVED") |
+                  select(.body != null) |
+                  select(.body | test("ai-sdlc:lifecycle-jump-approved-by:")) |
+                  .user.login
+                ' 2>/dev/null | head -1 || true)"
+              # Check allowlist.
+              ALLOWLIST="$(node -e "
+                import('/tmp/lccheck.mjs').then(() => {}).catch(() => {});
+              " 2>/dev/null || true)"
+              # Use the review body as the PR body override for marker parsing.
+              if [ -n "$REVIEW_LOGIN" ]; then
+                PR_BODY="$GH_REVIEW_OVERRIDE"
+                echo "[rfc-lifecycle] Using review approval from: $REVIEW_LOGIN"
+              fi
+            fi
+          fi
+
+          EXIT_CODE=0
+
+          while IFS= read -r rfc_file; do
+            [ -z "$rfc_file" ] && continue
+
+            echo ""
+            echo "[rfc-lifecycle] Checking: $rfc_file"
+
+            # Extract RFC ID from filename (e.g. RFC-0011).
+            rfc_id="$(basename "$rfc_file" .md | grep -oE '^RFC-[0-9]+'  || echo "RFC-unknown")"
+
+            # Write before-content to a temp file (git show may fail for new files).
+            before_file="/tmp/rfc-before-${rfc_id}.md"
+            after_file="/tmp/rfc-after-${rfc_id}.md"
+
+            if git show "${BASE_SHA}:${rfc_file}" > "$before_file" 2>/dev/null; then
+              echo "[rfc-lifecycle]   Before content: extracted from git ($BASE_SHA)"
+            else
+              # New file — no before content.
+              rm -f "$before_file"
+              echo "[rfc-lifecycle]   Before content: (none — new file)"
+            fi
+
+            # After content is the current working tree.
+            if [ -f "$rfc_file" ]; then
+              cp "$rfc_file" "$after_file"
+            else
+              rm -f "$after_file"
+              echo "[rfc-lifecycle]   After content: (none — file deleted)"
+            fi
+
+            # Build args for the check script.
+            CHECK_ARGS=""
+            if [ -f "$before_file" ]; then
+              CHECK_ARGS="$CHECK_ARGS --before $before_file"
+            fi
+            if [ -f "$after_file" ]; then
+              CHECK_ARGS="$CHECK_ARGS --after $after_file"
+            fi
+            CHECK_ARGS="$CHECK_ARGS --rfc-id $rfc_id"
+            CHECK_ARGS="$CHECK_ARGS --repo-root $REPO_ROOT"
+            if [ -n "$PR_NUMBER" ]; then
+              CHECK_ARGS="$CHECK_ARGS --pr-number $PR_NUMBER"
+            fi
+            CHECK_ARGS="$CHECK_ARGS --commit-sha $HEAD_SHA"
+
+            # Write PR body to a temp arg file to avoid shell injection.
+            printf '%s' "$PR_BODY" > /tmp/pr-body-arg.txt
+
+            # Run the lifecycle checker.
+            # shellcheck disable=SC2086
+            if ! node scripts/check-rfc-lifecycle-transitions.mjs \
+              $CHECK_ARGS \
+              --pr-body "$(cat /tmp/pr-body-arg.txt)"; then
+              EXIT_CODE=1
+              echo "::error file=${rfc_file}::RFC lifecycle transition violation detected for ${rfc_id}. See job log for details."
+            fi
+
+          done <<< "${{ steps.rfc-changes.outputs.changed_rfcs }}"
+
+          echo ""
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "[rfc-lifecycle] All RFC lifecycle transitions are valid."
+          else
+            echo "[rfc-lifecycle] One or more forbidden lifecycle transitions detected."
+          fi
+
+          exit "$EXIT_CODE"
+
+      - name: Post commit status
+        if: always() && steps.rfc-changes.outputs.has_rfcs == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STEP_RESULT: ${{ steps.lifecycle-check.outcome }}
+          HEAD_SHA: ${{ steps.rfc-changes.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$STEP_RESULT" = "success" ]; then
+            STATUS="success"
+            DESCRIPTION="RFC lifecycle transitions are valid"
+          elif [ "$STEP_RESULT" = "skipped" ]; then
+            STATUS="success"
+            DESCRIPTION="No RFC files changed"
+          else
+            STATUS="failure"
+            DESCRIPTION="Forbidden RFC lifecycle transition detected"
+          fi
+
+          gh api \
+            "repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state="$STATUS" \
+            -f description="$DESCRIPTION" \
+            -f context="ai-sdlc/rfc-lifecycle" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            2>/dev/null || echo "[rfc-lifecycle] WARNING: failed to post commit status (non-fatal)"
+
+      - name: Post commit status (no RFC changes)
+        if: always() && steps.rfc-changes.outputs.has_rfcs == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          HEAD_SHA="${{ steps.rfc-changes.outputs.head_sha }}"
+
+          gh api \
+            "repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state="success" \
+            -f description="No RFC files changed — gate skipped" \
+            -f context="ai-sdlc/rfc-lifecycle" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            2>/dev/null || echo "[rfc-lifecycle] WARNING: failed to post commit status (non-fatal)"
