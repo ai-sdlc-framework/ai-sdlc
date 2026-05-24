@@ -32,6 +32,18 @@ export interface RawSignal {
   attestedBy?: string;
   /** Auto-filled for manual signals when omitted. */
   attestedAt?: Date;
+  /**
+   * Optional ISO-3166 country code or compliance region tag for the signal's
+   * origin (e.g. 'eu', 'us-east', 'gb', 'apac', 'us'). Consumed by the
+   * Phase 4 residency-violation gate per RFC-0030 OQ-13.3: when the adopter
+   * has a declared regime constraint (via RFC-0022 compliance posture) that
+   * requires data residency in a specific region, signals from outside the
+   * allowed region(s) are refused and emitted as
+   * `Decision: signal-residency-violation`. When undefined, the residency
+   * gate skips this signal (no false positives on adapters that don't surface
+   * region metadata).
+   */
+  region?: string;
 }
 
 export interface SignalSourceAdapter {
@@ -65,5 +77,31 @@ export interface ManualSignalIncompleteDecision {
 
 export interface SignalFetchResult {
   signals: RawSignal[];
-  decisions: Array<AdapterCredentialInvalidDecision | ManualSignalIncompleteDecision>;
+  decisions: Array<
+    | AdapterCredentialInvalidDecision
+    | ManualSignalIncompleteDecision
+    | SignalResidencyViolationDecision
+  >;
+}
+
+/**
+ * Emitted at adapter level when a signal's `region` doesn't match the adopter's
+ * declared regime constraints per RFC-0030 OQ-13.3 (composes with RFC-0022
+ * Compliance Posture). Adapter response: refuse the signal + log the Decision +
+ * emit a `compliance.yaml regimeOverrides` clarification task. Pipeline does
+ * NOT halt — the catalog absorbs the violation (G0 non-blocking pipeline contract
+ * per RFC-0035).
+ */
+export interface SignalResidencyViolationDecision {
+  type: 'Decision';
+  decision: 'signal-residency-violation';
+  adapter: SignalSourceName;
+  sourceId: string;
+  /** The region the signal claimed (or 'unknown' when region metadata absent). */
+  signalRegion: string;
+  /** Regime IDs (e.g. 'gdpr', 'hipaa') whose residency constraints were violated. */
+  violatedRegimes: string[];
+  /** Allowed regions per the adopter's regime declaration. */
+  allowedRegions: string[];
+  message: string;
 }
