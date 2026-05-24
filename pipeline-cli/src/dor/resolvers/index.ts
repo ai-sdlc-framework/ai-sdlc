@@ -63,7 +63,11 @@ export async function resolveReference(
  *   - `[label](https://...)` markdown links (URL kind)
  *   - bare `https://...` URLs in text (URL kind, github-issue takes precedence
  *     for github.com/.../issues/ + /pull/ paths)
- *   - GitHub issue refs `#42`, `gh#42`, `owner/repo#42`
+ *   - GitHub issue refs — INTENTIONAL citations only:
+ *       - `closes #42`, `fixes #42`, `resolves #42` (GitHub auto-close verbs)
+ *       - `gh#42` (explicit prefix)
+ *       - `owner/repo#42` (qualified form)
+ *     Bare `#42` in narrative prose is NOT extracted (narrowed 2026-05-23).
  *   - RFC IDs `RFC-NNNN`
  *   - AISDLC backlog IDs `AISDLC-NN`
  *
@@ -107,8 +111,18 @@ export function extractReferences(body: string): Reference[] {
     add(url, classifyUrl(url));
   }
 
-  // 3. GitHub issue refs `#42`, `gh#42`, `owner/repo#42`.
-  for (const m of body.matchAll(/(?<![\w/])((?:gh)?#\d+)\b/gi)) {
+  // 3. GitHub issue refs — only intentional citations:
+  //    - `closes #42`, `fixes #42`, `resolves #42` (GitHub auto-close verbs)
+  //    - `gh#42` (explicit prefix)
+  //    - `owner/repo#42` (qualified form)
+  //    Bare `#42` in narrative prose is NOT extracted post-2026-05-23 narrowing
+  //    — citations like "see PR #524 for context" are narrative, not references
+  //    the gate needs to validate. Authors who want #N validated should use
+  //    the closes/fixes/resolves verb or wrap with `gh#42`.
+  for (const m of body.matchAll(/\b(?:closes|fixes|resolves)\s+(#\d+)\b/gi)) {
+    add(m[1], 'github-issue');
+  }
+  for (const m of body.matchAll(/(?<![\w/])(gh#\d+)\b/gi)) {
     add(m[1], 'github-issue');
   }
   for (const m of body.matchAll(/\b([\w.-]+\/[\w.-]+#\d+)\b/g)) {

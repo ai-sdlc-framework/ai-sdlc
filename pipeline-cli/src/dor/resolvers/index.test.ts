@@ -26,13 +26,27 @@ describe('extractReferences', () => {
     expect(raws).toContain('https://example.com/b');
   });
 
-  it('extracts gh issue refs (#NN, gh#NN, owner/repo#NN)', () => {
-    const body = 'fixes #42 and gh#43 and ai-sdlc-framework/ai-sdlc#44';
+  it('extracts gh issue refs from intentional citations (closes/fixes/resolves verbs, gh#, owner/repo#)', () => {
+    const body =
+      'fixes #42 and gh#43 and ai-sdlc-framework/ai-sdlc#44 and Closes #45 and resolves #46';
     const refs = extractReferences(body);
     const raws = refs.map((r) => r.raw);
     expect(raws).toContain('#42');
+    expect(raws).toContain('#45');
+    expect(raws).toContain('#46');
     expect(raws).toContain('gh#43');
     expect(raws).toContain('ai-sdlc-framework/ai-sdlc#44');
+  });
+
+  it('does NOT extract bare #NN from narrative prose (narrowed 2026-05-23)', () => {
+    // Bare `#NN` citations in narrative are not references the gate validates
+    // — only `closes/fixes/resolves #NN`, `gh#NN`, and `owner/repo#NN` are
+    // intentional reference shapes. See extractReferences header.
+    const body = 'See PR #524 for context. Originally reported in #999.';
+    const refs = extractReferences(body);
+    const raws = refs.map((r) => r.raw);
+    expect(raws).not.toContain('#524');
+    expect(raws).not.toContain('#999');
   });
 
   it('extracts RFC and AISDLC IDs', () => {
@@ -67,7 +81,7 @@ describe('extractReferences', () => {
   });
 
   it('dedupes', () => {
-    const refs = extractReferences('see #42 and again #42');
+    const refs = extractReferences('fixes #42 and resolves #42');
     expect(refs.filter((r) => r.raw === '#42').length).toBe(1);
   });
 
