@@ -1,7 +1,7 @@
 ---
 id: AISDLC-405
 title: 'fix(test): clean up test suite drift from AISDLC-398 (patch-id) + AISDLC-400 (queue drop)'
-status: To Do
+status: Done
 labels: [test, ci, operator-merge]
 references:
   - .github/workflows/__tests__/ai-sdlc-review.test.mjs
@@ -20,10 +20,10 @@ Every open PR (#524, #626, #636, #637, #638) is failing Build & Test on these te
 
 ## Acceptance criteria
 
-- [ ] AC-1: Run `node --test scripts/verify-attestation.test.mjs` locally. Identify which test(s) fail with `contentHashV4 mismatch`. Fix or update test expectations to match the post-398 patch-id-aware verifier behavior. If a test was testing v3/v4 legacy verification, the test should still work; only update if the test's invariant has genuinely changed.
-- [ ] AC-2: Run `node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs` locally. Identify docs-only short-circuit tests that reference removed merge_group behavior. Remove or update those tests to assert the new pull_request-only + paths-ignore behavior.
-- [ ] AC-3: All affected tests pass locally.
-- [ ] AC-4: Reference PRs #524, #626, #636, #637, #638 as immediate beneficiaries.
+- [x] AC-1: Run `node --test scripts/verify-attestation.test.mjs` locally. Identify which test(s) fail with `contentHashV4 mismatch`. Fix or update test expectations to match the post-398 patch-id-aware verifier behavior. If a test was testing v3/v4 legacy verification, the test should still work; only update if the test's invariant has genuinely changed.
+- [x] AC-2: Run `node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs` locally. Identify docs-only short-circuit tests that reference removed merge_group behavior. Remove or update those tests to assert the new pull_request-only + paths-ignore behavior.
+- [x] AC-3: All affected tests pass locally.
+- [x] AC-4: Reference PRs #524, #626, #636, #637, #638 as immediate beneficiaries.
 
 ## Out of scope
 
