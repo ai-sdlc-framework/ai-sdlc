@@ -1816,6 +1816,7 @@ export const decisionV1Schema = {
             enum: [
               'decision-opened',
               'recommendation-issued',
+              'stage-c-completed',
               'operator-answered',
               'timebox-fired',
               'overridden',

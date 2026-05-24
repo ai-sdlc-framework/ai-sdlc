@@ -191,6 +191,7 @@
             "enum": [
               "decision-opened",
               "recommendation-issued",
+              "stage-c-completed",
               "operator-answered",
               "timebox-fired",
               "overridden",

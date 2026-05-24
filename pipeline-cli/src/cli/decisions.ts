@@ -24,23 +24,35 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 import {
+  aggregateDecisionCorpus,
   appendDecisionEvent,
   computeStageACoverage,
   DECISION_SOURCES,
   decisionCatalogDisabledMessage,
   isDecisionCatalogEnabled,
+  isStageCAutoApplyEligible,
   listDecisions,
+  loadDecisionsConfig,
   makeDecisionOpenedEvent,
+  makeOperatorAnsweredEvent,
+  makeOverriddenEvent,
   makeRecommendationIssuedEvent,
+  makeStageCAutoApplyAnsweredEvent,
+  makeStageCCompletedEvent,
   nextDecisionId,
   projectDecision,
   resolveEventLogPath,
+  resolveStageCRuntimeConfig,
   runStageA,
+  runStageB,
+  runStageC,
   STAGE_A_COVERAGE_TARGET,
+  type AggregateCorpusResult,
   type Decision,
   type DecisionOption,
   type DecisionSource,
 } from '../decisions/index.js';
+import { recordOperatorOverride } from '../classifier/substrate/index.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
 import { isCompositionEnabled } from '../deps/snapshot.js';
 
@@ -648,6 +660,409 @@ export function buildDecisionsCli(): Argv {
           emitText(`  meets target: ${coverage.meetsTarget ? 'yes' : 'no'}`);
         }
       },
+    )
+    .command(
+      'score-c <id>',
+      'Run Stage C LLM evaluation on a decision (RFC-0035 Phase 5 / AISDLC-289). Defaults to dry-run; pass --store to persist + --auto-apply to fire the auto-apply path for reversible decisions that meet the confidence threshold.',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('store', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Emit a stage-c-completed event to persist the Stage C result on the Decision record.',
+          })
+          .option('auto-apply', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'When the recommendation meets the threshold AND the decision is reversible, also emit operator-answered (by: framework). Implies --store.',
+          })
+          .option('force', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Bypass the §5.3 mid-band fire guard so Stage C runs even when Stage B already resolved the decision.',
+          })
+          .option('threshold', {
+            type: 'number',
+            describe:
+              'Per-call confidence threshold override [0,1]. Default: decisions-config.yaml or 0.7.',
+          })
+          .option('model', {
+            type: 'string',
+            describe: 'Model override (e.g. claude-haiku-4-5).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, enabled: false, stageC: null });
+          } else {
+            emitText('(decision catalog feature flag is off — no decisions)');
+          }
+          return;
+        }
+
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) {
+          fail(`decision not found: ${id}`);
+        }
+
+        // Compute Stage A + Stage B so the mid-band guard has a real
+        // composite score to check against. This mirrors the orchestrator's
+        // production flow: A → B → C if mid-band.
+        const { decisions: allOpen } = listDecisions({ workDir });
+        const openDecisions = allOpen.filter((d) => d.metadata.id !== id);
+        let graph: ReturnType<typeof buildDependencyGraph> | undefined;
+        if (isCompositionEnabled()) {
+          try {
+            graph = buildDependencyGraph({ workDir });
+          } catch {
+            warnToStderr('[score-c] dep-graph unavailable — blast-radius defaults to zeros');
+          }
+        }
+        const stageA = runStageA({ decision, openDecisions, graph, workDir });
+        const stageB = runStageB({ decision, stageA });
+
+        // CLI requires no real invoker by design — the CLI is a dry-run
+        // surface for operators inspecting "what would Stage C say?". The
+        // substrate falls open to a `pending` sentinel which the operator
+        // can read as "no LLM wired up". Production callers (the
+        // orchestrator) inject a real invoker via the library API.
+        const loaded = loadDecisionsConfig({ workDir });
+        const { threshold: configThreshold } = resolveStageCRuntimeConfig(loaded);
+        const effectiveThreshold =
+          typeof argv.threshold === 'number' ? Number(argv.threshold) : configThreshold;
+
+        const result = await runStageC({
+          decision,
+          stageB,
+          workDir,
+          forceFire: Boolean(argv.force),
+          threshold: effectiveThreshold,
+          ...(typeof argv.model === 'string' && argv.model ? { model: String(argv.model) } : {}),
+        });
+
+        if (!result.fired) {
+          if (String(argv.format) === 'json') {
+            emit({
+              ok: true,
+              enabled: true,
+              fired: false,
+              skipReason: result.skipReason,
+              stageBCompositeScore: stageB.compositeScore,
+            });
+          } else {
+            emitText(`Stage C did not fire for ${id}`);
+            emitText(`  reason:                ${result.skipReason}`);
+            emitText(`  stage-b composite:     ${stageB.compositeScore.toFixed(3)}`);
+            emitText(`  mid-band:              [0.4, 0.7) — pass --force to bypass for spot-check`);
+          }
+          return;
+        }
+
+        const stageC = result.stageC!;
+        const autoApply = Boolean(argv['auto-apply']);
+        const shouldStore = Boolean(argv.store) || autoApply;
+        const autoApplyEligible = autoApply && isStageCAutoApplyEligible(decision, stageC);
+
+        if (shouldStore) {
+          const stageCEvent = makeStageCCompletedEvent({
+            decisionId: id,
+            stageC,
+            autoApplied: autoApplyEligible,
+          });
+          appendDecisionEvent(stageCEvent, { workDir });
+
+          if (autoApplyEligible) {
+            const answeredEvent = makeStageCAutoApplyAnsweredEvent({
+              decisionId: id,
+              chosenOptionId: stageC.recommendation.optionId,
+              rationale: stageC.recommendation.rationale,
+            });
+            appendDecisionEvent(answeredEvent, { workDir });
+          }
+        }
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            enabled: true,
+            fired: true,
+            stageC,
+            stored: shouldStore,
+            autoApplied: autoApplyEligible,
+            stageBCompositeScore: stageB.compositeScore,
+          });
+        } else {
+          emitText(`Stage C result for ${id}`);
+          emitText(
+            `  fired:               yes (stage-b composite ${stageB.compositeScore.toFixed(3)})`,
+          );
+          emitText(`  recommendation:      ${stageC.recommendation.optionId}`);
+          emitText(`  confidence:          ${stageC.recommendation.confidence.toFixed(3)}`);
+          emitText(`  threshold:           ${stageC.effectiveThreshold.toFixed(3)}`);
+          emitText(`  meets threshold:     ${stageC.metBehindThreshold}`);
+          emitText(`  llm-answer-eligible: ${stageC.llmAnswerEligible}`);
+          emitText(`  model:               ${stageC.model}`);
+          emitText(`  reversible:          ${decision.spec.reversible !== false}`);
+          if (stageC.error) emitText(`  error:               ${stageC.error}`);
+          emitText(`  rationale:           ${stageC.recommendation.rationale}`);
+          if (shouldStore) {
+            emitText(`  (stage-c-completed event persisted)`);
+            if (autoApplyEligible) {
+              emitText(
+                `  (operator-answered event by:framework persisted — override window: ${resolveStageCRuntimeConfig(loaded).overrideWindowHours}h)`,
+              );
+            }
+          }
+        }
+      },
+    )
+    .command(
+      'answer <id> <optionId>',
+      'Resolve a decision by picking an option (operator-answer path).',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .positional('optionId', {
+            type: 'string',
+            demandOption: true,
+            describe: "The option id to pick (must be one of the decision's declared option ids).",
+          })
+          .option('rationale', { type: 'string', describe: 'Optional free-text rationale.' })
+          .option('by', { type: 'string', describe: 'Operator identifier (email / login).' })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        const optionId = String(argv.optionId);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          fail(
+            decisionCatalogDisabledMessage() +
+              '\n[cli-decisions] answer: refusing to mutate the event log while the flag is off.',
+          );
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) fail(`decision not found: ${id}`);
+        if (!decision!.spec.options.some((o) => o.id === optionId)) {
+          fail(
+            `optionId "${optionId}" is not declared on ${id} — valid options: ${decision!.spec.options.map((o) => o.id).join(', ')}`,
+          );
+        }
+        const evt = makeOperatorAnsweredEvent({
+          decisionId: id,
+          chosenOptionId: optionId,
+          ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
+          ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+        });
+        appendDecisionEvent(evt, { workDir });
+
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, decisionId: id, chosenOptionId: optionId });
+        } else {
+          emitText(`decision answered: ${id} → ${optionId}`);
+          if (typeof argv.rationale === 'string' && argv.rationale) {
+            emitText(`  rationale: ${argv.rationale}`);
+          }
+        }
+      },
+    )
+    .command(
+      'override <id> <optionId>',
+      'Override a framework-auto-applied decision (RFC-0035 OQ-3 24h window). Records a negative exemplar on the substrate corpus + emits an `overridden` event on the decision log.',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .positional('optionId', {
+            type: 'string',
+            demandOption: true,
+            describe: 'The option id the operator picks instead of the framework choice.',
+          })
+          .option('rationale', { type: 'string', describe: 'Optional reason for the override.' })
+          .option('by', { type: 'string', describe: 'Operator identifier (email / login).' })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        const optionId = String(argv.optionId);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          fail(
+            decisionCatalogDisabledMessage() +
+              '\n[cli-decisions] override: refusing to mutate the event log while the flag is off.',
+          );
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) fail(`decision not found: ${id}`);
+        if (!decision!.spec.options.some((o) => o.id === optionId)) {
+          fail(
+            `optionId "${optionId}" is not declared on ${id} — valid options: ${decision!.spec.options.map((o) => o.id).join(', ')}`,
+          );
+        }
+
+        // Find the most recent stage-c-completed event with autoApplied:true.
+        const lastStageC = [...decision!.decisionLog]
+          .reverse()
+          .find(
+            (e) =>
+              e.type === 'stage-c-completed' &&
+              (e as { autoApplied?: boolean }).autoApplied === true,
+          ) as
+          | (import('../decisions/index.js').StageCCompletedEvent & {
+              autoApplied: boolean;
+            })
+          | undefined;
+        if (!lastStageC) {
+          fail(
+            `${id} has no auto-applied stage-c-completed event to override — use 'answer' to set an initial answer instead.`,
+          );
+        }
+        const supersededOptionId = lastStageC!.stageC.recommendation.optionId;
+        if (supersededOptionId === optionId) {
+          fail(`${id} is already auto-applied to ${optionId}; the override would be a no-op.`);
+        }
+
+        // Emit the overridden event on the decision log.
+        const evt = makeOverriddenEvent({
+          decisionId: id,
+          chosenOptionId: optionId,
+          supersededOptionId,
+          ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
+          ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+        });
+        appendDecisionEvent(evt, { workDir });
+
+        // Flip the substrate corpus polarity to negative (AC#6).
+        const corpusEntryId = lastStageC!.stageC.corpusEntryId ?? null;
+        const corpusFlip = recordOperatorOverride({
+          repoRoot: workDir,
+          taskType: 'decision-recommendation',
+          corpusEntryId,
+          newClassification: optionId,
+          ...(typeof argv.rationale === 'string' ? { reason: String(argv.rationale) } : {}),
+        });
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            decisionId: id,
+            chosenOptionId: optionId,
+            supersededOptionId,
+            corpusFlip,
+          });
+        } else {
+          emitText(`decision overridden: ${id} — ${supersededOptionId} → ${optionId}`);
+          if (corpusFlip.flipped) {
+            emitText(`  substrate corpus: negative exemplar recorded`);
+          } else {
+            emitText(`  substrate corpus: no flip (${corpusFlip.reason ?? 'unknown'})`);
+          }
+        }
+      },
+    )
+    .command(
+      'corpus',
+      'Substrate calibration corpus commands (composes with RFC-0024 shared substrate).',
+      (sub) =>
+        sub
+          .command(
+            'aggregate',
+            'Aggregate the substrate corpus across all 5 task types (per-task metrics + cross-task rollup + anchor candidates per OQ-11).',
+            (y) =>
+              y
+                .option('format', {
+                  type: 'string',
+                  choices: ['json', 'text'] as const,
+                  default: 'text' as const,
+                })
+                .option('anchor-threshold', {
+                  type: 'number',
+                  describe:
+                    'Override the anchor-promotion threshold (default 3 per OQ-11). Negative-polarity clusters at or above this size surface as anchor candidates.',
+                }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const opts: Parameters<typeof aggregateDecisionCorpus>[0] = { workDir };
+              if (typeof argv['anchor-threshold'] === 'number') {
+                opts.anchorPromotionThreshold = Number(argv['anchor-threshold']);
+              }
+              const result: AggregateCorpusResult = aggregateDecisionCorpus(opts);
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, ...result });
+              } else {
+                emitText('Substrate calibration corpus aggregate');
+                emitText('  per-task-type:');
+                for (const m of result.perTaskType) {
+                  emitText(
+                    `    ${m.taskType.padEnd(28)} total=${m.total}  pos=${m.positive}  neg=${m.negative}  pending=${m.pending}` +
+                      `  accuracy=${m.accuracy === null ? 'n/a' : m.accuracy.toFixed(3)}` +
+                      `  coverage=${m.coverage === null ? 'n/a' : m.coverage.toFixed(3)}` +
+                      `  avgConf=${m.avgConfidence === null ? 'n/a' : m.avgConfidence.toFixed(3)}`,
+                  );
+                }
+                emitText('  aggregate:');
+                const a = result.aggregate;
+                emitText(
+                  `    total=${a.total}  pos=${a.positive}  neg=${a.negative}  pending=${a.pending}` +
+                    `  accuracy=${a.accuracy === null ? 'n/a' : a.accuracy.toFixed(3)}` +
+                    `  coverage=${a.coverage === null ? 'n/a' : a.coverage.toFixed(3)}`,
+                );
+                emitText(
+                  `  anchor candidates (≥${result.anchorPromotionThreshold} consistent overrides):`,
+                );
+                if (result.anchorCandidates.length === 0) {
+                  emitText('    (none)');
+                } else {
+                  for (const ac of result.anchorCandidates) {
+                    emitText(
+                      `    ${ac.taskType.padEnd(28)} → ${ac.operatorOverrideClassification}` +
+                        `  count=${ac.count}  avgConfWhenWrong=${ac.avgConfidenceWhenWrong.toFixed(3)}`,
+                    );
+                  }
+                }
+              }
+            },
+          )
+          .demandCommand(1, 'A corpus subcommand is required (e.g. aggregate).')
+          .strict(),
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
     .strict()

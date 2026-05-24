@@ -41,6 +41,7 @@ export type DecisionLifecycle = (typeof DECISION_LIFECYCLES)[number];
 export const DECISION_EVENT_TYPES = [
   'decision-opened',
   'recommendation-issued',
+  'stage-c-completed',
   'operator-answered',
   'timebox-fired',
   'overridden',
@@ -206,10 +207,16 @@ export type DecisionEvent =
   | DecisionOpenedEvent
   | RecommendationIssuedEvent
   | OperatorAnsweredEvent
+  | StageCCompletedEvent
+  | OverriddenEvent
   | (DecisionEventEnvelope & {
       type: Exclude<
         DecisionEventType,
-        'decision-opened' | 'recommendation-issued' | 'operator-answered'
+        | 'decision-opened'
+        | 'recommendation-issued'
+        | 'operator-answered'
+        | 'stage-c-completed'
+        | 'overridden'
       >;
     } & Record<string, unknown>);
 
@@ -402,6 +409,164 @@ export interface StageBOutput {
   resolvedByStageB: boolean;
 }
 
+// ── Stage C output types (Phase 5 — RFC-0035 §5.3) ───────────────────────────
+
+/**
+ * RFC-0035 §5.3 — Stage C LLM evaluation. Phase 5 (AISDLC-289).
+ *
+ * Stage C composes with the RFC-0024 shared classifier substrate
+ * (`pipeline-cli/src/classifier/substrate/`) via the `decision-recommendation`
+ * task type. It does NOT re-implement LLM invocation; the substrate
+ * handles prompt building, response validation, corpus capture, override
+ * window, and silence-as-positive promotion.
+ *
+ * Stage C fires only when Stage B's composite score lands in the mid-band
+ * `[0.4, 0.7]` per §5.3 — outside that band Stage B is already confident
+ * (high) or already certain-it-needs-operator (low) and the LLM call would
+ * add no signal.
+ */
+export interface StageCRecommendation {
+  /** The option-id the LLM recommends. Always one of the decision's option ids. */
+  optionId: string;
+  /** Self-reported confidence in [0,1]. */
+  confidence: number;
+  /** One- or two-sentence rationale. */
+  rationale: string;
+}
+
+/**
+ * One alternative the LLM considered. The framework surfaces these alongside
+ * the primary recommendation so the operator can scan the trade-offs.
+ */
+export interface StageCAlternative {
+  optionId: string;
+  pros: string[];
+  cons: string[];
+}
+
+/**
+ * A sub-decision the LLM identified as implied-by the chosen option. The
+ * framework files these as follow-up Decisions when the operator picks
+ * the corresponding option.
+ */
+export interface StageCSubDecisionImplied {
+  /** The option that triggers this sub-decision. */
+  optionId: string;
+  /** One-line follow-up question. */
+  followUp: string;
+}
+
+/**
+ * Routing recommendation Stage C may emit when the Stage A+B routing was
+ * inconclusive. Surfaces as a soft suggestion — the operator still owns
+ * the routing decision.
+ */
+export interface StageCRoutingRecommendation {
+  /** Suggested actor identifier (email / 'framework' / 'operator'). */
+  actor: string;
+  /** Why this actor — surfaced in the digest. */
+  rationale: string;
+}
+
+/**
+ * Stage C full evaluation envelope. Persisted on the Decision record via
+ * the `stage-c-completed` event. Mirrors the §5.3 DecisionEvaluation
+ * interface from the RFC body.
+ */
+export interface StageCOutput {
+  /** The classifier substrate's substrate-entry id (corpus pointer for override capture). */
+  corpusEntryId: string | null;
+  /** The effective threshold the substrate compared `confidence` against. */
+  effectiveThreshold: number;
+  /** The model identifier the substrate resolved (`'claude-haiku-4-5'` default). */
+  model: string;
+  /** Whether `confidence >= effectiveThreshold` AND no invoker / parse errors. */
+  metBehindThreshold: boolean;
+  /** Primary recommendation. */
+  recommendation: StageCRecommendation;
+  /**
+   * Alternatives the LLM weighed. Phase 5 may leave this empty — the
+   * substrate's lean prompt only asks for the recommendation; richer
+   * alternatives ship in Phase 6 (decision support surface).
+   */
+  alternativesConsidered: StageCAlternative[];
+  /**
+   * Steel-manned objections to the recommendation. Phase 5 leaves this
+   * empty (Phase 6 adversarial-CA path adds them — OQ-9).
+   */
+  counterArguments: string[];
+  /** Implied sub-decisions (Phase 5: empty; Phase 6+ enriches). */
+  subDecisionsImplied: StageCSubDecisionImplied[];
+  /** Optional routing recommendation. */
+  routingRecommendation?: StageCRoutingRecommendation;
+  /**
+   * Whether the framework MAY auto-decide when `metBehindThreshold &&
+   * decision.spec.reversible`. False when the LLM signalled it's not
+   * confident enough OR when the decision is irreversible.
+   */
+  llmAnswerEligible: boolean;
+  /**
+   * When Stage C auto-applied (because reversible + metBehindThreshold +
+   * llmAnswerEligible), the timestamp the override window opened. Null when
+   * Stage C did NOT auto-apply (operator-confirm path).
+   */
+  autoApplyAt?: string | null;
+  /**
+   * Override-window length in hours at auto-apply time. Persisted on the
+   * event so post-mortem analysis can reproduce what the operator was
+   * timeboxed against.
+   */
+  overrideWindowHours?: number;
+  /**
+   * Captured invoker / validation error when the LLM call failed. The
+   * substrate falls open to a `pending` sentinel; we surface the reason
+   * so operators can see why a particular Stage C deferred.
+   */
+  error?: string;
+}
+
+/**
+ * RFC-0035 Phase 5 — `stage-c-completed` event.
+ *
+ * Emitted after Stage C evaluates a decision via the shared classifier
+ * substrate. Carries the full `StageCOutput`. The projection folds this
+ * into `status.evaluation.stageC`. When `autoApplyAt` is set, the same
+ * tick also emits an `operator-answered` event with `by: 'framework'`
+ * which moves the decision to `lifecycle: 'answered'`.
+ */
+export interface StageCCompletedEvent extends DecisionEventEnvelope {
+  type: 'stage-c-completed';
+  stageC: StageCOutput;
+  /**
+   * Whether the framework auto-applied the recommendation (i.e. also emitted
+   * an `operator-answered` event with `by: 'framework'`). When false, the
+   * decision stays in `lifecycle: 'open'` awaiting explicit operator answer.
+   */
+  autoApplied: boolean;
+}
+
+/**
+ * RFC-0035 Phase 5 — `overridden` event.
+ *
+ * Emitted when an operator overrides a framework auto-applied recommendation
+ * within the override window. The projection folds this into
+ * `status.lifecycle: 'answered'` (the override is itself the answer) AND
+ * marks the prior auto-applied answer as superseded by the override.
+ *
+ * The substrate's `recordOperatorOverride()` is invoked in parallel to
+ * flip the corpus entry's polarity to `negative` — this event is the
+ * decision-log mirror of that corpus mutation.
+ */
+export interface OverriddenEvent extends DecisionEventEnvelope {
+  type: 'overridden';
+  /** The option id the operator picked instead. */
+  chosenOptionId: string;
+  /** The option id the framework had auto-applied. */
+  supersededOptionId: string;
+  /** Optional operator-supplied reason. */
+  rationale?: string;
+}
+
 // ── recommendation-issued event (Phase 2+3) ──────────────────────────────────
 
 /**
@@ -450,6 +615,35 @@ export function validateDecisionEvent(raw: unknown): string | null {
   if (typeof r.ts !== 'string' || r.ts.length === 0) return 'ts: missing or empty';
   if (typeof r.decisionId !== 'string' || !ID_PATTERN.test(r.decisionId)) {
     return 'decisionId: must match DEC-NNNN';
+  }
+
+  if (r.type === 'stage-c-completed') {
+    if (!r.stageC || typeof r.stageC !== 'object') {
+      return 'stage-c-completed: stageC payload is required';
+    }
+    const sc = r.stageC as Record<string, unknown>;
+    if (!sc.recommendation || typeof sc.recommendation !== 'object') {
+      return 'stage-c-completed: stageC.recommendation is required';
+    }
+    const rec = sc.recommendation as Record<string, unknown>;
+    if (typeof rec.optionId !== 'string' || rec.optionId.length === 0) {
+      return 'stage-c-completed: stageC.recommendation.optionId is required';
+    }
+    if (typeof rec.confidence !== 'number' || !Number.isFinite(rec.confidence)) {
+      return 'stage-c-completed: stageC.recommendation.confidence must be a finite number';
+    }
+    if (typeof r.autoApplied !== 'boolean') {
+      return 'stage-c-completed: autoApplied (boolean) is required';
+    }
+  }
+
+  if (r.type === 'overridden') {
+    if (typeof r.chosenOptionId !== 'string' || r.chosenOptionId.length === 0) {
+      return 'overridden: chosenOptionId is required';
+    }
+    if (typeof r.supersededOptionId !== 'string' || r.supersededOptionId.length === 0) {
+      return 'overridden: supersededOptionId is required';
+    }
   }
 
   if (r.type === 'decision-opened') {

@@ -1,0 +1,101 @@
+# Decision Exemplar Bank
+#
+# Labelled past Decisions used to anchor the Stage C LLM prompt + serve
+# as the corpus seed for calibration. The substrate's
+# `recordOperatorOverride()` adds new exemplars to the corpus as the
+# framework operates; this file is the curated subset operators promoted
+# to "anchors" via the OQ-11 promotion path.
+#
+# Types:
+#   - true-positive   — recommendation the operator accepted (silence
+#                       within the override window)
+#   - true-negative   — recommendation the framework correctly refused
+#                       to auto-apply (low confidence or irreversible)
+#   - false-positive  — recommendation the framework made; operator
+#                       overrode within the window (negative exemplar)
+#   - borderline      — recommendation the operator confirmed but with
+#                       a different rationale than the LLM's
+#
+# Initial seed below covers the 14 OQ resolutions from the 2026-05-15
+# RFC-0035 walkthrough — exemplars representative of the decision
+# classes Stage C should expect during the soak window.
+
+exemplars:
+  # ── True positives (recommendation accepted) ──────────────────────
+
+  - id: oq-1-event-log
+    type: true-positive
+    category: data-model
+    summary: 'Catalog as event log vs first-class write-through resource'
+    options:
+      - { id: 'opt-a', description: 'First-class resource' }
+      - { id: 'opt-b', description: 'Projection over markdown' }
+      - { id: 'opt-c', description: 'Append-only event log (event sourcing)' }
+    operatorChosenOptionId: 'opt-c'
+    confidence: 0.85
+    rationale: 'Event sourcing matches the calibration / override-history / audit-trail use cases the catalog needs.'
+    principle: 'composition-over-duplication'
+
+  - id: oq-12-timebox-reversible
+    type: true-positive
+    category: lifecycle
+    summary: 'Deadline semantics: soft, hard, or both?'
+    options:
+      - { id: 'opt-a', description: 'Soft (priority decay only)' }
+      - { id: 'opt-b', description: 'Hard (auto-defer past deadline)' }
+      - {
+          id: 'opt-c',
+          description: 'Hard + default-on-silence for reversible; soft for irreversible',
+        }
+    operatorChosenOptionId: 'opt-c'
+    confidence: 0.78
+    rationale: 'Composes with OQ-3 24h-window pattern + irreversible exception.'
+    principle: 'compose-with-rfc-pattern'
+
+  # ── False positives (framework overrode by operator) ──────────────
+
+  - id: oq-6-capacity-parallel-model
+    type: false-positive
+    category: composition
+    summary: 'Capacity defaults: invent parallel model or compose with RFC-0016?'
+    options:
+      - { id: 'opt-a', description: 'Parallel capacity model (per-tier daily slots)' }
+      - { id: 'opt-b', description: 'Compose with RFC-0016 t-shirt sizing' }
+    initialRecommendation: 'opt-a'
+    operatorChosenOptionId: 'opt-b'
+    confidence: 0.65
+    operatorOverrideReason: "Compose-don't-duplicate principle — RFC-0016 already shipped the calibration loop + buckets"
+    principle: 'composition-over-duplication'
+
+  # ── True negatives (correctly refused to auto-apply) ──────────────
+
+  - id: oq-3-cold-start-irreversible
+    type: true-negative
+    category: cold-start
+    summary: 'LLM-confidence cold start when no exemplars exist'
+    options:
+      - { id: 'opt-a', description: 'Self-reported by LLM (untrustworthy)' }
+      - { id: 'opt-b', description: 'Manual rubric-driven' }
+      - { id: 'opt-c', description: 'Phased clamp at conservative defaults' }
+      - { id: 'opt-d', description: 'Conservative-default-until-N-samples' }
+      - { id: 'opt-e', description: 'Auto-apply with 24h operator-override window' }
+    operatorChosenOptionId: 'opt-e'
+    confidence: 0.45
+    refusedAutoApply: true
+    refusalReason: 'Below 0.7 threshold; load-bearing architectural decision; operator review essential'
+    principle: 'never-auto-apply-load-bearing'
+
+  # ── Borderline (recommendation accepted with different rationale) ─
+
+  - id: oq-9-counter-argument-pattern
+    type: borderline
+    category: ux-pattern
+    summary: 'Steel-man each option vs adversarial CA on recommendation'
+    options:
+      - { id: 'opt-a', description: 'Steel-man each option independently' }
+      - { id: 'opt-b', description: 'Single sharp adversarial CA on recommendation' }
+    operatorChosenOptionId: 'opt-b'
+    confidence: 0.72
+    rationale: 'Cheap, focused, format-matched.'
+    operatorRationaleDiff: 'Selected based on attention-is-finite argument that the walkthrough surfaced; not because of cost alone.'
+    principle: 'surface-counter-arguments-by-default'
