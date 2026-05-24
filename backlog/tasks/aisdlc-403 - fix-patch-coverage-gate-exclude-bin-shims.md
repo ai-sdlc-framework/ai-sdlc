@@ -7,6 +7,8 @@ references:
   - scripts/check-pr-patch-coverage.mjs
 priority: high
 permittedExternalPaths: []
+blocked:
+  reason: "DoR Gate 3 over-reach: parser flags concrete example paths + bare PR references in body prose as unresolvable references. Detail preserved deliberately; gate-parser narrowing tracked as follow-up to AISDLC-379. Operator acknowledged 2026-05-23."
 ---
 
 ## Description
