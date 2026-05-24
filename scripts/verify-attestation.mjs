@@ -1773,14 +1773,40 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   const all = loadAllAttestations(repoRoot);
 
   // AISDLC-398: check patch-id-named v6 envelope first, then SHA-named.
+  // AISDLC-419 (follow-up): also accept envelopes whose subject.sha1 is an
+  // attestation-only ancestor of HEAD. The signer's patch-id and the
+  // verifier's patch-id can diverge when the merge-base they each pick
+  // differs (signer uses origin/main at sign-time, verifier uses the PR's
+  // baseSha). When that happens, the patch-id-named envelope is not
+  // findable by name even though its subject.sha1 cryptographically
+  // commits to a valid ancestor of HEAD. The descendant relaxation
+  // (added by AISDLC-419 inside verifyV6Envelope) defends the binding;
+  // this widens the candidate set so that defense actually runs.
   const v6PatchIdFilename = contentPatchId ? `${contentPatchId}.v6.dsse.json` : null;
   const v6Envelopes = all.filter((entry) => {
     if (!entry.isV6) return false;
     const lowerName = entry.fileName.toLowerCase();
     // Patch-id filename (AISDLC-398 preferred)
     if (v6PatchIdFilename && lowerName === v6PatchIdFilename) return true;
-    // Legacy per-SHA filename (pre-AISDLC-398 compat)
+    // Legacy per-SHA filename (pre-AISDLC-398 compat) — current HEAD
     if (lowerName === `${lowerHead}.v6.dsse.json`) return true;
+    // AISDLC-419 follow-up: surface envelopes whose internal
+    // `subject.digest.sha1` is an attestation-only ancestor of HEAD,
+    // regardless of filename. The filename can be ANY 40-hex string
+    // (patch-id, sign-time HEAD bridge, etc) — what matters for
+    // structural validity is the cryptographic subject binding inside
+    // the envelope, and the inner descendant-relaxation in
+    // verifyV6Envelope. Doing the check here surfaces the envelope to
+    // the candidate set; verifyV6Envelope's signature + Merkle defenses
+    // still gate acceptance.
+    const subjectSha = entry.envelope?.subject?.digest?.sha1;
+    if (
+      typeof subjectSha === 'string' &&
+      /^[0-9a-f]{40}$/i.test(subjectSha) &&
+      isAttestationOnlyDescendant(subjectSha, lowerHead, repoRoot)
+    ) {
+      return true;
+    }
     return false;
   });
   if (v6Envelopes.length > 0) {

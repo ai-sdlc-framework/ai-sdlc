@@ -3981,6 +3981,125 @@ describe('runVerifier — v6 integration', () => {
 // from the CURRENT HEAD's files rather than comparing the stored hash against
 // itself. A force-push that changes blob SHAs (but preserves the unified diff
 // structure) MUST be rejected.
+describe('runVerifier (AISDLC-419 follow-up — broaden v6 envelope filter)', () => {
+  // Reproduces the production failure mode: a v6 envelope sits on disk
+  // named for the parent-of-HEAD (the "signed commit"). The chore commit
+  // on top only adds attestation files. The verifier's strict
+  // patch-id-or-HEAD-sha filter would skip the envelope entirely; with
+  // the broadened filter (AISDLC-419 follow-up) the envelope surfaces
+  // and the inner descendant-relaxation accepts it.
+  let fixture;
+  let v6Keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    v6Keys = genV6KeyPair();
+    writeTrustedReviewersYaml(fixture.root, v6Keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('accepts a v6 envelope whose subject.sha1 is an attestation-only ancestor of HEAD (post-rebase shape)', () => {
+    // Write a v6 envelope binding to fixture.headSha (the work commit).
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, v6Keys.privateKeyPem);
+
+    // Now add an attestation-only chore commit on top. Use a fake patch-id
+    // filename to mirror the production shape (the file is named for an
+    // arbitrary 40-hex that is NEITHER the chore HEAD nor the verifier's
+    // computed patch-id). This is the case the original AISDLC-419 fix
+    // failed to surface because the filter ignored the envelope.
+    const FAKE_PATCH_ID = 'a'.repeat(40);
+    writeFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${FAKE_PATCH_ID}.v6.dsse.json`),
+      readFileSync(
+        join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.v6.dsse.json`),
+        'utf-8',
+      ),
+    );
+    // Remove the per-HEAD bridge so the only matchable envelope is the
+    // fake-patch-id one (forces the broadened filter to be exercised).
+    rmSync(join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.v6.dsse.json`));
+
+    // Create the chore commit. Re-stash transcript-leaves first because
+    // the chore commit only adds attestation files.
+    execFileSync('git', ['add', '.ai-sdlc/attestations/', '.ai-sdlc/transcript-leaves.jsonl'], {
+      cwd: fixture.root,
+    });
+    execFileSync('git', ['commit', '-q', '-m', 'chore: sign v6 attestation'], {
+      cwd: fixture.root,
+    });
+    const choreHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixture.root,
+      encoding: 'utf-8',
+    }).trim();
+
+    // Run verifier with the chore commit as HEAD — this is what CI sees
+    // after the pre-push attestation-sign hook adds the chore commit.
+    const out = runVerifier({
+      headSha: choreHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid (envelope surfaced via broadened filter), got: ${out.reason}`,
+    );
+  });
+
+  it('STILL rejects when the descendant chore commit ALSO changes source files', () => {
+    // Same setup as above but smuggle a source-file change into the
+    // descendant chore commit. The broadened filter still surfaces the
+    // envelope (subject.sha1 is an ancestor), but the inner
+    // isAttestationOnlyDescendant check rejects because the diff isn't
+    // attestation-only.
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, v6Keys.privateKeyPem);
+    const FAKE_PATCH_ID = 'b'.repeat(40);
+    writeFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${FAKE_PATCH_ID}.v6.dsse.json`),
+      readFileSync(
+        join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.v6.dsse.json`),
+        'utf-8',
+      ),
+    );
+    rmSync(join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.v6.dsse.json`));
+    // Tamper a source file in the chore commit.
+    writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nTAMPERED\n');
+    execFileSync(
+      'git',
+      ['add', '.ai-sdlc/attestations/', '.ai-sdlc/transcript-leaves.jsonl', 'feature.txt'],
+      { cwd: fixture.root },
+    );
+    execFileSync('git', ['commit', '-q', '-m', 'chore: sign + tamper'], { cwd: fixture.root });
+    const tamperedHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixture.root,
+      encoding: 'utf-8',
+    }).trim();
+    const out = runVerifier({
+      headSha: tamperedHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(
+      out.status,
+      'invalid',
+      `expected invalid (source code tampered between sign and push), got: ${out.reason}`,
+    );
+  });
+});
+
 describe('runVerifier (AISDLC-398 fix #3 — v5 fast-path content-hash recompute)', () => {
   let fixture;
   let keys;
