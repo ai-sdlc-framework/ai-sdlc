@@ -1262,23 +1262,6 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       });
       expect(blockedRun.status).toBe(0);
       const blockedStdout = blockedRun.stdout || '';
-      // TEMP DIAGNOSTIC (revert after CI-vs-local debug): surface hook stderr
-      // so we can see which silent-exit path fires when this fails in CI.
-      if (!blockedStdout.includes('"permissionDecision": "deny"')) {
-        console.error('[test-diag] blockedRun.stdout:', JSON.stringify(blockedStdout));
-
-        console.error('[test-diag] blockedRun.stderr:', JSON.stringify(blockedRun.stderr || ''));
-
-        console.error('[test-diag] blockedRun.status:', blockedRun.status);
-
-        console.error('[test-diag] worktreePath:', worktreePath);
-
-        console.error('[test-diag] blockedTarget:', blockedTarget);
-
-        console.error('[test-diag] hookPath:', hookPath);
-
-        console.error('[test-diag] syntheticTaskFile:', beginResult.syntheticTaskFile);
-      }
       expect(blockedStdout).toContain('"permissionDecision": "deny"');
       // The deny reason mentions the specific allowlist entries — proves
       // the hook DID parse permittedExternalPaths (not the silent `[]`
