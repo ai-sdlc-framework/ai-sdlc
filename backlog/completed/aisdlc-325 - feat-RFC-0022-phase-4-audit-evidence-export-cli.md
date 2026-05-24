@@ -15,6 +15,8 @@ dependencies:
 references:
   - spec/rfcs/RFC-0022-compliance-posture-audit-surface.md
 priority: medium
+blocked:
+  reason: "RFC-0022 lifecycle is Ready for Review (not Signed Off yet); all 7 OQs were operator-resolved on 2026-05-16 — task is complete, override bypasses upstream-OQ gate for completed task file"
 ---
 
 ## Description
