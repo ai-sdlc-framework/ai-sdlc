@@ -127,12 +127,21 @@ export {
   DEFAULT_RECURRENCE_WINDOWS,
   DEFAULT_UPSTREAM_TEMPLATE_PATH,
   DEFAULT_VENDOR_NAMESPACE_ENFORCE,
+  DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE,
+  DEFAULT_COVERAGE_GAP_FILE_CAPTURE,
+  DEFAULT_DETERMINISM_SAMPLE_RATE,
+  DEFAULT_DETERMINISM_ALWAYS_ON_REQUIRES,
+  DEFAULT_DETERMINISM_ALWAYS_ON_TOP_BLAST_DECILE,
+  DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
   QUALITY_MONITORING_CONFIG_DEFAULTS,
   type QualityMonitoringConfig,
   type LoadQualityMonitoringConfigOpts,
   type UpstreamReportingConfig,
   type VendorNamespaceConfig,
   type VendorNamespaceEnforce,
+  type CoverageGapConfig,
+  type DeterminismDetectionConfig,
+  type OperatorTimeCostConfig,
 } from './quality-monitoring-config.js';
 
 // ── RFC-0025 §13 OQ-5 Upstream Reporting — Phase 6 (AISDLC-307) ─────
@@ -159,12 +168,47 @@ export {
 
 export {
   shouldSampleDeterminism,
+  shouldSampleDeterminismComposite,
+  isTopDecileBlastRadius,
   recordDeterminismBaseline,
   readDeterminismBaseline,
   checkDeterminismViolation,
   DETERMINISM_SAMPLE_RATE,
+  DETERMINISM_SAMPLE_FRACTION,
   DETERMINISM_DIR,
   BASELINE_MAX_AGE_MS,
   type DeterminismBaseline,
   type DeterminismCheckResult,
+  type DeterminismCompositeDecision,
+  type DeterminismSampleReason,
+  type ShouldSampleDeterminismCompositeOpts,
 } from './determinism-detector.js';
+
+// ── RFC-0025 §13 OQ-6 Coverage-gap response — Phase 5 (AISDLC-306) ───
+// Composes with RFC-0024 capture substrate. Auto-quarantines the
+// affected dispatch + writes a capture with `source: framework-coverage-gap`
+// + `triage: tbd` so operators triage via the standard RFC-0024 rubric.
+
+export {
+  recordFrameworkCoverageGap,
+  FRAMEWORK_COVERAGE_GAP_SOURCE,
+  type RecordCoverageGapOpts,
+  type RecordCoverageGapResult,
+} from './coverage-gap.js';
+
+// ── RFC-0025 §7.1 OQ-9 Operator-time-cost — Phase 5 (AISDLC-306) ────
+// Instrumented from RFC-0015 events.jsonl substrate. AFK-filtered active
+// cost feeds the §7 severity rubric output + RFC-0035 §7 fatigue signal
+// (gated until AISDLC-291 ships).
+
+export {
+  computeOperatorTimeCost,
+  classifyActiveCostBucket,
+  formatOperatorTimeCostForRubric,
+  resolveAfkInactivityMinutes,
+  BLOCKED_EVENT_TYPES,
+  ACTION_EVENT_TYPES,
+  type ComputeOperatorTimeCostOpts,
+  type OperatorTimeCostEntry,
+  type OperatorTimeCostMetrics,
+} from './operator-time-cost.js';

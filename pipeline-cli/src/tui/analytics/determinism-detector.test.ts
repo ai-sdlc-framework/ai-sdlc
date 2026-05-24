@@ -16,7 +16,10 @@ import {
   recordDeterminismBaseline,
   readDeterminismBaseline,
   shouldSampleDeterminism,
+  shouldSampleDeterminismComposite,
+  isTopDecileBlastRadius,
   DETERMINISM_SAMPLE_RATE,
+  DETERMINISM_SAMPLE_FRACTION,
   type DeterminismBaseline,
 } from './determinism-detector.js';
 
@@ -150,5 +153,143 @@ describe('checkDeterminismViolation', () => {
     expect(result.violated).toBe(true);
     expect(result.baseline?.commitSubject).toBe(BASELINE.commitSubject);
     expect(result.current?.filesChanged).toEqual(current.filesChanged);
+  });
+});
+
+// ── Phase 5 composite sampling (AISDLC-306 / OQ-7) ────────────────────
+
+describe('shouldSampleDeterminismComposite', () => {
+  it('fires on requires-determinism opt-in regardless of dispatch count', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 7,
+      requiresDeterminism: true,
+      blastRadiusEffectivePriority: null,
+      isTopBlastRadiusDecile: false,
+    });
+    expect(decision.sample).toBe(true);
+    expect(decision.reason).toBe('requires-determinism-flag');
+  });
+
+  it('fires on top-decile blast-radius even when requires-determinism is false', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 7,
+      requiresDeterminism: false,
+      blastRadiusEffectivePriority: 4,
+      isTopBlastRadiusDecile: true,
+    });
+    expect(decision.sample).toBe(true);
+    expect(decision.reason).toBe('top-decile-blast-radius');
+  });
+
+  it('fires on flat sample rate at 1-in-50 multiples', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 50,
+      requiresDeterminism: false,
+      blastRadiusEffectivePriority: 1,
+      isTopBlastRadiusDecile: false,
+    });
+    expect(decision.sample).toBe(true);
+    expect(decision.reason).toBe('flat-sample-rate');
+  });
+
+  it('does NOT fire on a low-blast non-multiple dispatch with default config', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 7,
+      requiresDeterminism: false,
+      blastRadiusEffectivePriority: 1,
+      isTopBlastRadiusDecile: false,
+    });
+    expect(decision.sample).toBe(false);
+    expect(decision.reason).toBe('not-sampled');
+  });
+
+  it('alwaysOnRequiresDeterminism=false disables the requires-determinism gate', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 7,
+      requiresDeterminism: true,
+      blastRadiusEffectivePriority: 1,
+      isTopBlastRadiusDecile: false,
+      alwaysOnRequiresDeterminism: false,
+    });
+    expect(decision.sample).toBe(false);
+  });
+
+  it('alwaysOnTopBlastRadiusDecile=false disables the top-decile gate', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 7,
+      requiresDeterminism: false,
+      blastRadiusEffectivePriority: 4,
+      isTopBlastRadiusDecile: true,
+      alwaysOnTopBlastRadiusDecile: false,
+    });
+    expect(decision.sample).toBe(false);
+  });
+
+  it('honors a custom sample rate of 0.1 (1-in-10)', () => {
+    const decision = shouldSampleDeterminismComposite({
+      dispatchCount: 10,
+      requiresDeterminism: false,
+      blastRadiusEffectivePriority: 1,
+      isTopBlastRadiusDecile: false,
+      defaultSampleRate: 0.1,
+    });
+    expect(decision.sample).toBe(true);
+    expect(decision.reason).toBe('flat-sample-rate');
+  });
+
+  it('sample rate 0 disables flat sampling but preserves always-on rules', () => {
+    const noFlat = shouldSampleDeterminismComposite({
+      dispatchCount: 100,
+      requiresDeterminism: false,
+      blastRadiusEffectivePriority: 1,
+      isTopBlastRadiusDecile: false,
+      defaultSampleRate: 0,
+    });
+    expect(noFlat.sample).toBe(false);
+
+    const stillAlwaysOn = shouldSampleDeterminismComposite({
+      dispatchCount: 100,
+      requiresDeterminism: true,
+      blastRadiusEffectivePriority: 4,
+      isTopBlastRadiusDecile: true,
+      defaultSampleRate: 0,
+    });
+    expect(stillAlwaysOn.sample).toBe(true);
+  });
+
+  it('default sample rate matches DETERMINISM_SAMPLE_FRACTION (0.02)', () => {
+    expect(DETERMINISM_SAMPLE_FRACTION).toBeCloseTo(1 / 50);
+  });
+});
+
+describe('isTopDecileBlastRadius', () => {
+  it('returns false for empty corpus', () => {
+    expect(isTopDecileBlastRadius([], 4)).toBe(false);
+  });
+
+  it('returns false when candidate priority is null', () => {
+    expect(isTopDecileBlastRadius([1, 2, 3, 4], null)).toBe(false);
+  });
+
+  it('identifies the top decile in a 20-item corpus', () => {
+    // 1..20: 90th percentile (nearest-rank) lands at index ceil(0.9*20)-1 = 17,
+    // sorted[17] = 18. So candidates >= 18 are top decile.
+    const corpus = Array.from({ length: 20 }, (_, i) => i + 1);
+    expect(isTopDecileBlastRadius(corpus, 18)).toBe(true);
+    expect(isTopDecileBlastRadius(corpus, 19)).toBe(true);
+    expect(isTopDecileBlastRadius(corpus, 20)).toBe(true);
+    expect(isTopDecileBlastRadius(corpus, 17)).toBe(false);
+  });
+
+  it('ignores invalid corpus entries (null/undefined/NaN)', () => {
+    const corpus = [1, null, undefined, NaN, 2, 3, 4];
+    // Valid corpus = [1, 2, 3, 4], 90th pct = sorted[ceil(0.9*4)-1]=sorted[3]=4
+    expect(isTopDecileBlastRadius(corpus, 4)).toBe(true);
+    expect(isTopDecileBlastRadius(corpus, 3)).toBe(false);
+  });
+
+  it('handles single-item corpus correctly', () => {
+    expect(isTopDecileBlastRadius([5], 5)).toBe(true);
+    expect(isTopDecileBlastRadius([5], 4)).toBe(false);
   });
 });

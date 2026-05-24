@@ -11,13 +11,38 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_RECURRENCE_WINDOWS,
   DEFAULT_UPSTREAM_TEMPLATE_PATH,
+  DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE,
+  DEFAULT_COVERAGE_GAP_FILE_CAPTURE,
+  DEFAULT_DETERMINISM_SAMPLE_RATE,
+  DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
   QUALITY_MONITORING_CONFIG_DEFAULTS,
   QualityMonitoringConfigError,
   enforceVendorNamespaceConfig,
   loadQualityMonitoringConfig,
   parseDurationDays,
   parseQualityMonitoringConfigYaml,
+  type QualityMonitoringConfig,
+  type VendorNamespaceEnforce,
 } from './quality-monitoring-config.js';
+
+// Helper: build a complete QualityMonitoringConfig from a partial; tests
+// only override the bits they care about. Phase 5 added required fields
+// (`coverageGap`, `determinismDetection`, `operatorTimeCost`) so older
+// tests need a base to spread from.
+function baseConfig(
+  enforce: VendorNamespaceEnforce,
+  customSubclasses: string[] = [],
+): QualityMonitoringConfig {
+  return {
+    recurrenceWindows: [],
+    upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
+    vendorNamespace: { enforce },
+    customSubclasses,
+    coverageGap: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap },
+    determinismDetection: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection },
+    operatorTimeCost: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost },
+  };
+}
 
 let workdir: string;
 
@@ -219,35 +244,18 @@ describe('parseQualityMonitoringConfigYaml — vendor-namespace (OQ-10)', () => 
 
 describe('enforceVendorNamespaceConfig (OQ-10)', () => {
   it('no-op when customSubclasses is empty', () => {
-    expect(() =>
-      enforceVendorNamespaceConfig({
-        recurrenceWindows: [],
-        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
-        vendorNamespace: { enforce: 'reject' },
-        customSubclasses: [],
-      }),
-    ).not.toThrow();
+    expect(() => enforceVendorNamespaceConfig(baseConfig('reject', []))).not.toThrow();
   });
 
   it('no-op when enforce: none, even with illegal subclass', () => {
     expect(() =>
-      enforceVendorNamespaceConfig({
-        recurrenceWindows: [],
-        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
-        vendorNamespace: { enforce: 'none' },
-        customSubclasses: ['un-namespaced-bad'],
-      }),
+      enforceVendorNamespaceConfig(baseConfig('none', ['un-namespaced-bad'])),
     ).not.toThrow();
   });
 
   it('throws QualityMonitoringConfigError on reject mode with illegal subclass', () => {
     expect(() =>
-      enforceVendorNamespaceConfig({
-        recurrenceWindows: [],
-        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
-        vendorNamespace: { enforce: 'reject' },
-        customSubclasses: ['acme-corp:legit', 'un-namespaced-bad'],
-      }),
+      enforceVendorNamespaceConfig(baseConfig('reject', ['acme-corp:legit', 'un-namespaced-bad'])),
     ).toThrow(QualityMonitoringConfigError);
   });
 
@@ -255,15 +263,7 @@ describe('enforceVendorNamespaceConfig (OQ-10)', () => {
     const warnings: string[] = [];
     const logger = { warn: (m: string): void => void warnings.push(m) };
     expect(() =>
-      enforceVendorNamespaceConfig(
-        {
-          recurrenceWindows: [],
-          upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
-          vendorNamespace: { enforce: 'warn' },
-          customSubclasses: ['un-namespaced-bad'],
-        },
-        { logger },
-      ),
+      enforceVendorNamespaceConfig(baseConfig('warn', ['un-namespaced-bad']), { logger }),
     ).not.toThrow();
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/vendor-namespace/);
@@ -272,12 +272,9 @@ describe('enforceVendorNamespaceConfig (OQ-10)', () => {
 
   it('does not throw on reject mode when all custom subclasses are valid', () => {
     expect(() =>
-      enforceVendorNamespaceConfig({
-        recurrenceWindows: [],
-        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
-        vendorNamespace: { enforce: 'reject' },
-        customSubclasses: ['acme-corp:custom-gate-faulty', 'my-company:billing-timeout'],
-      }),
+      enforceVendorNamespaceConfig(
+        baseConfig('reject', ['acme-corp:custom-gate-faulty', 'my-company:billing-timeout']),
+      ),
     ).not.toThrow();
   });
 });
@@ -307,5 +304,151 @@ describe('loadQualityMonitoringConfig — OQ-10 enforcement at load time', () =>
     const cfg = loadQualityMonitoringConfig({ workDir: workdir });
     expect(cfg.customSubclasses).toEqual(['un-namespaced-bad']);
     expect(cfg.vendorNamespace.enforce).toBe('none');
+  });
+});
+
+// ── Phase 5 (AISDLC-306) — coverage-gap / determinism / operator-time-cost ──
+
+describe('Phase 5 defaults (AISDLC-306 / OQ-6, OQ-7, OQ-9)', () => {
+  it('exposes shipping defaults from QUALITY_MONITORING_CONFIG_DEFAULTS', () => {
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap.autoQuarantine).toBe(
+      DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE,
+    );
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap.fileCapture).toBe(
+      DEFAULT_COVERAGE_GAP_FILE_CAPTURE,
+    );
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection.defaultSampleRate).toBe(
+      DEFAULT_DETERMINISM_SAMPLE_RATE,
+    );
+    expect(
+      QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection.alwaysOnRequiresDeterminism,
+    ).toBe(true);
+    expect(
+      QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection.alwaysOnTopBlastRadiusDecile,
+    ).toBe(true);
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost.afkInactivityMinutes).toBe(
+      DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
+    );
+  });
+
+  it('shipping defaults are: auto-quarantine ON, file-capture ON, 1-in-50, 30 min AFK', () => {
+    expect(DEFAULT_COVERAGE_GAP_AUTO_QUARANTINE).toBe(true);
+    expect(DEFAULT_COVERAGE_GAP_FILE_CAPTURE).toBe(true);
+    expect(DEFAULT_DETERMINISM_SAMPLE_RATE).toBeCloseTo(0.02);
+    expect(DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES).toBe(30);
+  });
+});
+
+describe('parseQualityMonitoringConfigYaml — Phase 5 blocks', () => {
+  it('parses coverage-gap block (OQ-6)', () => {
+    const yaml = [
+      'quality:',
+      '  coverage-gap:',
+      '    autoQuarantine: false',
+      '    fileCapture: false',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.coverageGap.autoQuarantine).toBe(false);
+    expect(cfg.coverageGap.fileCapture).toBe(false);
+  });
+
+  it('coverage-gap defaults preserved when only one key is overridden', () => {
+    const yaml = ['coverage-gap:', '  autoQuarantine: false'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.coverageGap.autoQuarantine).toBe(false);
+    expect(cfg.coverageGap.fileCapture).toBe(DEFAULT_COVERAGE_GAP_FILE_CAPTURE);
+  });
+
+  it('parses determinism-detection block (OQ-7)', () => {
+    const yaml = [
+      'quality:',
+      '  determinism-detection:',
+      '    defaultSampleRate: 0.1',
+      '    alwaysOnRequiresDeterminism: false',
+      '    alwaysOnTopBlastRadiusDecile: false',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.determinismDetection.defaultSampleRate).toBeCloseTo(0.1);
+    expect(cfg.determinismDetection.alwaysOnRequiresDeterminism).toBe(false);
+    expect(cfg.determinismDetection.alwaysOnTopBlastRadiusDecile).toBe(false);
+  });
+
+  it('rejects out-of-range determinism sample rates', () => {
+    const yaml = ['determinism-detection:', '  defaultSampleRate: 2.5'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    // Out-of-range silently rejected → fall back to default.
+    expect(cfg.determinismDetection.defaultSampleRate).toBe(DEFAULT_DETERMINISM_SAMPLE_RATE);
+  });
+
+  it('parses operator-time-cost block (OQ-9)', () => {
+    const yaml = ['quality:', '  operator-time-cost:', '    afkInactivityMinutes: 60'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.operatorTimeCost.afkInactivityMinutes).toBe(60);
+  });
+
+  it('rejects negative AFK minutes (falls back to default)', () => {
+    const yaml = ['operator-time-cost:', '  afkInactivityMinutes: -5'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.operatorTimeCost.afkInactivityMinutes).toBe(DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES);
+  });
+
+  it('parses all Phase 5 blocks plus existing ones in one file', () => {
+    const yaml = [
+      'quality:',
+      '  recurrence-windows:',
+      '    - 14d',
+      '  coverage-gap:',
+      '    autoQuarantine: false',
+      '  determinism-detection:',
+      '    defaultSampleRate: 0.05',
+      '  operator-time-cost:',
+      '    afkInactivityMinutes: 45',
+      '  vendor-namespace:',
+      '    enforce: warn',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.recurrenceWindows).toEqual(['14d']);
+    expect(cfg.coverageGap.autoQuarantine).toBe(false);
+    expect(cfg.coverageGap.fileCapture).toBe(DEFAULT_COVERAGE_GAP_FILE_CAPTURE);
+    expect(cfg.determinismDetection.defaultSampleRate).toBeCloseTo(0.05);
+    expect(cfg.operatorTimeCost.afkInactivityMinutes).toBe(45);
+    expect(cfg.vendorNamespace.enforce).toBe('warn');
+  });
+});
+
+describe('loadQualityMonitoringConfig — Phase 5 round-trip', () => {
+  it('loads coverage-gap + determinism-detection + operator-time-cost from yaml on disk', () => {
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      [
+        'quality:',
+        '  coverage-gap:',
+        '    autoQuarantine: false',
+        '    fileCapture: true',
+        '  determinism-detection:',
+        '    defaultSampleRate: 0.05',
+        '    alwaysOnRequiresDeterminism: false',
+        '  operator-time-cost:',
+        '    afkInactivityMinutes: 15',
+      ].join('\n'),
+    );
+    const cfg = loadQualityMonitoringConfig({ workDir: workdir });
+    expect(cfg.coverageGap.autoQuarantine).toBe(false);
+    expect(cfg.coverageGap.fileCapture).toBe(true);
+    expect(cfg.determinismDetection.defaultSampleRate).toBeCloseTo(0.05);
+    expect(cfg.determinismDetection.alwaysOnRequiresDeterminism).toBe(false);
+    expect(cfg.determinismDetection.alwaysOnTopBlastRadiusDecile).toBe(true); // default preserved
+    expect(cfg.operatorTimeCost.afkInactivityMinutes).toBe(15);
+  });
+
+  it('returns shipping defaults when yaml is missing', () => {
+    const cfg = loadQualityMonitoringConfig({ workDir: workdir });
+    expect(cfg.coverageGap).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap);
+    expect(cfg.determinismDetection).toEqual(
+      QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection,
+    );
+    expect(cfg.operatorTimeCost).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost);
   });
 });
