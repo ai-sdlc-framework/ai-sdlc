@@ -18,6 +18,8 @@ references:
   - spec/rfcs/RFC-0017-in-soul-variant-pattern.md
   - spec/rfcs/RFC-0018-in-soul-journey-pattern.md
 priority: high
+blocked:
+  reason: "RFC-0009 lifecycle is Ready for Review (all 13 OQs resolved v3.4); RFC-0017 + RFC-0018 referenced only as explicit out-of-scope carve-outs (AC #6). Operator-acknowledged via dispatch of AISDLC-315 (Phase 3 follow-on to AISDLC-313 + AISDLC-314 which already shipped against the same RFC under the same lifecycle posture)."
 ---
 
 ## Description
