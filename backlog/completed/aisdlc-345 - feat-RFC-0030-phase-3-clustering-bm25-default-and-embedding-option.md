@@ -15,6 +15,12 @@ references:
   - spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
   - spec/rfcs/RFC-0019-embedding-provider-adapter.md
 priority: high
+blocked:
+  reason: |
+    RFC-0030 + RFC-0019 OQs all resolved (operator walkthrough 2026-05-16 / re-walkthrough 2026-05-21);
+    both RFCs at lifecycle 'Ready for Review' pending operator promotion to 'Signed Off'.
+    Predecessor tasks AISDLC-343 + AISDLC-344 (Phase 1 + Phase 2) landed under the same condition.
+    Phase 3 is mechanical implementation against the resolved OQs — no new design decisions.
 ---
 
 ## Description
