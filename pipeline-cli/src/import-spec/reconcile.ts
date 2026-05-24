@@ -543,16 +543,18 @@ function rewriteTaskBodyAndAcs(filePath: string, upstream: SpecKitTaskEntry): vo
     upstream.body.trim().length > 0
       ? upstream.body.trim()
       : `Imported from spec-kit (upstream \`${upstream.taskId}\`).`;
-  let next = original.replace(
-    DESC_RE,
-    `<!-- SECTION:DESCRIPTION:BEGIN -->\n${newBody}\n<!-- SECTION:DESCRIPTION:END -->`,
-  );
+  // Use function replacers to avoid String.replace's $&, $1, $`, $', $<name>, $N
+  // interpretation when upstream content contains those substrings (e.g. monetary
+  // amounts like `$1` or regex documentation). Reviewer MAJOR (code, 2026-05-24).
+  const descReplacement = `<!-- SECTION:DESCRIPTION:BEGIN -->\n${newBody}\n<!-- SECTION:DESCRIPTION:END -->`;
+  let next = original.replace(DESC_RE, () => descReplacement);
 
   const acLines =
     upstream.acceptanceCriteria.length === 0
       ? '- [ ] (no acceptance criteria extracted from upstream — review needed)'
       : upstream.acceptanceCriteria.map((ac, idx) => `- [ ] #${idx + 1} ${ac}`).join('\n');
-  next = next.replace(AC_BLOCK_RE, `<!-- AC:BEGIN -->\n${acLines}\n<!-- AC:END -->`);
+  const acReplacement = `<!-- AC:BEGIN -->\n${acLines}\n<!-- AC:END -->`;
+  next = next.replace(AC_BLOCK_RE, () => acReplacement);
 
   writeFileSync(filePath, next, 'utf8');
 }

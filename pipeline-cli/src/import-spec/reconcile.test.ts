@@ -372,6 +372,29 @@ describe('reconcileSpec', () => {
     expect(eventLog).toContain('accept-auto-sync');
   });
 
+  it('auto-sync preserves literal $-prefixed substrings in upstream body (reviewer MAJOR)', () => {
+    // Defense against String.replace's $&, $1, $`, $' interpretation in
+    // rewriteTaskBodyAndAcs. The seed body already contains $1 / $&; the
+    // upstream body differs by punctuation+case only (cosmetic-tier), so the
+    // auto-sync path runs. Without the function-replacer fix, the $-tokens
+    // resolve as backreferences and corrupt the body on write.
+    const seedBody = 'Cost is $1 per call. Matched is $&.';
+    const filePath = writeImportedTask({ id: 'IMP-1', body: seedBody });
+    const upstreamBody = 'COST IS $1 PER CALL! MATCHED IS $&!';
+
+    const result = reconcileSpec({
+      workDir,
+      readUpstream: upstreamReader([makeUpstream({ body: upstreamBody })]),
+    });
+    expect(result.perTask[0].severity).toBe('cosmetic');
+    expect(result.perTask[0].action).toBe('auto-sync-applied');
+
+    const after = readFileSync(filePath, 'utf8');
+    expect(after).toContain('$1');
+    expect(after).toContain('$&');
+    expect(after).toContain('COST IS $1 PER CALL!');
+  });
+
   it('AC #4 + #5: high-severity (semantic) defers with 24h window and does NOT mutate the task', () => {
     const filePath = writeImportedTask({ id: 'IMP-1', status: 'In Progress' });
     const before = readFileSync(filePath, 'utf8');
