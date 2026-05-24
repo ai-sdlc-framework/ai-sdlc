@@ -1,7 +1,7 @@
 ---
 id: AISDLC-337
 title: 'feat: RFC-0019 Phase 1 — embedding adapter interface + registry + OpenAI default adapter + cost-tracker'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -44,14 +44,14 @@ Unit tests pass; `getEmbeddingAdapter('openai-text-embedding-3-small')` returns 
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `EmbeddingAdapter` interface ships at `orchestrator/src/embedding/types.ts` per §5
-- [ ] #2 Registry + `getEmbeddingAdapter()` ships at `orchestrator/src/embedding/registry.ts`
-- [ ] #3 Default `openai-text-embedding-3-small` adapter ships + works when `OPENAI_API_KEY` set
-- [ ] #4 Error classes `UnknownEmbeddingProvider`, `EmbeddingProviderUnavailable` exported
-- [ ] #5 JSON Schemas at `spec/schemas/embedding-adapter.v1.schema.json` AND `spec/schemas/vector-store-entry.v1.schema.json` (re-walkthrough explicit placement)
-- [ ] #6 Cost-tracker integration: new `embeddingTokens` line item with `(provider, modelVersion, accountId, consumerLabel)` dimensions (re-walkthrough adds `consumerLabel`)
-- [ ] #7 `embed()` API accepts optional `consumerLabel?: string` parameter (default `'unspecified'`); propagates through to cost-tracker (re-walkthrough)
-- [ ] #8 Adapter capability matrix includes `billingModel: 'pay-per-token' | 'subscription-quota'` field; OpenAI default adapter declares `'pay-per-token'` (re-walkthrough)
-- [ ] #9 Embedding cost does NOT consume SubscriptionLedger window quota when adapter `billingModel = 'pay-per-token'` (OQ-7 + re-walkthrough)
-- [ ] #10 Unit tests: registry round-trip, dimension validation, isAvailable() probe, unknown-provider error, consumerLabel propagation, billingModel field read
+- [x] #1 `EmbeddingAdapter` interface ships at `orchestrator/src/embedding/types.ts` per §5
+- [x] #2 Registry + `getEmbeddingAdapter()` ships at `orchestrator/src/embedding/registry.ts`
+- [x] #3 Default `openai-text-embedding-3-small` adapter ships + works when `OPENAI_API_KEY` set
+- [x] #4 Error classes `UnknownEmbeddingProvider`, `EmbeddingProviderUnavailable` exported
+- [x] #5 JSON Schemas at `spec/schemas/embedding-adapter.v1.schema.json` AND `spec/schemas/vector-store-entry.v1.schema.json` (re-walkthrough explicit placement)
+- [x] #6 Cost-tracker integration: new `embeddingTokens` line item with `(provider, modelVersion, accountId, consumerLabel)` dimensions (re-walkthrough adds `consumerLabel`)
+- [x] #7 `embed()` API accepts optional `consumerLabel?: string` parameter (default `'unspecified'`); propagates through to cost-tracker (re-walkthrough)
+- [x] #8 Adapter capability matrix includes `billingModel: 'pay-per-token' | 'subscription-quota'` field; OpenAI default adapter declares `'pay-per-token'` (re-walkthrough)
+- [x] #9 Embedding cost does NOT consume SubscriptionLedger window quota when adapter `billingModel = 'pay-per-token'` (OQ-7 + re-walkthrough)
+- [x] #10 Unit tests: registry round-trip, dimension validation, isAvailable() probe, unknown-provider error, consumerLabel propagation, billingModel field read
 <!-- AC:END -->

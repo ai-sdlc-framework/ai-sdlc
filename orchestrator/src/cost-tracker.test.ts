@@ -216,4 +216,93 @@ describe('CostTracker', () => {
       expect(series[0].runCount).toBe(2);
     });
   });
+
+  describe('recordEmbeddingCost (RFC-0019 AISDLC-337)', () => {
+    it('records embeddingTokens line item with correct pipelineType', () => {
+      const id = tracker.recordEmbeddingCost({
+        provider: 'openai-text-embedding-3-small',
+        modelVersion: '2024-01-25',
+        accountId: 'abc123hash',
+        consumerLabel: 'rfc-0009-tessellation-drift',
+        tokens: 500,
+        costUsd: (500 * 0.02) / 1_000_000,
+        billingModel: 'pay-per-token',
+      });
+      expect(id).toBeGreaterThan(0);
+
+      const entries = store.getCostEntries({});
+      const embEntry = entries.find((e) => e.pipelineType === 'embeddingTokens');
+      expect(embEntry).toBeDefined();
+      expect(embEntry!.pipelineType).toBe('embeddingTokens');
+    });
+
+    it('records consumerLabel as agentName for per-consumer attribution', () => {
+      tracker.recordEmbeddingCost({
+        provider: 'openai-text-embedding-3-small',
+        modelVersion: '2024-01-25',
+        accountId: null,
+        consumerLabel: 'rfc-0008-ppa-similarity',
+        tokens: 200,
+        costUsd: (200 * 0.02) / 1_000_000,
+        billingModel: 'pay-per-token',
+      });
+
+      const entries = store.getCostEntries({});
+      const embEntry = entries.find((e) => e.pipelineType === 'embeddingTokens');
+      expect(embEntry!.agentName).toBe('rfc-0008-ppa-similarity');
+    });
+
+    it('records provider@modelVersion as model field', () => {
+      tracker.recordEmbeddingCost({
+        provider: 'openai-text-embedding-3-small',
+        modelVersion: '2024-01-25',
+        accountId: null,
+        consumerLabel: 'test-consumer',
+        tokens: 100,
+        costUsd: (100 * 0.02) / 1_000_000,
+        billingModel: 'pay-per-token',
+      });
+
+      const entries = store.getCostEntries({});
+      const embEntry = entries.find((e) => e.pipelineType === 'embeddingTokens');
+      expect(embEntry!.model).toBe('openai-text-embedding-3-small@2024-01-25');
+    });
+
+    it('records tokens as inputTokens', () => {
+      tracker.recordEmbeddingCost({
+        provider: 'openai-text-embedding-3-small',
+        modelVersion: '2024-01-25',
+        accountId: null,
+        consumerLabel: 'test-tokens',
+        tokens: 1000,
+        costUsd: (1000 * 0.02) / 1_000_000,
+        billingModel: 'pay-per-token',
+      });
+
+      const entries = store.getCostEntries({});
+      const embEntry = entries.find(
+        (e) => e.pipelineType === 'embeddingTokens' && e.agentName === 'test-tokens',
+      );
+      expect(embEntry!.inputTokens).toBe(1000);
+      expect(embEntry!.totalTokens).toBe(1000);
+    });
+
+    it('uses self-hosted as stageName when accountId is null', () => {
+      tracker.recordEmbeddingCost({
+        provider: 'local-model',
+        modelVersion: '1.0.0',
+        accountId: null,
+        consumerLabel: 'test-self-hosted',
+        tokens: 50,
+        costUsd: 0,
+        billingModel: 'pay-per-token',
+      });
+
+      const entries = store.getCostEntries({});
+      const embEntry = entries.find(
+        (e) => e.pipelineType === 'embeddingTokens' && e.agentName === 'test-self-hosted',
+      );
+      expect(embEntry!.stageName).toBe('self-hosted');
+    });
+  });
 });

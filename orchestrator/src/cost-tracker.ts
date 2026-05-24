@@ -3,11 +3,17 @@
  * and tracks budget status.
  *
  * RFC reference: Lines 618-720 (cost tracking).
+ *
+ * RFC-0019 §10 / AISDLC-337: embeddingTokens line item added via
+ * recordEmbeddingCost(). Embedding costs are recorded with
+ * pipelineType='embeddingTokens' and do NOT decrement SubscriptionLedger
+ * window quota when adapter billingModel='pay-per-token' (OQ-7 re-walkthrough).
  */
 
 import type { StateStore } from './state/store.js';
 import type { CostLedgerEntry } from './state/types.js';
 import { DEFAULT_MODEL_COSTS, DEFAULT_COST_BUDGET_USD } from './defaults.js';
+import type { EmbeddingCostRecord } from './embedding/types.js';
 
 export interface CostSummary {
   totalCostUsd: number;
@@ -248,5 +254,43 @@ export class CostTracker {
     }
 
     return [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /**
+   * Record an embedding cost event per RFC-0019 §10 / AISDLC-337.
+   *
+   * Records a 'embeddingTokens' line item in the cost ledger with full
+   * (provider, modelVersion, accountId, consumerLabel) attribution dimensions
+   * per OQ-6 re-walkthrough.
+   *
+   * When adapter.billingModel === 'pay-per-token', the cost is recorded
+   * but does NOT consume SubscriptionLedger window quota (OQ-7 re-walkthrough).
+   * When billingModel === 'subscription-quota', callers must separately update
+   * the SubscriptionLedger via the inputTokens/outputTokens mechanism.
+   *
+   * @param record - Embedding cost attribution data from the adapter.
+   * @param runId - Pipeline run ID for traceability (optional; defaults to 'embedding').
+   */
+  recordEmbeddingCost(record: EmbeddingCostRecord, runId = 'embedding'): number {
+    // Encoding convention for embeddingTokens line items:
+    //   pipelineType = 'embeddingTokens'  ← discriminates from LLM entries
+    //   agentName    = consumerLabel       ← per-consumer attribution (OQ-6)
+    //   model        = provider@modelVersion ← identifies exact model snapshot
+    //   inputTokens  = tokens              ← total embedding tokens consumed
+    //   costUsd      = pre-computed by adapter ← $0.02/1M for OpenAI small
+    //   stageName    = accountId (or 'self-hosted') ← per-credential attribution
+    const entry: Omit<CostLedgerEntry, 'id' | 'createdAt'> = {
+      runId,
+      agentName: record.consumerLabel,
+      pipelineType: 'embeddingTokens',
+      model: `${record.provider}@${record.modelVersion}`,
+      inputTokens: record.tokens,
+      outputTokens: 0,
+      totalTokens: record.tokens,
+      costUsd: record.costUsd,
+      stageName: record.accountId ?? 'self-hosted',
+    };
+
+    return this.store.saveCostEntry(entry);
   }
 }

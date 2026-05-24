@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ai-sdlc.dev/schemas/embedding-adapter.v1.schema.json",
+  "title": "EmbeddingAdapter",
+  "description": "JSON Schema for the EmbeddingAdapter interface per RFC-0019 §5 and §6.2. Used by adopter adapters that want machine-checkable conformance with the embedding provider adapter framework.",
+  "type": "object",
+  "required": ["name", "modelId", "modelVersion", "dimensions", "capabilities", "requires"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Canonical adapter alias. MUST be unique across the registry. Convention: '<vendor>-<model-family>-<size>'. Examples: 'openai-text-embedding-3-small', 'cohere-embed-v3-multilingual'.",
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "modelId": {
+      "type": "string",
+      "description": "Provider-specific model identifier passed to the upstream API. Example: 'text-embedding-3-small'.",
+      "minLength": 1
+    },
+    "modelVersion": {
+      "type": "string",
+      "description": "Snapshot identifier. ISO date (YYYY-MM-DD) for date-pinned snapshots; semver for versioned models. Example: '2024-01-25'.",
+      "minLength": 1
+    },
+    "dimensions": {
+      "type": "integer",
+      "description": "Vector length emitted by this adapter. Validated against storage on first write to detect accidental dimension mismatches.",
+      "minimum": 1
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "Static capability matrix per RFC-0019 §6.2.",
+      "required": [
+        "dimensions",
+        "maxInputTokens",
+        "supportsBatching",
+        "selfHosted",
+        "billingModel"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dimensions": {
+          "type": "integer",
+          "description": "Output vector length. MUST match the top-level dimensions field.",
+          "minimum": 1
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "description": "Maximum tokens per single embed() call.",
+          "minimum": 1
+        },
+        "supportsBatching": {
+          "type": "boolean",
+          "description": "Whether the adapter implements embedBatch()."
+        },
+        "selfHosted": {
+          "type": "boolean",
+          "description": "Whether the adapter runs locally without an external API call."
+        },
+        "billingModel": {
+          "type": "string",
+          "description": "Billing model per OQ-7 re-walkthrough. 'pay-per-token' = tokens billed via provider invoice, NOT SubscriptionLedger. 'subscription-quota' = tokens billed via operator subscription (e.g., future Anthropic embeddings).",
+          "enum": ["pay-per-token", "subscription-quota"]
+        },
+        "approxCostPer1MTokens": {
+          "type": ["number", "null"],
+          "description": "Approximate cost in USD per 1M tokens. Null for self-hosted adapters (local CPU/GPU cost only).",
+          "minimum": 0
+        }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "description": "Runtime dependency declaration per RFC-0010 §13.8.",
+      "additionalProperties": false,
+      "properties": {
+        "envVar": {
+          "type": "string",
+          "description": "Environment variable required by this adapter. Example: 'OPENAI_API_KEY'."
+        },
+        "binary": {
+          "type": "string",
+          "description": "npm package or binary name required (for local/ONNX adapters)."
+        },
+        "versionRange": {
+          "type": "string",
+          "description": "Semver range for the binary, if applicable."
+        },
+        "modelFile": {
+          "type": "string",
+          "description": "Path to model file (e.g., for ONNX-based adapters)."
+        }
+      }
+    },
+    "deprecatedAt": {
+      "type": "string",
+      "description": "ISO date (YYYY-MM-DD) when the deprecation warning period starts. When set, pipeline-load emits EmbeddingModelDeprecating 90d before and EmbeddingModelDeprecated at/after this date.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "removedAt": {
+      "type": "string",
+      "description": "ISO date (YYYY-MM-DD) when the adapter is removed. When set AND today >= removedAt, pipeline-load fails with EmbeddingModelRemoved.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "replacementAlias": {
+      "type": "string",
+      "description": "Canonical name of the adapter operators should migrate to. Included in deprecation warnings/errors.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    }
+  }
+}

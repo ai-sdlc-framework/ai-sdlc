@@ -3795,6 +3795,123 @@ export const dorConfigV1Schema = {
   additionalProperties: false,
 } as const;
 
+export const embeddingAdapterV1Schema = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  $id: 'https://ai-sdlc.dev/schemas/embedding-adapter.v1.schema.json',
+  title: 'EmbeddingAdapter',
+  description:
+    'JSON Schema for the EmbeddingAdapter interface per RFC-0019 §5 and §6.2. Used by adopter adapters that want machine-checkable conformance with the embedding provider adapter framework.',
+  type: 'object',
+  required: ['name', 'modelId', 'modelVersion', 'dimensions', 'capabilities', 'requires'],
+  additionalProperties: false,
+  properties: {
+    name: {
+      type: 'string',
+      description:
+        "Canonical adapter alias. MUST be unique across the registry. Convention: '<vendor>-<model-family>-<size>'. Examples: 'openai-text-embedding-3-small', 'cohere-embed-v3-multilingual'.",
+      minLength: 1,
+      pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
+    },
+    modelId: {
+      type: 'string',
+      description:
+        "Provider-specific model identifier passed to the upstream API. Example: 'text-embedding-3-small'.",
+      minLength: 1,
+    },
+    modelVersion: {
+      type: 'string',
+      description:
+        "Snapshot identifier. ISO date (YYYY-MM-DD) for date-pinned snapshots; semver for versioned models. Example: '2024-01-25'.",
+      minLength: 1,
+    },
+    dimensions: {
+      type: 'integer',
+      description:
+        'Vector length emitted by this adapter. Validated against storage on first write to detect accidental dimension mismatches.',
+      minimum: 1,
+    },
+    capabilities: {
+      type: 'object',
+      description: 'Static capability matrix per RFC-0019 §6.2.',
+      required: ['dimensions', 'maxInputTokens', 'supportsBatching', 'selfHosted', 'billingModel'],
+      additionalProperties: false,
+      properties: {
+        dimensions: {
+          type: 'integer',
+          description: 'Output vector length. MUST match the top-level dimensions field.',
+          minimum: 1,
+        },
+        maxInputTokens: {
+          type: 'integer',
+          description: 'Maximum tokens per single embed() call.',
+          minimum: 1,
+        },
+        supportsBatching: {
+          type: 'boolean',
+          description: 'Whether the adapter implements embedBatch().',
+        },
+        selfHosted: {
+          type: 'boolean',
+          description: 'Whether the adapter runs locally without an external API call.',
+        },
+        billingModel: {
+          type: 'string',
+          description:
+            "Billing model per OQ-7 re-walkthrough. 'pay-per-token' = tokens billed via provider invoice, NOT SubscriptionLedger. 'subscription-quota' = tokens billed via operator subscription (e.g., future Anthropic embeddings).",
+          enum: ['pay-per-token', 'subscription-quota'],
+        },
+        approxCostPer1MTokens: {
+          type: ['number', 'null'],
+          description:
+            'Approximate cost in USD per 1M tokens. Null for self-hosted adapters (local CPU/GPU cost only).',
+          minimum: 0,
+        },
+      },
+    },
+    requires: {
+      type: 'object',
+      description: 'Runtime dependency declaration per RFC-0010 §13.8.',
+      additionalProperties: false,
+      properties: {
+        envVar: {
+          type: 'string',
+          description: "Environment variable required by this adapter. Example: 'OPENAI_API_KEY'.",
+        },
+        binary: {
+          type: 'string',
+          description: 'npm package or binary name required (for local/ONNX adapters).',
+        },
+        versionRange: {
+          type: 'string',
+          description: 'Semver range for the binary, if applicable.',
+        },
+        modelFile: {
+          type: 'string',
+          description: 'Path to model file (e.g., for ONNX-based adapters).',
+        },
+      },
+    },
+    deprecatedAt: {
+      type: 'string',
+      description:
+        'ISO date (YYYY-MM-DD) when the deprecation warning period starts. When set, pipeline-load emits EmbeddingModelDeprecating 90d before and EmbeddingModelDeprecated at/after this date.',
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+    },
+    removedAt: {
+      type: 'string',
+      description:
+        'ISO date (YYYY-MM-DD) when the adapter is removed. When set AND today >= removedAt, pipeline-load fails with EmbeddingModelRemoved.',
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+    },
+    replacementAlias: {
+      type: 'string',
+      description:
+        'Canonical name of the adapter operators should migrate to. Included in deprecation warnings/errors.',
+      pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
+    },
+  },
+} as const;
+
 export const orchestratorEventsV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/orchestrator-events.v1.schema.json',
@@ -6091,6 +6208,71 @@ export const subscriptionPlanSchema = {
   additionalProperties: false,
 } as const;
 
+export const vectorStoreEntryV1Schema = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  $id: 'https://ai-sdlc.dev/schemas/vector-store-entry.v1.schema.json',
+  title: 'VectorStoreEntry',
+  description:
+    'JSON Schema for the VectorStoreEntry shape per RFC-0019 §8.1. Defines the format of each line in the JSONL embedding storage backend files at <artifactsDir>/_embeddings/<provider>-<modelVersion>.jsonl.',
+  type: 'object',
+  required: [
+    'vector',
+    'embeddingProvider',
+    'embeddingModelVersion',
+    'writtenAt',
+    'text',
+    'textHash',
+  ],
+  additionalProperties: false,
+  properties: {
+    vector: {
+      type: 'array',
+      description:
+        "The embedding vector. Length MUST equal the adapter's declared dimensions at write time.",
+      items: {
+        type: 'number',
+      },
+      minItems: 1,
+    },
+    embeddingProvider: {
+      type: 'string',
+      description:
+        "adapter.name at write time (e.g., 'openai-text-embedding-3-small'). Together with embeddingModelVersion, forms the provenance identity of this vector. Vectors from different providers are NOT interchangeable.",
+      minLength: 1,
+    },
+    embeddingModelVersion: {
+      type: 'string',
+      description:
+        "adapter.modelVersion at write time (e.g., '2024-01-25'). Together with embeddingProvider, forms the provenance identity of this vector. Allows migration tooling (cli-embedding-bump) to detect stale vectors from retired snapshots.",
+      minLength: 1,
+    },
+    writtenAt: {
+      type: 'string',
+      description:
+        'ISO 8601 timestamp of when this entry was written. Used by cli-embedding-gc for mtime-based retention.',
+      format: 'date-time',
+    },
+    text: {
+      type: 'string',
+      description:
+        'Original source text. REQUIRED — needed for re-embedding during migration (cli-embedding-bump). Adopters with privacy concerns MAY store text in a separate encrypted store and reference it by textHash.',
+      minLength: 1,
+    },
+    textHash: {
+      type: 'string',
+      description:
+        "SHA-256 hex digest of the source text. Used as a read-side cache key ('have we already embedded this exact text?') and for content-addressable storage lookup. Recomputing on every lookup is wasteful; storing separately avoids that.",
+      pattern: '^[0-9a-f]{64}$',
+    },
+    metadata: {
+      type: 'object',
+      description:
+        "Adopter-defined metadata. Examples: {sourceDoc: 'rfc-0009.md', shardId: 'OQ-6'}, {consumerLabel: 'rfc-0009-tessellation-drift'}. Opaque to the framework.",
+      additionalProperties: true,
+    },
+  },
+} as const;
+
 export const worktreePoolSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/worktree-pool.schema.json',
@@ -6192,6 +6374,7 @@ export const SCHEMAS: Record<string, object> = {
   'dispatch-resume-signal.v1.schema.json': dispatchResumeSignalV1Schema,
   'dispatch-verdict.v1.schema.json': dispatchVerdictV1Schema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
+  'embedding-adapter.v1.schema.json': embeddingAdapterV1Schema,
   'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
@@ -6200,5 +6383,6 @@ export const SCHEMAS: Record<string, object> = {
   'sa-exemplar.schema.json': saExemplarSchema,
   'signal-source-adapter.v1.schema.json': signalSourceAdapterV1Schema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
+  'vector-store-entry.v1.schema.json': vectorStoreEntryV1Schema,
   'worktree-pool.schema.json': worktreePoolSchema,
 };
