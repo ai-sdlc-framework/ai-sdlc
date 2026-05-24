@@ -29,7 +29,7 @@ references:
   - ai-sdlc-plugin/commands/orchestrator-tick.md
   - pipeline-cli/src/orchestrator/loop.ts
   - pipeline-cli/src/cli/execute.ts
-  - pipeline-cli/src/execute/index.ts
+  - pipeline-cli/src/execute-pipeline.ts
 priority: high
 ---
 
