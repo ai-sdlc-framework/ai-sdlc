@@ -36,6 +36,7 @@ import {
   detectOrphanEnvelopes,
   detectQueueRebaseInvalidation,
   findChoreCommitViolations,
+  isAttestationOnlyDescendant,
   loadAllAttestations,
   parseTrustedReviewers,
   predicateMatchReason,
@@ -3601,6 +3602,259 @@ describe('verifyV6Envelope (unit)', () => {
       assert.ok(
         isFilenameOrSubjectMismatch,
         `expected filename or subject mismatch reason, got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('isAttestationOnlyDescendant (AISDLC-419)', () => {
+  // Create a tiny git repo, then assert the helper accepts attestation-only
+  // descendant chains and rejects everything else.
+  function initRepo() {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-desc-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+    return tmp;
+  }
+  function commit(repo, files, msg) {
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(repo, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', msg], { cwd: repo });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim();
+  }
+
+  it('returns true when subject === head', () => {
+    const tmp = initRepo();
+    try {
+      const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      assert.equal(isAttestationOnlyDescendant(sha, sha, tmp), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns true when descendant adds ONLY attestation envelope files', () => {
+    const tmp = initRepo();
+    try {
+      const subject = commit(tmp, { 'src/a.ts': 'export const A = 1;' }, 'feat: code');
+      const head = commit(
+        tmp,
+        { '.ai-sdlc/attestations/deadbeef.v6.dsse.json': '{"x":1}' },
+        'chore: sign attestation',
+      );
+      assert.equal(isAttestationOnlyDescendant(subject, head, tmp), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns true through TWO stacked attestation-only chore commits', () => {
+    const tmp = initRepo();
+    try {
+      const subject = commit(tmp, { 'src/a.ts': 'export const A = 1;' }, 'feat: code');
+      commit(
+        tmp,
+        { '.ai-sdlc/attestations/aaaaaaaa.v6.dsse.json': '{"a":1}' },
+        'chore: sign attestation (1)',
+      );
+      const head = commit(
+        tmp,
+        {
+          '.ai-sdlc/attestations/bbbbbbbb.v6.dsse.json': '{"b":1}',
+          '.ai-sdlc/transcript-leaves.jsonl': '{"l":1}\n',
+        },
+        'chore: sign attestation (2)',
+      );
+      assert.equal(isAttestationOnlyDescendant(subject, head, tmp), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns FALSE when descendant changes a source file', () => {
+    const tmp = initRepo();
+    try {
+      const subject = commit(tmp, { 'src/a.ts': 'export const A = 1;' }, 'feat: code');
+      const head = commit(
+        tmp,
+        {
+          '.ai-sdlc/attestations/cafe.v6.dsse.json': '{"c":1}',
+          'src/a.ts': 'export const A = 2;', // ← source change — must reject
+        },
+        'fix: also change code',
+      );
+      assert.equal(isAttestationOnlyDescendant(subject, head, tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns FALSE when subject is not an ancestor of head (different branch)', () => {
+    const tmp = initRepo();
+    try {
+      const base = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      const head = commit(tmp, { 'b.txt': 'y' }, 'feat: head');
+      // Create a divergent branch with a different commit
+      execFileSync('git', ['checkout', '-q', '-b', 'side', base], { cwd: tmp });
+      const sideSha = commit(tmp, { 'c.txt': 'z' }, 'feat: side');
+      assert.equal(isAttestationOnlyDescendant(sideSha, head, tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns FALSE for invalid SHAs', () => {
+    const tmp = initRepo();
+    try {
+      const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      assert.equal(isAttestationOnlyDescendant('not-a-sha', sha, tmp), false);
+      assert.equal(isAttestationOnlyDescendant(sha, 'also-not', tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('verifyV6Envelope (AISDLC-419 — attestation-only descendant relaxation)', () => {
+  // These tests run inside a real git repo because the relaxation uses
+  // `git merge-base --is-ancestor` + `git diff-tree`. Synthetic tmp-only
+  // tests (above) still cover the strict failure modes.
+  let keys;
+  before(() => {
+    keys = genV6KeyPair();
+  });
+  function makeTrustedReviewers(publicKeyPem) {
+    return [
+      { agentId: 'code-reviewer', pubkey: publicKeyPem, addedAt: '2026-01-01T00:00:00Z' },
+      { agentId: 'test-reviewer', pubkey: publicKeyPem, addedAt: '2026-01-01T00:00:00Z' },
+      { agentId: 'security-reviewer', pubkey: publicKeyPem, addedAt: '2026-01-01T00:00:00Z' },
+    ];
+  }
+  function initRepo() {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-relax-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+    return tmp;
+  }
+  function commit(repo, files, msg) {
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(repo, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', msg], { cwd: repo });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim();
+  }
+
+  it('accepts envelope when subject.sha1 is ancestor of HEAD via attestation-only chore commit', () => {
+    const tmp = initRepo();
+    try {
+      // C1 = signed commit; C2 = chore-attestation commit on top.
+      const subjectSha = commit(tmp, { 'src/a.ts': 'export const A = 1;' }, 'feat: code');
+      // Build a v6 envelope whose subject.sha1 = subjectSha
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, subjectSha, leaves, keys.privateKeyPem);
+      // Now create C2: an attestation-only commit on top.
+      const headSha = commit(
+        tmp,
+        { '.ai-sdlc/attestations/ignored.v6.dsse.json': '{"placeholder":1}' },
+        'chore: sign attestation (top-up)',
+      );
+      const result = verifyV6Envelope({
+        envelope,
+        // Caller (line 1709) synthesizes filename from subject.sha1 when patch-id-named.
+        envelopeFileName: `${subjectSha}.v6.dsse.json`,
+        headSha,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `expected valid (attestation-only descendant), got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('REJECTS envelope when descendant chore commit ALSO changes source files', () => {
+    const tmp = initRepo();
+    try {
+      const subjectSha = commit(tmp, { 'src/a.ts': 'export const A = 1;' }, 'feat: code');
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, subjectSha, leaves, keys.privateKeyPem);
+      // Sneak a source-file change into the descendant commit.
+      const headSha = commit(
+        tmp,
+        {
+          '.ai-sdlc/attestations/placeholder.v6.dsse.json': '{"x":1}',
+          'src/a.ts': 'export const A = 2;', // ← tamper
+        },
+        'chore: sign + sneak code change',
+      );
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${subjectSha}.v6.dsse.json`,
+        headSha,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'invalid',
+        `expected invalid (source code changed), got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('REJECTS envelope when subject.sha1 is not an ancestor of HEAD', () => {
+    const tmp = initRepo();
+    try {
+      const baseSha = commit(tmp, { 'a.txt': 'x' }, 'base');
+      const headSha = commit(tmp, { 'b.txt': 'y' }, 'feat: head');
+      // Create a divergent branch and sign for that commit instead.
+      execFileSync('git', ['checkout', '-q', '-b', 'side', baseSha], { cwd: tmp });
+      const sideSha = commit(tmp, { 'src/side.ts': 'export const S = 1;' }, 'feat: side');
+      // Build envelope binding to sideSha (a non-ancestor of headSha on main).
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, sideSha, leaves, keys.privateKeyPem);
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${sideSha}.v6.dsse.json`,
+        headSha,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'invalid',
+        `expected invalid (not an ancestor), got: ${result.reason}`,
       );
     } finally {
       rmSync(tmp, { recursive: true, force: true });
