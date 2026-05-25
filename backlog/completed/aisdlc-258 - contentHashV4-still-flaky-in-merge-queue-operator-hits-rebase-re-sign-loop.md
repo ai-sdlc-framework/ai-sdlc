@@ -76,5 +76,5 @@ But operator considers this a UX failure — they want the queue to "just work" 
 
 ## Severity
 
-**HIGH** — every multi-PR queue cycle requires operator intervention. Blocks autonomous orchestrator from achieving its "operator wakes up to merged PRs" UX goal.
+**HIGH** — every multi-PR queue cycle needs operator intervention. Blocks autonomous orchestrator from achieving its "operator wakes up to merged PRs" UX goal.
 <!-- SECTION:DESCRIPTION:END -->

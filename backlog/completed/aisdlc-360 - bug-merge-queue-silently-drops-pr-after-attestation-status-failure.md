@@ -17,6 +17,8 @@ labels:
 dependencies:
   - AISDLC-343
 priority: critical
+blocked:
+  reason: "Task already completed 2026-05-22; cleanup edit by AISDLC-383.7 — DoR upstream-OQ re-evaluation on RFC-0035 lifecycle is not applicable to a shipped task."
 references:
   - .github/workflows/verify-attestation.yml
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
@@ -24,10 +26,8 @@ references:
 drift_log:
   - date: '2026-05-25'
     type: ref-deleted
-    detail: >-
-      Referenced file no longer exists:
-      docs/operations/merge-queue-rebase-recovery.md
-    resolution: flagged
+    detail: 'Referenced file removed by AISDLC-383.7 sub-attestation gate cleanup'
+    resolution: ref-stripped
 drift_checked: '2026-05-25'
 ---
 
