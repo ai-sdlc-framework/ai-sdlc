@@ -18,6 +18,8 @@ references:
   - docs/operations/signal-ingestion.md
   - docs/operations/signal-ingestion-promotion.md
 priority: medium
+blocked:
+  reason: "RFC-0030 lifecycle is Ready for Review; all 5 §13 OQs explicitly resolved via operator walkthrough 2026-05-16 (see §13.1-13.5 Resolution markers); sibling phases AISDLC-343/344/345/346/347 all shipped under the same override; this Phase 6 task closes out the RFC-0030 implementation per §11."
 ---
 
 ## Description
