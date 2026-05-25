@@ -1554,6 +1554,245 @@ describe('file subcommand — draft state (AISDLC-320)', () => {
       resetInvokerCache();
     }
   });
+
+  // ── AISDLC-275 — autoClassify path WITH an invoker present ────────────────
+  // Covers the threshold-gated auto-triage + auto-severity branches in
+  // capture.ts (the `if (invoker) { ... }` body). Tests write a temporary
+  // ESM invoker module to the worktree's `node_modules/.cache/` and point
+  // `AI_SDLC_CLASSIFIER_INVOKER_MODULE` at it via the env-var shim
+  // documented in `invoker-loader.ts`. Each test resets the per-process
+  // invoker cache before + after so neighbouring tests are unaffected.
+  describe('AISDLC-275 autoClassify with invoker present', () => {
+    // Helper: write a tiny ESM file that default-exports an invoker
+    // whose `invoke()` returns the supplied fixture per task-type. The
+    // file lives inside `tmp` (the per-test ARTIFACTS_DIR / repoRoot)
+    // so it's GC'd by the beforeEach/afterEach harness automatically.
+    function writeInvokerModule(fixtures: {
+      triage?: {
+        classification: string;
+        confidence: number;
+        reasoning?: string;
+      };
+      severity?: {
+        classification: string;
+        confidence: number;
+        reasoning?: string;
+      };
+      throws?: string;
+    }): string {
+      // Use a unique filename per call so dynamic-import caches don't
+      // collide across test cases within the same vitest worker.
+      const filename = `invoker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mjs`;
+      const path = join(tmp, filename);
+      const body = `
+const fixtures = ${JSON.stringify(fixtures)};
+export default {
+  async invoke(req) {
+    if (fixtures.throws) throw new Error(fixtures.throws);
+    if (req.taskType === 'capture-triage' && fixtures.triage) {
+      return {
+        classification: fixtures.triage.classification,
+        confidence: fixtures.triage.confidence,
+        reasoning: fixtures.triage.reasoning ?? '',
+        inputTokens: 80,
+        outputTokens: 25,
+      };
+    }
+    if (req.taskType === 'capture-severity' && fixtures.severity) {
+      return {
+        classification: fixtures.severity.classification,
+        confidence: fixtures.severity.confidence,
+        reasoning: fixtures.severity.reasoning ?? '',
+        inputTokens: 80,
+        outputTokens: 25,
+      };
+    }
+    return {
+      classification: 'pending',
+      confidence: 0,
+      reasoning: 'no fixture',
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  },
+};
+`;
+      writeFileSync(path, body, 'utf8');
+      return path;
+    }
+
+    async function withInvoker<T>(modulePath: string, fn: () => Promise<T>): Promise<T> {
+      const { resetInvokerCache } = await import('../capture/invoker-loader.js');
+      resetInvokerCache();
+      const savedEnv = process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+      process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE = modulePath;
+      try {
+        return await fn();
+      } finally {
+        if (savedEnv === undefined) {
+          delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+        } else {
+          process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE = savedEnv;
+        }
+        resetInvokerCache();
+      }
+    }
+
+    it('autoTriageCapture is invoked when autoClassify=true + no explicit triage; recommendation auto-applies on high confidence', async () => {
+      const modulePath = writeInvokerModule({
+        triage: { classification: 'quick-fix-task', confidence: 0.9, reasoning: 'small rename' },
+        severity: { classification: 'low', confidence: 0.9, reasoning: 'cosmetic' },
+      });
+      await withInvoker(modulePath, async () => {
+        const blob = JSON.stringify({
+          finding: 'rename foo to bar',
+          agentRole: 'code-reviewer',
+          autoClassify: true,
+        });
+        setArgv('file', 'ignored', '--json', blob);
+        await buildCaptureCli().parseAsync();
+        const rec = stdoutJson<CaptureRecord>();
+        // Auto-triage applied: substrate `quick-fix-task` → capture `quick-fix`.
+        expect(rec.triage).toBe('quick-fix');
+        // Auto-severity applied: substrate `low` → capture `suggestion`.
+        expect(rec.severity).toBe('suggestion');
+        // Audit entry flags + corpus-entry decoration.
+        expect(rec.auditTrail[0].triageAutoApplied).toBe(true);
+        expect(rec.auditTrail[0].severityAutoApplied).toBe(true);
+        expect(typeof rec.auditTrail[0].triageCorpusEntryId).toBe('string');
+        expect(typeof rec.auditTrail[0].severityCorpusEntryId).toBe('string');
+        expect(rec.auditTrail[0].triageConfidence).toBe(0.9);
+        expect(rec.auditTrail[0].severityConfidence).toBe(0.9);
+        // High confidence + auto-applied → auto-submitted (NOT draft).
+        const submittedPath = join(tmp, 'backlog', 'captures', `${rec.id}.md`);
+        const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+        expect(existsSync(submittedPath)).toBe(true);
+        expect(existsSync(draftPath)).toBe(false);
+      });
+    });
+
+    it('autoTriageCapture below threshold does NOT auto-apply (autoTriageVal stays null → falls back to tbd)', async () => {
+      const modulePath = writeInvokerModule({
+        // Confidence below the 0.7 default — metBehindThreshold=false.
+        triage: { classification: 'quick-fix-task', confidence: 0.5, reasoning: 'ambiguous' },
+        severity: { classification: 'low', confidence: 0.5, reasoning: 'ambiguous' },
+      });
+      await withInvoker(modulePath, async () => {
+        const blob = JSON.stringify({
+          finding: 'unclear scope',
+          agentRole: 'code-reviewer',
+          autoClassify: true,
+        });
+        setArgv('file', 'ignored', '--json', blob);
+        await buildCaptureCli().parseAsync();
+        const rec = stdoutJson<CaptureRecord>();
+        // Recommendation NOT applied; falls back to defaults.
+        expect(rec.triage).toBe('tbd');
+        expect(rec.severity).toBe('unknown');
+        expect(rec.auditTrail[0].triageAutoApplied).toBeUndefined();
+        expect(rec.auditTrail[0].severityAutoApplied).toBeUndefined();
+        // Confidence + corpus ids still recorded for the operator-override
+        // capture path even when the recommendation didn't auto-apply.
+        expect(rec.auditTrail[0].triageConfidence).toBe(0.5);
+        expect(rec.auditTrail[0].severityConfidence).toBe(0.5);
+        expect(typeof rec.auditTrail[0].triageCorpusEntryId).toBe('string');
+        expect(typeof rec.auditTrail[0].severityCorpusEntryId).toBe('string');
+        // No auto-submit signal → draft.
+        const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+        expect(existsSync(draftPath)).toBe(true);
+      });
+    });
+
+    it('explicit severity=unknown still triggers autoInferSeverity invocation (corpus + confidence recorded, but explicit value wins via ??)', async () => {
+      const modulePath = writeInvokerModule({
+        // The triage call is skipped because explicit triage was supplied.
+        severity: { classification: 'critical', confidence: 0.95, reasoning: 'data loss' },
+      });
+      await withInvoker(modulePath, async () => {
+        const blob = JSON.stringify({
+          finding: 'auth bypass possible',
+          agentRole: 'security-reviewer',
+          autoClassify: true,
+          triage: 'new-issue',
+          severity: 'unknown', // explicit 'unknown' → branch fires severity inference, BUT the explicit value still wins in the `??` chain
+        });
+        setArgv('file', 'ignored', '--json', blob);
+        await buildCaptureCli().parseAsync();
+        const rec = stdoutJson<CaptureRecord>();
+        expect(rec.triage).toBe('new-issue'); // explicit triage respected
+        // The explicit-severity-but-unknown branch fires autoInferSeverity (so the corpus
+        // entry + confidence are recorded for the operator-override capture path), but the
+        // `severityVal = explicitSeverity ?? autoSeverityVal ?? 'unknown'` line short-circuits
+        // on the explicit string 'unknown' (it's not null/undefined). Final severity stays
+        // 'unknown'. This documents the existing code path; the per-AC behaviour can be
+        // refined later if the explicit-unknown override semantics need to change.
+        expect(rec.severity).toBe('unknown');
+        // Auto-severity branch ran → corpus entry + confidence recorded.
+        expect(typeof rec.auditTrail[0].severityCorpusEntryId).toBe('string');
+        expect(rec.auditTrail[0].severityConfidence).toBe(0.95);
+        // The auto-applied flag IS set whenever autoSeverityVal is non-null (the inference
+        // ran + met threshold + mapped to a known CaptureSeverity) — independently of whether
+        // the explicit value supersedes it in the final `??` chain. The flag reflects the
+        // INFERENCE outcome, not the FINAL value, per the `if (autoSeverityVal) ...` line in
+        // capture.ts.
+        expect(rec.auditTrail[0].severityAutoApplied).toBe(true);
+        expect(rec.auditTrail[0].triageAutoApplied).toBeUndefined();
+      });
+    });
+
+    it('autoTriageCapture throwing is swallowed; capture record is still written + draft state used', async () => {
+      const modulePath = writeInvokerModule({
+        throws: 'classifier blew up',
+      });
+      await withInvoker(modulePath, async () => {
+        const blob = JSON.stringify({
+          finding: 'something happened',
+          agentRole: 'developer',
+          autoClassify: true,
+        });
+        setArgv('file', 'ignored', '--json', blob);
+        await buildCaptureCli().parseAsync();
+        const rec = stdoutJson<CaptureRecord>();
+        // Substrate falls open on invoker throw → classification 'pending'
+        // does not map to a CaptureTriageValue → autoTriageVal stays null.
+        // Captured record is still written with defaults.
+        expect(rec.triage).toBe('tbd');
+        expect(rec.severity).toBe('unknown');
+        expect(rec.auditTrail[0].triageAutoApplied).toBeUndefined();
+        expect(rec.auditTrail[0].severityAutoApplied).toBeUndefined();
+        const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+        expect(existsSync(draftPath)).toBe(true);
+      });
+    });
+
+    it('passes the JSON --context through to the substrate (sourceContext wiring)', async () => {
+      // The context-bag wiring only matters insofar as the branch executes;
+      // assert the capture still records the context string + auto-triage
+      // path completes cleanly.
+      const modulePath = writeInvokerModule({
+        triage: { classification: 'new-feature-issue', confidence: 0.85, reasoning: 'scope' },
+        severity: { classification: 'medium', confidence: 0.85, reasoning: 'moderate' },
+      });
+      await withInvoker(modulePath, async () => {
+        const blob = JSON.stringify({
+          finding: 'add export to public API',
+          agentRole: 'code-reviewer',
+          autoClassify: true,
+          context: 'during code review of PR #500',
+        });
+        setArgv('file', 'ignored', '--json', blob);
+        await buildCaptureCli().parseAsync();
+        const rec = stdoutJson<CaptureRecord>();
+        expect(rec.source.context).toBe('during code review of PR #500');
+        // Substrate `new-feature-issue` → capture `new-feature-issue`.
+        expect(rec.triage).toBe('new-feature-issue');
+        // Substrate `medium` → capture `minor`.
+        expect(rec.severity).toBe('minor');
+        expect(rec.auditTrail[0].triageAutoApplied).toBe(true);
+        expect(rec.auditTrail[0].severityAutoApplied).toBe(true);
+      });
+    });
+  });
 });
 
 // ── submit subcommand ─────────────────────────────────────────────────────────
