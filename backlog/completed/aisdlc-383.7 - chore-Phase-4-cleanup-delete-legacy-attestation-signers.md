@@ -99,7 +99,7 @@ Phase 4 cleanup delivers the **safe-to-delete subset** of the RFC-0042 §Migrati
 - **Retained `CONTENTHASH_SHARED_CHURN_FILES`** (deletion target #7): the task body's claim "only used by v3/v4/v5 signers" is incorrect. The constant is exported from `orchestrator/src/runtime/attestations.ts` and consumed by **both** sides of the v3/v4/v5 hash recomputation in `scripts/verify-attestation.mjs`. Deleting it would break the retained verifier (which AC #2 + OQ-7 require we preserve).
 - **Retained AISDLC-274 stale-envelope detection** (deletion target #8): the stale-envelope sweep (Step 4c of `check-attestation-sign.sh`) is still required by the v5 chore-commit re-sign pattern when a rebase shifts the parent SHA. Removing it would have regressed v5 opt-in flows. The block can be deleted alongside the v5 signer once that follow-up lands.
 - **Retained AISDLC-381 fork-PR migration** of `auto-rearm-on-dequeue.yml` (deletion target #9): the workflow itself is still in active service (cron-based "ensure auto-merge stays armed" safety net per AISDLC-400). The AISDLC-381 narrative comments in its header could be cleaned up but the `pull_request_target` migration is independent of v6 rebase-fragility and remains necessary for fork-PR support.
-- **Kept the `--print-content-hash` mode** in `sign-attestation.mjs`: still consumed by `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase` as the AISDLC-102 oracle. Removing it requires coordinated changes to those slash commands; out of scope for a cleanup PR.
+- **Kept the `--print-content-hash` mode** in `sign-attestation.mjs`: still consumed by `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase` as the AISDLC-102 oracle. Coordinated changes to those slash commands are tracked under RFC-0042 follow-up scope; out of scope for a cleanup PR.
 
 ### Verification
 
@@ -110,9 +110,9 @@ Phase 4 cleanup delivers the **safe-to-delete subset** of the RFC-0042 §Migrati
 
 ### Follow-up
 
-The following originally-scoped deletions were deferred because they require coordinated downstream changes; file as a follow-up sub-task once the prerequisite work lands:
+The following originally-scoped deletions were deferred. File as follow-up sub-tasks under AISDLC-383 (RFC-0042 umbrella); each item names the prerequisite tracked work or rationale inline:
 
-1. **Delete v5 signer path in `sign-attestation.mjs`** (deletion target #1) once the ad-hoc reviewer flows that opt into `--schema-version v5` / `AI_SDLC_V5_LEGACY=1` are migrated to emit transcript leaves.
+1. **Delete v5 signer path in `sign-attestation.mjs`** (deletion target #1). Blocked on AISDLC-409 follow-up — the ad-hoc reviewer flows that opt into `--schema-version v5` / `AI_SDLC_V5_LEGACY=1` first need transcript-leaf emission wired in.
 2. **Delete AISDLC-274 stale-envelope detection** (deletion target #8) — depends on (1).
 3. **Delete `--print-content-hash` mode** in `sign-attestation.mjs` and corresponding callers in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`.
 4. **Drop `CONTENTHASH_SHARED_CHURN_FILES`** (deletion target #7) — only safe once the v3/v4/v5 verifier code is also retired (i.e. when OQ-7's "auditable forever" guarantee is relaxed).
