@@ -110,4 +110,4 @@ Rate: ~30% of multi-hour-lived PRs hit this. With shorter PR cycles + AISDLC-343
 
 Operator-away session 2026-05-17. The autonomous loop burned ~6 cycles trying to land 521 alone before this task was filed. Operator's explicit directive: "if pipeline experiences issues then open an issue for them and process it then get back to processing issues through the pipeline."
 
-The auto-rebase-and-resign workflow IS the "process it" step that closes the loop — once it ships, the operator-away loop becomes truly self-healing for this failure mode.
+The auto-rebase-and-resign workflow IS the "process it" step that closes the loop — once AISDLC-420 lands, the operator-away loop becomes truly self-healing for this failure mode.
