@@ -108,7 +108,12 @@ function emitText(text: string): void {
 
 // ── Render classifier batch (RFC-0024 Refit Phase 4) ─────────────────────────
 
-function renderClassifierBatch(
+/**
+ * Render a batch of `classifyPrCommentsBatch` results to stdout. Exported
+ * so the post-stdin orchestration helpers + tests can drive the renderer
+ * directly without rebuilding the yargs argv envelope.
+ */
+export function renderClassifierBatch(
   batch: readonly ClassifyPrCommentsBatchResult[],
   format: string,
 ): void {
@@ -144,6 +149,162 @@ function renderClassifierBatch(
       decision,
     })),
   });
+}
+
+// ── Stdin reader (shared by stdin-driven subcommands) ───────────────────────
+
+/**
+ * Read all available bytes from stdin synchronously and return them as a
+ * utf-8 string. Used by `parse-pr-comments` and `append-capture-marker`
+ * (both of which consume a JSON document piped via stdin).
+ *
+ * Uses `readSync(fd=0)` rather than the streaming `process.stdin` API so the
+ * yargs handler can `await` a single result instead of attaching a `data`
+ * listener — the latter races with the yargs handler's own resolution and
+ * loses input on small payloads.
+ *
+ * **Hermetic-test caveat**: `readSync(0,...)` blocks on the TTY inherited
+ * into vitest worker_threads. This function is therefore only exercised by
+ * the bin-shim subprocess path in production / `bin/cli-capture.mjs`. The
+ * post-stdin orchestration (parse JSON, call helpers, emit) is in the
+ * exported `runParsePrCommentsHandler` / `runAppendCaptureMarkerHandler`
+ * functions below — drive those directly to test the orchestration.
+ *
+ * Tests may inject a stub via `setStdinReaderForTesting()`.
+ */
+export async function readAllStdinSync(): Promise<string> {
+  const { readSync } = await import('node:fs');
+  const fd0 = 0;
+  const chunks: Buffer[] = [];
+  const chunkBuf = Buffer.alloc(65536);
+  let bytesRead = 0;
+  do {
+    try {
+      bytesRead = readSync(fd0, chunkBuf, 0, chunkBuf.length, null);
+      if (bytesRead > 0) chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
+    } catch {
+      break;
+    }
+  } while (bytesRead > 0);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Module-level stdin reader pointer. The yargs subcommand handlers call
+ * `stdinReader()` rather than `readAllStdinSync()` directly so tests can
+ * inject a deterministic fake. Production code paths leave it pointing at
+ * the real `readAllStdinSync`.
+ */
+let stdinReader: () => Promise<string> = readAllStdinSync;
+
+/**
+ * Test hook — override the stdin reader the yargs subcommands use. Pass
+ * `null` to restore the production default. Exposed so the in-process
+ * vitest suite can drive the full yargs argv path through
+ * `parse-pr-comments` / `append-capture-marker` without blocking on the
+ * inherited TTY.
+ */
+export function setStdinReaderForTesting(reader: (() => Promise<string>) | null): void {
+  stdinReader = reader ?? readAllStdinSync;
+}
+
+// ── Post-stdin handlers (RFC-0024 Refit Phase 4) ─────────────────────────────
+//
+// The two subcommands `parse-pr-comments` and `append-capture-marker` read
+// their input from stdin in production. The stdin-read uses `readSync(fd=0)`
+// from `node:fs`, which blocks on the inherited TTY in vitest worker_threads
+// and can't be stubbed (the property is non-configurable). The handlers
+// below take the already-read JSON string, do the parse + orchestration,
+// and emit to stdout/stderr — that's the surface tests can drive.
+
+/**
+ * Post-stdin orchestration for `parse-pr-comments`. Parses the JSON,
+ * routes to the legacy `findCaptureComments` path or the RFC-0024 Refit
+ * Phase 4 `classifyPrCommentsBatch` path based on `classify`, and renders.
+ *
+ * Exits the process via `process.exit(1)` on invalid JSON (matches the
+ * inline handler's behavior so the CLI semantics are unchanged).
+ */
+export async function runParsePrCommentsHandler(opts: {
+  input: string;
+  classify: boolean;
+  threshold?: number;
+  format: string;
+}): Promise<void> {
+  let comments: Array<{
+    body: string;
+    author?: { login: string };
+    url?: string;
+    prNumber?: number;
+    databaseId?: number;
+  }>;
+  try {
+    comments = JSON.parse(opts.input.trim());
+  } catch {
+    process.stderr.write('[cli-capture] parse-pr-comments: invalid JSON on stdin\n');
+    process.exit(1);
+  }
+
+  if (opts.classify === true) {
+    const batch = await classifyPrCommentsBatch(comments, {
+      threshold: opts.threshold,
+    });
+    renderClassifierBatch(batch, opts.format);
+    return;
+  }
+
+  const found = findCaptureComments(comments);
+
+  if (opts.format === 'table') {
+    if (found.length === 0) {
+      emitText('(no ai-sdlc:capture markers found in PR comments)');
+    } else {
+      for (const { comment, marker } of found) {
+        emitText(
+          `marker found:\n` +
+            `  author: ${comment.author?.login ?? 'unknown'}\n` +
+            `  severity: ${marker.severity ?? '(not set)'}\n` +
+            `  triage: ${marker.triage ?? '(not set)'}\n` +
+            `  finding: ${marker.finding}\n`,
+        );
+      }
+    }
+  } else {
+    emit({ found: found.map(({ comment, marker }) => ({ comment, marker })) });
+  }
+}
+
+/**
+ * Post-stdin orchestration for `append-capture-marker`. Parses the JSON,
+ * validates the `{body, captureId}` shape, calls
+ * `appendCaptureMarkerToComment`, and renders.
+ *
+ * Exits the process via `process.exit(1)` on invalid JSON or shape (matches
+ * the inline handler's behavior).
+ */
+export function runAppendCaptureMarkerHandler(opts: { input: string; format: string }): void {
+  let payload: { body?: unknown; captureId?: unknown };
+  try {
+    payload = JSON.parse(opts.input.trim());
+  } catch {
+    process.stderr.write('[cli-capture] append-capture-marker: invalid JSON on stdin\n');
+    process.exit(1);
+  }
+
+  if (typeof payload.body !== 'string' || typeof payload.captureId !== 'string') {
+    process.stderr.write(
+      '[cli-capture] append-capture-marker: stdin must be {body:string, captureId:string}\n',
+    );
+    process.exit(1);
+  }
+
+  const result = appendCaptureMarkerToComment(payload.body, payload.captureId);
+
+  if (opts.format === 'text') {
+    process.stdout.write(result.body);
+  } else {
+    emit(result);
+  }
 }
 
 // ── Detect current PR number from git branch + gh CLI ─────────────────────────
@@ -903,74 +1064,18 @@ export function buildCaptureCli(): Argv {
 
           let input = '';
           try {
-            const { readSync } = await import('node:fs');
-            const fd0 = 0; // stdin fd
-            const chunks: Buffer[] = [];
-            const chunkBuf = Buffer.alloc(65536);
-            let bytesRead = 0;
-            do {
-              try {
-                bytesRead = readSync(fd0, chunkBuf, 0, chunkBuf.length, null);
-                if (bytesRead > 0) chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
-              } catch {
-                break;
-              }
-            } while (bytesRead > 0);
-            input = Buffer.concat(chunks).toString('utf8');
+            input = await stdinReader();
           } catch {
             process.stderr.write('[cli-capture] parse-pr-comments: failed to read stdin\n');
             process.exit(1);
           }
 
-          let comments: Array<{
-            body: string;
-            author?: { login: string };
-            url?: string;
-            prNumber?: number;
-            databaseId?: number;
-          }>;
-          try {
-            comments = JSON.parse(input.trim());
-          } catch {
-            process.stderr.write('[cli-capture] parse-pr-comments: invalid JSON on stdin\n');
-            process.exit(1);
-          }
-
-          if (argv.classify === true) {
-            // RFC-0024 Refit Phase 4 — the OQ-3 LLM auto-classifier
-            // path. Without an LLM invoker injection point at this CLI
-            // boundary (the CLI doesn't depend on @anthropic-ai/sdk),
-            // we fall open to the substrate's pending sentinel. The
-            // shipped CLI surface returns the verdict per comment so
-            // operator tools / GitHub-webhook handlers can fan out into
-            // their own invoker; the classify call itself happens
-            // server-side where the invoker is wired.
-            const batch = await classifyPrCommentsBatch(comments, {
-              threshold: argv.threshold,
-            });
-            renderClassifierBatch(batch, String(argv.format));
-            return;
-          }
-
-          const found = findCaptureComments(comments);
-
-          if (String(argv.format) === 'table') {
-            if (found.length === 0) {
-              emitText('(no ai-sdlc:capture markers found in PR comments)');
-            } else {
-              for (const { comment, marker } of found) {
-                emitText(
-                  `marker found:\n` +
-                    `  author: ${comment.author?.login ?? 'unknown'}\n` +
-                    `  severity: ${marker.severity ?? '(not set)'}\n` +
-                    `  triage: ${marker.triage ?? '(not set)'}\n` +
-                    `  finding: ${marker.finding}\n`,
-                );
-              }
-            }
-          } else {
-            emit({ found: found.map(({ comment, marker }) => ({ comment, marker })) });
-          }
+          await runParsePrCommentsHandler({
+            input,
+            classify: argv.classify === true,
+            threshold: argv.threshold as number | undefined,
+            format: String(argv.format),
+          });
         },
       )
       // ── append-capture-marker (RFC-0024 Refit Phase 4 bidirectional sync) ────
@@ -988,47 +1093,16 @@ export function buildCaptureCli(): Argv {
 
           let input = '';
           try {
-            const { readSync } = await import('node:fs');
-            const fd0 = 0;
-            const chunks: Buffer[] = [];
-            const chunkBuf = Buffer.alloc(65536);
-            let bytesRead = 0;
-            do {
-              try {
-                bytesRead = readSync(fd0, chunkBuf, 0, chunkBuf.length, null);
-                if (bytesRead > 0) chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
-              } catch {
-                break;
-              }
-            } while (bytesRead > 0);
-            input = Buffer.concat(chunks).toString('utf8');
+            input = await stdinReader();
           } catch {
             process.stderr.write('[cli-capture] append-capture-marker: failed to read stdin\n');
             process.exit(1);
           }
 
-          let payload: { body?: unknown; captureId?: unknown };
-          try {
-            payload = JSON.parse(input.trim());
-          } catch {
-            process.stderr.write('[cli-capture] append-capture-marker: invalid JSON on stdin\n');
-            process.exit(1);
-          }
-
-          if (typeof payload.body !== 'string' || typeof payload.captureId !== 'string') {
-            process.stderr.write(
-              '[cli-capture] append-capture-marker: stdin must be {body:string, captureId:string}\n',
-            );
-            process.exit(1);
-          }
-
-          const result = appendCaptureMarkerToComment(payload.body, payload.captureId);
-
-          if (String(argv.format) === 'text') {
-            process.stdout.write(result.body);
-          } else {
-            emit(result);
-          }
+          runAppendCaptureMarkerHandler({
+            input,
+            format: String(argv.format),
+          });
         },
       )
       // ── lint-file ─────────────────────────────────────────────────────────────

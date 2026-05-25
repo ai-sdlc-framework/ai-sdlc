@@ -14,7 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildCaptureCli } from './capture.js';
+import {
+  buildCaptureCli,
+  renderClassifierBatch,
+  runAppendCaptureMarkerHandler,
+  runParsePrCommentsHandler,
+  setStdinReaderForTesting,
+} from './capture.js';
 import { writeCapture } from '../capture/capture-writer.js';
 import { writeDraftCaptureFile, writeSubmittedCaptureFile } from '../capture/draft-capture.js';
 import { renderRubricTable, getRubricEntry } from '../capture/triage-rubric.js';
@@ -96,6 +102,7 @@ afterEach(() => {
   }
 
   rmSync(tmp, { recursive: true, force: true });
+  setStdinReaderForTesting(null);
   vi.restoreAllMocks();
 });
 
@@ -676,26 +683,409 @@ describe('triage subcommand', () => {
 });
 
 // ── parse-pr-comments subcommand ──────────────────────────────────────────────
+//
+// The yargs subcommand handler reads from stdin via `readSync(fd=0)` which
+// blocks in vitest worker_threads (the property is non-configurable on
+// `node:fs` so it can't be stubbed). To get coverage on the orchestration
+// logic (parse JSON, route to legacy vs classifier path, emit), the post-
+// stdin handler is exported as `runParsePrCommentsHandler({input, ...})`.
+// Tests drive that exported function directly with the already-read JSON
+// string. The stdin-reading shell layer is a thin wrapper around it.
 
-describe('parse-pr-comments subcommand', () => {
-  // parse-pr-comments uses readSync(fd=0) from node:fs to read stdin.
-  // In vitest worker_threads, fd=0 inherits the terminal stdin and
-  // readSync blocks when run interactively. The property is non-configurable
-  // on node:fs so it cannot be stubbed. These tests are therefore skipped
-  // in the in-process test suite.
-  //
-  // Coverage of the orchestration glue (parse JSON, call findCaptureComments,
-  // emit output) is intentionally deferred:
-  //   - findCaptureComments is fully tested in pr-comment-parser.test.ts.
-  //   - The stdin reading loop in capture.ts §parse-pr-comments can be
-  //     exercised via `echo '[]' | node bin/cli-capture.mjs parse-pr-comments`
-  //     (an integration test outside the in-process suite).
-  //
-  // The test below covers the registered command name so yargs routing is at
-  // least verified without blocking.
+describe('runParsePrCommentsHandler — legacy (no --classify) path', () => {
+  it('emits JSON {found:[]} for an empty comment array', async () => {
+    await runParsePrCommentsHandler({
+      input: '[]',
+      classify: false,
+      format: 'json',
+    });
+    const result = stdoutJson<{ found: unknown[] }>();
+    expect(result.found).toEqual([]);
+  });
 
-  it.skip('exits 1 on empty stdin — skipped: readSync blocks in worker_threads TTY env', () => {
-    // See describe-level comment for rationale.
+  it('returns the marker-tagged comments in JSON format', async () => {
+    const comments = [
+      {
+        body: `<!-- ai-sdlc:capture severity=major triage=new-issue -->\nauth token drops on clock skew`,
+        author: { login: 'alice' },
+        url: 'https://github.com/o/r/pull/1#discussion_r1',
+      },
+      {
+        body: 'this comment has no marker',
+        author: { login: 'bob' },
+      },
+    ];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: false,
+      format: 'json',
+    });
+    const result = stdoutJson<{ found: Array<{ marker: { severity: string; triage: string } }> }>();
+    expect(result.found).toHaveLength(1);
+    expect(result.found[0].marker.severity).toBe('major');
+    expect(result.found[0].marker.triage).toBe('new-issue');
+  });
+
+  it('emits the no-markers-found message in table format', async () => {
+    await runParsePrCommentsHandler({
+      input: '[]',
+      classify: false,
+      format: 'table',
+    });
+    expect(stdoutText()).toMatch(/no ai-sdlc:capture markers found/);
+  });
+
+  it('renders marker-tagged comments in table format', async () => {
+    const comments = [
+      {
+        body: `<!-- ai-sdlc:capture severity=minor triage=quick-fix -->\nlint nit`,
+        author: { login: 'alice' },
+      },
+    ];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: false,
+      format: 'table',
+    });
+    const out = stdoutText();
+    expect(out).toMatch(/marker found:/);
+    expect(out).toMatch(/author: alice/);
+    expect(out).toMatch(/severity: minor/);
+    expect(out).toMatch(/triage: quick-fix/);
+    expect(out).toMatch(/finding: lint nit/);
+  });
+
+  it('renders (not set) for missing severity/triage in table format', async () => {
+    const comments = [
+      {
+        body: `<!-- ai-sdlc:capture -->\nbare marker`,
+        author: { login: 'alice' },
+      },
+    ];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: false,
+      format: 'table',
+    });
+    const out = stdoutText();
+    expect(out).toMatch(/severity: \(not set\)/);
+    expect(out).toMatch(/triage: \(not set\)/);
+  });
+
+  it('renders unknown for missing author login in table format', async () => {
+    const comments = [
+      {
+        body: `<!-- ai-sdlc:capture severity=minor -->\nbare`,
+      },
+    ];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: false,
+      format: 'table',
+    });
+    expect(stdoutText()).toMatch(/author: unknown/);
+  });
+
+  it('exits 1 with stderr message on invalid JSON', async () => {
+    await expect(
+      runParsePrCommentsHandler({
+        input: 'not json at all',
+        classify: false,
+        format: 'json',
+      }),
+    ).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid JSON on stdin/);
+  });
+});
+
+describe('runParsePrCommentsHandler — --classify path (RFC-0024 Refit Phase 4)', () => {
+  it('runs the classifier on every comment and emits JSON results', async () => {
+    // The CLI surface has no LLM-invoker injection point, so the
+    // substrate falls open to the pending sentinel → every comment
+    // returns classified-skip with reason=classifier-fall-open. This
+    // matches the documented production behavior and exercises the
+    // renderClassifierBatch JSON branch.
+    const comments = [
+      { body: 'arch concern', author: { login: 'alice' }, url: 'http://x/1', prNumber: 1 },
+      { body: 'typo nit', author: { login: 'bob' }, url: 'http://x/2', prNumber: 1 },
+    ];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: true,
+      format: 'json',
+    });
+    const result = stdoutJson<{
+      results: Array<{
+        comment: { author: string; url: string; prNumber: number };
+        decision: { kind: string; reason?: string };
+      }>;
+    }>();
+    expect(result.results).toHaveLength(2);
+    // CLI fall-open → both classified-skip with reason=classifier-fall-open
+    expect(result.results[0].decision.kind).toBe('classified-skip');
+    expect(result.results[0].decision.reason).toBe('classifier-fall-open');
+    expect(result.results[0].comment.author).toBe('alice');
+    expect(result.results[0].comment.url).toBe('http://x/1');
+    expect(result.results[0].comment.prNumber).toBe(1);
+  });
+
+  it('bypasses the classifier for marker-tagged comments and reports kind=marker', async () => {
+    const comments = [
+      {
+        body: `<!-- ai-sdlc:capture severity=major triage=new-issue -->\ntyped finding`,
+        author: { login: 'alice' },
+      },
+    ];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: true,
+      format: 'json',
+    });
+    const result = stdoutJson<{
+      results: Array<{ decision: { kind: string } }>;
+    }>();
+    expect(result.results[0].decision.kind).toBe('marker');
+  });
+
+  it('passes threshold override through to classifyPrCommentsBatch', async () => {
+    // With threshold=0, even fall-open shouldn't change classification; this
+    // just verifies the option flows without throwing.
+    const comments = [{ body: 'x', author: { login: 'a' } }];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: true,
+      threshold: 0,
+      format: 'json',
+    });
+    const result = stdoutJson<{ results: unknown[] }>();
+    expect(result.results).toHaveLength(1);
+  });
+
+  it('emits the empty-batch message in table format', async () => {
+    await runParsePrCommentsHandler({
+      input: '[]',
+      classify: true,
+      format: 'table',
+    });
+    expect(stdoutText()).toMatch(/no comments to classify/);
+  });
+
+  it('renders classifier results in table format', async () => {
+    const comments = [{ body: 'unmarked comment', author: { login: 'alice' }, url: 'http://x/1' }];
+    await runParsePrCommentsHandler({
+      input: JSON.stringify(comments),
+      classify: true,
+      format: 'table',
+    });
+    const out = stdoutText();
+    expect(out).toMatch(/classified-skip \(classifier-fall-open\)/);
+    expect(out).toMatch(/author: alice/);
+    expect(out).toMatch(/url: http:\/\/x\/1/);
+  });
+
+  it('exits 1 with stderr message on invalid JSON (classify path)', async () => {
+    await expect(
+      runParsePrCommentsHandler({
+        input: '{not json',
+        classify: true,
+        format: 'json',
+      }),
+    ).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid JSON on stdin/);
+  });
+});
+
+// ── renderClassifierBatch — direct unit tests for each decision kind ─────────
+//
+// renderClassifierBatch is the new helper that maps every ClassifyPrComment
+// decision kind to a one-line table headline. Driving it directly is the
+// cleanest way to cover all 5 discriminants (marker / ai-agent /
+// classified-capture / classified-skip / already-linked) without needing
+// to coax the substrate into producing each one.
+
+describe('renderClassifierBatch — table format covers all decision kinds', () => {
+  it('renders headline for marker / ai-agent / classified-capture / classified-skip / already-linked', () => {
+    const batch = [
+      {
+        comment: { body: '', author: { login: 'op' }, url: 'http://x/m', prNumber: 1 },
+        decision: {
+          kind: 'marker' as const,
+          finding: 'marker text',
+          severity: 'major',
+          triage: 'new-issue',
+        },
+      },
+      {
+        comment: { body: '', author: { login: 'github-actions[bot]' }, url: 'http://x/b' },
+        decision: { kind: 'ai-agent' as const, finding: 'bot finding' },
+      },
+      {
+        comment: { body: '', author: { login: 'alice' }, url: 'http://x/c' },
+        decision: {
+          kind: 'classified-capture' as const,
+          finding: 'arch concern',
+          decision: {
+            classification: 'is-capture' as const,
+            confidence: 0.83,
+            reasoning: 'r',
+            inputTokens: 10,
+            outputTokens: 5,
+          },
+        },
+      },
+      {
+        comment: { body: '', author: { login: 'bob' }, url: 'http://x/s' },
+        decision: {
+          kind: 'classified-skip' as const,
+          reason: 'below-threshold' as const,
+          decision: {
+            classification: 'is-capture' as const,
+            confidence: 0.3,
+            reasoning: 'r',
+            inputTokens: 10,
+            outputTokens: 5,
+          },
+        },
+      },
+      {
+        comment: { body: '', author: { login: 'carol' }, url: 'http://x/a' },
+        decision: { kind: 'already-linked' as const, existingCaptureId: 'cap_xyz' },
+      },
+    ];
+    renderClassifierBatch(batch as never, 'table');
+    const out = stdoutText();
+    expect(out).toMatch(/marker \(severity=major, triage=new-issue\)/);
+    expect(out).toMatch(/ai-agent bypass/);
+    expect(out).toMatch(/classified-capture \(confidence=0\.83\)/);
+    expect(out).toMatch(/classified-skip \(below-threshold\)/);
+    expect(out).toMatch(/already-linked \(cap_xyz\)/);
+  });
+
+  it('renders (unset) for marker severity/triage when omitted', () => {
+    const batch = [
+      {
+        comment: { body: '', author: { login: 'op' } },
+        decision: { kind: 'marker' as const, finding: 'bare' },
+      },
+    ];
+    renderClassifierBatch(batch, 'table');
+    const out = stdoutText();
+    expect(out).toMatch(/marker \(severity=\(unset\), triage=\(unset\)\)/);
+  });
+
+  it('renders unknown author + (no url) when comment lacks those fields', () => {
+    const batch = [
+      {
+        comment: { body: '' },
+        decision: { kind: 'already-linked' as const, existingCaptureId: 'cap_y' },
+      },
+    ];
+    renderClassifierBatch(batch, 'table');
+    const out = stdoutText();
+    expect(out).toMatch(/author: unknown/);
+    expect(out).toMatch(/url: \(no url\)/);
+  });
+
+  it('json format preserves the comment context (author/url/prNumber)', () => {
+    const batch = [
+      {
+        comment: { body: '', author: { login: 'alice' }, url: 'http://x/1', prNumber: 42 },
+        decision: { kind: 'already-linked' as const, existingCaptureId: 'cap_42' },
+      },
+    ];
+    renderClassifierBatch(batch, 'json');
+    const result = stdoutJson<{
+      results: Array<{ comment: { author: string; url: string; prNumber: number } }>;
+    }>();
+    expect(result.results[0].comment.author).toBe('alice');
+    expect(result.results[0].comment.url).toBe('http://x/1');
+    expect(result.results[0].comment.prNumber).toBe(42);
+  });
+});
+
+// ── append-capture-marker subcommand (RFC-0024 Refit Phase 4 AC-7) ───────────
+//
+// Same stdin caveat as parse-pr-comments — `readSync(fd=0)` blocks in
+// vitest worker_threads. The exported `runAppendCaptureMarkerHandler`
+// takes the already-read JSON string so tests can drive the orchestration
+// without the stdin loop.
+
+describe('runAppendCaptureMarkerHandler', () => {
+  it('appends the marker and emits JSON {body, changed, alreadyLinked}', () => {
+    runAppendCaptureMarkerHandler({
+      input: JSON.stringify({
+        body: 'review finding here',
+        captureId: 'cap_2026-05-23T12-34-56_abc123',
+      }),
+      format: 'json',
+    });
+    const result = stdoutJson<{ body: string; changed: boolean; alreadyLinked: boolean }>();
+    expect(result.changed).toBe(true);
+    expect(result.alreadyLinked).toBe(false);
+    expect(result.body).toContain('<!-- ai-sdlc:capture-id=cap_2026-05-23T12-34-56_abc123 -->');
+  });
+
+  it('reports alreadyLinked=true when the same marker is already present', () => {
+    const existing = 'finding\n\n<!-- ai-sdlc:capture-id=cap_2026-05-23T12-34-56_abc123 -->\n';
+    runAppendCaptureMarkerHandler({
+      input: JSON.stringify({ body: existing, captureId: 'cap_2026-05-23T12-34-56_abc123' }),
+      format: 'json',
+    });
+    const result = stdoutJson<{ changed: boolean; alreadyLinked: boolean }>();
+    expect(result.changed).toBe(false);
+    expect(result.alreadyLinked).toBe(true);
+  });
+
+  it('emits the raw body in text format (no JSON envelope)', () => {
+    runAppendCaptureMarkerHandler({
+      input: JSON.stringify({ body: 'finding', captureId: 'cap_y' }),
+      format: 'text',
+    });
+    const out = stdoutText();
+    expect(out).toContain('finding');
+    expect(out).toContain('<!-- ai-sdlc:capture-id=cap_y -->');
+    // Text format does NOT wrap in a JSON object
+    expect(out.trim().startsWith('{')).toBe(false);
+  });
+
+  it('exits 1 with stderr message on invalid JSON', () => {
+    expect(() =>
+      runAppendCaptureMarkerHandler({
+        input: 'not-json',
+        format: 'json',
+      }),
+    ).toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid JSON on stdin/);
+  });
+
+  it('exits 1 when payload is missing body', () => {
+    expect(() =>
+      runAppendCaptureMarkerHandler({
+        input: JSON.stringify({ captureId: 'cap_x' }),
+        format: 'json',
+      }),
+    ).toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/must be \{body:string, captureId:string\}/);
+  });
+
+  it('exits 1 when payload is missing captureId', () => {
+    expect(() =>
+      runAppendCaptureMarkerHandler({
+        input: JSON.stringify({ body: 'some text' }),
+        format: 'json',
+      }),
+    ).toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/must be \{body:string, captureId:string\}/);
+  });
+
+  it('exits 1 when body is not a string', () => {
+    expect(() =>
+      runAppendCaptureMarkerHandler({
+        input: JSON.stringify({ body: 42, captureId: 'cap_x' }),
+        format: 'json',
+      }),
+    ).toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/must be \{body:string, captureId:string\}/);
   });
 });
 
@@ -1524,5 +1914,107 @@ describe('redact subcommand — submitted capture path (AISDLC-320)', () => {
     const result = stdoutJson<CaptureRecord>();
     expect(result.finding).toBe('[REDACTED]');
     expect(result.auditTrail[result.auditTrail.length - 1].action).toBe('redacted');
+  });
+});
+
+// ── End-to-end yargs path tests for stdin-driven subcommands ─────────────────
+//
+// These tests drive the full buildCaptureCli().parseAsync() path through
+// the `parse-pr-comments` and `append-capture-marker` subcommands by
+// stubbing the module-level stdin reader. They cover the yargs option
+// wiring + the thin stdin try/catch wrapper that the in-process unit
+// tests above can't reach (because the real `readSync(fd=0)` blocks).
+
+describe('parse-pr-comments subcommand — end-to-end yargs path', () => {
+  it('routes JSON-format legacy parse with empty array via the full CLI', async () => {
+    setStdinReaderForTesting(async () => '[]');
+    setArgv('parse-pr-comments');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ found: unknown[] }>();
+    expect(result.found).toEqual([]);
+  });
+
+  it('routes --classify flag through to runParsePrCommentsHandler', async () => {
+    setStdinReaderForTesting(async () => JSON.stringify([{ body: 'x', author: { login: 'a' } }]));
+    setArgv('parse-pr-comments', '--classify');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ results: Array<{ decision: { kind: string } }> }>();
+    expect(result.results).toHaveLength(1);
+    // CLI surface has no LLM invoker → fall-open
+    expect(result.results[0].decision.kind).toBe('classified-skip');
+  });
+
+  it('routes --format table for legacy path', async () => {
+    setStdinReaderForTesting(async () => '[]');
+    setArgv('parse-pr-comments', '--format', 'table');
+    await buildCaptureCli().parseAsync();
+    expect(stdoutText()).toMatch(/no ai-sdlc:capture markers found/);
+  });
+
+  it('routes --classify --threshold through', async () => {
+    setStdinReaderForTesting(async () => '[]');
+    setArgv('parse-pr-comments', '--classify', '--threshold', '0.3');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ results: unknown[] }>();
+    expect(result.results).toEqual([]);
+  });
+
+  it('exits 1 when stdin reader throws (failed to read stdin branch)', async () => {
+    setStdinReaderForTesting(async () => {
+      throw new Error('boom');
+    });
+    setArgv('parse-pr-comments');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/failed to read stdin/);
+  });
+
+  it('exits 1 with stderr message on invalid JSON via yargs path', async () => {
+    setStdinReaderForTesting(async () => 'not-json');
+    setArgv('parse-pr-comments');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid JSON on stdin/);
+  });
+});
+
+describe('append-capture-marker subcommand — end-to-end yargs path', () => {
+  it('appends the marker and emits JSON via the full CLI', async () => {
+    setStdinReaderForTesting(async () => JSON.stringify({ body: 'finding', captureId: 'cap_xyz' }));
+    setArgv('append-capture-marker');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ body: string; changed: boolean; alreadyLinked: boolean }>();
+    expect(result.changed).toBe(true);
+    expect(result.body).toContain('<!-- ai-sdlc:capture-id=cap_xyz -->');
+  });
+
+  it('emits text format when --format text is set', async () => {
+    setStdinReaderForTesting(async () => JSON.stringify({ body: 'finding', captureId: 'cap_t' }));
+    setArgv('append-capture-marker', '--format', 'text');
+    await buildCaptureCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toContain('finding');
+    expect(out).toContain('<!-- ai-sdlc:capture-id=cap_t -->');
+  });
+
+  it('exits 1 when stdin reader throws (failed to read stdin branch)', async () => {
+    setStdinReaderForTesting(async () => {
+      throw new Error('boom');
+    });
+    setArgv('append-capture-marker');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/failed to read stdin/);
+  });
+
+  it('exits 1 on invalid JSON via yargs path', async () => {
+    setStdinReaderForTesting(async () => '{not json');
+    setArgv('append-capture-marker');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid JSON on stdin/);
+  });
+
+  it('exits 1 on malformed payload (missing captureId) via yargs path', async () => {
+    setStdinReaderForTesting(async () => JSON.stringify({ body: 'finding' }));
+    setArgv('append-capture-marker');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/must be \{body:string, captureId:string\}/);
   });
 });
