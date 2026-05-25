@@ -16,14 +16,17 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  applyOq11TriggerChecklistUpgrade,
   buildComplianceYaml,
   COMPLIANCE_REGIME_CHOICES,
   computeInitWizardDerivedGates,
+  describeOq11Trigger,
   formatDerivedGatesDisplay,
   getDbPoolRationale,
   runComplianceStep,
   type ComplianceRegimeChoice,
   type FeatureAdapters,
+  type Oq11TriggerKind,
   type WizardFlags,
 } from './init-features.js';
 import { BASELINE_DERIVED_GATES } from '../../compliance/types.js';
@@ -36,9 +39,17 @@ interface ComplianceStubState {
   runCommandCalls: { cmd: string; args: string[] }[];
   multiSelectCalls: { question: string; choices: ComplianceRegimeChoice[] }[];
   textInputCalls: { question: string; defaultValue?: string }[];
+  promptCalls: { question: string; defaultYes: boolean }[];
   /** FIFO queues for scripted responses. */
   multiSelectAnswers: string[][];
   textInputAnswers: string[];
+  /**
+   * FIFO queue for yes/no prompt answers (RFC-0009 §8.7 trigger checklist).
+   * When empty, the stub falls back to the per-prompt `defaultYes` argument —
+   * matching the production wizard's defaults (which default to `false` for
+   * the OQ-11 trigger questions so existing tests stay shared-with-rls).
+   */
+  promptAnswers: boolean[];
   runResponses: Map<string, { stdout: string; exitCode: number }>;
 }
 
@@ -52,8 +63,10 @@ function makeComplianceStub(opts: Partial<ComplianceStubState> = {}): {
     runCommandCalls: opts.runCommandCalls ?? [],
     multiSelectCalls: opts.multiSelectCalls ?? [],
     textInputCalls: opts.textInputCalls ?? [],
+    promptCalls: opts.promptCalls ?? [],
     multiSelectAnswers: opts.multiSelectAnswers ?? [],
     textInputAnswers: opts.textInputAnswers ?? [],
+    promptAnswers: opts.promptAnswers ?? [],
     runResponses:
       opts.runResponses ??
       new Map([
@@ -68,9 +81,16 @@ function makeComplianceStub(opts: Partial<ComplianceStubState> = {}): {
   };
 
   const adapters: FeatureAdapters = {
-    prompt: async (_question, _defaultYes) => {
-      // Compliance tests don't use yes/no prompts — return true as default
-      return true;
+    prompt: async (question, defaultYes) => {
+      state.promptCalls.push({ question, defaultYes });
+      // FIFO scripted answer; fall back to defaultYes when queue is exhausted
+      // so existing tests pre-AISDLC-319 (which never queued prompt answers)
+      // continue to receive the production-default answer for the OQ-11
+      // trigger questions (defaultYes: false → shared-with-rls remains).
+      if (state.promptAnswers.length > 0) {
+        return state.promptAnswers.shift()!;
+      }
+      return defaultYes;
     },
     multiSelect: async (question, choices) => {
       state.multiSelectCalls.push({ question, choices });
@@ -681,5 +701,294 @@ describe('runComplianceStep()', () => {
     const content = state.files.get('/proj/.ai-sdlc/compliance.yaml')!;
     expect(content).toContain('id: SOC2-T2');
     expect(content).toContain('id: HIPAA');
+  });
+});
+
+// ── AISDLC-319 / RFC-0009 §8.7 / OQ-11 DatabaseBranchPool trigger checklist ──
+
+describe('applyOq11TriggerChecklistUpgrade()', () => {
+  it('AC #1: baseline (no regimes, no triggers) → shared-with-rls; no triggers fire', () => {
+    const result = applyOq11TriggerChecklistUpgrade(
+      { ...BASELINE_DERIVED_GATES },
+      { customerContract: false, operatorSecurityReview: false },
+    );
+    expect(result.derivedGates.databaseBranchPool).toBe('shared-with-rls');
+    expect(result.triggers).toEqual([]);
+  });
+
+  it('AC #4: customer-contract trigger fires → per-shard upgrade; triggers=[customer-contract]', () => {
+    const result = applyOq11TriggerChecklistUpgrade(
+      { ...BASELINE_DERIVED_GATES },
+      { customerContract: true, operatorSecurityReview: false },
+    );
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.triggers).toEqual(['customer-contract']);
+  });
+
+  it('AC #4: operator-security-review trigger fires → per-shard upgrade; triggers=[operator-security-review]', () => {
+    const result = applyOq11TriggerChecklistUpgrade(
+      { ...BASELINE_DERIVED_GATES },
+      { customerContract: false, operatorSecurityReview: true },
+    );
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.triggers).toEqual(['operator-security-review']);
+  });
+
+  it('AC #4: both triggers 2 + 3 fire → per-shard; triggers includes both', () => {
+    const result = applyOq11TriggerChecklistUpgrade(
+      { ...BASELINE_DERIVED_GATES },
+      { customerContract: true, operatorSecurityReview: true },
+    );
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.triggers).toContain('customer-contract');
+    expect(result.triggers).toContain('operator-security-review');
+    expect(result.triggers).not.toContain('regulatory');
+  });
+
+  it('AC #3: regulatory trigger surfaces when input gates were already per-shard (regime-derived)', () => {
+    const hipaaGates = computeInitWizardDerivedGates(['HIPAA']);
+    expect(hipaaGates.databaseBranchPool).toBe('per-shard'); // sanity: regime already upgraded
+    const result = applyOq11TriggerChecklistUpgrade(hipaaGates, {
+      customerContract: false,
+      operatorSecurityReview: false,
+    });
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.triggers).toEqual(['regulatory']);
+  });
+
+  it('AC #3 + AC #4: regulatory + customer-contract both fire → per-shard; both triggers reported', () => {
+    const hipaaGates = computeInitWizardDerivedGates(['HIPAA']);
+    const result = applyOq11TriggerChecklistUpgrade(hipaaGates, {
+      customerContract: true,
+      operatorSecurityReview: false,
+    });
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.triggers).toEqual(['regulatory', 'customer-contract']);
+  });
+
+  it('monotonic: never downgrades per-shard back to shared-with-rls', () => {
+    const hipaaGates = computeInitWizardDerivedGates(['HIPAA']);
+    const result = applyOq11TriggerChecklistUpgrade(hipaaGates, {
+      customerContract: false,
+      operatorSecurityReview: false,
+    });
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+  });
+
+  it('passes through non-databaseBranchPool fields unchanged', () => {
+    const baseline = { ...BASELINE_DERIVED_GATES };
+    const result = applyOq11TriggerChecklistUpgrade(baseline, {
+      customerContract: true,
+      operatorSecurityReview: false,
+    });
+    expect(result.derivedGates.secretScanStrictness).toBe(baseline.secretScanStrictness);
+    expect(result.derivedGates.attestationRequired).toBe(baseline.attestationRequired);
+    expect(result.derivedGates.auditRetentionDays).toBe(baseline.auditRetentionDays);
+    expect(result.derivedGates.reviewerAuthorityModel).toBe(baseline.reviewerAuthorityModel);
+  });
+
+  it('does not mutate the input gates object', () => {
+    const baseline = { ...BASELINE_DERIVED_GATES };
+    const snapshot = { ...baseline };
+    applyOq11TriggerChecklistUpgrade(baseline, {
+      customerContract: true,
+      operatorSecurityReview: true,
+    });
+    expect(baseline).toEqual(snapshot);
+  });
+});
+
+describe('describeOq11Trigger()', () => {
+  it('returns a non-empty rationale for each trigger kind', () => {
+    const kinds: Oq11TriggerKind[] = [
+      'regulatory',
+      'customer-contract',
+      'operator-security-review',
+    ];
+    for (const k of kinds) {
+      const desc = describeOq11Trigger(k);
+      expect(typeof desc).toBe('string');
+      expect(desc.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('regulatory rationale references RFC-0022 derivedGates', () => {
+    expect(describeOq11Trigger('regulatory')).toMatch(/RFC-0022/);
+  });
+
+  it('customer-contract rationale mentions operator-declared posture', () => {
+    expect(describeOq11Trigger('customer-contract')).toMatch(/operator-declared/);
+  });
+
+  it('operator-security-review rationale mentions RLS gap', () => {
+    expect(describeOq11Trigger('operator-security-review')).toMatch(/RLS/);
+  });
+});
+
+describe('runComplianceStep() — RFC-0009 §8.7 OQ-11 trigger checklist (AISDLC-319)', () => {
+  it('AC #1: interactive baseline (no regimes, no triggers) → shared-with-rls, oq11Triggers=[]', async () => {
+    const { adapters } = makeComplianceStub({
+      multiSelectAnswers: [[]],
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [false, false], // customer-contract, operator-security-review
+    });
+
+    const result = await runComplianceStep('/proj', baseFlags, adapters);
+
+    expect(result.regimes).toHaveLength(0);
+    expect(result.derivedGates.databaseBranchPool).toBe('shared-with-rls');
+    expect(result.oq11Triggers).toEqual([]);
+  });
+
+  it('AC #2: wizard walks the 2 trigger questions (trigger 1 is regime-derived)', async () => {
+    const { state, adapters } = makeComplianceStub({
+      multiSelectAnswers: [[]],
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [false, false],
+    });
+
+    await runComplianceStep('/proj', baseFlags, adapters);
+
+    // Both checklist prompts must fire — one for customer contract, one for security review
+    const promptedQuestions = state.promptCalls.map((c) => c.question.toLowerCase());
+    expect(promptedQuestions.some((q) => q.includes('customer contract'))).toBe(true);
+    expect(promptedQuestions.some((q) => q.includes('security review'))).toBe(true);
+  });
+
+  it('AC #2: trigger checklist prompts default to false (shared-with-rls stays the framework default)', async () => {
+    const { state, adapters } = makeComplianceStub({
+      multiSelectAnswers: [[]],
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [false, false],
+    });
+
+    await runComplianceStep('/proj', baseFlags, adapters);
+
+    for (const call of state.promptCalls) {
+      if (
+        call.question.toLowerCase().includes('customer contract') ||
+        call.question.toLowerCase().includes('security review')
+      ) {
+        expect(call.defaultYes).toBe(false);
+      }
+    }
+  });
+
+  it('AC #4: customer-contract trigger upgrades pool to per-shard (no regime declared)', async () => {
+    const { adapters } = makeComplianceStub({
+      multiSelectAnswers: [[]], // no regulatory regimes
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [true, false], // customer-contract=YES, security-review=NO
+    });
+
+    const result = await runComplianceStep('/proj', baseFlags, adapters);
+
+    expect(result.regimes).toHaveLength(0);
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.oq11Triggers).toEqual(['customer-contract']);
+  });
+
+  it('AC #4: operator-security-review trigger upgrades pool to per-shard (no regime declared)', async () => {
+    const { adapters } = makeComplianceStub({
+      multiSelectAnswers: [[]],
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [false, true],
+    });
+
+    const result = await runComplianceStep('/proj', baseFlags, adapters);
+
+    expect(result.regimes).toHaveLength(0);
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.oq11Triggers).toEqual(['operator-security-review']);
+  });
+
+  it('AC #3 + AC #4: HIPAA regime + customer-contract both reported', async () => {
+    const { adapters } = makeComplianceStub({
+      multiSelectAnswers: [['HIPAA']],
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [true, false],
+    });
+
+    const result = await runComplianceStep('/proj', baseFlags, adapters);
+
+    expect(result.regimes).toContain('HIPAA');
+    expect(result.derivedGates.databaseBranchPool).toBe('per-shard');
+    expect(result.oq11Triggers).toContain('regulatory');
+    expect(result.oq11Triggers).toContain('customer-contract');
+  });
+
+  it('AC #4: per-shard rationale is logged when a non-regulatory trigger fires alone', async () => {
+    const { state, adapters } = makeComplianceStub({
+      multiSelectAnswers: [[]],
+      textInputAnswers: ['user@example.com', ''],
+      promptAnswers: [true, false],
+    });
+
+    await runComplianceStep('/proj', baseFlags, adapters);
+
+    const logOutput = state.log.join('\n');
+    expect(logOutput).toContain('per-shard');
+    expect(logOutput.toLowerCase()).toContain('customer contract');
+  });
+
+  it('--yes path: oq11Triggers is always empty (no prompts, baseline preserved)', async () => {
+    const { state, adapters } = makeComplianceStub({});
+
+    const result = await runComplianceStep('/proj', { ...baseFlags, yes: true }, adapters);
+
+    expect(state.promptCalls).toHaveLength(0);
+    expect(result.oq11Triggers).toEqual([]);
+    expect(result.derivedGates.databaseBranchPool).toBe('shared-with-rls');
+  });
+});
+
+// ── AISDLC-319 AC #5: Operator role stays platform-scoped (not tessellated) ──
+//
+// RFC-0009 OQ-10 resolution (2026-05-04, §8.8): the Operator role is
+// platform-scoped, NOT tessellated. Soul DIDs MUST NOT carry an operator
+// vertex on their Fractal Triad. The Triad type is `{ design, engineering,
+// product }` with NO `operator` member, and the DID JSON-Schema enforces
+// `additionalProperties: false` on `triad` so an operator-vertex field
+// cannot be smuggled in by adopter YAML.
+//
+// These tests pin the contract at the type + schema level so any future
+// refactor that introduces `operator` to the Triad fails fast.
+
+describe('AISDLC-319 AC #5: Operator role platform-scoped, NOT tessellated', () => {
+  it('Triad type carries exactly {design, engineering, product} — no operator vertex', async () => {
+    // The Triad interface is structural; verify by constructing an exhaustive instance
+    // and asserting the keys match the expected set. The TypeScript compiler also
+    // enforces this at build time (any 'operator' addition would fail TS strict checks).
+    const triad: import('@ai-sdlc/reference').Triad = {
+      design: { authority: 'op@example.com' },
+      engineering: { authority: 'op@example.com' },
+      product: { authority: 'op@example.com' },
+    };
+    expect(Object.keys(triad).sort()).toEqual(['design', 'engineering', 'product']);
+  });
+
+  it('design-intent-document.schema.json forbids an operator vertex on triad (additionalProperties: false)', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    // Walk up from the test file's directory until we find spec/schemas/
+    let dir = path.dirname(new URL(import.meta.url).pathname);
+    let schemaPath: string | null = null;
+    for (let i = 0; i < 8; i++) {
+      const candidate = path.join(dir, 'spec', 'schemas', 'design-intent-document.schema.json');
+      if (fs.existsSync(candidate)) {
+        schemaPath = candidate;
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    expect(schemaPath).not.toBeNull();
+    const schema = JSON.parse(fs.readFileSync(schemaPath!, 'utf8'));
+    const triadDef = schema.$defs?.triad ?? schema.properties?.spec?.properties?.triad;
+    expect(triadDef).toBeDefined();
+    expect(triadDef.additionalProperties).toBe(false);
+    expect([...triadDef.required].sort()).toEqual(['design', 'engineering', 'product']);
+    expect(triadDef.properties.operator).toBeUndefined();
   });
 });

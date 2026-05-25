@@ -182,6 +182,116 @@ export function computeInitWizardDerivedGates(regimes: string[]): DerivedGates {
   return accumulated;
 }
 
+// ── OQ-11 DatabaseBranchPool trigger checklist (RFC-0009 §8.7 / AISDLC-319) ──
+
+/**
+ * RFC-0009 §8.7 enumerates THREE triggers under which the framework's
+ * `shared-with-rls` default for `DatabaseBranchPool` is INSUFFICIENT and the
+ * operator MUST upgrade to a per-soul (`per-shard`) pool:
+ *
+ *  1. **Regulatory hard requirement** — HIPAA / PCI-DSS L1 / FedRAMP /
+ *     SOC2-with-physical-isolation / regional data residency. The compliance
+ *     posture wizard already drives this trigger via `INIT_WIZARD_REGIME_GATES`
+ *     (regimes → `databaseBranchPool: 'per-shard'` on `DerivedGates`).
+ *
+ *  2. **Customer contract** — a vendor agreement explicitly requires tenant
+ *     physical isolation, independent of regulatory baseline. Adopter-declared
+ *     during `init`; not derivable from RFC-0022.
+ *
+ *  3. **Operator security review** — an explicit risk identified during
+ *     operator security review that RLS cannot mitigate (side-channel,
+ *     supply-chain, regulator pre-approval gap). Adopter-declared during
+ *     `init`; not derivable from RFC-0022.
+ *
+ *  If ANY trigger fires → per-soul pool is required. Triggers 2 + 3 are
+ *  opt-in answers the init wizard collects directly; trigger 1 is computed
+ *  from declared regimes upstream.
+ *
+ *  Per RFC-0009 OQ-11 resolution (2026-05-04): the framework cannot
+ *  auto-detect triggers 2 and 3 — the operator declares them via the wizard
+ *  checklist.
+ */
+export type Oq11TriggerKind = 'regulatory' | 'customer-contract' | 'operator-security-review';
+
+/**
+ * Adopter-declared answers for triggers 2 + 3 of the §8.7 checklist.
+ * Trigger 1 (regulatory) is sourced from declared regimes, not from this bag.
+ */
+export interface Oq11TriggerAnswers {
+  /** Trigger 2 — customer contract requires tenant physical isolation. */
+  customerContract: boolean;
+  /** Trigger 3 — operator security review identified a risk RLS cannot mitigate. */
+  operatorSecurityReview: boolean;
+}
+
+/**
+ * Result of applying the OQ-11 trigger checklist on top of regime-derived gates.
+ */
+export interface Oq11TriggerChecklistResult {
+  /** The (possibly upgraded) DerivedGates. `databaseBranchPool` is `per-shard` when any trigger fires. */
+  derivedGates: DerivedGates;
+  /** Names of the triggers that fired (empty when none fire — shared-with-rls remains). */
+  triggers: Oq11TriggerKind[];
+}
+
+/**
+ * Apply the RFC-0009 §8.7 / OQ-11 trigger checklist on top of regime-derived
+ * `DerivedGates`. Upgrades `databaseBranchPool` from `shared-with-rls` to
+ * `per-shard` when ANY of the three triggers fires:
+ *
+ *  - Regulatory: already reflected in `inputGates.databaseBranchPool === 'per-shard'`
+ *    (set by `computeInitWizardDerivedGates` when a per-shard-forcing regime was
+ *    declared). When this is the case, 'regulatory' is recorded in `triggers`.
+ *  - Customer contract: `answers.customerContract === true`.
+ *  - Operator security review: `answers.operatorSecurityReview === true`.
+ *
+ *  The function is monotonic — once `databaseBranchPool` is `per-shard`, it stays
+ *  `per-shard`. Other DerivedGates fields are passed through unchanged.
+ *
+ *  Pure function — no I/O, no side-effects. The wizard wires it into
+ *  `runComplianceStep`; tests pin behavior directly.
+ */
+export function applyOq11TriggerChecklistUpgrade(
+  inputGates: DerivedGates,
+  answers: Oq11TriggerAnswers,
+): Oq11TriggerChecklistResult {
+  const triggers: Oq11TriggerKind[] = [];
+
+  // Trigger 1 (regulatory) — surfaces only when the gate was already
+  // upgraded upstream by a per-shard-forcing regime declaration.
+  if (inputGates.databaseBranchPool === 'per-shard') {
+    triggers.push('regulatory');
+  }
+
+  if (answers.customerContract) {
+    triggers.push('customer-contract');
+  }
+  if (answers.operatorSecurityReview) {
+    triggers.push('operator-security-review');
+  }
+
+  const upgraded = triggers.length > 0;
+  return {
+    derivedGates: upgraded ? { ...inputGates, databaseBranchPool: 'per-shard' } : { ...inputGates },
+    triggers,
+  };
+}
+
+/**
+ * Human-readable line for each trigger kind, shown in the wizard summary so
+ * the operator can see WHY the framework selected `per-shard`.
+ */
+export function describeOq11Trigger(kind: Oq11TriggerKind): string {
+  switch (kind) {
+    case 'regulatory':
+      return 'regulatory regime declared in .ai-sdlc/compliance.yaml (RFC-0022 derivedGates)';
+    case 'customer-contract':
+      return 'customer contract requires tenant physical isolation (operator-declared)';
+    case 'operator-security-review':
+      return 'operator security review identified a risk RLS cannot mitigate (operator-declared)';
+  }
+}
+
 /**
  * Result of the compliance posture wizard step.
  */
@@ -194,8 +304,13 @@ export interface ComplianceStepResult {
   attestedAt: string;
   /** Optional operator rationale for the attestation. */
   attestedNotes?: string;
-  /** Derived gate values computed from the declared regimes. */
+  /** Derived gate values computed from the declared regimes (+ §8.7 trigger upgrade). */
   derivedGates: DerivedGates;
+  /**
+   * Triggers from the RFC-0009 §8.7 / OQ-11 checklist that fired during this
+   * wizard run (empty when none fired — shared-with-rls is sufficient).
+   */
+  oq11Triggers: Oq11TriggerKind[];
   /** Absolute path of the written compliance.yaml file. */
   yamlPath: string;
   /** True if compliance.yaml was written; false in dry-run or if already exists. */
@@ -348,7 +463,7 @@ export async function runComplianceStep(
     return basename(projectDir);
   })();
 
-  // ── --yes / non-TTY path: baseline (no regimes) ───────────────────────
+  // ── --yes / non-TTY path: baseline (no regimes, no triggers) ──────────
   if (flags.yes || !process.stdin.isTTY) {
     const derivedGates = computeInitWizardDerivedGates([]);
     const attestedAt = new Date().toISOString();
@@ -373,6 +488,7 @@ export async function runComplianceStep(
       attestedAt,
       attestedNotes: undefined,
       derivedGates,
+      oq11Triggers: [],
       yamlPath: compliancePath,
       written,
     };
@@ -399,7 +515,32 @@ export async function runComplianceStep(
   const attestedNotes = attestedNotesRaw.trim() || undefined;
 
   const attestedAt = new Date().toISOString();
-  const derivedGates = computeInitWizardDerivedGates(selectedRegimes);
+  const regimeDerivedGates = computeInitWizardDerivedGates(selectedRegimes);
+
+  // ── RFC-0009 §8.7 / OQ-11 trigger checklist (AISDLC-319) ──────────────
+  // Trigger 1 (regulatory) is already reflected in `regimeDerivedGates`;
+  // collect triggers 2 + 3 from the operator. The framework cannot auto-detect
+  // these (per RFC-0009 §8.7) — operator declares.
+  adapters.log('');
+  adapters.log('> DatabaseBranchPool trigger checklist (RFC-0009 §8.7)');
+  adapters.log('  Default is shared pool with row-level-security isolation. Answer Yes only');
+  adapters.log('  if the trigger actually applies — per-soul pools add operational complexity.');
+
+  const customerContract = await adapters.prompt(
+    'Does any customer contract require tenant physical isolation (independent of regulatory baseline)?',
+    false,
+  );
+  const operatorSecurityReview = await adapters.prompt(
+    'Has operator security review identified a risk that RLS cannot mitigate?',
+    false,
+  );
+
+  const triggerResult = applyOq11TriggerChecklistUpgrade(regimeDerivedGates, {
+    customerContract,
+    operatorSecurityReview,
+  });
+  const derivedGates = triggerResult.derivedGates;
+  const oq11Triggers = triggerResult.triggers;
 
   const written = writeComplianceYaml({
     projectDir,
@@ -425,13 +566,23 @@ export async function runComplianceStep(
   }
   adapters.log(formatDerivedGatesDisplay(derivedGates));
 
-  // DB-pool rationale (AC #6: gate-config step reads compliance.yaml and
-  // surfaces the rationale when a regime forces per-shard)
+  // DB-pool rationale: surface BOTH the regime-derived rationale (AC #6) and
+  // the OQ-11 trigger checklist rationale (AISDLC-319 AC #2/#4).
   const dbRationale = getDbPoolRationale(selectedRegimes, derivedGates);
   if (dbRationale) {
     adapters.log('');
     adapters.log(`  DatabaseBranchPool pre-selection: per-shard`);
     adapters.log(dbRationale);
+  } else if (oq11Triggers.length > 0) {
+    // Triggers 2 / 3 fired but no regulatory trigger — explain the upgrade.
+    adapters.log('');
+    adapters.log(`  DatabaseBranchPool pre-selection: per-shard`);
+    adapters.log(`  (RFC-0009 §8.7 trigger fired:`);
+    for (const t of oq11Triggers) {
+      if (t === 'regulatory') continue; // already covered by dbRationale path
+      adapters.log(`    - ${describeOq11Trigger(t)}`);
+    }
+    adapters.log(`  )`);
   }
 
   adapters.log('');
@@ -446,6 +597,7 @@ export async function runComplianceStep(
     attestedAt,
     attestedNotes,
     derivedGates,
+    oq11Triggers,
     yamlPath: compliancePath,
     written,
   };
