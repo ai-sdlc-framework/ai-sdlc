@@ -1067,3 +1067,99 @@ describe('show subcommand — RFC-0035 Phase 6 support surface (AISDLC-290)', ()
     expect(out).toMatch(/## Verdict provenance/);
   });
 });
+
+// ── RFC-0035 Phase 7 — fatigue subcommand (AISDLC-291) ───────────────────────
+
+describe('fatigue subcommand (Phase 7 / AISDLC-291)', () => {
+  it('status reports inactive when no operator-state.yaml exists', async () => {
+    setArgv('fatigue', 'status', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutJson<{
+      ok: boolean;
+      active: boolean;
+      explicit: boolean;
+      inferred: boolean;
+    }>();
+    expect(out.ok).toBe(true);
+    expect(out.active).toBe(false);
+    expect(out.explicit).toBe(false);
+    expect(out.inferred).toBe(false);
+  });
+
+  it('set declares fatigue and persists the reason', async () => {
+    setArgv('fatigue', 'set', '--reason', 'long walkthrough day', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutJson<{
+      ok: boolean;
+      path: string;
+      state: { fatigueActive: boolean; fatigueReason: string; fatigueDeclaredAt: string };
+    }>();
+    expect(out.ok).toBe(true);
+    expect(out.state.fatigueActive).toBe(true);
+    expect(out.state.fatigueReason).toBe('long walkthrough day');
+    expect(out.state.fatigueDeclaredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // The on-disk file should now exist where the path field points.
+    expect(readFileSync(out.path, 'utf8')).toMatch(/fatigueActive: true/);
+  });
+
+  it('status reflects the just-set fatigue (round-trip)', async () => {
+    setArgv('fatigue', 'set', '--reason', 'too many decisions');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks.length = 0; // clear set output
+
+    setArgv('fatigue', 'status', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutJson<{
+      active: boolean;
+      explicit: boolean;
+      reason: string;
+    }>();
+    expect(out.active).toBe(true);
+    expect(out.explicit).toBe(true);
+    expect(out.reason).toBe('too many decisions');
+  });
+
+  it('clear flips active=false but preserves audit fields', async () => {
+    setArgv('fatigue', 'set', '--reason', 'first');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks.length = 0;
+
+    setArgv('fatigue', 'clear', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutJson<{
+      ok: boolean;
+      state: { fatigueActive: boolean; fatigueReason: string };
+    }>();
+    expect(out.ok).toBe(true);
+    expect(out.state.fatigueActive).toBe(false);
+    // Audit field preserved for retrospective auditing
+    expect(out.state.fatigueReason).toBe('first');
+  });
+
+  it('text mode emits a human-readable status line', async () => {
+    setArgv('fatigue', 'status');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/^fatigue active:\s+false/m);
+    expect(out).toMatch(/inferFromBehavior: false/);
+  });
+
+  it('text mode set output mentions the §7.2 dispatch policy', async () => {
+    setArgv('fatigue', 'set');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/fatigue set: active/);
+    expect(out).toMatch(/m\/l\/xl decisions deferred/);
+  });
+
+  it('works regardless of AI_SDLC_DECISION_CATALOG flag (session state ≠ decision data)', async () => {
+    // Operator-state is independent of the catalog flag — fatigue is a
+    // session-state concern, not a Decision mutation.
+    process.env.AI_SDLC_DECISION_CATALOG = 'off';
+    setArgv('fatigue', 'set', '--reason', 'flag off check', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutJson<{ ok: boolean; state: { fatigueActive: boolean } }>();
+    expect(out.ok).toBe(true);
+    expect(out.state.fatigueActive).toBe(true);
+  });
+});

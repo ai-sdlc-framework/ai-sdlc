@@ -58,6 +58,11 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import {
+  getFatigueStatus,
+  loadDecisionsConfig,
+  resolveDecisionsConfig,
+} from '../../decisions/index.js';
 import { resolveArtifactsDir } from '../sources/types.js';
 import {
   DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
@@ -156,14 +161,22 @@ export interface OperatorTimeCostMetrics {
    */
   unresolvedCount: number;
   /**
-   * RFC-0035 §7 fatigue-signal composition gate (OQ-9).
+   * RFC-0035 §7 fatigue-signal composition (OQ-9 + AISDLC-291).
    *
-   * Always `false` until RFC-0035 Phase 7 / AISDLC-291 ships. When the
-   * flag flips, the fatigue aggregator subscribes to this field to
-   * incorporate operator-time-cost into the fatigue signal. The seam is
-   * wired here so the integration requires no refactor.
+   * - `false` — no fatigue signal active (default; pre-AISDLC-291 callers
+   *   that don't pass `workDir` also see `false`).
+   * - `true`  — operator has declared explicit fatigue via
+   *   `cli-decisions fatigue set` (or the inferred-fatigue gate fires when
+   *   `decisions-config.yaml: fatigue.inferFromBehavior` is opted in).
+   *
+   * Phase 7 wiring: when `workDir` is provided, the fatigue state at
+   * `<workDir>/.ai-sdlc/operator-state.yaml` is read and surfaced here.
+   * The §7 severity rubric formatter (`formatOperatorTimeCostForRubric`)
+   * appends an `[RFC-0035 §7 fatigue: active]` note when this is `true`
+   * and the prior gated note when `false` for forward-compat with the
+   * existing test corpus.
    */
-  rfc0035FatigueSignal: false;
+  rfc0035FatigueSignal: boolean;
 }
 
 // ── Options ───────────────────────────────────────────────────────────
@@ -471,15 +484,29 @@ export function computeOperatorTimeCost(
 
   const operatorTimeCostBucket = classifyActiveCostBucket(meanActiveCostMs);
 
+  // RFC-0035 §7 fatigue-signal composition (AISDLC-291). When `workDir` is
+  // available, read the operator-state and decisions-config so the §7
+  // severity rubric can colour the output by fatigue status. Best-effort:
+  // any read failure (missing config, parse errors) degrades to `false`.
+  let rfc0035FatigueSignal = false;
+  if (opts.workDir) {
+    try {
+      const cfg = resolveDecisionsConfig(loadDecisionsConfig({ workDir: opts.workDir }));
+      rfc0035FatigueSignal = getFatigueStatus(opts.workDir, { config: cfg.fatigue }).active;
+    } catch {
+      // The operator-time-cost metric must never crash the hot loop —
+      // a missing or unreadable operator-state is treated as "not fatigued".
+      rfc0035FatigueSignal = false;
+    }
+  }
+
   return {
     entries,
     meanActiveCostMs,
     operatorTimeCostBucket,
     resolvedCount: resolvedEntries.length,
     unresolvedCount,
-    // RFC-0035 §7 fatigue-signal composition gate (OQ-9):
-    // gated until RFC-0035 Phase 7 / AISDLC-291 ships.
-    rfc0035FatigueSignal: false,
+    rfc0035FatigueSignal,
   };
 }
 
@@ -499,10 +526,14 @@ export function formatOperatorTimeCostForRubric(metrics: OperatorTimeCostMetrics
     metrics.meanActiveCostMs !== null
       ? ` (mean active: ${formatDurationMs(metrics.meanActiveCostMs)})`
       : ' (no data)';
-  const note =
-    metrics.rfc0035FatigueSignal === false
-      ? ' [RFC-0035 §7 fatigue-signal: gated until AISDLC-291]'
-      : '';
+  // Phase 7 (AISDLC-291) flipped the seam: `rfc0035FatigueSignal` is now a
+  // real boolean. When the operator declares fatigue (or the opt-in
+  // inferred-fatigue gate fires) the note shows "active" so the operator
+  // sees their declaration honoured downstream; otherwise it shows
+  // "inactive" rather than the pre-AISDLC-291 "gated" wording.
+  const note = metrics.rfc0035FatigueSignal
+    ? ' [RFC-0035 §7 fatigue-signal: active]'
+    : ' [RFC-0035 §7 fatigue-signal: inactive]';
   return `Operator time cost: ${bucketLabel}${meanPart}${note}`;
 }
 

@@ -28,10 +28,12 @@ import {
   appendDecisionEvent,
   buildDecisionSupportView,
   buildPendingExemplarsDigest,
+  clearFatigue,
   computeStageACoverage,
   DECISION_SOURCES,
   decisionCatalogDisabledMessage,
   disposeAndOptionallyPromote,
+  getFatigueStatus,
   isDecisionCatalogEnabled,
   isStageCAutoApplyEligible,
   listDecisions,
@@ -52,13 +54,16 @@ import {
   renderDecisionSupportSurface,
   renderPendingExemplarsDigestMarkdown,
   resolveDecisionExemplarsPath,
+  resolveDecisionsConfig,
   resolveEventLogPath,
+  resolveOperatorStatePath,
   resolvePendingExemplarsPath,
   resolveStageCRuntimeConfig,
   runCalibrationSweep,
   runStageA,
   runStageB,
   runStageC,
+  setFatigue,
   STAGE_A_COVERAGE_TARGET,
   type AggregateCorpusResult,
   type Decision,
@@ -1096,6 +1101,114 @@ export function buildDecisionsCli(): Argv {
           }
         }
       },
+    )
+    .command(
+      'fatigue',
+      'RFC-0035 §7.2 — operator fatigue signal: set, clear, status. Under fatigue, m/l/xl decisions defer to tomorrow; only small + reversible + LLM-eligible auto-decide.',
+      (sub) =>
+        sub
+          .command(
+            'set',
+            'Declare explicit operator fatigue. Defers m/l/xl decisions; only small reversible decisions are surfaced.',
+            (y) =>
+              y
+                .option('reason', {
+                  type: 'string',
+                  describe:
+                    'Optional short note (e.g. "long walkthrough day"). Persisted to .ai-sdlc/operator-state.yaml for audit.',
+                })
+                .option('format', {
+                  type: 'string',
+                  choices: ['json', 'text'] as const,
+                  default: 'text' as const,
+                }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              // Phase 7 read-write: `fatigue` is a session-state command, NOT a
+              // decision-mutating one. It works regardless of the catalog flag
+              // because the orchestrator's tier-aware dispatch policy uses the
+              // operator-state file independently of the catalog itself.
+              const { path, state } = setFatigue(workDir, {
+                ...(typeof argv.reason === 'string' && argv.reason
+                  ? { reason: String(argv.reason) }
+                  : {}),
+              });
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, path, state });
+              } else {
+                emitText(`fatigue set: active (declaredAt=${state.fatigueDeclaredAt})`);
+                if (state.fatigueReason) emitText(`  reason: ${state.fatigueReason}`);
+                emitText(`  state file: ${path}`);
+                emitText(
+                  '  policy: m/l/xl decisions deferred; only small + reversible + LLM-eligible auto-decide.',
+                );
+              }
+            },
+          )
+          .command(
+            'clear',
+            'Clear explicit operator fatigue. Resumes normal dispatch policy. Audit fields (declaredAt, reason) are preserved.',
+            (y) =>
+              y.option('format', {
+                type: 'string',
+                choices: ['json', 'text'] as const,
+                default: 'text' as const,
+              }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const { path, state } = clearFatigue(workDir);
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, path, state });
+              } else {
+                emitText('fatigue cleared.');
+                emitText(`  state file: ${path}`);
+              }
+            },
+          )
+          .command(
+            'status',
+            'Show current fatigue status (explicit + inferred when opted-in).',
+            (y) =>
+              y.option('format', {
+                type: 'string',
+                choices: ['json', 'text'] as const,
+                default: 'text' as const,
+              }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              // Compose with the project's decisions-config.yaml so the
+              // inferFromBehavior flag controls whether the status reflects
+              // any inferred signal at all. We do NOT compute inferred signal
+              // here — that requires hot-path analytics; `status` just reports
+              // the explicit state + config gates.
+              const cfg = resolveDecisionsConfig(loadDecisionsConfig({ workDir }));
+              const status = getFatigueStatus(workDir, { config: cfg.fatigue });
+              if (String(argv.format) === 'json') {
+                emit({
+                  ok: true,
+                  active: status.active,
+                  explicit: status.explicit,
+                  inferred: status.inferred,
+                  declaredAt: status.declaredAt,
+                  reason: status.reason,
+                  config: status.config,
+                  statePath: resolveOperatorStatePath(workDir),
+                });
+              } else {
+                emitText(`fatigue active:    ${status.active}`);
+                emitText(`  explicit:        ${status.explicit}`);
+                emitText(`  inferred:        ${status.inferred}`);
+                emitText(
+                  `  inferFromBehavior: ${status.config.inferFromBehavior} (opt-in; default off per OQ-8)`,
+                );
+                if (status.declaredAt) emitText(`  declaredAt:      ${status.declaredAt}`);
+                if (status.reason) emitText(`  reason:          ${status.reason}`);
+                emitText(`  state file:      ${resolveOperatorStatePath(workDir)}`);
+              }
+            },
+          )
+          .demandCommand(1, 'A fatigue subcommand is required (set | clear | status).')
+          .strict(),
     )
     .command(
       'corpus',

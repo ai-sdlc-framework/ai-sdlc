@@ -557,6 +557,10 @@ pnpm test:watch            # iteration mode
   Q5 resolution.
 - [`docs/steps.md`](./docs/steps.md) — per-step contract, inputs, outputs,
   side effects, when each step runs.
+- [`docs/decisions-config.md`](./docs/decisions-config.md) — adopter-facing
+  schema reference for `.ai-sdlc/decisions-config.yaml` (RFC-0035 Phase 7 /
+  AISDLC-291): pillar owners, capacity tiers, fatigue config,
+  `cli-decisions fatigue {set, clear, status}` CLI surface.
 - [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](../spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md)
   — the full design.
 

@@ -27,6 +27,10 @@ import yaml from 'js-yaml';
 // does export * from both modules.
 import type { PillarOwnerConfig } from './stage-b.js';
 
+// DecisionTier (xs|s|m|l|xl) — exported by decision-record.ts; imported as a
+// type here so the capacity tier map keys carry the same union.
+import type { DecisionTier } from './decision-record.js';
+
 // ── Notification surface configuration ──────────────────────────────────────
 
 export interface TuiNotificationConfig {
@@ -80,6 +84,77 @@ export interface AuditDigestConfig {
   mode?: 'overridden-only' | 'all' | 'anomalous';
 }
 
+// ── Capacity config (Phase 7 — AISDLC-291) ───────────────────────────────────
+
+/**
+ * RFC-0035 §7.1 — per-day decision budgets keyed by RFC-0016 t-shirt sizes.
+ * OQ-6 resolution: compose with RFC-0016 rather than inventing a parallel
+ * sizing taxonomy. Defaults below come from §7 / OQ-6: `xs: 30/day, s: 15,
+ * m: 6, l: 2, xl: 1`. Each tier is independently configurable.
+ *
+ * Operators can also set `loadBearingFormula` to `'log-blocked-count'`
+ * (default, OQ-2) or `'linear'` to opt into linear blast-radius scaling
+ * — most teams should leave it at the default. Future formulas land here.
+ */
+export interface CapacityTierConfig {
+  /** Max decisions of this tier the actor can resolve per day. */
+  perDay?: number;
+  /** Estimated wall-clock minutes per decision (advisory; surfaced in TUI). */
+  estMinutes?: number;
+}
+
+export interface DecisionsCapacityConfig {
+  xs?: CapacityTierConfig;
+  s?: CapacityTierConfig;
+  m?: CapacityTierConfig;
+  l?: CapacityTierConfig;
+  xl?: CapacityTierConfig;
+  /**
+   * OQ-2 load-bearing formula selector. `'log-blocked-count'` (default)
+   * computes `loadBearing = max(taskPriority(t)) + log(blockedTaskCount)`
+   * so blocking 100 tasks isn't 10× more load-bearing than blocking 10.
+   * `'linear'` is the naive fallback for orgs whose dep graph is shallow
+   * enough that diminishing returns aren't appropriate.
+   */
+  loadBearingFormula?: 'log-blocked-count' | 'linear';
+}
+
+// ── Fatigue config (Phase 7 — AISDLC-291) ────────────────────────────────────
+
+/**
+ * RFC-0035 §7.2 — fatigue signal. OQ-8 resolution: explicit operator
+ * declaration is the default contract; inferred fatigue (from override
+ * rate / throughput drop) is opt-in via `inferFromBehavior: true`.
+ *
+ * The thresholds only apply when `inferFromBehavior` is true; an org that
+ * stays with explicit-only can leave the threshold fields at defaults.
+ */
+export interface FatigueConfig {
+  /**
+   * OFF by default per OQ-8. Set to `true` to opt into the framework
+   * also inferring fatigue from operator-time-cost / override-rate /
+   * throughput-drop signals.
+   */
+  inferFromBehavior?: boolean;
+  /**
+   * Inferred fatigue trips when the operator override rate exceeds this
+   * fraction over the inferred-fatigue measurement window (default 0.5 =
+   * 50%, matching §7.2). Range [0, 1].
+   */
+  overrideRateThreshold?: number;
+  /**
+   * Inferred fatigue trips when decision throughput drops below this
+   * fraction of the rolling baseline (default 0.4 = drop of 60%, matching
+   * §7.2). Range [0, 1].
+   */
+  throughputDropThreshold?: number;
+  /**
+   * Rolling-window size in hours used by the inferred-fatigue computation.
+   * Default 1.0 (the "last hour" framing in §7.2).
+   */
+  measurementWindowHours?: number;
+}
+
 // ── Top-level config shape ────────────────────────────────────────────────────
 
 export interface DecisionsConfig {
@@ -104,6 +179,18 @@ export interface DecisionsConfig {
    * caution separately from capture-triage caution.
    */
   stageCConfidenceThreshold?: number;
+  /**
+   * Phase 7 (AISDLC-291) — per-tier daily decision budgets composing with
+   * RFC-0016 t-shirt sizes. Missing tiers fall back to the §7.1 defaults
+   * (xs:30, s:15, m:6, l:2, xl:1).
+   */
+  capacity?: DecisionsCapacityConfig;
+  /**
+   * Phase 7 (AISDLC-291) — fatigue signal configuration. Defaults to
+   * explicit-only per OQ-8; opt into inferred fatigue via
+   * `fatigue.inferFromBehavior: true`.
+   */
+  fatigue?: FatigueConfig;
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────
@@ -157,6 +244,84 @@ export function loadDecisionsConfig(opts: LoadDecisionsConfigOpts = {}): Decisio
   return parsed as DecisionsConfig;
 }
 
+// ── Capacity / fatigue defaults ──────────────────────────────────────────────
+
+/**
+ * RFC-0035 §7.1 defaults — also exported (and re-exported by `stage-a.ts`'s
+ * `DEFAULT_CAPACITY_CONFIG` indirectly) so callers can read the canonical
+ * tier budgets without round-tripping through `resolveDecisionsConfig`.
+ */
+export const DEFAULT_CAPACITY_TIERS: Record<DecisionTier, Required<CapacityTierConfig>> = {
+  xs: { perDay: 30, estMinutes: 2 },
+  s: { perDay: 15, estMinutes: 5 },
+  m: { perDay: 6, estMinutes: 10 },
+  l: { perDay: 2, estMinutes: 20 },
+  xl: { perDay: 1, estMinutes: 30 },
+} as const;
+
+export const DEFAULT_LOAD_BEARING_FORMULA: 'log-blocked-count' | 'linear' = 'log-blocked-count';
+
+/** RFC-0035 §7.2 fatigue defaults — explicit-only per OQ-8. */
+export const DEFAULT_FATIGUE_CONFIG: Required<FatigueConfig> = {
+  inferFromBehavior: false,
+  overrideRateThreshold: 0.5,
+  throughputDropThreshold: 0.4,
+  measurementWindowHours: 1,
+} as const;
+
+/**
+ * Resolve a {@link FatigueConfig} against §7.2 defaults. Exposed standalone
+ * (not just nested in `resolveDecisionsConfig`) so the {@link fatigue}
+ * module can call it without depending on the full resolver.
+ */
+export function resolveFatigueConfig(loaded: FatigueConfig | undefined): Required<FatigueConfig> {
+  return {
+    inferFromBehavior: loaded?.inferFromBehavior ?? DEFAULT_FATIGUE_CONFIG.inferFromBehavior,
+    overrideRateThreshold:
+      loaded?.overrideRateThreshold ?? DEFAULT_FATIGUE_CONFIG.overrideRateThreshold,
+    throughputDropThreshold:
+      loaded?.throughputDropThreshold ?? DEFAULT_FATIGUE_CONFIG.throughputDropThreshold,
+    measurementWindowHours:
+      loaded?.measurementWindowHours ?? DEFAULT_FATIGUE_CONFIG.measurementWindowHours,
+  };
+}
+
+/**
+ * Resolve a {@link DecisionsCapacityConfig} against §7.1 defaults. Returns a fully
+ * populated map of all 5 tiers plus the `loadBearingFormula` selector.
+ */
+export function resolveDecisionsCapacityConfig(loaded: DecisionsCapacityConfig | undefined): {
+  tiers: Record<DecisionTier, Required<CapacityTierConfig>>;
+  loadBearingFormula: 'log-blocked-count' | 'linear';
+} {
+  const tiers = {
+    xs: {
+      perDay: loaded?.xs?.perDay ?? DEFAULT_CAPACITY_TIERS.xs.perDay,
+      estMinutes: loaded?.xs?.estMinutes ?? DEFAULT_CAPACITY_TIERS.xs.estMinutes,
+    },
+    s: {
+      perDay: loaded?.s?.perDay ?? DEFAULT_CAPACITY_TIERS.s.perDay,
+      estMinutes: loaded?.s?.estMinutes ?? DEFAULT_CAPACITY_TIERS.s.estMinutes,
+    },
+    m: {
+      perDay: loaded?.m?.perDay ?? DEFAULT_CAPACITY_TIERS.m.perDay,
+      estMinutes: loaded?.m?.estMinutes ?? DEFAULT_CAPACITY_TIERS.m.estMinutes,
+    },
+    l: {
+      perDay: loaded?.l?.perDay ?? DEFAULT_CAPACITY_TIERS.l.perDay,
+      estMinutes: loaded?.l?.estMinutes ?? DEFAULT_CAPACITY_TIERS.l.estMinutes,
+    },
+    xl: {
+      perDay: loaded?.xl?.perDay ?? DEFAULT_CAPACITY_TIERS.xl.perDay,
+      estMinutes: loaded?.xl?.estMinutes ?? DEFAULT_CAPACITY_TIERS.xl.estMinutes,
+    },
+  } as Record<DecisionTier, Required<CapacityTierConfig>>;
+  return {
+    tiers,
+    loadBearingFormula: loaded?.loadBearingFormula ?? DEFAULT_LOAD_BEARING_FORMULA,
+  };
+}
+
 // ── Resolver (merge with defaults) ───────────────────────────────────────────
 
 /**
@@ -173,6 +338,11 @@ export function resolveDecisionsConfig(loaded: DecisionsConfig): {
   pillarOwners: PillarOwnerConfig;
   auditDigest: Required<AuditDigestConfig>;
   overrideWindowHours: number;
+  capacity: {
+    tiers: Record<DecisionTier, Required<CapacityTierConfig>>;
+    loadBearingFormula: 'log-blocked-count' | 'linear';
+  };
+  fatigue: Required<FatigueConfig>;
 } {
   return {
     notification: {
@@ -193,6 +363,8 @@ export function resolveDecisionsConfig(loaded: DecisionsConfig): {
       mode: loaded.auditDigest?.mode ?? 'overridden-only',
     },
     overrideWindowHours: loaded.overrideWindowHours ?? 24,
+    capacity: resolveDecisionsCapacityConfig(loaded.capacity),
+    fatigue: resolveFatigueConfig(loaded.fatigue),
   };
 }
 

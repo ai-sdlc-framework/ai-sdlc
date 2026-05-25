@@ -7,7 +7,8 @@
  *   - AFK noise filter (gaps > threshold are zeroed)
  *   - qualitative bucket classification
  *   - per-org config loaded from `quality-monitoring.yaml`
- *   - RFC-0035 §7 fatigue-signal gate (always false in Phase 5)
+ *   - RFC-0035 §7 fatigue-signal composition (Phase 7 / AISDLC-291): false
+ *     when no workDir is supplied; reads operator-state.yaml when it is
  *   - §7 severity rubric format helper
  */
 
@@ -188,12 +189,48 @@ describe('computeOperatorTimeCost', () => {
     expect(metrics.operatorTimeCostBucket).toBe('medium');
   });
 
-  it('rfc0035FatigueSignal is always false in Phase 5 (gated until AISDLC-291)', () => {
+  it('rfc0035FatigueSignal is false when no workDir is supplied (Phase 7 default)', () => {
     writeEventsFile('2026-05-24', [
       { ts: '2026-05-24T10:00:00.000Z', type: 'OrchestratorBlockedByDor', taskId: 'AISDLC-108' },
       { ts: '2026-05-24T10:30:01.000Z', type: 'OrchestratorDispatched', taskId: 'AISDLC-108' },
     ]);
     const metrics = computeOperatorTimeCost({ artifactsDir });
+    expect(metrics.rfc0035FatigueSignal).toBe(false);
+  });
+
+  it('rfc0035FatigueSignal is false when workDir is supplied but no operator-state.yaml exists (Phase 7)', () => {
+    writeEventsFile('2026-05-24', [
+      { ts: '2026-05-24T10:00:00.000Z', type: 'OrchestratorBlockedByDor', taskId: 'AISDLC-108' },
+      { ts: '2026-05-24T10:01:00.000Z', type: 'OrchestratorDispatched', taskId: 'AISDLC-108' },
+    ]);
+    const metrics = computeOperatorTimeCost({ artifactsDir, workDir: workdir });
+    expect(metrics.rfc0035FatigueSignal).toBe(false);
+  });
+
+  it('rfc0035FatigueSignal reflects operator-declared fatigue (Phase 7 / AISDLC-291)', () => {
+    const dotDir = join(workdir, '.ai-sdlc');
+    mkdirSync(dotDir, { recursive: true });
+    writeFileSync(
+      join(dotDir, 'operator-state.yaml'),
+      ['fatigueActive: true', 'fatigueDeclaredAt: 2026-05-24T19:42:00.000Z'].join('\n'),
+    );
+    writeEventsFile('2026-05-24', [
+      { ts: '2026-05-24T10:00:00.000Z', type: 'OrchestratorBlockedByDor', taskId: 'AISDLC-108' },
+      { ts: '2026-05-24T10:01:00.000Z', type: 'OrchestratorDispatched', taskId: 'AISDLC-108' },
+    ]);
+    const metrics = computeOperatorTimeCost({ artifactsDir, workDir: workdir });
+    expect(metrics.rfc0035FatigueSignal).toBe(true);
+  });
+
+  it('rfc0035FatigueSignal returns to false when fatigueActive: false (cleared)', () => {
+    const dotDir = join(workdir, '.ai-sdlc');
+    mkdirSync(dotDir, { recursive: true });
+    writeFileSync(join(dotDir, 'operator-state.yaml'), 'fatigueActive: false\n');
+    writeEventsFile('2026-05-24', [
+      { ts: '2026-05-24T10:00:00.000Z', type: 'OrchestratorBlockedByDor', taskId: 'AISDLC-108' },
+      { ts: '2026-05-24T10:01:00.000Z', type: 'OrchestratorDispatched', taskId: 'AISDLC-108' },
+    ]);
+    const metrics = computeOperatorTimeCost({ artifactsDir, workDir: workdir });
     expect(metrics.rfc0035FatigueSignal).toBe(false);
   });
 
@@ -264,7 +301,7 @@ describe('computeOperatorTimeCost — yaml config integration', () => {
 // ── §7 severity rubric format ─────────────────────────────────────────
 
 describe('formatOperatorTimeCostForRubric', () => {
-  it('renders bucket + mean active duration + RFC-0035 gate note', () => {
+  it('renders bucket + mean active duration + RFC-0035 inactive note when no fatigue', () => {
     const out = formatOperatorTimeCostForRubric({
       entries: [],
       meanActiveCostMs: 8 * 60 * 1000 + 23 * 1000,
@@ -275,7 +312,19 @@ describe('formatOperatorTimeCostForRubric', () => {
     });
     expect(out).toMatch(/^Operator time cost: medium/);
     expect(out).toMatch(/mean active: 8m 23s/);
-    expect(out).toMatch(/RFC-0035 §7 fatigue-signal: gated until AISDLC-291/);
+    expect(out).toMatch(/RFC-0035 §7 fatigue-signal: inactive/);
+  });
+
+  it('renders the fatigue-signal "active" note when fatigue is signalled (Phase 7)', () => {
+    const out = formatOperatorTimeCostForRubric({
+      entries: [],
+      meanActiveCostMs: 4 * 60 * 1000,
+      operatorTimeCostBucket: 'low',
+      resolvedCount: 1,
+      unresolvedCount: 0,
+      rfc0035FatigueSignal: true,
+    });
+    expect(out).toMatch(/RFC-0035 §7 fatigue-signal: active/);
   });
 
   it('renders "no data" when meanActiveCostMs is null', () => {

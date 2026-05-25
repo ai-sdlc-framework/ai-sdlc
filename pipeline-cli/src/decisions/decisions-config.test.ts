@@ -6,8 +6,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   actorLabel,
+  DEFAULT_CAPACITY_TIERS,
+  DEFAULT_FATIGUE_CONFIG,
+  DEFAULT_LOAD_BEARING_FORMULA,
   loadDecisionsConfig,
   resolveDecisionsConfig,
+  resolveDecisionsCapacityConfig,
+  resolveFatigueConfig,
   type DecisionsConfig,
 } from './decisions-config.js';
 
@@ -147,5 +152,122 @@ describe('actorLabel', () => {
 
   it('passes through unknown actor values', () => {
     expect(actorLabel('unknown@example.com', {})).toBe('unknown@example.com');
+  });
+});
+
+// ── RFC-0035 Phase 7 (AISDLC-291) — capacity + fatigue + loadBearingFormula ─
+
+describe('resolveFatigueConfig (Phase 7)', () => {
+  it('returns explicit-only defaults per OQ-8', () => {
+    const cfg = resolveFatigueConfig({});
+    expect(cfg.inferFromBehavior).toBe(false);
+    expect(cfg.overrideRateThreshold).toBe(0.5);
+    expect(cfg.throughputDropThreshold).toBe(0.4);
+    expect(cfg.measurementWindowHours).toBe(1);
+  });
+
+  it('preserves opted-in inferFromBehavior + custom thresholds', () => {
+    const cfg = resolveFatigueConfig({
+      inferFromBehavior: true,
+      overrideRateThreshold: 0.7,
+      throughputDropThreshold: 0.3,
+      measurementWindowHours: 2,
+    });
+    expect(cfg).toEqual({
+      inferFromBehavior: true,
+      overrideRateThreshold: 0.7,
+      throughputDropThreshold: 0.3,
+      measurementWindowHours: 2,
+    });
+  });
+
+  it('handles undefined loaded (callers pass nothing)', () => {
+    expect(resolveFatigueConfig(undefined)).toEqual(DEFAULT_FATIGUE_CONFIG);
+  });
+});
+
+describe('resolveDecisionsCapacityConfig (Phase 7 — OQ-6 RFC-0016 t-shirt sizes)', () => {
+  it('fills in all 5 tier defaults from §7.1', () => {
+    const resolved = resolveDecisionsCapacityConfig({});
+    expect(resolved.tiers.xs).toEqual(DEFAULT_CAPACITY_TIERS.xs);
+    expect(resolved.tiers.s).toEqual(DEFAULT_CAPACITY_TIERS.s);
+    expect(resolved.tiers.m).toEqual(DEFAULT_CAPACITY_TIERS.m);
+    expect(resolved.tiers.l).toEqual(DEFAULT_CAPACITY_TIERS.l);
+    expect(resolved.tiers.xl).toEqual(DEFAULT_CAPACITY_TIERS.xl);
+    expect(resolved.loadBearingFormula).toBe(DEFAULT_LOAD_BEARING_FORMULA);
+  });
+
+  it('preserves per-tier overrides', () => {
+    const resolved = resolveDecisionsCapacityConfig({
+      xs: { perDay: 50 },
+      l: { perDay: 1, estMinutes: 45 },
+    });
+    expect(resolved.tiers.xs.perDay).toBe(50);
+    expect(resolved.tiers.xs.estMinutes).toBe(DEFAULT_CAPACITY_TIERS.xs.estMinutes);
+    expect(resolved.tiers.l).toEqual({ perDay: 1, estMinutes: 45 });
+    expect(resolved.tiers.m).toEqual(DEFAULT_CAPACITY_TIERS.m);
+  });
+
+  it('honors loadBearingFormula override (OQ-2 opt-into-linear)', () => {
+    const resolved = resolveDecisionsCapacityConfig({ loadBearingFormula: 'linear' });
+    expect(resolved.loadBearingFormula).toBe('linear');
+  });
+
+  it('handles undefined loaded (callers pass nothing)', () => {
+    const resolved = resolveDecisionsCapacityConfig(undefined);
+    expect(resolved.tiers.xs).toEqual(DEFAULT_CAPACITY_TIERS.xs);
+    expect(resolved.loadBearingFormula).toBe(DEFAULT_LOAD_BEARING_FORMULA);
+  });
+});
+
+describe('resolveDecisionsConfig (Phase 7) — capacity + fatigue', () => {
+  it('fills capacity + fatigue defaults when not configured', () => {
+    const resolved = resolveDecisionsConfig({});
+    expect(resolved.capacity.tiers.m.perDay).toBe(6);
+    expect(resolved.capacity.tiers.xl.perDay).toBe(1);
+    expect(resolved.capacity.loadBearingFormula).toBe('log-blocked-count');
+    expect(resolved.fatigue.inferFromBehavior).toBe(false);
+  });
+
+  it('preserves loaded capacity overrides', () => {
+    const loaded: DecisionsConfig = {
+      capacity: {
+        m: { perDay: 10 },
+        loadBearingFormula: 'linear',
+      },
+      fatigue: { inferFromBehavior: true },
+    };
+    const resolved = resolveDecisionsConfig(loaded);
+    expect(resolved.capacity.tiers.m.perDay).toBe(10);
+    expect(resolved.capacity.tiers.xs.perDay).toBe(DEFAULT_CAPACITY_TIERS.xs.perDay);
+    expect(resolved.capacity.loadBearingFormula).toBe('linear');
+    expect(resolved.fatigue.inferFromBehavior).toBe(true);
+  });
+});
+
+describe('loadDecisionsConfig (Phase 7) — yaml parsing of capacity + fatigue', () => {
+  it('parses a Phase 7 yaml with capacity tiers + fatigue + overrideWindow', () => {
+    const raw = `
+capacity:
+  xs:
+    perDay: 60
+  l:
+    perDay: 1
+    estMinutes: 45
+  loadBearingFormula: linear
+fatigue:
+  inferFromBehavior: true
+  overrideRateThreshold: 0.6
+  measurementWindowHours: 2
+overrideWindowHours: 48
+`.trim();
+    const cfg = loadDecisionsConfig({ reader: (): string => raw });
+    expect(cfg.capacity?.xs?.perDay).toBe(60);
+    expect(cfg.capacity?.l).toEqual({ perDay: 1, estMinutes: 45 });
+    expect(cfg.capacity?.loadBearingFormula).toBe('linear');
+    expect(cfg.fatigue?.inferFromBehavior).toBe(true);
+    expect(cfg.fatigue?.overrideRateThreshold).toBe(0.6);
+    expect(cfg.fatigue?.measurementWindowHours).toBe(2);
+    expect(cfg.overrideWindowHours).toBe(48);
   });
 });
