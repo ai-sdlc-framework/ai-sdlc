@@ -240,6 +240,24 @@ export {
   type TessellatedSaResult,
 } from './tessellation-admission.js';
 export {
+  parseTargetedVariantRef,
+  resolveTargetedVariants,
+  applyCrossVariantRule,
+  computeVariantScopedScores,
+  defaultCrossSoulVariantRule,
+  type VariantOverlay,
+  type VariantDesignOverridesFramework,
+  type VariantDesignOverridesExt,
+  type VariantScores,
+  type VariantConfig,
+  type VariantAggregationRule,
+  type WorkItemVariantTargeting,
+  type VariantContext,
+  type ParsedVariantRef,
+  type VariantScopedSaResult,
+} from './variant-admission.js';
+export { combineVariantSaForSoulAlignment } from './admission-composite.js';
+export {
   parseBacklogTask,
   loadBacklogTaskFromRoot,
   mapBacklogTaskToAdmissionInput,

@@ -658,3 +658,232 @@ describe('computeAdmissionConfidence — direct unit tests (AISDLC-172)', () => 
     expect(fullEnrichmentOnly).toBeCloseTo(0.5, 6);
   });
 });
+
+// ── RFC-0017 Phase 2 integration (AISDLC-353) ──────────────────────────
+
+import { combineVariantSaForSoulAlignment } from './admission-composite.js';
+import type { VariantContext } from './variant-admission.js';
+
+describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC-353)', () => {
+  // InternalAdopter four-product suite (RFC-0017 §11): ProductA Soul DID with
+  // small-utility / enterprise / county-regional variants. AC #6 — end-to-end
+  // admission scoring on a work item targeting one of InternalAdopter's
+  // variants produces a variant-specific score (different from soul-aggregate).
+
+  function makeInternalAdopterVariantCtx(): VariantContext {
+    return {
+      variantsBySoul: {
+        'product-a': [
+          {
+            id: 'small-utility',
+            audienceCharacteristics: {
+              segments: ['municipal-small', 'water-district-small'],
+              sizeRange: { minStaff: 1, maxStaff: 50 },
+            },
+            designOverrides: {
+              voiceRegister: 'approachable-municipal',
+              colorPaletteOverlay: 'small-utility-warm',
+              densityProfile: 'comfortable',
+            },
+            designImperatives: ['low-tech-fluency-tolerance', 'single-task-focus-per-screen'],
+          },
+          {
+            id: 'enterprise',
+            audienceCharacteristics: {
+              segments: ['municipal-large', 'regional-utility'],
+              sizeRange: { minStaff: 51, maxStaff: 5000 },
+            },
+            designOverrides: {
+              voiceRegister: 'professional-administrative',
+              colorPaletteOverlay: 'enterprise-cool',
+              densityProfile: 'compact',
+            },
+            designImperatives: ['bulk-operation-efficiency', 'multi-tab-workflow-tolerance'],
+          },
+        ],
+      },
+      variantScores: {
+        'product-a': {
+          // Work item is "small-utility onboarding improvement" — variant-bound
+          'small-utility': { sa1: 0.92, sa2: 0.88 }, // strong fit
+          enterprise: { sa1: 0.35, sa2: 0.42 }, // poor fit
+        },
+      },
+      workItemTargeting: [
+        {
+          id: 'AISDLC-onboard-su',
+          targetedVariants: ['product-a/small-utility'],
+        },
+        {
+          id: 'AISDLC-bulk-ent',
+          targetedVariants: ['product-a/enterprise'],
+        },
+        {
+          id: 'AISDLC-cross-variant',
+          targetedVariants: ['product-a/small-utility', 'product-a/enterprise'],
+        },
+      ],
+      configBySoul: {
+        'product-a': { crossVariantAggregation: 'min' },
+      },
+    };
+  }
+
+  function makeAdmissionInput(
+    issueNumber: number,
+    workItemId: string,
+    overrides: Partial<AdmissionInput> = {},
+  ): AdmissionInput {
+    return {
+      issueNumber,
+      workItemId,
+      title: 'feat: small-utility onboarding improvement',
+      body: '### Complexity\n5\n\n### Acceptance Criteria\n- Onboarding flow works for small-utility variant',
+      labels: ['spec'],
+      reactionCount: 0,
+      commentCount: 0,
+      createdAt: '2026-01-01T00:00:00Z',
+      authorAssociation: 'OWNER',
+      ...overrides,
+    };
+  }
+
+  it('AC #6 [single-variant]: variant-targeted work item produces variant-specific composite', () => {
+    const ctx = makeInternalAdopterVariantCtx();
+    const input = makeAdmissionInput(1, 'AISDLC-onboard-su');
+
+    // With variant routing: small-utility sa1=0.92, sa2=0.88 → SA = 0.90
+    const withVariant = computeAdmissionComposite(input, undefined, {
+      variantContext: ctx,
+      // Pin SA at 0.5 to make the variant-driven lift unambiguous
+      soulAlignmentOverride: 0.5,
+    });
+
+    // Without variant routing: SA = 0.5 (label fallback)
+    const withoutVariant = computeAdmissionComposite(input, undefined, {
+      soulAlignmentOverride: 0.5,
+    });
+
+    // The variant-routed composite must reflect the higher per-variant SA
+    expect(withVariant.breakdown.soulAlignment).toBeCloseTo(
+      combineVariantSaForSoulAlignment(0.92, 0.88),
+      6,
+    );
+    expect(withVariant.breakdown.soulAlignment).toBeGreaterThan(
+      withoutVariant.breakdown.soulAlignment,
+    );
+
+    // Breakdown must surface the variant routing path
+    expect(withVariant.breakdown.variant?.routingPath).toBe('single-variant');
+    expect(withVariant.breakdown.variant?.targetedVariants).toHaveLength(1);
+    expect(withVariant.breakdown.variant?.targetedVariants[0].variantId).toBe('small-utility');
+
+    // Composite is strictly higher for the variant-aligned work item
+    expect(withVariant.score.composite).toBeGreaterThan(withoutVariant.score.composite);
+  });
+
+  it('AC #6 [mismatched variant]: enterprise-targeted onboarding work item scores LOWER', () => {
+    const ctx = makeInternalAdopterVariantCtx();
+    // Same onboarding work item but mis-targeted to enterprise — variant misfit
+    const input = makeAdmissionInput(2, 'AISDLC-bulk-ent', {
+      title: 'feat: small-utility onboarding (mistargeted as enterprise)',
+    });
+
+    const withVariant = computeAdmissionComposite(input, undefined, {
+      variantContext: ctx,
+      soulAlignmentOverride: 0.7, // soul-aggregate would have been quite high
+    });
+
+    // enterprise variant: sa1=0.35, sa2=0.42 → SA = combineVariantSaForSoulAlignment(0.35, 0.42)
+    expect(withVariant.breakdown.soulAlignment).toBeCloseTo(
+      combineVariantSaForSoulAlignment(0.35, 0.42),
+      6,
+    );
+    // Lower than what soul-aggregate would have produced (0.7) — variant routing
+    // correctly downgrades the score on variant misalignment
+    expect(withVariant.breakdown.soulAlignment).toBeLessThan(0.7);
+  });
+
+  it('AC #3 [multi-variant default min]: aggregates per-Soul cross-variant via min', () => {
+    const ctx = makeInternalAdopterVariantCtx();
+    const input = makeAdmissionInput(3, 'AISDLC-cross-variant', {
+      title: 'feat: feature touching both small-utility and enterprise',
+    });
+
+    const result = computeAdmissionComposite(input, undefined, {
+      variantContext: ctx,
+      soulAlignmentOverride: 0.5,
+    });
+
+    expect(result.breakdown.variant?.routingPath).toBe('multi-variant');
+    expect(result.breakdown.variant?.aggregationRule).toBe('min');
+    // min(small-utility sa1=0.92, enterprise sa1=0.35) = 0.35
+    // min(small-utility sa2=0.88, enterprise sa2=0.42) = 0.42
+    expect(result.breakdown.variant?.sa1).toBeCloseTo(0.35, 6);
+    expect(result.breakdown.variant?.sa2).toBeCloseTo(0.42, 6);
+    expect(result.breakdown.soulAlignment).toBeCloseTo(
+      combineVariantSaForSoulAlignment(0.35, 0.42),
+      6,
+    );
+  });
+
+  it('AC #3 [multi-variant per-Soul max override]: respects crossVariantAggregation: max', () => {
+    const baseCtx = makeInternalAdopterVariantCtx();
+    const ctx: VariantContext = {
+      ...baseCtx,
+      configBySoul: {
+        'product-a': { crossVariantAggregation: 'max' },
+      },
+    };
+    const input = makeAdmissionInput(4, 'AISDLC-cross-variant');
+
+    const result = computeAdmissionComposite(input, undefined, {
+      variantContext: ctx,
+      soulAlignmentOverride: 0.5,
+    });
+
+    expect(result.breakdown.variant?.routingPath).toBe('multi-variant');
+    expect(result.breakdown.variant?.aggregationRule).toBe('max');
+    expect(result.breakdown.variant?.sa1).toBeCloseTo(0.92, 6);
+    expect(result.breakdown.variant?.sa2).toBeCloseTo(0.88, 6);
+  });
+
+  it('AC #4 [backward-compat]: work item without targetedVariants preserves soul-aggregate', () => {
+    const ctx = makeInternalAdopterVariantCtx();
+    // Work item NOT in `workItemTargeting` map at all
+    const input = makeAdmissionInput(5, 'AISDLC-untargeted', {
+      title: 'feat: substrate-only refactor',
+    });
+
+    const withCtx = computeAdmissionComposite(input, undefined, {
+      variantContext: ctx,
+      soulAlignmentOverride: 0.65,
+    });
+    const withoutCtx = computeAdmissionComposite(input, undefined, {
+      soulAlignmentOverride: 0.65,
+    });
+
+    // The composite is identical — variant context exists but doesn't apply
+    expect(withCtx.breakdown.soulAlignment).toBeCloseTo(withoutCtx.breakdown.soulAlignment, 10);
+    expect(withCtx.score.composite).toBeCloseTo(withoutCtx.score.composite, 10);
+    // Breakdown does NOT surface the variant field when no routing applied
+    expect(withCtx.breakdown.variant).toBeUndefined();
+  });
+
+  it('AC #4 [backward-compat]: variantContext absent → composite unchanged from legacy', () => {
+    const input = makeAdmissionInput(6, 'AISDLC-anything');
+    const result = computeAdmissionComposite(input);
+    expect(result.breakdown.variant).toBeUndefined();
+    // soulAlignment from label-based fallback path ('spec' label → 0.9)
+    expect(result.breakdown.soulAlignment).toBeGreaterThan(0);
+  });
+
+  it('combineVariantSaForSoulAlignment computes equal-weighted mean and clamps to [0,1]', () => {
+    expect(combineVariantSaForSoulAlignment(0.4, 0.8)).toBeCloseTo(0.6, 8);
+    expect(combineVariantSaForSoulAlignment(0, 0)).toBe(0);
+    expect(combineVariantSaForSoulAlignment(1, 1)).toBe(1);
+    // Defensive clamps (shouldn't fire on valid [0,1] inputs but proves the contract)
+    expect(combineVariantSaForSoulAlignment(2, 2)).toBe(1);
+    expect(combineVariantSaForSoulAlignment(-0.5, -0.5)).toBe(0);
+  });
+});

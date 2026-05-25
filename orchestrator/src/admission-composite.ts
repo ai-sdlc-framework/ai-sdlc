@@ -44,6 +44,11 @@ import {
   type TessellationContext,
   type TessellatedSaResult,
 } from './tessellation-admission.js';
+import {
+  computeVariantScopedScores,
+  type VariantContext,
+  type VariantScopedSaResult,
+} from './variant-admission.js';
 
 /**
  * Result of the admission composite — returns a `PriorityScore`
@@ -68,6 +73,16 @@ export interface AdmissionComposite {
      * supplied. Absent (undefined) when the single-DID path was used.
      */
     tessellation?: TessellatedSaResult;
+    /**
+     * RFC-0017 Phase 2 — variant routing result.
+     * Present when `AdmissionCompositeOptions.variantContext` was supplied.
+     * Absent (undefined) when the single-soul path was used (backward-compat).
+     *
+     * `variantScopedSa` represents the variant-resolved soul-alignment value
+     * that REPLACED the tessellation/soul-aggregate `soulAlignment` when the
+     * work item declared `targetedVariants` of one of the affected souls.
+     */
+    variant?: VariantScopedSaResult;
   };
 }
 
@@ -104,6 +119,26 @@ export interface AdmissionCompositeOptions {
    * @see tessellation-admission.ts + spec/rfcs/RFC-0009 §6
    */
   tessellationContext?: TessellationContext;
+  /**
+   * RFC-0017 Phase 2 — variant-scope routing context.
+   *
+   * When present AND the work item declares `targetedVariants[]` of one of
+   * the affected souls, the composite's `soulAlignment` value is REFINED
+   * by per-variant Sα₁ + Sα₂ scoring per RFC-0017 §5.4:
+   *
+   *   resolveTargetedVariants(w) → variant scope filter from work-item targeting
+   *   |targets| == 0  → backward-compat: soul-aggregate Sα/Eρ₄ unchanged
+   *   |targets| == 1  → variant's per-variant Sα₁ + Sα₂ replaces soul-aggregate
+   *   |targets| > 1   → crossVariantAggregation (default `min`) over targeted variants
+   *
+   * Composes cleanly with `tessellationContext` — soul-scope tessellation runs
+   * first, then variant routing refines the resulting Sα/Eρ₄ to variant scope.
+   * Work items WITHOUT `targetedVariants` preserve the tessellation result
+   * unchanged (backward-compat per RFC-0017 §7).
+   *
+   * @see variant-admission.ts + spec/rfcs/RFC-0017 §5.4 + §6.2
+   */
+  variantContext?: VariantContext;
 }
 
 export function computeAdmissionComposite(
@@ -197,7 +232,25 @@ export function computeAdmissionComposite(
     options?.tessellationContext,
   );
 
-  const soulAlignment = tessellationResult.soulAlignment;
+  // ── RFC-0017 Phase 2: variant-scope refinement ────────────────
+  // When `variantContext` is provided AND the work item declares
+  // `targetedVariants[]`, the per-variant Sα₁ + Sα₂ scores REFINE the
+  // soul-aggregate `soulAlignment` from tessellation. The combined SA score
+  // fed to the composite is the mean of the variant-resolved Sα₁ + Sα₂
+  // (both feed soul-alignment per RFC-0008 §A.6 SA pillar definition).
+  // When no targeting declared OR variantContext is absent, this is a
+  // passthrough — the tessellation result is preserved unchanged
+  // (backward-compat per RFC-0017 §7).
+  const variantResult = computeVariantScopedScores(
+    workItemId,
+    tessellationResult.soulAlignment,
+    tessellationResult.soulAlignment,
+    options?.variantContext,
+  );
+  const soulAlignment =
+    variantResult.routingPath === 'no-variant-routing'
+      ? tessellationResult.soulAlignment
+      : combineVariantSaForSoulAlignment(variantResult.sa1, variantResult.sa2);
   const designSystemReadiness = tessellationResult.er4;
   const executionReality = Math.min(baseExecutionReality * autonomyFactor, designSystemReadiness);
 
@@ -234,6 +287,13 @@ export function computeAdmissionComposite(
   // destructure the breakdown exhaustively).
   const tessellationBreakdown =
     options?.tessellationContext !== undefined ? tessellationResult : undefined;
+  // Variant breakdown surfaced ONLY when the caller wired a variant context
+  // AND the work item actually targeted variants. Pure backward-compat for
+  // callers on the soul-aggregate path.
+  const variantBreakdown =
+    options?.variantContext !== undefined && variantResult.routingPath !== 'no-variant-routing'
+      ? variantResult
+      : undefined;
 
   return {
     score,
@@ -248,8 +308,27 @@ export function computeAdmissionComposite(
       executionReality,
       humanCurve,
       ...(tessellationBreakdown !== undefined ? { tessellation: tessellationBreakdown } : {}),
+      ...(variantBreakdown !== undefined ? { variant: variantBreakdown } : {}),
     },
   };
+}
+
+/**
+ * Combine variant-scope Sα₁ (audience resonance) + Sα₂ (vibe coherence) into
+ * a single soul-alignment value for the admission composite's SA pillar.
+ *
+ * The legacy admission composite uses a single `soulAlignment` scalar that
+ * conceptually rolls Sα₁ + Sα₂ together (RFC-0008 §A.6 SA pillar). When
+ * variant routing splits them out per RFC-0017 §5.4, we recombine via the
+ * arithmetic mean — equal weighting matches the soul-aggregate combination
+ * implied by `pillar-breakdown.ts` and avoids favouring one Sα facet over
+ * the other when both are equally variant-bounded.
+ *
+ * Exported for unit testing + so downstream callers can replicate the
+ * combination logic if they need to surface the constituent pieces.
+ */
+export function combineVariantSaForSoulAlignment(sa1: number, sa2: number): number {
+  return clamp01((sa1 + sa2) / 2);
 }
 
 // ── Admission confidence (AISDLC-172) ──────────────────────────────────
