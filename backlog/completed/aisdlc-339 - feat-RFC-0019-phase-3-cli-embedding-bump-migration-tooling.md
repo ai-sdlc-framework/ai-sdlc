@@ -1,9 +1,11 @@
 ---
 id: AISDLC-339
 title: 'feat: RFC-0019 Phase 3 — `cli-embedding-bump` migration tooling + stale-vector policy (catalog-routed)'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-05-16'
+updated_date: '2026-05-24'
 labels:
   - rfc-0019
   - embedding-substrate
@@ -49,15 +51,36 @@ Phase 3 of RFC-0019 §11. Migration tooling + catalog-routed stale-vector policy
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `cli-embedding-bump --dry-run` ships with accurate count + cost estimate
-- [ ] #2 `cli-embedding-bump --execute` is atomic under concurrent reads
-- [ ] #3 `lazy-re-embed` default: stale vector re-embeds silently + logs Decision
-- [ ] #4 `fail-loud` opt-in: stale vector refuses comparison + surfaces Decision
-- [ ] #5 Per-consumer `staleVectorPolicy?: 'lazy' | 'fail-loud' | 'inherit'` API parameter respected at embed()/read() call sites (re-walkthrough OQ-2)
-- [ ] #6 Cross-PROVIDER comparison attempt refuses + emits migration task via catalog (re-walkthrough OQ-3)
-- [ ] #7 Cross-VERSION-within-provider delegates to staleVectorPolicy (re-walkthrough OQ-3)
-- [ ] #8 Deprecation lifecycle: three-layer precedence (framework default → adapter `defaultGracePeriodDays` → per-org override) (re-walkthrough OQ-4)
-- [ ] #9 Catalog dedup: Decision counter emits at milestones 89/60/30/7/1 days before deprecatedAt, NOT per-load (re-walkthrough OQ-4)
-- [ ] #10 Pipeline never halts on stale-vector / cross-provider / deprecation events
-- [ ] #11 Integration tests: full deprecation lifecycle (milestone warnings + optional error + removal) + migration round-trip + per-consumer override + split cross-provider/version + catalog dedup
+- [x] #1 `cli-embedding-bump --dry-run` ships with accurate count + cost estimate
+- [x] #2 `cli-embedding-bump --execute` is atomic under concurrent reads
+- [x] #3 `lazy-re-embed` default: stale vector re-embeds silently + logs Decision
+- [x] #4 `fail-loud` opt-in: stale vector refuses comparison + surfaces Decision
+- [x] #5 Per-consumer `staleVectorPolicy?: 'lazy' | 'fail-loud' | 'inherit'` API parameter respected at embed()/read() call sites (re-walkthrough OQ-2)
+- [x] #6 Cross-PROVIDER comparison attempt refuses + emits migration task via catalog (re-walkthrough OQ-3)
+- [x] #7 Cross-VERSION-within-provider delegates to staleVectorPolicy (re-walkthrough OQ-3)
+- [x] #8 Deprecation lifecycle: three-layer precedence (framework default → adapter `defaultGracePeriodDays` → per-org override) (re-walkthrough OQ-4)
+- [x] #9 Catalog dedup: Decision counter emits at milestones 89/60/30/7/1 days before deprecatedAt, NOT per-load (re-walkthrough OQ-4)
+- [x] #10 Pipeline never halts on stale-vector / cross-provider / deprecation events
+- [x] #11 Integration tests: full deprecation lifecycle (milestone warnings + optional error + removal) + migration round-trip + per-consumer override + split cross-provider/version + catalog dedup
 <!-- AC:END -->
+
+## Implementation Notes
+
+Shipped:
+
+- `orchestrator/src/embedding/stale-vector.ts` — `StaleVectorPolicy` types (`'lazy' | 'fail-loud' | 'inherit'`), `resolveStaleVectorPolicy()` for the three-layer inheritance chain (per-call → org → framework default `lazy`), `StaleVectorEncountered` error.
+- `orchestrator/src/embedding/cross-provider.ts` — `checkProviderCompatibility()` for the cross-PROVIDER vs cross-VERSION split, `CrossProviderComparisonError`, `buildCrossProviderDecisionPayload()` for catalog Decision construction.
+- `orchestrator/src/embedding/deprecation.ts` — `evaluateDeprecationLifecycle()` with three-layer grace-period precedence (org > adapter `defaultGracePeriodDays` > framework 90d), milestone-based dedup keys (89/60/30/7/1 days before `deprecatedAt`), removed-phase auto-action `emit-migration-task`. Pipeline never halts.
+- `orchestrator/src/embedding/types.ts` — added optional `defaultGracePeriodDays` field to `EmbeddingCapabilities` per OQ-4.
+- `pipeline-cli/src/cli/embedding-bump.ts` — yargs router with `dry-run` and `execute` subcommands. Dry-run produces count + cost estimate using a per-provider rate table (override via `--rate-per-1m-tokens`). Execute is atomic: write new file via temp-then-rename, THEN rename source to `.bak.<timestamp>` so concurrent readers always see at least one valid file.
+- `pipeline-cli/bin/cli-embedding-bump.mjs` — bin shim + `cli-embedding-bump` registered in `package.json` bin map.
+
+Test coverage:
+
+- `orchestrator/src/embedding/stale-vector.test.ts` (14 tests) — 100% line + branch
+- `orchestrator/src/embedding/cross-provider.test.ts` (7 tests) — 100% line + branch
+- `orchestrator/src/embedding/deprecation.test.ts` (27 tests) — 100% line / 97.91% branch
+- `orchestrator/src/embedding/migration-integration.test.ts` (17 tests) — covers full lifecycle, mid-migration concurrent reads, per-consumer override, split cross-provider, three-layer grace precedence, catalog dedup at 1000-load scale
+- `pipeline-cli/src/cli/embedding-bump.test.ts` (32 tests) — 98.62% line / 95.45% branch coverage
+
+Phase 4 (AISDLC-340) wires these into the `Pipeline.spec.embedding` schema and Decision Catalog event emission. The orchestrator layer's policy modules are designed for Phase 4 consumption (pure functions + dedup keys) without further changes.

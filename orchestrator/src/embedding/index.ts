@@ -2,9 +2,11 @@
  * Embedding adapter framework per RFC-0019.
  * Phase 1: interface + registry + OpenAI default adapter + errors.
  * Phase 2: vector storage backend + JSONL default + backend factory + GC.
+ * Phase 3: stale-vector policy, cross-provider compatibility, deprecation
+ *          lifecycle (AISDLC-339). Migration tooling itself lives in
+ *          `pipeline-cli/src/cli/embedding-bump.ts`.
  *
- * Phases 3-5 (migration tooling, pipeline integration, soak) ship in
- * AISDLC-339 through AISDLC-341.
+ * Phases 4-5 (pipeline integration, soak) ship in AISDLC-340/341.
  */
 
 export type {
@@ -54,3 +56,40 @@ export type {
   StorageBackendName,
   StorageBackendOptions,
 } from './storage/index.js';
+
+// Phase 3: stale-vector policy + cross-provider compatibility + deprecation lifecycle.
+export type {
+  StaleVectorPolicy,
+  StaleVectorPolicyInput,
+  StaleVectorContext,
+  StaleVectorDecisionSeverity,
+} from './stale-vector.js';
+export {
+  FRAMEWORK_DEFAULT_STALE_VECTOR_POLICY,
+  resolveStaleVectorPolicy,
+  severityForPolicy,
+  isCurrentVector,
+  StaleVectorEncountered,
+} from './stale-vector.js';
+
+export type { ProviderCompatibility, CrossProviderDecisionPayload } from './cross-provider.js';
+export {
+  checkProviderCompatibility,
+  CrossProviderComparisonError,
+  buildCrossProviderDecisionPayload,
+} from './cross-provider.js';
+
+export type {
+  DeprecationLifecycleInput,
+  DeprecationLifecycleResult,
+  DeprecationDecisionEvent,
+  DeprecationPhase,
+} from './deprecation.js';
+export {
+  FRAMEWORK_DEFAULT_GRACE_PERIOD_DAYS,
+  DEPRECATION_MILESTONE_DAYS,
+  resolveGracePeriodDays,
+  nextDueMilestone,
+  buildDedupKey,
+  evaluateDeprecationLifecycle,
+} from './deprecation.js';

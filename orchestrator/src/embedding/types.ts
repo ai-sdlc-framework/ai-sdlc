@@ -62,6 +62,19 @@ export interface EmbeddingCapabilities {
   billingModel: EmbeddingBillingModel;
   /** Approximate cost per 1M tokens in USD (for display / cost estimation). Null for local. */
   approxCostPer1MTokens?: number;
+  /**
+   * Adapter-declared default deprecation grace period in days per RFC-0019
+   * §9.1 OQ-4 re-walkthrough. When set, this overrides the framework default
+   * (90d) but is itself overridden by per-org `gracePeriodDays`. Fast-moving
+   * providers (e.g., Cohere with 6-month deprecation cycles) declare a smaller
+   * value here so the warning window scales to the provider's actual lifecycle.
+   *
+   * The three-layer precedence is:
+   *   per-org `gracePeriodDays` (highest)
+   *   adapter `defaultGracePeriodDays` (this field)
+   *   framework `FRAMEWORK_DEFAULT_GRACE_PERIOD_DAYS` (90, lowest)
+   */
+  defaultGracePeriodDays?: number;
 }
 
 /**
