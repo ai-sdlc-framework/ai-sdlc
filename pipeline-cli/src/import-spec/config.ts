@@ -21,6 +21,24 @@ export type DorStrictness = 'strict' | 'warn';
 export type DorRejection = 'refuse-emit-clarification';
 
 /**
+ * RFC-0036 §14.1 `rfc-scaffold:` slice — adopter RFC location convention
+ * (OQ-4 — per-org-configurable). Phase 2 (AISDLC-327) writes the scaffold;
+ * Phase 9 (AISDLC-334) consumes the same setting to drive `cli-rfc index`.
+ *
+ * Field is exposed early so Phase 9 can ship before Phase 2 lands its
+ * writer surface — both phases agree on the same key, so there is no
+ * cross-phase drift risk.
+ */
+export interface RfcScaffoldConfig {
+  /**
+   * Adopter RFC directory, relative to `workDir`. Default `rfcs/` per
+   * RFC-0036 §14.1. Multi-repo adopters override to a central path
+   * (e.g. `../company-rfcs/`).
+   */
+  rfcDir: string;
+}
+
+/**
  * OQ-2 / RFC §14.1 drift-handling severity policies. Per-severity action.
  *
  * - `auto-sync`: the catalog auto-applies the upstream change to the
@@ -60,6 +78,7 @@ export interface DriftHandlingConfig {
 export interface AdopterAuthoringConfig {
   import: ImportConfig;
   driftHandling: DriftHandlingConfig;
+  rfcScaffold: RfcScaffoldConfig;
 }
 
 const DEFAULTS: AdopterAuthoringConfig = {
@@ -71,6 +90,9 @@ const DEFAULTS: AdopterAuthoringConfig = {
   driftHandling: {
     typoCosmetic: 'auto-sync',
     semanticScope: 'defer-24h-window',
+  },
+  rfcScaffold: {
+    rfcDir: 'rfcs/',
   },
 };
 
@@ -118,6 +140,7 @@ export function loadAdopterAuthoringConfig(
 
   const importSlice = source.import;
   const driftSlice = source['drift-handling'];
+  const rfcScaffoldSlice = source['rfc-scaffold'];
 
   const importCfg =
     importSlice && typeof importSlice === 'object'
@@ -127,14 +150,19 @@ export function loadAdopterAuthoringConfig(
     driftSlice && typeof driftSlice === 'object'
       ? mergeDriftHandling(driftSlice as Record<string, unknown>)
       : { ...DEFAULTS.driftHandling };
+  const rfcCfg =
+    rfcScaffoldSlice && typeof rfcScaffoldSlice === 'object'
+      ? mergeRfcScaffold(rfcScaffoldSlice as Record<string, unknown>)
+      : { ...DEFAULTS.rfcScaffold };
 
-  return { import: importCfg, driftHandling: driftCfg };
+  return { import: importCfg, driftHandling: driftCfg, rfcScaffold: rfcCfg };
 }
 
 function cloneDefaults(): AdopterAuthoringConfig {
   return {
     import: { ...DEFAULTS.import },
     driftHandling: { ...DEFAULTS.driftHandling },
+    rfcScaffold: { ...DEFAULTS.rfcScaffold },
   };
 }
 
@@ -174,4 +202,11 @@ function parseDriftAction(value: unknown, fallback: DriftSeverityAction): DriftS
   return value === 'auto-sync' || value === 'defer-24h-window'
     ? (value as DriftSeverityAction)
     : fallback;
+}
+
+function mergeRfcScaffold(slice: Record<string, unknown>): RfcScaffoldConfig {
+  const raw = slice.rfcDir;
+  const rfcDir =
+    typeof raw === 'string' && raw.trim().length > 0 ? raw : DEFAULTS.rfcScaffold.rfcDir;
+  return { rfcDir };
 }

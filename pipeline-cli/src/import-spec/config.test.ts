@@ -170,4 +170,52 @@ describe('loadAdopterAuthoringConfig', () => {
       });
     });
   });
+
+  describe('rfc-scaffold slice (RFC-0036 Phase 2/9 / AISDLC-327/334)', () => {
+    it('defaults rfcDir to "rfcs/" when the file is absent', () => {
+      withTmp((dir) => {
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.rfcScaffold.rfcDir).toBe('rfcs/');
+      });
+    });
+
+    it('reads the nested adopter-authoring: rfc-scaffold: block', () => {
+      withTmp((dir) => {
+        mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(dir, '.ai-sdlc', 'adopter-authoring.yaml'),
+          ['adopter-authoring:', '  rfc-scaffold:', '    rfcDir: ../company-rfcs/'].join('\n'),
+          'utf8',
+        );
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.rfcScaffold.rfcDir).toBe('../company-rfcs/');
+      });
+    });
+
+    it('accepts the flat top-level rfc-scaffold: block (convenience form)', () => {
+      withTmp((dir) => {
+        mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(dir, '.ai-sdlc', 'adopter-authoring.yaml'),
+          ['rfc-scaffold:', '  rfcDir: my-rfcs/'].join('\n'),
+          'utf8',
+        );
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.rfcScaffold.rfcDir).toBe('my-rfcs/');
+      });
+    });
+
+    it('falls back to default when rfcDir is empty or not a string', () => {
+      withTmp((dir) => {
+        mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(dir, '.ai-sdlc', 'adopter-authoring.yaml'),
+          ['rfc-scaffold:', '  rfcDir: ""'].join('\n'),
+          'utf8',
+        );
+        const cfg = loadAdopterAuthoringConfig({ workDir: dir });
+        expect(cfg.rfcScaffold.rfcDir).toBe('rfcs/');
+      });
+    });
+  });
 });
