@@ -12,7 +12,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeaf, loadLeavesForPatchId, type TranscriptLeaf } from '../attestation/merkle.js';
@@ -1364,5 +1365,199 @@ describe('inspect-v6', () => {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
+  });
+});
+
+// ── emit-leaf auto-compute patch-id branch (AISDLC-421 coverage gap) ───────
+// The production path is auto-compute — every reviewer-fan-out invocation runs
+// without `--patch-id` and lets the CLI derive the patch-id from git state.
+// Pre-hotfix these tests didn't exist (per code-reviewer minor finding); the
+// resulting coverage gap in cli/attestation.ts lines 560-585 dragged patch
+// coverage below the 80% gate. These three tests pin the production path
+// (happy + both failure modes) and lift the file above the threshold.
+
+describe('emit-leaf — auto-compute patch-id branch', () => {
+  function git(cwd: string, args: string[]): string {
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'test',
+        GIT_AUTHOR_EMAIL: 'test@test',
+        GIT_COMMITTER_NAME: 'test',
+        GIT_COMMITTER_EMAIL: 'test@test',
+      },
+    });
+  }
+
+  function initGitFixtureWithMain(repoRoot: string): { mainSha: string; headSha: string } {
+    git(repoRoot, ['init', '--initial-branch=main']);
+    writeFileSync(join(repoRoot, 'README.md'), '# base\n');
+    git(repoRoot, ['add', '.']);
+    git(repoRoot, ['commit', '-m', 'base']);
+    const mainSha = git(repoRoot, ['rev-parse', 'HEAD']).trim();
+    // Branch off main BEFORE the work commit so `main` stays at the base.
+    // Without this, main would advance with each new commit and main..HEAD
+    // would be empty — `git diff-tree main..HEAD` returns nothing → null
+    // patch-id, which would mask the auto-compute branch we're trying to test.
+    git(repoRoot, ['checkout', '-q', '-b', 'feature/work']);
+    writeFileSync(join(repoRoot, 'changed.txt'), 'work\n');
+    git(repoRoot, ['add', '.']);
+    git(repoRoot, ['commit', '-m', 'work']);
+    const headSha = git(repoRoot, ['rev-parse', 'HEAD']).trim();
+    return { mainSha, headSha };
+  }
+
+  it('auto-computes patch-id when --patch-id flag is omitted (happy path)', async () => {
+    initGitFixtureWithMain(tmpRoot);
+    makeTranscript('aisdlc-421', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-421',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    await expect(
+      buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-421',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpRoot, encoding: 'utf-8' }).trim(),
+        '--harness',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+        // INTENTIONALLY no --patch-id — the CLI must compute it.
+        '--base-ref',
+        'main',
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    // The leaf must land in SOME per-patch-id file. The filename is deterministic
+    // from the diff, but rather than recomputing it ourselves we list the
+    // directory and assert exactly one .jsonl was created with our leaf.
+    const leavesDir = join(tmpRoot, '.ai-sdlc', 'transcript-leaves');
+    const files = readdirSync(leavesDir);
+    const jsonlFiles = files.filter((f) => f.endsWith('.jsonl'));
+    expect(jsonlFiles).toHaveLength(1);
+    // Filename must be the canonical 40-hex patch-id pattern.
+    expect(jsonlFiles[0]).toMatch(/^[0-9a-f]{40}\.jsonl$/);
+    const leaves = readFileSync(join(leavesDir, jsonlFiles[0]!), 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l: string) => JSON.parse(l));
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].taskId).toBe('AISDLC-421');
+    expect(leaves[0].reviewerName).toBe('code-reviewer');
+  });
+
+  it('exits non-zero with a clear stderr message when --base-ref does not resolve (no merge-base)', async () => {
+    // tmpRoot is NOT a git repo at all — computeMergeBase returns null.
+    makeTranscript('aisdlc-421', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-421',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-421',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+        '--base-ref',
+        'does-not-exist',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    const stderr = stderrChunks.join('');
+    // The CLI should explain which derivation step failed and how to fix it.
+    expect(stderr).toMatch(/(could not compute merge-base|pass --patch-id explicitly)/);
+  });
+
+  it('exits non-zero when the diff after attestation exclusion is empty (no patch-id derivable)', async () => {
+    // Git fixture with main == HEAD (no commits beyond base). The diff
+    // base..HEAD is empty so computePatchId returns null → exit 1.
+    git(tmpRoot, ['init', '--initial-branch=main']);
+    writeFileSync(join(tmpRoot, 'README.md'), '# base\n');
+    git(tmpRoot, ['add', '.']);
+    git(tmpRoot, ['commit', '-m', 'base']);
+    // NO second commit — main IS HEAD.
+
+    makeTranscript('aisdlc-421', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-421',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-421',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpRoot, encoding: 'utf-8' }).trim(),
+        '--harness',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+        '--base-ref',
+        'main',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    const stderr = stderrChunks.join('');
+    expect(stderr).toMatch(/(could not compute patch-id|empty diff after attestation exclusion)/);
   });
 });

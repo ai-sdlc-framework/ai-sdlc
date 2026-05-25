@@ -17,7 +17,7 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - scripts/sign-attestation.mjs
+  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - scripts/verify-attestation.mjs
   - pipeline-cli/bin/cli-attestation.mjs
 priority: high

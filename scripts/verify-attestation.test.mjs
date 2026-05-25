@@ -3724,6 +3724,61 @@ describe('verifyV6Envelope (AISDLC-421 — per-patch-id leaves with shared fallb
     }
   });
 
+  it('shared-fallback MUST filter by taskId when other PRs leaves are present (AISDLC-421 hotfix regression)', () => {
+    // This test pins down the bug that ALL post-AISDLC-421 envelopes
+    // shipped on the shared-fallback path were failing verification.
+    //
+    // Setup: shared file has leaves from THIS task AND another task. The
+    // signer (sign-v6.ts) filters shared-file leaves to THIS task's only
+    // via `filteredByTask`. Before the hotfix, the verifier returned ALL
+    // shared-file leaves unfiltered → recomputed root differed → signature
+    // verification failed even though the envelope was correctly signed.
+    //
+    // The fix makes the verifier symmetric: derive taskId from leaves
+    // matching the envelope's transcriptHashes, then filter to that taskId.
+    const tmp = mkdtempSync(join(tmpdir(), 'aisdlc-421-hotfix-'));
+    try {
+      const thisTaskLeaves = [
+        { ...makeLeaf(10, 'code-reviewer', 'aaaa'.repeat(16)), taskId: 'AISDLC-THIS' },
+        { ...makeLeaf(11, 'test-reviewer', 'bbbb'.repeat(16)), taskId: 'AISDLC-THIS' },
+        { ...makeLeaf(12, 'security-reviewer', 'cccc'.repeat(16)), taskId: 'AISDLC-THIS' },
+      ];
+      const otherTaskNoiseLeaves = [
+        { ...makeLeaf(0, 'code-reviewer', 'dead'.repeat(16)), taskId: 'AISDLC-OTHER' },
+        { ...makeLeaf(1, 'test-reviewer', 'beef'.repeat(16)), taskId: 'AISDLC-OTHER' },
+        { ...makeLeaf(2, 'security-reviewer', 'cafe'.repeat(16)), taskId: 'AISDLC-OTHER' },
+      ];
+
+      // Envelope signs ONLY this task's leaves (mirrors `filteredByTask` in signer).
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      const envelope = buildValidV6Envelope(HEAD_SHA, thisTaskLeaves, keys.privateKeyPem);
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${HEAD_SHA}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2) + '\n',
+      );
+
+      // Shared file contains BOTH tasks' leaves interleaved.
+      const allLeaves = [...otherTaskNoiseLeaves, ...thisTaskLeaves];
+      const sharedContent = allLeaves.map((l) => JSON.stringify(l)).join('\n') + '\n';
+      writeFileSync(join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl'), sharedContent);
+
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `shared-fallback must filter by taskId — bug fix regression. reason: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('per-patch-id-first: when BOTH files exist, the per-patch-id file wins', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'aisdlc-421-prefer-'));
     try {

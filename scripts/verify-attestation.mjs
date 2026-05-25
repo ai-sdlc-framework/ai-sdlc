@@ -663,11 +663,43 @@ export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
   }
 
   // 3. Shared-file fallback (pre-AISDLC-421 legacy envelopes).
+  //
+  // AISDLC-421 hotfix: the signer in sign-v6.ts filters shared-file leaves by
+  // taskId when falling back (see `filteredByTask` in signAndWriteV6Envelope).
+  // The verifier MUST mirror that filter or the recomputed root will differ
+  // from the signer's root for every envelope that hit the shared-fallback
+  // path. We derive the taskId from the on-disk leaves matched by the
+  // envelope's transcriptHashes (the envelope itself doesn't carry a
+  // top-level taskId field — only per-leaf summaries do, and those summaries
+  // don't include taskId).
   const sharedLeaves = v6LoadLeaves(repoRoot);
   if (sharedLeaves.length > 0) {
+    if (envelopeHashes.length > 0) {
+      const matchSet = new Set(envelopeHashes);
+      const envelopeTaskIds = new Set(
+        sharedLeaves
+          .filter((l) => matchSet.has(l.transcriptHash))
+          .map((l) => l.taskId)
+          .filter((t) => typeof t === 'string' && t.length > 0),
+      );
+      if (envelopeTaskIds.size === 1) {
+        const [taskId] = envelopeTaskIds;
+        const filtered = sharedLeaves.filter(
+          (l) => typeof l.taskId === 'string' && l.taskId.toLowerCase() === taskId.toLowerCase(),
+        );
+        if (filtered.length > 0) {
+          return {
+            leaves: filtered,
+            source: `shared (.ai-sdlc/transcript-leaves.jsonl) [AISDLC-421 legacy fallback, filtered by taskId=${taskId}]`,
+          };
+        }
+      }
+    }
+    // No usable taskId derived — fall back to ALL leaves (pre-AISDLC-421
+    // envelopes were genuinely signed over the entire shared file).
     return {
       leaves: sharedLeaves,
-      source: 'shared (.ai-sdlc/transcript-leaves.jsonl) [AISDLC-421 legacy fallback]',
+      source: 'shared (.ai-sdlc/transcript-leaves.jsonl) [AISDLC-421 legacy fallback, full file]',
     };
   }
 
