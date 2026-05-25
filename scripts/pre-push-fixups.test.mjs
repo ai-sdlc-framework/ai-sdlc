@@ -59,7 +59,9 @@ function cleanEnv(extra = {}) {
   // attestation-sign needs schema version env clean.
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
-  // Sub-attestation stub (needed by check-attestation-sign.sh in test mode).
+  // Post-AISDLC-383.7: the AISDLC-380 sub-attestation gate was removed.
+  // These env vars are no longer consulted by check-attestation-sign.sh
+  // but we still scrub them defensively in case host env carries stale values.
   delete env.AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD;
   delete env.AI_SDLC_TEST_MODE;
   for (const [k, v] of Object.entries(extra)) env[k] = v;

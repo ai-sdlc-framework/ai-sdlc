@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:fork-pr-safety && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:drop-stale-envelope && pnpm test:auto-rebase-stale-prs && pnpm test:dor-gate && pnpm test:sub-attestation-gate && pnpm test:pre-push-fixups-gate && pnpm test:adopter-facing-strings && pnpm test:patch-coverage-gate && pnpm test:coverage-gate && pnpm test:release-please-config",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:fork-pr-safety && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:drop-stale-envelope && pnpm test:auto-rebase-stale-prs && pnpm test:dor-gate && pnpm test:pre-push-fixups-gate && pnpm test:adopter-facing-strings && pnpm test:patch-coverage-gate && pnpm test:coverage-gate && pnpm test:release-please-config",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -41,7 +41,6 @@
     "test:drop-stale-envelope": "node --test scripts/drop-stale-attestation-envelope.test.mjs",
     "test:auto-rebase-stale-prs": "node --test scripts/auto-rebase-stale-prs.test.mjs",
     "test:dor-gate": "node --test scripts/check-dor-gate.test.mjs",
-    "test:sub-attestation-gate": "node --test scripts/verify-reviewer-sub-attestations.test.mjs",
     "test:pre-push-fixups-gate": "node --test scripts/pre-push-fixups.test.mjs",
     "test:adopter-facing-strings": "node --test scripts/check-adopter-facing-strings.test.mjs",
     "test:patch-coverage-gate": "node --test scripts/check-pr-patch-coverage.test.mjs",

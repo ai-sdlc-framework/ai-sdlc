@@ -242,42 +242,21 @@ rm -f /tmp/codex-test-review-prompt-*.txt /tmp/codex-test-review-output-*.json
 
 Run this cleanup step even on error paths before returning.
 
-## Step 7 — Sign and return the verdict
+## Step 7 — Return the verdict
 
-After parsing the Codex output, you MUST sign the verdict with the reviewer signing helper (AISDLC-380). This prevents dev subagents from forging Codex approval.
-
-Use the Bash tool:
-
-```bash
-VERDICT_JSON='<compact JSON from Step 5>'
-TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
-
-node ai-sdlc-plugin/scripts/sign-reviewer-verdict.mjs \
-  --reviewer-name test-reviewer-codex \
-  --task-id "$TASK_ID" \
-  --verdict-json "$VERDICT_JSON" \
-  --output /tmp/test-reviewer-codex-sub-attestation.json
-
-echo "Sub-attestation written:"
-cat /tmp/test-reviewer-codex-sub-attestation.json
-```
-
-If the signing key is not present (`~/.ai-sdlc/reviewer-keys/test-reviewer-codex.pem`):
-- Tell the operator: "test-reviewer-codex signing key not found; run `node ai-sdlc-plugin/scripts/init-reviewer-signing-key.mjs --reviewer-name test-reviewer-codex`."
-- Continue and return the verdict WITHOUT the sub-attestation (the hook will require `AI_SDLC_LEGACY_VERDICTS=1`).
-
-Return a JSON object with BOTH the verdict AND the sub-attestation path as your **final output**:
+After parsing the Codex output, return the verdict JSON as your **final output**. Per RFC-0042 Phase 4 (AISDLC-383.7), reviewer-side per-verdict signing is no longer required: v6 envelopes derive reviewer evidence from committed transcript leaves (Merkle tree) signed by the operator's key.
 
 ```json
 {
   "approved": true,
-  "findings": [...],
-  "summary": "...",
-  "subAttestationPath": "/tmp/test-reviewer-codex-sub-attestation.json"
+  "findings": [
+    { "severity": "minor", "file": "src/foo.ts", "line": 42, "message": "..." }
+  ],
+  "summary": "Overall test assessment in 1-2 sentences"
 }
 ```
 
-The pipeline's Step 8 aggregator reads your last assistant turn directly and uses `subAttestationPath` to incorporate the sub-attestation into the aggregate verdict file.
+The pipeline's Step 8 aggregator reads your last assistant turn directly and incorporates this verdict into `.ai-sdlc/verdicts/<task-id>.json`. The pre-push hook then auto-signs the v6 envelope from the committed transcript leaves.
 
 ## Expected envelope shape
 
@@ -287,8 +266,7 @@ The pipeline's Step 8 aggregator reads your last assistant turn directly and use
   "findings": [
     { "severity": "minor", "file": "src/foo.ts", "line": 42, "message": "..." }
   ],
-  "summary": "Overall test assessment in 1-2 sentences",
-  "subAttestationPath": "/tmp/test-reviewer-codex-sub-attestation.json"
+  "summary": "Overall test assessment in 1-2 sentences"
 }
 ```
 
@@ -296,6 +274,5 @@ Where:
 - `approved`: `true` if no critical/major findings; `false` otherwise
 - `findings`: array of `{ severity, file, line, message }` — file and line may be `null` for general findings
 - `summary`: 1-2 sentence overall assessment
-- `subAttestationPath`: path to the signed sub-attestation file (AISDLC-380)
 
-This extends the `test-reviewer` (Claude variant) envelope with `subAttestationPath`. Callers handle the field gracefully when absent (legacy mode).
+This matches the `test-reviewer` (Claude variant) envelope.

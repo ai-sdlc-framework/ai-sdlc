@@ -50,19 +50,10 @@ function cleanEnv(extra = {}) {
   // AISDLC-250: don't inherit CODEX_VERSION from the host env so tests that
   // assert the "absent" path are hermetic even when the operator has exported it.
   delete env.CODEX_VERSION;
-  // AISDLC-380: existing tests focus on logic other than sub-attestation
-  // verification. Use a stub verifier that always exits 0 so the test's
-  // verdict files (legacy plain-JSON shape) pass through without signature
-  // checking. Tests that specifically test sub-attestation verification
-  // unset AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD in their env overrides.
-  //
-  // AISDLC-380 iter-3: the hook now gates the override on AI_SDLC_TEST_MODE=1
-  // so a dev subagent cannot use it to bypass the fail-CLOSED gate. Tests must
-  // therefore also set AI_SDLC_TEST_MODE=1 when using the override.
-  if (!('AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD' in extra)) {
-    env.AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD = 'true';
-    env.AI_SDLC_TEST_MODE = '1';
-  }
+  // AISDLC-383.7: the AISDLC-380 sub-attestation gate (Step 4d) was removed in
+  // Phase 4 cleanup. The associated AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD +
+  // AI_SDLC_TEST_MODE env vars are no longer consulted by the hook; tests no
+  // longer need to inject a stub verifier.
   for (const [k, v] of Object.entries(extra)) env[k] = v;
   return env;
 }
@@ -612,375 +603,24 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     }
   });
 
-  // ── AISDLC-380 Bug #3: fail-CLOSED when verifier or registry missing (v5 mode) ──
+  // ── AISDLC-383.7: AISDLC-380 sub-attestation gate tests removed ─────
   //
-  // RFC-0042 Phase 3 note (AISDLC-383.6): these tests explicitly set
-  // AI_SDLC_SCHEMA_VERSION=v5 to exercise the legacy v5 sub-attestation gate.
-  // The default is now v6, which skips the gate entirely.
+  // Phase 4 cleanup deleted the Step 4d sub-attestation gate from the hook
+  // (the gate had been audit-only since AISDLC-383.6, and v6 envelopes
+  // already skipped it entirely). The tests for the gate's audit-only
+  // and hard-fail modes are removed alongside the code they exercised.
+  // v6-default behavior is covered by the AC #4 / AC #1+5 tests above
+  // plus the v6-default + AISDLC-274 stale-envelope tests below.
 
-  it('AISDLC-380 Bug#3: v5 mode — exits with warning when verify-reviewer-sub-attestations.mjs is missing (audit-only)', () => {
-    // RFC-0042 Phase 3: v5 mode is audit-only. When the verifier script is absent,
-    // the hook emits a warning and proceeds to sign (exit 1 = re-push needed).
-    // This is a behavioral change from pre-cutover (was: exit 2 = blocked).
-    // Use a fresh repo without the verifier script installed.
-    const bareRoot = mkdtempSync(join(tmpdir(), 'ai-sdlc-att-bare-'));
-    try {
-      git(['init', '-q', '-b', 'main'], bareRoot);
-      git(['config', 'user.email', 'test@test.com'], bareRoot);
-      git(['config', 'user.name', 'test'], bareRoot);
-      git(['config', 'commit.gpgsign', 'false'], bareRoot);
-      writeFileSync(join(bareRoot, 'README.md'), 'baseline\n');
-      git(['add', '.'], bareRoot);
-      git(['commit', '-q', '-m', 'baseline'], bareRoot);
-      git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], bareRoot);
-
-      writeFileSync(join(bareRoot, '.active-task'), 'AISDLC-380C\n');
-
-      // Write a verdict file.
-      const dir = join(bareRoot, '.ai-sdlc', 'verdicts');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, 'aisdlc-380c.json'),
-        JSON.stringify([
-          { agentId: 'code-reviewer', approved: true, findings: [], summary: 'test' },
-        ]),
-      );
-
-      // Set up trusted-reviewers.yaml but NO verifier script.
-      writeFileSync(join(bareRoot, '.ai-sdlc', 'trusted-reviewers.yaml'), 'reviewers:\n');
-
-      const { cmd } = installFakeSigner(bareRoot);
-      const r = runHook(bareRoot, {
-        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-        // Explicitly unset the stub so the hook exercises the file-existence check.
-        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
-        // Force v5 mode to exercise the legacy sub-attestation path.
-        AI_SDLC_SCHEMA_VERSION: 'v5',
-      });
-
-      // RFC-0042 Phase 3: audit-only → hook warns but proceeds to sign (exit 1 = re-push).
-      assert.equal(
-        r.status,
-        1,
-        `expected exit 1 (audit-only: verifier missing → warns + proceeds), got ${r.status}: stderr=${r.stderr}`,
-      );
-      assert.match(
-        r.stderr,
-        /WARN.*verify-reviewer-sub-attestations\.mjs.*not found|WARN.*sub-attestation gate skipped/i,
-        `stderr must show audit-only warning: ${r.stderr}`,
-      );
-    } finally {
-      rmSync(bareRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('AISDLC-380 Bug#3: v5 mode — exits with warning when .ai-sdlc/trusted-reviewers.yaml is missing (audit-only)', () => {
-    // RFC-0042 Phase 3: v5 mode is audit-only. Registry missing → warn + proceed.
-    const bareRoot = mkdtempSync(join(tmpdir(), 'ai-sdlc-att-bare2-'));
-    try {
-      git(['init', '-q', '-b', 'main'], bareRoot);
-      git(['config', 'user.email', 'test@test.com'], bareRoot);
-      git(['config', 'user.name', 'test'], bareRoot);
-      git(['config', 'commit.gpgsign', 'false'], bareRoot);
-      writeFileSync(join(bareRoot, 'README.md'), 'baseline\n');
-      git(['add', '.'], bareRoot);
-      git(['commit', '-q', '-m', 'baseline'], bareRoot);
-      git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], bareRoot);
-
-      writeFileSync(join(bareRoot, '.active-task'), 'AISDLC-380D\n');
-
-      const dir = join(bareRoot, '.ai-sdlc', 'verdicts');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, 'aisdlc-380d.json'),
-        JSON.stringify([
-          { agentId: 'code-reviewer', approved: true, findings: [], summary: 'test' },
-        ]),
-      );
-
-      // Copy verify script but DO NOT write trusted-reviewers.yaml.
-      mkdirSync(join(bareRoot, 'scripts'), { recursive: true });
-      execFileSync('cp', [
-        join(__dirname, 'verify-reviewer-sub-attestations.mjs'),
-        join(bareRoot, 'scripts', 'verify-reviewer-sub-attestations.mjs'),
-      ]);
-      // .ai-sdlc dir exists but no trusted-reviewers.yaml file.
-      mkdirSync(join(bareRoot, '.ai-sdlc'), { recursive: true });
-
-      const { cmd } = installFakeSigner(bareRoot);
-      const r = runHook(bareRoot, {
-        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-        // Explicitly unset the stub to test the file-existence check path.
-        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
-        // Force v5 mode to exercise the legacy sub-attestation path.
-        AI_SDLC_SCHEMA_VERSION: 'v5',
-      });
-
-      // RFC-0042 Phase 3: audit-only → hook warns but proceeds to sign (exit 1 = re-push).
-      assert.equal(
-        r.status,
-        1,
-        `expected exit 1 (audit-only: registry missing → warns + proceeds), got ${r.status}: stderr=${r.stderr}`,
-      );
-      assert.match(
-        r.stderr,
-        /WARN.*trusted-reviewers\.yaml.*not found|WARN.*sub-attestation gate skipped/i,
-        `stderr must show audit-only warning: ${r.stderr}`,
-      );
-    } finally {
-      rmSync(bareRoot, { recursive: true, force: true });
-    }
-  });
-
-  // ── AISDLC-380 iter-3: env-override must require AI_SDLC_TEST_MODE=1 (v5 mode) ──
-
-  it('AISDLC-380 iter-3: v5 mode — AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD without AI_SDLC_TEST_MODE=1 falls through to audit-only file-existence check', () => {
-    // In v5 audit-only mode, setting the override without TEST_MODE=1 falls
-    // through to the file-existence check, which now warns instead of blocking.
-    const bareRoot = mkdtempSync(join(tmpdir(), 'ai-sdlc-att-iter3-'));
-    try {
-      git(['init', '-q', '-b', 'main'], bareRoot);
-      git(['config', 'user.email', 'test@test.com'], bareRoot);
-      git(['config', 'user.name', 'test'], bareRoot);
-      git(['config', 'commit.gpgsign', 'false'], bareRoot);
-      writeFileSync(join(bareRoot, 'README.md'), 'baseline\n');
-      git(['add', '.'], bareRoot);
-      git(['commit', '-q', '-m', 'baseline'], bareRoot);
-      git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], bareRoot);
-
-      writeFileSync(join(bareRoot, '.active-task'), 'AISDLC-380E\n');
-
-      const dir = join(bareRoot, '.ai-sdlc', 'verdicts');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, 'aisdlc-380e.json'),
-        JSON.stringify([
-          { agentId: 'code-reviewer', approved: true, findings: [], summary: 'test' },
-        ]),
-      );
-
-      // No verifier script, no registry — would-be fail-CLOSED conditions.
-      // In v5 audit-only mode: override without TEST_MODE falls through to
-      // file-existence check, which now warns + proceeds (not blocks).
-      const { cmd } = installFakeSigner(bareRoot);
-      const r = runHook(bareRoot, {
-        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
-        // NOTE: AI_SDLC_TEST_MODE intentionally NOT set.
-        AI_SDLC_TEST_MODE: '',
-        // Force v5 mode to exercise the legacy sub-attestation path.
-        AI_SDLC_SCHEMA_VERSION: 'v5',
-      });
-
-      // RFC-0042 Phase 3: audit-only → warns and proceeds (exit 1 = re-push needed).
-      assert.equal(
-        r.status,
-        1,
-        `expected exit 1 (audit-only: warns + proceeds), got ${r.status}: stderr=${r.stderr}`,
-      );
-      assert.match(
-        r.stderr,
-        /WARN.*not found|WARN.*sub-attestation gate skipped/i,
-        `stderr must show audit-only warning path: ${r.stderr}`,
-      );
-    } finally {
-      rmSync(bareRoot, { recursive: true, force: true });
-    }
-  });
-
-  // ── RFC-0042 Phase 3 cutover tests (AISDLC-383.6) ────────────────────────
-
-  it('RFC-0042 Phase 3 (AC #6): v6 mode — skips sub-attestation gate entirely, signs successfully', () => {
-    // AC #6: hermetic test covering cutover behavior.
-    // v6 is the default (AI_SDLC_SCHEMA_VERSION unset or 'v6').
-    // The hook must NOT invoke the sub-attestation verifier at all,
-    // even when the verdict file is a legacy plain-JSON shape (no sub-attestations).
-    // This specifically tests the case that would have failed pre-cutover.
-    writeFileSync(join(root, '.active-task'), 'AISDLC-383F\n');
-    // Write a legacy plain-JSON verdict file (no sub-attestations block).
-    const dir = join(root, '.ai-sdlc', 'verdicts');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, 'aisdlc-383f.json'),
-      JSON.stringify([
-        {
-          agentId: 'code-reviewer',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        {
-          agentId: 'test-reviewer',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-        {
-          agentId: 'security-reviewer',
-          harness: 'claude-code',
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        },
-      ]),
-    );
-    const { cmd } = installFakeSigner(root);
-    const r = runHook(root, {
-      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-      // Default v6 (no AI_SDLC_SCHEMA_VERSION set, or explicitly v6).
-      AI_SDLC_SCHEMA_VERSION: 'v6',
-    });
-
-    // v6 mode: gate skipped, sign proceeds, exit 1 = re-push required.
-    assert.equal(
-      r.status,
-      1,
-      `expected exit 1 (v6: gate skipped, signed), got ${r.status}: stderr=${r.stderr}`,
-    );
-    assert.match(
-      r.stderr,
-      /v6 envelope mode.*AISDLC-380 sub-attestation gate skipped/i,
-      `stderr must confirm v6 mode gate skip: ${r.stderr}`,
-    );
-    // Must NOT emit sub-attestation verification failure.
-    assert.equal(
-      r.stderr.includes('sub-attestation verification failed'),
-      false,
-      `v6 mode must NOT invoke sub-attestation verifier: ${r.stderr}`,
-    );
-  });
-
-  it('RFC-0042 Phase 3 (AC #6): v5 envelope with no sub-attestations — gate runs audit-only, push succeeds (pre-cutover would have blocked)', () => {
-    // AC #6: hermetic regression test — the specific cutover behavior.
-    // Pre-cutover: a v5 verdict file without sub-attestations would exit 2 (blocked).
-    // Post-cutover: same file in v5 audit-only mode → warning + exit 1 (push proceeds).
-    const bareRoot = mkdtempSync(join(tmpdir(), 'ai-sdlc-383.6-cutover-'));
-    try {
-      git(['init', '-q', '-b', 'main'], bareRoot);
-      git(['config', 'user.email', 'test@test.com'], bareRoot);
-      git(['config', 'user.name', 'test'], bareRoot);
-      git(['config', 'commit.gpgsign', 'false'], bareRoot);
-      writeFileSync(join(bareRoot, 'README.md'), 'baseline\n');
-      git(['add', '.'], bareRoot);
-      git(['commit', '-q', '-m', 'baseline'], bareRoot);
-      git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], bareRoot);
-
-      writeFileSync(join(bareRoot, '.active-task'), 'AISDLC-383G\n');
-
-      // Write a LEGACY plain-JSON verdict file (no sub-attestations block).
-      // This is exactly the kind of file that would have blocked pre-cutover
-      // when the sub-attestation gate was mandatory.
-      const dir = join(bareRoot, '.ai-sdlc', 'verdicts');
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(
-        join(dir, 'aisdlc-383g.json'),
-        JSON.stringify([
-          {
-            agentId: 'code-reviewer',
-            harness: 'claude-code',
-            approved: true,
-            findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-          },
-        ]),
-      );
-
-      // Install verifier + registry so the hook can run the gate.
-      mkdirSync(join(bareRoot, 'scripts'), { recursive: true });
-      execFileSync('cp', [
-        join(__dirname, 'verify-reviewer-sub-attestations.mjs'),
-        join(bareRoot, 'scripts', 'verify-reviewer-sub-attestations.mjs'),
-      ]);
-      mkdirSync(join(bareRoot, '.ai-sdlc'), { recursive: true });
-      writeFileSync(
-        join(bareRoot, '.ai-sdlc', 'trusted-reviewers.yaml'),
-        `# Test\nreviewers:\n  - type: 'reviewer'\n    reviewer: 'code-reviewer'\n    machine: 'testmachine'\n    addedAt: '2026-05-21'\n    addedBy: 'test'\n    pubkey: |\n      -----BEGIN PUBLIC KEY-----\n      MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=\n      -----END PUBLIC KEY-----\n`,
-      );
-
-      const { cmd } = installFakeSigner(bareRoot);
-      const r = runHook(bareRoot, {
-        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-        // Force v5 mode: the legacy path runs the gate (audit-only).
-        AI_SDLC_SCHEMA_VERSION: 'v5',
-        // Unset the stub verifier so the real verifier runs.
-        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
-      });
-
-      // Post-cutover: gate is audit-only — warning emitted, push proceeds (exit 1 = re-push).
-      assert.equal(
-        r.status,
-        1,
-        `expected exit 1 (audit-only: legacy verdict warns + proceeds), got ${r.status}: stderr=${r.stderr}`,
-      );
-      // Must emit audit-only warning (not a hard failure).
-      assert.match(
-        r.stderr,
-        /WARN.*sub-attestation verification failed.*audit-only|WARN.*push not blocked/i,
-        `stderr must confirm audit-only mode: ${r.stderr}`,
-      );
-      // Must NOT treat it as a hard block.
-      assert.equal(
-        r.status,
-        1,
-        'exit code 1 (re-push required for signed chore) confirms push was NOT blocked',
-      );
-    } finally {
-      rmSync(bareRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('AISDLC-409 backward-compat: AI_SDLC_V6_CUTOVER_ACTIVE=0 still forces v5 default + hard-fail gate', () => {
-    // Post-AISDLC-409 (2026-05-23), v6 is the default. The legacy
-    // AI_SDLC_V6_CUTOVER_ACTIVE=0 opt-out is preserved for backward-compat —
-    // operators who pinned the old env to 0 (to lock down to v5 + sub-attestation
-    // hard-fail) keep that behavior. This test exercises that legacy path:
-    //   - default is v5 (sign writes <sha>.dsse.json, not <sha>.v6.dsse.json)
-    //   - sub-attestation gate hard-fails on missing verifier/registry/sub-attestations
-    // Note: cleanEnv() in this file still injects AI_SDLC_V6_CUTOVER_ACTIVE=1
-    // for most tests — that value is now inert post-cutover (any value other
-    // than '0' defaults to v6). This test explicitly overrides with '0' to
-    // exercise the backward-compat path.
-
-    writeFileSync(join(root, '.active-task'), 'AISDLC-383H\n');
-    // Legacy plain-JSON verdict (no sub-attestations) — would have failed pre-cutover.
-    const dir = join(root, '.ai-sdlc', 'verdicts');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, 'aisdlc-383h.json'),
-      JSON.stringify([
-        { agentId: 'code-reviewer', harness: 'claude-code', approved: true, findings: {} },
-      ]),
-    );
-
-    // The verifier + registry are missing (not installed in this test repo) —
-    // the gated path should hard-fail when cutover-active is OFF.
-    const { cmd } = installFakeSigner(root);
-    const r = runHook(root, {
-      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-      // Explicitly OFF — overrides the cleanEnv default of '1'.
-      AI_SDLC_V6_CUTOVER_ACTIVE: '0',
-      // Real verifier path (stub off).
-      AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
-      AI_SDLC_TEST_MODE: '',
-    });
-
-    // Hard-fail expected: exit non-zero, with a clear error mentioning the gating.
-    assert.notEqual(
-      r.status,
-      0,
-      `expected non-zero exit (hard-fail), got ${r.status}: ${r.stderr}`,
-    );
-    assert.match(
-      r.stderr,
-      /AI_SDLC_V6_CUTOVER_ACTIVE=1|fails closed|push BLOCKED/i,
-      `stderr must mention the cutover gating: ${r.stderr}`,
-    );
-  });
+  // ── RFC-0042 Phase 3: default schema version is v6 (AI_SDLC_SCHEMA_VERSION unset) ──
 
   it('RFC-0042 Phase 3: default schema version is v6 (AI_SDLC_SCHEMA_VERSION unset)', () => {
-    // The hook must use v6 by default. Verify by checking that the gate-skip
-    // message appears when AI_SDLC_SCHEMA_VERSION is not set.
+    // The hook must use v6 by default. Verify by checking that the signer is
+    // invoked with --schema-version v6 (and the envelope lands at .v6.dsse.json).
     writeFileSync(join(root, '.active-task'), 'AISDLC-383H\n');
     writeVerdictFile(root, 'AISDLC-383H');
-    const { cmd } = installFakeSigner(root);
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       // AI_SDLC_SCHEMA_VERSION intentionally NOT set (should default to v6).
@@ -989,13 +629,16 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.equal(
       r.status,
       1,
-      `expected exit 1 (v6 default: gate skipped, signed), got ${r.status}: stderr=${r.stderr}`,
+      `expected exit 1 (v6 default: signed), got ${r.status}: stderr=${r.stderr}`,
     );
+    const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     assert.match(
-      r.stderr,
-      /v6 envelope mode.*AISDLC-380 sub-attestation gate skipped/i,
-      `stderr must confirm v6 is the default: ${r.stderr}`,
+      log,
+      /--schema-version v6/,
+      `signer must be invoked with --schema-version v6 by default: ${log}`,
     );
+    const attPath = join(root, '.ai-sdlc', 'attestations', `${head}.v6.dsse.json`);
+    assert.equal(existsSync(attPath), true, 'v6 envelope must exist at HEAD');
   });
 
   // ── AISDLC-274: stale-envelope detection ─────────────────────────────
