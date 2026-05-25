@@ -7,7 +7,13 @@ author: Alexander Kline
 created: 2026-05-04
 updated: 2026-05-04
 targetSpecVersion: v1alpha1
-requires:
+# AISDLC-311 audit (2026-05-24): re-classified from `requires:` to `assumes:`.
+# RFC-0029 is a non-normative standing-reference vision document with no
+# `implementedBy:` source files — there is no code to import from. The
+# references to RFC-0005 / RFC-0008 / RFC-0009 are design-contract reads
+# (PPA scoring semantics, DID structure) cited by the Product Authority
+# position, not runtime imports.
+assumes:
   - RFC-0005
   - RFC-0008
   - RFC-0009

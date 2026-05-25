@@ -1,7 +1,7 @@
 ---
 id: AISDLC-311
 title: 'feat: RFC `requires:` field semantics — distinguish design-contract from runtime-code dependency'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -10,6 +10,8 @@ labels:
   - registry-hygiene
 priority: medium
 dependencies: []
+blocked:
+  reason: "Task body uses 'requires:' as a quoted FIELD NAME — the AISDLC-311 design surface itself. DoR gate-7 phrase detection mis-classifies these as ungrounded dependency references; they are descriptions of the feature being shipped, not task-level dependency declarations. Override per AISDLC-296 / RFC-0011 §13."
 references:
   - spec/rfcs/RFC-0031-calibration-driven-did-revision-proposal.md
   - spec/rfcs/README.md

@@ -305,6 +305,116 @@ export function appendAuditEntry({
   }
 }
 
+// ---------------------------------------------------------------------------
+// AISDLC-311 — requires-shipped check at Implemented promotion
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract a YAML-list-shaped field (e.g. `requires:`, `assumes:`) from an
+ * RFC's frontmatter text. Supports inline (`[RFC-0001, RFC-0002]`) + block-
+ * list forms. Returns deduplicated bare RFC IDs.
+ *
+ * Pure parser — no I/O. Used by `checkRequiresShipped` to read the upgrading
+ * RFC's `requires:` declaration without depending on the check-rfc-docs
+ * frontmatter parser (the two modules are intentionally independent).
+ *
+ * @param {string} source  - Full RFC content (frontmatter + body) OR raw frontmatter block.
+ * @param {string} field   - One of 'requires' | 'assumes'.
+ * @returns {string[]}
+ */
+export function extractRfcListField(source, field) {
+  if (!source) return [];
+  const normalised = source.replace(/\r\n/g, '\n');
+  let block = normalised;
+  if (normalised.startsWith('---\n')) {
+    const fenceEnd = normalised.indexOf('\n---\n', 4);
+    if (fenceEnd !== -1) block = normalised.slice(4, fenceEnd);
+  }
+  const ids = new Set();
+  // Inline form.
+  const inlineRe = new RegExp(`^${field}:\\s*\\[([^\\]]*)\\]`, 'm');
+  const inline = block.match(inlineRe);
+  if (inline) {
+    for (const raw of (inline[1] ?? '').split(',')) {
+      const item = raw.trim().replace(/^['"]|['"]$/g, '');
+      if (/^RFC-\d{4}$/.test(item)) ids.add(item);
+    }
+    return [...ids];
+  }
+  // Block-list form.
+  const blockRe = new RegExp(`^${field}:\\n((?:\\s+-\\s+.+\\n?)*)`, 'm');
+  const blockMatch = block.match(blockRe);
+  if (!blockMatch) return [];
+  for (const line of (blockMatch[1] ?? '').split('\n')) {
+    const item = line
+      .replace(/^\s+-\s+/, '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
+    if (/^RFC-\d{4}$/.test(item)) ids.add(item);
+  }
+  return [...ids];
+}
+
+/**
+ * Check that all `requires:` entries of an RFC are themselves at the
+ * `Implemented` lifecycle when promoting the RFC to `Implemented`.
+ *
+ * Per AISDLC-311:
+ *   - `requires:` = runtime-code dependency. Target RFC MUST be `Implemented`.
+ *   - `assumes:` = design-contract dependency. Target RFC only needs to exist;
+ *                  it is NOT checked here.
+ *
+ * Returns `{ ok, violations[] }`. The CLI runner treats violations as
+ * warnings rather than hard failures during the initial soak window — this
+ * prevents the gate from retroactively breaking historical RFCs whose
+ * `requires:` field may not yet be split between requires/assumes. After
+ * the AISDLC-311 audit pass completes the caller can promote to a hard
+ * fail by inspecting `violations.length > 0`.
+ *
+ * @param {object} params
+ * @param {string|null} params.toContent     - RFC content after the change.
+ * @param {string|null} params.toLifecycle   - Resolved target lifecycle.
+ * @param {string}      params.rfcId         - For diagnostic messages.
+ * @param {(rfcId: string) => string|null} [params.readUpstreamRfcContent]
+ *        - Loader for upstream RFC content; tests stub this. Falls back to no
+ *          check when not provided.
+ * @returns {{ ok: boolean, violations: Array<{ rfcId: string, depId: string, depLifecycle: string }>, diagnostic?: string }}
+ */
+export function checkRequiresShipped({ toContent, toLifecycle, rfcId, readUpstreamRfcContent }) {
+  // Only enforce when the RFC is being promoted to `Implemented`.
+  if (toLifecycle !== 'Implemented') return { ok: true, violations: [] };
+  if (!toContent || typeof readUpstreamRfcContent !== 'function') {
+    return { ok: true, violations: [] };
+  }
+  const requires = extractRfcListField(toContent, 'requires');
+  if (requires.length === 0) return { ok: true, violations: [] };
+
+  const violations = [];
+  for (const depId of requires) {
+    const depContent = readUpstreamRfcContent(depId);
+    if (depContent === null) {
+      // Missing dep file — surface as a violation; the check-rfc-docs
+      // dependency-existence check will also flag this.
+      violations.push({ rfcId, depId, depLifecycle: 'missing' });
+      continue;
+    }
+    const depLifecycle = extractLifecycle(depContent);
+    if (depLifecycle !== 'Implemented') {
+      violations.push({ rfcId, depId, depLifecycle: depLifecycle ?? 'unknown' });
+    }
+  }
+
+  if (violations.length === 0) return { ok: true, violations: [] };
+  const diagnostic =
+    `[rfc-lifecycle] WARN ${rfcId}: promoting to 'Implemented' with unshipped ` +
+    `'requires:' deps: ${violations
+      .map((v) => `${v.depId} (lifecycle='${v.depLifecycle}')`)
+      .join(', ')}. ` +
+    `Per AISDLC-311, runtime-code dependencies (requires:) must ship before the consumer can ship. ` +
+    `If this RFC's implementation does NOT import any of these RFCs' code, move them to 'assumes:' instead.`;
+  return { ok: false, violations, diagnostic };
+}
+
 /**
  * Check a single RFC lifecycle transition.
  *
@@ -478,6 +588,7 @@ export function checkLifecycleTransition({
 export function checkAllTransitions(transitions) {
   const failures = [];
   const overrides = [];
+  const warnings = [];
   let clean = 0;
 
   for (const t of transitions) {
@@ -514,9 +625,30 @@ export function checkAllTransitions(transitions) {
         diagnostic: result.diagnostic,
       });
     }
+
+    // AISDLC-311 — requires-shipped check, runs alongside the ladder check.
+    // Warning-only during the initial soak window; do NOT escalate to a hard
+    // failure until the AISDLC-311 audit pass has reclassified historical
+    // `requires:` entries that are actually design-contract (`assumes:`).
+    if (typeof t.readUpstreamRfcContent === 'function') {
+      const reqResult = checkRequiresShipped({
+        toContent: t.toContent,
+        toLifecycle,
+        rfcId: t.rfcId,
+        readUpstreamRfcContent: t.readUpstreamRfcContent,
+      });
+      if (!reqResult.ok) {
+        warnings.push({
+          rfcId: t.rfcId,
+          kind: 'requires-not-shipped',
+          violations: reqResult.violations,
+          diagnostic: reqResult.diagnostic,
+        });
+      }
+    }
   }
 
-  return { failures, overrides, clean };
+  return { failures, overrides, warnings, clean };
 }
 
 /**
@@ -526,11 +658,14 @@ export function checkAllTransitions(transitions) {
  * @param {{ failures: Array, overrides: Array, clean: number }} report
  * @returns {number}
  */
-export function reportTransitionsAndExit({ failures, overrides, clean }) {
+export function reportTransitionsAndExit({ failures, overrides, warnings = [], clean }) {
   for (const ov of overrides) {
     console.log(
       `[rfc-lifecycle] OVERRIDE ${ov.rfcId}: '${ov.transition}' approved by ${ov.override.operator} — ${ov.override.reason}`,
     );
+  }
+  for (const w of warnings) {
+    console.log(w.diagnostic);
   }
   if (failures.length > 0) {
     for (const f of failures) {
@@ -544,7 +679,9 @@ export function reportTransitionsAndExit({ failures, overrides, clean }) {
     return 1;
   }
   console.log(
-    `[rfc-lifecycle] OK: ${clean} clean transition(s), ${overrides.length} approved override(s).`,
+    `[rfc-lifecycle] OK: ${clean} clean transition(s), ${overrides.length} approved override(s)` +
+      (warnings.length > 0 ? `, ${warnings.length} warning(s)` : '') +
+      `.`,
   );
   return 0;
 }

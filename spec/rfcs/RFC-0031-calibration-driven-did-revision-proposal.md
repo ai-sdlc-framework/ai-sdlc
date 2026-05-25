@@ -7,12 +7,20 @@ author: Alexander Kline
 created: 2026-05-04
 updated: 2026-05-16
 targetSpecVersion: v1alpha1
-requires:
+# AISDLC-311 audit (2026-05-24): re-classified from `requires:` to `assumes:`.
+# `orchestrator/src/sa-scoring/revision-proposal.ts` only imports `crypto.randomUUID`
+# from Node stdlib — no actual code imports from any of these dependencies'
+# implementations. The relationship is design-contract (the DID schema shape
+# from RFC-0009, the PPA semantics from RFC-0005 / RFC-0008) read by callers
+# rather than imported by this RFC's code.
+assumes:
   - RFC-0005
   - RFC-0008
   - RFC-0009
   - RFC-0029
   - RFC-0030
+implementedBy:
+  - orchestrator/src/sa-scoring/revision-proposal.ts
 requiresDocs: []
 ---
 

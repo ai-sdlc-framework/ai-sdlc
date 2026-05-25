@@ -43,9 +43,40 @@ updated: YYYY-MM-DD
 # Spec API version this RFC targets. Optional but recommended.
 targetSpecVersion: v1alpha1
 
-# Other RFC IDs this RFC depends on / amends. Optional.
+# Dependency declarations (AISDLC-311 — split semantics):
+#
+#   requires:  Runtime-code dependency — this RFC's implementation IMPORTS code
+#              from the listed RFC(s) implementations. They MUST ship (lifecycle
+#              `Implemented`) before this RFC's implementation can ship.
+#              Example: RFC-0035 Phase 5 imports the shared classifier substrate
+#              from RFC-0024 Refit Phase 2 → `requires: [RFC-0024]`.
+#
+#   assumes:   Design-contract dependency — this RFC reads the listed RFC(s)
+#              as a design contract (type shape, schema, naming, semantics) but
+#              does NOT code-import their implementation. They only need to
+#              EXIST at `Ready for Review` or higher — they do NOT need to ship
+#              before this RFC's implementation can ship.
+#              Example: RFC-0031 assumes the DID schema from RFC-0009 but only
+#              takes abstract `IdentityClass + fieldPath` parameters; callers
+#              will provide the RFC-0009-resolved values once RFC-0009 ships.
+#              → `assumes: [RFC-0005, RFC-0008, RFC-0009, RFC-0029, RFC-0030]`.
+#
+# When in doubt: if removing the dependency would cause a TypeScript / Node
+# import error, it's `requires:`; if removing it would only leave a comment
+# stale, it's `assumes:`. The DoR upstream-OQ gate only BLOCKS task dispatch
+# on `requires:` entries; `assumes:` entries are documentation.
+#
 # requires: [RFC-0002, RFC-0004]
+# assumes: [RFC-0009]
 # amends: [RFC-0002]
+#
+# Optional: the source-tree paths that implement this RFC. When declared, the
+# docs-drift linter cross-checks `requires:` entries against actual imports
+# from these files; missing imports surface a deprecation warning suggesting
+# `assumes:`. Omit when the RFC has no implementation yet (Draft / Ready for
+# Review with deferred impl).
+# implementedBy:
+#   - orchestrator/src/sa-scoring/revision-proposal.ts
 
 # Closed enum declaring which user-facing doc surfaces must reference this RFC.
 # Allowed values (each maps to a `docs/` subdirectory):
