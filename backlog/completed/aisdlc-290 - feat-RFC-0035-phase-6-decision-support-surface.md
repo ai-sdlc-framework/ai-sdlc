@@ -17,6 +17,8 @@ dependencies:
 references:
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
 priority: high
+blocked:
+  reason: 'RFC-0035 14/14 OQs resolved per 2026-05-15 walkthrough; lifecycle is Ready for Review awaiting per-owner sign-off. Phase 6 implementation proceeds under operator-acknowledged upstream-OQ override — same pattern as sibling Phase 4 (AISDLC-288) and Phase 5 (AISDLC-289).'
 ---
 
 ## Description
