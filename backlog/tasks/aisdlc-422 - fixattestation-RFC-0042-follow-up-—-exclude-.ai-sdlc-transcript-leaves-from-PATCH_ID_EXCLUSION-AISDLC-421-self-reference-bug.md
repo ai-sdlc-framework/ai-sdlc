@@ -78,3 +78,15 @@ Option C: discard #675's attestation chore commits, sign once with the fix uncom
 
 Recommend Option A unless #675 needs to land tonight.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 `PATCH_ID_EXCLUSIONS` in `pipeline-cli/src/attestation/patch-id.ts` includes both `.ai-sdlc/attestations/` AND `.ai-sdlc/transcript-leaves/`; old `PATCH_ID_EXCLUSION` retained as a deprecated alias.
+- [ ] #2 Verifier's pathspec in `scripts/verify-attestation.mjs` mirrors the exclusion list exactly.
+- [ ] #3 Bash hook `scripts/check-attestation-sign.sh` passes the same `:!.ai-sdlc/transcript-leaves/` exclusion to `git diff-tree` when computing patch-id.
+- [ ] #4 Hermetic test: stage and commit a leaves file at `<patch-id>.jsonl`, recompute patch-id from base..HEAD, assert it equals the pre-commit value.
+- [ ] #5 Hermetic test: AISDLC-398 regression — committing an attestation envelope file still yields the same patch-id (refactor didn't regress the original invariant).
+- [ ] #6 Full sign → commit → re-compute-patch-id → re-find-envelope roundtrip succeeds end-to-end in a real worktree (the recovery path that blocked PR #675).
+- [ ] #7 Local pre-push gate chain passes with NO `AI_SDLC_SKIP_*` flags set (coverage, DoR, attestation-sign all green).
+- [ ] #8 Patch coverage on the changed lines in `patch-id.ts` and `verify-attestation.mjs` >= 80%.
+<!-- AC:END -->
