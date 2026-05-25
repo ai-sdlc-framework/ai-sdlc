@@ -26,6 +26,7 @@ import { hideBin } from 'yargs/helpers';
 import {
   aggregateDecisionCorpus,
   appendDecisionEvent,
+  buildDecisionSupportView,
   buildPendingExemplarsDigest,
   computeStageACoverage,
   DECISION_SOURCES,
@@ -48,6 +49,7 @@ import {
   readDecisionExemplars,
   readPendingExemplars,
   rejectPendingExemplar,
+  renderDecisionSupportSurface,
   renderPendingExemplarsDigestMarkdown,
   resolveDecisionExemplarsPath,
   resolveEventLogPath,
@@ -62,6 +64,7 @@ import {
   type Decision,
   type DecisionOption,
   type DecisionSource,
+  type DecisionSupportView,
   type PendingExemplar,
 } from '../decisions/index.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
@@ -188,6 +191,27 @@ function renderShow(decision: Decision): string {
     lines.push(`  - ${evt.ts}  ${evt.type}${actor}`);
   }
   return lines.join('\n') + '\n';
+}
+
+/**
+ * Render the RFC-0035 Phase 6 (AISDLC-290) decision support surface for a
+ * single decision. Composes `renderShow()` (audit-style summary + event log)
+ * with the §8 support surface (problem / options / recommendation /
+ * counter-arguments / sub-decision graph / Stage A-B-C provenance) so a
+ * single `cli-decisions show <id>` invocation surfaces everything the
+ * operator needs to act on the decision.
+ *
+ * AC#5 backward-compat: when a decision has no Stage B/C output yet (e.g.
+ * Phase 1-style ad-hoc Decision that has only been opened), the support
+ * surface renders the problem + options + (omitted recommendation /
+ * counter-arguments / Stage B-C provenance / sub-decision graph) without
+ * any "(missing)" markers — see `decision-support-surface.ts` for the
+ * gating rules.
+ */
+function renderShowWithSupportSurface(decision: Decision): string {
+  const audit = renderShow(decision);
+  const supportSurface = renderDecisionSupportSurface(buildDecisionSupportView(decision));
+  return `${audit}\n${supportSurface}`;
 }
 
 // ── Interactive `add` flow ───────────────────────────────────────────────────
@@ -382,7 +406,7 @@ export function buildDecisionsCli(): Argv {
     )
     .command(
       'show <id>',
-      'Render one decision with its full event history.',
+      'Render one decision with its full event history + the Phase 6 decision support surface (recommendation / counter-arguments / sub-decision graph / Stage A-B-C provenance).',
       (y) =>
         y
           .positional('id', {
@@ -394,6 +418,12 @@ export function buildDecisionsCli(): Argv {
             type: 'string',
             choices: ['json', 'text'] as const,
             default: 'text' as const,
+          })
+          .option('support-surface-only', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Emit only the RFC-0035 Phase 6 decision support surface (problem / options / recommendation / counter-arguments / sub-decision graph / Stage A-B-C provenance). Suppresses the audit-style header + event history.',
           }),
       // NB: yargs only propagates handler errors via parseAsync rejection
       // when the handler is async — sync throws get swallowed. Keep this
@@ -402,6 +432,7 @@ export function buildDecisionsCli(): Argv {
       async (argv) => {
         const workDir = String(argv['work-dir']);
         const id = String(argv.id);
+        const supportSurfaceOnly = Boolean(argv['support-surface-only']);
         if (!/^DEC-\d{4,}$/.test(id)) {
           fail(`invalid decision id: ${id} — expected DEC-NNNN`);
         }
@@ -424,9 +455,17 @@ export function buildDecisionsCli(): Argv {
           process.exit(1);
         }
         if (String(argv.format) === 'json') {
-          emit({ ok: true, enabled: true, decision });
+          // Always include the structured support view alongside the raw
+          // decision so callers (TUI, web surface) can consume it without
+          // re-deriving. `supportSurface: null` is not used — the view is
+          // always buildable from the decision (empty sections when stages
+          // haven't run, per AC#5).
+          const supportSurface: DecisionSupportView = buildDecisionSupportView(decision);
+          emit({ ok: true, enabled: true, decision, supportSurface });
+        } else if (supportSurfaceOnly) {
+          process.stdout.write(renderDecisionSupportSurface(buildDecisionSupportView(decision)));
         } else {
-          process.stdout.write(renderShow(decision));
+          process.stdout.write(renderShowWithSupportSurface(decision));
         }
       },
     )

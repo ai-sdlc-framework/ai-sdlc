@@ -861,3 +861,209 @@ describe('exemplars subcommand (RFC-0035 Phase 9 / AISDLC-293)', () => {
     expect(affirmedList.exemplars[0].disposition).toBe('affirmed');
   });
 });
+
+// ── show subcommand: RFC-0035 Phase 6 / AISDLC-290 — decision support surface
+//    AC#1: per-decision rendering (problem, options, recommendation, confidence,
+//          counter-arguments)
+//    AC#2: sub-decision graph rendered as Mermaid-style text tree
+//    AC#3: integrates with `cli-decisions show <id>` (this block exercises
+//          that integration end-to-end)
+//    AC#4: Stage A/B/C verdict provenance visible
+//    AC#5: backward-compatible — decisions without sub-decisions / Stage B/C
+//          render without empty / "(missing)" sections
+
+describe('show subcommand — RFC-0035 Phase 6 support surface (AISDLC-290)', () => {
+  async function seedDecisionWithStageA(summary = 'phase-6 reversible decision'): Promise<string> {
+    setArgv(
+      'add',
+      '--summary',
+      summary,
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Keep',
+      '--option',
+      'opt-b:Switch',
+      '--reversible',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const id = stdoutJson<{ decisionId: string }>().decisionId;
+    stdoutChunks = [];
+    setArgv('score-a', id, '--store', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+    return id;
+  }
+
+  it('AC#5 — Phase-1 decision (no Stage A/B/C) renders surface without empty sections', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'minimal decision',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('show', 'DEC-0001');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    // Audit-style header preserved (existing behavior)
+    expect(out).toMatch(/DEC-0001 — minimal decision/);
+    expect(out).toMatch(/Event history/);
+    // Phase 6 surface — problem + options sections appear
+    expect(out).toMatch(/## Problem/);
+    expect(out).toMatch(/## Options/);
+    // Backward-compat — sections without data are suppressed (no Mermaid /
+    // Recommendation / Counter-arguments / Verdict provenance)
+    expect(out).not.toMatch(/## Recommendation/);
+    expect(out).not.toMatch(/## Counter-arguments/);
+    expect(out).not.toMatch(/```mermaid/);
+    expect(out).not.toMatch(/## Verdict provenance/);
+  });
+
+  it('AC#4 — show surfaces Stage A verdict provenance after score-a --store', async () => {
+    await seedDecisionWithStageA('decision with stage-a stored');
+    setArgv('show', 'DEC-0001');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/## Verdict provenance/);
+    expect(out).toMatch(/### Stage A/);
+    expect(out).toMatch(/priority signal:/);
+    expect(out).toMatch(/reversibility:/);
+    // Stage B and Stage C not present until those tiers run
+    expect(out).not.toMatch(/### Stage B/);
+    expect(out).not.toMatch(/### Stage C/);
+  });
+
+  it('AC#3 — JSON mode emits both decision and supportSurface payloads', async () => {
+    await seedDecisionWithStageA('decision-with-json');
+    setArgv('show', 'DEC-0001', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      ok: boolean;
+      decision: Decision;
+      supportSurface: {
+        decisionId: string;
+        problemSummary: string;
+        options: Array<{ id: string }>;
+        counterArguments: string[];
+        subDecisionGraph: Array<{ optionId: string }>;
+        stageAProvenance?: { prioritySignal: number };
+      };
+    }>();
+    expect(r.ok).toBe(true);
+    expect(r.supportSurface.decisionId).toBe('DEC-0001');
+    expect(r.supportSurface.problemSummary).toMatch(/decision-with-json/);
+    expect(r.supportSurface.options.map((o) => o.id)).toEqual(['opt-a', 'opt-b']);
+    // Stage A stored — provenance surfaces in JSON too
+    expect(r.supportSurface.stageAProvenance).toBeDefined();
+    expect(typeof r.supportSurface.stageAProvenance!.prioritySignal).toBe('number');
+  });
+
+  it('AC#1 + #2 + #4 — score-c --store --force surfaces recommendation / Mermaid / Stage A-B-C', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'mid-band phase-6 decision',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:Keep',
+      '--option',
+      'opt-b:Switch',
+      '--reversible',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const id = stdoutJson<{ decisionId: string }>().decisionId;
+    stdoutChunks = [];
+
+    // --force bypasses the mid-band guard; --store persists Stage C output
+    setArgv('score-c', id, '--force', '--store', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('show', id);
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    // AC#1 — recommendation + confidence rendered
+    expect(out).toMatch(/## Recommendation/);
+    expect(out).toMatch(/\*\*option:\*\*/);
+    expect(out).toMatch(/\*\*confidence:\*\*/);
+    // AC#4 — Stage C provenance surfaces (model + threshold + meets-threshold)
+    expect(out).toMatch(/### Stage C/);
+    expect(out).toMatch(/threshold:/);
+    expect(out).toMatch(/model:/);
+  });
+
+  it('AC#2 — option-declared subDecisions render as Mermaid flowchart in show output', async () => {
+    // The `cli-decisions add` flag-mode doesn't accept subDecisions, so this
+    // test seeds via the event log directly to exercise the declared-source
+    // graph path (Stage C-implied path is exercised in the unit tests).
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { dirname } = await import('node:path');
+    const logPath = resolveEventLogPath(tmp);
+    mkdirSync(dirname(logPath), { recursive: true });
+    const opened = {
+      eventVersion: 'v1',
+      type: 'decision-opened',
+      ts: '2026-05-15T10:00:00.000Z',
+      decisionId: 'DEC-0001',
+      source: 'rfc-open-question',
+      scope: 'rfc:RFC-0035',
+      summary: 'with declared sub-decisions',
+      reversible: true,
+      options: [
+        {
+          id: 'opt-a',
+          description: 'Keep existing routing',
+          subDecisions: ['how does the back-off behave?', 'what about cold-start?'],
+        },
+        { id: 'opt-b', description: 'Switch to new' },
+      ],
+    };
+    writeFileSync(logPath, JSON.stringify(opened) + '\n', 'utf8');
+
+    setArgv('show', 'DEC-0001');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/## Sub-decision graph/);
+    // Extract just the Mermaid fence so we can assert opt-b is skipped from
+    // the Mermaid diagram itself (it still appears in the audit Options:
+    // listing higher up in the same `show` output — that is intentional).
+    const mermaidMatch = out.match(/```mermaid\n([\s\S]*?)```/);
+    expect(mermaidMatch).not.toBeNull();
+    const mermaid = mermaidMatch![1];
+    expect(mermaid).toMatch(/flowchart TD/);
+    expect(mermaid).toMatch(/D\["DEC-0001"\]/);
+    expect(mermaid).toMatch(/opt-a: Keep existing routing/);
+    expect(mermaid).toMatch(/how does the back-off behave\?/);
+    // AC#5: opt-b has no sub-decisions → skipped from the Mermaid diagram
+    expect(mermaid).not.toMatch(/Switch to new/);
+    // Text outline fallback for TUI consumers
+    expect(out).toMatch(/Text outline \(TUI fallback\)/);
+  });
+
+  it('--support-surface-only suppresses the audit header and event history', async () => {
+    await seedDecisionWithStageA('surface-only decision');
+    setArgv('show', 'DEC-0001', '--support-surface-only');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    // The audit-style header lines + event history are SUPPRESSED
+    expect(out).not.toMatch(/Event history/);
+    expect(out).not.toMatch(/^DEC-0001 — /m); // the audit-summary header
+    // The Phase 6 surface is rendered
+    expect(out).toMatch(/## Problem/);
+    expect(out).toMatch(/## Options/);
+    expect(out).toMatch(/## Verdict provenance/);
+  });
+});
