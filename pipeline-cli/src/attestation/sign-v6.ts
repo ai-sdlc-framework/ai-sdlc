@@ -32,7 +32,7 @@ import { sign as cryptoSign } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { computeMerkleRoot, generateNonce, loadLeaves } from './merkle.js';
+import { computeMerkleRoot, generateNonce, loadLeaves, loadLeavesForPatchId } from './merkle.js';
 import type { TranscriptLeaf } from './merkle.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -221,36 +221,82 @@ export interface SignAndWriteV6EnvelopeOptions {
 }
 
 /**
- * Load leaves from transcript-leaves.jsonl, select the PR's subset by
- * `taskId`, build + sign the v6 envelope, and write it to
- * `.ai-sdlc/attestations/<head-sha>.v6.dsse.json`.
+ * Load leaves from the per-patch-id file (AISDLC-421) with a one-release-window
+ * fallback to the legacy shared `.ai-sdlc/transcript-leaves.jsonl`, then build
+ * + sign the v6 envelope and write it to
+ * `.ai-sdlc/attestations/<patch-id>.v6.dsse.json` (primary) +
+ * `.ai-sdlc/attestations/<head-sha>.v6.dsse.json` (legacy compat bridge).
  *
- * Returns the absolute path of the written envelope.
+ * Returns the absolute path of the written envelope (primary).
  *
- * @throws {Error} when no leaves exist for `taskId` in the leaf file.
+ * AISDLC-421 read-path:
+ *   1. If `patchId` is provided AND `<repo>/.ai-sdlc/transcript-leaves/<patchId>.jsonl`
+ *      exists → use it (the post-migration canonical path).
+ *   2. Otherwise fall back to `<repo>/.ai-sdlc/transcript-leaves.jsonl` filtered
+ *      by `taskId` (the pre-migration shared-file path; retained for the
+ *      migration window and for envelopes signed before this change).
+ *
+ * The Merkle tree is built ONLY from the leaves selected here (i.e. THIS PR's
+ * leaves). Because every PR writes to its own file post-AISDLC-421, the tree
+ * is per-PR and rootHash = f(THIS_PR_leaves), independent of all other PRs.
+ *
+ * @throws {Error} when no leaves can be found via either path.
  */
 export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): string {
   const { repoRoot, headSha, taskId, privateKeyPem, signerIdentity, patchId } = opts;
 
-  // Load ALL leaves (full tree for root computation).
-  const allLeaves = loadLeaves(repoRoot);
+  // AISDLC-421: per-patch-id-first read with shared-file fallback.
+  // `prLeaves` is the per-PR leaf set (the Merkle tree is built from these
+  // ONLY — no cross-PR shared root anymore).
+  let prLeaves: TranscriptLeaf[] = [];
+  let leafSource = 'unknown';
 
-  // Select the PR's leaves by taskId (case-insensitive match).
-  const prLeaves = allLeaves.filter((l) => l.taskId.toLowerCase() === taskId.toLowerCase());
+  if (patchId) {
+    const perPatchLeaves = loadLeavesForPatchId(patchId, repoRoot);
+    if (perPatchLeaves.length > 0) {
+      prLeaves = perPatchLeaves;
+      leafSource = `per-patch-id (.ai-sdlc/transcript-leaves/${patchId}.jsonl)`;
+    }
+  }
+
+  if (prLeaves.length === 0) {
+    // Migration-window fallback: legacy shared file filtered by taskId.
+    // Pre-AISDLC-421 callers wrote ALL PRs' leaves to this one file, so a
+    // simple read returns leaves from many PRs interleaved; we filter by
+    // taskId to recover this PR's subset.
+    const sharedLeaves = loadLeaves(repoRoot);
+    const filteredByTask = sharedLeaves.filter(
+      (l) => l.taskId.toLowerCase() === taskId.toLowerCase(),
+    );
+    if (filteredByTask.length > 0) {
+      prLeaves = filteredByTask;
+      leafSource = 'shared (.ai-sdlc/transcript-leaves.jsonl) [AISDLC-421 migration fallback]';
+    }
+  }
 
   if (prLeaves.length === 0) {
     throw new Error(
-      `[sign-v6] No transcript leaves found for taskId '${taskId}'. ` +
-        `Ensure reviewers ran and appended leaves before signing.`,
+      `[sign-v6] No transcript leaves found for taskId '${taskId}'` +
+        (patchId ? ` (patch-id ${patchId.slice(0, 12)}...)` : '') +
+        `. Checked per-patch-id file (.ai-sdlc/transcript-leaves/<patch-id>.jsonl) and ` +
+        `shared fallback (.ai-sdlc/transcript-leaves.jsonl). Ensure reviewers ran and ` +
+        `appended leaves before signing.`,
     );
   }
 
+  // Surface which file the leaves came from — helpful for debugging the
+  // migration window when the read may have hit either path.
+  process.stderr.write(`[sign-v6] leaves source: ${leafSource} (${prLeaves.length} leaves)\n`);
+
   const nonce = generateNonce(headSha);
 
+  // AISDLC-421: the Merkle tree is built from THIS PR's leaves only. There is
+  // no longer a cross-PR shared root — each PR's rootHash is computed over its
+  // own per-patch-id leaf set, so allLeaves === prLeaves.
   const envelope = buildV6Envelope({
     headSha,
     prLeaves,
-    allLeaves,
+    allLeaves: prLeaves,
     nonce,
     privateKeyPem,
     signerIdentity,

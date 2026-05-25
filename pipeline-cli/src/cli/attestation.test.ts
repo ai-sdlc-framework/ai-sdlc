@@ -15,8 +15,20 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendLeaf, loadLeaves, type TranscriptLeaf } from '../attestation/merkle.js';
+import { appendLeaf, loadLeavesForPatchId, type TranscriptLeaf } from '../attestation/merkle.js';
 import { buildAttestationCli } from './attestation.js';
+
+/**
+ * AISDLC-421: deterministic test patch-id used to drive `emit-leaf` in
+ * hermetic tests (no real git worktree available, so `--patch-id` is passed
+ * explicitly instead of letting the CLI auto-compute via `git patch-id`).
+ *
+ * Helper to read the leaves the test-fixture call produced.
+ */
+const TEST_PATCH_ID = '0'.repeat(40);
+function loadLeavesUnderTest(repoRoot: string, patchId: string = TEST_PATCH_ID): TranscriptLeaf[] {
+  return loadLeavesForPatchId(patchId, repoRoot);
+}
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -473,10 +485,12 @@ describe('emit-leaf — happy path', () => {
         'claude-code',
         '--model',
         'claude-sonnet-4-6',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync(),
     ).resolves.not.toThrow();
 
-    const leaves = loadLeaves(tmpRoot);
+    const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves).toHaveLength(1);
     const leaf = leaves[0];
     expect(leaf.leafIndex).toBe(0);
@@ -521,10 +535,12 @@ describe('emit-leaf — happy path', () => {
       'claude-code',
       '--model',
       'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
     ]).parseAsync();
 
     const expectedHash = createHash('sha256').update(readFileSync(transcriptPath)).digest('hex');
-    const leaves = loadLeaves(tmpRoot);
+    const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].transcriptHash).toBe(expectedHash);
   });
 
@@ -558,9 +574,11 @@ describe('emit-leaf — happy path', () => {
       'claude-code',
       '--model',
       'claude-opus-4-5',
+      '--patch-id',
+      TEST_PATCH_ID,
     ]).parseAsync();
 
-    const leaves = loadLeaves(tmpRoot);
+    const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictApproved).toBe(false);
     expect(leaves[0].findings.critical).toBe(1);
   });
@@ -595,9 +613,11 @@ describe('emit-leaf — happy path', () => {
       'claude-code',
       '--model',
       'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
     ]).parseAsync();
 
-    const leaves = loadLeaves(tmpRoot);
+    const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictApproved).toBe(true);
   });
 });
@@ -637,10 +657,12 @@ describe('emit-leaf — leafIndex monotonicity across multiple reviewers', () =>
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     }
 
-    const leaves = loadLeaves(tmpRoot);
+    const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves).toHaveLength(3);
     expect(leaves[0].leafIndex).toBe(0);
     expect(leaves[1].leafIndex).toBe(1);
@@ -691,10 +713,12 @@ describe('emit-leaf — leafIndex monotonicity across multiple reviewers', () =>
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     }
 
-    const leaves = loadLeaves(tmpRoot);
+    const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves).toHaveLength(4);
     // leafIndex must be strictly monotonic regardless of taskId.
     expect(leaves.map((l) => l.leafIndex)).toEqual([0, 1, 2, 3]);
@@ -732,16 +756,18 @@ describe('emit-leaf — idempotent re-emission', () => {
       'claude-code',
       '--model',
       'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
     ];
 
     // First call — should append.
     await buildAttestationCli(args).parseAsync();
-    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
 
     // Second call — should skip (idempotent).
     stdoutChunks.length = 0;
     await buildAttestationCli(args).parseAsync();
-    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
     expect(flushStdout()).toContain('skipping (idempotent)');
   });
 });
@@ -771,6 +797,8 @@ describe('emit-leaf — missing-transcript edge case', () => {
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -808,6 +836,8 @@ describe('emit-leaf — missing-transcript edge case', () => {
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -846,6 +876,8 @@ describe('emit-leaf — missing-transcript edge case', () => {
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -894,6 +926,8 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
       'claude-code',
       '--model',
       'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
     ];
   }
 
@@ -901,7 +935,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     await expect(
       buildAttestationCli(buildValidArgsWithHeadSha('a'.repeat(40))).parseAsync(),
     ).resolves.not.toThrow();
-    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
   });
 
   it('rejects empty string', async () => {
@@ -913,7 +947,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects too-short SHA (39 chars)', async () => {
@@ -925,7 +959,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects too-long SHA (41 chars)', async () => {
@@ -937,7 +971,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects uppercase hex (git emits lowercase; uppercase indicates caller bug)', async () => {
@@ -949,7 +983,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects non-hex characters', async () => {
@@ -962,7 +996,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects multi-line input (newline embedded)', async () => {
@@ -975,7 +1009,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 });
 
@@ -1011,10 +1045,12 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync(),
     ).resolves.not.toThrow();
 
-    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
   });
 
   it('rejects transcript-path outside .ai-sdlc/ (sibling of repo root)', async () => {
@@ -1045,13 +1081,15 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--transcript-path must resolve inside');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects transcript-path that escapes via ../ segments', async () => {
@@ -1091,6 +1129,8 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1123,6 +1163,8 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1170,13 +1212,15 @@ describe('emit-leaf — --verdict-path traversal hardening (AISDLC-391 AC-3)', (
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--verdict-path must resolve inside');
-    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects verdict-path that escapes via ../ segments', async () => {
@@ -1216,6 +1260,8 @@ describe('emit-leaf — --verdict-path traversal hardening (AISDLC-391 AC-3)', (
         'claude-code',
         '--model',
         'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;

@@ -537,14 +537,13 @@ export function v6VerifyInclusion(leafHash, proof, root, leafIndex, leafCount) {
 }
 
 /**
- * Load TranscriptLeaf records from `.ai-sdlc/transcript-leaves.jsonl`.
+ * Load TranscriptLeaf records from a specific JSONL file path.
  * Returns an empty array when the file does not exist.
  * Skips malformed JSONL lines (logs to stderr).
  *
- * Exported for hermetic tests.
+ * @internal building block for v6LoadLeaves / v6LoadLeavesForPatchId.
  */
-export function v6LoadLeaves(repoRoot) {
-  const filePath = join(repoRoot, '.ai-sdlc', 'transcript-leaves.jsonl');
+function v6LoadLeavesFromFile(filePath) {
   if (!existsSync(filePath)) return [];
   const content = readFileSync(filePath, 'utf-8');
   const leaves = [];
@@ -558,7 +557,7 @@ export function v6LoadLeaves(repoRoot) {
       leaf = JSON.parse(trimmed);
     } catch {
       process.stderr.write(
-        `[v6-verifier] WARNING: skipping malformed JSONL line ${lineNo} in transcript-leaves.jsonl\n`,
+        `[v6-verifier] WARNING: skipping malformed JSONL line ${lineNo} in ${filePath}\n`,
       );
       continue;
     }
@@ -568,16 +567,134 @@ export function v6LoadLeaves(repoRoot) {
 }
 
 /**
- * Verify a v6 attestation envelope against trusted reviewers and on-disk
- * transcript-leaves.jsonl. Returns `{ status, reason }`.
+ * Load TranscriptLeaf records from the SHARED legacy
+ * `.ai-sdlc/transcript-leaves.jsonl` (pre-AISDLC-421).
  *
- * Security model (AISDLC-383.3):
+ * AISDLC-421 retained as a read-only fallback for legacy envelopes signed
+ * against the shared-file leaf set. Returns an empty array when the file
+ * does not exist.
+ *
+ * Exported for hermetic tests.
+ */
+export function v6LoadLeaves(repoRoot) {
+  return v6LoadLeavesFromFile(join(repoRoot, '.ai-sdlc', 'transcript-leaves.jsonl'));
+}
+
+/**
+ * AISDLC-421: load TranscriptLeaf records from the per-patch-id file
+ * `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`.
+ *
+ * Returns an empty array when the file does not exist (caller should fall
+ * back to the shared-file lookup during the migration window).
+ *
+ * Exported for hermetic tests.
+ */
+export function v6LoadLeavesForPatchId(repoRoot, patchId) {
+  if (typeof patchId !== 'string' || !/^[0-9a-f]{40}$/i.test(patchId)) {
+    return [];
+  }
+  return v6LoadLeavesFromFile(
+    join(repoRoot, '.ai-sdlc', 'transcript-leaves', `${patchId.toLowerCase()}.jsonl`),
+  );
+}
+
+/**
+ * AISDLC-421: resolve the on-disk leaves for a v6 envelope, with the
+ * per-patch-id-first / shared-file-fallback contract.
+ *
+ * Resolution order:
+ *   1. If `patchIdHint` is provided (extracted from a patch-id-named envelope
+ *      filename like `<40-hex>.v6.dsse.json`), try the per-patch-id file.
+ *   2. Scan `.ai-sdlc/transcript-leaves/*.jsonl` and return the file whose
+ *      transcript-hash set is a superset of the envelope's `transcriptLeaves[].transcriptHash`
+ *      values. This handles the case where the envelope is SHA-named (legacy
+ *      filename layout) but the leaves are in a per-patch-id file because the
+ *      writer is post-AISDLC-421.
+ *   3. Fall back to the SHARED `.ai-sdlc/transcript-leaves.jsonl` filtered to
+ *      the envelope's claimed taskId (extracted from `transcriptLeaves[].taskId`
+ *      when available, or accept all leaves when not). Pre-AISDLC-421 envelopes
+ *      were signed over the entire shared file's leaf set, so we cannot filter
+ *      there — we return the full shared-file content for the verifier to match.
+ *
+ * Returns `{ leaves, source }` where `source` is a human-readable description
+ * for the verifier to log.
+ *
+ * Exported for hermetic tests.
+ */
+export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
+  // 1. Per-patch-id direct hit.
+  if (patchIdHint && /^[0-9a-f]{40}$/i.test(patchIdHint)) {
+    const direct = v6LoadLeavesForPatchId(repoRoot, patchIdHint);
+    if (direct.length > 0) {
+      return {
+        leaves: direct,
+        source: `per-patch-id (.ai-sdlc/transcript-leaves/${patchIdHint.toLowerCase()}.jsonl)`,
+      };
+    }
+  }
+
+  // 2. Scan per-patch-id directory + match by transcript-hash superset.
+  // Useful when the envelope is SHA-named (legacy) but the leaves are post-AISDLC-421.
+  const perPatchDir = join(repoRoot, '.ai-sdlc', 'transcript-leaves');
+  const envelopeHashes = Array.isArray(envelope?.transcriptLeaves)
+    ? envelope.transcriptLeaves
+        .map((s) => s?.transcriptHash)
+        .filter((h) => typeof h === 'string' && /^[0-9a-f]{64}$/i.test(h))
+    : [];
+  if (existsSync(perPatchDir) && envelopeHashes.length > 0) {
+    let candidateFiles = [];
+    try {
+      candidateFiles = readdirSync(perPatchDir).filter((n) => n.endsWith('.jsonl'));
+    } catch {
+      candidateFiles = [];
+    }
+    for (const fname of candidateFiles) {
+      const candidatePath = join(perPatchDir, fname);
+      const candidateLeaves = v6LoadLeavesFromFile(candidatePath);
+      if (candidateLeaves.length === 0) continue;
+      const candidateHashes = new Set(candidateLeaves.map((l) => l.transcriptHash));
+      if (envelopeHashes.every((h) => candidateHashes.has(h))) {
+        return {
+          leaves: candidateLeaves,
+          source: `per-patch-id scan match (.ai-sdlc/transcript-leaves/${fname})`,
+        };
+      }
+    }
+  }
+
+  // 3. Shared-file fallback (pre-AISDLC-421 legacy envelopes).
+  const sharedLeaves = v6LoadLeaves(repoRoot);
+  if (sharedLeaves.length > 0) {
+    return {
+      leaves: sharedLeaves,
+      source: 'shared (.ai-sdlc/transcript-leaves.jsonl) [AISDLC-421 legacy fallback]',
+    };
+  }
+
+  return { leaves: [], source: 'none (no per-patch-id file, no shared file, no scan match)' };
+}
+
+/**
+ * Verify a v6 attestation envelope against trusted reviewers and on-disk
+ * transcript-leaves. Returns `{ status, reason }`.
+ *
+ * Security model (AISDLC-383.3 + AISDLC-421):
  *   - rootHash and leafCount are RECOMPUTED from on-disk leaves (not trusted from envelope).
  *   - The envelope is bound to the head commit via its filename.
  *   - merkleProofs[].leafIndex is the logical TranscriptLeaf.leafIndex; array
  *     position is resolved via findIndex before calling v6VerifyInclusion.
- *   - Soft-fail (status: 'valid', informational warning) when transcript-leaves.jsonl
- *     is missing — per OQ-3 (on-demand spot-check only).
+ *   - Soft-fail (status: 'valid', informational warning) when leaves are
+ *     missing — per OQ-3 (on-demand spot-check only).
+ *
+ * AISDLC-421 leaf-source resolution (per AC#3):
+ *   1. If `patchIdHint` is provided (extracted from a patch-id-named
+ *      envelope file like `<40-hex>.v6.dsse.json`), try
+ *      `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`.
+ *   2. Scan `.ai-sdlc/transcript-leaves/*.jsonl` and match by leaf-hash
+ *      superset (handles SHA-named envelopes whose leaves moved to a
+ *      per-patch-id file post-AISDLC-421).
+ *   3. Fall back to the SHARED `.ai-sdlc/transcript-leaves.jsonl` for
+ *      legacy pre-AISDLC-421 envelopes signed against that file.
  *
  * @param {object} opts
  * @param {object} opts.envelope — parsed v6 envelope (flat JSON)
@@ -585,6 +702,8 @@ export function v6LoadLeaves(repoRoot) {
  * @param {string} opts.headSha — expected head commit SHA
  * @param {object[]} opts.trustedReviewers — parsed trusted-reviewers.yaml entries
  * @param {string} opts.repoRoot — path to the repo root
+ * @param {string} [opts.patchIdHint] — AISDLC-421: optional patch-id (40-hex)
+ *   extracted from the envelope filename, when patch-id-named.
  *
  * Exported for hermetic tests.
  */
@@ -594,6 +713,7 @@ export function verifyV6Envelope({
   headSha,
   trustedReviewers,
   repoRoot,
+  patchIdHint,
 }) {
   // ── 1. Schema validation ────────────────────────────────────────────────
   if (typeof envelope.schemaVersion !== 'string' || envelope.schemaVersion !== 'v6') {
@@ -689,27 +809,38 @@ export function verifyV6Envelope({
   // ── 3. Load on-disk transcript leaves ──────────────────────────────────
   // CRITICAL: recompute from on-disk leaves, not from envelope fields.
   //
+  // AISDLC-421: resolve leaves per the per-patch-id-first / shared-file-fallback
+  // contract (see v6ResolveLeavesForEnvelope). This eliminates the cross-PR
+  // rebase friction on the shared file while keeping legacy envelopes verifiable.
+  //
   // OQ-3 (RFC-0042) "soft-fail on missing transcript" was scoped to
   // OPERATOR-TRIGGERED `cli-attestation spot-check <pr>` on PRs whose
   // transcripts had been GC'd per the 90-day retention. The CI verifier
   // is the OPPOSITE situation — a freshly-pushed PR on Day 0 with no
   // transcript at all MUST NOT be accepted, otherwise an attacker can
   // replay any historic trusted-reviewer-signed v6 envelope by simply
-  // omitting transcript-leaves.jsonl from the PR diff.
+  // omitting transcript-leaves from the PR diff.
   //
   // Therefore: soft-fail is opt-in via `AI_SDLC_V6_SPOT_CHECK_MODE=1`. The
   // workflow MUST NOT set this var; only the spot-check CLI surface sets it.
-  const onDiskLeaves = v6LoadLeaves(repoRoot);
+  const { leaves: onDiskLeaves, source: leavesSource } = v6ResolveLeavesForEnvelope(
+    repoRoot,
+    envelope,
+    patchIdHint,
+  );
+  process.stderr.write(`[v6-verifier] leaves source: ${leavesSource}\n`);
   if (onDiskLeaves.length === 0) {
     const spotCheckMode = process.env['AI_SDLC_V6_SPOT_CHECK_MODE'] === '1';
     if (!spotCheckMode) {
       return {
         status: 'invalid',
         reason:
-          'v6: transcript-leaves.jsonl is missing or empty — required for CI verification. ' +
-          'Replay attack mitigation per AISDLC-383.4 security review. If this is an ' +
-          "operator-triggered spot-check on a PR whose transcripts were GC'd per the " +
-          '90-day retention policy, set AI_SDLC_V6_SPOT_CHECK_MODE=1 to allow soft-fail.',
+          'v6: no transcript leaves found — required for CI verification (checked per-patch-id ' +
+          'file .ai-sdlc/transcript-leaves/<patch-id>.jsonl and shared fallback ' +
+          '.ai-sdlc/transcript-leaves.jsonl per AISDLC-421). Replay attack mitigation per ' +
+          'AISDLC-383.4 security review. If this is an operator-triggered spot-check on a PR ' +
+          "whose transcripts were GC'd per the 90-day retention policy, set " +
+          'AI_SDLC_V6_SPOT_CHECK_MODE=1 to allow soft-fail.',
       };
     }
     // Spot-check mode: explicitly opted in by the operator via CLI surface.
@@ -1836,6 +1967,12 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     //     against replaying an envelope signed for a different commit.
     const isPatchIdNamed = v6PatchIdFilename && chosen.fileName.toLowerCase() === v6PatchIdFilename;
     const envelopeSubjectSha = chosen.envelope.subject?.digest?.sha1 ?? lowerHead;
+    // AISDLC-421: extract patch-id from a `<40-hex>.v6.dsse.json` filename so
+    // verifyV6Envelope can resolve `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`
+    // directly. When the envelope is SHA-named (legacy), patchIdHint stays null
+    // and verifyV6Envelope falls back to the directory scan + shared-file path.
+    const patchIdMatch = chosen.fileName.toLowerCase().match(/^([0-9a-f]{40})\.v6\.dsse\.json$/);
+    const patchIdHint = patchIdMatch && patchIdMatch[1] !== lowerHead ? patchIdMatch[1] : null;
     return verifyV6Envelope({
       envelope: chosen.envelope,
       envelopeFileName: isPatchIdNamed
@@ -1844,6 +1981,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       headSha: lowerHead,
       trustedReviewers,
       repoRoot,
+      patchIdHint,
     });
   }
 

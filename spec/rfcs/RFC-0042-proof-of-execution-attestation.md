@@ -176,8 +176,58 @@ If any step fails: attestation invalid; PR blocked.
 
 - `.ai-sdlc/transcripts/*` (gitignored): operator policy. Can GC anything > N months.
 - `.ai-sdlc/transcript-leaves.jsonl` (committed): NEVER pruned. ~7.5MB at 10K PRs. Acceptable.
+- `.ai-sdlc/transcript-leaves/<patch-id>.jsonl` (committed, AISDLC-421): per-PR leaf files. NEVER pruned. ~750 bytes per file × 3 leaves = ~250 bytes/PR amortized → still negligible.
 - `.ai-sdlc/attestations/*.dsse.json` (committed): one per PR, prunable on schedule (Merkle root retains audit trail).
 - Cold-storage transcripts: GC policy operator-defined; spot-check fails-gracefully ("transcript GC'd, root verified, no spot-check possible").
+
+### Per-PR transcript-leaf storage (AISDLC-421 amendment, 2026-05-24)
+
+#### Problem the amendment solves
+
+The original Layer 2 design committed leaves to a **single shared append-only file** at `.ai-sdlc/transcript-leaves.jsonl`. When AISDLC-420 introduced the auto-rebase workflow, this surfaced a 100%-rate friction: every open PR's branch held its own appended leaves on overlapping line ranges, so the moment any sibling PR merged to main, every other open PR's rebase produced a git merge conflict on `transcript-leaves.jsonl`. The resolution was always mechanical (`git checkout --ours` + `git rebase --continue`), but it forced manual intervention on every rebase and blocked the auto-rebase workflow from completing cleanly.
+
+Measured impact (2026-05-24 session): the conflict surfaced on **every single rebase** across 11 concurrent PRs.
+
+#### Amendment
+
+Replace the single shared file with **per-patch-id files**: each PR's signing operation writes to its own `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`. The patch-id is the same content-addressed identifier AISDLC-398 uses for envelope filenames (`git diff-tree -p <base>..<head> -- ':!.ai-sdlc/attestations/' | git patch-id --stable`).
+
+Each PR writes to a disjoint file → two PRs literally cannot modify the same file → rebase produces zero conflicts. The Merkle tree is now built from THIS PR's leaves ONLY (the file is self-contained per-PR); each PR's `rootHash` is `f(this_PR_leaves)`, independent of all other PRs.
+
+#### Why patch-id (not task-id)
+
+- Patch-id is content-addressed → survives rebase without name changes (same diff → same patch-id → same filename).
+- Task-id would collide when iter-2 sign happens after rebase (same task, different patch).
+- Symmetric with envelope discovery: `<patch-id>.v6.dsse.json` ↔ `<patch-id>.jsonl`.
+
+#### Sign / verify contract
+
+**Signer (`sign-attestation.mjs` + `signAndWriteV6Envelope`):**
+1. If `<repo>/.ai-sdlc/transcript-leaves/<patch-id>.jsonl` exists → use it.
+2. Otherwise fall back to `<repo>/.ai-sdlc/transcript-leaves.jsonl` filtered by `taskId` (migration window).
+3. Throws if neither path yields leaves.
+
+**Verifier (`scripts/verify-attestation.mjs`):**
+1. If the envelope's filename is patch-id-named (`<40-hex>.v6.dsse.json` whose hex ≠ headSha), extract the patch-id and read `<repo>/.ai-sdlc/transcript-leaves/<patch-id>.jsonl`.
+2. Scan `<repo>/.ai-sdlc/transcript-leaves/*.jsonl` and return the file whose transcript-hash set is a superset of the envelope's `transcriptLeaves[].transcriptHash` (handles SHA-named legacy envelopes whose leaves moved to a per-patch-id file post-AISDLC-421).
+3. Fall back to the shared `.ai-sdlc/transcript-leaves.jsonl` (legacy pre-AISDLC-421 envelopes).
+
+**Emitter (`cli-attestation emit-leaf`):**
+- Accepts `--patch-id` explicitly OR auto-computes via `git merge-base origin/main HEAD` + `git patch-id --stable`.
+- Always writes to `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`. Stops writing to the shared file.
+- Idempotency check (skip on duplicate `(taskId, reviewerName, transcriptHash)` triple) now scopes to the per-patch-id file (an iter-2 re-sign that clears the file intentionally is no longer blocked by stale shared-file entries from a previous iteration).
+
+#### `.gitattributes` merge driver
+
+`.ai-sdlc/transcript-leaves/* merge=binary`. Defense-in-depth: because every PR has a distinct patch-id, two PRs writing to the same file is essentially impossible by construction. The `merge=binary` driver ensures that if it DOES somehow happen (cherry-pick across branches, manual writes, patch-id collision), the rebase surfaces a hard conflict rather than silently union-merging — silent union would reorder leaves, invalidating the signed Merkle root because `rootHash` is computed over a specific leaf sequence.
+
+Hermetic evidence for the binary-over-union choice lives in `pipeline-cli/src/attestation/per-patch-id-rebase.test.ts` ("union-merge would reorder leaves and invalidate the signed Merkle root").
+
+#### Migration window
+
+Both signer and verifier accept BOTH layouts during a one-release-window soak. The shared-file fallback exists ONLY for envelopes signed before this amendment and is scheduled for deletion in a follow-up task after the soak completes. No operator action is required during the migration; the dual-read is transparent.
+
+See [`docs/operations/transcript-leaves-migration.md`](../../docs/operations/transcript-leaves-migration.md) for the operator runbook.
 
 ### Nonce binding (replay protection)
 

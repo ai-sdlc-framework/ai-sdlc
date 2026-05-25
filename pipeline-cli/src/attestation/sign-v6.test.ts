@@ -226,7 +226,11 @@ describe('signAndWriteV6Envelope — happy path', () => {
     expect(parsed.subject.digest.sha1).toBe(FAKE_HEAD_SHA);
   });
 
-  it('filters leaves by taskId (case-insensitive)', () => {
+  it('filters leaves by taskId (case-insensitive) via legacy shared-file fallback', () => {
+    // AISDLC-421: this test exercises the shared-file fallback (no patch-id),
+    // which filters by taskId. Post-AISDLC-421, the Merkle tree is built from
+    // THIS PR's leaves only — so `allLeaves === prLeaves === filteredByTask`,
+    // and leafCount reflects only the filtered set (no longer "the full file").
     const leaf0 = makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' });
     const leaf1 = makeLeaf({ leafIndex: 1, taskId: 'aisdlc-383.3', reviewerName: 'test-reviewer' });
     const leaf2 = makeLeaf({ leafIndex: 2, taskId: 'AISDLC-999', reviewerName: 'other' });
@@ -242,10 +246,11 @@ describe('signAndWriteV6Envelope — happy path', () => {
     });
 
     const parsed = JSON.parse(readFileSync(outPath, 'utf8')) as AttestationEnvelopeV6;
-    // Only 2 prLeaves (leaf0 + leaf1); leaf2 belongs to different task.
+    // Only 2 prLeaves match by taskId (leaf0 + leaf1); leaf2 is a different task.
     expect(parsed.transcriptLeaves).toHaveLength(2);
-    // But leafCount reflects the full tree (all 3 leaves).
-    expect(parsed.leafCount).toBe(3);
+    // AISDLC-421: leafCount now reflects THIS PR's tree only — not the full shared file.
+    // Each PR's Merkle root is computed independently from its own leaf set.
+    expect(parsed.leafCount).toBe(2);
   });
 });
 

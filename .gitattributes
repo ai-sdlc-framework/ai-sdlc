@@ -1,0 +1,19 @@
+# AISDLC-421 — per-patch-id transcript-leaves files.
+#
+# Each PR's attestation-signing flow appends leaves to its OWN file at
+# `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`. Because every PR has a
+# distinct patch-id (content-addressed via `git patch-id --stable`), two
+# PRs writing to the same file is essentially impossible by construction.
+#
+# `merge=binary` is the defense-in-depth driver: if two PRs DID somehow
+# land at the same patch-id (cherry-pick across branches, manual writes,
+# etc.) and both modified the file, the rebase MUST surface as a hard
+# conflict rather than silently union-merging. Silent union-merge would
+# reorder leaves, which would invalidate the signed Merkle root because
+# rootHash is computed over a SPECIFIC leaf sequence — a misleading
+# downstream "rootHash mismatch" would surface instead of the actual
+# upstream "two PRs collided on the same patch-id" failure.
+#
+# Rationale (hermetic test): see
+# pipeline-cli/src/attestation/per-patch-id-rebase.test.ts.
+.ai-sdlc/transcript-leaves/*.jsonl merge=binary

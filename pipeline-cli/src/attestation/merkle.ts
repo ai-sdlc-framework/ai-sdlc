@@ -310,27 +310,66 @@ export function generateNonce(headSha: string): string {
 
 // ── Leaf file I/O ─────────────────────────────────────────────────────────────
 
-/** Repo-relative path of the committed leaf index. */
+/**
+ * Repo-relative path of the SHARED legacy leaf index (pre-AISDLC-421).
+ *
+ * Retained read-only during the migration window for legacy envelope verification.
+ * NEW writes go to `.ai-sdlc/transcript-leaves/<patch-id>.jsonl` (per-patch-id files)
+ * to eliminate the cross-PR rebase conflict surface AISDLC-421 addresses.
+ */
 export const LEAVES_FILE_RELATIVE = '.ai-sdlc/transcript-leaves.jsonl';
 
 /**
- * Resolve the absolute path of the leaves file given a repo root.
+ * Repo-relative DIRECTORY for per-patch-id leaf files (AISDLC-421).
+ *
+ * Each PR's signing operation writes to `<dir>/<patch-id>.jsonl` so concurrent
+ * PRs land in disjoint files and never produce git merge conflicts on rebase.
+ */
+export const LEAVES_DIR_RELATIVE = '.ai-sdlc/transcript-leaves';
+
+/**
+ * Resolve the absolute path of the SHARED legacy leaves file given a repo root.
  * Defaults to `process.cwd()` when `repoRoot` is not supplied.
+ *
+ * AISDLC-421: legacy path; used for fallback during the migration window only.
  */
 export function leavesFilePath(repoRoot?: string): string {
   return join(repoRoot ?? process.cwd(), LEAVES_FILE_RELATIVE);
 }
 
 /**
- * Load all leaves from `.ai-sdlc/transcript-leaves.jsonl`.
+ * Resolve the absolute path of the per-patch-id leaves file (AISDLC-421).
+ *
+ * Layout: `<repoRoot>/.ai-sdlc/transcript-leaves/<patch-id>.jsonl`.
+ *
+ * The patch-id is the content-addressed identifier computed by AISDLC-398's
+ * `computePatchId(base, head, repoRoot)` (i.e. `git patch-id --stable` of the
+ * PR's diff with `.ai-sdlc/attestations/**` excluded). Using patch-id (not
+ * task-id) means the file name survives rebases — same content → same name.
+ */
+export function leavesFilePathForPatchId(patchId: string, repoRoot?: string): string {
+  if (!/^[0-9a-f]{40}$/i.test(patchId)) {
+    throw new Error(
+      `[merkle] leavesFilePathForPatchId: patchId must be 40 lowercase hex characters, got: ${JSON.stringify(
+        patchId,
+      )}`,
+    );
+  }
+  return join(repoRoot ?? process.cwd(), LEAVES_DIR_RELATIVE, `${patchId.toLowerCase()}.jsonl`);
+}
+
+/**
+ * Load all leaves from a specific JSONL file path.
  *
  * Returns an empty array when the file does not exist.
  * Lines that fail JSON.parse are skipped and logged to stderr.
  * Lines where `leaf.leafIndex !== arrayPosition` are also logged to stderr
  * (index mismatch indicates a file corruption or concurrent write race).
+ *
+ * @internal — building block for `loadLeaves` (legacy) and
+ * `loadLeavesForPatchId` (AISDLC-421 per-patch-id path).
  */
-export function loadLeaves(repoRoot?: string): TranscriptLeaf[] {
-  const filePath = leavesFilePath(repoRoot);
+export function loadLeavesFromFile(filePath: string): TranscriptLeaf[] {
   if (!existsSync(filePath)) return [];
 
   const content = readFileSync(filePath, 'utf8');
@@ -362,7 +401,28 @@ export function loadLeaves(repoRoot?: string): TranscriptLeaf[] {
 }
 
 /**
- * Atomically append a single leaf to `.ai-sdlc/transcript-leaves.jsonl`.
+ * Load all leaves from the SHARED legacy `.ai-sdlc/transcript-leaves.jsonl`.
+ *
+ * AISDLC-421: retained read-only for legacy envelope verification fallback.
+ * New writes go to per-patch-id files via `loadLeavesForPatchId`.
+ */
+export function loadLeaves(repoRoot?: string): TranscriptLeaf[] {
+  return loadLeavesFromFile(leavesFilePath(repoRoot));
+}
+
+/**
+ * Load leaves from the per-patch-id file `.ai-sdlc/transcript-leaves/<patch-id>.jsonl`
+ * (AISDLC-421).
+ *
+ * Returns an empty array when the file does not exist (caller should fall back to
+ * the legacy shared-file path during the migration window).
+ */
+export function loadLeavesForPatchId(patchId: string, repoRoot?: string): TranscriptLeaf[] {
+  return loadLeavesFromFile(leavesFilePathForPatchId(patchId, repoRoot));
+}
+
+/**
+ * Atomically append a single leaf to a JSONL file at `filePath`.
  *
  * The leaf is serialised as one JSON line (JSONL format). Atomicity is achieved
  * via write-to-tmp + renameSync: on POSIX, rename(2) is atomic within the same
@@ -370,9 +430,11 @@ export function loadLeaves(repoRoot?: string): TranscriptLeaf[] {
  *
  * Concurrent callers may race on the rename — the last writer wins. This is
  * acceptable because the slash command body is the sole writer per task run.
+ *
+ * @internal — building block for `appendLeaf` (legacy) and
+ * `appendLeafForPatchId` (AISDLC-421 per-patch-id path).
  */
-export function appendLeaf(leaf: TranscriptLeaf, repoRoot?: string): void {
-  const filePath = leavesFilePath(repoRoot);
+export function appendLeafToFile(leaf: TranscriptLeaf, filePath: string): void {
   const dir = dirname(filePath);
 
   mkdirSync(dir, { recursive: true });
@@ -389,4 +451,32 @@ export function appendLeaf(leaf: TranscriptLeaf, repoRoot?: string): void {
   const tmpPath = filePath + '.tmp';
   writeFileSync(tmpPath, newContent, { encoding: 'utf8' });
   renameSync(tmpPath, filePath);
+}
+
+/**
+ * Atomically append a single leaf to the SHARED legacy
+ * `.ai-sdlc/transcript-leaves.jsonl`.
+ *
+ * AISDLC-421: retained for backward compatibility but NOT called by the
+ * default `cli-attestation emit-leaf` path anymore. New writes go to
+ * per-patch-id files via `appendLeafForPatchId`.
+ */
+export function appendLeaf(leaf: TranscriptLeaf, repoRoot?: string): void {
+  appendLeafToFile(leaf, leavesFilePath(repoRoot));
+}
+
+/**
+ * Atomically append a single leaf to the per-patch-id file
+ * `.ai-sdlc/transcript-leaves/<patch-id>.jsonl` (AISDLC-421).
+ *
+ * Creates the parent directory if missing. Each PR writes to a disjoint file
+ * (one per patch-id), eliminating the cross-PR rebase conflict surface that
+ * the shared shared `transcript-leaves.jsonl` exhibited.
+ */
+export function appendLeafForPatchId(
+  leaf: TranscriptLeaf,
+  patchId: string,
+  repoRoot?: string,
+): void {
+  appendLeafToFile(leaf, leavesFilePathForPatchId(patchId, repoRoot));
 }

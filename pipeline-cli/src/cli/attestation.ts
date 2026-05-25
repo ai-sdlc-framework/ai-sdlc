@@ -27,14 +27,17 @@ import { join, relative, resolve, sep } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
-  appendLeaf,
+  appendLeafForPatchId,
   computeMerkleRoot,
   generateNonce,
   hashLeaf,
+  leavesFilePathForPatchId,
   loadLeaves,
+  loadLeavesForPatchId,
   type TranscriptLeaf,
   verifyInclusion,
 } from '../attestation/merkle.js';
+import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
 import {
   formatV6Envelope,
   resolveSigningKeyPath,
@@ -393,9 +396,10 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       // ── emit-leaf ───────────────────────────────────────────────────────────────
       .command(
         'emit-leaf',
-        'Append a transcript leaf to .ai-sdlc/transcript-leaves.jsonl after a reviewer run. ' +
+        'Append a transcript leaf to .ai-sdlc/transcript-leaves/<patch-id>.jsonl after a reviewer run. ' +
           'Idempotent: skips if a leaf with the same (taskId, reviewerName, transcriptHash) already exists. ' +
-          'Required before v6 signing (RFC-0042 Phase 3 / AISDLC-383.8).',
+          'Required before v6 signing (RFC-0042 Phase 3 / AISDLC-383.8). ' +
+          'AISDLC-421: writes to a per-patch-id file (one file per PR) to eliminate cross-PR rebase conflicts.',
         (y: Argv) =>
           y
             .option('task-id', {
@@ -436,6 +440,19 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               type: 'string',
               demandOption: true,
               describe: 'LLM model identifier, e.g. claude-sonnet-4-6.',
+            })
+            .option('patch-id', {
+              type: 'string',
+              describe:
+                'AISDLC-421: 40-char hex patch-id (same as AISDLC-398 envelope filenames). ' +
+                'When omitted, computed automatically via `git merge-base origin/main HEAD` + ' +
+                '`git patch-id --stable`. Required for the per-patch-id transcript-leaves file path.',
+            })
+            .option('base-ref', {
+              type: 'string',
+              default: 'origin/main',
+              describe:
+                'AISDLC-421: base ref for the auto-computed patch-id (default: origin/main).',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -524,8 +541,55 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             suggestion: verdict.findings?.suggestion ?? 0,
           };
 
-          // Idempotency check: skip if a leaf with this (taskId, reviewerName, transcriptHash) triple exists.
-          const existingLeaves = loadLeaves(repoRoot);
+          // AISDLC-421: resolve patch-id (explicit flag > auto-compute from git).
+          //
+          // The per-patch-id file path eliminates cross-PR rebase conflicts on
+          // `.ai-sdlc/transcript-leaves.jsonl`. Each PR writes to its own
+          // `<patch-id>.jsonl`, which is content-addressed and survives rebases
+          // by construction (same diff → same patch-id → same filename).
+          let patchId = args['patch-id'] as string | undefined;
+          if (patchId) {
+            if (!/^[0-9a-f]{40}$/i.test(patchId)) {
+              process.stderr.write(
+                `[cli-attestation] emit-leaf: --patch-id must be 40 lowercase hex characters ` +
+                  `(got ${patchId.length}-char value: ${JSON.stringify(patchId.slice(0, 80))})\n`,
+              );
+              process.exit(1);
+            }
+            patchId = patchId.toLowerCase();
+          } else {
+            // Auto-compute patch-id from git state. This is the canonical path
+            // when the caller is the slash-command body or the reconcile sub-tick;
+            // both run in a worktree where `git merge-base origin/main HEAD` and
+            // `git patch-id --stable` are available and produce a stable
+            // content-addressed identifier.
+            const baseRef = args['base-ref'] as string;
+            const mergeBase = computeMergeBase(baseRef, 'HEAD', repoRoot);
+            if (!mergeBase) {
+              process.stderr.write(
+                `[cli-attestation] emit-leaf: could not compute merge-base for ${baseRef}..HEAD ` +
+                  `in ${repoRoot} — pass --patch-id explicitly.\n`,
+              );
+              process.exit(1);
+            }
+            const computed = computePatchId(mergeBase, headSha, repoRoot);
+            if (!computed) {
+              process.stderr.write(
+                `[cli-attestation] emit-leaf: could not compute patch-id for ${mergeBase}..${headSha} ` +
+                  `in ${repoRoot} — empty diff after attestation exclusion, or git unavailable. ` +
+                  `Pass --patch-id explicitly.\n`,
+              );
+              process.exit(1);
+            }
+            patchId = computed;
+          }
+
+          // Idempotency check: skip if a leaf with this (taskId, reviewerName, transcriptHash) triple
+          // already exists in the per-patch-id file. We ONLY check the per-patch-id file (not the
+          // legacy shared file) because the writer is always per-patch-id post-AISDLC-421; checking
+          // the shared file would cause spurious skips when the per-patch-id file has been deleted
+          // intentionally (e.g. iter-2 re-sign clears it to rebuild from scratch).
+          const existingLeaves = loadLeavesForPatchId(patchId, repoRoot);
           const alreadyEmitted = existingLeaves.some(
             (l) =>
               l.taskId === taskId &&
@@ -535,12 +599,15 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           if (alreadyEmitted) {
             emitText(
-              `[cli-attestation] emit-leaf: leaf already exists for (${taskId}, ${reviewerName}, ${transcriptHash.slice(0, 8)}...) — skipping (idempotent)`,
+              `[cli-attestation] emit-leaf: leaf already exists for (${taskId}, ${reviewerName}, ${transcriptHash.slice(0, 8)}...) in patch-id ${patchId.slice(0, 12)}... — skipping (idempotent)`,
             );
             return;
           }
 
-          // Determine next leafIndex (sequential across ALL leaves in the file, not just this task).
+          // Determine next leafIndex (sequential within THIS patch-id file).
+          // AISDLC-421: leafIndex is now per-patch-id, not global. Each PR's
+          // Merkle tree is built from its own file, so 0-based indexing per file
+          // is the right semantic.
           const leafIndex = existingLeaves.length;
 
           // Generate nonce bound to this PR's head SHA (replay-resistance per RFC-0042 §Nonce binding).
@@ -561,18 +628,17 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             signedAt,
           };
 
-          // Append atomically via write-to-tmp + renameSync.
+          // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
           // Concurrent callers on different reviewer subagents are expected to be
           // sequential in the slash command body (reviewers complete, THEN emit-leaf
           // is called per-reviewer) so the TOCTOU window is minimal. On the rare
           // case of a true race, the last writer wins and the index-mismatch warning
-          // in loadLeaves() will surface it on the next run. A follow-up advisory
-          // lock can be added when parallel emission is required (tracked as a
-          // known limitation in the AISDLC-383.8 PR body).
-          appendLeaf(leaf, repoRoot);
+          // in loadLeavesFromFile() will surface it on the next run.
+          appendLeafForPatchId(leaf, patchId, repoRoot);
 
+          const filePath = leavesFilePathForPatchId(patchId, repoRoot);
           emitText(
-            `[cli-attestation] emit-leaf: leaf #${leafIndex} appended ` +
+            `[cli-attestation] emit-leaf: leaf #${leafIndex} appended to ${filePath} ` +
               `(taskId=${taskId}, reviewer=${reviewerName}, ` +
               `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved})`,
           );

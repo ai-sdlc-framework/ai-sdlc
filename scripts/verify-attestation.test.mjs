@@ -25,7 +25,7 @@
 
 import { describe, it, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync, spawnSync as spawnSyncNode } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -3455,7 +3455,11 @@ describe('verifyV6Envelope (unit)', () => {
         'invalid',
         `CI mode must reject missing leaves, got: ${result.reason}`,
       );
-      assert.match(result.reason, /transcript-leaves\.jsonl is missing or empty/);
+      // AISDLC-421: error message now mentions both the per-patch-id and
+      // shared-fallback paths since the verifier checks both.
+      assert.match(result.reason, /no transcript leaves found/);
+      assert.match(result.reason, /per-patch-id file/);
+      assert.match(result.reason, /shared fallback/);
       assert.match(result.reason, /Replay attack mitigation/);
     } finally {
       if (prev !== undefined) process.env['AI_SDLC_V6_SPOT_CHECK_MODE'] = prev;
@@ -3602,6 +3606,210 @@ describe('verifyV6Envelope (unit)', () => {
       assert.ok(
         isFilenameOrSubjectMismatch,
         `expected filename or subject mismatch reason, got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── AISDLC-421 — per-patch-id leaves + legacy shared-file fallback ──────────
+
+describe('verifyV6Envelope (AISDLC-421 — per-patch-id leaves with shared fallback)', () => {
+  let keys;
+  const HEAD_SHA = 'a'.repeat(40);
+  const PATCH_ID = 'b'.repeat(40);
+
+  before(() => {
+    keys = genV6KeyPair();
+  });
+
+  function makeTrustedReviewers(publicKeyPem) {
+    return [
+      {
+        identity: 'test@example.com',
+        machine: 'test',
+        pubkey: publicKeyPem,
+        addedAt: '2026-05-24',
+        addedBy: 'test',
+      },
+    ];
+  }
+
+  /**
+   * Write a per-patch-id leaves file (`.ai-sdlc/transcript-leaves/<patch-id>.jsonl`)
+   * + a v6 envelope for those leaves at the patch-id-named filename.
+   */
+  function writeV6PerPatchIdFixture(root, headSha, patchId, leaves, privateKeyPem) {
+    mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
+    mkdirSync(join(root, '.ai-sdlc', 'transcript-leaves'), { recursive: true });
+    const leavesContent = leaves.map((l) => JSON.stringify(l)).join('\n') + '\n';
+    writeFileSync(join(root, '.ai-sdlc', 'transcript-leaves', `${patchId}.jsonl`), leavesContent);
+    const envelope = buildValidV6Envelope(headSha, leaves, privateKeyPem);
+    const envPath = join(root, '.ai-sdlc', 'attestations', `${patchId}.v6.dsse.json`);
+    writeFileSync(envPath, JSON.stringify(envelope, null, 2) + '\n');
+    return { envelope, envPath };
+  }
+
+  it('AC#3 verifies an envelope whose leaves are in the per-patch-id file (post-AISDLC-421 canonical path)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aisdlc-421-v6-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6PerPatchIdFixture(
+        tmp,
+        HEAD_SHA,
+        PATCH_ID,
+        leaves,
+        keys.privateKeyPem,
+      );
+      // Sanity: NO shared file exists.
+      assert.equal(existsSync(join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl')), false);
+      // Per-patch-id file exists.
+      assert.equal(
+        existsSync(join(tmp, '.ai-sdlc', 'transcript-leaves', `${PATCH_ID}.jsonl`)),
+        true,
+      );
+
+      // Production wires patch-id-named envelopes by synthesizing
+      // envelopeFileName from the subject SHA (so the binding check still
+      // passes). Mirror that here.
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+        patchIdHint: PATCH_ID,
+      });
+      assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#7 legacy envelope (shared transcript-leaves.jsonl only) still verifies via shared-file fallback', () => {
+    // Pre-AISDLC-421 fixture: NO per-patch-id file. Leaves live in the shared file.
+    const tmp = mkdtempSync(join(tmpdir(), 'aisdlc-421-legacy-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      // Sanity: shared file present, NO per-patch-id directory.
+      assert.equal(existsSync(join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl')), true);
+      assert.equal(existsSync(join(tmp, '.ai-sdlc', 'transcript-leaves')), false);
+
+      // Verifier resolves leaves via the SHARED-file fallback (no patchIdHint).
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+        // patchIdHint omitted — this is a legacy SHA-named envelope.
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `expected legacy envelope to verify, got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('per-patch-id-first: when BOTH files exist, the per-patch-id file wins', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aisdlc-421-prefer-'));
+    try {
+      const realLeaves = [
+        makeLeaf(0, 'code-reviewer', 'aaaa'.repeat(16)),
+        makeLeaf(1, 'test-reviewer', 'bbbb'.repeat(16)),
+        makeLeaf(2, 'security-reviewer', 'cccc'.repeat(16)),
+      ];
+      // Different (stale) leaves in the shared file with the SAME taskId.
+      // The envelope is signed against the per-patch-id file; if the verifier
+      // mistakenly read the shared file, the rootHash wouldn't match the
+      // recomputed root → verification would fail.
+      const staleLeaves = [
+        makeLeaf(0, 'code-reviewer', 'dead'.repeat(16)),
+        makeLeaf(1, 'test-reviewer', 'beef'.repeat(16)),
+        makeLeaf(2, 'security-reviewer', 'cafe'.repeat(16)),
+      ];
+
+      const { envelope } = writeV6PerPatchIdFixture(
+        tmp,
+        HEAD_SHA,
+        PATCH_ID,
+        realLeaves,
+        keys.privateKeyPem,
+      );
+      // Inject the stale shared file alongside.
+      const staleContent = staleLeaves.map((l) => JSON.stringify(l)).join('\n') + '\n';
+      writeFileSync(join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl'), staleContent);
+
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+        patchIdHint: PATCH_ID,
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `expected per-patch-id file to win over shared file, got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('SHA-named envelope whose leaves are in a per-patch-id file → scan-match path resolves it', () => {
+    // Edge case: envelope was written with a legacy SHA-name (pre-AISDLC-398)
+    // but the writer moved to per-patch-id leaves post-AISDLC-421. The
+    // verifier scans `.ai-sdlc/transcript-leaves/*.jsonl` and matches by
+    // leaf-hash superset.
+    const tmp = mkdtempSync(join(tmpdir(), 'aisdlc-421-scan-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer', 'aaaa'.repeat(16)),
+        makeLeaf(1, 'test-reviewer', 'bbbb'.repeat(16)),
+        makeLeaf(2, 'security-reviewer', 'cccc'.repeat(16)),
+      ];
+      mkdirSync(join(tmp, '.ai-sdlc', 'transcript-leaves'), { recursive: true });
+      const leavesContent = leaves.map((l) => JSON.stringify(l)).join('\n') + '\n';
+      // Per-patch-id file present (some patch-id).
+      writeFileSync(join(tmp, '.ai-sdlc', 'transcript-leaves', `${PATCH_ID}.jsonl`), leavesContent);
+
+      // Envelope signed for those leaves but NAMED by HEAD_SHA (legacy filename).
+      const envelope = buildValidV6Envelope(HEAD_SHA, leaves, keys.privateKeyPem);
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${HEAD_SHA}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2) + '\n',
+      );
+
+      // Verifier called WITHOUT patchIdHint (because the envelope is SHA-named).
+      // The scan-by-hash-superset path should find the leaves in the per-patch-id file.
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+        // patchIdHint omitted — verifier must find via the directory scan.
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `expected scan-match to resolve per-patch-id file, got: ${result.reason}`,
       );
     } finally {
       rmSync(tmp, { recursive: true, force: true });
