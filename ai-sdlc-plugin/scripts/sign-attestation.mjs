@@ -95,7 +95,19 @@ function computePatchIdForFilename(base, head, repoRoot) {
   try {
     diffOutput = execFileSync(
       'git',
-      ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ':!.ai-sdlc/attestations/'],
+      [
+        'diff-tree',
+        '--no-color',
+        '-p',
+        `${base}..${head}`,
+        '--',
+        // AISDLC-422: keep this exclusion list IDENTICAL to
+        // `PATCH_ID_EXCLUSIONS` in pipeline-cli/src/attestation/patch-id.ts.
+        // Asymmetric exclusion = signer/verifier compute different patch-ids;
+        // envelope lookup fails. Drift = bug.
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves/',
+      ],
       {
         cwd: repoRoot,
         encoding: 'utf-8',
