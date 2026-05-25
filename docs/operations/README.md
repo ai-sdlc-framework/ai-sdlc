@@ -79,6 +79,7 @@ Admission filter that ensures tasks are properly specified before agent dispatch
 |---------|-------------|
 | [`init.md`](init.md) | `ai-sdlc init` adopter guide — wizard prompts, flags, idempotency, recommended bootstrap sequences |
 | [`auto-rebase-token-setup.md`](auto-rebase-token-setup.md) | Setting up the token required for the `/ai-sdlc rebase` automated rebase command |
+| [`auto-rebase-stale-prs.md`](auto-rebase-stale-prs.md) | Auto-rebase DIRTY/BEHIND PRs on push-to-main (Option A — operator re-signs locally) |
 
 ---
 
