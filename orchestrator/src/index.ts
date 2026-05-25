@@ -240,6 +240,21 @@ export {
   type TessellatedSaResult,
 } from './tessellation-admission.js';
 export {
+  detectTessellationDrift,
+  DEFAULT_DIVERGENCE_THRESHOLD,
+  type TessellationDriftRule,
+  type TessellationDriftDetectedEvent,
+  type AstScanDetails,
+  type AstScanFinding,
+  type CrossSoulProvenanceDetails,
+  type CrossSoulProvenanceFinding,
+  type SubstrateFile,
+  type ProvenanceAuditEntry,
+  type TessellationDriftConfig,
+  type TessellationDriftInput,
+  type TessellationDriftResult,
+} from './tessellation-drift.js';
+export {
   parseTargetedVariantRef,
   resolveTargetedVariants,
   applyCrossVariantRule,
