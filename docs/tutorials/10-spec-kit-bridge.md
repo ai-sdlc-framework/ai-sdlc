@@ -446,6 +446,8 @@ The reconciler compares the imported task body (which captures the upstream stat
 
 Per OQ-6, v1 ships a first-party adapter for spec-kit only. Other upstreams need a translator that emits a spec-kit-compatible `tasks.md`. Write the translator under `.ai-sdlc/translators/<adopter>.ts` and point `cli-import-spec` at its output directory. The seam contract is the `tasks.md` format — any tool that can emit it can feed the bridge.
 
+**Detailed walkthrough:** see [`docs/concepts/adopter-translators.md`](../concepts/adopter-translators.md) for the full BYO translator pattern, the canonical task-import format spec, the reference scaffold ([`docs/examples/translators/example-adopter.ts`](../examples/translators/example-adopter.ts)), and a worked Linear → ai-sdlc translator ([`docs/examples/translators/linear-translator.ts`](../examples/translators/linear-translator.ts)).
+
 First-party adapter demand for additional upstreams becomes a Decision in the catalog over time; the operator weighs adopter signal before the framework commits to maintaining a new adapter.
 
 ### A clarification task back upstream sits ignored
