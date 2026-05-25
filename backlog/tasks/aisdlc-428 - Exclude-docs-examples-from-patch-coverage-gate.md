@@ -1,17 +1,17 @@
 ---
 id: AISDLC-428
-title: 'Exclude docs/examples/** from patch-coverage gate'
+title: Exclude docs/examples/** from patch-coverage gate
 status: To Do
-priority: high
 assignee: []
-labels: [coverage-gate-fix, deferred-from-overnight-drain]
+created_date: ''
+updated_date: '2026-05-25 17:33'
+labels:
+  - coverage-gate-fix
+  - deferred-from-overnight-drain
+dependencies: []
 references:
-  - 'PR #691'
-  - 'scripts/check-pr-patch-coverage.mjs'
-acceptanceCriteria:
-  - 'Add docs/examples/** to NON_INSTRUMENTED_PATTERNS in scripts/check-pr-patch-coverage.mjs'
-  - 'PR #691 (AISDLC-335) coverage gate passes after this fix lands on main + #691 rebases'
-  - 'Add regression test in scripts/check-pr-patch-coverage.test.mjs covering the new exclusion'
+  - scripts/check-pr-patch-coverage.mjs
+priority: high
 ---
 
 # AISDLC-428 — Exclude docs/examples/** from patch-coverage gate
