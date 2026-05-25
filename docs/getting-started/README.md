@@ -4,8 +4,10 @@ Get up and running with the AI-SDLC Framework.
 
 ## What is AI-SDLC?
 
-AI-SDLC is an orchestrator that drives AI coding agents through the full software development lifecycle. It provides:
+AI-SDLC is a **Decision Engine** for autonomous AI software development. It's the **contract-to-shipped** half of a spec-driven development stack: you (or a front-of-funnel tool like [GitHub Spec Kit](https://github.com/github/spec-kit)) hand it a well-specified contract; AI-SDLC dispatches autonomous agents, enforces quality gates, attests every change, and routes every decision to the right human actor. It provides:
 
+- **Decision Engine substrate** — operator-as-decision-steward; every architectural / quality / autonomy decision routes through the [Decision Catalog (RFC-0035)](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)
+- **Spec-kit bridge** — `cli-import-spec` / `/ai-sdlc import-spec` consumes spec-kit `tasks.md`, runs the DoR Gate at import, and lands governed backlog tasks ready for dispatch (RFC-0036). **Recommended adopter authoring path.**
 - **Agent-agnostic orchestration** — works with Claude Code, GitHub Copilot, Cursor, OpenAI Codex, or any LLM API
 - **Structured pipelines** that route tasks through defined stages based on complexity
 - **Quality gates** with three-tier enforcement (advisory, soft-mandatory, hard-mandatory)
@@ -15,6 +17,28 @@ AI-SDLC is an orchestrator that drives AI coding agents through the full softwar
 - **Tamper-evident audit logging** for every action taken
 
 Everything is declared as YAML resources validated against JSON Schema, following the same patterns as Kubernetes and other infrastructure-as-code systems.
+
+## The recommended adopter authoring path
+
+AI-SDLC supports three artifact altitudes (RFC → Spec → Task; see [`docs/concepts/spec-driven.md`](../concepts/spec-driven.md)). For day-to-day feature work, the recommended path uses **GitHub Spec Kit** as the front-of-funnel tool and the **spec-kit bridge** to land tasks in the AI-SDLC backlog:
+
+```text
+spec-kit  ──────►  cli-import-spec  ──────►  AI-SDLC backlog  ──────►  /ai-sdlc execute
+(idea →            (DoR Gate at                (governed tasks            (autonomous
+ contract)          import; refuse              passing the                 dispatch +
+                    + emit clarification        quality contract)            reviewers +
+                    upstream on failure)                                     attestation +
+                                                                             merge)
+```
+
+The bridge is **the seam** between authoring and execution. Each side evolves independently:
+
+- **Front of funnel** (your choice): spec-kit, an adopter RFC scaffold, Linear, Notion, plain markdown. As long as the output is translatable to spec-kit-style `tasks.md`, AI-SDLC consumes it. Spec-kit is recommended because its mature integrations and `/speckit.analyze` cross-artifact consistency check compose cleanly with the DoR Gate.
+- **Back of funnel** (always AI-SDLC): DoR Gate → PPA → execute → cross-harness review → attest → merge.
+
+**Start here:** [Tutorial 10 — Spec-Kit Bridge end-to-end walkthrough](../tutorials/10-spec-kit-bridge.md). Authors a feature in spec-kit, imports it, walks through DoR-at-import + analyze auto-resolution + the upstream-clarification feedback loop, dispatches, and ships. Use this if you want the recommended adopter authoring path end-to-end.
+
+> **Spec-kit is recommended, not required.** Adopters can author backlog tasks directly without any upstream tool. The framework's contract with adopters is the DoR Gate; whatever feeds the gate is the adopter's choice. See [`docs/concepts/spec-driven.md`](../concepts/spec-driven.md) §5 ("When to skip tiers") for guidance.
 
 ## Architecture Overview
 
@@ -218,6 +242,8 @@ pnpm test
 
 ## Next Steps
 
+- **[Spec-Kit Bridge tutorial](../tutorials/10-spec-kit-bridge.md)** -- **Recommended adopter authoring path.** End-to-end walkthrough: install spec-kit → author spec → import → DoR-at-import → dispatch → ship → handle drift (RFC-0036).
+- **[Concepts: spec-driven development](../concepts/spec-driven.md)** -- The three-tier authoring model (RFC → Spec → Task), Decision-Engine framing, and the seam contract.
 - **[Runners Reference](../api-reference/runners.md)** -- All supported agent runners and configuration
 - **[Tutorials](../tutorials/)** -- Step-by-step walkthroughs for pipelines, gates, autonomy, adapters, and orchestration
 - **[API Reference](../api-reference/)** -- Complete SDK and orchestrator reference
