@@ -11,6 +11,15 @@ Complete working examples demonstrating AI-SDLC SDK usage.
 | [adapter-implementation.ts](adapter-implementation.ts) | Custom adapter from scratch, registry, webhook bridge, EventBus (RFC-0003 §3 example — IssueTracker pattern extended to the five infrastructure interfaces) |
 | [orchestration-patterns.ts](orchestration-patterns.ts) | All 5 orchestration patterns with execution and handoff validation |
 
+## Translator Examples (BYO upstream for the spec-kit bridge)
+
+See [`docs/concepts/adopter-translators.md`](../concepts/adopter-translators.md) for the full BYO translator pattern (RFC-0036 Phase 10 / OQ-6).
+
+| Example | Description |
+|---|---|
+| [translators/example-adopter.ts](translators/example-adopter.ts) | Typed translator scaffold with `// TODO:` markers; copy + adapt for any upstream |
+| [translators/linear-translator.ts](translators/linear-translator.ts) | Worked example: Linear issues → spec-kit `tasks.md` via GraphQL |
+
 ## YAML Examples
 
 | Example | Description |

@@ -215,6 +215,7 @@ The Decision Catalog ([RFC-0035](../../../spec/rfcs/RFC-0035-decision-catalog-op
 | [RFC-0011: DoR Gate](../../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) | The seven-point quality rubric every task must pass before entering the pipeline |
 | [RFC-0035: Decision Catalog](../../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) | How decisions are routed to the right human actor; the substrate for the Decision Engine framing |
 | [RFC-0036: Spec-Kit Bridge](../../../spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md) | The full adopter authoring RFC: three-tier model, spec-kit import path, adopter RFC scaffold, positioning updates |
+| [Adopter Translators (BYO upstream)](adopter-translators.md) | Bring-your-own translator pattern for non-spec-kit upstreams (Linear, Notion, plain markdown); canonical `tasks.md` format; BYO → first-party promotion via RFC-0035 |
 | [GitHub Spec Kit](https://github.com/github/spec-kit) | The recommended front-of-funnel tool: idea → contract |
 | [Getting Started](../getting-started/README.md) | Installation, CLI quick start, first pipeline |
 | [spec/primer.md](../../spec/primer.md) | Conceptual introduction to the full framework |
