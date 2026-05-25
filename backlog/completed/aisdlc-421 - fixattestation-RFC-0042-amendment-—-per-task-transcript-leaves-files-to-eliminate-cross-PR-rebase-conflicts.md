@@ -131,9 +131,9 @@ Replaced the single shared `.ai-sdlc/transcript-leaves.jsonl` with per-patch-id 
 - `pipeline-cli/src/attestation/sign-v6.test.ts` (modified): one assertion updated (`leafCount` now reflects this PR's tree, not the full shared file).
 
 ### Design decisions
-- **`merge=binary` over `merge=union`**: per-patch-id files are disjoint by construction; the driver is defense-in-depth. Hermetic evidence shows union-merge would silently reorder leaves and invalidate the signed Merkle root (rootHash depends on leaf sequence). Binary surfaces unexpected collisions as a hard conflict instead.
+- **`merge=binary` over `merge=union`**: per-patch-id files are disjoint by construction; the driver is defense-in-depth. Hermetic evidence shows union-merge would silently reorder leaves and invalidate the signed Merkle root (rootHash is a function of leaf sequence). Binary surfaces unexpected collisions as a hard conflict instead.
 - **patch-id (not task-id) as the file key**: matches AISDLC-398 envelope filename algorithm; survives rebases by construction (same diff → same patch-id → same filename).
-- **Per-PR Merkle root**: each PR's tree is built from its own leaves only. Simpler than the previous "subset of full tree" semantic and removes an entire class of "rootHash depends on every other PR's history" race conditions.
+- **Per-PR Merkle root**: each PR's tree is built from its own leaves only. Simpler than the previous "subset of full tree" semantic and removes an entire class of rootHash-coupling-to-other-PRs race conditions.
 - **Dual-read migration window**: both signer and verifier accept both layouts. Cleanup (deleting the shared-file fallback) deferred to a follow-up task after the one-release soak.
 
 ### Verification
