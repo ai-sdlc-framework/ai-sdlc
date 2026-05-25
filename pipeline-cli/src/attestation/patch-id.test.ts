@@ -288,8 +288,93 @@ describe('patch-id helpers (AISDLC-398 AC-4)', () => {
       expect(patchIdFilenameV6('', '', '/tmp')).toBeNull();
     });
 
-    it('PATCH_ID_EXCLUSION has correct value', () => {
+    it('PATCH_ID_EXCLUSION (deprecated alias) still points at the attestations dir', () => {
       expect(PATCH_ID_EXCLUSION).toBe(':!.ai-sdlc/attestations/');
+    });
+  });
+
+  // ── AISDLC-422: per-patch-id leaves directory excluded from patch-id ───
+  // Pins down the self-reference bug that blocked the autonomous drain
+  // post-AISDLC-421. Without the exclusion, committing the
+  // `.ai-sdlc/transcript-leaves/<patch-id>.jsonl` file would shift the
+  // patch-id, the pre-push attestation-sign hook would re-compute it
+  // against the post-commit HEAD, fail to find leaves at the new name,
+  // and abort with "No transcript leaves found".
+  describe('AISDLC-422 — transcript-leaves directory exclusion', () => {
+    it('PATCH_ID_EXCLUSIONS includes both attestations AND transcript-leaves dirs', async () => {
+      const mod = await import('./patch-id.js');
+      expect(mod.PATCH_ID_EXCLUSIONS).toEqual([
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves/',
+      ]);
+    });
+
+    it('committing a leaves file at `<patch-id>.jsonl` does NOT change the patch-id', () => {
+      // Set up a feature branch whose diff is purely a source file change.
+      sh('git checkout main', repoDir);
+      sh('git checkout -b feat-422-stability', repoDir);
+      writeFileSync(join(repoDir, 'src.ts'), 'export const v = 422;\n');
+      sh('git add src.ts', repoDir);
+      sh('git commit -m "feat: source change"', repoDir);
+
+      const baseSha = sh('git merge-base main HEAD', repoDir);
+      const headBeforeLeaves = sh('git rev-parse HEAD', repoDir);
+      const pidBeforeLeaves = computePatchId(baseSha, headBeforeLeaves, repoDir);
+      expect(pidBeforeLeaves).not.toBeNull();
+      expect(pidBeforeLeaves).toMatch(/^[0-9a-f]{40}$/);
+
+      // Stage + commit a leaves file at the computed patch-id name. This is
+      // the exact sequence the production signer follows: emit-leaf →
+      // commit → push. Pre-AISDLC-422 the patch-id would shift here because
+      // the leaves directory contributes to the diff.
+      mkdirSync(join(repoDir, '.ai-sdlc', 'transcript-leaves'), { recursive: true });
+      const leafContent = JSON.stringify({ taskId: 'AISDLC-TEST', leafIndex: 0 }) + '\n';
+      writeFileSync(
+        join(repoDir, '.ai-sdlc', 'transcript-leaves', `${pidBeforeLeaves}.jsonl`),
+        leafContent,
+      );
+      sh('git add .ai-sdlc/transcript-leaves/', repoDir);
+      sh('git commit -m "chore: leaves for stability test"', repoDir);
+
+      const headAfterLeaves = sh('git rev-parse HEAD', repoDir);
+      const pidAfterLeaves = computePatchId(baseSha, headAfterLeaves, repoDir);
+
+      // The work-commit changed; the leaves-commit added a new commit.
+      // Both produce the same patch-id IFF the leaves directory is
+      // excluded from the patch-id computation.
+      expect(headAfterLeaves).not.toBe(headBeforeLeaves);
+      expect(pidAfterLeaves).toBe(pidBeforeLeaves);
+
+      // Clean up.
+      sh('git checkout main', repoDir);
+      sh('git branch -D feat-422-stability', repoDir);
+    });
+
+    it('also excludes attestation envelope files in the same directory (regression for AISDLC-398)', () => {
+      // Belt-and-braces: this is the original AISDLC-398 invariant — adding
+      // an attestation envelope shouldn't shift patch-id either. AISDLC-422
+      // refactor (single-string → tuple) shouldn't have regressed it.
+      sh('git checkout main', repoDir);
+      sh('git checkout -b feat-422-attestations', repoDir);
+      writeFileSync(join(repoDir, 'src2.ts'), 'export const v = 1;\n');
+      sh('git add src2.ts', repoDir);
+      sh('git commit -m "feat: source"', repoDir);
+
+      const baseSha = sh('git merge-base main HEAD', repoDir);
+      const headBefore = sh('git rev-parse HEAD', repoDir);
+      const pidBefore = computePatchId(baseSha, headBefore, repoDir);
+
+      mkdirSync(join(repoDir, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(join(repoDir, '.ai-sdlc', 'attestations', `${pidBefore}.v6.dsse.json`), '{}\n');
+      sh('git add .ai-sdlc/attestations/', repoDir);
+      sh('git commit -m "chore: sign envelope"', repoDir);
+
+      const headAfter = sh('git rev-parse HEAD', repoDir);
+      const pidAfter = computePatchId(baseSha, headAfter, repoDir);
+      expect(pidAfter).toBe(pidBefore);
+
+      sh('git checkout main', repoDir);
+      sh('git branch -D feat-422-attestations', repoDir);
     });
   });
 

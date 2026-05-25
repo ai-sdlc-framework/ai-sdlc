@@ -167,7 +167,11 @@ MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "$MERGE_BASE" ] && [ ${#MERGE_BASE} -eq 40 ]; then
   # Compute patch-id: pipe diff-tree output through git patch-id --stable.
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' 2>/dev/null || echo '')
+  # AISDLC-422: keep the exclusion list IDENTICAL to PATCH_ID_EXCLUSIONS in
+  # pipeline-cli/src/attestation/patch-id.ts. Asymmetric exclusion makes
+  # this bash hook compute a different patch-id than the TypeScript signer,
+  # which is the failure mode AISDLC-422 fixes for the rebase-recovery loop.
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' 2>/dev/null || echo '')
   if [ -n "$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     # Output format: "<patch-id> <commit-sha>"

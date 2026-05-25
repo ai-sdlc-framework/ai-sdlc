@@ -76,7 +76,20 @@ function computePatchIdForVerifier(base, head, repoRoot) {
   try {
     diffOutput = execFileSync(
       'git',
-      ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ':!.ai-sdlc/attestations/'],
+      [
+        'diff-tree',
+        '--no-color',
+        '-p',
+        `${base}..${head}`,
+        '--',
+        // AISDLC-422: keep this exclusion list IDENTICAL to
+        // `PATCH_ID_EXCLUSIONS` in pipeline-cli/src/attestation/patch-id.ts.
+        // Asymmetric exclusion = verifier computes a different patch-id than
+        // the signer, so the envelope lookup misses and verification fails
+        // (same bug class as the AISDLC-421 verifier-shared-fallback hotfix).
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves/',
+      ],
       {
         cwd: repoRoot,
         encoding: 'utf-8',
@@ -157,6 +170,10 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
         '--',
         ':!.ai-sdlc/attestations/',
         ':!.ai-sdlc/transcript-leaves.jsonl',
+        // AISDLC-422: also exclude the per-patch-id leaves directory so the
+        // "attestation-only descendant" determination doesn't count newly
+        // committed `<patch-id>.jsonl` files as source-diff content.
+        ':!.ai-sdlc/transcript-leaves/',
       ],
       {
         cwd: repoRoot,

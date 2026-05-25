@@ -31,8 +31,38 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 
-/** The exclusion pathspec for `.ai-sdlc/attestations/**` files. */
-export const PATCH_ID_EXCLUSION = ':!.ai-sdlc/attestations/';
+/**
+ * Exclusion pathspecs for the patch-id computation.
+ *
+ * - `.ai-sdlc/attestations/` — the signed envelope itself; excluded since
+ *   AISDLC-398 so the chore commit that lands the envelope doesn't change
+ *   the patch-id (chicken-and-egg).
+ * - `.ai-sdlc/transcript-leaves/` — the per-patch-id leaves file; excluded
+ *   per AISDLC-422 because committing `<patch-id>.jsonl` would otherwise
+ *   change the diff and therefore the patch-id (self-referential filename).
+ *   The signer writes the leaves file BEFORE computing patch-id; if the
+ *   leaves directory contributes to the diff, then committing the file
+ *   shifts the patch-id and the pre-push attestation-sign hook on the
+ *   re-push can't find leaves at the new patch-id name. Exclusion makes
+ *   the per-patch-id filename stable across the chore-commit boundary.
+ *
+ * Kept as a tuple so callers spread it into git invocations and adding
+ * another exclusion is a one-element append rather than a re-architecture.
+ *
+ * Legacy `PATCH_ID_EXCLUSION` is retained as a single-string alias for
+ * backward-compat with downstream callers; new code should consume
+ * `PATCH_ID_EXCLUSIONS`.
+ */
+export const PATCH_ID_EXCLUSIONS = [
+  ':!.ai-sdlc/attestations/',
+  ':!.ai-sdlc/transcript-leaves/',
+] as const;
+
+/**
+ * @deprecated Use {@link PATCH_ID_EXCLUSIONS}. This single-string alias
+ * remains for one release so external callers don't break on upgrade.
+ */
+export const PATCH_ID_EXCLUSION = PATCH_ID_EXCLUSIONS[0];
 
 /**
  * Compute the `git patch-id --stable` for the content diff of `base..head`,
@@ -68,13 +98,13 @@ export function computePatchId(
   try {
     if (gitFn) {
       diffOutput = gitFn(
-        ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', PATCH_ID_EXCLUSION],
+        ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ...PATCH_ID_EXCLUSIONS],
         repoRoot,
       );
     } else {
       diffOutput = execFileSync(
         'git',
-        ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', PATCH_ID_EXCLUSION],
+        ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ...PATCH_ID_EXCLUSIONS],
         {
           cwd: repoRoot,
           encoding: 'utf-8',
