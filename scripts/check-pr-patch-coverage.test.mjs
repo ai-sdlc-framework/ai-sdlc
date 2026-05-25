@@ -362,6 +362,29 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     assert.equal(parsed.reason, 'no-instrumentable-changes');
     assert.deepEqual(parsed.changedCodeFiles, []);
   });
+
+  it('exits 0 when only docs/examples/**.ts changed (AISDLC-428)', () => {
+    // docs/examples/** are reference scaffolds for adopters (e.g. RFC-0036
+    // BYO-translator examples). Exercised via copy-paste into adopter
+    // projects, not via vitest instrumentation. Must be excluded from gate.
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    const head = commitFile(
+      repo,
+      'docs/examples/translators/example-adopter.ts',
+      "export function translate() { return 'stub'; }\n",
+      'docs: add adopter translator example',
+    );
+    // No coverage file written — the gate must skip, not fail.
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 for docs/examples, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.reason, 'no-instrumentable-changes');
+    assert.deepEqual(parsed.changedCodeFiles, []);
+  });
 });
 
 // ── AC 4: failure with diagnostic when coverage data missing ─────────────────

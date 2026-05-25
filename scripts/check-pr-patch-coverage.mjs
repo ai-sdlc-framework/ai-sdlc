@@ -129,6 +129,11 @@ const NON_INSTRUMENTED_PATTERNS = [
   // hermetic + integration tests (e.g. AC-2 real-hook test). Vitest can't
   // instrument them. Same rationale as bin/*.mjs above.
   /(^|\/)ai-sdlc-plugin\/hooks\/.+\.(?:js|mjs|cjs)$/,
+  // docs/examples/** — reference scaffolds for adopters (e.g. BYO translator
+  // examples from RFC-0036 Phase 10). Exercised via copy-paste into adopter
+  // projects, not via vitest instrumentation. Same rationale as bin shims +
+  // hooks above. AISDLC-428.
+  /(^|\/)docs\/examples\//,
   // Build/test config files — vitest.config, tsconfig, eslint config, etc.
   // These define how tests run; they are not themselves testable units.
   // Same rationale as bin shims and hooks above.
