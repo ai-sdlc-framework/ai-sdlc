@@ -1,6 +1,8 @@
 ---
 id: AISDLC-383.6
-title: 'chore(attestation): RFC-0042 Phase 3 cutover — disable AISDLC-380 sub-attestation gate'
+title: >-
+  chore(attestation): RFC-0042 Phase 3 cutover — disable AISDLC-380
+  sub-attestation gate
 status: Done
 assignee: []
 created_date: '2026-05-20'
@@ -17,7 +19,14 @@ priority: medium
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - scripts/check-attestation-sign.sh
-  - scripts/verify-reviewer-sub-attestations.mjs
+drift_log:
+  - date: '2026-05-25'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      scripts/verify-reviewer-sub-attestations.mjs
+    resolution: flagged
+drift_checked: '2026-05-25'
 ---
 
 ## Final Summary

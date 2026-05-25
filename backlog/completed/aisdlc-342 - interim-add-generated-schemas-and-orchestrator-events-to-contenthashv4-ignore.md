@@ -15,7 +15,14 @@ references:
   - orchestrator/src/runtime/attestations.ts
   - scripts/verify-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - docs/operations/merge-queue-rebase-recovery.md
+drift_log:
+  - date: '2026-05-25'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/merge-queue-rebase-recovery.md
+    resolution: flagged
+drift_checked: '2026-05-25'
 ---
 
 ## Bug

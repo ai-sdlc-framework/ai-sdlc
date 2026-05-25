@@ -1,8 +1,11 @@
 ---
 id: AISDLC-360
-title: 'bug(orchestrator): merge queue silently drops PR after queue probe ai-sdlc/attestation status FAILURE — needs auto-rebase-and-resign'
+title: >-
+  bug(orchestrator): merge queue silently drops PR after queue probe
+  ai-sdlc/attestation status FAILURE — needs auto-rebase-and-resign
 status: Done
-assignee: ['@claude']
+assignee:
+  - '@claude'
 created_date: '2026-05-17'
 completed_date: '2026-05-22'
 labels:
@@ -18,7 +21,14 @@ references:
   - .github/workflows/verify-attestation.yml
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
-  - docs/operations/merge-queue-rebase-recovery.md
+drift_log:
+  - date: '2026-05-25'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/merge-queue-rebase-recovery.md
+    resolution: flagged
+drift_checked: '2026-05-25'
 ---
 
 ## Bug

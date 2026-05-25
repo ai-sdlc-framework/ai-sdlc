@@ -15,7 +15,6 @@ priority: medium
 references:
   - .husky/pre-push
   - scripts/check-coverage.sh
-  - docs/operations/merge-queue-rebase-recovery.md
 drift_log:
   - date: '2026-05-22'
     type: ref-deleted
@@ -23,7 +22,13 @@ drift_log:
       Referenced file no longer exists:
       ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs
     resolution: flagged
-drift_checked: '2026-05-22'
+  - date: '2026-05-25'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/merge-queue-rebase-recovery.md
+    resolution: flagged
+drift_checked: '2026-05-25'
 ---
 
 ## Three build/test infrastructure friction items hit during the 282/286/323 finalization

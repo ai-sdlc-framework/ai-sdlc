@@ -1,6 +1,8 @@
 ---
 id: AISDLC-258
-title: contentHashV4 still flaky in merge queue — operator hits rebase+re-sign loop on every multi-PR queue
+title: >-
+  contentHashV4 still flaky in merge queue — operator hits rebase+re-sign loop
+  on every multi-PR queue
 status: Done
 assignee: []
 created_date: '2026-05-10 16:35'
@@ -15,7 +17,14 @@ references:
   - scripts/verify-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - .github/workflows/verify-attestation.yml
-  - docs/operations/merge-queue-rebase-recovery.md
+drift_log:
+  - date: '2026-05-25'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      docs/operations/merge-queue-rebase-recovery.md
+    resolution: flagged
+drift_checked: '2026-05-25'
 ---
 
 ## Description
