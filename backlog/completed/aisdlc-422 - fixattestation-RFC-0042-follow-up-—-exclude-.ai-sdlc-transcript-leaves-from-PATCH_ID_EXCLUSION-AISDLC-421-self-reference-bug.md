@@ -3,7 +3,7 @@ id: AISDLC-422
 title: >-
   fix(attestation): RFC-0042 follow-up — exclude .ai-sdlc/transcript-leaves/
   from PATCH_ID_EXCLUSION (AISDLC-421 self-reference bug)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-25 03:16'
 labels:
