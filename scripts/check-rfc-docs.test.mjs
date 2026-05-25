@@ -19,15 +19,21 @@ import { fileURLToPath } from 'node:url';
 import {
   parseFrontmatter,
   validateRfc,
+  validateRfcDependencies,
   checkAllRfcs,
   reportAndExit,
   listRfcFiles,
   findReferences,
   collectRfcTransitionsFromGit,
+  readRfcLifecycle,
+  sourceImportsAny,
+  checkRequiresImport,
   SURFACE_TO_SUBDIR,
   ENFORCED_STATUSES,
   KNOWN_STATUSES,
   TEMPLATE_FILENAME,
+  ASSUMES_OK_LIFECYCLES,
+  REQUIRES_OK_LIFECYCLES,
 } from './check-rfc-docs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -715,5 +721,357 @@ describe('module exports', () => {
       'Under Review',
       'Withdrawn',
     ]);
+  });
+
+  it('exports the assumes-ok lifecycle set matching the AISDLC-311 contract', () => {
+    assert.deepEqual([...ASSUMES_OK_LIFECYCLES].sort(), [
+      'Implemented',
+      'Ready for Review',
+      'Signed Off',
+      'Superseded',
+    ]);
+  });
+
+  it('exports the requires-ok lifecycle set (Implemented only)', () => {
+    assert.deepEqual([...REQUIRES_OK_LIFECYCLES], ['Implemented']);
+  });
+});
+
+// ----------------------------------------------- AISDLC-311 dep semantics
+
+describe('sourceImportsAny (import scanner)', () => {
+  it('returns false for empty input', () => {
+    assert.equal(sourceImportsAny('', ['path/to/file.ts']), false);
+    assert.equal(sourceImportsAny('import foo from "bar";', []), false);
+    assert.equal(sourceImportsAny(null, ['path/to/file.ts']), false);
+  });
+
+  it('detects a relative ESM import matching the basename', () => {
+    const src = `import { foo } from '../sa-scoring/revision-proposal';\n`;
+    assert.equal(sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']), true);
+  });
+
+  it('detects a package ESM import containing the last two path segments', () => {
+    const src = `import { foo } from '@ai-sdlc/orchestrator/sa-scoring/revision-proposal';\n`;
+    assert.equal(sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']), true);
+  });
+
+  it('detects a side-effect ESM import', () => {
+    const src = `import '@ai-sdlc/orchestrator/sa-scoring/revision-proposal';\n`;
+    assert.equal(sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']), true);
+  });
+
+  it('detects a dynamic import()', () => {
+    const src = `const m = await import('../sa-scoring/revision-proposal.js');\n`;
+    assert.equal(sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']), true);
+  });
+
+  it('detects a CommonJS require()', () => {
+    const src = `const { foo } = require('../sa-scoring/revision-proposal');\n`;
+    assert.equal(sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']), true);
+  });
+
+  it('returns false when no module specifier matches', () => {
+    const src = `import { foo } from '../something-else';\n`;
+    assert.equal(
+      sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']),
+      false,
+    );
+  });
+
+  it('returns false when source has no import / require at all', () => {
+    const src = `function add(a, b) { return a + b; }\n`;
+    assert.equal(
+      sourceImportsAny(src, ['orchestrator/src/sa-scoring/revision-proposal.ts']),
+      false,
+    );
+  });
+});
+
+describe('checkRequiresImport', () => {
+  let tmpDir;
+  after(() => {
+    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null when implementedBy is missing on either side', () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'rfc-check-imp-'));
+    assert.equal(checkRequiresImport(tmpDir, [], ['x.ts']), null);
+    assert.equal(checkRequiresImport(tmpDir, ['y.ts'], []), null);
+    assert.equal(checkRequiresImport(tmpDir, [], []), null);
+  });
+
+  it('returns null when none of the rfc files exist on disk', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-check-imp-'));
+    try {
+      assert.equal(checkRequiresImport(dir, ['does/not/exist.ts'], ['also/missing.ts']), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns true when an rfc file imports the dep', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-check-imp-'));
+    try {
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      writeFileSync(join(dir, 'src/consumer.ts'), `import { foo } from '../dep/module';\n`);
+      assert.equal(checkRequiresImport(dir, ['src/consumer.ts'], ['dep/module.ts']), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns false when rfc files exist but none import the dep', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-check-imp-'));
+    try {
+      mkdirSync(join(dir, 'src'), { recursive: true });
+      writeFileSync(join(dir, 'src/consumer.ts'), `import { something } from 'unrelated';\n`);
+      assert.equal(
+        checkRequiresImport(dir, ['src/consumer.ts'], ['dep/specific-module.ts']),
+        false,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('readRfcLifecycle', () => {
+  it('returns null for an invalid RFC id', () => {
+    assert.equal(readRfcLifecycle('/tmp', 'not-an-rfc-id'), null);
+  });
+
+  it('returns null when rfcsDir does not exist', () => {
+    assert.equal(readRfcLifecycle('/does/not/exist/at/all', 'RFC-9999'), null);
+  });
+
+  it('reads explicit lifecycle from frontmatter', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    try {
+      writeFileSync(
+        join(dir, 'RFC-0042-foo.md'),
+        '---\nid: RFC-0042\nlifecycle: Signed Off\n---\nbody\n',
+      );
+      assert.equal(readRfcLifecycle(dir, 'RFC-0042'), 'Signed Off');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to status:Implemented when lifecycle is absent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    try {
+      writeFileSync(
+        join(dir, 'RFC-0042-foo.md'),
+        '---\nid: RFC-0042\nstatus: Implemented\n---\nbody\n',
+      );
+      assert.equal(readRfcLifecycle(dir, 'RFC-0042'), 'Implemented');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('maps legacy status:Approved → Signed Off', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    try {
+      writeFileSync(
+        join(dir, 'RFC-0042-foo.md'),
+        '---\nid: RFC-0042\nstatus: Approved\n---\nbody\n',
+      );
+      assert.equal(readRfcLifecycle(dir, 'RFC-0042'), 'Signed Off');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('maps legacy status:Under Review → Ready for Review', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    try {
+      writeFileSync(
+        join(dir, 'RFC-0042-foo.md'),
+        '---\nid: RFC-0042\nstatus: Under Review\n---\nbody\n',
+      );
+      assert.equal(readRfcLifecycle(dir, 'RFC-0042'), 'Ready for Review');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns null when no matching file is found', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-lifecycle-'));
+    try {
+      writeFileSync(join(dir, 'RFC-0042-foo.md'), '---\nid: RFC-0042\nlifecycle: Draft\n---\n');
+      assert.equal(readRfcLifecycle(dir, 'RFC-9999'), null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('validateRfcDependencies', () => {
+  let dir;
+  after(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function setupRfcs(entries) {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = mkdtempSync(join(tmpdir(), 'rfc-deps-'));
+    for (const [filename, content] of Object.entries(entries)) {
+      writeFileSync(join(dir, filename), content);
+    }
+    return dir;
+  }
+
+  it('passes when requires and assumes are both empty', () => {
+    const rfcsDir = setupRfcs({});
+    const { failures, warnings } = validateRfcDependencies({ id: 'RFC-0042' }, { rfcsDir });
+    assert.deepEqual(failures, []);
+    assert.deepEqual(warnings, []);
+  });
+
+  it('hard-fails when the same RFC is in both requires and assumes', () => {
+    const rfcsDir = setupRfcs({
+      'RFC-0001-x.md': '---\nid: RFC-0001\nlifecycle: Implemented\n---\n',
+    });
+    const { failures } = validateRfcDependencies(
+      { id: 'RFC-0042', requires: ['RFC-0001'], assumes: ['RFC-0001'] },
+      { rfcsDir },
+    );
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].reason, /BOTH 'requires:' and 'assumes:'/);
+  });
+
+  it('hard-fails when a requires entry is not a valid RFC id', () => {
+    const rfcsDir = setupRfcs({});
+    const { failures } = validateRfcDependencies(
+      { id: 'RFC-0042', requires: ['not-an-rfc'] },
+      { rfcsDir },
+    );
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].reason, /not a valid RFC id/);
+  });
+
+  it('hard-fails when a requires entry references a missing file', () => {
+    const rfcsDir = setupRfcs({});
+    const { failures } = validateRfcDependencies(
+      { id: 'RFC-0042', requires: ['RFC-9876'] },
+      { rfcsDir },
+    );
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].reason, /does not resolve to a file/);
+  });
+
+  it('hard-fails when an assumes entry references a missing file', () => {
+    const rfcsDir = setupRfcs({});
+    const { failures } = validateRfcDependencies(
+      { id: 'RFC-0042', assumes: ['RFC-9876'] },
+      { rfcsDir },
+    );
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].reason, /does not resolve to a file/);
+  });
+
+  it('warns when assumes references a Draft RFC (design surface not yet stable)', () => {
+    const rfcsDir = setupRfcs({
+      'RFC-0001-x.md': '---\nid: RFC-0001\nlifecycle: Draft\n---\n',
+    });
+    const { failures, warnings } = validateRfcDependencies(
+      { id: 'RFC-0042', assumes: ['RFC-0001'] },
+      { rfcsDir },
+    );
+    assert.deepEqual(failures, []);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0].reason, /lifecycle 'Draft'/);
+  });
+
+  it('passes when assumes references a Ready-for-Review RFC', () => {
+    const rfcsDir = setupRfcs({
+      'RFC-0001-x.md': '---\nid: RFC-0001\nlifecycle: Ready for Review\n---\n',
+    });
+    const { failures, warnings } = validateRfcDependencies(
+      { id: 'RFC-0042', assumes: ['RFC-0001'] },
+      { rfcsDir },
+    );
+    assert.deepEqual(failures, []);
+    assert.deepEqual(warnings, []);
+  });
+
+  it('passes when requires references an RFC and no implementedBy is declared', () => {
+    const rfcsDir = setupRfcs({
+      'RFC-0001-x.md': '---\nid: RFC-0001\nlifecycle: Implemented\n---\n',
+    });
+    const { failures, warnings } = validateRfcDependencies(
+      { id: 'RFC-0042', requires: ['RFC-0001'] },
+      { rfcsDir },
+    );
+    assert.deepEqual(failures, []);
+    assert.deepEqual(warnings, []);
+  });
+
+  it('warns "suggests assumes:" when requires declared but no actual import found', () => {
+    // Build a temporary repo tree where consumer.ts does NOT import dep.ts.
+    const repoRoot = mkdtempSync(join(tmpdir(), 'rfc-deps-repo-'));
+    try {
+      mkdirSync(join(repoRoot, 'src'), { recursive: true });
+      writeFileSync(join(repoRoot, 'src/consumer.ts'), `// no imports here\n`);
+      writeFileSync(join(repoRoot, 'src/dep.ts'), `export const x = 1;\n`);
+      const rfcsDir = join(repoRoot, 'spec/rfcs');
+      mkdirSync(rfcsDir, { recursive: true });
+      writeFileSync(
+        join(rfcsDir, 'RFC-0001-dep.md'),
+        '---\nid: RFC-0001\nlifecycle: Implemented\nimplementedBy:\n  - src/dep.ts\n---\n',
+      );
+      const { failures, warnings } = validateRfcDependencies(
+        {
+          id: 'RFC-0042',
+          requires: ['RFC-0001'],
+          implementedBy: ['src/consumer.ts'],
+        },
+        { rfcsDir, repoRoot },
+      );
+      assert.deepEqual(failures, []);
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0].reason, /no actual import detected/);
+      assert.match(warnings[0].reason, /move 'RFC-0001' to 'assumes:'/);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not warn when an actual import IS detected', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'rfc-deps-repo-'));
+    try {
+      mkdirSync(join(repoRoot, 'src'), { recursive: true });
+      writeFileSync(join(repoRoot, 'src/consumer.ts'), `import { x } from './dep';\n`);
+      writeFileSync(join(repoRoot, 'src/dep.ts'), `export const x = 1;\n`);
+      const rfcsDir = join(repoRoot, 'spec/rfcs');
+      mkdirSync(rfcsDir, { recursive: true });
+      writeFileSync(
+        join(rfcsDir, 'RFC-0001-dep.md'),
+        '---\nid: RFC-0001\nlifecycle: Implemented\nimplementedBy:\n  - src/dep.ts\n---\n',
+      );
+      const { failures, warnings } = validateRfcDependencies(
+        {
+          id: 'RFC-0042',
+          requires: ['RFC-0001'],
+          implementedBy: ['src/consumer.ts'],
+        },
+        { rfcsDir, repoRoot },
+      );
+      assert.deepEqual(failures, []);
+      assert.deepEqual(warnings, []);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns empty when rfcsDir is omitted (semantic-conflict only)', () => {
+    const { failures, warnings } = validateRfcDependencies(
+      { id: 'RFC-0042', requires: ['RFC-0001'] },
+      {},
+    );
+    assert.deepEqual(failures, []);
+    assert.deepEqual(warnings, []);
   });
 });

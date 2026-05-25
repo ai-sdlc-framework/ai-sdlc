@@ -5964,7 +5964,21 @@ export const rfcSchema = {
       type: 'array',
       items: { type: 'string', pattern: '^RFC-[0-9]{4}$' },
       description:
-        'Other RFC IDs this RFC depends on (e.g. RFC-0006 requires RFC-0002 and RFC-0004). Optional.',
+        "Runtime-code dependency (AISDLC-311): this RFC's implementation imports code from the listed RFC(s)' implementations. The listed RFCs MUST ship (lifecycle `Implemented`) before this RFC's implementation can ship. Use `assumes:` instead when the dependency is a design contract that this RFC reads (e.g. type shape, schema field) but does NOT code-import. Optional.",
+    },
+    assumes: {
+      type: 'array',
+      items: { type: 'string', pattern: '^RFC-[0-9]{4}$' },
+      description:
+        "Design-contract dependency (AISDLC-311): this RFC reads the listed RFC(s) as a design contract (type shape, schema, naming, semantics) but does NOT import their implementation code. The listed RFCs only need to EXIST at `Ready for Review` or higher (design surface stable enough to compose against) — they do NOT need to ship before this RFC's implementation can ship. Use `requires:` instead when there is an actual runtime-code import. Optional.",
+      examples: [['RFC-0009', 'RFC-0029']],
+    },
+    implementedBy: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'Source-tree paths (relative to repo root) that implement this RFC (e.g. `orchestrator/src/sa-scoring/revision-proposal.ts`). When declared, the docs-drift linter (AISDLC-311) cross-checks `requires:` entries against actual imports from these files; if no imports are found, a deprecation warning suggests moving the entry to `assumes:`. Optional — when omitted, the cross-check is skipped.',
+      examples: [['orchestrator/src/sa-scoring/revision-proposal.ts']],
     },
     amends: {
       type: 'array',

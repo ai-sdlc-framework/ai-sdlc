@@ -23,11 +23,13 @@ import {
   TERMINAL_STATES,
   OVERRIDE_MARKER_REGEX,
   extractLifecycle,
+  extractRfcListField,
   parseOverrideMarker,
   sanitizeReason,
   loadLifecycleApprovers,
   appendAuditEntry,
   checkLifecycleTransition,
+  checkRequiresShipped,
   checkAllTransitions,
   reportTransitionsAndExit,
   checkAllowlistMutationGuard,
@@ -1179,5 +1181,212 @@ describe('module exports', () => {
 
   it('exports checkAuditLogIntegrity (AISDLC-417)', () => {
     assert.equal(typeof checkAuditLogIntegrity, 'function');
+  });
+
+  it('exports extractRfcListField (AISDLC-311)', () => {
+    assert.equal(typeof extractRfcListField, 'function');
+  });
+
+  it('exports checkRequiresShipped (AISDLC-311)', () => {
+    assert.equal(typeof checkRequiresShipped, 'function');
+  });
+});
+
+// ------------------------------------------- AISDLC-311 requires-shipped gate
+
+describe('extractRfcListField', () => {
+  it('returns [] for empty input', () => {
+    assert.deepEqual(extractRfcListField('', 'requires'), []);
+    assert.deepEqual(extractRfcListField(null, 'requires'), []);
+  });
+
+  it('parses inline list', () => {
+    const src = '---\nid: RFC-0042\nrequires: [RFC-0001, RFC-0002]\n---\nbody\n';
+    assert.deepEqual(extractRfcListField(src, 'requires'), ['RFC-0001', 'RFC-0002']);
+  });
+
+  it('parses block list', () => {
+    const src = '---\nid: RFC-0042\nassumes:\n  - RFC-0009\n  - RFC-0029\n---\nbody\n';
+    assert.deepEqual(extractRfcListField(src, 'assumes'), ['RFC-0009', 'RFC-0029']);
+  });
+
+  it('ignores entries that do not match the RFC pattern', () => {
+    const src = '---\nrequires:\n  - RFC-0001\n  - not-an-rfc\n---\n';
+    assert.deepEqual(extractRfcListField(src, 'requires'), ['RFC-0001']);
+  });
+
+  it('deduplicates entries', () => {
+    const src = '---\nrequires:\n  - RFC-0001\n  - RFC-0001\n---\n';
+    assert.deepEqual(extractRfcListField(src, 'requires'), ['RFC-0001']);
+  });
+
+  it('returns [] when the field is absent', () => {
+    const src = '---\nid: RFC-0042\n---\n';
+    assert.deepEqual(extractRfcListField(src, 'requires'), []);
+    assert.deepEqual(extractRfcListField(src, 'assumes'), []);
+  });
+
+  it('accepts raw frontmatter blocks (no opening fence)', () => {
+    const src = 'requires: [RFC-0001]\nlifecycle: Implemented\n';
+    assert.deepEqual(extractRfcListField(src, 'requires'), ['RFC-0001']);
+  });
+});
+
+describe('checkRequiresShipped', () => {
+  it('passes when toLifecycle is not Implemented', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nrequires: [RFC-0001]\n---\n',
+      toLifecycle: 'Signed Off',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: () => '---\nlifecycle: Draft\n---\n',
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.violations, []);
+  });
+
+  it('passes when no `requires:` field is declared', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nid: RFC-0042\n---\nbody\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: () => null,
+    });
+    assert.equal(r.ok, true);
+  });
+
+  it('passes when all requires deps are Implemented', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nrequires: [RFC-0001, RFC-0002]\n---\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: (id) => `---\nid: ${id}\nlifecycle: Implemented\n---\n`,
+    });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.violations, []);
+  });
+
+  it('flags a violation when a requires dep is at lifecycle Draft', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nrequires: [RFC-0001]\n---\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: () => '---\nlifecycle: Draft\n---\n',
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.violations.length, 1);
+    assert.equal(r.violations[0].depId, 'RFC-0001');
+    assert.equal(r.violations[0].depLifecycle, 'Draft');
+    assert.match(r.diagnostic, /RFC-0001/);
+    assert.match(r.diagnostic, /move them to 'assumes:'/);
+  });
+
+  it('flags a violation when a requires dep is at Signed Off (not Implemented)', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nrequires: [RFC-0001]\n---\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: () => '---\nlifecycle: Signed Off\n---\n',
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.violations[0].depLifecycle, 'Signed Off');
+  });
+
+  it('flags a missing dep file as a violation', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nrequires: [RFC-0001]\n---\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: () => null,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.violations[0].depLifecycle, 'missing');
+  });
+
+  it('ignores `assumes:` deps (only checks `requires:`)', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nassumes: [RFC-0001]\nrequires: [RFC-0002]\n---\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+      readUpstreamRfcContent: (id) =>
+        id === 'RFC-0002' ? '---\nlifecycle: Implemented\n---\n' : '---\nlifecycle: Draft\n---\n',
+    });
+    // RFC-0001 (assumes:) is Draft but should NOT be flagged.
+    // RFC-0002 (requires:) is Implemented — passes.
+    assert.equal(r.ok, true);
+  });
+
+  it('is a no-op when readUpstreamRfcContent is not provided', () => {
+    const r = checkRequiresShipped({
+      toContent: '---\nrequires: [RFC-0001]\n---\n',
+      toLifecycle: 'Implemented',
+      rfcId: 'RFC-0042',
+    });
+    assert.equal(r.ok, true);
+  });
+});
+
+describe('checkAllTransitions — requires-shipped warnings (AISDLC-311)', () => {
+  it('passes warnings through alongside clean transitions', () => {
+    const report = checkAllTransitions([
+      {
+        rfcId: 'RFC-0042',
+        fromContent: '---\nlifecycle: Signed Off\n---\n',
+        toContent: '---\nlifecycle: Implemented\nrequires: [RFC-0001]\n---\n',
+        readUpstreamRfcContent: () => '---\nlifecycle: Draft\n---\n',
+      },
+    ]);
+    assert.equal(report.failures.length, 0);
+    assert.equal(report.warnings.length, 1);
+    assert.equal(report.warnings[0].kind, 'requires-not-shipped');
+    assert.match(report.warnings[0].diagnostic, /RFC-0001/);
+    // Clean transition count: the ladder check still passed (Signed Off → Implemented is legal).
+    assert.equal(report.clean, 1);
+  });
+
+  it('does not emit warnings when requires-shipped passes', () => {
+    const report = checkAllTransitions([
+      {
+        rfcId: 'RFC-0042',
+        fromContent: '---\nlifecycle: Signed Off\n---\n',
+        toContent: '---\nlifecycle: Implemented\nrequires: [RFC-0001]\n---\n',
+        readUpstreamRfcContent: () => '---\nlifecycle: Implemented\n---\n',
+      },
+    ]);
+    assert.equal(report.warnings.length, 0);
+  });
+
+  it('warnings field defaults to empty array when no readUpstreamRfcContent provided', () => {
+    const report = checkAllTransitions([
+      {
+        rfcId: 'RFC-0042',
+        fromContent: '---\nlifecycle: Signed Off\n---\n',
+        toContent: '---\nlifecycle: Implemented\nrequires: [RFC-0001]\n---\n',
+      },
+    ]);
+    assert.deepEqual(report.warnings, []);
+  });
+});
+
+describe('reportTransitionsAndExit — warnings rendering', () => {
+  it('prints warning diagnostics but still exits 0 when no failures', () => {
+    const logs = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = (...args) => logs.push(['log', ...args]);
+    console.error = (...args) => logs.push(['err', ...args]);
+    try {
+      const code = reportTransitionsAndExit({
+        failures: [],
+        overrides: [],
+        warnings: [{ rfcId: 'RFC-0042', diagnostic: '[rfc-lifecycle] WARN ...' }],
+        clean: 1,
+      });
+      assert.equal(code, 0);
+      assert.ok(logs.some(([k, msg]) => k === 'log' && /WARN/.test(msg)));
+      assert.ok(logs.some(([k, msg]) => k === 'log' && /1 warning/.test(msg)));
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+    }
   });
 });

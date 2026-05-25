@@ -72,6 +72,16 @@ export interface RfcOqCheckResult {
   unresolvedOqSample: string[];
   /** True when either lifecycleBlocked or unresolvedOqCount > 0. */
   rejected: boolean;
+  /**
+   * AISDLC-311 — how the task references this RFC.
+   *   'requires'   = runtime-code dependency (lifecycle + OQ status BLOCK).
+   *   'assumes'    = design-contract dependency (only existence required;
+   *                  lifecycle + OQ status DO NOT block).
+   *   'reference'  = mentioned via `references:` or bare body text (legacy
+   *                  conservative path — treated as 'requires' for backward
+   *                  compat unless the same RFC is also in 'assumes').
+   */
+  dependencyKind?: 'requires' | 'assumes' | 'reference';
 }
 
 export interface UpstreamOqCheckInput {
@@ -198,6 +208,53 @@ export function extractRfcReferences(frontmatter: string): string[] {
     if (/^RFC-\d{4}$/.test(item)) {
       refs.push(item);
     }
+  }
+  return refs;
+}
+
+/**
+ * Extract `requires:` or `assumes:` list entries from a task's YAML
+ * frontmatter (AISDLC-311 — split dependency semantics).
+ *
+ * Tasks MAY declare:
+ *   - `requires:` → runtime-code dependency on the listed RFCs' implementations.
+ *     Tasks with `requires:` MUST wait for those RFCs to ship (lifecycle
+ *     `Implemented`) before dispatch.
+ *   - `assumes:` → design-contract dependency. Tasks with `assumes:` only need
+ *     the RFCs to EXIST at `Ready for Review` or higher — the design surface
+ *     is stable enough to write against. Documentation-only from the
+ *     upstream-OQ gate's perspective.
+ *
+ * Supports both inline (`requires: [RFC-0001, RFC-0002]`) and block-list
+ * (`requires:\n  - RFC-0001\n  - RFC-0002`) forms. Returns only entries that
+ * look like bare RFC IDs.
+ */
+export function extractRfcDependencyList(
+  frontmatter: string,
+  field: 'requires' | 'assumes',
+): string[] {
+  const refs: string[] = [];
+  // Inline form: `field: [RFC-0001, RFC-0002]`
+  const inlineMatch = frontmatter.match(new RegExp(`^${field}:\\s*\\[([^\\]]*)\\]`, 'm'));
+  if (inlineMatch) {
+    const inner = inlineMatch[1] ?? '';
+    for (const raw of inner.split(',')) {
+      const item = raw.trim().replace(/^['"]|['"]$/g, '');
+      if (/^RFC-\d{4}$/.test(item)) refs.push(item);
+    }
+    return refs;
+  }
+  // Block-list form: `field:\n  - RFC-0001\n  - RFC-0002`
+  const blockMatch = frontmatter.match(new RegExp(`^${field}:\\n((?:\\s+-\\s+.+\\n?)*)`, 'm'));
+  if (!blockMatch) return refs;
+  const lines = blockMatch[1]?.split('\n') ?? [];
+  for (const line of lines) {
+    const item = line
+      .replace(/^\s+-\s+/, '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
+    if (!item) continue;
+    if (/^RFC-\d{4}$/.test(item)) refs.push(item);
   }
   return refs;
 }
@@ -414,10 +471,43 @@ export function checkUpstreamOqs(input: UpstreamOqCheckInput): UpstreamOqCheckRe
     };
   }
 
-  // Collect all RFC references (deduplicated).
-  const fromFrontmatter = extractRfcReferences(input.frontmatter);
+  // Collect dependencies by kind (AISDLC-311 split semantics).
+  // - `requires:` and bare body / `references:` mentions both ENFORCE the
+  //   upstream lifecycle + OQ gate (the gate's existing behavior preserved).
+  // - `assumes:` is documentation-only: we still resolve + record the RFC
+  //   check (so callers can render the design context) but the result NEVER
+  //   contributes to `rejected`.
+  const fromRequires = extractRfcDependencyList(input.frontmatter, 'requires');
+  const fromAssumes = extractRfcDependencyList(input.frontmatter, 'assumes');
+  const fromReferences = extractRfcReferences(input.frontmatter);
   const fromBody = extractRfcIdsFromBody(input.body);
-  const allRefs = deduplicate([...fromFrontmatter, ...fromBody]);
+
+  // Build the kind map. `requires:` wins over `reference` (legacy); `assumes:`
+  // wins over `reference` so a task that explicitly declares a design-only
+  // dependency isn't retroactively blocked by the same RFC also showing up
+  // in `references:`. When an RFC appears in BOTH `requires:` and `assumes:`,
+  // `requires:` wins (the runtime-code constraint is strictly stronger).
+  const kindByRef = new Map<string, 'requires' | 'assumes' | 'reference'>();
+  for (const ref of fromReferences) {
+    const id = normalizeRfcId(ref);
+    kindByRef.set(id, 'reference');
+  }
+  for (const ref of fromBody) {
+    const id = normalizeRfcId(ref);
+    if (!kindByRef.has(id)) kindByRef.set(id, 'reference');
+  }
+  for (const ref of fromAssumes) {
+    const id = normalizeRfcId(ref);
+    kindByRef.set(id, 'assumes');
+  }
+  for (const ref of fromRequires) {
+    const id = normalizeRfcId(ref);
+    kindByRef.set(id, 'requires');
+  }
+
+  // Deduplicate the original-form ref list (preferring frontmatter
+  // representations) for use as the per-check `rfcRef` event field.
+  const allRefs = deduplicate([...fromRequires, ...fromAssumes, ...fromReferences, ...fromBody]);
 
   if (allRefs.length === 0) {
     return {
@@ -434,6 +524,7 @@ export function checkUpstreamOqs(input: UpstreamOqCheckInput): UpstreamOqCheckRe
   for (const ref of allRefs) {
     const rfcId = normalizeRfcId(ref);
     const rfcFilePath = resolveRfcFilePath(ref, input.workDir) ?? '';
+    const kind = kindByRef.get(rfcId) ?? 'reference';
 
     // When a readRfcFile override is provided (tests), call it with the
     // resolved file path when available, otherwise fall back to the original
@@ -444,6 +535,17 @@ export function checkUpstreamOqs(input: UpstreamOqCheckInput): UpstreamOqCheckRe
       : undefined;
 
     const check = checkRfc({ rfcId, rfcFilePath, rfcContent });
+    check.dependencyKind = kind;
+
+    // AISDLC-311 — `assumes:` is documentation-only: the design surface only
+    // needs to exist (any of Ready for Review / Signed Off / Implemented).
+    // Override the `rejected` field for `assumes:` entries so they never
+    // contribute to gate failure. The lifecycle + OQ fields are preserved
+    // so callers can render context.
+    if (kind === 'assumes') {
+      check.rejected = false;
+    }
+
     rfcChecks.push(check);
 
     if (check.rejected) {

@@ -343,6 +343,280 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
   return { failures, warnings };
 }
 
+// ---------------------------------------------------------------------------
+// Dependency-field semantics (AISDLC-311)
+// ---------------------------------------------------------------------------
+//
+// `requires:` = runtime-code dependency (target RFC's implementation MUST ship
+//               first; this RFC's code imports from target's code).
+// `assumes:`  = design-contract dependency (target RFC only needs to EXIST at
+//               `Ready for Review` or higher; design surface is stable enough
+//               to compose against without code-import).
+// `implementedBy:` = source-tree paths that implement the RFC. Optional. When
+//               declared, the linter cross-checks `requires:` entries against
+//               actual imports from these paths; missing imports surface a
+//               deprecation warning suggesting `assumes:`.
+//
+// Lifecycle states that count as "design surface stable" for `assumes:`
+// dependency satisfaction. Matches the `BLOCKED_LIFECYCLES` inverse from
+// pipeline-cli's upstream-OQ gate.
+
+export const ASSUMES_OK_LIFECYCLES = new Set([
+  'Ready for Review',
+  'Signed Off',
+  'Implemented',
+  'Superseded',
+]);
+
+/**
+ * Lifecycle states that count as "implementation shipped" for `requires:`
+ * dependency satisfaction. Only `Implemented` qualifies — `Signed Off` means
+ * the spec is locked but reference implementation may still be in flight.
+ */
+export const REQUIRES_OK_LIFECYCLES = new Set(['Implemented']);
+
+/**
+ * Read the lifecycle (`lifecycle:` or fallback `status:` mapped to the
+ * lifecycle ladder) for a given RFC by id. Returns `null` when the RFC
+ * file doesn't exist on disk OR the frontmatter can't be parsed.
+ *
+ * Maps legacy `status` to lifecycle when `lifecycle` field is absent:
+ *   Approved | Final → Signed Off
+ *   Implemented      → Implemented
+ *   Under Review     → Ready for Review
+ *   anything else    → Draft
+ */
+export function readRfcLifecycle(rfcsDir, rfcId) {
+  if (!/^RFC-\d{4}$/.test(rfcId)) return null;
+  let entries;
+  try {
+    entries = readdirSync(rfcsDir);
+  } catch {
+    return null;
+  }
+  const match = entries.find(
+    (f) => f.toUpperCase().startsWith(rfcId.toUpperCase()) && f.endsWith('.md'),
+  );
+  if (!match) return null;
+  let parsed;
+  try {
+    parsed = parseFrontmatter(readFileSync(join(rfcsDir, match), 'utf-8'));
+  } catch {
+    return null;
+  }
+  const fm = parsed.frontmatter ?? {};
+  if (typeof fm.lifecycle === 'string' && fm.lifecycle.length > 0) {
+    return fm.lifecycle;
+  }
+  // Fallback: derive from legacy `status:` field.
+  const status = typeof fm.status === 'string' ? fm.status : '';
+  if (status === 'Implemented') return 'Implemented';
+  if (status === 'Approved' || status === 'Final') return 'Signed Off';
+  if (status === 'Under Review') return 'Ready for Review';
+  return 'Draft';
+}
+
+/**
+ * Scan a single source file for `import` / `require` references to any path
+ * under any of the `implementedBy` targets of `depRfc`. The check is purely
+ * textual: when ANY of `depImplementedBy[i]`'s path SEGMENT (e.g. the
+ * `revision-proposal` basename from `orchestrator/src/sa-scoring/revision-proposal.ts`)
+ * appears inside an `import ... from '...'` or `require('...')` string in the
+ * source, the reference is considered satisfied.
+ *
+ * This is intentionally lenient — the goal is to catch the dominant case
+ * ("RFC X's code does NOT actually import RFC Y's code") rather than to
+ * resolve TypeScript module graphs end-to-end. False positives (a substring
+ * collision) are preferred over false negatives (incorrectly flagging a real
+ * import). Tests pin the recognised forms.
+ */
+export function sourceImportsAny(sourceText, depImplementedBy) {
+  if (!sourceText || !Array.isArray(depImplementedBy) || depImplementedBy.length === 0) {
+    return false;
+  }
+  // Extract module specifier strings from import/require statements.
+  const moduleSpecifiers = [];
+  // ESM: import ... from 'x' | import 'x' | import('x')
+  for (const m of sourceText.matchAll(/import\s+(?:[^'"`]+\s+from\s+)?['"`]([^'"`]+)['"`]/g)) {
+    moduleSpecifiers.push(m[1]);
+  }
+  for (const m of sourceText.matchAll(/import\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g)) {
+    moduleSpecifiers.push(m[1]);
+  }
+  // CommonJS: require('x')
+  for (const m of sourceText.matchAll(/require\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g)) {
+    moduleSpecifiers.push(m[1]);
+  }
+  if (moduleSpecifiers.length === 0) return false;
+  // Compare against each declared `implementedBy` path. We match on the
+  // basename (without extension) as well as the last-two-segments of the
+  // path so both relative imports (`../revision-proposal`) and barrel
+  // imports (`@ai-sdlc/orchestrator/sa-scoring`) are recognised.
+  const needles = new Set();
+  for (const p of depImplementedBy) {
+    const cleaned = p.replace(/^\.\//, '').replace(/\.(ts|tsx|mts|cts|js|mjs|cjs)$/, '');
+    const parts = cleaned.split('/');
+    // last segment (basename without ext)
+    if (parts.length >= 1) needles.add(parts[parts.length - 1]);
+    // last two segments (covers `sa-scoring/revision-proposal`)
+    if (parts.length >= 2) needles.add(parts.slice(-2).join('/'));
+  }
+  for (const spec of moduleSpecifiers) {
+    for (const needle of needles) {
+      if (needle && spec.includes(needle)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Cross-check whether any of `rfc.implementedBy` source files import code
+ * from any of `dep.implementedBy` source files. Returns `true` when at
+ * least one import is detected, `false` when no imports are found, and
+ * `null` when the check cannot be performed (missing files or empty paths).
+ *
+ * Pure-ish — reads the filesystem when called.
+ */
+export function checkRequiresImport(repoRoot, rfcImplementedBy, depImplementedBy) {
+  if (
+    !Array.isArray(rfcImplementedBy) ||
+    rfcImplementedBy.length === 0 ||
+    !Array.isArray(depImplementedBy) ||
+    depImplementedBy.length === 0
+  ) {
+    return null;
+  }
+  let anyReadable = false;
+  for (const relPath of rfcImplementedBy) {
+    const abs = resolve(repoRoot, relPath);
+    if (!existsSync(abs)) continue;
+    let content;
+    try {
+      content = readFileSync(abs, 'utf-8');
+    } catch {
+      continue;
+    }
+    anyReadable = true;
+    if (sourceImportsAny(content, depImplementedBy)) return true;
+  }
+  return anyReadable ? false : null;
+}
+
+/**
+ * Validate the `requires:` / `assumes:` dependency declarations for one RFC.
+ *
+ * Per AISDLC-311:
+ *   - `requires:` entries: target RFC MUST exist; when target declares
+ *     `implementedBy:` AND this RFC declares `implementedBy:`, cross-check
+ *     for at least one actual import; if absent, emit a deprecation warning
+ *     suggesting `assumes:`.
+ *   - `assumes:` entries: target RFC MUST exist AND be at `Ready for Review`
+ *     or higher (design surface stable enough to compose against). Below
+ *     that, emit a warning.
+ *   - An RFC ID listed in BOTH `requires:` and `assumes:` is a hard failure
+ *     (semantic conflict).
+ *
+ * Returns `{ failures, warnings }`. Pure function — caller injects the
+ * filesystem-bound RFC loader so tests can stub it.
+ */
+export function validateRfcDependencies(frontmatter, { rfcsDir, repoRoot } = {}) {
+  const failures = [];
+  const warnings = [];
+  const id = typeof frontmatter.id === 'string' ? frontmatter.id : '<unknown>';
+  const requires = Array.isArray(frontmatter.requires) ? frontmatter.requires : [];
+  const assumes = Array.isArray(frontmatter.assumes) ? frontmatter.assumes : [];
+  const implementedBy = Array.isArray(frontmatter.implementedBy) ? frontmatter.implementedBy : [];
+
+  // Semantic-conflict check: same RFC in both lists is a hard failure.
+  const overlap = requires.filter((r) => assumes.includes(r));
+  for (const dup of overlap) {
+    failures.push({
+      rfc: id,
+      surface: null,
+      reason: `dependency '${dup}' appears in BOTH 'requires:' and 'assumes:' — pick one (runtime-code = requires; design-contract = assumes)`,
+    });
+  }
+
+  if (!rfcsDir) {
+    // Without the rfcsDir we can only enforce the semantic-conflict rule.
+    return { failures, warnings };
+  }
+
+  // `requires:` existence + (optional) import cross-check.
+  for (const dep of requires) {
+    if (!/^RFC-\d{4}$/.test(dep)) {
+      failures.push({
+        rfc: id,
+        surface: null,
+        reason: `'requires:' entry '${dep}' is not a valid RFC id (expected RFC-NNNN)`,
+      });
+      continue;
+    }
+    const depLifecycle = readRfcLifecycle(rfcsDir, dep);
+    if (depLifecycle === null) {
+      failures.push({
+        rfc: id,
+        surface: null,
+        reason: `'requires:' entry '${dep}' does not resolve to a file under ${relative(REPO_ROOT, rfcsDir) || rfcsDir}/`,
+      });
+      continue;
+    }
+    // Cross-check imports when BOTH this RFC and the dep declare implementedBy.
+    // Skipped when no implementedBy on either side (the deprecation-warning
+    // contract is purely informational — we never block on it).
+    const depFrontmatter = (() => {
+      try {
+        const files = readdirSync(rfcsDir);
+        const f = files.find((x) => x.toUpperCase().startsWith(dep) && x.endsWith('.md'));
+        return f ? parseFrontmatter(readFileSync(join(rfcsDir, f), 'utf-8')).frontmatter : null;
+      } catch {
+        return null;
+      }
+    })();
+    const depImplementedBy = Array.isArray(depFrontmatter?.implementedBy)
+      ? depFrontmatter.implementedBy
+      : [];
+    if (implementedBy.length > 0 && depImplementedBy.length > 0 && repoRoot) {
+      const hasImport = checkRequiresImport(repoRoot, implementedBy, depImplementedBy);
+      if (hasImport === false) {
+        warnings.push({
+          rfc: id,
+          reason: `'requires: ${dep}' declared but no actual import detected from this RFC's implementedBy files (${implementedBy.join(', ')}). If the dependency is design-only, move '${dep}' to 'assumes:' (AISDLC-311).`,
+        });
+      }
+    }
+  }
+
+  // `assumes:` existence + lifecycle-floor check.
+  for (const dep of assumes) {
+    if (!/^RFC-\d{4}$/.test(dep)) {
+      failures.push({
+        rfc: id,
+        surface: null,
+        reason: `'assumes:' entry '${dep}' is not a valid RFC id (expected RFC-NNNN)`,
+      });
+      continue;
+    }
+    const depLifecycle = readRfcLifecycle(rfcsDir, dep);
+    if (depLifecycle === null) {
+      failures.push({
+        rfc: id,
+        surface: null,
+        reason: `'assumes:' entry '${dep}' does not resolve to a file under ${relative(REPO_ROOT, rfcsDir) || rfcsDir}/`,
+      });
+      continue;
+    }
+    if (!ASSUMES_OK_LIFECYCLES.has(depLifecycle)) {
+      warnings.push({
+        rfc: id,
+        reason: `'assumes: ${dep}' references an RFC at lifecycle '${depLifecycle}' (need 'Ready for Review' or higher; design contract not yet stable enough to compose against)`,
+      });
+    }
+  }
+
+  return { failures, warnings };
+}
+
 /**
  * Collect RFC lifecycle transitions for changed files by diffing git.
  *
@@ -412,7 +686,23 @@ export function collectRfcTransitionsFromGit({ rfcsDir, repoRoot, baseRef, prBod
       // File was deleted; toContent stays null.
     }
 
-    return { rfcId, fromContent, toContent, prBody };
+    // AISDLC-311 — readUpstreamRfcContent for the lifecycle-promotion gate.
+    // Reads an upstream RFC's CURRENT working-tree content (post-rebase, so
+    // the dep's own promotion lands in the same PR / merge group is honored).
+    // Returns null when the upstream file is missing.
+    const readUpstreamRfcContent = (depId) => {
+      if (!/^RFC-\d{4}$/.test(depId)) return null;
+      try {
+        const entries = readdirSync(rfcsDir);
+        const match = entries.find((f) => f.toUpperCase().startsWith(depId) && f.endsWith('.md'));
+        if (!match) return null;
+        return readFileSync(join(rfcsDir, match), 'utf-8');
+      } catch {
+        return null;
+      }
+    };
+
+    return { rfcId, fromContent, toContent, prBody, readUpstreamRfcContent };
   });
 }
 
@@ -420,7 +710,11 @@ export function collectRfcTransitionsFromGit({ rfcsDir, repoRoot, baseRef, prBod
  * Walk the RFC tree, validate each, return an aggregated report.
  * Caller decides whether to print + exit. Pure-ish — only reads fs.
  */
-export function checkAllRfcs({ rfcsDir = DEFAULT_RFCS_DIR, docsDir = DEFAULT_DOCS_DIR } = {}) {
+export function checkAllRfcs({
+  rfcsDir = DEFAULT_RFCS_DIR,
+  docsDir = DEFAULT_DOCS_DIR,
+  repoRoot = REPO_ROOT,
+} = {}) {
   const today = new Date();
   const files = listRfcFiles(rfcsDir);
   const failures = [];
@@ -456,6 +750,18 @@ export function checkAllRfcs({ rfcsDir = DEFAULT_RFCS_DIR, docsDir = DEFAULT_DOC
     } else {
       enforcedCount++;
     }
+
+    // AISDLC-311 dependency-field check runs for ALL RFCs (independent of
+    // sign-off status) so the registry-wide hygiene is enforced. Hard
+    // failures: invalid RFC id, missing target, both-requires-and-assumes.
+    // Warnings: requires-without-import (suggests assumes), assumes against
+    // pre-Ready-for-Review target.
+    const { failures: depF, warnings: depW } = validateRfcDependencies(parsed.frontmatter, {
+      rfcsDir,
+      repoRoot,
+    });
+    failures.push(...depF);
+    warnings.push(...depW);
   }
 
   return {

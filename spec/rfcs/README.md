@@ -42,7 +42,7 @@ Historically, several RFCs (RFC-0006, RFC-0007, RFC-0008, RFC-0009) used an "Add
 When you'd be tempted to add an Addendum:
 
 1. **Reserve a new RFC number** in the [Registry](#registry) with `Status: Reserved` + a one-line description of what the new content covers
-2. **Draft the new RFC** with `requires: [<parent-rfc-id>]` in its frontmatter — the dependency is explicit
+2. **Draft the new RFC** with `requires: [<parent-rfc-id>]` (runtime-code dep — the new RFC's implementation imports from the parent) OR `assumes: [<parent-rfc-id>]` (design-contract dep — the new RFC reads the parent's design surface but does not code-import). See the [requires vs assumes section](#requires-vs-assumes--dependency-kind-semantics-aisdlc-311) below.
 3. **Reference the parent** in §1 Summary: "This RFC extends RFC-NNNN with..."
 4. **Open a separate PR** for the new RFC — independent review, independent sign-off, independent lifecycle
 5. **The parent stays signed-off** — no re-opening required
@@ -176,10 +176,31 @@ The schema lives at [`spec/schemas/rfc.schema.json`](../schemas/rfc.schema.json)
 | Field                  | Type           | Notes                                                                                                                                                  |
 | ---------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `targetSpecVersion`    | string         | Spec API version targeted (e.g. `v1alpha1`). Recommended.                                                                                              |
-| `requires`             | array of RFC ID | RFCs this RFC depends on (e.g. RFC-0006 requires RFC-0002 and RFC-0004).                                                                              |
+| `requires`             | array of RFC ID | **Runtime-code dependency** (AISDLC-311). This RFC's implementation IMPORTS code from the listed RFCs. They MUST ship (lifecycle `Implemented`) before this RFC's implementation can ship. |
+| `assumes`              | array of RFC ID | **Design-contract dependency** (AISDLC-311). This RFC reads the listed RFCs as a design contract (type shape, schema, semantics) but does NOT code-import. They only need to EXIST at `Ready for Review` or higher. |
+| `implementedBy`        | array of paths | Source-tree paths that implement this RFC. When declared, the docs-drift linter cross-checks `requires:` entries against actual imports; missing imports surface a deprecation warning suggesting `assumes:`. |
 | `amends`               | array of RFC ID | RFCs this RFC amends (e.g. RFC-0010 amends RFC-0002).                                                                                                  |
 | `deferredDocs`         | boolean        | Escape hatch — see below.                                                                                                                              |
 | `deferredDocsDeadline` | ISO 8601 date   | Required when `deferredDocs: true`.                                                                                                                    |
+
+### `requires:` vs `assumes:` — dependency-kind semantics (AISDLC-311)
+
+The original `requires:` field conflated two distinct kinds of inter-RFC dependency. AISDLC-311 splits them into explicit fields:
+
+| Kind | Field | Meaning | Ship-order gate | Example |
+| ---- | ----- | ------- | --------------- | ------- |
+| Runtime-code | `requires:` | RFC A's implementation **imports** code from RFC B's implementation. | A cannot ship until B ships (lifecycle `Implemented`). | RFC-0035 Phase 5 imports the shared classifier substrate from RFC-0024 Refit Phase 2. |
+| Design-contract | `assumes:` | RFC A reads RFC B as a design surface (type shape, schema, semantics) but does NOT code-import. | A can ship without B's implementation, as long as A's code doesn't import B's. | RFC-0031 assumes the DID schema from RFC-0009 but only takes abstract `IdentityClass + fieldPath` parameters; callers will provide the RFC-0009-resolved values once RFC-0009 ships. |
+
+**Test of the day** — if removing the dependency would cause a TypeScript / Node `import` error, it's `requires:`. If removing it would only leave a comment or design rationale stale, it's `assumes:`.
+
+**Gate composition:**
+
+- **DoR upstream-OQ gate** (`pipeline-cli/src/dor/upstream-oq-gate.ts`) — tasks that declare a dependency via `requires:` are BLOCKED when the target RFC has open OQs or is pre-`Signed Off`. Tasks that declare via `assumes:` are documentation-only — the lifecycle / OQ status of the target does NOT block. Tasks that mention an RFC only via `references:` or bare body text retain the legacy conservative behavior (treated as `requires:`).
+- **Lifecycle promotion gate** (`scripts/check-rfc-lifecycle-transitions.mjs`) — when an RFC is promoted to `lifecycle: Implemented`, its `requires:` entries SHOULD also be at `Implemented`. Violations surface as warnings during the AISDLC-311 soak window; a future task may promote them to hard failures.
+- **Docs-drift linter** (`scripts/check-rfc-docs.mjs`) — `requires:` and `assumes:` entries must reference valid RFC IDs that exist on disk. An RFC ID in BOTH `requires:` and `assumes:` is a hard failure (semantic conflict). When the RFC declares `implementedBy:` and the target also declares `implementedBy:`, the linter scans for actual imports; if none are found, a deprecation warning suggests moving the entry to `assumes:`.
+
+**Backwards-compat:** the legacy single-field `requires:` is still accepted. RFCs that have not yet been audited (AC #2) continue to work; the linter emits the deprecation warning as the forcing function.
 
 ### `requiresDocs` values
 

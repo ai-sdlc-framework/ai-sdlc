@@ -17,6 +17,7 @@ import {
   checkRfc,
   checkUpstreamOqs,
   extractBlockedReason,
+  extractRfcDependencyList,
   extractRfcIdsFromBody,
   extractRfcLifecycle,
   extractRfcReferences,
@@ -557,5 +558,169 @@ describe('resolveRfcFilePath', () => {
     mkdirSync(join(tmp, 'spec', 'rfcs'), { recursive: true });
     expect(resolveRfcFilePath('RFC-9999', tmp)).toBeNull();
     rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AISDLC-311 — `requires:` / `assumes:` split semantics
+// ---------------------------------------------------------------------------
+
+describe('extractRfcDependencyList', () => {
+  it('returns [] when the field is absent', () => {
+    const fm = 'id: AISDLC-311\nstatus: To Do\n';
+    expect(extractRfcDependencyList(fm, 'requires')).toEqual([]);
+    expect(extractRfcDependencyList(fm, 'assumes')).toEqual([]);
+  });
+
+  it('parses inline form (`requires: [RFC-0001, RFC-0002]`)', () => {
+    const fm = 'requires: [RFC-0001, RFC-0002]\n';
+    expect(extractRfcDependencyList(fm, 'requires')).toEqual(['RFC-0001', 'RFC-0002']);
+  });
+
+  it('parses inline form with quoted entries', () => {
+    const fm = `requires: ['RFC-0001', "RFC-0002"]\n`;
+    expect(extractRfcDependencyList(fm, 'requires')).toEqual(['RFC-0001', 'RFC-0002']);
+  });
+
+  it('parses block-list form', () => {
+    const fm = 'assumes:\n  - RFC-0009\n  - RFC-0029\n';
+    expect(extractRfcDependencyList(fm, 'assumes')).toEqual(['RFC-0009', 'RFC-0029']);
+  });
+
+  it('ignores non-RFC entries', () => {
+    const fm = 'requires:\n  - RFC-0001\n  - some-other-thing\n  - RFC-0002\n';
+    expect(extractRfcDependencyList(fm, 'requires')).toEqual(['RFC-0001', 'RFC-0002']);
+  });
+
+  it('returns [] when an inline list contains no RFC ids', () => {
+    const fm = 'requires: [foo, bar]\n';
+    expect(extractRfcDependencyList(fm, 'requires')).toEqual([]);
+  });
+
+  it('does not cross-pollinate fields', () => {
+    const fm = 'requires:\n  - RFC-0001\nassumes:\n  - RFC-0009\n';
+    expect(extractRfcDependencyList(fm, 'requires')).toEqual(['RFC-0001']);
+    expect(extractRfcDependencyList(fm, 'assumes')).toEqual(['RFC-0009']);
+  });
+});
+
+describe('checkUpstreamOqs — `assumes:` dependency-kind semantics (AISDLC-311)', () => {
+  // Inline RFC fixtures: one Draft RFC with open OQs and one Implemented RFC.
+  const RFC_DRAFT_WITH_OQ = `---
+id: RFC-9981
+title: Draft RFC with open OQ
+lifecycle: Draft
+---
+## 13. Open Questions
+**OQ-1 — Should we cache?**
+
+No answer yet.
+`;
+
+  it('blocks when the same Draft-with-open-OQ RFC is in `requires:`', () => {
+    const fm = 'id: AISDLC-X\nrequires:\n  - RFC-9981\n';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body: '',
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rejected).toBe(true);
+    expect(result.rfcChecks).toHaveLength(1);
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('requires');
+    expect(result.events).toHaveLength(1);
+  });
+
+  it('does NOT block when the same RFC is in `assumes:` (design-contract only)', () => {
+    const fm = 'id: AISDLC-X\nassumes:\n  - RFC-9981\n';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body: '',
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rejected).toBe(false);
+    expect(result.rfcChecks).toHaveLength(1);
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('assumes');
+    // The lifecycle + OQ data is still surfaced for callers that want to render
+    // context, but `rejected` is forced to false for assumes:.
+    expect(result.rfcChecks[0]?.lifecycle).toBe('Draft');
+    expect(result.rfcChecks[0]?.unresolvedOqCount).toBeGreaterThan(0);
+    expect(result.rfcChecks[0]?.rejected).toBe(false);
+    expect(result.events).toEqual([]);
+  });
+
+  it('`requires:` overrides `references:` when the same RFC is in both', () => {
+    // RFC in both references (legacy) and requires (new) → kind is 'requires'.
+    const fm = 'id: AISDLC-X\nreferences:\n  - RFC-9981\nrequires:\n  - RFC-9981\n';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body: '',
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rejected).toBe(true);
+    expect(result.rfcChecks).toHaveLength(1);
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('requires');
+  });
+
+  it('`assumes:` overrides `references:` when the same RFC is in both', () => {
+    // A task that explicitly downgrades a `references:` mention to
+    // design-only via `assumes:` should NOT be retroactively blocked.
+    const fm = 'id: AISDLC-X\nreferences:\n  - RFC-9981\nassumes:\n  - RFC-9981\n';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body: '',
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rejected).toBe(false);
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('assumes');
+  });
+
+  it('when an RFC is in BOTH `requires:` and `assumes:`, `requires:` wins (strictly stronger constraint)', () => {
+    const fm = 'id: AISDLC-X\nrequires:\n  - RFC-9981\nassumes:\n  - RFC-9981\n';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body: '',
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rejected).toBe(true);
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('requires');
+  });
+
+  it('preserves legacy `reference` kind for RFCs only mentioned via references:/body', () => {
+    const fm = 'id: AISDLC-X\nreferences:\n  - RFC-9981\n';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body: '',
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('reference');
+    // Legacy `reference` kind retains the historical conservative behavior:
+    // a Draft RFC with open OQs blocks the task. AISDLC-311 only RELAXES the
+    // gate when the task EXPLICITLY downgrades via `assumes:`.
+    expect(result.rejected).toBe(true);
+  });
+
+  it('body-only references default to `reference` kind', () => {
+    const fm = 'id: AISDLC-X\n';
+    const body = 'See RFC-9981 for context.';
+    const result = checkUpstreamOqs({
+      taskId: 'AISDLC-X',
+      frontmatter: fm,
+      body,
+      workDir: '/tmp',
+      readRfcFile: (path) => (path.includes('RFC-9981') ? RFC_DRAFT_WITH_OQ : null),
+    });
+    expect(result.rfcChecks[0]?.dependencyKind).toBe('reference');
   });
 });
