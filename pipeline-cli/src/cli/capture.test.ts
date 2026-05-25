@@ -1485,6 +1485,75 @@ describe('file subcommand — draft state (AISDLC-320)', () => {
     expect(out).toMatch(/capture filed: cap_/);
     expect(out).toMatch(/state: draft/);
   });
+
+  // AISDLC-275 — autoClassify path with no invoker module configured.
+  // Covers the "if (parsed.autoClassify === true) → loadConfiguredInvoker
+  // returns null → skip body → fall through to defaults" branch in
+  // capture.ts (lines ~298-310 and the capturedEntry construction that
+  // follows). Without these tests the autoClassify branch was 0% covered.
+  it('AI-agent --json with autoClassify=true and no invoker configured falls open to defaults', async () => {
+    const { resetInvokerCache } = await import('../capture/invoker-loader.js');
+    resetInvokerCache();
+    const savedEnv = process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+    delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+    try {
+      const blob = JSON.stringify({
+        finding: 'autoclassify but no invoker',
+        agentRole: 'developer',
+        autoClassify: true,
+      });
+      setArgv('file', 'ignored', '--json', blob);
+      await buildCaptureCli().parseAsync();
+      const rec = stdoutJson<CaptureRecord>();
+      // Falls open: triage defaults to 'tbd', severity to 'unknown'.
+      expect(rec.triage).toBe('tbd');
+      expect(rec.severity).toBe('unknown');
+      // Default-path → draft (no auto-submit signal).
+      const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+      expect(existsSync(draftPath)).toBe(true);
+      // Audit entry has no auto-applied flags.
+      expect(rec.auditTrail[0].triageAutoApplied).toBeUndefined();
+      expect(rec.auditTrail[0].severityAutoApplied).toBeUndefined();
+    } finally {
+      if (savedEnv === undefined) {
+        delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+      } else {
+        process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE = savedEnv;
+      }
+      resetInvokerCache();
+    }
+  });
+
+  it('AI-agent --json with autoClassify=true and explicit triage/severity skips classifier', async () => {
+    const { resetInvokerCache } = await import('../capture/invoker-loader.js');
+    resetInvokerCache();
+    const savedEnv = process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+    delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+    try {
+      const blob = JSON.stringify({
+        finding: 'autoclassify with explicit values',
+        agentRole: 'code-reviewer',
+        autoClassify: true,
+        triage: 'new-issue',
+        severity: 'major',
+      });
+      setArgv('file', 'ignored', '--json', blob);
+      await buildCaptureCli().parseAsync();
+      const rec = stdoutJson<CaptureRecord>();
+      // Explicit values respected; auto-classify is a no-op.
+      expect(rec.triage).toBe('new-issue');
+      expect(rec.severity).toBe('major');
+      expect(rec.auditTrail[0].triageAutoApplied).toBeUndefined();
+      expect(rec.auditTrail[0].severityAutoApplied).toBeUndefined();
+    } finally {
+      if (savedEnv === undefined) {
+        delete process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE;
+      } else {
+        process.env.AI_SDLC_CLASSIFIER_INVOKER_MODULE = savedEnv;
+      }
+      resetInvokerCache();
+    }
+  });
 });
 
 // ── submit subcommand ─────────────────────────────────────────────────────────
