@@ -17,6 +17,8 @@ references:
   - spec/rfcs/RFC-0019-embedding-provider-adapter.md
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
 priority: high
+blocked:
+  reason: 'RFC-0019 OQs operator-re-walkthrough complete (v0.3, 2026-05-21); RFC-0035 Phase 6 shipping in parallel — both lifecycles will promote to Signed Off after AISDLC-340/341 soak'
 ---
 
 ## Description
