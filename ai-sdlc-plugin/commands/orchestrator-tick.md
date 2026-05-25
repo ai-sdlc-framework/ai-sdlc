@@ -719,10 +719,13 @@ recovery: see RFC-0041 §5.2 (WorkerStaleHeartbeat row).
 
 ---
 
-## Implementation note — legacy `claude-cli` inline-manifest path
+## Implementation note — legacy `claude-cli` inline-manifest path (removed)
 
 The pre-RFC-0041 path (`cli-orchestrator tick --spawner claude-cli` +
-in-session `Agent` dispatch) is retained for backward-compat but
-**deprecated**. The Dispatch Board path is preferred for any operator who
-wants to drain >1 task at a time. The legacy path will be removed in
-RFC-0041 Phase 3.3 (AISDLC-377.6) after a one-release deprecation window.
+in-session `Agent` dispatch via `ClaudeCliInlineSpawner`) was removed in
+RFC-0041 Phase 3.3 (AISDLC-377.6) after the AISDLC-377.4 deprecation-warning
+window elapsed. The Dispatch Board path described above is the supported way
+to drive autonomous drain on subscription billing.
+
+Migration breadcrumb:
+[`docs/operations/claude-cli-spawner-removed.md`](../../docs/operations/claude-cli-spawner-removed.md).

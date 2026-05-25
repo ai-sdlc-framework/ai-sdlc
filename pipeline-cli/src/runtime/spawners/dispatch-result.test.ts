@@ -127,7 +127,11 @@ describe('isDispatchResult', () => {
         version: 1,
         taskId: 'X',
         subagentType: 'developer',
-        status: 'manifest-emitted',
+        // Anything other than 'success' | 'error' must be rejected; the
+        // legacy `'manifest-emitted'` value (emitted only by the removed
+        // ClaudeCliInlineSpawner, RFC-0041 Phase 3.3 / AISDLC-377.6) is one
+        // such case but the type-guard rejects any non-listed string.
+        status: 'pending',
         output: '',
         durationMs: 0,
         writtenAt: FIXED_NOW,

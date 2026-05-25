@@ -104,10 +104,15 @@ export CODEX_SPAWN_AGENT_BIN="$(pwd)/scripts/codex-spawn-agent-bridge.mjs"
 node pipeline-cli/bin/cli-orchestrator.mjs start --max-concurrent 1
 ```
 
-Supported values are `mock`, `api-key`, `claude-cli`, and `codex`. Selecting
+Supported values are `mock`, `api-key`, `claude`, and `codex`. Selecting
 a spawner explicitly opts the orchestrator into umbrella dispatch for admitted
 tasks. When no spawner is selected and `AI_SDLC_ORCHESTRATOR_USE_UMBRELLA` is
 unset, the existing default behavior is unchanged.
+
+The legacy `claude-cli` inline-manifest spawner was removed in RFC-0041
+Phase 3.3 (AISDLC-377.6). See
+[`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md)
+for the migration breadcrumb.
 
 For `codex`, the underlying `ai-sdlc-pipeline execute --spawner codex` path
 constructs `CodexHarnessAdapter` from `CODEX_SPAWN_AGENT_BIN`. If the bridge
@@ -116,25 +121,19 @@ worktree setup, or status mutation.
 
 ### Fallback: `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK`
 
-The default spawner for the umbrella is `claude-cli` (inline manifest mode,
-AISDLC-198). This requires the AISDLC-225 consumer bridge to be deployed so
-that the dispatch manifest is actually consumed and subagents are invoked.
+The default spawner for the umbrella is `claude` (shells out to `claude -p`
+for subscription billing, AISDLC-352).
 
-While AISDLC-225 is in flight (consumer bridge not yet shipped), you can
-fall back to `api-key` billing by setting:
+The `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` env var was originally
+a retry hook for the `claude-cli` "manifest not consumed" failure mode.
+RFC-0041 Phase 3.3 (AISDLC-377.6) removed the `claude-cli` spawner, so the
+retry guard never fires now (the env var is left in place as a configuration
+hook for future spawners with analogous transient-unavailability modes).
+Setting it still triggers the `FALLBACK_BILLING_WARNING` from
+`emitBillingSafetyWarnings` so operators see the same diagnostic at tick
+start, but no automatic api-key retry will fire.
 
-```bash
-export AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key
-```
-
-With this set, if the `claude-cli` spawner reports the consumer bridge is
-missing, the orchestrator automatically retries the same task with `api-key`
-(requires `ANTHROPIC_API_KEY` in the environment). This incurs Anthropic API
-costs (same billing model as `pnpm dogfood watch`), but lets unattended
-orchestrator runs produce complete PRs today.
-
-If `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK` is unset (the default) AND the
-`claude-cli` spawner is unavailable, the dispatch records a failure in
+If the configured spawner is unavailable, the dispatch records a failure in
 `outcomes[i].failure` with `type: 'spawner-unavailable'` and continues to
 the next admitted task — it never blocks the entire tick.
 
@@ -188,7 +187,7 @@ The `failure` field (when present):
 | `developer-failed` | Dev subagent returned `commitSha: null` (no work produced). |
 | `developer-json-contract-violated` | Dev returned prose twice; umbrella gave up. |
 | `aborted` | Push or `gh pr create` failed mid-flight. |
-| `spawner-unavailable` | `claude-cli` spawner manifest not consumed; no fallback configured. |
+| `spawner-unavailable` | Configured spawner could not be resolved (missing env var, binary not on PATH, etc.); no fallback configured. |
 | `unknown` | Catch-all for other umbrella failures. |
 
 ### What to do if the umbrella fails mid-tick
@@ -201,13 +200,14 @@ task status to its pre-dispatch value, removes the worktree, and
 See the "Recovering quarantined work" section below for forensic inspection.
 
 **If `failure.type === 'spawner-unavailable'`:**
-Set `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` (see above) and
-re-dispatch the task. Alternatively, wait for AISDLC-225 (consumer bridge)
-to ship and then re-run.
+The configured spawner could not be resolved. Common causes: `claude` binary
+not on PATH for `--spawner claude`, `ANTHROPIC_API_KEY` unset for
+`--spawner api-key`, `CODEX_SPAWN_AGENT_BIN` unset for `--spawner codex`.
+Fix the env / install gap and re-dispatch the task.
 
 **If `failure.type === 'unknown'`:**
 Inspect the `message` field. Common causes:
-- `ANTHROPIC_API_KEY` missing when `--spawner api-key` fallback was attempted.
+- `ANTHROPIC_API_KEY` missing when `--spawner api-key` was requested.
 - Validation failure in Step 1 (malformed task frontmatter).
 - Network errors during `gh pr create`.
 
@@ -220,125 +220,56 @@ mcp__plugin_ai-sdlc_ai-sdlc__task_edit AISDLC-99 --status "To Do"
 
 ---
 
-## Inline orchestrator mode (`--spawner claude-cli`) (AISDLC-198)
+## Subscription-billed autonomous drain (Dispatch Board model)
 
-The inline orchestrator is the recommended way to run the autonomous
-orchestrator on **subscription billing** (Claude Code Max). It avoids
-per-token API costs by running the orchestrator's tick loop INSIDE the
-operator's Claude Code session instead of as a separate process.
+RFC-0041 Phase 3.3 (AISDLC-377.6) removed the legacy `--spawner claude-cli`
+inline-manifest path; the recommended way to run subscription-billed autonomous
+drain is now the **Dispatch Board** (RFC-0041 Conductor/Worker architecture):
 
-### Why inline mode
+- **Conductor** — one operator-opened CC session running
+  `/ai-sdlc orchestrator-tick`. Loops via `ScheduleWakeup(30s)`, scans the
+  backlog frontier, writes per-task manifests to `.ai-sdlc/dispatch/queue/`,
+  reconciles completion verdicts from `done/`, fans out reviewers, signs
+  attestations, and flips draft PRs to ready-for-review.
+- **Workers** — N additional operator-opened CC sessions, each running
+  `/ai-sdlc dispatch-worker`. Each Worker claims a manifest from the queue,
+  fires a foreground `Agent(developer)`, and writes the result back to the
+  board. N sessions = N-wide parallelism at **zero incremental cost** beyond
+  the operator's existing Claude Code Max subscription.
 
-The autonomous orchestrator (`cli-orchestrator`) needs to dispatch subagents
-(developer, reviewers). Subagent dispatch via the `Agent` tool is only
-available inside an active Claude Code session. Inline mode solves this
-by making the slash command body the orchestrator process — see
-[`docs/operations/claude-cli-spawner.md`](./claude-cli-spawner.md) for the
-full option evaluation.
+For headless / CI contexts (no operator CC session), use
+[`docs/operations/dispatch-supervisor-install.md`](./dispatch-supervisor-install.md)
+to run the `cli-dispatch-supervisor` daemon — it spawns `env -u CLAUDECODE
+claude -p` subprocess Workers with operator-controlled 30 min watchdogs.
 
 ### Prerequisites
 
 1. Claude Code Max subscription (any tier).
-2. `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental` set in your shell
-   (enables the `cli-orchestrator` feature gate — required by RFC-0015 §3.1).
+2. `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental` (or unset / truthy — default-ON
+   since AISDLC-411).
 3. Backlog with at least one task in `To Do` status.
 4. Working directory is the project root (where `backlog/`, `.worktrees/`,
-   and `artifacts/` live).
+   and `.ai-sdlc/dispatch/` live).
 
-### Starting the inline orchestrator
+### Plain-shell autonomous tick (cron / daemon / sidecar)
 
-In your Claude Code session, run the `/ai-sdlc execute` slash command in loop
-mode:
-
-```
-/loop /ai-sdlc execute <task-id>
-```
-
-For autonomous multi-task orchestration (the full loop), the slash command body
-reads the dispatch manifest written by `ClaudeCliInlineSpawner` and invokes the
-Agent tool for each admitted task. The manifest is at:
-
-```
-artifacts/_orchestrator/dispatch-manifest.json
-```
-
-Between ticks the slash command uses `ScheduleWakeup` to yield without blocking.
-
-### Monitoring inline orchestrator progress
-
-Progress lines emitted by the orchestrator are in the format:
-
-```
-[ai-sdlc-progress] <stage>: <message>
-```
-
-The dispatch manifest written before each Agent call is at:
+If no operator CC session is available, the simplest path is:
 
 ```bash
-cat artifacts/_orchestrator/dispatch-manifest.json
+cli-orchestrator tick                # default: --spawner claude
+# OR explicitly:
+cli-orchestrator tick --spawner claude
 ```
 
-Events are also written to `artifacts/_orchestrator/events-YYYY-MM-DD.jsonl`:
+`--spawner claude` shells out to `claude -p` for each dispatch. Uses
+subscription auth (Agent SDK credit pool post-2026-06-15).
 
-```bash
-tail -f artifacts/_orchestrator/events-$(date +%Y-%m-%d).jsonl | jq .
-```
+### Migrating from the legacy inline-manifest path
 
-### How the dispatch manifest works
-
-When the orchestrator runs with `--spawner claude-cli`, each dispatch slot
-calls `ClaudeCliInlineSpawner.spawn()`, which writes a JSON manifest and
-returns `status: 'manifest-emitted'`. The manifest shape:
-
-```json
-{
-  "version": 1,
-  "taskId": "AISDLC-123",
-  "subagentType": "developer",
-  "model": "claude-sonnet-4-6",
-  "prompt": "...",
-  "cwd": "/path/to/worktree",
-  "runInBackground": false,
-  "emittedAt": "2026-05-05T00:00:00.000Z"
-}
-```
-
-The calling slash command body reads the manifest and invokes the `Agent` tool
-with the described parameters. This keeps all Agent-tool invocations inside the
-Claude Code session (subscription billing) while letting the TypeScript
-orchestrator handle scheduling, admission filters, and event emission.
-
-### Stopping the inline orchestrator
-
-The orchestrator tick loop stops when:
-- `maxTicks` is reached (set via `--max-ticks N`).
-- The operator sends `Ctrl+C` (SIGINT) — the loop drains in-flight dispatches
-  and exits cleanly.
-- The slash command session ends (ScheduleWakeup will not fire again).
-
-### Transitioning from manual dispatch to inline orchestrator
-
-If you have been manually running `/ai-sdlc execute <task-id>` for each task:
-
-1. Verify the inline orchestrator prerequisites above are met.
-2. Start the loop (replace manual per-task invocations).
-3. The orchestrator reads the backlog frontier and picks the next `To Do`
-   task automatically — no manual task-id selection needed.
-
-### Troubleshooting inline mode
-
-**`manifest-emitted` status in pipeline logs**: This is expected in inline mode.
-It means the spawner wrote the manifest; the slash command body must invoke
-the Agent tool. If you see this in a non-inline context, the wrong spawner kind
-was selected.
-
-**Manifest file not found**: The manifest path defaults to
-`$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`. If `ARTIFACTS_DIR` is
-unset it falls back to `<workDir>/artifacts/_orchestrator/`. Check that the
-`artifacts/` directory is writable.
-
-**Orchestrator not starting**: Verify `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`
-is set. The loop refuses to start when the flag is unset.
+If you currently run `cli-orchestrator tick --spawner claude-cli` (or any
+script that does), see
+[`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md)
+for the full migration breadcrumb.
 
 ---
 

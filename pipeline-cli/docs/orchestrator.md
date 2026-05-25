@@ -846,12 +846,13 @@ Was adapters.umbrellaDispatch injected?
               ▼
               resolveUmbrellaSpawnerKind()
                 ├─ adapters.umbrellaSpawnerKind set? → use it
-                └─ else → 'claude-cli' (default)
+                ├─ AI_SDLC_ORCHESTRATOR_SPAWNER env set? → parse it
+                └─ else → 'claude' (default since AISDLC-352)
               │
               ▼
               runExecuteCommand({
                 taskId, workDir,
-                spawnerKind: 'claude-cli',  // default
+                spawnerKind: 'claude',  // default since AISDLC-352
                 maxIterations: 2,
                 run: true,
               })
@@ -859,11 +860,11 @@ Was adapters.umbrellaDispatch injected?
               ├─ ok: true  → map ExecuteCommandResult → RichDispatchResult
               │                (pipeline.reviewerVerdicts, prNumber, iterations)
               │
-              └─ ok: false →
-                  Is AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key set?
-                  AND does the failure reason match a spawner pattern?
-                    YES → retry with spawnerKind='api-key'
-                    NO  → return { failure: { type, message } }
+              └─ ok: false → return { failure: { type, message } }
+                              (RFC-0041 Phase 3.3 / AISDLC-377.6 removed the
+                              `claude-cli` spawner; the matching
+                              "spawner-unavailable → api-key" retry now
+                              no-ops — see buildDefaultUmbrellaDispatch.)
 ```
 
 ### Outcome shape extension (AISDLC-229)
@@ -890,7 +891,7 @@ such outcomes. No existing test code changes are required.
 
 | Variable | Effect |
 |---|---|
-| `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` | Fall back to `--spawner api-key` (ANTHROPIC_API_KEY required) when the `claude-cli` spawner is unavailable (AISDLC-225 not yet deployed). |
+| `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` | Originally a retry hook for the `--spawner claude-cli` "manifest not consumed" failure mode. RFC-0041 Phase 3.3 (AISDLC-377.6) removed the `claude-cli` spawner; the retry guard never fires now (left in place as a configuration hook for future spawners with analogous transient-unavailability modes). Setting it still triggers the `FALLBACK_BILLING_WARNING` from `emitBillingSafetyWarnings` so operators see the same diagnostic. |
 
 See `docs/operations/orchestrator-runbook.md` for runbook coverage of
 spawner-unavailable failures and what to do when the umbrella fails mid-tick.

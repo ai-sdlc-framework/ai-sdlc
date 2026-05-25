@@ -36,22 +36,20 @@
  *
  *   - `mock`       — `MockSpawner` with hard-coded approval fixtures.
  *                    For dry-run plumbing checks + integration tests only.
- *                    Default in v1 because the harder spawners (api-key,
- *                    claude-cli) carry billing / cross-session implications
- *                    that need explicit operator opt-in. `--run --spawner
- *                    mock` refuses before filesystem mutation.
+ *                    Default in v1 because the real spawners (`api-key`,
+ *                    `claude`, `codex`) carry billing / cross-session
+ *                    implications that need explicit operator opt-in.
+ *                    `--run --spawner mock` refuses before filesystem mutation.
  *   - `api-key`    — `defaultSpawner()`'s SDK path (uses `ANTHROPIC_API_KEY`).
  *                    Burns API credits per dispatch — same billing model as
  *                    `pnpm dogfood watch`. Documented for AI-assistant /
- *                    unattended use until the `claude-cli` spawner ships.
- *   - `claude-cli` — `ClaudeCliInlineSpawner` (Option 3, AISDLC-198).
- *                    Implements the "co-located process / inline orchestrator"
- *                    pattern: instead of invoking a subprocess, the spawner
- *                    writes a dispatch manifest to
- *                    `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`.
- *                    The calling slash command body reads the manifest and
- *                    invokes the Agent tool for subscription billing.
- *                    Design rationale: `docs/operations/claude-cli-spawner.md`.
+ *                    unattended use when subscription auth is unavailable.
+ *   - `claude`     — `ShellClaudePSpawner` (AISDLC-349, default for the
+ *                    autonomous orchestrator since AISDLC-352). Shells out to
+ *                    the operator's installed `claude -p` for each dispatch.
+ *                    Uses subscription auth (Agent SDK credit pool post-
+ *                    2026-06-15). The recommended path for cron / daemon /
+ *                    sidecar invocations.
  *   - `codex`      — `CodexHarnessAdapter` over the Codex `spawn_agent` host
  *                    tool (AISDLC-202.2, Phase 2). The CLI resolver constructs
  *                    the adapter with a subprocess bridge whose path is read
@@ -90,7 +88,6 @@ import { computeBranchName } from '../steps/02-compute-branch.js';
 import { validateTask } from '../steps/01-validate.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
-import { ClaudeCliInlineSpawner } from '../runtime/spawners/claude-cli-inline.js';
 import { ShellClaudePSpawner } from '../runtime/shell-claude-p-spawner.js';
 import {
   CodexHarnessAdapter,
@@ -111,39 +108,36 @@ import {
 } from '../types.js';
 
 /** Spawner identifiers accepted by `--spawner`. */
-export type SpawnerKind = 'mock' | 'api-key' | 'claude-cli' | 'claude' | 'codex';
+export type SpawnerKind = 'mock' | 'api-key' | 'claude' | 'codex';
 
 export const SPAWNER_KINDS: readonly SpawnerKind[] = [
   'mock',
   'api-key',
-  'claude-cli',
   'claude',
   'codex',
 ] as const;
 
 /**
- * Message describing the `--spawner claude-cli` mode for operator documentation.
+ * Operator-facing error message printed when `--spawner claude-cli` is passed
+ * after RFC-0041 Phase 3.3 removal (AISDLC-377.6).
  *
- * Note: this is no longer an error message — `claude-cli` is now implemented
- * as the `ClaudeCliInlineSpawner` (Option 3, AISDLC-198). It emits a dispatch
- * manifest to `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json` rather
- * than calling a subprocess. The calling slash command body reads the manifest
- * and invokes the Agent tool.
+ * The `claude-cli` spawner (`ClaudeCliInlineSpawner`, AISDLC-198) emitted a
+ * dispatch manifest to `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`
+ * which the calling slash command body consumed via the `Agent` tool. The
+ * deprecation window (AISDLC-377.4) elapsed; the code path and its co-located
+ * tests were deleted in AISDLC-377.6.
  *
- * Design rationale: `docs/operations/claude-cli-spawner.md`
- *
- * Exported so tests can assert the wording.
+ * Exported so the orchestrator CLI + tests can surface a uniform message.
  */
-export const CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE =
-  'The `claude-cli` spawner uses Option 3 (inline orchestrator, AISDLC-198): ' +
-  'it emits a dispatch manifest to $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json ' +
-  'instead of invoking a subprocess. The calling slash command body must invoke ' +
-  'the Agent tool using the manifest parameters.\n' +
-  'To use subscription billing without a slash command body, run:\n' +
-  "  /ai-sdlc execute <task-id>    (operator's Claude Code session, subscription billing)\n" +
-  'To use API-key billing from a CLI:\n' +
+export const CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE =
+  'The `claude-cli` spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6).\n' +
+  'Migrate to one of the supported spawner kinds:\n' +
+  '  --spawner claude              (default; subscription billing via `claude -p`)\n' +
   '  --spawner api-key             (ANTHROPIC_API_KEY required)\n' +
-  'Design doc: docs/operations/claude-cli-spawner.md';
+  '  --spawner codex               (Codex CLI host-bridge dispatch)\n' +
+  'For autonomous parallel drain, use the Dispatch Board model:\n' +
+  '  /ai-sdlc orchestrator-tick    (Conductor) + /ai-sdlc dispatch-worker (Worker sessions)\n' +
+  'Migration guide: docs/operations/claude-cli-spawner-removed.md';
 
 /**
  * Build a `MockSpawner` whose fixtures unconditionally APPROVE. Used by
@@ -195,10 +189,21 @@ export function buildApprovingMockSpawner(): MockSpawner {
 
 /**
  * Resolve a spawner from the `--spawner` flag. Async because `defaultSpawner()`
- * is async (it probes PATH for `claude` and reads env). Throws on
- * `claude-cli` (deferred) so the caller emits a clear error envelope.
+ * is async (it probes PATH for `claude` and reads env).
+ *
+ * `claude-cli` was removed in RFC-0041 Phase 3.3 (AISDLC-377.6); the yargs
+ * `choices: SPAWNER_KINDS` constraint rejects it at parse time, but callers
+ * that bypass yargs (e.g. programmatic) may still pass the literal string —
+ * the default case throws `CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE` when it does.
  */
 export async function resolveSpawner(kind: SpawnerKind): Promise<SubagentSpawner> {
+  // Defense-in-depth: programmatic callers may still pass the removed kind as
+  // a string. Convert it to a clear migration error before the exhaustiveness
+  // check below would emit a less actionable "unknown spawner kind" message.
+  if ((kind as string) === 'claude-cli') {
+    throw new Error(CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE);
+  }
+
   switch (kind) {
     case 'mock':
       return buildApprovingMockSpawner();
@@ -219,24 +224,13 @@ export async function resolveSpawner(kind: SpawnerKind): Promise<SubagentSpawner
         env: () => apiKey,
       });
     }
-    case 'claude-cli':
-      // Option 3 (AISDLC-198): inline mode — the spawner emits a dispatch
-      // manifest to $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json.
-      // The calling slash command body reads the manifest and invokes the
-      // Agent tool. The `taskId` is left empty here because `resolveSpawner`
-      // is task-agnostic; callers that need the taskId in the manifest
-      // (e.g. the orchestrator loop) should construct `ClaudeCliInlineSpawner`
-      // directly with `{ taskId }` rather than going through this factory.
-      return new ClaudeCliInlineSpawner();
     case 'claude':
       // AISDLC-349: real `claude -p` shell-out spawner. Use this from a
-      // shell-driven `cli-orchestrator tick` (cron/daemon/sidecar context)
-      // where there is no Claude Code slash command body to read the
-      // `claude-cli` manifest. Uses the operator's logged-in subscription
-      // auth — no API tokens consumed; cost lands on the same Claude Code
-      // Max plan that backs `/ai-sdlc execute`. Same `ShellClaudePSpawner`
-      // implementation that `executePipeline()` falls back to in Tier 2
-      // (RFC-0012 §8.2).
+      // shell-driven `cli-orchestrator tick` (cron/daemon/sidecar context).
+      // Uses the operator's logged-in subscription auth — no API tokens
+      // consumed; cost lands on the same Claude Code Max plan that backs
+      // `/ai-sdlc execute`. Same `ShellClaudePSpawner` implementation that
+      // `executePipeline()` falls back to in Tier 2 (RFC-0012 §8.2).
       return new ShellClaudePSpawner();
     case 'codex': {
       // AISDLC-202.2 — Phase 2 of the Codex execution path. The
@@ -480,7 +474,7 @@ export async function runExecuteCommand(
       return {
         ok: false,
         reason:
-          '`--resume-from-draft` requires a real spawner (--spawner api-key, claude, or claude-cli).',
+          '`--resume-from-draft` requires a real spawner (--spawner api-key, claude, or codex).',
       };
     }
     let spawner: SubagentSpawner;
@@ -511,7 +505,7 @@ export async function runExecuteCommand(
     if (opts.spawnerKind === 'mock') {
       return {
         ok: false,
-        reason: '`--rework-pr` requires a real spawner (--spawner api-key, claude, or claude-cli).',
+        reason: '`--rework-pr` requires a real spawner (--spawner api-key, claude, or codex).',
       };
     }
     let spawner: SubagentSpawner;
@@ -772,7 +766,7 @@ export function executeCommand(): CommandModule {
         })
         .option('spawner', {
           describe:
-            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude-cli (inline manifest mode for slash command body, AISDLC-198) | claude (real `claude -p` shell-out for cron/daemon tick, AISDLC-349) | codex (Codex CLI host-bridge dispatch via CodexHarnessAdapter, AISDLC-202.2; requires CODEX_SPAWN_AGENT_BIN). See pipeline-cli/README.md.',
+            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude (real `claude -p` shell-out for cron/daemon tick, AISDLC-349; default for cli-orchestrator) | codex (Codex CLI host-bridge dispatch via CodexHarnessAdapter, AISDLC-202.2; requires CODEX_SPAWN_AGENT_BIN). The legacy `claude-cli` inline-manifest spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) — see docs/operations/claude-cli-spawner-removed.md. See pipeline-cli/README.md.',
           type: 'string',
           choices: SPAWNER_KINDS as unknown as string[],
           default: 'mock' as SpawnerKind,

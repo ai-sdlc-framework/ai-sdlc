@@ -12,9 +12,9 @@ The orchestrator runs a continuous reconciliation loop over your backlog, dispat
 
 | Runbook | Description |
 |---------|-------------|
-| [`orchestrator-runbook.md`](orchestrator-runbook.md) | Day-to-day operations: auto-rebuild, inline mode, in-flight detection, blocking tasks, quarantine recovery, worktree mutex, resume from interrupted runs |
+| [`orchestrator-runbook.md`](orchestrator-runbook.md) | Day-to-day operations: auto-rebuild, in-flight detection, blocking tasks, quarantine recovery, worktree mutex, resume from interrupted runs |
 | [`orchestrator-promotion.md`](orchestrator-promotion.md) | Hybrid promotion runbook — soak corpus + spot-check evidence to flip `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` default-on |
-| [`orchestrator-inline-loop.md`](orchestrator-inline-loop.md) | Running the orchestrator inline inside a Claude Code session (subscription billing) |
+| [`claude-cli-spawner-removed.md`](claude-cli-spawner-removed.md) | RFC-0041 Phase 3.3 (AISDLC-377.6) removal of the `--spawner claude-cli` inline-manifest path — migration breadcrumb for legacy scripts |
 
 **Feature flag:** `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`
 
@@ -107,7 +107,6 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 | [`operator-runbook.md`](operator-runbook.md) | What the Pipeline Operator role is, daily/weekly/monthly cadence, event triage |
 | [`stacked-prs.md`](stacked-prs.md) | Managing stacked PRs in the merge queue |
 | [`adapter-authoring.md`](adapter-authoring.md) | Authoring a new harness adapter (`AgentRunner` / `HarnessAdapter` extension point) |
-| [`claude-cli-spawner.md`](claude-cli-spawner.md) | Claude CLI spawner option evaluation — inline vs. subprocess vs. API-key billing |
 
 ---
 

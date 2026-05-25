@@ -22,31 +22,33 @@ the bidirectional review convention and pilot procedure.
 
 ## Choosing a dispatch model
 
-RFC-0041 (Conductor/Worker Process Architecture) defines three patterns for
+RFC-0041 (Conductor/Worker Process Architecture) defines two patterns for
 dispatching developer Workers. Choose one based on your cost posture and
 infrastructure constraints.
 
-> **Correction note (2026-05-21):** an earlier version of this table cited
-> "Anthropic's hardcoded 600s background-agent watchdog (~85% kill rate)" as
-> a reason to avoid `--spawner claude-cli`. That claim was a misdiagnosis.
-> Forensic scan of 73 dev subagent transcripts (`python3 ~/.claude/skills/audit-subagent/audit.py`)
-> found **0 watchdog-shape kills** and **80.8% clean completion** (median 16 min,
-> max 2.5 h). The 19.2% failures were operator-initiated interrupts (literal
-> `[Request interrupted by user]` in the transcript), not system kills. The
-> `claude-cli` deprecation should be re-evaluated against this corrected
-> baseline — the table below preserves the deprecation for now but with the
-> rationale honestly cited.
+| Pattern | How Workers run | Cost post-2026-06-15 | Parallelism | Best for |
+|---|---|---|---|---|
+| **`in-session-agent`** (Dispatch Board + `/ai-sdlc dispatch-worker`) | Foreground `Agent` call in each operator-opened CC session | **Subscription quota** — zero incremental cost | One task per CC session; open N sessions for N-wide parallel | High-volume autonomous drain on operator's subscription. Recommended default. |
+| **`claude-p-shell`** (supervisor daemon + `claude -p`) | `env -u CLAUDECODE claude -p` subprocess spawned by `cli-dispatch-supervisor` | Agent SDK credit pool then API tokens | N from one supervisor (bounded by `WorktreePool.parallelism.maxConcurrent`) | Headless CI, true daemon, ops contexts where no active CC session is available |
 
-| Pattern | How Workers run | Background-agent kill behavior | Cost post-2026-06-15 | Parallelism | Best for |
-|---|---|---|---|---|---|
-| **`in-session-agent`** (Dispatch Board + `/ai-sdlc dispatch-worker`) | Foreground `Agent` call in each operator-opened CC session | None observed (interactive) | **Subscription quota** — zero incremental cost | One task per CC session; open N sessions for N-wide parallel | High-volume autonomous drain on operator's subscription. Recommended default. |
-| **`claude-p-shell`** (supervisor daemon + `claude -p`) | `env -u CLAUDECODE claude -p` subprocess spawned by `cli-dispatch-supervisor` | Operator-controlled 30 min (`ShellClaudePSpawner`) | Agent SDK credit pool then API tokens | N from one supervisor (bounded by `WorktreePool.parallelism.maxConcurrent`) | Headless CI, true daemon, ops contexts where no active CC session is available |
-| **`--spawner claude-cli`** (legacy, **DEPRECATION UNDER REVIEW**) | `Agent(... run_in_background: true)` inside the Conductor's own CC session | **Previously claimed: 600s/85% kill rate. Re-measured 2026-05-21: 0 watchdog kills in 73 dev transcripts, 80.8% clean, median 16 min, max 2.5 h.** Failures are operator-initiated interrupts. | Subscription interactive quota | Unbounded by any observed watchdog | **Deprecation status pending re-evaluation.** Was scheduled for removal in v0.11 based on the now-corrected claim. |
+> **Removed in RFC-0041 Phase 3.3 (AISDLC-377.6):** the legacy `--spawner
+> claude-cli` inline-manifest path (`Agent(... run_in_background: true)`
+> inside the Conductor's own CC session). The original deprecation rationale
+> cited "Anthropic's hardcoded 600s background-agent watchdog (~85% kill
+> rate)" — that claim was a misdiagnosis (forensic scan of 73 dev subagent
+> transcripts found 0 watchdog-shape kills, 80.8% clean completion, median
+> 16 min, max 2.5 h; the 19.2% failures were operator-initiated interrupts).
+> The removal stands because the Dispatch Board model provides better
+> properties (operator-controlled parallelism, billing-pool isolation, durable
+> filesystem handoff). Migration breadcrumb:
+> [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md).
 
 ### Migration recipe — from `--spawner claude-cli` to `dispatch-worker`
 
-If you currently run `/ai-sdlc orchestrator-tick` (or `cli-orchestrator tick --spawner claude-cli`)
-and rely on `Agent(... run_in_background)` to dispatch developer Workers:
+If you currently run `cli-orchestrator tick --spawner claude-cli` (or have any
+script / cron entry / CI step that passes it), the flag is rejected at parse
+time as of AISDLC-377.6 with `Invalid values: Choices: "mock", "api-key",
+"claude", "codex"`. Migrate as follows:
 
 1. **Set up the Dispatch Board** — ensure `.ai-sdlc/dispatch-config.yaml` exists with:
    ```yaml
@@ -58,18 +60,14 @@ and rely on `Agent(... run_in_background)` to dispatch developer Workers:
 2. **Open N operator CC sessions** (iTerm tabs, tmux panes, separate terminals) and run
    `/ai-sdlc dispatch-worker` in each. Each session claims manifests from the board and
    executes tasks via foreground `Agent` calls (no watchdog, subscription quota).
-3. **Switch the Conductor** to emit manifests instead of calling `Agent(... run_in_background)`.
-   The Conductor continues to use `/ai-sdlc orchestrator-tick` on its `ScheduleWakeup` loop —
-   the change is that ticks now write `queue/<id>.dispatch.json` and poll `done/` rather than
-   dispatching inline agents.
-4. **Remove `--spawner claude-cli`** from any cron entries, shell aliases, or CI steps.
-   The deprecation warning fires on every invocation until the flag is removed.
-
-**Suppressing the warning during transition** (for CI contexts that have already acknowledged
-the deprecation):
-```bash
-AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1 cli-orchestrator tick --spawner claude-cli
-```
+3. **Switch the Conductor** to `/ai-sdlc orchestrator-tick` on its
+   `ScheduleWakeup` loop. Ticks now write `queue/<id>.dispatch.json` and poll
+   `done/` for verdicts (Dispatch Board protocol).
+4. **Remove `--spawner claude-cli`** from any cron entries, shell aliases, or
+   CI steps. For plain-shell autonomous tick (cron/daemon/sidecar) the
+   replacement is `--spawner claude` (subscription billing via `claude -p`)
+   — that's already the default since AISDLC-352, so removing the flag is
+   often the entire change.
 
 **For the supervisor (`claude-p-shell`) path** (headless/CI without active CC sessions), see
 [`docs/operations/dispatch-supervisor-install.md`](./dispatch-supervisor-install.md).

@@ -118,10 +118,11 @@ export interface ShellClaudePSpawnerOptions {
 }
 
 /**
- * Per-subagent-type model defaults — mirrors `DEFAULT_MODELS` in
- * `claude-cli-inline.ts` so both spawners enforce the same split:
- * dev/code/test on sonnet, security on opus (the costly reasoning-heavy
- * tier). Documented in CLAUDE.md and AISDLC-349.
+ * Per-subagent-type model defaults — dev/code/test on sonnet, security on
+ * opus (the costly reasoning-heavy tier). Documented in CLAUDE.md and
+ * AISDLC-349. (Pre-AISDLC-377.6 this comment also called out the
+ * `ClaudeCliInlineSpawner`'s mirror copy of these defaults; that spawner
+ * was removed in RFC-0041 Phase 3.3.)
  */
 const DEFAULT_MODELS: Partial<Record<SubagentType, string>> = {
   developer: 'claude-sonnet-4-6',

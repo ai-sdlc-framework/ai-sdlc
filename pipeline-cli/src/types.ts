@@ -654,12 +654,13 @@ export interface SubagentResult {
    *   - `'success'` — the subagent ran and returned output.
    *   - `'timeout'` — the subagent exceeded its timeout.
    *   - `'error'` — the subagent failed (subprocess error, non-zero exit, etc.).
-   *   - `'manifest-emitted'` — inline-mode only (ClaudeCliInlineSpawner,
-   *     AISDLC-198). The spawner wrote a dispatch manifest to disk instead of
-   *     invoking a subprocess. The calling slash command body must invoke the
-   *     Agent tool using the manifest parameters before continuing the pipeline.
+   *
+   * Pre-RFC-0041 Phase 3.3 (AISDLC-377.6) this union also accepted
+   * `'manifest-emitted'`, emitted only by `ClaudeCliInlineSpawner` (AISDLC-198).
+   * That spawner was removed; the status string is no longer in the union and
+   * no in-tree spawner returns it.
    */
-  status: 'success' | 'timeout' | 'error' | 'manifest-emitted';
+  status: 'success' | 'timeout' | 'error';
   error?: string;
   durationMs: number;
   /**

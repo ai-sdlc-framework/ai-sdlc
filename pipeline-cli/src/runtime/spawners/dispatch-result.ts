@@ -3,18 +3,21 @@
  *
  * ## Context
  *
- * The `ClaudeCliInlineSpawner` (AISDLC-198) is the "producer" half of the
- * inline-orchestrator path: it writes a dispatch manifest to
- * `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json` and returns a
- * `SubagentResult` with `status: 'manifest-emitted'`.
+ * The `cli-orchestrator tick --continue-from-result` flag (AISDLC-225) reads a
+ * pre-completed Agent result from disk and feeds it back into `executePipeline()`
+ * as the developer's spawn output. The original producer was the
+ * `ClaudeCliInlineSpawner` (AISDLC-198) inline-manifest path, removed in
+ * RFC-0041 Phase 3.3 (AISDLC-377.6). The result-file half of the protocol is
+ * retained because:
  *
- * The slash command body (`/ai-sdlc orchestrator-tick`) is the "consumer" half:
- * it reads the manifest, invokes the Agent tool, then writes the Agent result
- * back to `$ARTIFACTS_DIR/_orchestrator/dispatch-result.json`.
+ *   - The `/ai-sdlc orchestrator-tick` slash command body still uses
+ *     `write-dispatch-result` to hand its Agent output back to a subsequent
+ *     orchestrator tick.
+ *   - Bespoke / programmatic dispatchers can write a `dispatch-result.json`
+ *     to drive `executePipeline()` Steps 6+ without re-running the developer.
  *
  * This module provides the helpers both sides need:
- *   - `resolveResultPath` — canonical path resolution (mirrors
- *     `resolveManifestPath` in `claude-cli-inline.ts`).
+ *   - `resolveResultPath` — canonical path resolution.
  *   - `writeDispatchResult` — the consumer bridge writes the Agent result here.
  *   - `readDispatchResult` — the orchestrator tick loop reads the result back
  *     and converts it to a `SubagentResult` for `executePipeline()`.
@@ -22,17 +25,13 @@
  *
  * ## File lifecycle
  *
- * 1. Spawner writes `dispatch-manifest.json` (in `claude-cli-inline.ts`).
- * 2. Slash command body reads the manifest, invokes Agent, calls
+ * 1. A producer (slash command body, CI consumer, custom dispatcher) calls
  *    `writeDispatchResult()` with the Agent output.
- * 3. Orchestrator tick loop calls `readDispatchResult()` to recover the
+ * 2. Orchestrator tick loop calls `readDispatchResult()` to recover the
  *    `SubagentResult` and continues `executePipeline()` Steps 6+.
- * 4. Both files persist between ticks as observability artifacts — operators
- *    can inspect them to see what the orchestrator most recently dispatched
- *    and what the subagent returned.
+ * 3. The result file persists between ticks as an observability artifact —
+ *    operators can inspect it to see what the subagent most recently returned.
  *
- * @see docs/operations/orchestrator-inline-loop.md — full consumer protocol
- * @see pipeline-cli/src/runtime/spawners/claude-cli-inline.ts — manifest producer
  * @module runtime/spawners/dispatch-result
  */
 
@@ -99,7 +98,6 @@ export interface WriteDispatchResultOptions {
 
 /**
  * Resolve the dispatch-result output path from options or environment.
- * Mirrors `resolveManifestPath` in `claude-cli-inline.ts`.
  * Exported for tests.
  */
 export function resolveResultPath(overridePath?: string): string {
@@ -177,8 +175,8 @@ export interface ReadDispatchResultOptions {
  * the on-disk `DispatchResult` back to a `SubagentResult` so
  * `executePipeline()` can continue from Step 6.
  *
- * Returns `null` when the file doesn't exist (no manifest-emitted dispatch
- * is pending) or when the file content doesn't parse as a valid
+ * Returns `null` when the file doesn't exist (no pre-completed dispatch
+ * result is staged) or when the file content doesn't parse as a valid
  * `DispatchResult`.
  */
 export function readDispatchResult(options: ReadDispatchResultOptions = {}): DispatchResult | null {

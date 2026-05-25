@@ -585,17 +585,6 @@ describe('emitBillingSafetyWarnings (AISDLC-352)', () => {
     expect(lines[0]).toContain('AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key');
   });
 
-  it('emits FALLBACK_BILLING_WARNING when AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key AND spawner=claude-cli', () => {
-    const lines: string[] = [];
-    emitBillingSafetyWarnings(
-      'claude-cli',
-      { AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK: 'api-key' },
-      (msg) => lines.push(msg),
-    );
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key');
-  });
-
   it('does NOT emit FALLBACK_BILLING_WARNING when spawner=api-key', () => {
     const lines: string[] = [];
     emitBillingSafetyWarnings(

@@ -23,7 +23,6 @@
 |---|---|---|
 | **`/ai-sdlc execute` slash command body (Tier 1)** | None — slash command body uses the main session's `Agent` tool directly | Operator's interactive Claude Code quota. `executePipeline()` is NOT called from Tier 1; the slash command body interleaves CLI subcommands with `Agent` tool calls. |
 | **`cli-orchestrator tick` (default, autonomous tick from cron/daemon)** | `ShellClaudePSpawner` via `--spawner claude` (AISDLC-352 default — no flag required) | Operator's monthly Agent SDK credit ($200/mo on Max-20x). **High-throughput alternative that draws zero Agent SDK credit**: use `/ai-sdlc orchestrator-tick` inside an active Claude Code session instead — the `Agent` tool call runs in the interactive quota. See [`docs/operations/billing-and-cost-optimization.md §1b`](../../docs/operations/billing-and-cost-optimization.md) for the trade-offs and cost-projection table. |
-| **`cli-orchestrator tick --spawner claude-cli` (slash command body path)** | `ClaudeCliInlineSpawner` — emits manifest; slash command body invokes `Agent` tool. **DEPRECATED** — see [Deprecated spawners](#deprecated-spawners) below | Operator's interactive Claude Code quota. Only valid inside an active Claude Code session. |
 | **RFC-0041 `in-session-agent` Workers** | N operator-opened CC sessions each running `/ai-sdlc dispatch-worker` — claims manifests from the Dispatch Board, dispatches via foreground `Agent` calls | Subscription interactive quota — **zero incremental cost**. Recommended default for autonomous drain. |
 | **RFC-0041 `claude-p-shell` Workers** | `cli-dispatch-supervisor` spawns `env -u CLAUDECODE claude -p` — operator-controlled 30 min watchdog | Agent SDK credit pool ($200/mo on Max-20x) then API tokens. For headless/CI contexts. |
 | **`cli-orchestrator start` (autonomous loop)** | `ShellClaudePSpawner` via the `claude` default spawner (AISDLC-352) | Operator's monthly Agent SDK credit ($200/mo on Max-20x). `claude -p` is explicitly covered by the new SDK credit pool. |
@@ -32,12 +31,11 @@
 | **Custom auth, tenant routing, alt SDK shape** | Implement your own `SubagentSpawner` (see [Custom spawner howto](#custom-spawner-howto)) | Whatever your spawner authenticates against. |
 | **Unit / integration tests** | `MockSpawner` from `@ai-sdlc/pipeline-cli` | Free — no LLM calls. |
 
-### `--spawner claude` vs `--spawner claude-cli` — naming gotcha
+### `--spawner claude` — the subscription-billing path
 
-The two kinds look similar but do different things:
+**`--spawner claude`** (AISDLC-349) shells out to `claude -p` via `child_process.spawn`. **This is the default for `cli-orchestrator tick` since AISDLC-352.** Use this for cron / daemon / sidecar dispatch from a plain shell where there is no slash command body. Uses the operator's logged-in subscription auth. Honors the per-role model split (`developer`/`code-reviewer`/`test-reviewer` → `claude-sonnet-4-6`; `security-reviewer` → `claude-opus-4-6`).
 
-- **`--spawner claude`** (AISDLC-349) — actually shells out to `claude -p` via `child_process.spawn`. **This is the default for `cli-orchestrator tick` since AISDLC-352.** Use this for cron / daemon / sidecar dispatch from a plain shell where there is no slash command body. Uses the operator's logged-in subscription auth. Honors the same per-role model split (`developer`/`code-reviewer`/`test-reviewer` → `claude-sonnet-4-6`; `security-reviewer` → `claude-opus-4-6`) that `ClaudeCliInlineSpawner` emits in its manifest.
-- **`--spawner claude-cli`** — **DEPRECATED** (see below). Emits a `dispatch-manifest.json` to `$ARTIFACTS_DIR/_orchestrator/`; the calling Claude Code slash command body reads the manifest + invokes the `Agent` tool. **Silently fails with `developer-json-contract-violated` when run from a plain shell** because nothing reads the manifest.
+The legacy **`--spawner claude-cli`** inline-manifest spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6). See [`docs/operations/claude-cli-spawner-removed.md`](../../docs/operations/claude-cli-spawner-removed.md) for the migration breadcrumb.
 
 When in doubt, call `defaultSpawner()` — it picks the right one for your
 environment and throws a clear instructional error if neither subscription nor
@@ -460,57 +458,24 @@ class MyCustomSpawner implements SubagentSpawner {
    default for a reason: the three reviewers are read-only and dispatch
    independently, so wall-clock time wins.)
 
-## Deprecated spawners
+## Removed spawners
 
-### `--spawner claude-cli` (removed in v0.11)
+### `--spawner claude-cli` — removed in RFC-0041 Phase 3.3 (AISDLC-377.6)
 
-**Status: DEPRECATED** — RFC-0041 Phase 3.1 (AISDLC-377.4). Prints a warning to stderr on every
-invocation. Will be removed entirely in v0.11 (tracked in AISDLC-377.6).
+The `claude-cli` inline-manifest spawner (`ClaudeCliInlineSpawner`, AISDLC-198)
+was removed after a one-release deprecation window (AISDLC-377.4 shipped the
+deprecation warning). Yargs `--spawner claude-cli` is rejected at parse time;
+programmatic callers that bypass yargs and pass the string literal receive a
+clear `CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE` error pointing at the migration
+breadcrumb.
 
-**Deprecation rationale — UNDER REVIEW as of 2026-05-21:**
-
-The original deprecation rationale claimed the `claude-cli` spawner
-(`ClaudeCliInlineSpawner`) "races the Anthropic platform's hardcoded 600-second
-background-agent watchdog" with a "~85% kill rate" observed during the
-2026-05-20 4-wide drain attempt. **That claim was a misdiagnosis.**
-
-Forensic re-measurement on 2026-05-21 via `python3 ~/.claude/skills/audit-subagent/audit.py`
-across 73 dev subagent transcripts (~30 days):
-
-- **0 watchdog-shape kills** (`tool_use_pending` signature: 0)
-- **80.8% clean completion** (`stop_reason=end_turn` with JSON envelope or text body)
-- **19.2% operator-initiated interrupts** (literal `[Request interrupted by user]` in transcript)
-- Clean dev duration: median **16 min**, max **150 min (2.5 hours)**
-- 83% of clean runs exceed 600s; a hard 600s wall-clock watchdog cannot exist
-
-The 2026-05-20 "85% kill rate" almost certainly counted operator-initiated
-wave-cancellations as system kills without reading the transcript files. The
-diagnostic skill above is the source of truth going forward; re-run it
-whenever a subagent-reliability claim needs to be made.
-
-The `claude-cli` spawner's deprecation status pending re-evaluation against
-this corrected baseline. The replacements below remain documented because
-they provide useful properties (operator-controlled parallelism, billing-pool
-isolation post-2026-06-15) — but the watchdog-avoidance framing has been
-removed.
-
-**What to use instead (until the deprecation is re-evaluated):**
+**What to use instead:**
 
 | Goal | Replacement |
 |---|---|
 | Subscription-quota autonomous drain | `in-session-agent` via Dispatch Board + `/ai-sdlc dispatch-worker` in N operator-opened CC sessions. Foreground `Agent` calls integrate cleanly with the operator's interactive workflow. |
-| Headless/CI dispatch without active CC session | `claude-p-shell` via `cli-dispatch-supervisor` — operator-controlled 30 min watchdog (a real watchdog this time, in the supervisor process), draws Agent SDK credit pool. |
-
-**Migration guide:** see
-[`docs/operations/operator-runbook.md` § "Choosing a dispatch model"](../../docs/operations/operator-runbook.md#choosing-a-dispatch-model).
-
-**Suppressing the deprecation warning** (for transitional CI that has acknowledged the deprecation):
-
-```bash
-AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1 cli-orchestrator tick --spawner claude-cli
-```
-
-The suppression env var only silences the stderr warning; it does NOT affect behaviour.
+| Headless/CI dispatch without active CC session | `--spawner claude` (`ShellClaudePSpawner`) — draws the operator's Agent SDK credit pool post-2026-06-15 and uses subscription auth pre-cutover. |
+| Existing scripts still passing `--spawner claude-cli` | Migrate to `--spawner claude` (no behaviour difference for non-slash-command callers) or to the Dispatch Board model. See [`docs/operations/claude-cli-spawner-removed.md`](../../docs/operations/claude-cli-spawner-removed.md). |
 
 ---
 

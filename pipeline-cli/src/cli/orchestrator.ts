@@ -51,7 +51,6 @@ import {
 } from '../runtime/spawners/dispatch-result.js';
 import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
 import { SPAWNER_KINDS, type SpawnerKind } from './execute.js';
-import { emitClaudeCliDeprecationWarning } from '../orchestrator/deprecation-warnings.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -80,7 +79,7 @@ function fail(reason: string, code = 1): never {
  * 2. `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the
  *    configured spawner is not `api-key`. This means the orchestrator will
  *    silently fall back to API-key billing on spawner-unavailable errors
- *    (e.g. when `claude-cli` can't find the manifest consumer). Operators
+ *    (e.g. when the configured CLI or bridge isn't reachable). Operators
  *    often don't realise the fallback is wired.
  *
  * Exported so tests can assert the exact message text.
@@ -198,7 +197,10 @@ export function buildOrchestratorCli(
         `Spawner for umbrella dispatch. Also configurable with ${ORCHESTRATOR_SPAWNER_ENV}. ` +
         'Effective default is claude (subscription billing via claude -p) — resolved in ' +
         'resolveUmbrellaSpawnerKind so the env var is honored when --spawner is absent. ' +
-        'Pass --spawner claude-cli for the /ai-sdlc orchestrator-tick slash command body path.',
+        'The legacy `claude-cli` inline-manifest spawner was removed in RFC-0041 ' +
+        'Phase 3.3 (AISDLC-377.6); use the Dispatch Board model ' +
+        '(`/ai-sdlc orchestrator-tick` + `/ai-sdlc dispatch-worker`) for ' +
+        'subscription-billed parallel autonomous drain.',
       type: 'string',
       choices: SPAWNER_KINDS,
       // NO yargs `default` — see AISDLC-352 code-reviewer MAJOR. A yargs default
@@ -224,10 +226,6 @@ export function buildOrchestratorCli(
         const resolvedAdapters = buildAdapters(argv as Record<string, unknown>, adapters);
         // AISDLC-352 — emit billing-safety warnings before dispatch
         emitBillingSafetyWarnings(resolveUmbrellaSpawnerKind(resolvedAdapters));
-        // RFC-0041 Phase 3.1 (AISDLC-377.4) — deprecation warning for claude-cli
-        if (resolveUmbrellaSpawnerKind(resolvedAdapters) === 'claude-cli') {
-          emitClaudeCliDeprecationWarning(process.stderr, process.env);
-        }
         try {
           const ticks = await runOrchestratorLoop(config, resolvedAdapters);
           emit({
@@ -337,14 +335,6 @@ export function buildOrchestratorCli(
 
         // AISDLC-352 — emit billing-safety warnings before dispatch
         emitBillingSafetyWarnings(resolveUmbrellaSpawnerKind(tickAdapters));
-
-        // RFC-0041 Phase 3.1 (AISDLC-377.4) — deprecation warning for the
-        // legacy claude-cli spawner path that races the Anthropic 600s
-        // background-agent watchdog. Suppressible via
-        // AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1 for transitional CI.
-        if (resolveUmbrellaSpawnerKind(tickAdapters) === 'claude-cli') {
-          emitClaudeCliDeprecationWarning(process.stderr, process.env);
-        }
 
         const result = await runOrchestratorTick(config, tickAdapters, 1);
         emit({ ok: true, mode: 'tick', tick: result });

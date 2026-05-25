@@ -2,9 +2,11 @@
  * Tests for the AISDLC-182 umbrella `execute` subcommand.
  *
  * Coverage:
- *   1. Spawner resolution — `mock` succeeds, `claude-cli` returns a
- *      ClaudeCliInlineSpawner (AISDLC-198), `api-key` errors when ANTHROPIC_API_KEY
- *      is unset.
+ *   1. Spawner resolution — `mock` succeeds, `api-key` errors when
+ *      ANTHROPIC_API_KEY is unset, `claude` returns ShellClaudePSpawner,
+ *      `codex` requires CODEX_SPAWN_AGENT_BIN. The removed `claude-cli`
+ *      kind (RFC-0041 Phase 3.3 / AISDLC-377.6) is rejected with a
+ *      pointed migration error.
  *   2. Verdict-file write — `writeVerdictFile()` lands the JSON at
  *      `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` and the payload
  *      shape matches what `scripts/check-attestation-sign.sh` expects.
@@ -22,12 +24,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE,
+  CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE,
   buildApprovingMockSpawner,
   resolveSpawner,
   runExecuteCommand,
   writeVerdictFile,
 } from './execute.js';
+import type { SpawnerKind } from './execute.js';
 import { buildCli } from './index.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
@@ -110,17 +113,20 @@ describe('resolveSpawner', () => {
     expect(spawner).toBeInstanceOf(MockSpawner);
   });
 
-  it('returns a ClaudeCliInlineSpawner when kind=claude-cli (AISDLC-198)', async () => {
-    // Option 3 (inline orchestrator) is now implemented — resolveSpawner no longer
-    // throws for claude-cli. It returns a ClaudeCliInlineSpawner that emits a
-    // dispatch manifest to $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json.
-    const spawner = await resolveSpawner('claude-cli');
-    // Verify it's a SubagentSpawner with the expected methods
-    expect(typeof spawner.spawn).toBe('function');
-    expect(typeof spawner.spawnParallel).toBe('function');
-    // The CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE now documents the inline mode
-    // (no longer an error message, but still exported for grep-ability).
-    expect(CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE).toContain('AISDLC-198');
+  it('throws CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE when kind=claude-cli (RFC-0041 Phase 3.3 / AISDLC-377.6)', async () => {
+    // The legacy `--spawner claude-cli` (inline-manifest, AISDLC-198) was
+    // removed in RFC-0041 Phase 3.3 — the yargs `choices: SPAWNER_KINDS`
+    // constraint already rejects it at parse time, and this test exercises
+    // the programmatic-caller defense-in-depth path that still receives the
+    // string literal. The thrown message points the operator at the
+    // migration breadcrumb.
+    await expect(resolveSpawner('claude-cli' as unknown as SpawnerKind)).rejects.toThrow(
+      /removed in RFC-0041 Phase 3\.3 \(AISDLC-377\.6\)/,
+    );
+    expect(CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE).toContain('AISDLC-377.6');
+    expect(CLAUDE_CLI_SPAWNER_REMOVED_MESSAGE).toContain(
+      'docs/operations/claude-cli-spawner-removed.md',
+    );
   });
 
   it('errors when kind=api-key and ANTHROPIC_API_KEY is unset', async () => {
@@ -472,8 +478,8 @@ describe('runExecuteCommand — real-run mode', () => {
   });
 
   it('returns ok=false when the spawner factory throws (api-key missing ANTHROPIC_API_KEY)', async () => {
-    // Previously tested with claude-cli which threw; now claude-cli is implemented.
     // Use api-key without ANTHROPIC_API_KEY set to exercise the "spawner throws" path.
+    // (Pre-AISDLC-377.6 this used to assert against the claude-cli throw path.)
     writeTaskFile(tmp, { id: 'AISDLC-202', title: 'spawner gate', status: 'To Do' });
     const saved = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;

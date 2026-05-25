@@ -85,13 +85,15 @@ Unused credit doesn't roll over. Once exhausted, traffic falls through to API-ke
 
 **How it works**:
 
-The `/ai-sdlc orchestrator-tick` slash command is the "consumer bridge" for the `--spawner claude-cli` inline path (AISDLC-225 / RFC-0015):
+The `/ai-sdlc orchestrator-tick` slash command is the Conductor side of the RFC-0041 Dispatch Board protocol (the pre-RFC-0041 inline-manifest path via `--spawner claude-cli` was removed in AISDLC-377.6):
 
-1. The command calls `cli-orchestrator tick --max-concurrent 1`. The orchestrator's `ClaudeCliInlineSpawner` writes a `dispatch-manifest.json` to `$ARTIFACTS_DIR/_orchestrator/` and returns `{status: 'manifest-emitted'}` without invoking any LLM.
-2. The slash command body (which runs in the main Claude Code session) reads the manifest and calls the `Agent` tool with the manifest's parameters.
-3. Because the `Agent` call is made from inside an interactive session turn, it draws from the operator's interactive quota — NOT the Agent SDK credit pool.
-4. After the subagent completes, the slash command writes `dispatch-result.json` and runs the continuation tick (Steps 6+ of the pipeline: reviewer fan-out, attestation, PR open).
+1. The command runs `cli-dispatch sweep` + `cli-dispatch collect-verdicts` to reconcile completed Worker dispatches and surface any `done/<task-id>.verdict.json` payloads from the previous tick.
+2. For each `success` verdict, the slash command body fans out the three reviewer subagents via foreground `Agent` calls (these draw from the operator's interactive quota — NOT the Agent SDK credit pool — because they run inside an interactive session turn).
+3. The reviewer verdicts are written to `.ai-sdlc/verdicts/<task-id-lower>.json`; the slash command body signs the DSSE attestation and force-pushes the chore commit on top of the dev's branch.
+4. The command then peeks the frontier, fires `cli-dispatch write-manifest` to enqueue new work to `.ai-sdlc/dispatch/queue/`, and writes a `bg-agent-request` for each admitted task — Pattern X v2's Phase B fires a `run_in_background:true` `Agent(developer)` for the request on the next tick, and Phase A reconciles its completion notification one or more ticks later.
 5. `ScheduleWakeup(30s)` fires — the next tick starts automatically 30 seconds later.
+
+For headless / CI contexts (no operator CC session available), use `cli-orchestrator tick --spawner claude` from cron / daemon / sidecar — that path bills against the Agent SDK credit pool instead of the interactive quota.
 
 **Trade-off**: requires ONE active Claude Code session to remain open. The session can hibernate (no keyboard activity) between ticks; `ScheduleWakeup` wakes it automatically. If the session terminates, the loop stops until you restart it.
 
@@ -239,8 +241,8 @@ The loop respects `AISDLC-242` recoverable-abort detection — interrupted dispa
 
 Run through this before every autonomous tick session to avoid surprise API-key charges:
 
-1. **Use `--spawner claude` (or rely on the new default).**
-   Since AISDLC-352, `cli-orchestrator tick` defaults to `--spawner claude`. You no longer need to pass the flag explicitly for cron/daemon dispatch. If you have a legacy script that passes `--spawner claude-cli` from a plain shell (not inside a Claude Code session), update it to `--spawner claude` — the `claude-cli` spawner emits a manifest that nothing reads in a plain shell, causing silent `developer-json-contract-violated` failures.
+1. **Use `--spawner claude` (or rely on the default).**
+   Since AISDLC-352, `cli-orchestrator tick` defaults to `--spawner claude`. You no longer need to pass the flag explicitly for cron/daemon dispatch. The legacy `--spawner claude-cli` inline-manifest path was removed in RFC-0041 Phase 3.3 (AISDLC-377.6); any script that still passes it will be rejected at parse time with `Invalid values: Choices: "mock", "api-key", "claude", "codex"`. Drop the flag (or replace with `--spawner claude`) — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md).
 
 2. **Unset `ANTHROPIC_API_KEY` unless you intend to use API-key billing.**
    When `ANTHROPIC_API_KEY` is set and you run `cli-orchestrator tick --spawner claude`, the CLI emits this warning to stderr:
@@ -355,7 +357,7 @@ Yes — same architecture, just smaller credit pool ($20/mo). One dispatch consu
 
 **Q. Does `ai-sdlc-pipeline execute --spawner claude-cli` use the SDK credit?**
 
-Currently no — the `claude-cli` spawner uses the inline-manifest protocol that requires an operator-typed `/ai-sdlc orchestrator-tick` consumer. That consumer runs in interactive Claude Code → interactive quota. (Open issue: post-cutover the inline-manifest path could route through `claude -p` instead — file an ask if this matters for your setup.)
+The `claude-cli` spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) and is no longer a valid `--spawner` choice — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md). For subscription billing without an interactive operator session, use `--spawner claude` (shell-out to `claude -p`, draws Agent SDK credit pool). For interactive-quota dispatch with zero incremental cost, use the Dispatch Board model: `/ai-sdlc orchestrator-tick` + N `/ai-sdlc dispatch-worker` sessions.
 
 **Q. My CI is silently skipping reviewers — is that a problem?**
 
@@ -376,7 +378,7 @@ Not today — the spawner choice is per-dispatch, not per-step. If this matters,
 - [`pipeline-cli/docs/spawner.md`](../../pipeline-cli/docs/spawner.md) — engineer-facing reference for the `SubagentSpawner` interface, custom spawner howto, and per-spawner contract details
 - [`docs/operations/operator-runbook.md`](./operator-runbook.md) — high-level operator workflows
 - [`docs/operations/orchestrator-runbook.md`](./orchestrator-runbook.md) — `cli-orchestrator` setup + monitoring
-- [`docs/operations/claude-cli-spawner.md`](./claude-cli-spawner.md) — `claude-cli` inline-manifest protocol details
+- [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md) — RFC-0041 Phase 3.3 (AISDLC-377.6) `--spawner claude-cli` removal & migration breadcrumb
 - [`spec/rfcs/RFC-0012-shared-pipeline-core.md`](../../spec/rfcs/RFC-0012-shared-pipeline-core.md) — Tier 1 vs Tier 2 architectural rationale
 - [`spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md`](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) §14 — subscription scheduling + token-budget governance
 

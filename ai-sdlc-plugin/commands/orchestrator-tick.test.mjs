@@ -5,7 +5,8 @@
  * consumer-bridge contract. Replaced by RFC-0041 Phase 1 (AISDLC-377.1):
  * the Conductor now emits Dispatch Board manifests + polls done/+failed/
  * verdicts in foreground; Worker sessions running /ai-sdlc dispatch-worker
- * own the actual `Agent` dispatch.
+ * own the actual `Agent` dispatch. The legacy `claude-cli` inline-manifest
+ * path was removed in RFC-0041 Phase 3.3 (AISDLC-377.6).
  *
  * Body-contract assertions read from `orchestrator-tick.md` itself,
  * mirroring the pattern in `execute.test.mjs`.

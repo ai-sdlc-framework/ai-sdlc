@@ -225,14 +225,12 @@ export interface OrchestratorAdapters {
   /**
    * AISDLC-229 / AISDLC-352 — spawner kind for the umbrella dispatcher.
    * Defaults to `'claude'` (subscription billing via `claude -p`, AISDLC-352).
-   * Pre-352 the default was `'claude-cli'` (inline manifest mode, AISDLC-198)
-   * — use `--spawner claude-cli` to preserve that behaviour in slash-command-
-   * body callers. Override via the `AI_SDLC_ORCHESTRATOR_SPAWNER` env var or
-   * by injecting this field directly (tests).
+   * Override via the `AI_SDLC_ORCHESTRATOR_SPAWNER` env var or by injecting
+   * this field directly (tests).
    *
-   * When `claude-cli` is selected but `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key`
-   * is set AND the umbrella reports the consumer bridge is missing (AISDLC-225
-   * not yet shipped), the orchestrator automatically falls back to `api-key`.
+   * RFC-0041 Phase 3.3 (AISDLC-377.6) removed the legacy `claude-cli` inline-
+   * manifest spawner kind. The supported kinds are now `mock`, `api-key`,
+   * `claude`, and `codex`.
    */
   umbrellaSpawnerKind?: SpawnerKind;
   /**
@@ -603,13 +601,11 @@ export async function runOrchestratorTick(
   //        directly, the same path that successfully drove AISDLC-178.5,
   //        178.6, and 229 itself through the queue.
   //      - Opt INTO the umbrella path with `AI_SDLC_ORCHESTRATOR_USE_UMBRELLA=1`.
-  //        AISDLC-240 — the umbrella's default `claude-cli` spawner depends
-  //        on AISDLC-225's manifest-consumer bridge, which is not yet shipped.
-  //        Without it the spawner emits a manifest no one consumes, the
-  //        subprocess "completes" with empty stdout, and every dispatch
-  //        fails as `developer-json-contract-violated`. Reverting the
-  //        default to the legacy path unblocks orchestrator dispatch
-  //        until AISDLC-225 closes the consumer loop.
+  //        AISDLC-352 promoted `claude` (shell-out `claude -p`) to the
+  //        umbrella's default spawner, and AISDLC-377.6 removed the legacy
+  //        `claude-cli` inline-manifest path entirely. The default direct-
+  //        spawner path still uses `ShellClaudePSpawner`, the same backing
+  //        implementation `--spawner claude` resolves to.
   const envUmbrellaSpawner = resolveEnvUmbrellaSpawnerKind();
   const useUmbrella =
     (process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA ?? '').trim() === '1' ||
@@ -2572,9 +2568,11 @@ function buildDefaultMaxBudgetUsdLoader(workDir: string): (taskId: string) => nu
  *      umbrella will need the fallback (checked post-hoc after the umbrella
  *      runs — see `buildDefaultUmbrellaDispatch`), fall back to `api-key`.
  *   4. Otherwise default to `claude` (subscription billing via `claude -p`,
- *      AISDLC-352). Pre-352 the default was `claude-cli` (inline manifest
- *      mode); that is still valid for slash-command-body callers who pass
- *      `--spawner claude-cli` explicitly.
+ *      AISDLC-352).
+ *
+ * RFC-0041 Phase 3.3 (AISDLC-377.6) removed the legacy `claude-cli` inline-
+ * manifest spawner kind. The supported kinds are `mock`, `api-key`, `claude`,
+ * and `codex`.
  */
 export function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
   if (adapters.umbrellaSpawnerKind) return adapters.umbrellaSpawnerKind;
@@ -2586,18 +2584,22 @@ export function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): Spaw
 function resolveEnvUmbrellaSpawnerKind(): SpawnerKind | undefined {
   const raw = (process.env[ORCHESTRATOR_SPAWNER_ENV] ?? '').trim();
   if (!raw) return undefined;
-  if (
-    raw === 'mock' ||
-    raw === 'api-key' ||
-    raw === 'claude-cli' ||
-    raw === 'claude' ||
-    raw === 'codex'
-  ) {
+  if (raw === 'mock' || raw === 'api-key' || raw === 'claude' || raw === 'codex') {
     return raw;
   }
-  throw new Error(
-    `${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude-cli, claude, codex`,
-  );
+  // RFC-0041 Phase 3.3 (AISDLC-377.6) — `claude-cli` was removed; surface a
+  // pointed migration message rather than the generic "must be one of" list
+  // so legacy env-var configurations get an actionable error.
+  if (raw === 'claude-cli') {
+    throw new Error(
+      `${ORCHESTRATOR_SPAWNER_ENV}=claude-cli is no longer supported. ` +
+        'The `claude-cli` inline-manifest spawner was removed in RFC-0041 ' +
+        'Phase 3.3 (AISDLC-377.6). Set ' +
+        `${ORCHESTRATOR_SPAWNER_ENV}=claude (default), api-key, or codex, ` +
+        'or unset it. See docs/operations/claude-cli-spawner-removed.md.',
+    );
+  }
+  throw new Error(`${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude, codex`);
 }
 
 /**
@@ -2663,11 +2665,14 @@ function extractPipelineDetail(
  *
  * Spawner selection:
  *   1. Default: `claude` (subscription billing via `claude -p`, AISDLC-352).
- *      Use `--spawner claude-cli` to opt into the AISDLC-198 inline manifest
- *      mode for slash-command-body callers.
- *   2. Fallback: if `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set
- *      AND the umbrella returns `ok: false` with a spawner-unavailable reason
- *      (AISDLC-225 consumer bridge not yet shipped), retry with `api-key`.
+ *      RFC-0041 Phase 3.3 (AISDLC-377.6) removed the legacy `claude-cli`
+ *      inline-manifest kind; supported kinds are now `mock`, `api-key`,
+ *      `claude`, and `codex`.
+ *   2. Fallback: the `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` retry
+ *      path was originally wired for the `claude-cli` "manifest not consumed"
+ *      failure mode; with `claude-cli` removed it is now a no-op
+ *      (left in place so a future spawner can opt back in by extending the
+ *      `wantFallback` predicate).
  *   3. Otherwise: record `failure: { type: 'spawner-unavailable', ... }` and
  *      set outcome to `aborted` so the tick continues without blocking.
  *
@@ -2819,35 +2824,19 @@ function buildDefaultUmbrellaDispatch(
       });
     };
 
-    // First attempt with configured spawner (default: `claude` since AISDLC-352).
-    let execResult = await runUmbrella(spawnerKind);
-
-    // AISDLC-229 AC #2 — spawner-unavailable fallback. When:
-    //   1. the first attempt failed (ok: false)
-    //   2. AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key is set
-    //   3. the failure reason looks like a spawner-resolution error
-    // …retry once with `api-key`.
-    const fallbackEnv = process.env.AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK;
-    const wantFallback = fallbackEnv === 'api-key';
-    if (!execResult.ok && wantFallback && spawnerKind === 'claude-cli') {
-      const reason = execResult.reason ?? '';
-      // Spawner-unavailable signatures: missing API key, manifest errors,
-      // or explicit ANTHROPIC_API_KEY requirement message.
-      const looksLikeSpawnerIssue =
-        reason.includes('ANTHROPIC_API_KEY') ||
-        reason.includes('spawner') ||
-        reason.includes('manifest') ||
-        reason.includes('ClaudeCliInlineSpawner') ||
-        reason.includes('claude-cli');
-      if (looksLikeSpawnerIssue) {
-        logger.warn(
-          `[orchestrator] claude-cli spawner unavailable for ${taskId}; ` +
-            `falling back to api-key (AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key)`,
-        );
-        emit({ type: 'OrchestratorDispatched', taskId }); // re-emit to log the retry
-        execResult = await runUmbrella('api-key');
-      }
-    }
+    // First (and currently only) attempt with the configured spawner
+    // (default: `claude` since AISDLC-352).
+    //
+    // AISDLC-229 AC #2's `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key`
+    // retry was originally wired for the `--spawner claude-cli` "manifest not
+    // consumed by slash command body" failure mode. RFC-0041 Phase 3.3
+    // (AISDLC-377.6) removed the `claude-cli` spawner, so the retry guard
+    // (`spawnerKind === 'claude-cli'`) would never fire — the branch was
+    // dropped to keep the dispatcher easy to read. The env var is still
+    // accepted (emitted as a billing-safety warning in cli/orchestrator.ts),
+    // and the fallback can be re-introduced by extending the predicate when
+    // a future spawner has an analogous transient unavailability mode.
+    const execResult = await runUmbrella(spawnerKind);
 
     // Map ExecuteCommandResult → RichDispatchResult
     if (!execResult.ok) {

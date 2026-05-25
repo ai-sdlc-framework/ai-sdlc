@@ -98,8 +98,9 @@ ai-sdlc-pipeline execute <task-id> \
 
 **Constraints:**
 - Does NOT re-dispatch the developer. The existing commits are the unit of work.
-- Requires a real spawner (`--spawner api-key` or `--spawner claude-cli`) even for the reviewer-only sub-cases (the spawner is used to re-run reviewers in sub-case C).
+- Requires a real spawner (`--spawner api-key`, `--spawner claude`, or `--spawner codex`) even for the reviewer-only sub-cases (the spawner is used to re-run reviewers in sub-case C).
 - `--spawner mock` is refused.
+- The legacy `--spawner claude-cli` was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md).
 
 ---
 
@@ -200,5 +201,8 @@ The `draft PR` vs `ready PR` distinction in the trace is the AISDLC-273 Step 3 p
 | `--dry-run` | — | Validate + compute plan, no mutation |
 | `--spawner mock` | — | Dry-run/plumbing fixture; refused for `--run`/`--resume-from-draft`/`--rework-pr` |
 | `--spawner api-key` | `ANTHROPIC_API_KEY` env | Real API-key billed dispatch |
-| `--spawner claude-cli` | slash command body | Inline manifest mode (AISDLC-198) |
+| `--spawner claude` | `claude` CLI on PATH | Subscription-billed shell-out (`claude -p`, AISDLC-349) — default for `cli-orchestrator tick` since AISDLC-352 |
+| `--spawner codex` | `CODEX_SPAWN_AGENT_BIN` env | Codex CLI host-bridge dispatch (AISDLC-202.2) |
 | `--max-iterations N` | — | Cap for Step 9 + rework loops (default 2) |
+
+> The legacy `--spawner claude-cli` (inline manifest mode, AISDLC-198) was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) — see [`docs/operations/claude-cli-spawner-removed.md`](./claude-cli-spawner-removed.md).
