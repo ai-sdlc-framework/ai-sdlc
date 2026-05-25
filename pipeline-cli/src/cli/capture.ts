@@ -64,6 +64,12 @@ import {
 } from '../capture/draft-capture.js';
 import { findCaptureComments } from '../capture/pr-comment-parser.js';
 import {
+  appendCaptureMarkerToComment,
+  classifyPrCommentsBatch,
+  PR_COMMENT_DEFAULT_THRESHOLD,
+  type ClassifyPrCommentsBatchResult,
+} from '../capture/pr-comment-classifier.js';
+import {
   parseIncodeMarkers,
   markersToWarnings,
   renderLinterWarnings,
@@ -98,6 +104,46 @@ function emit(value: unknown): void {
 
 function emitText(text: string): void {
   process.stdout.write(text.endsWith('\n') ? text : text + '\n');
+}
+
+// ── Render classifier batch (RFC-0024 Refit Phase 4) ─────────────────────────
+
+function renderClassifierBatch(
+  batch: readonly ClassifyPrCommentsBatchResult[],
+  format: string,
+): void {
+  if (format === 'table') {
+    if (batch.length === 0) {
+      emitText('(no comments to classify)');
+      return;
+    }
+    for (const { comment, decision } of batch) {
+      const author = comment.author?.login ?? 'unknown';
+      const url = comment.url ?? '(no url)';
+      const headline =
+        decision.kind === 'marker'
+          ? `marker (severity=${decision.severity ?? '(unset)'}, triage=${decision.triage ?? '(unset)'})`
+          : decision.kind === 'ai-agent'
+            ? 'ai-agent bypass'
+            : decision.kind === 'classified-capture'
+              ? `classified-capture (confidence=${decision.decision.confidence})`
+              : decision.kind === 'classified-skip'
+                ? `classified-skip (${decision.reason})`
+                : `already-linked (${decision.existingCaptureId})`;
+      emitText(`${headline}\n  author: ${author}\n  url: ${url}\n`);
+    }
+    return;
+  }
+  emit({
+    results: batch.map(({ comment, decision }) => ({
+      comment: {
+        author: comment.author?.login,
+        url: comment.url,
+        prNumber: comment.prNumber,
+      },
+      decision,
+    })),
+  });
 }
 
 // ── Detect current PR number from git branch + gh CLI ─────────────────────────
@@ -834,13 +880,24 @@ export function buildCaptureCli(): Argv {
       // ── parse-pr-comments ─────────────────────────────────────────────────────
       .command(
         'parse-pr-comments',
-        "Scan a PR's review comments for ai-sdlc:capture markers (RFC-0024 §5.2). Reads JSON from stdin.",
+        "Scan a PR's review comments for ai-sdlc:capture markers (RFC-0024 §5.2). Reads JSON from stdin. Pass --classify to also run the OQ-3 LLM auto-classifier on un-marked comments (RFC-0024 Refit Phase 4 / AISDLC-276).",
         (y) =>
-          y.option('format', {
-            type: 'string',
-            choices: ['json', 'table'] as const,
-            default: 'json',
-          }),
+          y
+            .option('format', {
+              type: 'string',
+              choices: ['json', 'table'] as const,
+              default: 'json',
+            })
+            .option('classify', {
+              type: 'boolean',
+              default: false,
+              describe:
+                'Also run the Haiku auto-classifier on un-marked comments (RFC-0024 Refit Phase 4). Without --classify, only marker-tagged comments are returned (legacy behaviour).',
+            })
+            .option('threshold', {
+              type: 'number',
+              describe: `Per-call threshold override for --classify mode (default ${PR_COMMENT_DEFAULT_THRESHOLD}).`,
+            }),
         async (argv) => {
           requireFeatureFlag();
 
@@ -865,12 +922,34 @@ export function buildCaptureCli(): Argv {
             process.exit(1);
           }
 
-          let comments: Array<{ body: string; author?: { login: string }; url?: string }>;
+          let comments: Array<{
+            body: string;
+            author?: { login: string };
+            url?: string;
+            prNumber?: number;
+            databaseId?: number;
+          }>;
           try {
             comments = JSON.parse(input.trim());
           } catch {
             process.stderr.write('[cli-capture] parse-pr-comments: invalid JSON on stdin\n');
             process.exit(1);
+          }
+
+          if (argv.classify === true) {
+            // RFC-0024 Refit Phase 4 — the OQ-3 LLM auto-classifier
+            // path. Without an LLM invoker injection point at this CLI
+            // boundary (the CLI doesn't depend on @anthropic-ai/sdk),
+            // we fall open to the substrate's pending sentinel. The
+            // shipped CLI surface returns the verdict per comment so
+            // operator tools / GitHub-webhook handlers can fan out into
+            // their own invoker; the classify call itself happens
+            // server-side where the invoker is wired.
+            const batch = await classifyPrCommentsBatch(comments, {
+              threshold: argv.threshold,
+            });
+            renderClassifierBatch(batch, String(argv.format));
+            return;
           }
 
           const found = findCaptureComments(comments);
@@ -891,6 +970,64 @@ export function buildCaptureCli(): Argv {
             }
           } else {
             emit({ found: found.map(({ comment, marker }) => ({ comment, marker })) });
+          }
+        },
+      )
+      // ── append-capture-marker (RFC-0024 Refit Phase 4 bidirectional sync) ────
+      .command(
+        'append-capture-marker',
+        'Append the <!-- ai-sdlc:capture-id=<id> --> footer to a PR comment body (RFC-0024 Refit Phase 4 / AISDLC-276 AC-7). Reads {body, captureId} JSON from stdin; emits {body, changed, alreadyLinked} on stdout. Idempotent — refuses to overwrite an existing different-id marker (GitHub-edit-wins per AC-6).',
+        (y) =>
+          y.option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'json',
+          }),
+        async (argv) => {
+          requireFeatureFlag();
+
+          let input = '';
+          try {
+            const { readSync } = await import('node:fs');
+            const fd0 = 0;
+            const chunks: Buffer[] = [];
+            const chunkBuf = Buffer.alloc(65536);
+            let bytesRead = 0;
+            do {
+              try {
+                bytesRead = readSync(fd0, chunkBuf, 0, chunkBuf.length, null);
+                if (bytesRead > 0) chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
+              } catch {
+                break;
+              }
+            } while (bytesRead > 0);
+            input = Buffer.concat(chunks).toString('utf8');
+          } catch {
+            process.stderr.write('[cli-capture] append-capture-marker: failed to read stdin\n');
+            process.exit(1);
+          }
+
+          let payload: { body?: unknown; captureId?: unknown };
+          try {
+            payload = JSON.parse(input.trim());
+          } catch {
+            process.stderr.write('[cli-capture] append-capture-marker: invalid JSON on stdin\n');
+            process.exit(1);
+          }
+
+          if (typeof payload.body !== 'string' || typeof payload.captureId !== 'string') {
+            process.stderr.write(
+              '[cli-capture] append-capture-marker: stdin must be {body:string, captureId:string}\n',
+            );
+            process.exit(1);
+          }
+
+          const result = appendCaptureMarkerToComment(payload.body, payload.captureId);
+
+          if (String(argv.format) === 'text') {
+            process.stdout.write(result.body);
+          } else {
+            emit(result);
           }
         },
       )

@@ -10,4 +10,5 @@ export * from './capture-writer.js';
 export * from './draft-capture.js';
 export * from './incode-linter.js';
 export * from './pr-comment-parser.js';
+export * from './pr-comment-classifier.js';
 export * from './triage-rubric.js';
