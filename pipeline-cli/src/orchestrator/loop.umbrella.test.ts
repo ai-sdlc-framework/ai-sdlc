@@ -426,6 +426,58 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
     }
   });
 
+  it('throws actionable migration error when AI_SDLC_ORCHESTRATOR_SPAWNER=claude-cli (AISDLC-377.6)', async () => {
+    const previousSpawner = process.env[ORCHESTRATOR_SPAWNER_ENV];
+    process.env[ORCHESTRATOR_SPAWNER_ENV] = 'claude-cli';
+
+    try {
+      await expect(
+        runOrchestratorTick(
+          config,
+          {
+            logger: silentLogger(),
+            frontier: fakeFrontier(['AISDLC-377.6-LEGACY-SPAWNER']),
+            escalate: async () => {},
+            ...hermeticFilterAdapters(),
+          },
+          1,
+        ),
+      ).rejects.toThrow(/AISDLC-377\.6|no longer supported/);
+    } finally {
+      if (previousSpawner === undefined) {
+        delete process.env[ORCHESTRATOR_SPAWNER_ENV];
+      } else {
+        process.env[ORCHESTRATOR_SPAWNER_ENV] = previousSpawner;
+      }
+    }
+  });
+
+  it('throws "must be one of" error when AI_SDLC_ORCHESTRATOR_SPAWNER is unknown', async () => {
+    const previousSpawner = process.env[ORCHESTRATOR_SPAWNER_ENV];
+    process.env[ORCHESTRATOR_SPAWNER_ENV] = 'garbage-not-a-spawner';
+
+    try {
+      await expect(
+        runOrchestratorTick(
+          config,
+          {
+            logger: silentLogger(),
+            frontier: fakeFrontier(['AISDLC-377.6-GARBAGE-SPAWNER']),
+            escalate: async () => {},
+            ...hermeticFilterAdapters(),
+          },
+          1,
+        ),
+      ).rejects.toThrow(/must be one of/);
+    } finally {
+      if (previousSpawner === undefined) {
+        delete process.env[ORCHESTRATOR_SPAWNER_ENV];
+      } else {
+        process.env[ORCHESTRATOR_SPAWNER_ENV] = previousSpawner;
+      }
+    }
+  });
+
   it('surfaces missing CODEX_SPAWN_AGENT_BIN as spawner-unavailable before rollback work', async () => {
     const taskId = 'AISDLC-326-CODEX-MISSING-BRIDGE';
     const umbrellaExecutor = async (): Promise<ExecuteCommandResult> => ({
