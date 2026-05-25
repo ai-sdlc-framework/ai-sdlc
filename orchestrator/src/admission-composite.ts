@@ -49,6 +49,11 @@ import {
   type VariantContext,
   type VariantScopedSaResult,
 } from './variant-admission.js';
+import {
+  computeComplianceClearance,
+  type ComplianceClearanceContext,
+  type ComplianceClearanceResult,
+} from './compliance-clearance.js';
 
 /**
  * Result of the admission composite — returns a `PriorityScore`
@@ -83,6 +88,17 @@ export interface AdmissionComposite {
      * work item declared `targetedVariants` of one of the affected souls.
      */
     variant?: VariantScopedSaResult;
+    /**
+     * RFC-0009 Phase 4.1 — Eρ₅ Compliance Clearance result.
+     * Present when `AdmissionCompositeOptions.complianceClearanceContext`
+     * was supplied AND the adopter has opted in (`enabled: true`).
+     *
+     * When `er5 === 0` the composite is GATED to zero — the work item cannot
+     * proceed without resolving the violation. The `routingPath` field
+     * surfaces the decision branch for audit purposes; when the adopter has
+     * not opted in, the breakdown field is elided (backward-compat).
+     */
+    complianceClearance?: ComplianceClearanceResult;
   };
 }
 
@@ -139,6 +155,32 @@ export interface AdmissionCompositeOptions {
    * @see variant-admission.ts + spec/rfcs/RFC-0017 §5.4 + §6.2
    */
   variantContext?: VariantContext;
+  /**
+   * RFC-0009 Phase 4.1 — Eρ₅ Compliance Clearance context.
+   *
+   * When present AND `enabled: true`, the admission composite applies the
+   * Eρ₅ multiplier (categorical 0/1 gating) per RFC-0009 §7.1:
+   *
+   *   Eρ₅ = 0 if any declared regime is violated → composite gated to 0
+   *   Eρ₅ = 1 otherwise → composite unchanged
+   *
+   * When absent OR `enabled: false`, Eρ₅ is not applied — backward-compatible
+   * with Phase 2/3 behavior. The opt-in gate is intentional per RFC-0009 §10
+   * Phase 4; promotion to default-on is subject to ecosystem feedback.
+   *
+   * The regime set is the union of (a) each affected soul's
+   * `triad.engineering.complianceRegimes` (passed through
+   * `perSoulRegimes`) and (b) any RFC-0022 `CompliancePosture` regimes
+   * (passed through `posture`). Both pass the OQ-5 hard-regulatory scope
+   * filter; soft regimes are filtered at declaration time.
+   *
+   * Composes with `tessellationContext` — the soul scope from tessellation
+   * routing is used to select which souls' regimes apply to this work item.
+   *
+   * @see compliance-clearance.ts + spec/rfcs/RFC-0009 §7.1 + §10
+   * @see spec/rfcs/RFC-0022 (consumption surface)
+   */
+  complianceClearanceContext?: ComplianceClearanceContext;
 }
 
 export function computeAdmissionComposite(
@@ -254,12 +296,32 @@ export function computeAdmissionComposite(
   const designSystemReadiness = tessellationResult.er4;
   const executionReality = Math.min(baseExecutionReality * autonomyFactor, designSystemReadiness);
 
+  // ── RFC-0009 Phase 4.1: Eρ₅ Compliance Clearance ──────────────
+  // Categorical 0/1 gating per §7.1. When the adopter has opted in AND any
+  // declared regime is violated, the composite is gated to 0 (work item
+  // cannot proceed without resolving the violation). When the adopter has
+  // not opted in (default), this returns er5=1 and the composite is
+  // unchanged — full backward compatibility with Phase 2/3 behavior.
+  //
+  // Uses the same `affectedSoulIds` resolved by tessellation routing, so the
+  // regime check follows the work item's actual soul scope. Substrate-only
+  // work (affectedSoulIds = []) falls through to the `__platform` sentinel.
+  const complianceClearanceResult = computeComplianceClearance(
+    workItemId,
+    tessellationResult.affectedSoulIds,
+    options?.complianceClearanceContext,
+  );
+
   // ── HC (tanh-compressed with HC_design) ───────────────────────
   const humanCurve = computeAdmissionHumanCurve(input);
 
   // ── §A.6 admission subset composite ───────────────────────────
   const composite =
-    soulAlignment * demandPressureAdjusted * executionReality * (1 + humanCurve.hcComposite);
+    soulAlignment *
+    demandPressureAdjusted *
+    executionReality *
+    complianceClearanceResult.er5 *
+    (1 + humanCurve.hcComposite);
 
   const score: PriorityScore = {
     composite,
@@ -294,6 +356,10 @@ export function computeAdmissionComposite(
     options?.variantContext !== undefined && variantResult.routingPath !== 'no-variant-routing'
       ? variantResult
       : undefined;
+  // Compliance clearance breakdown surfaced ONLY when the adopter opted in
+  // (avoids polluting the breakdown shape for Phase 2/3 callers).
+  const complianceClearanceBreakdown =
+    options?.complianceClearanceContext?.enabled === true ? complianceClearanceResult : undefined;
 
   return {
     score,
@@ -309,6 +375,9 @@ export function computeAdmissionComposite(
       humanCurve,
       ...(tessellationBreakdown !== undefined ? { tessellation: tessellationBreakdown } : {}),
       ...(variantBreakdown !== undefined ? { variant: variantBreakdown } : {}),
+      ...(complianceClearanceBreakdown !== undefined
+        ? { complianceClearance: complianceClearanceBreakdown }
+        : {}),
     },
   };
 }

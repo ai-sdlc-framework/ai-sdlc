@@ -560,6 +560,20 @@ export {
   listSupportedFrameworks,
 } from './compliance-extended.js';
 
+// RFC-0009 Phase 4.1 — Eρ₅ Compliance Clearance
+export {
+  HARD_REGULATORY_REGIME_PREFIXES,
+  isHardRegulatoryRegime,
+  validateComplianceRegimes,
+  computeComplianceClearance,
+  type ValidateComplianceRegimesResult,
+  type ComplianceViolation,
+  type ComplianceViolationEntry,
+  type SoulComplianceRegimes,
+  type ComplianceClearanceContext,
+  type ComplianceClearanceResult,
+} from './compliance-clearance.js';
+
 // RFC-0022 Phase 1 — CompliancePosture schema + loader
 export {
   loadCompliancePosture,
