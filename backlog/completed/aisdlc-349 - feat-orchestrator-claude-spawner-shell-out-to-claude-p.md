@@ -1,6 +1,8 @@
 ---
 id: AISDLC-349
-title: 'feat(orchestrator): add --spawner claude that actually shells out to `claude -p` for autonomous tick'
+title: >-
+  feat(orchestrator): add --spawner claude that actually shells out to `claude
+  -p` for autonomous tick
 status: Done
 assignee: []
 created_date: '2026-05-16'
@@ -12,9 +14,16 @@ labels:
 dependencies: []
 priority: high
 references:
-  - pipeline-cli/src/runtime/spawners/claude-cli-inline.ts
   - pipeline-cli/src/orchestrator/loop.ts
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
+drift_log:
+  - date: '2026-05-25'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/runtime/spawners/claude-cli-inline.ts
+    resolution: flagged
+drift_checked: '2026-05-25'
 ---
 
 ## Bug
