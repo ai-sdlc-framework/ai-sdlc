@@ -13,6 +13,8 @@ labels:
   - docs
 dependencies:
   - AISDLC-293
+blocked:
+  reason: 'RFC-0035 OQ status acknowledged — RFC is Ready for Review with all 14 OQs resolved (operator walkthrough 2026-05-15); Phase 11 docs ship while the RFC awaits per-owner sign-off per the documented critical path. RFC-0011 OQ-10 is a cost-estimation question, non-blocking for a Phase 11 docs PR that only references RFC-0011.'
 references:
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
   - docs/operations/dor-promotion.md
@@ -108,6 +110,6 @@ corpus-or-override two-path structure operators already know.
 ### Follow-up
 
 - (none) — the runbook is the Phase 11 deliverable per RFC-0035 §14.
-  Phase 12+ (governance reporting integration, RFC-0033) is tracked
-  separately.
+  Downstream phases (governance reporting integration) are tracked
+  separately under their own RFCs.
 <!-- SECTION:FINAL_SUMMARY:END -->
