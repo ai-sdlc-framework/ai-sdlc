@@ -11,6 +11,15 @@
  */
 
 /**
+ * Stale-vector policy per RFC-0019 OQ-2 re-walkthrough. Defines the
+ * behaviour when a vector is read but is stale relative to the adapter's
+ * current `(provider, modelVersion)`. Consumers MAY pin a stricter
+ * value at the API site (e.g., RFC-0009 Eτ_tessellation_drift pins
+ * `'fail-loud'` regardless of org default).
+ */
+export type EmbeddingStaleVectorPolicy = 'lazy-re-embed' | 'fail-loud' | 'warn';
+
+/**
  * A single stored vector entry per RFC-0019 §8.1.
  *
  * Both `embeddingProvider` and `embeddingModelVersion` MUST be set on every

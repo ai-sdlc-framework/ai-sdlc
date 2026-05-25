@@ -408,6 +408,57 @@ export interface NotificationsConfig {
   templates: Record<string, NotificationTemplate>;
 }
 
+/**
+ * Stale-vector policy per RFC-0019 OQ-2 re-walkthrough.
+ *
+ * Per-org default; consumers MAY pin a stricter policy at the API site:
+ * - `lazy-re-embed` (default): silently re-embed stale vectors on read.
+ *   Optimal for read-time consumers (PPA similarity, classifier embeddings,
+ *   backlog auto-tagging). Destructive for historical-trajectory consumers.
+ * - `fail-loud`: refuse comparison and emit a HIGH-severity Decision. Pin
+ *   this at the API site for drift/trajectory consumers (RFC-0009 Eτ).
+ * - `warn`: log a warning but return the stale vector. Use only with the
+ *   strong caveat that downstream math may be silently wrong.
+ */
+export type EmbeddingStaleVectorPolicy = 'lazy-re-embed' | 'fail-loud' | 'warn';
+
+/**
+ * Per-org deprecation override per RFC-0019 OQ-4 re-walkthrough.
+ * Three-layer precedence: framework default (90d) → adapter
+ * defaultGracePeriodDays → this per-org override.
+ */
+export interface EmbeddingDeprecationOverrides {
+  gracePeriodDays?: number;
+  strictModeAtDeprecatedAt?: boolean;
+}
+
+/**
+ * Pipeline-level embedding configuration per RFC-0019 §10.1.
+ *
+ * Absent = embedding framework disabled (consumers emit
+ * `EmbeddingProviderNotConfigured`). Present + `AI_SDLC_EMBEDDING_PROVIDER=on`
+ * = pipeline-load resolves the named adapter from the registry and
+ * instantiates the named storage backend.
+ */
+export interface EmbeddingSpec {
+  /** Canonical adapter alias resolved against the registry. */
+  provider: string;
+  /** Adapter alias to fall back to when the primary is unavailable. */
+  fallback?: string;
+  /** Backend identifier; defaults to 'jsonl'. */
+  storageBackend?: string;
+  /** Backend-specific configuration. Opaque to the framework. */
+  storageBackendConfig?: Record<string, unknown>;
+  /** Per-org stale-vector default; consumers may override at the API site. */
+  staleVectorPolicy?: EmbeddingStaleVectorPolicy;
+  /** When true (default) write paths embed-and-store automatically. */
+  autoEmbedOnWrite?: boolean;
+  /** Maximum texts per embedBatch() call. */
+  maxBatchSize?: number;
+  /** Per-org deprecation override (composes with adapter + framework defaults). */
+  deprecationOverrides?: EmbeddingDeprecationOverrides;
+}
+
 export interface PipelineSpec {
   triggers: Trigger[];
   providers: Record<string, Provider>;
@@ -420,6 +471,8 @@ export interface PipelineSpec {
   notifications?: NotificationsConfig;
   costPolicy?: CostPolicy;
   priorityPolicy?: PriorityPolicy;
+  /** Embedding-provider configuration per RFC-0019 §10.1 (AISDLC-340). */
+  embedding?: EmbeddingSpec;
 }
 
 export type PipelinePhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Suspended';

@@ -47,7 +47,11 @@ import {
   type FeatureSelection,
   type WizardFlags,
 } from './init-features.js';
-import { CALIBRATION_YAML_STUB, buildSoulDsbTemplate } from './init-templates.js';
+import {
+  CALIBRATION_YAML_STUB,
+  EMBEDDING_CONFIG_YAML_STUB,
+  buildSoulDsbTemplate,
+} from './init-templates.js';
 
 export const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
@@ -425,6 +429,12 @@ function initProject(
     // confidence thresholds + rejection weights/floor for the DID revision
     // proposal mechanism. Defaults match the operator-affirmed shipped values.
     { name: 'calibration.yaml', content: CALIBRATION_YAML_STUB },
+    // RFC-0019 §15.1 per-org embedding-framework defaults (AISDLC-340).
+    // Documents every NEW re-walkthrough field (scaleEscalationHeuristic,
+    // perConsumerOverridesAllowed, crossProviderPolicy split, catalogDedup
+    // milestones, unifiedCostReport, adapterBillingModelRespected). The
+    // file is OPTIONAL — when absent, framework defaults match these values.
+    { name: 'embedding-config.yaml', content: EMBEDDING_CONFIG_YAML_STUB },
   ];
 
   if (dryRun) {

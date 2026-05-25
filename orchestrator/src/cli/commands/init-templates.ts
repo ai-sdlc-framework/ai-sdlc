@@ -693,6 +693,88 @@ calibration:
 `;
 
 /**
+ * `.ai-sdlc/embedding-config.yaml` — per-org embedding-framework defaults
+ * per RFC-0019 §15.1 (operator re-walkthrough 2026-05-21). Includes every
+ * NEW field surfaced by the re-walkthrough (marked as such inline):
+ *   - scaleEscalationHeuristic (OQ-1)
+ *   - perConsumerOverridesAllowed (OQ-2)
+ *   - crossProviderPolicy split (OQ-3)
+ *   - catalogDedup milestones (OQ-4)
+ *   - unifiedCostReport (OQ-6 + OQ-7)
+ *   - adapterBillingModelRespected (OQ-7)
+ *
+ * The framework reads this file when `AI_SDLC_EMBEDDING_PROVIDER=on` AND
+ * `Pipeline.spec.embedding` is present. Per-pipeline fields in
+ * `Pipeline.spec.embedding` override the corresponding per-org defaults here.
+ *
+ * The file is OPTIONAL — when absent, framework defaults apply (matching
+ * the values below). Operators commit this file to make the defaults
+ * explicit + reviewable.
+ */
+export const EMBEDDING_CONFIG_YAML_STUB = `# Per-org embedding-framework defaults (RFC-0019 §15.1).
+#
+# Read by the framework when AI_SDLC_EMBEDDING_PROVIDER=on. Per-pipeline
+# fields under spec.embedding override these defaults. The file is
+# OPTIONAL — when absent, the framework defaults below apply.
+#
+# Reference: spec/rfcs/RFC-0019-embedding-provider-adapter.md §15.1
+# Runbook:   docs/operations/embedding-providers.md
+
+embedding:
+  provider: openai-text-embedding-3-small   # default adapter (OQ-5 + Phase 1)
+
+  storage:                              # OQ-1 — JSONL backend + scale-escalation heuristic
+    backend: jsonl
+    path: \${ARTIFACTS_DIR}/_embeddings/
+    gcRetentionDays: 90                 # mtime-based GC threshold
+    scaleEscalationHeuristic:           # NEW (re-walkthrough): operator-visible swap trigger
+      maxEntriesPerProvider: 100000     # > 100K → swap to sqlite or vector DB
+      maxP95ReadLatencyMs: 250          # OR > 250ms p95 read → swap
+      operatorRunbook: docs/operations/embedding-providers.md#scale-escalation
+
+  staleVectorPolicy:                    # OQ-2 — per-org default + per-consumer override
+    default: lazy-re-embed              # alternatives: fail-loud | warn
+    logToCatalog: true                  # log every stale-vector event as Decision
+    perConsumerOverridesAllowed: true   # NEW (re-walkthrough): consumers may pin policy at API
+                                        # site (e.g., RFC-0009 Eτ drift pins fail-loud regardless
+                                        # of org default to preserve historical-trajectory fidelity)
+
+  crossProviderPolicy:                  # OQ-3 — split (re-walkthrough refinement)
+    crossProvider: refuse               # ALWAYS strict no-op cross-PROVIDER (openai vs cohere)
+                                        # → Decision: cross-provider-comparison-attempted
+    crossVersionWithinProvider: delegate-to-staleVectorPolicy
+                                        # cross-VERSION delegates to OQ-2 (resolves v0.2 conflict)
+
+  deprecation:                          # OQ-4 — three-layer precedence + catalog dedup
+    gracePeriodDays: 90                 # framework default; adapter may declare defaultGracePeriodDays
+    strictModeAtDeprecatedAt: false
+    catalogDedup:                       # NEW (re-walkthrough): prevent Decision flood under orchestrator
+      enabled: true
+      milestonesDaysBeforeDeprecatedAt: [89, 60, 30, 7, 1]
+                                        # emit Decisions at milestones, NOT per-load
+
+  costTracking:                         # OQ-6 — distinct line item + per-consumer attribution
+    lineItem: embeddingTokens
+    budgetIntegration: rfc-0004
+    consumerLabelRequired: false        # NEW (re-walkthrough): optional but recommended;
+                                        # callers pass consumerLabel for per-category attribution
+                                        # (e.g., 'rfc-0009-tessellation-drift', 'rfc-0008-ppa-similarity')
+    unifiedCostReport:                  # NEW (re-walkthrough): cross-substrate finance view
+      enabled: true                     # aggregates embeddingTokens + inputTokens + outputTokens +
+                                        # SubscriptionLedger window cost; tagged by costModel
+      costModelLabels:
+        - subscription-quota            # Claude Code Max / Codex
+        - pay-per-token                 # OpenAI / Cohere / future Anthropic embeddings if launched
+
+  subscriptionLedgerInteraction:        # OQ-7 — separation + per-adapter billingModel
+    consumeQuotaDefault: false          # default for pay-per-token adapters
+    adapterBillingModelRespected: true  # NEW (re-walkthrough): adapter declares
+                                        # 'pay-per-token' | 'subscription-quota' in capability matrix;
+                                        # subscription-quota adapters route through SubscriptionLedger
+                                        # (e.g., future Anthropic embeddings if shipped)
+`;
+
+/**
  * Per-soul DesignSystemBinding template (RFC-0009 Phase 2.2).
  *
  * Scaffolded at `.ai-sdlc/souls/<slug>/design-system-binding.yaml` for

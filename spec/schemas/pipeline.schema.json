@@ -258,6 +258,10 @@
         "priorityPolicy": {
           "$ref": "#/$defs/PriorityPolicy"
         },
+        "embedding": {
+          "$ref": "#/$defs/EmbeddingSpec",
+          "description": "Optional embedding-provider configuration per RFC-0019 §10.1. When absent, the embedding framework is disabled and consumers emit EmbeddingProviderNotConfigured. When present AND AI_SDLC_EMBEDDING_PROVIDER=on, pipeline-load resolves the named adapter from orchestrator/src/embedding/registry.ts and instantiates the named storage backend."
+        },
         "parallelism": {
           "$ref": "#/$defs/Parallelism",
           "description": "Concurrency configuration. When omitted, the pipeline executes serially. See RFC-0010 §6.1 / §9.1."
@@ -893,6 +897,66 @@
         },
         "adapters": {
           "$ref": "#/$defs/PriorityAdaptersConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EmbeddingSpec": {
+      "type": "object",
+      "description": "Embedding provider configuration per RFC-0019 §10.1. Absent = framework disabled. Present + AI_SDLC_EMBEDDING_PROVIDER=on = framework loads. See docs/operations/embedding-providers.md.",
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Canonical adapter alias resolved against orchestrator/src/embedding/registry.ts. Example: 'openai-text-embedding-3-small'. Unknown names fail pipeline-load with UnknownEmbeddingProvider."
+        },
+        "fallback": {
+          "type": "string",
+          "description": "Adapter alias to fall back to when the primary is unavailable. Same value as `provider` means no fallback. Subject to the same registry resolution."
+        },
+        "storageBackend": {
+          "type": "string",
+          "default": "jsonl",
+          "description": "Backend identifier resolved against orchestrator/src/embedding/storage/index.ts. v1 ships 'jsonl'; future backends ('sqlite', 'pgvector', 'qdrant') implement EmbeddingStorageBackend and self-register."
+        },
+        "storageBackendConfig": {
+          "type": "object",
+          "description": "Backend-specific configuration. Opaque to the framework; passed through to the backend constructor.",
+          "additionalProperties": true
+        },
+        "staleVectorPolicy": {
+          "type": "string",
+          "enum": ["lazy-re-embed", "fail-loud", "warn"],
+          "default": "lazy-re-embed",
+          "description": "Per-org default for stale-vector encounters per RFC-0019 OQ-2 re-walkthrough. Consumers MAY pin a stricter policy at the API site (e.g., RFC-0009 Eτ_tessellation_drift pins 'fail-loud' regardless of org default to preserve historical-trajectory fidelity)."
+        },
+        "autoEmbedOnWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, write paths embed-and-store automatically. When false, callers must explicitly invoke embed() + store."
+        },
+        "maxBatchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2048,
+          "description": "Maximum texts per embedBatch() call. Adapter-specific cap; framework chunks larger requests."
+        },
+        "deprecationOverrides": {
+          "type": "object",
+          "description": "Per-org deprecation override per RFC-0019 OQ-4 re-walkthrough. Overrides the adapter-declared defaultGracePeriodDays (which itself overrides the 90d framework default). Catalog dedup milestones (89/60/30/7/1 days before deprecatedAt) are applied uniformly.",
+          "properties": {
+            "gracePeriodDays": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Days before deprecatedAt at which warnings begin. Three-layer precedence: framework default (90d) → adapter defaultGracePeriodDays → this per-org override."
+            },
+            "strictModeAtDeprecatedAt": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, pipeline-load FAILS at deprecatedAt (operator-strict). When false (default), warnings continue past deprecatedAt and only removedAt fails the load."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

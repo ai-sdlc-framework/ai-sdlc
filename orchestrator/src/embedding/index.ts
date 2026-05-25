@@ -5,8 +5,9 @@
  * Phase 3: stale-vector policy, cross-provider compatibility, deprecation
  *          lifecycle (AISDLC-339). Migration tooling itself lives in
  *          `pipeline-cli/src/cli/embedding-bump.ts`.
+ * Phase 4 (AISDLC-340): pipeline-load wiring + first-consumer (Eτ drift) spec stub.
  *
- * Phases 4-5 (pipeline integration, soak) ship in AISDLC-340/341.
+ * Phase 5 (soak) ships in AISDLC-341.
  */
 
 export type {
@@ -42,6 +43,7 @@ export type { EmbeddingCostCallback } from './adapters/openai-text-embedding-3-s
 // Phase 2: vector storage backend + JSONL default + backend factory.
 export type {
   EmbeddingStorageBackend,
+  EmbeddingStaleVectorPolicy,
   VectorStoreEntry,
   VectorStoreFilter,
 } from './storage/types.js';
@@ -93,3 +95,26 @@ export {
   buildDedupKey,
   evaluateDeprecationLifecycle,
 } from './deprecation.js';
+
+// Phase 4 (AISDLC-340): pipeline-load wiring per RFC-0019 §10.1.
+export {
+  loadEmbeddingFromPipelineSpec,
+  isEmbeddingFrameworkEnabled,
+  resolveEffectiveGracePeriodDays,
+  EMBEDDING_DEFAULTS,
+} from './pipeline-load.js';
+export type {
+  EmbeddingSpecInput,
+  ResolvedEmbedding,
+  LoadEmbeddingOptions,
+  DeprecationWarningEvent,
+} from './pipeline-load.js';
+
+// Phase 4 (AISDLC-340): first downstream consumer spec stub
+// (RFC-0009 Eτ_tessellation_drift — runtime usage activates when AISDLC-317 ships).
+export {
+  TESSELLATION_DRIFT_CONSUMER_LABEL,
+  TESSELLATION_DRIFT_STALE_VECTOR_POLICY,
+  TESSELLATION_DRIFT_CONSUMER,
+  embedDriftSignal,
+} from './consumers/tessellation-drift.js';

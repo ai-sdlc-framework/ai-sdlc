@@ -49,7 +49,8 @@
     "cli-compliance-audit": "bin/cli-compliance-audit.mjs",
     "cli-import-spec": "bin/cli-import-spec.mjs",
     "cli-embedding-gc": "bin/cli-embedding-gc.mjs",
-    "cli-embedding-bump": "bin/cli-embedding-bump.mjs"
+    "cli-embedding-bump": "bin/cli-embedding-bump.mjs",
+    "cli-cost-report": "bin/cli-cost-report.mjs"
   },
   "exports": {
     ".": {
