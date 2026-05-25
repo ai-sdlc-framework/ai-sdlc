@@ -1,9 +1,10 @@
 ---
 id: AISDLC-428
 title: Exclude docs/examples/** from patch-coverage gate
-status: To Do
+status: Done
 assignee: []
-created_date: ''
+created_date: '2026-05-25'
+completed_date: '2026-05-25'
 updated_date: '2026-05-25 17:33'
 labels:
   - coverage-gate-fix
@@ -33,8 +34,7 @@ Matches the rationale already documented for `bin/*.mjs`,
 `ai-sdlc-plugin/hooks/*.js`, etc. — these are reference scaffolds 
 exercised via copy-paste, not via vitest instrumentation.
 
-## Scope
-1. Add the regex to `NON_INSTRUMENTED_PATTERNS` array
-2. Add a test in `scripts/check-pr-patch-coverage.test.mjs` asserting 
-   `docs/examples/foo.ts` is filtered out
-3. Push as a small focused PR; rebase #691 after merge
+## Acceptance Criteria
+- [x] AC-1: `scripts/check-pr-patch-coverage.mjs` `NON_INSTRUMENTED_PATTERNS` array contains the regex `/(^|\/)docs\/examples\//` matching all paths under `docs/examples/`.
+- [x] AC-2: `scripts/check-pr-patch-coverage.test.mjs` contains a regression test that commits a file at `docs/examples/translators/example-adopter.ts`, writes no coverage data, and asserts the gate exits 0 with `reason: 'no-instrumentable-changes'`.
+- [x] AC-3: `pnpm test` passes (no regression).
