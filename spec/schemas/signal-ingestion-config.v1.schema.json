@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/signal-ingestion-config.v1.schema.json",
+  "title": "AI-SDLC SignalIngestionConfig",
+  "description": "Per-org configuration for the RFC-0030 Signal Ingestion Pipeline. Lives on disk at .ai-sdlc/signal-ingestion.yaml. The orchestrator loader (orchestrator/src/signal-ingestion/config.ts) accepts either a top-level object (legacy / minimal form) OR the canonical envelope shape with `apiVersion: ai-sdlc.io/v1alpha1`, `kind: SignalIngestionConfig`, `spec: {...}` for forward-compat with the other AI-SDLC declarative resources.\n\nAll numeric weights/thresholds MUST be non-negative finite numbers. The `enabled` flag defaults to false — the signal-ingestion pipeline is OFF until the operator explicitly opts in (gated by the `AI_SDLC_SIGNAL_INGESTION` env flag during the soak window; see `docs/operations/signal-ingestion.md` and `docs/operations/signal-ingestion-promotion.md`).\n\nConfiguration changes to this file (tier-multiplier edits, threshold tweaks, adapter list changes) are governance-relevant and emit `SignalIngestionConfigChanged` events to `events.jsonl` per RFC-0030 §11 closing note. The orchestrator computes a diff against `DEFAULT_SIGNAL_INGESTION_CONFIG` at load time so the audit trail is queryable without requiring a separate config-history store.",
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "Envelope form (preferred)",
+      "type": "object",
+      "required": ["apiVersion", "kind", "spec"],
+      "properties": {
+        "apiVersion": {
+          "$ref": "common.schema.json#/$defs/apiVersion"
+        },
+        "kind": {
+          "type": "string",
+          "const": "SignalIngestionConfig"
+        },
+        "metadata": {
+          "$ref": "common.schema.json#/$defs/metadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/SignalIngestionSpec"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "title": "Bare-spec form (loader-tolerated; spec fields at top level)",
+      "$ref": "#/$defs/SignalIngestionSpec"
+    }
+  ],
+  "$defs": {
+    "SignalIngestionSpec": {
+      "type": "object",
+      "description": "Fully-resolved RFC-0030 signal ingestion spec. Every field is optional at the YAML layer — the loader fills missing fields from DEFAULT_SIGNAL_INGESTION_CONFIG. The schema documents the shape + defaults so editors with JSON Schema integration surface inline hints.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Master switch. When false (default), the pipeline emits no signals + the D1 composition layer falls through to the legacy backlog-only path. Flip to true after operator opt-in via the AI_SDLC_SIGNAL_INGESTION flag (soak window) or unconditionally post-promotion."
+        },
+        "tierMultipliers": {
+          "$ref": "#/$defs/TierMultipliers"
+        },
+        "icpResonanceWeights": {
+          "$ref": "#/$defs/IcpResonanceWeights"
+        },
+        "recencyHalfLifeDays": {
+          "type": "number",
+          "minimum": 0,
+          "default": 30,
+          "description": "Exponential decay half-life in days for the recency component. Signals older than ~6 months contribute < 2% of original weight at the default. RFC-0030 §6.3."
+        },
+        "tier2SignificanceThreshold": {
+          "$ref": "#/$defs/Tier2SignificanceThreshold"
+        },
+        "saResonanceThresholds": {
+          "$ref": "#/$defs/SaResonanceThresholds"
+        },
+        "clustering": {
+          "$ref": "#/$defs/ClusteringConfig"
+        },
+        "d1Composition": {
+          "$ref": "#/$defs/D1CompositionWeights"
+        },
+        "adapters": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Adapter names registered with the SignalSourceRegistry (e.g. signal-source-support-ticket, signal-source-community-thread, signal-source-manual). Default = ['signal-source-support-ticket', 'signal-source-community-thread']. RFC-0030 §5.",
+          "default": ["signal-source-support-ticket", "signal-source-community-thread"]
+        },
+        "acceptedLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2
+          },
+          "description": "BCP-47 language tags accepted by the classifier. Signals in unsupported languages are dropped + logged as a SignalLanguageUnsupported decision (RFC-0030 OQ-13.2 resolution). Default = ['en'] (v1 is English-only; multi-language deferred to v2).",
+          "default": ["en"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "TierMultipliers": {
+      "type": "object",
+      "description": "Per-customer-tier weight multipliers applied at D1 scoring time. The Churned multiplier (default 2.0) is the highest of all tiers because demand validated by willingness-to-pay-and-found-wanting is the strongest signal of product-market gap. RFC-0030 §6.1.",
+      "properties": {
+        "enterprise": { "type": "number", "minimum": 0, "default": 3.0 },
+        "mid": { "type": "number", "minimum": 0, "default": 1.5 },
+        "smb": { "type": "number", "minimum": 0, "default": 1.0 },
+        "free": { "type": "number", "minimum": 0, "default": 0.5 },
+        "churned": { "type": "number", "minimum": 0, "default": 2.0 }
+      },
+      "additionalProperties": false
+    },
+    "IcpResonanceWeights": {
+      "type": "object",
+      "description": "Per-ICP-resonance weight multipliers. Strong = signal source matches declared ICP segments verbatim. Partial = adjacent segment. Weak = peripheral. RFC-0030 §6.2.",
+      "properties": {
+        "strong": { "type": "number", "minimum": 0, "default": 1.5 },
+        "partial": { "type": "number", "minimum": 0, "default": 1.0 },
+        "weak": { "type": "number", "minimum": 0, "default": 0.5 }
+      },
+      "additionalProperties": false
+    },
+    "Tier2SignificanceThreshold": {
+      "type": "object",
+      "description": "Significance gate Tier 2 signals (community, competitive) must cross before they feed D1. Below threshold = monitored only. RFC-0030 §8.",
+      "properties": {
+        "minSignalCount": {
+          "type": "number",
+          "minimum": 0,
+          "default": 5,
+          "description": "Minimum number of signals in the cluster to qualify."
+        },
+        "minUniqueSources": {
+          "type": "number",
+          "minimum": 0,
+          "default": 3,
+          "description": "Minimum number of distinct sources in the cluster."
+        },
+        "minTier1SignalCount": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1,
+          "description": "Minimum number of Tier 1 signals required in the cluster (\"≥1 Tier 1 signal required\" is the structural defense against adversarial flooding per OQ-13.5)."
+        },
+        "minClusterAgeDays": {
+          "type": "number",
+          "minimum": 0,
+          "default": 7,
+          "description": "Minimum cluster age in days (the cluster has persisted past initial-buzz)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "SaResonanceThresholds": {
+      "type": "object",
+      "description": "Soul Authority resonance threshold bands for D1 weighting. ≥ fullWeight → full weight. discounted ≤ x < fullWeight → weight × 0.7. excluded ≤ x < discounted → weight × 0.3 (flagged for review). x < excluded (typically 0.0) → excluded from D1. RFC-0030 §9.",
+      "properties": {
+        "fullWeight": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7 },
+        "discounted": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.4 },
+        "excluded": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.0 }
+      },
+      "additionalProperties": false
+    },
+    "ClusteringConfig": {
+      "type": "object",
+      "description": "Clustering algorithm + threshold. BM25 + structural overlap is the default (no external dependencies). The `embedding` algorithm requires a configured RFC-0019 embedding provider adapter. RFC-0030 §7.",
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": ["bm25", "embedding"],
+          "default": "bm25"
+        },
+        "similarityThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.6
+        }
+      },
+      "additionalProperties": false
+    },
+    "D1CompositionWeights": {
+      "type": "object",
+      "description": "RFC-0030 §10 non-replacement weighting: the signal-pipeline-derived demand stream and the human-authored backlog-item demand stream both feed D1. The composer normalises the pair so any positive values are meaningful (e.g. {1, 3} → {0.25, 0.75}). Default = 50/50 — neither stream dominates out of the box. AISDLC-347 / Phase 5.",
+      "properties": {
+        "signalPipelineWeight": { "type": "number", "minimum": 0, "default": 0.5 },
+        "backlogItemWeight": { "type": "number", "minimum": 0, "default": 0.5 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

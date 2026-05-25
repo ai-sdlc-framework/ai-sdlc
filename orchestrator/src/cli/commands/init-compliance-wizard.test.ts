@@ -147,6 +147,7 @@ const baseFlags: WizardFlags = {
   withClassifier: false,
   withBranchProtection: false,
   withWorkflows: false,
+  withSignalIngestion: false,
   add: undefined,
   dryRun: false,
   force: false,

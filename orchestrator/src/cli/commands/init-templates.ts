@@ -1091,6 +1091,179 @@ export const QUALITY_MONITORING_TEMPLATES: FeatureTemplateSet = {
 };
 
 /**
+ * `.ai-sdlc/signal-ingestion.yaml` stub — RFC-0030 Signal Ingestion Pipeline.
+ *
+ * AISDLC-348 / Phase 6: ships the full §11 config schema with every block
+ * commented-out under `enabled: false`. The pipeline is OFF until the
+ * operator explicitly flips `enabled: true` AND opts in via the
+ * `AI_SDLC_SIGNAL_INGESTION` flag during the soak window.
+ *
+ * Like `QUALITY_MONITORING_CONFIG_STUB`, this file is documentation-as-data:
+ * the runtime defaults inside `orchestrator/src/signal-ingestion/config.ts`
+ * (DEFAULT_SIGNAL_INGESTION_CONFIG) are the source of truth, but operators
+ * get a complete cribsheet of what they can tune. Tier multipliers, ICP
+ * resonance weights, SA-resonance thresholds, Tier-2 significance gate,
+ * clustering algorithm, D1 composition split, and adapter list are all
+ * documented inline with the shipped defaults.
+ *
+ * Drift policy: when DEFAULT_SIGNAL_INGESTION_CONFIG gains new fields,
+ * mirror them here so freshly-scaffolded configs are immediately complete.
+ * The values in the commented blocks below MUST match the constants in
+ * `config.ts`.
+ *
+ * Configuration changes to this file emit `SignalIngestionConfigChanged`
+ * events to `events.jsonl` (see RFC-0030 §11 closing note + AISDLC-348
+ * governance event logger). Operators should treat tier-multiplier edits,
+ * threshold tweaks, and adapter list changes as governance-relevant: they
+ * change which customer signals the framework treats as load-bearing
+ * demand and therefore affect D1 scoring upstream of the dispatcher.
+ */
+export const SIGNAL_INGESTION_CONFIG_STUB = `# RFC-0030 Signal Ingestion Pipeline configuration (§11).
+#
+# Per-org config for the Demand Sources → D1 pipeline. Pluggable source
+# adapters fetch raw signals (support tickets, community threads, manual
+# entries), classify them by tier + ICP + recency, cluster them into
+# demand themes, filter through SA resonance, and feed D1 cluster-level
+# demand scores into PPA.
+#
+# Ships DISABLED by default. The pipeline is gated by both:
+#   1. \`spec.enabled: true\` in this file
+#   2. \`AI_SDLC_SIGNAL_INGESTION\` env flag set to a truthy value during
+#      the soak window (1/true/yes/on). Post-promotion the flag is default-on
+#      and only the YAML toggle matters.
+#
+# Configuration changes emit \`SignalIngestionConfigChanged\` governance
+# events to \`<ARTIFACTS_DIR>/_orchestrator/events-YYYY-MM-DD.jsonl\`. Edits
+# to tier multipliers, thresholds, or adapter lists are governance-relevant
+# (RFC-0030 §11 closing note) — log + product-lead review them like any
+# other DID-adjacent decision.
+#
+# Operator runbook: docs/operations/signal-ingestion.md
+# Promotion runbook: docs/operations/signal-ingestion-promotion.md
+# Schema: spec/schemas/signal-ingestion-config.v1.schema.json
+# RFC: spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
+
+apiVersion: ai-sdlc.io/v1alpha1
+kind: SignalIngestionConfig
+metadata:
+  name: signal-ingestion
+spec:
+  # Master switch. Flip to \`true\` AFTER:
+  #   1. You have configured at least one working adapter under \`adapters:\`
+  #   2. You have set the \`AI_SDLC_SIGNAL_INGESTION\` env flag (soak window)
+  #   3. You have read docs/operations/signal-ingestion.md for the runbook
+  enabled: false
+
+  # Tier multipliers (RFC-0030 §6.1).
+  # Per-customer-tier weight applied at D1 scoring time. The Churned multiplier
+  # (default 2.0) is intentionally high: churned customers are the strongest
+  # signal of product-market gap. Tune for your deployment heterogeneity —
+  # B2B enterprise platforms typically raise \`enterprise\` (e.g. 5.0) and
+  # flatten \`smb\` / \`free\` (e.g. 0.25). Consumer products typically flatten
+  # all tiers to ~1.0 since tier is less informative.
+  # tierMultipliers:
+  #   enterprise: 3.0
+  #   mid: 1.5
+  #   smb: 1.0
+  #   free: 0.5
+  #   churned: 2.0
+
+  # ICP resonance weights (RFC-0030 §6.2).
+  # Strong = signal source matches declared ICP segments verbatim.
+  # Partial = adjacent segment (e.g. enterprise but wrong industry vertical).
+  # Weak = peripheral (e.g. student account on a B2B product).
+  # icpResonanceWeights:
+  #   strong: 1.5
+  #   partial: 1.0
+  #   weak: 0.5
+
+  # Recency decay half-life in days (RFC-0030 §6.3).
+  # Exponential decay; signals older than ~6 months contribute < 2% of their
+  # original weight at the default. Shorten (e.g. 14) for rapidly-evolving
+  # products; lengthen (e.g. 60) for products with slow signal cycles.
+  # recencyHalfLifeDays: 30
+
+  # Tier 2 significance threshold (RFC-0030 §8).
+  # Tier 2 signals (community, competitive) only feed D1 once a cluster crosses
+  # ALL of these gates. The \`minTier1SignalCount: 1\` gate is the structural
+  # defense against adversarial flooding (OQ-13.5): community buzz without
+  # any direct customer signal stays in the monitor-only zone.
+  # tier2SignificanceThreshold:
+  #   minSignalCount: 5
+  #   minUniqueSources: 3
+  #   minTier1SignalCount: 1
+  #   minClusterAgeDays: 7
+
+  # SA resonance thresholds (RFC-0030 §9).
+  # Per RFC-0029 Principle 4 "The Soul Holds" — high-SA clusters get full
+  # weight, mid-SA discounted, low-SA flagged for review, zero-SA excluded.
+  # When aggregate cluster SA resonance drops below 0.4 sustained for
+  # 3 sprints, the SoulDriftDetected event fires with
+  # \`driftSource: demandMisalignment\`.
+  # saResonanceThresholds:
+  #   fullWeight: 0.7
+  #   discounted: 0.4
+  #   excluded: 0.0
+
+  # Clustering algorithm + similarity threshold (RFC-0030 §7).
+  # \`bm25\` is the deterministic-first default (no external dependencies).
+  # \`embedding\` requires a configured RFC-0019 embedding provider adapter.
+  # Raise \`similarityThreshold\` (closer to 1.0) for stricter clustering;
+  # lower for looser theme aggregation.
+  # clustering:
+  #   algorithm: bm25
+  #   similarityThreshold: 0.6
+
+  # D1 composition weights (RFC-0030 §10 / AISDLC-347 Phase 5).
+  # Non-replacement: signal-pipeline-derived demand and human-authored
+  # backlog-item demand both feed D1. The composer normalises the pair to
+  # sum to 1; default 50/50 keeps neither stream dominant out of the box.
+  # Raise \`signalPipelineWeight\` after the pipeline has soaked and you
+  # trust its output more than manual translation.
+  # d1Composition:
+  #   signalPipelineWeight: 0.5
+  #   backlogItemWeight: 0.5
+
+  # Adapter list (RFC-0030 §5).
+  # Each name must be registered with the SignalSourceRegistry. The shipped
+  # registry includes:
+  #   - signal-source-support-ticket (Tier 1 by default)
+  #   - signal-source-community-thread (Tier 2 by default)
+  #   - signal-source-manual (Tier 1; requires attestedBy + auto-filled
+  #     attestedAt; reuses the RFC-0022 OQ-2 audit-trail pattern)
+  # Adopters can register custom adapters via createDefaultSignalSourceRegistry()
+  # then \`.register(new CustomAdapter())\`.
+  # adapters:
+  #   - signal-source-support-ticket
+  #   - signal-source-community-thread
+
+  # Accepted languages (RFC-0030 OQ-13.2 resolution).
+  # Signals in unsupported languages are dropped at the classifier and logged
+  # as a SignalLanguageUnsupported decision. v1 ships English-only;
+  # multi-language is deferred to v2. To re-enable a language drop early
+  # (e.g. for testing), narrow this list to a single language.
+  # acceptedLanguages:
+  #   - en
+`;
+
+/**
+ * Signal-ingestion template set scaffolded by the wizard's
+ * \`--with-signal-ingestion\` / \`--add signal-ingestion\` flag (AISDLC-348).
+ *
+ * Ships the per-org config stub disabled-by-default. The pipeline runtime
+ * lives in \`orchestrator/src/signal-ingestion/\`; this template just gives
+ * adopters the documented config surface to start from.
+ *
+ * Idempotent: existing files at the target paths are skipped by the
+ * dispatcher.
+ */
+export const SIGNAL_INGESTION_TEMPLATES: FeatureTemplateSet = {
+  files: {
+    '.ai-sdlc/signal-ingestion.yaml': SIGNAL_INGESTION_CONFIG_STUB,
+  },
+};
+
+/**
  * Workflow template set scaffolded by `--with-workflows` / `--add workflows`
  * (AISDLC-261). Bundles all four canonical GitHub Actions workflow files that
  * an adopter needs for the AI-SDLC framework to function end-to-end:

@@ -64,6 +64,20 @@ export {
   type TierMultipliers,
 } from './config.js';
 
+// RFC-0030 §11 / AISDLC-348 Phase 6 — governance event logging
+export {
+  computeConfigDiff,
+  eventsFilePath as signalIngestionEventsFilePath,
+  loadSignalIngestionConfigWithGovernance,
+  writeSignalIngestionConfigChangedEvent,
+  type LoadConfigWithGovernanceOptions,
+  type LoadConfigWithGovernanceResult,
+  type SignalIngestionConfigChange,
+  type SignalIngestionConfigChangedEvent,
+  type SignalIngestionConfigDiff,
+  type WriteConfigChangeEventOpts,
+} from './governance-events.js';
+
 // RFC-0030 Phase 3 — clustering
 export {
   clusterSignals,

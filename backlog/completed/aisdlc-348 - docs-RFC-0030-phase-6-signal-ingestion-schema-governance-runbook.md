@@ -1,0 +1,90 @@
+---
+id: AISDLC-348
+title: 'docs: RFC-0030 Phase 6 — signal-ingestion.yaml schema + governance event logging + operator runbook'
+status: Done
+assignee: []
+created_date: '2026-05-16'
+updated_date: '2026-05-24'
+labels:
+  - rfc-0030
+  - signal-ingestion
+  - phase-6
+  - docs
+dependencies:
+  - AISDLC-347
+references:
+  - spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
+  - spec/schemas/signal-ingestion-config.v1.schema.json
+  - docs/operations/signal-ingestion.md
+  - docs/operations/signal-ingestion-promotion.md
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Phase 6 of RFC-0030 §11. Ships the per-org config schema + governance event logging + operator runbook.
+
+## Scope (RFC-0030 §11)
+
+- `spec/schemas/signal-ingestion-config.v1.schema.json` — JSON Schema for `SignalIngestionConfig` per §11.
+- `.ai-sdlc/signal-ingestion.yaml` template ships in `ai-sdlc init` with documented defaults.
+- **Governance event logging:** configuration changes (tier multiplier edits, threshold tweaks, adapter list changes) emit governance events to `events.jsonl` per §11 closing note ("Configuration changes require Product Lead approval (logged as governance events; not DID changes but governance-relevant)"). Composes with RFC-0033 governance reporting layer (when shipped).
+- **Operator runbook:** `docs/operations/signal-ingestion.md` covering: adapter configuration, tier-multiplier tuning, SA-resonance threshold calibration, flooding-detection sensitivity, manual signal entry workflow.
+- Promotion runbook section: `AI_SDLC_SIGNAL_INGESTION` flag promotion to default-on (corpus-driven; matches RFC-0014/0015 promotion convention).
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+
+<!-- AC:BEGIN -->
+- [x] #1 `spec/schemas/signal-ingestion-config.v1.schema.json` ships
+- [x] #2 `ai-sdlc init` template ships `.ai-sdlc/signal-ingestion.yaml` with defaults
+- [x] #3 Configuration changes emit governance events to events.jsonl
+- [x] #4 `docs/operations/signal-ingestion.md` operator runbook published
+- [x] #5 Promotion runbook covers: adopter-corpus threshold, spot-check protocol, rollback, post-flip monitoring
+- [x] #6 Cross-references RFC-0011 / RFC-0014 / RFC-0015 promotion runbooks
+<!-- AC:END -->
+
+## Final Summary
+
+### Summary
+Phase 6 of RFC-0030: ships the per-org `SignalIngestionConfig` JSON Schema, scaffolds the `.ai-sdlc/signal-ingestion.yaml` template via `ai-sdlc init --with-signal-ingestion` / `--add signal-ingestion`, adds the governance event logger that emits `SignalIngestionConfigChanged` events to the orchestrator's date-rotated `events.jsonl` stream when the loaded config drifts from defaults (or a supplied previous snapshot), and publishes the operator runbook + promotion runbook following the hybrid corpus/override pattern established by RFC-0011 / RFC-0014 / RFC-0015.
+
+### Changes
+- `spec/schemas/signal-ingestion-config.v1.schema.json` (new): JSON Schema with envelope + bare-spec oneOf for backward compat, full `$defs` for all sub-config blocks.
+- `orchestrator/src/signal-ingestion/governance-events.ts` (new): `computeConfigDiff()` + `writeSignalIngestionConfigChangedEvent()` + `loadSignalIngestionConfigWithGovernance()`; writes to the same date-rotated file pipeline-cli's `writeEvent()` uses so the TUI events pane surfaces config changes alongside dispatch events.
+- `orchestrator/src/signal-ingestion/governance-events.test.ts` (new): 14 tests, governance-events.ts coverage 99.15% lines / 100% functions.
+- `orchestrator/src/signal-ingestion/index.ts` (modified): exports the governance surface.
+- `orchestrator/src/cli/commands/init-templates.ts` (modified): `SIGNAL_INGESTION_CONFIG_STUB` + `SIGNAL_INGESTION_TEMPLATES`.
+- `orchestrator/src/cli/commands/init-features.ts` (modified): `FeatureSelection.signalIngestion` + `WizardFlags.withSignalIngestion` + prompt + dispatcher + next-steps copy.
+- `orchestrator/src/cli/commands/init.ts` (modified): `--with-signal-ingestion` flag + `signal-ingestion` validateAddArg accept.
+- `orchestrator/src/cli/commands/init-features.test.ts` (modified): updated prompt-count + answer-array to include the new prompt.
+- `orchestrator/src/cli/commands/init-compliance-wizard.test.ts` (modified): updated `baseFlags` to include `withSignalIngestion: false`.
+- `docs/operations/signal-ingestion.md` (new): operator runbook covering all 11 sections — adapter setup, tier multipliers, SA-resonance thresholds, flooding detection, manual entry, governance audit trail.
+- `docs/operations/signal-ingestion-promotion.md` (new): promotion runbook (corpus path + override path + spot-check protocol + flag flip + rollback + post-flip monitoring).
+- `docs/operations/README.md` (modified): added Signal Ingestion section to the navigation map + flag table.
+- `docs/operations/init.md` (modified): documented `--with-signal-ingestion` and `--add signal-ingestion`.
+- `reference/src/core/generated-schemas.ts` (modified): auto-regenerated by `pnpm --filter @ai-sdlc/reference build` to include the new schema.
+
+### Design decisions
+- **Default OFF in `--yes` mode**: ALL_FEATURES sets `signalIngestion: false` because the pipeline is in soak; scaffolding the config on a fresh adopter who hasn't opted in via `AI_SDLC_SIGNAL_INGESTION` would be noise. Opt-in via `--with-signal-ingestion` is explicit.
+- **Self-contained governance writer** in `orchestrator/`: avoids inverting the orchestrator → pipeline-cli dependency direction. Reuses the same date-rotated file path (`_orchestrator/events-YYYY-MM-DD.jsonl`) so all observability flows through one TUI pane / `cli-status` view; the duplication is ~30 lines of `appendFileSync` + UTC date format.
+- **`comparedAgainst` discriminator** on the event: `'defaults'` for first-load drift, `'previous-load'` when caller supplies `previousConfigSnapshot`. Lets dashboards distinguish "operator opted in for the first time" from "operator tuned mid-run".
+- **Deterministic diff ordering**: changes are sorted lexicographically by `path` so the same drift always produces the same `changes` array (audit stability across operators + machines).
+- **Non-replacement composition**: the config stub ships with `enabled: false` and every override block commented-out so the file is documentation-as-data. The runtime defaults in `config.ts` remain the source of truth.
+
+### Verification
+- `pnpm --filter @ai-sdlc/reference build` — schema regenerated to 30 schemas total (was 29).
+- `pnpm --filter @ai-sdlc/orchestrator build` — clean.
+- `pnpm --filter @ai-sdlc/orchestrator test` — 3738 passed, 1 skipped.
+- `pnpm --filter @ai-sdlc/orchestrator test signal-ingestion` — 205 passed across 7 test files including 14 new governance-events tests.
+- `pnpm --filter @ai-sdlc/orchestrator test:coverage` — 93.98% lines (above 80% gate). governance-events.ts: 99.15% lines / 100% functions / 100% statements.
+- `pnpm build` — full workspace clean.
+- `pnpm lint` — clean.
+- `pnpm format:check` — clean.
+
+### Follow-up
+- `cli-signals add ...` TUI-friendly wrapper for the `signal-source-manual` adapter (operator runbook §6 mentions this as a future surface).
+- Future "Adapter Credential Management" RFC per OQ-13.1 — deferred from this RFC; tracked in the Decision Catalog.
+- Multi-language signal support per OQ-13.2 — deferred to v2; visible-gap accumulation surfaces real demand.
+- Flag-flip task once corpus is ready or operator-override evidence is in hand (see promotion runbook).

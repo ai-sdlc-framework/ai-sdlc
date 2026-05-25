@@ -63,6 +63,23 @@ Admission filter that ensures tasks are properly specified before agent dispatch
 
 ---
 
+### Signal Ingestion Pipeline
+
+Pluggable adapters fetch raw customer signals (support tickets, community threads, manual entries), classify them by tier + ICP + recency, cluster them into demand themes, filter through SA resonance, and feed cluster-level demand into PPA D1.
+
+| Runbook | Description |
+|---------|-------------|
+| [`signal-ingestion.md`](signal-ingestion.md) | Operator runbook — adapter setup, tier-multiplier tuning, SA-resonance threshold calibration, flooding-detection sensitivity, manual signal entry, governance-event audit |
+| [`signal-ingestion-promotion.md`](signal-ingestion-promotion.md) | Hybrid promotion runbook — corpus + spot-check evidence to flip `AI_SDLC_SIGNAL_INGESTION` default-on |
+
+**Feature flag:** `AI_SDLC_SIGNAL_INGESTION` (off — soak window)
+
+**RFC:** [`spec/rfcs/RFC-0030-signal-ingestion-pipeline.md`](../../spec/rfcs/RFC-0030-signal-ingestion-pipeline.md)
+
+**Schema:** [`spec/schemas/signal-ingestion-config.v1.schema.json`](../../spec/schemas/signal-ingestion-config.v1.schema.json)
+
+---
+
 ### Quality Gates and CI
 
 | Runbook | Description |
@@ -112,6 +129,7 @@ Admission filter that ensures tasks are properly specified before agent dispatch
 | `AI_SDLC_DEPS_COMPOSITION` | off | Dependency graph composition (`cli-deps snapshot/gc/inspect`) |
 | `AI_SDLC_TUI` | off | Operator TUI dashboard (`cli-tui`) |
 | `AI_SDLC_DOR_GATE` | warn-only | Definition of Ready admission gate |
+| `AI_SDLC_SIGNAL_INGESTION` | off | RFC-0030 signal ingestion pipeline (composes with `.ai-sdlc/signal-ingestion.yaml` `spec.enabled`) |
 
 Canonical truthy values for all flags: `1`, `true`, `yes`, `on` (case-insensitive). `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` also accepts `experimental` as the recommended opt-in value.
 

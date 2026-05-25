@@ -506,7 +506,8 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     addRaw === 'attestation' ||
     addRaw === 'classifier' ||
     addRaw === 'branch-protection' ||
-    addRaw === 'workflows'
+    addRaw === 'workflows' ||
+    addRaw === 'signal-ingestion'
   ) {
     add = addRaw;
   }
@@ -517,6 +518,7 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     withClassifier: !!opts.withClassifier,
     withBranchProtection: !!opts.withBranchProtection,
     withWorkflows: !!opts.withWorkflows,
+    withSignalIngestion: !!opts.withSignalIngestion,
     add,
     dryRun: !!opts.dryRun,
     workspace: typeof opts.workspace === 'string' ? opts.workspace : undefined,
@@ -530,7 +532,15 @@ function validateAddArg(
 ): { ok: true; value?: WizardFlags['add'] | 'souls' } | { ok: false; error: string } {
   if (addRaw === undefined || addRaw === null || addRaw === false) return { ok: true };
   if (typeof addRaw !== 'string') return { ok: false, error: `--add must be a string` };
-  const allowed = ['dor', 'attestation', 'classifier', 'branch-protection', 'workflows', 'souls'];
+  const allowed = [
+    'dor',
+    'attestation',
+    'classifier',
+    'branch-protection',
+    'workflows',
+    'signal-ingestion',
+    'souls',
+  ];
   if (!allowed.includes(addRaw)) {
     return {
       ok: false,
@@ -570,9 +580,14 @@ export const initCommand = new Command('init')
     '--force',
     'Overwrite existing workflow files (use with --with-workflows or --add workflows)',
   )
+  // ── AISDLC-348 RFC-0030 signal-ingestion scaffold flag ──────────────
+  .option(
+    '--with-signal-ingestion',
+    'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)',
+  )
   .option(
     '--add <feature>',
-    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection | workflows | souls',
+    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection | workflows | signal-ingestion | souls',
   )
   // ── RFC-0009 Phase 2.2 — per-soul DSB scaffolding ──────────────────
   .option(

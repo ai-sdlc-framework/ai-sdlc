@@ -122,6 +122,7 @@ const baseFlags: WizardFlags = {
   withClassifier: false,
   withBranchProtection: false,
   withWorkflows: false,
+  withSignalIngestion: false,
   add: undefined,
   dryRun: false,
   force: false,
@@ -156,7 +157,8 @@ describe('resolveFeatureSelection', () => {
 
   it('AC #1: prompts in the documented order when no flags are set', async () => {
     const { state, adapters } = makeStub({
-      promptAnswers: [true, false, true, false, true],
+      // 6 prompts: dor, attestation, classifier, branchProtection, workflows, signalIngestion
+      promptAnswers: [true, false, true, false, true, false],
     });
     const sel = await resolveFeatureSelection(baseFlags, adapters);
     expect(state.promptCalls.map((c) => c.question)).toEqual([
@@ -165,6 +167,7 @@ describe('resolveFeatureSelection', () => {
       'Add review classifier for cost-optimized reviews?',
       'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
       'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
+      'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
     ]);
     expect(sel).toEqual({
       dor: true,
@@ -172,12 +175,15 @@ describe('resolveFeatureSelection', () => {
       classifier: true,
       branchProtection: false,
       workflows: true,
+      signalIngestion: false,
     });
   });
 
   it('AC #3: --with-X flags suppress the matching prompt', async () => {
-    const { state, adapters } = makeStub({ promptAnswers: [true, true, true] });
-    // withDor + withClassifier set → only attestation + branchProtection + workflows are prompted
+    // withDor + withClassifier set → 4 prompts remain: attestation, branchProtection,
+    // workflows, signalIngestion. signalIngestion prompt answered false to match
+    // ALL_FEATURES (which carries signalIngestion: false per AISDLC-348 soak default).
+    const { state, adapters } = makeStub({ promptAnswers: [true, true, true, false] });
     const sel = await resolveFeatureSelection(
       { ...baseFlags, withDor: true, withClassifier: true },
       adapters,
@@ -186,6 +192,7 @@ describe('resolveFeatureSelection', () => {
       'Do you want attestation infrastructure (audit-only)?',
       'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
       'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
+      'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
     ]);
     expect(sel).toEqual(ALL_FEATURES);
   });
@@ -211,7 +218,8 @@ describe('resolveFeatureSelection', () => {
   });
 
   it('default-No prompt answer is honored', async () => {
-    const { adapters } = makeStub({ promptAnswers: [false, false, false, false, false] });
+    // 6 prompts: dor, attestation, classifier, branchProtection, workflows, signalIngestion.
+    const { adapters } = makeStub({ promptAnswers: [false, false, false, false, false, false] });
     const sel = await resolveFeatureSelection(baseFlags, adapters);
     expect(sel).toEqual(NO_FEATURES);
   });

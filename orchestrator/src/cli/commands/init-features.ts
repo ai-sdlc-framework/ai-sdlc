@@ -31,6 +31,7 @@ import {
   CLASSIFIER_TEMPLATES,
   DOR_TEMPLATES,
   HUSKY_PREPUSH_SIGN_SNIPPET,
+  SIGNAL_INGESTION_TEMPLATES,
   WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
 } from './init-templates.js';
@@ -655,6 +656,15 @@ export interface FeatureSelection {
    * Enabled by `--with-workflows` flag or `--add workflows` subcommand (AISDLC-261).
    */
   workflows: boolean;
+  /**
+   * `signalIngestion` — scaffold the RFC-0030 signal-ingestion config stub at
+   * `.ai-sdlc/signal-ingestion.yaml` (Phase 6 / AISDLC-348). The file ships
+   * `enabled: false`; the pipeline runtime stays dark until the operator
+   * explicitly flips it AND opts in via `AI_SDLC_SIGNAL_INGESTION` during
+   * the soak window. Default OFF in `--yes` mode (per the soak convention)
+   * but available via `--with-signal-ingestion` / `--add signal-ingestion`.
+   */
+  signalIngestion: boolean;
 }
 
 /** All feature flags off — used as the initial state before flags + prompts. */
@@ -664,15 +674,27 @@ export const NO_FEATURES: FeatureSelection = {
   classifier: false,
   branchProtection: false,
   workflows: false,
+  signalIngestion: false,
 };
 
-/** All features on — the answer used by `--yes` (accept all defaults). */
+/**
+ * All features on — the answer used by `--yes` (accept all defaults).
+ *
+ * Note: `signalIngestion` is deliberately FALSE in this set even though
+ * `--yes` accepts all *defaults*. RFC-0030's pipeline is gated by the
+ * `AI_SDLC_SIGNAL_INGESTION` env flag during its soak window, and the
+ * shipped default for the flag is OFF. Scaffolding the config stub on a
+ * fresh adopter who hasn't opted in would be noise; the file is only
+ * meaningful when the operator has explicit interest. Adopters opt in
+ * via `--with-signal-ingestion` or `--add signal-ingestion`.
+ */
 export const ALL_FEATURES: FeatureSelection = {
   dor: true,
   attestation: true,
   classifier: true,
   branchProtection: true,
   workflows: true,
+  signalIngestion: false,
 };
 
 /** Flag-bag controlling wizard behavior (already parsed from argv). */
@@ -694,11 +716,24 @@ export interface WizardFlags {
    */
   withWorkflows: boolean;
   /**
+   * `--with-signal-ingestion` scaffolds the RFC-0030 signal-ingestion config
+   * stub at `.ai-sdlc/signal-ingestion.yaml` without prompting (AISDLC-348).
+   * The file ships `enabled: false`; the pipeline stays dark until the
+   * operator explicitly opts in. Always OFF by default in `--yes` mode.
+   */
+  withSignalIngestion: boolean;
+  /**
    * `--add <feature>` extends an already-initialized repo with a single
    * feature without re-prompting. AC #7 (idempotent extension). When set,
    * the wizard short-circuits to scaffold ONLY this feature.
    */
-  add?: 'dor' | 'attestation' | 'classifier' | 'branch-protection' | 'workflows';
+  add?:
+    | 'dor'
+    | 'attestation'
+    | 'classifier'
+    | 'branch-protection'
+    | 'workflows'
+    | 'signal-ingestion';
   /** `--dry-run` — print what would be done, don't write. */
   dryRun: boolean;
   /**
@@ -1000,6 +1035,9 @@ export async function resolveFeatureSelection(
       case 'workflows':
         sel.workflows = true;
         break;
+      case 'signal-ingestion':
+        sel.signalIngestion = true;
+        break;
     }
     return sel;
   }
@@ -1074,6 +1112,20 @@ export async function resolveFeatureSelection(
     );
   }
 
+  // RFC-0030 Signal Ingestion Pipeline (AISDLC-348)
+  // Default to FALSE in the interactive prompt: the pipeline is in a soak
+  // window gated by AI_SDLC_SIGNAL_INGESTION; scaffolding the config on a
+  // fresh adopter who hasn't opted in is noise. Opt-in path: --with-signal-
+  // ingestion or --add signal-ingestion.
+  if (flags.withSignalIngestion) {
+    sel.signalIngestion = true;
+  } else {
+    sel.signalIngestion = await adapters.prompt(
+      'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
+      false,
+    );
+  }
+
   return sel;
 }
 
@@ -1125,6 +1177,7 @@ export async function applyFeatureSelection(
   if (selection.attestation) templateSets.push(ATTESTATION_TEMPLATES);
   if (selection.classifier) templateSets.push(CLASSIFIER_TEMPLATES);
   if (selection.workflows) templateSets.push(WORKFLOWS_TEMPLATES);
+  if (selection.signalIngestion) templateSets.push(SIGNAL_INGESTION_TEMPLATES);
 
   // AISDLC-261 PR #480 review fix: dedupe across template sets so e.g.
   // `ai-sdlc-gate.yml` (in BOTH BASELINE_WORKFLOW_TEMPLATES and
@@ -1416,6 +1469,24 @@ export function renderNextSteps(
     lines.push('       b) Set the AI_SDLC_PAT secret with write access to the repo.');
     lines.push('     Re-run with --force to overwrite workflows on a pre-261 repo:');
     lines.push('       ai-sdlc init --add workflows --force');
+    lines.push('');
+    stepN++;
+  }
+
+  if (selection.signalIngestion) {
+    lines.push(`${stepN}. RFC-0030 signal-ingestion config was scaffolded (DISABLED by default).`);
+    lines.push('     .ai-sdlc/signal-ingestion.yaml ships every block commented-out under');
+    lines.push('     enabled: false. The pipeline is gated by BOTH the YAML toggle AND the');
+    lines.push('     AI_SDLC_SIGNAL_INGESTION env flag during the soak window.');
+    lines.push('     To opt in:');
+    lines.push('       a) Read docs/operations/signal-ingestion.md (adapter setup +');
+    lines.push('          tier-multiplier + SA-threshold tuning + manual entry workflow).');
+    lines.push('       b) Set AI_SDLC_SIGNAL_INGESTION=1 in your shell / CI env.');
+    lines.push('       c) Edit .ai-sdlc/signal-ingestion.yaml, set spec.enabled: true,');
+    lines.push('          uncomment the adapters block, and confirm tier multipliers.');
+    lines.push('     Config edits emit SignalIngestionConfigChanged governance events to');
+    lines.push('     <ARTIFACTS_DIR>/_orchestrator/events-YYYY-MM-DD.jsonl.');
+    lines.push('     Promotion runbook: docs/operations/signal-ingestion-promotion.md');
     lines.push('');
     stepN++;
   }

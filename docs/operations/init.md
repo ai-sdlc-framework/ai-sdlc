@@ -79,8 +79,9 @@ Independent of any wizard answer, every run of `ai-sdlc init` writes:
 | `--with-classifier` | Scaffold classifier config stub without prompting. |
 | `--with-branch-protection` | Apply branch protection without prompting (requires `gh` on PATH). |
 | `--with-workflows` | Scaffold the full GitHub Actions workflow bundle (gate, review, attestation, auto-merge) without prompting (AISDLC-261). |
+| `--with-signal-ingestion` | Scaffold the RFC-0030 signal-ingestion config stub at `.ai-sdlc/signal-ingestion.yaml` (AISDLC-348). Disabled by default; opt in via `AI_SDLC_SIGNAL_INGESTION` during the soak window. |
 | `--force` | Overwrite existing workflow files. Only applies to `.github/workflows/` files — non-workflow files are always skipped for safety. Use with `--with-workflows` or `--add workflows` (AISDLC-261). |
-| `--add <feature>` | Extend an already-initialized repo with a single feature. `<feature>` is one of `dor`, `attestation`, `classifier`, `branch-protection`, `workflows`. Idempotent — files that already exist are left untouched (except with `--force` for `workflows`). The baseline scaffold is NOT re-written in `--add` mode. |
+| `--add <feature>` | Extend an already-initialized repo with a single feature. `<feature>` is one of `dor`, `attestation`, `classifier`, `branch-protection`, `workflows`, `signal-ingestion`. Idempotent — files that already exist are left untouched (except with `--force` for `workflows`). The baseline scaffold is NOT re-written in `--add` mode. |
 | `--dry-run` | Print what would happen without writing files. For branch protection this prints the JSON body of the `gh api` request. |
 | `--skip-mcp` | Skip MCP server auto-configuration (Claude Code, Cursor, etc.). |
 | `--cursor` | Force-install Cursor MCP config even if Cursor isn't detected on this machine. |
