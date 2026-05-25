@@ -175,9 +175,25 @@ describe('AC#11 — full deprecation lifecycle (integration)', () => {
   });
 });
 
-// ── AC#11 — mid-migration concurrent-read consistency ────────────────────────
+// ── AC#11 — JSONL backend read stability (orchestrator-side coverage) ────────
+//
+// NOTE (Iter 2 MAJOR): the TRUE mid-migration concurrency proof — launching
+// `executeMigration()` in a Promise + performing reads against the same file
+// during the rename window — lives in `pipeline-cli/src/cli/embedding-bump.test.ts`
+// (see the `AC#11 mid-migration concurrent reads` describe block there). That
+// test imports `executeMigration` directly, which orchestrator CANNOT do
+// because `@ai-sdlc/orchestrator` does not depend on `@ai-sdlc/pipeline-cli`
+// (the dependency direction is the inverse: pipeline-cli is the CLI runtime
+// that ships orchestrator-free by design). Cross-package importing here would
+// violate the workspace's dependency graph.
+//
+// What THIS test covers is the orchestrator-side half of AC#11: the JSONL
+// backend's read path returns consistent entries across repeated reads of a
+// seeded source file (no torn reads from the on-disk format, no partial line
+// parses). The full atomic-swap-under-concurrent-read coverage is in the
+// pipeline-cli test as referenced above.
 
-describe('AC#11 — mid-migration concurrent reads return consistent result', () => {
+describe('AC#11 — JSONL backend read stability across repeated reads', () => {
   let tmpDir: string;
   let backend: JsonlEmbeddingStorageBackend;
 
@@ -189,7 +205,7 @@ describe('AC#11 — mid-migration concurrent reads return consistent result', ()
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('AC#11: a read during migration sees EITHER the source file OR the target file — never a partial mix', async () => {
+  it('seeded source file returns consistent results across N repeated reads (no torn-read fragments)', async () => {
     // Seed source file with 5 entries.
     for (let i = 0; i < 5; i++) {
       await backend.write({
@@ -198,21 +214,19 @@ describe('AC#11 — mid-migration concurrent reads return consistent result', ()
       });
     }
 
-    // Read the source repeatedly. Each read should return EITHER the original
-    // entry OR null (if the migration removed the source) — never a corrupted
-    // entry with mismatched provider/textHash.
+    // Read the source repeatedly. Each read should return the original
+    // entry — never a corrupted entry with mismatched provider/textHash.
     const reads: Array<VectorStoreEntry | null> = [];
     for (let i = 0; i < 10; i++) {
       const result = await backend.read('t0', 'old-provider', 'old-ver');
       reads.push(result);
     }
     for (const r of reads) {
-      if (r !== null) {
-        expect(r.text).toBe('text-0');
-        expect(r.embeddingProvider).toBe('old-provider');
-        expect(r.embeddingModelVersion).toBe('old-ver');
-        expect(r.textHash).toBe('t0');
-      }
+      expect(r).not.toBeNull();
+      expect(r!.text).toBe('text-0');
+      expect(r!.embeddingProvider).toBe('old-provider');
+      expect(r!.embeddingModelVersion).toBe('old-ver');
+      expect(r!.textHash).toBe('t0');
     }
   });
 });

@@ -27,7 +27,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
@@ -279,6 +279,18 @@ export async function executeMigration(
   const toModelVersion = options?.toModelVersion ?? new Date().toISOString().slice(0, 10);
   const toFilePath = jsonlPath(embeddingsDir, toProvider, toModelVersion);
 
+  // Self-overwrite guard (Iter 2 CRITICAL): re-running with identical
+  // {provider, modelVersion} would resolve the target path back onto the source
+  // file, overwriting the source mid-rename and losing the .bak (the source has
+  // already been renamed away by the time we attempt to write). Refuse loudly.
+  if (resolvePath(toFilePath) === resolvePath(fromFile.filePath)) {
+    throw new Error(
+      `[cli-embedding-bump] --to resolves to the same path as --from ` +
+        `(${toFilePath}). Re-running with identical provider+modelVersion would ` +
+        `overwrite the source with re-embedded data and lose the backup. Refusing.`,
+    );
+  }
+
   const reEmbed = options?.reEmbed ?? STUB_REEMBED;
   const texts = entries.map((e) => e.text);
   const newVectors = await reEmbed(texts);
@@ -448,6 +460,13 @@ export async function runEmbeddingBumpCli(): Promise<void> {
             type: 'string',
             description: 'Target model version (defaults to today ISO date)',
           })
+          .option('allow-stub-reembed', {
+            type: 'boolean',
+            default: false,
+            description:
+              'TESTING ONLY: allow STUB_REEMBED (writes zero-vectors). ' +
+              'Without this flag, the CLI refuses to run until a real adapter is wired (AISDLC-340).',
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -455,6 +474,23 @@ export async function runEmbeddingBumpCli(): Promise<void> {
             description: 'Output format',
           }),
       async (args) => {
+        // MAJOR (Iter 2): the CLI handler does not yet wire a real embedding adapter.
+        // Without an explicit opt-in flag, executeMigration would default to
+        // STUB_REEMBED and silently write zero-vectors over real data in production.
+        // Refuse by default; emit a clearly-visible stderr warning when opted in.
+        if (!args['allow-stub-reembed']) {
+          throw new Error(
+            `[cli-embedding-bump] execute: no real embedding adapter wired. ` +
+              `STUB_REEMBED would write zero-vectors. Either pass ` +
+              `--allow-stub-reembed (for testing only) or wait for AISDLC-340 ` +
+              `to wire the real adapter.`,
+          );
+        }
+        process.stderr.write(
+          `[cli-embedding-bump] WARNING: using STUB_REEMBED (zero vectors). ` +
+            `This is for testing only — do not run in production.\n`,
+        );
+
         const embeddingsDir = join(args['artifacts-dir'], '_embeddings');
         const result = await executeMigration(embeddingsDir, args.from, args.to, {
           ...(args['to-model-version'] ? { toModelVersion: args['to-model-version'] } : {}),

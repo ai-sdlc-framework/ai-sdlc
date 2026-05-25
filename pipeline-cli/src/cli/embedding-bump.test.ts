@@ -11,7 +11,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -387,6 +395,157 @@ describe('executeMigration', () => {
     expect(out[0]).toHaveLength(1536);
     expect(out[0]!.every((v) => v === 0)).toBe(true);
   });
+
+  it('Iter 2 CRITICAL: refuses when --to resolves to the same path as --from (self-overwrite guard)', async () => {
+    // Seed a source file whose provider+modelVersion matches the eventual target.
+    // The file on disk holds entries with provider='p', modelVersion='v'. The
+    // migration's findFromFile() returns { filePath: <fileName>, modelVersion: 'v' },
+    // so passing toProvider='p' + toModelVersion='v' would resolve toFilePath
+    // back onto fromFile.filePath, overwriting the source with re-embedded data.
+    // The slug() helper sanitizes the filename so we need the on-disk name to
+    // match what jsonlPath() produces for the (toProvider, toModelVersion) pair.
+    const provider = 'p';
+    const modelVersion = 'v';
+    const fileName = `${provider}-${modelVersion}.jsonl`; // matches slug('p','v')
+    writeJsonlFile(embDir, fileName, [makeEntry('keep-me', provider, modelVersion, 4)]);
+
+    // Snapshot the source file contents to verify they're untouched after the throw.
+    const sourcePath = join(embDir, fileName);
+    const sourceContentBefore = readFileSync(sourcePath, 'utf-8');
+
+    await expect(
+      executeMigration(embDir, provider, provider, {
+        toModelVersion: modelVersion,
+        backupTimestamp: 's',
+      }),
+    ).rejects.toThrow(/same path as --from/i);
+
+    // Source file unchanged on disk — the guard fires BEFORE any rename.
+    expect(existsSync(sourcePath)).toBe(true);
+    expect(readFileSync(sourcePath, 'utf-8')).toBe(sourceContentBefore);
+
+    // No .bak file was created — the migration did not begin.
+    const bakFiles = readdirSync(embDir).filter((f) => f.includes('.bak.'));
+    expect(bakFiles).toHaveLength(0);
+
+    // No .tmp file was left behind either.
+    const tmpFiles = readdirSync(embDir).filter((f) => f.endsWith('.tmp'));
+    expect(tmpFiles).toHaveLength(0);
+  });
+});
+
+// ── AC#11 mid-migration concurrent reads — TRUE atomicity proof ──────────────
+//
+// Iter 2 MAJOR (option a): launch executeMigration() in a Promise while
+// firing repeated reads against the source path during the rename window.
+// Every read must return EITHER the original entries OR null/empty (if the
+// source has already been renamed to .bak) — never a partial mix, never a
+// half-written line. Each read uses a custom slow reEmbed to widen the window
+// between source-read and target-rename, giving the concurrent reads a real
+// chance to land mid-flight.
+
+describe('AC#11 mid-migration concurrent reads (true atomicity proof)', () => {
+  let tmpDir: string;
+  let embDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'aisdlc-339-true-mid-mig-'));
+    embDir = makeEmbeddingsDir(tmpDir);
+  });
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('concurrent reads of the source path during executeMigration see either complete source contents or post-rename absence', async () => {
+    const provider = 'old-prov';
+    const modelVersion = 'old-ver';
+    const fileName = `${provider}-${modelVersion}.jsonl`;
+    const sourcePath = join(embDir, fileName);
+
+    // Seed source with deterministic entries that we can verify byte-for-byte.
+    const entries: VectorStoreEntry[] = [];
+    for (let i = 0; i < 20; i++) {
+      entries.push(makeEntry(`text-${i}`, provider, modelVersion, 4));
+    }
+    writeJsonlFile(embDir, fileName, entries);
+    const sourceContent = readFileSync(sourcePath, 'utf-8');
+
+    // Slow reEmbed widens the window between "read source" and "rename source
+    // away to .bak". 50ms gives the concurrent read loop dozens of iterations.
+    const slowReEmbed: ReEmbedFn = async (texts) => {
+      await new Promise((res) => setTimeout(res, 50));
+      return texts.map(() => [0, 0, 0, 0]) as number[][];
+    };
+
+    // Launch migration in the background (don't await yet).
+    const migrationPromise = executeMigration(embDir, provider, 'new-prov', {
+      reEmbed: slowReEmbed,
+      toModelVersion: 'new-ver',
+      backupTimestamp: 'concurrent-read-test',
+    });
+
+    // Fire reads against the source path while the migration is in flight.
+    // Each read returns one of:
+    //   - the original source contents (migration hasn't reached step 5 yet)
+    //   - null (source has been renamed to .bak)
+    // Anything else (partial line, corrupted JSON, missing trailing newline)
+    // is a torn-read and a failure of atomicity.
+    type ReadOutcome =
+      | { phase: 'source-intact'; content: string }
+      | { phase: 'post-rename'; missing: true };
+    const reads: ReadOutcome[] = [];
+
+    const readUntilDone = async (): Promise<void> => {
+      while (true) {
+        if (existsSync(sourcePath)) {
+          const content = readFileSync(sourcePath, 'utf-8');
+          reads.push({ phase: 'source-intact', content });
+        } else {
+          reads.push({ phase: 'post-rename', missing: true });
+          break; // once source is gone, stop polling
+        }
+        // tight loop with cooperative yield
+        await new Promise((res) => setImmediate(res));
+      }
+    };
+
+    const [migrationResult] = await Promise.all([migrationPromise, readUntilDone()]);
+
+    // Every source-intact read MUST contain the EXACT original bytes — not a
+    // truncated prefix, not a partial line, not the new contents. This is the
+    // atomicity invariant: writes go through temp-then-rename, so a reader
+    // that sees the source path either sees it complete or sees nothing.
+    let sawIntact = false;
+    let sawPostRename = false;
+    for (const r of reads) {
+      if (r.phase === 'source-intact') {
+        sawIntact = true;
+        expect(r.content).toBe(sourceContent);
+      } else {
+        sawPostRename = true;
+      }
+    }
+    // We must have polled the path BOTH while the source existed (pre-step-5)
+    // AND after it was renamed (post-step-5). If we only saw post-rename the
+    // window was too tight; the 50ms slow re-embed should make pre-rename reads
+    // easy to catch.
+    expect(sawIntact).toBe(true);
+    expect(sawPostRename).toBe(true);
+
+    // After migration completes, source is gone, .bak exists with original
+    // contents, and target file holds the migrated entries.
+    expect(existsSync(migrationResult.fromFilePath)).toBe(false);
+    expect(existsSync(migrationResult.backupFilePath)).toBe(true);
+    expect(readFileSync(migrationResult.backupFilePath, 'utf-8')).toBe(sourceContent);
+    expect(existsSync(migrationResult.toFilePath)).toBe(true);
+
+    const migratedEntries = readJsonlEntries(migrationResult.toFilePath);
+    expect(migratedEntries).toHaveLength(entries.length);
+    for (let i = 0; i < entries.length; i++) {
+      expect(migratedEntries[i]!.text).toBe(`text-${i}`);
+      expect(migratedEntries[i]!.embeddingProvider).toBe('new-prov');
+    }
+  });
 });
 
 // ── CLI router tests (yargs router via process.argv mutation) ────────────────
@@ -576,6 +735,7 @@ describe('runEmbeddingBumpCli (yargs router coverage)', () => {
       'q',
       '--to-model-version',
       '2026-05-24',
+      '--allow-stub-reembed',
     );
     await runEmbeddingBumpCli();
 
@@ -601,6 +761,7 @@ describe('runEmbeddingBumpCli (yargs router coverage)', () => {
       'q',
       '--to-model-version',
       '2026-05-24',
+      '--allow-stub-reembed',
       '--format',
       'json',
     );
@@ -620,5 +781,78 @@ describe('runEmbeddingBumpCli (yargs router coverage)', () => {
     expect(payload.toModelVersion).toBe('2026-05-24');
     expect(payload.toFilePath).toContain('q-2026-05-24.jsonl');
     expect(payload.backupFilePath).toContain('.bak.');
+  });
+
+  it('Iter 2 MAJOR: execute without --allow-stub-reembed REFUSES (no real adapter wired)', async () => {
+    const artifactsDir = makeArtifactsDir();
+    seedSourceJsonl(artifactsDir, 'src.jsonl', [makeEntry('hello', 'p', 'v', 4)]);
+
+    setArgv(
+      'execute',
+      '--artifacts-dir',
+      artifactsDir,
+      '--from',
+      'p',
+      '--to',
+      'q',
+      '--to-model-version',
+      '2026-05-24',
+    );
+
+    await expect(runEmbeddingBumpCli()).rejects.toThrow(
+      /no real embedding adapter wired.*STUB_REEMBED would write zero-vectors/s,
+    );
+
+    // No target file written — the refusal happened before executeMigration ran.
+    const embDir = join(artifactsDir, '_embeddings');
+    const filesAfter = readdirSync(embDir);
+    expect(filesAfter).toEqual(['src.jsonl']);
+  });
+
+  it('Iter 2 MAJOR: execute with --allow-stub-reembed emits a stderr WARNING before proceeding', async () => {
+    const artifactsDir = makeArtifactsDir();
+    seedSourceJsonl(artifactsDir, 'src.jsonl', [makeEntry('hello', 'p', 'v', 4)]);
+
+    // Capture stderr alongside stdout.
+    const savedStderr = process.stderr.write.bind(process.stderr);
+    const stderrChunks: string[] = [];
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      setArgv(
+        'execute',
+        '--artifacts-dir',
+        artifactsDir,
+        '--from',
+        'p',
+        '--to',
+        'q',
+        '--to-model-version',
+        '2026-05-24',
+        '--allow-stub-reembed',
+      );
+      await runEmbeddingBumpCli();
+    } finally {
+      process.stderr.write = savedStderr;
+    }
+
+    const stderrText = stderrChunks.join('');
+    expect(stderrText).toMatch(/WARNING: using STUB_REEMBED \(zero vectors\)/);
+    expect(stderrText).toMatch(/for testing only — do not run in production/);
+
+    // The migration DID proceed: target file landed with STUB_REEMBED zeros.
+    const targetPath = join(artifactsDir, '_embeddings', 'q-2026-05-24.jsonl');
+    expect(existsSync(targetPath)).toBe(true);
+    const targetEntries = readFileSync(targetPath, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l) as VectorStoreEntry);
+    expect(targetEntries).toHaveLength(1);
+    // Stub re-embed writes 1536-dim zero vectors.
+    expect(targetEntries[0]!.vector).toHaveLength(1536);
+    expect(targetEntries[0]!.vector.every((v) => v === 0)).toBe(true);
   });
 });
