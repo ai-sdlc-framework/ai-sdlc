@@ -131,6 +131,45 @@ describe('AC #1: hard-regulatory whitelist (OQ-5 scope)', () => {
     expect(isHardRegulatoryRegime('fedramp-moderate')).toBe(true);
   });
 
+  it('AISDLC-316 round-2 MAJOR #2 fix: rejects prefix-collision soft regimes', () => {
+    // Pre-fix bug: `startsWith('SOX')` would match `SOXophone` because there
+    // was no boundary check between the prefix and the next character. A soft
+    // adopter-named regime with a collision-prone suffix would get silently
+    // accepted as hard-regulatory by BOTH validateComplianceRegimes (declaration
+    // time) AND the defense-in-depth filter at scoring time. Tighten the prefix
+    // check so the boundary char must be a separator (`-`, `_`, `:`, `.`) or a
+    // digit (tier-variant pattern); letters following the prefix must reject.
+    expect(isHardRegulatoryRegime('SOXophone')).toBe(false);
+    expect(isHardRegulatoryRegime('AMLET')).toBe(false);
+    expect(isHardRegulatoryRegime('KYCS-internal')).toBe(false);
+    expect(isHardRegulatoryRegime('KYCS-internal-team-style')).toBe(false);
+    expect(isHardRegulatoryRegime('HIPAAphobia')).toBe(false);
+    // Additional collision candidates worth covering.
+    expect(isHardRegulatoryRegime('GDPReport')).toBe(false);
+    expect(isHardRegulatoryRegime('SOC2alpha')).toBe(false); // letter after digit-bearing prefix
+    expect(isHardRegulatoryRegime('PIPLine')).toBe(false);
+    expect(isHardRegulatoryRegime('PIPEDAtable')).toBe(false);
+    expect(isHardRegulatoryRegime('CCPAdjacent')).toBe(false);
+  });
+
+  it('AISDLC-316 round-2 MAJOR #2 fix: still accepts canonical positives after tightening', () => {
+    // Whole-id matches.
+    expect(isHardRegulatoryRegime('SOX')).toBe(true);
+    expect(isHardRegulatoryRegime('AML')).toBe(true);
+    expect(isHardRegulatoryRegime('KYC')).toBe(true);
+    expect(isHardRegulatoryRegime('HIPAA')).toBe(true);
+    expect(isHardRegulatoryRegime('SOC2')).toBe(true);
+    // Separator-bounded variants (the original positive contract).
+    expect(isHardRegulatoryRegime('SOC2-T2')).toBe(true);
+    expect(isHardRegulatoryRegime('PCI-DSS-L1')).toBe(true);
+    expect(isHardRegulatoryRegime('FedRAMP-Moderate')).toBe(true);
+    expect(isHardRegulatoryRegime('FedRAMP-High')).toBe(true);
+    expect(isHardRegulatoryRegime('ISO-27001:2022')).toBe(true);
+    expect(isHardRegulatoryRegime('DATA-RESIDENCY-EU')).toBe(true);
+    expect(isHardRegulatoryRegime('SOX_internal')).toBe(true); // underscore is a separator
+    expect(isHardRegulatoryRegime('SOX.amendment')).toBe(true); // dot is a separator
+  });
+
   it('exposes the canonical prefix list (frozen) for adopter introspection', () => {
     // The whitelist is used by adopter-side tooling (init wizards, lint rules);
     // expose it as a readonly array so consumers can build their own UIs around it.
@@ -349,6 +388,70 @@ describe('AC #2: Eρ₅ clearance evaluation during admission', () => {
     const result = computeComplianceClearance('AISDLC-316', [], ctx);
     expect(result.er5).toBe(0);
     expect(result.routingPath).toBe('clearance-violated');
+  });
+
+  it('AISDLC-316 round-2 MAJOR #1 fix: case-collision between soul-declared and violation regimeId still gates', () => {
+    // Pre-fix bug: regimeSet stored the literal declared casing (`'hipaa'`)
+    // and `Set.has(v.regimeId)` was case-sensitive, so a violation reporting
+    // `regimeId: 'HIPAA'` (canonical uppercase) silently missed the lookup
+    // and the composite was NOT gated. Both sides of the comparison now
+    // normalise to uppercase.
+    const ctx: ComplianceClearanceContext = {
+      enabled: true,
+      perSoulRegimes: [{ soulId: 'soul-a', regimes: ['hipaa'] }], // lowercase declaration
+      violations: [
+        {
+          id: 'AISDLC-316',
+          violations: [
+            {
+              regimeId: 'HIPAA', // uppercase violation report
+              control: '§164.312(a)',
+              reason: 'PHI fields routed to platform analytics without BAA',
+              severity: 'critical',
+            },
+          ],
+        },
+      ],
+    };
+    const result = computeComplianceClearance('AISDLC-316', ['soul-a'], ctx);
+    expect(result.er5).toBe(0);
+    expect(result.routingPath).toBe('clearance-violated');
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].regimeId).toBe('HIPAA');
+  });
+
+  it('AISDLC-316 round-2 MAJOR #1 fix: opposite case-collision also gates (uppercase decl + lowercase violation)', () => {
+    const ctx: ComplianceClearanceContext = {
+      enabled: true,
+      perSoulRegimes: [{ soulId: 'soul-a', regimes: ['HIPAA'] }], // uppercase decl
+      violations: [
+        {
+          id: 'AISDLC-316',
+          violations: [
+            { regimeId: 'hipaa', reason: 'PHI leak' }, // lowercase violation
+          ],
+        },
+      ],
+    };
+    const result = computeComplianceClearance('AISDLC-316', ['soul-a'], ctx);
+    expect(result.er5).toBe(0);
+    expect(result.routingPath).toBe('clearance-violated');
+  });
+
+  it('AISDLC-316 round-2 MAJOR #1 fix: case-collision via RFC-0022 posture also gates', () => {
+    const ctx: ComplianceClearanceContext = {
+      enabled: true,
+      perSoulRegimes: [{ soulId: 'soul-a', regimes: [] }],
+      posture: [makePosture(['hipaa'])], // posture in lowercase
+      violations: [
+        {
+          id: 'AISDLC-316',
+          violations: [{ regimeId: 'HIPAA', reason: 'PHI leak via posture-declared regime' }],
+        },
+      ],
+    };
+    const result = computeComplianceClearance('AISDLC-316', ['soul-a'], ctx);
+    expect(result.er5).toBe(0);
   });
 
   it('matches work item IDs case-insensitively (mirrors tessellation algorithm)', () => {

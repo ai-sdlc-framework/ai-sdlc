@@ -93,19 +93,47 @@ export const HARD_REGULATORY_REGIME_PREFIXES: readonly string[] = Object.freeze(
  * Comparison is case-insensitive on the regime ID (`HIPAA` and `hipaa` both
  * match) but the canonical prefixes are uppercase by convention.
  *
+ * **Boundary guard (AISDLC-316 round-2 code-review fix)**: a match requires the
+ * prefix to be either the WHOLE regime id OR followed by a separator
+ * (`-`, `_`, `:`, `.`) or a digit (tier-variant pattern). This prevents
+ * collision-prone soft regimes like `SOXophone`, `AMLET`, `KYCS-internal`,
+ * `HIPAAphobia` from being mis-classified as hard-regulatory by a naive
+ * `startsWith` check. Tier-variants like `SOC2-T2`, `PCI-DSS-L1`,
+ * `FedRAMP-Moderate`, `ISO-27001:2022`, `SOC2T2` (digit boundary) still match.
+ *
  * @example
  *   isHardRegulatoryRegime('HIPAA')           // true
- *   isHardRegulatoryRegime('SOC2-T2')         // true (SOC2 prefix)
- *   isHardRegulatoryRegime('PCI-DSS-L1')      // true (PCI-DSS prefix)
- *   isHardRegulatoryRegime('FedRAMP-Moderate')// true (FedRAMP prefix)
- *   isHardRegulatoryRegime('ISO-27001:2022')  // true (ISO-27001 prefix)
+ *   isHardRegulatoryRegime('SOC2-T2')         // true (SOC2 prefix + '-' boundary)
+ *   isHardRegulatoryRegime('PCI-DSS-L1')      // true (PCI-DSS prefix + '-' boundary)
+ *   isHardRegulatoryRegime('FedRAMP-Moderate')// true (FedRAMP prefix + '-' boundary)
+ *   isHardRegulatoryRegime('ISO-27001:2022')  // true (ISO-27001 prefix + ':' boundary)
  *   isHardRegulatoryRegime('clean-code')      // false (soft / out of scope)
  *   isHardRegulatoryRegime('team-style')      // false (soft / out of scope)
+ *   isHardRegulatoryRegime('SOXophone')       // false (SOX prefix but letter boundary)
+ *   isHardRegulatoryRegime('AMLET')           // false (AML prefix but letter boundary)
+ *   isHardRegulatoryRegime('HIPAAphobia')     // false (HIPAA prefix but letter boundary)
  */
 export function isHardRegulatoryRegime(regimeId: string): boolean {
   if (typeof regimeId !== 'string' || regimeId.length === 0) return false;
   const upper = regimeId.toUpperCase();
-  return HARD_REGULATORY_REGIME_PREFIXES.some((prefix) => upper.startsWith(prefix.toUpperCase()));
+  return HARD_REGULATORY_REGIME_PREFIXES.some((prefix) => {
+    const upperPrefix = prefix.toUpperCase();
+    if (!upper.startsWith(upperPrefix)) return false;
+    // Whole-id match → accept.
+    if (upper.length === upperPrefix.length) return true;
+    // Boundary char must be a separator or a digit (tier/version variant).
+    // Letters following the prefix would be a soft-regime collision (e.g.
+    // SOXophone, AMLET, HIPAAphobia) and MUST NOT match.
+    const next = upper.charCodeAt(upperPrefix.length);
+    // '-' = 45, '_' = 95, ':' = 58, '.' = 46, '0'-'9' = 48-57
+    return (
+      next === 45 || // '-'
+      next === 95 || // '_'
+      next === 58 || // ':'
+      next === 46 || // '.'
+      (next >= 48 && next <= 57) // digit
+    );
+  });
 }
 
 // ── Declaration-time validation (OQ-5 scope guard) ─────────────────────
@@ -332,7 +360,25 @@ export function computeComplianceClearance(
   }
 
   // ── Build the regime set ───────────────────────────────────────
+  // Set keys are stored as UPPER-CASE canonical form so that case-collisions
+  // between declaration and violation reporting do not silently drop a
+  // gating violation. AISDLC-316 round-2 code-review MAJOR #1 fix: previously
+  // a soul declaring `['hipaa']` and an enforcement plugin asserting
+  // `regimeId: 'HIPAA'` failed the `regimeSet.has(v.regimeId)` lookup
+  // (case-sensitive `Set.has`) → violation silently dropped → composite NOT
+  // gated. Normalising both sides to uppercase is the defense.
+  // `displayCheckedRegimes` preserves the original (first-seen) casing so
+  // the audit trail shown in `checkedRegimes` stays human-friendly.
   const regimeSet = new Set<string>();
+  const displayCheckedRegimes: string[] = [];
+
+  function addRegime(rawId: string): void {
+    if (!isHardRegulatoryRegime(rawId)) return;
+    const upper = rawId.toUpperCase();
+    if (regimeSet.has(upper)) return;
+    regimeSet.add(upper);
+    displayCheckedRegimes.push(rawId);
+  }
 
   // Soul-declared regimes — use affectedSoulIds when present, else __platform.
   const soulIdsToCheck: readonly string[] =
@@ -341,7 +387,7 @@ export function computeComplianceClearance(
     const entry = ctx.perSoulRegimes.find((e) => e.soulId === soulId);
     if (!entry) continue;
     for (const r of entry.regimes) {
-      if (isHardRegulatoryRegime(r)) regimeSet.add(r);
+      addRegime(r);
     }
   }
 
@@ -349,12 +395,12 @@ export function computeComplianceClearance(
   if (ctx.posture && ctx.posture.length > 0) {
     for (const posture of ctx.posture) {
       for (const regime of posture.spec.regimes ?? []) {
-        if (isHardRegulatoryRegime(regime.id)) regimeSet.add(regime.id);
+        addRegime(regime.id);
       }
     }
   }
 
-  const checkedRegimes = Array.from(regimeSet);
+  const checkedRegimes = displayCheckedRegimes;
 
   // ── No regimes apply ───────────────────────────────────────────
   if (checkedRegimes.length === 0) {
@@ -367,9 +413,15 @@ export function computeComplianceClearance(
   }
 
   // ── Look up violations for this work item ──────────────────────
+  // Violation regimeId is normalised to UPPER-CASE before lookup so that a
+  // soul declaring `['hipaa']` matches an enforcement plugin asserting
+  // `regimeId: 'HIPAA'` (and vice versa). AISDLC-316 round-2 fix.
   const normalizedId = workItemId.toLowerCase();
   const entry = ctx.violations?.find((e) => e.id.toLowerCase() === normalizedId);
-  const applicableViolations = entry?.violations.filter((v) => regimeSet.has(v.regimeId)) ?? [];
+  const applicableViolations =
+    entry?.violations.filter(
+      (v) => typeof v.regimeId === 'string' && regimeSet.has(v.regimeId.toUpperCase()),
+    ) ?? [];
 
   if (applicableViolations.length > 0) {
     return {
