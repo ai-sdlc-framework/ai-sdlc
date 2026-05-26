@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Ready for Review
 author: Morgan Hirtle
 created: 2026-05-04
-updated: 2026-05-18
+updated: 2026-05-26
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0009
@@ -19,10 +19,10 @@ requiresDocs: []
 # RFC-0017: In-Soul Variant Pattern
 
 **Document type:** Normative
-**Status:** Ready for Review v0.3 — operator OQ walkthrough complete 2026-05-18; all 8 §10 OQs resolved with full rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument). **Cross-cutting framing:** every operator-impacting variant lifecycle event (count thresholds, deprecation transitions, Engineering substrate-cost review, cardinality activation requests) **routes through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts on variant-substrate edge cases. §10.1 codifies per-Soul / per-org config schema. Practitioner-validation gates in §11 remain unresolved pending InternalAdopter four-soul implementation pass. Implementation broken into 5 phase tasks (AISDLC-352..356).
+**Status:** Ready for Review v0.4 — Design Authority editorial pass complete 2026-05-26 (Mo). §6.1 `designOverrides` closed enum revised: `voiceRegister` cut (6/6 leading design systems treat content register outside the visual token surface — see OQ-5 2026-05-26 revisit); `typographyScale`, `motionProfile`, `radiusProfile` added per industry-aligned theming-surface convention (Tailwind / Radix / Material / Carbon / Spectrum / Atlassian). §5.2/§5.4 add the `designImperatives` variant-wins conflict-resolution language as a Design-Authority practitioner judgment call (not schema-enforced). §11 ProductD row deferred to RFC-0018 (temporal-context-bound = Journey, not Variant). Conditional Design-Authority sign-off in §Sign-Off table pending (1) this editorial pass landing + (2) §11 practitioner validation gates resolved on InternalAdopter implementation pass. v0.3 operator OQ walkthrough resolutions otherwise intact. Implementation broken into 5 phase tasks (AISDLC-352..356).
 **Lifecycle:** Ready for Review
 **Created:** 2026-05-04
-**Updated:** 2026-05-18
+**Updated:** 2026-05-26
 **Authors:** Morgan Hirtle (Design Authority, InternalAdopter)
 **Engineering pass:** Dominique Legault, Claude Opus 4.7 (orchestrator), 2026-05-04 — fleshed §3-§13 from Mo's v0.1 stub.
 **OQ walkthrough:** Dominique Legault (Operator), 2026-05-18 — full-rubric resolution of all 8 §10 OQs.
@@ -39,6 +39,7 @@ requiresDocs: []
 | Person | Role | Status | Date |
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.1 stub | 2026-05-04 |
+| Morgan Hirtle | Chief of Design / Design Authority | ✅ Conditional sign-off on v0.3 — approved pending: (1) this editorial pass reflected in spec, (2) practitioner validation gates in §11 resolved on InternalAdopter implementation pass. Core pattern, inheritance model, boundary guidance, and admission scoring composition ratified. | 2026-05-26 |
 | Dominique Legault | CTO / Engineering Authority | ✏️ Engineering pass on v0.2 (pending Design editorial) | 2026-05-04 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
 
@@ -49,7 +50,7 @@ This RFC is properly Mo's Design-Authority territory; the Product Authority lens
 **PPA composition observations**:
 
 - **SA1 implication**: Variant-level `targetAudience.segments` + `audienceCharacteristics` feed SA1 (Problem Resonance) when work items target a specific variant. PPA v1.1 §5 already specifies variant scoring inheriting parent-shard SA1; v0.2's `targetedVariants` field on work items operationalizes this. Approved.
-- **SA2 implication**: Variant `designOverrides` (voice, palette, density) are Design-Authority specializations; SA2 (Vibe Coherence) consumes them per the per-variant scoring path. No Product-side concern; Mo's editorial applies.
+- **SA2 implication**: Variant `designOverrides` (palette, density, typography, motion, radii — see §6.1 final enum) are Design-Authority specializations; SA2 (Vibe Coherence) consumes them per the per-variant scoring path. No Product-side concern; Mo's editorial applies.
 - **Compliance tightening invariant**: `complianceFloor: inherit` enforced at type level (per RFC-0028 substrate enforcement pattern) is the right architectural answer — child variants cannot loosen parent compliance regimes. Strong endorse.
 - **Demand cluster routing**: when RFC-0030 (Signal Ingestion Pipeline) lands, demand clusters tagged with variant-specific segments should route through the variant's SA1, not the soul's. Cross-reference recommended once 0030 lands.
 
@@ -123,9 +124,11 @@ spec:
         segments: [municipal-small, water-district-small]
         sizeRange: { minStaff: 1, maxStaff: 50 }
       designOverrides:
-        voiceRegister: "approachable-municipal"
         colorPaletteOverlay: "small-utility-warm"
         densityProfile: "comfortable"
+        typographyScale: "large-print"
+        motionProfile: "reduced"
+        radiusProfile: "rounded"
       complianceFloor: inherit  # MUST inherit; explicit for clarity
       designImperatives:
         - "low-tech-fluency-tolerance"
@@ -135,9 +138,11 @@ spec:
         segments: [municipal-large, regional-utility]
         sizeRange: { minStaff: 51, maxStaff: 5000 }
       designOverrides:
-        voiceRegister: "professional-administrative"
         colorPaletteOverlay: "enterprise-cool"
         densityProfile: "compact"
+        typographyScale: "default"
+        motionProfile: "full"
+        radiusProfile: "default"
       complianceFloor: inherit
       designImperatives:
         - "bulk-operation-efficiency"
@@ -150,9 +155,9 @@ spec:
 |---|---|---|---|
 | `id` | string (kebab-case, unique within soul) | yes | Variant identifier |
 | `targetAudience` | object | yes | Audience characteristics; structure mirrors Soul DID `targetAudience` schema (Sα₁ input) |
-| `designOverrides` | object | no | Subset of design fields the variant specializes (voice, color overlay, density). MUST be a subset of fields the parent Soul declares as variant-overridable. |
+| `designOverrides` | object | no | Subset of visual-token surfaces the variant specializes: `colorPaletteOverlay`, `densityProfile`, `typographyScale`, `motionProfile`, `radiusProfile` (see §6.1 schema for the closed framework enum + vendor-prefix extension contract). MUST be a subset of fields the parent Soul declares as variant-overridable. |
 | `complianceFloor` | enum (`inherit`) | yes | MUST be `inherit`. Variants cannot diverge from soul compliance. The field is required-and-fixed for clarity at the YAML surface — schema validation rejects any other value. |
-| `designImperatives` | string[] | no | Variant-scoped Sα₂ inputs. Layered on top of soul-level `designImperatives`; variant imperatives take precedence in conflict (most-specific-wins). |
+| `designImperatives` | string[] | no | Variant-scoped Sα₂ inputs. Layered on top of soul-level `designImperatives`. Where a variant imperative addresses the same design dimension as a soul-level imperative, the variant imperative takes precedence as the more specific declaration. **Conflict identification and resolution is a Design Authority judgment call, not schema-enforced.** The schema does not attempt to detect or automatically resolve contradictions between soul-level and variant-level imperatives — doing so would require automating design judgment that belongs to the authority who declared the imperatives. Practitioners are expected to review the full imperative set (soul + variant) for coherence at declaration time. |
 | `cardinality` (RESERVED) | enum (`primary`, `secondary`, `experimental`) | no | Future-use lifecycle hint. v1 ignores; documents the `experimental` exit ramp for OQ-3. |
 
 ### 5.3 Bounded inheritance
@@ -161,11 +166,13 @@ A Variant inherits from its parent Soul DID:
 
 | Inherited (variant cannot override) | Specializable (variant overrides allowed) |
 |---|---|
-| `complianceRegimes` (per-soul) | `voiceRegister` (variant-scoped) |
-| `substrateInvariants` | `colorPaletteOverlay` (additive layer over soul palette) |
-| `tenantQuotaShare` (RFC-0010) | `densityProfile` |
-| `engineering.performanceBudgets` | `designImperatives` (additive, most-specific-wins) |
-| `engineering.observabilityRequirements` | `targetAudience` (variant-specific segments) |
+| `complianceRegimes` (per-soul) | `colorPaletteOverlay` (additive layer over soul palette) |
+| `substrateInvariants` | `densityProfile` |
+| `tenantQuotaShare` (RFC-0010) | `typographyScale` |
+| `engineering.performanceBudgets` | `motionProfile` |
+| `engineering.observabilityRequirements` | `radiusProfile` |
+| | `designImperatives` (additive, most-specific-wins; see §5.2 conflict-resolution note) |
+| | `targetAudience` (variant-specific segments) |
 
 If a variant attempts to override an inherited field, schema validation MUST emit `VariantInheritanceViolation` (Engineering vertex error per RFC-0008 §C5).
 
@@ -186,7 +193,7 @@ spec:
 Scoring composes per-variant:
 
 - **Sα₁ Audience Resonance** — variant's `targetAudience` overrides soul's
-- **Sα₂ Vibe Coherence** — variant's `designImperatives` UNION soul's; conflict resolution: variant wins (most-specific)
+- **Sα₂ Vibe Coherence** — variant's `designImperatives` UNION soul's; conflict resolution: variant wins (most-specific). The "variant wins" rule applies to imperatives that address the same design dimension. **Identifying whether two imperatives are in conflict is a practitioner judgment call at declaration time, not a schema validation.** The Design Authority is the accountable party for imperative coherence across soul and variant layers (see §5.2).
 - **Cκ Capability Coverage** — soul-level (variants don't override capability)
 - **Eρ_n** — soul-level (variants inherit compliance/substrate; no override)
 - **Dπ_n** — soul-level (Demand Pressure / Market Force / Entropy Tax are platform-aggregate channels)
@@ -231,11 +238,14 @@ Add to the Soul DID schema (file path: RFC-0009 implementation phase concern):
           "targetAudience": { "$ref": "#/$defs/AudienceProfile" },
           "designOverrides": {
             "type": "object",
+            "description": "Closed framework enum + vendor-prefix extension (OQ-5 resolution, 2026-05-18; revisit 2026-05-26 cut voiceRegister + added typography/motion/radius per industry alignment). Adopters extend via vendor reverse-DNS prefix (e.g., 'acme.com/accessibilityProfile').",
             "additionalProperties": false,
             "properties": {
-              "voiceRegister": { "type": "string" },
               "colorPaletteOverlay": { "type": "string" },
-              "densityProfile": { "type": "string", "enum": ["compact", "comfortable", "spacious"] }
+              "densityProfile": { "type": "string", "enum": ["compact", "comfortable", "spacious"] },
+              "typographyScale": { "type": "string", "enum": ["default", "large-print", "data-dense"] },
+              "motionProfile": { "type": "string", "enum": ["full", "reduced", "none"] },
+              "radiusProfile": { "type": "string", "enum": ["sharp", "default", "rounded"] }
             }
           },
           "complianceFloor": {
@@ -349,6 +359,8 @@ The "use the existing Soul DID model" answer. **Rejected for the homogeneous-sub
 
    **Resolution (2026-05-18):** **Closed framework enum + vendor-prefix extension** (composes with RFC-0025 OQ-10 vendor-namespace pattern + Kubernetes CRD / JSON Schema / HTML `data-*` conventions). Framework owns `voiceRegister`, `colorPaletteOverlay`, `densityProfile` (closed; expanding requires RFC amendment with Design sign-off). Adopters extend via vendor reverse-DNS prefix (e.g., `acme.com/accessibilityProfile`); schema validates prefix. **Selected over closed-enum-only (author rec)** because vendor-prefix pattern is already established in this codebase (RFC-0025 OQ-10) and across the ecosystem; provides extension flexibility without compromising Design Authority's loop on framework-owned fields.
 
+   **Revisit (2026-05-26, Mo's editorial pass):** **Closed framework enum revised to `[colorPaletteOverlay, densityProfile, typographyScale, motionProfile, radiusProfile]`** — `voiceRegister` cut. **Load-bearing rationale:** variant-overridable fields correspond to the theming surface that leading design systems expose as token-level customization. 6/6 systems surveyed (Tailwind, Radix, Material, Carbon, Spectrum, Atlassian) converge on **color, spacing, typography, motion, and radii** as the core theming surface; **none include content register at the visual token layer.** Content/voice belongs in a separate doc surface (Adobe brand guidelines pattern, Carbon Content pattern, Atlassian voice-and-tone-as-principles pattern). If a future content-layer RFC needs voice-register specialization, it should model it properly (e.g., `microcopyTone`, `errorVoice`) in a sibling `contentOverrides` block, gated by the same ≥2-adopter activation threshold OQ-8 uses for `cardinality`. **`radiusProfile` naming:** controls corner-rounding character (`sharp` / `default` / `rounded`), not border stroke weight — distinct properties. Naming follows the `densityProfile` / `motionProfile` pattern and is unambiguous about what it governs. **Vendor-prefix extension contract intact.**
+
 **OQ-6 — Variant ID URI representation in DID:** RFC-0009 uses `did:platform-x:soul:engage`. What's the variant URI? Options: (a) `did:platform-x:soul:engage/variant:small-utility`, (b) `did:platform-x:soul:engage:small-utility` (slug-concat), (c) `did:platform-x:variant:engage/small-utility`. Recommendation: (a) — preserves explicit hierarchy.
 
    **Resolution (2026-05-18):** **Option (a) — `did:platform-x:soul:engage/variant:small-utility`** (path-style with explicit `variant:` keyword) per author rec. Matches Kubernetes resource paths / HTTP REST / AWS ARN / DID Web conventions (hierarchical resource systems consistently use path-style with explicit kind keywords). Preserves the structural inheritance relationship (variant is a CHILD of soul per §3.2). Composes naturally with future nested-variant extension AND with future in-soul partition types from RFC-0018 (`/journey:onboarding-flow`). **Selected over slug-concat (b)** because (b) has parser ambiguity; **selected over option (c)** because (c) treats variant as peer of soul, contradicting the inheritance model.
@@ -382,11 +394,13 @@ variant:
   scoring:                                   # OQ-4
     crossVariantAggregation: min             # matches RFC-0009 cross-soul default
 
-  overrides:                                 # OQ-5
+  overrides:                                 # OQ-5 (revised 2026-05-26)
     framework:
-      - voiceRegister
       - colorPaletteOverlay
       - densityProfile
+      - typographyScale
+      - motionProfile
+      - radiusProfile
     adopterExtensionsAllowed: true           # via vendor reverse-DNS prefix
 
   uri:                                       # OQ-6
@@ -416,7 +430,7 @@ InternalAdopter's four-product suite drives the validation pass:
 | ProductA | small-utility, enterprise, county-regional | Audience-segment specialization; voice register variation |
 | ProductB | field-tech-on-truck, field-tech-handheld, supervisor-tablet | Density profile + form-factor specialization |
 | ProductC | billing-clerk, customer-portal, csr-dashboard | Role-based audience + workflow-density specialization |
-| ProductD | annual-test, repair-event, regulatory-audit-mode | Temporal-context-bound design intent (validates the §11 carries through to RFC-0018 Journey too) |
+| ProductD | (deferred to RFC-0018) | Proposed variants (annual-test, repair-event, regulatory-audit-mode) are temporal-context-bound operational modes activated by *when* and *why* a user is in the system — not static audience or visual specializations. This case illustrates the Variant/Journey boundary: same user, different operational moment = Journey. Deferred to RFC-0018 §11 as a validation case for that pattern. |
 
 Validation criteria (Mo's edits welcome):
 1. Each variant's design intent is articulable in ≤ 5 `designImperatives` strings
@@ -437,3 +451,4 @@ Validation criteria (Mo's edits welcome):
 | v0.1 | 2026-05-04 | Morgan Hirtle | Initial stub (carve-out from RFC-0009 OQ-3). Established summary + practitioner-validation source. |
 | v0.2 | 2026-05-04 | Engineering pass (Dominique + Claude Opus 4.7) | Filled §3-§13 from boilerplate. Schema sketch, inheritance table, admission-scoring composition, boundary-vs-separate-soul, alternatives, 8 open questions, InternalAdopter validation plan. Awaiting Mo's design-authority editorial pass on §5.3 + §10. |
 | v0.3 | 2026-05-18 | Dominique (Operator OQ walkthrough) | Full-rubric resolution of all 8 §10 OQs (problem → industry research → 3-4 options → recommendation + counter-argument per OQ). Resolutions: per-org configurable variant count limits (OQ-1, defaults 5 soft / 20 hard); schema-enforced flat (no nested variants for v1 — OQ-2); composite deprecation lifecycle with 30d default + per-Soul override + G0-routed degraded-mode (OQ-3); per-Soul configurable cross-variant aggregation with `min` default (OQ-4, matches RFC-0009); closed framework enum + vendor-prefix extension for designOverrides (OQ-5, composes with RFC-0025 OQ-10 pattern); path-style URI `did:.../variant:...` (OQ-6); Design owns + Engineering review via Decision Catalog (OQ-7); cardinality activation via catalog auto-promote on ≥2 adopter requests (OQ-8). §10.1 added consolidating per-Soul / per-org `.ai-sdlc/variant-config.yaml` schema. Cross-cutting framing: all operator-impacting variant lifecycle events route through RFC-0035 G0 non-blocking pipeline contract. Frontmatter requires expanded: added RFC-0024 (capture substrate), RFC-0025 (audit), RFC-0029 (pillar model), RFC-0035 (catalog routing). Lifecycle promoted Draft → Ready for Review. Implementation broken into 5 phase tasks: AISDLC-352 (Phase 1 schema additions), AISDLC-353 (Phase 2 admission scorer composition), AISDLC-354 (Phase 3 Eτ_tessellation_drift extension + deprecation lifecycle), AISDLC-355 (Phase 4 InternalAdopter four-product reference impl), AISDLC-356 (Phase 5 glossary + conformance test suite + doc surfaces). Practitioner-validation gates in §11 remain unresolved pending InternalAdopter implementation pass. |
+| v0.4 | 2026-05-26 | Morgan Hirtle (Design Authority editorial pass) | **§6.1 `designOverrides` closed enum revised:** `voiceRegister` cut; `typographyScale` (default / large-print / data-dense), `motionProfile` (full / reduced / none), `radiusProfile` (sharp / default / rounded) added. Load-bearing rationale documented in OQ-5 revisit: 6/6 leading design systems (Tailwind, Radix, Material, Carbon, Spectrum, Atlassian) converge on color, spacing, typography, motion, and radii as the core theming surface; none include content register at the visual token layer. If a future content-layer RFC needs voice/register, it should model it in a sibling `contentOverrides` block, gated by the same ≥2-adopter threshold OQ-8 uses. **`radiusProfile` naming:** controls corner-rounding character, not border stroke weight (distinct properties); naming follows `densityProfile`/`motionProfile` pattern. **§5.2 + §5.4 add `designImperatives` conflict-resolution language:** variant-wins applies when imperatives address the same design dimension; conflict identification is a Design-Authority practitioner judgment call at declaration time, not schema-enforced. Schema does not attempt to automate design judgment. **§11 ProductD row deferred to RFC-0018:** proposed variants (annual-test, repair-event, regulatory-audit-mode) are temporal-context-bound operational modes (Journey shape per RFC-0018), not static specializations (Variant shape). Illustrates the Variant/Journey boundary as a validation case for the companion RFC. **§5.1 example YAML + §5.3 inheritance table updated** to reflect the revised enum. **Sign-off:** Mo's conditional v0.3 sign-off added in §Sign-Off table — approved pending (1) this editorial pass landing + (2) §11 practitioner validation gates resolved on InternalAdopter implementation pass. Core pattern, inheritance model, boundary guidance, and admission scoring composition ratified. v0.3 operator OQ resolutions otherwise intact. |
