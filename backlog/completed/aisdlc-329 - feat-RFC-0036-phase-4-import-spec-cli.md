@@ -9,7 +9,7 @@ labels:
   - spec-kit-bridge
   - phase-4
 dependencies:
-  - AISDLC-328
+  - AISDLC-444
 references:
   - spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md
 priority: high
@@ -68,4 +68,4 @@ Tests live next to each source file with the full end-to-end loop covered in `im
 
 - **DoR at import time** — Phase 5 (AISDLC-330).
 - **Reconcile / drift handling** — Phase 6 (AISDLC-331).
-- **`specRef:` JSON schema in `spec/schemas/`** — Phase 3 (AISDLC-328). Backlog tasks accept arbitrary frontmatter today; the Phase 4 `specRef:` shape matches RFC-0036 §9.1 verbatim and is forward-compatible with the eventual schema.
+- **`specRef:` JSON schema in `spec/schemas/`** — Phase 3 (AISDLC-444, renumbered from AISDLC-328 during 2026-05-26 ID-collision cleanup). Backlog tasks accept arbitrary frontmatter today; the Phase 4 `specRef:` shape matches RFC-0036 §9.1 verbatim and is forward-compatible with the eventual schema.

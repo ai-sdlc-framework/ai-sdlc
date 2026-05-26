@@ -1,7 +1,7 @@
 ---
 id: AISDLC-370
 title: 'feat(hooks): pre-push DoR gate — shift DoR clarifications left before CI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19'
 labels:
