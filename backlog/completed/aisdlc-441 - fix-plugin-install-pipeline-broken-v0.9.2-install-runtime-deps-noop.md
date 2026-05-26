@@ -1,7 +1,7 @@
 ---
 id: AISDLC-441
 title: 'fix(plugin): install pipeline broken in v0.9.2 — install-runtime-deps.sh is a no-op + no hook triggers it'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-26'
 labels:
