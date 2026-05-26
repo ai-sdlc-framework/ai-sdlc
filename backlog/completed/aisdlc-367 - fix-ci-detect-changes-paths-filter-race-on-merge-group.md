@@ -1,7 +1,7 @@
 ---
 id: AISDLC-367
 title: 'fix(ci): Detect Changes paths-filter races merge_group ephemeral branch deletion'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-18'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-259
 title: Fix TUI panel border misalignment on CRITICAL PATH + OPERATOR THROUGHPUT row
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-05-12 09:55'
 labels:

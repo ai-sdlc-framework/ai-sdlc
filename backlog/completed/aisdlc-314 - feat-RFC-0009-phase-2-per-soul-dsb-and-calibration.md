@@ -1,7 +1,7 @@
 ---
 id: AISDLC-314
 title: 'feat: RFC-0009 Phase 2.2 — Per-soul DSB authoring + Cκ per-soul calibration aggregation'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
