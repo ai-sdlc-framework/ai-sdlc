@@ -8,6 +8,8 @@
  * drift is detected.
  */
 
+import { fileURLToPath } from 'url';
+import { realpathSync } from 'fs';
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { runCommand } from './commands/run.js';
@@ -102,14 +104,46 @@ export function buildProgram(versions: VersionTriple): Command {
 // Bin entry: only run argv parsing when invoked as a script, not when the
 // module is imported by tests.
 //
-// `process.argv[1]` is the path Node resolved for the entry script.
-// When it ends with the compiled CLI bundle (`dist/cli/index.js`) we are
-// the main entry. When imported (e.g. via Vitest) argv[1] points at the
-// test runner, so we skip parsing.
-const isMainEntry = (() => {
-  const entry = process.argv[1] ?? '';
-  return entry.endsWith('cli/index.js') || entry.endsWith('cli/index.ts');
-})();
+// IMPORTANT: Node does NOT resolve symlinks for `process.argv[1]`. When
+// the CLI is installed globally via npm (`npm install -g`), the bin path
+// is a symlink (e.g. `/usr/local/bin/ai-sdlc`) that points to the real
+// `dist/cli/index.js`. The old `endsWith('cli/index.js')` check failed
+// for that case because argv[1] held the symlink path, not the target.
+//
+// Fix: compare `import.meta.url` (always the real module's file URL) to
+// `pathToFileURL(realpathSync(argv[1]))` (which resolves the symlink).
+// When imported by Vitest, argv[1] points at the test runner, so
+// `realpathSync` still returns a path that differs from import.meta.url
+// and the guard correctly returns false.
+
+/**
+ * Determine whether this module is being run as the CLI entry point,
+ * correctly handling npm bin symlinks.
+ *
+ * Exported for unit-testing; production callers should use the module-level
+ * `isMainEntry` constant instead.
+ *
+ * @param moduleUrl  - The `import.meta.url` of the caller module.
+ * @param argv1      - `process.argv[1]` (the script path Node was given).
+ */
+export function computeIsMainEntry(moduleUrl: string, argv1: string | undefined): boolean {
+  if (!argv1) return false;
+  try {
+    // Resolve symlinks on BOTH sides before comparing, so that:
+    //   1. npm bin symlinks in argv1 resolve to the real dist/cli/index.js.
+    //   2. OS-level dir symlinks (e.g. macOS /tmp → /private/tmp) don't cause
+    //      spurious mismatches when moduleUrl itself was built from an
+    //      unresolved path.
+    const realArgv1 = realpathSync(argv1);
+    const realModule = realpathSync(fileURLToPath(moduleUrl));
+    return realArgv1 === realModule;
+  } catch {
+    // realpathSync / fileURLToPath can throw — treat as "not main".
+    return false;
+  }
+}
+
+const isMainEntry = computeIsMainEntry(import.meta.url, process.argv[1]);
 
 if (isMainEntry) {
   const program = buildProgram(resolveVersions());
