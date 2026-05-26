@@ -8,6 +8,7 @@ labels:
   - rfc-0012
   - copilot
   - spawner
+  - parent
   - developer-experience
 dependencies: []
 assumes:
@@ -22,6 +23,12 @@ references:
   - pipeline-cli/README.md
 priority: medium
 permittedExternalPaths: []
+blocked:
+  reason: 'Umbrella parent task — dispatch sub-phases AISDLC-429.1, AISDLC-429.2, AISDLC-429.3 directly. 429.1 (design map, paper-only) unblocks 429.2 (adapter + resolver); 429.2 unblocks 429.3 (orchestrator wiring + docs). Parent unblocks when all three sub-tasks reach Done.'
+  unblockedBy:
+    - AISDLC-429.1
+    - AISDLC-429.2
+    - AISDLC-429.3
 ---
 
 ## Description
@@ -61,15 +68,9 @@ Add `copilot` to `SpawnerKind`, ship a `CopilotHarnessAdapter` that implements `
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `SpawnerKind` in `pipeline-cli/src/cli/execute.ts` includes `'copilot'`; `SPAWNER_KINDS` array updated; the `default:` exhaustiveness check still compiles.
-- [ ] #2 New file `pipeline-cli/src/runtime/spawners/copilot-harness.ts` exports `CopilotHarnessAdapter` implementing `SubagentSpawner` via an injected `CopilotSpawnAgentFn` (mirrors `CodexHarnessAdapter` shape).
-- [ ] #3 New file `pipeline-cli/src/runtime/spawners/copilot-harness.test.ts` covers: (a) developer dispatch round-trip with mocked `spawnAgent` returning a `DeveloperReturn`, (b) each of the three reviewer dispatches returning `{approved, findings, summary, harness:'copilot'}` and passing through `coerceReviewerVerdict` unchanged, (c) timeout propagation, (d) error surfacing when the bridge throws.
-- [ ] #4 `resolveSpawner('copilot')` (in `pipeline-cli/src/cli/execute.ts`) constructs a `CopilotHarnessAdapter` wired to a default subprocess bridge (`subprocessCopilotSpawnAgent()`); when neither `copilot` is on PATH nor `$COPILOT_SPAWN_AGENT_BIN` is set, throws a clear "configure COPILOT_SPAWN_AGENT_BIN or install the `copilot` CLI" error before any pipeline mutation.
-- [ ] #5 `cli-orchestrator tick --spawner copilot` accepts the kind (yargs `choices: SPAWNER_KINDS`), `resolveUmbrellaSpawnerKind()` round-trips it, and `loop.umbrella.test.ts` has at least one case proving the umbrella dispatcher forwards `'copilot'` end-to-end.
-- [ ] #6 `pipeline-cli/README.md` "Spawner kinds" table has a `copilot` row with billing column = "GitHub Copilot subscription"; `CLAUDE.md` "Spawner kinds for `cli-orchestrator tick`" bullet list adds a `copilot` entry.
-- [ ] #7 New operator-facing doc `docs/operations/copilot-spawner.md` documents: install path for the `copilot` CLI, env-var override (`$COPILOT_SPAWN_AGENT_BIN`), known limitations vs `claude`/`codex`, and the "billing safety" note from the Risk section. Add a cross-link from `docs/operations/operator-runbook.md`.
-- [ ] #8 New code reaches 80%+ patch coverage (enforced by `scripts/check-coverage.sh`).
-- [ ] #9 `pnpm build && pnpm test && pnpm lint && pnpm format:check` clean before push.
+- [ ] #1 All three sub-tasks (AISDLC-429.1, AISDLC-429.2, AISDLC-429.3) reach Done status.
+- [ ] #2 `pnpm --filter @ai-sdlc/pipeline-cli exec` exposes `--spawner copilot` end-to-end through `cli-execute` and `cli-orchestrator tick`, with the same operator-facing wiring the existing `claude` / `codex` / `api-key` kinds have.
+- [ ] #3 Operator-facing documentation (`pipeline-cli/README.md` spawner-kinds table + `CLAUDE.md` "Spawner kinds" list + `docs/operations/copilot-spawner.md` runbook + cross-link from the operator runbook) is up to date and reviewable as the canonical source for picking the `copilot` kind.
 
 <!-- AC:END -->
 
