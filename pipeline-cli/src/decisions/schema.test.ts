@@ -97,7 +97,7 @@ describe('decision.v1.schema.json (AC#1)', () => {
         answeredBy: null,
         answeredAt: null,
         routing: {
-          assignedActor: 'dominique@reliablegenius.io',
+          assignedActor: 'operator@example.com',
           actorRationale: 'Cross-pillar (Engineering + Operator)',
           llmEligible: false,
         },
@@ -112,7 +112,7 @@ describe('decision.v1.schema.json (AC#1)', () => {
           type: 'decision-opened',
           ts: '2026-05-08T14:32:00.000Z',
           decisionId: 'DEC-0042',
-          by: 'dominique@reliablegenius.io',
+          by: 'operator@example.com',
           source: 'rfc-open-question',
           scope: 'rfc:RFC-0035',
           summary: 'Catalog as separate resource vs view projected from existing markdown',

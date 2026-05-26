@@ -49,7 +49,7 @@ function makePosture(regimeIds: string[]): CompliancePosture {
     spec: {
       regimes: regimeIds.map((id) => ({
         id,
-        attestedBy: 'dominique@reliablegenius.io',
+        attestedBy: 'operator@example.com',
         attestedAt: '2026-05-25T00:00:00Z',
       })),
       auditExports: [],

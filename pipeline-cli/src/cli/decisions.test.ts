@@ -132,7 +132,7 @@ describe('AC#4 — add subcommand (flag-driven path)', () => {
       '--option',
       'opt-b:Switch to new',
       '--assigned-actor',
-      'dominique@reliablegenius.io',
+      'operator@example.com',
       '--format',
       'json',
     );
@@ -142,7 +142,7 @@ describe('AC#4 — add subcommand (flag-driven path)', () => {
     expect(r.decisionId).toBe('DEC-0001');
     expect(r.decision.spec.summary).toBe('Pick a routing strategy');
     expect(r.decision.spec.options).toHaveLength(2);
-    expect(r.decision.status.routing?.assignedActor).toBe('dominique@reliablegenius.io');
+    expect(r.decision.status.routing?.assignedActor).toBe('operator@example.com');
 
     // AC#5 — verify event-log file landed at the documented path.
     const logPath = resolveEventLogPath(tmp);

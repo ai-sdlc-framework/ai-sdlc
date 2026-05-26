@@ -1335,7 +1335,7 @@ export const compliancePostureV1Schema = {
         attestedBy: {
           type: 'string',
           description:
-            "Who declared this regime applies. E.g., 'dominique@reliablegenius.io' or 'Acme Legal LLP'. REQUIRED — compliance regimes are legal claims; the framework refuses to load a posture with regimes lacking this field.",
+            "Who declared this regime applies. E.g., 'Acme Legal LLP' or a contributor name. REQUIRED — compliance regimes are legal claims; the framework refuses to load a posture with regimes lacking this field.",
           minLength: 1,
         },
         attestedAt: {

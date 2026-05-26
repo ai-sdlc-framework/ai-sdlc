@@ -269,7 +269,7 @@ export interface DsseSignature {
   /**
    * Identifier of the public key that produced this signature. Used to
    * look up the trusted-reviewer entry. Free-form — typically `<identity>:
-   * <machine>` (e.g. `dominique@reliablegenius.io:laptop-2025`).
+   * <machine>` (e.g. `contributor@example.com:laptop-2025`).
    */
   keyid: string;
   /** base64-encoded raw ed25519 signature (64 bytes → 88 chars b64). */

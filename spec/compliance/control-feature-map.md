@@ -132,7 +132,7 @@ Annex A controls referenced below.
 
 ## Maintenance Notes
 
-- **Annual review:** Owner (dominique@reliablegenius.io) reviews this file annually against
+- **Annual review:** Owner (Dominique Legault) reviews this file annually against
   each framework's updated control catalog. Scheduled as a recurring backlog task.
 - **Per-RFC updates:** When a new RFC adds framework features, the RFC PR must include an
   update to this file mapping the new feature to relevant controls (RFC-0022 §13 Q7).
