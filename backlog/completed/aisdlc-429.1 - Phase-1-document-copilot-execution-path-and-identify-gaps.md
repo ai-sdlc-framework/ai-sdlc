@@ -1,7 +1,7 @@
 ---
 id: AISDLC-429.1
 title: 'Phase 1: Document Copilot CLI execution path and identify invocation grammar gaps'
-status: To Do
+status: Done
 labels:
   - rfc-0012
   - copilot
@@ -51,11 +51,11 @@ The document should explicitly NOT prescribe code; that's Phase 2's job.
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 New doc `docs/operations/copilot-execution-path.md` maps RFC-0012 Steps 0-13 to `copilot` CLI primitives and clearly marks any Tier 1 deviations from Claude Code Agent dispatch.
-- [ ] #2 Each Step is annotated with one of: "no change needed (uses shared deterministic primitives)", "needs Copilot adapter (proposed shape: ...)", or "blocked / needs upstream change in Copilot CLI".
-- [ ] #3 Document lists the chosen `copilot` CLI invocation grammar that Phase 2's `subprocessCopilotSpawnAgent()` bridge will use, plus the per-`SubagentType` system prompt strategy (built-in defaults vs. operator-injected full plugin-agent bodies).
-- [ ] #4 Document lists any open questions that block Phase 2 dispatch (if any); the dev sub-agent for this Phase 1 task MUST escalate per CLAUDE.md "Subagent Governance — OQ-resolution prohibition" rather than resolving them inline.
-- [ ] #5 The document is reviewable as a standalone PR — does not depend on Phase 2 or Phase 3 work.
+- [x] #1 New doc `docs/operations/copilot-execution-path.md` maps RFC-0012 Steps 0-13 to `copilot` CLI primitives and clearly marks any Tier 1 deviations from Claude Code Agent dispatch.
+- [x] #2 Each Step is annotated with one of: "no change needed (uses shared deterministic primitives)", "needs Copilot adapter (proposed shape: ...)", or "blocked / needs upstream change in Copilot CLI".
+- [x] #3 Document lists the chosen `copilot` CLI invocation grammar that Phase 2's `subprocessCopilotSpawnAgent()` bridge will use, plus the per-`SubagentType` system prompt strategy (built-in defaults vs. operator-injected full plugin-agent bodies).
+- [x] #4 Document lists any open questions that block Phase 2 dispatch (if any); the dev sub-agent for this Phase 1 task MUST escalate per CLAUDE.md "Subagent Governance — OQ-resolution prohibition" rather than resolving them inline.
+- [x] #5 The document is reviewable as a standalone PR — does not depend on Phase 2 or Phase 3 work.
 <!-- AC:END -->
 
 ## Implementation Notes
