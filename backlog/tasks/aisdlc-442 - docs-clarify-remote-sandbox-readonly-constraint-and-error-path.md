@@ -12,7 +12,6 @@ labels:
 dependencies: []
 references:
   - CLAUDE.md
-  - docs/operations/remote-agents-readonly.md
   - ai-sdlc-plugin/commands/execute.md
   - ai-sdlc-plugin/scripts/resolve-pipeline-cli.sh
 priority: medium

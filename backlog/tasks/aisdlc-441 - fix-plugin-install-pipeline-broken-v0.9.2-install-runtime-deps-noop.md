@@ -13,7 +13,7 @@ dependencies: []
 references:
   - ai-sdlc-plugin/scripts/install-runtime-deps.sh
   - ai-sdlc-plugin/plugin.json
-  - ai-sdlc-plugin/package.json
+  - ai-sdlc-plugin/mcp-server/package.json
   - ai-sdlc-plugin/hooks/session-start.sh
   - ai-sdlc-plugin/scripts/resolve-pipeline-cli.sh
 priority: critical
