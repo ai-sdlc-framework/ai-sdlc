@@ -3,7 +3,7 @@ id: RFC-0022
 title: Compliance Posture + Audit Surface
 status: Draft
 lifecycle: Ready for Review
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-03
 updated: 2026-05-16
 targetSpecVersion: v1alpha1
@@ -18,7 +18,7 @@ requiresDocs: []
 **Document type:** Normative
 **Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 7 §13 OQs resolved (in-tree YAML defaults with adopter override in v1, forced attestedNotes + attestedAt + attestedBy auto-fill, hand-curated control-feature-map with per-RFC reviewer check, single .tar.gz audit export, on-demand export only for v1, single posture per project for v1 with loader API designed for v2 multi-posture additive composition, PR template + reviewer-subagent check). §13.1 codifies the consolidated `.ai-sdlc/compliance.yaml` per-org config schema. Implementation broken into 4 phase tasks (AISDLC-322..325).
 **Lifecycle:** Ready for Review
-**Author:** dominique@reliablegenius.io (with Claude assist)
+**Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-03
 **Updated:** 2026-05-16
 **Target Spec Version:** v1alpha1
@@ -27,9 +27,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io (pending)
+- [ ] Engineering owner — Dominique Legault (pending)
 - [x] Product owner — Alexander Kline (2026-05-04)
-- [ ] Operator owner — dominique@reliablegenius.io (pending)
+- [ ] Operator owner — Dominique Legault (pending)
 
 ### Product Authority review
 
@@ -177,7 +177,7 @@ interface Regime {
   // Attestation metadata — who declared this regime applies, when, why.
   // REQUIRED in v1: framework refuses to load a posture with regimes lacking
   // attestation metadata (forces explicit operator/legal sign-off on each declaration).
-  attestedBy: string;              // e.g., 'dominique@reliablegenius.io' or 'Acme Legal LLP'
+  attestedBy: string;              // e.g., 'Dominique Legault' or 'Acme Legal LLP'
   attestedAt: string;              // ISO 8601 date
   attestedNotes?: string;          // operator's rationale (recommended for audit trail)
 }
@@ -278,7 +278,7 @@ The RFC-0011 init wizard (`ai-sdlc init`) gains a "Compliance posture" step inse
    [ ] FedRAMP Moderate (US federal)
    [ ] ISO 27001:2022
    [x] (none — unregulated project)
-?  Who is attesting these regimes apply? <dominique@reliablegenius.io>
+?  Who is attesting these regimes apply? <Dominique Legault>
 ?  Notes on the attestation (optional, audit-visible): <demo project; no PII; unregulated>
 
 ✓ Wrote .ai-sdlc/compliance.yaml with derived gates:
@@ -501,7 +501,7 @@ compliance:
       - hipaa
       - soc2
     attestation:                        # OQ-2 — auto-filled audit fields
-      attestedBy: dominique@reliablegenius.io    # auto-filled from git committer
+      attestedBy: Dominique Legault    # auto-filled from git committer
       attestedAt: "2026-05-16T14:30:00Z"          # auto-filled at write time
 
   regimeOverrides:                      # OQ-1 — adopter overrides ship in v1, not deferred to v2
@@ -543,9 +543,9 @@ Default constants ship in the `ai-sdlc init` compliance template. The regime →
 
 ## 15. Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io (pending)
+- [ ] Engineering owner — Dominique Legault (pending)
 - [ ] Product owner — Alex (pending)
-- [ ] Operator owner — dominique@reliablegenius.io (pending)
+- [ ] Operator owner — Dominique Legault (pending)
 
 ## 16. Revision History
 

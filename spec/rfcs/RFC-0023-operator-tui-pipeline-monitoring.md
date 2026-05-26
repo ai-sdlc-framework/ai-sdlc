@@ -3,7 +3,7 @@ id: RFC-0023
 title: Operator TUI — Pipeline Monitoring + Steering Surface
 status: Approved
 lifecycle: Signed Off
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-03
 updated: 2026-05-13
 targetSpecVersion: v1alpha1
@@ -15,7 +15,7 @@ requiresDocs: []
 
 **Status:** Approved (AISDLC-178 umbrella + all 7 phases 178.1–178.7 + extension 178.4.1 shipped; all 10 OQs resolved via operator walkthrough 2026-05-03)
 **Lifecycle:** Signed Off (lifecycle audit 2026-05-13 promoted from Ready for Review; flag default-on follows the same opt-in pattern as RFC-0014 / RFC-0015)
-**Author:** dominique@reliablegenius.io
+**Author:** Dominique Legault
 **Created:** 2026-05-03
 **Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
@@ -450,5 +450,5 @@ Position grounded in RFC-0029 Principle 5 (governance by composition; TUI consum
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
-| v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 10 open questions |
-| v0.2 | 2026-05-03 | dominique@reliablegenius.io | All 10 OQs resolved via operator walkthrough. Lifecycle: Draft → Ready for Review. Engineering + Operator signed; awaiting Product Lead. |
+| v0.1 | 2026-05-03 | Dominique Legault | Initial draft seed; 10 open questions |
+| v0.2 | 2026-05-03 | Dominique Legault | All 10 OQs resolved via operator walkthrough. Lifecycle: Draft → Ready for Review. Engineering + Operator signed; awaiting Product Lead. |

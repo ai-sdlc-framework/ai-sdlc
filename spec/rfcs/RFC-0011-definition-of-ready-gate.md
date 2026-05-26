@@ -3,7 +3,7 @@ id: RFC-0011
 title: Definition-of-Ready Gate for Pipeline Admission
 status: Implemented
 lifecycle: Implemented
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-04-30
 updated: 2026-05-13
 targetSpecVersion: v1alpha1
@@ -17,7 +17,7 @@ requiresDocs: []
 
 **Status:** Implemented (AISDLC-115 umbrella + all 9 phases 115.1–115.9 shipped; `evaluationMode: enforce` live in dogfood since 2026-05-03)
 **Lifecycle:** Implemented (lifecycle audit 2026-05-13 promoted from Signed Off)
-**Author:** dominique@reliablegenius.io (with Claude assist)
+**Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-04-30
 **Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
@@ -26,9 +26,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [x] Engineering owner — dominique@reliablegenius.io (2026-04-30)
+- [x] Engineering owner — Dominique Legault (2026-04-30)
 - [x] Product owner — Alexander Kline (2026-05-04)
-- [x] Operator owner — dominique@reliablegenius.io (2026-04-30)
+- [x] Operator owner — Dominique Legault (2026-04-30)
 
 ## Revision History
 

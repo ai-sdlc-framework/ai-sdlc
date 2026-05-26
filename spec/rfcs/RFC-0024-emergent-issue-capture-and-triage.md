@@ -3,7 +3,7 @@ id: RFC-0024
 title: Emergent Issue Capture + Triage Pattern
 status: Draft
 lifecycle: Ready for Review
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-03
 updated: 2026-05-15
 targetSpecVersion: v1alpha1
@@ -15,7 +15,7 @@ requiresDocs: []
 
 **Status:** Ready for Review v0.4 — partial implementation: AISDLC-269 shipped capture authoring + triage flow against the **2026-05-13 first-pass OQ resolutions**. The **2026-05-15 walkthrough revised** OQ-1 / OQ-2 / OQ-3 / OQ-5 / OQ-7 / OQ-9 / OQ-11 and added §15.1 Capture Lifecycle Defaults — a real gap between shipped behavior and the resolved design. Lifecycle rolled back from `Implemented` to `Ready for Review`; gap closed by **RFC-0024 Refit (AISDLC-320 / 321 + 275-278)**; flips back to `Implemented` after Refit Phase 6 (AISDLC-278) ships.
 **Lifecycle:** Ready for Review
-**Author:** dominique@reliablegenius.io
+**Author:** Dominique Legault
 **Created:** 2026-05-03
 **Updated:** 2026-05-15
 **Target Spec Version:** v1alpha1
@@ -185,7 +185,7 @@ Every capture is a JSON object conforming to `spec/schemas/capture-record.v1.sch
   "source": {
     "type": "operator|ai-agent",
     "agentRole": "code-reviewer|test-reviewer|security-reviewer|developer|orchestrator|null",
-    "operator": "dominique@reliablegenius.io|null",
+    "operator": "Dominique Legault|null",
     "context": "free-text — what the source was doing when this surfaced"
   },
   "evidence": {
@@ -205,7 +205,7 @@ Every capture is a JSON object conforming to `spec/schemas/capture-record.v1.sch
   "resolvedAt": null,                                 // populated when triage flips from tbd to a terminal value
   "resolvedBy": null,
   "auditTrail": [
-    { "action": "captured", "by": "dominique@reliablegenius.io", "at": "2026-05-03T17:42:03Z" }
+    { "action": "captured", "by": "Dominique Legault", "at": "2026-05-03T17:42:03Z" }
   ]
 }
 ```
@@ -288,7 +288,7 @@ The framework treats captures as immutable records once written. The `auditTrail
 ```jsonc
 "auditTrail": [
   { "action": "captured", "by": "code-reviewer", "at": "2026-05-03T17:42:03Z" },
-  { "action": "triaged", "by": "dominique@reliablegenius.io", "to": "new-issue", "at": "2026-05-03T17:45:11Z" },
+  { "action": "triaged", "by": "Dominique Legault", "to": "new-issue", "at": "2026-05-03T17:45:11Z" },
   { "action": "issue-created", "by": "framework", "issueId": "AISDLC-178", "via-adapter": "backlog-md", "at": "2026-05-03T17:45:11Z" }
 ]
 ```
@@ -458,7 +458,7 @@ Position grounded in RFC-0029 Part II + Principle 5 (governance by composition).
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
-| v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 12 open questions |
-| v0.2 | 2026-05-04 | dominique@reliablegenius.io | Abstraction pass: lifted ai-sdlc-internal terminology (backlog tasks, RFCs) to framework-level (Issue, Feature Issue, Bug Issue) routed through the configured issue-tracker adapter (RFC-0003). Triage values renamed: `new-task` → `new-issue`; `new-rfc` → `new-feature-issue`. Capture record schema fields renamed: `relatedTaskId/extensionTargetTaskId/blocksTaskId/createdTaskId/createdRfcId/rfcCarvePath` → `relatedIssueId/extensionTargetIssueId/blocksIssueId/createdIssueId/createdFeatureIssueId/featureIssueCarveRef`. Added §1.1 framework-vs-ai-sdlc-internal terminology table. Added two-step Feature Issue → execution Issue lifecycle clarification in §8. Added RFC-0003 reference. ai-sdlc-internal examples (AISDLC-NNN) preserved as illustrative only. |
-| v0.3 | 2026-05-13 | dominique@reliablegenius.io | Implementation shipped (AISDLC-269). `spec/schemas/capture-record.v1.schema.json` formalizes §6 schema. `pipeline-cli/src/capture/` implements capture writer, reader, triage rubric, PR-comment parser, in-code marker linter. `cli-capture` CLI ships §5.1/§5.2/§5.3/§5.4 surfaces. `captures-pending.ts` filter implements §9.3 pre-dispatch guard. All 12 OQs resolved with normative answers in §15 (first-pass). Lifecycle flipped to Implemented. |
-| v0.4 | 2026-05-15 | dominique@reliablegenius.io | Second OQ walkthrough revised OQ-1 (team-shared → Draft → Shared state machine) / OQ-2 (operator-confirms → threshold-gated dual axis) / OQ-3 (marker-only → bidirectional sync + LLM auto-classifier) / OQ-5 (leave-unknown → threshold-gated severity) / OQ-7 (redact-only → tiered deletion with draft `discard`) / OQ-9 (TUI-only → multi-surface 3d/7d/14d/21d ladder + auto-archive) / OQ-11 (manual → DoR-classifier integration) and added §15.1 Capture Lifecycle Defaults (4 timeboxes + per-org `capture-config.yaml`). Revealed gap between shipped behavior (AISDLC-269, against 2026-05-13 first-pass) and revised design. **Lifecycle rolled back from Implemented to Ready for Review.** Refit tasks AISDLC-320 / 321 + 275-278 file the gap closure; lifecycle flips back to Implemented after Refit Phase 6 (AISDLC-278) ships. |
+| v0.1 | 2026-05-03 | Dominique Legault | Initial draft seed; 12 open questions |
+| v0.2 | 2026-05-04 | Dominique Legault | Abstraction pass: lifted ai-sdlc-internal terminology (backlog tasks, RFCs) to framework-level (Issue, Feature Issue, Bug Issue) routed through the configured issue-tracker adapter (RFC-0003). Triage values renamed: `new-task` → `new-issue`; `new-rfc` → `new-feature-issue`. Capture record schema fields renamed: `relatedTaskId/extensionTargetTaskId/blocksTaskId/createdTaskId/createdRfcId/rfcCarvePath` → `relatedIssueId/extensionTargetIssueId/blocksIssueId/createdIssueId/createdFeatureIssueId/featureIssueCarveRef`. Added §1.1 framework-vs-ai-sdlc-internal terminology table. Added two-step Feature Issue → execution Issue lifecycle clarification in §8. Added RFC-0003 reference. ai-sdlc-internal examples (AISDLC-NNN) preserved as illustrative only. |
+| v0.3 | 2026-05-13 | Dominique Legault | Implementation shipped (AISDLC-269). `spec/schemas/capture-record.v1.schema.json` formalizes §6 schema. `pipeline-cli/src/capture/` implements capture writer, reader, triage rubric, PR-comment parser, in-code marker linter. `cli-capture` CLI ships §5.1/§5.2/§5.3/§5.4 surfaces. `captures-pending.ts` filter implements §9.3 pre-dispatch guard. All 12 OQs resolved with normative answers in §15 (first-pass). Lifecycle flipped to Implemented. |
+| v0.4 | 2026-05-15 | Dominique Legault | Second OQ walkthrough revised OQ-1 (team-shared → Draft → Shared state machine) / OQ-2 (operator-confirms → threshold-gated dual axis) / OQ-3 (marker-only → bidirectional sync + LLM auto-classifier) / OQ-5 (leave-unknown → threshold-gated severity) / OQ-7 (redact-only → tiered deletion with draft `discard`) / OQ-9 (TUI-only → multi-surface 3d/7d/14d/21d ladder + auto-archive) / OQ-11 (manual → DoR-classifier integration) and added §15.1 Capture Lifecycle Defaults (4 timeboxes + per-org `capture-config.yaml`). Revealed gap between shipped behavior (AISDLC-269, against 2026-05-13 first-pass) and revised design. **Lifecycle rolled back from Implemented to Ready for Review.** Refit tasks AISDLC-320 / 321 + 275-278 file the gap closure; lifecycle flips back to Implemented after Refit Phase 6 (AISDLC-278) ships. |

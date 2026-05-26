@@ -3,7 +3,7 @@ id: RFC-0015
 title: Autonomous Pipeline Orchestrator
 status: Approved
 lifecycle: Signed Off
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-01
 updated: 2026-05-13
 targetSpecVersion: v1alpha1
@@ -20,7 +20,7 @@ requiresDocs: []
 **Document type:** Normative
 **Status:** Approved (AISDLC-169 umbrella + all 5 phases 169.1–169.5 shipped; design locked + implementation complete behind `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`)
 **Lifecycle:** Signed Off (lifecycle audit 2026-05-13 promoted from Ready for Review; flag default-on promotion gated on AISDLC-253 fixture-leak fix + fresh corpus, not on implementation gap)
-**Author:** dominique@reliablegenius.io (with Claude assist)
+**Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-01
 **Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
@@ -29,9 +29,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [x] Engineering owner — dominique@reliablegenius.io (2026-05-02)
+- [x] Engineering owner — Dominique Legault (2026-05-02)
 - [x] Product owner — Alexander Kline (2026-05-04)
-- [x] Operator owner — dominique@reliablegenius.io (2026-05-02)
+- [x] Operator owner — Dominique Legault (2026-05-02)
 
 ### Product Authority review
 

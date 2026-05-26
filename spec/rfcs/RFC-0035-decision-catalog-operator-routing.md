@@ -3,7 +3,7 @@ id: RFC-0035
 title: Decision Catalog and Operator Decision Routing
 status: Draft
 lifecycle: Ready for Review
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-08
 updated: 2026-05-15
 targetSpecVersion: v1alpha1
@@ -17,7 +17,7 @@ requiresDocs: []
 
 **Status:** Draft (v0.2 — all 14 OQs resolved via operator walkthrough 2026-05-15; §15.1 Design Patterns codifies the architectural coherence)
 **Lifecycle:** Ready for Review (14/14 OQs resolved; awaiting per-owner sign-off)
-**Author:** dominique@reliablegenius.io
+**Author:** Dominique Legault
 **Created:** 2026-05-08
 **Updated:** 2026-05-15
 **Target Spec Version:** v1alpha1
@@ -26,9 +26,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io
+- [ ] Engineering owner — Dominique Legault
 - [ ] Product owner — Alexander Kline
-- [ ] Operator owner — dominique@reliablegenius.io
+- [ ] Operator owner — Dominique Legault
 
 ## Table of Contents
 
@@ -254,10 +254,10 @@ The current owner mapping (operator-configurable, defaults shown):
 
 ```yaml
 pillarOwners:
-  engineering: dominique@reliablegenius.io
-  product:     alexander@arcanaconceptstudio.com
+  engineering: Dominique Legault
+  product:     Alexander Kline
   design:      morgan@<...>
-operator:      dominique@reliablegenius.io
+operator:      Dominique Legault
 ```
 
 ### 6.3 Override surface
@@ -396,7 +396,7 @@ spec:
 status:
   lifecycle: open
   routing:
-    assignedActor: dominique@reliablegenius.io
+    assignedActor: Dominique Legault
     actorRationale: 'Cross-pillar (Engineering + Operator); architectural'
     llmEligible: false
   evaluation:

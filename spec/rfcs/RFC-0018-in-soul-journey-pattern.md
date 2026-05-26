@@ -3,7 +3,7 @@ id: RFC-0018
 title: In-Soul Journey Pattern
 status: Draft
 lifecycle: Draft
-author: morgan@sprypoint.com
+author: Morgan Hirtle
 created: 2026-05-04
 updated: 2026-05-04
 targetSpecVersion: v1alpha1

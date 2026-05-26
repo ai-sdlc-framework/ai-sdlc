@@ -3,7 +3,7 @@ id: RFC-0038
 title: Adopter-Defined Reviewer Extension Point
 status: Draft
 lifecycle: Draft
-author: alexanderkline13@gmail.com
+author: Alexander Kline
 created: 2026-05-19
 updated: 2026-05-19
 targetSpecVersion: v1alpha1
@@ -16,7 +16,7 @@ requiresDocs: []
 
 **Status:** Draft
 **Lifecycle:** Draft
-**Author:** alexanderkline13@gmail.com (Product owner contribution)
+**Author:** Alexander Kline (Product owner contribution)
 **Created:** 2026-05-19
 **Updated:** 2026-05-19
 **Target Spec Version:** v1alpha1
@@ -25,7 +25,7 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io
+- [ ] Engineering owner — Dominique Legault
 - [ ] Product owner — Alexander Kline
 
 ## 1. Summary

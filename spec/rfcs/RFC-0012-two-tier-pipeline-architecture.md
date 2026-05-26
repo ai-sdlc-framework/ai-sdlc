@@ -3,7 +3,7 @@ id: RFC-0012
 title: Two-Tier Pipeline Architecture with Shared Core Library
 status: Implemented
 lifecycle: Implemented
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-04-30
 updated: 2026-05-13
 targetSpecVersion: v1alpha1
@@ -14,7 +14,7 @@ requiresDocs: []
 
 **Status:** Implemented (pipeline-cli is the production runtime substrate; AISDLC-100.{1,2,3,5,6,7,8} phase tasks shipped + Codex adaptation AISDLC-202.{1,2,3,4} shipped; umbrella-task close-out lost in re-org per operator confirmation 2026-05-13)
 **Lifecycle:** Implemented (lifecycle audit 2026-05-13 promoted Signed Off → Implemented; the two-tier slash-command + library contract runs every `/ai-sdlc execute` invocation today)
-**Author:** dominique@reliablegenius.io (with Claude assist)
+**Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-04-30
 **Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
@@ -24,8 +24,8 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [x] Engineering owner — dominique@reliablegenius.io (2026-04-30)
-- [x] Operator owner — dominique@reliablegenius.io (2026-04-30)
+- [x] Engineering owner — Dominique Legault (2026-04-30)
+- [x] Operator owner — Dominique Legault (2026-04-30)
 
 (Product owner sign-off intentionally omitted: this RFC is internal architecture with no product-facing surface change. The user-visible commands (`/ai-sdlc execute`, `pnpm watch`) work the same way; only the implementation underneath changes.)
 

@@ -471,8 +471,8 @@ The friction audit of the remaining ~14 non-attestation gates is tracked separat
 
 Per AISDLC-118 lifecycle (Draft → Ready for Review → Signed Off → Implemented). All 7 OQs walked through 2026-05-20 with operator using decision-rubric skill; resolutions inline above. RFC promoted Draft → Ready for Review → **Signed Off** on 2026-05-20.
 
-- [x] **Engineering owner:** dominique@reliablegenius.io (2026-05-20)
-- [x] **Operator:** dominique@reliablegenius.io (2026-05-20)
+- [x] **Engineering owner:** Dominique Legault (2026-05-20)
+- [x] **Operator:** Dominique Legault (2026-05-20)
 
 Implementation tracked under AISDLC-383 umbrella + 7 phase sub-tasks (AISDLC-383.1 through 383.7).
 

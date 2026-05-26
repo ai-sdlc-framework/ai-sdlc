@@ -3,7 +3,7 @@ id: RFC-0017
 title: In-Soul Variant Pattern
 status: Draft
 lifecycle: Ready for Review
-author: morgan@sprypoint.com
+author: Morgan Hirtle
 created: 2026-05-04
 updated: 2026-05-18
 targetSpecVersion: v1alpha1

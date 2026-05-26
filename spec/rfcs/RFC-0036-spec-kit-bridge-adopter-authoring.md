@@ -3,7 +3,7 @@ id: RFC-0036
 title: Spec-Kit Bridge and Adopter Spec-Authoring Surface
 status: Draft
 lifecycle: Ready for Review
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-13
 updated: 2026-05-18
 targetSpecVersion: v1alpha1
@@ -17,7 +17,7 @@ requiresDocs: []
 
 **Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 12 §14 OQs resolved. **Cross-cutting framing:** every operator-impacting resolution is **routed through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — strict outcomes (tasks.md only, no fallback; drift requires explicit operator decision; full DoR rubric at import; strict schema versioning) are preserved while all "blocking + operator confirm" patterns are reshaped as Decisions with auto-resolution OR timeboxed default-on-silence. Pipeline never halts on RFC-0036 operations. §14.1 codifies the per-org config schema. Implementation broken into 11 phase tasks (AISDLC-326..336).
 **Lifecycle:** Ready for Review
-**Author:** dominique@reliablegenius.io
+**Author:** Dominique Legault
 **Created:** 2026-05-13
 **Updated:** 2026-05-16
 **Target Spec Version:** v1alpha1
@@ -26,9 +26,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io
+- [ ] Engineering owner — Dominique Legault
 - [x] Product owner — Alexander Kline *(OQ-9 positioning resolution signed off: "Decision Engine" primary, "spec-driven AI workflows" secondary — 2026-05-18)*
-- [ ] Operator owner — dominique@reliablegenius.io
+- [ ] Operator owner — Dominique Legault
 
 ## Table of Contents
 

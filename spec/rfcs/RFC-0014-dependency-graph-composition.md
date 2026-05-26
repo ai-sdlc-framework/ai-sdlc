@@ -3,7 +3,7 @@ id: RFC-0014
 title: Dependency Graph Composition for Pipeline Decisions
 status: Implemented
 lifecycle: Implemented
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-01
 updated: 2026-05-13
 targetSpecVersion: v1alpha1
@@ -14,7 +14,7 @@ requiresDocs: []
 
 **Status:** Implemented (AISDLC-167 umbrella + all 5 phases 167.1–167.5 shipped; `AI_SDLC_DEPS_COMPOSITION` flag stays opt-in per operator decision 2026-05-10)
 **Lifecycle:** Implemented (lifecycle audit 2026-05-13 promoted from Draft; the legacy status field lagged shipped reality)
-**Author:** dominique@reliablegenius.io (with Claude assist)
+**Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-01
 **Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
@@ -23,9 +23,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io (pending)
+- [ ] Engineering owner — Dominique Legault (pending)
 - [x] Product owner — Alexander Kline (2026-05-04)
-- [ ] Operator owner — dominique@reliablegenius.io (pending)
+- [ ] Operator owner — Dominique Legault (pending)
 
 ### Product Authority review
 

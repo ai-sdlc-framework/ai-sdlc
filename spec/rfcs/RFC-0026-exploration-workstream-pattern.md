@@ -3,7 +3,7 @@ id: RFC-0026
 title: Exploration Workstream Pattern
 status: Draft
 lifecycle: Draft
-author: dominique@reliablegenius.io
+author: Dominique Legault
 created: 2026-05-03
 updated: 2026-05-03
 targetSpecVersion: v1alpha1
@@ -15,7 +15,7 @@ requiresDocs: []
 
 **Status:** Draft (initial seed; structure may shift)
 **Lifecycle:** Draft
-**Author:** dominique@reliablegenius.io
+**Author:** Dominique Legault
 **Created:** 2026-05-03
 **Target Spec Version:** v1alpha1
 **Depends on:** RFC-0011 (DoR gate), RFC-0015 (autonomous orchestrator), RFC-0024 (emergent capture)
@@ -163,8 +163,8 @@ Every exploration starts with a brief — a structured artifact that replaces th
     "Production implementation",
     "Performance benchmarking against current orchestrator at scale"
   ],
-  "owner": "dominique@reliablegenius.io",
-  "stakeholders": ["alex@reliablegenius.io"],
+  "owner": "Dominique Legault",
+  "stakeholders": ["Alexander Kline"],
   "createdAt": "2026-05-03T18:00:00Z",
   "approvedAt": null,
   "explorationStartedAt": null
@@ -381,4 +381,4 @@ Position grounded in RFC-0029 Part II + Principle 4 (the soul holds — explorat
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
-| v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 12 open questions |
+| v0.1 | 2026-05-03 | Dominique Legault | Initial draft seed; 12 open questions |
