@@ -1,7 +1,7 @@
 ---
 id: AISDLC-413
 title: 'fix(plugin): update orchestrator-tick + dispatch-worker skill-body env gates to match AISDLC-411 default-ON polarity'
-status: In Progress
+status: Done
 labels: [plugin, rfc-0015, post-411, operator-merge]
 references:
   - ai-sdlc-plugin/commands/dispatch-worker.md
