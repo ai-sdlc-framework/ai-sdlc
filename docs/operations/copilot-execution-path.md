@@ -309,13 +309,24 @@ pipeline from inside a Copilot session, dispatching to itself for
 sub-tasks. That would be a Tier 1 attended analogue of Claude Code's
 slash-command body. Phase 1 / Phase 2 / Phase 3 do not block on it.
 
-## Open questions blocking Phase 2 dispatch
+## Open questions (resolved 2026-05-26)
 
 Per CLAUDE.md "Subagent Governance — OQ-resolution prohibition
-(AISDLC-298)", these questions are surfaced for operator routing
+(AISDLC-298)", these questions were surfaced for operator routing
 through the [Decision Catalog (RFC-0035)](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md).
-**This document does NOT resolve them; Phase 2 cannot start until they
-are answered by the operator.**
+
+**Status (2026-05-26):** OQ-1 through OQ-5, OQ-7, and OQ-8 are
+**resolved from authoritative GitHub Copilot CLI documentation**
+(citations per OQ). OQ-6 (concurrent dispatch safety) remains the sole
+open question — non-blocking, smoke-test-only, covered by Phase 2 AC #5.
+**Phase 2 (AISDLC-429.2) is dispatchable.**
+
+Authoritative sources:
+
+- [GitHub Copilot CLI — Run the CLI programmatically](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically)
+- [GitHub Copilot CLI — About Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli)
+- [GitHub Copilot CLI — Best practices](https://docs.github.com/en/copilot/how-tos/copilot-cli/cli-best-practices)
+- [GitHub Copilot CLI marketing page](https://github.com/features/copilot/cli)
 
 ### OQ-1 — Prompt-passing mechanism
 
@@ -340,6 +351,16 @@ gets blurred in the transcript).
 `copilot prompt --help` (or equivalent) on a Copilot-entitled machine
 and pastes the relevant subcommands into the AISDLC-429.2 ticket.
 
+**Resolution (2026-05-26):** **Option (a)** — `-p` / `--prompt` flag
+is documented in [Run the CLI programmatically](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically).
+Example: `copilot -p "Explain this file: ./complex.ts"`. Stdin pipe is
+also supported (`echo "..." | copilot`), but piped input is ignored
+when `-p` is also passed. **Bridge contract:** use `-p` exclusively
+for deterministic dispatch; do not rely on stdin. System prompt vs.
+user prompt distinction is not in the documented flag surface, so the
+bridge concatenates them per-`SubagentType` (per the §"Per-`SubagentType`
+system prompt strategy" section above) into a single `-p` payload.
+
 ### OQ-2 — Non-interactive mode flag
 
 Does the CLI gate non-interactive mode behind:
@@ -358,6 +379,23 @@ serialises at Step 11, so a hung dispatch wastes the operator's
 
 **Recommended escalation route:** same as OQ-1 — operator's `copilot
 --help` output is the answer.
+
+**Resolution (2026-05-26):** **No separate flag needed** — passing `-p`
+triggers non-interactive mode automatically (CLI executes the prompt
+then exits). The recommended headless contract combines four flags per
+[Run the CLI programmatically](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically):
+
+```bash
+copilot -p "<prompt>" -s --no-ask-user --allow-tool='<scope>'
+```
+
+- `-p` — non-interactive one-shot
+- `-s` — silent (suppresses session metadata noise)
+- `--no-ask-user` — prevents clarifying questions that would hang dispatch
+- `--allow-tool='shell(git:*), write'` — scoped tool grant; alternative is `--allow-all-tools` for full headless
+
+**Bridge contract:** the subprocess bridge always passes these four
+flags. No TTY-detection or env-var fallback needed.
 
 ### OQ-3 — Structured-output mode
 
@@ -387,6 +425,19 @@ the raw stdout for a developer-class prompt + a reviewer-class
 prompt. Same procedure AISDLC-247 used for the Codex cross-harness
 review pilot.
 
+**Resolution (2026-05-26):** **Option (b)** — Copilot CLI emits
+free-form text only. No JSON / NDJSON / stream-json output flag is
+documented across any of the four cited sources. **Bridge contract:**
+identical to the Codex bridge — rely on prompt-side instruction
+("your FINAL message MUST be a single JSON object…") + `tryParseJson`'s
+fenced-extraction tolerance. Verdict-loss risk is the same as Codex
+and is mitigated the same way (retry path in
+`parseDeveloperReturnWithRetry` for developer dispatches; the standard
+reviewer prompt template enforces JSON envelope shape for reviewer
+dispatches). No JSON pre-processing step is added; the bridge
+populates `CopilotSpawnAgentResponse.text` (raw stdout) and
+`CopilotSpawnAgentResponse.parsed` (best-effort `tryParseJson(text)`).
+
 ### OQ-4 — Subscription tier matrix
 
 Which Copilot subscription tiers entitle the standalone `copilot` CLI?
@@ -407,6 +458,17 @@ should adjust the README's "supported harnesses" table accordingly.
 documentation + the standalone CLI's own release notes. Operator
 links the canonical source into the AISDLC-429.3 ticket.
 
+**Resolution (2026-05-26):** **Option (c) + Free tier** — per the
+[GitHub Copilot CLI marketing page](https://github.com/features/copilot/cli):
+*"Copilot CLI is included as a core feature of all GitHub Copilot
+plans (Free, Pro, Pro+, Business, and Enterprise)."* This is the
+widest tier matrix of any AI-SDLC spawner (Codex requires a paid
+ChatGPT plan; Claude requires API key or Claude Code subscription).
+**Runbook impact:** Phase 3's `copilot-spawner.md` runbook states
+"any GitHub Copilot plan including Free" as the entitlement
+requirement. README's "supported harnesses" table can highlight
+`copilot` as the lowest-friction option for new operators.
+
 ### OQ-5 — Auth flow
 
 Does the standalone `copilot` CLI authenticate via:
@@ -425,6 +487,27 @@ login flow available).
 
 **Recommended escalation route:** operator's first dispatch attempt
 on a fresh machine documents the actual auth handshake.
+
+**Resolution (2026-05-26):** **Option (d)** — environment variable.
+[Run the CLI programmatically](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically)
+shows the CI/CD pattern:
+
+```yaml
+env:
+  COPILOT_GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+```
+
+For local interactive use, the npm-installed CLI's own login flow
+(invoked the first time `copilot` runs on a fresh machine) persists
+credentials per [About Copilot CLI](https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli):
+*"authenticate using your existing GitHub credentials."* Token file
+location is not documented but is local to `~/.copilot/`.
+
+**Bridge contract:** the subprocess bridge does NOT set
+`COPILOT_GITHUB_TOKEN` itself — it inherits the operator's environment.
+Phase 3's runbook documents the required PAT scopes and how to set
+the env var in CI / cron contexts. Local interactive operators rely
+on the CLI's own auth state.
 
 ### OQ-6 — Concurrent dispatch safety
 
@@ -445,6 +528,18 @@ bridge may need to handle it itself.
 **Recommended escalation route:** smoke test from the AISDLC-429.2
 dev — three concurrent `copilot` invocations against trivial prompts;
 verify all three return independently.
+
+**Resolution (2026-05-26):** **Open — smoke-test required (non-blocking).**
+Concurrent-dispatch behavior is not documented across the four cited
+sources. **Defensive default in adapter:** trust the CLI for parallel
+sessions (each worktree dispatch is already cwd-isolated, and the
+documented session-state directory `~/.copilot/session-state/<session-id>/`
+suggests per-invocation session isolation by default). If the
+AISDLC-429.2 smoke test reveals token-cache races or CLI-side
+rate-limit serialisation, `CopilotHarnessAdapter.spawnParallel` adds
+an internal `p-limit(1)` wrapper (the Codex-bridge fallback pattern).
+Phase 2 AC #5 covers the smoke test; no Phase 2 contract changes
+hinge on this resolution.
 
 ### OQ-7 — Worktree cwd handling
 
@@ -467,6 +562,18 @@ flag explicitly.
 + runs a smoke dispatch with no `--cwd` flag inside a worktree to
 verify behaviour.
 
+**Resolution (2026-05-26):** **Option (a) by default** — no `--cwd`
+flag is documented across the four cited sources. The only mechanism
+is the parent process's cwd. **Bridge contract:**
+`child_process.spawn(binary, args, { cwd: request.cwd })` is sufficient.
+No `--cwd` flag passed (the docs don't list one and silently-unknown
+flags risk error-exit on a hardened CLI). If the AISDLC-429.2 smoke
+test reveals option (c) `.git`-walk behavior that would break Pattern
+C (Copilot inspecting the parent repo instead of the worktree), the
+bridge adds a defensive `git rev-parse --show-toplevel` pre-flight to
+confirm the dispatched cwd resolves to the worktree boundary. Open as
+a Phase 2 smoke-test verification, not a contract change.
+
 ### OQ-8 — Failure-mode parity with `parseDeveloperReturnWithRetry`
 
 If a developer dispatch returns prose (not JSON) on first attempt,
@@ -487,6 +594,19 @@ retry loop.
 **Recommended escalation route:** operator's first AISDLC-429.2
 smoke dispatch with a deliberately malformed developer return.
 
+**Resolution (2026-05-26):** **Option (b) by design** — no
+cross-invocation `--resume <session-id>` flag is documented.
+[Run the CLI programmatically](https://docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically)
+documents `--share='./[filename]'` and `--share-gist` for *exporting*
+completed sessions, but not for *resuming* them in a later subprocess
+invocation. `/resume` is an interactive slash-command (in-shell only).
+**Bridge contract:** fresh session per invocation (mirrors the Codex
+bridge). Step 6's `parseDeveloperReturnWithRetry` carries the prior
+attempt's diff + reviewer feedback inline in the retry prompt — same
+shape as the Codex retry path. The Codex bridge has been operating
+under option (b) successfully since AISDLC-202.2; no Copilot-specific
+deviation needed.
+
 ## What ships in Phase 2 vs. what Phase 3 owns
 
 Per the parent task (AISDLC-429) and the AISDLC-202 precedent:
@@ -500,9 +620,13 @@ Per the parent task (AISDLC-429) and the AISDLC-202 precedent:
 | Hermetic tests (no real `copilot` binary required) | Cross-link from this design doc to the new runbook |
 | 80%+ patch coverage gate | Cross-harness review extension (out of scope for the initial cut, per parent-task non-goal) |
 
-Phase 2 cannot start until OQ-1, OQ-2, OQ-3, OQ-4, OQ-5, OQ-7 are
-resolved by the operator. OQ-6 and OQ-8 are non-blocking — they
-inform the test matrix but don't change the contract surface.
+**Dispatch status (2026-05-26):** OQ-1, OQ-2, OQ-3, OQ-4, OQ-5, OQ-7,
+OQ-8 are resolved from authoritative GitHub Copilot CLI documentation
+(citations per OQ). OQ-6 (concurrent dispatch safety) remains
+smoke-test-required but is non-blocking — covered by Phase 2 AC #5
+and mitigated by the documented per-invocation session-state isolation
+(`~/.copilot/session-state/<session-id>/`). **AISDLC-429.2 is
+dispatchable.**
 
 ## References
 
