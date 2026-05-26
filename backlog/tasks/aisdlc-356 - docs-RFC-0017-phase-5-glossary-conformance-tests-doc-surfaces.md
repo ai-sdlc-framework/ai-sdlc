@@ -18,6 +18,8 @@ dependencies:
 references:
   - spec/rfcs/RFC-0017-in-soul-variant-pattern.md
 priority: medium
+blocked:
+  reason: "RFC-0017 v0.4 dispatched under conditional Design Authority sign-off (Morgan Hirtle, PR #709) + Engineering Authority ratification (Dominique Legault, PR #710). RFC lifecycle remains Ready for Review pending Product Authority v0.4 ratification (Alex). Mo's §11 practitioner validation condition discharges when AISDLC-355 ships. Operator-authorized dispatch override 2026-05-26."
 ---
 
 ## Description
