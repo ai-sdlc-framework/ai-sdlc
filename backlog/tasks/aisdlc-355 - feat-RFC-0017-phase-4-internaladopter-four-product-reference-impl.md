@@ -1,6 +1,6 @@
 ---
 id: AISDLC-355
-title: 'feat: RFC-0017 Phase 4 — InternalAdopter four-product suite as reference implementation (practitioner validation pass)'
+title: 'feat: RFC-0017 Phase 4 — InternalAdopter three-product suite (ProductA/B/C) as reference implementation; ProductD deferred to RFC-0018 per v0.4 (practitioner validation pass)'
 status: To Do
 assignee: []
 created_date: '2026-05-18'
@@ -25,10 +25,10 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 
 ## Scope (§11 validation criteria)
 
-- **ProductA**: variants `small-utility`, `enterprise`, `county-regional` — validates audience-segment specialization + voice register variation.
+- **ProductA**: variants `small-utility`, `enterprise`, `county-regional` — validates audience-segment specialization across the v0.4 visual-token surface (color/density/typography/motion/radius).
 - **ProductB**: variants `field-tech-on-truck`, `field-tech-handheld`, `supervisor-tablet` — validates density profile + form-factor specialization.
 - **ProductC**: variants `billing-clerk`, `customer-portal`, `csr-dashboard` — validates role-based audience + workflow-density specialization.
-- **ProductD**: variants `annual-test`, `repair-event`, `regulatory-audit-mode` — validates temporal-context-bound design intent (also validates §11 carries through to RFC-0018 Journey companion).
+- **ProductD**: **DEFERRED to RFC-0018 §11** per v0.4 Design Authority editorial pass. Proposed variants (`annual-test`, `repair-event`, `regulatory-audit-mode`) are temporal-context-bound operational modes activated by *when* and *why* a user is in the system — same user, different operational moment = Journey shape (RFC-0018), not Variant shape. ProductD validates the Variant/Journey boundary as a validation case for the companion RFC, not this one. **Scope of this task is now three products (A, B, C), not four.**
 
 ## Validation criteria (Mo's editorial welcome)
 
@@ -45,7 +45,7 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 - [ ] #1 ProductA variant declarations ship with `small-utility` / `enterprise` / `county-regional`
 - [ ] #2 ProductB variant declarations ship with `field-tech-on-truck` / `field-tech-handheld` / `supervisor-tablet`
 - [ ] #3 ProductC variant declarations ship with `billing-clerk` / `customer-portal` / `csr-dashboard`
-- [ ] #4 ProductD variant declarations ship with `annual-test` / `repair-event` / `regulatory-audit-mode`
+- [ ] #4 ProductD scope removed from this task per v0.4 (deferred to RFC-0018 §11 — temporal-context-bound modes are Journey shape, not Variant). File follow-up task against RFC-0018 once that RFC's implementation plan is broken down.
 - [ ] #5 Each variant has ≤ 5 `designImperatives` strings (validates closed-enum discipline OR exercises vendor-prefix extension)
 - [ ] #6 Admission scoring spot-check: variant-routed score differs from soul-aggregate by ≥ X% on a representative work item
 - [ ] #7 Engineering review confirms substrate shared across all four products' variants
