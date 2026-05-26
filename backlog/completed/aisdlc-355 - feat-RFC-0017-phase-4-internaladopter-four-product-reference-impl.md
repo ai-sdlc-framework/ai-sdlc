@@ -33,7 +33,7 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 ## Validation criteria (Mo's editorial welcome)
 
 1. Each variant's design intent articulable in ≤ 5 `designImperatives` strings
-2. No variant requires a field NOT in the §6.1 schema (closed-enum holds; OR validates the vendor-prefix extension path from OQ-5 if a real bespoke field surfaces)
+2. No variant uses a field outside the §6.1 closed-enum schema (all overrides within the framework surface, OR validates the vendor-prefix extension path from OQ-5 if a real bespoke field surfaces)
 3. Admission scoring on a real work item (e.g., "small-utility onboarding improvement") produces a different + better-justified score than soul-aggregate scoring
 4. Engineering vertex confirms substrate is genuinely shared across all variants of each soul (no hidden divergence)
 5. Deprecation lifecycle test: deprecate a variant; verify consumers degrade gracefully through full G0-routed lifecycle.
