@@ -59,6 +59,16 @@ export function validateConfigFiles(
       const raw = readFileSync(resolve(dir, file), 'utf-8');
       const doc: unknown = parseYaml(raw);
 
+      // Skip non-resource YAML files (all-commented placeholders,
+      // review-exemplars.yaml, manifest.yaml, etc.). Mirrors the guard in
+      // config.ts:116 — AI-SDLC resources always have apiVersion + kind.
+      // Without this, parseYaml(fully-commented-file) returns null and
+      // validateResource(null) reports a confusing "Missing kind field"
+      // error even when the file is correctly an inert placeholder.
+      if (!doc || typeof doc !== 'object' || !('apiVersion' in doc) || !('kind' in doc)) {
+        continue;
+      }
+
       const result = validateResource(doc);
       const kind =
         typeof doc === 'object' && doc !== null && 'kind' in doc

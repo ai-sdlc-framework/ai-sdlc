@@ -199,39 +199,71 @@ describe('validateConfigFiles()', () => {
 
   // ---------- Non-object parsed YAML (e.g., a plain string) ----------
 
-  it('returns null kind for non-object YAML content', () => {
+  it('silently skips non-object YAML content (scalar/string docs)', () => {
+    // Non-object YAML (a bare string, number, etc.) is not an AI-SDLC
+    // resource — skip silently per the config.ts:116 mirror guard.
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['scalar.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('just a string');
     mockedParseYaml.mockReturnValue('just a string');
-    mockedValidateResource.mockReturnValue({
-      valid: false,
-      errors: [{ path: '/', message: 'not an object', keyword: 'type' }],
-    });
 
     const results = validateConfigFiles('/some/dir');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].kind).toBeNull();
-    expect(results[0].valid).toBe(false);
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
   });
 
   // ---------- Null parsed YAML ----------
 
-  it('returns null kind for null YAML content', () => {
+  it('silently skips fully-commented / null YAML content (placeholder files)', () => {
+    // Mirrors config.ts:116 — files without apiVersion+kind aren't AI-SDLC
+    // resources; skip silently rather than reporting a confusing
+    // "Missing kind field" error. Common case: adopter placeholder YAMLs
+    // awaiting an upstream RFC to land (see Forge's cost-governance.yaml /
+    // governance-report.yaml before they were removed 2026-05-26).
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['empty.yaml'] as unknown as ReturnType<typeof readdirSync>);
-    mockedReadFileSync.mockReturnValue('');
+    mockedReadFileSync.mockReturnValue('# all-commented placeholder\n');
     mockedParseYaml.mockReturnValue(null);
-    mockedValidateResource.mockReturnValue({
-      valid: false,
-      errors: [{ path: '/', message: 'empty document', keyword: 'type' }],
-    });
 
     const results = validateConfigFiles('/some/dir');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].kind).toBeNull();
+    // No result emitted — the file was silently skipped before reaching
+    // validateResource(). validateResource MUST NOT have been called.
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
+  });
+
+  it('silently skips docs missing apiVersion field', () => {
+    // Adopter placeholder with content but no apiVersion — still not a
+    // resource by AI-SDLC convention, skip silently.
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue(['partial.yaml'] as unknown as ReturnType<
+      typeof readdirSync
+    >);
+    mockedReadFileSync.mockReturnValue('kind: Foo\nspec: {}\n');
+    mockedParseYaml.mockReturnValue({ kind: 'Foo', spec: {} });
+
+    const results = validateConfigFiles('/some/dir');
+
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
+  });
+
+  it('silently skips docs missing kind field', () => {
+    // Adopter placeholder with apiVersion but no kind — still not a
+    // valid AI-SDLC resource, skip silently.
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue(['partial.yaml'] as unknown as ReturnType<
+      typeof readdirSync
+    >);
+    mockedReadFileSync.mockReturnValue('apiVersion: v1alpha1\nspec: {}\n');
+    mockedParseYaml.mockReturnValue({ apiVersion: 'v1alpha1', spec: {} });
+
+    const results = validateConfigFiles('/some/dir');
+
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
   });
 
   // ---------- YAML parse error ----------
