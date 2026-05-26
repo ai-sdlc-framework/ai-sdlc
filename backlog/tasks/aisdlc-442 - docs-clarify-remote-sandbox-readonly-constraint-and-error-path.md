@@ -1,6 +1,6 @@
 ---
 id: AISDLC-442
-title: 'docs: clarify remote-sandbox read-only constraint + improve error path when CCR tries /ai-sdlc execute (closes #701)'
+title: 'docs: clarify remote-sandbox read-only constraint + improve error path when CCR tries /ai-sdlc execute (closes GH issue 701)'
 status: To Do
 assignee: []
 created_date: '2026-05-26'
@@ -22,7 +22,7 @@ permittedExternalPaths: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-## Problem (GH issue #701)
+## Problem (GH issue GH issue 701)
 
 A Claude Code agent running in the managed remote execution environment (CCR remote sandbox) cannot run `/ai-sdlc execute` against a freshly-filed backlog task. The sandbox lacks the prerequisites the slash command body assumes:
 
@@ -47,7 +47,7 @@ CLAUDE.md already documents this: *"Remote agents (`/schedule`) — read-only by
 - [ ] #2 Refusal message names the supported alternative: file a backlog task (`mcp__backlog__task_create`) or GitHub issue for local pickup
 - [ ] #3 New section in `CLAUDE.md` (or expand existing "Remote agents" section) explaining the local-vs-remote split with concrete examples of what works where
 - [ ] #4 `docs/operations/remote-agents-readonly.md` created (or expanded if exists) covering: what CCR can do, what it can't, why, and the supported handoff workflow
-- [ ] #5 PR body closes #701
+- [ ] #5 PR body closes GH issue 701
 - [ ] #6 Hermetic test for the env detection + refusal path
 - [ ] #7 80%+ patch coverage on new code
 <!-- AC:END -->

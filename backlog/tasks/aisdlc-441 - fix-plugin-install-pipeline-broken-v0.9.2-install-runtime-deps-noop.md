@@ -23,7 +23,7 @@ permittedExternalPaths: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-## Problem (GH issue #713)
+## Problem (GH issue GH issue 713)
 
 **Severity: P0 — published v0.9.2 plugin is unusable on a fresh install.**
 
@@ -34,7 +34,7 @@ Two compounding bugs:
 1. **`scripts/install-runtime-deps.sh` is a no-op.** It runs `npm install` against `ai-sdlc-plugin/package.json` which has zero `dependencies:` — only a custom `runtimeDependencies:` field that npm doesn't understand. So the script "succeeds" without installing anything.
 2. **No hook triggers the script.** Even if the script worked, nothing in `plugin.json`'s hook list invokes it. The path-resolver (`scripts/resolve-pipeline-cli.sh`) has logic to call `install-runtime-deps.sh` as a self-heal, but the script's no-op nature makes that self-heal cosmetic.
 
-## Manual recovery (documented in #713)
+## Manual recovery (documented in GH issue 713)
 
 From inside the plugin cache directory:
 
@@ -68,6 +68,6 @@ After that, the MCP server starts and `/ai-sdlc execute` runs.
 - [ ] #5 Some hook OR resolver step actually invokes the install script on first load (not pure copy-then-fail)
 - [ ] #6 `resolve-pipeline-cli.sh` error message surfaces the real root cause when self-heal fails (no more "tried 4 topologies" that all are unreachable)
 - [ ] #7 Hermetic test simulates fresh-install scenario + asserts deps resolve
-- [ ] #8 PR body closes #713
+- [ ] #8 PR body closes GH issue 713
 - [ ] #9 80%+ patch coverage on new test code
 <!-- AC:END -->
