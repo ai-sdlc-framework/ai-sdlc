@@ -158,9 +158,59 @@ if _is_usable "$DOGFOOD_BIN"; then
 fi
 
 # ── Nothing found (all topologies exhausted) ────────────────────────────────
-cat >&2 <<'EOF'
-resolve-pipeline-cli.sh: ERROR — @ai-sdlc/pipeline-cli binary not found.
+#
+# AISDLC-441: surface ROOT CAUSE when we can detect it instead of just
+# listing topologies. Common pre-AISDLC-441 silent failure modes:
+#   (a) plugin.json missing — wrong CLAUDE_PLUGIN_ROOT
+#   (b) plugin.json present but no runtimeDependencies object — broken plugin
+#       package (was the AISDLC-441 root cause)
+#   (c) plugin.json + runtimeDependencies present, network unreachable —
+#       install ran but couldn't fetch
+#
+# When the self-heal script ran above but didn't produce the deps, that's
+# usually (b) or (c). Run a diagnostic pass to tell the operator which.
+ROOT_CAUSE=""
+DIAG_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-}}"
+if [ -n "$DIAG_DIR" ] && [ -d "$DIAG_DIR" ]; then
+  if [ ! -f "$DIAG_DIR/plugin.json" ]; then
+    ROOT_CAUSE="Root cause: $DIAG_DIR/plugin.json is missing — \$CLAUDE_PLUGIN_DIR / \$CLAUDE_PLUGIN_ROOT does not point at a valid plugin install."
+  elif command -v node >/dev/null 2>&1; then
+    DIAG=$(node -e '
+      const fs = require("node:fs");
+      try {
+        const json = JSON.parse(fs.readFileSync(process.argv[1], "utf-8"));
+        const deps = json && json.runtimeDependencies;
+        if (!deps || typeof deps !== "object" || Array.isArray(deps) || Object.keys(deps).length === 0) {
+          process.stdout.write("NO_RUNTIME_DEPS");
+        } else {
+          process.stdout.write("HAS_RUNTIME_DEPS:" + Object.keys(deps).length);
+        }
+      } catch (e) {
+        process.stdout.write("PARSE_ERROR:" + e.message);
+      }
+    ' "$DIAG_DIR/plugin.json" 2>/dev/null || echo "NODE_FAILED")
+    case "$DIAG" in
+      NO_RUNTIME_DEPS)
+        ROOT_CAUSE="Root cause: $DIAG_DIR/plugin.json has no runtimeDependencies object — the install script cannot self-heal because there is nothing to install. The plugin package is broken; report this to the plugin author."
+        ;;
+      HAS_RUNTIME_DEPS:*)
+        ROOT_CAUSE="Root cause: plugin.json declares runtimeDependencies (${DIAG#HAS_RUNTIME_DEPS:}) but \`npm install\` did not produce the expected files. Most likely: network unreachable, npm registry misconfigured, or the published package version doesn't exist. Run \`bash \"$DIAG_DIR/scripts/install-runtime-deps.sh\" \"$DIAG_DIR\"\` manually to see the npm error output."
+        ;;
+      PARSE_ERROR:*)
+        ROOT_CAUSE="Root cause: $DIAG_DIR/plugin.json is not valid JSON — ${DIAG#PARSE_ERROR:}"
+        ;;
+    esac
+  fi
+fi
 
+{
+  echo "resolve-pipeline-cli.sh: ERROR — @ai-sdlc/pipeline-cli binary not found."
+  echo ""
+  if [ -n "$ROOT_CAUSE" ]; then
+    echo "$ROOT_CAUSE"
+    echo ""
+  fi
+  cat <<'EOF'
 Tried all install topologies:
   1. $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin  (marketplace install)
   2. $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin (plugin root)
@@ -184,4 +234,5 @@ Fix options (choose one):
 
 See: ai-sdlc-plugin/README.md "Install topologies + path resolution"
 EOF
+} >&2
 exit 1

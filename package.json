@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:fork-pr-safety && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:drop-stale-envelope && pnpm test:auto-rebase-stale-prs && pnpm test:dor-gate && pnpm test:pre-push-fixups-gate && pnpm test:adopter-facing-strings && pnpm test:patch-coverage-gate && pnpm test:coverage-gate && pnpm test:release-please-config",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:install-runtime-deps-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:fork-pr-safety && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:drop-stale-envelope && pnpm test:auto-rebase-stale-prs && pnpm test:dor-gate && pnpm test:pre-push-fixups-gate && pnpm test:adopter-facing-strings && pnpm test:patch-coverage-gate && pnpm test:coverage-gate && pnpm test:release-please-config",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -30,6 +30,7 @@
     "test:task-move-gate": "node --test scripts/check-task-moved.test.mjs",
     "test:attestation-sign-gate": "node --test scripts/check-attestation-sign.test.mjs",
     "test:sign-attestation-gate": "node --test ai-sdlc-plugin/scripts/sign-attestation.test.mjs",
+    "test:install-runtime-deps-gate": "node --test ai-sdlc-plugin/scripts/install-runtime-deps.test.mjs",
     "test:verify-attestation-gate": "node --test scripts/verify-attestation.test.mjs",
     "test:orchestrator-state-gate": "node --test scripts/check-orchestrator-state.test.mjs",
     "test:gate-workflow": "node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs",

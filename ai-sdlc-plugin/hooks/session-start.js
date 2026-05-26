@@ -10,7 +10,7 @@
 
 const { readFileSync, existsSync } = require('fs');
 const { join } = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -20,6 +20,74 @@ try {
   input = JSON.parse(raw);
 } catch {
   process.exit(0);
+}
+
+// ── AISDLC-441: Self-heal runtime dependencies on first load ─────────
+//
+// Claude Code's local marketplace installer copies the plugin cache layer
+// but does NOT invoke `npm install`, so runtimeDependencies declared in
+// plugin.json are missing on a fresh install. Detect this and run the
+// self-heal script BEFORE Claude Code tries to start the MCP server or
+// any pipeline-cli bin.
+//
+// Idempotency: the install script writes a sentinel at
+// node_modules/.ai-sdlc-installed when it succeeds. We early-exit when
+// BOTH the sentinel and the expected entry points exist. If anyone
+// manually deletes node_modules, the sentinel disappears and the
+// self-heal re-runs naturally.
+//
+// Fail-safe: the install is best-effort; we never block session start.
+// Errors are surfaced as a warning in the governance context so the
+// operator sees them but Claude Code still launches.
+try {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (pluginRoot && existsSync(join(pluginRoot, 'plugin.json'))) {
+    const sentinel = join(pluginRoot, 'node_modules', '.ai-sdlc-installed');
+    const pipelineCliBin = join(
+      pluginRoot,
+      'node_modules',
+      '@ai-sdlc',
+      'pipeline-cli',
+      'bin',
+      'cli-deps.mjs',
+    );
+    const mcpServerBin = join(
+      pluginRoot,
+      'node_modules',
+      '@ai-sdlc',
+      'plugin-mcp-server',
+      'dist',
+      'bin.js',
+    );
+    const needsInstall =
+      !existsSync(sentinel) || !existsSync(pipelineCliBin) || !existsSync(mcpServerBin);
+
+    if (needsInstall) {
+      const installScript = join(pluginRoot, 'scripts', 'install-runtime-deps.sh');
+      if (existsSync(installScript)) {
+        // Run synchronously so deps are present before Claude Code launches
+        // the MCP server. Allow up to 120s for a cold npm install.
+        const result = spawnSync('bash', [installScript, pluginRoot], {
+          encoding: 'utf-8',
+          timeout: 120_000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        if (result.status !== 0) {
+          // Stash the error for the warnings array below so the operator
+          // sees what went wrong in the session-start governance banner.
+          // Truncate to keep the banner readable.
+          const stderrTail = (result.stderr || '')
+            .split('\n')
+            .filter((l) => l.trim().length > 0)
+            .slice(-3)
+            .join(' | ');
+          process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR = `install-runtime-deps.sh exit ${result.status}: ${stderrTail || 'no stderr'}`;
+        }
+      }
+    }
+  }
+} catch {
+  // Never block session start on install errors.
 }
 
 // ── Find project root ────────────────────────────────────────────────
@@ -60,6 +128,15 @@ const blockedPaths = parseListField(yaml, 'blockedPaths');
 // ── Detect missing dev tools ─────────────────────────────────────────
 
 const warnings = [];
+
+// AISDLC-441: surface runtime-deps install failures so the operator sees them.
+if (process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR) {
+  warnings.push(
+    `⚠ Plugin runtime-dependency install failed — ${process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR}. ` +
+      'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
+      'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"',
+  );
+}
 
 // Check for vitest without coverage provider
 try {
