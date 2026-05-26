@@ -12,8 +12,12 @@
  * exercise the listener pipeline so that bug class is now covered.
  */
 
-import { describe, it, expect } from 'vitest';
-import { buildProgram } from './index.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { writeFileSync, symlinkSync, rmSync } from 'fs';
+import { pathToFileURL } from 'url';
+import { buildProgram, computeIsMainEntry } from './index.js';
 import type { VersionTriple } from './versions.js';
 
 interface CapturedExit {
@@ -121,5 +125,75 @@ describe('CLI unknown subcommand (integration)', () => {
     expect(err).toContain('Unknown subcommand: nope');
     // Without drift, the hint nudges the user to run --version to confirm.
     expect(err).toMatch(/--version/);
+  });
+});
+
+describe('computeIsMainEntry — symlink-aware main detection', () => {
+  // Temporary files created during tests, cleaned up in afterEach.
+  const created: string[] = [];
+
+  afterEach(() => {
+    for (const p of created.splice(0)) {
+      try {
+        rmSync(p);
+      } catch {
+        // Best-effort cleanup; ignore if already removed.
+      }
+    }
+  });
+
+  it('returns false when argv1 is undefined', () => {
+    expect(computeIsMainEntry('file:///some/module.js', undefined)).toBe(false);
+  });
+
+  it('returns false when argv1 does not exist on disk', () => {
+    expect(computeIsMainEntry('file:///some/module.js', '/no/such/path/cli.js')).toBe(false);
+  });
+
+  it('returns false when argv1 points to a different file', () => {
+    const target = join(tmpdir(), `aisdlc-test-other-${process.pid}.js`);
+    writeFileSync(target, '');
+    created.push(target);
+    // The moduleUrl is for a completely different file, so they must not match.
+    const moduleUrl = pathToFileURL(target + '.different').href;
+    expect(computeIsMainEntry(moduleUrl, target)).toBe(false);
+  });
+
+  it('returns true when argv1 is the exact same file as moduleUrl', () => {
+    const target = join(tmpdir(), `aisdlc-test-exact-${process.pid}.js`);
+    writeFileSync(target, '');
+    created.push(target);
+    const moduleUrl = pathToFileURL(target).href;
+    expect(computeIsMainEntry(moduleUrl, target)).toBe(true);
+  });
+
+  it('returns true when argv1 is a symlink that resolves to the module file (npm bin scenario)', () => {
+    // This is the core regression test: simulate `npm install -g` creating
+    // a symlink in the bin directory that points to the real dist/cli/index.js.
+    const realFile = join(tmpdir(), `aisdlc-test-real-${process.pid}.js`);
+    const symlinkPath = join(tmpdir(), `aisdlc-test-symlink-${process.pid}`);
+    writeFileSync(realFile, '');
+    symlinkSync(realFile, symlinkPath);
+    created.push(realFile, symlinkPath);
+
+    // moduleUrl represents import.meta.url of the real dist file.
+    const moduleUrl = pathToFileURL(realFile).href;
+
+    // argv1 is the symlink path — what `which ai-sdlc` returns after npm -g install.
+    expect(computeIsMainEntry(moduleUrl, symlinkPath)).toBe(true);
+  });
+
+  it('returns false when the symlink points to a different file than moduleUrl', () => {
+    const realFile = join(tmpdir(), `aisdlc-test-real2-${process.pid}.js`);
+    const otherFile = join(tmpdir(), `aisdlc-test-other2-${process.pid}.js`);
+    const symlinkPath = join(tmpdir(), `aisdlc-test-symlink2-${process.pid}`);
+    writeFileSync(realFile, '');
+    writeFileSync(otherFile, '');
+    symlinkSync(realFile, symlinkPath);
+    created.push(realFile, otherFile, symlinkPath);
+
+    // moduleUrl is for otherFile, but the symlink resolves to realFile.
+    const moduleUrl = pathToFileURL(otherFile).href;
+    expect(computeIsMainEntry(moduleUrl, symlinkPath)).toBe(false);
   });
 });
