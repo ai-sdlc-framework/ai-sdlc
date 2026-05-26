@@ -16,8 +16,6 @@ dependencies:
 references:
   - spec/rfcs/RFC-0017-in-soul-variant-pattern.md
 priority: medium
-blocked:
-  reason: "RFC-0017 v0.4 dispatched under conditional Design Authority sign-off (Morgan Hirtle, PR #709) + Engineering Authority ratification (Dominique Legault, PR #710). RFC lifecycle remains Ready for Review pending Product Authority v0.4 ratification (Alex). This task IS the §11 practitioner validation pass that discharges Mo's condition #1; landing it converts Mo's sign-off from conditional to unconditional. Operator-authorized dispatch override 2026-05-26. Renumbered from AISDLC-355 to fix ID collision with prior shipped task (2026-05-26)."
 ---
 
 ## Description
@@ -35,7 +33,7 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 ## Validation criteria (Mo's editorial welcome)
 
 1. Each variant's design intent articulable in ≤ 5 `designImperatives` strings
-2. No variant requires a field NOT in the §6.1 schema (closed-enum holds; OR validates the vendor-prefix extension path from OQ-5 if a real bespoke field surfaces)
+2. No variant uses a field outside the §6.1 schema (closed-enum holds; OR validates the vendor-prefix extension path from OQ-5 if a real bespoke field surfaces)
 3. Admission scoring on a real work item (e.g., "small-utility onboarding improvement") produces a different + better-justified score than soul-aggregate scoring
 4. Engineering vertex confirms substrate is genuinely shared across all variants of each soul (no hidden divergence)
 5. Deprecation lifecycle test: deprecate a variant; verify consumers degrade gracefully through full G0-routed lifecycle.
