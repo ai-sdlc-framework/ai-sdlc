@@ -1,5 +1,5 @@
 ---
-id: AISDLC-354
+id: AISDLC-436
 title: 'feat: RFC-0017 Phase 3 — variant deprecation lifecycle (catalog-routed) + Eτ_tessellation_drift extension + Engineering review routing'
 status: To Do
 assignee: []
@@ -9,7 +9,7 @@ labels:
   - variant-pattern
   - phase-3
 dependencies:
-  - AISDLC-352
+  - AISDLC-435
   - AISDLC-353
 references:
   - spec/rfcs/RFC-0017-in-soul-variant-pattern.md
@@ -17,7 +17,7 @@ references:
   - spec/rfcs/RFC-0009-tessellated-design-intent-documents.md
 priority: high
 blocked:
-  reason: "RFC-0017 v0.4 dispatched under conditional Design Authority sign-off (Morgan Hirtle, PR #709) + Engineering Authority ratification (Dominique Legault, PR #710). RFC lifecycle remains Ready for Review pending Product Authority v0.4 ratification (Alex). Mo's §11 practitioner validation condition discharges when AISDLC-355 ships. Operator-authorized dispatch override 2026-05-26."
+  reason: "RFC-0017 v0.4 dispatched under conditional Design Authority sign-off (Morgan Hirtle, PR #709) + Engineering Authority ratification (Dominique Legault, PR #710). RFC lifecycle remains Ready for Review pending Product Authority v0.4 ratification (Alex). Mo's §11 practitioner validation condition discharges when AISDLC-437 ships. Operator-authorized dispatch override 2026-05-26. Renumbered from AISDLC-354 to fix ID collision with prior shipped task (2026-05-26)."
 ---
 
 ## Description

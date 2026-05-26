@@ -1,5 +1,5 @@
 ---
-id: AISDLC-355
+id: AISDLC-437
 title: 'feat: RFC-0017 Phase 4 — InternalAdopter three-product suite (ProductA/B/C) as reference implementation; ProductD deferred to RFC-0018 per v0.4 (practitioner validation pass)'
 status: To Do
 assignee: []
@@ -10,14 +10,14 @@ labels:
   - phase-4
   - practitioner-validation
 dependencies:
-  - AISDLC-352
+  - AISDLC-435
   - AISDLC-353
-  - AISDLC-354
+  - AISDLC-436
 references:
   - spec/rfcs/RFC-0017-in-soul-variant-pattern.md
 priority: medium
 blocked:
-  reason: "RFC-0017 v0.4 dispatched under conditional Design Authority sign-off (Morgan Hirtle, PR #709) + Engineering Authority ratification (Dominique Legault, PR #710). RFC lifecycle remains Ready for Review pending Product Authority v0.4 ratification (Alex). This task IS the §11 practitioner validation pass that discharges Mo's condition #1; landing it converts Mo's sign-off from conditional to unconditional. Operator-authorized dispatch override 2026-05-26."
+  reason: "RFC-0017 v0.4 dispatched under conditional Design Authority sign-off (Morgan Hirtle, PR #709) + Engineering Authority ratification (Dominique Legault, PR #710). RFC lifecycle remains Ready for Review pending Product Authority v0.4 ratification (Alex). This task IS the §11 practitioner validation pass that discharges Mo's condition #1; landing it converts Mo's sign-off from conditional to unconditional. Operator-authorized dispatch override 2026-05-26. Renumbered from AISDLC-355 to fix ID collision with prior shipped task (2026-05-26)."
 ---
 
 ## Description
