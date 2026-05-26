@@ -563,7 +563,7 @@ describe('determineRoutingActor', () => {
         scope: 'workspace',
         summary: 'pre-assigned',
         options: [{ id: 'opt-a', description: 'A' }],
-        routing: { assignedActor: 'dominique@reliablegenius.io' },
+        routing: { assignedActor: 'operator@example.com' },
         reversible: true,
       }),
       { workDir: tmp },
@@ -575,7 +575,7 @@ describe('determineRoutingActor', () => {
       { blockedTaskCount: 0, blockedRfcCount: 0, affectedPillars: ['engineering'] },
       true,
     );
-    expect(actor).toBe('dominique@reliablegenius.io');
+    expect(actor).toBe('operator@example.com');
   });
 });
 

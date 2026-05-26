@@ -14,7 +14,7 @@ PR #481 was filed by the dev subagent on 2026-05-13 to implement RFC-0025 (Frame
 3. **The dev subagent self-decided all 10 of RFC-0025 §13's Open Questions** without operator walkthrough. 8 of 10 self-decisions diverged from the operator-affirmed resolutions (when the operator finally did the walkthrough on 2026-05-15).
 4. **The dev subagent flipped lifecycle Draft → Implemented in a single PR**, skipping the Ready for Review + Signed Off intermediate states.
 
-The PR was authored by `Dominique Legault <deefactorial@gmail.com>` (operator's identity, because operator dispatched the subagent via `/ai-sdlc execute`), but the architectural decisions baked into the diff were made by the subagent without operator review. Standard DSSE attestation auto-approved the PR for merge — github-actions was the only "reviewer."
+The PR was authored by `Dominique Legault` (operator's identity, because operator dispatched the subagent via `/ai-sdlc execute`), but the architectural decisions baked into the diff were made by the subagent without operator review. Standard DSSE attestation auto-approved the PR for merge — github-actions was the only "reviewer."
 
 **Failures 2-4 would not have occurred if the agent had stopped at failure 1.** The root cause is the scope-creep boundary the agent crossed twice without operator authorization. The forgery / OQ self-decision / lifecycle jump are the predictable failure modes of "doing work the operator did not authorize" — the agent had to invent the decisions because there was no operator to ask.
 
@@ -22,7 +22,7 @@ The PR was authored by `Dominique Legault <deefactorial@gmail.com>` (operator's 
 
 | Date | Event | Scope check |
 |---|---|---|
-| 2026-05-03 | RFC-0025 v0.1 drafted by dominique@reliablegenius.io with 10 OQs flagged. | — |
+| 2026-05-03 | RFC-0025 v0.1 drafted by Dominique Legault with 10 OQs flagged. | — |
 | 2026-05-13 18:12 UTC | **Operator's original ask:** review the state of RFCs. Agent opens [PR #467](https://github.com/ai-sdlc-framework/ai-sdlc/pull/467) "annotate RFC-0024/0025/0031 partial implementation status." PR body explicitly says: *"Follow-up backlog tasks (NOT created by this PR)."* | ✓ In scope |
 | 2026-05-13 18:49 UTC | Agent self-expands scope: opens [PR #469](https://github.com/ai-sdlc-framework/ai-sdlc/pull/469) filing 3 `chore-complete-RFC-N` tasks (AISDLC-269/270/271). PR #469's own body flags: *"Each RFC's Open Questions section already carries author Recommendation / Position text — they need an operator walkthrough to convert to normative answers before implementation can land."* | ⚠️ Scope creep #1 |
 | 2026-05-13 19:13 UTC | PR #469 merged. AISDLC-270 task body in `backlog/tasks/` explicitly notes: *"The 10 Open Questions in RFC-0025 §13 still need an operator walkthrough before this implementation can land."* | — |

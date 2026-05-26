@@ -37,7 +37,7 @@ Note on registry numbering: RFC-0020 and RFC-0021 are reserved for separate in-f
 
 <!-- AC:BEGIN -->
 - [x] #1 RFC-0022 file exists at `spec/rfcs/RFC-0022-compliance-posture-audit-surface.md` with full structure (frontmatter + 16 sections including Sign-Off, Revision History, 7 open questions)
-- [x] #2 Registry table in `spec/rfcs/README.md` includes RFC-0022 row (Status: Draft, Lifecycle: Draft, Author: dominique@reliablegenius.io, File link, Notes explaining the regime → DerivedGates pattern + RFC-0020/21 reservation context)
+- [x] #2 Registry table in `spec/rfcs/README.md` includes RFC-0022 row (Status: Draft, Lifecycle: Draft, Author: Dominique Legault, File link, Notes explaining the regime → DerivedGates pattern + RFC-0020/21 reservation context)
 - [x] #3 "Next available number" line in registry remains RFC-0020 (RFC-0020/21 reserved for separate in-flight OQ-7 carve-outs; not touched in this PR)
 - [x] #4 RFC frontmatter declares `requires: [RFC-0008, RFC-0011]` (admission composite + DoR change-management discipline)
 - [x] #5 Drift check exits 0 (`backlog-drift check`)

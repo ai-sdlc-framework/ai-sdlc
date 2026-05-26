@@ -424,14 +424,14 @@ describe('commitDorAnswerCaptures', () => {
     const proposals = [makeProposal('first concern'), makeProposal('second concern')];
     const written = commitDorAnswerCaptures(proposals, {
       dorThreadIssueId: 'AISDLC-444',
-      operator: 'dominique@reliablegenius.io',
+      operator: 'operator@example.com',
       artifactsDir,
     });
     expect(written).toHaveLength(2);
     for (const record of written) {
       expect(record.blocksIssueId).toBe('AISDLC-444');
       expect(record.source.type).toBe('operator');
-      expect(record.source.operator).toBe('dominique@reliablegenius.io');
+      expect(record.source.operator).toBe('operator@example.com');
       expect(record.source.context).toContain('AISDLC-444');
     }
   });
@@ -441,7 +441,7 @@ describe('commitDorAnswerCaptures', () => {
     const proposals = [makeProposal('only this one is confirmed')];
     const written = commitDorAnswerCaptures(proposals, {
       dorThreadIssueId: 'AISDLC-444',
-      operator: 'dominique@reliablegenius.io',
+      operator: 'operator@example.com',
       artifactsDir,
     });
     expect(written).toHaveLength(1);
@@ -643,7 +643,7 @@ One more thing — the session-token cache doesn't handle clock skew between nod
     const result = await processDorAnswer(operatorAnswer, {
       invoker,
       dorThreadIssueId: 'AISDLC-700',
-      operator: 'dominique@reliablegenius.io',
+      operator: 'operator@example.com',
       dorQuestionContext: 'Gate 5: is the affected surface named?',
       repoRoot,
       corpusDir,
@@ -667,7 +667,7 @@ One more thing — the session-token cache doesn't handle clock skew between nod
       expect(record.source.context).toContain('AISDLC-700');
       expect(record.source.context).toContain('Gate 5');
       expect(record.source.type).toBe('operator');
-      expect(record.source.operator).toBe('dominique@reliablegenius.io');
+      expect(record.source.operator).toBe('operator@example.com');
       expect(record.triage).toBe('tbd');
     }
 

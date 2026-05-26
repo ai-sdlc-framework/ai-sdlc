@@ -227,13 +227,13 @@ describe('AC#3 — operator answers resolve Decisions', () => {
     resolveDorDecision(decisionId, 'provide-answer', {
       workDir,
       env: FLAG_ON,
-      by: 'dominique@reliablegenius.io',
+      by: 'operator@example.com',
     });
 
     const decision = projectDecision(decisionId, { workDir });
     expect(decision!.status.lifecycle).toBe('answered');
     expect(decision!.status.answeredOptionId).toBe('provide-answer');
-    expect(decision!.status.answeredBy).toBe('dominique@reliablegenius.io');
+    expect(decision!.status.answeredBy).toBe('operator@example.com');
     expect(decision!.status.answeredAt).toBeTruthy();
   });
 

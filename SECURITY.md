@@ -10,7 +10,7 @@
 
 If you discover a security vulnerability in this project, please report it responsibly.
 
-**Email:** security@ai-sdlc.io
+**Report via GitHub Security Advisory:** [Open a private advisory](https://github.com/ai-sdlc-framework/ai-sdlc/security/advisories/new)
 
 Please include:
 

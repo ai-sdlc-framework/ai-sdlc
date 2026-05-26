@@ -226,7 +226,7 @@ describe('buildDecisionSupportView', () => {
       status: {
         lifecycle: 'answered',
         answeredOptionId: 'opt-b', // operator picked the OTHER option
-        answeredBy: 'dominique@reliablegenius.io',
+        answeredBy: 'operator@example.com',
         answeredAt: '2026-05-15T11:00:00.000Z',
         evaluation: { stageC: makeStageC() },
       },

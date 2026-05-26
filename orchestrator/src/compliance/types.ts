@@ -42,7 +42,7 @@ export interface Regime {
 
   /**
    * Who declared this regime applies.
-   * E.g., 'dominique@reliablegenius.io' or 'Acme Legal LLP'.
+   * E.g., 'Acme Legal LLP' or a contributor name.
    * REQUIRED in v1: framework refuses to load a posture with regimes lacking attestation
    * metadata (forces explicit operator/legal sign-off on each declaration).
    */

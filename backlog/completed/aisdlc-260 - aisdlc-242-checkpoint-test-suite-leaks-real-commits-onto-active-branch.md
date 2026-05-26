@@ -46,7 +46,7 @@ The AISDLC-242 checkpoint test suite operates against a `git` working tree to ve
 - A test that uses `process.cwd()` instead of an injected `repoRoot` and inherits the test runner's cwd.
 - A test that creates a temp dir via `mkdtempSync` but forgets to invoke `git init` in the temp dir, so `git` falls back to walking up and finds the parent repo.
 
-Whatever the mechanism, the test is not hermetic — it leaks real commits with the operator's `user.email = dominique@reliablegenius.io` identity onto whatever branch happens to be checked out.
+Whatever the mechanism, the test is not hermetic — it leaks real commits with the operator's `user.email = Dominique Legault` identity onto whatever branch happens to be checked out.
 
 ## Acceptance criteria
 

@@ -34,7 +34,7 @@ The RFC ships with 7 open questions for operator walkthrough; each carries a lea
 
 <!-- AC:BEGIN -->
 - [x] #1 RFC-0019 file exists at `spec/rfcs/RFC-0019-embedding-provider-adapter.md` with full structure (frontmatter + 18 sections including Sign-Off, Revision History, 7 open questions)
-- [x] #2 Registry table in `spec/rfcs/README.md` includes RFC-0019 row (Status: Draft, Lifecycle: Draft, Author: dominique@reliablegenius.io, File link, Notes)
+- [x] #2 Registry table in `spec/rfcs/README.md` includes RFC-0019 row (Status: Draft, Lifecycle: Draft, Author: Dominique Legault, File link, Notes)
 - [x] #3 "Next available number" line in registry updated from RFC-0019 to RFC-0020
 - [x] #4 RFC frontmatter declares `requires: [RFC-0010]` (structural template + deprecation pattern)
 - [x] #5 Drift check exits 0 (`backlog-drift check`)
