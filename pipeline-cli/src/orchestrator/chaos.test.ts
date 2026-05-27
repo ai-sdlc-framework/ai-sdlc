@@ -332,6 +332,10 @@ describe('chaos — mid-remediation SIGTERM (worker state persistence)', () => {
 
 describe('chaos — events.jsonl append-only integrity', () => {
   it('preserves all prior lines when subsequent ticks fail', async () => {
+    // NOTE: this test runs 3 sequential orchestrator ticks and can approach
+    // the default 5000ms Vitest timeout under heavy CI load. Explicit 20s
+    // budget so the meaningful assertion (append-only integrity) is what
+    // fails, not an arbitrary wall-clock limit. (AISDLC-377)
     // Tick 1 succeeds (writes 3 events). Tick 2 fails inside dispatch
     // (writes Tick + Dispatched + Failed events, no Completed). Tick 3
     // succeeds again. The events.jsonl file must contain a clean,
@@ -382,7 +386,7 @@ describe('chaos — events.jsonl append-only integrity', () => {
     const types = events.map((e) => e.type);
     expect(types.filter((t) => t === 'OrchestratorCompleted').length).toBeGreaterThanOrEqual(2);
     expect(types.filter((t) => t === 'OrchestratorFailed').length).toBeGreaterThanOrEqual(1);
-  });
+  }, 20_000); // 20s — 3 sequential ticks can approach 5s under heavy CI load
 });
 
 // ── Scenario 5: SIGTERM drain semantics ──────────────────────────────

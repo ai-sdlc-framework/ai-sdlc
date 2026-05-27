@@ -1,23 +1,32 @@
 ---
 id: RFC-0041
 title: Conductor / Worker Process Architecture for Autonomous Dispatch
-status: Approved
-lifecycle: Signed Off
+status: Implemented
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-26
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0010
   - RFC-0012
   - RFC-0015
+implementedBy:
+  - pipeline-cli/src/dispatch/board.ts
+  - pipeline-cli/src/dispatch/types.ts
+  - pipeline-cli/src/dispatch/supervisor.ts
+  - pipeline-cli/src/dispatch/recommend-worker.ts
+  - pipeline-cli/src/dispatch/cost-estimate.ts
+  - pipeline-cli/bin/cli-dispatch-supervisor.mjs
+  - pipeline-cli/src/cli/dispatch.ts
+  - pipeline-cli/src/orchestrator/dispatch-bg-agent.ts
 requiresDocs: []
 ---
 
 # RFC-0041: Conductor / Worker Process Architecture for Autonomous Dispatch
 
-**Status:** Approved
-**Lifecycle:** Signed Off — OQ walkthrough complete 2026-05-20; all 7 §10 OQs resolved; Engineering + Operator signed off
+**Status:** Implemented
+**Lifecycle:** Implemented — OQ walkthrough complete 2026-05-20; all 7 §10 OQs resolved; Engineering + Operator signed off. All 6 phase sub-tasks (AISDLC-377.1–377.6) reached Done 2026-05-25/26; Dispatch Board protocol, `in-session-agent` Worker, `claude-p-shell` supervisor, and `--spawner claude-cli` removal shipped.
 **Author:** Dominique Legault
 **Created:** 2026-05-20
 **Updated:** 2026-05-20

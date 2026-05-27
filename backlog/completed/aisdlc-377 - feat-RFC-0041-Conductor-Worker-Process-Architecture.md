@@ -1,9 +1,10 @@
 ---
 id: AISDLC-377
 title: 'feat: RFC-0041 Conductor / Worker Process Architecture for Autonomous Dispatch (umbrella)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
+completed_date: '2026-05-26'
 labels:
   - rfc-0041
   - architecture
@@ -51,12 +52,12 @@ Estimated wall-clock: 2–3 weeks (Phase 1 ~1 wk, Phase 2 ~1 wk, Phase 3 staged 
 
 ## Acceptance criteria (umbrella-level)
 
-- [ ] All 6 phase sub-tasks (377.1–377.6) reach Done
-- [ ] `/ai-sdlc orchestrator-tick` from inside a Claude Code session no longer dispatches via `Agent(... run_in_background: true)` — all dispatch flows through the Dispatch Board
-- [ ] Operator can run an autonomous drain with **zero** Agent SDK credit pool draw (subscription-only path via N `in-session-agent` Worker sessions)
-- [ ] Operator can ALSO run a headless drain via `claude-p-shell` supervisor when no CC session is available, with explicit cost surfacing
-- [ ] RFC-0041 lifecycle promoted Draft → Ready for Review → Signed Off → Implemented over the implementation arc
-- [ ] CLAUDE.md "Canonical execution paths" table updated to reflect the dispatch-board + workerKind model
+- [x] All 6 phase sub-tasks (377.1–377.6) reach Done
+- [x] `/ai-sdlc orchestrator-tick` from inside a Claude Code session no longer dispatches via `Agent(... run_in_background: true)` — all dispatch flows through the Dispatch Board
+- [x] Operator can run an autonomous drain with **zero** Agent SDK credit pool draw (subscription-only path via N `in-session-agent` Worker sessions)
+- [x] Operator can ALSO run a headless drain via `claude-p-shell` supervisor when no CC session is available, with explicit cost surfacing
+- [x] RFC-0041 lifecycle promoted Draft → Ready for Review → Signed Off → Implemented over the implementation arc
+- [x] CLAUDE.md "Canonical execution paths" table updated to reflect the dispatch-board + workerKind model
 
 ## Out of scope (for this umbrella)
 
@@ -67,3 +68,31 @@ Estimated wall-clock: 2–3 weeks (Phase 1 ~1 wk, Phase 2 ~1 wk, Phase 3 staged 
 ## Source
 
 Operator session 2026-05-20: stepped back from the 4-wide drain watchdog failure into an architectural review; RFC-0041 drafted, v2 added pluggable Worker kinds, v3 OQ-walkthrough resolved all 7 OQs; operator requested implementation breakdown.
+
+## Final Summary
+
+## Summary
+
+All 6 RFC-0041 phase sub-tasks (377.1–377.6) reached Done between 2026-05-20 and 2026-05-25. The umbrella task promotes RFC-0041 to `lifecycle: Implemented`, moves this file to `backlog/completed/`, and fixes a pre-existing chaos test timeout that was intermittently failing under heavy CI load.
+
+## Changes
+
+- `spec/rfcs/RFC-0041-conductor-worker-process-architecture.md` (modified): promoted `lifecycle: Signed Off` → `Implemented`, `status: Approved` → `Implemented`; added `implementedBy:` list pointing to the key implementation files shipped by sub-tasks 377.1–377.6.
+- `pipeline-cli/src/orchestrator/chaos.test.ts` (modified): added explicit 20s timeout to the "preserves all prior lines when subsequent ticks fail" test — it runs 3 sequential orchestrator ticks and was intermittently timing out at 5000ms (default) under heavy CI load.
+- `backlog/completed/aisdlc-377 - feat-RFC-0041-Conductor-Worker-Process-Architecture.md` (new): moved from tasks/, status → Done, all ACs checked, completed_date set.
+
+## Design decisions
+
+- **RFC-0041 implementedBy list**: points to the primary dispatch library (`pipeline-cli/src/dispatch/board.ts`, `types.ts`, `supervisor.ts`, `recommend-worker.ts`, `cost-estimate.ts`), the supervisor binary (`pipeline-cli/bin/cli-dispatch-supervisor.mjs`), the CLI surface (`pipeline-cli/src/cli/dispatch.ts`), and the Pattern X bg-agent coordination module (`pipeline-cli/src/orchestrator/dispatch-bg-agent.ts`). These are the files that make RFC-0041's normative claims true.
+- **Chaos test timeout**: 20s gives a 4× headroom over the observed ~5s single-run duration. The existing test logic is correct; only the budget needed expanding for parallel-suite runs.
+
+## Verification
+
+- `pnpm build` — clean
+- `pnpm test` — clean (chaos test timeout fixed)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+## Follow-up
+
+(none)
