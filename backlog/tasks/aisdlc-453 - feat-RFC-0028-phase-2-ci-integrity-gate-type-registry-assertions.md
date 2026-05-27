@@ -1,5 +1,5 @@
 ---
-id: AISDLC-448
+id: AISDLC-453
 title: 'feat: RFC-0028 Phase 2 — CI integrity gate (type-registry assertions) + structural drift detection'
 status: To Do
 assignee: []
@@ -10,7 +10,7 @@ labels:
   - phase-2
   - ci-gate
 dependencies:
-  - AISDLC-447
+  - AISDLC-452
 references:
   - spec/rfcs/RFC-0028-engineering-axis-substrate-enforcement.md
 priority: high

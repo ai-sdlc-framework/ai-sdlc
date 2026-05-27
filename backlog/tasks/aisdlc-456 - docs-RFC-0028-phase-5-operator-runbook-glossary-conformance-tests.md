@@ -1,5 +1,5 @@
 ---
-id: AISDLC-451
+id: AISDLC-456
 title: 'docs: RFC-0028 Phase 5 — operator runbook + glossary + conformance test suite'
 status: To Do
 assignee: []
@@ -10,9 +10,9 @@ labels:
   - phase-5
   - docs
 dependencies:
-  - AISDLC-447
-  - AISDLC-448
-  - AISDLC-449
+  - AISDLC-452
+  - AISDLC-453
+  - AISDLC-454
 references:
   - spec/rfcs/RFC-0028-engineering-axis-substrate-enforcement.md
 priority: medium
@@ -29,9 +29,9 @@ Phase 5 of RFC-0028. Adopter-facing docs + conformance tests roll-up.
 
 Sections:
 - **Authoring a Substrate Contract**: 4 required sub-contracts (Council / Cadence / Compliance / Cross-Soul Policy) with field-level `identityClass` examples
-- **Choosing identityClass values**: when to mark a field `core` vs `evolving` per canonical taxonomy (AISDLC-447)
-- **Reading the CI integrity gate output**: how to interpret each of the 5 assertion failures + remediation steps for each (AISDLC-448)
-- **Reconciling statistical drift Decisions**: three reconciliation paths and when each applies (AISDLC-449)
+- **Choosing identityClass values**: when to mark a field `core` vs `evolving` per canonical taxonomy (AISDLC-452)
+- **Reading the CI integrity gate output**: how to interpret each of the 5 assertion failures + remediation steps for each (AISDLC-453)
+- **Reconciling statistical drift Decisions**: three reconciliation paths and when each applies (AISDLC-454)
 - **Cold-start period**: what happens during the first 30 days of operation (no statistical drift detection; structural alone defends)
 - **Promotion runbook**: when to promote a field from `core` to `evolving` (corpus-driven evidence + Design + Engineering sign-off)
 
@@ -46,12 +46,12 @@ Sections:
 ### Conformance test suite
 
 Comprehensive test suite verifying:
-- Canonical identityClass taxonomy is enforced (AISDLC-447)
-- All 5 type-registry CI assertions pass on valid contracts AND fail correctly on each violation class (AISDLC-448)
-- Drift composition rules: structural blocks PR; statistical surfaces non-blocking; both composable in catalog (AISDLC-449)
+- Canonical identityClass taxonomy is enforced (AISDLC-452)
+- All 5 type-registry CI assertions pass on valid contracts AND fail correctly on each violation class (AISDLC-453)
+- Drift composition rules: structural blocks PR; statistical surfaces non-blocking; both composable in catalog (AISDLC-454)
 - Cold-start handling: structural detection alone during baseline-accumulation window
 - Tightening-only enforcement: child Soul DIDs that loosen `core` fields fail type check
-- RFC-0009 cross-ref pointers exist and resolve (AISDLC-450)
+- RFC-0009 cross-ref pointers exist and resolve (AISDLC-455)
 
 ### Adopter-facing surfaces
 

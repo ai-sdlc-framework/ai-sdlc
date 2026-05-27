@@ -1,5 +1,5 @@
 ---
-id: AISDLC-447
+id: AISDLC-452
 title: 'feat: RFC-0028 Phase 1 — canonical `identityClass` taxonomy + harmonize with shipped `layer1-deterministic.ts`'
 status: To Do
 assignee: []

@@ -1,5 +1,5 @@
 ---
-id: AISDLC-449
+id: AISDLC-454
 title: 'feat: RFC-0028 Phase 3 — structural + statistical drift composition wiring + cold-start handling + Decision routing'
 status: To Do
 assignee: []
@@ -10,8 +10,8 @@ labels:
   - phase-3
   - drift-detection
 dependencies:
-  - AISDLC-447
-  - AISDLC-448
+  - AISDLC-452
+  - AISDLC-453
 references:
   - spec/rfcs/RFC-0028-engineering-axis-substrate-enforcement.md
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
@@ -27,7 +27,7 @@ Phase 3 of RFC-0028 §7.2 v0.2 resolution. Wires the canonical pairing of struct
 
 ### Composition rules implemented
 
-1. **Structural drift (CI-time) REJECTS deployment** (from AISDLC-448): `Decision: substrate-structural-drift-detected` blocks PR merge.
+1. **Structural drift (CI-time) REJECTS deployment** (from AISDLC-453): `Decision: substrate-structural-drift-detected` blocks PR merge.
 2. **Statistical drift (runtime) SURFACES to operator (RFC-0035 G0 non-blocking)**: PPA's `SoulDriftDetected` event (rolling 30d mean < 0.4 or stddev > 0.15 for 3 sprints) routes to `Decision: soul-statistical-drift-detected` → operator batch review with reconciliation paths. Pipeline never halts.
 3. **Both Decisions composable in catalog**: operator TUI surface (RFC-0023) presents structural-drift attempts (rejected at CI) alongside statistical-drift signals (caught at runtime) — closes the loop on "drift caught early vs drift that escaped."
 
@@ -36,7 +36,7 @@ Phase 3 of RFC-0028 §7.2 v0.2 resolution. Wires the canonical pairing of struct
 Statistical drift detection requires rolling 30d baseline. Pre-baseline period:
 - < 30d signal available → detector emits "calibrating" status
 - No statistical Decisions emitted during calibration window
-- Structural detection (AISDLC-448) is sole defense during calibration
+- Structural detection (AISDLC-453) is sole defense during calibration
 - Same proven shape as RFC-0030 OQ-13.5 z-score flooding detection — reuse the cold-start pattern
 
 ### Catalog substrate wiring
