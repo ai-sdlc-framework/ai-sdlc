@@ -28,6 +28,12 @@
           "type": "array",
           "description": "Planned design changes surfaced to engineering for lookahead (RFC-0008 §A.9).",
           "items": { "$ref": "#/$defs/plannedChange" }
+        },
+        "variants": {
+          "type": "array",
+          "description": "In-Soul Variant declarations per RFC-0017 §5.1. Each variant carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's compliance regime and substrate invariants.",
+          "items": { "$ref": "#/$defs/variantDeclaration" },
+          "maxItems": 20
         }
       },
       "additionalProperties": false
@@ -597,6 +603,97 @@
         }
       },
       "additionalProperties": false
+    },
+    "variantAudienceProfile": {
+      "type": "object",
+      "description": "Variant-scoped audience characteristics. Mirrors Soul DID targetAudience structure. Feeds Sα₁ Problem/Audience Resonance when work items target this variant (RFC-0017 §5.4).",
+      "properties": {
+        "segments": {
+          "type": "array",
+          "description": "Named audience segments this variant targets.",
+          "items": { "type": "string" }
+        },
+        "sizeRange": {
+          "type": "object",
+          "description": "Staff/user size range for this audience.",
+          "properties": {
+            "minStaff": { "type": "integer", "minimum": 0 },
+            "maxStaff": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "variantDesignOverrides": {
+      "type": "object",
+      "description": "Closed framework enum of visual-token surfaces the variant may specialize per RFC-0017 §6.1 + OQ-5 revisit (2026-05-26). voiceRegister cut per Design Authority editorial (6/6 leading design systems treat content register outside the visual token surface). Adopter extensions via vendor reverse-DNS prefix (e.g. 'acme.com/accessibilityProfile') are accepted via patternProperties; non-prefixed unknown keys are rejected.",
+      "properties": {
+        "colorPaletteOverlay": {
+          "type": "string",
+          "description": "Additive color palette overlay over the soul's base palette."
+        },
+        "densityProfile": {
+          "type": "string",
+          "enum": ["compact", "comfortable", "spacious"],
+          "description": "Layout density character for this variant."
+        },
+        "typographyScale": {
+          "type": "string",
+          "enum": ["default", "large-print", "data-dense"],
+          "description": "Typography scale character for this variant."
+        },
+        "motionProfile": {
+          "type": "string",
+          "enum": ["full", "reduced", "none"],
+          "description": "Motion/animation character for this variant."
+        },
+        "radiusProfile": {
+          "type": "string",
+          "enum": ["sharp", "default", "rounded"],
+          "description": "Corner-rounding character for this variant (controls shape, not border stroke weight)."
+        }
+      },
+      "patternProperties": {
+        "^[a-z][a-z0-9-]+(\\.[a-z][a-z0-9-]+)+\\/[a-zA-Z][a-zA-Z0-9-]*$": {
+          "description": "Vendor-prefixed adopter extension. Key MUST follow reverse-DNS prefix convention (e.g. 'acme.com/accessibilityProfile')."
+        }
+      },
+      "additionalProperties": false
+    },
+    "variantDeclaration": {
+      "type": "object",
+      "description": "One variant declaration on a Soul DID per RFC-0017 §5.1. Carries distinct visual identity specializations and audience targeting while inheriting the parent Soul's compliance regime and substrate invariants (§5.3 bounded inheritance).",
+      "required": ["id", "targetAudience", "complianceFloor"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Kebab-case variant identifier. Must be unique within the parent Soul DID."
+        },
+        "targetAudience": {
+          "$ref": "#/$defs/variantAudienceProfile"
+        },
+        "designOverrides": {
+          "$ref": "#/$defs/variantDesignOverrides"
+        },
+        "complianceFloor": {
+          "type": "string",
+          "const": "inherit",
+          "description": "MUST be 'inherit'. Variants cannot diverge from soul compliance — schema validation rejects any other value (RFC-0017 §5.3 bounded inheritance)."
+        },
+        "designImperatives": {
+          "type": "array",
+          "description": "Variant-scoped Sα₂ inputs layered on soul-level designImperatives. Variant wins on conflict per RFC-0017 §5.4 (most-specific declaration).",
+          "items": { "type": "string" }
+        },
+        "cardinality": {
+          "type": "string",
+          "enum": ["primary", "secondary", "experimental"],
+          "description": "RESERVED: future lifecycle hint per RFC-0017 §5.2. v1 ignores; documents the experimental exit ramp (OQ-8)."
+        }
+      }
     }
   }
 }

@@ -1985,6 +1985,13 @@ export const designIntentDocumentSchema = {
             'Planned design changes surfaced to engineering for lookahead (RFC-0008 §A.9).',
           items: { $ref: '#/$defs/plannedChange' },
         },
+        variants: {
+          type: 'array',
+          description:
+            "In-Soul Variant declarations per RFC-0017 §5.1. Each variant carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's compliance regime and substrate invariants.",
+          items: { $ref: '#/$defs/variantDeclaration' },
+          maxItems: 20,
+        },
       },
       additionalProperties: false,
     },
@@ -2584,6 +2591,105 @@ export const designIntentDocumentSchema = {
         },
       },
       additionalProperties: false,
+    },
+    variantAudienceProfile: {
+      type: 'object',
+      description:
+        'Variant-scoped audience characteristics. Mirrors Soul DID targetAudience structure. Feeds Sα₁ Problem/Audience Resonance when work items target this variant (RFC-0017 §5.4).',
+      properties: {
+        segments: {
+          type: 'array',
+          description: 'Named audience segments this variant targets.',
+          items: { type: 'string' },
+        },
+        sizeRange: {
+          type: 'object',
+          description: 'Staff/user size range for this audience.',
+          properties: {
+            minStaff: { type: 'integer', minimum: 0 },
+            maxStaff: { type: 'integer', minimum: 0 },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    variantDesignOverrides: {
+      type: 'object',
+      description:
+        "Closed framework enum of visual-token surfaces the variant may specialize per RFC-0017 §6.1 + OQ-5 revisit (2026-05-26). voiceRegister cut per Design Authority editorial (6/6 leading design systems treat content register outside the visual token surface). Adopter extensions via vendor reverse-DNS prefix (e.g. 'acme.com/accessibilityProfile') are accepted via patternProperties; non-prefixed unknown keys are rejected.",
+      properties: {
+        colorPaletteOverlay: {
+          type: 'string',
+          description: "Additive color palette overlay over the soul's base palette.",
+        },
+        densityProfile: {
+          type: 'string',
+          enum: ['compact', 'comfortable', 'spacious'],
+          description: 'Layout density character for this variant.',
+        },
+        typographyScale: {
+          type: 'string',
+          enum: ['default', 'large-print', 'data-dense'],
+          description: 'Typography scale character for this variant.',
+        },
+        motionProfile: {
+          type: 'string',
+          enum: ['full', 'reduced', 'none'],
+          description: 'Motion/animation character for this variant.',
+        },
+        radiusProfile: {
+          type: 'string',
+          enum: ['sharp', 'default', 'rounded'],
+          description:
+            'Corner-rounding character for this variant (controls shape, not border stroke weight).',
+        },
+      },
+      patternProperties: {
+        '^[a-z][a-z0-9-]+(\\.[a-z][a-z0-9-]+)+\\/[a-zA-Z][a-zA-Z0-9-]*$': {
+          description:
+            "Vendor-prefixed adopter extension. Key MUST follow reverse-DNS prefix convention (e.g. 'acme.com/accessibilityProfile').",
+        },
+      },
+      additionalProperties: false,
+    },
+    variantDeclaration: {
+      type: 'object',
+      description:
+        "One variant declaration on a Soul DID per RFC-0017 §5.1. Carries distinct visual identity specializations and audience targeting while inheriting the parent Soul's compliance regime and substrate invariants (§5.3 bounded inheritance).",
+      required: ['id', 'targetAudience', 'complianceFloor'],
+      additionalProperties: false,
+      properties: {
+        id: {
+          type: 'string',
+          pattern: '^[a-z][a-z0-9-]*$',
+          description: 'Kebab-case variant identifier. Must be unique within the parent Soul DID.',
+        },
+        targetAudience: {
+          $ref: '#/$defs/variantAudienceProfile',
+        },
+        designOverrides: {
+          $ref: '#/$defs/variantDesignOverrides',
+        },
+        complianceFloor: {
+          type: 'string',
+          const: 'inherit',
+          description:
+            "MUST be 'inherit'. Variants cannot diverge from soul compliance — schema validation rejects any other value (RFC-0017 §5.3 bounded inheritance).",
+        },
+        designImperatives: {
+          type: 'array',
+          description:
+            'Variant-scoped Sα₂ inputs layered on soul-level designImperatives. Variant wins on conflict per RFC-0017 §5.4 (most-specific declaration).',
+          items: { type: 'string' },
+        },
+        cardinality: {
+          type: 'string',
+          enum: ['primary', 'secondary', 'experimental'],
+          description:
+            'RESERVED: future lifecycle hint per RFC-0017 §5.2. v1 ignores; documents the experimental exit ramp (OQ-8).',
+        },
+      },
     },
   },
 } as const;
@@ -6533,6 +6639,193 @@ export const subscriptionPlanSchema = {
   additionalProperties: false,
 } as const;
 
+export const variantConfigSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/variant-config.schema.json',
+  title: 'AI-SDLC variant-config.yaml',
+  description:
+    "Per-organization variant configuration schema per RFC-0017 §10.1. Ships as '.ai-sdlc/variant-config.yaml' (per-org defaults). Per-Soul overrides may live in the soul's own spec.variantConfig block. Default constants: softWarnAt=5 (Miller 7±2 cognitive-load threshold), hardLimit=20 (re-architect-as-multi-soul threshold per RFC-0009 §3).",
+  type: 'object',
+  properties: {
+    variant: {
+      type: 'object',
+      description: 'Top-level variant configuration block.',
+      properties: {
+        limits: {
+          type: 'object',
+          description:
+            'OQ-1 — per-org variant count thresholds. Defaults: softWarnAt=5, hardLimit=20.',
+          properties: {
+            softWarnAt: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                "Variant count at which a non-blocking Decision 'variant-count-soft-warning' is emitted. Default 5 (Miller 7±2 cognitive-load threshold).",
+            },
+            hardLimit: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                "Variant count at which declaration is rejected with Decision 'variant-count-hard-limit-exceeded' plus a clarification task recommending multi-soul re-architecture. Default 20 (re-architect threshold per RFC-0009 §3). MUST be greater than softWarnAt.",
+            },
+          },
+          additionalProperties: false,
+        },
+        lifecycle: {
+          type: 'object',
+          description: 'OQ-3 — variant deprecation and removal lifecycle.',
+          properties: {
+            deprecationWindowDays: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                "Default deprecation window in days before a variant may be hard-removed. Default 30 (internal-config cadence). Per-Soul override via soul's spec.variantConfig.lifecycle.deprecationWindowDays.",
+            },
+            routing: {
+              type: 'object',
+              description: 'Decision-Catalog routing for variant lifecycle events.',
+              properties: {
+                onDeclared: {
+                  type: 'string',
+                  enum: ['log-catalog-no-interrupt'],
+                  description:
+                    'Action when deprecation declared. Default: log to Decision Catalog without interrupting the pipeline.',
+                },
+                onApproaching: {
+                  type: 'string',
+                  enum: ['operator-batch-surface'],
+                  description:
+                    'Action when deprecation window is approaching. Default: surface in operator batch review.',
+                },
+                onConsumersPending: {
+                  type: 'string',
+                  enum: ['degraded-mode-and-migration-tasks'],
+                  description:
+                    'Action when removal requested but consumers still reference the variant. Default: keep variant in degraded mode and emit migration tasks.',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+        scoring: {
+          type: 'object',
+          description: 'OQ-4 — cross-variant aggregation rule.',
+          properties: {
+            crossVariantAggregation: {
+              type: 'string',
+              enum: ['min', 'max', 'mean'],
+              description:
+                "Default cross-variant aggregation rule. Default 'min' — matches RFC-0009 §7.2 cross-soul default. Per-Soul override via soul's spec.variantConfig.scoring.crossVariantAggregation.",
+            },
+          },
+          additionalProperties: false,
+        },
+        overrides: {
+          type: 'object',
+          description:
+            'OQ-5 (revised 2026-05-26) — framework-owned designOverrides fields and adopter extension policy.',
+          properties: {
+            framework: {
+              type: 'array',
+              description:
+                'Closed enum of framework-owned designOverrides field names. Expanding requires RFC amendment with Design Authority sign-off.',
+              items: {
+                type: 'string',
+                enum: [
+                  'colorPaletteOverlay',
+                  'densityProfile',
+                  'typographyScale',
+                  'motionProfile',
+                  'radiusProfile',
+                ],
+              },
+            },
+            adopterExtensionsAllowed: {
+              type: 'boolean',
+              description:
+                "Whether adopters may extend designOverrides via vendor reverse-DNS prefix (e.g. 'acme.com/accessibilityProfile'). Default true.",
+            },
+          },
+          additionalProperties: false,
+        },
+        uri: {
+          type: 'object',
+          description: 'OQ-6 — variant URI format convention.',
+          properties: {
+            format: {
+              type: 'string',
+              description:
+                "Path-style URI format template per RFC-0017 OQ-6 resolution. The explicit 'variant:' keyword preserves the parent/child hierarchy.",
+            },
+          },
+          additionalProperties: false,
+        },
+        authority: {
+          type: 'object',
+          description: 'OQ-7 — variant declaration authority model.',
+          properties: {
+            declarationOwner: {
+              type: 'string',
+              enum: ['design'],
+              description:
+                "Which authority owns variant declarations. Always 'design' per RFC-0017 OQ-7 + RFC-0029 Principle 1.",
+            },
+            substrateCostReview: {
+              type: 'object',
+              description: 'Engineering review routing for substrate-cost concerns.',
+              properties: {
+                reviewer: {
+                  type: 'string',
+                  enum: ['engineering'],
+                },
+                routing: {
+                  type: 'string',
+                  enum: ['decision-catalog'],
+                },
+                blockDecision: {
+                  type: 'string',
+                  description:
+                    'Decision Catalog key emitted when Engineering blocks on substrate cost.',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+        cardinality: {
+          type: 'object',
+          description: 'OQ-8 — cardinality field activation policy.',
+          properties: {
+            activationThreshold: {
+              type: 'object',
+              properties: {
+                adopterRequests: {
+                  type: 'integer',
+                  minimum: 1,
+                  description:
+                    'Number of distinct adopter requests before cardinality activation is auto-promoted to operator batch review. Default 2.',
+                },
+              },
+              additionalProperties: false,
+            },
+            routing: {
+              type: 'string',
+              enum: ['decision-catalog-auto-promote'],
+              description: 'How cardinality activation requests are routed.',
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const vectorStoreEntryV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.dev/schemas/vector-store-entry.v1.schema.json',
@@ -6596,6 +6889,59 @@ export const vectorStoreEntryV1Schema = {
       additionalProperties: true,
     },
   },
+} as const;
+
+export const workItemSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/work-item.schema.json',
+  title: 'AI-SDLC WorkItem',
+  description:
+    'A backlog work item with optional soul and variant targeting for admission scoring. Implements RFC-0009 §5.3 targetedSouls and RFC-0017 §5.4 targetedVariants.',
+  type: 'object',
+  required: ['id', 'title'],
+  properties: {
+    id: {
+      type: 'string',
+      description: 'Canonical work item identifier (e.g. AISDLC-313).',
+      minLength: 1,
+    },
+    title: {
+      type: 'string',
+      description: 'Human-readable title for the work item.',
+      minLength: 1,
+    },
+    description: {
+      type: 'string',
+      description: 'Optional longer description.',
+    },
+    labels: {
+      type: 'array',
+      description: 'Classification labels.',
+      items: { type: 'string' },
+    },
+    targetedSouls: {
+      type: 'array',
+      description:
+        'Soul DID URIs this work item explicitly targets per RFC-0009 §5.3 (targetedSouls field). Drives soul-scope admission scoring. Empty = substrate-only (min-over-all-souls degenerate case per RFC-0009 §6).',
+      items: {
+        type: 'string',
+        description:
+          "Soul DID URI (e.g. 'did:platform-x:soul:spry-engage') or soul slug (e.g. 'spry-engage').",
+      },
+    },
+    targetedVariants: {
+      type: 'array',
+      description:
+        "Variant references this work item targets per RFC-0017 §5.4. Each entry is a path-style URI in the format 'did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}' (OQ-6 resolution). When non-empty, admission scoring routes Sα₁ + Sα₂ through variant-scoped fields instead of soul-aggregate. Empty or absent = soul-aggregate scoring (backward-compatible with RFC-0009 baseline).",
+      items: {
+        type: 'string',
+        pattern: '^did(?::[^:]+)+:soul:[a-z][a-z0-9-]*/variant:[a-z][a-z0-9-]*$',
+        description:
+          "Path-style variant URI per RFC-0017 OQ-6: 'did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}'. The explicit 'variant:' keyword preserves the parent/child hierarchy and composes with future RFC-0018 Journey partition types.",
+      },
+    },
+  },
+  additionalProperties: true,
 } as const;
 
 export const worktreePoolSchema = {
@@ -6709,6 +7055,8 @@ export const SCHEMAS: Record<string, object> = {
   'signal-ingestion-config.v1.schema.json': signalIngestionConfigV1Schema,
   'signal-source-adapter.v1.schema.json': signalSourceAdapterV1Schema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
+  'variant-config.schema.json': variantConfigSchema,
   'vector-store-entry.v1.schema.json': vectorStoreEntryV1Schema,
+  'work-item.schema.json': workItemSchema,
   'worktree-pool.schema.json': worktreePoolSchema,
 };

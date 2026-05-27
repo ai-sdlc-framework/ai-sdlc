@@ -681,9 +681,10 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
               sizeRange: { minStaff: 1, maxStaff: 50 },
             },
             designOverrides: {
-              voiceRegister: 'approachable-municipal',
               colorPaletteOverlay: 'small-utility-warm',
               densityProfile: 'comfortable',
+              typographyScale: 'large-print',
+              motionProfile: 'reduced',
             },
             designImperatives: ['low-tech-fluency-tolerance', 'single-task-focus-per-screen'],
           },
@@ -694,9 +695,9 @@ describe('computeAdmissionComposite — RFC-0017 Phase 2 variant routing (AISDLC
               sizeRange: { minStaff: 51, maxStaff: 5000 },
             },
             designOverrides: {
-              voiceRegister: 'professional-administrative',
               colorPaletteOverlay: 'enterprise-cool',
               densityProfile: 'compact',
+              motionProfile: 'full',
             },
             designImperatives: ['bulk-operation-efficiency', 'multi-tab-workflow-tolerance'],
           },

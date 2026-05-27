@@ -41,12 +41,13 @@ function makeVariants(): Record<string, VariantOverlay[]> {
           sizeRange: { minStaff: 1, maxStaff: 50 },
         },
         designOverrides: {
-          voiceRegister: 'approachable-municipal',
           colorPaletteOverlay: 'small-utility-warm',
           densityProfile: 'comfortable',
+          typographyScale: 'large-print',
+          motionProfile: 'reduced',
         },
         designOverridesExt: {
-          // Vendor-prefix per OQ-5
+          // Vendor-prefix per OQ-5 (revised 2026-05-26 — voiceRegister cut from framework enum)
           'acme.com/accessibilityProfile': 'low-tech-fluency',
         },
         designImperatives: ['low-tech-fluency-tolerance', 'single-task-focus-per-screen'],
@@ -58,9 +59,11 @@ function makeVariants(): Record<string, VariantOverlay[]> {
           sizeRange: { minStaff: 51, maxStaff: 5000 },
         },
         designOverrides: {
-          voiceRegister: 'professional-administrative',
           colorPaletteOverlay: 'enterprise-cool',
           densityProfile: 'compact',
+          typographyScale: 'default',
+          motionProfile: 'full',
+          radiusProfile: 'default',
         },
         designImperatives: ['bulk-operation-efficiency', 'multi-tab-workflow-tolerance'],
       },
@@ -70,7 +73,7 @@ function makeVariants(): Record<string, VariantOverlay[]> {
           segments: ['county-government', 'regional-coordinator'],
           sizeRange: { minStaff: 20, maxStaff: 200 },
         },
-        designOverrides: { voiceRegister: 'inter-agency-formal' },
+        designOverrides: { radiusProfile: 'sharp' },
       },
     ],
     'spry-billing': [
@@ -529,12 +532,12 @@ describe('computeVariantScopedScores', () => {
     // the router — they're carried on the VariantOverlay but only the per-variant
     // score (computed upstream by the Sα₂ scorer) is consumed here. This test
     // ensures the type carries the field shape and the router copes.
-    const variantsWithExt = {
+    const variantsWithExt: Record<string, VariantOverlay[]> = {
       'spry-engage': [
         {
           id: 'small-utility',
           audienceCharacteristics: { segments: ['municipal-small'] },
-          designOverrides: { voiceRegister: 'approachable-municipal' },
+          designOverrides: { densityProfile: 'comfortable' },
           designOverridesExt: {
             'acme.com/accessibilityProfile': 'low-tech-fluency',
             'beta.org/legalDisclosureLevel': 2,

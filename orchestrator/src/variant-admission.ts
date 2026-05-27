@@ -42,17 +42,27 @@ import type { Tessellation } from '@ai-sdlc/reference';
 // ── Variant-overlay declarations (mirror RFC-0017 §6.1 schema) ──────────
 
 /**
- * Framework-owned `designOverrides` enum fields per RFC-0017 §6.1 + OQ-5.
- * These are the only field names the framework declares; adopters extend via
- * vendor-prefix (see `designOverridesExt` below).
+ * Framework-owned `designOverrides` enum fields per RFC-0017 §6.1 + OQ-5 revisit (2026-05-26).
+ *
+ * Design Authority editorial pass (Mo, 2026-05-26): `voiceRegister` cut — 6/6 leading design
+ * systems (Tailwind, Radix, Material, Carbon, Spectrum, Atlassian) converge on color, spacing,
+ * typography, motion, and radii as the core theming surface; none include content register at
+ * the visual token layer. `typographyScale`, `motionProfile`, and `radiusProfile` added.
+ *
+ * These are the only framework-owned field names. Adopters extend via vendor-prefix
+ * (see `designOverridesExt` below).
  */
 export interface VariantDesignOverridesFramework {
-  /** Variant-scoped voice register (e.g. "approachable-municipal"). */
-  voiceRegister?: string;
   /** Variant-scoped color palette overlay (additive over soul palette). */
   colorPaletteOverlay?: string;
   /** Variant-scoped density profile. */
   densityProfile?: 'compact' | 'comfortable' | 'spacious';
+  /** Variant-scoped typography scale. */
+  typographyScale?: 'default' | 'large-print' | 'data-dense';
+  /** Variant-scoped motion/animation profile. */
+  motionProfile?: 'full' | 'reduced' | 'none';
+  /** Variant-scoped corner-rounding character (shape, not border stroke weight). */
+  radiusProfile?: 'sharp' | 'default' | 'rounded';
 }
 
 /**

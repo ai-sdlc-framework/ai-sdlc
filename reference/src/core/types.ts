@@ -1378,6 +1378,101 @@ export interface Triad {
   product: TriadProductVertex;
 }
 
+// ── RFC-0017 Variant Types ─────────────────────────────────────────────
+
+/**
+ * Variant-scoped audience profile per RFC-0017 §5.2 + §6.1.
+ * Feeds Sα₁ Problem/Audience Resonance when work items target this variant.
+ */
+export interface VariantAudienceProfile {
+  /** Named audience segments this variant targets. */
+  segments?: string[];
+  /** Staff/user size range for this audience. */
+  sizeRange?: {
+    minStaff?: number;
+    maxStaff?: number;
+  };
+}
+
+/**
+ * Framework-owned designOverrides fields per RFC-0017 §6.1 + OQ-5 revisit (2026-05-26).
+ * voiceRegister was cut in the Design Authority editorial pass — content register
+ * lives outside the visual token surface per 6/6 leading design systems.
+ * Adopters extend via vendor reverse-DNS prefix (e.g. `acme.com/accessibilityProfile`).
+ */
+export interface VariantDesignOverrides {
+  /** Additive color palette overlay over the soul's base palette. */
+  colorPaletteOverlay?: string;
+  /** Layout density character for this variant. */
+  densityProfile?: 'compact' | 'comfortable' | 'spacious';
+  /** Typography scale character for this variant. */
+  typographyScale?: 'default' | 'large-print' | 'data-dense';
+  /** Motion/animation character for this variant. */
+  motionProfile?: 'full' | 'reduced' | 'none';
+  /** Corner-rounding character for this variant (shape, not border stroke weight). */
+  radiusProfile?: 'sharp' | 'default' | 'rounded';
+  /**
+   * Adopter extensions via vendor reverse-DNS prefix per RFC-0017 OQ-5.
+   * Keys MUST follow `<reverse-dns>/<field>` convention (e.g. `acme.com/accessibilityProfile`).
+   */
+  [vendorKey: string]: string | undefined;
+}
+
+/**
+ * One variant declaration on a Soul DID per RFC-0017 §5.1.
+ * Carries distinct visual identity specializations and audience targeting while
+ * inheriting the parent Soul's compliance regime and substrate invariants (§5.3).
+ */
+export interface VariantDeclaration {
+  /**
+   * Kebab-case variant identifier. Must be unique within the parent Soul DID.
+   * Pattern: `^[a-z][a-z0-9-]*$`
+   */
+  id: string;
+  /**
+   * Variant-scoped audience characteristics. Mirrors Soul DID targetAudience.
+   * Feeds Sα₁ Audience Resonance scoring when work items target this variant (§5.4).
+   */
+  targetAudience: VariantAudienceProfile;
+  /**
+   * Visual-token surface overrides for this variant (closed framework enum + vendor prefix).
+   * MUST be a subset of fields the parent Soul declares as variant-overridable (§5.3).
+   */
+  designOverrides?: VariantDesignOverrides;
+  /**
+   * MUST be `'inherit'`. Variants cannot diverge from soul compliance regime.
+   * Schema validation rejects any other value (RFC-0017 §5.3 bounded inheritance).
+   */
+  complianceFloor: 'inherit';
+  /**
+   * Variant-scoped Sα₂ inputs layered on soul-level designImperatives.
+   * Variant wins on conflict per RFC-0017 §5.4 (most-specific declaration).
+   * Conflict identification is a Design Authority practitioner judgment call (§5.2).
+   */
+  designImperatives?: string[];
+  /**
+   * RESERVED: future lifecycle hint per RFC-0017 §5.2 OQ-8.
+   * v1 ignores this field; documents the `experimental` exit ramp.
+   */
+  cardinality?: 'primary' | 'secondary' | 'experimental';
+}
+
+/**
+ * Work item variant targeting per RFC-0017 §5.4.
+ * Used alongside `targetedSouls` to route admission scoring through variant-scoped
+ * Sα₁ + Sα₂ fields instead of soul-aggregate.
+ */
+export interface WorkItemVariantRef {
+  /**
+   * Path-style URI per RFC-0017 OQ-6:
+   * `did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}`
+   *
+   * The explicit `variant:` keyword preserves the parent/child hierarchy and
+   * composes with future RFC-0018 Journey partition types (`/journey:{id}`).
+   */
+  uri: string;
+}
+
 // ── RFC-0009 Tessellation Types ────────────────────────────────────────
 
 /**
@@ -1435,6 +1530,19 @@ export interface DesignIntentDocumentSpec {
   brandIdentity?: BrandIdentity;
   experientialTargets?: ExperientialTargets;
   plannedChanges?: PlannedChange[];
+  /**
+   * In-Soul Variant declarations per RFC-0017 §5.1.
+   *
+   * Present only on Soul DIDs. Each variant carries distinct visual identity
+   * specializations and audience targeting while inheriting the parent Soul's
+   * compliance regime and substrate invariants (§5.3 bounded inheritance).
+   *
+   * Constraints (RFC-0017 OQ-1 + OQ-2):
+   *   - soft warn emitted at ≥ 5 variants (non-blocking; configurable per-org)
+   *   - hard reject at ≥ 20 variants (blocking; configurable per-org)
+   *   - schema-enforced flat: variants cannot nest sub-variants (OQ-2)
+   */
+  variants?: VariantDeclaration[];
 }
 
 export interface DesignIntentDocumentStatus {

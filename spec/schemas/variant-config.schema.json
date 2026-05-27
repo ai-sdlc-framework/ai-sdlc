@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/variant-config.schema.json",
+  "title": "AI-SDLC variant-config.yaml",
+  "description": "Per-organization variant configuration schema per RFC-0017 §10.1. Ships as '.ai-sdlc/variant-config.yaml' (per-org defaults). Per-Soul overrides may live in the soul's own spec.variantConfig block. Default constants: softWarnAt=5 (Miller 7±2 cognitive-load threshold), hardLimit=20 (re-architect-as-multi-soul threshold per RFC-0009 §3).",
+  "type": "object",
+  "properties": {
+    "variant": {
+      "type": "object",
+      "description": "Top-level variant configuration block.",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "description": "OQ-1 — per-org variant count thresholds. Defaults: softWarnAt=5, hardLimit=20.",
+          "properties": {
+            "softWarnAt": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Variant count at which a non-blocking Decision 'variant-count-soft-warning' is emitted. Default 5 (Miller 7±2 cognitive-load threshold)."
+            },
+            "hardLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Variant count at which declaration is rejected with Decision 'variant-count-hard-limit-exceeded' plus a clarification task recommending multi-soul re-architecture. Default 20 (re-architect threshold per RFC-0009 §3). MUST be greater than softWarnAt."
+            }
+          },
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "description": "OQ-3 — variant deprecation and removal lifecycle.",
+          "properties": {
+            "deprecationWindowDays": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Default deprecation window in days before a variant may be hard-removed. Default 30 (internal-config cadence). Per-Soul override via soul's spec.variantConfig.lifecycle.deprecationWindowDays."
+            },
+            "routing": {
+              "type": "object",
+              "description": "Decision-Catalog routing for variant lifecycle events.",
+              "properties": {
+                "onDeclared": {
+                  "type": "string",
+                  "enum": ["log-catalog-no-interrupt"],
+                  "description": "Action when deprecation declared. Default: log to Decision Catalog without interrupting the pipeline."
+                },
+                "onApproaching": {
+                  "type": "string",
+                  "enum": ["operator-batch-surface"],
+                  "description": "Action when deprecation window is approaching. Default: surface in operator batch review."
+                },
+                "onConsumersPending": {
+                  "type": "string",
+                  "enum": ["degraded-mode-and-migration-tasks"],
+                  "description": "Action when removal requested but consumers still reference the variant. Default: keep variant in degraded mode and emit migration tasks."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "scoring": {
+          "type": "object",
+          "description": "OQ-4 — cross-variant aggregation rule.",
+          "properties": {
+            "crossVariantAggregation": {
+              "type": "string",
+              "enum": ["min", "max", "mean"],
+              "description": "Default cross-variant aggregation rule. Default 'min' — matches RFC-0009 §7.2 cross-soul default. Per-Soul override via soul's spec.variantConfig.scoring.crossVariantAggregation."
+            }
+          },
+          "additionalProperties": false
+        },
+        "overrides": {
+          "type": "object",
+          "description": "OQ-5 (revised 2026-05-26) — framework-owned designOverrides fields and adopter extension policy.",
+          "properties": {
+            "framework": {
+              "type": "array",
+              "description": "Closed enum of framework-owned designOverrides field names. Expanding requires RFC amendment with Design Authority sign-off.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "colorPaletteOverlay",
+                  "densityProfile",
+                  "typographyScale",
+                  "motionProfile",
+                  "radiusProfile"
+                ]
+              }
+            },
+            "adopterExtensionsAllowed": {
+              "type": "boolean",
+              "description": "Whether adopters may extend designOverrides via vendor reverse-DNS prefix (e.g. 'acme.com/accessibilityProfile'). Default true."
+            }
+          },
+          "additionalProperties": false
+        },
+        "uri": {
+          "type": "object",
+          "description": "OQ-6 — variant URI format convention.",
+          "properties": {
+            "format": {
+              "type": "string",
+              "description": "Path-style URI format template per RFC-0017 OQ-6 resolution. The explicit 'variant:' keyword preserves the parent/child hierarchy."
+            }
+          },
+          "additionalProperties": false
+        },
+        "authority": {
+          "type": "object",
+          "description": "OQ-7 — variant declaration authority model.",
+          "properties": {
+            "declarationOwner": {
+              "type": "string",
+              "enum": ["design"],
+              "description": "Which authority owns variant declarations. Always 'design' per RFC-0017 OQ-7 + RFC-0029 Principle 1."
+            },
+            "substrateCostReview": {
+              "type": "object",
+              "description": "Engineering review routing for substrate-cost concerns.",
+              "properties": {
+                "reviewer": {
+                  "type": "string",
+                  "enum": ["engineering"]
+                },
+                "routing": {
+                  "type": "string",
+                  "enum": ["decision-catalog"]
+                },
+                "blockDecision": {
+                  "type": "string",
+                  "description": "Decision Catalog key emitted when Engineering blocks on substrate cost."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "cardinality": {
+          "type": "object",
+          "description": "OQ-8 — cardinality field activation policy.",
+          "properties": {
+            "activationThreshold": {
+              "type": "object",
+              "properties": {
+                "adopterRequests": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Number of distinct adopter requests before cardinality activation is auto-promoted to operator batch review. Default 2."
+                }
+              },
+              "additionalProperties": false
+            },
+            "routing": {
+              "type": "string",
+              "enum": ["decision-catalog-auto-promote"],
+              "description": "How cardinality activation requests are routed."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
