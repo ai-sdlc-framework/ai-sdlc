@@ -255,7 +255,13 @@ jobs:
             git checkout "$HEAD_SHA" -- '.ai-sdlc/attestations' 2>/dev/null || true
             # AISDLC-383.4: also surface transcript-leaves.jsonl for v6 verifier.
             git checkout "$HEAD_SHA" -- '.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || true
-            echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations + transcript-leaves.jsonl from $HEAD_SHA (if present)"
+            # AISDLC-445: also surface the per-patch-id transcript-leaves/ directory
+            # (AISDLC-421 primary path). Without this, the verifier falls back to the
+            # shared transcript-leaves.jsonl (which may contain stale leaves from a
+            # prior PR), producing a misleading "rootSignature did not match" error
+            # even when the envelope itself is valid.
+            git checkout "$HEAD_SHA" -- '.ai-sdlc/transcript-leaves/' 2>/dev/null || true
+            echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations + transcript-leaves.jsonl + transcript-leaves/ from $HEAD_SHA (if present)"
           else
             # pull_request_target: copy the envelope from the sandboxed
             # pr-content/ checkout. The sandbox MAY not have an envelope
@@ -305,6 +311,32 @@ jobs:
               cp -- "pr-content/.ai-sdlc/transcript-leaves.jsonl" \
                     ".ai-sdlc/transcript-leaves.jsonl"
               echo "[verify-attestation] staged transcript-leaves.jsonl from fork PR"
+            fi
+            # AISDLC-445: stage per-patch-id transcript-leaves/<patch-id>.jsonl files
+            # from the fork PR content (AISDLC-421 primary path). Without this, the
+            # verifier's v6ResolveLeavesForEnvelope falls back to the shared
+            # transcript-leaves.jsonl which may carry stale leaves from a prior PR,
+            # causing a Merkle root mismatch and misleading "rootSignature did not
+            # match any trusted reviewer pubkey" error even when the envelope is valid.
+            #
+            # Filename validation (<40hex>.jsonl) is the path-traversal guard —
+            # a malicious fork PR cannot smuggle e.g. `../../etc/passwd.jsonl` past
+            # the regex. This is DATA-ONLY: files are read by the verifier
+            # (running from main's scripts/) as JSON record sources; they are
+            # never executed or loaded as scripts.
+            if [ -d "pr-content/.ai-sdlc/transcript-leaves" ]; then
+              mkdir -p .ai-sdlc/transcript-leaves
+              LEAVES_STAGED=0
+              for leaffile in pr-content/.ai-sdlc/transcript-leaves/*.jsonl; do
+                [ -f "$leaffile" ] || continue
+                basename="${leaffile##*/}"
+                # Strict pattern match: 40 lowercase hex + .jsonl only.
+                if [[ "$basename" =~ ^[0-9a-f]{40}\.jsonl$ ]]; then
+                  cp -- "$leaffile" ".ai-sdlc/transcript-leaves/$basename"
+                  LEAVES_STAGED=$((LEAVES_STAGED + 1))
+                fi
+              done
+              echo "[verify-attestation] staged $LEAVES_STAGED per-patch-id transcript-leaves file(s) from pr-content/"
             fi
             # Fetch the fork HEAD SHA into main's git store so the
             # verifier's `git diff <base>...<head>` operations resolve.
