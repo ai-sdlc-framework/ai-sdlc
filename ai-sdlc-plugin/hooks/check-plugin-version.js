@@ -362,19 +362,18 @@ function verifyMcpServerTarball(installedVersion) {
         }
       }
     } else {
-      // No per-file manifest — compare bin.js against the top-level
-      // signedSha512. This is the legacy / single-binary path.
-      const actualBinSha = crypto
-        .createHash('sha512')
-        .update(fs.readFileSync(mcpServerDistBin))
-        .digest('hex');
-      if (actualBinSha !== signedSha512) {
-        warnTarballVerification(
-          `tarball SHA-512 mismatch: installed dist/bin.js differs from signed envelope`,
-          mcpVersion,
-        );
-        return;
-      }
+      // Legacy envelope (pre-distFiles signer): top-level signedSha512 is the
+      // FULL TARBALL hash — we cannot reconstruct that locally without
+      // re-packing. A naive comparison against dist/bin.js's SHA would always
+      // mismatch (different bytes, different sizes). Skip per-file byte
+      // verification on this path and rely on the DSSE signature check
+      // below — operator should re-sign with the post-AISDLC-439 signer to
+      // get per-file verification. Soft-warn so the staleness is visible.
+      warnTarballVerification(
+        `envelope is legacy (no distFiles[]) — per-file byte verification skipped; ` +
+          `re-sign with scripts/sign-mcp-tarball.mjs to enable.`,
+        mcpVersion,
+      );
     }
 
     // Verify DSSE signature against any-of-N trusted-reviewers pubkeys.
