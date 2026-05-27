@@ -20,9 +20,12 @@ import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { gzipSync } from 'node:zlib';
+
 import {
   TARBALL_PREDICATE_TYPE,
   buildTarballPredicate,
+  computeDistFileSha512s,
   sha512Hex,
   signTarballEnvelope,
 } from './sign-mcp-tarball.mjs';
@@ -138,6 +141,98 @@ describe('buildTarballPredicate', () => {
     });
     assert.ok(pred.predicate.signedAt);
     assert.doesNotThrow(() => new Date(pred.predicate.signedAt));
+  });
+
+  it('includes distFiles array (empty default) and accepts override', () => {
+    const empty = buildTarballPredicate({
+      packageName: '@x/y',
+      version: '1.0.0',
+      sha512: 'aa',
+      tarballUrl: 'https://x',
+      registry: 'https://x',
+      signerIdentity: 'a',
+      machine: 'b',
+    });
+    assert.deepStrictEqual(empty.predicate.distFiles, []);
+    const withDist = buildTarballPredicate({
+      packageName: '@x/y',
+      version: '1.0.0',
+      sha512: 'aa',
+      tarballUrl: 'https://x',
+      registry: 'https://x',
+      signerIdentity: 'a',
+      machine: 'b',
+      distFiles: [{ path: 'dist/bin.js', sha512: 'beef' }],
+    });
+    assert.deepStrictEqual(withDist.predicate.distFiles, [{ path: 'dist/bin.js', sha512: 'beef' }]);
+  });
+});
+
+// ── Test: computeDistFileSha512s extracts per-file SHAs from npm tarball ─
+
+/**
+ * Build a minimal POSIX/ustar tar archive containing a single file at the
+ * given path with the given content, returned as a gzipped Buffer. This
+ * mimics the relevant subset of `npm pack` output.
+ */
+function buildFakeTarballBuf(entries) {
+  const blocks = [];
+  for (const { path: p, content } of entries) {
+    const header = Buffer.alloc(512, 0);
+    header.write(p, 0, 100, 'utf-8');
+    header.write('0000644', 100, 7, 'ascii'); // mode
+    header.write('0000000', 108, 7, 'ascii'); // uid
+    header.write('0000000', 116, 7, 'ascii'); // gid
+    header.write(content.length.toString(8).padStart(11, '0'), 124, 11, 'ascii');
+    header.write('00000000000', 136, 11, 'ascii'); // mtime (epoch)
+    header.write('        ', 148, 8, 'ascii'); // checksum placeholder (spaces)
+    header.write('0', 156, 1, 'ascii'); // type: regular file
+    header.write('ustar\x00', 257, 6, 'ascii'); // magic
+    header.write('00', 263, 2, 'ascii'); // version
+    // Compute checksum: sum of header bytes treating checksum field as spaces.
+    let sum = 0;
+    for (let i = 0; i < 512; i++) sum += header[i];
+    const cksum = sum.toString(8).padStart(6, '0') + '\x00 ';
+    header.write(cksum, 148, 8, 'ascii');
+    blocks.push(header);
+    const dataBuf = Buffer.from(content);
+    blocks.push(dataBuf);
+    const pad = (512 - (content.length % 512)) % 512;
+    if (pad > 0) blocks.push(Buffer.alloc(pad, 0));
+  }
+  // End-of-archive: two zero blocks.
+  blocks.push(Buffer.alloc(1024, 0));
+  return gzipSync(Buffer.concat(blocks));
+}
+
+describe('computeDistFileSha512s', () => {
+  it('returns [] when no allowlisted file is present', () => {
+    const tgz = buildFakeTarballBuf([
+      { path: 'package/README.md', content: 'hello' },
+      { path: 'package/dist/other.js', content: 'console.log(1)' },
+    ]);
+    const result = computeDistFileSha512s(tgz);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it('extracts and hashes package/dist/bin.js', () => {
+    const binContent = '#!/usr/bin/env node\nconsole.log("hi")\n';
+    const expectedSha = sha512Hex(Buffer.from(binContent));
+    const tgz = buildFakeTarballBuf([
+      { path: 'package/README.md', content: 'readme' },
+      { path: 'package/dist/bin.js', content: binContent },
+    ]);
+    const result = computeDistFileSha512s(tgz);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].path, 'dist/bin.js');
+    assert.strictEqual(result[0].sha512, expectedSha);
+  });
+
+  it('strips the leading package/ prefix in the recorded path', () => {
+    const tgz = buildFakeTarballBuf([{ path: 'package/dist/bin.js', content: 'x' }]);
+    const result = computeDistFileSha512s(tgz);
+    assert.ok(!result[0].path.startsWith('package/'));
+    assert.strictEqual(result[0].path, 'dist/bin.js');
   });
 });
 

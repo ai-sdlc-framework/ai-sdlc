@@ -212,6 +212,18 @@ function verifyMcpServerTarball(installedVersion) {
     const mcpPkg = JSON.parse(fs.readFileSync(mcpServerPkgPath, 'utf-8'));
     const mcpVersion = mcpPkg.version;
     if (!mcpVersion) return;
+    // Reject anything that isn't a plain semver — `mcpVersion` flows into a
+    // filesystem path below; a compromised package.json with `"version":
+    // "../../trusted-reviewers"` would otherwise resolve outside `.ai-sdlc/
+    // attestations/`. Pre-release / build-metadata suffixes are allowed
+    // (e.g. `1.2.3-rc.1+build.42`).
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(mcpVersion)) {
+      warnTarballVerification(
+        `mcp-server package.json version is not valid semver: ${mcpVersion}`,
+        mcpVersion,
+      );
+      return;
+    }
 
     // Locate signed envelope.
     const envelopePath = path.join(
@@ -282,18 +294,20 @@ function verifyMcpServerTarball(installedVersion) {
       return;
     }
 
-    // Compute actual SHA-512 of the installed MCP server dist bundle.
-    // We hash the compiled binary (dist/bin.js) as the canonical tarball
-    // artifact — it is the primary entry point shipped in the npm tarball.
-    // The full tarball SHA (from npm pack) is what sign-mcp-tarball.mjs
-    // signed; we cannot reconstruct that locally without re-packing. Instead,
-    // we verify the dist binary SHA as a representative fast check, then fall
-    // back to the full tarball SHA via npm pack if the dist check passes but
-    // the SHA still mismatches.
+    // Compute actual SHA-512 of the installed MCP server dist bundle and
+    // compare it against signedSha512 from the envelope. Without this
+    // comparison the hook only confirms the envelope is signed by a trusted
+    // reviewer — it does NOT confirm the envelope describes the installed
+    // bytes. The primary supply-chain attack DSSE protects against (attacker
+    // replaces dist/bin.js while keeping the legitimate envelope) is silently
+    // bypassed when this comparison is skipped.
     //
-    // NOTE: For a fully strict verification, run scripts/verify-mcp-tarball.mjs
-    // directly (see docs/operations/mcp-server-signing.md). The hook performs
-    // a best-effort fast check; the standalone verifier is authoritative.
+    // We hash `dist/bin.js` (the primary entry point in the tarball) plus
+    // each `predicate.distFiles[]` entry the signer recorded in
+    // sign-mcp-tarball.mjs. For envelopes without `distFiles` (legacy or the
+    // common single-binary case), comparing the bin.js sha is the entire
+    // check; the standalone scripts/verify-mcp-tarball.mjs re-packs and
+    // verifies the full tarball SHA-512 for fully strict verification.
     const mcpServerDistBin = path.join(
       pluginRoot,
       'node_modules',
@@ -305,6 +319,62 @@ function verifyMcpServerTarball(installedVersion) {
     if (!fs.existsSync(mcpServerDistBin)) {
       // dist not built — skip (install-runtime-deps handles this).
       return;
+    }
+
+    // signedSha512 may describe either the full tarball OR a per-file digest
+    // map. If the predicate contains a distFiles[] manifest (sign-mcp-tarball
+    // emits this for per-file integrity), compare each entry; otherwise
+    // compare bin.js against the top-level signedSha512.
+    const distFiles = predicate?.predicate?.distFiles;
+    if (Array.isArray(distFiles) && distFiles.length > 0) {
+      for (const entry of distFiles) {
+        if (!entry || typeof entry.path !== 'string' || typeof entry.sha512 !== 'string') {
+          warnTarballVerification(`distFiles entry malformed in envelope`, mcpVersion);
+          return;
+        }
+        // Defense-in-depth: refuse entries that escape the dist root.
+        const normalized = path.posix.normalize(entry.path);
+        if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+          warnTarballVerification(
+            `distFiles entry has unsafe path: ${entry.path}`,
+            mcpVersion,
+          );
+          return;
+        }
+        const entryAbs = path.join(
+          pluginRoot,
+          'node_modules',
+          '@ai-sdlc',
+          'plugin-mcp-server',
+          normalized,
+        );
+        if (!fs.existsSync(entryAbs)) continue; // missing file — likely partial install
+        const actual = crypto
+          .createHash('sha512')
+          .update(fs.readFileSync(entryAbs))
+          .digest('hex');
+        if (actual !== entry.sha512) {
+          warnTarballVerification(
+            `tarball SHA-512 mismatch for ${entry.path}: installed bytes differ from signed envelope`,
+            mcpVersion,
+          );
+          return;
+        }
+      }
+    } else {
+      // No per-file manifest — compare bin.js against the top-level
+      // signedSha512. This is the legacy / single-binary path.
+      const actualBinSha = crypto
+        .createHash('sha512')
+        .update(fs.readFileSync(mcpServerDistBin))
+        .digest('hex');
+      if (actualBinSha !== signedSha512) {
+        warnTarballVerification(
+          `tarball SHA-512 mismatch: installed dist/bin.js differs from signed envelope`,
+          mcpVersion,
+        );
+        return;
+      }
     }
 
     // Verify DSSE signature against any-of-N trusted-reviewers pubkeys.

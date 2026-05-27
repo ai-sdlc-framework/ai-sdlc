@@ -43,6 +43,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { gunzipSync } from 'node:zlib';
 
 /** Predicate type URI — versioned for forward evolution. */
 export const TARBALL_PREDICATE_TYPE = 'https://ai-sdlc.io/mcp-server-tarball/v1';
@@ -89,6 +91,42 @@ async function fetchBuffer(url) {
 }
 
 /**
+ * Extract per-file SHA-512 hashes for a fixed allowlist of files inside a
+ * gzipped npm tarball, without depending on any tar parser package. We parse
+ * the standard tar header format (ustar magic, 512-byte blocks) directly.
+ *
+ * The allowlist is `dist/bin.js` plus any other operator-recoverable entry
+ * point — keeping it short bounds the predicate size and makes the verifier's
+ * comparison loop trivial. Files NOT in the allowlist do not get per-file
+ * SHAs; the top-level tarball SHA still binds them via the SLSA subject.
+ */
+export function computeDistFileSha512s(tarballBuf) {
+  const allowlist = new Set(['package/dist/bin.js']);
+  const tarBuf = gunzipSync(tarballBuf);
+  const results = [];
+  let offset = 0;
+  while (offset + 512 <= tarBuf.length) {
+    const header = tarBuf.subarray(offset, offset + 512);
+    // Empty block (two consecutive 512 zero blocks mark EOF).
+    if (header[0] === 0) break;
+    // ustar magic at byte 257..262 ("ustar\x00") confirms tar format.
+    const name = header.subarray(0, 100).toString('utf-8').replace(/\0.*$/, '');
+    const sizeStr = header.subarray(124, 136).toString('utf-8').replace(/\0.*$/, '').trim();
+    const size = parseInt(sizeStr, 8) || 0;
+    const fileEnd = offset + 512 + size;
+    if (allowlist.has(name) && size > 0) {
+      const data = tarBuf.subarray(offset + 512, fileEnd);
+      const sha = createHash('sha512').update(data).digest('hex');
+      results.push({ path: name.replace(/^package\//, ''), sha512: sha });
+    }
+    // Move to next header (each file's data is padded to a 512 multiple).
+    const padded = Math.ceil(size / 512) * 512;
+    offset = offset + 512 + padded;
+  }
+  return results;
+}
+
+/**
  * Compute SHA-512 of a Buffer, returned as lowercase hex.
  */
 export function sha512Hex(buf) {
@@ -110,6 +148,7 @@ export function buildTarballPredicate({
   registry,
   signerIdentity,
   machine,
+  distFiles,
 }) {
   return {
     _type: 'https://in-toto.io/Statement/v1',
@@ -129,6 +168,7 @@ export function buildTarballPredicate({
       registry,
       tarballUrl,
       sha512,
+      distFiles: distFiles ?? [],
       signedAt: new Date().toISOString(),
       signerIdentity,
       machine,
@@ -262,6 +302,27 @@ async function main() {
     `[sign-mcp-tarball] tarball size: ${tarballBuf.length} bytes  sha512: ${sha512.slice(0, 16)}...\n`,
   );
 
+  // Extract per-file SHAs for the allowlisted entry-point files inside the
+  // tarball — these let the SessionStart hook compare the installed bytes
+  // against the signed envelope without having to re-pack the tarball.
+  let distFiles = [];
+  try {
+    distFiles = computeDistFileSha512s(tarballBuf);
+    if (distFiles.length > 0) {
+      process.stderr.write(
+        `[sign-mcp-tarball] distFiles signed: ${distFiles.map((f) => f.path).join(', ')}\n`,
+      );
+    } else {
+      process.stderr.write(
+        `[sign-mcp-tarball] WARN: no allowlisted distFiles found in tarball — SessionStart hook will be unable to verify per-file SHAs\n`,
+      );
+    }
+  } catch (err) {
+    process.stderr.write(
+      `[sign-mcp-tarball] WARN: distFiles extraction failed (${err.message}); continuing with tarball-only SHA\n`,
+    );
+  }
+
   // Build predicate.
   const identity =
     process.env['GIT_AUTHOR_EMAIL'] ?? process.env['EMAIL'] ?? `${userInfo().username}@local`;
@@ -275,6 +336,7 @@ async function main() {
     registry,
     signerIdentity: identity,
     machine,
+    distFiles,
   });
 
   if (dryRun) {
