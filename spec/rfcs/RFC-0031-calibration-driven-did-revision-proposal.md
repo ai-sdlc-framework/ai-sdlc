@@ -46,7 +46,7 @@ This RFC defines a **PPA mechanism** (the proposal-generation path), not a **DID
 | Person | Role | Status | Date |
 |--------|------|--------|------|
 | Alexander Kline | Head of Product Strategy / Product Authority | ✍️ Authored v1 | 2026-05-04 |
-| Dominique Legault | CTO / Engineering Authority | ⏸ Pending | — |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed (all 5 OQs resolved per audit-affirmed walkthrough 2026-05-16; lifecycle Implemented via AISDLC-271) | 2026-05-27 |
 | Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending | — |
 
 ## Revision History
