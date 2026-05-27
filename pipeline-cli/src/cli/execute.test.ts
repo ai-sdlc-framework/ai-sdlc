@@ -201,6 +201,42 @@ describe('resolveSpawner', () => {
       }
     }
   });
+
+  it('errors with a clear configuration message when kind=copilot and COPILOT_SPAWN_AGENT_BIN is unset (AISDLC-429.2)', async () => {
+    const saved = process.env.COPILOT_SPAWN_AGENT_BIN;
+    delete process.env.COPILOT_SPAWN_AGENT_BIN;
+    try {
+      await expect(resolveSpawner('copilot')).rejects.toThrow(/COPILOT_SPAWN_AGENT_BIN/);
+    } finally {
+      if (saved !== undefined) process.env.COPILOT_SPAWN_AGENT_BIN = saved;
+    }
+  });
+
+  it('error message for copilot also includes an install hint (AISDLC-429.2 AC #4)', async () => {
+    const saved = process.env.COPILOT_SPAWN_AGENT_BIN;
+    delete process.env.COPILOT_SPAWN_AGENT_BIN;
+    try {
+      await expect(resolveSpawner('copilot')).rejects.toThrow(/[Ii]nstall/);
+    } finally {
+      if (saved !== undefined) process.env.COPILOT_SPAWN_AGENT_BIN = saved;
+    }
+  });
+
+  it('returns a CopilotHarnessAdapter when kind=copilot and COPILOT_SPAWN_AGENT_BIN is set (AISDLC-429.2)', async () => {
+    const saved = process.env.COPILOT_SPAWN_AGENT_BIN;
+    process.env.COPILOT_SPAWN_AGENT_BIN = '/tmp/fake-copilot-bridge';
+    try {
+      const spawner = await resolveSpawner('copilot');
+      expect(typeof spawner.spawn).toBe('function');
+      expect(typeof spawner.spawnParallel).toBe('function');
+    } finally {
+      if (saved === undefined) {
+        delete process.env.COPILOT_SPAWN_AGENT_BIN;
+      } else {
+        process.env.COPILOT_SPAWN_AGENT_BIN = saved;
+      }
+    }
+  });
 });
 
 describe('buildApprovingMockSpawner', () => {

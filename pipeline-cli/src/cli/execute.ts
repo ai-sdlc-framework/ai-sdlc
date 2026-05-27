@@ -61,6 +61,15 @@
  *                    constructing `CodexHarnessAdapter` directly with a
  *                    custom `CodexSpawnAgentFn` injection.
  *                    Design map: `docs/operations/codex-execution-path.md`.
+ *   - `copilot`    — `CopilotHarnessAdapter` over the Copilot `spawn_agent`
+ *                    host tool (AISDLC-429.2, Phase 2). The CLI resolver
+ *                    constructs the adapter with a subprocess bridge whose
+ *                    path is read from `COPILOT_SPAWN_AGENT_BIN`. When
+ *                    that env var is absent the resolver fails with a clear
+ *                    configuration message before any pipeline mutation.
+ *                    Programmatic callers can bypass the env var by
+ *                    constructing `CopilotHarnessAdapter` directly with a
+ *                    custom `CopilotSpawnAgentFn` injection.
  *
  * # Hard rules honored
  *
@@ -93,6 +102,10 @@ import {
   CodexHarnessAdapter,
   subprocessCodexSpawnAgent,
 } from '../runtime/spawners/codex-harness.js';
+import {
+  CopilotHarnessAdapter,
+  subprocessCopilotSpawnAgent,
+} from '../runtime/spawners/copilot-harness.js';
 import { ROLLBACK_OUTCOMES, RECOVERABLE_ABORT_OUTCOMES } from '../orchestrator/loop.js';
 import { detectRecoverableWorktree } from '../orchestrator/checkpoint.js';
 import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
@@ -108,13 +121,14 @@ import {
 } from '../types.js';
 
 /** Spawner identifiers accepted by `--spawner`. */
-export type SpawnerKind = 'mock' | 'api-key' | 'claude' | 'codex';
+export type SpawnerKind = 'mock' | 'api-key' | 'claude' | 'codex' | 'copilot';
 
 export const SPAWNER_KINDS: readonly SpawnerKind[] = [
   'mock',
   'api-key',
   'claude',
   'codex',
+  'copilot',
 ] as const;
 
 /**
@@ -244,6 +258,19 @@ export async function resolveSpawner(kind: SpawnerKind): Promise<SubagentSpawner
       // injection (e.g. an in-process bridge to Codex's host tools).
       const spawnAgent = subprocessCodexSpawnAgent();
       return new CodexHarnessAdapter({ spawnAgent });
+    }
+    case 'copilot': {
+      // AISDLC-429.2 — Phase 2 of the Copilot execution path. The
+      // `CopilotHarnessAdapter` is callback-driven (host-agnostic); the CLI
+      // resolver wires the default subprocess bridge that shells out to
+      // `$COPILOT_SPAWN_AGENT_BIN`. `subprocessCopilotSpawnAgent()` throws
+      // synchronously when that env var is unset so the operator sees a
+      // clear "configure COPILOT_SPAWN_AGENT_BIN" message before any
+      // pipeline mutation. Programmatic callers can construct
+      // `CopilotHarnessAdapter` directly with their own `CopilotSpawnAgentFn`
+      // injection (e.g. an in-process bridge to Copilot's host tools).
+      const spawnAgent = subprocessCopilotSpawnAgent();
+      return new CopilotHarnessAdapter({ spawnAgent });
     }
     default: {
       // Exhaustiveness — yargs `choices: SPAWNER_KINDS` already gates this,
@@ -766,7 +793,7 @@ export function executeCommand(): CommandModule {
         })
         .option('spawner', {
           describe:
-            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude (real `claude -p` shell-out for cron/daemon tick, AISDLC-349; default for cli-orchestrator) | codex (Codex CLI host-bridge dispatch via CodexHarnessAdapter, AISDLC-202.2; requires CODEX_SPAWN_AGENT_BIN). The legacy `claude-cli` inline-manifest spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) — see docs/operations/claude-cli-spawner-removed.md. See pipeline-cli/README.md.',
+            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude (real `claude -p` shell-out for cron/daemon tick, AISDLC-349; default for cli-orchestrator) | codex (Codex CLI host-bridge dispatch via CodexHarnessAdapter, AISDLC-202.2; requires CODEX_SPAWN_AGENT_BIN) | copilot (Copilot CLI host-bridge dispatch via CopilotHarnessAdapter, AISDLC-429.2; requires COPILOT_SPAWN_AGENT_BIN). The legacy `claude-cli` inline-manifest spawner was removed in RFC-0041 Phase 3.3 (AISDLC-377.6) — see docs/operations/claude-cli-spawner-removed.md. See pipeline-cli/README.md.',
           type: 'string',
           choices: SPAWNER_KINDS as unknown as string[],
           default: 'mock' as SpawnerKind,
