@@ -960,4 +960,35 @@ describe('pruneStaleParentDebris — AISDLC-446', () => {
     // The completed/ file should still exist
     expect(existsSync(join(workDir, 'backlog/completed/aisdlc-200 - in-completed.md'))).toBe(true);
   });
+
+  it('skips when local readFileSync throws (file vanished between ls-files and read)', async () => {
+    const phantomFile = 'backlog/tasks/aisdlc-446 - phantom.md';
+    expect(existsSync(join(workDir, phantomFile))).toBe(false);
+
+    const warnings: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((msg: string) => {
+      warnings.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok(`${phantomFile}\n`))
+      .on(
+        /^git ls-tree origin\/main .+backlog\/completed\//,
+        ok('backlog/completed/aisdlc-446 - phantom.md\n'),
+      )
+      .on(/^git show origin\/main:/, ok(CONTENT_MATCH));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    warnSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual([]);
+    expect(result.skippedContentDiffers).toEqual([phantomFile]);
+    expect(result.noCounterpart).toEqual([]);
+    const warnLog = warnings.find(
+      (l) => l.includes('[prune-stale-debris]') && l.includes('could not read local file'),
+    );
+    expect(warnLog).toBeDefined();
+  });
 });
