@@ -2,6 +2,57 @@
 
 Thank you for your interest in contributing to the AI-SDLC Framework specification. This document explains how to participate.
 
+## Issue-first workflow
+
+**Opening a GitHub Issue before a Pull Request dramatically reduces overhead for everyone involved.**
+
+### Why
+
+When an external contributor submits a PR without a linked issue, a maintainer must manually:
+
+1. Understand the motivation (is this the right approach? does it duplicate in-flight work?)
+2. Coordinate rebases if main moves during review
+3. Handle attestation ceremony (re-sign after each rebase)
+4. Work around GitHub's fork-token read-only limitations
+
+Contrast this with the issue-first path:
+
+1. Contributor opens an issue describing the problem or proposal
+2. Maintainer reviews the issue, confirms it fits the roadmap
+3. Maintainer (or the contributor once invited to the repo) runs `/ai-sdlc execute <issue-number>`
+4. The automated pipeline implements, tests, reviews, and opens a signed PR in 5-20 minutes
+
+### The workflow
+
+```
+1. Open a GitHub Issue:
+   https://github.com/ai-sdlc/ai-sdlc/issues/new
+
+2. Describe the problem or proposal clearly.
+   - Bug: what is the current behavior? what is expected?
+   - Feature: what is the use case? what does the ideal API look like?
+
+3. A maintainer will triage and — if accepted — implement via the pipeline,
+   or invite you to implement it. Either way, the issue is the anchor.
+```
+
+### The CI check
+
+Every PR automatically receives an `ai-sdlc/issue-link` status check that scans the PR title and body for a GitHub-linked-issue reference (`Closes #N`, `Fixes #N`, `Resolves #N`, or cross-repo `org/repo#N`).
+
+- **Success** — a reference was found, or the PR carries the `ci:no-issue-required` label.
+- **Failure** — no reference found. The check is informational; it will NOT block your PR from merging unless a maintainer has made it required in branch protection settings.
+
+The bypass label `ci:no-issue-required` is intended for:
+
+- `release-please` rolling PRs
+- `dependabot` version bumps
+- Self-evident maintainer chores (typos, minor doc tweaks)
+
+### What if I already opened a PR without an issue?
+
+That's okay — add `Closes #N` to your PR body (after opening the matching issue) and re-sync your PR. The check will re-run on the next push.
+
 ## Types of Contributions
 
 ### Spec Edits (Normative)

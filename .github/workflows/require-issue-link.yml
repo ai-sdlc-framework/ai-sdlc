@@ -1,0 +1,114 @@
+# require-issue-link.yml — AISDLC-443
+#
+# Posts `ai-sdlc/issue-link` as a status check on every PR.
+# Status is SUCCESS when the PR body or title contains a GitHub-linked-issue
+# reference (Closes/Fixes/Resolves #N, or cross-repo org/repo#N form).
+# Status is FAILURE when no such reference is found.
+#
+# BYPASS: label `ci:no-issue-required` on the PR skips the check
+# (status posts SUCCESS immediately). Intended for:
+#   - release-please rolling PRs
+#   - dependabot bumps
+#   - self-evident maintainer chores
+#
+# This is an INFORMATIONAL status check — it is NOT a required branch-
+# protection check by default. Operators who want to enforce the policy
+# hard should wire `ai-sdlc/issue-link` into required branch-protection
+# checks via:
+#   gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
+#     -F 'contexts[]=ai-sdlc/issue-link' ...
+# (See CONTRIBUTING.md §Issue-first workflow for the full rationale.)
+#
+# EDGE CASES handled (AC #5):
+#   - Cross-repo references:  Closes org/repo#123
+#   - Multiple references:    body may contain several Closes/Fixes/Resolves lines
+#   - PR title references:    both title and body are scanned
+#   - Case-insensitive:       closes, CLOSES, Fixes, FIXES, Resolves, RESOLVES
+#   - GitHub short forms:     #N (bare hash-prefixed number in Closes context)
+
+name: Require Linked Issue
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+
+permissions:
+  statuses: write
+  pull-requests: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check-issue-link:
+    name: ai-sdlc/issue-link
+    runs-on: ubuntu-latest
+    # Skip when the PR is a draft — informational only on draft PRs.
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Check for linked issue or bypass label
+        id: check
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # ── Bypass label check ────────────────────────────────────────────
+          # If the PR carries the `ci:no-issue-required` label, post success
+          # immediately and exit — no issue link needed.
+          if echo "$PR_LABELS" | grep -qi 'ci:no-issue-required'; then
+            echo "result=bypass" >> "$GITHUB_OUTPUT"
+            echo "[require-issue-link] bypass label present → posting success"
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$REPO/statuses/$SHA" \
+              -f state=success \
+              -f context="ai-sdlc/issue-link" \
+              -f description="bypass: ci:no-issue-required label present" \
+              -f target_url="https://github.com/$REPO/pull/$PR_NUMBER"
+            exit 0
+          fi
+
+          # ── Linked-issue regex ────────────────────────────────────────────
+          # Matches:
+          #   Closes #123
+          #   Fixes #45
+          #   Resolves #7
+          #   closes org/repo#123   (cross-repo)
+          #   FIXES #99
+          # Case-insensitive. Scans both PR title and PR body.
+          PATTERN='(closes|fixes|resolves)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+)'
+
+          COMBINED="$PR_TITLE
+          $PR_BODY"
+
+          if echo "$COMBINED" | grep -Eiq "$PATTERN"; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "[require-issue-link] linked issue reference found → posting success"
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$REPO/statuses/$SHA" \
+              -f state=success \
+              -f context="ai-sdlc/issue-link" \
+              -f description="linked issue reference found" \
+              -f target_url="https://github.com/$REPO/pull/$PR_NUMBER"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "[require-issue-link] no linked issue reference found → posting failure"
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$REPO/statuses/$SHA" \
+              -f state=failure \
+              -f context="ai-sdlc/issue-link" \
+              -f description="add Closes/Fixes/Resolves #N to link an issue" \
+              -f target_url="https://github.com/$REPO/blob/main/CONTRIBUTING.md#issue-first-workflow"
+          fi

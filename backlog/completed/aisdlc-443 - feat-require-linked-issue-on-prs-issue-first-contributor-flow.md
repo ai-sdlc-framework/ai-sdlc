@@ -1,7 +1,7 @@
 ---
 id: AISDLC-443
 title: 'feat(docs+ci): require linked issue on PRs + friendly issue-first contributor flow (closes GH issue 582)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-26'
 labels:

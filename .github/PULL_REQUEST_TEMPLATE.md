@@ -1,3 +1,22 @@
+<!--
+  👋 Thanks for contributing!
+
+  Consider opening a GitHub Issue first if you haven't already.
+  Here's why that helps:
+  - A maintainer can pick up your issue and implement it through our
+    automated pipeline (/ai-sdlc execute) in 5-20 minutes.
+  - You get faster turnaround: no rebase coordination, no attestation
+    ceremony, no fork-permission workarounds.
+  - The issue stays open as a discussion thread even after the PR merges.
+
+  Fast path → open an issue: https://github.com/ai-sdlc/ai-sdlc/issues/new
+  Then reference it below with "Closes #N".
+
+  Already have an issue? Great — just fill in the Closes line below.
+  Skipping the issue is fine for obvious chores (typos, doc tweaks).
+  The CI check will post a status but won't block your PR.
+-->
+
 ## Summary
 
 <!-- Brief description of the changes -->
@@ -16,7 +35,8 @@
 
 ## Related Issues
 
-<!-- Link to related issues: Closes #, Fixes #, Relates to # -->
+<!-- Link to related issues: Closes #, Fixes #, Resolves # -->
+<!-- If no issue exists yet, consider opening one first (see preamble above). -->
 
 Closes #
 
