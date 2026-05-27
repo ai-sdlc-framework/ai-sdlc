@@ -38,7 +38,7 @@ requiresDocs: []
 | Person | Role | Status | Date |
 |--------|------|--------|------|
 | Alexander Kline | Head of Product Strategy / Product Authority | ✍️ Authored v1 | 2026-05-04 |
-| Dominique Legault | CTO / Engineering Authority | ⏸ Pending | — |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed (all OQs resolved per §13 re-walkthrough 2026-05-26) | 2026-05-27 |
 | Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending | — |
 
 ## Revision History

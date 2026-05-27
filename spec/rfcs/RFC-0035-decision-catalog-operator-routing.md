@@ -26,9 +26,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — Dominique Legault
-- [ ] Product owner — Alexander Kline
-- [ ] Operator owner — Dominique Legault
+- [x] Engineering owner — Dominique Legault (2026-05-27 — all 14 OQs resolved per §15 walkthrough 2026-05-15)
+- [ ] Product owner — Alexander Kline (pending)
+- [x] Operator owner — Dominique Legault (2026-05-27 — all 14 OQs resolved per §15 walkthrough 2026-05-15)
 
 ## Table of Contents
 

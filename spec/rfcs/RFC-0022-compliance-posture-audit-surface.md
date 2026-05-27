@@ -27,9 +27,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — Dominique Legault (pending)
+- [x] Engineering owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
 - [x] Product owner — Alexander Kline (2026-05-04)
-- [ ] Operator owner — Dominique Legault (pending)
+- [x] Operator owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
 
 ### Product Authority review
 
@@ -543,9 +543,9 @@ Default constants ship in the `ai-sdlc init` compliance template. The regime →
 
 ## 15. Sign-Off
 
-- [ ] Engineering owner — Dominique Legault (pending)
-- [ ] Product owner — Alex (pending)
-- [ ] Operator owner — Dominique Legault (pending)
+- [x] Engineering owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
+- [ ] Product owner — Alex (pending — note: top-of-file Sign-Off shows Alex signed v0.x 2026-05-04; this duplicate section is out of sync, consider consolidating)
+- [x] Operator owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
 
 ## 16. Revision History
 
