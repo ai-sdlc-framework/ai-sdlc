@@ -77,51 +77,48 @@ If you find yourself trying to write `.worktrees/.active-task` at the project ro
 
 Heuristic 3 is intentionally conservative — it only fires when BOTH conditions hold. A local session without a signing key fails later at Step 10; the heuristic targets the case where an operator explicitly uses a managed environment. **Never refuse on missing signing key alone** (that is a setup error, not a sandbox context).
 
+> **Override for testing**: set `AI_SDLC_SKIP_CCR_GUARD=1` to bypass this check in integration tests or local CI environments that inject CCR-like env vars without actually being CCR sandboxes. The override check MUST run before the detection block so it can short-circuit the `exit 1` branch.
+
 ```bash
 # AISDLC-442: Refuse early in CCR remote-sandbox environments.
 # These sandboxes have no signing key, no plugin install, no operator filesystem.
 # Running /ai-sdlc execute there produces cryptic downstream errors — refuse here instead.
-_CCR_DETECTED=0
-_CCR_REASON=""
-
-if [ "${CLAUDE_CODE_ENV:-}" = "ccr" ]; then
-  _CCR_DETECTED=1
-  _CCR_REASON="CLAUDE_CODE_ENV=ccr detected"
-elif [ "${CLAUDE_REMOTE_EXECUTION:-}" = "1" ]; then
-  _CCR_DETECTED=1
-  _CCR_REASON="CLAUDE_REMOTE_EXECUTION=1 detected"
-elif [ -n "${CLAUDE_CODE_ENV:-}" ] && [ ! -f "${HOME}/.ai-sdlc/signing-key.pem" ]; then
-  _CCR_DETECTED=1
-  _CCR_REASON="CLAUDE_CODE_ENV set + ~/.ai-sdlc/signing-key.pem absent (likely managed sandbox)"
-fi
-
-if [ "$_CCR_DETECTED" = "1" ]; then
-  echo "ERROR: /ai-sdlc execute cannot run in a CCR remote sandbox. ($_CCR_REASON)" >&2
-  echo "" >&2
-  echo "Remote sandboxes are read-only by design — they lack:" >&2
-  echo "  - ~/.ai-sdlc/signing-key.pem (operator-machine-local, never in CCR)" >&2
-  echo "  - Plugin install (no mcp__plugin_ai-sdlc_ai-sdlc__* tools)" >&2
-  echo "  - Worktree filesystem (sandbox layout differs)" >&2
-  echo "  - Operator filesystem (.ai-sdlc/trusted-reviewers.yaml pubkeys)" >&2
-  echo "" >&2
-  echo "Supported alternatives from a CCR sandbox:" >&2
-  echo "  1. File a backlog task for local pickup:" >&2
-  echo "       Use mcp__backlog__task_create (works fine in CCR)" >&2
-  echo "  2. File a GitHub issue for local pickup:" >&2
-  echo "       Use mcp__github__create_issue (works fine in CCR)" >&2
-  echo "  Then run /ai-sdlc execute <task-id> from a LOCAL Claude Code session." >&2
-  echo "" >&2
-  echo "See: docs/operations/remote-agents-readonly.md" >&2
-  exit 1
-fi
-```
-
-> **Override for testing**: set `AI_SDLC_SKIP_CCR_GUARD=1` to bypass this check in integration tests or local CI environments that inject CCR-like env vars without actually being CCR sandboxes.
-
-```bash
 if [ "${AI_SDLC_SKIP_CCR_GUARD:-}" = "1" ]; then
   echo "[ai-sdlc-progress] CCR guard: skipped (AI_SDLC_SKIP_CCR_GUARD=1)" >&2
+else
   _CCR_DETECTED=0
+  _CCR_REASON=""
+
+  if [ "${CLAUDE_CODE_ENV:-}" = "ccr" ]; then
+    _CCR_DETECTED=1
+    _CCR_REASON="CLAUDE_CODE_ENV=ccr detected"
+  elif [ "${CLAUDE_REMOTE_EXECUTION:-}" = "1" ]; then
+    _CCR_DETECTED=1
+    _CCR_REASON="CLAUDE_REMOTE_EXECUTION=1 detected"
+  elif [ -n "${CLAUDE_CODE_ENV:-}" ] && [ ! -f "${HOME}/.ai-sdlc/signing-key.pem" ]; then
+    _CCR_DETECTED=1
+    _CCR_REASON="CLAUDE_CODE_ENV set + ~/.ai-sdlc/signing-key.pem absent (likely managed sandbox)"
+  fi
+
+  if [ "$_CCR_DETECTED" = "1" ]; then
+    echo "ERROR: /ai-sdlc execute cannot run in a CCR remote sandbox. ($_CCR_REASON)" >&2
+    echo "" >&2
+    echo "Remote sandboxes are read-only by design — they lack:" >&2
+    echo "  - ~/.ai-sdlc/signing-key.pem (operator-machine-local, never in CCR)" >&2
+    echo "  - Plugin install (no mcp__plugin_ai-sdlc_ai-sdlc__* tools)" >&2
+    echo "  - Worktree filesystem (sandbox layout differs)" >&2
+    echo "  - Operator filesystem (.ai-sdlc/trusted-reviewers.yaml pubkeys)" >&2
+    echo "" >&2
+    echo "Supported alternatives from a CCR sandbox:" >&2
+    echo "  1. File a backlog task for local pickup:" >&2
+    echo "       Use mcp__backlog__task_create (works fine in CCR)" >&2
+    echo "  2. File a GitHub issue for local pickup:" >&2
+    echo "       Use mcp__github__create_issue (works fine in CCR)" >&2
+    echo "  Then run /ai-sdlc execute <task-id> from a LOCAL Claude Code session." >&2
+    echo "" >&2
+    echo "See: docs/operations/remote-agents-readonly.md" >&2
+    exit 1
+  fi
 fi
 ```
 

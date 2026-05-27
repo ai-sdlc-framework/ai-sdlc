@@ -697,6 +697,20 @@ describe('/ai-sdlc execute — CCR remote-sandbox guard (AISDLC-442)', () => {
     );
   });
 
+  it('places the AI_SDLC_SKIP_CCR_GUARD override BEFORE any exit 1 so it is actually reachable', () => {
+    // Code-reviewer caught the bug: override placed after `exit 1` is dead code.
+    // The override check MUST precede the detection block's exit 1 so setting
+    // AI_SDLC_SKIP_CCR_GUARD=1 actually bypasses the refusal.
+    const overrideIdx = cmdBody.indexOf('AI_SDLC_SKIP_CCR_GUARD');
+    const exitIdx = cmdBody.indexOf('exit 1');
+    assert.ok(overrideIdx !== -1, 'AI_SDLC_SKIP_CCR_GUARD must appear in body');
+    assert.ok(exitIdx !== -1, 'exit 1 must appear in body');
+    assert.ok(
+      overrideIdx < exitIdx,
+      `AI_SDLC_SKIP_CCR_GUARD (idx=${overrideIdx}) must appear BEFORE first exit 1 (idx=${exitIdx}) — otherwise the override is dead code`,
+    );
+  });
+
   it('exits with non-zero status on CCR detection (not silently no-op)', () => {
     // The guard must exit 1, not just print and continue.
     // Assert the guard block contains `exit 1` after the CCR check.
