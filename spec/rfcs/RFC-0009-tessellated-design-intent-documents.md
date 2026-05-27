@@ -2,13 +2,25 @@
 id: RFC-0009
 title: Tessellated Design Intent Documents for Multi-Soul Platforms
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: Alexander Kline
 created: 2026-04-24
-updated: 2026-05-04
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requiresDocs: []
+implementedBy:
+  - AISDLC-312 (Phase 1 — DID schema amendments + init scaffolding)
+  - AISDLC-313 (Phase 2.1 — Admission composite tessellation routing)
+  - AISDLC-314 (Phase 2.2 — Per-soul DSB + Cκ calibration)
+  - AISDLC-315 (Phase 3 — Resource soul-scoping)
+  - AISDLC-316 (Phase 4.1 — Eρ₅ Compliance Clearance)
+  - AISDLC-317 (Phase 4.2 — Eτ_tessellation_drift rules)
+  - AISDLC-318 (Phase 4.3 — HC_cost channel)
+  - AISDLC-319 (Phase 4.4 — DatabaseBranchPool + Operator role wiring)
 ---
+
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All 13 OQs resolved in v3.4 (2026-05-04). All 3 owners signed v3.4 (Dominique Engineering+Operator, Morgan Design w/ documented C1-C3 follow-on commitments, Alex Product). All 8 implementation phases shipped (AISDLC-312/313/314/315/316/317/318/319 — see implementedBy). Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all required sign-offs already present in §Sign-Off table, (b) Design conditions C1-C3 explicitly recorded as "follow-on commitments, not a blocker on RFC-0009", (c) implementation is fully shipped and merged. The intermediate "Signed Off" step is procedurally redundant given the sign-off table state pre-dates this lifecycle bump. -->
+
 
 # RFC-0009: Tessellated Design Intent Documents for Multi-Soul Platforms
 
@@ -28,6 +40,7 @@ requiresDocs: []
 
 | Person | Role | Status | Date |
 |--------|------|--------|------|
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Lifecycle → Implemented confirmation v3.5 (all 8 phases shipped per implementedBy frontmatter; Design C1-C3 conditions remain follow-on commitments not blockers) | 2026-05-27 |
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v3.4 (Engineering + Operator) | 2026-05-04 |
 | Morgan Hirtle | Chief of Design / Design Authority | ✅ Signed v3.4 with conditions | 2026-05-04 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v3.4 (authored v3.2 + PPA v1.0/v1.1) | 2026-05-04 |
@@ -56,6 +69,7 @@ Signed with the following conditions recorded for resolution before `lifecycle: 
 | v3.2 | 2026-04-27 | Parity pass with PPA v1.1 (Alexander, same day). Strengthens §4 Fractal Triad with the Identity / Expression / Coherence framing for the structural pillar asymmetry — Product declares identity, Design expresses identity, Engineering maintains coherence between Identity and Expression at runtime; the asymmetry is a structural property of the basis, not a gap to fix. Strengthens §5.1 design vertex with explicit DID ownership-model parallel to PPA v1.1 §4 (Product owns mission/experientialTargets feeding SA1; Design owns designPrinciples/brandIdentity/visualIdentity feeding SA2; Engineering reviews and may block only on technical infeasibility of measurable signals). Adds §7.3 explicit acknowledgment of PPA v1.1's C8 Cost Governance Integration as the operational channel wiring SubscriptionPlan.tenantQuotaShare → Eρ₆. Marks OQ-13 resolved-against-rename: PPA v1.1 landed on "multi-soul scoring" terminology in body + title; "soul sharding" survives as accurate vocabulary for the *pattern itself* (mechanism), complementing "multi-soul platform" which describes the *architectural shape* (output). Adds PPA v1.1 to References. No normative content changed from v3 or v3.1; v3.2 is purely strengthening + cross-reference parity. |
 | v3.3 | 2026-05-03 | Operator walkthrough resolved 5 of 13 open questions: OQ-1 (Option D — required-with-defaults), OQ-2 (Option A — `min` with affected-souls scope filter), OQ-3 (REVERSAL — variant + journey carved out to RFC-0017/0018, NOT bundled here), OQ-4 (Variant B — Tessellated Platform / Soul / Tessellation; retire `shard` as noun), OQ-5 (Option A — gating, hard regulatory only). OQ-6 through OQ-12 remain open for future walkthrough. OQ-13 re-affirmed unchanged. Lifecycle remains Draft pending OQ-6-12 + Engineering + Design sign-off. Rename pass applied throughout: `shard` (noun) → `soul`; `Shard DID` → `Soul DID`; `crossShardScoringRule` → `crossSoulScoringRule`; `shardId/shardScope/shardOverrides/shardBindings/targetedShards` → `soulId/soulScope/soulOverrides/soulBindings/targetedSouls`; example slugs `shard-a/b/c` → `soul-a/b/c`; DID URI segments `did:platform-x:shard:*` → `did:platform-x:soul:*`. `soul sharding` retained as mechanism verb form per OQ-13. Sections of v3.2 main that normatively spec variant + journey patterns deleted and replaced with pointer to RFC-0017/0018. |
 | **v3.4** | **2026-05-04** | **Operator walkthrough resolved remaining 7 of 13 open questions: OQ-6 (Option A — orchestrator-side detection; rule #1 ships, rule #2 awaits RFC-0019, rule #3 awaits RFC-0009 impl), OQ-7 (REVERSAL — §13.5+§13.6 carved to RFC-0020+RFC-0021), OQ-8 (filed as AISDLC-171 bug), OQ-9 (filed as AISDLC-172 bug), OQ-10 (Option A — platform-scoped), OQ-11 (Option A — shared+RLS default with trigger checklist; cross-references RFC-0022), OQ-12 (Option B — new HC_cost channel with RFC-0016 data dependency). All 13 OQs now resolved (OQ-1-12 active + OQ-13 already resolved against title rename). Lifecycle: Ready for Review (Engineering + Design + Product all signed 2026-05-04).** |
+| **v3.5** | **2026-05-27** | **Lifecycle promoted Ready for Review → Implemented. All 8 implementation phases shipped (AISDLC-312/313/314/315/316/317/318/319 — see implementedBy frontmatter). Design Authority conditions C1-C3 remain follow-on commitments per Morgan's 2026-05-04 sign-off (not blockers). Operator-authorized lifecycle-jump override marker included (Dominique = Engineering + Operator approver).** |
 
 ---
 

@@ -27,12 +27,19 @@ Origin: 2026-05-27 session where parent worktree was dirty with 29 entries (out-
 
 The rule's INTENT is "don't ad-hoc destroy state." The wording conflates that with "never invoke the sanctioned recovery script."
 
-## Acceptance criteria
+
+
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
 
 - [ ] AC-1: Hard rule reworded in execute.md + orchestrator-tick.md: "Never run `git reset --hard` UNLESS via the sanctioned check-orchestrator-state.sh script OR after explicit operator authorization in the current session."
 - [ ] AC-2: When parent is dirty + sanctioned script refuses, escalate to Decision Catalog with timebox 1h (depends on AISDLC-447): "Parent dirty — operator-authorize reset or triage?"
 - [ ] AC-3: Document the distinction in CLAUDE.md "Hooks" section: sanctioned reset = OK, ad-hoc reset = blocked
 - [ ] AC-4: Worked example added to orchestrator-tick skill body showing the dirty-parent → decision-catalog flow
+
+<!-- AC:END -->
 
 ## References
 
@@ -42,4 +49,4 @@ The rule's INTENT is "don't ad-hoc destroy state." The wording conflates that wi
 - CLAUDE.md "Pattern C hard guards" section
 - VISION.md §4 (Honest failure modes)
 - AISDLC-447 (timebox dependency for AC-2)
-<!-- SECTION:DESCRIPTION:END -->
+

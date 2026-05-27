@@ -25,7 +25,12 @@ Root cause of 18h passive monitoring loop on 2026-05-26→27. After context comp
 
 The orchestrator-tick skill body has no rule that says "if you've been heartbeating with no state change for N ticks, re-investigate the cached blockers." Result: silent rot.
 
-## Acceptance criteria
+
+
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
 
 - [ ] AC-1: orchestrator-tick skill body adds Step 6.5 "stale-cache reverify": after K consecutive ticks with no PR state change AND no new dispatches, re-fetch failing-check details for each BLOCKED PR
 - [ ] AC-2: K is configurable (default 2 for 1h cadence = 2h grace, ~3 for 20min cadence = 1h grace)
@@ -33,10 +38,12 @@ The orchestrator-tick skill body has no rule that says "if you've been heartbeat
 - [ ] AC-4: When reverify confirms same blocker, escalate timebox urgency in Decision Catalog (depends on AISDLC-447)
 - [ ] AC-5: Tests + worked example in skill body docs
 
+<!-- AC:END -->
+
 ## References
 
 - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
 - ai-sdlc-plugin/commands/orchestrator-tick.md (Step 6 ScheduleWakeup)
 - VISION.md §4 (Honest failure modes — no silent rot)
 - AISDLC-447 (depends on timebox flag for AC-4)
-<!-- SECTION:DESCRIPTION:END -->
+
