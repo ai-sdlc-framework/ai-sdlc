@@ -1,7 +1,7 @@
 ---
 id: AISDLC-383
 title: 'feat: RFC-0042 Proof-of-Execution Attestation via In-Repo Merkle Transcripts (umbrella)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
@@ -12,8 +12,6 @@ labels:
   - critical
 dependencies: []
 priority: critical
-blocked:
-  reason: 'Awaits RFC-0042 sign-off (operator walkthrough of 7 OQs). Implementation cannot start until OQ-1 through OQ-7 resolved.'
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
