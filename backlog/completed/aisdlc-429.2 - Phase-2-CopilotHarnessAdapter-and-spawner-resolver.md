@@ -1,7 +1,7 @@
 ---
 id: AISDLC-429.2
 title: 'Phase 2: `CopilotHarnessAdapter` + `--spawner copilot` resolver'
-status: To Do
+status: Done
 labels:
   - rfc-0012
   - copilot
