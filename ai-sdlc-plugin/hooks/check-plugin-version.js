@@ -335,10 +335,7 @@ function verifyMcpServerTarball(installedVersion) {
         // Defense-in-depth: refuse entries that escape the dist root.
         const normalized = path.posix.normalize(entry.path);
         if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
-          warnTarballVerification(
-            `distFiles entry has unsafe path: ${entry.path}`,
-            mcpVersion,
-          );
+          warnTarballVerification(`distFiles entry has unsafe path: ${entry.path}`, mcpVersion);
           return;
         }
         const entryAbs = path.join(
@@ -349,10 +346,7 @@ function verifyMcpServerTarball(installedVersion) {
           normalized,
         );
         if (!fs.existsSync(entryAbs)) continue; // missing file — likely partial install
-        const actual = crypto
-          .createHash('sha512')
-          .update(fs.readFileSync(entryAbs))
-          .digest('hex');
+        const actual = crypto.createHash('sha512').update(fs.readFileSync(entryAbs)).digest('hex');
         if (actual !== entry.sha512) {
           warnTarballVerification(
             `tarball SHA-512 mismatch for ${entry.path}: installed bytes differ from signed envelope`,
