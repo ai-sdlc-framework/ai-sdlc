@@ -1,7 +1,7 @@
 ---
 id: AISDLC-444
 title: 'feat: RFC-0036 Phase 3 — backlog task schema: `specRef` field + JSON Schema update'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -13,6 +13,8 @@ dependencies: []
 references:
   - spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md
 priority: high
+blocked:
+  reason: 'RFC-0036 lifecycle is Ready for Review; all 12 §14 OQs resolved via operator walkthrough 2026-05-16 (RFC §14 header) — implementation phases AISDLC-326..336 cleared to proceed.'
 ---
 
 ## Description
@@ -31,9 +33,9 @@ Phase 3 of RFC-0036 §13. Optional `specRef` field on backlog tasks so imported 
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `specRef:` field added to backlog task frontmatter schema (optional)
-- [ ] #2 JSON Schema updated; validator accepts both present + absent
-- [ ] #3 Drift gate file-existence check for `specRef` (info-level on missing)
-- [ ] #4 Backward-compat: existing tasks without `specRef` validate cleanly
-- [ ] #5 Tests cover schema validation (present, absent, malformed)
+- [x] #1 `specRef:` field added to backlog task frontmatter schema (optional)
+- [x] #2 JSON Schema updated; validator accepts both present + absent
+- [x] #3 Drift gate file-existence check for `specRef` (info-level on missing)
+- [x] #4 Backward-compat: existing tasks without `specRef` validate cleanly
+- [x] #5 Tests cover schema validation (present, absent, malformed)
 <!-- AC:END -->

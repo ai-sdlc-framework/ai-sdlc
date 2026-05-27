@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/backlog-task.v1.schema.json",
+  "title": "AI-SDLC BacklogTask",
+  "description": "Frontmatter schema for backlog task markdown files (backlog/tasks/*.md and backlog/completed/*.md). All fields not listed here are permitted (additionalProperties not enforced at this schema level — YAML round-trips must preserve unknown keys per the backlog-frontmatter.ts contract). The specRef field is optional: native/operator-authored tasks omit it; tasks imported via the spec-kit bridge (RFC-0036 Phase 4, cli-import-spec) carry it.",
+  "type": "object",
+  "required": ["id", "title", "status"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Backlog task identifier, e.g. 'AISDLC-444'. Case-insensitive convention; internal tooling normalises to lowercase."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable task title."
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Lifecycle status. Common values: 'To Do', 'In Progress', 'Done'. Exact set is adopter-configured in backlog/config.yml."
+    },
+    "assignee": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional list of assignee identifiers."
+    },
+    "created_date": {
+      "type": "string",
+      "description": "ISO date or 'YYYY-MM-DD HH:MM' timestamp the task was created."
+    },
+    "updated_date": {
+      "type": "string",
+      "description": "ISO date or 'YYYY-MM-DD HH:MM' timestamp of the last edit. Stamped automatically by applyTaskEdit()."
+    },
+    "labels": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional taxonomy labels."
+    },
+    "priority": {
+      "type": "string",
+      "description": "Optional priority hint (e.g. 'high', 'medium', 'low')."
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional list of upstream task IDs this task depends on."
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional list of RFC paths or other reference strings. Checked by the backlog-drift gate."
+    },
+    "permittedExternalPaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional allowlist of sibling-repo paths the developer subagent may write to (PreToolUse hook contract)."
+    },
+    "dispatchable": {
+      "type": "boolean",
+      "description": "When false, the autonomous orchestrator never dispatches a developer subagent for this task (AISDLC-243). Default true when omitted."
+    },
+    "dispatchableReason": {
+      "type": "string",
+      "description": "Human-readable advisory explaining why dispatchable:false was set."
+    },
+    "blocked": {
+      "type": "object",
+      "description": "Optional hold on the task. Presence bypasses the upstream-OQ gate and the DoR ingress workflow gate.",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Explanation of why the task is blocked and when it can unblock."
+        }
+      },
+      "required": ["reason"],
+      "additionalProperties": false
+    },
+    "specRef": {
+      "type": "object",
+      "description": "Back-reference to the upstream spec artifact that produced this task (RFC-0036 §9.1). Optional: omitted for native/operator-authored tasks; present for tasks imported via cli-import-spec. The 'source' field is required; all other fields are optional but expected for spec-kit imports.",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["spec-kit", "adopter-rfc", "linear", "notion", "inline", "other"],
+          "description": "Which upstream tool produced the task."
+        },
+        "featureId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Slug identifying the spec-kit feature directory (e.g. 'auth-feature')."
+        },
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Upstream task identifier within the artifact (e.g. 'T-007')."
+        },
+        "artifactPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative or absolute path to the upstream spec artifact (e.g. '.specify/specs/auth-feature/tasks.md'). The drift gate performs a file-existence check on this path and emits an info-level warning when the file is absent."
+        },
+        "contractsPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional path to the upstream API/contract artifact (e.g. '.specify/specs/auth-feature/contracts/auth-api.yaml')."
+        },
+        "importedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp when the task was imported from the upstream artifact."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
