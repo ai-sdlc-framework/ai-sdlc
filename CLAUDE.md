@@ -147,14 +147,52 @@ The `code-reviewer` and `test-reviewer` subagents check for inline OQ resolution
 
 **Legacy v5 algorithm (AISDLC-362, retained read-only):** `computeContentHashV5(entries, signedMergeBase)` — SHA-256 of canonical JSON `{schemaVersion:'v5', signedMergeBase:'<sha>', files:[{path,blobSha}...]}`. `collectChangedFileEntriesForV5(repoRoot, baseRef, headRef)` — computes `git merge-base <baseRef> HEAD` ONCE at sign time (the FROZEN merge-base), then diffs `<signedMergeBase>..HEAD`. Non-overlapping sibling merges do not invalidate v5; overlapping (same file) sibling merges correctly invalidate it. Docs-only PRs (`spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, root `*.md`) bypass the full review+attestation pipeline: `paths-ignore` skips `ai-sdlc-review.yml` and `verify-attestation.yml` on `pull_request` events (AISDLC-388 reinstated the `paths-ignore` that AISDLC-214 removed); on `merge_group` events (where `paths-ignore` does not apply), both workflows detect docs-only changesets inline via `scripts/is-docs-only-changeset.mjs` (AISDLC-206) and short-circuit directly (AISDLC-214). The `verify-attestation.yml` short-circuit still posts `ai-sdlc/attestation: success` on merge_group docs-only events as a transitional measure; this code will be deleted once branch protection is updated (AISDLC-388 AC-4). The former fallback workflows (`ai-sdlc-review-docs-only.yml`, `verify-attestation-docs-only.yml`) have been retired — they caused CANCELLED races on the merge queue.
 
-## Remote agents (`/schedule`) — read-only by design
+## Remote agents (`/schedule`) — read-only by design (AISDLC-442)
 
-CCR remote sandboxes have no signing key, no plugin install, no worktree, no operator filesystem. Treat them as read-only.
+CCR remote sandboxes are **read-only by design**. They lack four prerequisites that `/ai-sdlc execute` requires:
 
-**Acceptable**: PR/backlog status surveys, cron metric digests, Slack workflows, CI run-list / flake detection.
-**Prohibited**: `/ai-sdlc execute`, signing-key flows, plugin subagents (`developer`, `code-reviewer`, etc.), worktree ops, sibling-repo writes.
+| Missing prerequisite | Why it matters |
+|---|---|
+| `~/.ai-sdlc/signing-key.pem` | Signing key is operator-machine-local; CCR has no access |
+| Plugin install | `mcp__plugin_ai-sdlc_ai-sdlc__*` tools are unavailable |
+| Worktree filesystem | `.worktrees/<task-id>/` creation / git-worktree ops fail |
+| Operator filesystem | `.ai-sdlc/trusted-reviewers.yaml` pubkeys inaccessible |
 
-If a `/schedule` task needs real code work, have it file a backlog task or GitHub issue describing the work — a local Claude Code session picks it up.
+**Acceptable in CCR**: PR/backlog status surveys, cron metric digests, Slack workflows, CI run-list / flake detection, `mcp__backlog__task_create`, `mcp__github__create_issue`.
+
+**Prohibited in CCR**: `/ai-sdlc execute`, signing-key flows, plugin subagents (`developer`, `code-reviewer`, etc.), worktree ops, sibling-repo writes.
+
+### Local vs. remote — what works where
+
+| Task type | Works in CCR? | Works locally? | Notes |
+|---|---|---|---|
+| Survey open PRs | Yes | Yes | `gh pr list` |
+| Check CI run health | Yes | Yes | `gh run list` |
+| Post Slack digest | Yes | Yes | Webhook call |
+| File a backlog task | Yes | Yes | `mcp__backlog__task_create` |
+| File a GitHub issue | Yes | Yes | `mcp__github__create_issue` |
+| Run `/ai-sdlc execute` | **No** | Yes | Requires signing key + worktree |
+| Sign attestation envelopes | **No** | Yes | Signing key is operator-machine-local |
+| Open worktrees | **No** | Yes | `git worktree add` fails in sandbox |
+| Run developer subagent | **No** | Yes | Plugin subagents unavailable in CCR |
+
+### Supported handoff workflow
+
+When a CCR `/schedule` task detects work that requires local execution:
+
+1. **File a backlog task** via `mcp__backlog__task_create` — or a GitHub issue via `mcp__github__create_issue` if the work is broad.
+2. **Include full context** in the task body: what triggered the work, what the expected outcome is, any relevant file paths.
+3. **The local operator session picks it up** on the next `/ai-sdlc orchestrator-tick` or manually via `/ai-sdlc execute <task-id>`.
+
+> `/ai-sdlc execute` detects CCR sandboxes at startup (AISDLC-442) and refuses with a clear error pointing here. See `docs/operations/remote-agents-readonly.md` for the full runbook.
+
+### Detection heuristics
+
+`/ai-sdlc execute` uses three signals (first match wins):
+
+1. `CLAUDE_CODE_ENV=ccr` — canonical env var injected by Claude Code in CCR sessions.
+2. `CLAUDE_REMOTE_EXECUTION=1` — alternative injection used in some operator configurations.
+3. `CLAUDE_CODE_ENV` set (any value) + `~/.ai-sdlc/signing-key.pem` absent — likely managed sandbox; conservative fallback when (1) and (2) don't fire.
 
 ## RFCs
 

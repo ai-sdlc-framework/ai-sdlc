@@ -631,3 +631,87 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     );
   });
 });
+
+// ── AISDLC-442: CCR remote-sandbox guard ─────────────────────────────────────
+describe('/ai-sdlc execute — CCR remote-sandbox guard (AISDLC-442)', () => {
+  it('detects CLAUDE_CODE_ENV=ccr and refuses with an actionable error', () => {
+    // Primary detection heuristic: canonical CCR env var.
+    assert.match(
+      cmdBody,
+      /CLAUDE_CODE_ENV.*=.*ccr|CLAUDE_CODE_ENV.*ccr/,
+      'must check CLAUDE_CODE_ENV=ccr as primary CCR detection heuristic',
+    );
+  });
+
+  it('detects CLAUDE_REMOTE_EXECUTION=1 and refuses', () => {
+    // Secondary detection heuristic.
+    assert.match(
+      cmdBody,
+      /CLAUDE_REMOTE_EXECUTION.*=.*1/,
+      'must check CLAUDE_REMOTE_EXECUTION=1 as secondary CCR detection heuristic',
+    );
+  });
+
+  it('detects CLAUDE_CODE_ENV set + signing-key absent as conservative fallback heuristic', () => {
+    // Tertiary heuristic: env set + key absent.
+    assert.match(
+      cmdBody,
+      /signing-key\.pem/,
+      'must check ~/.ai-sdlc/signing-key.pem absence in CCR detection',
+    );
+  });
+
+  it('refusal message names the supported alternative — mcp__backlog__task_create', () => {
+    // AC-2: refusal must name the supported alternative.
+    assert.match(
+      cmdBody,
+      /mcp__backlog__task_create/,
+      'CCR refusal message must name mcp__backlog__task_create as the supported alternative',
+    );
+  });
+
+  it('refusal message names the supported alternative — mcp__github__create_issue', () => {
+    // AC-2: refusal must also mention GitHub issue filing.
+    assert.match(
+      cmdBody,
+      /mcp__github__create_issue/,
+      'CCR refusal message must name mcp__github__create_issue as the supported alternative',
+    );
+  });
+
+  it('refusal message references the read-only docs', () => {
+    // AC-2: refusal message should point to the operations doc.
+    assert.match(
+      cmdBody,
+      /remote-agents-readonly\.md/,
+      'CCR refusal message must point at docs/operations/remote-agents-readonly.md',
+    );
+  });
+
+  it('provides an AI_SDLC_SKIP_CCR_GUARD override for testing environments', () => {
+    // Integration tests that inject CCR-like env vars must be able to bypass.
+    assert.match(
+      cmdBody,
+      /AI_SDLC_SKIP_CCR_GUARD/,
+      'must provide AI_SDLC_SKIP_CCR_GUARD override for test environments',
+    );
+  });
+
+  it('exits with non-zero status on CCR detection (not silently no-op)', () => {
+    // The guard must exit 1, not just print and continue.
+    // Assert the guard block contains `exit 1` after the CCR check.
+    assert.match(
+      cmdBody,
+      /_CCR_DETECTED.*exit 1|exit 1.*CCR/s,
+      'CCR guard must exit 1 when detected, not silently continue',
+    );
+  });
+
+  it('attributes the guard to AISDLC-442', () => {
+    assert.match(
+      cmdBody,
+      /AISDLC-442/,
+      'remote-sandbox guard section must be attributed to AISDLC-442',
+    );
+  });
+});

@@ -63,6 +63,68 @@ Step 4 below writes the active-task sentinel at `<worktree>/.active-task` (per-w
 
 If you find yourself trying to write `.worktrees/.active-task` at the project root, stop — that's the wrong path and would race with parallel runs.
 
+## Remote-sandbox guard (AISDLC-442)
+
+`/ai-sdlc execute` requires a local operator session: signing key, worktree filesystem, plugin install, and operator filesystem (`.ai-sdlc/trusted-reviewers.yaml`) are all absent in CCR remote sandboxes. **The command MUST refuse immediately with an operator-actionable message when it detects a CCR environment** — cryptic downstream errors (missing signing key, worktree ops failing) are harder to diagnose than an explicit refusal here.
+
+### Detection heuristics (evaluated in order, first match wins)
+
+| Priority | Condition | Why it signals CCR |
+|---|---|---|
+| 1 | `CLAUDE_CODE_ENV=ccr` (exact, case-sensitive) | Canonical env var; Claude Code injects this in CCR sessions |
+| 2 | `CLAUDE_REMOTE_EXECUTION=1` | Alternative CCR injection used in some operator configurations |
+| 3 | `~/.ai-sdlc/signing-key.pem` absent AND `CLAUDE_CODE_ENV` is set (any value) | Signing-key absence + Claude Code env = likely managed sandbox |
+
+Heuristic 3 is intentionally conservative — it only fires when BOTH conditions hold. A local session without a signing key fails later at Step 10; the heuristic targets the case where an operator explicitly uses a managed environment. **Never refuse on missing signing key alone** (that is a setup error, not a sandbox context).
+
+```bash
+# AISDLC-442: Refuse early in CCR remote-sandbox environments.
+# These sandboxes have no signing key, no plugin install, no operator filesystem.
+# Running /ai-sdlc execute there produces cryptic downstream errors — refuse here instead.
+_CCR_DETECTED=0
+_CCR_REASON=""
+
+if [ "${CLAUDE_CODE_ENV:-}" = "ccr" ]; then
+  _CCR_DETECTED=1
+  _CCR_REASON="CLAUDE_CODE_ENV=ccr detected"
+elif [ "${CLAUDE_REMOTE_EXECUTION:-}" = "1" ]; then
+  _CCR_DETECTED=1
+  _CCR_REASON="CLAUDE_REMOTE_EXECUTION=1 detected"
+elif [ -n "${CLAUDE_CODE_ENV:-}" ] && [ ! -f "${HOME}/.ai-sdlc/signing-key.pem" ]; then
+  _CCR_DETECTED=1
+  _CCR_REASON="CLAUDE_CODE_ENV set + ~/.ai-sdlc/signing-key.pem absent (likely managed sandbox)"
+fi
+
+if [ "$_CCR_DETECTED" = "1" ]; then
+  echo "ERROR: /ai-sdlc execute cannot run in a CCR remote sandbox. ($_CCR_REASON)" >&2
+  echo "" >&2
+  echo "Remote sandboxes are read-only by design — they lack:" >&2
+  echo "  - ~/.ai-sdlc/signing-key.pem (operator-machine-local, never in CCR)" >&2
+  echo "  - Plugin install (no mcp__plugin_ai-sdlc_ai-sdlc__* tools)" >&2
+  echo "  - Worktree filesystem (sandbox layout differs)" >&2
+  echo "  - Operator filesystem (.ai-sdlc/trusted-reviewers.yaml pubkeys)" >&2
+  echo "" >&2
+  echo "Supported alternatives from a CCR sandbox:" >&2
+  echo "  1. File a backlog task for local pickup:" >&2
+  echo "       Use mcp__backlog__task_create (works fine in CCR)" >&2
+  echo "  2. File a GitHub issue for local pickup:" >&2
+  echo "       Use mcp__github__create_issue (works fine in CCR)" >&2
+  echo "  Then run /ai-sdlc execute <task-id> from a LOCAL Claude Code session." >&2
+  echo "" >&2
+  echo "See: docs/operations/remote-agents-readonly.md" >&2
+  exit 1
+fi
+```
+
+> **Override for testing**: set `AI_SDLC_SKIP_CCR_GUARD=1` to bypass this check in integration tests or local CI environments that inject CCR-like env vars without actually being CCR sandboxes.
+
+```bash
+if [ "${AI_SDLC_SKIP_CCR_GUARD:-}" = "1" ]; then
+  echo "[ai-sdlc-progress] CCR guard: skipped (AI_SDLC_SKIP_CCR_GUARD=1)" >&2
+  _CCR_DETECTED=0
+fi
+```
+
 ## Path resolution (AISDLC-245.4, AISDLC-272)
 
 <!-- PATH-RESOLUTION:BEGIN
