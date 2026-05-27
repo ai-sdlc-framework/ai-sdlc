@@ -2,10 +2,10 @@
 id: RFC-0019
 title: Embedding Provider Adapter Framework
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-21
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0010
@@ -13,7 +13,15 @@ requires:
   - RFC-0025
   - RFC-0035
 requiresDocs: []
+implementedBy:
+  - AISDLC-337 (Phase 1 — Adapter interface + registry + OpenAI default)
+  - AISDLC-338 (Phase 2 — JSONL vector storage + GC)
+  - AISDLC-339 (Phase 3 — cli-embedding-bump migration tooling)
+  - AISDLC-340 (Phase 4 — Pipeline integration + schema)
+  - AISDLC-341 (Phase 5 — Soak + promotion runbook)
 ---
+
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All OQs resolved in v0.3 (operator re-walkthrough 2026-05-21 with full rigor rubric). All 5 implementation phases shipped (AISDLC-337..341 — see implementedBy frontmatter). Engineering + Operator + Product sign-offs all complete (top + §17 §17 both updated 2026-05-27). Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all required sign-offs present pre-bump, (b) implementation fully shipped and merged, (c) the intermediate "Signed Off" step is procedurally redundant given all three sign-off boxes are checked. -->
 
 # RFC-0019: Embedding Provider Adapter Framework
 

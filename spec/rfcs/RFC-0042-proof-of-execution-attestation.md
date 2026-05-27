@@ -2,16 +2,32 @@
 id: RFC-0042
 title: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
 status: Approved
-lifecycle: Signed Off
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-20
-updated: 2026-05-20
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires: [RFC-0011]
 requiresDocs:
   - operator-runbook
 deferredDocs: true
 deferredDocsDeadline: '2026-07-15'
+implementedBy:
+  - AISDLC-383 (Umbrella)
+  - AISDLC-383.1 (Phase 1 — Transcript capture in reviewer subagents)
+  - AISDLC-383.2 (Phase 1 — Merkle leaf-index + root computation)
+  - AISDLC-383.3 (Phase 2 — v6 envelope schema + signer)
+  - AISDLC-383.4 (Phase 2 — v6 verifier in verify-attestation workflow)
+  - AISDLC-383.5 (BYPASS_ALL_GATES env var friction relief)
+  - AISDLC-383.6 (Phase 3 cutover — disable AISDLC-380 sub-attestation gate)
+  - AISDLC-383.7 (Phase 4 cleanup — delete legacy attestation signers)
+  - AISDLC-383.8 (Pipeline transcript-leaf emission — v6 cutover prerequisite)
+  - AISDLC-391 (AISDLC-383.8 security follow-ups — head-sha validation + path-traversal hardening)
+  - AISDLC-409 (v6 default-on cutover)
+  - AISDLC-419 (v6 verifier — accept attestation-only descendants)
+  - AISDLC-421 (per-task transcript-leaves files)
+  - AISDLC-422 (PATCH_ID_EXCLUSION self-reference bug fix)
+  - AISDLC-445 (CI stage per-patch-id transcript-leaves directory)
 ---
 
 # RFC-0042: Proof-of-Execution Attestation via In-Repo Merkle Transcripts

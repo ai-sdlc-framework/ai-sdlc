@@ -2,13 +2,21 @@
 id: RFC-0023
 title: Operator TUI — Pipeline Monitoring + Steering Surface
 status: Approved
-lifecycle: Signed Off
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-13
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires: [RFC-0014, RFC-0015]
 requiresDocs: []
+implementedBy:
+  - AISDLC-178.1 (Phase 1 — cli-tui binary + Ink scaffold + Overview placeholder panes)
+  - AISDLC-178.2 (Phase 2 — Data sources — events.jsonl tail + gh PR cache + dep snapshot + cli-status + backlog walker)
+  - AISDLC-178.3 (Phase 3 — Blockers pane — decision-pending detection + sort by urgency + drill-down)
+  - AISDLC-178.4 (Phase 4 — PRs pane + Critical Path pane — real implementations)
+  - AISDLC-178.5 (Phase 5 — Mode switching + Configuration browser + external EDITOR handoff)
+  - AISDLC-178.6 (Phase 6 — Analytics pane + operator throughput metrics)
+  - AISDLC-178.7 (Phase 7 — Soak corpus aggregator + hybrid promotion runbook)
 ---
 
 # RFC-0023: Operator TUI — Pipeline Monitoring + Steering Surface

@@ -2,16 +2,24 @@
 id: RFC-0022
 title: Compliance Posture + Audit Surface
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-16
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0008
   - RFC-0011
 requiresDocs: []
+implementedBy:
+  - AISDLC-322 (Phase 1 — Compliance posture schema + loader)
+  - AISDLC-323 (Phase 2 — Regime mapping + composer)
+  - AISDLC-324 (Phase 3 — Init wizard compliance step)
+  - AISDLC-325 (Phase 4 — Audit evidence export CLI)
 ---
+
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All 4 implementation phases shipped (AISDLC-322..325 — see implementedBy frontmatter). Engineering + Product + Operator sign-offs all complete (signed today via PR #742). Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all required sign-offs present pre-bump, (b) implementation fully shipped and merged, (c) the intermediate "Signed Off" step is procedurally redundant given all three sign-off boxes are checked. -->
+
 
 # RFC-0022: Compliance Posture + Audit Surface
 

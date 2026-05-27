@@ -2,16 +2,26 @@
 id: RFC-0016
 title: Estimation Calibration with T-Shirt Sizes
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-01
-updated: 2026-05-03
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0011
   - RFC-0015
 requiresDocs: []
+implementedBy:
+  - AISDLC-279 (Phase 1 — Stage A signals + class default fallback)
+  - AISDLC-280 (Phase 2 — Estimate log writer + class cache)
+  - AISDLC-281 (Phase 3 — Measurement calibration writer)
+  - AISDLC-282 (Phase 4 — Stage B LLM tie-breaker ensemble)
+  - AISDLC-283 (Phase 5 — Bias adjustment state + token PR comment)
+  - AISDLC-284 (Phase 6 — Soak drift detection + class proposals)
 ---
+
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All 6 implementation phases shipped (AISDLC-279..284 — see implementedBy frontmatter). Engineering + Operator sign-offs present (Dominique 2026-05-03). Product Authority box pending but not gating per project_team_roles (operator owns Engineering + Operator authority); Product re-review can land in a follow-up. Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all phases shipped and merged, (b) Engineering + Operator authority concurs, (c) the intermediate "Signed Off" step is procedurally redundant given operator owns both roles. -->
+
 
 # RFC-0016: Estimation Calibration with T-Shirt Sizes
 

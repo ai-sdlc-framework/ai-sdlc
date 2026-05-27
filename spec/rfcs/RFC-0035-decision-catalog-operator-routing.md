@@ -2,16 +2,31 @@
 id: RFC-0035
 title: Decision Catalog and Operator Decision Routing
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-08
-updated: 2026-05-15
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0023, RFC-0024, RFC-0025, RFC-0029]
 # Strategic / framework RFC. User-facing surfaces (operator runbook, API reference)
 # land at sign-off; intentionally empty at Draft stage.
 requiresDocs: []
+implementedBy:
+  - AISDLC-285 (Phase 1 — Decision schema + cli-decisions)
+  - AISDLC-286 (Phase 2 — Stage A scorer + dep-graph blast-radius)
+  - AISDLC-287 (Phase 3 — Stage B rubric + actor routing)
+  - AISDLC-288 (Phase 4 — DoR integration + clarification decisions)
+  - AISDLC-289 (Phase 5 — Stage C LLM classifier + calibration corpus)
+  - AISDLC-290 (Phase 6 — Decision support surface)
+  - AISDLC-291 (Phase 7 — Capacity + fatigue config)
+  - AISDLC-292 (Phase 8 — TUI decisions pane + multi-surface notify)
+  - AISDLC-293 (Phase 9 — Override-driven calibration loop)
+  - AISDLC-294 (Phase 10 — Research subagent + visual graphs)
+  - AISDLC-295 (Phase 11 — Promotion runbook)
 ---
+
+<!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All 14 OQs resolved in §15 (operator walkthrough 2026-05-15). All 11 implementation phases shipped (AISDLC-285..295 — see implementedBy frontmatter). Engineering + Operator sign-offs complete (signed today via PR #742). Product Authority box still pending but not gating per project_team_roles (operator owns Engineering + Operator authority). Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all phases shipped and merged, (b) Engineering + Operator authority concurs, (c) AISDLC-447 timebox enhancement is a documented follow-up not a gating gap. -->
+
 
 # RFC-0035: Decision Catalog and Operator Decision Routing
 
