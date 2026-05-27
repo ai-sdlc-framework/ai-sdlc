@@ -36,7 +36,7 @@ Three buckets — ship in `orchestrator/src/substrate/identity-class.ts` (new mo
   - Scoring tuning weights: bid diversity weight, recency half-life
   - Similarity thresholds: `clustering.similarityThreshold`
   - Quota quantities: `tenantQuotaShare`
-- **Default `core` for novel fields** — promotion to `evolving` requires RFC amendment with Design + Engineering sign-off (conservative default; burden-of-proof is "argue why operational").
+- **Default `core` for novel fields** — promotion to `evolving` needs an RFC amendment with Design + Engineering sign-off (conservative default; burden-of-proof is "argue why operational").
 
 ### Harmonization with shipped code
 
