@@ -1,7 +1,7 @@
 ---
 id: AISDLC-440
 title: 'chore(plugin): ship npm-shrinkwrap.json for mcp-server transitive integrity (DEC-0002)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-26'
 labels:

@@ -34,7 +34,8 @@
     "bundle": "node scripts/bundle.mjs",
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "shrinkwrap:regen": "node scripts/regen-shrinkwrap.mjs"
   },
   "dependencies": {
     "@ai-sdlc/pipeline-cli": "workspace:*",

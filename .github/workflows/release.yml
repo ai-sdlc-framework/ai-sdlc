@@ -79,6 +79,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      # Regenerate npm-shrinkwrap.json for the MCP server so each published
+      # tarball ships locked transitive dep SHAs (DEC-0002, AISDLC-440).
+      # This runs AFTER pnpm install (workspace deps are resolved in the store)
+      # and AFTER pnpm build (dist/ must exist before publish).
+      # The script replaces `workspace:*` refs with real npm versions, runs
+      # `npm install --package-lock-only`, then `npm shrinkwrap`, and restores
+      # the original package.json. The resulting npm-shrinkwrap.json is
+      # committed to the source tree via the release-please PR; this step
+      # simply ensures the published tarball has an up-to-date copy.
+      - name: Regenerate MCP server npm-shrinkwrap.json
+        run: node ai-sdlc-plugin/mcp-server/scripts/regen-shrinkwrap.mjs
       - run: pnpm -r publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
