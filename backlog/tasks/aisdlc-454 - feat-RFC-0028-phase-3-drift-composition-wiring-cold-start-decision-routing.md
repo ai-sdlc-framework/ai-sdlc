@@ -33,7 +33,7 @@ Phase 3 of RFC-0028 §7.2 v0.2 resolution. Wires the canonical pairing of struct
 
 ### Cold-start handling
 
-Statistical drift detection depends on a rolling 30d baseline. Pre-baseline period:
+Statistical drift detection uses a rolling 30d baseline. Pre-baseline period:
 - < 30d signal available → detector emits "calibrating" status
 - No statistical Decisions emitted during calibration window
 - Structural detection (AISDLC-453) is sole defense during calibration
