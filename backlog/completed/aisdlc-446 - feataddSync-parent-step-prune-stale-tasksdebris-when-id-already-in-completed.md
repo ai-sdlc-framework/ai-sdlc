@@ -1,7 +1,7 @@
 ---
 id: AISDLC-446
 title: 'feat(orchestrator): sync-parent should prune stale parent debris when same task ID exists in completed/'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-27'
 labels:

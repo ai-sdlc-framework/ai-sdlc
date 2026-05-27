@@ -28,6 +28,10 @@ import {
   isFileOnOriginMain,
   findPathMismatchOnOrigin,
   isFileOnOriginMainInAnyDir,
+  pruneStaleParentDebris,
+  extractTaskId,
+  findCompletedCounterpartOnOrigin,
+  readOriginMainFile,
 } from './00-5-sync-parent.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
 
@@ -652,5 +656,308 @@ describe('Step 0.5 — path-mismatch reconciliation (AISDLC-222)', () => {
         process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'] = originalEnv;
       }
     }
+  });
+});
+
+// ── AISDLC-446: pruneStaleParentDebris unit tests ─────────────────────────────
+
+describe('extractTaskId', () => {
+  it('extracts lowercase task ID from backlog/tasks/ path', () => {
+    expect(extractTaskId('backlog/tasks/aisdlc-446 - some-slug.md')).toBe('aisdlc-446');
+  });
+
+  it('extracts lowercase task ID from backlog/completed/ path', () => {
+    expect(extractTaskId('backlog/completed/AISDLC-100 - foo.md')).toBe('aisdlc-100');
+  });
+
+  it('returns null for a non-backlog path', () => {
+    expect(extractTaskId('src/some-file.ts')).toBeNull();
+  });
+
+  it('returns null for a path without the numeric suffix', () => {
+    expect(extractTaskId('backlog/tasks/README.md')).toBeNull();
+  });
+});
+
+describe('findCompletedCounterpartOnOrigin', () => {
+  it('returns the completed/ path when a same-ID file exists on origin/main', async () => {
+    const fake = new FakeRunner().on(
+      /^git ls-tree origin\/main .+backlog\/completed\//,
+      ok(
+        'backlog/completed/aisdlc-446 - prune-stale-debris.md\nbacklog/completed/aisdlc-447 - other.md\n',
+      ),
+    );
+    const result = await findCompletedCounterpartOnOrigin('aisdlc-446', workDir, fake.toRunner());
+    expect(result).toBe('backlog/completed/aisdlc-446 - prune-stale-debris.md');
+  });
+
+  it('returns null when no same-ID file exists in completed/', async () => {
+    const fake = new FakeRunner().on(
+      /^git ls-tree origin\/main .+backlog\/completed\//,
+      ok('backlog/completed/aisdlc-999 - other.md\n'),
+    );
+    const result = await findCompletedCounterpartOnOrigin('aisdlc-446', workDir, fake.toRunner());
+    expect(result).toBeNull();
+  });
+
+  it('returns null when completed/ directory is empty on origin', async () => {
+    const fake = new FakeRunner().on(/^git ls-tree origin\/main .+backlog\/completed\//, ok(''));
+    const result = await findCompletedCounterpartOnOrigin('aisdlc-446', workDir, fake.toRunner());
+    expect(result).toBeNull();
+  });
+
+  it('returns null when git ls-tree exits non-zero', async () => {
+    const fake = new FakeRunner().on(/^git ls-tree/, fakeRunnerFail('error', 128));
+    const result = await findCompletedCounterpartOnOrigin('aisdlc-446', workDir, fake.toRunner());
+    expect(result).toBeNull();
+  });
+
+  it('matches case-insensitively (AISDLC vs aisdlc)', async () => {
+    const fake = new FakeRunner().on(
+      /^git ls-tree origin\/main .+backlog\/completed\//,
+      ok('backlog/completed/AISDLC-446 - prune-stale-debris.md\n'),
+    );
+    const result = await findCompletedCounterpartOnOrigin('aisdlc-446', workDir, fake.toRunner());
+    // The file from origin is returned as-is; the match is by ID equality
+    expect(result).toBe('backlog/completed/AISDLC-446 - prune-stale-debris.md');
+  });
+});
+
+describe('readOriginMainFile', () => {
+  it('returns content string on success', async () => {
+    const fake = new FakeRunner().on(
+      /^git show origin\/main:/,
+      ok('---\nid: AISDLC-446\nstatus: Done\n---\n\n## Body\n'),
+    );
+    const result = await readOriginMainFile(
+      'backlog/completed/aisdlc-446 - slug.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result).toBe('---\nid: AISDLC-446\nstatus: Done\n---\n\n## Body\n');
+  });
+
+  it('returns null when git show exits non-zero', async () => {
+    const fake = new FakeRunner().on(/^git show/, fakeRunnerFail('not found', 128));
+    const result = await readOriginMainFile(
+      'backlog/completed/aisdlc-446 - slug.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result).toBeNull();
+  });
+});
+
+// ── AISDLC-446: pruneStaleParentDebris integration tests ──────────────────────
+
+describe('pruneStaleParentDebris — AISDLC-446', () => {
+  const CONTENT_MATCH = '---\nid: AISDLC-446\nstatus: Done\n---\n\n## Body\n\nDone.\n';
+  const CONTENT_LOCAL_EDIT =
+    '---\nid: AISDLC-446\nstatus: To Do\n---\n\n## Body\n\nEdited locally.\n';
+
+  it('AC#3 — clean-delete: content matches → deletes the stale tasks/ file', async () => {
+    const staleFile = join(workDir, 'backlog/tasks/aisdlc-446 - prune-stale-debris.md');
+    writeFileSync(staleFile, CONTENT_MATCH, 'utf8');
+    expect(existsSync(staleFile)).toBe(true);
+
+    const logLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logLines.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      // git ls-files returns the stale file
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-446 - prune-stale-debris.md\n'))
+      // git ls-tree for completed/ listing returns the counterpart
+      .on(
+        /^git ls-tree origin\/main .+backlog\/completed\//,
+        ok('backlog/completed/aisdlc-446 - prune-stale-debris.md\n'),
+      )
+      // git show returns same content as local file
+      .on(/^git show origin\/main:/, ok(CONTENT_MATCH));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual(['backlog/tasks/aisdlc-446 - prune-stale-debris.md']);
+    expect(result.skippedContentDiffers).toEqual([]);
+    expect(result.noCounterpart).toEqual([]);
+    // File should have been deleted
+    expect(existsSync(staleFile)).toBe(false);
+    // One log line should have been emitted
+    const pruneLog = logLines.find(
+      (l) => l.includes('[prune-stale-debris]') && l.includes('pruned'),
+    );
+    expect(pruneLog).toBeDefined();
+    expect(pruneLog).toContain('backlog/tasks/aisdlc-446');
+  });
+
+  it('AC#4 — content-mismatch-skip: content differs → logs warning, leaves file intact', async () => {
+    const staleFile = join(workDir, 'backlog/tasks/aisdlc-446 - prune-stale-debris.md');
+    writeFileSync(staleFile, CONTENT_LOCAL_EDIT, 'utf8');
+    expect(existsSync(staleFile)).toBe(true);
+
+    const warnLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation((msg: string) => {
+      warnLines.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-446 - prune-stale-debris.md\n'))
+      .on(
+        /^git ls-tree origin\/main .+backlog\/completed\//,
+        ok('backlog/completed/aisdlc-446 - prune-stale-debris.md\n'),
+      )
+      // git show returns DIFFERENT content
+      .on(/^git show origin\/main:/, ok(CONTENT_MATCH));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual([]);
+    expect(result.skippedContentDiffers).toEqual([
+      'backlog/tasks/aisdlc-446 - prune-stale-debris.md',
+    ]);
+    expect(result.noCounterpart).toEqual([]);
+    // File must NOT have been deleted
+    expect(existsSync(staleFile)).toBe(true);
+    // Warning must have been emitted
+    const warnLog = warnLines.find(
+      (l) => l.includes('[prune-stale-debris]') && l.includes('content differs'),
+    );
+    expect(warnLog).toBeDefined();
+  });
+
+  it('AC#5 — no-counterpart-no-op: no completed/ counterpart → leaves file alone, no output', async () => {
+    const taskFile = join(workDir, 'backlog/tasks/aisdlc-999 - brand-new.md');
+    writeFileSync(taskFile, CONTENT_MATCH, 'utf8');
+    expect(existsSync(taskFile)).toBe(true);
+
+    const logLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logLines.push(msg);
+    });
+    const warnLines: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((msg: string) => {
+      warnLines.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-999 - brand-new.md\n'))
+      // completed/ listing returns no same-ID file
+      .on(/^git ls-tree origin\/main .+backlog\/completed\//, ok(''));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+    warnSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual([]);
+    expect(result.skippedContentDiffers).toEqual([]);
+    expect(result.noCounterpart).toEqual(['backlog/tasks/aisdlc-999 - brand-new.md']);
+    // File should still exist
+    expect(existsSync(taskFile)).toBe(true);
+    // No prune-stale-debris log lines
+    const pruneLines = [...logLines, ...warnLines].filter((l) =>
+      l.includes('[prune-stale-debris]'),
+    );
+    expect(pruneLines).toHaveLength(0);
+  });
+
+  it('AC#6 — idempotent: no untracked task files → no-op, no output', async () => {
+    const logLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logLines.push(msg);
+    });
+    const warnLines: string[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation((msg: string) => {
+      warnLines.push(msg);
+    });
+
+    const fake = new FakeRunner().on(/^git ls-files/, ok(''));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+    warnSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual([]);
+    expect(result.skippedContentDiffers).toEqual([]);
+    expect(result.noCounterpart).toEqual([]);
+    const pruneLines = [...logLines, ...warnLines].filter((l) =>
+      l.includes('[prune-stale-debris]'),
+    );
+    expect(pruneLines).toHaveLength(0);
+  });
+
+  it('AC#9 — one log line per pruned file, silent when no debris', async () => {
+    // Create two stale files with matching content
+    const staleFile1 = join(workDir, 'backlog/tasks/aisdlc-100 - stale-a.md');
+    const staleFile2 = join(workDir, 'backlog/tasks/aisdlc-101 - stale-b.md');
+    writeFileSync(staleFile1, CONTENT_MATCH, 'utf8');
+    writeFileSync(staleFile2, CONTENT_MATCH, 'utf8');
+
+    const logLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logLines.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      .on(
+        /^git ls-files/,
+        ok('backlog/tasks/aisdlc-100 - stale-a.md\nbacklog/tasks/aisdlc-101 - stale-b.md\n'),
+      )
+      // Both have counterparts in completed/
+      .on(
+        /^git ls-tree origin\/main .+backlog\/completed\//,
+        ok(
+          'backlog/completed/aisdlc-100 - stale-a.md\nbacklog/completed/aisdlc-101 - stale-b.md\n',
+        ),
+      )
+      // Both have identical content
+      .on(/^git show origin\/main:/, ok(CONTENT_MATCH));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toHaveLength(2);
+    // Exactly one log line per pruned file
+    const pruneLogLines = logLines.filter(
+      (l) => l.includes('[prune-stale-debris]') && l.includes('pruned'),
+    );
+    expect(pruneLogLines).toHaveLength(2);
+    expect(existsSync(staleFile1)).toBe(false);
+    expect(existsSync(staleFile2)).toBe(false);
+  });
+
+  it('only targets backlog/tasks/ files, not backlog/completed/ untracked files', async () => {
+    // An untracked file in backlog/completed/ should NOT be pruned
+    writeFileSync(
+      join(workDir, 'backlog/completed/aisdlc-200 - in-completed.md'),
+      CONTENT_MATCH,
+      'utf8',
+    );
+
+    const fake = new FakeRunner().on(
+      /^git ls-files/,
+      ok('backlog/completed/aisdlc-200 - in-completed.md\n'),
+    );
+    // Should not need to call ls-tree since the file doesn't match tasks/ pattern
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual([]);
+    expect(result.noCounterpart).toEqual([]);
+    expect(result.skippedContentDiffers).toEqual([]);
+    // The completed/ file should still exist
+    expect(existsSync(join(workDir, 'backlog/completed/aisdlc-200 - in-completed.md'))).toBe(true);
   });
 });

@@ -278,6 +278,41 @@ echo "[Step 0.5] $SYNC_RESULT"
 
 > **Non-blocking contract.** Even when the sync PR opens, Step 0.5 returns immediately and Step 1 proceeds. The parent's untracked files remain until the operator runs `git clean -f backlog/tasks/aisdlc-N*.md` (or until the next Step 0 self-heal after the sync PR merges — at that point the files are on `origin/main`, `git reset --hard origin/main` is safe, and the parent is fully clean again).
 
+## Step 0.5b — Prune stale parent debris (AISDLC-446)
+
+After the sync-to-main step above, run a complementary prune pass over untracked `backlog/tasks/aisdlc-N*.md` files. This catches the class of debris documented in AISDLC-446: the operator filed a task → dev moved it to `completed/` in a PR → PR merged → `origin/main` now has the file under `completed/`, but the parent's untracked `tasks/` copy persists indefinitely (Pattern C's `git reset --hard origin/main` preserves untracked files by design).
+
+**What it does (per AC):**
+
+1. For each untracked `backlog/tasks/aisdlc-N*.md`, looks for a same-ID file in `origin/main:backlog/completed/` via `git ls-tree`.
+2. If found AND content matches (`git show origin/main:<path>` == local file) → **delete** the stale local file. One log line per deletion.
+3. If found BUT content differs → **log a warning and skip** (operator may have unsaved local edits).
+4. If NOT found → leave alone (genuine new task; the sync-to-main step above handles it).
+5. Idempotent and silent when there is nothing to prune.
+
+```bash
+PRUNE_RESULT=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" prune-stale-parent-debris --work-dir "$(pwd)" 2>&1)
+PRUNE_EXIT=$?
+if [ "$PRUNE_EXIT" -ne 0 ]; then
+  echo "WARNING (Step 0.5b): prune-stale-parent-debris exited non-zero: $PRUNE_RESULT"
+  # Non-fatal — continue. A prune failure should not block dispatch.
+else
+  # Only log when something was actually pruned (non-empty pruned array).
+  PRUNED_COUNT=$(printf '%s' "$PRUNE_RESULT" | node -e "
+    const d=[];process.stdin.on('data',c=>d.push(c));
+    process.stdin.on('end',()=>{
+      try{const r=JSON.parse(d.join(''));process.stdout.write(String((r.pruned||[]).length));}
+      catch{process.stdout.write('0');}
+    });
+  " 2>/dev/null || echo '0')
+  if [ "$PRUNED_COUNT" -gt 0 ]; then
+    echo "[Step 0.5b] pruned $PRUNED_COUNT stale task file(s) from backlog/tasks/ (already in completed/ on origin/main)"
+  fi
+fi
+```
+
+> **Implementation note.** The `prune-stale-parent-debris` subcommand is backed by `pipeline-cli/src/steps/00-5-sync-parent.ts` (`pruneStaleParentDebris`). Non-fatal by design: a failure to prune is logged as a warning, never a blocker — the worst outcome is that a stale file lingers until the next tick resolves it. The content-equality check (`git show origin/main:<path>` vs. `readFileSync`) ensures we never silently discard an operator's in-progress edits.
+
 ## Step 1 — Detect argument form, validate the work item
 
 First, classify `$ARGUMENTS` into one of the three forms documented in [Argument forms](#argument-forms-aisdlc-393) above (AISDLC-393). The shell pipeline below mirrors `parseExecuteArg` in `dogfood/src/dispatch-execute-arg.ts`; the precedence order is **explicit `gh:` first**, then **prefixed task ID**, then **bare/`#`-prefixed numeric** as the GH-issue fallback.

@@ -65,6 +65,7 @@ import { parseDeveloperReturn } from '../steps/06-parse-dev-return.js';
 import { pushAndPr } from '../steps/11-push-and-pr.js';
 import { setupWorktree } from '../steps/03-setup-worktree.js';
 import { siblingPrs } from '../steps/12-sibling-prs.js';
+import { syncParentUntrackedFiles, pruneStaleParentDebris } from '../steps/00-5-sync-parent.js';
 import { sweepMergedWorktrees } from '../steps/00-sweep.js';
 import { validateTask } from '../steps/01-validate.js';
 import type { AggregatedVerdict, DeveloperReturn, ReviewerVerdict } from '../types.js';
@@ -322,6 +323,28 @@ export function buildCli(): Argv {
           }
           const target = saveReviewerCache(saveOpts);
           emit({ ok: true, path: target });
+        },
+      )
+      // Step 0.5 (sync-parent) — AISDLC-217
+      .command(
+        'sync-parent',
+        'Step 0.5 — sync untracked parent task files to origin/main via a docs-only PR',
+        (y) => y,
+        async (argv) => {
+          const result = await syncParentUntrackedFiles({ workDir: argv['work-dir'] as string });
+          emit(result);
+          if (!result.ok) process.exit(1);
+        },
+      )
+      // Step 0.5 (prune) — AISDLC-446
+      .command(
+        'prune-stale-parent-debris',
+        'Step 0.5 prune — delete untracked backlog/tasks/ files whose same-ID counterpart is already in origin/main:backlog/completed/ with identical content',
+        (y) => y,
+        async (argv) => {
+          const result = await pruneStaleParentDebris({ workDir: argv['work-dir'] as string });
+          emit(result);
+          if (!result.ok) process.exit(1);
         },
       )
       // Step 0

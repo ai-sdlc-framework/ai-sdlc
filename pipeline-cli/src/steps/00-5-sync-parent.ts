@@ -27,6 +27,15 @@
  * skipped with a `[step-0.5]` log line. Opt-in auto-delete via
  * `AI_SDLC_STEP_0_5_AUTO_RECONCILE=1`.
  *
+ * ## Prune stale parent debris (AISDLC-446)
+ *
+ * `pruneStaleParentDebris()` is a complementary step that runs AFTER
+ * `syncParentUntrackedFiles`. It scans for untracked `backlog/tasks/aisdlc-N*.md`
+ * files whose same-ID counterpart already exists in `origin/main:backlog/completed/`.
+ * When the content matches (no diff), the stale tasks/ file is deleted silently
+ * except for one log line. When content differs (operator has local edits), a
+ * warning is logged and the file is preserved.
+ *
  * ## Contract
  *
  * - `ok: true` + `syncedFiles: []` → parent is clean, no action taken.
@@ -40,7 +49,15 @@
  * @module steps/00-5-sync-parent
  */
 
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, existsSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  unlinkSync,
+  existsSync,
+  readFileSync,
+} from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
@@ -466,4 +483,217 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
       // ignore
     }
   }
+}
+
+// ── AISDLC-446: Prune stale parent debris ─────────────────────────────────────
+
+/**
+ * Options for `pruneStaleParentDebris`.
+ */
+export interface PruneStaleParentDebrisOptions {
+  /**
+   * Absolute path to the parent (orchestrator) repo root.
+   */
+  workDir: string;
+  /**
+   * Optional runner — defaults to `defaultRunner`.
+   */
+  runner?: Runner;
+}
+
+/**
+ * Per-file decision recorded by `pruneStaleParentDebris`.
+ */
+export type PruneDecision =
+  | { file: string; action: 'deleted' }
+  | { file: string; action: 'skipped-content-differs' }
+  | { file: string; action: 'no-counterpart' };
+
+/**
+ * Result shape returned by `pruneStaleParentDebris`.
+ */
+export interface PruneStaleParentDebrisResult {
+  /** True even when nothing was pruned — false only on internal error. */
+  ok: boolean;
+  /** Optional error message when ok === false. */
+  reason?: string;
+  /** Files deleted (matched + content identical). */
+  pruned: string[];
+  /** Files skipped because content differed from the completed/ version. */
+  skippedContentDiffers: string[];
+  /** Files skipped because no completed/ counterpart exists on origin/main. */
+  noCounterpart: string[];
+}
+
+/**
+ * Extract the task ID prefix from a backlog filename.
+ *
+ * Given `backlog/tasks/aisdlc-446 - some-slug.md`, returns `aisdlc-446`
+ * (lowercased). Returns `null` when the filename doesn't match the expected
+ * `backlog/tasks/aisdlc-N` pattern.
+ */
+export function extractTaskId(relativePath: string): string | null {
+  // Match backlog/tasks/ or backlog/completed/ prefix + aisdlc-N id
+  const match = relativePath.match(/^backlog\/(?:tasks|completed)\/(aisdlc-\d+)\b/i);
+  if (!match) return null;
+  return match[1].toLowerCase();
+}
+
+/**
+ * Find an untracked `backlog/tasks/aisdlc-N*.md` file's counterpart in
+ * `origin/main:backlog/completed/` by task ID (not by exact filename, since
+ * the slug might differ). Returns the completed/ path on origin/main when
+ * found, or null when not found.
+ *
+ * Uses `git ls-tree origin/main backlog/completed/` to list completed files
+ * and filters by task ID prefix.
+ */
+export async function findCompletedCounterpartOnOrigin(
+  taskId: string,
+  workDir: string,
+  runner: Runner,
+): Promise<string | null> {
+  // List all files under backlog/completed/ on origin/main
+  const r = await runner('git', ['ls-tree', 'origin/main', '--name-only', 'backlog/completed/'], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  if (r.code !== 0 || !r.stdout.trim()) return null;
+
+  const files = r.stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // Find a file whose task-ID prefix matches (case-insensitive)
+  const idLower = taskId.toLowerCase();
+  const match = files.find((f) => {
+    const fileId = extractTaskId(f);
+    return fileId?.toLowerCase() === idLower;
+  });
+
+  return match ?? null;
+}
+
+/**
+ * Read the content of a file from `origin/main` via `git show`.
+ * Returns the content string on success, or null on failure.
+ */
+export async function readOriginMainFile(
+  relativePath: string,
+  workDir: string,
+  runner: Runner,
+): Promise<string | null> {
+  const r = await runner('git', ['show', `origin/main:${relativePath}`], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  if (r.code !== 0) return null;
+  return r.stdout;
+}
+
+/**
+ * AISDLC-446 — Prune stale parent debris.
+ *
+ * Scans the parent's working tree for untracked `backlog/tasks/aisdlc-N*.md`
+ * files. For each:
+ *
+ * 1. If a same-ID file exists in `origin/main:backlog/completed/` AND content
+ *    matches → delete the stale tasks/ file (one log line per deletion).
+ * 2. If a same-ID file exists BUT content differs → log a warning, skip
+ *    (operator may have local edits worth preserving).
+ * 3. If no same-ID file exists in completed/ on origin → leave alone
+ *    (genuine new task; the existing sync-to-main path handles it).
+ *
+ * Idempotent: re-running when nothing matches produces no output.
+ */
+export async function pruneStaleParentDebris(
+  opts: PruneStaleParentDebrisOptions,
+): Promise<PruneStaleParentDebrisResult> {
+  const runner = opts.runner ?? defaultRunner;
+  const workDir = opts.workDir;
+
+  // Safe terminal-output sanitiser — strips C0/C1 control chars.
+  // eslint-disable-next-line no-control-regex
+  const safeForLog = (s: string): string => s.replace(/[\x00-\x1f\x7f-\x9f]/g, '?');
+
+  // List all untracked files
+  const untracked = await listUntrackedFiles(workDir, runner);
+
+  // Keep only backlog/tasks/ files matching the aisdlc-N pattern
+  const taskFiles = untracked.filter((f) => /^backlog\/tasks\/aisdlc-\d/i.test(f));
+
+  const pruned: string[] = [];
+  const skippedContentDiffers: string[] = [];
+  const noCounterpart: string[] = [];
+
+  for (const file of taskFiles) {
+    const taskId = extractTaskId(file);
+    if (!taskId) {
+      // Safety: shouldn't happen given the regex above, but skip gracefully
+      noCounterpart.push(file);
+      continue;
+    }
+
+    // Check for counterpart in origin/main:backlog/completed/
+    const counterpartPath = await findCompletedCounterpartOnOrigin(taskId, workDir, runner);
+
+    if (!counterpartPath) {
+      // AC #5: no counterpart — leave alone
+      noCounterpart.push(file);
+      continue;
+    }
+
+    // AC #3/#4: counterpart found — compare content
+    const originContent = await readOriginMainFile(counterpartPath, workDir, runner);
+
+    // Read the local file content
+    let localContent: string | null = null;
+    const absPath = join(workDir, file);
+    try {
+      localContent = readFileSync(absPath, 'utf8');
+    } catch {
+      // Can't read local file — skip
+      console.warn(
+        `[prune-stale-debris] ${safeForLog(basename(file))}: could not read local file — skipping`,
+      );
+      skippedContentDiffers.push(file);
+      continue;
+    }
+
+    if (originContent === null) {
+      // Can't read origin content — skip conservatively
+      console.warn(
+        `[prune-stale-debris] ${safeForLog(basename(file))}: could not read origin content for ${safeForLog(counterpartPath)} — skipping`,
+      );
+      skippedContentDiffers.push(file);
+      continue;
+    }
+
+    if (localContent !== originContent) {
+      // AC #4: content differs — warn and skip
+      console.warn(
+        `[prune-stale-debris] ${safeForLog(basename(file))}: content differs from origin completed/ version (${safeForLog(counterpartPath)}) — skipping (operator may have local edits)`,
+      );
+      skippedContentDiffers.push(file);
+      continue;
+    }
+
+    // AC #3: content matches — safe to delete
+    try {
+      unlinkSync(absPath);
+      console.log(
+        `[prune-stale-debris] ${safeForLog(file)}: pruned (matched completed/ version at ${safeForLog(counterpartPath)})`,
+      );
+      pruned.push(file);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[prune-stale-debris] ${safeForLog(file)}: failed to delete — ${safeForLog(msg)}`,
+      );
+      skippedContentDiffers.push(file);
+    }
+  }
+
+  return { ok: true, pruned, skippedContentDiffers, noCounterpart };
 }

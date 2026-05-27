@@ -69,6 +69,9 @@ isn't a JS event loop.
 /ai-sdlc orchestrator-tick (Conductor)
   │
   ├── 1. Check AI_SDLC_AUTONOMOUS_ORCHESTRATOR is set
+  ├── 1.5. sync-parent + prune-stale-parent-debris (AISDLC-217 / AISDLC-446):
+  │       non-fatal hygiene pass; syncs genuinely-new untracked task files +
+  │       prunes stale tasks/ copies whose completed/ counterpart is on origin/main
   ├── 2. Sweep stale heartbeats (reap dead Workers into failed/)
   ├── 2.5. [Pattern X v2 / AISDLC-396] TWO-PHASE sweep:
   │       Phase A — RECONCILE completions: for each completion notification
@@ -143,6 +146,44 @@ case "$(echo "${AI_SDLC_AUTONOMOUS_ORCHESTRATOR:-}" | tr '[:upper:]' '[:lower:]'
     exit 1
     ;;
 esac
+```
+
+## Step 1.5 — Auto-sync untracked parent task files + prune stale debris (AISDLC-217 / AISDLC-446)
+
+Every orchestrator tick runs the same two-pass cleanup that `/ai-sdlc execute` Step 0.5 / Step 0.5b runs. This keeps the parent's working tree tidy on every tick rather than only when `execute` fires.
+
+**Pass 1 — sync-parent (AISDLC-217):** syncs genuinely-new untracked `backlog/{tasks,completed}/aisdlc-N*.md` files to `origin/main` via a docs-only PR. Non-fatal when the sync PR fails (logs and continues).
+
+**Pass 2 — prune-stale-parent-debris (AISDLC-446):** deletes untracked `backlog/tasks/aisdlc-N*.md` files whose same-ID counterpart already exists in `origin/main:backlog/completed/` with identical content. Skips files with local edits. Silent when nothing to prune.
+
+```bash
+# Pass 1: sync untracked parent task files
+SYNC_RESULT=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" sync-parent --work-dir "$(pwd)" 2>&1)
+SYNC_EXIT=$?
+if [ "$SYNC_EXIT" -ne 0 ]; then
+  echo "[orchestrator-tick] WARNING (Step 1.5 sync): $SYNC_RESULT"
+  # Non-fatal — continue. Non-backlog untracked files are surfaced as a warning.
+else
+  echo "[orchestrator-tick] sync-parent: $SYNC_RESULT"
+fi
+
+# Pass 2: prune stale parent debris
+PRUNE_RESULT=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" prune-stale-parent-debris --work-dir "$(pwd)" 2>&1)
+PRUNE_EXIT=$?
+if [ "$PRUNE_EXIT" -ne 0 ]; then
+  echo "[orchestrator-tick] WARNING (Step 1.5 prune): $PRUNE_RESULT"
+else
+  PRUNED_COUNT=$(printf '%s' "$PRUNE_RESULT" | node -e "
+    const d=[];process.stdin.on('data',c=>d.push(c));
+    process.stdin.on('end',()=>{
+      try{const r=JSON.parse(d.join(''));process.stdout.write(String((r.pruned||[]).length));}
+      catch{process.stdout.write('0');}
+    });
+  " 2>/dev/null || echo '0')
+  if [ "$PRUNED_COUNT" -gt 0 ]; then
+    echo "[orchestrator-tick] prune-stale-parent-debris: pruned $PRUNED_COUNT stale task file(s)"
+  fi
+fi
 ```
 
 ## Step 2 — Sweep stale heartbeats
