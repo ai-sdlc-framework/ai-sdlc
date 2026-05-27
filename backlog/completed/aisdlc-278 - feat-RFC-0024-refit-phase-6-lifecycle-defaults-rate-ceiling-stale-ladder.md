@@ -1,7 +1,7 @@
 ---
 id: AISDLC-278
 title: 'feat: RFC-0024 Refit Phase 6 — §15.1 Lifecycle defaults + OQ-6 rate ceiling + OQ-9 stale ladder'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:

@@ -34,6 +34,7 @@
     "cli-tui": "bin/cli-tui.mjs",
     "cli-tui-corpus": "bin/cli-tui-corpus.mjs",
     "cli-capture": "bin/cli-capture.mjs",
+    "cli-capture-lifecycle": "bin/cli-capture-lifecycle.mjs",
     "cli-decisions": "bin/cli-decisions.mjs",
     "cli-task-complete": "bin/cli-task-complete.mjs",
     "cli-backlog-verify": "bin/cli-backlog-verify.mjs",

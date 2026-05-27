@@ -2,10 +2,10 @@
 id: RFC-0024
 title: Emergent Issue Capture + Triage Pattern
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-15
+updated: 2026-05-26
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0015]
 requiresDocs: []
@@ -13,11 +13,11 @@ requiresDocs: []
 
 # RFC-0024: Emergent Issue Capture + Triage Pattern
 
-**Status:** Ready for Review v0.4 — partial implementation: AISDLC-269 shipped capture authoring + triage flow against the **2026-05-13 first-pass OQ resolutions**. The **2026-05-15 walkthrough revised** OQ-1 / OQ-2 / OQ-3 / OQ-5 / OQ-7 / OQ-9 / OQ-11 and added §15.1 Capture Lifecycle Defaults — a real gap between shipped behavior and the resolved design. Lifecycle rolled back from `Implemented` to `Ready for Review`; gap closed by **RFC-0024 Refit (AISDLC-320 / 321 + 275-278)**; flips back to `Implemented` after Refit Phase 6 (AISDLC-278) ships.
-**Lifecycle:** Ready for Review
+**Status:** Implemented v0.5 — all Refit phases shipped (AISDLC-320 / 321 / 275-278). AISDLC-278 (Refit Phase 6) closed the final §15.1 gap: lifecycle timebox service (`cli-capture-lifecycle`), OQ-6 rate ceiling, OQ-9 stale ladder, archive support, and `capture-config.yaml` template.
+**Lifecycle:** Implemented
 **Author:** Dominique Legault
 **Created:** 2026-05-03
-**Updated:** 2026-05-15
+**Updated:** 2026-05-26
 **Target Spec Version:** v1alpha1
 **Depends on:** RFC-0011 (DoR gate), RFC-0015 (autonomous orchestrator)
 **Anchor:** [VISION.md §5](../../VISION.md) — emergent-work gap

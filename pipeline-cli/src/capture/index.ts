@@ -14,3 +14,4 @@ export * from './pr-comment-classifier.js';
 export * from './triage-rubric.js';
 export * from './auto-triage.js';
 export * from './invoker-loader.js';
+export * from './capture-lifecycle.js';
