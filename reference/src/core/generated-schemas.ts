@@ -1990,7 +1990,7 @@ export const designIntentDocumentSchema = {
           description:
             "In-Soul Variant declarations per RFC-0017 §5.1. Each variant carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's compliance regime and substrate invariants.",
           items: { $ref: '#/$defs/variantDeclaration' },
-          maxItems: 20,
+          maxItems: 19,
         },
       },
       additionalProperties: false,
