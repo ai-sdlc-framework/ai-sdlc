@@ -349,6 +349,8 @@ Drift between DID versions over time defaults toward the owning pillar's perspec
 }
 ```
 
+> **See also: [RFC-0028](RFC-0028-engineering-axis-substrate-enforcement.md) (authoring-time companion).** RFC-0028 specifies the Substrate Contract pattern — typed per-Soul-DID configuration that shared substrate code reads from — and the type-registry CI integrity gate that enforces the §5.1 `substrateInvariants` declarations at authoring time. Where this section defines the schema invariants, RFC-0028 operationalizes how those invariants are enforced before code reaches runtime.
+
 ### 5.3 The `parentTessellation` field (Soul DIDs only)
 
 ```json
@@ -450,6 +452,8 @@ A new sub-dimension under Eτ (Entropy Tax). Fires when a work item:
 | **Rule #3: Cross-soul provenance audits** | Walk provenance records (§8.3) and flag work items whose `targetedSouls` set crosses tessellation boundaries without recorded amendment; flag substrate work whose downstream provenance shows soul-distinct outcomes diverge sharply. | **Deferred to RFC-0009 implementation phase** (provenance tagging needs the substrate-vs-soul partition to exist in code first). Ships once §8.3 ProvenanceRecord extension lands and the first generation of tessellated provenance records accumulates. |
 
 The staggered roll-out means RFC-0009's implementation phase ships rule #1 immediately (covers the highest-frequency drift mode — soul-name leakage in substrate); rule #3 follows naturally as provenance data accumulates; rule #2 unlocks once RFC-0019's embedding adapter is implementable.
+
+> **See also: [RFC-0028](RFC-0028-engineering-axis-substrate-enforcement.md) (authoring-time companion — fourth detection mechanism at the type-registry layer).** RFC-0028 §4 specifies CI integrity gate assertions that complement these three orchestrator-side rules: type-registry-layer detection catches *declared* drift before it ships (cross-file invariants the AST scan cannot see), runs at CI time rather than orchestration time, and pairs with the runtime statistical detection in PPA's `SoulDriftDetected` event per RFC-0028 OQ-7.2's canonical composition rules (structural BLOCKS deployment; statistical SURFACES via RFC-0035 G0 non-blocking).
 
 ### 7.3 Eρ₆ Cost Clearance (proposed; v3.1 — interaction with RFC-0010)
 

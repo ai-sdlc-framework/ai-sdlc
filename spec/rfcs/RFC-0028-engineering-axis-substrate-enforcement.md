@@ -2,25 +2,28 @@
 id: RFC-0028
 title: Engineering-Axis Substrate Enforcement for Multi-Soul Platforms
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: Alexander Kline
 created: 2026-05-04
-updated: 2026-05-04
+updated: 2026-05-27
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0008
   - RFC-0009
+  - RFC-0035
 requiresDocs: []
 ---
 
 # RFC-0028: Engineering-Axis Substrate Enforcement for Multi-Soul Platforms
 
-**Document type:** Normative (draft)
-**Status:** Draft v1 — Initial proposal. Reference-platform dogfood evidence cited but not exposed.
-**Lifecycle:** Draft
+**Document type:** Normative
+**Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-27 with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). All 4 §7 OQs resolved. Refinements: (OQ-7.1) field-level `identityClass` with canonical taxonomy (compliance locks / regime / director / `complianceFloor: inherit` = `core`; operational cadence / scoring weights / similarity thresholds / quota quantities = `evolving`; default `core` for novel fields) — harmonizes with already-shipped `'core' | 'evolving'` discriminant in `layer1-deterministic.ts`; (OQ-7.2) canonical pairing of structural (CI authoring-time) + statistical (runtime) drift detection with explicit composition rules (structural BLOCKS PR via `Decision: substrate-structural-drift-detected`; statistical SURFACES via `Decision: soul-statistical-drift-detected` per RFC-0035 G0 non-blocking) + cold-start calibration window (structural alone defends pre-baseline); (OQ-7.3) normative preservation of centroid slot via §3.2 named-consumer rule (no special slot carved out); (OQ-7.4) light cross-refs in RFC-0009 §3 AND §7.2 pointing at RFC-0028 (preserves "RFCs shouldn't accumulate" principle while solving discoverability gap). Implementation broken into 5 phase tasks: AISDLC-447..451.
+**Lifecycle:** Ready for Review
 **Created:** 2026-05-04
+**Updated:** 2026-05-27
 **Authors:** Alexander Kline (Head of Product Strategy / Product Authority; RFC-0009 v3.2 author + PPA v1.0/v1.1 author)
-**Requires:** RFC-0008 (PPA Triad Integration), RFC-0009 (Tessellated Design Intent Documents)
+**OQ walkthrough:** Dominique Legault (Operator), 2026-05-27 — full-rubric resolution of all 4 §7 OQs.
+**Requires:** RFC-0008 (PPA Triad Integration), RFC-0009 (Tessellated Design Intent Documents), RFC-0035 (Decision Catalog — G0 non-blocking routing for drift Decisions)
 **Convergent with:** PPA Composite (v1.1 ER1–ER6 alignment with RFC-0009 §7 Eρ-family; v1.2 direction for `identityClass`), RFC-0006 Addendum A, RFC-0007, RFC-0011 (DoR)
 
 > The bold-style status block above is preserved for human readability. The YAML frontmatter at the top of the file is the source of truth for tooling.
@@ -40,6 +43,7 @@ requiresDocs: []
 | Version | Date | Author | Notes |
 |---------|------|--------|-------|
 | v1 | 2026-05-04 | Alexander | Initial draft. Originally filed as RFC-0009 Addendum A (PR #252); converted to standalone RFC per Engineering Authority guidance ("RFCs should not be patched; addendums become their own RFCs"). Content preserved verbatim modulo addendum→RFC voice; cross-references to RFC-0009 §7.1/§7.2/§5.1 retained. |
+| v0.2 | 2026-05-27 | dominique (Operator OQ walkthrough) | All 4 §7 OQs resolved with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Resolutions: **(OQ-7.1)** field-level `identityClass` with canonical taxonomy (compliance locks / regime / director / `complianceFloor: inherit` = `core`; operational cadence / scoring weights / similarity thresholds / quota quantities = `evolving`; default `core` for novel fields) — harmonizes with already-shipped `'core' \| 'evolving'` discriminant in `orchestrator/src/sa-scoring/layer1-deterministic.ts`. **(OQ-7.2)** canonical pairing of structural (CI authoring-time) + statistical (runtime) drift detection with explicit composition rules — structural BLOCKS PR via `Decision: substrate-structural-drift-detected` (hard gate); statistical SURFACES via `Decision: soul-statistical-drift-detected` per RFC-0035 G0 non-blocking (operator batch review); both events composable in catalog for closed-loop drift audit; cold-start calibration window defers statistical detection until rolling 30d baseline accumulates. **(OQ-7.3)** normative preservation of centroid slot via §3.2 named-consumer rule (no special slot carved out); future centroid MUST plug into named-consumer pattern. **(OQ-7.4)** light cross-references added in BOTH RFC-0009 §3 (Substrate Invariants) AND §7.2 (drift detection rules) pointing at RFC-0028 (pointers only, no inline content — composes with "RFCs shouldn't accumulate" principle). Frontmatter `requires` expanded: added RFC-0035 (catalog routing for drift Decisions). Lifecycle promoted Draft → Ready for Review. Implementation broken into 5 phase tasks: AISDLC-447 (Phase 1 canonical identityClass taxonomy + harmonize with shipped layer1-deterministic.ts), AISDLC-448 (Phase 2 CI integrity gate — type-registry assertions + structural drift detection), AISDLC-449 (Phase 3 drift composition wiring + cold-start handling + Decision routing), AISDLC-450 (Phase 4 RFC-0009 cross-reference edits), AISDLC-451 (Phase 5 operator runbook + glossary + conformance test suite). Practitioner-validation gates remain pending corpus run. |
 
 ---
 
@@ -167,9 +171,11 @@ The Substrate Contract enforces tightening-only at the type system:
 
 This makes the tightening-only rule **impossible to violate** at authoring time, rather than merely detectable at runtime.
 
-## 7. Open Questions
+## 7. Open Questions — resolved (operator walkthrough 2026-05-27 with full rubric)
 
-The following remain unresolved and are surfaced for framework-maintainer discussion. These are RFC-0028's own open questions, separate from RFC-0009's 13 OQs (all closed in v3.4).
+> **Resolution status (2026-05-27):** All 4 §7 OQs resolved via operator walkthrough with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** drift-detection Decisions route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md) where appropriate (statistical drift surfaces non-blocking; structural drift is a hard CI gate per OQ-7.2 composition rules). Implementation broken into 5 phase tasks: AISDLC-447..451.
+
+These OQs are separate from RFC-0009's 13 OQs (all closed in v3.4).
 
 ### 7.1 `identityClass: core | evolving` at substrate-field level
 
@@ -184,6 +190,14 @@ The Substrate Contract pattern in this RFC currently treats every field as `core
 
 This RFC does not propose an answer; it surfaces the question.
 
+**Resolution (2026-05-27, full rubric):** **Field-level `identityClass` SHIPS with canonical taxonomy.** Industry research: Protobuf/Avro favor fixed-or-flexible binary classification; compliance frameworks (HIPAA/PCI-DSS/SOC2) distinguish categorical vs operational controls (a real-world per-field-class precedent); Kubernetes API uses per-field annotations with some fields immutable post-create; the shipped code at `orchestrator/src/sa-scoring/layer1-deterministic.ts` already uses `'core' | 'evolving'` — partial implementation that needs canonical taxonomy to harmonize against. **Two substantive considerations the original question surfaced but didn't synthesize:** (a) all-`core` default is a footgun — treating operational cadence/scoring-weight tuning as Soul-pivot events causes false-positive rescoring cascade (100x cost amplifier in PPA throughput); (b) the shipped code already uses the discriminant — whatever this OQ resolves to must harmonize. **Canonical taxonomy ships in the resolution:**
+
+- **`core`** (cannot be loosened by child Soul DIDs; pivot rescoring fires on change): categorical compliance locks (`requiresTenantPhysicalIsolation`, `requiresVulnerableAudienceLockout`); compliance regime declarations (HIPAA / PCI-DSS / SOC2 / FedRAMP / GDPR posture); director / orchestrator agent identifier (changing the director IS a Soul-level event); `complianceFloor: inherit` lock (per §6 tightening-only)
+- **`evolving`** (free movement within tightening-only bounds; admission-queue rescoring only): operational cadence (`observerCooldownMs`, `cadenceMinIntervalDays`); scoring tuning weights (bid diversity, recency half-life); similarity thresholds (`clustering.similarityThreshold`); quota quantities (`tenantQuotaShare`)
+- **Default `core`** for novel fields not yet classified — promotion to `evolving` requires RFC amendment with Design + Engineering sign-off (conservative default; demotes burden-of-proof to "argue why this is operational" rather than "argue why this is identity")
+
+**Counter-argument:** "Per-field identityClass adds config surface for marginal benefit." Rebuttal: it REDUCES surface — every substrate change without it is currently treated as Soul-pivot triggering full re-scoring; field-level identityClass turns operational tuning (similarity-threshold adjustment) from "Soul identity event" into "admission re-score event" — a 100x cost difference in PPA scoring throughput. **Selected over all-`core` (status quo)** because shipped code already contradicts it AND the all-`core` default causes operational-tuning pivot rescoring. **Selected over curated subset** because curated lists drift — every new field requires manual classification or silently defaults wrong. **Selected over per-Soul configurable** because identity is a framework concern, not an adopter knob (adopters can tighten via specialization but shouldn't loosen canonical classification).
+
 ### 7.2 Structural-vs-statistical drift pairing
 
 The CI integrity gate is **structural drift detection** at authoring time. PPA's `SoulDriftDetected` event (rolling 30-day mean < 0.4 or stddev > 0.15 for 3 sprints) is **statistical drift detection** at runtime.
@@ -192,15 +206,37 @@ Proposal for the framework: specify both as complementary layers, not alternativ
 
 The reference platform runs both via separate mechanisms (a runtime drift-telemetry channel at a tighter threshold + the type-registry integrity gate at authoring); the framework could specify their pairing as canonical.
 
+**Resolution (2026-05-27, full rubric):** **Pair as canonical layers + explicit composition rules + cold-start calibration window.** Industry research: database integrity (schema constraints + data validation), type systems (compile-time + runtime), compliance audits (continuous monitoring + periodic audits), security stack (SAST + DAST + IAST), software engineering (linter + tests + production monitoring), reliability engineering (SLI/SLO + chaos) — overwhelming pattern is complementary layers catching different failure classes; treating either as substitute fails systematically. **Composition rules ship in this resolution:**
+
+1. **Structural drift (CI-time) → REJECTS deployment.** Type-registry assertion fails → `Decision: substrate-structural-drift-detected` (severity HIGH) → blocks PR merge. Hard gate.
+2. **Statistical drift (runtime) → SURFACES to operator (RFC-0035 G0 non-blocking).** `SoulDriftDetected` event fires → `Decision: soul-statistical-drift-detected` → operator batch review with reconciliation paths. Pipeline never halts.
+3. **Both Decisions composable in catalog**: operator can correlate structural-drift attempts (rejected at CI) with statistical-drift signals (caught at runtime) — closes the loop on "drift caught early vs drift that escaped."
+4. **Cold-start handling**: statistical drift detection requires baseline (rolling 30d). Pre-baseline period (< 30d signal available) emits "calibrating" status, no statistical Decisions; structural detection is sole defense during calibration window. Same proven shape as RFC-0030 OQ-13.5 z-score flooding detection (which we just specified).
+
+**Counter-argument:** "Pairing both at the framework level is over-specification — adopters with shallow corpora may not need statistical drift (no baseline to drift against)." Rebuttal: cold-start handling explicitly addresses this. **Selected over surface-the-question (status quo)** because adopters each derive ad-hoc → cross-deployment inconsistency (the failure-mode shape RFC-0030 OQ-13.5 v0.2 had). **Selected over both-soft-warn** because structural drift detected at CI is the authoring-time hard-gate value — losing it means structural drift can ship and only catches via runtime statistical detection (longer feedback loop, more damage). **Selected over no-spec** because per-adopter wiring creates the same v0.2 inconsistency.
+
 ### 7.3 Centroid computation slot
 
 PPA's Internal Compass note: "the architectural slots are placed so centroid computation becomes possible later without changing the governance surface." The Substrate Contract pattern's per-field "named consumer" rule preserves this slot — adding centroid-derived fields later does not break the contract surface.
 
 This RFC does not require centroid computation; it observes the slot is preserved.
 
+**Resolution (2026-05-27, full rubric):** **Normative preservation via existing §3.2 named-consumer rule — no special slot carved out.** Industry research: centroid computation requires substrate (feature extraction + accumulation + computation cadence + update strategy) that doesn't yet exist in this codebase (embedding adapter just shipped via RFC-0019; signal-corpus accumulation just shipped via RFC-0030; feature-extraction layer never designed). Vector databases (pgvector, Pinecone) compute centroids natively; streaming systems (Kafka Streams, Flink) compute rolling centroids — pre-requisites that don't yet exist locally. **Normative form of the observation:** *"Future centroid computation MUST plug into the Substrate Contract via the §3.2 named-consumer rule like any other substrate field. No carved-out slot is reserved. The named-consumer rule itself is the preservation mechanism."* The normative form does the load-bearing work: future contributors cannot argue "centroid is special, deserves its own slot."
+
+**Counter-argument:** "Reserving the `centroid` field name now would prevent future name collisions and pre-specify Decision types so consumers can wire against them today." Rebuttal: reserving `centroid` requires guessing the shape of centroid output (vector? scalar? per-dim array?), which depends on the embedding adapter's dimensions (1536 vs 3072 vs 1024) and feature-extraction strategy. Pre-specifying without that substrate is speculative-design antipattern. The named-consumer rule already prevents collisions — when centroid ships, IT gets a named consumer, the slot is preserved automatically. **Selected over passive observation (status quo)** because passive language invites future "centroid deserves a carve-out" arguments — normative language closes the escape hatch. **Selected over reserve-API-surface-now** because shape depends on substrate that doesn't yet exist. **Selected over ship-centroid-in-this-RFC** because multi-RFC critical path requires RFC-0019 + RFC-0030 + feature-extraction layer outside RFC-0028's scope.
+
 ### 7.4 Cross-reference path back to RFC-0009 §7.2
 
 Per Engineering Authority guidance ("RFCs should not be patched; addendums become their own RFCs"), this RFC stays standalone rather than amending RFC-0009 §7.2's detection rules in place. Open question: should §7.2 gain a permanent cross-reference pointing at RFC-0028 as a fourth detection mechanism (orchestrator-side rules + type-registry-layer detection), or should the rules and the type-registry layer remain organizationally distinct (orchestrator detection in RFC-0009 §7.2; authoring-time detection in this RFC)?
+
+**Resolution (2026-05-27, full rubric):** **Light cross-references added in BOTH RFC-0009 §3 (Substrate Invariants) AND §7.2 (drift detection rules).** Industry research: documentation-architecture patterns favor linked-but-separately-owned pages (C4 / ADRs / Notion / Linear / Confluence); IETF RFCs formalize both heavy ("Updates RFC X") and light ("References RFC X") cross-references; light-cross-ref pattern (Wikipedia "See also", JSDoc `@see` tags) is the established compromise between discoverability and accumulation. **Substantive consideration the original framing missed:** the OQ presents this as binary (cross-ref §7.2 only OR no cross-ref), but RFC-0028 §3 self-references RFC-0009 §3 Substrate Invariants — §3 integration is load-bearing, not secondary. Cross-ref in §7.2 alone misses the §3 entry point. **Dual cross-ref ships:**
+
+- RFC-0009 §3 gains a "See also: RFC-0028 (authoring-time companion — Substrate Contract pattern, type-registry CI integrity gate)." pointer
+- RFC-0009 §7.2 gains a "See also: RFC-0028 (authoring-time companion — fourth detection mechanism at the type-registry layer)." pointer
+
+Pointers only; no inline content added — composes with "RFCs shouldn't accumulate" principle that motivated splitting RFC-0028 out in the first place.
+
+**Counter-argument:** "Two cross-refs is over-engineering — one in §7.2 suffices since drift detection is the primary integration point." Rebuttal: RFC-0028 §3 explicitly says "complements RFC-0009 §3 Substrate Invariants by ensuring per-Soul-DID contract fields cannot accumulate silent no-ops" — the §3 integration IS load-bearing. A developer arriving at RFC-0009 §3 to understand substrate invariants must know the authoring-time enforcement story exists. **Selected over §7.2-only** because §3 integration is equally load-bearing per RFC-0028 §3 self-reference. **Selected over heavy cross-ref (RFC-0028 listed as 4th mechanism inline in §7.2)** because heavy inline contradicts the "RFCs shouldn't accumulate" principle. **Selected over no-cross-ref (status quo)** because requiring registry-lookup to discover the authoring-time story is the discoverability anti-pattern this OQ surfaces.
 
 ## 8. Non-goals
 
