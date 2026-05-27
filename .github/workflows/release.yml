@@ -61,10 +61,15 @@ jobs:
     if: needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # need write to commit the signed DSSE envelope back
       id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Use AI_SDLC_PAT so the post-publish commit triggers CI (same
+          # rationale as the release-please step above; GITHUB_TOKEN commits
+          # are silently skipped by downstream workflow rules).
+          token: ${{ secrets.AI_SDLC_PAT }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -77,6 +82,102 @@ jobs:
       - run: pnpm -r publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # ── AISDLC-439 (DEC-0001): Sign MCP server tarball after publish ──
+      #
+      # After pnpm -r publish succeeds, the @ai-sdlc/plugin-mcp-server
+      # tarball is live on the npm registry. We now:
+      #   1. Resolve the published version from ai-sdlc-plugin/mcp-server/package.json.
+      #   2. Run scripts/sign-mcp-tarball.mjs to fetch the tarball, compute
+      #      its SHA-512, build a DSSE predicate
+      #      (predicateType: https://ai-sdlc.io/mcp-server-tarball/v1), and
+      #      sign it with the operator's release signing key
+      #      (AISDLC_SIGNING_KEY from repository secrets).
+      #   3. Commit the signed envelope to
+      #      .ai-sdlc/attestations/mcp-server-<version>.dsse.json so install-
+      #      time verifiers can fetch it via git pull without external infra.
+      #
+      # The signing key in AISDLC_SIGNING_KEY must match one of the public
+      # keys in .ai-sdlc/trusted-reviewers.yaml. Rotate via a PR that adds a
+      # new pubkey entry before deleting the old one (see
+      # docs/operations/mcp-server-signing.md — key rotation).
+      #
+      # Soft-fail policy: if the sign step fails (network hiccup, key secret
+      # absent), we emit a warning and continue rather than blocking the npm
+      # publish. The operator can re-run sign-mcp-tarball.mjs manually and
+      # commit the envelope. Tracked at:
+      #   docs/operations/mcp-server-signing.md — recovery procedures.
+      - name: Resolve published MCP server version
+        id: mcp-version
+        run: |
+          MCP_VERSION=$(node -e "
+            const pkg = JSON.parse(require('fs').readFileSync('ai-sdlc-plugin/mcp-server/package.json','utf-8'));
+            process.stdout.write(pkg.version);
+          ")
+          echo "version=${MCP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "[release] MCP server version: ${MCP_VERSION}"
+
+      - name: Sign MCP server tarball DSSE attestation
+        id: sign-tarball
+        env:
+          AISDLC_SIGNING_KEY: ${{ secrets.AISDLC_SIGNING_KEY }}
+          GIT_AUTHOR_EMAIL: 'release-bot@ai-sdlc.io'
+          GIT_AUTHOR_NAME: 'AI-SDLC Release Bot'
+        run: |
+          MCP_VERSION="${{ steps.mcp-version.outputs.version }}"
+          if [ -z "$AISDLC_SIGNING_KEY" ]; then
+            echo "::warning::AISDLC_SIGNING_KEY secret is not set — skipping MCP server tarball signing. See docs/operations/mcp-server-signing.md for setup."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          KEY_FILE="$(mktemp /tmp/aisdlc-sign-key-XXXXXX.pem)"
+          # Write key from secret (zsh/bash-safe heredoc via printf to avoid
+          # issues with newlines in GitHub secret expansion).
+          printf '%s' "$AISDLC_SIGNING_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          ENVELOPE_PATH=".ai-sdlc/attestations/mcp-server-${MCP_VERSION}.dsse.json"
+
+          if [ -f "$ENVELOPE_PATH" ]; then
+            echo "[release] Envelope already exists at ${ENVELOPE_PATH} — skipping sign (idempotent)."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            rm -f "$KEY_FILE"
+            exit 0
+          fi
+
+          # Wait briefly to allow the npm registry to propagate the tarball
+          # before we attempt to fetch it (eventual-consistency window).
+          sleep 15
+
+          node scripts/sign-mcp-tarball.mjs \
+            --version "$MCP_VERSION" \
+            --key "$KEY_FILE" \
+            --out "$ENVELOPE_PATH"
+          SIGN_EXIT=$?
+          rm -f "$KEY_FILE"
+
+          if [ $SIGN_EXIT -ne 0 ]; then
+            echo "::warning::MCP server tarball sign step failed (exit ${SIGN_EXIT}). The tarball is published but the DSSE envelope was not written. See docs/operations/mcp-server-signing.md for manual recovery."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "envelope=${ENVELOPE_PATH}" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+      - name: Commit signed MCP server tarball envelope
+        if: steps.sign-tarball.outputs.skipped != 'true' && steps.sign-tarball.outputs.envelope != ''
+        run: |
+          MCP_VERSION="${{ steps.mcp-version.outputs.version }}"
+          ENVELOPE_PATH="${{ steps.sign-tarball.outputs.envelope }}"
+
+          git config user.email "release-bot@ai-sdlc.io"
+          git config user.name "AI-SDLC Release Bot"
+
+          git add "$ENVELOPE_PATH"
+          git commit -m "chore(release): sign @ai-sdlc/plugin-mcp-server@${MCP_VERSION} tarball DSSE envelope (AISDLC-439)"
+          git push origin HEAD:main
 
   publish-pypi:
     name: Publish Python SDK to PyPI
