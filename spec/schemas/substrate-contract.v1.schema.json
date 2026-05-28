@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/substrate-contract.v1.schema.json",
+  "title": "AI-SDLC SubstrateContract",
+  "description": "RFC-0028 Substrate Contract — typed, per-Soul-DID configuration object that shared substrate code reads from. Per-soul behavior emerges from contract values; the substrate has no soul-specific conditionals (the §7.2 AST scan target). Phase 1 (AISDLC-452) ships the minimum surface needed to declare the field-level `identityClass` discriminant with the canonical `core | evolving` taxonomy enumerated per §7.1 v0.2 resolution. Phases 2-5 (AISDLC-453..456) wire CI integrity assertions, structural drift detection, and operator runbooks against this schema.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "SubstrateContract"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["soulId", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "soulId": {
+          "type": "string",
+          "description": "Soul DID identifier this contract binds to. Must match a `tessellation.souls[]` entry (CI integrity assertion in Phase 2).",
+          "minLength": 1
+        },
+        "fields": {
+          "type": "array",
+          "description": "Substrate Contract fields. Each field carries an `identityClass` discriminant per RFC-0028 §7.1 v0.2 resolution (canonical `core | evolving` taxonomy). Fields without an explicit `identityClass` default to `core` per the conservative novel-field rule (promotion to `evolving` requires RFC amendment with Design + Engineering sign-off).",
+          "items": {
+            "$ref": "#/$defs/SubstrateContractField"
+          },
+          "default": []
+        }
+      }
+    }
+  },
+  "$defs": {
+    "IdentityClass": {
+      "type": "string",
+      "description": "Canonical RFC-0028 §7.1 v0.2 taxonomy. `core` = cannot be loosened by child Soul DIDs; pivot rescoring fires on change. `evolving` = free movement within tightening-only bounds; admission-queue rescoring only.",
+      "enum": ["core", "evolving"]
+    },
+    "SubstrateContractField": {
+      "type": "object",
+      "description": "A single field on a Substrate Contract. Per RFC-0028 §3.2 universal invariants, every field MUST document its named consumer, default-fallback semantic, and inheritance class (`identityClass`). The no-dead-wires rule applies: a field without a named consumer is admissible-as-dead and must be removed or wired before the contract ships.",
+      "required": ["name", "namedConsumer", "defaultFallback"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Field name. When listed in the canonical RFC-0028 §7.1 taxonomy (`requiresTenantPhysicalIsolation`, `observerCooldownMs`, etc.), the `identityClass` discriminant SHOULD match the canonical bucket. Novel field names default to `core`.",
+          "minLength": 1
+        },
+        "identityClass": {
+          "$ref": "#/$defs/IdentityClass",
+          "description": "Canonical inheritance class per RFC-0028 §7.1. Omit to opt into the novel-field default of `core` (a warning is emitted by `defaultIdentityClassForNovelField` to surface the missing classification to authors)."
+        },
+        "namedConsumer": {
+          "type": "string",
+          "description": "Repo-relative path or symbol identifying the substrate file/function that reads this value. Required per RFC-0028 §3.2 no-dead-wires rule.",
+          "minLength": 1
+        },
+        "defaultFallback": {
+          "type": "string",
+          "description": "Plain-text description of what happens if the field is absent. The substrate MUST NOT silently drop behavior — every field documents its fallback semantic.",
+          "minLength": 1
+        },
+        "complianceLockKind": {
+          "type": "string",
+          "description": "When set, indicates the field is a tightening-only compliance lock per RFC-0028 §6. `boolean-locked` types as `true` literal; `numeric-cap` types as bounded discriminated union; `categorical` enforces inheritance via TypeScript template-literal types.",
+          "enum": ["boolean-locked", "numeric-cap", "categorical"]
+        }
+      }
+    }
+  }
+}
