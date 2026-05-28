@@ -17,9 +17,10 @@ references:
   - pipeline-cli/src/cli/deps.ts
   - pipeline-cli/src/dor/upstream-oq-gate.ts
   - ai-sdlc-plugin/commands/orchestrator-tick.md
-  - spec/rfcs/RFC-0014-dependency-graph-composition.md
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md
   - VISION.md
+assumes:
+  - RFC-0014
+  - RFC-0011
 priority: medium
 ---
 
