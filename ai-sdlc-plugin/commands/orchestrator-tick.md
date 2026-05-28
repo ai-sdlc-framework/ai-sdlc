@@ -633,19 +633,58 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   fi
 
   # 2. Probe the frontier — does cli-deps frontier have a ready task?
-  FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json 2>/dev/null || echo '[]')
+  #    AISDLC-451 — `--check-dispatch-readiness` runs the per-entry
+  #    dispatch-readiness rubric (stale-shipped / closed-prior-pr / blocked
+  #    / missing-id) so this loop skips frontier candidates the operator
+  #    would otherwise reject during triage. Non-ready candidates emit
+  #    `OrchestratorBlockedByDispatchReadiness` events and surface in the
+  #    next Decision Catalog tick as `frontier candidate X is <verdict>
+  #    — close task file?` decisions.
+  FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>/dev/null || echo '{"frontier":[]}')
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "
     const d=[]; process.stdin.on('data',c=>d.push(c));
     process.stdin.on('end',()=>{
       try {
         const r = JSON.parse(d.join(''));
-        const ready = Array.isArray(r) && r.find((t) => t && !t.nonDispatchable);
+        // The cli-deps frontier JSON shape is {frontier: [...]} — top-level
+        // is an object since AISDLC-410's promotion. Be permissive about
+        // legacy array-only outputs for defense-in-depth.
+        const list = Array.isArray(r) ? r : (Array.isArray(r && r.frontier) ? r.frontier : []);
+        const ready = list.find((t) => {
+          if (!t || t.nonDispatchable || t.dispatchable === false) return false;
+          // AISDLC-451 — when the readiness rubric ran, only 'ready' verdicts
+          // proceed. Absent field means rubric was skipped (back-compat) —
+          // fall through to admit.
+          if (t.dispatchReadiness && t.dispatchReadiness !== 'ready') return false;
+          return true;
+        });
         process.stdout.write(ready ? 'yes' : 'no');
       } catch { process.stdout.write('no'); }
     });
   ")
   if [ "$HAS_READY" = "no" ]; then
     echo "[orchestrator-tick] fill-to-cap: frontier has no ready tasks; done"
+    # AISDLC-451 — when the rubric flagged frontier candidates as non-ready
+    # (stale-shipped / closed-prior-pr / blocked / missing-id), echo a
+    # recommendation line per candidate so the operator (or a downstream
+    # automation that tails Conductor stdout) can file a Decision Catalog
+    # entry with `cli-decisions add --summary "frontier candidate <ID> is
+    # <verdict> — close task file?" --scope frontier-triage`. We don't
+    # automatically file the Decision here to keep this Step idempotent
+    # across rapid ticks.
+    echo "$FRONTIER_JSON" | node -e "
+      const d=[]; process.stdin.on('data',c=>d.push(c));
+      process.stdin.on('end',()=>{
+        try {
+          const r = JSON.parse(d.join(''));
+          const list = Array.isArray(r) ? r : (Array.isArray(r && r.frontier) ? r.frontier : []);
+          for (const t of list) {
+            if (!t || !t.dispatchReadiness || t.dispatchReadiness === 'ready') continue;
+            process.stdout.write('[orchestrator-tick] AISDLC-451 frontier triage: ' + t.id + ' is ' + t.dispatchReadiness + ' — ' + (t.dispatchReadinessReason || 'no reason') + '\n');
+          }
+        } catch {}
+      });
+    " || true
     break
   fi
 

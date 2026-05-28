@@ -1,7 +1,7 @@
 ---
 id: AISDLC-392
 title: 'chore: promote Decision Catalog feature flag to default-on (RFC-0035 Phase 5)'
-status: To Do
+status: Done
 labels:
   - decision-catalog
   - feature-flag

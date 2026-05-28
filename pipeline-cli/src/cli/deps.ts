@@ -53,6 +53,10 @@ import {
 } from '../deps/snapshot.js';
 import { parseSimpleYaml, parseTaskFile } from '../steps/01-validate.js';
 import { computeBranchName } from '../steps/02-compute-branch.js';
+import {
+  checkDispatchReadinessBatch,
+  type DispatchReadinessVerdict,
+} from '../dor/dispatch-readiness.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -151,6 +155,16 @@ export function buildDepsCli(): Argv {
             type: 'string',
             describe:
               'Override $ARTIFACTS_DIR when reading the subscription ledger for the recommendedWorkerKind heuristic (RFC-0041 Phase 3.2).',
+          })
+          .option('check-dispatch-readiness', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'AISDLC-451 — run the dispatch-readiness rubric on every frontier entry: ' +
+              'flag tasks that are already shipped on origin/main, have a closed prior PR, ' +
+              'carry a `blocked.reason`, or reference a missing task ID. Adds ~100-300ms ' +
+              'per entry (one git log + one gh pr list call) so off by default; the ' +
+              'orchestrator-tick Step 5 fill-to-cap loop turns it on to skip stale candidates.',
           }),
       async (argv) => {
         const workDir = argv['work-dir'] as string;
@@ -180,12 +194,37 @@ export function buildDepsCli(): Argv {
             claudePShellMaxConcurrent,
           });
         };
+
+        // AISDLC-451 — frontier triage rubric. When `--check-dispatch-readiness`
+        // is set, run the dispatch-readiness rubric once for every frontier
+        // entry and surface the verdict in the output. Each check does ~1 git
+        // log + ~1 gh pr list, so we run them lazily (one batch call); the
+        // module is otherwise hermetic against the workDir + injected runners.
+        const checkReadiness = argv['check-dispatch-readiness'] as boolean;
+        const readinessVerdicts: Map<string, DispatchReadinessVerdict> = checkReadiness
+          ? checkDispatchReadinessBatch(
+              ranked.map((r) => r.id),
+              { workDir },
+            )
+          : new Map();
+        const getReadiness = (taskId: string): DispatchReadinessVerdict | undefined =>
+          readinessVerdicts.get(taskId.toUpperCase());
+
         if ((argv.format as string) === 'table') {
           const rows = ranked.map((e: RankedFrontierEntry) => {
             // AISDLC-243 — annotate non-dispatchable tasks so operators can
             // see at a glance which frontier entries the orchestrator will skip.
             const nonDispatchable = isNonDispatchable(g, e.id);
-            const idCell = nonDispatchable ? `${e.id} [non-dispatchable]` : e.id;
+            // AISDLC-451 — annotate dispatch-readiness verdicts so operators
+            // can see at a glance which frontier entries the orchestrator
+            // will skip (stale-shipped, closed-prior-pr, blocked, missing-id).
+            const verdict = getReadiness(e.id);
+            const annotations: string[] = [];
+            if (nonDispatchable) annotations.push('[non-dispatchable]');
+            if (verdict && verdict.readiness !== 'ready') {
+              annotations.push(`[${verdict.readiness}]`);
+            }
+            const idCell = annotations.length > 0 ? `${e.id} ${annotations.join(' ')}` : e.id;
             return [
               idCell,
               e.title || '(no title)',
@@ -212,20 +251,49 @@ export function buildDepsCli(): Argv {
           // RFC-0041 Phase 3.2 — `recommendedWorkerKind` field added per
           // task so json consumers can read the heuristic output without
           // re-running it.
+          // AISDLC-451 — when the readiness rubric ran, expose the verdict
+          // per-entry as `dispatchReadiness` so the orchestrator-tick Step 5
+          // fill-to-cap loop (and any json-driven dashboard) can filter out
+          // stale-shipped / closed-prior-pr / missing-id entries without
+          // re-walking the rubric. When the flag is off, the field is absent
+          // (back-compat with consumers that only read the existing fields).
           emit({
             ok: true,
             compositionEnabled: compositionOn,
-            frontier: ranked.map((r) => ({
-              id: r.id,
-              title: r.title,
-              dependencies: r.dependencies,
-              dispatchable: !isNonDispatchable(g, r.id),
-              recommendedWorkerKind: computeRecKind(r.id),
-            })),
-            ranked: ranked.map((r) => ({
-              ...r,
-              recommendedWorkerKind: computeRecKind(r.id),
-            })),
+            dispatchReadinessChecked: checkReadiness,
+            frontier: ranked.map((r) => {
+              const v = getReadiness(r.id);
+              const base = {
+                id: r.id,
+                title: r.title,
+                dependencies: r.dependencies,
+                dispatchable: !isNonDispatchable(g, r.id),
+                recommendedWorkerKind: computeRecKind(r.id),
+              };
+              return v
+                ? {
+                    ...base,
+                    dispatchReadiness: v.readiness,
+                    dispatchReadinessReason: v.reason,
+                    dispatchReadinessEvidence: v.evidence,
+                  }
+                : base;
+            }),
+            ranked: ranked.map((r) => {
+              const v = getReadiness(r.id);
+              return v
+                ? {
+                    ...r,
+                    recommendedWorkerKind: computeRecKind(r.id),
+                    dispatchReadiness: v.readiness,
+                    dispatchReadinessReason: v.reason,
+                    dispatchReadinessEvidence: v.evidence,
+                  }
+                : {
+                    ...r,
+                    recommendedWorkerKind: computeRecKind(r.id),
+                  };
+            }),
           });
         }
       },

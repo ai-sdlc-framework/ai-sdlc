@@ -616,4 +616,108 @@ spec:
       }
     });
   });
+
+  // AISDLC-451 — frontier triage rubric. The `--check-dispatch-readiness`
+  // flag opts into the per-entry rubric that surfaces stale-shipped /
+  // closed-prior-pr / blocked / missing-id verdicts so the operator (and the
+  // orchestrator-tick Step 5 fill-to-cap loop) can skip non-ready frontier
+  // entries without re-walking the rubric out-of-band. The default-off
+  // behavior keeps cli-deps callers that don't need the rubric on the fast
+  // path (no git log / gh pr list subprocess spawn per entry).
+  describe('frontier --check-dispatch-readiness (AISDLC-451)', () => {
+    it('omits dispatchReadiness fields when the flag is absent (back-compat)', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-4510', title: 'a' });
+      setArgv('frontier', '--work-dir', tmp);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        dispatchReadinessChecked: boolean;
+        frontier: Array<Record<string, unknown>>;
+      };
+      expect(r.dispatchReadinessChecked).toBe(false);
+      expect(r.frontier[0]).not.toHaveProperty('dispatchReadiness');
+    });
+
+    it('emits dispatchReadiness=ready when the flag is set and no triage signal fires', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-4511', title: 'b' });
+      setArgv('frontier', '--work-dir', tmp, '--check-dispatch-readiness');
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        dispatchReadinessChecked: boolean;
+        frontier: Array<{ id: string; dispatchReadiness: string }>;
+      };
+      expect(r.dispatchReadinessChecked).toBe(true);
+      expect(r.frontier[0].dispatchReadiness).toBe('ready');
+    });
+
+    it('emits dispatchReadiness=blocked for a task with blocked.reason in frontmatter', async () => {
+      // The frontier filter already filters tasks whose deps aren't completed,
+      // and the dependency graph builder doesn't read `blocked.reason` so the
+      // task will appear in the frontier; the readiness check then catches it.
+      const blockedId = 'AISDLC-4512';
+      // writeTaskFile is the standard test helper; it doesn't support `blocked`
+      // yet, so write the file directly via writeFileSync.
+      writeBlockedTaskRaw(tmp, blockedId, 'Awaiting operator triage');
+      setArgv('frontier', '--work-dir', tmp, '--check-dispatch-readiness');
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{
+          id: string;
+          dispatchReadiness: string;
+          dispatchReadinessEvidence: { blockedReason?: string };
+        }>;
+      };
+      const blockedEntry = r.frontier.find((e) => e.id === blockedId);
+      expect(blockedEntry).toBeDefined();
+      expect(blockedEntry?.dispatchReadiness).toBe('blocked');
+      expect(blockedEntry?.dispatchReadinessEvidence.blockedReason).toBe(
+        'Awaiting operator triage',
+      );
+    });
+
+    it('table format annotates the readiness verdict alongside the ID', async () => {
+      const blockedId = 'AISDLC-4513';
+      writeBlockedTaskRaw(tmp, blockedId, 'soak');
+      setArgv('frontier', '--format', 'table', '--work-dir', tmp, '--check-dispatch-readiness');
+      await buildDepsCli().parseAsync();
+      const text = stdoutText();
+      expect(text).toContain(blockedId);
+      // The annotation appears in square brackets right after the ID.
+      const blockedLine = text.split('\n').find((l) => l.includes(blockedId));
+      expect(blockedLine).toBeDefined();
+      expect(blockedLine).toContain('[blocked]');
+    });
+
+    it("table format does NOT annotate 'ready' entries (only non-ready verdicts surface)", async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-4514', title: 'ready task' });
+      setArgv('frontier', '--format', 'table', '--work-dir', tmp, '--check-dispatch-readiness');
+      await buildDepsCli().parseAsync();
+      const text = stdoutText();
+      const line = text.split('\n').find((l) => l.includes('AISDLC-4514'));
+      expect(line).toBeDefined();
+      expect(line).not.toContain('[ready]');
+      expect(line).not.toContain('[stale-shipped]');
+      expect(line).not.toContain('[blocked]');
+    });
+  });
 });
+
+/**
+ * Helper — write a task file with a `blocked.reason` field. The standard
+ * `writeTaskFile` helper does not support the `blocked:` frontmatter block
+ * (it predates AISDLC-223), and AISDLC-451's frontier-readiness check needs
+ * it to verify the `blocked` verdict surfaces correctly.
+ */
+function writeBlockedTaskRaw(workDir: string, id: string, reason: string): void {
+  const filename = `${id.toLowerCase()} - test-task.md`;
+  const path = join(workDir, 'backlog', 'tasks', filename);
+  const content =
+    `---\n` +
+    `id: ${id}\n` +
+    `title: blocked test task\n` +
+    `status: To Do\n` +
+    `blocked:\n` +
+    `  reason: ${reason}\n` +
+    `---\n` +
+    `body\n`;
+  writeFileSync(path, content);
+}
