@@ -1,7 +1,7 @@
 ---
 id: AISDLC-384
 title: 'chore(governance): audit friction of remaining ~14 non-attestation gates after RFC-0042 lands'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
