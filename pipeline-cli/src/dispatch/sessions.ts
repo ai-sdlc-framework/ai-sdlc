@@ -12,7 +12,15 @@
  * Schema: spec/schemas/dispatch-session.v1.schema.json
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 
 /** Subdirectory under .ai-sdlc/dispatch/ for session files. */
@@ -78,12 +86,16 @@ export function ensureSessionsDirs(boardDir: string): void {
 }
 
 /**
- * Write (create or overwrite) a session file.
+ * Write (create or overwrite) a session file atomically.
+ * Writes to a `.tmp` sibling first, then renames to avoid partial-write
+ * corruption that would leave readSession returning null.
  */
 export function writeSession(boardDir: string, session: DispatchSession): void {
   ensureSessionsDirs(boardDir);
   const filePath = sessionFilePath(boardDir, session.taskId);
-  writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
+  const tmpPath = filePath + '.tmp';
+  writeFileSync(tmpPath, JSON.stringify(session, null, 2), 'utf-8');
+  renameSync(tmpPath, filePath);
 }
 
 /**
@@ -168,8 +180,13 @@ export function countActiveSessions(boardDir: string): number {
 }
 
 /**
- * Move a session file to the archive subdir. Called by execute-parallel-cleanup
- * after killing the corresponding tmux window.
+ * Move a session file to the archive subdir atomically. Called by
+ * execute-parallel-cleanup after killing the corresponding tmux window.
+ *
+ * Atomic pattern: write to a tmp file in the archive dir, then rename (atomic
+ * on same filesystem), then delete the original — a crash mid-operation never
+ * leaves the session in both locations in a way that readSession would return
+ * a ghost active session.
  *
  * Returns true if the file was archived, false if it did not exist.
  */
@@ -178,8 +195,10 @@ export function archiveSession(boardDir: string, taskId: string): boolean {
   if (!existsSync(filePath)) return false;
   ensureSessionsDirs(boardDir);
   const archivePath = path.join(sessionsArchiveDir(boardDir), sessionFilename(taskId));
+  const tmpArchivePath = archivePath + '.tmp';
   const content = readFileSync(filePath, 'utf-8');
-  writeFileSync(archivePath, content, 'utf-8');
+  writeFileSync(tmpArchivePath, content, 'utf-8');
+  renameSync(tmpArchivePath, archivePath);
   rmSync(filePath);
   return true;
 }

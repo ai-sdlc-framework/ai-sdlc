@@ -122,7 +122,7 @@ function isTaskActive(sessionsDir, taskId) {
   return status === 'starting' || status === 'in-progress';
 }
 
-// ─── Helper: write session file via the inline node snippet ───────────────
+// ─── Helper: write session file via the inline node snippet (atomic) ─────────
 
 function spawnWriteSession(sessionsDir, taskId, tmuxSession, tmuxWindow, spawnedAt) {
   const result = spawnSync(
@@ -142,10 +142,10 @@ function spawnWriteSession(sessionsDir, taskId, tmuxSession, tmuxWindow, spawned
           spawnedAt: process.argv[5],
           status: 'starting',
         };
-        fs.writeFileSync(
-          sessionsDir + '/' + process.argv[2].toLowerCase() + '.session.json',
-          JSON.stringify(session, null, 2)
-        );
+        const filePath = sessionsDir + '/' + process.argv[2].toLowerCase() + '.session.json';
+        const tmpPath = filePath + '.tmp';
+        fs.writeFileSync(tmpPath, JSON.stringify(session, null, 2));
+        fs.renameSync(tmpPath, filePath);
         process.stdout.write('ok');
       `,
       sessionsDir,
@@ -345,6 +345,76 @@ describe('execute-parallel spawn logic', () => {
       const remainingSlots = 5 - active;
       // Simulate the cap check
       assert.equal(remainingSlots, 0, 'no remaining slots — spawn should be refused');
+    });
+
+    // Finding #10: when tmux new-window exits non-zero, the session file must
+    // be updated to status='failed'. This tests the error path of the spawn loop.
+    it('marks session as failed when tmux spawn fails', () => {
+      const spawnedAt = new Date().toISOString();
+      const taskId = 'AISDLC-700';
+      const taskIdLower = taskId.toLowerCase();
+      const sessionFile = path.join(sessionsDir, `${taskIdLower}.session.json`);
+
+      // Write the initial session (status=starting) to simulate a successful reservation
+      const ok = spawnWriteSession(
+        sessionsDir,
+        taskId,
+        'ai-sdlc-parallel',
+        'exec-aisdlc-700',
+        spawnedAt,
+      );
+      assert.ok(ok, 'initial session write should succeed');
+
+      // Simulate tmux failure: run the error-handler node snippet inline
+      // This is the node -e block from execute-parallel.md that runs on tmux failure.
+      const result = spawnSync(
+        'node',
+        [
+          '-e',
+          `
+            const fs = require('fs');
+            const f = process.argv[1];
+            try {
+              const s = JSON.parse(fs.readFileSync(f, 'utf8'));
+              s.status = 'failed';
+              s.lastHeartbeat = new Date().toISOString();
+              const tmp = f + '.tmp';
+              fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+              fs.renameSync(tmp, f);
+            } catch {}
+          `,
+          sessionFile,
+        ],
+        { encoding: 'utf8', timeout: 5_000 },
+      );
+      assert.equal(result.status, 0, 'error handler should exit 0');
+
+      const s = JSON.parse(readFileSync(sessionFile, 'utf8'));
+      assert.equal(s.status, 'failed', 'session must be marked failed after tmux error');
+      assert.ok(s.lastHeartbeat, 'lastHeartbeat must be set on failure');
+    });
+
+    // Finding #4 + #10: freshly-spawned session with empty paneId should have correct shape.
+    // Full schema validation is covered in sessions.test.ts (pipeline-cli, where ajv is available).
+    it('freshly-spawned session has empty paneId and correct fields', () => {
+      const spawnedAt = new Date().toISOString();
+      spawnWriteSession(
+        sessionsDir,
+        'AISDLC-701',
+        'ai-sdlc-parallel',
+        'exec-aisdlc-701',
+        spawnedAt,
+      );
+      const sessionFile = path.join(sessionsDir, 'aisdlc-701.session.json');
+      assert.ok(existsSync(sessionFile), 'session file should be created');
+      const s = JSON.parse(readFileSync(sessionFile, 'utf8'));
+
+      // The spawn always writes paneId: '' at reservation time
+      assert.equal(s.paneId, '', 'initial paneId must be empty string');
+      assert.equal(s.status, 'starting');
+      assert.equal(s.schemaVersion, 'v1');
+      assert.equal(s.taskId, 'AISDLC-701');
+      assert.equal(s.tmuxWindow, 'exec-aisdlc-701');
     });
   });
 });

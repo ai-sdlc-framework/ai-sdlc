@@ -27,7 +27,9 @@ fi
 # Available memory ≈ (free + inactive + speculative) × page_size (4096 bytes).
 # We treat this as "available" — macOS can reclaim inactive pages on demand.
 
-PAGE_SIZE=4096
+# Read the actual page size from the kernel (Apple Silicon M-series uses 16384,
+# Intel Macs use 4096). Fall back to 4096 if sysctl is unavailable.
+PAGE_SIZE=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096)
 
 _parse_vm_stat_pages() {
   local label="$1"

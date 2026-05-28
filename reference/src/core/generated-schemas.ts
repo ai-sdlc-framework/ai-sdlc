@@ -3783,8 +3783,8 @@ export const dispatchSessionV1Schema = {
     },
     paneId: {
       type: 'string',
-      minLength: 1,
-      description: "tmux pane ID (e.g. '%14'). Empty string when pane ID is not yet known.",
+      description:
+        "tmux pane ID (e.g. '%14'). Empty string when pane ID is not yet known (at initial reservation time).",
     },
     spawnedAt: {
       type: 'string',

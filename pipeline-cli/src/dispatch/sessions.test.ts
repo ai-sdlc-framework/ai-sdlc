@@ -170,6 +170,20 @@ describe('dispatch-session.v1.schema.json', () => {
     const s = { ...mkSession(), prNumber: 0 };
     expect(validateSession(s)).toBe(false);
   });
+
+  it('accepts an empty paneId (initial reservation before tmux assigns pane)', () => {
+    // Spawn writes paneId: '' at reservation time — schema must accept this.
+    // Finding #4: the old minLength:1 incorrectly rejected every freshly-spawned session.
+    const s = { ...mkSession(), paneId: '' };
+    const ok = validateSession(s);
+    if (!ok) {
+      const errs = (validateSession.errors ?? [])
+        .map((e) => `${e.instancePath || '(root)'} ${e.message}`)
+        .join('\n  ');
+      throw new Error(`schema incorrectly rejected empty paneId:\n  ${errs}`);
+    }
+    expect(ok).toBe(true);
+  });
 });
 
 // ─── isSessionActive ────────────────────────────────────────────────────────
@@ -291,6 +305,32 @@ describe('updateSession', () => {
   it('is a no-op when the session file does not exist', () => {
     // Should not throw
     expect(() => updateSession(boardDir, 'AISDLC-999', { status: 'done' })).not.toThrow();
+  });
+});
+
+// ─── atomic write safety ────────────────────────────────────────────────────
+
+describe('writeSession atomic safety', () => {
+  it('does not leave a .tmp file after a successful write', () => {
+    const s = mkSession();
+    writeSession(boardDir, s);
+    const tmpPath = sessionFilePath(boardDir, s.taskId) + '.tmp';
+    expect(existsSync(tmpPath)).toBe(false);
+  });
+
+  it('session written with empty paneId validates against schema', () => {
+    // Finding #4 + #10: freshly-spawned session must pass schema validation.
+    const s = mkSession({ paneId: '' });
+    writeSession(boardDir, s);
+    const raw = JSON.parse(readFileSync(sessionFilePath(boardDir, s.taskId), 'utf-8'));
+    const ok = validateSession(raw);
+    if (!ok) {
+      const errs = (validateSession.errors ?? [])
+        .map((e) => `${e.instancePath || '(root)'} ${e.message}`)
+        .join('\n  ');
+      throw new Error(`schema rejected spawn-time session (empty paneId):\n  ${errs}`);
+    }
+    expect(ok).toBe(true);
   });
 });
 

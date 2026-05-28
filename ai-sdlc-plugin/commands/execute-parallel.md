@@ -39,6 +39,20 @@ ARG="${ARGUMENTS:-}"
 REQUESTED_COUNT=4
 EXPLICIT_TASKS=""
 
+# ─── Task ID validation gate (SECURITY) ──────────────────────────────────────
+# ALL task IDs from ALL input pathways (--tasks arg, frontier JSON, operator
+# confirmation) MUST pass through this function before being interpolated into
+# tmux commands, file paths, or branch names. Reject with a clear error if any
+# ID fails — this is the primary defense against command injection.
+validate_task_id() {
+  local id="$1"
+  if ! printf '%s' "$id" | grep -qE '^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$'; then
+    echo "ERROR: invalid task ID '$id' — must match ^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$" >&2
+    return 1
+  fi
+  return 0
+}
+
 # Parse --count N
 if printf '%s' "$ARG" | grep -q '\-\-count'; then
   REQUESTED_COUNT=$(printf '%s' "$ARG" | sed -E 's/.*--count[= ]([0-9]+).*/\1/')
@@ -94,6 +108,16 @@ if [ -d "$SESSIONS_DIR" ]; then
   done
 fi
 
+# Corroborate with live tmux windows — a stale session file doesn't bypass the cap.
+# Use the max of (session-file count, live tmux window count) as the effective count.
+TMUX_SESSION="ai-sdlc-parallel"
+TMUX_WINDOW_COUNT=$(tmux list-windows -t "$TMUX_SESSION" 2>/dev/null | wc -l | tr -d ' ')
+TMUX_WINDOW_COUNT=${TMUX_WINDOW_COUNT:-0}
+if [ "$TMUX_WINDOW_COUNT" -gt "$ACTIVE_COUNT" ]; then
+  echo "[execute-parallel] NOTE: tmux shows $TMUX_WINDOW_COUNT windows but session files show $ACTIVE_COUNT active — using tmux count as effective cap." >&2
+  ACTIVE_COUNT=$TMUX_WINDOW_COUNT
+fi
+
 HARD_CAP=5
 REMAINING_SLOTS=$((HARD_CAP - ACTIVE_COUNT))
 
@@ -116,7 +140,17 @@ fi
 ```bash
 if [ -n "$EXPLICIT_TASKS" ]; then
   # Operator specified explicit task IDs — validate and use them
-  CANDIDATES=$(printf '%s' "$EXPLICIT_TASKS" | tr ',' '\n' | head -$REQUESTED_COUNT)
+  # Each ID is validated against the strict regex before any further use.
+  RAW_CANDIDATES=$(printf '%s' "$EXPLICIT_TASKS" | tr ',' '\n' | head -$REQUESTED_COUNT)
+  CANDIDATES=""
+  while IFS= read -r tid; do
+    [ -z "$tid" ] && continue
+    if ! validate_task_id "$tid"; then
+      echo "ERROR: aborting — invalid task ID in --tasks argument." >&2
+      exit 1
+    fi
+    CANDIDATES="${CANDIDATES}${CANDIDATES:+$'\n'}${tid}"
+  done <<< "$RAW_CANDIDATES"
   echo "[execute-parallel] Using operator-specified tasks: $CANDIDATES"
 else
   # Read dispatch-ready frontier
@@ -154,12 +188,17 @@ else
       }
     } catch {}
 
+    // Validate task IDs from frontier JSON — defense against malicious backlog task files.
+    const TASK_ID_RE = /^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$/;
     const candidates = (Array.isArray(frontier) ? frontier : [])
       .filter(t => {
+        const id = t.taskId || t.id || '';
+        // Must match strict regex — rejects path-traversal and injection payloads
+        if (!TASK_ID_RE.test(id)) return false;
         // Must be dispatch-ready
         if (t.dispatchReadiness && t.dispatchReadiness !== 'ready') return false;
         // Must not be already active
-        if (activeTasks.has((t.taskId || t.id || '').toUpperCase())) return false;
+        if (activeTasks.has(id.toUpperCase())) return false;
         return true;
       })
       .slice(0, requestedCount)
@@ -201,12 +240,27 @@ Ask the operator:
 > - Or type "cancel" to abort
 
 If the operator says "no" or "cancel" → exit 0.
-If the operator provides alternative task IDs → use those instead.
+If the operator provides alternative task IDs → validate each against the strict regex
+(`^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$`) before use; refuse with a clear error if any
+alternative fails validation.
 Otherwise proceed with the confirmed list.
 
 ```bash
 # (AskUserQuestion is handled by the slash command harness above this code block)
 # After confirmation, CONFIRMED_TASKS holds the final list (one per line).
+# If the operator supplied alternative IDs, validate them before use:
+# OPERATOR_ALTERNATIVES="<comma-separated IDs from operator reply>"
+# if [ -n "$OPERATOR_ALTERNATIVES" ]; then
+#   CONFIRMED_TASKS=""
+#   while IFS= read -r tid; do
+#     [ -z "$tid" ] && continue
+#     if ! validate_task_id "$tid"; then
+#       echo "ERROR: aborting — invalid alternative task ID '$tid'" >&2
+#       exit 1
+#     fi
+#     CONFIRMED_TASKS="${CONFIRMED_TASKS}${CONFIRMED_TASKS:+$'\n'}${tid}"
+#   done <<< "$(printf '%s' "$OPERATOR_ALTERNATIVES" | tr ',' '\n')"
+# fi
 CONFIRMED_TASKS="$CANDIDATES"
 ```
 
@@ -226,8 +280,31 @@ echo "[execute-parallel] tmux session '$TMUX_SESSION' ready"
 SPAWNED_TASKS=""
 SPAWN_ERRORS=""
 
-printf '%s\n' "$CONFIRMED_TASKS" | while read -r TASK_ID; do
+# Detect case-insensitive duplicates BEFORE spawning — two IDs that lower-case
+# to the same string would silently overwrite each other's session file.
+SEEN_LOWER=""
+while IFS= read -r tid; do
+  [ -z "$tid" ] && continue
+  tl=$(printf '%s' "$tid" | tr '[:upper:]' '[:lower:]')
+  for seen in $SEEN_LOWER; do
+    if [ "$tl" = "$seen" ]; then
+      echo "ERROR: task IDs '$tid' and a prior entry both map to lowercase '$tl' — case-insensitive collision. Deduplicate before spawning." >&2
+      exit 1
+    fi
+  done
+  SEEN_LOWER="$SEEN_LOWER $tl"
+done <<< "$CONFIRMED_TASKS"
+
+while IFS= read -r TASK_ID; do
   [ -z "$TASK_ID" ] && continue
+
+  # SECURITY: validate task ID against strict regex before any tmux/file use.
+  if ! validate_task_id "$TASK_ID"; then
+    echo "[execute-parallel] ERROR: invalid task ID '$TASK_ID' — skipping" >&2
+    SPAWN_ERRORS="$SPAWN_ERRORS $TASK_ID"
+    continue
+  fi
+
   TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
   SESSION_FILE="$SESSIONS_DIR/${TASK_ID_LOWER}.session.json"
   TMUX_WINDOW="exec-${TASK_ID_LOWER}"
@@ -266,16 +343,18 @@ printf '%s\n' "$CONFIRMED_TASKS" | while read -r TASK_ID; do
       spawnedAt: process.argv[5],
       status: 'starting',
     };
-    fs.writeFileSync(
-      sessionsDir + '/' + process.argv[2].toLowerCase() + '.session.json',
-      JSON.stringify(session, null, 2)
-    );
+    const filePath = sessionsDir + '/' + process.argv[2].toLowerCase() + '.session.json';
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(session, null, 2));
+    fs.renameSync(tmpPath, filePath);
   " "$SESSIONS_DIR" "$TASK_ID" "$TMUX_SESSION" "$TMUX_WINDOW" "$SPAWN_AT" 2>/dev/null || {
     echo "[execute-parallel] ERROR: failed to write session file for $TASK_ID — skipping" >&2
+    SPAWN_ERRORS="$SPAWN_ERRORS $TASK_ID"
     continue
   }
 
   # Spawn: new tmux window running /ai-sdlc execute <task-id>
+  # SECURITY: TASK_ID is validated above — safe to interpolate.
   # The window runs in the current working directory so /ai-sdlc execute can
   # find the repo root.
   tmux new-window \
@@ -292,7 +371,9 @@ printf '%s\n' "$CONFIRMED_TASKS" | while read -r TASK_ID; do
         const s = JSON.parse(fs.readFileSync(f, 'utf8'));
         s.status = 'failed';
         s.lastHeartbeat = new Date().toISOString();
-        fs.writeFileSync(f, JSON.stringify(s, null, 2));
+        const tmp = f + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+        fs.renameSync(tmp, f);
       } catch {}
     " "$SESSION_FILE" 2>/dev/null || true
     SPAWN_ERRORS="$SPAWN_ERRORS $TASK_ID"
@@ -302,7 +383,7 @@ printf '%s\n' "$CONFIRMED_TASKS" | while read -r TASK_ID; do
   # Capture pane ID
   PANE_ID=$(tmux display-message -p -t "${TMUX_SESSION}:${TMUX_WINDOW}" '#{pane_id}' 2>/dev/null || echo '')
 
-  # Update session with pane ID
+  # Update session with pane ID (atomic write)
   if [ -n "$PANE_ID" ]; then
     node -e "
       const fs = require('fs');
@@ -310,14 +391,21 @@ printf '%s\n' "$CONFIRMED_TASKS" | while read -r TASK_ID; do
       try {
         const s = JSON.parse(fs.readFileSync(f, 'utf8'));
         s.paneId = process.argv[2];
-        fs.writeFileSync(f, JSON.stringify(s, null, 2));
+        const tmp = f + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+        fs.renameSync(tmp, f);
       } catch {}
     " "$SESSION_FILE" "$PANE_ID" 2>/dev/null || true
   fi
 
   echo "[execute-parallel] SPAWNED: $TASK_ID → tmux window '$TMUX_WINDOW' (pane $PANE_ID)"
   SPAWNED_TASKS="$SPAWNED_TASKS $TASK_ID"
-done
+done <<< "$CONFIRMED_TASKS"
+
+echo "[execute-parallel] Summary: spawned=$(echo $SPAWNED_TASKS | wc -w | tr -d ' ') errors=$(echo $SPAWN_ERRORS | wc -w | tr -d ' ')"
+if [ -n "$SPAWN_ERRORS" ]; then
+  echo "[execute-parallel] Failed tasks:$SPAWN_ERRORS" >&2
+fi
 ```
 
 ## Step 8 — Print status table

@@ -52,7 +52,7 @@ node -e "
     try {
       const epochMs = new Date(ts).getTime();
       if (isNaN(epochMs)) return '?';
-      const ageSec = Math.floor(nowEpoch - epochMs / 1000);
+      const ageSec = Math.floor(nowEpoch - (epochMs / 1000));
       if (ageSec < 0) return '0s';
       if (ageSec < 60) return ageSec + 's ago';
       if (ageSec < 3600) return Math.floor(ageSec / 60) + 'm ago';
@@ -75,7 +75,8 @@ node -e "
       const hb = heartbeatAge(s.lastHeartbeat);
       process.stdout.write(task + ' ' + win + ' ' + status + ' ' + step + ' ' + pr + ' ' + hb + '\n');
     } catch (e) {
-      process.stdout.write(f.padEnd(18).slice(0, 18) + ' (unreadable: ' + e.message + ')\n');
+      // Log only the error code (not e.message) to avoid leaking filesystem paths.
+      process.stdout.write(f.padEnd(18).slice(0, 18) + ' (unreadable: ' + (e.code || 'parse-error') + ')\n');
     }
   }
 " "$SESSIONS_DIR" "$NOW_EPOCH" 2>/dev/null

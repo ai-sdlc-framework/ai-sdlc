@@ -96,7 +96,7 @@ If operator says "no" → exit 0.
 
 ```bash
 node -e "
-  const { execSync } = require('child_process');
+  const { execFileSync } = require('child_process');
   const fs = require('fs');
   const path = require('path');
 
@@ -104,6 +104,10 @@ node -e "
   const archiveDir = process.argv[2];
   const tmuxSession = process.argv[3];
   const candidatesJson = process.argv[4];
+
+  // Validate tmuxWindow matches the expected pattern (defense-in-depth against
+  // an attacker-controlled session file injecting shell metacharacters).
+  const TMUX_WINDOW_RE = /^exec-aisdlc-[a-z0-9.-]+$/;
 
   let sessions;
   try { sessions = JSON.parse(candidatesJson); } catch { sessions = []; }
@@ -121,32 +125,43 @@ node -e "
 
     // Kill tmux window for active sessions
     if (isActive && s.tmuxWindow) {
-      try {
-        execSync('tmux kill-window -t ' + JSON.stringify(tmuxSession + ':' + s.tmuxWindow), {
-          stdio: 'pipe',
-        });
-        console.log('[cleanup] Killed tmux window: ' + s.tmuxWindow + ' (' + taskId + ')');
-        killed++;
-      } catch (e) {
-        // Window may already be gone
-        console.log('[cleanup] tmux kill-window for ' + s.tmuxWindow + ' failed (already gone?): ' + e.message);
+      // Validate tmuxWindow before use — rejects shell-metachar payloads.
+      if (!TMUX_WINDOW_RE.test(s.tmuxWindow)) {
+        console.error('[cleanup] SECURITY: tmuxWindow value ' + JSON.stringify(s.tmuxWindow) + ' for ' + taskId + ' does not match expected pattern — skipping kill to prevent injection');
+        errors++;
+      } else {
+        try {
+          // Use execFileSync with arg array — no shell evaluation, no injection risk.
+          execFileSync('tmux', ['kill-window', '-t', tmuxSession + ':' + s.tmuxWindow], {
+            stdio: 'pipe',
+          });
+          console.log('[cleanup] Killed tmux window: ' + s.tmuxWindow + ' (' + taskId + ')');
+          killed++;
+        } catch (e) {
+          // Window may already be gone
+          console.log('[cleanup] tmux kill-window for ' + s.tmuxWindow + ' failed (already gone?): ' + e.code);
+        }
       }
-      // Update status to failed before archiving
+      // Update status to failed before archiving (atomic write)
       try {
         const updated = { ...s, status: 'failed', lastHeartbeat: new Date().toISOString(), currentStep: 'killed-by-cleanup' };
-        fs.writeFileSync(sessionFile, JSON.stringify(updated, null, 2));
+        const tmpPath = sessionFile + '.tmp';
+        fs.writeFileSync(tmpPath, JSON.stringify(updated, null, 2));
+        fs.renameSync(tmpPath, sessionFile);
       } catch {}
     }
 
-    // Archive the session file
+    // Archive the session file (atomic: write to tmp, rename, then delete original)
     try {
       const content = fs.readFileSync(sessionFile, 'utf8');
-      fs.writeFileSync(archiveFile, content);
+      const tmpArchive = archiveFile + '.tmp';
+      fs.writeFileSync(tmpArchive, content);
+      fs.renameSync(tmpArchive, archiveFile);
       fs.rmSync(sessionFile);
       console.log('[cleanup] Archived session: ' + taskId + ' → ' + archiveFile);
       archived++;
     } catch (e) {
-      console.error('[cleanup] ERROR archiving ' + taskId + ': ' + e.message);
+      console.error('[cleanup] ERROR archiving ' + taskId + ': ' + e.code);
       errors++;
     }
   }

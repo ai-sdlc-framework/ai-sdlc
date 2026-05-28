@@ -318,6 +318,32 @@ fi
 First, classify `$ARGUMENTS` into one of the three forms documented in [Argument forms](#argument-forms-aisdlc-393) above (AISDLC-393). The shell pipeline below mirrors `parseExecuteArg` in `dogfood/src/dispatch-execute-arg.ts`; the precedence order is **explicit `gh:` first**, then **prefixed task ID**, then **bare/`#`-prefixed numeric** as the GH-issue fallback.
 
 ```bash
+# AISDLC-462: Heartbeat helper for /ai-sdlc execute-parallel coordination.
+# Defined here (before any call site) so every call below finds it already declared.
+# Writes currentStep + lastHeartbeat to .ai-sdlc/dispatch/sessions/<task>.session.json
+# when that file exists (created by execute-parallel on spawn). No-op otherwise —
+# backward-compatible with standalone /ai-sdlc execute invocations.
+update_session_state() {
+  local task_id_lower="$1" step="$2"
+  local session_file=".ai-sdlc/dispatch/sessions/${task_id_lower}.session.json"
+  [ -f "$session_file" ] || return 0
+  node -e "
+    const fs = require('fs');
+    const f = process.argv[1];
+    const step = process.argv[2];
+    try {
+      const s = JSON.parse(fs.readFileSync(f, 'utf8'));
+      s.currentStep = step;
+      s.lastHeartbeat = new Date().toISOString();
+      if (step === 'done') s.status = 'done';
+      else if (s.status === 'starting') s.status = 'in-progress';
+      const tmp = f + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+      fs.renameSync(tmp, f);
+    } catch (e) { /* non-fatal */ }
+  " "$session_file" "$step" 2>/dev/null || true
+}
+
 ARG="$ARGUMENTS"
 # Trim surrounding whitespace (matches parseExecuteArg behaviour).
 ARG="$(printf '%s' "$ARG" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
@@ -521,28 +547,7 @@ TASK_ID_LOWER="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')"
 TASK_FILE=$(ls "backlog/tasks/${TASK_ID_LOWER} -"* 2>/dev/null | head -1)
 [ -z "$TASK_FILE" ] && { echo "ERROR: no task file for $TASK_ID"; exit 1; }
 
-# AISDLC-462: Heartbeat helper for /ai-sdlc execute-parallel coordination.
-# Writes currentStep + lastHeartbeat to .ai-sdlc/dispatch/sessions/<task>.session.json
-# when that file exists (created by execute-parallel on spawn). No-op otherwise —
-# backward-compatible with standalone /ai-sdlc execute invocations.
-update_session_state() {
-  local task_id_lower="$1" step="$2"
-  local session_file=".ai-sdlc/dispatch/sessions/${task_id_lower}.session.json"
-  [ -f "$session_file" ] || return 0
-  node -e "
-    const fs = require('fs');
-    const f = process.argv[1];
-    const step = process.argv[2];
-    try {
-      const s = JSON.parse(fs.readFileSync(f, 'utf8'));
-      s.currentStep = step;
-      s.lastHeartbeat = new Date().toISOString();
-      if (step === 'done') s.status = 'done';
-      else if (s.status === 'starting') s.status = 'in-progress';
-      fs.writeFileSync(f, JSON.stringify(s, null, 2));
-    } catch (e) { /* non-fatal */ }
-  " "$session_file" "$step" 2>/dev/null || true
-}
+# update_session_state is defined before Step 1 — see the preamble above.
 ```
 
 Read the task with `mcp__backlog__task_view` to render its full structure. Then verify:

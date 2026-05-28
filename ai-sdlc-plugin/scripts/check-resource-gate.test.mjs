@@ -37,6 +37,7 @@ function runGate(opts = {}) {
     fakeVmstatOutput = null, // null = use real vm_stat
     fakeNcpu = null, // null = use real sysctl hw.ncpu
     fakeLoad1min = null, // null = use real sysctl vm.loadavg
+    fakePageSize = null, // null = let the script use the real hw.pagesize
     skipOverride = false,
   } = opts;
 
@@ -57,15 +58,17 @@ function runGate(opts = {}) {
       chmodSync(p, 0o755);
     }
 
-    // Write fake sysctl if requested (handles hw.ncpu and vm.loadavg)
-    if (fakeNcpu !== null || fakeLoad1min !== null) {
+    // Write fake sysctl if requested (handles hw.ncpu, hw.pagesize, and vm.loadavg)
+    if (fakeNcpu !== null || fakeLoad1min !== null || fakePageSize !== null) {
       const ncpuVal = fakeNcpu ?? 8;
       const load1 = fakeLoad1min ?? 1.0;
       const loadavgLine = `{ ${load1.toFixed(2)} 0.50 0.25 }`;
+      const pageSizeVal = fakePageSize ?? 4096;
       const script =
         [
           '#!/usr/bin/env bash',
           'case "$*" in',
+          `  *hw.pagesize*) printf '%s\\n' ${JSON.stringify(String(pageSizeVal))} ;;`,
           `  *hw.ncpu*) printf '%s\\n' ${JSON.stringify(String(ncpuVal))} ;;`,
           `  *vm.loadavg*) printf '%s\\n' ${JSON.stringify(loadavgLine)} ;;`,
           '  *) /usr/sbin/sysctl "$@" ;;',
@@ -104,13 +107,12 @@ function runGate(opts = {}) {
 
 // ─── Memory calculation helpers (matches the bash arithmetic) ─────────────────
 
-const PAGE_SIZE = 4096;
 const GB = 1073741824;
 const THRESHOLD_BYTES = 4 * GB;
 
-function buildVmStatOutput({ freePages, inactivePages, speculativePages }) {
+function buildVmStatOutput({ freePages, inactivePages, speculativePages, pageSize = 4096 }) {
   return [
-    'Mach Virtual Memory Statistics: (page size of 4096 bytes)',
+    `Mach Virtual Memory Statistics: (page size of ${pageSize} bytes)`,
     `Pages free:                           ${freePages}.`,
     `Pages active:                          50000.`,
     `Pages inactive:                       ${inactivePages}.`,
@@ -264,5 +266,53 @@ describe('check-resource-gate.sh', () => {
       1,
       `expected exit 1 (load == ncpu), got ${r.exitCode}\nstderr: ${r.stderr}`,
     );
+  });
+
+  // Finding #3: Apple Silicon (M-series) uses 16384 bytes/page.
+  // With hw.pagesize=16384, the same page count that appeared to be 2GB on Intel
+  // is actually 8GB on Apple Silicon — the gate must pass correctly.
+  it('exits 0 on Apple Silicon (hw.pagesize=16384): 500000 pages = ~8GB > 4GB threshold', () => {
+    // 500000 pages × 16384 bytes = 8192 MB ≈ 8 GB — well above 4 GB threshold
+    const vmstat = buildVmStatOutput({
+      freePages: 200_000,
+      inactivePages: 200_000,
+      speculativePages: 100_000,
+      pageSize: 16384,
+    });
+    const r = runGate({
+      fakeVmstatOutput: vmstat,
+      fakeNcpu: 8,
+      fakeLoad1min: 1.0,
+      fakePageSize: 16384,
+    });
+    assert.equal(
+      r.exitCode,
+      0,
+      `expected exit 0 (Apple Silicon: 500000×16384 = 8GB > 4GB threshold), got ${r.exitCode}\nstderr: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /PASSED/i);
+  });
+
+  it('exits 1 on Apple Silicon (hw.pagesize=16384): 200000 pages ≈ 3.2GB < 4GB threshold', () => {
+    // 200000 pages × 16384 bytes = 3276.8 MB ≈ 3.2 GB — below 4 GB threshold
+    // This validates the fix correctly handles the refusal case too.
+    const vmstat = buildVmStatOutput({
+      freePages: 80_000,
+      inactivePages: 80_000,
+      speculativePages: 40_000,
+      pageSize: 16384,
+    });
+    const r = runGate({
+      fakeVmstatOutput: vmstat,
+      fakeNcpu: 8,
+      fakeLoad1min: 1.0,
+      fakePageSize: 16384,
+    });
+    assert.equal(
+      r.exitCode,
+      1,
+      `expected exit 1 (Apple Silicon: 200000×16384 ≈ 3.2GB < 4GB threshold), got ${r.exitCode}\nstderr: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /REFUSED.*memory/i);
   });
 });
