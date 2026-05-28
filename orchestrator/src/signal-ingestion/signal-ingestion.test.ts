@@ -60,11 +60,12 @@ describe('SignalSourceRegistry', () => {
     );
   });
 
-  it('creates a default registry with all Phase 1 adapters', () => {
+  it('creates a default registry with all v1 env-var-based adapters (RFC-0030 OQ-13.1 v0.3)', () => {
     const registry = createDefaultSignalSourceRegistry();
 
     expect(registry.list().sort()).toEqual([
       'signal-source-community-thread',
+      'signal-source-in-app-feedback',
       'signal-source-manual',
       'signal-source-support-ticket',
     ]);

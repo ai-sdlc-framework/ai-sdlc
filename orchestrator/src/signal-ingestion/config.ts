@@ -126,6 +126,37 @@ export interface ResidencyEnforcementConfig {
   multiPostureBehavior: 'union';
 }
 
+/**
+ * RFC-0030 OQ-13.4 v0.3 re-walkthrough — manual-entry anti-gaming hardening.
+ *
+ * Layered on top of the shipped audit-trail pattern (RFC-0022 OQ-2: forced
+ * `attestedBy` + auto-filled `attestedAt`):
+ *
+ *  - `dailyCapPerOperator`: per-operator UTC-day rate limit on manual entries
+ *    (default 10/day). Above cap → `Decision: manual-signal-rate-limit-exceeded`.
+ *  - `evidenceUrlOptional`: when `true`, manual signals MAY carry an
+ *    `evidenceUrl` field (call recording URL, ticket URL, transcript link).
+ *    The field is preserved through the pipeline + visible in audit export.
+ *  - `qualityMetric`: rolling manual/total share metric. When the share
+ *    exceeds `shareWarningThreshold` over `windowDays` → `Decision:
+ *    manual-signal-share-elevated` (warning, not block — surfaces
+ *    architectural anti-pattern).
+ */
+export interface ManualEntryQualityMetricConfig {
+  enabled: boolean;
+  windowDays: number;
+  shareWarningThreshold: number;
+}
+
+export interface ManualEntryConfig {
+  /** Per-operator UTC-day cap. Default 10. Set to `0` to disable. */
+  dailyCapPerOperator: number;
+  /** Whether the optional `evidenceUrl` field on manual signals is accepted. */
+  evidenceUrlOptional: boolean;
+  /** Rolling manual-share quality metric configuration. */
+  qualityMetric: ManualEntryQualityMetricConfig;
+}
+
 /** Fully-resolved signal ingestion configuration. */
 export interface SignalIngestionConfig {
   enabled: boolean;
@@ -149,6 +180,10 @@ export interface SignalIngestionConfig {
    * `multiPostureBehavior: 'union'`.
    */
   residencyEnforcement: ResidencyEnforcementConfig;
+  /**
+   * RFC-0030 OQ-13.4 v0.3 — manual-entry anti-gaming config block.
+   */
+  manualEntry: ManualEntryConfig;
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -187,7 +222,14 @@ export const DEFAULT_SIGNAL_INGESTION_CONFIG: SignalIngestionConfig = {
     signalPipelineWeight: 0.5,
     backlogItemWeight: 0.5,
   },
-  adapters: ['signal-source-support-ticket', 'signal-source-community-thread'],
+  // RFC-0030 OQ-13.1 v0.3 — env-var-based adapters only. OAuth-required
+  // adapters (full Salesforce / HubSpot integrations, Zendesk-with-OAuth)
+  // defer to the future credential-management RFC.
+  adapters: [
+    'signal-source-support-ticket',
+    'signal-source-community-thread',
+    'signal-source-in-app-feedback',
+  ],
   acceptedLanguages: ['en'],
   residencyEnforcement: {
     sourceFromCompliancePosture: true,
@@ -198,6 +240,15 @@ export const DEFAULT_SIGNAL_INGESTION_CONFIG: SignalIngestionConfig = {
       unifiedCostReport: true,
     },
     multiPostureBehavior: 'union',
+  },
+  manualEntry: {
+    dailyCapPerOperator: 10,
+    evidenceUrlOptional: true,
+    qualityMetric: {
+      enabled: true,
+      windowDays: 7,
+      shareWarningThreshold: 0.3,
+    },
   },
 };
 
@@ -293,6 +344,7 @@ function resolveConfig(raw: unknown, filePath: string): SignalIngestionConfig {
     adapters: resolveStringArray(spec['adapters'], DEFAULT_SIGNAL_INGESTION_CONFIG.adapters),
     acceptedLanguages: resolveLanguageList(spec['acceptedLanguages']),
     residencyEnforcement: resolveResidencyEnforcement(spec['residencyEnforcement']),
+    manualEntry: resolveManualEntry(spec['manualEntry']),
   };
 }
 
@@ -498,6 +550,62 @@ function resolveResidencyEnforcement(value: unknown): ResidencyEnforcementConfig
     enforcementPoints,
     multiPostureBehavior: 'union',
   };
+}
+
+function resolveManualEntry(value: unknown): ManualEntryConfig {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.manualEntry;
+  if (value === undefined || value === null) {
+    return {
+      dailyCapPerOperator: defaults.dailyCapPerOperator,
+      evidenceUrlOptional: defaults.evidenceUrlOptional,
+      qualityMetric: { ...defaults.qualityMetric },
+    };
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('manualEntry must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  const qm = obj['qualityMetric'];
+  let qualityMetric: ManualEntryQualityMetricConfig;
+  if (qm === undefined || qm === null) {
+    qualityMetric = { ...defaults.qualityMetric };
+  } else if (typeof qm !== 'object' || Array.isArray(qm)) {
+    throw new SignalIngestionConfigError('manualEntry.qualityMetric must be an object');
+  } else {
+    const q = qm as Record<string, unknown>;
+    qualityMetric = {
+      enabled: resolveBoolean(q['enabled'], defaults.qualityMetric.enabled),
+      windowDays: resolvePositiveNumber(
+        q['windowDays'],
+        defaults.qualityMetric.windowDays,
+        'manualEntry.qualityMetric.windowDays',
+      ),
+      shareWarningThreshold: resolveShareThreshold(
+        q['shareWarningThreshold'],
+        defaults.qualityMetric.shareWarningThreshold,
+      ),
+    };
+  }
+  return {
+    dailyCapPerOperator: resolveNonNegativeNumber(
+      obj['dailyCapPerOperator'],
+      defaults.dailyCapPerOperator,
+      'manualEntry.dailyCapPerOperator',
+    ),
+    evidenceUrlOptional: resolveBoolean(obj['evidenceUrlOptional'], defaults.evidenceUrlOptional),
+    qualityMetric,
+  };
+}
+
+function resolveShareThreshold(value: unknown, defaultValue: number): number {
+  if (value === undefined || value === null) return defaultValue;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    throw new SignalIngestionConfigError(
+      `manualEntry.qualityMetric.shareWarningThreshold must be a number in [0, 1], got ${JSON.stringify(value)}`,
+    );
+  }
+  return n;
 }
 
 function resolveLanguageList(value: unknown): string[] {

@@ -82,6 +82,7 @@ describe('computeConfigDiff', () => {
     expect(diff.changes[0].previous).toEqual([
       'signal-source-support-ticket',
       'signal-source-community-thread',
+      'signal-source-in-app-feedback',
     ]);
     expect(diff.changes[0].current).toEqual([
       'signal-source-support-ticket',

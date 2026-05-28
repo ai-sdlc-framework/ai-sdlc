@@ -120,15 +120,24 @@ A B2B enterprise platform may weight Enterprise customers 5×; a consumer produc
 
 ## 5. Source Adapters
 
-The pipeline accepts signals from configured sources via the `SignalSourceAdapter` interface. Reference adapters (initial set):
+The pipeline accepts signals from configured sources via the `SignalSourceAdapter` interface.
 
-| Source | Adapter | Signal Tier (default) |
-|---|---|---|
-| Customer support tickets (Zendesk, Intercom, Help Scout) | `signal-source-support-ticket` | Tier 1 |
-| Sales call notes / CRM (Salesforce, HubSpot) | `signal-source-crm-note` | Tier 1 |
-| Community discussions (Discord, Slack community, Discourse) | `signal-source-community-thread` | Tier 2 |
-| In-app feedback widgets (e.g., Productboard) | `signal-source-in-app-feedback` | Tier 1 |
-| Competitive intelligence (manual entry, periodic) | `signal-source-competitive-intel` | Tier 2 |
+**v1 adapter scope (RFC-0030 OQ-13.1 v0.3 re-walkthrough)**: env-var-based authentication ONLY. OAuth-required adapters (full Salesforce / HubSpot integrations, Zendesk-with-OAuth-scopes) defer to the future credential-management RFC; adapters declaring `requiresOAuth: true` are REFUSED at registration with `Decision: adapter-requires-credential-mgmt-rfc`.
+
+| Source | Adapter | Signal Tier (default) | Credential model | v1 shipping |
+|---|---|---|---|---|
+| Customer support tickets (Zendesk PAT subset) | `signal-source-support-ticket` | Tier 1 | env var `SIGNAL_ZENDESK_PAT` | Yes |
+| Community discussions (Discord, Slack community) | `signal-source-community-thread` | Tier 2 | env var `SIGNAL_COMMUNITY_BOT_TOKEN` (or per-platform alias) | Yes |
+| In-app feedback widgets (e.g., Productboard, Pendo) | `signal-source-in-app-feedback` | Tier 1 | env var `SIGNAL_IN_APP_FEEDBACK_API_KEY` | Yes |
+| Manual entry (phone calls, hallway feedback) | `signal-source-manual` | Tier 1 | none (`attestedBy` + rate-limit, see §13.4) | Yes |
+| Full Zendesk OAuth integration | `signal-source-zendesk-oauth` | Tier 1 | OAuth (refresh tokens, scopes) | No — credential-mgmt RFC |
+| Sales call notes / CRM (Salesforce, HubSpot OAuth) | `signal-source-crm-note` | Tier 1 | OAuth (refresh tokens, scopes) | No — credential-mgmt RFC |
+| Competitive intelligence (manual entry, periodic) | `signal-source-competitive-intel` | Tier 2 | none (attested manual variant) | Future |
+
+Two distinct failure-mode Decisions for env-var adapters:
+- `adapter-credential-not-configured` — env var missing / empty → operator SETUP task; pipeline continues with remaining valid adapters.
+- `adapter-credential-rejected` — env var present but upstream auth call failed (401 / 403) → operator ROTATION task; pipeline continues.
+- Legacy `adapter-credential-invalid` preserved for adapters that have not yet been migrated to env-var probing (backward-compat).
 
 ### 5.1 Adapter contract
 
@@ -136,6 +145,7 @@ The pipeline accepts signals from configured sources via the `SignalSourceAdapte
 export interface SignalSourceAdapter {
   name: string;                      // e.g., 'support-ticket-zendesk'
   defaultTier: 1 | 2;
+  requiresOAuth?: boolean;           // OQ-13.1 v0.3: refused at registration when true
   fetchSignals(since: Date): Promise<RawSignal[]>;
   isAvailable(): Promise<boolean>;
 }
@@ -147,6 +157,10 @@ export interface RawSignal {
   customerTier?: 'enterprise' | 'mid' | 'smb' | 'free' | 'churned';
   payload: string;                   // free-text body
   metadata?: Record<string, unknown>;
+  attestedBy?: string;               // OQ-13.4 manual signals: forced
+  attestedAt?: Date;                 // OQ-13.4 auto-filled from committer
+  region?: string;                   // OQ-13.3 per-stage residency enforcement
+  evidenceUrl?: string;              // OQ-13.4 v0.3 optional evidence link
 }
 ```
 

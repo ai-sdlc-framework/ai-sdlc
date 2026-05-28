@@ -67,13 +67,16 @@ that already has the config produces "skip .ai-sdlc/signal-ingestion.yaml
 
 ## 2. Adapter configuration
 
-Three reference adapters ship with the orchestrator:
+Four reference adapters ship with the orchestrator (RFC-0030 OQ-13.1 v0.3 re-walkthrough — env-var-based authentication only):
 
-| Adapter name | Source | Default tier | Notes |
-|---|---|---|---|
-| `signal-source-support-ticket` | Customer support tickets (Zendesk, Intercom, Help Scout) | 1 | Adopters supply the API integration in their fork; the shipped adapter is a reference shape |
-| `signal-source-community-thread` | Community discussions (Discord, Slack community, Discourse) | 2 | Subject to the Tier 2 significance threshold (§3) |
-| `signal-source-manual` | Operator-entered signals (e.g., from a phone call) | 1 | Requires `attestedBy` (operator); `attestedAt` auto-filled from git committer per the RFC-0022 OQ-2 audit-trail pattern |
+| Adapter name | Source | Default tier | Credential env var | Notes |
+|---|---|---|---|---|
+| `signal-source-support-ticket` | Customer support tickets (Zendesk PAT subset) | 1 | `SIGNAL_ZENDESK_PAT` | Adopters supply the API integration in their fork; the shipped adapter is a reference shape |
+| `signal-source-community-thread` | Community discussions (Discord, Slack community) | 2 | `SIGNAL_COMMUNITY_BOT_TOKEN` | Subject to the Tier 2 significance threshold (§3) |
+| `signal-source-in-app-feedback` | Productboard / Pendo / in-house widgets | 1 | `SIGNAL_IN_APP_FEEDBACK_API_KEY` | API-key based; OAuth integrations defer to credential-mgmt RFC |
+| `signal-source-manual` | Operator-entered signals (e.g., from a phone call) | 1 | none | Requires `attestedBy`; `attestedAt` auto-filled from committer; per-operator rate limit + optional `evidenceUrl`; see §6 |
+
+**OAuth-required adapters are NOT supported in v1.** Adapters declaring `requiresOAuth: true` are REFUSED at registration; the registry returns a `Decision: adapter-requires-credential-mgmt-rfc` pointing to the future credential-management RFC. Full Salesforce / HubSpot integrations + Zendesk-with-OAuth-scopes fall in this category.
 
 To register a custom adapter, extend the default registry in your
 orchestrator wiring:
@@ -109,11 +112,21 @@ spec:
     - signal-source-crm-note
 ```
 
-Adapter credential management (OAuth tokens, API keys) is deferred to a
-future RFC per RFC-0030 OQ-13.1 resolution. v1 adapters self-validate via
-`isAvailable()` only; credential failures emit a `Decision:
-adapter-credential-invalid` rather than halting the pipeline. The
-remaining valid adapters continue to fetch.
+Adapter credential lifecycle (OAuth refresh tokens, scope management) is
+deferred to a future credential-management RFC per RFC-0030 OQ-13.1 v0.3
+resolution. v1 adapters self-validate via env-var probing (`isAvailable()`
+returns true when the configured env var is non-empty). Credential
+failures emit one of two distinct Decisions so the operator gets the
+right downstream task:
+
+| Decision | Trigger | Operator action |
+|---|---|---|
+| `adapter-credential-not-configured` | Env var missing or empty | Set the env var to enable this adapter |
+| `adapter-credential-rejected` | Env var present but upstream auth call failed (401/403) | Rotate / re-generate the credential |
+| `adapter-credential-invalid` (legacy) | Adapter has not migrated to env-var probing | Treat as either of the above — preserved for backward-compat |
+| `adapter-requires-credential-mgmt-rfc` | Adapter declares `requiresOAuth: true` | Wait for the credential-management RFC, or remove the adapter from `adapters:` |
+
+In all cases the pipeline continues with the remaining valid adapters — credential failure is non-blocking per the G0 contract.
 
 ---
 
@@ -268,28 +281,66 @@ manual-signal-incomplete` and the entry is refused. The operator gets a
 clarification task; the pipeline continues on automated sources without
 halting (G0 routing).
 
+**RFC-0030 OQ-13.4 v0.3 re-walkthrough — anti-gaming layers**
+
+Layered on top of the forced audit trail:
+
+1. **Per-operator daily rate limit** (default 10 manual signals per operator per UTC day). Above the cap → `Decision: manual-signal-rate-limit-exceeded`; operator can escalate via batch review.
+2. **Optional `evidenceUrl` field** (call recording URL, ticket URL, transcript link). When present, the audit trail is materially stronger; when absent the attested observation stands but is flagged in the share metric.
+3. **Manual-share quality metric** (rolling 7-day `manualSignals / totalSignals`). Above 30% sustained → `Decision: manual-signal-share-elevated` (warning, not block — surfaces architectural anti-pattern that pipeline is acting as a data-entry tool rather than automated demand-detection).
+
+Configure all three under `spec.manualEntry` in the YAML:
+
+```yaml
+spec:
+  manualEntry:
+    dailyCapPerOperator: 10          # default; set to 0 to disable
+    evidenceUrlOptional: true        # the framework treats evidenceUrl as optional
+    qualityMetric:
+      enabled: true
+      windowDays: 7
+      shareWarningThreshold: 0.3     # 30% — emit Decision above this
+```
+
 **Usage** (programmatic surface):
 
 ```ts
 import { ManualSignalSourceAdapter } from '@ai-sdlc/orchestrator/signal-ingestion';
 
 const adapter = new ManualSignalSourceAdapter({
-  attestedBy: 'dominique@example.com',
-  // attestedAt is auto-filled from git committer; not supplied here.
+  dailyCapPerOperator: 10, // default 10/day per operator
 });
-await adapter.recordSignal({
+
+adapter.addSignal({
   sourceId: 'phone-call-2026-05-24-acme-corp',
   sourceTimestamp: new Date(),
   customerId: 'acme-corp',
   customerTier: 'enterprise',
   payload:
     'Acme is evaluating Competitor X because our search relevance dropped after the last index migration.',
+  attestedBy: 'dominique@example.com',
+  evidenceUrl: 'https://example.com/call-recording/abc123', // OQ-13.4 optional
 });
 ```
 
-A future CLI surface (`cli-signals add ...`) will provide a TTY-friendly
-wrapper that prompts for `attestedBy` if absent and assembles the
-RawSignal interactively. Tracked as a follow-up to AISDLC-348.
+When the operator hits the daily cap, `addSignal()` throws `ManualSignalRateLimitExceeded`; the registry converts it into `Decision: manual-signal-rate-limit-exceeded` and the pipeline continues fetching from other adapters. The escalation path is operator-driven batch review (not yet wired to a CLI; tracked as a follow-up).
+
+The manual-share quality metric runs out-of-band. Wire it into your orchestrator tick to surface the warning Decision:
+
+```ts
+import { computeManualShareMetric } from '@ai-sdlc/orchestrator/signal-ingestion';
+
+const fetched = await fetchSignalsFromAvailableAdapters(adapters, since);
+const metric = computeManualShareMetric(fetched.signals, {
+  windowDays: config.manualEntry.qualityMetric.windowDays,
+  shareWarningThreshold: config.manualEntry.qualityMetric.shareWarningThreshold,
+});
+if (metric.elevated && metric.decision) {
+  // Forward metric.decision to the RFC-0035 catalog as a warning event
+}
+```
+
+A future CLI surface (`cli-signals add ...`) will provide a TTY-friendly wrapper that prompts for `attestedBy` + `evidenceUrl` if absent and assembles the RawSignal interactively. Tracked as a follow-up to AISDLC-348.
 
 ---
 
@@ -520,6 +571,7 @@ observability silo.
 - Adding/removing adapters
 - Adjusting D1 composition weights
 - Adjusting the accepted-languages list
+- Editing any `manualEntry` field (`dailyCapPerOperator`, `evidenceUrlOptional`, `qualityMetric.*`)
 
 **What does NOT trigger an event:**
 
