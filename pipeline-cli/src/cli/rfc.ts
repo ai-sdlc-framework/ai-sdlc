@@ -1,15 +1,14 @@
 /**
- * `cli-rfc` — RFC-0036 Phase 9 (AISDLC-334) adopter RFC tooling.
+ * `cli-rfc` — RFC-0036 adopter RFC tooling.
  *
  * Subcommands:
  *   index   — list adopter RFCs + cross-reference them against the
  *             RFC-0035 Decision Catalog (decisions-resolved / pending
- *             per RFC).
+ *             per RFC). Shipped in Phase 9 (AISDLC-334).
+ *   init    — scaffold a new adopter RFC from the framework template.
+ *             Shipped in Phase 2 (AISDLC-327).
  *
- * Phase 2 (AISDLC-327) will add `init <slug>` later; the yargs program
- * is structured so adding new subcommands is additive.
- *
- * ## How RFC ↔ Decision cross-referencing works
+ * ## How RFC ↔ Decision cross-referencing works (index)
  *
  * RFC-0035 Decision records carry a free-form `metadata.scope` field
  * (e.g. `rfc:RFC-0035`, `issue:AISDLC-285`, `workspace`). This CLI
@@ -24,17 +23,30 @@
  *
  * The cross-reference is intentionally one-directional (Decisions →
  * RFCs via scope) — adopter RFC bodies are not parsed for explicit
- * Decision back-links because that surface isn't standardised yet
- * (it lands once AISDLC-327 ships `rfc init` with a Decision-link
- * template field). Today's signal — Decision.scope — is sufficient
- * for the Phase 9 AC (#2, #3, #5) and avoids depending on Phase 2's
- * not-yet-shipped scaffold.
+ * Decision back-links because that surface isn't standardised yet.
+ *
+ * ## How the init scaffold works (Phase 2 / AISDLC-327)
+ *
+ * `cli-rfc init <slug>` materialises a new adopter RFC at
+ * `<rfcDir>/<slug>.md` (defaulting to `rfcs/<slug>.md`) from
+ * `pipeline-cli/templates/framework-rfc.md` — a single template per
+ * RFC-0036 OQ-5 (variants are a future Decision in the Catalog when
+ * adopter demand justifies them). Resolution order for `<rfcDir>` is
+ * the same as `index`: `--rfc-dir` flag > `.ai-sdlc/adopter-authoring.yaml`
+ * `rfc-scaffold.rfcDir` > `rfcs/` default. The scaffold refuses to
+ * overwrite an existing file unless `--force` is passed; the slug is
+ * validated for filesystem safety before writing.
+ *
+ * Per OQ-12 the same surface ships as the `/ai-sdlc rfc init <slug>`
+ * slash command in the plugin — the slash command body shells out to
+ * this binary.
  *
  * @module cli/rfc
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
@@ -301,13 +313,215 @@ export function renderIndexTable(entries: RfcIndexEntry[]): string {
   return lines.join('\n') + '\n';
 }
 
+// ── init scaffold (Phase 2 / AISDLC-327) ─────────────────────────────────────
+
+/**
+ * Validate an RFC slug. Returns the normalised (lowercased) slug or
+ * throws an `Error` with a human-actionable message. Rules:
+ *
+ *   - Non-empty after trimming.
+ *   - Lowercase ASCII letters, digits, and hyphens only (allow the
+ *     uppercase form on input — it's normalised).
+ *   - Must not start or end with a hyphen.
+ *   - No path separators or traversal sequences.
+ *   - Length ≤ 80 chars (keeps filenames + URL paths sane).
+ *
+ * The slug is the filename stem (`<slug>.md`); the validation is a
+ * filesystem-safety gate, not a style enforcer.
+ */
+export function validateRfcSlug(raw: string): string {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) {
+    throw new Error('[cli-rfc init] slug is required (got empty string)');
+  }
+  if (trimmed.length > 80) {
+    throw new Error(`[cli-rfc init] slug too long (${trimmed.length} chars; max 80)`);
+  }
+  if (trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('..')) {
+    throw new Error(
+      `[cli-rfc init] slug must not contain path separators or '..': ${JSON.stringify(trimmed)}`,
+    );
+  }
+  const lower = trimmed.toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(lower)) {
+    throw new Error(
+      `[cli-rfc init] slug must be lowercase alphanumeric + hyphens (no leading/trailing hyphens): ${JSON.stringify(raw)}`,
+    );
+  }
+  return lower;
+}
+
+/**
+ * Compute the absolute destination path for `<slug>.md` under the
+ * resolved RFC directory. Pure — does no I/O.
+ */
+export function computeRfcInitPath(rfcDir: string, slug: string): string {
+  return join(rfcDir, `${slug}.md`);
+}
+
+/**
+ * Locate the framework RFC template (`framework-rfc.md`). Resolution
+ * order:
+ *
+ *   1. Explicit `templatePath` override (tests / advanced operators).
+ *   2. `pipeline-cli/templates/framework-rfc.md` resolved relative to
+ *      this module's location — robust across `src/cli/rfc.ts` (dev /
+ *      tsx) and `dist/cli/rfc.js` (compiled).
+ *
+ * Returns the absolute path. Throws when the template cannot be found
+ * so the operator gets a precise error rather than a malformed RFC.
+ */
+export function resolveTemplatePath(
+  opts: { templatePath?: string; moduleUrl?: string } = {},
+): string {
+  if (opts.templatePath && opts.templatePath.trim()) {
+    const abs = isAbsolute(opts.templatePath) ? opts.templatePath : resolve(opts.templatePath);
+    if (!existsSync(abs)) {
+      throw new Error(`[cli-rfc init] template not found at ${abs}`);
+    }
+    return abs;
+  }
+
+  const here = dirname(fileURLToPath(opts.moduleUrl ?? import.meta.url));
+  // Search ancestors of `here` for `templates/framework-rfc.md`. This
+  // walks up at most a handful of levels (src/cli → src → pipeline-cli;
+  // dist/cli → dist → pipeline-cli) so the template ships next to the
+  // package at `pipeline-cli/templates/framework-rfc.md` regardless of
+  // whether the CLI is invoked via tsx (src) or node (dist).
+  const candidates: string[] = [];
+  let cursor = here;
+  for (let i = 0; i < 6; i++) {
+    candidates.push(join(cursor, 'templates', 'framework-rfc.md'));
+    const parent = dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  for (const cand of candidates) {
+    if (existsSync(cand)) return cand;
+  }
+  throw new Error(
+    `[cli-rfc init] could not locate framework-rfc.md template; searched: ${candidates.join(', ')}`,
+  );
+}
+
+/**
+ * Render the framework RFC template by substituting placeholders.
+ * Pure — string-only; the caller writes the file.
+ *
+ * Placeholders honoured:
+ *   - `{{title}}`       — human-readable title (derived from slug if not provided).
+ *   - `{{slug}}`        — the validated lowercase slug.
+ *   - `{{author}}`      — author name (defaults to `<your-name>` placeholder).
+ *   - `{{createdDate}}` — ISO 8601 calendar date (YYYY-MM-DD).
+ */
+export function renderRfcTemplate(opts: {
+  template: string;
+  slug: string;
+  title?: string;
+  author?: string;
+  createdDate?: string;
+}): string {
+  const title = (opts.title?.trim() || slugToTitle(opts.slug)).trim();
+  const author = (opts.author?.trim() || '<your-name>').trim();
+  const createdDate = (opts.createdDate?.trim() || new Date().toISOString().slice(0, 10)).trim();
+  return opts.template
+    .replace(/\{\{title\}\}/g, title)
+    .replace(/\{\{slug\}\}/g, opts.slug)
+    .replace(/\{\{author\}\}/g, author)
+    .replace(/\{\{createdDate\}\}/g, createdDate);
+}
+
+/**
+ * Convert a kebab-case slug to a Title Case heading. Pure helper.
+ */
+export function slugToTitle(slug: string): string {
+  return slug
+    .split('-')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+export interface InitRfcOpts {
+  workDir: string;
+  slug: string;
+  title?: string;
+  author?: string;
+  rfcDir?: string;
+  force?: boolean;
+  templatePath?: string;
+  /** Override `new Date()` for hermetic tests. */
+  now?: () => Date;
+}
+
+export interface InitRfcResult {
+  filePath: string;
+  rfcDir: string;
+  rfcDirSource: 'cli-flag' | 'config' | 'default' | 'spec-rfcs-fallback';
+  slug: string;
+  title: string;
+  createdDate: string;
+  created: boolean;
+  templatePath: string;
+}
+
+/**
+ * Materialise a new adopter RFC. Validates the slug, resolves the RFC
+ * directory (cli-flag > config > default), creates the directory if
+ * absent, refuses to overwrite an existing file unless `force` is set,
+ * and writes the rendered template.
+ *
+ * Returns the resolved metadata (paths + final values used). Throws on
+ * validation errors and on existing-file conflicts; the CLI handler
+ * formats the error for the operator.
+ */
+export function initRfc(opts: InitRfcOpts): InitRfcResult {
+  const slug = validateRfcSlug(opts.slug);
+  const { rfcDir, source } = resolveRfcDir(opts.workDir, {
+    rfcDir: opts.rfcDir && opts.rfcDir.trim() ? opts.rfcDir : undefined,
+  });
+  const filePath = computeRfcInitPath(rfcDir, slug);
+
+  if (existsSync(filePath) && !opts.force) {
+    throw new Error(
+      `[cli-rfc init] refusing to overwrite existing file at ${filePath} — pass --force to replace it`,
+    );
+  }
+
+  const templatePath = resolveTemplatePath({ templatePath: opts.templatePath });
+  const template = readFileSync(templatePath, 'utf8');
+  const createdDate = (opts.now ? opts.now() : new Date()).toISOString().slice(0, 10);
+  const title = (opts.title?.trim() || slugToTitle(slug)).trim();
+  const rendered = renderRfcTemplate({
+    template,
+    slug,
+    title,
+    author: opts.author,
+    createdDate,
+  });
+
+  mkdirSync(rfcDir, { recursive: true });
+  writeFileSync(filePath, rendered, 'utf8');
+
+  return {
+    filePath,
+    rfcDir,
+    rfcDirSource: source,
+    slug,
+    title,
+    createdDate,
+    created: true,
+    templatePath,
+  };
+}
+
 // ── CLI builder ──────────────────────────────────────────────────────────────
 
 export function buildRfcCli(): Argv {
   return yargs(hideBin(process.argv))
     .scriptName('cli-rfc')
     .usage(
-      'Usage: $0 <command> [options]\n\nRFC-0036 adopter RFC tooling (Phase 9 — index against RFC-0035 Decision Catalog).',
+      'Usage: $0 <command> [options]\n\nRFC-0036 adopter RFC tooling (init = Phase 2 / AISDLC-327; index = Phase 9 / AISDLC-334).',
     )
     .option('work-dir', {
       alias: 'w',
@@ -378,6 +592,93 @@ export function buildRfcCli(): Argv {
           );
         }
         process.stdout.write(renderIndexTable(entries));
+      },
+    )
+    .command(
+      'init <slug>',
+      'Scaffold a new adopter RFC from the framework template (RFC-0036 Phase 2 / AISDLC-327).',
+      (y) =>
+        y
+          .positional('slug', {
+            type: 'string',
+            describe:
+              'RFC slug (filename stem). Lowercase alphanumeric + hyphens, no path separators, max 80 chars.',
+            demandOption: true,
+          })
+          .option('title', {
+            type: 'string',
+            describe:
+              'Human-readable RFC title. Defaults to a Title-Case rendering of the slug (e.g. multi-tenancy-model → "Multi Tenancy Model").',
+          })
+          .option('author', {
+            type: 'string',
+            describe:
+              'Author name written into the template. Defaults to "<your-name>" placeholder so the operator notices it on first read.',
+          })
+          .option('rfc-dir', {
+            type: 'string',
+            describe:
+              'Override the RFC directory (relative to --work-dir). Otherwise read from adopter-authoring.yaml rfc-scaffold.rfcDir; defaults to rfcs/, falling back to spec/rfcs/.',
+          })
+          .option('force', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Overwrite an existing file at the destination. By default, the scaffold refuses to clobber existing content.',
+          })
+          .option('template', {
+            type: 'string',
+            describe:
+              'Absolute or relative path to a template file. Defaults to the framework-rfc.md shipped with @ai-sdlc/pipeline-cli.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['text', 'json'] as const,
+            default: 'text' as const,
+            describe: 'Output format. `json` is intended for programmatic consumers.',
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const slug = String(argv.slug);
+        const rfcDirOverride = typeof argv['rfc-dir'] === 'string' ? String(argv['rfc-dir']) : '';
+        const templatePath = typeof argv.template === 'string' ? String(argv.template) : '';
+        try {
+          const result = initRfc({
+            workDir,
+            slug,
+            title: typeof argv.title === 'string' ? String(argv.title) : undefined,
+            author: typeof argv.author === 'string' ? String(argv.author) : undefined,
+            rfcDir: rfcDirOverride || undefined,
+            force: Boolean(argv.force),
+            templatePath: templatePath || undefined,
+          });
+
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, ...result });
+            return;
+          }
+
+          emitText(`Scaffolded adopter RFC at ${result.filePath}`);
+          emitText(`  slug:       ${result.slug}`);
+          emitText(`  title:      ${result.title}`);
+          emitText(`  rfcDir:     ${result.rfcDir} (source: ${result.rfcDirSource})`);
+          emitText(`  template:   ${result.templatePath}`);
+          emitText(`  createdAt:  ${result.createdDate}`);
+          emitText('');
+          emitText('Next steps:');
+          emitText('  1. Open the file and replace the scaffold notice + placeholders.');
+          emitText(
+            '  2. Capture Open Questions as you draft; resolve them in the Decisions section.',
+          );
+          emitText('  3. Commit the RFC; cross-link from any backlog tasks via `references:`.');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          warnToStderr(msg);
+          if (String(argv.format) === 'json') {
+            emit({ ok: false, error: msg });
+          }
+          process.exit(1);
+        }
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')

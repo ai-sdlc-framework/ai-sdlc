@@ -11,6 +11,7 @@ Step-by-step walkthroughs for common AI-SDLC scenarios.
 5. **[Multi-agent orchestration](05-multi-agent-orchestration.md)** — Configure agent handoffs and orchestration patterns
 6. **[Cost governance with CostPolicy](cost-governance.md)** — Declare per-execution / per-stage / monthly budgets and cost-aware model selection (RFC-0004)
 7. **[Spec-Kit Bridge — author specs upstream, ship with AI-SDLC](10-spec-kit-bridge.md)** — End-to-end walkthrough: install spec-kit → author spec → import → DoR-at-import → dispatch → ship → handle drift (RFC-0036). **Recommended adopter authoring path.**
+8. **[Authoring an Adopter RFC](11-authoring-adopter-rfc.md)** — When to write an RFC, scaffold one with `ai-sdlc rfc init`, capture and resolve Open Questions, and compose with the Decision Catalog + DoR upstream-OQ gate (RFC-0036 Phase 2 / AISDLC-327).
 
 ## Contributing
 

@@ -13,6 +13,8 @@ dependencies:
 references:
   - spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md
 priority: high
+blocked:
+  reason: 'RFC-0036 lifecycle is Ready for Review; all 12 OQs resolved with **Resolution:** markers via operator walkthrough 2026-05-16 (see §14 header). Phase 2 implementation proceeds against the resolved OQs; lifecycle bump to Signed Off is a separate operator action tracked by AISDLC-336 / RFC-0036 Phase 11 promotion runbook.'
 ---
 
 ## Description

@@ -14,13 +14,20 @@ import { join } from 'node:path';
 import {
   buildRfcCli,
   buildRfcIndex,
+  computeRfcInitPath,
   extractRfcIdFromFilename,
   extractRfcIdFromScope,
   extractRfcTitle,
   groupDecisionsByRfc,
+  initRfc,
   renderIndexTable,
+  renderRfcTemplate,
   resolveRfcDir,
+  resolveTemplatePath,
+  slugToTitle,
+  validateRfcSlug,
 } from './rfc.js';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   appendDecisionEvent,
   makeDecisionOpenedEvent,
@@ -501,5 +508,334 @@ describe('cli-rfc index — yargs router (AC #1, #2, #3, #4, #5)', () => {
     const json = stdoutJson<{ count: number; entries: unknown[] }>();
     expect(json.count).toBe(0);
     expect(json.entries).toEqual([]);
+  });
+});
+
+// ── init scaffold tests (Phase 2 / AISDLC-327) ────────────────────────────────
+
+describe('validateRfcSlug', () => {
+  it('accepts simple lowercase kebab-case slugs', () => {
+    expect(validateRfcSlug('multi-tenancy-model')).toBe('multi-tenancy-model');
+    expect(validateRfcSlug('rfc-0001')).toBe('rfc-0001');
+    expect(validateRfcSlug('a')).toBe('a');
+  });
+  it('normalises uppercase input to lowercase', () => {
+    expect(validateRfcSlug('Multi-Tenancy-Model')).toBe('multi-tenancy-model');
+  });
+  it('rejects empty / whitespace-only', () => {
+    expect(() => validateRfcSlug('')).toThrow(/required/);
+    expect(() => validateRfcSlug('   ')).toThrow(/required/);
+  });
+  it('rejects path separators and traversal', () => {
+    expect(() => validateRfcSlug('foo/bar')).toThrow(/path separators/);
+    expect(() => validateRfcSlug('..\\evil')).toThrow(/path separators/);
+    expect(() => validateRfcSlug('a/../b')).toThrow(/path separators/);
+  });
+  it('rejects leading/trailing hyphens', () => {
+    expect(() => validateRfcSlug('-leading')).toThrow(/lowercase/);
+    expect(() => validateRfcSlug('trailing-')).toThrow(/lowercase/);
+  });
+  it('rejects punctuation outside [a-z0-9-]', () => {
+    expect(() => validateRfcSlug('foo_bar')).toThrow(/lowercase/);
+    expect(() => validateRfcSlug('foo.bar')).toThrow(/lowercase/);
+    expect(() => validateRfcSlug('foo bar')).toThrow(/lowercase/);
+  });
+  it('rejects slugs over 80 chars', () => {
+    expect(() => validateRfcSlug('a'.repeat(81))).toThrow(/too long/);
+  });
+});
+
+describe('slugToTitle', () => {
+  it('title-cases kebab-case slugs', () => {
+    expect(slugToTitle('multi-tenancy-model')).toBe('Multi Tenancy Model');
+    expect(slugToTitle('postgres-vector-migration')).toBe('Postgres Vector Migration');
+  });
+  it('handles single-word slugs', () => {
+    expect(slugToTitle('observability')).toBe('Observability');
+  });
+});
+
+describe('computeRfcInitPath', () => {
+  it('joins rfcDir + <slug>.md', () => {
+    expect(computeRfcInitPath('/abs/rfcs', 'foo')).toBe(join('/abs/rfcs', 'foo.md'));
+  });
+});
+
+describe('renderRfcTemplate', () => {
+  it('substitutes all four placeholders', () => {
+    const tpl = '# RFC: {{title}}\n{{slug}} / {{author}} / {{createdDate}}\n';
+    const out = renderRfcTemplate({
+      template: tpl,
+      slug: 'my-rfc',
+      title: 'My RFC',
+      author: 'Dom',
+      createdDate: '2026-05-27',
+    });
+    expect(out).toContain('# RFC: My RFC');
+    expect(out).toContain('my-rfc / Dom / 2026-05-27');
+  });
+  it('falls back to slug-derived title when title omitted', () => {
+    const tpl = '{{title}}\n';
+    expect(renderRfcTemplate({ template: tpl, slug: 'multi-tenant' })).toContain('Multi Tenant');
+  });
+  it('defaults author to <your-name> placeholder', () => {
+    const tpl = '{{author}}\n';
+    expect(renderRfcTemplate({ template: tpl, slug: 'x' })).toContain('<your-name>');
+  });
+  it('replaces all occurrences of each placeholder', () => {
+    const tpl = '{{slug}} {{slug}} {{slug}}';
+    expect(renderRfcTemplate({ template: tpl, slug: 'foo' })).toBe('foo foo foo');
+  });
+});
+
+describe('resolveTemplatePath', () => {
+  it('honours explicit templatePath when it exists', () => {
+    const explicit = join(tmp, 'my-template.md');
+    writeFileSync(explicit, '# explicit', 'utf8');
+    expect(resolveTemplatePath({ templatePath: explicit })).toBe(explicit);
+  });
+  it('throws when explicit templatePath does not exist', () => {
+    const missing = join(tmp, 'nope.md');
+    expect(() => resolveTemplatePath({ templatePath: missing })).toThrow(/template not found/);
+  });
+  it('locates the shipped framework template via module-relative walk', () => {
+    // No override → walk up from this test file's location. The template
+    // ships at pipeline-cli/templates/framework-rfc.md so the walk
+    // (src/cli → src → pipeline-cli) must find it. This guards against
+    // packaging drift (e.g. someone removing templates/ from files: list).
+    const resolved = resolveTemplatePath();
+    expect(existsSync(resolved)).toBe(true);
+    expect(resolved).toMatch(/framework-rfc\.md$/);
+  });
+});
+
+describe('initRfc (helpers)', () => {
+  function explicitTemplate(): string {
+    const tpl = join(tmp, 'tpl.md');
+    writeFileSync(
+      tpl,
+      '# RFC: {{title}}\nslug={{slug}}\nauthor={{author}}\ndate={{createdDate}}\n',
+      'utf8',
+    );
+    return tpl;
+  }
+
+  it('writes <slug>.md under default rfcs/ and creates the directory', () => {
+    const tpl = explicitTemplate();
+    const result = initRfc({
+      workDir: tmp,
+      slug: 'multi-tenancy-model',
+      templatePath: tpl,
+      now: () => new Date('2026-05-27T12:00:00Z'),
+    });
+    expect(result.filePath).toBe(join(tmp, 'rfcs/', 'multi-tenancy-model.md'));
+    expect(result.rfcDirSource).toBe('default');
+    expect(result.slug).toBe('multi-tenancy-model');
+    expect(result.title).toBe('Multi Tenancy Model');
+    expect(result.createdDate).toBe('2026-05-27');
+    expect(existsSync(result.filePath)).toBe(true);
+    const body = readFileSync(result.filePath, 'utf8');
+    expect(body).toContain('# RFC: Multi Tenancy Model');
+    expect(body).toContain('slug=multi-tenancy-model');
+    expect(body).toContain('date=2026-05-27');
+  });
+
+  it('honours --rfc-dir override (cli-flag source)', () => {
+    const tpl = explicitTemplate();
+    mkdirSync(join(tmp, 'company-rfcs'), { recursive: true });
+    const result = initRfc({
+      workDir: tmp,
+      slug: 'foo',
+      rfcDir: 'company-rfcs',
+      templatePath: tpl,
+    });
+    expect(result.rfcDir).toBe(join(tmp, 'company-rfcs'));
+    expect(result.rfcDirSource).toBe('cli-flag');
+    expect(result.filePath).toBe(join(tmp, 'company-rfcs', 'foo.md'));
+  });
+
+  it('reads adopter-authoring.yaml rfc-scaffold.rfcDir override (config source)', () => {
+    const tpl = explicitTemplate();
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(tmp, 'corp-rfcs'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'adopter-authoring.yaml'),
+      'adopter-authoring:\n  rfc-scaffold:\n    rfcDir: corp-rfcs/\n',
+      'utf8',
+    );
+    const result = initRfc({
+      workDir: tmp,
+      slug: 'config-driven',
+      templatePath: tpl,
+    });
+    expect(result.rfcDir).toBe(join(tmp, 'corp-rfcs/'));
+    expect(result.rfcDirSource).toBe('config');
+    expect(existsSync(result.filePath)).toBe(true);
+  });
+
+  it('refuses to overwrite an existing file by default', () => {
+    const tpl = explicitTemplate();
+    const target = join(tmp, 'rfcs/', 'existing.md');
+    mkdirSync(join(tmp, 'rfcs'), { recursive: true });
+    writeFileSync(target, 'do not clobber me', 'utf8');
+    expect(() => initRfc({ workDir: tmp, slug: 'existing', templatePath: tpl })).toThrow(
+      /refusing to overwrite/,
+    );
+    // Original content preserved.
+    expect(readFileSync(target, 'utf8')).toBe('do not clobber me');
+  });
+
+  it('overwrites when --force is passed', () => {
+    const tpl = explicitTemplate();
+    const target = join(tmp, 'rfcs/', 'existing.md');
+    mkdirSync(join(tmp, 'rfcs'), { recursive: true });
+    writeFileSync(target, 'stale', 'utf8');
+    const result = initRfc({
+      workDir: tmp,
+      slug: 'existing',
+      templatePath: tpl,
+      force: true,
+    });
+    expect(result.created).toBe(true);
+    expect(readFileSync(target, 'utf8')).toContain('# RFC: Existing');
+  });
+
+  it('respects custom title + author overrides', () => {
+    const tpl = explicitTemplate();
+    const result = initRfc({
+      workDir: tmp,
+      slug: 'observability',
+      title: 'Observability Re-Architecture',
+      author: 'Dominique Legault',
+      templatePath: tpl,
+    });
+    const body = readFileSync(result.filePath, 'utf8');
+    expect(body).toContain('# RFC: Observability Re-Architecture');
+    expect(body).toContain('author=Dominique Legault');
+  });
+
+  it('rejects invalid slugs before touching the filesystem', () => {
+    const tpl = explicitTemplate();
+    expect(() => initRfc({ workDir: tmp, slug: '../escape', templatePath: tpl })).toThrow(
+      /path separators/,
+    );
+    expect(existsSync(join(tmp, 'rfcs'))).toBe(false);
+  });
+
+  it('rejects a slug that resolves to an empty value', () => {
+    const tpl = explicitTemplate();
+    expect(() => initRfc({ workDir: tmp, slug: '', templatePath: tpl })).toThrow(/required/);
+  });
+});
+
+describe('cli-rfc init — yargs router (AC #1, #2, #3, #4, #5)', () => {
+  function explicitTemplate(): string {
+    const tpl = join(tmp, 'tpl.md');
+    writeFileSync(tpl, '# RFC: {{title}}\nbody {{slug}} {{createdDate}}\n', 'utf8');
+    return tpl;
+  }
+
+  it('AC #1: cli-rfc init <slug> writes <rfcDir>/<slug>.md', async () => {
+    const tpl = explicitTemplate();
+    setArgv('init', 'multi-tenancy-model', '--template', tpl, '--format', 'json');
+    await buildRfcCli().parseAsync();
+    const json = stdoutJson<{
+      ok: boolean;
+      filePath: string;
+      slug: string;
+      title: string;
+      rfcDir: string;
+      rfcDirSource: string;
+    }>();
+    expect(json.ok).toBe(true);
+    expect(json.slug).toBe('multi-tenancy-model');
+    expect(json.title).toBe('Multi Tenancy Model');
+    expect(json.filePath).toBe(join(tmp, 'rfcs/', 'multi-tenancy-model.md'));
+    expect(json.rfcDirSource).toBe('default');
+    expect(existsSync(json.filePath)).toBe(true);
+  });
+
+  it('AC #4: writes to <adopter-repo>/rfcs/ by default (text mode prints destination)', async () => {
+    const tpl = explicitTemplate();
+    setArgv('init', 'observability', '--template', tpl);
+    await buildRfcCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toContain('Scaffolded adopter RFC');
+    expect(out).toContain(join(tmp, 'rfcs/', 'observability.md'));
+    expect(out).toContain('source: default');
+  });
+
+  it('AC #4: --rfc-dir override is honoured end-to-end', async () => {
+    const tpl = explicitTemplate();
+    mkdirSync(join(tmp, 'custom-rfcs'), { recursive: true });
+    setArgv('init', 'foo', '--rfc-dir', 'custom-rfcs', '--template', tpl, '--format', 'json');
+    await buildRfcCli().parseAsync();
+    const json = stdoutJson<{ rfcDirSource: string; filePath: string }>();
+    expect(json.rfcDirSource).toBe('cli-flag');
+    expect(json.filePath).toBe(join(tmp, 'custom-rfcs', 'foo.md'));
+  });
+
+  it('AC #4: adopter-authoring.yaml rfc-scaffold.rfcDir override is honoured end-to-end', async () => {
+    const tpl = explicitTemplate();
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(tmp, 'corp-rfcs'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'adopter-authoring.yaml'),
+      'adopter-authoring:\n  rfc-scaffold:\n    rfcDir: corp-rfcs/\n',
+      'utf8',
+    );
+    setArgv('init', 'config-driven', '--template', tpl, '--format', 'json');
+    await buildRfcCli().parseAsync();
+    const json = stdoutJson<{ rfcDirSource: string; filePath: string }>();
+    expect(json.rfcDirSource).toBe('config');
+    expect(json.filePath).toBe(join(tmp, 'corp-rfcs/', 'config-driven.md'));
+  });
+
+  it('exits non-zero when the slug is invalid (path traversal attempt)', async () => {
+    const tpl = explicitTemplate();
+    setArgv('init', '../evil', '--template', tpl);
+    await expect(buildRfcCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/path separators/);
+  });
+
+  it('exits non-zero when target file exists without --force', async () => {
+    const tpl = explicitTemplate();
+    mkdirSync(join(tmp, 'rfcs'), { recursive: true });
+    writeFileSync(join(tmp, 'rfcs/', 'existing.md'), 'old', 'utf8');
+    setArgv('init', 'existing', '--template', tpl);
+    await expect(buildRfcCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/refusing to overwrite/);
+    expect(readFileSync(join(tmp, 'rfcs/', 'existing.md'), 'utf8')).toBe('old');
+  });
+
+  it('--force overwrites existing files end-to-end', async () => {
+    const tpl = explicitTemplate();
+    mkdirSync(join(tmp, 'rfcs'), { recursive: true });
+    writeFileSync(join(tmp, 'rfcs/', 'existing.md'), 'old', 'utf8');
+    setArgv('init', 'existing', '--template', tpl, '--force', '--format', 'json');
+    await buildRfcCli().parseAsync();
+    const json = stdoutJson<{ ok: boolean; created: boolean }>();
+    expect(json.ok).toBe(true);
+    expect(json.created).toBe(true);
+    expect(readFileSync(join(tmp, 'rfcs/', 'existing.md'), 'utf8')).toContain('# RFC: Existing');
+  });
+
+  it('AC #3: uses the shipped framework-rfc.md template by default', async () => {
+    // No --template flag → relies on module-relative resolution.
+    setArgv('init', 'default-template', '--format', 'json');
+    await buildRfcCli().parseAsync();
+    const json = stdoutJson<{ filePath: string; templatePath: string }>();
+    expect(json.templatePath).toMatch(/framework-rfc\.md$/);
+    const body = readFileSync(json.filePath, 'utf8');
+    // Spot-check the canonical sections.
+    expect(body).toContain('## Summary');
+    expect(body).toContain('## Background');
+    expect(body).toContain('## Open Questions');
+    expect(body).toContain('## Decisions');
+    expect(body).toContain('## Phases');
+    expect(body).toContain('## Acceptance');
+    expect(body).toContain('## References');
+    // Title derived from slug.
+    expect(body).toContain('# RFC: Default Template');
   });
 });
