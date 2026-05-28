@@ -33,7 +33,9 @@ import type { GateEvaluation, IssueInput } from '../types.js';
  */
 const TRACKED_WORK_ID =
   // AISDLC-NN(.NN) | RFC-NNNN | (gh)#NN | org/repo#NN | https://… | repo-relative file path
-  String.raw`(?:AISDLC-\d+(?:\.\d+)?|RFC-\d{4}|(?:gh)?#\d+|[\w.-]+\/[\w.-]+#\d+|https?:\/\/[^\s)]+|[\w./-]+\.[a-zA-Z0-9]+)`;
+  // (file paths MUST contain at least one slash OR end in a recognised code/spec extension
+  // to avoid matching bare version-like tokens — `after 1.2 ships` previously matched `1.2`)
+  String.raw`(?:AISDLC-\d+(?:\.\d+)?|RFC-\d{4}|(?:gh)?#\d+|[\w.-]+\/[\w.-]+#\d+|https?:\/\/[^\s)]+|[\w.-]+\/[\w./-]+\.[a-zA-Z0-9]+|[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|yaml|yml|md|sh|py|go|rs|toml|sql))`;
 
 /**
  * Dependency phrases that can introduce a tracked-work id. Kept narrow

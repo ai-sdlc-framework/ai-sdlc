@@ -108,6 +108,23 @@ describe('findInvisibleDependencies', () => {
     const offenders = findInvisibleDependencies(input('This needs a green CI run before merge.'));
     expect(offenders.length).toBe(0);
   });
+
+  it('passes "after 1.2 ships" (version-like token, not a file path)', () => {
+    const offenders = findInvisibleDependencies(input('Wait to merge until after 1.2 ships.'));
+    expect(offenders.length).toBe(0);
+  });
+
+  it('passes "v0.10.0 deprecation" (version-like token, not a file path)', () => {
+    const offenders = findInvisibleDependencies(
+      input('Track this for the v0.10.0 deprecation window.'),
+    );
+    expect(offenders.length).toBe(0);
+  });
+
+  it('still flags a real file-path reference (depends on src/foo.ts)', () => {
+    const offenders = findInvisibleDependencies(input('depends on src/foo.ts shipping first'));
+    expect(offenders.length).toBeGreaterThan(0);
+  });
 });
 
 describe('evaluateGate7', () => {
