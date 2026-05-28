@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/dispatch-session.v1.schema.json",
+  "title": "AI-SDLC DispatchSession",
+  "description": "Per-task session file written by /ai-sdlc execute-parallel to .ai-sdlc/dispatch/sessions/<task-id-lower>.session.json. Tracks the tmux pane lifecycle and heartbeat state for a single concurrently-running /ai-sdlc execute invocation. Updated by the spawned session after each Step 0-13 transition. AISDLC-462.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "tmuxSession",
+    "tmuxWindow",
+    "paneId",
+    "spawnedAt",
+    "status"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v1"],
+      "description": "Session schema version. Pinned so future readers can refuse sessions they don't understand."
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$",
+      "description": "Stable backlog task identifier in canonical uppercase form (e.g. 'AISDLC-453')."
+    },
+    "tmuxSession": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the tmux session hosting all parallel panes (e.g. 'ai-sdlc-parallel')."
+    },
+    "tmuxWindow": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the tmux window for this task's pane (e.g. 'exec-aisdlc-453')."
+    },
+    "paneId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "tmux pane ID (e.g. '%14'). Empty string when pane ID is not yet known."
+    },
+    "spawnedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp when the tmux window was created."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["starting", "in-progress", "done", "failed"],
+      "description": "Current lifecycle state of the session. 'starting' = tmux window spawned, claude not yet running. 'in-progress' = first heartbeat received. 'done' = /ai-sdlc execute reported success + prUrl set. 'failed' = /ai-sdlc execute exited non-zero or was killed."
+    },
+    "currentStep": {
+      "type": "string",
+      "description": "Most recent Step 0-13 name written by the heartbeat helper (e.g. '07-reviewers-running', 'done'). Absent until first heartbeat."
+    },
+    "lastHeartbeat": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of the most recent step transition written by the spawned session. Absent until first heartbeat."
+    },
+    "prUrl": {
+      "type": ["string", "null"],
+      "description": "GitHub PR URL set when status reaches 'done'. Null or absent while the session is still running."
+    },
+    "prNumber": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "GitHub PR number (integer) corresponding to prUrl. Null or absent while the session is still running."
+    }
+  },
+  "additionalProperties": false
+}

@@ -3741,6 +3741,88 @@ export const dispatchResumeSignalV1Schema = {
   additionalProperties: false,
 } as const;
 
+export const dispatchSessionV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/dispatch-session.v1.schema.json',
+  title: 'AI-SDLC DispatchSession',
+  description:
+    'Per-task session file written by /ai-sdlc execute-parallel to .ai-sdlc/dispatch/sessions/<task-id-lower>.session.json. Tracks the tmux pane lifecycle and heartbeat state for a single concurrently-running /ai-sdlc execute invocation. Updated by the spawned session after each Step 0-13 transition. AISDLC-462.',
+  type: 'object',
+  required: [
+    'schemaVersion',
+    'taskId',
+    'tmuxSession',
+    'tmuxWindow',
+    'paneId',
+    'spawnedAt',
+    'status',
+  ],
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['v1'],
+      description:
+        "Session schema version. Pinned so future readers can refuse sessions they don't understand.",
+    },
+    taskId: {
+      type: 'string',
+      minLength: 1,
+      pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$',
+      description:
+        "Stable backlog task identifier in canonical uppercase form (e.g. 'AISDLC-453').",
+    },
+    tmuxSession: {
+      type: 'string',
+      minLength: 1,
+      description: "Name of the tmux session hosting all parallel panes (e.g. 'ai-sdlc-parallel').",
+    },
+    tmuxWindow: {
+      type: 'string',
+      minLength: 1,
+      description: "Name of the tmux window for this task's pane (e.g. 'exec-aisdlc-453').",
+    },
+    paneId: {
+      type: 'string',
+      minLength: 1,
+      description: "tmux pane ID (e.g. '%14'). Empty string when pane ID is not yet known.",
+    },
+    spawnedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 timestamp when the tmux window was created.',
+    },
+    status: {
+      type: 'string',
+      enum: ['starting', 'in-progress', 'done', 'failed'],
+      description:
+        "Current lifecycle state of the session. 'starting' = tmux window spawned, claude not yet running. 'in-progress' = first heartbeat received. 'done' = /ai-sdlc execute reported success + prUrl set. 'failed' = /ai-sdlc execute exited non-zero or was killed.",
+    },
+    currentStep: {
+      type: 'string',
+      description:
+        "Most recent Step 0-13 name written by the heartbeat helper (e.g. '07-reviewers-running', 'done'). Absent until first heartbeat.",
+    },
+    lastHeartbeat: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'ISO-8601 timestamp of the most recent step transition written by the spawned session. Absent until first heartbeat.',
+    },
+    prUrl: {
+      type: ['string', 'null'],
+      description:
+        "GitHub PR URL set when status reaches 'done'. Null or absent while the session is still running.",
+    },
+    prNumber: {
+      type: ['integer', 'null'],
+      minimum: 1,
+      description:
+        'GitHub PR number (integer) corresponding to prUrl. Null or absent while the session is still running.',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const dispatchVerdictV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/dispatch-verdict.v1.schema.json',
@@ -6522,6 +6604,9 @@ export const signalIngestionConfigV1Schema = {
             "BCP-47 language tags accepted by the classifier. Signals in unsupported languages are dropped + logged as a SignalLanguageUnsupported decision (RFC-0030 OQ-13.2 resolution). Default = ['en'] (v1 is English-only; multi-language deferred to v2).",
           default: ['en'],
         },
+        residencyEnforcement: {
+          $ref: '#/$defs/ResidencyEnforcementConfig',
+        },
       },
       additionalProperties: false,
     },
@@ -6619,6 +6704,57 @@ export const signalIngestionConfigV1Schema = {
       properties: {
         signalPipelineWeight: { type: 'number', minimum: 0, default: 0.5 },
         backlogItemWeight: { type: 'number', minimum: 0, default: 0.5 },
+      },
+      additionalProperties: false,
+    },
+    ResidencyEnforcementConfig: {
+      type: 'object',
+      description:
+        "Per-stage data residency enforcement toggles per RFC-0030 v0.3 OQ-13.3 re-walkthrough refinement (AISDLC-432). Composes with RFC-0022 Compliance Posture (which owns regime DECLARATION) by gating per-pipeline-stage ENFORCEMENT. All flags default to ON when at least one regime is declared; adopters can selectively disable enforcement points when their regime allows it (rare). `multiPostureBehavior: 'union'` is the v1 default — when an adopter declares both HIPAA AND GDPR, each regime's allowed-region constraint must be satisfied (strictest wins). See `docs/operations/signal-ingestion.md` §6.5 for the per-stage enforcement runbook.",
+      properties: {
+        sourceFromCompliancePosture: {
+          type: 'boolean',
+          default: true,
+          description:
+            'When true, the allowed-regions list per regime is sourced from the RFC-0022 compliance.yaml `derivedGates.allowedRegions`. When false, adopters must populate the allowed regions via the lower-level orchestrator API (advanced; rare).',
+        },
+        enforcementPoints: {
+          type: 'object',
+          properties: {
+            fetchSignals: {
+              type: 'boolean',
+              default: true,
+              description:
+                "Adapter-level check at fetchSignals() time — refuses signals whose region falls outside the declared regime's allowed regions. Emits `Decision: signal-residency-violation`.",
+            },
+            clustering: {
+              type: 'boolean',
+              default: true,
+              description:
+                'Partition signals by residencyRegion before similarity computation — cross-region cluster merge is structurally impossible. Required when regime is GDPR / HIPAA / PIPEDA.',
+            },
+            storage: {
+              type: 'boolean',
+              default: true,
+              description:
+                'Persist `residencyRegion` field on every stored signal record. Cross-region reads emit elevated audit log entries (SOC2 / HIPAA accountability).',
+            },
+            unifiedCostReport: {
+              type: 'boolean',
+              default: true,
+              description:
+                'Tag cost attribution rows with `residencyRegion`; unified cost report breaks out per-region totals so adopters can audit cross-region cost mingling.',
+            },
+          },
+          additionalProperties: false,
+        },
+        multiPostureBehavior: {
+          type: 'string',
+          enum: ['union'],
+          default: 'union',
+          description:
+            'How the pipeline composes multiple regime declarations. v1 ships `union` only — UNION of regime constraints, strictest applies.',
+        },
       },
       additionalProperties: false,
     },
@@ -6782,6 +6918,97 @@ export const subscriptionPlanSchema = {
     },
   },
   additionalProperties: false,
+} as const;
+
+export const substrateContractV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/substrate-contract.v1.schema.json',
+  title: 'AI-SDLC SubstrateContract',
+  description:
+    'RFC-0028 Substrate Contract — typed, per-Soul-DID configuration object that shared substrate code reads from. Per-soul behavior emerges from contract values; the substrate has no soul-specific conditionals (the §7.2 AST scan target). Phase 1 (AISDLC-452) ships the minimum surface needed to declare the field-level `identityClass` discriminant with the canonical `core | evolving` taxonomy enumerated per §7.1 v0.2 resolution. Phases 2-5 (AISDLC-453..456) wire CI integrity assertions, structural drift detection, and operator runbooks against this schema.',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'metadata', 'spec'],
+  additionalProperties: false,
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'SubstrateContract',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      required: ['soulId', 'fields'],
+      additionalProperties: false,
+      properties: {
+        soulId: {
+          type: 'string',
+          description:
+            'Soul DID identifier this contract binds to. Must match a `tessellation.souls[]` entry (CI integrity assertion in Phase 2).',
+          minLength: 1,
+        },
+        fields: {
+          type: 'array',
+          description:
+            'Substrate Contract fields. Each field carries an `identityClass` discriminant per RFC-0028 §7.1 v0.2 resolution (canonical `core | evolving` taxonomy). Fields without an explicit `identityClass` default to `core` per the conservative novel-field rule (promotion to `evolving` requires RFC amendment with Design + Engineering sign-off).',
+          items: {
+            $ref: '#/$defs/SubstrateContractField',
+          },
+          default: [],
+        },
+      },
+    },
+  },
+  $defs: {
+    IdentityClass: {
+      type: 'string',
+      description:
+        'Canonical RFC-0028 §7.1 v0.2 taxonomy. `core` = cannot be loosened by child Soul DIDs; pivot rescoring fires on change. `evolving` = free movement within tightening-only bounds; admission-queue rescoring only.',
+      enum: ['core', 'evolving'],
+    },
+    SubstrateContractField: {
+      type: 'object',
+      description:
+        'A single field on a Substrate Contract. Per RFC-0028 §3.2 universal invariants, every field MUST document its named consumer, default-fallback semantic, and inheritance class (`identityClass`). The no-dead-wires rule applies: a field without a named consumer is admissible-as-dead and must be removed or wired before the contract ships.',
+      required: ['name', 'namedConsumer', 'defaultFallback'],
+      additionalProperties: false,
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Field name. When listed in the canonical RFC-0028 §7.1 taxonomy (`requiresTenantPhysicalIsolation`, `observerCooldownMs`, etc.), the `identityClass` discriminant SHOULD match the canonical bucket. Novel field names default to `core`.',
+          minLength: 1,
+        },
+        identityClass: {
+          $ref: '#/$defs/IdentityClass',
+          description:
+            'Canonical inheritance class per RFC-0028 §7.1. Omit to opt into the novel-field default of `core` (a warning is emitted by `defaultIdentityClassForNovelField` to surface the missing classification to authors).',
+        },
+        namedConsumer: {
+          type: 'string',
+          description:
+            'Repo-relative path or symbol identifying the substrate file/function that reads this value. Required per RFC-0028 §3.2 no-dead-wires rule.',
+          minLength: 1,
+        },
+        defaultFallback: {
+          type: 'string',
+          description:
+            'Plain-text description of what happens if the field is absent. The substrate MUST NOT silently drop behavior — every field documents its fallback semantic.',
+          minLength: 1,
+        },
+        complianceLockKind: {
+          type: 'string',
+          description:
+            'When set, indicates the field is a tightening-only compliance lock per RFC-0028 §6. `boolean-locked` types as `true` literal; `numeric-cap` types as bounded discriminated union; `categorical` enforces inheritance via TypeScript template-literal types.',
+          enum: ['boolean-locked', 'numeric-cap', 'categorical'],
+        },
+      },
+    },
+  },
 } as const;
 
 export const variantConfigSchema = {
@@ -7189,6 +7416,7 @@ export const SCHEMAS: Record<string, object> = {
   'dispatch-config.v1.schema.json': dispatchConfigV1Schema,
   'dispatch-manifest.v1.schema.json': dispatchManifestV1Schema,
   'dispatch-resume-signal.v1.schema.json': dispatchResumeSignalV1Schema,
+  'dispatch-session.v1.schema.json': dispatchSessionV1Schema,
   'dispatch-verdict.v1.schema.json': dispatchVerdictV1Schema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
   'embedding-adapter.v1.schema.json': embeddingAdapterV1Schema,
@@ -7201,6 +7429,7 @@ export const SCHEMAS: Record<string, object> = {
   'signal-ingestion-config.v1.schema.json': signalIngestionConfigV1Schema,
   'signal-source-adapter.v1.schema.json': signalSourceAdapterV1Schema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
+  'substrate-contract.v1.schema.json': substrateContractV1Schema,
   'variant-config.schema.json': variantConfigSchema,
   'vector-store-entry.v1.schema.json': vectorStoreEntryV1Schema,
   'work-item.schema.json': workItemSchema,

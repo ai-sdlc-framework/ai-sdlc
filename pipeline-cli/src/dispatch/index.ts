@@ -116,3 +116,24 @@ export type {
   VerificationStatus,
   WorkerKind,
 } from './types.js';
+
+// AISDLC-462: Dispatch Session helpers for execute-parallel coordination.
+export {
+  archiveSession,
+  countActiveSessions,
+  ensureSessionsDirs,
+  isSessionActive,
+  listActiveSessions,
+  listSessions,
+  readSession,
+  SESSIONS_ARCHIVE_SUBDIR,
+  SESSIONS_SUBDIR,
+  sessionsArchiveDir,
+  sessionsDir,
+  sessionFilename,
+  sessionFilePath,
+  updateSession,
+  writeSession,
+} from './sessions.js';
+
+export type { DispatchSession, SessionStatus } from './sessions.js';

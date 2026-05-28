@@ -356,6 +356,7 @@ if [ "$ARG_FORM" = "gh-issue" ] && [ "$GH_ISSUE_NUMBER" -le 0 ] 2>/dev/null; the
 fi
 
 echo "[ai-sdlc-progress] Step 1: detected ARG_FORM=$ARG_FORM ($ARG)"
+update_session_state "$TASK_ID_LOWER" "01-validated" 2>/dev/null || true
 ```
 
 ### Step 1.a — GH-issue path branch (AISDLC-393 AC-2, AC-3, AC-4, AC-5)
@@ -519,6 +520,29 @@ When `ARG_FORM=backlog-task`, continue with the existing backlog-task validation
 TASK_ID_LOWER="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')"
 TASK_FILE=$(ls "backlog/tasks/${TASK_ID_LOWER} -"* 2>/dev/null | head -1)
 [ -z "$TASK_FILE" ] && { echo "ERROR: no task file for $TASK_ID"; exit 1; }
+
+# AISDLC-462: Heartbeat helper for /ai-sdlc execute-parallel coordination.
+# Writes currentStep + lastHeartbeat to .ai-sdlc/dispatch/sessions/<task>.session.json
+# when that file exists (created by execute-parallel on spawn). No-op otherwise —
+# backward-compatible with standalone /ai-sdlc execute invocations.
+update_session_state() {
+  local task_id_lower="$1" step="$2"
+  local session_file=".ai-sdlc/dispatch/sessions/${task_id_lower}.session.json"
+  [ -f "$session_file" ] || return 0
+  node -e "
+    const fs = require('fs');
+    const f = process.argv[1];
+    const step = process.argv[2];
+    try {
+      const s = JSON.parse(fs.readFileSync(f, 'utf8'));
+      s.currentStep = step;
+      s.lastHeartbeat = new Date().toISOString();
+      if (step === 'done') s.status = 'done';
+      else if (s.status === 'starting') s.status = 'in-progress';
+      fs.writeFileSync(f, JSON.stringify(s, null, 2));
+    } catch (e) { /* non-fatal */ }
+  " "$session_file" "$step" 2>/dev/null || true
+}
 ```
 
 Read the task with `mcp__backlog__task_view` to render its full structure. Then verify:
@@ -700,7 +724,17 @@ When invoking the Agent tool for the developer agent:
 
 Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them to the user as they appear.
 
+```bash
+# AISDLC-462: Heartbeat before developer invocation.
+update_session_state "$TASK_ID_LOWER" "05-dev-running" 2>/dev/null || true
+```
+
 ## Step 6 — Parse developer return value
+
+```bash
+# AISDLC-462: Heartbeat after developer completes.
+update_session_state "$TASK_ID_LOWER" "06-dev-done" 2>/dev/null || true
+```
 
 The developer returns a JSON object. Parse it and check:
 
@@ -746,6 +780,7 @@ CONFIDENCE=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.confidence')
 FELL_OPEN=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.fellOpen')
 
 echo "[ai-sdlc-progress] Step 7a: classifier decision: [$SELECTED] (confidence: $CONFIDENCE, fellOpen: $FELL_OPEN)"
+update_session_state "$TASK_ID_LOWER" "07-reviewers-running" 2>/dev/null || true
 ```
 
 The classifier reviewer names map to the reviewer subagents like this (the agents themselves keep their existing types — no rename needed):
@@ -1015,6 +1050,7 @@ for REVIEWER_NAME in $SELECTED; do
 done
 
 echo "[ai-sdlc-progress] Step 7c: transcript leaf emission complete (leaves at $WORKTREE_PATH/.ai-sdlc/transcript-leaves.jsonl)"
+update_session_state "$TASK_ID_LOWER" "07c-leaves-emitted" 2>/dev/null || true
 ```
 
 > **Concurrency note (AISDLC-383.8).** Leaves are emitted sequentially (one per reviewer in the `for` loop) after all reviewer Agent calls complete. This is the safest ordering: leafIndex is determined by the number of lines in `transcript-leaves.jsonl` at emission time, and sequential writes ensure no TOCTOU race. Parallel emission (emitting all three simultaneously via background jobs) would require an advisory lock on the JSONL file — tracked as a follow-up if throughput becomes a bottleneck.
@@ -1130,6 +1166,7 @@ else
 
     if [ -n "$PRE_HASH" ] && [ "$PRE_HASH" = "$POST_HASH" ]; then
       echo "[ai-sdlc-progress] Step 10.5: rebased cleanly, contentHash unchanged ($PRE_HASH); reviewers' approval reused"
+      update_session_state "$TASK_ID_LOWER" "10-signing" 2>/dev/null || true
       # Fall through to Step 10 unchanged
     else
       echo "[ai-sdlc-progress] Step 10.5: rebased; contentHash changed ($PRE_HASH → $POST_HASH); re-spawning 3 reviewers (1 round)"
@@ -1371,6 +1408,30 @@ gh pr create \
 
 Print the PR URL. Capture it as `MAIN_PR_URL` and the PR number as `MAIN_PR_NUMBER`.
 
+```bash
+# AISDLC-462: Update session file with prUrl once PR is open (non-fatal).
+if [ -n "${MAIN_PR_URL:-}" ] && [ -n "${MAIN_PR_NUMBER:-}" ]; then
+  _SESSION_FILE=".ai-sdlc/dispatch/sessions/${TASK_ID_LOWER}.session.json"
+  if [ -f "$_SESSION_FILE" ]; then
+    node -e "
+      const fs = require('fs');
+      const f = process.argv[1];
+      const prUrl = process.argv[2];
+      const prNum = parseInt(process.argv[3], 10);
+      try {
+        const s = JSON.parse(fs.readFileSync(f, 'utf8'));
+        s.prUrl = prUrl;
+        s.prNumber = prNum;
+        s.currentStep = '11b-pr-opened';
+        s.lastHeartbeat = new Date().toISOString();
+        if (s.status === 'starting') s.status = 'in-progress';
+        fs.writeFileSync(f, JSON.stringify(s, null, 2));
+      } catch (e) { /* non-fatal */ }
+    " "$_SESSION_FILE" "$MAIN_PR_URL" "$MAIN_PR_NUMBER" 2>/dev/null || true
+  fi
+fi
+```
+
 > **Note on Step 7a-bis incremental-review marker.** The marker lookup (`gh pr view "$BRANCH" --json comments`) works on DRAFT PRs — GitHub's REST API returns draft PR data regardless of draft state. The marker upsert in Step 11c below (`gh pr comment "$BRANCH"`) similarly works on drafts. No special handling needed here.
 
 ### Step 11c — Update the incremental-review marker (AISDLC-142, formerly Step 8.5)
@@ -1498,6 +1559,7 @@ This is the final step of the pipeline and the ONLY moment CI fires for this PR.
 # run against the fully-reviewed state.
 gh pr ready "$MAIN_PR_NUMBER"
 echo "[ai-sdlc-progress] Step 13: PR #$MAIN_PR_NUMBER flipped to ready_for_review — CI will fire once"
+update_session_state "$TASK_ID_LOWER" "done" 2>/dev/null || true
 ```
 
 If `gh pr ready` fails (network, the PR was already marked ready, etc.), do NOT abort — log the error and continue to cleanup. The PR is still open and reviewable; the operator can flip it manually via `gh pr ready <number>` or via the GitHub UI.

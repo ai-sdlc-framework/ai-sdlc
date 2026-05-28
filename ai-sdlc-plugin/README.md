@@ -63,6 +63,9 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 | Command | Description |
 |---------|-------------|
 | `/ai-sdlc execute <task-id>` | Full pipeline: worktree → developer → 3 reviewers → PR |
+| `/ai-sdlc execute-parallel [--count N] [--tasks ...]` | Spawn N concurrent execute sessions in tmux (max 5). Resource-gated; operator confirms before spawn. AISDLC-462. |
+| `/ai-sdlc execute-parallel-status` | Live status table of all parallel sessions (task, pane, status, step, PR, heartbeat-age). AISDLC-462. |
+| `/ai-sdlc execute-parallel-cleanup [--tasks ...]` | Kill in-flight tmux panes; archive session files to `sessions/archived/`. AISDLC-462. |
 | `/ai-sdlc review` | Standalone review pass on the current branch |
 | `/ai-sdlc rebase <pr>` | Mechanical rebase + re-sign of an open PR |
 | `/ai-sdlc triage` | Issue triage (DOR evaluation + PPA trust) |
