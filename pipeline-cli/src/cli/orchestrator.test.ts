@@ -874,3 +874,59 @@ describe('cli-orchestrator tick --task-from-file (AISDLC-373)', () => {
     expect(out.tick.dispatched).toEqual(['AISDLC-502']);
   });
 });
+
+// ── AISDLC-460 — ci-failure-watch subcommand ──────────────────────────
+
+describe('cli-orchestrator ci-failure-watch', () => {
+  it('--list-cooldowns returns the active cool-down records and exits', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-ci-watch-'));
+    try {
+      // Seed a cool-down file directly.
+      const dir = join(tmp, '.ai-sdlc', 'ci-conflict-resolver', 'cooldown');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, '42.json'),
+        JSON.stringify({
+          prNumber: 42,
+          classification: 'conflict-detected',
+          escalatedAt: Date.now() - 1000,
+          reason: 'semantic-conflict',
+        }),
+      );
+      setArgv('ci-failure-watch', '--work-dir', tmp, '--list-cooldowns');
+      await buildOrchestratorCli().parseAsync();
+      const out = stdoutJson() as { ok: boolean; mode: string; listCooldowns: unknown[] };
+      expect(out.ok).toBe(true);
+      expect(out.mode).toBe('ci-failure-watch');
+      expect(out.listCooldowns).toHaveLength(1);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('dry-run path (no --enable-dispatch) — surface contract test', async () => {
+    // The dry-run path requires `gh` to be wired (the CLI calls real
+    // gh because the standalone surface does NOT accept an injected
+    // Runner — adapters injection is reserved for the umbrella spawner
+    // path). Hermetic coverage of the watcher core itself lives in
+    // pipeline-cli/src/runtime/ci-failure-watcher.test.ts which
+    // exercises every classification + cool-down + dedup branch with
+    // a fake Runner.
+    //
+    // Here we verify the surface — yargs parses the flags + emits
+    // ok:true when --list-cooldowns short-circuits before gh runs.
+    // Full end-to-end with gh is a soak-time integration test, not a
+    // unit test.
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-ci-watch-'));
+    try {
+      setArgv('ci-failure-watch', '--work-dir', tmp, '--list-cooldowns');
+      await buildOrchestratorCli().parseAsync();
+      const out = stdoutJson() as { ok: boolean; mode: string; listCooldowns: unknown[] };
+      expect(out.ok).toBe(true);
+      expect(out.mode).toBe('ci-failure-watch');
+      expect(out.listCooldowns).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

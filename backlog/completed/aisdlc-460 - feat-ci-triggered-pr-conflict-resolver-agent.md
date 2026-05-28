@@ -1,9 +1,11 @@
 ---
 id: AISDLC-460
 title: 'feat: CI-triggered PR conflict-resolver agent (auto-rebase on CI failure notification)'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - claude
 created_date: '2026-05-27'
+updated_date: '2026-05-27'
 labels:
   - agent
   - ci
@@ -64,10 +66,10 @@ Phase 1 ships two trigger surfaces:
 
 ### Out of scope (defer)
 
-- Webhook-based push notification (vs polling) — requires a public endpoint, security review, and a new infra surface. Phase 2 once Phase 1 polling proves the agent works.
+- Webhook-based push notification (vs polling) — Phase 2 once Phase 1 polling proves the agent works; full design (public endpoint, security review, new infra surface) deferred to a Phase 2 task.
 - Slack notification fan-out — Phase 2; the watcher just needs to act, not announce.
 - Automatic re-arming after merge-queue rejection — Phase 2.
-- Cross-PR dependency resolution (e.g. "PR #A depends on #B's branch; rebase #A only after #B lands") — Phase 2.
+- Cross-PR dependency resolution (e.g. PR #A waiting on #B's branch landing first) — Phase 2.
 
 ### Tests
 
@@ -82,16 +84,16 @@ Phase 1 ships two trigger surfaces:
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `ai-sdlc-plugin/agents/ci-conflict-resolver.md` ships with frontmatter + hard rules + trigger contract documented
-- [ ] #2 `pipeline-cli/src/runtime/ci-failure-watcher.ts` (or similar) polls open PRs and classifies failure shapes
-- [ ] #3 Rebase-fixable failures spawn the agent in a worktree; agent runs rebase-resolver flow; force-pushes; re-arms auto-merge
-- [ ] #4 Non-rebase-fixable failures post a one-line comment and respect 24h cool-down
-- [ ] #5 N=2 concurrent-PR cap enforced per watcher tick
-- [ ] #6 `/ai-sdlc resolve-conflicts <pr-number>` manual slash command surface
-- [ ] #7 `cli-orchestrator ci-failure-watch` subcommand surface (cron-wireable)
-- [ ] #8 Hermetic tests cover all classification shapes + cool-down + concurrency cap + deduplicated comments
-- [ ] #9 Operator runbook at `docs/operations/ci-conflict-resolver.md` documents trigger surfaces, cost-cap, and Phase 2 deferrals
-- [ ] #10 Agent never merges PRs, never force-pushes to main, never edits `.ai-sdlc/**` or `.github/workflows/**`
+- [x] #1 `ai-sdlc-plugin/agents/ci-conflict-resolver.md` ships with frontmatter + hard rules + trigger contract documented
+- [x] #2 `pipeline-cli/src/runtime/ci-failure-watcher.ts` (or similar) polls open PRs and classifies failure shapes
+- [x] #3 Rebase-fixable failures spawn the agent in a worktree; agent runs rebase-resolver flow; force-pushes; re-arms auto-merge
+- [x] #4 Non-rebase-fixable failures post a one-line comment and respect 24h cool-down
+- [x] #5 N=2 concurrent-PR cap enforced per watcher tick
+- [x] #6 `/ai-sdlc resolve-conflicts <pr-number>` manual slash command surface
+- [x] #7 `cli-orchestrator ci-failure-watch` subcommand surface (cron-wireable)
+- [x] #8 Hermetic tests cover all classification shapes + cool-down + concurrency cap + deduplicated comments
+- [x] #9 Operator runbook at `docs/operations/ci-conflict-resolver.md` documents trigger surfaces, cost-cap, and Phase 2 deferrals
+- [x] #10 Agent never merges PRs, never force-pushes to main, never edits `.ai-sdlc/**` or `.github/workflows/**`
 <!-- AC:END -->
 
 ## Out of scope

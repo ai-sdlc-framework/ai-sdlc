@@ -49,6 +49,14 @@ import {
   writeDispatchResult,
   type DispatchResult,
 } from '../runtime/spawners/dispatch-result.js';
+import {
+  DEFAULT_POLL_INTERVAL_SEC as CI_WATCHER_DEFAULT_POLL_INTERVAL_SEC,
+  MAX_CONCURRENT_AGENTS_PER_TICK as CI_WATCHER_MAX_CONCURRENT_AGENTS_PER_TICK,
+  listActiveCooldowns,
+  runWatcherLoop,
+  runWatcherTick,
+  type WatcherTickResult,
+} from '../runtime/ci-failure-watcher.js';
 import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
 import { SPAWNER_KINDS, type SpawnerKind } from './execute.js';
 
@@ -453,6 +461,107 @@ export function buildOrchestratorCli(
           mode: 'status',
           status,
           flag: ORCHESTRATOR_FLAG,
+        });
+      },
+    )
+    .command(
+      'ci-failure-watch',
+      'AISDLC-460 — poll open PRs every --poll-interval-sec seconds, dispatch ci-conflict-resolver agent for rebase-fixable failures, post deduped escalation comments + 24h cool-down for the rest. Dry-run by default (no agent spawn); pass --enable-dispatch to wire dispatch.',
+      (y) =>
+        y
+          .option('poll-interval-sec', {
+            describe: 'Polling cadence between ticks (default 60s per AISDLC-460).',
+            type: 'number',
+            default: CI_WATCHER_DEFAULT_POLL_INTERVAL_SEC,
+          })
+          .option('max-ticks', {
+            describe: 'Optional cap on tick count. Default: 1 (single tick, cron-friendly).',
+            type: 'number',
+            default: 1,
+          })
+          .option('max-concurrent-agents', {
+            describe:
+              'Max ci-conflict-resolver agents to spawn per tick (AISDLC-460 cost-cap, default 2).',
+            type: 'number',
+            default: CI_WATCHER_MAX_CONCURRENT_AGENTS_PER_TICK,
+          })
+          .option('repo', {
+            describe: 'Repository slug (org/repo) passed to gh. Defaults to cwd remote.',
+            type: 'string',
+          })
+          .option('enable-dispatch', {
+            describe:
+              'Wire the ci-conflict-resolver agent spawner. Without this flag the tick is a dry-run (classify + cool-down probe only — no agent spawn, no comment post).',
+            type: 'boolean',
+            default: false,
+          })
+          .option('list-cooldowns', {
+            describe:
+              'Print the currently active cool-down records and exit. Does NOT run any tick.',
+            type: 'boolean',
+            default: false,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+
+        if (argv['list-cooldowns']) {
+          const active = listActiveCooldowns(workDir);
+          emit({ ok: true, mode: 'ci-failure-watch', listCooldowns: active });
+          return;
+        }
+
+        const repo = argv.repo ? String(argv.repo) : undefined;
+        const maxConcurrentAgents = Number(argv['max-concurrent-agents']);
+        const pollIntervalSec = Number(argv['poll-interval-sec']);
+        const maxTicks = Number(argv['max-ticks']);
+
+        // Phase 1 — the agent spawner is supplied externally by the
+        // hosting surface (operator CC session running /ai-sdlc resolve-conflicts,
+        // or the orchestrator-tick reconciliation step). The standalone
+        // `cli-orchestrator ci-failure-watch` CLI does NOT have access to
+        // the Claude Code `Agent` tool, so --enable-dispatch is gated
+        // behind an explicit operator opt-in that signals "I have wired
+        // a spawner via some other surface" (typically by piping the
+        // tick output to a follow-up Agent call).
+        //
+        // Without --enable-dispatch we run the classify-only dry-run.
+        // This satisfies the AC #7 "cron-wireable" contract — operators
+        // can cron `cli-orchestrator ci-failure-watch` to keep cool-downs
+        // pruned + diagnostic snapshots written to events.jsonl, and
+        // wire a separate Agent invocation when they want full
+        // dispatch.
+        const spawner = argv['enable-dispatch']
+          ? async () => {
+              throw new Error(
+                'ci-failure-watch --enable-dispatch requires an external spawner — none wired in this CLI surface. ' +
+                  'Use /ai-sdlc resolve-conflicts <pr> for foreground dispatch, or wire the spawner via the orchestrator-tick reconciliation step.',
+              );
+            }
+          : undefined;
+
+        const tickOptions = {
+          workDir,
+          pollIntervalSec,
+          maxTicks,
+          maxConcurrentAgents,
+          ...(repo ? { repo } : {}),
+          ...(spawner ? { spawner } : {}),
+        };
+
+        const results: WatcherTickResult[] =
+          maxTicks === 1 ? [await runWatcherTick(tickOptions)] : await runWatcherLoop(tickOptions);
+
+        emit({
+          ok: true,
+          mode: 'ci-failure-watch',
+          ticksRun: results.length,
+          lastTick: results[results.length - 1] ?? null,
+          summary: {
+            scannedPrs: results.reduce((a, r) => a + r.scannedPrs, 0),
+            dispatchedPrs: results.reduce((a, r) => a + r.dispatchedPrs.length, 0),
+            escalated: results.reduce((a, r) => a + r.escalated.length, 0),
+            skippedByCooldown: results.reduce((a, r) => a + r.skippedByCooldown.length, 0),
+          },
         });
       },
     )

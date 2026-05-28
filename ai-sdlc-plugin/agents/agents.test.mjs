@@ -86,6 +86,7 @@ const agentFiles = [
   'refinement-reviewer.md',
   'code-reviewer-codex.md',
   'test-reviewer-codex.md',
+  'ci-conflict-resolver.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const codexReviewerFiles = ['code-reviewer-codex.md', 'test-reviewer-codex.md'];
