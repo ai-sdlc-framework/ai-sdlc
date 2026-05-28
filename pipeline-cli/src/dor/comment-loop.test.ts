@@ -133,6 +133,68 @@ describe('renderClarificationComment', () => {
     expect(body).toContain(dorCommentMarkerFor('dedicated-slack'));
     expect(body).not.toContain(dorCommentMarkerFor('author'));
   });
+
+  // AISDLC-457 — AC-5: when the verdict has fail gates but none of them
+  // are `severity === 'block'`, the legacy renderer emitted the "blocked
+  // on the following gates" header and zero detail, producing a non-
+  // actionable comment. The fix falls back to all failing gates (with
+  // the severity suffixed) so the comment always has actionable detail
+  // beneath the header.
+  it('falls back to warn-severity fails when no block-severity fails exist (AC-5)', () => {
+    const verdict: RefinementVerdict = {
+      ...blockedVerdict(),
+      gates: [
+        {
+          gateId: 4,
+          verdict: 'fail',
+          severity: 'warn',
+          stage: 'A',
+          confidence: 'medium',
+          finding: 'Scope is unbounded — body lists 12 unrelated changes',
+        },
+        { gateId: 1, verdict: 'pass', severity: 'block', stage: 'A', confidence: 'high' },
+      ],
+    };
+    const body = renderClarificationComment(verdict);
+    // Header still fires.
+    expect(body).toContain("it's blocked on the following gates");
+    // Detail beneath the header is NON-empty — the warn-severity gate is
+    // surfaced with its severity suffix.
+    expect(body).toContain('### Gate 4 — Scope is bounded (severity: warn)');
+    expect(body).toContain('Scope is unbounded — body lists 12 unrelated changes');
+  });
+
+  it('prefers block-severity fails when both block and warn fails are present', () => {
+    const verdict: RefinementVerdict = {
+      ...blockedVerdict(),
+      gates: [
+        {
+          gateId: 1,
+          verdict: 'fail',
+          severity: 'block',
+          stage: 'A',
+          confidence: 'high',
+          finding: 'AC #2 is not binary-testable',
+        },
+        {
+          gateId: 4,
+          verdict: 'fail',
+          severity: 'warn',
+          stage: 'A',
+          confidence: 'medium',
+          finding: 'Scope is unbounded',
+        },
+      ],
+    };
+    const body = renderClarificationComment(verdict);
+    // Block-severity gate surfaces (no severity suffix).
+    expect(body).toContain('### Gate 1 — Acceptance criteria are binary-testable');
+    expect(body).not.toContain('Gate 1 — Acceptance criteria are binary-testable (severity:');
+    // Warn-severity gate is NOT surfaced when a block-severity gate
+    // exists — preserves the legacy signal-to-noise on standard blocked
+    // verdicts.
+    expect(body).not.toContain('### Gate 4 —');
+  });
 });
 
 // ── RFC-0014 Phase 3 — blast-radius + external-deps callouts ──────────

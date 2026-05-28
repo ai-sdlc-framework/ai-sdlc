@@ -90,7 +90,16 @@ export function renderClarificationComment(
   const marker = dorCommentMarkerFor(opts.channel ?? 'author');
   const rubricUrl = opts.rubricUrl ?? 'https://docs.ai-sdlc.io/rfc/0011';
 
-  const blocked = verdict.gates.filter((g) => g.verdict === 'fail' && g.severity === 'block');
+  // AISDLC-457: always emit per-gate violation detail when the "blocked
+  // on the following gates" header fires. The legacy filter only
+  // surfaced `severity === 'block'` fails, which produced an empty gate
+  // list (and therefore a non-actionable comment) on verdicts that had
+  // only `severity === 'warn'` fails. Prefer the block-severity subset
+  // when present (preserves the prior signal-to-noise on standard
+  // blocked verdicts) and fall back to all failing gates otherwise.
+  const failing = verdict.gates.filter((g) => g.verdict === 'fail');
+  const blocked = failing.filter((g) => g.severity === 'block');
+  const detailGates = blocked.length > 0 ? blocked : failing;
 
   const sections: string[] = [marker, '', '## Issue not yet ready for execution', ''];
   sections.push(
@@ -98,8 +107,9 @@ export function renderClarificationComment(
   );
   sections.push('');
 
-  for (const gate of blocked) {
-    sections.push(`### Gate ${gate.gateId} — ${gateName(gate.gateId)}`);
+  for (const gate of detailGates) {
+    const severitySuffix = gate.severity === 'block' ? '' : ` (severity: ${gate.severity})`;
+    sections.push(`### Gate ${gate.gateId} — ${gateName(gate.gateId)}${severitySuffix}`);
     if (gate.finding) sections.push(redactSecrets(gate.finding));
     sections.push('');
   }
