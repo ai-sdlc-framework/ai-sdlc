@@ -16,6 +16,18 @@ dependencies:
 references:
   - spec/rfcs/RFC-0017-in-soul-variant-pattern.md
 priority: medium
+blocked:
+  reason: >-
+    Upstream-OQ gate override: (1) RFC-0017 frontmatter `lifecycle:` field
+    is stale at 'Ready for Review' but the body header reads `**Lifecycle:**
+    Signed Off` after the 2026-05-26 v0.4 sign-off from all three Authority
+    pillars (Mo conditional, Dominique Engineering, Alex Product) per the
+    Sign-Off table. RFC-0017 v0.4.3 explicitly notes Mo's condition #1
+    discharges when AISDLC-437 ships — this task is the discharge mechanism.
+    (2) RFC-0018 is referenced only in body text as a "ProductD deferred to
+    RFC-0018" note explaining scope reduction; it is NOT a runtime dependency
+    of this task's implementation. Frontmatter `references:` correctly lists
+    only RFC-0017.
 ---
 
 ## Description
