@@ -28,6 +28,7 @@ import {
   appendDecisionEvent,
   buildDecisionSupportView,
   buildPendingExemplarsDigest,
+  buildSubDecisionGraph,
   clearFatigue,
   computeStageACoverage,
   computeTimeboxExpiresAt,
@@ -37,6 +38,7 @@ import {
   filterExpiredDecisions,
   getFatigueStatus,
   isDecisionCatalogEnabled,
+  isNotebookSummariesEnabled,
   isStageCAutoApplyEligible,
   listDecisions,
   loadDecisionsConfig,
@@ -50,25 +52,32 @@ import {
   mirrorSubstrateEntry,
   msRemainingUntil,
   nextDecisionId,
+  notebookSummariesDisabledMessage,
   parseTimebox,
   projectDecision,
   promoteAllDisposedPendingExemplars,
   readDecisionExemplars,
+  readNotebookSummary,
   readPendingExemplars,
+  readResearchArtifacts,
   rejectPendingExemplar,
   renderDecisionSupportSurface,
   renderPendingExemplarsDigestMarkdown,
+  renderSubDecisionGraphHtml,
+  renderSubDecisionGraphMermaid,
   resolveDecisionExemplarsPath,
   resolveDecisionsConfig,
   resolveEventLogPath,
   resolveOperatorStatePath,
   resolvePendingExemplarsPath,
+  resolveResearchSubagentThreshold,
   resolveStageCRuntimeConfig,
   runCalibrationSweep,
   runStageA,
   runStageB,
   runStageC,
   setFatigue,
+  shouldInvokeResearchSubagent,
   sortDecisionsByTimeboxUrgency,
   STAGE_A_COVERAGE_TARGET,
   TIMEBOX_CATEGORICAL_ALIASES,
@@ -1017,6 +1026,208 @@ export function buildDecisionsCli(): Argv {
             }
           }
         }
+      },
+    )
+    .command(
+      'graph <id>',
+      'RFC-0035 Phase 10 (AISDLC-294) — render the sub-decision graph for a decision. `--format mermaid` (default) emits the raw flowchart source for inclusion in markdown / web surfaces; `--format html` emits a standalone HTML page with the Mermaid CDN renderer embedded so operators can open it in a browser.',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['mermaid', 'html', 'json'] as const,
+            default: 'mermaid' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, enabled: false, graph: null });
+          } else {
+            emitText('(decision catalog feature flag is off — no decisions)');
+          }
+          return;
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) {
+          fail(`decision not found: ${id}`);
+        }
+        const evaluation = decision!.status.evaluation as
+          | { stageC?: import('../decisions/index.js').StageCOutput }
+          | undefined;
+        const stageC = evaluation?.stageC;
+        const graph = buildSubDecisionGraph(decision!, stageC);
+        const mermaid = renderSubDecisionGraphMermaid(graph, id);
+
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, enabled: true, decisionId: id, graph, mermaid });
+          return;
+        }
+        if (mermaid === null) {
+          emitText(`(no sub-decisions declared or implied for ${id} — empty graph)`);
+          return;
+        }
+        if (String(argv.format) === 'html') {
+          const html = renderSubDecisionGraphHtml(graph, id);
+          process.stdout.write(html ?? '');
+          return;
+        }
+        process.stdout.write(mermaid + '\n');
+      },
+    )
+    .command(
+      'research <id>',
+      'RFC-0035 Phase 10 (AISDLC-294) — list / read persisted research-subagent findings for a decision. The framework writes findings under .ai-sdlc/_decisions/research/<DEC>-<ts>.md when Stage C confidence falls below the configured threshold AND an invoker is wired up. This subcommand only READS — it does NOT spawn a subagent (no transport baked into the CLI; production wires the invoker via the library API).',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['text', 'json'] as const,
+            default: 'text' as const,
+          })
+          .option('gate', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Report the gate decision (would the framework invoke?) based on the current Stage C output + configured threshold. Does not spawn the subagent.',
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, enabled: false, artifacts: [], gate: null });
+          } else {
+            emitText('(decision catalog feature flag is off — no decisions)');
+          }
+          return;
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) {
+          fail(`decision not found: ${id}`);
+        }
+        const artifacts = readResearchArtifacts(workDir, id);
+
+        let gateResult: ReturnType<typeof shouldInvokeResearchSubagent> | null = null;
+        let effectiveThreshold: number | null = null;
+        if (argv.gate) {
+          const loaded = loadDecisionsConfig({ workDir });
+          effectiveThreshold = resolveResearchSubagentThreshold(loaded);
+          const evaluation = decision!.status.evaluation as
+            | { stageC?: import('../decisions/index.js').StageCOutput }
+            | undefined;
+          gateResult = shouldInvokeResearchSubagent({
+            stageC: evaluation?.stageC ?? null,
+            threshold: effectiveThreshold,
+          });
+        }
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            enabled: true,
+            decisionId: id,
+            artifacts,
+            ...(argv.gate ? { gate: gateResult, effectiveThreshold } : {}),
+          });
+          return;
+        }
+        if (argv.gate && gateResult) {
+          emitText(`Research-subagent gate for ${id}`);
+          emitText(`  threshold:           ${effectiveThreshold?.toFixed(3) ?? 'n/a'}`);
+          emitText(`  observedConfidence:  ${gateResult.observedConfidence?.toFixed(3) ?? 'n/a'}`);
+          emitText(`  invoke:              ${gateResult.invoke}`);
+          if (gateResult.skipReason) emitText(`  skipReason:          ${gateResult.skipReason}`);
+          emitText('');
+        }
+        if (artifacts.length === 0) {
+          emitText(`(no research findings persisted for ${id})`);
+          return;
+        }
+        emitText(`Research findings for ${id} (${artifacts.length} artifact(s)):`);
+        emitText('');
+        for (const a of artifacts) {
+          emitText(`--- ${a.timestamp} (${a.path}) ---`);
+          emitText(a.findingsMarkdown.trimEnd());
+          emitText('');
+        }
+      },
+    )
+    .command(
+      'summary <id>',
+      'RFC-0035 Phase 10 (AISDLC-294) — read the persisted NotebookLM-style summary for a decision (gated on AI_SDLC_DECISION_NOTEBOOK_SUMMARIES feature flag). Read-only: does NOT generate; production wires `runNotebookSummary()` from the library API.',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['text', 'json'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, enabled: false, summary: null });
+          } else {
+            emitText('(decision catalog feature flag is off — no decisions)');
+          }
+          return;
+        }
+        if (!isNotebookSummariesEnabled()) {
+          warnToStderr(notebookSummariesDisabledMessage());
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) {
+          fail(`decision not found: ${id}`);
+        }
+        const summary = readNotebookSummary(workDir, id);
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            enabled: true,
+            notebookSummariesEnabled: isNotebookSummariesEnabled(),
+            decisionId: id,
+            summary,
+          });
+          return;
+        }
+        if (summary === null) {
+          emitText(`(no notebook summary persisted for ${id})`);
+          return;
+        }
+        emitText(`Notebook summary for ${id}`);
+        emitText(`  (path: ${summary.path})`);
+        emitText('');
+        emitText(summary.summaryMarkdown.trimEnd());
       },
     )
     .command(

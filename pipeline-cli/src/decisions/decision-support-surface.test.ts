@@ -12,6 +12,7 @@ import {
   buildSubDecisionGraph,
   renderDecisionSupportSurface,
   renderStageProvenance,
+  renderSubDecisionGraphHtml,
   renderSubDecisionGraphMermaid,
   type DecisionSupportView,
 } from './decision-support-surface.js';
@@ -508,5 +509,65 @@ describe('renderDecisionSupportSurface', () => {
     });
     const renderedPending = renderDecisionSupportSurface(buildDecisionSupportView(pending));
     expect(renderedPending).toMatch(/\*\*status:\*\* pending-operator/);
+  });
+});
+
+// ── Phase 10 (AISDLC-294) — HTML graph renderer ─────────────────────────────
+
+describe('renderSubDecisionGraphHtml', () => {
+  it('returns null when graph has no sub-decisions', () => {
+    const decision = baseDecision();
+    const graph = buildSubDecisionGraph(decision, undefined);
+    expect(renderSubDecisionGraphHtml(graph, decision.metadata.id)).toBeNull();
+  });
+
+  it('emits a standalone HTML doc when graph has content', () => {
+    const decision = baseDecision({
+      spec: {
+        summary: 'x',
+        options: [{ id: 'opt-a', description: 'A', subDecisions: ['who owns the rollout?'] }],
+      },
+    });
+    const graph = buildSubDecisionGraph(decision, undefined);
+    const html = renderSubDecisionGraphHtml(graph, decision.metadata.id);
+    expect(html).toContain('<!DOCTYPE html>');
+    expect(html).toContain('class="mermaid"');
+    expect(html).toContain('flowchart TD');
+    expect(html).toContain('who owns the rollout?');
+    expect(html).toContain('mermaid.esm.min.mjs');
+  });
+
+  it('HTML-escapes the page title', () => {
+    const decision = baseDecision({ metadata: { ...baseDecision().metadata, id: 'DEC-0042' } });
+    decision.spec = {
+      summary: 'x',
+      options: [{ id: 'opt-a', description: 'A', subDecisions: ['x'] }],
+    };
+    const graph = buildSubDecisionGraph(decision, undefined);
+    const html = renderSubDecisionGraphHtml(graph, decision.metadata.id);
+    expect(html).toContain('Decision DEC-0042 — sub-decision graph');
+  });
+
+  it('defends against </script> injection in option text', () => {
+    const decision = baseDecision({
+      spec: {
+        summary: 'x',
+        options: [
+          {
+            id: 'opt-a',
+            description: 'A</script><script>alert(1)</script>',
+            subDecisions: ['x'],
+          },
+        ],
+      },
+    });
+    const graph = buildSubDecisionGraph(decision, undefined);
+    const html = renderSubDecisionGraphHtml(graph, decision.metadata.id);
+    // The literal `</script>` must NOT appear in the rendered HTML at the
+    // top-level (any occurrence must be escaped). Mermaid metachar handling
+    // happens inside the Mermaid renderer, but the HTML wrapper must
+    // sanitize.
+    expect(html).not.toMatch(/<\/script><script>alert/);
+    expect(html).toContain('&lt;/script&gt;');
   });
 });

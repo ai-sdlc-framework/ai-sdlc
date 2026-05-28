@@ -396,6 +396,89 @@ function quoteMermaidLabel(text: string): string {
   return `"${text.replace(/"/g, '&quot;')}"`;
 }
 
+// ── Phase 10 (AISDLC-294) — Richer HTML graph rendering ─────────────────────
+
+/**
+ * Render the sub-decision graph as a standalone HTML document that ships
+ * the Mermaid renderer (CDN) so operators can open it directly in a
+ * browser without a local toolchain. The HTML escapes Mermaid metachars
+ * via the existing `renderSubDecisionGraphMermaid()` quoting; the wrapper
+ * only adds the doc shell + `<script type="module">` boot.
+ *
+ * Returns `null` when the underlying graph has nothing worth rendering
+ * (mirrors `renderSubDecisionGraphMermaid`'s contract).
+ *
+ * This is the §8.2 "richer rendering" surface — the operator can pipe it
+ * to a file (`> /tmp/dec-0042.html`) and open it directly. Future work
+ * may replace the CDN dependency with a bundled `mermaid.min.js` for
+ * offline use; v1 ships the CDN form because the cost is one script tag
+ * and the surface is operator-side, not subagent-side (no sandbox).
+ */
+export function renderSubDecisionGraphHtml(
+  graph: SubDecisionGraphNode[],
+  decisionId: string,
+): string | null {
+  const mermaid = renderSubDecisionGraphMermaid(graph, decisionId);
+  if (mermaid === null) return null;
+
+  // HTML-escape the embedded Mermaid source. Mermaid's own quoting is
+  // already done inside `quoteMermaidLabel`; we only need to defend
+  // against `</script>` injection in option text (paranoid but cheap).
+  const escapedMermaid = escapeForScript(mermaid);
+  const escapedTitle = escapeHtml(`Decision ${decisionId} — sub-decision graph`);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapedTitle}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           max-width: 1200px; margin: 2em auto; padding: 0 1em; color: #1d1d1f; }
+    h1 { font-size: 1.4em; margin-bottom: 0.5em; }
+    .mermaid { background: #fafafa; border: 1px solid #e1e4e8; border-radius: 6px;
+               padding: 1.5em; overflow-x: auto; }
+    footer { margin-top: 2em; color: #6e6e73; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <h1>${escapedTitle}</h1>
+  <div class="mermaid">${escapedMermaid}</div>
+  <footer>
+    Rendered by <code>cli-decisions graph &lt;id&gt; --format html</code> (RFC-0035 Phase 10).
+  </footer>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
+`;
+}
+
+/**
+ * Escape characters that would break out of an HTML element body. Used
+ * for the page title; the Mermaid block uses {@link escapeForScript}.
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Escape characters that would let raw Mermaid source break out of a
+ * `<div class="mermaid">` block AND defend against `</script>` injection
+ * if a malicious option label ever contained it. Mermaid itself parses
+ * the inner text — we just need to keep HTML / script boundaries clean.
+ */
+function escapeForScript(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /**
  * Render the Stage A / B / C provenance block as Markdown bullet lines.
  * Each tier is rendered independently — operators see "which tier resolved

@@ -180,6 +180,15 @@ export interface DecisionsConfig {
    */
   stageCConfidenceThreshold?: number;
   /**
+   * RFC-0035 Phase 10 (AISDLC-294) §8.2 — research-subagent confidence
+   * floor. When Stage C's recommendation confidence falls strictly below
+   * this value, the framework MAY spawn an on-demand research subagent
+   * via the injected `ResearchSubagentInvoker`. Default: 0.6 (strictly
+   * less than the Stage C auto-apply threshold, 0.7, so the bands don't
+   * overlap). Per-org configurable.
+   */
+  researchSubagentConfidenceThreshold?: number;
+  /**
    * Phase 7 (AISDLC-291) — per-tier daily decision budgets composing with
    * RFC-0016 t-shirt sizes. Missing tiers fall back to the §7.1 defaults
    * (xs:30, s:15, m:6, l:2, xl:1).

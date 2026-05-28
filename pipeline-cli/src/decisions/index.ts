@@ -11,6 +11,9 @@
  * Phase 9 (AISDLC-293) adds the override-driven calibration loop
  * (`pending-exemplars`, `decision-exemplars`, `calibration-sweep`,
  * `exemplars-digest`).
+ * Phase 10 (AISDLC-294) adds the research subagent runner
+ * (`research-subagent`), NotebookLM-style summaries (`notebook-summary`),
+ * and the HTML graph renderer surface on `decision-support-surface`.
  *
  * @module decisions
  */
@@ -33,3 +36,5 @@ export * from './exemplars-digest.js';
 export * from './decision-support-surface.js';
 export * from './fatigue.js';
 export * from './timebox.js';
+export * from './research-subagent.js';
+export * from './notebook-summary.js';
