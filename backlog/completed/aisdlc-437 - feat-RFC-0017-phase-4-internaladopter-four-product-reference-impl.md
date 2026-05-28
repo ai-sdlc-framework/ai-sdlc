@@ -1,7 +1,7 @@
 ---
 id: AISDLC-437
 title: 'feat: RFC-0017 Phase 4 — InternalAdopter three-product suite (ProductA/B/C) as reference implementation; ProductD deferred to RFC-0018 per v0.4 (practitioner validation pass)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18'
 labels:
@@ -42,12 +42,23 @@ Phase 4 of RFC-0017 §9 + §11 practitioner validation. Implements InternalAdopt
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 ProductA variant declarations ship with `small-utility` / `enterprise` / `county-regional`
-- [ ] #2 ProductB variant declarations ship with `field-tech-on-truck` / `field-tech-handheld` / `supervisor-tablet`
-- [ ] #3 ProductC variant declarations ship with `billing-clerk` / `customer-portal` / `csr-dashboard`
-- [ ] #4 ProductD scope removed from this task per v0.4 (deferred to RFC-0018 §11 — temporal-context-bound modes are Journey shape, not Variant). File follow-up task against RFC-0018 once that RFC's implementation plan is broken down.
-- [ ] #5 Each variant has ≤ 5 `designImperatives` strings (validates closed-enum discipline OR exercises vendor-prefix extension)
-- [ ] #6 Admission scoring spot-check: variant-routed score differs from soul-aggregate by ≥ X% on a representative work item
-- [ ] #7 Engineering review confirms substrate shared across all four products' variants
-- [ ] #8 End-to-end deprecation lifecycle test on one ProductA variant
+- [x] #1 ProductA variant declarations ship with `small-utility` / `enterprise` / `county-regional`
+- [x] #2 ProductB variant declarations ship with `field-tech-on-truck` / `field-tech-handheld` / `supervisor-tablet`
+- [x] #3 ProductC variant declarations ship with `billing-clerk` / `customer-portal` / `csr-dashboard`
+- [x] #4 ProductD scope removed from this task per v0.4 (deferred to RFC-0018 §11 — temporal-context-bound modes are Journey shape, not Variant). File follow-up task against RFC-0018 once that RFC's implementation plan is broken down.
+- [x] #5 Each variant has ≤ 5 `designImperatives` strings (validates closed-enum discipline OR exercises vendor-prefix extension)
+- [x] #6 Admission scoring spot-check: variant-routed score differs from soul-aggregate by ≥ X% on a representative work item
+- [x] #7 Engineering review confirms substrate shared across all four products' variants
+- [x] #8 End-to-end deprecation lifecycle test on one ProductA variant
 <!-- AC:END -->
+
+## Implementation Notes
+
+Shipped as `orchestrator/src/variant/internal-adopter/` module:
+
+- `products.ts` — declarative ProductA/B/C fixtures with shared `INTERNAL_ADOPTER_SUBSTRATE` constant (single-reference substrate-sharing proof for AC #7); 9 variants total, each ≤ 5 `designImperatives` per AC #5
+- `products.test.ts` — AC #1, #2, #3, #5, #7 coverage; runs `validateVariantDeclarations()` as defense-in-depth
+- `admission-spotcheck.test.ts` — AC #6 with 20% deviation threshold (X parameter justified inline against RFC-0008 Sα₂ calibration ranges); exercises `computeVariantScopedScores()` on representative work items
+- `deprecation-lifecycle.test.ts` — AC #8 end-to-end lifecycle (declared → approaching → removal-pending → removed) on ProductA's `county-regional` variant; verifies G0 non-blocking invariant + 60d per-Soul override
+
+ProductD follow-up under RFC-0018 §11 is intentionally NOT filed here — RFC-0018's implementation plan must land first before its phase tasks are broken down (per CLAUDE.md scope-creep prevention guidance: present recommendation, don't self-authorize). Operator can file it when RFC-0018 OQ walkthrough closes.

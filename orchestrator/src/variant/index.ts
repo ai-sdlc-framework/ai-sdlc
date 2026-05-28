@@ -77,3 +77,17 @@ export type {
   ReviewerGateCheckInput,
   ReviewerGateCheckResult,
 } from './engineering-review.js';
+
+// Phase 4 — InternalAdopter three-product reference impl (AISDLC-437)
+export {
+  INTERNAL_ADOPTER_SUBSTRATE,
+  INTERNAL_ADOPTER_PRODUCTS,
+  productA,
+  productB,
+  productC,
+  buildVariantsBySoul,
+  buildVariantScores,
+  computeSoulAggregateBaseline,
+} from './internal-adopter/index.js';
+
+export type { InternalAdopterSubstrate, InternalAdopterProduct } from './internal-adopter/index.js';
