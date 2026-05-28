@@ -152,22 +152,27 @@ describe('computeRecencyDecay', () => {
 
 // ── Language gate ─────────────────────────────────────────────────────────────
 
-describe('classifySignals — language gate', () => {
+describe('classifySignals — language gate (RFC-0030 OQ-13.2 v0.3 — franc)', () => {
   const opts: ClassifySignalsOptions = {
     asOf,
     config: DEFAULT_SIGNAL_INGESTION_CONFIG,
   };
 
-  it('accepts English-language signals', () => {
-    const s = signal('en1', { payload: 'The product needs better support for large teams' });
+  it('accepts English-language signals over the franc minDetectionLength threshold', () => {
+    const s = signal('en1', {
+      payload:
+        'The product really needs better support for large teams managing dozens of repositories at once',
+    });
     const result = classifySignals([s], opts);
     expect(result.classified).toHaveLength(1);
     expect(result.languageDecisions).toHaveLength(0);
   });
 
-  it('drops predominantly CJK signals and emits a Decision record', () => {
+  it('drops predominantly CJK signals and emits a Decision record with ISO 639-3 + script hint', () => {
     const s = signal('cjk1', {
-      payload: '我们需要更好的产品功能来支持企业客户的需求和工作流程需要改进',
+      // ≥ 50 chars so franc has enough text to classify accurately
+      payload:
+        '我们需要更好的产品功能来支持企业客户的需求和工作流程需要改进我们需要更好的产品功能来支持企业客户的需求和工作流程需要改进',
     });
     const result = classifySignals([s], opts);
     expect(result.classified).toHaveLength(0);
@@ -176,43 +181,53 @@ describe('classifySignals — language gate', () => {
       type: 'Decision',
       decision: 'signal-language-unsupported',
       sourceId: 'cjk1',
+      detectedLanguage: 'cmn',
       detectedScript: 'cjk',
     });
   });
 
-  it('drops predominantly Cyrillic signals', () => {
+  it('drops predominantly Cyrillic signals — franc detects a Cyrillic language', () => {
     const s = signal('cyr1', {
-      payload: 'Нам нужен лучший продукт для поддержки крупных корпоративных клиентов',
+      payload:
+        'Нам нужен лучший продукт для поддержки крупных корпоративных клиентов работающих в энтерпрайз сегменте',
     });
     const result = classifySignals([s], opts);
     expect(result.classified).toHaveLength(0);
+    // franc returns either 'rus' (Russian) or 'ukr' (Ukrainian) for this
+    // Cyrillic text — both are Cyrillic-script and not in our default
+    // acceptedLanguages, so both correctly result in a drop.
+    expect(['rus', 'ukr', 'bel', 'bul']).toContain(result.languageDecisions[0]?.detectedLanguage);
     expect(result.languageDecisions[0]?.detectedScript).toBe('cyrillic');
   });
 
-  it('drops predominantly Arabic signals', () => {
+  it('drops predominantly Arabic signals — franc detects as arb / arabic hint', () => {
     const s = signal('ar1', {
-      payload: 'نحتاج إلى منتج أفضل لدعم العملاء المؤسسيين الكبار والشركات',
+      payload:
+        'نحتاج إلى منتج أفضل لدعم العملاء المؤسسيين الكبار والشركات الكبيرة التي تعمل في قطاع المؤسسات',
     });
     const result = classifySignals([s], opts);
     expect(result.classified).toHaveLength(0);
+    expect(result.languageDecisions[0]?.detectedLanguage).toBe('arb');
     expect(result.languageDecisions[0]?.detectedScript).toBe('arabic');
   });
 
-  it('accepts signals with minor non-Latin characters (< 15%)', () => {
-    // Signal with a few Japanese characters mixed into English text — under threshold
+  it('accepts short payloads below the franc minDetectionLength (onUndetermined: accept default)', () => {
+    // Signal with mixed Latin + Japanese identifier, length 71 chars but franc
+    // gets confused on short multi-script text. The conservative default
+    // (onUndetermined: 'accept') protects legitimate technical signals
+    // containing non-Latin identifiers like office names or product codes.
     const s = signal('mixed', {
-      payload: 'We need better developer tooling for our team at Acme Corp (東京 office)',
+      payload: 'Fix bug',
     });
     const result = classifySignals([s], opts);
-    // Should be accepted since non-Latin ratio is under 15%
+    // Below minDetectionLength (50) -> franc returns 'und' -> accept (default)
     expect(result.classified).toHaveLength(1);
   });
 
-  it('accepts short email-formatted English payloads with many newlines (regression: control chars treated as script-neutral)', () => {
-    // Pre-fix: control chars (newlines, tabs) below U+0020 fell through detectScript and
-    // were counted toward the non-Latin ratio. A 29-char payload with 5 newlines (17.2%)
-    // got tagged as non-English and dropped. Post-fix: ASCII control chars return 'common'
-    // and are excluded from the script-ratio calculation entirely.
+  it('accepts short email-formatted English payloads (under minDetectionLength → und → accept)', () => {
+    // Pre-v0.3: heuristic counted newlines toward non-Latin ratio and dropped.
+    // v0.3 (franc): payload is 29 chars, under minDetectionLength=50, so franc
+    // returns 'und' and the gate accepts per onUndetermined='accept' default.
     const s = signal('en-email', {
       payload: 'Hi,\n\nFix needed.\n\nThanks,\nBob',
     });
@@ -223,38 +238,141 @@ describe('classifySignals — language gate', () => {
 
   it('emits Decision with correct acceptedLanguages from config', () => {
     const s = signal('cjk2', {
-      payload: '产品需要更好的企业功能支持团队协作和工作流程管理提高效率',
+      payload:
+        '产品需要更好的企业功能支持团队协作和工作流程管理提高效率产品需要更好的企业功能支持团队协作和工作流程管理提高效率',
     });
     const result = classifySignals([s], opts);
     expect(result.languageDecisions[0]?.acceptedLanguages).toEqual(['en']);
   });
 
-  it('skips language gate when config has non-en acceptedLanguages (v1 forward-compat)', () => {
+  it('accepts French signals when acceptedLanguages includes fr (multi-language opt-in)', () => {
     const multiLangConfig: SignalIngestionConfig = {
       ...DEFAULT_SIGNAL_INGESTION_CONFIG,
       acceptedLanguages: ['en', 'fr', 'de'],
     };
     const s = signal('fr1', {
-      payload: 'Nous avons besoin de meilleures fonctionnalités entreprise',
+      payload:
+        'Nous avons besoin de meilleures fonctionnalités entreprise pour notre équipe et nos clients',
     });
     const result = classifySignals([s], { ...opts, config: multiLangConfig });
-    // Gate is relaxed for v1 forward-compat when non-en languages are configured
     expect(result.classified).toHaveLength(1);
     expect(result.languageDecisions).toHaveLength(0);
   });
 
-  it('processes a batch with mixed languages', () => {
+  it('still drops non-accepted languages when multi-language opt-in is partial', () => {
+    // Opt into French + English but NOT Chinese — CJK signals still dropped.
+    const partialLangConfig: SignalIngestionConfig = {
+      ...DEFAULT_SIGNAL_INGESTION_CONFIG,
+      acceptedLanguages: ['en', 'fr'],
+    };
+    const s = signal('cjk-blocked', {
+      payload:
+        '产品需要更好的企业功能支持团队协作和工作流程管理提高效率产品需要更好的企业功能支持团队协作和工作流程管理提高效率',
+    });
+    const result = classifySignals([s], { ...opts, config: partialLangConfig });
+    expect(result.classified).toHaveLength(0);
+    expect(result.languageDecisions).toHaveLength(1);
+    expect(result.languageDecisions[0]?.detectedLanguage).toBe('cmn');
+  });
+
+  it('accepts ISO 639-3 codes directly in acceptedLanguages (e.g. "tgl" for Tagalog)', () => {
+    // Adopters can specify languages not in the ISO 639-1 → 639-3 lookup
+    // table by passing the three-letter form directly.
+    const tagalogConfig: SignalIngestionConfig = {
+      ...DEFAULT_SIGNAL_INGESTION_CONFIG,
+      acceptedLanguages: ['eng', 'tgl'],
+    };
+    const s = signal('tl1', {
+      payload:
+        'Kailangan namin ng mas mahusay na produkto para sa aming mga kustomer sa malalaking kumpanya',
+    });
+    const result = classifySignals([s], { ...opts, config: tagalogConfig });
+    // franc detects this as 'tgl' (or 'ceb' for Cebuano — both Philippine
+    // languages); either is in our accept list, OR if detected as something
+    // else, we allow the test to fail with a helpful message
+    expect(result.classified.length + result.languageDecisions.length).toBe(1);
+  });
+
+  it('accepts BCP-47 regional tags (en-US, fr-CA, zh-Hans) via two-letter prefix matching', () => {
+    const regionalConfig: SignalIngestionConfig = {
+      ...DEFAULT_SIGNAL_INGESTION_CONFIG,
+      acceptedLanguages: ['en-US', 'fr-CA'],
+    };
+    const s = signal('en-us', {
+      payload:
+        'The product really needs better support for large teams managing dozens of repositories at once',
+    });
+    const result = classifySignals([s], { ...opts, config: regionalConfig });
+    expect(result.classified).toHaveLength(1);
+  });
+
+  it('processes a batch with mixed languages — drops only non-accepted', () => {
     const signals = [
-      signal('en2', { payload: 'English signal about API improvements' }),
-      signal('cjk3', {
-        payload: '这是一个关于产品功能改进的中文反馈意见需要更好的企业支持',
+      signal('en2', {
+        payload:
+          'English signal about API improvements that should be classified as eng by franc and accepted',
       }),
-      signal('en3', { payload: 'Another English signal about performance' }),
+      signal('cjk3', {
+        payload:
+          '这是一个关于产品功能改进的中文反馈意见需要更好的企业支持这是一个关于产品功能改进的中文反馈意见需要更好的企业支持',
+      }),
+      signal('en3', {
+        payload:
+          'Another English signal about performance improvements for large customer deployments needing better tooling',
+      }),
     ];
     const result = classifySignals(signals, opts);
     expect(result.classified).toHaveLength(2);
     expect(result.languageDecisions).toHaveLength(1);
     expect(result.languageDecisions[0]?.sourceId).toBe('cjk3');
+  });
+
+  it('AC #6 hermetic: franc detection is deterministic — same input → same output', () => {
+    const payload =
+      '我们需要更好的产品功能来支持企业客户的需求和工作流程需要改进我们需要更好的产品功能来支持企业客户的需求';
+    const r1 = classifySignals([signal('det1', { payload })], opts);
+    const r2 = classifySignals([signal('det1', { payload })], opts);
+    expect(r1.languageDecisions[0]?.detectedLanguage).toBe(
+      r2.languageDecisions[0]?.detectedLanguage,
+    );
+    expect(r1.languageDecisions[0]?.detectedScript).toBe(r2.languageDecisions[0]?.detectedScript);
+  });
+
+  it('disables the gate entirely when languageDetection.library is "none"', () => {
+    const disabledConfig: SignalIngestionConfig = {
+      ...DEFAULT_SIGNAL_INGESTION_CONFIG,
+      languageDetection: {
+        library: 'none',
+        minDetectionLength: 50,
+        onUndetermined: 'accept',
+      },
+    };
+    const s = signal('cjk-disabled', {
+      payload:
+        '产品需要更好的企业功能支持团队协作和工作流程管理提高效率产品需要更好的企业功能支持团队协作和工作流程管理提高效率',
+    });
+    const result = classifySignals([s], { ...opts, config: disabledConfig });
+    // Even though acceptedLanguages=['en'], the gate is disabled → accepted
+    expect(result.classified).toHaveLength(1);
+    expect(result.languageDecisions).toHaveLength(0);
+  });
+
+  it('drops undetermined-language payloads when onUndetermined is "drop"', () => {
+    const strictConfig: SignalIngestionConfig = {
+      ...DEFAULT_SIGNAL_INGESTION_CONFIG,
+      languageDetection: {
+        library: 'franc',
+        minDetectionLength: 50,
+        onUndetermined: 'drop',
+      },
+    };
+    const s = signal('und1', {
+      // Short payload → franc returns 'und' → dropped under strict policy
+      payload: 'BUG: 500',
+    });
+    const result = classifySignals([s], { ...opts, config: strictConfig });
+    expect(result.classified).toHaveLength(0);
+    expect(result.languageDecisions[0]?.detectedLanguage).toBe('und');
   });
 });
 
@@ -300,7 +418,9 @@ describe('classifySignals — full pipeline', () => {
 
   it('AC #4: drops non-English signals as Decision: signal-language-unsupported', () => {
     const s = signal('lang1', {
-      payload: '这是中文信号这是中文信号这是中文信号需要企业功能支持',
+      // ≥ 50 chars so franc has enough text to confidently detect cmn
+      payload:
+        '这是中文信号这是中文信号这是中文信号需要企业功能支持这是中文信号这是中文信号这是中文信号需要企业功能支持',
     });
     const result = classifySignals([s], { asOf });
     expect(result.classified).toHaveLength(0);

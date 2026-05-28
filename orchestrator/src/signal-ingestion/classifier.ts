@@ -19,10 +19,15 @@
  *      time passes (age is passed as input). Half-life is read from config
  *      (default 30 days).
  *
- * **Language gate** (OQ-13.2): non-English signal payloads are detected via a
- * lightweight script-block heuristic. Signals in unsupported languages are
- * dropped and logged as `Decision: signal-language-unsupported`. Per-org
- * `acceptedLanguages` config is respected (default `['en']`).
+ * **Language gate** (OQ-13.2 v0.3 re-walkthrough): non-accepted-language signal
+ * payloads are detected via the `franc` library (deterministic; <10ms per
+ * signal; JS-native; MIT-licensed; 95%+ accuracy on text >50 chars; returns
+ * ISO 639-3 codes). Signals in unsupported languages are dropped and logged as
+ * `Decision: signal-language-unsupported`. Per-org `acceptedLanguages` config
+ * is respected (default `['en']`); multi-language opt-in (e.g. `['en', 'fr',
+ * 'es']`) accepts those languages knowingly — adopters take on documented BM25
+ * quality degradation (~15-30% precision drop without per-language stopwords)
+ * in exchange for non-English signal coverage.
  *
  * All multipliers and weights are read from `SignalIngestionConfig`; they are
  * NOT hardcoded, satisfying AC #6.
@@ -30,8 +35,14 @@
  * @module signal-ingestion/classifier
  */
 
+import { franc, francAll } from 'franc';
 import type { CustomerTier, RawSignal, SignalTier } from './types.js';
-import type { SignalIngestionConfig, TierMultipliers, IcpResonanceWeights } from './config.js';
+import type {
+  LanguageDetectionConfig,
+  SignalIngestionConfig,
+  TierMultipliers,
+  IcpResonanceWeights,
+} from './config.js';
 import { DEFAULT_SIGNAL_INGESTION_CONFIG } from './config.js';
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -74,11 +85,26 @@ export interface ClassifiedSignal {
   baseWeight: number;
 }
 
-/** Emitted when a signal is dropped for language reasons. */
+/** Emitted when a signal is dropped for language reasons (RFC-0030 OQ-13.2 v0.3). */
 export interface SignalLanguageUnsupportedDecision {
   type: 'Decision';
   decision: 'signal-language-unsupported';
   sourceId: string;
+  /**
+   * Detected language as ISO 639-3 three-letter code (e.g. `'cmn'`, `'fra'`,
+   * `'spa'`, `'eng'`). `'und'` when text was too short or no script matched.
+   * For backwards compatibility with v0.2 dashboards reading `detectedScript`,
+   * a coarse script family hint (`'cjk'`, `'cyrillic'`, `'arabic'`, `'latin'`)
+   * may still be derivable from the language code via the franc data tables.
+   */
+  detectedLanguage: string;
+  /**
+   * @deprecated since v0.3 — use `detectedLanguage`. Retained for one release
+   * window so downstream consumers (TUI, runbook examples) can migrate.
+   * Populated with a coarse script-family hint derived from `detectedLanguage`
+   * (`'cjk'`, `'cyrillic'`, `'arabic'`, `'hebrew'`, `'devanagari'`, `'thai'`,
+   * `'greek'`, `'armenian'`, `'georgian'`, `'latin'`, or `'unknown'`).
+   */
   detectedScript: string;
   acceptedLanguages: string[];
   message: string;
@@ -170,21 +196,23 @@ export function classifySignals(
   const tierRegistry = options.tierRegistry;
   const adapterTiers = options.adapterTiers ?? new Map<string, SignalTier>();
   const acceptedLanguages = config.acceptedLanguages;
+  const languageDetection = config.languageDetection;
 
   const classified: ClassifiedSignal[] = [];
   const languageDecisions: SignalLanguageUnsupportedDecision[] = [];
 
   for (const signal of signals) {
-    // Language gate — drop non-supported-language signals
-    const langCheck = checkLanguage(signal.payload, acceptedLanguages);
+    // Language gate — drop non-accepted-language signals
+    const langCheck = checkLanguage(signal.payload, acceptedLanguages, languageDetection);
     if (!langCheck.accepted) {
       languageDecisions.push({
         type: 'Decision',
         decision: 'signal-language-unsupported',
         sourceId: signal.sourceId,
+        detectedLanguage: langCheck.detectedLanguage,
         detectedScript: langCheck.detectedScript,
         acceptedLanguages,
-        message: `Signal ${signal.sourceId} dropped: detected script '${langCheck.detectedScript}' not in accepted languages ${JSON.stringify(acceptedLanguages)}`,
+        message: `Signal ${signal.sourceId} dropped: detected language '${langCheck.detectedLanguage}' (script '${langCheck.detectedScript}') not in accepted languages ${JSON.stringify(acceptedLanguages)}`,
       });
       continue;
     }
@@ -391,164 +419,245 @@ export function computeRecencyDecay(
 
 interface LanguageCheckResult {
   accepted: boolean;
-  /** Unicode script block name or 'latin' for accepted. */
+  /** ISO 639-3 code from `franc` (e.g. `'eng'`, `'cmn'`, `'fra'`, `'und'`). */
+  detectedLanguage: string;
+  /** Coarse script-family hint for backwards compat with v0.2 dashboards. */
   detectedScript: string;
 }
 
 /**
- * Lightweight language gate based on Unicode script heuristics.
+ * Language gate using the `franc` trigram-based detector (RFC-0030 OQ-13.2
+ * v0.3 re-walkthrough resolution).
  *
- * The RFC-0030 v1 scope is English-only. We detect non-Latin scripts
- * (CJK, Cyrillic, Arabic, Hebrew, Thai, Devanagari, etc.) by checking for
- * code point ranges. A signal is considered non-English when > 15% of its
- * alphanumeric characters fall outside the Latin extended range (U+0000-U+024F).
+ * `franc` returns ISO 639-3 three-letter codes (`'eng'`, `'cmn'`, `'fra'`,
+ * `'spa'`, etc.) or `'und'` for undetermined text (too short / no script
+ * match). It is deterministic, MIT-licensed, JS-native (no model download),
+ * runs in <10ms per signal, and is 95%+ accurate on text >50 characters.
  *
- * This heuristic is intentionally conservative — it drops only signals that
- * are predominantly in another script, not signals that contain a few
- * loan-words or proper nouns. A false-positive rate of ~2% is expected on
- * technical signals containing non-Latin identifiers (Unicode emoji, math
- * symbols, etc.) — those edge cases are tracked as visible-gap metrics for
- * the v2 multi-language work (OQ-13.2).
- *
- * The `acceptedLanguages` list is checked for the literal string 'en' (or
- * any BCP-47 tag starting with 'en'). When the list includes non-en entries,
- * the gate is relaxed: signals with those scripts are accepted if they can
- * be associated via the tag. In v1 this is a forward-compat hook — the actual
- * per-language classifier is deferred to v2. For now, only 'en' is treated as
- * fully supported; all other entries in `acceptedLanguages` that are not 'en'
- * cause the gate to skip for that signal (pass-through to v2).
+ * Behaviour:
+ *  - The language-tag matcher accepts BCP-47 / ISO 639-1 / ISO 639-3 forms in
+ *    `acceptedLanguages` (e.g. `'en'`, `'eng'`, `'en-US'` all match English).
+ *  - Empty payloads return `accepted: true` (nothing to gate on; downstream
+ *    classifier handles empty-payload signals).
+ *  - When `franc` returns `'und'` (text too short, no script matched, or
+ *    `library: 'none'`), behaviour is controlled by
+ *    `languageDetection.onUndetermined` — `'accept'` (default) is conservative
+ *    because the dominant short-payload case is legitimate (e.g. "Crash on
+ *    save", "BUG: 500"); `'drop'` is strict.
+ *  - When `library: 'none'`, the gate is disabled entirely — all signals
+ *    accepted regardless of `acceptedLanguages`. Useful for testing or for
+ *    adopters that pre-filter signals upstream.
+ *  - **Fuzzy acceptance via francAll top-N**: short technical English (under
+ *    ~50 chars; e.g. "auth login failure when SAML callback returns no nonce")
+ *    can misdetect as Nordic / Latin-script neighbours (nno, nld, dan) due to
+ *    uncommon trigrams. To avoid false-drops on legitimate English, we accept
+ *    when ANY accepted language appears in the top-N candidates with a relative
+ *    score ≥ `TOP_N_ACCEPT_THRESHOLD` of the top hit. This is the standard
+ *    franc-misclassification workaround documented in
+ *    https://github.com/wooorm/franc#data
  */
-function checkLanguage(payload: string, acceptedLanguages: string[]): LanguageCheckResult {
-  // If acceptedLanguages includes non-en entries, relax the gate for v1
-  // forward-compat. Only apply the strict gate when the list is exactly ['en']
-  // or a subset of en-* tags.
-  const hasNonEnLanguage = acceptedLanguages.some((lang) => !lang.startsWith('en'));
-  if (hasNonEnLanguage) {
-    // v1 forward-compat: don't drop signals when org has opted into multi-language.
-    // The actual per-language classification is deferred to v2.
-    return { accepted: true, detectedScript: 'latin' };
+function checkLanguage(
+  payload: string,
+  acceptedLanguages: string[],
+  languageDetection: LanguageDetectionConfig,
+): LanguageCheckResult {
+  // Empty payload — nothing to gate on.
+  if (!payload || payload.length === 0) {
+    return { accepted: true, detectedLanguage: 'und', detectedScript: 'unknown' };
   }
 
-  const detectedScript = detectDominantNonLatinScript(payload);
-  if (detectedScript !== null) {
-    return { accepted: false, detectedScript };
+  // `library: 'none'` disables the gate entirely.
+  if (languageDetection.library === 'none') {
+    return { accepted: true, detectedLanguage: 'und', detectedScript: 'unknown' };
   }
-  return { accepted: true, detectedScript: 'latin' };
-}
 
-/**
- * Detect the dominant non-Latin script in a text string.
- * Returns `null` when the text is predominantly Latin (accepted as English).
- */
-function detectDominantNonLatinScript(text: string): string | null {
-  if (!text || text.length === 0) return null;
+  // Top language for reporting purposes (Decision payload + script hint).
+  const detectedLanguage = franc(payload, { minLength: languageDetection.minDetectionLength });
+  const detectedScript = scriptHintFor(detectedLanguage);
 
-  let latinCount = 0;
-  let nonLatinCount = 0;
-  let dominantScript = 'unknown';
-  const scriptCounts: Record<string, number> = {};
+  // 'und' — text too short OR no script matched — handle per config policy.
+  if (detectedLanguage === 'und') {
+    if (languageDetection.onUndetermined === 'accept') {
+      return { accepted: true, detectedLanguage, detectedScript };
+    }
+    return { accepted: false, detectedLanguage, detectedScript };
+  }
 
-  for (const ch of text) {
-    const cp = ch.codePointAt(0)!;
-    const script = detectScript(cp);
-    if (script === 'latin' || script === 'common') {
-      latinCount++;
-    } else {
-      nonLatinCount++;
-      scriptCounts[script] = (scriptCounts[script] ?? 0) + 1;
+  // Top-of-list match — fast path.
+  if (languageMatchesAccepted(detectedLanguage, acceptedLanguages)) {
+    return { accepted: true, detectedLanguage, detectedScript };
+  }
+
+  // Fuzzy acceptance via script-prefiltered candidate list. `francAll` only
+  // returns languages whose SCRIPT matches the input — Chinese text returns
+  // only CJK languages; Cyrillic text returns only Cyrillic languages. So if
+  // any accepted language appears at all in the candidate list (above a low
+  // relative-score floor), the input shares a script family with an accepted
+  // language — which is the load-bearing signal we care about. Short technical
+  // English may misclassify the TOP slot as nno/dan/nld, but `eng` will still
+  // appear in the list with a high relative score because the script
+  // (Latin-script) matches. Genuinely-foreign signals (Chinese, Arabic, Hindi)
+  // exclude `eng` from the list entirely via the script prefilter.
+  const allCandidates = francAll(payload, {
+    minLength: languageDetection.minDetectionLength,
+  });
+  for (const [lang, score] of allCandidates) {
+    if (score < FUZZY_ACCEPT_SCORE_FLOOR) break;
+    if (languageMatchesAccepted(lang, acceptedLanguages)) {
+      return { accepted: true, detectedLanguage: lang, detectedScript: scriptHintFor(lang) };
     }
   }
 
-  const total = latinCount + nonLatinCount;
-  if (total === 0) return null;
-
-  const nonLatinRatio = nonLatinCount / total;
-  if (nonLatinRatio <= 0.15) return null; // predominantly Latin — accept as English
-
-  // Find the most common non-Latin script
-  let maxCount = 0;
-  for (const [script, count] of Object.entries(scriptCounts)) {
-    if (count > maxCount) {
-      maxCount = count;
-      dominantScript = script;
-    }
-  }
-
-  return dominantScript;
+  return { accepted: false, detectedLanguage, detectedScript };
 }
 
 /**
- * Classify a Unicode code point into a broad script category.
+ * Minimum relative score (normalised against the top hit's 1.0) for a
+ * candidate to be considered for fuzzy acceptance. 0.80 is permissive enough
+ * to catch English misclassified as Nordic in short technical bug reports
+ * (typical eng-score for sub-60-char English is 0.85-0.98) while still
+ * excluding genuinely-distant guesses (franc rarely puts distant-script
+ * languages above 0.5 because the script prefilter already excludes them).
+ *
+ * The load-bearing protection against false-accepts of foreign-script text is
+ * franc's built-in SCRIPT PREFILTER: Chinese text returns only CJK
+ * candidates, Arabic text returns only Arabic candidates, etc. The fuzzy
+ * threshold here only matters for Latin-script close-runners-up.
  */
-function detectScript(cp: number): string {
-  // ASCII control chars (U+0000-U+001F: newlines, tabs, CR, etc.) are
-  // script-neutral whitespace/formatting — counting them as non-Latin would
-  // false-drop short multi-newline English payloads (e.g. email-formatted
-  // tickets like "Hi,\n\nFix needed.\n\nThanks,\nBob") whose newlines
-  // would tip the non-Latin ratio above the language-gate threshold.
-  if (cp < 0x0020) return 'common';
-  // Basic Latin (U+0020-U+007F) + Latin-1 Supplement (U+00A0-U+00FF)
-  // + Latin Extended-A/B (U+0100-U+024F)
-  if (cp >= 0x0020 && cp <= 0x024f) return 'latin';
+const FUZZY_ACCEPT_SCORE_FLOOR = 0.8;
 
-  // Common punctuation, symbols, numbers (not script-specific)
-  if (
-    (cp >= 0x2000 && cp <= 0x206f) || // General Punctuation
-    (cp >= 0x2070 && cp <= 0x209f) || // Superscripts and Subscripts
-    (cp >= 0x20a0 && cp <= 0x20cf) || // Currency Symbols
-    (cp >= 0x2100 && cp <= 0x214f) || // Letterlike Symbols
-    (cp >= 0xfe50 && cp <= 0xfe6f) // Small Form Variants
-  ) {
-    return 'common';
+/**
+ * Check whether a franc-detected ISO 639-3 code matches any of the
+ * adopter-configured accepted-language tags.
+ *
+ * Accepts the common forms in `acceptedLanguages`:
+ *  - ISO 639-3 three-letter codes: `'eng'`, `'fra'`, `'spa'`, `'cmn'`, …
+ *  - ISO 639-1 two-letter codes: `'en'`, `'fr'`, `'es'`, `'zh'`, …
+ *  - BCP-47 regional tags: `'en-US'`, `'fr-CA'`, `'zh-Hans'`, … (prefix matched
+ *    against the two-letter base code)
+ *
+ * The two-letter ↔ three-letter mapping covers the most common languages
+ * adopters opt into; uncommon languages can be specified directly in their
+ * ISO 639-3 form to bypass the mapping.
+ */
+function languageMatchesAccepted(detectedIso6393: string, acceptedLanguages: string[]): boolean {
+  for (const raw of acceptedLanguages) {
+    const tag = raw.toLowerCase();
+    // Exact ISO 639-3 match (e.g. 'eng' === 'eng').
+    if (tag === detectedIso6393) return true;
+    // Two-letter ISO 639-1 (or BCP-47 prefix) match via the mapping table.
+    const base = tag.split('-')[0]!; // 'en' from 'en-US', 'en' from 'en'
+    const mapped = ISO_639_1_TO_639_3[base];
+    if (mapped && mapped === detectedIso6393) return true;
   }
-
-  // Emoji and symbols
-  if (
-    (cp >= 0x1f300 && cp <= 0x1f9ff) || // Emoji
-    (cp >= 0x2600 && cp <= 0x27bf) // Miscellaneous Symbols
-  ) {
-    return 'common';
-  }
-
-  // CJK Unified Ideographs
-  if (
-    (cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
-    (cp >= 0x3000 && cp <= 0x303f) || // CJK Symbols and Punctuation
-    (cp >= 0x3040 && cp <= 0x309f) || // Hiragana
-    (cp >= 0x30a0 && cp <= 0x30ff) || // Katakana
-    (cp >= 0xac00 && cp <= 0xd7af) || // Hangul Syllables
-    (cp >= 0x3400 && cp <= 0x4dbf) || // CJK Extension A
-    (cp >= 0x20000 && cp <= 0x2a6df) // CJK Extension B
-  ) {
-    return 'cjk';
-  }
-
-  // Cyrillic (U+0400-U+04FF)
-  if (cp >= 0x0400 && cp <= 0x04ff) return 'cyrillic';
-
-  // Arabic (U+0600-U+06FF)
-  if (cp >= 0x0600 && cp <= 0x06ff) return 'arabic';
-
-  // Hebrew (U+0590-U+05FF)
-  if (cp >= 0x0590 && cp <= 0x05ff) return 'hebrew';
-
-  // Devanagari (U+0900-U+097F)
-  if (cp >= 0x0900 && cp <= 0x097f) return 'devanagari';
-
-  // Thai (U+0E00-U+0E7F)
-  if (cp >= 0x0e00 && cp <= 0x0e7f) return 'thai';
-
-  // Greek and Coptic (U+0370-U+03FF)
-  if (cp >= 0x0370 && cp <= 0x03ff) return 'greek';
-
-  // Armenian (U+0530-U+058F)
-  if (cp >= 0x0530 && cp <= 0x058f) return 'armenian';
-
-  // Georgian (U+10A0-U+10FF)
-  if (cp >= 0x10a0 && cp <= 0x10ff) return 'georgian';
-
-  return 'unknown';
+  return false;
 }
+
+/**
+ * Two-letter ISO 639-1 → three-letter ISO 639-3 mapping for the most common
+ * languages adopters opt into. Not exhaustive — uncommon languages should be
+ * configured directly in their ISO 639-3 form (e.g. `'tgl'` for Tagalog).
+ *
+ * Source: ISO 639 standard cross-reference. The list intentionally includes
+ * the languages most likely to appear in multi-language customer-support
+ * pipelines (top ~30 languages by speaker count plus EU + East-Asian
+ * majors).
+ */
+const ISO_639_1_TO_639_3: Record<string, string> = {
+  en: 'eng',
+  fr: 'fra',
+  es: 'spa',
+  de: 'deu',
+  it: 'ita',
+  pt: 'por',
+  nl: 'nld',
+  ru: 'rus',
+  pl: 'pol',
+  uk: 'ukr',
+  cs: 'ces',
+  sk: 'slk',
+  hu: 'hun',
+  ro: 'ron',
+  bg: 'bul',
+  el: 'ell',
+  tr: 'tur',
+  sv: 'swe',
+  no: 'nob',
+  da: 'dan',
+  fi: 'fin',
+  is: 'isl',
+  ga: 'gle',
+  zh: 'cmn',
+  ja: 'jpn',
+  ko: 'kor',
+  vi: 'vie',
+  th: 'tha',
+  id: 'ind',
+  ms: 'zlm',
+  tl: 'tgl',
+  hi: 'hin',
+  bn: 'ben',
+  ta: 'tam',
+  te: 'tel',
+  ur: 'urd',
+  fa: 'pes',
+  ar: 'arb',
+  he: 'heb',
+  sw: 'swh',
+  am: 'amh',
+};
+
+/**
+ * Coarse script-family hint for a franc-detected ISO 639-3 code. Returned in
+ * `SignalLanguageUnsupportedDecision.detectedScript` for backwards compat with
+ * v0.2 dashboards that key on script family rather than language.
+ *
+ * This is a small lookup table — only covers the languages we expect to
+ * surface in customer-signal pipelines. Unknown codes get `'unknown'`.
+ */
+function scriptHintFor(iso6393: string): string {
+  if (iso6393 === 'und') return 'unknown';
+  if (CJK_LANGUAGES.has(iso6393)) return 'cjk';
+  if (CYRILLIC_LANGUAGES.has(iso6393)) return 'cyrillic';
+  if (ARABIC_LANGUAGES.has(iso6393)) return 'arabic';
+  if (iso6393 === 'heb' || iso6393 === 'ydd') return 'hebrew';
+  if (DEVANAGARI_LANGUAGES.has(iso6393)) return 'devanagari';
+  if (iso6393 === 'tha') return 'thai';
+  if (iso6393 === 'ell') return 'greek';
+  if (iso6393 === 'hye') return 'armenian';
+  if (iso6393 === 'kat') return 'georgian';
+  // Default: assume Latin-script for everything else (most languages franc
+  // detects in our coverage are Latin-script — fr/es/de/pt/it/nl/etc.).
+  return 'latin';
+}
+
+const CJK_LANGUAGES = new Set(['cmn', 'jpn', 'kor', 'yue', 'wuu', 'nan', 'hak']);
+const CYRILLIC_LANGUAGES = new Set([
+  'rus',
+  'ukr',
+  'bel',
+  'bul',
+  'mkd',
+  'srp',
+  'tat',
+  'kaz',
+  'kir',
+  'tgk',
+  'mon',
+  'khk',
+]);
+const ARABIC_LANGUAGES = new Set(['arb', 'pes', 'urd', 'pbu', 'prs', 'ckb', 'uig']);
+const DEVANAGARI_LANGUAGES = new Set([
+  'hin',
+  'mar',
+  'nep',
+  'npi',
+  'mai',
+  'bho',
+  'awa',
+  'mag',
+  'san',
+]);
 
 // ── Weight computation (convenience) ─────────────────────────────────────────
 

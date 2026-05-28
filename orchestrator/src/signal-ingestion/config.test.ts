@@ -538,3 +538,101 @@ spec:
     }
   });
 });
+
+// RFC-0030 OQ-13.2 v0.3 — languageDetection config block
+describe('loadSignalIngestionConfig — languageDetection (OQ-13.2 v0.3)', () => {
+    it('defaults to franc / minDetectionLength=50 / onUndetermined=accept', () => {
+      const dir = makeTmpDir();
+      try {
+        const config = loadSignalIngestionConfig({ projectRoot: dir });
+        expect(config.languageDetection).toEqual({
+          library: 'franc',
+          minDetectionLength: 50,
+          onUndetermined: 'accept',
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('parses an explicit languageDetection block', () => {
+      const dir = makeTmpDir();
+      try {
+        writeConfig(
+          dir,
+          `
+spec:
+  languageDetection:
+    library: franc
+    minDetectionLength: 100
+    onUndetermined: drop
+`,
+        );
+        const config = loadSignalIngestionConfig({ projectRoot: dir });
+        expect(config.languageDetection).toEqual({
+          library: 'franc',
+          minDetectionLength: 100,
+          onUndetermined: 'drop',
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts library: none to disable the gate', () => {
+      const dir = makeTmpDir();
+      try {
+        writeConfig(
+          dir,
+          `
+spec:
+  languageDetection:
+    library: none
+`,
+        );
+        const config = loadSignalIngestionConfig({ projectRoot: dir });
+        expect(config.languageDetection.library).toBe('none');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('throws on invalid library value', () => {
+      const dir = makeTmpDir();
+      try {
+        writeConfig(dir, 'spec:\n  languageDetection:\n    library: chatgpt\n');
+        expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
+          SignalIngestionConfigError,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('throws on invalid onUndetermined value', () => {
+      const dir = makeTmpDir();
+      try {
+        writeConfig(dir, 'spec:\n  languageDetection:\n    onUndetermined: panic\n');
+        expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
+          SignalIngestionConfigError,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('partial languageDetection block fills in remaining defaults', () => {
+      const dir = makeTmpDir();
+      try {
+        writeConfig(dir, 'spec:\n  languageDetection:\n    minDetectionLength: 80\n');
+        const config = loadSignalIngestionConfig({ projectRoot: dir });
+        expect(config.languageDetection).toEqual({
+          library: 'franc', // default
+          minDetectionLength: 80, // override
+          onUndetermined: 'accept', // default
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+});

@@ -75,6 +75,41 @@ export interface ClusteringConfig {
 }
 
 /**
+ * Language-detection configuration (RFC-0030 OQ-13.2 re-walkthrough v0.3).
+ *
+ * v0.3 adds explicit `franc` library specification + behaviour controls.
+ * The previous v0.2 implementation used a script-block heuristic that
+ * conflated "non-Latin script" with "non-English", causing false drops on
+ * legitimate English payloads containing CJK identifiers (e.g. office names)
+ * and false accepts on legitimate French / Spanish / German payloads
+ * (Latin script but not English). `franc` is deterministic, MIT-licensed,
+ * JS-native, runs in <10ms per signal on text >50 chars at 95%+ accuracy.
+ */
+export interface LanguageDetectionConfig {
+  /**
+   * Detection library identifier. Currently always `'franc'` — the field
+   * exists as a forward-compat hook for swapping the detector (e.g. LLM-based
+   * detection in v2). Configuring `'none'` disables the gate entirely,
+   * useful for testing or for adopters that pre-filter signals upstream.
+   */
+  library: 'franc' | 'none';
+  /**
+   * Minimum character count below which `franc` returns 'und' (undetermined).
+   * Below this length, signals are accepted without language gating to avoid
+   * dropping legitimate short payloads (e.g. "Bug: crash on save" — 18 chars).
+   * Default 50 — the practical lower bound for franc accuracy.
+   */
+  minDetectionLength: number;
+  /**
+   * Behaviour when franc returns 'und' (text too short OR no script matched).
+   * `'accept'` (default) is conservative — pass through to the rest of the
+   * pipeline since short payloads + ambiguous scripts have low false-positive
+   * risk. `'drop'` is strict — drop and log as `signal-language-unsupported`.
+   */
+  onUndetermined: 'accept' | 'drop';
+}
+
+/**
  * Phase 5 — non-replacement weighting between signal-pipeline-derived demand
  * and human-authored backlog-item demand when both feed D1 (RFC-0030 §10).
  *
@@ -218,11 +253,28 @@ export interface SignalIngestionConfig {
   d1Composition: D1CompositionWeights;
   adapters: string[];
   /**
-   * Per-org list of accepted BCP-47 language tags. Default: `['en']`.
-   * Non-English signals are dropped when their language is not in this list
-   * (RFC-0030 OQ-13.2 resolution).
+   * Per-org list of accepted BCP-47 (or ISO 639-1 / 639-3) language tags.
+   * Default: `['en']`.
+   *
+   * Signals whose detected language is NOT in this list are dropped and logged
+   * as `Decision: signal-language-unsupported` (RFC-0030 OQ-13.2 v0.3
+   * resolution). Multi-language opt-in (e.g. `['en', 'fr', 'es']`) accepts
+   * signals in any listed language; adopters take on documented BM25 quality
+   * degradation (~15-30% precision drop without per-language stopwords /
+   * stemming — Robertson & Zaragoza §3.5) in exchange for non-English signal
+   * coverage.
+   *
+   * Tags are normalised to lowercase. The detector returns ISO 639-3
+   * three-letter codes (`'eng'`, `'fra'`, `'spa'`); the config matcher
+   * accepts the common forms (`'en'`, `'eng'`, `'en-US'`) and maps them
+   * to the 639-3 family.
    */
   acceptedLanguages: string[];
+  /**
+   * Language-detection runtime config (RFC-0030 §11 v0.3). The default
+   * specifies `franc` per the OQ-13.2 re-walkthrough resolution.
+   */
+  languageDetection: LanguageDetectionConfig;
   /**
    * Per-stage residency enforcement configuration per RFC-0030 OQ-13.3
    * re-walkthrough (v0.3). Defaults to all enforcement points ON with
@@ -315,6 +367,11 @@ export const DEFAULT_SIGNAL_INGESTION_CONFIG: SignalIngestionConfig = {
     'signal-source-in-app-feedback',
   ],
   acceptedLanguages: ['en'],
+  languageDetection: {
+    library: 'franc',
+    minDetectionLength: 50,
+    onUndetermined: 'accept',
+  },
   residencyEnforcement: {
     sourceFromCompliancePosture: true,
     enforcementPoints: {
@@ -439,6 +496,7 @@ function resolveConfig(raw: unknown, filePath: string): SignalIngestionConfig {
     d1Composition: resolveD1Composition(spec['d1Composition']),
     adapters: resolveStringArray(spec['adapters'], DEFAULT_SIGNAL_INGESTION_CONFIG.adapters),
     acceptedLanguages: resolveLanguageList(spec['acceptedLanguages']),
+    languageDetection: resolveLanguageDetectionConfig(spec['languageDetection']),
     residencyEnforcement: resolveResidencyEnforcement(spec['residencyEnforcement']),
     manualEntry: resolveManualEntry(spec['manualEntry']),
     flooding: resolveFloodingConfig(spec['flooding']),
@@ -936,6 +994,40 @@ function resolveShareThreshold(value: unknown, defaultValue: number): number {
     );
   }
   return n;
+}
+
+function resolveLanguageDetectionConfig(value: unknown): LanguageDetectionConfig {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.languageDetection;
+  if (value === undefined || value === null) return { ...defaults };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('languageDetection must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+
+  const library = obj['library'];
+  if (library !== undefined && library !== 'franc' && library !== 'none') {
+    throw new SignalIngestionConfigError(
+      `languageDetection.library must be 'franc' or 'none', got ${JSON.stringify(library)}`,
+    );
+  }
+
+  const onUndetermined = obj['onUndetermined'];
+  if (onUndetermined !== undefined && onUndetermined !== 'accept' && onUndetermined !== 'drop') {
+    throw new SignalIngestionConfigError(
+      `languageDetection.onUndetermined must be 'accept' or 'drop', got ${JSON.stringify(onUndetermined)}`,
+    );
+  }
+
+  return {
+    library: (library as LanguageDetectionConfig['library']) ?? defaults.library,
+    minDetectionLength: resolvePositiveNumber(
+      obj['minDetectionLength'],
+      defaults.minDetectionLength,
+      'minDetectionLength',
+    ),
+    onUndetermined:
+      (onUndetermined as LanguageDetectionConfig['onUndetermined']) ?? defaults.onUndetermined,
+  };
 }
 
 function resolveLanguageList(value: unknown): string[] {
