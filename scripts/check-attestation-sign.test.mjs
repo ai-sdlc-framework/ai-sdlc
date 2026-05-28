@@ -81,19 +81,25 @@ function setupRepo() {
 
 /**
  * Install a fake signer script at `<root>/bin/fake-signer.sh` that writes a
- * stub attestation file at `.ai-sdlc/attestations/<head-sha>.dsse.json`.
+ * stub attestation file at `.ai-sdlc/attestations/<head-sha>.dsse.json` and
+ * (when withLeaves=true) a per-patch-id transcript-leaves file at
+ * `.ai-sdlc/transcript-leaves/<head-sha>.jsonl`.
  * Returns an absolute command string suitable for AI_SDLC_SIGN_ATTESTATION_CMD.
  *
  * @param {string} root  worktree root
  * @param {object} opts
- * @param {boolean} [opts.fail=false]    if true, the signer exits non-zero
+ * @param {boolean} [opts.fail=false]       if true, the signer exits non-zero
  *   without writing the file (simulates orchestrator-not-built or signing-key
  *   missing).
- * @param {boolean} [opts.silent=false]  if true, the signer exits 0 but does
+ * @param {boolean} [opts.silent=false]     if true, the signer exits 0 but does
  *   NOT write the attestation file (simulates a buggy signer that doesn't
  *   produce its expected output).
+ * @param {boolean} [opts.withLeaves=false] AISDLC-471: if true, the signer
+ *   also writes a per-patch-id transcript-leaves file at
+ *   `.ai-sdlc/transcript-leaves/<head-sha>.jsonl` (simulates the real signer's
+ *   `cli-attestation.mjs emit-leaf` step that AISDLC-421 introduced).
  */
-function installFakeSigner(root, { fail = false, silent = false } = {}) {
+function installFakeSigner(root, { fail = false, silent = false, withLeaves = false } = {}) {
   const binDir = join(root, 'bin');
   mkdirSync(binDir, { recursive: true });
   const logPath = join(root, 'signer.log');
@@ -120,12 +126,19 @@ else
   EXT=".dsse.json"
 fi
 printf '{"_test":"stub","head":"%s","schemaVersion":"%s"}\\n' "$HEAD" "$SCHEMA_VERSION_ARG" > "$WT_ROOT/.ai-sdlc/attestations/$HEAD$EXT"`;
+  // AISDLC-471: optionally write a per-patch-id transcript-leaves file so the
+  // test can assert that the hook commits it alongside the envelope.
+  const leavesBlock = withLeaves
+    ? `mkdir -p "$WT_ROOT/.ai-sdlc/transcript-leaves"
+printf '{"_test":"stub-leaf","head":"%s"}\\n' "$HEAD" > "$WT_ROOT/.ai-sdlc/transcript-leaves/$HEAD.jsonl"`
+    : '# withLeaves=false: skip transcript-leaves write';
   const shim = `#!/usr/bin/env bash
 echo "fake-signer $*" >> "${logPath}"
 ${failBlock}
 WT_ROOT=$(git rev-parse --show-toplevel)
 HEAD=$(git rev-parse HEAD)
 ${writeBlock}
+${leavesBlock}
 exit 0
 `;
   writeFileSync(shimPath, shim);
@@ -642,6 +655,105 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
   });
 
   // ── AISDLC-274: stale-envelope detection ─────────────────────────────
+
+  // ── AISDLC-471: per-patch-id transcript-leaves committed alongside envelope ──
+  //
+  // The bug: the hook's git add step only staged .ai-sdlc/attestations/, leaving
+  // .ai-sdlc/transcript-leaves/<patch-id>.jsonl untracked. CI checks out the tree,
+  // can't find the per-patch-id file, falls back to the legacy shared
+  // .ai-sdlc/transcript-leaves.jsonl (which has leaves from OTHER PRs), recomputes
+  // the wrong Merkle root, and fails with rootSignature mismatch.
+  //
+  // The fix: also `git add .ai-sdlc/transcript-leaves/` in the chore commit step
+  // so the per-patch-id leaves file travels with the envelope.
+
+  it('AISDLC-471: chore commit includes per-patch-id transcript-leaves file when signer writes it', () => {
+    // Set up: sentinel + verdict + fake signer that writes both the envelope
+    // AND a per-patch-id transcript-leaves file (simulates the real signer's
+    // cli-attestation.mjs emit-leaf step from AISDLC-421).
+    writeFileSync(join(root, '.active-task'), 'AISDLC-471\n');
+    writeVerdictFile(root, 'AISDLC-471');
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd } = installFakeSigner(root, { withLeaves: true });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_INTERNAL_NO_EXIT_1: '1',
+    });
+
+    assert.equal(r.status, 0, `expected 0 (orchestrator mode), got ${r.status}: ${r.stderr}`);
+
+    // AC #1: envelope must be committed (pre-existing behavior).
+    const envelopeInTree = spawnSync(
+      'git',
+      ['ls-tree', 'HEAD', '--', `.ai-sdlc/attestations/${head}.v6.dsse.json`],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    assert.ok(
+      envelopeInTree.stdout.trim().length > 0,
+      `envelope must be committed: git ls-tree output was empty (stderr: ${envelopeInTree.stderr})`,
+    );
+
+    // AC #2 (load-bearing for AISDLC-471): per-patch-id leaves file must be committed.
+    const leavesInTree = spawnSync(
+      'git',
+      ['ls-tree', 'HEAD', '--', `.ai-sdlc/transcript-leaves/${head}.jsonl`],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    assert.ok(
+      leavesInTree.stdout.trim().length > 0,
+      `per-patch-id leaves file must be committed alongside the envelope — ` +
+        `this is the AC #2 regression guard for AISDLC-471. ` +
+        `git ls-tree output was empty (stderr: ${leavesInTree.stderr})`,
+    );
+  });
+
+  it('AISDLC-471: backward-compat — hook still works when signer writes no leaves file (empty dir)', () => {
+    // When the signer does not emit per-patch-id leaves (e.g. ad-hoc operator
+    // signing, or a caller that has not yet wired cli-attestation.mjs emit-leaf),
+    // the hook must still succeed: just commits the envelope without the leaves
+    // file. `git add` of a non-existent/empty directory is a no-op.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-471\n');
+    writeVerdictFile(root, 'AISDLC-471');
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+
+    // withLeaves: false → signer does NOT write .ai-sdlc/transcript-leaves/
+    const { cmd } = installFakeSigner(root, { withLeaves: false });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_INTERNAL_NO_EXIT_1: '1',
+    });
+
+    assert.equal(
+      r.status,
+      0,
+      `expected 0 (orchestrator mode, no leaves), got ${r.status}: ${r.stderr}`,
+    );
+
+    // Envelope must still be committed (primary function intact).
+    const envelopeInTree = spawnSync(
+      'git',
+      ['ls-tree', 'HEAD', '--', `.ai-sdlc/attestations/${head}.v6.dsse.json`],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    assert.ok(
+      envelopeInTree.stdout.trim().length > 0,
+      `envelope must be committed even when no leaves file exists: ${envelopeInTree.stderr}`,
+    );
+
+    // No leaves file must have been sneaked into the commit tree (it simply
+    // doesn't exist — the absence is fine, the hook must not error).
+    const leavesInTree = spawnSync(
+      'git',
+      ['ls-tree', 'HEAD', '--', `.ai-sdlc/transcript-leaves/${head}.jsonl`],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    assert.equal(
+      leavesInTree.stdout.trim(),
+      '',
+      'no leaves file should appear in the commit tree when none was written by the signer',
+    );
+  });
 
   it('AISDLC-274: hook removes stale envelope + signs fresh after queue-rebase simulation', () => {
     // Simulates the rebase-stale case: there is an envelope file in
