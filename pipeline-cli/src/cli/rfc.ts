@@ -475,18 +475,43 @@ export interface InitRfcResult {
  * validation errors and on existing-file conflicts; the CLI handler
  * formats the error for the operator.
  */
+/**
+ * Resolve the scaffolding target dir — NEVER falls back to `spec/rfcs/`
+ * even when an existing `spec/rfcs/` is present in the worktree. The
+ * spec-rfcs fallback in {@link resolveRfcDir} is appropriate for indexing
+ * (operators running `cli-rfc index` in the framework's own repo still
+ * want to see framework RFCs), but mixing adopter-authored RFCs into the
+ * framework's `spec/rfcs/` is wrong by design.
+ *
+ * Order: cli-flag > config rfc-scaffold.rfcDir > `rfcs/` (default).
+ */
+function resolveRfcInitDir(
+  workDir: string,
+  optsOverride?: { rfcDir?: string },
+): { rfcDir: string; source: 'cli-flag' | 'config' | 'default' } {
+  if (optsOverride?.rfcDir && optsOverride.rfcDir.trim()) {
+    return { rfcDir: join(workDir, optsOverride.rfcDir), source: 'cli-flag' };
+  }
+  let configuredRel: string | null = null;
+  try {
+    const cfg = loadAdopterAuthoringConfig({ workDir });
+    configuredRel = cfg.rfcScaffold.rfcDir;
+  } catch {
+    configuredRel = null;
+  }
+  const isDefault = configuredRel === 'rfcs/' || configuredRel === null;
+  return {
+    rfcDir: join(workDir, configuredRel ?? 'rfcs/'),
+    source: isDefault ? 'default' : 'config',
+  };
+}
+
 export function initRfc(opts: InitRfcOpts): InitRfcResult {
   const slug = validateRfcSlug(opts.slug);
-  const { rfcDir, source } = resolveRfcDir(opts.workDir, {
+  const { rfcDir, source } = resolveRfcInitDir(opts.workDir, {
     rfcDir: opts.rfcDir && opts.rfcDir.trim() ? opts.rfcDir : undefined,
   });
   const filePath = computeRfcInitPath(rfcDir, slug);
-
-  if (existsSync(filePath) && !opts.force) {
-    throw new Error(
-      `[cli-rfc init] refusing to overwrite existing file at ${filePath} — pass --force to replace it`,
-    );
-  }
 
   const templatePath = resolveTemplatePath({ templatePath: opts.templatePath });
   const template = readFileSync(templatePath, 'utf8');
@@ -501,7 +526,26 @@ export function initRfc(opts: InitRfcOpts): InitRfcResult {
   });
 
   mkdirSync(rfcDir, { recursive: true });
-  writeFileSync(filePath, rendered, 'utf8');
+  // Atomic create when !force: pass `wx` so the kernel fails the open() if the
+  // file already exists. This closes the TOCTOU race that existed between
+  // existsSync() + writeFileSync(): two concurrent `init` calls for the same
+  // slug both passing the existence check, the later one silently overwriting.
+  const flag = opts.force ? 'w' : 'wx';
+  try {
+    writeFileSync(filePath, rendered, { encoding: 'utf8', flag });
+  } catch (err) {
+    if (
+      !opts.force &&
+      err instanceof Error &&
+      'code' in err &&
+      (err as NodeJS.ErrnoException).code === 'EEXIST'
+    ) {
+      throw new Error(
+        `[cli-rfc init] refusing to overwrite existing file at ${filePath} — pass --force to replace it`,
+      );
+    }
+    throw err;
+  }
 
   return {
     filePath,
