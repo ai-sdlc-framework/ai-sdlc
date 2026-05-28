@@ -15,6 +15,8 @@ dependencies: []
 references:
   - spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
 priority: medium
+blocked:
+  reason: 'RFC-0030 lifecycle is Ready for Review (not Signed Off); §13.2 v0.3 re-walkthrough resolution is in-place and explicitly scopes this task. Operator-acknowledged OQ status per upstream-OQ-gate override convention.'
 ---
 
 ## Description
