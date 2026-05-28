@@ -506,6 +506,113 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
     expect(outcome.pipeline).toBeUndefined();
   });
 
+  // ── AISDLC-429.3 — Copilot CLI spawner kind ─────────────────────────────
+  //
+  // Phase 3 of AISDLC-429 wires `--spawner copilot` through the orchestrator
+  // umbrella dispatch path. These tests mirror the pre-existing `codex`
+  // cases (success route-through, env-var parsing, missing-bridge failure)
+  // so the routing contract is enforced symmetrically across the two
+  // host-bridge spawners.
+
+  it('routes explicit umbrellaSpawnerKind=copilot to the umbrella executor unchanged', async () => {
+    const taskId = 'AISDLC-429.3-COPILOT-EXPLICIT';
+    const calls: Array<{ taskId: string; spawnerKind: string }> = [];
+
+    const umbrellaExecutor = async (t: string, k: string): Promise<ExecuteCommandResult> => {
+      calls.push({ taskId: t, spawnerKind: k });
+      return successExecResult(t);
+    };
+
+    const tick = await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        frontier: fakeFrontier([taskId]),
+        umbrellaSpawnerKind: 'copilot',
+        umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
+        escalate: async () => {},
+        ...hermeticFilterAdapters(),
+      },
+      1,
+    );
+
+    expect(calls).toEqual([{ taskId, spawnerKind: 'copilot' }]);
+    expect(tick.dispatched).toEqual([taskId]);
+    expect(tick.outcomes[0].outcome).toBe('approved');
+  });
+
+  it('uses AI_SDLC_ORCHESTRATOR_SPAWNER=copilot for the default umbrella executor', async () => {
+    const previousSpawner = process.env[ORCHESTRATOR_SPAWNER_ENV];
+    const previousUseUmbrella = process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA;
+    delete process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA;
+    process.env[ORCHESTRATOR_SPAWNER_ENV] = 'copilot';
+
+    try {
+      const taskId = 'AISDLC-429.3-COPILOT-ENV';
+      const calls: Array<{ taskId: string; spawnerKind: string }> = [];
+
+      const umbrellaExecutor = async (t: string, k: string): Promise<ExecuteCommandResult> => {
+        calls.push({ taskId: t, spawnerKind: k });
+        return successExecResult(t);
+      };
+
+      const tick = await runOrchestratorTick(
+        config,
+        {
+          logger: silentLogger(),
+          frontier: fakeFrontier([taskId]),
+          umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
+          escalate: async () => {},
+          ...hermeticFilterAdapters(),
+        },
+        1,
+      );
+
+      expect(calls).toEqual([{ taskId, spawnerKind: 'copilot' }]);
+      expect(tick.dispatched).toEqual([taskId]);
+      expect(tick.outcomes[0].outcome).toBe('approved');
+    } finally {
+      if (previousSpawner === undefined) {
+        delete process.env[ORCHESTRATOR_SPAWNER_ENV];
+      } else {
+        process.env[ORCHESTRATOR_SPAWNER_ENV] = previousSpawner;
+      }
+      if (previousUseUmbrella === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA = previousUseUmbrella;
+      }
+    }
+  });
+
+  it('surfaces missing COPILOT_SPAWN_AGENT_BIN as spawner-unavailable before rollback work', async () => {
+    const taskId = 'AISDLC-429.3-COPILOT-MISSING-BRIDGE';
+    const umbrellaExecutor = async (): Promise<ExecuteCommandResult> => ({
+      ok: false,
+      reason:
+        '`--spawner copilot` requires COPILOT_SPAWN_AGENT_BIN in the environment before dispatch.',
+    });
+
+    const tick = await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        frontier: fakeFrontier([taskId]),
+        umbrellaSpawnerKind: 'copilot',
+        umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
+        escalate: async () => {},
+        ...hermeticFilterAdapters(),
+      },
+      1,
+    );
+
+    expect(tick.dispatched).toEqual([taskId]);
+    const outcome = tick.outcomes[0];
+    expect(outcome.failure?.type).toBe('spawner-unavailable');
+    expect(outcome.failure?.message).toContain('COPILOT_SPAWN_AGENT_BIN');
+    expect(outcome.pipeline).toBeUndefined();
+  });
+
   // ── AC #2: spawner fallback ────────────────────────────────────────────
 
   describe('spawner-fallback (AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key)', () => {

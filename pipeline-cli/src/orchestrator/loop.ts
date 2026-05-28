@@ -2572,7 +2572,8 @@ function buildDefaultMaxBudgetUsdLoader(workDir: string): (taskId: string) => nu
  *
  * RFC-0041 Phase 3.3 (AISDLC-377.6) removed the legacy `claude-cli` inline-
  * manifest spawner kind. The supported kinds are `mock`, `api-key`, `claude`,
- * and `codex`.
+ * `codex`, and `copilot` (AISDLC-429.3 wired the GitHub Copilot CLI spawner
+ * — see docs/operations/copilot-spawner.md).
  */
 export function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
   if (adapters.umbrellaSpawnerKind) return adapters.umbrellaSpawnerKind;
@@ -2584,7 +2585,13 @@ export function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): Spaw
 function resolveEnvUmbrellaSpawnerKind(): SpawnerKind | undefined {
   const raw = (process.env[ORCHESTRATOR_SPAWNER_ENV] ?? '').trim();
   if (!raw) return undefined;
-  if (raw === 'mock' || raw === 'api-key' || raw === 'claude' || raw === 'codex') {
+  if (
+    raw === 'mock' ||
+    raw === 'api-key' ||
+    raw === 'claude' ||
+    raw === 'codex' ||
+    raw === 'copilot'
+  ) {
     return raw;
   }
   // RFC-0041 Phase 3.3 (AISDLC-377.6) — `claude-cli` was removed; surface a
@@ -2595,11 +2602,13 @@ function resolveEnvUmbrellaSpawnerKind(): SpawnerKind | undefined {
       `${ORCHESTRATOR_SPAWNER_ENV}=claude-cli is no longer supported. ` +
         'The `claude-cli` inline-manifest spawner was removed in RFC-0041 ' +
         'Phase 3.3 (AISDLC-377.6). Set ' +
-        `${ORCHESTRATOR_SPAWNER_ENV}=claude (default), api-key, or codex, ` +
+        `${ORCHESTRATOR_SPAWNER_ENV}=claude (default), api-key, codex, or copilot, ` +
         'or unset it. See docs/operations/claude-cli-spawner-removed.md.',
     );
   }
-  throw new Error(`${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude, codex`);
+  throw new Error(
+    `${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude, codex, copilot`,
+  );
 }
 
 /**

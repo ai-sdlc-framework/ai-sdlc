@@ -13,6 +13,7 @@
 | Claude Code Tier 1 `/ai-sdlc execute` | Supported attended path | [`ai-sdlc-plugin/commands/execute.md`](../../ai-sdlc-plugin/commands/execute.md) |
 | Tier 2 `executePipeline()` / `ai-sdlc-pipeline execute` | Supported where a real `SubagentSpawner` is configured | [`pipeline-cli/README.md`](../../pipeline-cli/README.md) |
 | Codex CLI orchestration | Operational (AISDLC-202.2 through AISDLC-202.4 + AISDLC-247 shipped; pilot validated 2026-05-09) | [Codex CLI Execution Path](./codex-execution-path.md) |
+| GitHub Copilot CLI orchestration | Operational (AISDLC-429.2 + AISDLC-429.3 shipped; real-CLI pilot pending) | [Copilot CLI Execution Path](./copilot-execution-path.md) (design) / [`--spawner copilot` Operator Runbook](./copilot-spawner.md) (operations) |
 
 The Codex cross-harness review path is production-ready. See
 [`docs/operations/cross-harness-review.md`](./cross-harness-review.md) for
