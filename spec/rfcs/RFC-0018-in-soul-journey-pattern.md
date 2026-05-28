@@ -2,25 +2,29 @@
 id: RFC-0018
 title: In-Soul Journey Pattern
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: Morgan Hirtle
 created: 2026-05-04
-updated: 2026-05-04
+updated: 2026-05-28
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0009
   - RFC-0017
+  - RFC-0035
 requiresDocs: []
 ---
 
 # RFC-0018: In-Soul Journey Pattern
 
-**Document type:** Normative (draft)
-**Status:** Draft v0.2 — Initial spec expansion (Engineering pass on Mo's v0.1 stub). Practitioner-validation gates in §11 unresolved; full normative status awaits InternalAdopter accessibility-audit-pipeline implementation pass + Mo's design-authority editorial review of §3-§13.
+**Document type:** Normative
+**Status:** Ready for Review v0.3 — operator OQ walkthrough complete 2026-05-28 with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). All 10 §10 OQs resolved. Cross-cutting framing: operator-impacting journey-lifecycle events (count thresholds, state cardinality, metric staleness, accessibility-cadence overdue, WCAG-superseded use, sub-journey / cross-soul activation requests, state-ID drift) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts. §10.1 codifies per-Soul / per-org config schema. Implementation broken into 6 phase tasks (AISDLC-465..470).
+**Lifecycle:** Ready for Review
 **Created:** 2026-05-04
+**Updated:** 2026-05-28
 **Authors:** Morgan Hirtle (Design Authority, InternalAdopter)
 **Engineering pass:** Dominique Legault, Claude Opus 4.7 (orchestrator), 2026-05-04 — fleshed §3-§13 from Mo's v0.1 stub. Design + accessibility-vertex semantics (specifically §5.4 success metrics + §10 OQs) deferred to Mo for editorial pass.
-**Requires:** RFC-0009 (Tessellated Design Intent Documents), RFC-0017 (In-Soul Variant Pattern)
+**OQ walkthrough:** Dominique Legault (Operator), 2026-05-28 — full-rubric resolution of all 10 §10 OQs.
+**Requires:** RFC-0009 (Tessellated Design Intent Documents), RFC-0017 (In-Soul Variant Pattern), RFC-0035 (Decision Catalog — G0 non-blocking routing for journey lifecycle Decisions)
 
 > The bold-style status block above is preserved for human readability. The
 > YAML frontmatter at the top of the file is the source of truth for tooling
@@ -33,7 +37,7 @@ requiresDocs: []
 | Person | Role | Status | Date |
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.1 stub | 2026-05-04 |
-| Dominique Legault | CTO / Engineering Authority | ✏️ Engineering pass on v0.2 (pending Design editorial) | 2026-05-04 |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.3 (all 10 §10 OQs resolved per operator walkthrough 2026-05-28 with full rigor rubric; pending Design editorial pass) | 2026-05-28 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
 
 ### Product Authority review (PPA-composability scope only)
@@ -405,29 +409,124 @@ Outsource journey state-machine modeling to a workflow engine. **Rejected** — 
 - [ ] Conformance test suite — journey declaration round-trip; admission-scoring composition; inheritance + WCAG-elevation enforcement
 - [ ] Author/update each user-facing doc surface declared in `requiresDocs` (currently `[]` — pending tutorial/runbook decision)
 
-## 10. Open Questions
+## 10. Open Questions — resolved (operator walkthrough 2026-05-28 with full rubric)
 
-These need design + operator walkthrough before Lifecycle: Draft → Ready for Review.
+> **Resolution status (2026-05-28):** All 10 §10 OQs resolved via operator walkthrough with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** every operator-impacting journey-lifecycle event (count thresholds, state cardinality, metric staleness, accessibility cadence overdue, WCAG superseded version use, sub-journey / cross-soul activation requests, state-ID drift) routes through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md). §10.1 codifies per-Soul / per-org config schema. Implementation broken into 6 phase tasks: AISDLC-465..470.
 
 **OQ-1 — Maximum journeys per Soul/Variant:** Should the schema cap journey count? Recommendation: soft warning at 10+, hard limit at 50. Journeys are heavier than variants — encourage discipline.
 
+   **Resolution (2026-05-28, full rubric):** **Per-org configurable; defaults soft 10 / hard 50.** Author's defaults (soft 10 from Miller's 7±2 + industry advisory; hard 50 from Salesforce-style enterprise-platform ceiling) wrapped in the per-org-configurability convention established this session (matches RFC-0017 OQ-1 variant count exactly). Industry research: Atlassian ~12, Slack ~8, Salesforce 30+, Temporal recommends ≤50; cognitive-load research (Miller 7±2, Cowan ~4) supports ~10 as mental-model-maintenance threshold. Soft warn → `Decision: journey-count-soft-warning` (non-blocking batch review); hard limit → refuse declaration + `Decision: journey-count-hard-limit-exceeded` + clarification task. **Selected over fixed 10/50** because Salesforce-style enterprise platforms legitimately exceed 50; per-org override prevents constant-rejecting-RFC friction. **Selected over RFC-0017's 5/20** because journey count tracks user-flow surface (typically 10+ per mid-market SaaS) not audience-segment surface (typically <10). Different concept space; different defaults.
+
 **OQ-2 — State cardinality limits:** Per-journey state limit? Recommendation: NO hard limit; surface a soft warning at >12 states (suggests a journey should be split into sub-journeys).
+
+   **Resolution (2026-05-28, full rubric):** **Per-org configurable; defaults soft 12 / hard 100 + concrete v1 message.** Industry research: cognitive-load (Miller 7±2), XState/robot3 advisory "consider hierarchical states" at >10, BPMN practical limit ~20, IEEE state-diagram readability research >15 correlates with maintenance issues. Soft warn message ships operator-actionable workaround: *"Consider splitting into multiple top-level journeys with handoff terminal states (v1 workaround) OR await OQ-3 sub-journey activation (v2)."* Hard limit at 100 is sanity check (typo / runaway-loop guard, NOT architectural constraint — regulatory-submission journeys with 25-40 states are legitimate). Soft warn → `Decision: journey-state-count-soft-warning`; hard limit → refuse + `Decision: journey-state-count-hard-limit-exceeded`. **Selected over author's "no hard limit + vague sub-journey message"** because (a) sub-journey advisory is meaningless when OQ-3 rejects sub-journeys for v1 (operator can't act on it) and (b) typo / runaway-loop guard has real value. **Selected over no limits** because sanity guard prevents 500-state declarations that are almost certainly bugs. **Selected over RFC-0017 5/20 mirror** because state count is conceptually different from variant count.
 
 **OQ-3 — Sub-journeys (journey-within-journey):** Can a journey reference another journey as a sub-flow (e.g., "checkout journey embeds payment sub-journey")? Recommendation: NO for v1 — composition adds complexity for a use case we don't have practitioner evidence for. Revisit if multi-step flows surface.
 
+   **Resolution (2026-05-28, full rubric):** **Schema-enforced flat: `journeys[]` cannot contain `journeys[]`** + future Decision-Catalog auto-promote on ≥2 distinct adopter requests. Matches RFC-0017 OQ-2 nested-variants resolution exactly (design-tokens pattern: Tailwind/Material/Stripe/Vercel; Mendling et al. BPMN research on maintainability concerns above 2 levels of nesting; XState statecharts.dev warning against nesting >2 levels). v1 workaround documented in operator runbook + OQ-2 warning text: model sub-flows as multiple top-level journeys with handoff terminal states using shared `userId` / `sessionId` correlation. Future RFC via `Decision: journey-sub-flow-activation-request` (Stage A counter, auto-promote at ≥2 distinct adopter requests; matches RFC-0017 OQ-8 + this RFC OQ-9 pattern). **Selected over convention-only NO (author's lean)** because schema-permissive + convention-gated is the design-tokens-explosion anti-pattern RFC-0017 OQ-2 v0.2 had to refit. **Selected over allow-nested-v1** because premature without practitioner evidence (complexity-management debt from day 1). **Selected over opt-in flag** because adds config surface for capability without demand.
+
 **OQ-4 — Completion-criteria expressiveness:** §5.2 sketches `terminal-success-state | all-states-reached | custom-predicate`. Is `custom-predicate` an arbitrary string DSL, a JS expression, a JsonLogic predicate, or off the table for v1? Recommendation: closed enum for v1 (`terminal-success-state` + `all-states-reached` only); defer `custom-predicate` until adopters surface a real need.
+
+   **Resolution (2026-05-28, full rubric):** **Closed enum for v1 + future Decision-Catalog auto-promote on ≥2 adopter requests + pre-recommended CEL (Google Common Expression Language) for v2.** Industry research: CEL is the modern de-facto sandboxed expression language (Kubernetes admission webhooks, gRPC, Cloud IAM); statically-typed, statically-analyzable, deterministic, no IO. JsonLogic limited expressiveness; arbitrary JS is anti-pattern (sandbox escape, non-determinism, non-analyzable); JEXL too dangerous; Rego / Cedar overkill. Future RFC via `Decision: journey-custom-predicate-activation-request` (matches RFC-0017 OQ-8 cardinality + this RFC OQ-3, OQ-9 pattern). Pre-recommending CEL in the resolution captures current industry consensus AND signals to adopters that the answer is already known (not blocking on technology selection). **Selected over vague defer (author's lean)** because vague defer has no concrete adopter-demand mechanism. **Selected over ship-CEL-v1** because premature without demand. **Selected over arbitrary-JS** because anti-pattern (security + non-determinism).
 
 **OQ-5 — Success-metrics source:** §9 mentions an adapter pattern for ingesting metrics like `completion-rate`. What's the adapter contract — operator-supplied numbers, or framework-side polling of an analytics backend? Recommendation: operator-supplied numbers via a typed `MetricSnapshot` resource (operator's analytics pipeline writes them). Frees the framework from analytics-backend integration.
 
+   **Resolution (2026-05-28, full rubric):** **Operator-supplied `MetricSnapshot` resource for v1 + `Decision: journey-metric-stale` on stale data (>30d default, per-Soul configurable) + future-RFC pre-recommends `MetricsAdapter` pattern parallel to RFC-0030 SignalSourceAdapter.** Industry research: push vs pull patterns both production-proven; product analytics (Mixpanel, Amplitude, Heap) require N-vendor adapters for framework-poll (high framework-side cost); operator-supplied glue is lower friction because adopters already have analytics. Stale-metric handling: warn-and-unknown (not fail-closed) via Decision routing — treat as missing input for Cκ at journey scope. **Selected over author's lean** because v0.2 leaves stale-handling implicit (Phase 1 implementer choice) AND omits the v2 trajectory composition with RFC-0030. **Selected over adapter-framework-day-one** because premature; high framework-side cost. **Selected over reuse-SignalSourceAdapter** because conflates qualitative (text) vs quantitative (numeric) semantics → bad type hierarchy long-term.
+
 **OQ-6 — Accessibility cadence enforcement:** §5.1's `auditCadence: quarterly | annually | release-gated | continuous` declares cadence but the framework doesn't currently enforce it. Should overdue audits trigger Eρ₅ degradation (compliance-clearance gate fails until audit lands)? Recommendation: YES with a 30-day grace window past the cadence; configurable per Soul.
+
+   **Resolution (2026-05-28, full rubric):** **Graduated Eρ₅ degradation + threshold Decisions + per-Soul `accessibility.auditOverdueGracePolicy` config.** Industry research: SOC2 30d grace; PCI-DSS strict; Vanta/Drata/Secureframe production governance tools use graduated risk-score reduction (not binary cliff); HIPAA ongoing assessments. Graduated schedule: 0-30d past cadence → warn (no Eρ₅ impact); 30-60d → Eρ₅ -25%; 60-90d → Eρ₅ -50%; 90d+ → effective block. Decisions at each threshold transition: `journey-audit-overdue-warn`, `journey-audit-overdue-graduated`, `journey-audit-overdue-blocking`. Per-Soul config preserves stricter modes (`binary-30d`, `hard-block`) for SOC2/HIPAA-strict shops. **Selected over author's binary 30d grace then fail** because operator-hostile cliff behavior + contradicts industry pattern (Vanta/Drata graduated). **Selected over hard-block at cadence+0d** because too aggressive as default (preserved as per-Soul opt-in). **Selected over warn-only** because loses Eρ₅ scoring teeth the OQ surfaces.
 
 **OQ-7 — WCAG version evolution:** WCAG 3.0 is in development. How does the schema handle a new WCAG version landing — bump `wcagVersion` enum, leave existing journey declarations valid? Recommendation: additive enum (existing journeys keep their declared version; new journeys can pick the latest); document migration in a follow-on RFC when WCAG 3.0 normative.
 
+   **Resolution (2026-05-28, full rubric):** **Additive enum + WCAG 3.0 scoring-model preview documented + `Decision: wcag-version-superseded` advisory on W3C-superseded versions.** Industry research: WCAG version history 2.0 (2008) → 2.1 (2018) → 2.2 (2023) → 3.0 (in development); W3C never formally removes versions but 2.1+ is recommended; WCAG 3.0 is a structural shift (binary conformance → Silver framework graduated scoring). Resolution pre-documents that the `conformanceTarget: number` field assumes binary; WCAG 3.0 normative will likely require `scoringModel: 'binary' | 'graduated'` discriminant in a future RFC. Pre-documenting captures the foreseeable scope. `Decision: wcag-version-superseded` advisory when adopter declares WCAG 2.0 (no scoring impact; visible-gap signal). **Selected over author's lean (additive enum + vague defer)** because both refinements implicit → re-discovery cost. **Selected over strict-force-latest** because contradicts version-bound audit reality (conformance audits target specific version). **Selected over schema-permissive** because loses validation value.
+
 **OQ-8 — Drift detection on state ID references:** §6.2 says substrate code referencing a removed state ID is a drift signal. How does the detector find these references — string match on the state ID, AST scan for typed references, or both? Recommendation: string match v1 (cheap, conservative); AST scan in a follow-on if false-positive rate is too high.
+
+   **Resolution (2026-05-28, full rubric):** **AST scan from v1, reusing RFC-0009 §13 Rule #1 infrastructure.** The existing AST scan engine ALREADY EXISTS for soul-slug leakage detection — adding journey state-ID detection is extending the engine with one additional rule, not building from scratch. Industry research: modern tools (Sonar, Semgrep, CodeQL) use AST or semantic match (not string match); string match's 15-30% false-positive rate creates decision fatigue when surfaced as `Decision: journey-state-id-drift` events. Author's "string match v1, AST follow-on" path is actually MORE work because (a) deprecation cost forces operator CI migration, (b) inconsistency with existing §13 infrastructure, (c) high v1 FP load compounds decision fatigue. Composes with OQ-10's "4th rule in same engine" resolution — the scan technology choice and engine integration are deeply linked. **Selected over author's lean (string match v1, AST follow-on)** because deprecation cost dominates. **Selected over string-match-only** because persistent false-positive rate creates decision fatigue. **Selected over LSP-based** because per-language tooling burden disproportionate to v1.
 
 **OQ-9 — Cross-soul journeys (the multi-product user path case):** §4 non-goal #5 explicitly excludes these. But practitioners DO have multi-product user flows (e.g., a ProductA onboarding that hands off to ProductB). What's the right operator pattern — separate journey per soul + a "handoff" terminal state, or document this as a known limitation? Recommendation: document as known limitation v1; surface as candidate for a "Cross-Soul Coordination" follow-on RFC if multiple adopters report this.
 
+   **Resolution (2026-05-28, full rubric):** **Document as v1 limitation + concrete per-soul-with-handoff workaround + Decision-Catalog auto-promote on ≥2 distinct adopter requests.** Industry research: Salesforce (Service → Sales → Marketing handoff), Atlassian (Jira → Confluence → BitBucket), HubSpot (Marketing → Sales → CRM), Microsoft 365 — all production multi-product flows use the per-soul-with-handoff pattern via shared correlation IDs (sessionId, userId, customer reference). Concrete v1 workaround documented in operator runbook: (a) each Soul owns its own journey with `transitioned-to-soul-B` terminal state; (b) cross-soul correlation via shared `userId` / `sessionId` in work-item metadata; (c) operator-application owns cross-soul orchestration; (d) framework scores per-soul only; (e) cross-soul completion-rate computed by operator's analytics pipeline. Future RFC via `Decision: cross-soul-journey-coordination-request` (matches RFC-0017 OQ-8 + this RFC OQ-3, OQ-4 pattern). **Selected over author's lean ("vague limitation")** because "known limitation" without workaround leaves operators stranded. **Selected over ship-cross-soul-v1** because substantial scope without practitioner evidence. **Selected over block-cross-soul-use-cases** because operator-hostile (multi-product flows exist in reality).
+
 **OQ-10 — Interaction with RFC-0009's Tessellation Drift detection:** RFC-0009 §13 lists 3 drift detection rules (AST scan, embedding distance, cross-soul provenance). Journey declarations add a 4th class of drift (state-ID drift). Should this be a 4th rule in the same engine, or a separate detector? Recommendation: 4th rule in the same engine — composability with the existing dispatcher is more important than separation of concerns.
+
+   **Resolution (2026-05-28, full rubric):** **4th rule in the same §13 engine + concrete registration mechanism spec'd: `Tessellation§13RuleRegistry.register(rule)`.** Industry research: unified-engine-with-plugin-rules (Sonar, Semgrep, CodeQL, Snyk, Dependabot, Renovate) is the modern de-facto pattern; federated engines arise from organizational boundaries not design choice. Composes with OQ-8 (AST scan reusing §13 Rule #1 infrastructure) and RFC-0028 OQ-7.2 (unified-drift-detection direction). Rule interface: `{ name, description, scan(target): DriftEvent[], severity }`. §13 dispatcher fans out all registered rules in parallel; aggregates Decisions for catalog routing. Concrete new rule: `JourneyStateIdDriftRule` scans substrate code for references to journey-state-id strings; emits `Decision: journey-state-id-drift` when referenced state ID is not declared in any active journey OR the journey itself has been removed. **Selected over author's lean (4th rule in same engine, no registration mechanism)** because Phase 2 implementer would invent the registration shape; spec'ing it prevents convention-by-implementation problem. **Selected over separate-engine** because contradicts OQ-8 + AI-SDLC unification pattern. **Selected over defer-to-Phase-2** because same re-discovery cost.
+
+### 10.1 Configuration Schema (per-Soul / per-org defaults)
+
+Per-organization configurability across the OQ resolutions. Per-Soul overrides codify journey-substrate config:
+
+```yaml
+# .ai-sdlc/journey-config.yaml (per-org defaults)
+journey:
+  limits:                                    # OQ-1
+    softWarnAt: 10                           # Miller's 7±2 upper end + industry advisory
+    hardLimit: 50                            # Salesforce-style enterprise ceiling
+
+  stateLimits:                               # OQ-2
+    softWarnAt: 12                           # Miller's 7±2 + IEEE readability research
+    hardLimit: 100                           # sanity guard (typo / runaway-loop), NOT architectural
+    softWarnMessage: "Consider splitting into multiple top-level journeys with handoff terminal states (v1 workaround) OR await OQ-3 sub-journey activation (v2)"
+
+  subJourneys:                               # OQ-3
+    allowed: false                           # schema-enforced flat
+    futureActivationDecision: journey-sub-flow-activation-request
+    futurePromotionThreshold:
+      distinctAdopterRequests: 2
+
+  completionCriteria:                        # OQ-4
+    enumValues: [terminal-success-state, all-states-reached]
+    futureActivationDecision: journey-custom-predicate-activation-request
+    futurePromotionThreshold:
+      distinctAdopterRequests: 2
+    futureLanguage: cel                       # Google Common Expression Language
+
+  successMetrics:                            # OQ-5
+    contract: operator-supplied
+    resource: MetricSnapshot
+    staleness:
+      thresholdDays: 30                      # per-Soul configurable
+      onStale:
+        decision: journey-metric-stale
+        scoringBehavior: warn-and-unknown    # NOT fail-closed
+    futureAdapterPattern: MetricsAdapter      # parallel to RFC-0030 SignalSourceAdapter
+
+  accessibility:                             # OQ-6
+    auditOverdueGracePolicy: graduated       # alternatives: binary-30d, hard-block
+    graduatedThresholds:
+      warnAt: 0                              # days past cadence
+      reduced25At: 30
+      reduced50At: 60
+      effectiveBlockAt: 90
+    decisions:
+      atWarn: journey-audit-overdue-warn
+      atGraduated: journey-audit-overdue-graduated
+      atBlocking: journey-audit-overdue-blocking
+
+  wcag:                                      # OQ-7
+    enum: additive                           # existing journey declarations stay valid; new can pick latest
+    supersededAdvisory:
+      enabled: true
+      decision: wcag-version-superseded      # advisory only; no scoring impact
+    forwardCompatNote: "WCAG 3.0 binary → graduated scoring shift may require `scoringModel` discriminant in future RFC"
+
+  driftDetection:                            # OQ-8 + OQ-10
+    integration: rfc-0009-§13-rule-4         # 4th rule in same engine
+    registry: Tessellation§13RuleRegistry
+    ruleName: JourneyStateIdDriftRule
+    scanTechnology: ast                       # reuses §13 Rule #1 AST scan infrastructure
+    decisionOnMatch: journey-state-id-drift
+
+  crossSoulCoordination:                     # OQ-9
+    v1Mechanism: per-soul-with-handoff-pattern
+    correlationField: shared-userId-or-sessionId-in-work-item-metadata
+    futureActivationDecision: cross-soul-journey-coordination-request
+    futurePromotionThreshold:
+      distinctAdopterRequests: 2
+```
+
+Default constants ship in the `ai-sdlc init` journey-config template. Per-Soul overrides via the soul's `spec.journeyConfig` block (composes with RFC-0009 substrate). Schema enforces limits at journey-declaration load, lifecycle states at threshold transitions, vendor-prefix for any future adopter override fields.
 
 ## 11. Practitioner Validation Plan
 
@@ -459,3 +558,4 @@ Validation criteria (Mo's edits welcome):
 |---|---|---|---|
 | v0.1 | 2026-05-04 | Morgan Hirtle | Initial stub (carve-out from RFC-0009 OQ-3). Established summary + practitioner-validation source. |
 | v0.2 | 2026-05-04 | Engineering pass (Dominique + Claude Opus 4.7) | Filled §3-§13 from boilerplate. Schema sketch with state machines + accessibility + success metrics; inheritance table; admission-scoring composition (Sα₂ + Cκ + Eρ₅); boundary-vs-just-a-feature; alternatives; 10 open questions; InternalAdopter validation plan. Awaiting Mo's design-authority editorial pass on §5.4 success metrics + §10 OQs. |
+| v0.3 | 2026-05-28 | dominique (Operator OQ walkthrough) | Full-rubric resolution of all 10 §10 OQs (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Resolutions: **(OQ-1)** per-org configurable journey count limits with defaults soft 10 / hard 50 (matches RFC-0017 OQ-1 per-org-config pattern; higher than variant 5/20 because journey count tracks user-flow surface). **(OQ-2)** per-org configurable state cardinality limits with defaults soft 12 / hard 100 (sanity guard, not architectural); concrete operator-actionable warning message pointing at v1 workaround. **(OQ-3)** schema-enforced flat (no nested journeys); future RFC via `Decision: journey-sub-flow-activation-request` at ≥2 distinct adopter requests (matches RFC-0017 OQ-2 + OQ-8 pattern). **(OQ-4)** closed enum for completion-criteria v1 (`terminal-success-state`, `all-states-reached`); future Decision-Catalog auto-promote on ≥2 requests; pre-recommended CEL (Google Common Expression Language) for v2 — captures industry consensus + signals adopters the answer is known. **(OQ-5)** operator-supplied `MetricSnapshot` resource for v1 + `Decision: journey-metric-stale` on stale data (>30d default, per-Soul configurable; warn-and-unknown, NOT fail-closed) + v2 trajectory pre-recommends `MetricsAdapter` pattern parallel to RFC-0030 SignalSourceAdapter. **(OQ-6)** graduated Eρ₅ degradation (0-30d warn / 30-60d -25% / 60-90d -50% / 90d+ blocking) + threshold Decisions + per-Soul `accessibility.auditOverdueGracePolicy` config (preserves stricter `binary-30d` / `hard-block` modes for SOC2/HIPAA shops). **(OQ-7)** additive WCAG-version enum + pre-documented scoring-model shift for WCAG 3.0 (binary → Silver framework graduated; may require `scoringModel` discriminant in future RFC) + `Decision: wcag-version-superseded` advisory on W3C-superseded version use. **(OQ-8)** AST scan from v1 reusing RFC-0009 §13 Rule #1 infrastructure (NOT string match — engine already exists; deprecation cost dominates). **(OQ-9)** v1 limitation with concrete per-soul-with-handoff workaround documented (shared `userId` / `sessionId` correlation, framework scores per-soul only) + future RFC via `Decision: cross-soul-journey-coordination-request`. **(OQ-10)** 4th rule in same §13 engine + concrete registration mechanism (`Tessellation§13RuleRegistry.register(rule)` + standard interface) — composes with OQ-8 + RFC-0028 OQ-7.2 unified-drift-detection direction. §10.1 added consolidating per-Soul / per-org `.ai-sdlc/journey-config.yaml` schema. Cross-cutting framing: operator-impacting journey-lifecycle events route through RFC-0035 G0 catalog. Frontmatter `requires` expanded: added RFC-0035 (catalog routing for journey Decisions). Lifecycle promoted Draft → Ready for Review. Implementation broken into 6 phase tasks: AISDLC-465 (Phase 1 schema additions + count/state limits + inheritance validator + nested rejection), AISDLC-466 (Phase 2 admission scorer composition + completion criteria), AISDLC-467 (Phase 3 §13 4th rule integration — JourneyStateIdDriftRule + Tessellation§13RuleRegistry), AISDLC-468 (Phase 4 MetricSnapshot resource + stale-metric Decision + accessibility cadence graduated degradation), AISDLC-469 (Phase 5 WCAG version evolution + superseded Decision + WCAG 3.0 forward-compat documentation), AISDLC-470 (Phase 6 InternalAdopter reference impl + glossary + conformance tests + cross-soul workaround docs). Engineering + Operator sign-off (Dominique) added; pending Design editorial pass from Mo + Practitioner validation per §11. |
