@@ -24,6 +24,7 @@ import type {
   OperatorAnsweredEvent,
   OverriddenEvent,
   StageCCompletedEvent,
+  TimeboxExtendedEvent,
 } from './decision-record.js';
 
 /**
@@ -56,16 +57,43 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
         ...(opened.reversible !== undefined ? { reversible: opened.reversible } : {}),
         options: opened.options,
         ...(opened.dependsOn !== undefined ? { dependsOn: opened.dependsOn } : {}),
+        ...(opened.timebox !== undefined ? { timebox: opened.timebox } : {}),
       },
       status: {
         lifecycle: 'open',
         ...(opened.routing !== undefined ? { routing: opened.routing } : {}),
         ...(opened.capacity !== undefined ? { capacity: opened.capacity } : {}),
         ...(opened.deadline !== undefined ? { deadline: opened.deadline } : {}),
+        ...(opened.timeboxExpiresAt !== undefined
+          ? { timeboxExpiresAt: opened.timeboxExpiresAt }
+          : {}),
       },
       decisionLog: [...(current?.decisionLog ?? []), event],
     };
     return decision;
+  }
+
+  if (event.type === 'timebox-extended') {
+    // RFC-0035 AISDLC-447 — operator-extension of an existing timebox.
+    // Fold the new expiry onto status.timeboxExpiresAt + record the new
+    // canonical duration on spec.timebox so subsequent reads show the
+    // current ground truth (the audit trail of every prior timebox lives
+    // in decisionLog).
+    if (current === null) return null;
+    const ext = event as TimeboxExtendedEvent;
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      spec: {
+        ...current.spec,
+        timebox: ext.newTimebox,
+      },
+      status: {
+        ...current.status,
+        timeboxExpiresAt: ext.newTimeboxExpiresAt,
+      },
+      decisionLog: [...current.decisionLog, event],
+    };
   }
 
   if (event.type === 'recommendation-issued') {
@@ -206,4 +234,59 @@ export function listDecisions(opts: ReadEventsOpts = {}): {
   const list = Array.from(decisions.values());
   list.sort((a, b) => a.metadata.created.localeCompare(b.metadata.created));
   return { decisions: list, skipped };
+}
+
+// ── Timebox-aware sort + filter (RFC-0035 AISDLC-447) ────────────────────────
+
+/**
+ * Sort decisions by timebox-remaining ascending (most-urgent first).
+ *
+ * Within the timeboxed set, decisions are ordered by `timeboxExpiresAt`
+ * ascending (earliest = most-urgent). Decisions without a timebox sort
+ * after all timeboxed ones, in `metadata.created` ascending order so the
+ * existing creation-order behaviour is preserved for the untimeboxed tail.
+ *
+ * The function is pure and returns a new array — the input is not mutated.
+ */
+export function sortDecisionsByTimeboxUrgency(decisions: Decision[]): Decision[] {
+  const copy = [...decisions];
+  copy.sort((a, b) => {
+    const aExp = a.status.timeboxExpiresAt ?? null;
+    const bExp = b.status.timeboxExpiresAt ?? null;
+    if (aExp && bExp) {
+      const cmp = aExp.localeCompare(bExp);
+      if (cmp !== 0) return cmp;
+      return a.metadata.created.localeCompare(b.metadata.created);
+    }
+    if (aExp && !bExp) return -1; // timeboxed before untimeboxed
+    if (!aExp && bExp) return 1;
+    return a.metadata.created.localeCompare(b.metadata.created);
+  });
+  return copy;
+}
+
+/**
+ * True when the decision's timebox is set AND in the past relative to `now`.
+ * Decisions without a timebox can never be "expired" — they sort to the
+ * bottom of the urgency list but `--expired` filters them out.
+ */
+export function isDecisionTimeboxExpired(decision: Decision, now: Date = new Date()): boolean {
+  const exp = decision.status.timeboxExpiresAt;
+  if (!exp) return false;
+  const t = Date.parse(exp);
+  if (!Number.isFinite(t)) return false;
+  return t < now.getTime();
+}
+
+/**
+ * Filter to only decisions whose timebox has expired AND that are still
+ * unresolved (lifecycle ≠ 'answered' / 'archived' / 'superseded'). Resolved
+ * decisions are excluded — once the operator answered, the timebox is moot.
+ */
+export function filterExpiredDecisions(decisions: Decision[], now: Date = new Date()): Decision[] {
+  return decisions.filter((d) => {
+    if (!isDecisionTimeboxExpired(d, now)) return false;
+    const lc = d.status.lifecycle;
+    return lc !== 'answered' && lc !== 'archived' && lc !== 'superseded';
+  });
 }

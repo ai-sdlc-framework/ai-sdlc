@@ -1865,6 +1865,11 @@ export const decisionV1Schema = {
           items: { type: 'string' },
           description: 'Decision IDs (DEC-NNNN) that gate this decision.',
         },
+        timebox: {
+          type: 'string',
+          description:
+            "RFC-0035 AISDLC-447 — operator-authored timebox as an ISO-8601 duration (e.g. 'PT4H', 'P1D', 'P7D'). Categorical aliases (URGENT/24H/WEEK/BACKLOG) are resolved to ISO-8601 form before persistence.",
+        },
       },
     },
     status: {
@@ -1929,6 +1934,12 @@ export const decisionV1Schema = {
           type: ['string', 'null'],
           format: 'date-time',
         },
+        timeboxExpiresAt: {
+          type: ['string', 'null'],
+          format: 'date-time',
+          description:
+            'RFC-0035 AISDLC-447 — absolute expiry timestamp computed at decision-opened time as `created + parseTimebox(timebox)`. Updated when a `timebox-extended` event lands. Null / absent for decisions opened without a timebox.',
+        },
       },
     },
     decisionLog: {
@@ -1952,6 +1963,7 @@ export const decisionV1Schema = {
               'stage-c-completed',
               'operator-answered',
               'timebox-fired',
+              'timebox-extended',
               'overridden',
               'calibration-adjusted',
               'superseded',

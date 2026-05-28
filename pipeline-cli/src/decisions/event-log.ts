@@ -34,6 +34,7 @@ import {
   type DecisionEvent,
   type DecisionOpenedEvent,
   type OperatorAnsweredEvent,
+  type TimeboxExtendedEvent,
 } from './decision-record.js';
 
 // ── Path resolution ──────────────────────────────────────────────────────────
@@ -259,6 +260,15 @@ export interface OpenDecisionInput {
   routing?: DecisionOpenedEvent['routing'];
   capacity?: DecisionOpenedEvent['capacity'];
   deadline?: string | null;
+  /**
+   * RFC-0035 AISDLC-447 — canonical ISO-8601 timebox (categorical aliases
+   * pre-resolved by the caller). The factory persists this as-authored on
+   * the event; callers should compute + pass `timeboxExpiresAt` in the same
+   * call so both fields land atomically.
+   */
+  timebox?: string;
+  /** RFC-0035 AISDLC-447 — pre-computed absolute expiry (ISO-8601 UTC). */
+  timeboxExpiresAt?: string;
   by?: string;
   now?: Date;
 }
@@ -286,6 +296,43 @@ export function makeDecisionOpenedEvent(input: OpenDecisionInput): DecisionOpene
   if (input.routing !== undefined) event.routing = input.routing;
   if (input.capacity !== undefined) event.capacity = input.capacity;
   if (input.deadline !== undefined) event.deadline = input.deadline;
+  if (input.timebox !== undefined) event.timebox = input.timebox;
+  if (input.timeboxExpiresAt !== undefined) event.timeboxExpiresAt = input.timeboxExpiresAt;
+  if (input.by !== undefined) event.by = input.by;
+  return event;
+}
+
+// ── Timebox-extended event factory (AISDLC-447) ──────────────────────────────
+
+export interface ExtendTimeboxInput {
+  decisionId: string;
+  /** Canonical ISO-8601 duration (categorical aliases pre-resolved). */
+  newTimebox: string;
+  /** Pre-computed absolute expiry (ISO-8601 UTC). */
+  newTimeboxExpiresAt: string;
+  /** The prior expiry timestamp this extension supersedes (null if none). */
+  previousTimeboxExpiresAt: string | null;
+  rationale?: string;
+  by?: string;
+  now?: Date;
+}
+
+/**
+ * Build a well-formed `timebox-extended` event without writing it. Call
+ * {@link appendDecisionEvent} afterwards to persist.
+ */
+export function makeTimeboxExtendedEvent(input: ExtendTimeboxInput): TimeboxExtendedEvent {
+  const ts = (input.now ?? new Date()).toISOString();
+  const event: TimeboxExtendedEvent = {
+    eventVersion: 'v1',
+    type: 'timebox-extended',
+    ts,
+    decisionId: input.decisionId,
+    newTimebox: input.newTimebox,
+    newTimeboxExpiresAt: input.newTimeboxExpiresAt,
+    previousTimeboxExpiresAt: input.previousTimeboxExpiresAt,
+  };
+  if (input.rationale !== undefined) event.rationale = input.rationale;
   if (input.by !== undefined) event.by = input.by;
   return event;
 }

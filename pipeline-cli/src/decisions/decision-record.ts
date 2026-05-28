@@ -44,6 +44,7 @@ export const DECISION_EVENT_TYPES = [
   'stage-c-completed',
   'operator-answered',
   'timebox-fired',
+  'timebox-extended',
   'overridden',
   'calibration-adjusted',
   'superseded',
@@ -93,6 +94,17 @@ export interface DecisionSpec {
   options: DecisionOption[];
   /** DEC-NNNN ids that gate this decision. */
   dependsOn?: string[];
+  /**
+   * RFC-0035 AISDLC-447 — timebox the operator authored. ISO-8601 duration
+   * string (e.g. `PT4H`, `P1D`, `P7D`, `P30D`). When omitted the decision
+   * has no timebox and is sorted last in `cli-decisions list`.
+   *
+   * Persisted alongside the computed `status.timeboxExpiresAt` so downstream
+   * consumers can re-derive expiry on a different clock if needed, and so
+   * the audit log records the operator's authored intent (e.g. `URGENT`
+   * resolves to `PT4H` at write time).
+   */
+  timebox?: string;
 }
 
 export interface DecisionRouting {
@@ -122,6 +134,13 @@ export interface DecisionStatus {
   priority?: number | null;
   capacity?: DecisionCapacity;
   deadline?: string | null;
+  /**
+   * RFC-0035 AISDLC-447 — absolute timebox expiry timestamp (ISO-8601 UTC).
+   * Computed at `decision-opened` time as `created + parseTimebox(timebox)`.
+   * Updated when a `timebox-extended` event lands. Null / absent for
+   * decisions opened without a timebox.
+   */
+  timeboxExpiresAt?: string | null;
 }
 
 /**
@@ -180,6 +199,40 @@ export interface DecisionOpenedEvent extends DecisionEventEnvelope {
   capacity?: DecisionCapacity;
   /** Optional initial deadline. */
   deadline?: string | null;
+  /**
+   * RFC-0035 AISDLC-447 — operator-authored timebox as an ISO-8601 duration
+   * (`PT4H`, `P1D`, `P7D`, `P30D`, ...). Categorical aliases (URGENT, 24H,
+   * WEEK, BACKLOG) are resolved to ISO-8601 form before the event is
+   * appended (see {@link parseTimebox}).
+   */
+  timebox?: string;
+  /**
+   * RFC-0035 AISDLC-447 — absolute expiry timestamp (ISO-8601 UTC) computed
+   * at append time. Persisted on the event so the projection doesn't have
+   * to re-derive (and so two readers on different clocks agree on when the
+   * decision expires).
+   */
+  timeboxExpiresAt?: string;
+}
+
+/**
+ * RFC-0035 AISDLC-447 — `timebox-extended` event.
+ *
+ * Emitted by the operator-override path (`cli-decisions extend <id>
+ * --timebox <new>`) to push the expiry timestamp out. Carries the previous
+ * + new ISO durations and the new computed expiry so the audit log is
+ * self-contained: a reader on a different clock can verify the math.
+ */
+export interface TimeboxExtendedEvent extends DecisionEventEnvelope {
+  type: 'timebox-extended';
+  /** The new ISO-8601 duration (categorical aliases resolved). */
+  newTimebox: string;
+  /** Absolute expiry timestamp after extension (ISO-8601 UTC). */
+  newTimeboxExpiresAt: string;
+  /** The prior expiry timestamp this extension supersedes. Null when the decision had no timebox before. */
+  previousTimeboxExpiresAt: string | null;
+  /** Optional operator rationale for the extension. */
+  rationale?: string;
 }
 
 /**
@@ -209,6 +262,7 @@ export type DecisionEvent =
   | OperatorAnsweredEvent
   | StageCCompletedEvent
   | OverriddenEvent
+  | TimeboxExtendedEvent
   | (DecisionEventEnvelope & {
       type: Exclude<
         DecisionEventType,
@@ -217,6 +271,7 @@ export type DecisionEvent =
         | 'operator-answered'
         | 'stage-c-completed'
         | 'overridden'
+        | 'timebox-extended'
       >;
     } & Record<string, unknown>);
 
@@ -643,6 +698,23 @@ export function validateDecisionEvent(raw: unknown): string | null {
     }
     if (typeof r.supersededOptionId !== 'string' || r.supersededOptionId.length === 0) {
       return 'overridden: supersededOptionId is required';
+    }
+  }
+
+  if (r.type === 'timebox-extended') {
+    if (typeof r.newTimebox !== 'string' || r.newTimebox.length === 0) {
+      return 'timebox-extended: newTimebox is required';
+    }
+    if (typeof r.newTimeboxExpiresAt !== 'string' || r.newTimeboxExpiresAt.length === 0) {
+      return 'timebox-extended: newTimeboxExpiresAt is required';
+    }
+    // previousTimeboxExpiresAt is required-by-key but may be null when the
+    // decision had no timebox prior to the extension.
+    if (
+      r.previousTimeboxExpiresAt !== null &&
+      (typeof r.previousTimeboxExpiresAt !== 'string' || r.previousTimeboxExpiresAt.length === 0)
+    ) {
+      return 'timebox-extended: previousTimeboxExpiresAt must be string or null';
     }
   }
 

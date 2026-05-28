@@ -1163,3 +1163,380 @@ describe('fatigue subcommand (Phase 7 / AISDLC-291)', () => {
     expect(out.state.fatigueActive).toBe(true);
   });
 });
+
+// ── AISDLC-447 — `--timebox` on `add`, sort + filter on `list`, `extend` ────
+
+describe('AISDLC-447 — add --timebox flag', () => {
+  it('AC-1: accepts an ISO-8601 duration and persists timebox metadata on the decision', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'urgent thing',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'PT4H',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      ok: boolean;
+      decisionId: string;
+      decision: Decision;
+    }>();
+    expect(r.ok).toBe(true);
+    expect(r.decision.spec.timebox).toBe('PT4H');
+    expect(typeof r.decision.status.timeboxExpiresAt).toBe('string');
+    // Expiry within a few seconds of now+4h
+    const now = Date.now();
+    const exp = Date.parse(r.decision.status.timeboxExpiresAt!);
+    const expectedMs = 4 * 60 * 60 * 1000;
+    expect(Math.abs(exp - now - expectedMs)).toBeLessThan(5_000);
+  });
+
+  it('AC-2: resolves categorical alias URGENT → PT4H', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'urgent',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'URGENT',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decision: Decision }>();
+    expect(r.decision.spec.timebox).toBe('PT4H');
+  });
+
+  it('AC-2: resolves alias 24H → P1D (case-insensitive)', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'next-day',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      '24h',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ decision: Decision }>().decision.spec.timebox).toBe('P1D');
+  });
+
+  it('AC-2: resolves WEEK → P7D', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'weekly',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'WEEK',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ decision: Decision }>().decision.spec.timebox).toBe('P7D');
+  });
+
+  it('AC-2: resolves BACKLOG → P30D', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'backlog',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'BACKLOG',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ decision: Decision }>().decision.spec.timebox).toBe('P30D');
+  });
+
+  it('refuses an invalid --timebox value with a clear error message', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'bad',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'not-a-duration',
+      '--format',
+      'json',
+    );
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/--timebox/);
+  });
+
+  it('AC-7: decision-opened event carries timebox + timeboxExpiresAt fields', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'audit',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'PT2H',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const logPath = resolveEventLogPath(tmp);
+    const evt = JSON.parse(readFileSync(logPath, 'utf8').trim());
+    expect(evt.type).toBe('decision-opened');
+    expect(evt.timebox).toBe('PT2H');
+    expect(typeof evt.timeboxExpiresAt).toBe('string');
+  });
+
+  it('omitting --timebox leaves both fields undefined (backward compatible)', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      'no-timebox',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decision: Decision }>();
+    expect(r.decision.spec.timebox).toBeUndefined();
+    expect(r.decision.status.timeboxExpiresAt).toBeUndefined();
+  });
+});
+
+describe('AISDLC-447 — list timebox-aware sort + --expired filter', () => {
+  async function seedDecision(summary: string, timebox?: string, delayMs = 0): Promise<string> {
+    const args = [
+      'add',
+      '--summary',
+      summary,
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--format',
+      'json',
+    ];
+    if (timebox !== undefined) args.push('--timebox', timebox);
+    setArgv(...args);
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decisionId: string }>();
+    stdoutChunks = [];
+    if (delayMs > 0) await new Promise((res) => setTimeout(res, delayMs));
+    return r.decisionId;
+  }
+
+  it('AC-3: sorts pending decisions by timebox-remaining ascending (most-urgent first)', async () => {
+    // Open in mixed order: long-tail first, then urgent, then no-timebox.
+    await seedDecision('long', 'P30D');
+    await seedDecision('urgent', 'PT4H');
+    await seedDecision('no-timebox');
+    await seedDecision('medium', 'P1D');
+
+    setArgv('list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decisions: Decision[] }>();
+    // Order: PT4H, P1D, P30D, no-timebox (creation-asc tiebreak)
+    expect(r.decisions.map((d) => d.spec.summary)).toEqual([
+      'urgent',
+      'medium',
+      'long',
+      'no-timebox',
+    ]);
+  });
+
+  it('--sort created restores legacy creation-order behaviour', async () => {
+    await seedDecision('first', 'P30D');
+    await seedDecision('second', 'PT4H');
+
+    setArgv('list', '--format', 'json', '--sort', 'created');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decisions: Decision[] }>();
+    expect(r.decisions.map((d) => d.spec.summary)).toEqual(['first', 'second']);
+  });
+
+  it('AC-4: --expired filters to past-timebox decisions', async () => {
+    // PT0H is rejected by parser; we need to manually inject an expired decision.
+    // Use the event-log writer directly to bypass `now`.
+    const { appendDecisionEvent: append, makeDecisionOpenedEvent: make } =
+      await import('../decisions/event-log.js');
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const future = new Date(Date.now() + 60 * 60 * 1000);
+    append(
+      make({
+        decisionId: 'DEC-0001',
+        source: 'ad-hoc',
+        scope: 'workspace',
+        summary: 'expired',
+        options: [{ id: 'opt-a', description: 'A' }],
+        timebox: 'PT1H',
+        timeboxExpiresAt: past.toISOString(),
+        now: new Date(past.getTime() - 60 * 60 * 1000),
+      }),
+      { workDir: tmp },
+    );
+    append(
+      make({
+        decisionId: 'DEC-0002',
+        source: 'ad-hoc',
+        scope: 'workspace',
+        summary: 'fresh',
+        options: [{ id: 'opt-a', description: 'A' }],
+        timebox: 'PT1H',
+        timeboxExpiresAt: future.toISOString(),
+        now: new Date(),
+      }),
+      { workDir: tmp },
+    );
+
+    setArgv('list', '--format', 'json', '--expired');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decisions: Decision[] }>();
+    expect(r.decisions.map((d) => d.metadata.id)).toEqual(['DEC-0001']);
+  });
+
+  it('--expired without timebox returns the empty set', async () => {
+    await seedDecision('no-timebox');
+    setArgv('list', '--format', 'json', '--expired');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ decisions: Decision[] }>().decisions).toEqual([]);
+  });
+
+  it('table format adds a timebox column when at least one decision is timeboxed', async () => {
+    await seedDecision('urgent', 'PT4H');
+    setArgv('list', '--format', 'table');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/timebox/);
+  });
+});
+
+describe('AISDLC-447 — extend subcommand', () => {
+  async function seedDecisionId(timebox?: string): Promise<string> {
+    const args = [
+      'add',
+      '--summary',
+      'extend-me',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--format',
+      'json',
+    ];
+    if (timebox !== undefined) args.push('--timebox', timebox);
+    setArgv(...args);
+    await buildDecisionsCli().parseAsync();
+    const id = stdoutJson<{ decisionId: string }>().decisionId;
+    stdoutChunks = [];
+    return id;
+  }
+
+  it('AC-6: extends an existing timebox and emits a timebox-extended event with audit fields', async () => {
+    const id = await seedDecisionId('PT2H');
+    setArgv(
+      'extend',
+      id,
+      '--timebox',
+      'P1D',
+      '--rationale',
+      'operator pull-back',
+      '--by',
+      'op@example.com',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      ok: boolean;
+      decisionId: string;
+      newTimebox: string;
+      newTimeboxExpiresAt: string;
+      previousTimeboxExpiresAt: string | null;
+    }>();
+    expect(r.ok).toBe(true);
+    expect(r.newTimebox).toBe('P1D');
+    expect(typeof r.previousTimeboxExpiresAt).toBe('string');
+    expect(r.newTimeboxExpiresAt > r.previousTimeboxExpiresAt!).toBe(true);
+
+    // The projected decision reflects the new expiry.
+    stdoutChunks = [];
+    setArgv('show', id, '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const show = stdoutJson<{ decision: Decision }>();
+    expect(show.decision.spec.timebox).toBe('P1D');
+    expect(show.decision.status.timeboxExpiresAt).toBe(r.newTimeboxExpiresAt);
+    expect(show.decision.decisionLog.map((e) => e.type)).toContain('timebox-extended');
+  });
+
+  it('AC-2: extend accepts a categorical alias', async () => {
+    const id = await seedDecisionId('PT2H');
+    setArgv('extend', id, '--timebox', 'WEEK', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ newTimebox: string }>().newTimebox).toBe('P7D');
+  });
+
+  it('AC-6: extend can set a timebox on a decision that had none (previous=null)', async () => {
+    const id = await seedDecisionId(); // no initial timebox
+    setArgv('extend', id, '--timebox', 'PT4H', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      newTimebox: string;
+      previousTimeboxExpiresAt: string | null;
+    }>();
+    expect(r.newTimebox).toBe('PT4H');
+    expect(r.previousTimeboxExpiresAt).toBeNull();
+  });
+
+  it('refuses an invalid timebox value', async () => {
+    const id = await seedDecisionId('PT2H');
+    setArgv('extend', id, '--timebox', 'garbage', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/--timebox/);
+  });
+
+  it('refuses an unknown decision id', async () => {
+    setArgv('extend', 'DEC-9999', '--timebox', 'PT4H', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/decision not found/);
+  });
+
+  it('refuses a malformed decision id', async () => {
+    setArgv('extend', 'not-an-id', '--timebox', 'PT4H', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid decision id/);
+  });
+
+  it('refuses to mutate when the catalog flag is off', async () => {
+    const id = await seedDecisionId('PT2H');
+    process.env.AI_SDLC_DECISION_CATALOG = 'off';
+    setArgv('extend', id, '--timebox', 'P1D', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/refusing to mutate/);
+  });
+});

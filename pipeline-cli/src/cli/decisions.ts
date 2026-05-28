@@ -30,9 +30,11 @@ import {
   buildPendingExemplarsDigest,
   clearFatigue,
   computeStageACoverage,
+  computeTimeboxExpiresAt,
   DECISION_SOURCES,
   decisionCatalogDisabledMessage,
   disposeAndOptionallyPromote,
+  filterExpiredDecisions,
   getFatigueStatus,
   isDecisionCatalogEnabled,
   isStageCAutoApplyEligible,
@@ -44,8 +46,11 @@ import {
   makeRecommendationIssuedEvent,
   makeStageCAutoApplyAnsweredEvent,
   makeStageCCompletedEvent,
+  makeTimeboxExtendedEvent,
   mirrorSubstrateEntry,
+  msRemainingUntil,
   nextDecisionId,
+  parseTimebox,
   projectDecision,
   promoteAllDisposedPendingExemplars,
   readDecisionExemplars,
@@ -64,7 +69,9 @@ import {
   runStageB,
   runStageC,
   setFatigue,
+  sortDecisionsByTimeboxUrgency,
   STAGE_A_COVERAGE_TARGET,
+  TIMEBOX_CATEGORICAL_ALIASES,
   type AggregateCorpusResult,
   type Decision,
   type DecisionOption,
@@ -111,16 +118,43 @@ async function prompt(rl: ReadlineInterface, question: string): Promise<string> 
 
 // ── Render helpers (text mode) ───────────────────────────────────────────────
 
+/**
+ * Compact human-readable timebox-remaining badge: `4h`, `1d 12h`, `-2h`
+ * (negative = expired by). Returns the empty string when the decision has
+ * no timebox so untimeboxed rows render as empty cells (and the column
+ * itself disappears when nothing in the set has a timebox).
+ */
+function formatTimeboxBadge(decision: Decision, now: Date = new Date()): string {
+  const ms = msRemainingUntil(decision.status.timeboxExpiresAt, now);
+  if (ms === null) return '';
+  const abs = Math.abs(ms);
+  const days = Math.floor(abs / 86_400_000);
+  const hours = Math.floor((abs % 86_400_000) / 3_600_000);
+  const mins = Math.floor((abs % 3_600_000) / 60_000);
+  const sign = ms < 0 ? '-' : '';
+  if (days > 0) return `${sign}${days}d ${hours}h`;
+  if (hours > 0) return `${sign}${hours}h ${mins}m`;
+  return `${sign}${mins}m`;
+}
+
 function renderListTable(decisions: Decision[]): string {
   if (decisions.length === 0) return '(no decisions in the catalog)\n';
-  const headers = ['id', 'lifecycle', 'source', 'created', 'summary'] as const;
-  const rows = decisions.map((d) => [
-    d.metadata.id,
-    d.status.lifecycle,
-    d.metadata.source,
-    d.metadata.created.slice(0, 10),
-    d.spec.summary.length > 60 ? d.spec.summary.slice(0, 57) + '...' : d.spec.summary,
-  ]);
+  const anyTimebox = decisions.some((d) => Boolean(d.status.timeboxExpiresAt));
+  const headers = anyTimebox
+    ? (['id', 'lifecycle', 'source', 'created', 'timebox', 'summary'] as const)
+    : (['id', 'lifecycle', 'source', 'created', 'summary'] as const);
+  const now = new Date();
+  const rows = decisions.map((d) => {
+    const base = [
+      d.metadata.id,
+      d.status.lifecycle,
+      d.metadata.source,
+      d.metadata.created.slice(0, 10),
+    ];
+    if (anyTimebox) base.push(formatTimeboxBadge(d, now));
+    base.push(d.spec.summary.length > 60 ? d.spec.summary.slice(0, 57) + '...' : d.spec.summary);
+    return base;
+  });
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
   const fmt = (cells: string[]): string =>
     cells
@@ -230,6 +264,12 @@ interface AddInputs {
   options: DecisionOption[];
   assignedActor?: string;
   by?: string;
+  /**
+   * RFC-0035 AISDLC-447 — canonical ISO-8601 duration after categorical-alias
+   * resolution (the original alias is dropped here; the audit lives in the
+   * event log via the `by` field + ts). Undefined when no timebox supplied.
+   */
+  timebox?: string;
 }
 
 async function gatherAddInputsInteractive(): Promise<AddInputs> {
@@ -267,6 +307,20 @@ async function gatherAddInputsInteractive(): Promise<AddInputs> {
 
     const by =
       (await prompt(rl, "Author 'by' field (optional, defaults to assigned actor): ")) || undefined;
+
+    const aliasList = Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|');
+    const timeboxRaw = await prompt(
+      rl,
+      `Timebox (optional; ISO-8601 duration like PT4H/P1D/P7D or alias ${aliasList}): `,
+    );
+    let timebox: string | undefined;
+    if (timeboxRaw) {
+      try {
+        timebox = parseTimebox(timeboxRaw).duration;
+      } catch (err) {
+        throw new Error((err as Error).message);
+      }
+    }
 
     process.stderr.write('\nNow enter options. At least one is required.\n');
     process.stderr.write("Press return at the 'Option id' prompt to finish.\n\n");
@@ -314,6 +368,7 @@ async function gatherAddInputsInteractive(): Promise<AddInputs> {
       options,
       ...(assignedActor ? { assignedActor } : {}),
       ...(by ? { by } : {}),
+      ...(timebox ? { timebox } : {}),
     };
   } finally {
     rl.close();
@@ -363,6 +418,11 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
     inputs.assignedActor = String(argv['assigned-actor']);
   }
   if (typeof argv.by === 'string' && argv.by) inputs.by = String(argv.by);
+  if (typeof argv.timebox === 'string' && argv.timebox) {
+    // parseTimebox throws on invalid input; the caller catches + fail()s
+    // with the operator-friendly message via the surrounding try/catch.
+    inputs.timebox = parseTimebox(String(argv.timebox)).duration;
+  }
   return inputs;
 }
 
@@ -381,13 +441,27 @@ export function buildDecisionsCli(): Argv {
     })
     .command(
       'list',
-      'List decisions projected from the event log.',
+      'List decisions projected from the event log. Default sort is timebox-remaining ascending (most-urgent first; untimeboxed sorted last by created date).',
       (y) =>
-        y.option('format', {
-          type: 'string',
-          choices: ['json', 'table'] as const,
-          default: 'table' as const,
-        }),
+        y
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'table' as const,
+          })
+          .option('sort', {
+            type: 'string',
+            choices: ['timebox', 'created'] as const,
+            default: 'timebox' as const,
+            describe:
+              'AISDLC-447 — sort order. `timebox` = timebox-remaining ascending (most-urgent first); `created` = legacy creation-order ascending.',
+          })
+          .option('expired', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'AISDLC-447 — filter to decisions whose timebox has expired AND are still unresolved (lifecycle ≠ answered / archived / superseded).',
+          }),
       async (argv) => {
         const workDir = String(argv['work-dir']);
         if (!isDecisionCatalogEnabled()) {
@@ -400,7 +474,12 @@ export function buildDecisionsCli(): Argv {
           }
           return;
         }
-        const { decisions, skipped } = listDecisions({ workDir });
+        const { decisions: rawDecisions, skipped } = listDecisions({ workDir });
+        // Apply --expired filter BEFORE sort so the urgency ordering only
+        // reflects the visible subset.
+        const filtered = argv.expired ? filterExpiredDecisions(rawDecisions) : rawDecisions;
+        const decisions =
+          argv.sort === 'created' ? filtered : sortDecisionsByTimeboxUrgency(filtered);
         if (String(argv.format) === 'json') {
           emit({ ok: true, enabled: true, decisions, skipped });
         } else {
@@ -520,6 +599,10 @@ export function buildDecisionsCli(): Argv {
             type: 'string',
             describe: 'Override the auto-allocated DEC-NNNN id (advanced).',
           })
+          .option('timebox', {
+            type: 'string',
+            describe: `AISDLC-447 — operator-authored timebox. ISO-8601 duration (PT4H, P1D, P7D, P30D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). When set, the decision sorts to the top of \`list\` urgency + expires at created+duration.`,
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -559,6 +642,22 @@ export function buildDecisionsCli(): Argv {
         const decisionId =
           typeof argv.id === 'string' && argv.id ? String(argv.id) : nextDecisionId({ workDir });
 
+        // RFC-0035 AISDLC-447 — when --timebox is set, compute expiry from
+        // the SAME `now` we'll stamp on the event so the two derived fields
+        // agree to the millisecond (the factory uses Date.now() if `now` is
+        // omitted, but we want a single shared reference for both).
+        const eventNow = new Date();
+        let timeboxExpiresAt: string | undefined;
+        if (inputs.timebox !== undefined) {
+          try {
+            const parsed = parseTimebox(inputs.timebox);
+            timeboxExpiresAt = computeTimeboxExpiresAt(parsed.durationMs, eventNow);
+          } catch (err) {
+            // This is belt-and-suspenders — gatherAddInputs* already validated.
+            fail((err as Error).message);
+          }
+        }
+
         const event = makeDecisionOpenedEvent({
           decisionId,
           source: inputs.source,
@@ -571,6 +670,9 @@ export function buildDecisionsCli(): Argv {
             ? { routing: { assignedActor: inputs.assignedActor } }
             : {}),
           ...(inputs.by !== undefined ? { by: inputs.by } : {}),
+          ...(inputs.timebox !== undefined ? { timebox: inputs.timebox } : {}),
+          ...(timeboxExpiresAt !== undefined ? { timeboxExpiresAt } : {}),
+          now: eventNow,
         });
 
         const path = appendDecisionEvent(event, { workDir });
@@ -583,6 +685,9 @@ export function buildDecisionsCli(): Argv {
           emitText(`  event log: ${path}`);
           emitText(`  summary:   ${inputs.summary}`);
           emitText(`  options:   ${inputs.options.map((o) => o.id).join(', ')}`);
+          if (inputs.timebox !== undefined && timeboxExpiresAt) {
+            emitText(`  timebox:   ${inputs.timebox} (expires ${timeboxExpiresAt})`);
+          }
         }
       },
     )
@@ -1099,6 +1204,84 @@ export function buildDecisionsCli(): Argv {
           } else if (corpusFlip.flipped) {
             emitText(`  pending-exemplars: already mirrored (no-op)`);
           }
+        }
+      },
+    )
+    .command(
+      'extend <id>',
+      'AISDLC-447 — extend (or set) a decision timebox. Emits a `timebox-extended` event with the previous + new expiry timestamps for audit. Accepts ISO-8601 durations or categorical aliases (URGENT/24H/WEEK/BACKLOG).',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('timebox', {
+            type: 'string',
+            demandOption: true,
+            describe: `New timebox. ISO-8601 duration (PT4H, P1D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). Expiry is computed as now+duration.`,
+          })
+          .option('rationale', {
+            type: 'string',
+            describe: 'Optional rationale for the extension.',
+          })
+          .option('by', { type: 'string', describe: 'Operator identifier (email / login).' })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          fail(
+            decisionCatalogDisabledMessage() +
+              '\n[cli-decisions] extend: refusing to mutate the event log while the flag is off.',
+          );
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) fail(`decision not found: ${id}`);
+
+        let parsed: ReturnType<typeof parseTimebox>;
+        try {
+          parsed = parseTimebox(String(argv.timebox));
+        } catch (err) {
+          fail((err as Error).message);
+        }
+
+        const eventNow = new Date();
+        const newExpiresAt = computeTimeboxExpiresAt(parsed.durationMs, eventNow);
+        const previousExpiresAt = decision!.status.timeboxExpiresAt ?? null;
+
+        const evt = makeTimeboxExtendedEvent({
+          decisionId: id,
+          newTimebox: parsed.duration,
+          newTimeboxExpiresAt: newExpiresAt,
+          previousTimeboxExpiresAt: previousExpiresAt,
+          ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
+          ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+          now: eventNow,
+        });
+        appendDecisionEvent(evt, { workDir });
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            decisionId: id,
+            newTimebox: parsed.duration,
+            newTimeboxExpiresAt: newExpiresAt,
+            previousTimeboxExpiresAt: previousExpiresAt,
+          });
+        } else {
+          emitText(`decision timebox extended: ${id}`);
+          emitText(`  previous expiry: ${previousExpiresAt ?? '(none)'}`);
+          emitText(`  new timebox:     ${parsed.duration}`);
+          emitText(`  new expiry:      ${newExpiresAt}`);
         }
       },
     )
