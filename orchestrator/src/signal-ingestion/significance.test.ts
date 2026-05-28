@@ -4,11 +4,20 @@ import {
   assessTier2Significance,
   checkSignalResidency,
   classifySaResonance,
+  computeBaselineStat,
+  computeZScore,
   DEFAULT_FLOODING_DETECTION_CONFIG,
   detectFlooding,
   filterSignalsByResidency,
+  InMemoryQuarantineStore,
+  isSignalQuarantined,
   SA_WEIGHT_MULTIPLIERS,
+  unquarantineFlooded,
+  type FloodingDetectionResult,
+  type PerSourceBaseline,
+  type QuarantineStore,
   type ResidencyRegimeDeclaration,
+  type SignalFloodingDetectedDecision,
   type SignificanceAssessedCluster,
 } from './significance.js';
 import type { DemandCluster } from './clustering.js';
@@ -406,225 +415,399 @@ describe('assessClusterSignificance — combined verdict', () => {
   });
 });
 
-// ── AC #4 + AC #5: flooding detection ───────────────────────────────────────
+// ── AC #4 / AC #5: z-score flooding detector + cold-start + quarantine ─────
 
-describe('detectFlooding — AC #4 + AC #5', () => {
+describe('detectFlooding — z-score detector (AISDLC-433)', () => {
   const baseAsOf = new Date('2026-05-20T12:00:00.000Z');
 
-  function recentSignal(adapterName: string, sourceId: string, hoursAgo = 1): RawSignal {
-    return rawSignal({
-      sourceId,
-      sourceTimestamp: new Date(baseAsOf.getTime() - hoursAgo * 60 * 60 * 1000),
-      metadata: { adapterName },
-    });
+  function withinWindow(
+    adapterName: string,
+    sourceIdPrefix: string,
+    n: number,
+    minutesAgo = 30,
+  ): RawSignal[] {
+    const out: RawSignal[] = [];
+    for (let i = 0; i < n; i++) {
+      out.push(
+        rawSignal({
+          sourceId: `${sourceIdPrefix}-${i}`,
+          sourceTimestamp: new Date(baseAsOf.getTime() - minutesAgo * 60 * 1000),
+          metadata: { adapterName },
+        }),
+      );
+    }
+    return out;
   }
 
-  it('returns null when window is empty', () => {
-    const result = detectFlooding([], { asOf: baseAsOf });
-    expect(result).toBeNull();
+  // A consistent 7-day baseline of ~5 signals/day with low variance.
+  const flatBaseline7d: PerSourceBaseline = {
+    'source-a': [5, 4, 5, 6, 5, 5, 4],
+    'source-b': [5, 5, 4, 6, 5, 5, 5],
+    'source-c': [5, 5, 5, 5, 4, 6, 5],
+  };
+
+  it('returns status=empty-window when no signals fall in the detection window', () => {
+    const result: FloodingDetectionResult = detectFlooding([], {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+    });
+    expect(result.status).toBe('empty-window');
+    expect(result.decision).toBeUndefined();
   });
 
-  it('returns null when no indicators trip (normal traffic)', () => {
+  it('returns status=calibrating when baseline has < baselineDays of history (cold-start AC #4)', () => {
+    // Only 3 days of baseline for source-a → cold-start.
+    const coldBaseline: PerSourceBaseline = { 'source-a': [5, 4, 6] };
+    const signals = withinWindow('source-a', 'a', 100);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: coldBaseline,
+    });
+    expect(result.status).toBe('calibrating');
+    expect(result.decision).toBeUndefined();
+    expect(result.baselineDaysObserved).toBe(3);
+  });
+
+  it('returns status=clean when uniqueSources >= minUniqueSourcesForSuspicion (organic traffic)', () => {
+    // Five distinct sources contributing — healthy organic. Even with elevated
+    // volume per source, the diversity guard makes this NOT flooding.
     const signals = [
-      recentSignal('source-a', 'a-1', 1),
-      recentSignal('source-b', 'b-1', 2),
-      recentSignal('source-c', 'c-1', 3),
+      ...withinWindow('source-a', 'a', 50),
+      ...withinWindow('source-b', 'b', 50),
+      ...withinWindow('source-c', 'c', 50),
+      ...withinWindow('source-d', 'd', 50),
+      ...withinWindow('source-e', 'e', 50),
     ];
+    const wideBaseline: PerSourceBaseline = {
+      'source-a': [5, 5, 5, 5, 5, 5, 5],
+      'source-b': [5, 5, 5, 5, 5, 5, 5],
+      'source-c': [5, 5, 5, 5, 5, 5, 5],
+      'source-d': [5, 5, 5, 5, 5, 5, 5],
+      'source-e': [5, 5, 5, 5, 5, 5, 5],
+    };
     const result = detectFlooding(signals, {
       asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 5,
+      perSourceBaselines: wideBaseline,
     });
-    expect(result).toBeNull();
+    expect(result.status).toBe('clean');
+    expect(result.decision).toBeUndefined();
   });
 
-  it('detects volume spike (severity low)', () => {
-    // 20 signals across 2 sources → mean 10 per source vs baseline 1 → 10× spike
-    // also: 2 sources / 20 signals = 0.1 diversity ratio < 0.2 → diversity trips too
-    // need lots of distinct sources to avoid the diversity trip
+  it('detects single-source flood and emits Decision with quarantine entries', () => {
+    // source-a baseline ~5/day; window has 100 signals → z-score huge.
+    // uniqueSources = 1 < minUniqueSourcesForSuspicion (3) → trigger condition met.
+    const store = new InMemoryQuarantineStore();
+    const signals = withinWindow('source-a', 'a', 100);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+      quarantineStore: store,
+    });
+    expect(result.status).toBe('flooded');
+    expect(result.decision).toBeDefined();
+    const decision = result.decision!;
+    expect(decision.decision).toBe('signal-flooding-detected');
+    expect(decision.flaggedSources).toHaveLength(1);
+    expect(decision.flaggedSources[0]!.sourceId).toBe('source-a');
+    expect(decision.flaggedSources[0]!.zScore).toBeGreaterThan(3.0);
+    expect(decision.quarantinedSourceIds).toEqual(['source-a']);
+    expect(decision.quarantineDurationHours).toBe(24);
+    expect(store.getActiveEntries(baseAsOf).length).toBe(100);
+  });
+
+  it('detects coordinated low-volume burst across 2 sources (still < 3 unique) — AC #11', () => {
+    // 2 sources × 30 signals each → 60 total. Each source baseline ~5/day; window
+    // is one bucket so z-score huge. uniqueSources = 2 < 3 → trigger.
+    const signals = [...withinWindow('source-a', 'a', 30), ...withinWindow('source-b', 'b', 30)];
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+    });
+    expect(result.status).toBe('flooded');
+    expect(result.decision!.flaggedSources.length).toBe(2);
+  });
+
+  it('respects baseline drift: 6 signals on a 5±0.5 baseline does NOT trip (just above mean)', () => {
+    // source-a baseline ~5/day stddev ~0.7; window has 6 signals → z-score < 3.
+    // uniqueSources = 1 < 3 (would trigger if z-score crossed) — but z-score is below threshold.
+    const signals = withinWindow('source-a', 'a', 6);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+    });
+    expect(result.status).toBe('clean');
+  });
+
+  it('falls back from adapterName to sourceId prefix when metadata missing', () => {
     const signals: RawSignal[] = [];
-    for (let i = 0; i < 20; i++) signals.push(recentSignal(`source-${i}`, `s${i}-1`, 1));
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 0.1, // tiny baseline; window mean = 1 > 3 × 0.1
-    });
-    expect(result).not.toBeNull();
-    expect(result!.indicators.volumeSpike).toBe(true);
-    expect(result!.indicators.lowSourceDiversity).toBe(false);
-    expect(result!.severity).toBe('low');
-    expect(result!.response).toBe('auto-throttle');
-  });
-
-  it('detects low source diversity (severity low when only this indicator trips)', () => {
-    // 20 signals from 2 sources — diversity ratio 0.1 < 0.2 trips
-    // mean = 10 per source; baseline 100 → no volume spike
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-b', `b-${i}`, 1));
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 100, // high baseline → no volume spike
-    });
-    expect(result).not.toBeNull();
-    expect(result!.indicators.lowSourceDiversity).toBe(true);
-    expect(result!.indicators.volumeSpike).toBe(false);
-    expect(result!.severity).toBe('low');
-  });
-
-  it('detects per-source baseline drift (severity low when only this trips)', () => {
-    // source-a normal baseline 1; window has 10 signals from source-a → drift 10× > 5×
-    const signals: RawSignal[] = [];
-    // Distribute across many sources to avoid diversity + volume trip
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    for (let i = 0; i < 50; i++) signals.push(recentSignal(`source-${i}`, `o-${i}`, 1));
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 100, // high baseline → no volume spike
-      perSourceBaselines: { 'source-a': 1 }, // a should have ~1 signal; got 10
-    });
-    expect(result).not.toBeNull();
-    expect(result!.indicators.perSourceBaselineDrift).toBe(true);
-    expect(result!.driftingSources).toEqual(['source-a']);
-    expect(result!.severity).toBe('low');
-  });
-
-  it('produces medium severity when two indicators trip', () => {
-    // 30 signals across 3 sources — low diversity (0.1) + volume spike
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-b', `b-${i}`, 1));
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-c', `c-${i}`, 1));
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 1, // baseline 1, mean 10 per source = spike
-    });
-    expect(result).not.toBeNull();
-    expect(result!.severity).toBe('medium');
-    expect(result!.response).toBe('auto-throttle-and-review');
-    const trippedCount =
-      Number(result!.indicators.volumeSpike) +
-      Number(result!.indicators.lowSourceDiversity) +
-      Number(result!.indicators.perSourceBaselineDrift);
-    expect(trippedCount).toBe(2);
-  });
-
-  it('produces high severity when all three indicators trip', () => {
-    // 20 signals from 2 sources, baseline 1, source-a baseline 1 (drifted 10×)
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    for (let i = 0; i < 10; i++) signals.push(recentSignal('source-b', `b-${i}`, 1));
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 0.5, // low baseline → volume spike
-      perSourceBaselines: { 'source-a': 1, 'source-b': 1 },
-    });
-    expect(result).not.toBeNull();
-    expect(result!.indicators.volumeSpike).toBe(true);
-    expect(result!.indicators.lowSourceDiversity).toBe(true);
-    expect(result!.indicators.perSourceBaselineDrift).toBe(true);
-    expect(result!.severity).toBe('high');
-    expect(result!.response).toBe('operator-review');
-  });
-
-  it('suppresses diversity check when below minSignalCountForDiversityCheck', () => {
-    // 5 signals from 1 source — diversity ratio 0.2 normally trips, but below
-    // minSignalCountForDiversityCheck (10) so it should not.
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 5; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 100, // no spike
-    });
-    expect(result).toBeNull(); // nothing trips
-  });
-
-  it('excludes signals outside the detection window', () => {
-    const signals: RawSignal[] = [
-      // outside the 24h window
-      recentSignal('source-a', 'a-old', 48),
-      recentSignal('source-b', 'b-old', 48),
-      recentSignal('source-c', 'c-old', 48),
-      // inside the window
-      recentSignal('source-a', 'a-new', 1),
-    ];
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 100,
-    });
-    // Only 1 signal in window → no indicators trip
-    expect(result).toBeNull();
-  });
-
-  it('uses fallback resolveSourceName from sourceId prefix when adapterName missing', () => {
-    // No adapterName → falls back to before-dash prefix
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 100; i++) {
       signals.push(
-        rawSignal({ sourceId: `zendesk-${i}`, sourceTimestamp: baseAsOf, metadata: {} }),
+        rawSignal({
+          sourceId: `zendesk-${i}`,
+          sourceTimestamp: new Date(baseAsOf.getTime() - 10 * 60 * 1000),
+          metadata: {},
+        }),
       );
     }
-    for (let i = 0; i < 12; i++) {
-      signals.push(
-        rawSignal({ sourceId: `discourse-${i}`, sourceTimestamp: baseAsOf, metadata: {} }),
-      );
-    }
-    // 24 signals / 2 sources = diversity ratio 0.083 < 0.2 → trips
     const result = detectFlooding(signals, {
       asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 100,
+      perSourceBaselines: { zendesk: [5, 5, 5, 5, 5, 5, 5] },
     });
-    expect(result).not.toBeNull();
-    expect(result!.indicators.lowSourceDiversity).toBe(true);
-    expect(result!.uniqueSources).toBe(2); // zendesk, discourse
+    expect(result.status).toBe('flooded');
+    expect(result.decision!.flaggedSources[0]!.sourceId).toBe('zendesk');
   });
 
-  it('falls back gracefully when no population baseline supplied', () => {
-    // populationBaseline = 0 → uses small-population guard
-    // 12 signals, 2 sources, mean = 6 per source — exceeds default multiplier 3
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 6; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    for (let i = 0; i < 6; i++) signals.push(recentSignal('source-b', `b-${i}`, 1));
-    const result = detectFlooding(signals, { asOf: baseAsOf });
-    // Spike trips (mean 6 > 3), diversity ratio 2/12 = 0.166 trips, no per-source baseline
-    expect(result).not.toBeNull();
-    expect(result!.indicators.volumeSpike).toBe(true);
-    expect(result!.indicators.lowSourceDiversity).toBe(true);
-  });
-
-  it('reports max source drift ratio across all sources', () => {
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 6; i++) signals.push(recentSignal('source-a', `a-${i}`, 1));
-    for (let i = 0; i < 30; i++) signals.push(recentSignal('source-b', `b-${i}`, 1));
-    for (let i = 0; i < 30; i++) signals.push(recentSignal(`source-${i}`, `o-${i}`, 1)); // distract
-    const result = detectFlooding(signals, {
-      asOf: baseAsOf,
-      populationBaselineSignalsPerSource: 100, // no spike
-      perSourceBaselines: { 'source-a': 1, 'source-b': 5 }, // a→6×, b→6×
-    });
-    expect(result).not.toBeNull();
-    expect(result!.maxSourceBaselineDriftRatio).toBeCloseTo(6, 1);
-  });
-
-  it('uses custom config when supplied', () => {
+  it('honours custom config (lower zScoreThreshold trips on smaller spike)', () => {
+    const signals = withinWindow('source-a', 'a', 8); // mild spike
     const customConfig = {
       ...DEFAULT_FLOODING_DETECTION_CONFIG,
-      windowHours: 1,
-      volumeSpikeMultiplier: 100,
+      zScoreThreshold: 1.5, // much more sensitive
     };
-    const signals: RawSignal[] = [];
-    for (let i = 0; i < 20; i++) signals.push(recentSignal(`source-${i}`, `s-${i}`, 0.5));
     const result = detectFlooding(signals, {
       asOf: baseAsOf,
       config: customConfig,
-      populationBaselineSignalsPerSource: 1, // 1 × 100 multiplier = 100 threshold, mean = 1
+      perSourceBaselines: flatBaseline7d,
     });
-    // Window mean = 1 per source < 100 threshold → no spike
-    expect(result).toBeNull();
+    expect(result.status).toBe('flooded');
+  });
+
+  it('emits Decision with quarantineDurationHours=0 when quarantine is disabled', () => {
+    const signals = withinWindow('source-a', 'a', 100);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+      quarantineConfig: { enabled: false, durationHours: 24 },
+    });
+    expect(result.status).toBe('flooded');
+    expect(result.decision!.quarantineDurationHours).toBe(0);
+    expect(result.decision!.quarantinedSourceIds).toEqual([]);
+  });
+
+  it('respects per-org override for quarantine duration', () => {
+    const signals = withinWindow('source-a', 'a', 100);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+      quarantineConfig: { enabled: true, durationHours: 72 },
+    });
+    expect(result.decision!.quarantineDurationHours).toBe(72);
+  });
+
+  it('uses deterministic decision IDs when factory is supplied', () => {
+    const signals = withinWindow('source-a', 'a', 100);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+      generateDecisionId: () => 'test-decision-id-1',
+    });
+    expect(result.decision!.decisionId).toBe('test-decision-id-1');
+  });
+
+  it('emits Decision detectedAt as ISO string matching asOf', () => {
+    const signals = withinWindow('source-a', 'a', 100);
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+    });
+    expect(result.decision!.detectedAt).toBe(baseAsOf.toISOString());
+  });
+
+  it('reports baselineDaysObserved correctly across heterogeneous source baselines', () => {
+    // source-a has 7 days, source-b has 3 days. baselineDays default = 7 → still
+    // calibrating overall (max across sources is 7 — calibrated). Then trigger
+    // only fires for source-a (source-b skipped at per-source level).
+    const signals = [...withinWindow('source-a', 'a', 100), ...withinWindow('source-b', 'b', 100)];
+    const mixed: PerSourceBaseline = {
+      'source-a': [5, 5, 5, 5, 5, 5, 5],
+      'source-b': [5, 5, 5],
+    };
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: mixed,
+    });
+    expect(result.status).toBe('flooded');
+    expect(result.baselineDaysObserved).toBe(7);
+    expect(result.decision!.flaggedSources.map((f) => f.sourceId)).toEqual(['source-a']);
+  });
+
+  it('excludes signals outside the windowMinutes', () => {
+    const signals = [
+      // 2h ago — outside default 60min window
+      ...withinWindow('source-a', 'a', 50, 120),
+      // 10min ago — inside window
+      ...withinWindow('source-a', 'b', 50, 10),
+    ];
+    const result = detectFlooding(signals, {
+      asOf: baseAsOf,
+      perSourceBaselines: flatBaseline7d,
+    });
+    expect(result.status).toBe('flooded');
+    expect(result.decision!.signalCount).toBe(50);
   });
 });
 
-// ── AC #6: residency violation detection ────────────────────────────────────
+// Per-source statistics helpers — exercise the math primitives directly
+describe('computeBaselineStat + computeZScore — math primitives', () => {
+  it('computes mean + population stddev', () => {
+    const stat = computeBaselineStat([5, 5, 5, 5, 5, 5, 5]);
+    expect(stat.mean).toBe(5);
+    expect(stat.stddev).toBe(0);
+    expect(stat.sampleCount).toBe(7);
+  });
 
-describe('checkSignalResidency — AC #6', () => {
+  it('computes stddev for a variable baseline', () => {
+    const stat = computeBaselineStat([1, 2, 3, 4, 5]);
+    expect(stat.mean).toBe(3);
+    // Population stddev: sqrt((4+1+0+1+4)/5) = sqrt(2)
+    expect(stat.stddev).toBeCloseTo(Math.sqrt(2), 5);
+  });
+
+  it('z-score returns +Infinity when stddev is 0 and observation > mean', () => {
+    const stat = computeBaselineStat([5, 5, 5, 5, 5]);
+    expect(computeZScore(100, stat)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('z-score returns 0 when observation == mean and stddev is 0', () => {
+    const stat = computeBaselineStat([5, 5, 5, 5, 5]);
+    expect(computeZScore(5, stat)).toBe(0);
+  });
+
+  it('z-score returns standard deviations from mean for variable baseline', () => {
+    const stat = computeBaselineStat([1, 2, 3, 4, 5]);
+    // (10 - 3) / sqrt(2) ≈ 4.95
+    expect(computeZScore(10, stat)).toBeCloseTo(7 / Math.sqrt(2), 5);
+  });
+});
+
+// ── Quarantine lifecycle + operator unquarantine (AC #5, #8, #9) ────────────
+
+describe('QuarantineStore + unquarantineFlooded — operator unblock path', () => {
+  const asOf = new Date('2026-05-20T12:00:00.000Z');
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  function flagSource(store: QuarantineStore, sourceId: string, decisionId: string): void {
+    store.quarantine({
+      sourceId,
+      adapterSource: sourceId,
+      decisionId,
+      quarantinedAt: asOf,
+      expiresAt: new Date(asOf.getTime() + oneDayMs),
+      reason: 'z-score 4.5σ',
+    });
+  }
+
+  it('isQuarantined returns true while the entry is active', () => {
+    const store = new InMemoryQuarantineStore();
+    flagSource(store, 'src-1', 'dec-1');
+    expect(store.isQuarantined('src-1', asOf)).toBe(true);
+  });
+
+  it('isQuarantined returns false after auto-expiry', () => {
+    const store = new InMemoryQuarantineStore();
+    flagSource(store, 'src-1', 'dec-1');
+    const after = new Date(asOf.getTime() + oneDayMs + 1000);
+    expect(store.isQuarantined('src-1', after)).toBe(false);
+  });
+
+  it('getActiveEntries excludes auto-expired entries', () => {
+    const store = new InMemoryQuarantineStore();
+    flagSource(store, 'src-1', 'dec-1');
+    flagSource(store, 'src-2', 'dec-2');
+    expect(store.getActiveEntries(asOf)).toHaveLength(2);
+    const after = new Date(asOf.getTime() + oneDayMs + 1000);
+    expect(store.getActiveEntries(after)).toHaveLength(0);
+  });
+
+  it('release removes entries for the given Decision', () => {
+    const store = new InMemoryQuarantineStore();
+    flagSource(store, 'src-1', 'dec-1');
+    flagSource(store, 'src-2', 'dec-2');
+    store.release('dec-1', asOf);
+    expect(store.isQuarantined('src-1', asOf)).toBe(false);
+    expect(store.isQuarantined('src-2', asOf)).toBe(true);
+  });
+
+  it('unquarantineFlooded releases entries + emits false-positive Decision (AC #9)', () => {
+    const store = new InMemoryQuarantineStore();
+    flagSource(store, 'src-1', 'flooding-decision-original');
+    flagSource(store, 'src-2', 'flooding-decision-original');
+    const decision = unquarantineFlooded({
+      store,
+      originalDecisionId: 'flooding-decision-original',
+      operatorNote: 'Bug bash — genuine demand',
+      asOf,
+    });
+    expect(decision).not.toBeNull();
+    expect(decision!.decision).toBe('signal-flooding-false-positive');
+    expect(decision!.originalDecisionId).toBe('flooding-decision-original');
+    expect(decision!.releasedSourceIds.sort()).toEqual(['src-1', 'src-2']);
+    expect(decision!.operatorNote).toBe('Bug bash — genuine demand');
+    expect(store.isQuarantined('src-1', asOf)).toBe(false);
+  });
+
+  it('unquarantineFlooded returns null when Decision has no active entries (idempotent)', () => {
+    const store = new InMemoryQuarantineStore();
+    const decision = unquarantineFlooded({
+      store,
+      originalDecisionId: 'never-quarantined',
+      asOf,
+    });
+    expect(decision).toBeNull();
+  });
+
+  it('end-to-end: detector populates store + operator unquarantines via Decision ID', () => {
+    const store = new InMemoryQuarantineStore();
+    const signals = [];
+    for (let i = 0; i < 100; i++) {
+      signals.push(
+        rawSignal({
+          sourceId: `s-${i}`,
+          sourceTimestamp: new Date(asOf.getTime() - 10 * 60 * 1000),
+          metadata: { adapterName: 'flooding-source' },
+        }),
+      );
+    }
+    const baseline: PerSourceBaseline = {
+      'flooding-source': [5, 5, 5, 5, 5, 5, 5],
+    };
+    const detect = detectFlooding(signals, {
+      asOf,
+      perSourceBaselines: baseline,
+      quarantineStore: store,
+      generateDecisionId: () => 'flood-decision-e2e',
+    });
+    expect(detect.status).toBe('flooded');
+    expect(store.getActiveEntries(asOf)).toHaveLength(100);
+
+    // Operator clicks "Unquarantine" — emits false-positive Decision.
+    const released = unquarantineFlooded({
+      store,
+      originalDecisionId: 'flood-decision-e2e',
+      asOf,
+    });
+    expect(released).not.toBeNull();
+    expect(released!.releasedSourceIds).toHaveLength(100);
+    expect(store.getActiveEntries(asOf)).toHaveLength(0);
+  });
+
+  it('isSignalQuarantined helper returns false when no store is supplied (back-compat)', () => {
+    const signal = rawSignal({ sourceId: 'src-x' });
+    expect(isSignalQuarantined(signal, undefined)).toBe(false);
+  });
+
+  it('isSignalQuarantined helper consults the store when supplied', () => {
+    const store = new InMemoryQuarantineStore();
+    flagSource(store, 'src-1', 'dec-1');
+    const signal = rawSignal({ sourceId: 'src-1' });
+    expect(isSignalQuarantined(signal, store, asOf)).toBe(true);
+    const sigOther = rawSignal({ sourceId: 'src-other' });
+    expect(isSignalQuarantined(sigOther, store, asOf)).toBe(false);
+  });
+});
+
+// ── AC #7: residency violation detection ────────────────────────────────────
+
+describe('checkSignalResidency — AC #7', () => {
   const declaration: ResidencyRegimeDeclaration = {
     regimes: ['gdpr'],
     allowedRegionsByRegime: { gdpr: ['eu', 'gb'] },
@@ -715,7 +898,7 @@ describe('checkSignalResidency — AC #6', () => {
   });
 });
 
-describe('filterSignalsByResidency — AC #6 convenience helper', () => {
+describe('filterSignalsByResidency — AC #7 convenience helper', () => {
   it('separates permitted signals from refused ones and emits per-signal decisions', () => {
     const declaration: ResidencyRegimeDeclaration = {
       regimes: ['gdpr'],
@@ -751,9 +934,9 @@ describe('filterSignalsByResidency — AC #6 convenience helper', () => {
   });
 });
 
-// ── AC #7: Pipeline never halts (no thrown errors) ──────────────────────────
+// ── AC #8: Pipeline never halts (no thrown errors) ──────────────────────────
 
-describe('AC #7 — pipeline never halts', () => {
+describe('AC #8 — pipeline never halts', () => {
   it('assessClusterSignificance never throws on empty input', () => {
     expect(() => assessClusterSignificance([])).not.toThrow();
     const result = assessClusterSignificance([]);
@@ -769,7 +952,7 @@ describe('AC #7 — pipeline never halts', () => {
 
   it('detectFlooding never throws on empty input', () => {
     expect(() => detectFlooding([])).not.toThrow();
-    expect(detectFlooding([])).toBeNull();
+    expect(detectFlooding([]).status).toBe('empty-window');
   });
 
   it('detectFlooding never throws with malformed metadata', () => {
@@ -798,24 +981,40 @@ describe('AC #7 — pipeline never halts', () => {
     }
   });
 
-  it('flooding detection produces a Decision (not exception) even at extreme severity', () => {
+  it('flooding detection produces a Decision (not exception) under extreme attack', () => {
     const signals: RawSignal[] = [];
     for (let i = 0; i < 1000; i++) {
       signals.push(
         rawSignal({
           sourceId: `attack-${i}`,
-          sourceTimestamp: new Date('2026-05-20T11:00:00.000Z'),
+          sourceTimestamp: new Date('2026-05-20T11:30:00.000Z'),
           metadata: { adapterName: 'source-a' },
         }),
       );
     }
     const result = detectFlooding(signals, {
       asOf: new Date('2026-05-20T12:00:00.000Z'),
-      populationBaselineSignalsPerSource: 1,
-      perSourceBaselines: { 'source-a': 1 },
+      perSourceBaselines: { 'source-a': [5, 5, 5, 5, 5, 5, 5] },
     });
-    expect(result).not.toBeNull();
-    expect(result!.severity).toBe('high');
+    expect(result.status).toBe('flooded');
+    const decision: SignalFloodingDetectedDecision = result.decision!;
+    expect(decision.flaggedSources[0]!.zScore).toBeGreaterThan(3);
     // Caller can act on Decision; nothing in the pipeline throws.
+  });
+
+  it('detectFlooding survives cold-start gracefully (no throw on partial baseline)', () => {
+    const signals = [
+      rawSignal({
+        sourceId: 'src-1',
+        sourceTimestamp: new Date('2026-05-20T11:50:00.000Z'),
+        metadata: { adapterName: 'src' },
+      }),
+    ];
+    expect(() =>
+      detectFlooding(signals, {
+        asOf: new Date('2026-05-20T12:00:00.000Z'),
+        perSourceBaselines: { src: [5, 5] }, // only 2 days
+      }),
+    ).not.toThrow();
   });
 });

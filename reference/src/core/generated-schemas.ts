@@ -6607,6 +6607,92 @@ export const signalIngestionConfigV1Schema = {
         residencyEnforcement: {
           $ref: '#/$defs/ResidencyEnforcementConfig',
         },
+        flooding: {
+          $ref: '#/$defs/FloodingConfig',
+        },
+      },
+      additionalProperties: false,
+    },
+    FloodingConfig: {
+      type: 'object',
+      description:
+        'RFC-0030 OQ-13.5 v0.3 (AISDLC-433) adversarial-injection defense. REPLACES the legacy fixed-multiplier detector with z-score on per-source rolling baseline + quarantine. The legacy `flooding.detection.sourceBaselineDriftMultiplier` key is deprecated; the loader translates it to the closest z-score equivalent for one release window then hard-errors. See docs/operations/signal-ingestion.md §5 for the migration recipe.',
+      properties: {
+        detection: {
+          $ref: '#/$defs/FloodingDetectionConfig',
+        },
+        quarantine: {
+          $ref: '#/$defs/FloodingQuarantineConfig',
+        },
+      },
+      additionalProperties: false,
+    },
+    FloodingDetectionConfig: {
+      type: 'object',
+      description:
+        'Z-score detector parameters. Trigger condition: `windowCount > (baselineMean + zScoreThreshold × baselineStddev) AND uniqueSources_in_window < minUniqueSourcesForSuspicion`. Cold-start (baseline < baselineDays) returns the `calibrating` status with no Decision; Tier 2 significance is sole defense during calibration.',
+      properties: {
+        algorithm: {
+          type: 'string',
+          const: 'z-score',
+          description:
+            'Detection algorithm. Only `z-score` is supported post-AISDLC-433; the legacy multiplier-based detector was removed.',
+        },
+        zScoreThreshold: {
+          type: 'number',
+          minimum: 0,
+          default: 3.0,
+          description:
+            'Z-score (σ multiples) above the per-source baseline mean. Default 3.0 — matches the 3σ industry-standard anomaly-detection threshold.',
+        },
+        windowMinutes: {
+          type: 'number',
+          minimum: 0,
+          default: 60,
+          description:
+            'Detection window in minutes. Signals with `sourceTimestamp` within `[asOf - windowMinutes, asOf]` form the detection window. Default 60 (catches burst attacks).',
+        },
+        minUniqueSourcesForSuspicion: {
+          type: 'number',
+          minimum: 0,
+          default: 3,
+          description:
+            'When unique sources in the window >= this value, the trigger is suppressed (healthy organic-traffic guard). Default 3 — RFC-0030 §13.5 spec.',
+        },
+        baselineDays: {
+          type: 'number',
+          minimum: 0,
+          default: 7,
+          description:
+            'Rolling-baseline window in days. When the per-source baseline has fewer samples, the detector returns `calibrating` with no Decision. Default 7.',
+        },
+        sourceBaselineDriftMultiplier: {
+          type: 'number',
+          minimum: 0,
+          deprecated: true,
+          description:
+            'DEPRECATED (AISDLC-433): replaced by the z-score algorithm on rolling per-source baseline. The loader translates legacy values to `zScoreThreshold = legacyMultiplier × 0.6` for one release window then hard-errors. Migration: set `zScoreThreshold` explicitly (default 3.0). See docs/operations/signal-ingestion.md §5.',
+        },
+      },
+      additionalProperties: false,
+    },
+    FloodingQuarantineConfig: {
+      type: 'object',
+      description:
+        'Quarantine state for flooding-flagged signals. Quarantined signals are NOT fed to D1 (excluded from `D1(cluster)` formula in §10) and auto-expire after `durationHours`. Operators can unquarantine via the RFC-0023 Blockers pane / `unquarantineFlooded()` helper.',
+      properties: {
+        enabled: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Master switch. When false, flooding Decisions still emit but signals stay live in D1.',
+        },
+        durationHours: {
+          type: 'number',
+          minimum: 0,
+          default: 24,
+          description: 'Auto-expiry window in hours. Default 24h. Operators can override per-org.',
+        },
       },
       additionalProperties: false,
     },

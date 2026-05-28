@@ -323,4 +323,50 @@ describe('loadSignalIngestionConfigWithGovernance', () => {
     const parsed = JSON.parse(lines[0]);
     expect(parsed.configPath).toBe(result.configPath);
   });
+
+  it('surfaces legacy sourceBaselineDriftMultiplier as a deprecation Decision (codex #752 fix)', () => {
+    writeConfig(
+      [
+        'enabled: true',
+        'flooding:',
+        '  detection:',
+        '    sourceBaselineDriftMultiplier: 5',
+        '    windowMinutes: 60',
+        '    minUniqueSourcesForSuspicion: 3',
+        '    baselineDays: 7',
+      ].join('\n') + '\n',
+    );
+    const result = loadSignalIngestionConfigWithGovernance({
+      projectRoot,
+      artifactsDir,
+      skipEventEmission: true,
+    });
+    expect(result.deprecations).toHaveLength(1);
+    expect(result.deprecations[0].field).toBe('flooding.detection.sourceBaselineDriftMultiplier');
+    expect(result.deprecations[0].legacyValue).toBe(5);
+    // Translation: 5 × 0.6 = 3.0
+    expect(result.deprecations[0].translatedTo).toBe(3.0);
+    expect(result.config.flooding.detection.zScoreThreshold).toBe(3.0);
+  });
+
+  it('emits no deprecations when only v0.3 keys are present', () => {
+    writeConfig(
+      [
+        'enabled: true',
+        'flooding:',
+        '  detection:',
+        '    zScoreThreshold: 3.5',
+        '    windowMinutes: 60',
+        '    minUniqueSourcesForSuspicion: 3',
+        '    baselineDays: 7',
+      ].join('\n') + '\n',
+    );
+    const result = loadSignalIngestionConfigWithGovernance({
+      projectRoot,
+      artifactsDir,
+      skipEventEmission: true,
+    });
+    expect(result.deprecations).toEqual([]);
+    expect(result.config.flooding.detection.zScoreThreshold).toBe(3.5);
+  });
 });

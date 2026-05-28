@@ -205,54 +205,166 @@ SA threshold edits are governance-relevant and emit
 
 ---
 
-## 5. Flooding-detection sensitivity
+## 5. Flooding-detection sensitivity — z-score detector (AISDLC-433)
 
-Flooding detection (RFC-0030 OQ-13.5 / Phase 4) protects against
-adversarial signal injection — a bad actor flooding the community channel
-with fabricated signals.
+Flooding detection (RFC-0030 OQ-13.5 v0.3 / AISDLC-433) protects against
+adversarial signal injection — a bad actor flooding the community
+channel with fabricated signals.
 
-The Tier 2 significance threshold provides the **structural defense**:
-clusters need ≥1 Tier 1 signal AND ≥3 unique sources AND ≥7 days age AND
-≥5 signals to feed D1. Community buzz without direct customer signal
-stays in the monitor-only zone:
+**Two layers of defense:**
+
+1. **Tier 2 significance threshold** — structural floor. Clusters need
+   ≥1 Tier 1 signal AND ≥3 unique sources AND ≥7 days age AND ≥5
+   signals to feed D1. Community buzz without direct customer signal
+   stays in the monitor-only zone:
+
+   ```yaml
+   spec:
+     tier2SignificanceThreshold:
+       minSignalCount: 5
+       minUniqueSources: 3
+       minTier1SignalCount: 1     # the load-bearing structural defense
+       minClusterAgeDays: 7
+   ```
+
+2. **Z-score flooding detector + quarantine** — runtime anomaly layer.
+   The detector (`detectFlooding()` in
+   `orchestrator/src/signal-ingestion/significance.ts`) computes a
+   z-score for each in-window source against its rolling 7-day baseline
+   and emits `Decision: signal-flooding-detected` + quarantines the
+   source's signals when:
+
+   ```
+   windowCount > (baselineMean + zScoreThreshold × baselineStddev)
+     AND uniqueSources_in_window < minUniqueSourcesForSuspicion
+   ```
+
+### Algorithm
+
+For every distinct source observed in the detection window
+(`[asOf - windowMinutes, asOf]`, default 60 minutes):
+
+- Compute the per-source `{mean, stddev}` from the per-day signal-count
+  samples over the rolling `baselineDays`-day baseline (default 7).
+- Compute the source's `windowCount` (signals in the detection window).
+- Compute `zScore = (windowCount - mean) / stddev` (z-score returns
+  `+Infinity` when `stddev = 0` and `windowCount > mean`).
+- Flag the source when `zScore > zScoreThreshold` (default 3.0σ).
+- Trigger condition adds a healthy-traffic guard:
+  `uniqueSources_in_window < minUniqueSourcesForSuspicion` (default 3).
+  When ≥3 distinct sources contribute to the window, it's organic
+  traffic — z-score alone doesn't fire.
+
+### Cold-start handling
+
+When the rolling baseline has fewer than `baselineDays` samples (typical
+on first deployment / new adapter), the detector returns the
+`calibrating` status and emits **no Decisions**. The Tier 2 significance
+threshold is the sole defense during the calibration window. After 7
+days of corpus accumulation the detector goes live.
+
+### Quarantine state
+
+When the trigger fires:
+
+- Every in-window signal from a flagged source is recorded in the
+  `QuarantineStore` with `expiresAt = asOf + quarantineDurationHours`
+  (default 24h, per-org configurable).
+- The D1 path (`computeClusterD1()`) consults the store via
+  `isSignalQuarantined()` and **excludes quarantined signals from
+  cluster scoring** — a mixed cluster contributes the clean members'
+  weight only.
+- Auto-expiry releases the quarantine lazily on read: signals from a
+  source whose `expiresAt` has passed are no longer treated as
+  quarantined.
+
+### Operator one-click unquarantine
+
+The TUI Blockers pane (RFC-0023) surfaces every active
+`signal-flooding-detected` Decision and offers a one-click
+**Unquarantine** action. Programmatically:
+
+```ts
+import { unquarantineFlooded } from '@ai-sdlc/orchestrator/signal-ingestion';
+
+const falsePositive = unquarantineFlooded({
+  store,                              // the runtime QuarantineStore
+  originalDecisionId: 'flooding-2026-05-26T1200Z',
+  operatorNote: 'Bug bash drove genuine demand spike — false positive.',
+});
+// falsePositive: SignalFloodingFalsePositiveDecision (or null if idempotent no-op)
+```
+
+The `signal-flooding-false-positive` Decision is the **feedback signal**
+the v2 reputation-weighting layer will use to calibrate per-source
+trust.
+
+### Per-org config
 
 ```yaml
 spec:
-  tier2SignificanceThreshold:
-    minSignalCount: 5
-    minUniqueSources: 3
-    minTier1SignalCount: 1     # the load-bearing defense
-    minClusterAgeDays: 7
+  flooding:
+    detection:
+      algorithm: z-score              # only z-score is supported (AISDLC-433)
+      zScoreThreshold: 3.0
+      windowMinutes: 60
+      minUniqueSourcesForSuspicion: 3
+      baselineDays: 7
+    quarantine:
+      enabled: true
+      durationHours: 24
 ```
-
-The runtime flooding detector (`detectFlooding()` in
-`orchestrator/src/signal-ingestion/significance.ts`) emits
-`Decision: signal-flooding-detected` when:
-
-- Volume spike from a single source (e.g. >5x baseline in a 24h window)
-- Source-diversity drop (single source dominates the cluster's signal
-  count)
-- Per-source baseline drift (a source previously contributing 5/day
-  suddenly contributing 50/day)
-
-Auto-action: low-confidence sources are throttled at the per-org
-configurable threshold. High-severity cases (multi-source coordinated
-spike, structural drift) surface to operator batch review via the
-Decision Catalog (RFC-0035 G0 routing).
 
 **Tuning guidance:**
 
-- **Open communities with high baseline noise** can raise
-  `minClusterAgeDays` to 14 or `minSignalCount` to 10 to reduce
-  false-positive Tier-2 admissions.
-- **Closed communities with curated membership** can lower
-  `minUniqueSources` to 2 or `minClusterAgeDays` to 3 — flooding is less
-  of a concern, and faster Tier-2 admission lets emergent demand feed D1
-  sooner.
+- **Sensitive deployments** (small community, fast-moving demand) can
+  lower `zScoreThreshold` to 2.5 — catches subtler spikes at the cost
+  of more false-positives the operator unquarantines.
+- **Noisy baselines** (large community with bursty traffic) can raise
+  `zScoreThreshold` to 4.0 to reduce false-positives.
+- **Closed communities with curated membership** can disable quarantine
+  (`flooding.quarantine.enabled: false`) — Decisions still emit but
+  signals stay live in D1; operator reviews after-the-fact.
 
-A future RFC will add per-source reputation-weighting once corpus data
-justifies the calibration. For v1, the structural defense (≥1 Tier 1
-signal) is the primary line.
+### Migration from the legacy multiplier-based detector
+
+Pre-AISDLC-433 deployments used `flooding.detection.sourceBaselineDriftMultiplier`
+(default 5.0×) on a per-source rolling baseline. AISDLC-433 **replaces**
+that detector with the z-score algorithm; the multiplier path is
+**deleted** from the codebase.
+
+**Migration recipe:**
+
+1. Open `.ai-sdlc/signal-ingestion.yaml`.
+2. Find the `flooding.detection.sourceBaselineDriftMultiplier` line.
+3. Replace it with `zScoreThreshold:` set to `multiplier × 0.6`
+   (empirical mapping — a 5× multiplier corresponds approximately to a
+   3σ spike on most production datasets).
+4. Add the other v0.3 keys to the same block:
+   `windowMinutes`, `minUniqueSourcesForSuspicion`, `baselineDays`.
+
+**Soak behavior (one release window):** when the legacy key is still
+present in the YAML, the loader (`loadSignalIngestionConfigWithDeprecations()`)
+emits a `signal-ingestion-config-deprecated-field` Decision **and**
+auto-translates the value to the closest z-score equivalent. Operators
+get a visible Decision in the catalog while the auto-translation
+preserves runtime behavior — no surprise breakage during migration.
+
+**Post-soak hard-error:** when `AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR=1`
+is set in the operator's environment (the post-soak default that ships
+in the next release window), the loader throws on the legacy field
+instead of translating. Adopters who haven't migrated fail loudly with
+a migration-instruction error.
+
+### Reputation-weighting deferred to v2
+
+Per-source reputation-weighting (analogous to HackerOne / Bugcrowd
+researcher reputation, Wikipedia editor reputation) **requires 7+
+corpus windows of baseline data to calibrate reliably**. Shipping it
+with cold-start data systematically biases against new sources. v2
+ships once the corpus accumulates; the `signal-flooding-false-positive`
+Decisions accumulating in the catalog during v1 are the feedback
+substrate v2 calibrates against.
 
 ---
 

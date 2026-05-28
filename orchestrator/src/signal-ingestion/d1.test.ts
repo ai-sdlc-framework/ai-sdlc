@@ -30,7 +30,7 @@ import type { DemandCluster } from './clustering.js';
 import type { ClusteredSignalInput } from './clustering-types.js';
 import { DEFAULT_SIGNAL_INGESTION_CONFIG, type SignalIngestionConfig } from './config.js';
 import type { ICPResonance } from './classifier.js';
-import type { SignificanceAssessedCluster } from './significance.js';
+import { InMemoryQuarantineStore, type SignificanceAssessedCluster } from './significance.js';
 import type { CustomerTier, RawSignal, SignalTier } from './types.js';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -458,5 +458,133 @@ describe('enrichDemandSignalFromClusters — AC #3 PPA Triad integration', () =>
     });
     expect(result.enriched.demandSignal).toBeCloseTo(0.7, 5);
     expect(result.composition.pipelineBypass).toBe(true);
+  });
+});
+
+// ── AC #6 (AISDLC-433): Quarantined signals are excluded from D1(cluster) ───
+
+describe('computeClusterD1 — AISDLC-433 quarantine exclusion', () => {
+  const asOf = new Date('2026-05-20T12:00:00.000Z');
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  it('excludes quarantined signals from cluster scoring (AC #6)', () => {
+    const store = new InMemoryQuarantineStore();
+    const memberClean = clusterMember('enterprise', 'strong', 0.9, 1, 'sig-clean');
+    const memberDirty = clusterMember('enterprise', 'strong', 0.9, 1, 'sig-dirty');
+    store.quarantine({
+      sourceId: 'sig-dirty',
+      adapterSource: 'source-a',
+      decisionId: 'flood-1',
+      quarantinedAt: asOf,
+      expiresAt: new Date(asOf.getTime() + oneDayMs),
+      reason: 'z-score 4.0σ',
+    });
+
+    const assessment = assessedCluster({
+      clusterId: 'cluster:mixed',
+      members: [memberClean, memberDirty],
+    });
+
+    // Without store → both members contribute.
+    const withoutStore = computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG);
+
+    // With store → only `memberClean` contributes.
+    const withStore = computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG, {
+      quarantineStore: store,
+      asOf,
+    });
+
+    expect(withStore.rawScore).toBeLessThan(withoutStore.rawScore);
+    expect(withStore.rawScore).toBeCloseTo(withoutStore.rawScore / 2, 5);
+  });
+
+  it('all-quarantined cluster scores 0 even though eligibleForD1=true', () => {
+    const store = new InMemoryQuarantineStore();
+    const m1 = clusterMember('enterprise', 'strong', 0.9, 1, 'q1');
+    const m2 = clusterMember('mid', 'partial', 0.8, 1, 'q2');
+    for (const id of ['q1', 'q2']) {
+      store.quarantine({
+        sourceId: id,
+        adapterSource: 'source-a',
+        decisionId: 'flood-2',
+        quarantinedAt: asOf,
+        expiresAt: new Date(asOf.getTime() + oneDayMs),
+        reason: 'z-score 5σ',
+      });
+    }
+
+    const assessment = assessedCluster({
+      clusterId: 'cluster:all-quarantined',
+      members: [m1, m2],
+    });
+
+    const result = computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG, {
+      quarantineStore: store,
+      asOf,
+    });
+    expect(result.rawScore).toBe(0);
+    // `eligible` mirrors the significance gate, not the quarantine state —
+    // quarantine is a per-member filter, not a cluster-level gate.
+    expect(result.eligible).toBe(true);
+  });
+
+  it('aggregateD1FromClusters passes quarantineStore through to per-cluster scoring', () => {
+    const store = new InMemoryQuarantineStore();
+    const m1 = clusterMember('enterprise', 'strong', 0.9, 1, 'all-q');
+    store.quarantine({
+      sourceId: 'all-q',
+      adapterSource: 'source-a',
+      decisionId: 'flood-3',
+      quarantinedAt: asOf,
+      expiresAt: new Date(asOf.getTime() + oneDayMs),
+      reason: 'z-score 6σ',
+    });
+    const assessment = assessedCluster({
+      clusterId: 'cluster:all-q',
+      members: [m1],
+    });
+    const aggregated = aggregateD1FromClusters([assessment], DEFAULT_SIGNAL_INGESTION_CONFIG, {
+      quarantineStore: store,
+      asOf,
+    });
+    expect(aggregated.clusters[0]!.rawScore).toBe(0);
+  });
+
+  it('quarantine auto-expiry releases signals to D1 candidacy', () => {
+    const store = new InMemoryQuarantineStore();
+    const m = clusterMember('enterprise', 'strong', 0.9, 1, 'expiry-test');
+    store.quarantine({
+      sourceId: 'expiry-test',
+      adapterSource: 'source-a',
+      decisionId: 'flood-exp',
+      quarantinedAt: asOf,
+      expiresAt: new Date(asOf.getTime() + oneDayMs),
+      reason: 'z-score 4σ',
+    });
+    const assessment = assessedCluster({
+      clusterId: 'cluster:expiry',
+      members: [m],
+    });
+    // Inside quarantine window → contributes 0.
+    expect(
+      computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG, {
+        quarantineStore: store,
+        asOf,
+      }).rawScore,
+    ).toBe(0);
+    // After expiry → contributes again.
+    const after = new Date(asOf.getTime() + oneDayMs + 1000);
+    const released = computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG, {
+      quarantineStore: store,
+      asOf: after,
+    });
+    expect(released.rawScore).toBeGreaterThan(0);
+  });
+
+  it('omitting quarantineStore preserves pre-AISDLC-433 behaviour (back-compat)', () => {
+    const assessment = assessedCluster();
+    const baseline = computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG);
+    const withEmptyOptions = computeClusterD1(assessment, DEFAULT_SIGNAL_INGESTION_CONFIG, {});
+    expect(withEmptyOptions.rawScore).toBe(baseline.rawScore);
   });
 });

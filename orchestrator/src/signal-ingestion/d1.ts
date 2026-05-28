@@ -43,9 +43,23 @@
 import type { ClusteredSignalInput } from './clustering-types.js';
 import { DEFAULT_SIGNAL_INGESTION_CONFIG } from './config.js';
 import type { D1CompositionWeights, SignalIngestionConfig } from './config.js';
-import type { SignificanceAssessedCluster } from './significance.js';
+import type { QuarantineStore, SignificanceAssessedCluster } from './significance.js';
+import { isSignalQuarantined } from './significance.js';
 
 // ── Public types ────────────────────────────────────────────────────────────
+
+/**
+ * Options for `computeClusterD1()` / `aggregateD1FromClusters()` per
+ * AISDLC-433. The optional `quarantineStore` lets the D1 path consult the
+ * z-score detector's quarantine state and EXCLUDE quarantined signals from
+ * cluster scoring (AC #6). Back-compat: when omitted, no signals are treated
+ * as quarantined — pre-AISDLC-433 callers continue to work unchanged.
+ */
+export interface ComputeClusterD1Options {
+  quarantineStore?: QuarantineStore;
+  /** Clock override for quarantine expiry checks. Defaults to `new Date()`. */
+  asOf?: Date;
+}
 
 /**
  * Per-cluster D1 score breakdown — produced by `computeClusterD1()`.
@@ -177,6 +191,7 @@ function computeClusterMemberWeight(
 export function computeClusterD1(
   assessment: SignificanceAssessedCluster,
   config: SignalIngestionConfig = DEFAULT_SIGNAL_INGESTION_CONFIG,
+  options: ComputeClusterD1Options = {},
 ): ClusterD1Score {
   if (!assessment.eligibleForD1) {
     return {
@@ -188,10 +203,17 @@ export function computeClusterD1(
     };
   }
 
-  const memberSum = assessment.cluster.members.reduce(
-    (acc, member) => acc + computeClusterMemberWeight(member, config),
-    0,
-  );
+  // AC #6: signals currently in quarantine (flooding-flagged with active
+  // expiresAt) are excluded from the D1(cluster) formula. The exclusion is
+  // member-level — a cluster mixing quarantined + clean signals still
+  // contributes the clean members' weight; clusters whose entire membership
+  // is quarantined effectively score 0 even though they're "eligible" per
+  // significance + SA.
+  const asOf = options.asOf ?? new Date();
+  const memberSum = assessment.cluster.members.reduce((acc, member) => {
+    if (isSignalQuarantined(member.signal, options.quarantineStore, asOf)) return acc;
+    return acc + computeClusterMemberWeight(member, config);
+  }, 0);
   // `assessment.d1WeightMultiplier` is the precomputed combined multiplier
   // from Phase 4: `significanceMultiplier × SA_WEIGHT_MULTIPLIERS[bucket]`.
   // For any eligible cluster, significanceMultiplier === 1.0 (qualified) and
@@ -227,8 +249,9 @@ export function computeClusterD1(
 export function aggregateD1FromClusters(
   assessments: SignificanceAssessedCluster[],
   config: SignalIngestionConfig = DEFAULT_SIGNAL_INGESTION_CONFIG,
+  options: ComputeClusterD1Options = {},
 ): AggregatedD1Result {
-  const perCluster = assessments.map((a) => computeClusterD1(a, config));
+  const perCluster = assessments.map((a) => computeClusterD1(a, config, options));
   const eligibleScores = perCluster.filter((c) => c.eligible);
 
   const maxRawScore = eligibleScores.reduce((max, c) => Math.max(max, c.rawScore), 0);

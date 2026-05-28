@@ -38,9 +38,10 @@ import { dirname, join } from 'node:path';
 
 import {
   DEFAULT_SIGNAL_INGESTION_CONFIG,
-  loadSignalIngestionConfig,
+  loadSignalIngestionConfigWithDeprecations,
   type LoadSignalIngestionConfigOptions,
   type SignalIngestionConfig,
+  type SignalIngestionConfigDeprecatedFieldDecision,
 } from './config.js';
 
 // ── Diff representation ────────────────────────────────────────────────
@@ -274,6 +275,16 @@ export interface LoadConfigWithGovernanceResult {
   eventWritten: boolean;
   /** Absolute path the loader used (echoed for downstream logging). */
   configPath: string;
+  /**
+   * Deprecation Decisions emitted during config load — e.g. legacy
+   * `sourceBaselineDriftMultiplier` translated to `zScoreThreshold`. Empty
+   * array when no legacy keys were present. Callers should pipe each into
+   * `cli-decisions add` so the operator sees the soft-deprecation window
+   * status. AISDLC-433 follow-up: governance loader now routes through
+   * `loadSignalIngestionConfigWithDeprecations` so the audit trail does
+   * NOT silently drop legacy YAML keys.
+   */
+  deprecations: SignalIngestionConfigDeprecatedFieldDecision[];
 }
 
 /**
@@ -293,7 +304,12 @@ export interface LoadConfigWithGovernanceResult {
 export function loadSignalIngestionConfigWithGovernance(
   options: LoadConfigWithGovernanceOptions = {},
 ): LoadConfigWithGovernanceResult {
-  const config = loadSignalIngestionConfig({
+  // Route through loadSignalIngestionConfigWithDeprecations so the
+  // canonical governance-aware loader does NOT silently drop legacy
+  // `sourceBaselineDriftMultiplier` keys (codex MAJOR on #752 — the
+  // basic loader runs resolveFloodingDetection which ignores unknown
+  // keys, breaking the one-release-window soft-translation contract).
+  const { config, deprecations } = loadSignalIngestionConfigWithDeprecations({
     projectRoot: options.projectRoot,
     configPath: options.configPath,
   });
@@ -327,5 +343,5 @@ export function loadSignalIngestionConfigWithGovernance(
     );
   }
 
-  return { config, diff, eventWritten, configPath };
+  return { config, diff, eventWritten, configPath, deprecations };
 }

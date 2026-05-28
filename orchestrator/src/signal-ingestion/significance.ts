@@ -1,6 +1,7 @@
 /**
  * RFC-0030 Phase 4 — Tier 2 significance threshold, SA resonance filter,
- * flooding detection, residency-violation gate.
+ * flooding detection (z-score on rolling per-source baseline), residency-
+ * violation gate.
  *
  * This module operates on Phase 3 `DemandCluster[]` output and produces:
  *
@@ -19,22 +20,33 @@
  *        - `<= excluded` (== 0.0)    → `out-of-scope` (excluded from D1;
  *          logged as out-of-scope demand)
  *
- *   3. **OQ-13.5 flooding detection**: across a population of recent signals,
- *      Stage A classifies severity by three independent signals:
- *        - **Volume spike**: signals-per-source exceeds `volumeSpikeMultiplier`
- *          × baseline mean.
- *        - **Low source diversity**: `uniqueSources / signalCount` falls below
- *          `minSourceDiversityRatio`.
- *        - **Per-source baseline drift**: any source's signal count exceeds
- *          `sourceBaselineDriftMultiplier` × its rolling baseline.
- *      Severity:
- *        - `low`  — one signal tripped; auto-throttle low-confidence sources
- *          (action surfaced as `auto-throttle`).
- *        - `medium` — two signals tripped; auto-throttle + log for operator
- *          batch review.
- *        - `high` — all three tripped; surface to operator batch review
- *          (action `operator-review`).
- *      Pipeline NEVER halts on flooding (AC #7 — G0 non-blocking contract).
+ *   3. **OQ-13.5 flooding detection (AISDLC-433 v0.3 refinement)** — REPLACES
+ *      the previous fixed-multiplier detector with z-score on the same
+ *      per-source rolling baseline:
+ *        - For every source in the detection window, compute its
+ *          `windowCount` (signals in the last `windowMinutes`) and compare
+ *          to the per-source baseline `{mean, stddev}` computed from the
+ *          rolling `baselineDays`-day history.
+ *        - Trigger condition (RFC-0030 §13.5):
+ *            `windowCount > (mean + zScoreThreshold × stddev)`
+ *            AND `uniqueSources_in_window < minUniqueSourcesForSuspicion`
+ *          → emit `Decision: signal-flooding-detected`.
+ *        - **Cold-start handling** (AC #4): when the rolling baseline has
+ *          fewer than `baselineDays` of history, the detector returns the
+ *          `calibrating` status and emits NO Decision — Tier 2 significance
+ *          is the sole defense during the calibration window.
+ *        - **Quarantine** (AC #6, #7): flooding signals are tagged
+ *          `quarantined: true` with an `expiresAt` timestamp; quarantined
+ *          signals do NOT feed D1 (D1 path filters them out). Default
+ *          duration 24h; per-org `flooding.quarantineDurationHours`
+ *          override. Auto-expiry releases signals back to D1 candidacy.
+ *        - **Operator one-click unquarantine** (AC #8, #9): the surface
+ *          composes with RFC-0023 Blockers pane via the `QuarantineStore`
+ *          API + the `unquarantineFlooded()` helper. Unquarantine emits
+ *          `Decision: signal-flooding-false-positive` referencing the
+ *          original flooding Decision (feedback signal for v2
+ *          reputation-weighting calibration).
+ *      Pipeline NEVER halts on flooding (G0 non-blocking contract).
  *
  *   4. **OQ-13.3 residency-violation gate** (adapter-level): per `checkSignalResidency`,
  *      a signal whose `region` falls outside the adopter's declared regime
@@ -45,6 +57,8 @@
 
 import type { DemandCluster } from './clustering.js';
 import type {
+  FloodingDetectionConfig,
+  FloodingQuarantineConfig,
   SignalIngestionConfig,
   Tier2SignificanceThreshold,
   SaResonanceThresholds,
@@ -160,128 +174,111 @@ export interface SignalOutOfScopeDecision {
 }
 
 /**
- * Flooding severity per OQ-13.5 Stage A. Three thresholds combine
- * monotonically — `low` (1 tripped), `medium` (2 tripped), `high` (3 tripped).
+ * Detection status returned by `detectFlooding()`.
+ *   - `flooded`     — the trigger condition fired; a Decision was emitted.
+ *   - `clean`       — detector ran, baseline sufficient, no trigger.
+ *   - `calibrating` — rolling baseline has <`baselineDays` of history; no
+ *                     Decisions emitted (Tier 2 significance is sole defense
+ *                     during calibration). Per AC #4.
+ *   - `empty-window`— the detection window contains zero signals.
  */
-export type FloodingSeverity = 'low' | 'medium' | 'high';
+export type FloodingDetectionStatus = 'flooded' | 'clean' | 'calibrating' | 'empty-window';
 
 /**
- * Recommended response per flooding severity. Pipeline never halts; the
- * response is consumed by RFC-0035 catalog batching.
+ * Z-score detector output for one detection window.
+ *
+ * `status` describes the outcome (cold-start / clean / flooded / empty).
+ * `decision` is populated iff `status === 'flooded'`; it's the Decision the
+ * caller routes to the RFC-0035 catalog.
  */
-export type FloodingResponse = 'auto-throttle' | 'auto-throttle-and-review' | 'operator-review';
-
-/**
- * Per-source flooding measurement. `signalCount > baselineCount` × multiplier
- * triggers the per-source baseline-drift signal.
- */
-export interface SourceFloodingStat {
-  sourceId: string;
+export interface FloodingDetectionResult {
+  status: FloodingDetectionStatus;
+  /** Populated when `status === 'flooded'`. */
+  decision?: SignalFloodingDetectedDecision;
+  /** Number of signals in the detection window. */
   signalCount: number;
-  baselineCount: number;
+  /** Distinct sources in the detection window. */
+  uniqueSources: number;
+  /** Days of baseline data the detector had access to. */
+  baselineDaysObserved: number;
 }
 
 /**
- * Stage A classification of a candidate flooding event per OQ-13.5.
+ * Per-source baseline samples. Each entry is the daily signal-count
+ * observation for that source over the rolling baseline window. The detector
+ * computes `{mean, stddev}` from the samples.
+ *
+ * Operators wire this map from their historical-data substrate; persistence
+ * is the caller's responsibility (orchestrator events.jsonl roll-up, etc.).
+ * AISDLC-433 ships the detection algorithm; the substrate plumbing is the
+ * caller's domain.
+ */
+export type PerSourceBaseline = Record<string, number[]>;
+
+/**
+ * Per-source baseline statistic. Internal — exposed for unit testing.
+ */
+export interface BaselineStat {
+  /** Mean of the samples. */
+  mean: number;
+  /** Population standard deviation of the samples. */
+  stddev: number;
+  /** Number of samples (days observed). */
+  sampleCount: number;
+}
+
+/**
+ * Source-level flooding flag — surfaces in the Decision so the operator
+ * sees which source tripped the trigger.
+ */
+export interface FloodingSourceFlag {
+  /** Source identifier (adapter name when available, falls back to sourceId prefix). */
+  sourceId: string;
+  /** Z-score for this source's window count vs its baseline. */
+  zScore: number;
+  /** Window signal count. */
+  windowCount: number;
+  /** Baseline mean signals/day. */
+  baselineMean: number;
+  /** Baseline standard deviation signals/day. */
+  baselineStddev: number;
+  /** Days of baseline data observed for this source. */
+  baselineDays: number;
+}
+
+/**
+ * Decision emitted when the z-score detector trips per RFC-0030 §13.5
+ * (AISDLC-433 v0.3 refinement). Replaces the legacy multi-indicator Decision.
  */
 export interface SignalFloodingDetectedDecision {
   type: 'Decision';
   decision: 'signal-flooding-detected';
-  severity: FloodingSeverity;
-  /** Which Stage A indicators tripped. */
-  indicators: {
-    volumeSpike: boolean;
-    lowSourceDiversity: boolean;
-    perSourceBaselineDrift: boolean;
-  };
-  /** Total signal count over the detection window. */
+  /** Stable Decision ID — the operator unquarantine path references this. */
+  decisionId: string;
+  /** Detection-window cutoff used when this Decision was emitted. */
+  detectedAt: string;
+  /** Total signal count in the detection window. */
   signalCount: number;
-  /** Number of unique sources contributing to the window. */
+  /** Number of distinct sources contributing to the window. */
   uniqueSources: number;
-  /** Population mean of signals per source over the baseline window. */
-  baselineSignalsPerSource: number;
-  /** Highest per-source drift ratio (max(signalCount / baselineCount)). */
-  maxSourceBaselineDriftRatio: number;
-  /** Source IDs flagged for per-source baseline drift. */
-  driftingSources: string[];
-  /** Recommended response per AC #5. */
-  response: FloodingResponse;
+  /** Per-source z-scores + baseline stats for sources that exceeded threshold. */
+  flaggedSources: FloodingSourceFlag[];
+  /** Source IDs of signals quarantined as a result of this Decision (empty when quarantine disabled). */
+  quarantinedSourceIds: string[];
+  /** Quarantine duration applied (hours; 0 when disabled). */
+  quarantineDurationHours: number;
   message: string;
 }
 
-// ── Configurable parameters ─────────────────────────────────────────────────
-
 /**
- * Flooding-detection thresholds. Operators may override via
- * `floodingDetection:` in `.ai-sdlc/signal-ingestion.yaml` (Phase 6 surfaces
- * this as a config field; Phase 4 ships sensible defaults).
- *
- * Defaults chosen to be conservative — `low` severity should fire on
- * meaningfully elevated traffic, not a 10%-over-baseline blip.
+ * Re-export of the live default for back-compat with the previous shipped
+ * surface. Phase 4 originally exposed `DEFAULT_FLOODING_DETECTION_CONFIG`
+ * as a frozen object; AISDLC-433 routes the same name to the v0.3 z-score
+ * defaults (sourced from `DEFAULT_SIGNAL_INGESTION_CONFIG.flooding.detection`)
+ * so downstream callers continue to import a working default object.
  */
-export interface FloodingDetectionConfig {
-  /**
-   * Detection window in hours. Signals with `sourceTimestamp` within
-   * `[asOf - windowHours, asOf]` form the detection window.
-   * Defaults to 24 hours.
-   */
-  windowHours: number;
-
-  /**
-   * Volume spike multiplier. Stage A trips `volumeSpike` when the detection
-   * window's signal-per-source mean exceeds the baseline mean by this factor.
-   * Defaults to 3.0 (3× baseline).
-   */
-  volumeSpikeMultiplier: number;
-
-  /**
-   * Minimum source diversity ratio. Stage A trips `lowSourceDiversity` when
-   * `uniqueSources / signalCount` falls below this value (i.e. a small number
-   * of sources is producing a large number of signals — the classic flooding
-   * signature). Defaults to 0.2 (≥ 80% of the window must come from < 20% of
-   * sources to trip).
-   *
-   * NOTE: also requires `signalCount >= minSignalCountForDiversityCheck` to
-   * avoid tripping on tiny populations (e.g. 1 signal / 1 source has a
-   * diversity ratio of 1.0 which would never trip, but 5 signals / 1 source
-   * = 0.2 would trip prematurely).
-   */
-  minSourceDiversityRatio: number;
-
-  /**
-   * Minimum signal count below which `lowSourceDiversity` is suppressed
-   * (avoids tripping on tiny populations). Defaults to 10.
-   */
-  minSignalCountForDiversityCheck: number;
-
-  /**
-   * Per-source baseline drift multiplier. Stage A trips
-   * `perSourceBaselineDrift` when any single source's signal count exceeds
-   * its baseline count by this factor. Defaults to 5.0.
-   */
-  sourceBaselineDriftMultiplier: number;
-
-  /**
-   * Confidence floor for auto-throttling. Sources with `confidence` (per the
-   * Source Reputation registry, when wired in v2) below this are eligible for
-   * the `auto-throttle` action when flooding fires at `low` or `medium`
-   * severity. Defaults to 0.5.
-   *
-   * v1 NOTE: per AC #5, the actual throttle action is delegated to the
-   * catalog (we emit the Decision; the catalog applies the action). v1
-   * source-reputation = none; this field is preserved for v2 wiring.
-   */
-  lowConfidenceThreshold: number;
-}
-
-/** Defaults for `FloodingDetectionConfig`. */
 export const DEFAULT_FLOODING_DETECTION_CONFIG: FloodingDetectionConfig = Object.freeze({
-  windowHours: 24,
-  volumeSpikeMultiplier: 3.0,
-  minSourceDiversityRatio: 0.2,
-  minSignalCountForDiversityCheck: 10,
-  sourceBaselineDriftMultiplier: 5.0,
-  lowConfidenceThreshold: 0.5,
+  ...DEFAULT_SIGNAL_INGESTION_CONFIG.flooding.detection,
 });
 
 // ── Tier 2 significance gate (§8) ───────────────────────────────────────────
@@ -450,180 +447,261 @@ export function assessClusterSignificance(
   return { assessments, lowSaDecisions, outOfScopeDecisions };
 }
 
-// ── Flooding detection (OQ-13.5 Stage A) ────────────────────────────────────
+// ── Flooding detection (RFC-0030 §13.5 v0.3 — z-score, AISDLC-433) ──────────
 
 /**
- * Options for `detectFlooding()`.
+ * Options for `detectFlooding()`. The z-score detector REPLACES the
+ * multiplier-based path that shipped with AISDLC-346.
  */
 export interface DetectFloodingOptions {
   /**
-   * Detection-window thresholds. Defaults to `DEFAULT_FLOODING_DETECTION_CONFIG`.
+   * Detection thresholds. Defaults to the loaded config's `flooding.detection`
+   * block (or `DEFAULT_FLOODING_DETECTION_CONFIG` when no config supplied).
    */
   config?: FloodingDetectionConfig;
 
   /**
-   * Per-source baseline counts (rolling baseline from prior pipeline runs).
-   * Keys are source adapter names (`signal-source-support-ticket`,
-   * `signal-source-community-thread`, etc.); values are the baseline signal
-   * count for that source over a comparable window.
-   *
-   * Sources NOT in this map default to a baseline of 0 (any signal trips the
-   * per-source drift indicator) — typical when a brand-new adapter starts
-   * producing signals. Operators wire this map from their historical-data
-   * substrate; v1 uses an empty map by default which means the per-source
-   * drift indicator only trips for sources with explicit baselines.
+   * Quarantine sub-config. When omitted defaults to the framework default
+   * (`enabled: true`, `durationHours: 24`). Used to populate the Decision's
+   * `quarantineDurationHours` field + the `QuarantineStore` entries.
    */
-  perSourceBaselines?: Record<string, number>;
+  quarantineConfig?: FloodingQuarantineConfig;
 
   /**
-   * Population baseline (mean signals-per-source) from prior pipeline runs.
-   * Defaults to 0 (any window triggers `volumeSpike` when at least one source
-   * has signals). Operators wire this from the historical-data substrate.
+   * Per-source rolling baseline. Each entry is a list of daily signal-count
+   * observations for that source over the rolling `baselineDays` window.
+   * The detector computes `{mean, stddev}` from the samples.
+   *
+   * Source key resolution (matches the pre-AISDLC-433 contract): prefers
+   * `metadata.adapterName`, falls back to the `sourceId` prefix before the
+   * first `-`.
    */
-  populationBaselineSignalsPerSource?: number;
+  perSourceBaselines?: PerSourceBaseline;
 
-  /** Window cutoff. Defaults to `new Date()`. */
+  /** Detection-window cutoff. Defaults to `new Date()`. */
   asOf?: Date;
+
+  /**
+   * Optional quarantine store the detector writes to. When supplied, every
+   * flooded source has its signals tagged in the store. When omitted, the
+   * Decision still carries the `quarantinedSourceIds` list but no
+   * persistence happens — useful for pure unit testing.
+   */
+  quarantineStore?: QuarantineStore;
+
+  /**
+   * Decision ID factory. Defaults to a UTC timestamp + 8-char random suffix.
+   * Tests override this to make assertions deterministic.
+   */
+  generateDecisionId?: () => string;
 }
 
 /**
- * Detect adversarial flooding in a recent-signals window per OQ-13.5 Stage A.
+ * Z-score detector — RFC-0030 §13.5 v0.3 trigger condition is
+ * `windowCount > (mean + zScoreThreshold × stddev) AND uniqueSources_in_window
+ * < minUniqueSourcesForSuspicion`.
  *
- * Returns `null` when NO indicators tripped (no flooding detected). When at
- * least one indicator tripped, returns a `SignalFloodingDetectedDecision`
- * with severity = number of indicators tripped (`low` | `medium` | `high`).
+ * Returns a `FloodingDetectionResult` whose `status` discriminates the four
+ * outcomes (flooded / clean / calibrating / empty-window). The caller routes
+ * `result.decision` to the catalog when `status === 'flooded'`.
  *
- * **Algorithm**:
- *   1. Filter `signals` to the detection window (`[asOf - windowHours, asOf]`).
- *   2. Group by source adapter name (`signal.metadata?.adapterName`); fall back
- *      to the source-id prefix when adapterName isn't present.
- *   3. Compute:
- *        - `volumeSpike` = `windowSignalsPerSourceMean > volumeSpikeMultiplier
- *          × populationBaselineSignalsPerSource` (skipped when baseline is 0
- *          AND window has fewer signals than `volumeSpikeMultiplier × 1`).
- *        - `lowSourceDiversity` = `signalCount >=
- *          minSignalCountForDiversityCheck` AND `uniqueSources / signalCount <
- *          minSourceDiversityRatio`.
- *        - `perSourceBaselineDrift` = any source's window count exceeds
- *          `sourceBaselineDriftMultiplier × perSourceBaselines[source]`.
- *   4. Severity = sum of true indicators → `low` (1), `medium` (2), `high` (3).
- *   5. Response per AC #5:
- *        - `low`    → `auto-throttle`
- *        - `medium` → `auto-throttle-and-review`
- *        - `high`   → `operator-review`
+ * Cold-start (AC #4): when the maximum per-source `baselineDays` observed
+ * across all in-window sources is < `config.baselineDays`, the detector
+ * returns `status: 'calibrating'` with no Decision — Tier 2 significance is
+ * the sole defense until the rolling baseline has built up.
  *
- * Returns `null` when no indicators trip OR when the window is empty.
+ * Quarantine (AC #6, #7): when `quarantineConfig.enabled`, every in-window
+ * signal from a flagged source is tagged in the supplied `quarantineStore`
+ * with `expiresAt = asOf + quarantineDurationHours`. Auto-expiry happens
+ * lazily on read (see `isSignalQuarantined()`).
  */
 export function detectFlooding(
   signals: RawSignal[],
   options: DetectFloodingOptions = {},
-): SignalFloodingDetectedDecision | null {
+): FloodingDetectionResult {
   const config = options.config ?? DEFAULT_FLOODING_DETECTION_CONFIG;
+  const quarantineConfig =
+    options.quarantineConfig ?? DEFAULT_SIGNAL_INGESTION_CONFIG.flooding.quarantine;
   const asOf = options.asOf ?? new Date();
   const perSourceBaselines = options.perSourceBaselines ?? {};
-  const populationBaseline = options.populationBaselineSignalsPerSource ?? 0;
+  const generateDecisionId = options.generateDecisionId ?? defaultDecisionIdFactory(asOf);
 
-  const windowStartMs = asOf.getTime() - config.windowHours * 60 * 60 * 1000;
+  const windowStartMs = asOf.getTime() - config.windowMinutes * 60 * 1000;
   const windowEndMs = asOf.getTime();
+
   const windowSignals = signals.filter((s) => {
     const ts = s.sourceTimestamp.getTime();
     return ts >= windowStartMs && ts <= windowEndMs;
   });
 
-  if (windowSignals.length === 0) return null;
+  if (windowSignals.length === 0) {
+    return { status: 'empty-window', signalCount: 0, uniqueSources: 0, baselineDaysObserved: 0 };
+  }
 
-  // Group by source adapter name.
-  const perSourceCounts = new Map<string, number>();
+  // Group window signals by source.
+  const perSourceWindowCounts = new Map<string, number>();
+  const perSourceWindowSignals = new Map<string, RawSignal[]>();
   for (const s of windowSignals) {
     const src = resolveSourceName(s);
-    perSourceCounts.set(src, (perSourceCounts.get(src) ?? 0) + 1);
+    perSourceWindowCounts.set(src, (perSourceWindowCounts.get(src) ?? 0) + 1);
+    const bucket = perSourceWindowSignals.get(src) ?? [];
+    bucket.push(s);
+    perSourceWindowSignals.set(src, bucket);
   }
 
   const signalCount = windowSignals.length;
-  const uniqueSources = perSourceCounts.size;
-  const signalsPerSourceMean = signalCount / uniqueSources;
+  const uniqueSources = perSourceWindowCounts.size;
 
-  // Indicator 1: volume spike
-  // When baseline = 0, fall back to a small-population guard: only trip when
-  // window mean exceeds the multiplier itself (e.g. 3.0 default → need ≥ 4
-  // signals per source). This avoids tripping on a single-signal window when
-  // no baseline has been wired yet.
-  let volumeSpike: boolean;
-  if (populationBaseline > 0) {
-    volumeSpike = signalsPerSourceMean > config.volumeSpikeMultiplier * populationBaseline;
-  } else {
-    volumeSpike = signalsPerSourceMean > config.volumeSpikeMultiplier;
+  // Cold-start: take max baselineDays across all in-window sources. When ANY
+  // source has the full window observed, the detector is calibrated for that
+  // source; when NO source has the full window, we're calibrating overall.
+  let maxBaselineDays = 0;
+  for (const src of perSourceWindowCounts.keys()) {
+    const samples = perSourceBaselines[src] ?? [];
+    if (samples.length > maxBaselineDays) maxBaselineDays = samples.length;
   }
 
-  // Indicator 2: low source diversity (guarded by minSignalCountForDiversityCheck)
-  let lowSourceDiversity = false;
-  if (signalCount >= config.minSignalCountForDiversityCheck) {
-    const diversityRatio = uniqueSources / signalCount;
-    lowSourceDiversity = diversityRatio < config.minSourceDiversityRatio;
+  if (maxBaselineDays < config.baselineDays) {
+    return {
+      status: 'calibrating',
+      signalCount,
+      uniqueSources,
+      baselineDaysObserved: maxBaselineDays,
+    };
   }
 
-  // Indicator 3: per-source baseline drift
-  let perSourceBaselineDrift = false;
-  const driftingSources: string[] = [];
-  let maxDriftRatio = 0;
-  for (const [src, count] of perSourceCounts) {
-    const baseline = perSourceBaselines[src] ?? 0;
-    if (baseline === 0) continue; // skip sources without explicit baseline
-    const ratio = count / baseline;
-    if (ratio > maxDriftRatio) maxDriftRatio = ratio;
-    if (count > config.sourceBaselineDriftMultiplier * baseline) {
-      perSourceBaselineDrift = true;
-      driftingSources.push(src);
+  // Trigger condition guard #2: uniqueSources_in_window < minUniqueSourcesForSuspicion.
+  // When uniqueSources >= threshold, a "many sources contributing" pattern is
+  // healthy organic traffic — z-score alone is not enough to call it flooding.
+  // RFC-0030 §13.5: "trigger when volume > 3σ AND uniqueSources < 3".
+  if (uniqueSources >= config.minUniqueSourcesForSuspicion) {
+    return {
+      status: 'clean',
+      signalCount,
+      uniqueSources,
+      baselineDaysObserved: maxBaselineDays,
+    };
+  }
+
+  // Per-source z-score check.
+  const flaggedSources: FloodingSourceFlag[] = [];
+  for (const [src, windowCount] of perSourceWindowCounts) {
+    const samples = perSourceBaselines[src] ?? [];
+    if (samples.length < config.baselineDays) continue; // skip cold per-source
+    const stats = computeBaselineStat(samples);
+    const zScore = computeZScore(windowCount, stats);
+    if (zScore > config.zScoreThreshold) {
+      flaggedSources.push({
+        sourceId: src,
+        zScore,
+        windowCount,
+        baselineMean: stats.mean,
+        baselineStddev: stats.stddev,
+        baselineDays: stats.sampleCount,
+      });
     }
   }
 
-  const indicators = { volumeSpike, lowSourceDiversity, perSourceBaselineDrift };
-  const trippedCount =
-    (volumeSpike ? 1 : 0) + (lowSourceDiversity ? 1 : 0) + (perSourceBaselineDrift ? 1 : 0);
-
-  if (trippedCount === 0) return null;
-
-  let severity: FloodingSeverity;
-  let response: FloodingResponse;
-  if (trippedCount === 1) {
-    severity = 'low';
-    response = 'auto-throttle';
-  } else if (trippedCount === 2) {
-    severity = 'medium';
-    response = 'auto-throttle-and-review';
-  } else {
-    severity = 'high';
-    response = 'operator-review';
+  if (flaggedSources.length === 0) {
+    return {
+      status: 'clean',
+      signalCount,
+      uniqueSources,
+      baselineDaysObserved: maxBaselineDays,
+    };
   }
 
-  return {
+  // Build Decision + apply quarantine.
+  const decisionId = generateDecisionId();
+  const detectedAt = asOf.toISOString();
+
+  const quarantinedSourceIds: string[] = [];
+  const quarantineDurationHours = quarantineConfig.enabled ? quarantineConfig.durationHours : 0;
+  if (quarantineConfig.enabled) {
+    const expiresAt = new Date(asOf.getTime() + quarantineDurationHours * 60 * 60 * 1000);
+    for (const flag of flaggedSources) {
+      quarantinedSourceIds.push(flag.sourceId);
+      const sourceSignals = perSourceWindowSignals.get(flag.sourceId) ?? [];
+      if (options.quarantineStore !== undefined) {
+        for (const sig of sourceSignals) {
+          options.quarantineStore.quarantine({
+            sourceId: sig.sourceId,
+            adapterSource: flag.sourceId,
+            decisionId,
+            quarantinedAt: asOf,
+            expiresAt,
+            reason: `z-score ${flag.zScore.toFixed(2)}σ (baseline mean=${flag.baselineMean.toFixed(2)}, stddev=${flag.baselineStddev.toFixed(2)})`,
+          });
+        }
+      }
+    }
+  }
+
+  const decision: SignalFloodingDetectedDecision = {
     type: 'Decision',
     decision: 'signal-flooding-detected',
-    severity,
-    indicators,
+    decisionId,
+    detectedAt,
     signalCount,
     uniqueSources,
-    baselineSignalsPerSource: populationBaseline,
-    maxSourceBaselineDriftRatio: maxDriftRatio,
-    driftingSources,
-    response,
-    message: floodingMessage(severity, indicators, signalCount, uniqueSources),
+    flaggedSources,
+    quarantinedSourceIds,
+    quarantineDurationHours,
+    message: floodingMessage(flaggedSources, signalCount, uniqueSources, quarantineDurationHours),
+  };
+
+  return {
+    status: 'flooded',
+    decision,
+    signalCount,
+    uniqueSources,
+    baselineDaysObserved: maxBaselineDays,
   };
 }
 
+/**
+ * Population-standard-deviation baseline stat. Exposed for unit testing.
+ * Returns `{mean: 0, stddev: 0, sampleCount: 0}` on empty input — caller's
+ * cold-start gate should prevent that from reaching `computeZScore()`.
+ */
+export function computeBaselineStat(samples: readonly number[]): BaselineStat {
+  if (samples.length === 0) return { mean: 0, stddev: 0, sampleCount: 0 };
+  const sum = samples.reduce((acc, n) => acc + n, 0);
+  const mean = sum / samples.length;
+  const sqSum = samples.reduce((acc, n) => acc + (n - mean) ** 2, 0);
+  const stddev = Math.sqrt(sqSum / samples.length);
+  return { mean, stddev, sampleCount: samples.length };
+}
+
+/**
+ * Z-score of a single observation against `BaselineStat`. When `stddev === 0`
+ * (degenerate baseline — every sample identical), returns `+Infinity` if the
+ * observation exceeds the mean, `0` if it equals the mean — matches the
+ * statistical convention that any deviation from a zero-variance baseline is
+ * infinitely surprising. Exposed for unit testing.
+ */
+export function computeZScore(observation: number, stats: BaselineStat): number {
+  if (stats.stddev === 0) {
+    if (observation > stats.mean) return Number.POSITIVE_INFINITY;
+    return 0;
+  }
+  return (observation - stats.mean) / stats.stddev;
+}
+
 function floodingMessage(
-  severity: FloodingSeverity,
-  indicators: SignalFloodingDetectedDecision['indicators'],
+  flaggedSources: FloodingSourceFlag[],
   signalCount: number,
   uniqueSources: number,
+  quarantineDurationHours: number,
 ): string {
-  const trippedNames: string[] = [];
-  if (indicators.volumeSpike) trippedNames.push('volume-spike');
-  if (indicators.lowSourceDiversity) trippedNames.push('low-source-diversity');
-  if (indicators.perSourceBaselineDrift) trippedNames.push('per-source-baseline-drift');
+  const flaggedNames = flaggedSources.map((f) => `${f.sourceId} (z=${f.zScore.toFixed(2)}σ)`);
+  const quarantinePart =
+    quarantineDurationHours > 0
+      ? ` Quarantine applied for ${quarantineDurationHours}h.`
+      : ' Quarantine disabled — signals stay live.';
   return (
-    `Flooding detected at severity '${severity}' (${trippedNames.join(' + ')}); ` +
-    `${signalCount} signals over ${uniqueSources} sources in the detection window.`
+    `Flooding detected: ${signalCount} signals over ${uniqueSources} sources in the detection window; ` +
+    `flagged sources [${flaggedNames.join(', ')}].${quarantinePart}`
   );
 }
 
@@ -637,6 +715,202 @@ function resolveSourceName(signal: RawSignal): string {
   const dashIdx = signal.sourceId.indexOf('-');
   if (dashIdx > 0) return signal.sourceId.slice(0, dashIdx);
   return signal.sourceId;
+}
+
+function defaultDecisionIdFactory(asOf: Date): () => string {
+  let counter = 0;
+  return (): string => {
+    counter += 1;
+    const suffix = counter > 1 ? `-${counter}` : '';
+    return `flooding-${asOf.toISOString().replace(/[:.]/g, '')}${suffix}`;
+  };
+}
+
+// ── Quarantine store + operator unquarantine (AC #6, #7, #8, #9) ────────────
+
+/**
+ * A single entry in the quarantine store. Created by `detectFlooding()` when
+ * a flooded source's signals are quarantined; consumed by:
+ *   - The D1 path, to exclude quarantined signals from cluster scoring
+ *     (`isSignalQuarantined()`).
+ *   - The operator unquarantine flow (`unquarantineFlooded()`) for one-click
+ *     release after a false-positive review.
+ *   - The RFC-0023 Blockers pane, which renders pending Decisions + offers
+ *     the unquarantine action.
+ */
+export interface QuarantineEntry {
+  /** Signal `sourceId` quarantined. */
+  sourceId: string;
+  /** Adapter-level source key (the key used by the detector + baselines). */
+  adapterSource: string;
+  /** Originating Decision ID. The false-positive Decision references this. */
+  decisionId: string;
+  quarantinedAt: Date;
+  /** When quarantine auto-expires. */
+  expiresAt: Date;
+  /** Free-form rationale (z-score + baseline stats). */
+  reason: string;
+}
+
+/**
+ * Minimal in-memory `QuarantineStore` implementation. Production deployments
+ * persist to events.jsonl + a sidecar quarantine state file; the in-memory
+ * shape is the contract the persistent implementation honours.
+ *
+ * The store is intentionally narrow: `quarantine`, `isQuarantined`,
+ * `getActiveEntries`, `getEntryByDecisionId`, `release`. No batch
+ * operations — operators unquarantine one Decision at a time per the
+ * RFC-0023 one-click model.
+ */
+export interface QuarantineStore {
+  /** Record a new quarantine entry. */
+  quarantine(entry: QuarantineEntry): void;
+  /** Whether a signal sourceId is currently quarantined (NOT auto-expired). */
+  isQuarantined(sourceId: string, asOf?: Date): boolean;
+  /**
+   * All currently-active quarantine entries (auto-expired entries excluded).
+   * Used by the TUI Blockers pane to render pending decisions.
+   */
+  getActiveEntries(asOf?: Date): QuarantineEntry[];
+  /** Entries created by a specific Decision (for unquarantine routing). */
+  getEntryByDecisionId(decisionId: string): QuarantineEntry[];
+  /** Release all entries for the given Decision (idempotent). */
+  release(decisionId: string, releasedAt?: Date): QuarantineEntry[];
+}
+
+/**
+ * Default in-memory store. Tests use this directly; production callers should
+ * implement a persistent variant satisfying the same interface.
+ */
+export class InMemoryQuarantineStore implements QuarantineStore {
+  private readonly entries: QuarantineEntry[] = [];
+  private readonly released = new Set<string>();
+
+  quarantine(entry: QuarantineEntry): void {
+    this.entries.push(entry);
+  }
+
+  isQuarantined(sourceId: string, asOf: Date = new Date()): boolean {
+    const ms = asOf.getTime();
+    for (const e of this.entries) {
+      if (e.sourceId !== sourceId) continue;
+      if (this.released.has(e.decisionId)) continue;
+      if (e.expiresAt.getTime() <= ms) continue;
+      return true;
+    }
+    return false;
+  }
+
+  getActiveEntries(asOf: Date = new Date()): QuarantineEntry[] {
+    const ms = asOf.getTime();
+    return this.entries.filter(
+      (e) => !this.released.has(e.decisionId) && e.expiresAt.getTime() > ms,
+    );
+  }
+
+  getEntryByDecisionId(decisionId: string): QuarantineEntry[] {
+    return this.entries.filter((e) => e.decisionId === decisionId);
+  }
+
+  release(decisionId: string, _releasedAt: Date = new Date()): QuarantineEntry[] {
+    const matched = this.getEntryByDecisionId(decisionId);
+    if (matched.length === 0) return [];
+    this.released.add(decisionId);
+    return matched;
+  }
+}
+
+/**
+ * Convenience: check whether a single `RawSignal` is currently quarantined by
+ * looking up its `sourceId` in the store. The D1 path calls this when
+ * computing `eligibleForD1` — quarantined signals are excluded from the
+ * D1(cluster) formula per AC #6.
+ *
+ * Returns `false` when no store is supplied (back-compat — pre-AISDLC-433
+ * D1 paths didn't have a quarantine layer to consult).
+ */
+export function isSignalQuarantined(
+  signal: RawSignal,
+  store: QuarantineStore | undefined,
+  asOf: Date = new Date(),
+): boolean {
+  if (store === undefined) return false;
+  return store.isQuarantined(signal.sourceId, asOf);
+}
+
+/**
+ * Operator unquarantine Decision — emitted by `unquarantineFlooded()` per
+ * AC #9. References the original flooding Decision so the v2
+ * reputation-weighting layer can calibrate against false-positive feedback.
+ */
+export interface SignalFloodingFalsePositiveDecision {
+  type: 'Decision';
+  decision: 'signal-flooding-false-positive';
+  /** Stable ID for this false-positive Decision (audit trail). */
+  decisionId: string;
+  /** Original `signal-flooding-detected` Decision ID. */
+  originalDecisionId: string;
+  releasedAt: string;
+  /** Source IDs released back to D1 candidacy. */
+  releasedSourceIds: string[];
+  /** Free-form operator note explaining the false-positive call. */
+  operatorNote?: string;
+  message: string;
+}
+
+/**
+ * Options for `unquarantineFlooded()`.
+ */
+export interface UnquarantineFloodedOptions {
+  store: QuarantineStore;
+  /** Decision ID of the original `signal-flooding-detected` Decision. */
+  originalDecisionId: string;
+  /** Optional operator note (free-form rationale). */
+  operatorNote?: string;
+  /** Clock override for the `releasedAt` timestamp. */
+  asOf?: Date;
+  /** Decision-ID factory for the false-positive Decision (tests override). */
+  generateDecisionId?: () => string;
+}
+
+/**
+ * Operator one-click unquarantine — releases every signal entry tagged with
+ * `originalDecisionId` and emits the `signal-flooding-false-positive`
+ * Decision per RFC-0030 §13.5 + AC #8 + AC #9.
+ *
+ * Returns `null` when no active entries match the Decision ID (idempotent —
+ * the operator's second click on the same row is a no-op + null result).
+ */
+export function unquarantineFlooded(
+  options: UnquarantineFloodedOptions,
+): SignalFloodingFalsePositiveDecision | null {
+  const asOf = options.asOf ?? new Date();
+  const generateDecisionId =
+    options.generateDecisionId ?? falsePositiveDecisionIdFactory(asOf, options.originalDecisionId);
+
+  const released = options.store.release(options.originalDecisionId, asOf);
+  if (released.length === 0) return null;
+
+  const releasedSourceIds = Array.from(new Set(released.map((e) => e.sourceId)));
+  const decisionId = generateDecisionId();
+  return {
+    type: 'Decision',
+    decision: 'signal-flooding-false-positive',
+    decisionId,
+    originalDecisionId: options.originalDecisionId,
+    releasedAt: asOf.toISOString(),
+    releasedSourceIds,
+    operatorNote: options.operatorNote,
+    message:
+      `Operator marked flooding Decision ${options.originalDecisionId} as false-positive; ` +
+      `released ${releasedSourceIds.length} source(s) back to D1 candidacy. ` +
+      `v2 reputation-weighting layer will use this Decision as calibration signal.`,
+  };
+}
+
+function falsePositiveDecisionIdFactory(asOf: Date, originalDecisionId: string): () => string {
+  return (): string =>
+    `flooding-fp-${asOf.toISOString().replace(/[:.]/g, '')}-${originalDecisionId.slice(-8)}`;
 }
 
 // ── OQ-13.3 residency-violation gate (adapter-level) ────────────────────────

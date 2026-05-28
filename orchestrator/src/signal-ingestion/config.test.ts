@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   loadSignalIngestionConfig,
+  loadSignalIngestionConfigWithDeprecations,
   DEFAULT_SIGNAL_INGESTION_CONFIG,
   SignalIngestionConfigError,
 } from './config.js';
@@ -363,6 +364,175 @@ spec:
       expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
         SignalIngestionConfigError,
       );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── AISDLC-433: flooding block + z-score defaults ───────────────────────
+
+  it('fills in default flooding block when omitted', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(dir, 'spec:\n  enabled: true\n');
+      const config = loadSignalIngestionConfig({ projectRoot: dir });
+      expect(config.flooding).toEqual(DEFAULT_SIGNAL_INGESTION_CONFIG.flooding);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses flooding.detection z-score config', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(
+        dir,
+        `
+spec:
+  flooding:
+    detection:
+      algorithm: z-score
+      zScoreThreshold: 2.5
+      windowMinutes: 30
+      minUniqueSourcesForSuspicion: 2
+      baselineDays: 14
+    quarantine:
+      enabled: false
+      durationHours: 48
+`,
+      );
+      const config = loadSignalIngestionConfig({ projectRoot: dir });
+      expect(config.flooding.detection).toEqual({
+        zScoreThreshold: 2.5,
+        windowMinutes: 30,
+        minUniqueSourcesForSuspicion: 2,
+        baselineDays: 14,
+      });
+      expect(config.flooding.quarantine).toEqual({ enabled: false, durationHours: 48 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects flooding.detection.algorithm values other than z-score (post-AISDLC-433)', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(
+        dir,
+        `
+spec:
+  flooding:
+    detection:
+      algorithm: fixed-multiplier
+`,
+      );
+      expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
+        SignalIngestionConfigError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── AISDLC-433: deprecation handling ────────────────────────────────────────
+
+describe('loadSignalIngestionConfigWithDeprecations', () => {
+  it('returns empty deprecations when no legacy fields are present', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(dir, 'spec:\n  enabled: true\n');
+      const result = loadSignalIngestionConfigWithDeprecations({ projectRoot: dir });
+      expect(result.deprecations).toEqual([]);
+      expect(result.config.enabled).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('translates legacy flooding.detection.sourceBaselineDriftMultiplier and emits a Decision', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(
+        dir,
+        `
+spec:
+  flooding:
+    detection:
+      sourceBaselineDriftMultiplier: 5.0
+`,
+      );
+      const result = loadSignalIngestionConfigWithDeprecations({ projectRoot: dir });
+      expect(result.deprecations).toHaveLength(1);
+      const decision = result.deprecations[0]!;
+      expect(decision.decision).toBe('signal-ingestion-config-deprecated-field');
+      expect(decision.field).toBe('flooding.detection.sourceBaselineDriftMultiplier');
+      expect(decision.replacement).toBe('flooding.detection.zScoreThreshold');
+      expect(decision.legacyValue).toBe(5.0);
+      // 5.0 × 0.6 = 3.0 — empirical mapping documented in runbook §5.
+      expect(decision.translatedTo).toBe(3.0);
+      // The translated value reaches the resolved config.
+      expect(result.config.flooding.detection.zScoreThreshold).toBe(3.0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves explicit zScoreThreshold over legacy translation (operator intent wins)', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(
+        dir,
+        `
+spec:
+  flooding:
+    detection:
+      sourceBaselineDriftMultiplier: 5.0
+      zScoreThreshold: 2.0
+`,
+      );
+      const result = loadSignalIngestionConfigWithDeprecations({ projectRoot: dir });
+      expect(result.deprecations).toHaveLength(1);
+      // Explicit operator value wins over the legacy translation.
+      expect(result.config.flooding.detection.zScoreThreshold).toBe(2.0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('hard-errors on legacy field when AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR=1', () => {
+    const dir = makeTmpDir();
+    const previous = process.env['AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR'];
+    process.env['AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR'] = '1';
+    try {
+      writeConfig(
+        dir,
+        `
+spec:
+  flooding:
+    detection:
+      sourceBaselineDriftMultiplier: 5.0
+`,
+      );
+      expect(() => loadSignalIngestionConfigWithDeprecations({ projectRoot: dir })).toThrow(
+        SignalIngestionConfigError,
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env['AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR'];
+      } else {
+        process.env['AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR'] = previous;
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns defaults + empty deprecations when config file is absent', () => {
+    const dir = makeTmpDir();
+    try {
+      const result = loadSignalIngestionConfigWithDeprecations({ projectRoot: dir });
+      expect(result.deprecations).toEqual([]);
+      expect(result.config).toEqual(DEFAULT_SIGNAL_INGESTION_CONFIG);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

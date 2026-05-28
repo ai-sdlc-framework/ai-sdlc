@@ -11,6 +11,13 @@
  *  - `acceptedLanguages` defaults to `['en']` per RFC-0030 OQ-13.2 resolution.
  *  - Tier multipliers and ICP resonance weights are read from the config; the
  *    defaults match RFC-0030 §11.
+ *  - `flooding` block (RFC-0030 OQ-13.5 v0.3 re-walkthrough refinement,
+ *    AISDLC-433) replaces the legacy `sourceBaselineDriftMultiplier` knob
+ *    with a z-score detector on per-source rolling 7d baseline + quarantine.
+ *    The legacy `flooding.detection.sourceBaselineDriftMultiplier` field at
+ *    the LOADER level emits a `signal-ingestion-config-deprecated-field`
+ *    Decision; the loader translates it to the closest z-score equivalent
+ *    for one release window then hard-errors after the soak.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -157,6 +164,48 @@ export interface ManualEntryConfig {
   qualityMetric: ManualEntryQualityMetricConfig;
 }
 
+/**
+ * Flooding-detection block (RFC-0030 OQ-13.5 v0.3 re-walkthrough refinement).
+ *
+ * REPLACES the legacy fixed-multiplier detector with z-score on a rolling
+ * per-source baseline. The trigger condition is
+ * `volume_in_window > (baseline_mean + zScoreThreshold × baseline_stddev)
+ *   AND uniqueSources_in_window < minUniqueSourcesForSuspicion`.
+ *
+ * Cold-start handling (per AC #4): when the rolling baseline has fewer than
+ * `baselineDays` of history, the detector returns the special `calibrating`
+ * status and emits NO `signal-flooding-detected` Decision — Tier 2
+ * significance is the sole defense during the calibration window.
+ */
+export interface FloodingDetectionConfig {
+  /** Z-score threshold (σ multiples) above baseline mean. Default 3.0. */
+  zScoreThreshold: number;
+  /** Detection window in minutes. Default 60. */
+  windowMinutes: number;
+  /** `uniqueSources < this` is part of the trigger condition. Default 3. */
+  minUniqueSourcesForSuspicion: number;
+  /** Rolling-baseline window in days. Default 7. */
+  baselineDays: number;
+}
+
+/**
+ * Quarantine sub-block (RFC-0030 §13.5 v0.3). Quarantined signals are NOT
+ * fed to D1; quarantine auto-expires after `durationHours`. Operators can
+ * unquarantine before expiry via `unquarantineFlooded()`.
+ */
+export interface FloodingQuarantineConfig {
+  /** Master switch. When false, flooding Decisions emit but signals stay live. */
+  enabled: boolean;
+  /** How long quarantine lasts before auto-expiry. Default 24h. */
+  durationHours: number;
+}
+
+/** Combined flooding config (detection + quarantine). */
+export interface FloodingConfig {
+  detection: FloodingDetectionConfig;
+  quarantine: FloodingQuarantineConfig;
+}
+
 /** Fully-resolved signal ingestion configuration. */
 export interface SignalIngestionConfig {
   enabled: boolean;
@@ -184,6 +233,41 @@ export interface SignalIngestionConfig {
    * RFC-0030 OQ-13.4 v0.3 — manual-entry anti-gaming config block.
    */
   manualEntry: ManualEntryConfig;
+  /**
+   * Flooding-detection + quarantine block (RFC-0030 OQ-13.5 v0.3
+   * re-walkthrough refinement, AISDLC-433). REPLACES the legacy
+   * multiplier-based detector path; the loader emits a
+   * `signal-ingestion-config-deprecated-field` Decision when the legacy
+   * `flooding.detection.sourceBaselineDriftMultiplier` key is still present
+   * AND translates it to the closest z-score equivalent for one release
+   * window (then hard-errors).
+   */
+  flooding: FloodingConfig;
+}
+
+/**
+ * Decision emitted by the config loader when a deprecated field is still
+ * present in `.ai-sdlc/signal-ingestion.yaml`. Translated to the closest
+ * z-score equivalent for one release window; after the soak, the loader
+ * hard-errors instead of translating (controlled by
+ * `AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR=1`).
+ *
+ * Returned alongside the resolved config from
+ * `loadSignalIngestionConfigWithDeprecations()` so the caller can route the
+ * Decision to the catalog without coupling the loader to event emission.
+ */
+export interface SignalIngestionConfigDeprecatedFieldDecision {
+  type: 'Decision';
+  decision: 'signal-ingestion-config-deprecated-field';
+  /** Deprecated field path, e.g. `flooding.detection.sourceBaselineDriftMultiplier`. */
+  field: string;
+  /** What the operator should switch to. */
+  replacement: string;
+  /** Legacy value the loader translated from (for audit). */
+  legacyValue: unknown;
+  /** Z-score equivalent the loader translated to (for audit). */
+  translatedTo: unknown;
+  message: string;
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -248,6 +332,18 @@ export const DEFAULT_SIGNAL_INGESTION_CONFIG: SignalIngestionConfig = {
       enabled: true,
       windowDays: 7,
       shareWarningThreshold: 0.3,
+    },
+  },
+  flooding: {
+    detection: {
+      zScoreThreshold: 3.0,
+      windowMinutes: 60,
+      minUniqueSourcesForSuspicion: 3,
+      baselineDays: 7,
+    },
+    quarantine: {
+      enabled: true,
+      durationHours: 24,
     },
   },
 };
@@ -345,7 +441,241 @@ function resolveConfig(raw: unknown, filePath: string): SignalIngestionConfig {
     acceptedLanguages: resolveLanguageList(spec['acceptedLanguages']),
     residencyEnforcement: resolveResidencyEnforcement(spec['residencyEnforcement']),
     manualEntry: resolveManualEntry(spec['manualEntry']),
+    flooding: resolveFloodingConfig(spec['flooding']),
   };
+}
+
+function resolveFloodingConfig(value: unknown): FloodingConfig {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.flooding;
+  if (value === undefined || value === null) {
+    return { detection: { ...defaults.detection }, quarantine: { ...defaults.quarantine } };
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('flooding must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  return {
+    detection: resolveFloodingDetection(obj['detection']),
+    quarantine: resolveFloodingQuarantine(obj['quarantine']),
+  };
+}
+
+function resolveFloodingDetection(value: unknown): FloodingDetectionConfig {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.flooding.detection;
+  if (value === undefined || value === null) return { ...defaults };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('flooding.detection must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  // Reject the deprecated `algorithm` field iff it's not `z-score` — only the
+  // z-score algorithm is supported post-AISDLC-433. (Operators with the
+  // `algorithm: z-score` line from the v0.3 RFC YAML pass through silently.)
+  if (
+    obj['algorithm'] !== undefined &&
+    obj['algorithm'] !== null &&
+    obj['algorithm'] !== 'z-score'
+  ) {
+    throw new SignalIngestionConfigError(
+      `flooding.detection.algorithm must be 'z-score' (multiplier-based detector removed in AISDLC-433), got ${JSON.stringify(obj['algorithm'])}`,
+    );
+  }
+  return {
+    zScoreThreshold: resolvePositiveNumber(
+      obj['zScoreThreshold'],
+      defaults.zScoreThreshold,
+      'flooding.detection.zScoreThreshold',
+    ),
+    windowMinutes: resolvePositiveNumber(
+      obj['windowMinutes'],
+      defaults.windowMinutes,
+      'flooding.detection.windowMinutes',
+    ),
+    minUniqueSourcesForSuspicion: resolvePositiveNumber(
+      obj['minUniqueSourcesForSuspicion'],
+      defaults.minUniqueSourcesForSuspicion,
+      'flooding.detection.minUniqueSourcesForSuspicion',
+    ),
+    baselineDays: resolvePositiveNumber(
+      obj['baselineDays'],
+      defaults.baselineDays,
+      'flooding.detection.baselineDays',
+    ),
+  };
+}
+
+function resolveFloodingQuarantine(value: unknown): FloodingQuarantineConfig {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.flooding.quarantine;
+  if (value === undefined || value === null) return { ...defaults };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('flooding.quarantine must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  return {
+    enabled: resolveBoolean(obj['enabled'], defaults.enabled),
+    durationHours: resolvePositiveNumber(
+      obj['durationHours'],
+      defaults.durationHours,
+      'flooding.quarantine.durationHours',
+    ),
+  };
+}
+
+// ── Deprecation handling (AISDLC-433) ───────────────────────────────────────
+
+/**
+ * Result of `loadSignalIngestionConfigWithDeprecations()`. `config` is the
+ * fully-resolved config (with any legacy fields already translated to their
+ * z-score equivalents). `deprecations` is the list of
+ * `signal-ingestion-config-deprecated-field` Decisions the caller MUST route
+ * to the RFC-0035 Decision Catalog so the operator sees the deprecation
+ * surface and can migrate.
+ */
+export interface LoadSignalIngestionConfigWithDeprecationsResult {
+  config: SignalIngestionConfig;
+  deprecations: SignalIngestionConfigDeprecatedFieldDecision[];
+}
+
+/**
+ * Env-var that flips legacy-field handling from "translate + emit Decision"
+ * to "hard-error". The intent: after the one-release-window soak, set this
+ * in CI so adopters who haven't migrated fail loudly. AISDLC-433 ships with
+ * the var OFF — translation + Decision routing is the cutover behaviour.
+ */
+const LEGACY_HARD_ERROR_ENV_VAR = 'AI_SDLC_SIGNAL_INGESTION_LEGACY_HARD_ERROR';
+
+/**
+ * Load + resolve config, AND surface every deprecated-field Decision the
+ * loader detected. Wraps `loadSignalIngestionConfig()` so callers that want
+ * the deprecation audit trail can opt in without changing the existing
+ * Pure-load callers (which keep using `loadSignalIngestionConfig`).
+ *
+ * Behaviour:
+ *  - When the legacy `flooding.detection.sourceBaselineDriftMultiplier` key
+ *    is present in the YAML AND `LEGACY_HARD_ERROR_ENV_VAR` is unset, the
+ *    loader translates it to `zScoreThreshold = legacyMultiplier × 0.6` (an
+ *    empirical mapping documented in the operator runbook — a 5× multiplier
+ *    over a per-source baseline corresponds approximately to a 3σ spike on
+ *    most production datasets) and emits one
+ *    `signal-ingestion-config-deprecated-field` Decision.
+ *  - When `LEGACY_HARD_ERROR_ENV_VAR=1`, the loader throws
+ *    `SignalIngestionConfigError` with a migration message.
+ *  - When neither legacy key nor v0.3 z-score key is present, the loader
+ *    fills in defaults silently (no deprecation noise).
+ */
+export function loadSignalIngestionConfigWithDeprecations(
+  options: LoadSignalIngestionConfigOptions = {},
+): LoadSignalIngestionConfigWithDeprecationsResult {
+  const projectRoot = options.projectRoot ?? process.cwd();
+  const configPath =
+    options.configPath ?? resolve(projectRoot, DEFAULT_SIGNAL_INGESTION_CONFIG_PATH);
+
+  // Read raw YAML to inspect for legacy keys BEFORE resolveConfig() strips them.
+  const deprecations: SignalIngestionConfigDeprecatedFieldDecision[] = [];
+
+  if (existsSync(configPath)) {
+    let raw: string;
+    try {
+      raw = readFileSync(configPath, 'utf8');
+    } catch (err) {
+      throw new SignalIngestionConfigError(
+        `Failed to read signal ingestion config at ${configPath}`,
+        err,
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = parseYaml(raw);
+    } catch (err) {
+      throw new SignalIngestionConfigError(
+        `Failed to parse signal ingestion YAML at ${configPath}`,
+        err,
+      );
+    }
+
+    const legacy = extractLegacyFloodingMultiplier(parsed);
+    if (legacy !== undefined) {
+      const hardError = isTruthyEnv(process.env[LEGACY_HARD_ERROR_ENV_VAR]);
+      if (hardError) {
+        throw new SignalIngestionConfigError(
+          `flooding.detection.sourceBaselineDriftMultiplier is removed (AISDLC-433); ` +
+            `migrate to flooding.detection.zScoreThreshold. ` +
+            `See docs/operations/signal-ingestion.md §5 for the migration recipe.`,
+        );
+      }
+      // Translate legacy multiplier → z-score equivalent.
+      // Empirical mapping: a 5× multiplier ≈ 3σ on most production datasets
+      // (see operator runbook §5 for the derivation). Linear scaling around
+      // the default: `zScore = multiplier × 0.6` — preserves operator intent
+      // while letting the v0.3 algorithm take over.
+      const legacyMultiplier = Number(legacy);
+      const translatedZScore = Number.isFinite(legacyMultiplier)
+        ? legacyMultiplier * 0.6
+        : DEFAULT_SIGNAL_INGESTION_CONFIG.flooding.detection.zScoreThreshold;
+      deprecations.push({
+        type: 'Decision',
+        decision: 'signal-ingestion-config-deprecated-field',
+        field: 'flooding.detection.sourceBaselineDriftMultiplier',
+        replacement: 'flooding.detection.zScoreThreshold',
+        legacyValue: legacy,
+        translatedTo: translatedZScore,
+        message:
+          `flooding.detection.sourceBaselineDriftMultiplier (legacy value ${JSON.stringify(legacy)}) ` +
+          `is deprecated and will be removed after the one-release-window soak. ` +
+          `Translated to flooding.detection.zScoreThreshold = ${translatedZScore} for this release. ` +
+          `Migrate by setting flooding.detection.zScoreThreshold explicitly in ` +
+          `.ai-sdlc/signal-ingestion.yaml (recommended default 3.0). ` +
+          `See docs/operations/signal-ingestion.md §5 for the full migration recipe.`,
+      });
+
+      // Mutate the parsed object so resolveConfig sees a translated value (the
+      // operator's intent is preserved through the legacy-to-z-score mapping).
+      injectTranslatedZScore(parsed, translatedZScore);
+    }
+
+    const config = resolveConfig(parsed, configPath);
+    return { config, deprecations };
+  }
+
+  // File absent → defaults; no deprecations.
+  return { config: { ...DEFAULT_SIGNAL_INGESTION_CONFIG }, deprecations };
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const v = value.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function extractLegacyFloodingMultiplier(parsed: unknown): unknown {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const root = parsed as Record<string, unknown>;
+  const spec = (root['spec'] as Record<string, unknown> | undefined) ?? root;
+  const flooding = spec['flooding'];
+  if (typeof flooding !== 'object' || flooding === null) return undefined;
+  const detection = (flooding as Record<string, unknown>)['detection'];
+  if (typeof detection !== 'object' || detection === null) return undefined;
+  return (detection as Record<string, unknown>)['sourceBaselineDriftMultiplier'];
+}
+
+function injectTranslatedZScore(parsed: unknown, zScoreThreshold: number): void {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+  const root = parsed as Record<string, unknown>;
+  const spec = (root['spec'] as Record<string, unknown> | undefined) ?? root;
+  const flooding = spec['flooding'];
+  if (typeof flooding !== 'object' || flooding === null) return;
+  const detection = (flooding as Record<string, unknown>)['detection'];
+  if (typeof detection !== 'object' || detection === null) return;
+  const detectionObj = detection as Record<string, unknown>;
+  // Only inject when operator did NOT also supply the explicit v0.3 key;
+  // an explicit v0.3 value takes precedence over the translated legacy value
+  // (operator's stated intent wins over the inferred translation).
+  if (detectionObj['zScoreThreshold'] === undefined) {
+    detectionObj['zScoreThreshold'] = zScoreThreshold;
+  }
+  // Strip the legacy key so resolveFloodingDetection() doesn't see it via any
+  // future additionalProperties check.
+  delete detectionObj['sourceBaselineDriftMultiplier'];
 }
 
 function resolveBoolean(value: unknown, defaultValue: boolean): boolean {
