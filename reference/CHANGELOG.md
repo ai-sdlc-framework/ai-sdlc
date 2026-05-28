@@ -1,5 +1,39 @@
 # @ai-sdlc/reference
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.10.0...reference-v0.11.0) (2026-05-28)
+
+
+### Features
+
+* add --timebox flag to cli-decisions for urgency escalation (AISDLC-447) ([#747](https://github.com/ai-sdlc-framework/ai-sdlc/issues/747)) ([efa0c82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/efa0c8297b0ebf0a39e5913273949c0a15e84345))
+* add /ai-sdlc execute-parallel tmux wrapper (AISDLC-462) ([#764](https://github.com/ai-sdlc-framework/ai-sdlc/issues/764)) ([dda8c5c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dda8c5c5edee0d29775c870f6226534ddc7582b7))
+* add signal source adapter substrate ([#506](https://github.com/ai-sdlc-framework/ai-sdlc/issues/506)) ([f4ee355](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f4ee355bbfc8a3a9d7d69c807861d739e6abad0a))
+* **ci:** flaky-test convention + nightly workflow + pre-commit short-circuit (AISDLC-371 reopen) ([#561](https://github.com/ai-sdlc-framework/ai-sdlc/issues/561)) ([21e3f2d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/21e3f2d5a9d7aed7a475b49f7a87f831b2f9eb9c))
+* **dispatch:** RFC-0041 Phase 1.5 — iteration mechanism (Conductor-triggered, Worker-driven session resumption) [needs-human-attention] (AISDLC-377.2) ([#586](https://github.com/ai-sdlc-framework/ai-sdlc/issues/586)) ([8dfcfa0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8dfcfa03a6de7e6d6158c4780f233aba2296c2f7))
+* **orchestrator:** add resume-from-draft + rework-pr recovery paths (AISDLC-273) ([#489](https://github.com/ai-sdlc-framework/ai-sdlc/issues/489)) ([39acbcb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39acbcb4fd44650cbbbeace5bbaf2e6772998bac))
+* **orchestrator:** add RFC-0019 phase 1 embedding adapter + registry (AISDLC-337) ([#650](https://github.com/ai-sdlc-framework/ai-sdlc/issues/650)) ([67bc6dd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/67bc6dd8f2eb136fff9bd89dfc75bbd682283073))
+* **orchestrator:** harden estimation log + cache for Phase-5 concurrency (AISDLC-328) ([#661](https://github.com/ai-sdlc-framework/ai-sdlc/issues/661)) ([8f55cb7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8f55cb7cf86fe0c38637cb710ef7d1ccea1b4044))
+* **orchestrator:** per-soul DSB authoring + Ck calibration aggregation (AISDLC-314) ([#562](https://github.com/ai-sdlc-framework/ai-sdlc/issues/562)) ([cf8615b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf8615b8683c47e3bd193f20e848d53d0ca9e317))
+* **orchestrator:** RFC-0022 Phase 1 — CompliancePosture schema + loader (AISDLC-322) ([#505](https://github.com/ai-sdlc-framework/ai-sdlc/issues/505)) ([23f5816](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23f58169ee5b461a289acd33750cde76e31af026))
+* **orchestrator:** signal-ingestion schema + governance + runbook for rfc-0030 phase 6 (AISDLC-348) ([#683](https://github.com/ai-sdlc-framework/ai-sdlc/issues/683)) ([b669485](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b66948503977e0655afec5b3b1020b593821cc2c))
+* **orchestrator:** wire RFC-0019 phase 4 pipeline schema + embedding load (AISDLC-340) ([#690](https://github.com/ai-sdlc-framework/ai-sdlc/issues/690)) ([cd8425f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd8425fc0d4163d87ec21d9e67be28febe51ae58))
+* **pipeline-cli:** RFC-0035 Phase 1 — Decision resource schema + cli-decisions {list, show, add} (AISDLC-285) ([#504](https://github.com/ai-sdlc-framework/ai-sdlc/issues/504)) ([019cdfe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/019cdfe265a3301580c003c06a792d6e1ef89c03))
+* RFC-0016 Phase 2 — estimate log writer + class cache (AISDLC-280) ([#498](https://github.com/ai-sdlc-framework/ai-sdlc/issues/498)) ([023e845](https://github.com/ai-sdlc-framework/ai-sdlc/commit/023e8454479ad452e19ba4273f8fab958e8f7f1f))
+* **spec:** add backlog-task.v1.schema.json with optional specRef field (AISDLC-444) ([#729](https://github.com/ai-sdlc-framework/ai-sdlc/issues/729)) ([d6d0ce4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d6d0ce4f816dae179a347212e7ca2ac9651b178d))
+* **spec:** add dispatch board protocol + in-session-agent worker (AISDLC-377.1) ([#576](https://github.com/ai-sdlc-framework/ai-sdlc/issues/576)) ([0685b95](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0685b9512661fb6c9fe29b41dc6f70216b7a345c))
+* **spec:** add triad/tessellation/parentTessellation to DID schema + init scaffolding (AISDLC-312) ([#544](https://github.com/ai-sdlc-framework/ai-sdlc/issues/544)) ([bc8feea](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc8feeaab54d9dd0dff16bd345ae203831a5850f))
+* **spec:** rfc-0009 phase 3 soul-scoping for 4 resources (AISDLC-315) ([#666](https://github.com/ai-sdlc-framework/ai-sdlc/issues/666)) ([5141be3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5141be30cc65990dd91d37a8d7362de68fc040da))
+* **spec:** rfc-0017 phase 1 soul did variant schema additions (AISDLC-435) ([#726](https://github.com/ai-sdlc-framework/ai-sdlc/issues/726)) ([dbe9ffb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dbe9ffb3caad42159e9b512a02e0fbfb1994813c))
+* **spec:** rfc-0035 phase 5 — stage c llm classifier + corpus (AISDLC-289) ([#673](https://github.com/ai-sdlc-framework/ai-sdlc/issues/673)) ([4745f93](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4745f93acd0cbcc884f2354f8fae215656aa866b))
+* **spec:** split RFC requires/assumes dependency semantics (AISDLC-311) ([#684](https://github.com/ai-sdlc-framework/ai-sdlc/issues/684)) ([c2b9200](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c2b9200b9a14d4845ecb8703dc7ff6b571471e08))
+* v6 envelope schema + signer (RFC-0042 phase 2) (AISDLC-383.3) ([#598](https://github.com/ai-sdlc-framework/ai-sdlc/issues/598)) ([666858d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/666858d89a7f7149dde5d1ab63296fe3568d7be2))
+
+
+### Bug Fixes
+
+* **ci:** update stale merge_group trigger assertions post-AISDLC-400 (AISDLC-405) ([#639](https://github.com/ai-sdlc-framework/ai-sdlc/issues/639)) ([ec35a48](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec35a48cc4fb62670a9b9ee07194dbb3944af844))
+* **reference:** handle loader-private YAML kinds without false-positive warnings (AISDLC-265) ([#474](https://github.com/ai-sdlc-framework/ai-sdlc/issues/474)) ([e51029c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e51029c0da04ac4ef6025281579361470e2039ff))
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.9.0...reference-v0.10.0) (2026-05-11)
 
 

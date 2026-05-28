@@ -5,6 +5,64 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.10.0...orchestrator-v0.11.0) (2026-05-28)
+
+
+### Features
+
+* **adapter:** extract codeArea from task references (AISDLC-268) ([#475](https://github.com/ai-sdlc-framework/ai-sdlc/issues/475)) ([7e04f3e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7e04f3e29570985a65a8e99ffcb676211332fec1))
+* add signal source adapter substrate ([#506](https://github.com/ai-sdlc-framework/ai-sdlc/issues/506)) ([f4ee355](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f4ee355bbfc8a3a9d7d69c807861d739e6abad0a))
+* **attestation:** reviewer-side signed sub-attestations — partial closure of 2026-05-20 forgery hole (AISDLC-380) ([#580](https://github.com/ai-sdlc-framework/ai-sdlc/issues/580)) ([1568606](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1568606d2f4e8f7c4c5e3b15df8be11140f88f68))
+* **ci:** changelog.md owned by release-please; warn on feature-branch edits (AISDLC-401) ([#637](https://github.com/ai-sdlc-framework/ai-sdlc/issues/637)) ([1779ed5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1779ed5dc2f4b31d1ae021ed0ae058527c0a3e6c))
+* **ci:** flaky-test convention + nightly workflow + pre-commit short-circuit (AISDLC-371 reopen) ([#561](https://github.com/ai-sdlc-framework/ai-sdlc/issues/561)) ([21e3f2d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/21e3f2d5a9d7aed7a475b49f7a87f831b2f9eb9c))
+* **orchestrator:** add compliance-posture wizard step to ai-sdlc init (AISDLC-324) ([#546](https://github.com/ai-sdlc-framework/ai-sdlc/issues/546)) ([dbeaac2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dbeaac229555dbc5ba79099f1c158bb00fd42fae))
+* **orchestrator:** add JSONL vector storage + cli-embedding-gc (AISDLC-338) ([#660](https://github.com/ai-sdlc-framework/ai-sdlc/issues/660)) ([3f4d9d4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3f4d9d438bccb92f565dd0989cf7a68bfe61fbda))
+* **orchestrator:** add rfc-0017 phase 3 deprecation lifecycle and drift extension (AISDLC-436) ([#736](https://github.com/ai-sdlc-framework/ai-sdlc/issues/736)) ([7f758ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7f758ab65fd2a58a0a0be88ab1ad98ef67cfd24a))
+* **orchestrator:** add RFC-0019 phase 1 embedding adapter + registry (AISDLC-337) ([#650](https://github.com/ai-sdlc-framework/ai-sdlc/issues/650)) ([67bc6dd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/67bc6dd8f2eb136fff9bd89dfc75bbd682283073))
+* **orchestrator:** cli-embedding-bump + stale-vector + deprecation lifecycle (AISDLC-339) ([#688](https://github.com/ai-sdlc-framework/ai-sdlc/issues/688)) ([a953222](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a9532224aa55f9743b5ab3763f96310750baf231))
+* **orchestrator:** contentHashV5 — delta-hash with embedded signedMergeBase (AISDLC-362) ([#535](https://github.com/ai-sdlc-framework/ai-sdlc/issues/535)) ([8455935](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8455935e9a476be8e005623b35c417e7a8911e35))
+* **orchestrator:** per-org calibration.yaml config for RFC-0031 (AISDLC-310) ([#543](https://github.com/ai-sdlc-framework/ai-sdlc/issues/543)) ([7cf6d80](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7cf6d807f6ed8e4cbd0baf0eb8bd001df5048cd6))
+* **orchestrator:** per-soul DSB authoring + Ck calibration aggregation (AISDLC-314) ([#562](https://github.com/ai-sdlc-framework/ai-sdlc/issues/562)) ([cf8615b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf8615b8683c47e3bd193f20e848d53d0ca9e317))
+* **orchestrator:** per-stage residency enforcement + multi-posture composition (AISDLC-432) ([#760](https://github.com/ai-sdlc-framework/ai-sdlc/issues/760)) ([27e4006](https://github.com/ai-sdlc-framework/ai-sdlc/commit/27e4006bd64507025f0a4ab3f4f0b07cc75895b9))
+* **orchestrator:** rfc-0009 phase 2.1 tessellation admission routing (AISDLC-313) ([#558](https://github.com/ai-sdlc-framework/ai-sdlc/issues/558)) ([1d28adc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1d28adc6df860fbb549a6624f45d2f33cc7a076b))
+* **orchestrator:** rfc-0009 phase 4.1 e-rho-5 compliance clearance (AISDLC-316) ([#696](https://github.com/ai-sdlc-framework/ai-sdlc/issues/696)) ([6b5f27f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6b5f27fae95d1572fe5b55c8a4970d78b9be5623))
+* **orchestrator:** rfc-0009 phase 4.2 e-tau tessellation-drift detector (AISDLC-317) ([#692](https://github.com/ai-sdlc-framework/ai-sdlc/issues/692)) ([4bd609b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4bd609b5e65b61a716fb17f4e1d6ae7f71fb2a65))
+* **orchestrator:** rfc-0009 phase 4.4 oq-11 trigger checklist + oq-10 pin (AISDLC-319) ([#697](https://github.com/ai-sdlc-framework/ai-sdlc/issues/697)) ([068a0fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/068a0fa0ff11ebd4e52c452b898cee7b49dd4c21))
+* **orchestrator:** rfc-0017 phase 2 variant scorer routing (AISDLC-353) ([#682](https://github.com/ai-sdlc-framework/ai-sdlc/issues/682)) ([19401d8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/19401d8d8492c3ea3273175893baa14f4d3e500a))
+* **orchestrator:** RFC-0017 phase 4 internal-adopter reference impl (AISDLC-437) ([#755](https://github.com/ai-sdlc-framework/ai-sdlc/issues/755)) ([68d3eab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/68d3eab871bf50b569307970002a42d7866d5470))
+* **orchestrator:** RFC-0022 Phase 1 — CompliancePosture schema + loader (AISDLC-322) ([#505](https://github.com/ai-sdlc-framework/ai-sdlc/issues/505)) ([23f5816](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23f58169ee5b461a289acd33750cde76e31af026))
+* **orchestrator:** RFC-0022 Phase 2 — Regime → DerivedGates composer (AISDLC-323) ([#516](https://github.com/ai-sdlc-framework/ai-sdlc/issues/516)) ([a0caca4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a0caca46c20ac3e49a6c1fbe51a99c6de5995235))
+* **orchestrator:** RFC-0025 refit phase 1 — quality monitoring substrate salvage (AISDLC-302) ([#550](https://github.com/ai-sdlc-framework/ai-sdlc/issues/550)) ([aeb5de9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aeb5de995a999d9e21474a61fc02d1422940d2c5))
+* **orchestrator:** rfc-0030 env-var adapter scope + manual hardening (AISDLC-430) ([#762](https://github.com/ai-sdlc-framework/ai-sdlc/issues/762)) ([d1e26dd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d1e26ddff56bc87a6078daf4b006becc6238d205))
+* **orchestrator:** rfc-0030 phase 2 — signal classification + language gate (AISDLC-344) ([#654](https://github.com/ai-sdlc-framework/ai-sdlc/issues/654)) ([0a542ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0a542ab191a81ded52b779b4354a8bbe5ed5b2a3))
+* **orchestrator:** rfc-0030 phase 3 — clustering bm25 default + embedding option (AISDLC-345) ([#659](https://github.com/ai-sdlc-framework/ai-sdlc/issues/659)) ([cc9a46e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc9a46e824ec86423531a783f4f8b2d90879f027))
+* **orchestrator:** rfc-0030 phase 4 significance + sa + flooding (AISDLC-346) ([#667](https://github.com/ai-sdlc-framework/ai-sdlc/issues/667)) ([9fe25b1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9fe25b15804c01d6444e40795242f690102d2828))
+* **orchestrator:** rfc-0030 phase 5 d1 reformulation + ppa integration (AISDLC-347) ([#671](https://github.com/ai-sdlc-framework/ai-sdlc/issues/671)) ([fd17d91](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd17d914532e5b7a920493b48e2e7afd8724bd59))
+* **orchestrator:** scaffold .github/workflows on ai-sdlc init (AISDLC-261) ([#480](https://github.com/ai-sdlc-framework/ai-sdlc/issues/480)) ([8dca58f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8dca58f74ac6a3e08a482e7391ab6586c62a1641))
+* **orchestrator:** ship canonical identityClass taxonomy + substrate-contract schema (AISDLC-452) ([#750](https://github.com/ai-sdlc-framework/ai-sdlc/issues/750)) ([31313a4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/31313a48bb3f729af8a5f416136aab8eb8472f25))
+* **orchestrator:** signal-ingestion schema + governance + runbook for rfc-0030 phase 6 (AISDLC-348) ([#683](https://github.com/ai-sdlc-framework/ai-sdlc/issues/683)) ([b669485](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b66948503977e0655afec5b3b1020b593821cc2c))
+* **orchestrator:** wire RFC-0019 phase 4 pipeline schema + embedding load (AISDLC-340) ([#690](https://github.com/ai-sdlc-framework/ai-sdlc/issues/690)) ([cd8425f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd8425fc0d4163d87ec21d9e67be28febe51ae58))
+* rfc-0025 phase 4 suggest-only attribution + config schema (AISDLC-305) ([#676](https://github.com/ai-sdlc-framework/ai-sdlc/issues/676)) ([e8c5d75](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e8c5d75befdaad9735ec17d63e7887b1f51d4da7))
+* **spec:** add triad/tessellation/parentTessellation to DID schema + init scaffolding (AISDLC-312) ([#544](https://github.com/ai-sdlc-framework/ai-sdlc/issues/544)) ([bc8feea](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc8feeaab54d9dd0dff16bd345ae203831a5850f))
+* **spec:** rfc-0017 phase 1 soul did variant schema additions (AISDLC-435) ([#726](https://github.com/ai-sdlc-framework/ai-sdlc/issues/726)) ([dbe9ffb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dbe9ffb3caad42159e9b512a02e0fbfb1994813c))
+
+
+### Bug Fixes
+
+* **orchestrator:** add generated-schemas.ts to CONTENTHASHV4_IGNORE_FILES (AISDLC-342) ([#502](https://github.com/ai-sdlc-framework/ai-sdlc/issues/502)) ([a2a32d4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a2a32d4392cb1002ed5e4363ca13bcca2e68bf27))
+* **orchestrator:** init auto-yields to defaults in non-TTY contexts (AISDLC-263) ([#472](https://github.com/ai-sdlc-framework/ai-sdlc/issues/472)) ([cf8996d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf8996d53425ca8f101355d1c01b38efa34dfb9e))
+* **orchestrator:** init resolves to git root by default (AISDLC-262) ([#478](https://github.com/ai-sdlc-framework/ai-sdlc/issues/478)) ([a961602](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a96160276545e02b2712d0f02ff19e2e32c01a93))
+* **orchestrator:** resolve npm bin symlinks in isMainEntry check (gh-issue-610) ([#703](https://github.com/ai-sdlc-framework/ai-sdlc/issues/703)) ([9219583](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9219583cd2172f19059767a818718dab2b12d6b7))
+* **orchestrator:** wire HC_design Source 3 compliance signal from DSB (AISDLC-266) ([#477](https://github.com/ai-sdlc-framework/ai-sdlc/issues/477)) ([8854a00](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8854a0035129a51e471483f81ca74ef9561af4a5))
+* **reference:** handle loader-private YAML kinds without false-positive warnings (AISDLC-265) ([#474](https://github.com/ai-sdlc-framework/ai-sdlc/issues/474)) ([e51029c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e51029c0da04ac4ef6025281579361470e2039ff))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.11.0
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.9.0...orchestrator-v0.10.0) (2026-05-11)
 
 

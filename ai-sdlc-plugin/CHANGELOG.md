@@ -5,6 +5,56 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.2...ai-sdlc-plugin-v0.10.0) (2026-05-28)
+
+
+### Features
+
+* add /ai-sdlc execute-parallel tmux wrapper (AISDLC-462) ([#764](https://github.com/ai-sdlc-framework/ai-sdlc/issues/764)) ([dda8c5c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dda8c5c5edee0d29775c870f6226534ddc7582b7))
+* ai-sdlc rfc init scaffold + framework-rfc template (AISDLC-327) ([#751](https://github.com/ai-sdlc-framework/ai-sdlc/issues/751)) ([0221d88](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0221d883b98b764cfa4d981fe64f8182c6e49a8b))
+* **attestation:** reviewer-side signed sub-attestations — partial closure of 2026-05-20 forgery hole (AISDLC-380) ([#580](https://github.com/ai-sdlc-framework/ai-sdlc/issues/580)) ([1568606](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1568606d2f4e8f7c4c5e3b15df8be11140f88f68))
+* **ci:** changelog.md owned by release-please; warn on feature-branch edits (AISDLC-401) ([#637](https://github.com/ai-sdlc-framework/ai-sdlc/issues/637)) ([1779ed5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1779ed5dc2f4b31d1ae021ed0ae058527c0a3e6c))
+* **ci:** content-address envelope filenames via git patch-id (AISDLC-398) ([#632](https://github.com/ai-sdlc-framework/ai-sdlc/issues/632)) ([b15e312](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b15e31238e25aad0c411dd863421458ae99ad5fe))
+* **ci:** flaky-test convention + nightly workflow + pre-commit short-circuit (AISDLC-371 reopen) ([#561](https://github.com/ai-sdlc-framework/ai-sdlc/issues/561)) ([21e3f2d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/21e3f2d5a9d7aed7a475b49f7a87f831b2f9eb9c))
+* **ci:** sign MCP server npm tarball SHA in DSSE attestation (AISDLC-439) ([#738](https://github.com/ai-sdlc-framework/ai-sdlc/issues/738)) ([e327127](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e3271274f7d4c727d9b37ca9d92c67c1a29fdc85))
+* **deps:** frontier dispatch-readiness rubric (AISDLC-451) ([#746](https://github.com/ai-sdlc-framework/ai-sdlc/issues/746)) ([af36f9f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/af36f9fdfec8ebcd4a22f4ef44dd3a5276975d28))
+* **dispatch:** RFC-0041 Phase 1.5 — iteration mechanism (Conductor-triggered, Worker-driven session resumption) [needs-human-attention] (AISDLC-377.2) ([#586](https://github.com/ai-sdlc-framework/ai-sdlc/issues/586)) ([8dfcfa0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8dfcfa03a6de7e6d6158c4780f233aba2296c2f7))
+* **docs:** agentic scope-creep prevention guardrails (AISDLC-308) ([#630](https://github.com/ai-sdlc-framework/ai-sdlc/issues/630)) ([705fef8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/705fef8da784a890c5885547be81e262e7ea4c5b))
+* **docs:** prohibit subagent inline OQ resolution + add reviewer check (AISDLC-298) ([#540](https://github.com/ai-sdlc-framework/ai-sdlc/issues/540)) ([fb55bad](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fb55badb5c7fbf6cb2f38918baf30addb45df685))
+* emit transcript leaves after reviewer runs (AISDLC-383.8) ([#602](https://github.com/ai-sdlc-framework/ai-sdlc/issues/602)) ([87fc52b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/87fc52b2b8f31270eba9a96aaff5e56640a27aca))
+* **execute:** accept GH issue numbers (Option A: inline TaskSpec + sourceKind) (AISDLC-393, closes [#612](https://github.com/ai-sdlc-framework/ai-sdlc/issues/612)) ([#620](https://github.com/ai-sdlc-framework/ai-sdlc/issues/620)) ([ca72663](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ca726635122417a890c29a5be2a72852164f7e8d))
+* **orchestrator:** add compliance-posture wizard step to ai-sdlc init (AISDLC-324) ([#546](https://github.com/ai-sdlc-framework/ai-sdlc/issues/546)) ([dbeaac2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dbeaac229555dbc5ba79099f1c158bb00fd42fae))
+* **orchestrator:** ci-triggered PR conflict-resolver agent (AISDLC-460) ([#761](https://github.com/ai-sdlc-framework/ai-sdlc/issues/761)) ([f84c3e1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f84c3e186c8b9feb824fa64b1e4edd6925d8b711))
+* **orchestrator:** contentHashV5 — delta-hash with embedded signedMergeBase (AISDLC-362) ([#535](https://github.com/ai-sdlc-framework/ai-sdlc/issues/535)) ([8455935](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8455935e9a476be8e005623b35c417e7a8911e35))
+* **orchestrator:** default spawner = claude + ANTHROPIC_API_KEY warning (AISDLC-352) ([#532](https://github.com/ai-sdlc-framework/ai-sdlc/issues/532)) ([7863ca2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7863ca2e41a3aaeb2ec8ebabf9bf6e7eeee40daf))
+* **orchestrator:** flip v6 attestation default-ON (AISDLC-409) ([#641](https://github.com/ai-sdlc-framework/ai-sdlc/issues/641)) ([1640698](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1640698a36634ba31f0521ac449dbcae3943e3d0))
+* **orchestrator:** Pattern X — dev pushes, Conductor reconciles (AISDLC-396) ([#621](https://github.com/ai-sdlc-framework/ai-sdlc/issues/621)) ([dae8a58](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dae8a588739c81c6a645f26a2c903da692c70609))
+* **orchestrator:** prune stale parent debris when task ID in completed (AISDLC-446) ([#735](https://github.com/ai-sdlc-framework/ai-sdlc/issues/735)) ([9a7f4b5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9a7f4b5c7476088abab3e6e4c8b18a3bfe66bbd6))
+* **orchestrator:** reconcile sub-tick + reviewer-pass cache (AISDLC-418) ([#662](https://github.com/ai-sdlc-framework/ai-sdlc/issues/662)) ([8bbb777](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8bbb77796b30fd40b9f2686c8964df384cf0c958))
+* **orchestrator:** rfc-0016 phase 5 — per-class bias + 3-state token + pr-comment (AISDLC-283) ([#522](https://github.com/ai-sdlc-framework/ai-sdlc/issues/522)) ([c76c443](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c76c44303e248b671fef2b344f61aa9e9d71b9d8))
+* **orchestrator:** rfc-0036 phase 4 — cli-import-spec spec-kit bridge (AISDLC-329) ([#668](https://github.com/ai-sdlc-framework/ai-sdlc/issues/668)) ([f935954](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f935954c817d1bd41125ede01e58267436affc1b))
+* Phase 1 transcript capture in reviewer subagents (AISDLC-383.1) ([#593](https://github.com/ai-sdlc-framework/ai-sdlc/issues/593)) ([bc55b5c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc55b5c5c2c5dd72f7840005f1171748a51390c4))
+* **pipeline-cli:** RFC-0035 Phase 1 — Decision resource schema + cli-decisions {list, show, add} (AISDLC-285) ([#504](https://github.com/ai-sdlc-framework/ai-sdlc/issues/504)) ([019cdfe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/019cdfe265a3301580c003c06a792d6e1ef89c03))
+* **spec:** add dispatch board protocol + in-session-agent worker (AISDLC-377.1) ([#576](https://github.com/ai-sdlc-framework/ai-sdlc/issues/576)) ([0685b95](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0685b9512661fb6c9fe29b41dc6f70216b7a345c))
+* v6 envelope schema + signer (RFC-0042 phase 2) (AISDLC-383.3) ([#598](https://github.com/ai-sdlc-framework/ai-sdlc/issues/598)) ([666858d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/666858d89a7f7149dde5d1ab63296fe3568d7be2))
+
+
+### Bug Fixes
+
+* **attestation:** exclude transcript-leaves/ from patch-id (AISDLC-422) ([#680](https://github.com/ai-sdlc-framework/ai-sdlc/issues/680)) ([a42309e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a42309e8503996518785f38b3d76affd36d7f15a))
+* **ci:** prevent stale-envelope accumulation across queue rebases (AISDLC-274) ([#490](https://github.com/ai-sdlc-framework/ai-sdlc/issues/490)) ([e78b0a0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e78b0a029972c3ade9f5adce1d8624675e7ea7e1))
+* emit hookEventName in session-start + subagent-start hooks (AISDLC-382) ([#585](https://github.com/ai-sdlc-framework/ai-sdlc/issues/585)) ([bb94edd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bb94edde0fe11c0943c3c8c82ec8d7ec67076d7e))
+* heal plugin install via session-start hook + parse runtimeDependencies (AISDLC-441) ([#719](https://github.com/ai-sdlc-framework/ai-sdlc/issues/719)) ([790e38b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/790e38bf9d7fb288f3ed5f968cb1e3780d6646d2))
+* make /ai-sdlc execute portable to adopter projects (AISDLC-272) ([#482](https://github.com/ai-sdlc-framework/ai-sdlc/issues/482)) ([98b5a51](https://github.com/ai-sdlc-framework/ai-sdlc/commit/98b5a51b0a386daf7128f251797a354b71df345d))
+* **orchestrator:** add OpenPullRequestExists filter to close deadlock (AISDLC-361) ([#534](https://github.com/ai-sdlc-framework/ai-sdlc/issues/534)) ([09d78be](https://github.com/ai-sdlc-framework/ai-sdlc/commit/09d78be549eb5cab6d2ba7289183d0bdf100a4ee))
+* **orchestrator:** address PR [#576](https://github.com/ai-sdlc-framework/ai-sdlc/issues/576) unaddressed majors + file AISDLC-380 governance task (AISDLC-377.1) ([#577](https://github.com/ai-sdlc-framework/ai-sdlc/issues/577)) ([87aab49](https://github.com/ai-sdlc-framework/ai-sdlc/commit/87aab494b340e43c38d0dfc64e3d5d0943cd1ba0))
+* **orchestrator:** auto-rearm after force-push + branch-slug helper (AISDLC-356) ([#533](https://github.com/ai-sdlc-framework/ai-sdlc/issues/533)) ([6a36c62](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6a36c62deb4c233bda989bea952b8fbf42188670))
+* **orchestrator:** init auto-yields to defaults in non-TTY contexts (AISDLC-263) ([#472](https://github.com/ai-sdlc-framework/ai-sdlc/issues/472)) ([cf8996d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf8996d53425ca8f101355d1c01b38efa34dfb9e))
+* **orchestrator:** pipeline error propagation + PR auto-promote + gh PATH detection (AISDLC-354) ([#531](https://github.com/ai-sdlc-framework/ai-sdlc/issues/531)) ([b365b2b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b365b2bcbd701e14e39f5b0b6fb1777d6b9cdd56))
+* **orchestrator:** resume-from-draft stale verdict + verdict shape + degenerate retry (AISDLC-355) ([#527](https://github.com/ai-sdlc-framework/ai-sdlc/issues/527)) ([117f4b9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/117f4b9f33b23b3df4c4ffdea6aa32c43a6416fb))
+* **plugin:** skill-body env gates match AISDLC-411 default-ON polarity ([#645](https://github.com/ai-sdlc-framework/ai-sdlc/issues/645)) ([f125a5c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f125a5c861148b9152584efb810697b1982fb6da))
+* remove AISDLC-215 docs-only auto-approve synthesis (AISDLC-387) ([#603](https://github.com/ai-sdlc-framework/ai-sdlc/issues/603)) ([af70882](https://github.com/ai-sdlc-framework/ai-sdlc/commit/af708826e4f4139485450f2acb566b55f876814b))
+
 ## [0.9.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.1...ai-sdlc-plugin-v0.9.2) (2026-05-12)
 
 
