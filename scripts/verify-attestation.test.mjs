@@ -37,6 +37,7 @@ import {
   detectQueueRebaseInvalidation,
   findChoreCommitViolations,
   isAttestationOnlyDescendant,
+  isTreeEquivalentModuloAttestation,
   loadAllAttestations,
   parseTrustedReviewers,
   predicateMatchReason,
@@ -4689,5 +4690,402 @@ describe('runVerifier (AISDLC-398 fix #3 — v5 fast-path content-hash recompute
       isValidRejectionReason,
       `expected a content/hash or schema rejection, got: ${out.reason}`,
     );
+  });
+});
+
+// ── AISDLC-448 — orphan-ancestor tree-equivalence relaxation ─────────────────
+//
+// Root-cause coverage for the 2026-05-27 incident (4 BLOCKED PRs: #737, #739,
+// #740, #741). The verifier's AISDLC-419 attestation-only-descendant
+// relaxation only fired when subject.sha1 was reachable from HEAD. After a
+// rebase the envelope's subject becomes orphaned, so the relaxation never
+// runs and the verifier rejects a structurally valid envelope.
+//
+// AISDLC-448 extends the relaxation to the BOTH-mismatch + orphan case via
+// `isTreeEquivalentModuloAttestation`: when the source tree at the orphaned
+// subject and at HEAD are byte-identical modulo the attestation paths, the
+// envelope is accepted. The Merkle + trusted-key signature gates still apply
+// inside `verifyV6Envelope` (steps 3-7).
+describe('isTreeEquivalentModuloAttestation (AISDLC-448)', () => {
+  // Initialise a tmp git repo and helper for cheap commit creation.
+  function initRepo() {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-treeq-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+    return tmp;
+  }
+  function commit(repo, files, msg) {
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(repo, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', msg], { cwd: repo });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim();
+  }
+
+  it('returns true when subject === head', () => {
+    const tmp = initRepo();
+    try {
+      const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      assert.equal(isTreeEquivalentModuloAttestation(sha, sha, tmp), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns true for an orphaned subject whose tree equals HEAD modulo attestation paths', () => {
+    // Reproduce the AISDLC-448 incident shape: PR is signed against a dev
+    // commit, then rebased onto a new main tip, then a chore-attestation
+    // commit lands on top. After the rebase the original signed SHA is
+    // orphaned (not an ancestor of new HEAD), but the source tree at both
+    // SHAs is byte-identical modulo `.ai-sdlc/attestations/**`.
+    const tmp = initRepo();
+    try {
+      // Build a base + a dev commit on top.
+      const baseSha = commit(tmp, { 'baseline.txt': 'baseline\n' }, 'baseline');
+      const signedSha = commit(tmp, { 'src/feature.ts': 'export const F = 1;\n' }, 'feat: dev');
+      // Branch off baseline to simulate "new main moved forward" — orphans
+      // signedSha from the new HEAD's ancestor chain.
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', baseSha], { cwd: tmp });
+      // Re-apply the SAME source tree (so trees compare equal) under a new
+      // commit, then add an attestation chore on top.
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const F = 1;\n');
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: dev (rebased)'], { cwd: tmp });
+      const choreHead = commit(
+        tmp,
+        {
+          '.ai-sdlc/attestations/aaaaaaaa.v6.dsse.json': '{"x":1}',
+          '.ai-sdlc/transcript-leaves.jsonl': '{"l":1}\n',
+        },
+        'chore: sign attestation',
+      );
+      // signedSha must NOT be an ancestor of choreHead (orphaned).
+      const ancestor = spawnSyncNode('git', ['merge-base', '--is-ancestor', signedSha, choreHead], {
+        cwd: tmp,
+      });
+      assert.notEqual(ancestor.status, 0, 'precondition: signedSha must be orphaned');
+      // Source tree at signedSha and choreHead agree modulo attestation paths.
+      assert.equal(isTreeEquivalentModuloAttestation(signedSha, choreHead, tmp), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns FALSE when orphaned subject and HEAD diverge on a source file', () => {
+    // Same orphan setup, but the rebased branch changed a source byte. The
+    // tree comparison must flag this as non-equivalent so the verifier
+    // rejects (preserving tampering detection across rebases).
+    const tmp = initRepo();
+    try {
+      const baseSha = commit(tmp, { 'baseline.txt': 'baseline\n' }, 'baseline');
+      const signedSha = commit(tmp, { 'src/feature.ts': 'export const F = 1;\n' }, 'feat: dev');
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', baseSha], { cwd: tmp });
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const F = 2;\n'); // tamper
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: dev (rebased + tampered)'], {
+        cwd: tmp,
+      });
+      const choreHead = commit(
+        tmp,
+        { '.ai-sdlc/attestations/bbbbbbbb.v6.dsse.json': '{"y":1}' },
+        'chore: sign attestation',
+      );
+      assert.equal(isTreeEquivalentModuloAttestation(signedSha, choreHead, tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns true even when both trees changed under attestation paths (relaxation scope)', () => {
+    // The whole point of the relaxation is that attestation-path diffs are
+    // tolerated. If subject committed envelope A and HEAD committed envelope
+    // B, both under .ai-sdlc/attestations/, the function should still return
+    // true (the diff is purely under the excluded prefix).
+    const tmp = initRepo();
+    try {
+      const baseSha = commit(tmp, { 'baseline.txt': 'b\n' }, 'baseline');
+      const signedSha = commit(
+        tmp,
+        {
+          'src/feature.ts': 'export const F = 1;\n',
+          '.ai-sdlc/attestations/oldenv.v6.dsse.json': '{"old":1}',
+        },
+        'feat + old attestation',
+      );
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', baseSha], { cwd: tmp });
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const F = 1;\n');
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(join(tmp, '.ai-sdlc', 'attestations', 'newenv.v6.dsse.json'), '{"new":1}');
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'rebased: code + new attestation only'], {
+        cwd: tmp,
+      });
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: tmp,
+        encoding: 'utf-8',
+      }).trim();
+      assert.equal(isTreeEquivalentModuloAttestation(signedSha, head, tmp), true);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns FALSE for invalid SHAs', () => {
+    const tmp = initRepo();
+    try {
+      const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      assert.equal(isTreeEquivalentModuloAttestation('not-a-sha', sha, tmp), false);
+      assert.equal(isTreeEquivalentModuloAttestation(sha, 'also-not', tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns FALSE when subject SHA is unreachable (gc-pruned)', () => {
+    // Conservative fallback: when `git diff` can't resolve one of the refs
+    // (typical in shallow clones or post-gc state), reject rather than
+    // accept on a degraded view of history.
+    const tmp = initRepo();
+    try {
+      const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      const fakeSha = 'f'.repeat(40);
+      assert.equal(isTreeEquivalentModuloAttestation(fakeSha, sha, tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('verifyV6Envelope (AISDLC-448 — orphan-ancestor relaxation)', () => {
+  // End-to-end coverage: build a real v6 envelope bound to a soon-to-be-
+  // orphaned dev commit, orphan it via rebase, add a chore-attestation
+  // commit on top, run verifyV6Envelope, assert valid.
+  let keys;
+  before(() => {
+    keys = genV6KeyPair();
+  });
+  function makeTrustedReviewers(publicKeyPem) {
+    return [
+      { agentId: 'code-reviewer', pubkey: publicKeyPem, addedAt: '2026-01-01T00:00:00Z' },
+      { agentId: 'test-reviewer', pubkey: publicKeyPem, addedAt: '2026-01-01T00:00:00Z' },
+      { agentId: 'security-reviewer', pubkey: publicKeyPem, addedAt: '2026-01-01T00:00:00Z' },
+    ];
+  }
+  function initRepo() {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-orphan-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+    return tmp;
+  }
+  function commit(repo, files, msg) {
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(repo, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', msg], { cwd: repo });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim();
+  }
+
+  it('accepts envelope when subject is orphaned but tree-equivalent to HEAD (rebase + chore-commit shape)', () => {
+    const tmp = initRepo();
+    try {
+      // Phase 1: dev signs against original feature commit.
+      const baseSha = commit(tmp, { 'baseline.txt': 'baseline\n' }, 'baseline');
+      const signedSha = commit(
+        tmp,
+        { 'src/feature.ts': 'export const F = 1;\n' },
+        'feat: original dev',
+      );
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, signedSha, leaves, keys.privateKeyPem);
+
+      // Phase 2: rebase orphans signedSha. Stash + re-apply same source on a
+      // new branch off baseSha. The new HEAD has the same source tree as
+      // signedSha, but signedSha is no longer in HEAD's ancestor chain.
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', baseSha], { cwd: tmp });
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const F = 1;\n');
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: dev (rebased)'], { cwd: tmp });
+
+      // Phase 3: chore commit lands on top, materialising the attestation
+      // envelope under a fake patch-id filename (mirrors production where
+      // signer + verifier compute different patch-ids).
+      const FAKE_PATCH_ID = 'a'.repeat(40);
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      const envelopeJson = JSON.stringify(envelope, null, 2);
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${FAKE_PATCH_ID}.v6.dsse.json`),
+        envelopeJson,
+      );
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl'),
+        leaves.map((l) => JSON.stringify(l)).join('\n') + '\n',
+      );
+      const choreHead = commit(tmp, {}, 'chore: sign attestation (post-rebase)');
+
+      // Phase 4: verify. With AISDLC-419 alone this rejects (subject is
+      // orphaned). With AISDLC-448 the tree-equivalence relaxation accepts.
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${FAKE_PATCH_ID}.v6.dsse.json`,
+        headSha: choreHead,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `expected valid (orphan tree-equivalent to HEAD), got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('REJECTS envelope when rebase resolved a source-byte conflict (tampering between sign and rebased HEAD)', () => {
+    // Same orphan shape, but the rebased branch's source content differs
+    // from the originally-signed content. The tree-equivalence check must
+    // catch this and reject — preserving the v6 envelope's content binding
+    // across rebases.
+    const tmp = initRepo();
+    try {
+      const baseSha = commit(tmp, { 'baseline.txt': 'baseline\n' }, 'baseline');
+      const signedSha = commit(
+        tmp,
+        { 'src/feature.ts': 'export const F = 1;\n' },
+        'feat: original dev',
+      );
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, signedSha, leaves, keys.privateKeyPem);
+
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', baseSha], { cwd: tmp });
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      // ← different source content from signedSha's tree
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const F = 999;\n');
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: dev (rebased + altered)'], {
+        cwd: tmp,
+      });
+
+      const FAKE_PATCH_ID = 'b'.repeat(40);
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${FAKE_PATCH_ID}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2),
+      );
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl'),
+        leaves.map((l) => JSON.stringify(l)).join('\n') + '\n',
+      );
+      const choreHead = commit(tmp, {}, 'chore: sign attestation (post-rebase, altered)');
+
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${FAKE_PATCH_ID}.v6.dsse.json`,
+        headSha: choreHead,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'invalid',
+        `expected invalid (orphan tree diverged from HEAD), got: ${result.reason}`,
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('runVerifier surfaces orphan-ancestor envelopes via the broadened candidate filter', () => {
+    // End-to-end through runVerifier: ensure the candidate filter at
+    // runVerifier-level (line ~1966) also accepts orphan-ancestor envelopes
+    // via the new tree-equivalence path. Without the filter change, the
+    // envelope is never surfaced and the verifier returns "no v6 envelope"
+    // even though the inner verifyV6Envelope relaxation is present.
+    const fixture = setupFixture();
+    const v6Keys = genV6KeyPair();
+    writeTrustedReviewersYaml(fixture.root, v6Keys.publicKeyPem);
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      // Sign against the fixture's headSha.
+      writeV6Fixture(fixture.root, fixture.headSha, leaves, v6Keys.privateKeyPem);
+
+      // Read the envelope bytes back, rename to a fake patch-id filename,
+      // and orphan the original SHA via reset/recommit on a new branch.
+      const envBytes = readFileSync(
+        join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.v6.dsse.json`),
+        'utf-8',
+      );
+      rmSync(join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.v6.dsse.json`));
+      const FAKE_PATCH_ID = 'c'.repeat(40);
+
+      // Reset to base, replay the same feature content under a new commit
+      // (orphans fixture.headSha).
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', fixture.baseSha], {
+        cwd: fixture.root,
+      });
+      writeFileSync(join(fixture.root, 'feature.txt'), 'feature\n');
+      execFileSync('git', ['add', 'feature.txt'], { cwd: fixture.root });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: re-applied'], { cwd: fixture.root });
+
+      // Materialise the renamed envelope + leaves on the rebased branch.
+      mkdirSync(join(fixture.root, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(
+        join(fixture.root, '.ai-sdlc', 'attestations', `${FAKE_PATCH_ID}.v6.dsse.json`),
+        envBytes,
+      );
+      writeFileSync(
+        join(fixture.root, '.ai-sdlc', 'transcript-leaves.jsonl'),
+        leaves.map((l) => JSON.stringify(l)).join('\n') + '\n',
+      );
+      execFileSync('git', ['add', '.ai-sdlc/attestations/', '.ai-sdlc/transcript-leaves.jsonl'], {
+        cwd: fixture.root,
+      });
+      execFileSync('git', ['commit', '-q', '-m', 'chore: sign v6 attestation'], {
+        cwd: fixture.root,
+      });
+      const choreHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: fixture.root,
+        encoding: 'utf-8',
+      }).trim();
+
+      const out = runVerifier({
+        headSha: choreHead,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+      });
+      assert.equal(
+        out.status,
+        'valid',
+        `expected valid (orphan envelope surfaced via AISDLC-448 candidate filter), got: ${out.reason}`,
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 });

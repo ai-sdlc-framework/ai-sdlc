@@ -44,6 +44,20 @@
  * chore-commit allowlist closes the malicious-chore-commit attack surface
  * AISDLC-84 had inadvertently opened.
  *
+ * AISDLC-448: v6 envelope head-binding relaxation extended to BOTH-mismatch.
+ * Root cause of 4 BLOCKED PRs on 2026-05-27: the AISDLC-419 attestation-only
+ * descendant relaxation only fires when subject.sha1 is reachable from HEAD
+ * (linear chore-commit case). After a rebase, the envelope's subject is
+ * orphaned (no longer in HEAD's ancestor chain), so the ancestor check
+ * fails AND the descendant relaxation never runs. We added a second
+ * relaxation, `isTreeEquivalentModuloAttestation`, which checks tree
+ * equivalence between the orphaned subject and HEAD modulo attestation
+ * paths. Security argument: the v6 envelope's Merkle root + trusted-key
+ * signature still gates acceptance (steps 3-7 of `verifyV6Envelope`); the
+ * tree-equivalence check only relaxes the head-binding precondition for
+ * envelopes whose source content matches HEAD. See
+ * `isTreeEquivalentModuloAttestation` head-block for the full analysis.
+ *
  * Inputs (env vars):
  *   PR_HEAD_SHA  — head SHA of the PR being verified (used for diff computation)
  *   PR_BASE_SHA  — base SHA (typically `origin/main`'s tip the PR is targeting)
@@ -118,6 +132,23 @@ function computePatchIdForVerifier(base, head, repoRoot) {
 }
 
 /**
+ * Path-exclusion args for `git diff` / `git diff-tree` that omit the
+ * attestation envelope dir + per-patch-id transcript-leaves dir + shared
+ * transcript-leaves file. Used by BOTH the linear-ancestor relaxation
+ * (`isAttestationOnlyDescendant`) and the orphan tree-equivalence relaxation
+ * (`isTreeEquivalentModuloAttestation`).
+ *
+ * AISDLC-448: extracted into a shared constant so the two relaxation paths
+ * stay byte-for-byte identical. Drift between them would re-open the same
+ * BOTH-mismatch class of false negatives this task was filed to close.
+ */
+const ATTESTATION_PATH_EXCLUSIONS = [
+  ':!.ai-sdlc/attestations/',
+  ':!.ai-sdlc/transcript-leaves.jsonl',
+  ':!.ai-sdlc/transcript-leaves/',
+];
+
+/**
  * AISDLC-419: detect "attestation-only descendant" relationship.
  *
  * Returns true iff `subjectSha` is an ancestor of `headSha` AND the only
@@ -158,6 +189,10 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
     return false;
   }
   // 2. Non-attestation diff content between subjectSha and headSha must be empty.
+  // AISDLC-422: the exclusion list (`.ai-sdlc/attestations/`,
+  // `.ai-sdlc/transcript-leaves.jsonl`, `.ai-sdlc/transcript-leaves/`) lives
+  // in the shared ATTESTATION_PATH_EXCLUSIONS constant so the orphan
+  // tree-equivalence relaxation stays in sync (AISDLC-448).
   let diffOutput;
   try {
     diffOutput = execFileSync(
@@ -168,12 +203,7 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
         '-p',
         `${subjectSha}..${headSha}`,
         '--',
-        ':!.ai-sdlc/attestations/',
-        ':!.ai-sdlc/transcript-leaves.jsonl',
-        // AISDLC-422: also exclude the per-patch-id leaves directory so the
-        // "attestation-only descendant" determination doesn't count newly
-        // committed `<patch-id>.jsonl` files as source-diff content.
-        ':!.ai-sdlc/transcript-leaves/',
+        ...ATTESTATION_PATH_EXCLUSIONS,
       ],
       {
         cwd: repoRoot,
@@ -183,6 +213,100 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
     );
   } catch {
     // git failure (e.g. shallow clone, unreachable SHA). Conservative: reject.
+    return false;
+  }
+  return !diffOutput || diffOutput.trim().length === 0;
+}
+
+/**
+ * AISDLC-448: detect "tree-equivalent modulo attestation" relationship.
+ *
+ * Returns true iff the tree state at `subjectSha` and the tree state at
+ * `headSha` are byte-identical EXCEPT for files under the attestation paths
+ * (`.ai-sdlc/attestations/`, `.ai-sdlc/transcript-leaves.jsonl`,
+ * `.ai-sdlc/transcript-leaves/`).
+ *
+ * Unlike `isAttestationOnlyDescendant`, this DOES NOT require `subjectSha`
+ * to be an ancestor of `headSha`. It is therefore safe to use when the
+ * envelope's subject SHA has been orphaned by a rebase — the rebased HEAD
+ * still encodes the same source-tree content that the (orphaned) subject
+ * tree encoded, and the v6 envelope's transcript binding still attests to
+ * that content via the trusted-reviewer-signed Merkle root.
+ *
+ * Use case: the pattern observed in the 2026-05-27 incident (4 BLOCKED PRs)
+ * is: sign-attestation runs against the dev commit; rebase onto main moves
+ * dev's commit (orphaning the signed SHA); a chore commit lands on top
+ * containing the post-rebase attestation file. The verifier sees:
+ *   - filename mismatch (envelope is patch-id-named or pre-rebase SHA-named)
+ *   - subject mismatch (envelope.subject.sha1 is the orphaned dev SHA)
+ *   - subject NOT an ancestor of HEAD (orphaned by rebase)
+ * Under AISDLC-419 alone, this is rejected. Under AISDLC-448, the tree-
+ * equivalence check accepts it because: a clean rebase preserves the source
+ * tree byte-for-byte (only the commit graph changes), and the chore commit
+ * on top only touches `.ai-sdlc/attestations/**` + transcript-leaves.
+ *
+ * Security analysis:
+ *   - The v6 envelope is signed by a trusted reviewer key over a Merkle
+ *     root computed from on-disk transcript leaves. The signature does not
+ *     depend on commit-SHA ancestry; it binds to leaf content.
+ *   - Cross-PR replay surface: an attacker would need to land HEAD content
+ *     whose source-tree (modulo attestation paths) exactly matches a
+ *     historic envelope's subject-tree (modulo attestation paths). That
+ *     IS the same source tree that was reviewed. Re-using the envelope
+ *     does not grant approval for any NEW source content; it merely
+ *     re-asserts approval for content that was already reviewed. The
+ *     transcript-leaves + Merkle proof + trusted-key signature gates
+ *     remain in force (steps 3-7 of `verifyV6Envelope`).
+ *   - Tampering surface: any source-tree divergence (a stray comment,
+ *     reformatted whitespace, anything outside the attestation paths)
+ *     produces non-empty `git diff` output and the function returns false.
+ *
+ * The two relaxations compose:
+ *   - `isAttestationOnlyDescendant` covers the linear case (subject is
+ *     ancestor of HEAD, only attestation diffs in between). This handles
+ *     the stacked chore-commit pattern.
+ *   - `isTreeEquivalentModuloAttestation` covers the orphan case (subject
+ *     is NOT ancestor of HEAD due to rebase). This handles the rebase +
+ *     chore-commit pattern.
+ *
+ * Callers should attempt `isAttestationOnlyDescendant` FIRST (cheaper —
+ * stops at the ancestor check) and fall through to this function only
+ * when the ancestor check fails.
+ *
+ * Exported for hermetic tests.
+ */
+export function isTreeEquivalentModuloAttestation(subjectSha, headSha, repoRoot) {
+  if (!/^[0-9a-f]{40}$/i.test(subjectSha) || !/^[0-9a-f]{40}$/i.test(headSha)) {
+    return false;
+  }
+  if (subjectSha.toLowerCase() === headSha.toLowerCase()) {
+    // Same commit — trivially equivalent. Caller should never reach the
+    // relaxation path for this case, but be safe.
+    return true;
+  }
+  // Use `git diff` (not `git diff-tree`) so the comparison works regardless
+  // of ancestry — diff-tree assumes a connected commit graph between the
+  // two refs. `git diff <A> <B>` only requires both trees to be reachable
+  // git objects (they are: both came from `loadAllAttestations` filenames
+  // or envelope subject fields, both of which were resolvable when the
+  // envelope was written; the rebase moves commits but does not delete
+  // tree objects until git gc runs, which the workflow does not trigger).
+  let diffOutput;
+  try {
+    diffOutput = execFileSync(
+      'git',
+      ['diff', '--no-color', subjectSha, headSha, '--', ...ATTESTATION_PATH_EXCLUSIONS],
+      {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        maxBuffer: 128 * 1024 * 1024,
+      },
+    );
+  } catch {
+    // git failure — most commonly: subjectSha is no longer a reachable
+    // tree object (gc'd or shallow-cloned away). Conservative: reject so
+    // the verifier produces an actionable error instead of silently
+    // accepting on a degraded view of history.
     return false;
   }
   return !diffOutput || diffOutput.trim().length === 0;
@@ -813,6 +937,15 @@ export function verifyV6Envelope({
   // Both conditions together preserve replay protection: cross-PR replay
   // fails the ancestor check, and tampering with non-attestation files
   // between sign and push fails the empty-diff check.
+  //
+  // AISDLC-448: extend the relaxation to the BOTH-mismatch + orphan-ancestor
+  // case observed on 2026-05-27 (4 BLOCKED PRs). After a rebase, the
+  // envelope's subject.sha1 is orphaned (no longer reachable from HEAD), so
+  // the AISDLC-419 ancestor check fails. The new relaxation accepts when
+  // the TREE STATE at the orphaned subject is byte-identical to HEAD's
+  // modulo the attestation paths — see `isTreeEquivalentModuloAttestation`
+  // for the security analysis. The Merkle + signature verification (steps
+  // 3-7 below) still gates final acceptance.
   const expectedFileName = `${headSha.toLowerCase()}.v6.dsse.json`;
   const fileNameMismatch = envelopeFileName.toLowerCase() !== expectedFileName;
   const subjectMismatch = envelopeSubjectSha.toLowerCase() !== headSha.toLowerCase();
@@ -827,19 +960,21 @@ export function verifyV6Envelope({
     };
   }
   if (subjectMismatch) {
-    // AISDLC-419: the divergence may be the result of one or more
-    // attestation-only chore commits sitting on top of the signed commit
-    // (the Step 10 sign + pre-push `check-attestation-sign.sh` chain
-    // creates exactly this shape). Relax iff:
-    //   - subject.digest.sha1 is an ancestor of headSha (git merge-base --is-ancestor)
-    //   - `git diff-tree <subject>..<head> -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves.jsonl'`
-    //     is empty
-    // Both checks together preserve replay protection: cross-PR replay
-    // fails the ancestor check; tampering with non-attestation files
-    // between sign and push fails the empty-diff check.
+    // First try the AISDLC-419 linear-ancestor relaxation (cheap — short-
+    // circuits on the ancestor check). When subject is reachable from HEAD,
+    // the diff between them must be attestation-only.
     if (isAttestationOnlyDescendant(envelopeSubjectSha, headSha, repoRoot)) {
       process.stderr.write(
         `[v6-verifier] AISDLC-419: accepting envelope (subject=${envelopeSubjectSha.slice(0, 7)}) as attestation-only ancestor of HEAD=${headSha.slice(0, 7)} — no source diff between them.\n`,
+      );
+      // Fall through to transcript / Merkle / signature verification.
+    } else if (isTreeEquivalentModuloAttestation(envelopeSubjectSha, headSha, repoRoot)) {
+      // AISDLC-448: BOTH-mismatch + orphan-ancestor relaxation. Subject is
+      // not reachable from HEAD (rebase orphaned it) but the source tree
+      // at the orphan and at HEAD agree byte-for-byte modulo attestation
+      // paths. The Merkle + signature gates still apply (steps 3-7).
+      process.stderr.write(
+        `[v6-verifier] AISDLC-448: accepting envelope (subject=${envelopeSubjectSha.slice(0, 7)}) as tree-equivalent to HEAD=${headSha.slice(0, 7)} modulo attestation paths (orphan-ancestor relaxation; subject not reachable from HEAD).\n`,
       );
       // Fall through to transcript / Merkle / signature verification.
     } else if (fileNameMismatch) {
@@ -1979,13 +2114,19 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     // verifyV6Envelope. Doing the check here surfaces the envelope to
     // the candidate set; verifyV6Envelope's signature + Merkle defenses
     // still gate acceptance.
+    //
+    // AISDLC-448: also surface envelopes whose subject is orphaned by a
+    // rebase but whose subject TREE STATE is byte-equivalent to HEAD's
+    // modulo attestation paths. Same security argument as the inner
+    // verifyV6Envelope relaxation — see isTreeEquivalentModuloAttestation.
     const subjectSha = entry.envelope?.subject?.digest?.sha1;
-    if (
-      typeof subjectSha === 'string' &&
-      /^[0-9a-f]{40}$/i.test(subjectSha) &&
-      isAttestationOnlyDescendant(subjectSha, lowerHead, repoRoot)
-    ) {
-      return true;
+    if (typeof subjectSha === 'string' && /^[0-9a-f]{40}$/i.test(subjectSha)) {
+      if (isAttestationOnlyDescendant(subjectSha, lowerHead, repoRoot)) {
+        return true;
+      }
+      if (isTreeEquivalentModuloAttestation(subjectSha, lowerHead, repoRoot)) {
+        return true;
+      }
     }
     return false;
   });
