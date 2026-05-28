@@ -82,6 +82,9 @@
           },
           "description": "BCP-47 language tags accepted by the classifier. Signals in unsupported languages are dropped + logged as a SignalLanguageUnsupported decision (RFC-0030 OQ-13.2 resolution). Default = ['en'] (v1 is English-only; multi-language deferred to v2).",
           "default": ["en"]
+        },
+        "residencyEnforcement": {
+          "$ref": "#/$defs/ResidencyEnforcementConfig"
         }
       },
       "additionalProperties": false
@@ -173,6 +176,50 @@
       "properties": {
         "signalPipelineWeight": { "type": "number", "minimum": 0, "default": 0.5 },
         "backlogItemWeight": { "type": "number", "minimum": 0, "default": 0.5 }
+      },
+      "additionalProperties": false
+    },
+    "ResidencyEnforcementConfig": {
+      "type": "object",
+      "description": "Per-stage data residency enforcement toggles per RFC-0030 v0.3 OQ-13.3 re-walkthrough refinement (AISDLC-432). Composes with RFC-0022 Compliance Posture (which owns regime DECLARATION) by gating per-pipeline-stage ENFORCEMENT. All flags default to ON when at least one regime is declared; adopters can selectively disable enforcement points when their regime allows it (rare). `multiPostureBehavior: 'union'` is the v1 default — when an adopter declares both HIPAA AND GDPR, each regime's allowed-region constraint must be satisfied (strictest wins). See `docs/operations/signal-ingestion.md` §6.5 for the per-stage enforcement runbook.",
+      "properties": {
+        "sourceFromCompliancePosture": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, the allowed-regions list per regime is sourced from the RFC-0022 compliance.yaml `derivedGates.allowedRegions`. When false, adopters must populate the allowed regions via the lower-level orchestrator API (advanced; rare)."
+        },
+        "enforcementPoints": {
+          "type": "object",
+          "properties": {
+            "fetchSignals": {
+              "type": "boolean",
+              "default": true,
+              "description": "Adapter-level check at fetchSignals() time — refuses signals whose region falls outside the declared regime's allowed regions. Emits `Decision: signal-residency-violation`."
+            },
+            "clustering": {
+              "type": "boolean",
+              "default": true,
+              "description": "Partition signals by residencyRegion before similarity computation — cross-region cluster merge is structurally impossible. Required when regime is GDPR / HIPAA / PIPEDA."
+            },
+            "storage": {
+              "type": "boolean",
+              "default": true,
+              "description": "Persist `residencyRegion` field on every stored signal record. Cross-region reads emit elevated audit log entries (SOC2 / HIPAA accountability)."
+            },
+            "unifiedCostReport": {
+              "type": "boolean",
+              "default": true,
+              "description": "Tag cost attribution rows with `residencyRegion`; unified cost report breaks out per-region totals so adopters can audit cross-region cost mingling."
+            }
+          },
+          "additionalProperties": false
+        },
+        "multiPostureBehavior": {
+          "type": "string",
+          "enum": ["union"],
+          "default": "union",
+          "description": "How the pipeline composes multiple regime declarations. v1 ships `union` only — UNION of regime constraints, strictest applies."
+        }
       },
       "additionalProperties": false
     }

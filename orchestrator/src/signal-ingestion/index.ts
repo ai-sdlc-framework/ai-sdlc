@@ -58,6 +58,7 @@ export {
   type D1CompositionWeights,
   type IcpResonanceWeights,
   type LoadSignalIngestionConfigOptions,
+  type ResidencyEnforcementConfig,
   type SaResonanceThresholds,
   type SignalIngestionConfig,
   type Tier2SignificanceThreshold,
@@ -81,14 +82,33 @@ export {
 // RFC-0030 Phase 3 — clustering
 export {
   clusterSignals,
+  clusterSignalsWithResidency,
   computeClusterId,
   cosineSimilarity,
   type ClusterSignalsOptions,
+  type ClusterSignalsWithResidencyOptions,
   type ClusteredSignalInput,
   type ClusteringAlgorithmUsed,
   type ClusteringResult,
+  type ClusteringResultWithResidency,
   type DemandCluster,
 } from './clustering.js';
+
+// RFC-0030 OQ-13.3 re-walkthrough — per-stage residency enforcement +
+// multi-posture composition (AISDLC-432).
+export {
+  clusterRequiresSegregation,
+  composePostures,
+  groupCostByRegion,
+  makeStoredSignalRecord,
+  partitionSignalsByRegion,
+  readSignalRecordWithAudit,
+  type CostAttributionRow,
+  type CostByRegionBreakdown,
+  type CrossRegionReadAuditEntry,
+  type PostureRegimeInput,
+  type StoredSignalRecord,
+} from './residency.js';
 
 // RFC-0030 Phase 4 — significance threshold + SA resonance filter + flooding + residency
 export {

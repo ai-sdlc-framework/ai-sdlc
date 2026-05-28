@@ -93,6 +93,39 @@ export interface D1CompositionWeights {
   backlogItemWeight: number;
 }
 
+/**
+ * Per-stage residency enforcement toggles per RFC-0030 v0.3 OQ-13.3
+ * re-walkthrough. Each flag corresponds to an enforcement point in the
+ * pipeline:
+ *
+ *   - `fetchSignals`: adapter-level signal tag check against allowed regions
+ *     (already implemented via `checkSignalResidency`).
+ *   - `clustering`: partition signals by residencyRegion before similarity
+ *     computation; cross-region cluster merge is structurally impossible.
+ *   - `storage`: persist `residencyRegion` field on every stored record;
+ *     cross-region reads emit elevated audit-log entries.
+ *   - `unifiedCostReport`: group cost attribution rows by region so per-region
+ *     totals are visible in the unified cost report.
+ *
+ * `multiPostureBehavior` controls how the pipeline composes multiple regimes
+ * declared by the adopter. `'union'` is the v0.3 default — UNION of regime
+ * constraints, strictest applies (when an adopter declares HIPAA AND GDPR,
+ * a signal must satisfy BOTH regimes' allowed-region constraints).
+ *
+ * Defaults match RFC-0030 §11 v0.3 (all enforcement points ON; multi-posture
+ * = UNION).
+ */
+export interface ResidencyEnforcementConfig {
+  sourceFromCompliancePosture: boolean;
+  enforcementPoints: {
+    fetchSignals: boolean;
+    clustering: boolean;
+    storage: boolean;
+    unifiedCostReport: boolean;
+  };
+  multiPostureBehavior: 'union';
+}
+
 /** Fully-resolved signal ingestion configuration. */
 export interface SignalIngestionConfig {
   enabled: boolean;
@@ -110,6 +143,12 @@ export interface SignalIngestionConfig {
    * (RFC-0030 OQ-13.2 resolution).
    */
   acceptedLanguages: string[];
+  /**
+   * Per-stage residency enforcement configuration per RFC-0030 OQ-13.3
+   * re-walkthrough (v0.3). Defaults to all enforcement points ON with
+   * `multiPostureBehavior: 'union'`.
+   */
+  residencyEnforcement: ResidencyEnforcementConfig;
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -150,6 +189,16 @@ export const DEFAULT_SIGNAL_INGESTION_CONFIG: SignalIngestionConfig = {
   },
   adapters: ['signal-source-support-ticket', 'signal-source-community-thread'],
   acceptedLanguages: ['en'],
+  residencyEnforcement: {
+    sourceFromCompliancePosture: true,
+    enforcementPoints: {
+      fetchSignals: true,
+      clustering: true,
+      storage: true,
+      unifiedCostReport: true,
+    },
+    multiPostureBehavior: 'union',
+  },
 };
 
 // ── Error ───────────────────────────────────────────────────────────────────
@@ -243,6 +292,7 @@ function resolveConfig(raw: unknown, filePath: string): SignalIngestionConfig {
     d1Composition: resolveD1Composition(spec['d1Composition']),
     adapters: resolveStringArray(spec['adapters'], DEFAULT_SIGNAL_INGESTION_CONFIG.adapters),
     acceptedLanguages: resolveLanguageList(spec['acceptedLanguages']),
+    residencyEnforcement: resolveResidencyEnforcement(spec['residencyEnforcement']),
   };
 }
 
@@ -400,6 +450,54 @@ function resolveStringArray(value: unknown, defaultValue: string[]): string[] {
     throw new SignalIngestionConfigError('adapters entries must be strings');
   }
   return value as string[];
+}
+
+function resolveResidencyEnforcement(value: unknown): ResidencyEnforcementConfig {
+  const defaults = DEFAULT_SIGNAL_INGESTION_CONFIG.residencyEnforcement;
+  if (value === undefined || value === null) {
+    return {
+      sourceFromCompliancePosture: defaults.sourceFromCompliancePosture,
+      enforcementPoints: { ...defaults.enforcementPoints },
+      multiPostureBehavior: defaults.multiPostureBehavior,
+    };
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new SignalIngestionConfigError('residencyEnforcement must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  const points = obj['enforcementPoints'];
+  let enforcementPoints = { ...defaults.enforcementPoints };
+  if (points !== undefined && points !== null) {
+    if (typeof points !== 'object' || Array.isArray(points)) {
+      throw new SignalIngestionConfigError(
+        'residencyEnforcement.enforcementPoints must be an object',
+      );
+    }
+    const p = points as Record<string, unknown>;
+    enforcementPoints = {
+      fetchSignals: resolveBoolean(p['fetchSignals'], defaults.enforcementPoints.fetchSignals),
+      clustering: resolveBoolean(p['clustering'], defaults.enforcementPoints.clustering),
+      storage: resolveBoolean(p['storage'], defaults.enforcementPoints.storage),
+      unifiedCostReport: resolveBoolean(
+        p['unifiedCostReport'],
+        defaults.enforcementPoints.unifiedCostReport,
+      ),
+    };
+  }
+  const multi = obj['multiPostureBehavior'];
+  if (multi !== undefined && multi !== null && multi !== 'union') {
+    throw new SignalIngestionConfigError(
+      `residencyEnforcement.multiPostureBehavior must be 'union' (v1 only), got ${JSON.stringify(multi)}`,
+    );
+  }
+  return {
+    sourceFromCompliancePosture: resolveBoolean(
+      obj['sourceFromCompliancePosture'],
+      defaults.sourceFromCompliancePosture,
+    ),
+    enforcementPoints,
+    multiPostureBehavior: 'union',
+  };
 }
 
 function resolveLanguageList(value: unknown): string[] {

@@ -277,4 +277,94 @@ spec:
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // ── AISDLC-432: residencyEnforcement block (RFC-0030 v0.3 §11) ───────────
+
+  it('defaults residencyEnforcement to all enforcement points ON with union behaviour', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(dir, 'spec:\n  enabled: true\n');
+      const config = loadSignalIngestionConfig({ projectRoot: dir });
+      expect(config.residencyEnforcement).toEqual({
+        sourceFromCompliancePosture: true,
+        enforcementPoints: {
+          fetchSignals: true,
+          clustering: true,
+          storage: true,
+          unifiedCostReport: true,
+        },
+        multiPostureBehavior: 'union',
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses partial residencyEnforcement.enforcementPoints overrides with defaults for missing flags', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(
+        dir,
+        'spec:\n  residencyEnforcement:\n    enforcementPoints:\n      clustering: false\n',
+      );
+      const config = loadSignalIngestionConfig({ projectRoot: dir });
+      expect(config.residencyEnforcement.enforcementPoints.clustering).toBe(false);
+      // Other points retain defaults.
+      expect(config.residencyEnforcement.enforcementPoints.fetchSignals).toBe(true);
+      expect(config.residencyEnforcement.enforcementPoints.storage).toBe(true);
+      expect(config.residencyEnforcement.enforcementPoints.unifiedCostReport).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses sourceFromCompliancePosture override', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(dir, 'spec:\n  residencyEnforcement:\n    sourceFromCompliancePosture: false\n');
+      const config = loadSignalIngestionConfig({ projectRoot: dir });
+      expect(config.residencyEnforcement.sourceFromCompliancePosture).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws when residencyEnforcement is not an object', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(dir, 'spec:\n  residencyEnforcement: [list, not, object]\n');
+      expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
+        SignalIngestionConfigError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws when enforcementPoints is not an object', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(
+        dir,
+        'spec:\n  residencyEnforcement:\n    enforcementPoints: [not, an, object]\n',
+      );
+      expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
+        SignalIngestionConfigError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws when multiPostureBehavior is set to an unsupported value', () => {
+    const dir = makeTmpDir();
+    try {
+      writeConfig(dir, 'spec:\n  residencyEnforcement:\n    multiPostureBehavior: intersection\n');
+      expect(() => loadSignalIngestionConfig({ projectRoot: dir })).toThrow(
+        SignalIngestionConfigError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

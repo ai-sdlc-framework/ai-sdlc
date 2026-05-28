@@ -293,6 +293,166 @@ RawSignal interactively. Tracked as a follow-up to AISDLC-348.
 
 ---
 
+## 6.5. Residency enforcement points in the signal pipeline
+
+Compliance regimes (GDPR / HIPAA / PIPEDA) require enforcement at the
+data-handling layer, not just policy declaration. RFC-0022 (Compliance
+Posture + Audit Surface) owns regime DECLARATION (`compliance.yaml` +
+`derivedGates`); RFC-0030 §13.3 v0.3 specifies the per-stage enforcement
+points THIS pipeline applies. AISDLC-432 ships the post-Phase-4
+substrate.
+
+The four enforcement points correspond to four pipeline stages, each
+gated by a flag in `spec.residencyEnforcement.enforcementPoints` (default
+ON for all four when at least one regime is declared):
+
+### a. `fetchSignals` — adapter-level signal tag check
+
+Each adapter tags fetched signals with a `region` derived from upstream
+metadata (Zendesk org region, Salesforce sandbox region, Slack workspace
+region). The Phase-4 `checkSignalResidency` gate consults the active
+regime's `allowedRegions`; out-of-policy signals are refused and emit
+`Decision: signal-residency-violation` to the catalog. The pipeline
+continues on the remaining signals (G0 non-blocking — RFC-0035). When a
+signal has no `region` metadata, the gate skips it (visible-gap surface,
+not failure — adapters that don't yet plumb region metadata are flagged
+in the population-level region breakdown but not refused).
+
+### b. `clustering` — cross-region merge prevention
+
+`clusterSignalsWithResidency()` partitions signals by
+`residencyRegion` BEFORE similarity computation, so cross-region cluster
+merge is structurally impossible. The wrapper falls through to
+`clusterSignals()` (no partitioning) when `partitionByRegion: false` —
+no overhead for adopters with no residency regime declared. Use
+`clusterRequiresSegregation()` against the active regime declaration to
+decide:
+
+```ts
+import {
+  clusterRequiresSegregation,
+  clusterSignalsWithResidency,
+  composePostures,
+} from '@ai-sdlc/orchestrator/signal-ingestion';
+
+const declaration = composePostures([
+  { regime: 'gdpr', allowedRegions: ['eu', 'gb'] },
+  { regime: 'hipaa', allowedRegions: ['us'] },
+]);
+const partitionByRegion = clusterRequiresSegregation(declaration);
+const result = await clusterSignalsWithResidency(signals, {
+  partitionByRegion,
+});
+// result.regionPartitions = { eu: 3, us: 1, ... } when partitioning ran.
+```
+
+### c. `storage` — `residencyRegion` field + elevated cross-region read audit
+
+Every stored signal record carries a mandatory `residencyRegion` field
+derived from the signal's `region` tag (lower-cased; `'unknown'` when
+absent). Use `makeStoredSignalRecord()` at persistence time and
+`readSignalRecordWithAudit()` at read time:
+
+```ts
+import {
+  makeStoredSignalRecord,
+  readSignalRecordWithAudit,
+} from '@ai-sdlc/orchestrator/signal-ingestion';
+
+const record = makeStoredSignalRecord(rawSignal);
+// On read, by an agent / surface in a different region:
+const { auditEntry } = readSignalRecordWithAudit(record, {
+  callerRegion: 'us',
+  reader: 'ppa-d1-aggregator',
+});
+if (auditEntry !== null) {
+  // Persist the elevated audit entry to your audit log
+  // (SOC2 CC7.2 / HIPAA accountability mandate).
+}
+```
+
+Cross-region reads are **logged, not blocked** — the audit obligation is
+on read (matching AWS S3 cross-region replication audit semantics). When
+either side is `'unknown'`, no audit fires (visible-gap state surfaced
+via the population-level region breakdown).
+
+### d. `unifiedCostReport` — per-region cost attribution
+
+Cost-attribution rows from the embedding adapter (RFC-0019 OQ-7), the
+LLM classifier, and external-API consumers are tagged with
+`residencyRegion` and grouped via `groupCostByRegion()`:
+
+```ts
+import {
+  groupCostByRegion,
+  type CostAttributionRow,
+} from '@ai-sdlc/orchestrator/signal-ingestion';
+
+const rows: CostAttributionRow[] = [
+  { consumerLabel: 'rfc-0030-clustering', costUsd: 0.05, residencyRegion: 'eu' },
+  { consumerLabel: 'rfc-0030-clustering', costUsd: 0.03, residencyRegion: 'us' },
+];
+const breakdown = groupCostByRegion(rows);
+// breakdown = { totalUsd: 0.08, perRegion: { eu: 0.05, us: 0.03 } }
+```
+
+The breakdown lets operators audit cross-region cost mingling at a
+glance — anomalous concentration of cost in one region against the
+declared customer base is a signal worth investigating.
+
+### Multi-posture composition (UNION-of-constraints)
+
+When an adopter declares both HIPAA AND GDPR (or any combination of
+regimes), `composePostures()` produces a single
+`ResidencyRegimeDeclaration` consumable by every enforcement point. The
+composition is **UNION of constraints** — every active regime's
+allowed-regions constraint must be satisfied. A signal in `'eu'`
+satisfies GDPR but NOT HIPAA-only adopters, so multi-posture deployments
+should scope adapter inputs to a single regime per source.
+
+```ts
+const declaration = composePostures([
+  { regime: 'gdpr', allowedRegions: ['eu', 'gb'] },
+  { regime: 'hipaa', allowedRegions: ['us'] },
+]);
+// declaration.regimes = ['gdpr', 'hipaa']
+// declaration.allowedRegionsByRegime = { gdpr: ['eu','gb'], hipaa: ['us'] }
+// → an 'eu' signal is refused (violates HIPAA),
+//   a 'us' signal is refused (violates GDPR),
+//   only signals whose region is in BOTH lists pass (empty set here).
+```
+
+The composer is forward-compatible with RFC-0022 OQ-7 multi-posture
+declaration; until OQ-7 ships, adopters compose manually via
+`composePostures()`.
+
+### Audit export
+
+Every per-stage enforcement point emits either a Decision (adapter
+violations), an AuditEvent (cross-region reads), or a structured
+breakdown (cost report). The operator's audit export consumer (RFC-0022
+audit surface) reads these from `events.jsonl` + per-record audit logs;
+filter on `severity: 'elevated'` to surface the audit-worthy entries
+that demand SOC2 / HIPAA review attention.
+
+### Disabling enforcement (rare)
+
+Adopters whose regime doesn't require a given enforcement point can
+disable it via the per-point flags:
+
+```yaml
+spec:
+  residencyEnforcement:
+    enforcementPoints:
+      clustering: false  # adopter accepts cross-region cluster mingling
+```
+
+This is rare — the default-ON behaviour matches the conservative
+intent of compliance regimes. Every override is governance-relevant +
+emits a `SignalIngestionConfigChanged` event.
+
+---
+
 ## 7. Governance event audit trail
 
 Configuration changes are governance-relevant per RFC-0030 §11 closing

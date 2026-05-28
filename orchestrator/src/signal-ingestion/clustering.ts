@@ -515,6 +515,90 @@ export function computeClusterId(sortedSourceIds: string[]): string {
   return `cluster:${hash.digest('hex').slice(0, 24)}`;
 }
 
+// ── Residency-aware clustering (RFC-0030 OQ-13.3 re-walkthrough) ───────────
+
+/**
+ * Cluster signals with per-region segregation per RFC-0030 v0.3 OQ-13.3
+ * clustering enforcement point. Partitions the input by `signal.region`
+ * (via `partitionSignalsByRegion`) and runs `clusterSignals()` once per
+ * partition, concatenating the per-partition `DemandCluster[]` outputs so
+ * cross-region cluster merge is structurally impossible.
+ *
+ * **Decision boundary**: when `partitionByRegion` is `false` (caller-supplied
+ * or the active regime doesn't require segregation via
+ * `clusterRequiresSegregation()`), this function falls through to a single
+ * `clusterSignals()` call — zero overhead for adopters with no residency
+ * regime declared.
+ *
+ * The returned `ClusteringResult.algorithmUsed` is the algorithm used by the
+ * FIRST partition (all partitions use the same algorithm; `fallbackReason`
+ * surfaces if any partition fell back from embedding to BM25). When
+ * `partitionByRegion: true`, the function additionally returns
+ * `regionPartitions: { region: clusterCount }` for audit / cost-attribution
+ * surfacing.
+ */
+export interface ClusterSignalsWithResidencyOptions extends ClusterSignalsOptions {
+  /**
+   * When true, signals are partitioned by `region` before similarity
+   * computation. Defaults to `false` (caller decides based on the active
+   * regime declaration via `clusterRequiresSegregation()`).
+   */
+  partitionByRegion?: boolean;
+}
+
+export interface ClusteringResultWithResidency extends ClusteringResult {
+  /**
+   * Per-region cluster count breakdown. Only populated when
+   * `partitionByRegion: true`. Region keys lowercased; `__unspecified` is the
+   * bucket for signals with no `region` tag.
+   */
+  regionPartitions?: Record<string, number>;
+}
+
+export async function clusterSignalsWithResidency(
+  signals: ClusteredSignalInput[],
+  options: ClusterSignalsWithResidencyOptions = {},
+): Promise<ClusteringResultWithResidency> {
+  const partitionByRegion = options.partitionByRegion ?? false;
+
+  if (!partitionByRegion) {
+    return clusterSignals(signals, options);
+  }
+
+  // Lazy-import to avoid a clustering -> residency import cycle.
+  const { partitionSignalsByRegion } = await import('./residency.js');
+  const partitions = partitionSignalsByRegion(signals);
+
+  const allClusters: DemandCluster[] = [];
+  const regionPartitions: Record<string, number> = {};
+  let algorithmUsed: ClusteringAlgorithmUsed = 'bm25';
+  let fallbackReason: ClusteringResult['fallbackReason'];
+
+  for (const [region, partitionSignals] of partitions) {
+    if (partitionSignals.length === 0) continue;
+    // Strip partitionByRegion from options when delegating so we don't
+    // recurse (clusterSignals doesn't read this field anyway, but defensive).
+    const { partitionByRegion: _ignored, ...delegateOptions } = options;
+    const result = await clusterSignals(partitionSignals, delegateOptions);
+    allClusters.push(...result.clusters);
+    regionPartitions[region] = result.clusters.length;
+    algorithmUsed = result.algorithmUsed;
+    if (result.fallbackReason !== undefined) fallbackReason = result.fallbackReason;
+  }
+
+  // Sort across all partitions by deterministic clusterId so the output
+  // ordering matches non-partitioned clusterSignals semantics.
+  allClusters.sort((a, b) => a.clusterId.localeCompare(b.clusterId));
+
+  const out: ClusteringResultWithResidency = {
+    clusters: allClusters,
+    algorithmUsed,
+    regionPartitions,
+  };
+  if (fallbackReason !== undefined) out.fallbackReason = fallbackReason;
+  return out;
+}
+
 // ── Re-export for callers ───────────────────────────────────────────────────
 
 export type { CustomerTier, RawSignal, SignalTier };
