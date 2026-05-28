@@ -15,6 +15,10 @@
  * @see spec/rfcs/RFC-0028-engineering-axis-substrate-enforcement.md §6, §7.1
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
 // ── Canonical taxonomy enum ──────────────────────────────────────────
 
 /**
@@ -108,7 +112,13 @@ export function defaultIdentityClassForNovelField(
   fieldName: string,
   options: { warn?: NovelFieldWarningHook } = {},
 ): IdentityClass {
-  const canonical = CANONICAL_FIELD_CLASSIFICATIONS[fieldName];
+  // Use Object.prototype.hasOwnProperty.call to prevent prototype-pollution
+  // lookups — without this guard a field named `toString` or `constructor`
+  // would resolve to inherited Object prototype values (a function typed as
+  // IdentityClass) instead of defaulting to 'core'.
+  const canonical = Object.prototype.hasOwnProperty.call(CANONICAL_FIELD_CLASSIFICATIONS, fieldName)
+    ? CANONICAL_FIELD_CLASSIFICATIONS[fieldName]
+    : undefined;
   if (canonical !== undefined) return canonical;
   const defaulted: IdentityClass = 'core';
   options.warn?.(fieldName, defaulted);
@@ -212,25 +222,101 @@ export interface IdentityClassDiscrepancy {
  * Returns the list of discrepancies (may be empty). Callers are responsible
  * for piping each into `cli-decisions add --scope ... --option ...`.
  */
-export function auditLayer1DeterministicClassifications(): IdentityClassDiscrepancy[] {
-  return [
+export function auditLayer1DeterministicClassifications(
+  options: { readFile?: (path: string) => string } = {},
+): IdentityClassDiscrepancy[] {
+  const readFile = options.readFile ?? ((p: string): string => readFileSync(p, 'utf8'));
+
+  // Resolve sibling paths relative to THIS module's location, not cwd —
+  // tests run from the package dir, dogfood callers run from the repo root;
+  // both must find the shipped source files.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const saScoringDir = join(here, '..', 'sa-scoring');
+
+  const filesToAudit: Array<{ file: string; absolutePath: string }> = [
     {
       file: 'orchestrator/src/sa-scoring/did-compiler.ts',
-      symbol: 'ic() helper (default fallback)',
-      field: 'identityClass (novel scoring-entry default)',
-      observed: 'evolving',
-      canonical: 'core',
-      rationale:
-        'did-compiler.ts `ic()` defaults missing `identityClass` to `evolving` (line 172). ' +
-        'Canonical RFC-0028 §7.1 taxonomy specifies novel fields default to `core` ' +
-        '(conservative; promotion to evolving requires RFC amendment). The DID-scoring ' +
-        'domain may legitimately defend the evolving-default (most scoring rules are ' +
-        'operational tuning, not Soul identity) — operator decision required to either ' +
-        '(a) align DID-scoring default to canonical core, (b) carve a documented ' +
-        'cross-layer exemption keeping evolving as DID-scoring default, or ' +
-        '(c) revise the canonical taxonomy to per-domain defaults.',
+      absolutePath: join(saScoringDir, 'did-compiler.ts'),
+    },
+    {
+      file: 'orchestrator/src/sa-scoring/layer1-deterministic.ts',
+      absolutePath: join(saScoringDir, 'layer1-deterministic.ts'),
     },
   ];
+
+  const discrepancies: IdentityClassDiscrepancy[] = [];
+
+  for (const { file, absolutePath } of filesToAudit) {
+    let source: string;
+    try {
+      source = readFile(absolutePath);
+    } catch {
+      // File missing from the working tree — skip, do not throw. The audit
+      // is best-effort; absent source is itself surfaced via the empty result
+      // and the test suite ensures the canonical path exists.
+      continue;
+    }
+
+    const lines = source.split('\n');
+    lines.forEach((line, idx) => {
+      const lineNumber = idx + 1;
+
+      // Pattern 1: `?? 'evolving'` or `?? "evolving"` — explicit default
+      // fallback to evolving. Canonical taxonomy says novel fields default
+      // to core, so any such fallback IS a discrepancy.
+      const defaultMatch = /\?\?\s*['"](evolving|core)['"]/.exec(line);
+      if (defaultMatch) {
+        const observed = defaultMatch[1] as IdentityClass;
+        if (observed !== 'core') {
+          discrepancies.push({
+            file,
+            symbol: `line ${lineNumber} default fallback`,
+            field: 'identityClass (novel default)',
+            observed,
+            canonical: 'core',
+            rationale:
+              `${file}:${lineNumber} defaults missing identityClass to '${observed}' via \`?? '${observed}'\`. ` +
+              `Canonical RFC-0028 §7.1 taxonomy specifies novel fields default to 'core' (conservative; ` +
+              `promotion to evolving requires RFC amendment). The DID-scoring domain may legitimately ` +
+              `defend a different default — operator decision required to (a) align to canonical 'core', ` +
+              `(b) carve a documented cross-layer exemption, or (c) revise the canonical taxonomy.`,
+          });
+        }
+      }
+
+      // Pattern 2: Explicit literal `identityClass: 'evolving'` or `identityClass: 'core'` on a single line.
+      // We do NOT cross-reference against a per-field expected value here (the
+      // canonical taxonomy is field-name keyed and TypeScript source doesn't
+      // make the receiving field name unambiguously parseable line-by-line).
+      // We surface these as informational discrepancies ONLY when paired with
+      // a default keyword that the codex review described — explicit
+      // assignments at type-declaration sites (e.g. `identityClass: IdentityClass`)
+      // do not match this pattern.
+      const literalMatch = /identityClass\s*:\s*['"](evolving|core)['"]/.exec(line);
+      if (literalMatch && !defaultMatch) {
+        const observed = literalMatch[1] as IdentityClass;
+        // Only surface as discrepancy when observed = evolving (canonical default
+        // is core; explicit 'core' assignments align with canonical and are not
+        // discrepancies even when the field is unknown to the canonical taxonomy).
+        if (observed === 'evolving') {
+          discrepancies.push({
+            file,
+            symbol: `line ${lineNumber} explicit literal`,
+            field: 'identityClass (explicit assignment — verify field is canonically evolving)',
+            observed,
+            canonical: 'core',
+            rationale:
+              `${file}:${lineNumber} explicitly assigns identityClass='evolving'. Verify the receiving ` +
+              `field is canonically 'evolving' per RFC-0028 §7.1 taxonomy; novel scoring-entry fields ` +
+              `default to 'core' per canonical taxonomy. Operator decision required if the field is ` +
+              `novel or canonically 'core'.`,
+          });
+        }
+      }
+    });
+  }
+
+  return discrepancies;
 }
 
 // ── Errors ───────────────────────────────────────────────────────────

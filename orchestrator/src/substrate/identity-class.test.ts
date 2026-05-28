@@ -177,22 +177,94 @@ describe('tightening-only enforcement (type system)', () => {
   });
 });
 
+describe('novel-field default — prototype-pollution safety', () => {
+  it('returns "core" for prototype property names like `toString` (not the inherited function)', () => {
+    const result = defaultIdentityClassForNovelField('toString');
+    expect(result).toBe('core');
+    expect(typeof result).toBe('string');
+  });
+
+  it('returns "core" for `constructor` (does not resolve inherited Object.constructor)', () => {
+    const result = defaultIdentityClassForNovelField('constructor');
+    expect(result).toBe('core');
+    expect(typeof result).toBe('string');
+  });
+
+  it('returns "core" for `hasOwnProperty` (Object.prototype member name)', () => {
+    expect(defaultIdentityClassForNovelField('hasOwnProperty')).toBe('core');
+  });
+
+  it('fires the warning hook for prototype-method names (treated as novel, not inherited)', () => {
+    const calls: Array<{ fieldName: string; defaultedTo: IdentityClass }> = [];
+    const warn = (fieldName: string, defaultedTo: IdentityClass) =>
+      calls.push({ fieldName, defaultedTo });
+    defaultIdentityClassForNovelField('toString', { warn });
+    expect(calls).toEqual([{ fieldName: 'toString', defaultedTo: 'core' }]);
+  });
+});
+
 describe('audit discrepancy emission', () => {
-  it('emits exactly one canonical discrepancy for the did-compiler.ts default fallback', () => {
+  it('emits discrepancies derived by scanning the shipped source files (not hard-coded)', () => {
     const discrepancies = auditLayer1DeterministicClassifications();
-    expect(discrepancies).toHaveLength(1);
+    expect(discrepancies.length).toBeGreaterThan(0);
   });
 
-  it('discrepancy targets did-compiler.ts ic() helper with observed=evolving vs canonical=core', () => {
-    const [d] = auditLayer1DeterministicClassifications();
-    expect(d.file).toBe('orchestrator/src/sa-scoring/did-compiler.ts');
-    expect(d.symbol).toContain('ic()');
-    expect(d.observed).toBe('evolving');
-    expect(d.canonical).toBe('core');
+  it('discrepancies target the real shipped files only', () => {
+    const discrepancies = auditLayer1DeterministicClassifications();
+    for (const d of discrepancies) {
+      expect([
+        'orchestrator/src/sa-scoring/did-compiler.ts',
+        'orchestrator/src/sa-scoring/layer1-deterministic.ts',
+      ]).toContain(d.file);
+    }
   });
 
-  it('discrepancy rationale references RFC-0028 §7.1 + three operator-routing options', () => {
-    const [d] = auditLayer1DeterministicClassifications();
+  it("catches the `?? 'evolving'` default-fallback discrepancy in did-compiler.ts", () => {
+    const discrepancies = auditLayer1DeterministicClassifications();
+    const defaultFallback = discrepancies.find(
+      (d) =>
+        d.file === 'orchestrator/src/sa-scoring/did-compiler.ts' &&
+        d.symbol.includes('default fallback'),
+    );
+    expect(defaultFallback).toBeDefined();
+    expect(defaultFallback?.observed).toBe('evolving');
+    expect(defaultFallback?.canonical).toBe('core');
+  });
+
+  it("would catch a NEW explicit `identityClass: 'evolving'` assignment if added to scope", () => {
+    // Inject a synthetic file content via the readFile hook to prove the
+    // scanner picks up newly-added evolving classifications (not stuck on the
+    // previously hard-coded discrepancy list).
+    const synthetic = `
+      const someNewRule = {
+        identityClass: 'evolving',
+      };
+    `;
+    const discrepancies = auditLayer1DeterministicClassifications({
+      readFile: (path) => {
+        if (path.endsWith('did-compiler.ts')) return synthetic;
+        if (path.endsWith('layer1-deterministic.ts')) return '';
+        throw new Error('unexpected path: ' + path);
+      },
+    });
+    const literal = discrepancies.find((d) => d.symbol.includes('explicit literal'));
+    expect(literal).toBeDefined();
+    expect(literal?.observed).toBe('evolving');
+  });
+
+  it("explicit `identityClass: 'core'` assignments are NOT flagged (aligns with canonical default)", () => {
+    const synthetic = `const ok = { identityClass: 'core' };`;
+    const discrepancies = auditLayer1DeterministicClassifications({
+      readFile: () => synthetic,
+    });
+    // No discrepancies — 'core' matches canonical default.
+    expect(discrepancies).toEqual([]);
+  });
+
+  it('rationale references RFC-0028 §7.1 + three operator-routing options', () => {
+    const discrepancies = auditLayer1DeterministicClassifications();
+    const d = discrepancies[0];
+    expect(d).toBeDefined();
     expect(d.rationale).toMatch(/RFC-0028 §7\.1/);
     expect(d.rationale).toMatch(/\(a\).+\(b\).+\(c\)/s);
   });
