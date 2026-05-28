@@ -231,25 +231,15 @@ describe('audit discrepancy emission', () => {
     expect(defaultFallback?.canonical).toBe('core');
   });
 
-  it("would catch a NEW explicit `identityClass: 'evolving'` assignment if added to scope", () => {
-    // Inject a synthetic file content via the readFile hook to prove the
-    // scanner picks up newly-added evolving classifications (not stuck on the
-    // previously hard-coded discrepancy list).
-    const synthetic = `
-      const someNewRule = {
-        identityClass: 'evolving',
-      };
-    `;
+  it("explicit `identityClass: 'evolving'` literals are NOT flagged (false-positive avoidance)", () => {
+    // Pattern 2 (literal flagging) was deliberately REMOVED — canonical-evolving
+    // fields like observerCooldownMs correctly carry `identityClass: 'evolving'`
+    // and a field-agnostic literal scan would emit spurious Decision records.
+    const synthetic = `const evolvingField = { identityClass: 'evolving' };`;
     const discrepancies = auditLayer1DeterministicClassifications({
-      readFile: (path) => {
-        if (path.endsWith('did-compiler.ts')) return synthetic;
-        if (path.endsWith('layer1-deterministic.ts')) return '';
-        throw new Error('unexpected path: ' + path);
-      },
+      readFile: () => synthetic,
     });
-    const literal = discrepancies.find((d) => d.symbol.includes('explicit literal'));
-    expect(literal).toBeDefined();
-    expect(literal?.observed).toBe('evolving');
+    expect(discrepancies).toEqual([]);
   });
 
   it("explicit `identityClass: 'core'` assignments are NOT flagged (aligns with canonical default)", () => {
@@ -257,8 +247,17 @@ describe('audit discrepancy emission', () => {
     const discrepancies = auditLayer1DeterministicClassifications({
       readFile: () => synthetic,
     });
-    // No discrepancies — 'core' matches canonical default.
     expect(discrepancies).toEqual([]);
+  });
+
+  it("still flags `?? 'evolving'` default-fallback via synthetic input (Pattern 1 remains active)", () => {
+    const synthetic = `function ic(x) { return x.identityClass ?? 'evolving'; }`;
+    const discrepancies = auditLayer1DeterministicClassifications({
+      readFile: () => synthetic,
+    });
+    expect(discrepancies.length).toBeGreaterThan(0);
+    expect(discrepancies[0].symbol).toContain('default fallback');
+    expect(discrepancies[0].observed).toBe('evolving');
   });
 
   it('rationale references RFC-0028 §7.1 + three operator-routing options', () => {

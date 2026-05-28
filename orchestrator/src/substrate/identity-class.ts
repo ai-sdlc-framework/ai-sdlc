@@ -284,35 +284,16 @@ export function auditLayer1DeterministicClassifications(
         }
       }
 
-      // Pattern 2: Explicit literal `identityClass: 'evolving'` or `identityClass: 'core'` on a single line.
-      // We do NOT cross-reference against a per-field expected value here (the
-      // canonical taxonomy is field-name keyed and TypeScript source doesn't
-      // make the receiving field name unambiguously parseable line-by-line).
-      // We surface these as informational discrepancies ONLY when paired with
-      // a default keyword that the codex review described — explicit
-      // assignments at type-declaration sites (e.g. `identityClass: IdentityClass`)
-      // do not match this pattern.
-      const literalMatch = /identityClass\s*:\s*['"](evolving|core)['"]/.exec(line);
-      if (literalMatch && !defaultMatch) {
-        const observed = literalMatch[1] as IdentityClass;
-        // Only surface as discrepancy when observed = evolving (canonical default
-        // is core; explicit 'core' assignments align with canonical and are not
-        // discrepancies even when the field is unknown to the canonical taxonomy).
-        if (observed === 'evolving') {
-          discrepancies.push({
-            file,
-            symbol: `line ${lineNumber} explicit literal`,
-            field: 'identityClass (explicit assignment — verify field is canonically evolving)',
-            observed,
-            canonical: 'core',
-            rationale:
-              `${file}:${lineNumber} explicitly assigns identityClass='evolving'. Verify the receiving ` +
-              `field is canonically 'evolving' per RFC-0028 §7.1 taxonomy; novel scoring-entry fields ` +
-              `default to 'core' per canonical taxonomy. Operator decision required if the field is ` +
-              `novel or canonically 'core'.`,
-          });
-        }
-      }
+      // Pattern 2 (explicit `identityClass: 'evolving'` literal flagging)
+      // was REMOVED — it produced false positives for legitimate
+      // canonical-evolving fields (`observerCooldownMs`,
+      // `cadenceMinIntervalDays`, `clustering.similarityThreshold`,
+      // `tenantQuotaShare`) which correctly assign `identityClass:
+      // 'evolving'`. Cross-referencing the receiving field name from a
+      // raw text scan is too error-prone for an audit signal that flows
+      // into the Decision Catalog. Pattern 1 (`?? 'evolving'`
+      // default-fallback) is field-agnostic-safe and is the sole
+      // discrepancy class this scanner emits.
     });
   }
 
