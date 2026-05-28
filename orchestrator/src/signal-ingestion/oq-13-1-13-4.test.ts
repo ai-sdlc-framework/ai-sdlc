@@ -356,6 +356,34 @@ describe('OQ-13.4 AC#5/6 — manual rate-limit per operator', () => {
     }
   });
 
+  it('rate-limit bucket uses wall-clock `now`, not caller-supplied `attestedAt` (anti-spoof)', () => {
+    // Codex MAJOR fix: spoofed attestedAt MUST NOT create fresh per-day
+    // buckets that bypass the cap. Bucket keys MUST track wall-clock time.
+    const adapter = new ManualSignalSourceAdapter({ dailyCapPerOperator: 2 });
+    const now = new Date('2026-05-27T10:00:00.000Z');
+    // Submit 2 signals with three different spoofed attestedAt values, all
+    // at the same wall-clock `now`. Cap is 2 → third submission throws,
+    // regardless of attestedAt rotation.
+    expect(() =>
+      adapter.addSignal(
+        { ...signal('s1'), attestedBy: 'op@example.com', attestedAt: new Date('2099-01-01') },
+        now,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      adapter.addSignal(
+        { ...signal('s2'), attestedBy: 'op@example.com', attestedAt: new Date('2030-06-15') },
+        now,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      adapter.addSignal(
+        { ...signal('s3'), attestedBy: 'op@example.com', attestedAt: new Date('1999-12-31') },
+        now,
+      ),
+    ).toThrow(ManualSignalRateLimitExceeded);
+  });
+
   it('attestation check fires BEFORE rate-limit (missing attestedBy is ManualSignalIncomplete)', () => {
     const adapter = new ManualSignalSourceAdapter({ dailyCapPerOperator: 0 });
     expect(() => adapter.addSignal(signal('missing'))).toThrow(ManualSignalIncomplete);

@@ -93,7 +93,12 @@ export class ManualSignalSourceAdapter implements SignalSourceAdapter {
       throw new ManualSignalIncomplete(input.sourceId);
     }
     const attestedAt = input.attestedAt ?? now;
-    const utcDate = utcDateKey(attestedAt);
+    // Rate-limit bucket keys MUST use wall-clock `now`, not caller-supplied
+    // `attestedAt`. A spoofed attestedAt (e.g. `new Date('2099-01-01')`)
+    // would otherwise create a fresh per-day bucket on each submit and
+    // bypass the daily cap entirely. The persisted attestedAt remains
+    // caller-supplied for audit fidelity (OQ-13.4 v0.3 anti-gaming fix).
+    const utcDate = utcDateKey(now);
     const bucketKey = `${input.attestedBy}|${utcDate}`;
 
     if (this.dailyCapPerOperator > 0) {
