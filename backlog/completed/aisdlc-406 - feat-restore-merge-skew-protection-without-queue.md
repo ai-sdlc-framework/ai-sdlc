@@ -1,7 +1,7 @@
 ---
 id: AISDLC-406
 title: 'feat(ci): restore merge-skew protection post queue-drop (main health monitor + alert)'
-status: In Progress
+status: Done
 labels: [ci, operator-merge, skew-protection, post-aisdlc-400]
 references:
   - .github/workflows/ai-sdlc-gate.yml
