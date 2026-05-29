@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Husky pre-push hook. Order matters:
 #
+#   0. Substrate contract integrity gate (AISDLC-453) — RFC-0028 §4 type-registry
+#      assertions. Deterministic, no LLM, <5s. Cold-start: no-op when no
+#      substrate-contracts/ directory exists (fresh adopter). Skip:
+#      AI_SDLC_SKIP_SUBSTRATE_GATE=1.
 #   1. Coverage gate — fails fast on under-tested code so we don't
 #      sign an attestation for a build we'd reject anyway.
 #      NOTE: pnpm test:coverage is known to show transient failures (up to 17
@@ -39,9 +43,10 @@
 #      skip (they check the same bypass var).
 #
 # Skip individual gates with their respective env vars
-# (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
-# AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_CHANGELOG_CHECK=1,
-# AI_SDLC_SKIP_DOR_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# (AI_SDLC_SKIP_SUBSTRATE_GATE=1, AI_SDLC_SKIP_COVERAGE_GATE=1,
+# AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
+# AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_DOR_GATE=1,
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -52,6 +57,7 @@ set -euo pipefail
 # (AISDLC-370: DoR gate uses the push range to walk touched task files.)
 PUSH_STDIN="$(cat || true)"
 
+node scripts/check-substrate-contract.mjs
 ./scripts/check-coverage.sh
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-453
 title: 'feat: RFC-0028 Phase 2 — CI integrity gate (type-registry assertions) + structural drift detection'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-27'
 labels:
@@ -55,12 +55,22 @@ Reuses substrate from RFC-0030 (signal-ingestion) Phase 4 governance-events modu
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 5 type-registry CI assertions implemented per RFC-0028 §4
-- [ ] #2 `scripts/check-substrate-contract.mjs` ships and is invoked by pre-push hook
-- [ ] #3 `substrate-contract-integrity.yml` CI workflow ships and feeds into `ai-sdlc/pr-ready` rollup
-- [ ] #4 Assertion failure emits `Decision: substrate-structural-drift-detected` severity HIGH with which-assertion / which-Soul / which-field details
-- [ ] #5 PR merge BLOCKED on assertion failure (hard gate)
-- [ ] #6 Deterministic: no LLM, no I/O; all 5 assertions run in <5s on typical contract corpus
-- [ ] #7 Hermetic tests cover each assertion's pass + fail paths AND the §4.2 concrete catch reproduction (phantom-Soul-DID registration)
-- [ ] #8 Cold-start handling: gate is no-op when zero substrate contracts exist in the repository (fresh adopter)
+- [x] #1 5 type-registry CI assertions implemented per RFC-0028 §4
+- [x] #2 `scripts/check-substrate-contract.mjs` ships and is invoked by pre-push hook
+- [ ] #3 `substrate-contract-integrity.yml` CI workflow ships and feeds into `ai-sdlc/pr-ready` rollup — PARTIAL: governance blocks `.github/workflows/**` writes; gate feeds into rollup via `pnpm test` in existing `build-test` job. Operator to add standalone workflow file after review.
+- [x] #4 Assertion failure emits `Decision: substrate-structural-drift-detected` severity HIGH with which-assertion / which-Soul / which-field details
+- [x] #5 PR merge BLOCKED on assertion failure (hard gate — via pre-push hook + pnpm test in CI)
+- [x] #6 Deterministic: no LLM, no I/O; all 5 assertions run in <5s on typical contract corpus
+- [x] #7 Hermetic tests cover each assertion's pass + fail paths AND the §4.2 concrete catch reproduction (phantom-Soul-DID registration)
+- [x] #8 Cold-start handling: gate is no-op when zero substrate contracts exist in the repository (fresh adopter)
 <!-- AC:END -->
+
+## Final Summary
+
+Shipped `scripts/check-substrate-contract.mjs` (RFC-0028 Phase 2 CI integrity gate) with 5
+deterministic type-registry assertions, 70 hermetic tests, pre-push hook integration, and
+`pnpm test:substrate-contract-gate` wired into the root test suite. The gate is a cold-start
+no-op when no `substrate-contracts/` directory exists (AC-8). AC-3 (standalone CI workflow) is
+partially met: the `.github/workflows/**` governance restriction prevents creating a new workflow
+file; instead the gate feeds into `ai-sdlc/pr-ready` via the existing `build-test` job which
+runs `pnpm test`. Operator to add `substrate-contract-integrity.yml` after review.
