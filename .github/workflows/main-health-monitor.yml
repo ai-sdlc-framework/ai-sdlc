@@ -83,10 +83,14 @@ jobs:
         id: workflow-test
         continue-on-error: true
         run: |
-          node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs
-          node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs
-          node --test .github/workflows/__tests__/fork-pr-safety.test.mjs
-          node --test .github/workflows/__tests__/dor-ingress.test.mjs
+          # AISDLC-406 review fix: a SINGLE `node --test` invocation over the
+          # whole __tests__ glob. The runner executes EVERY matched file and
+          # reports EVERY failure, then exits non-zero if any failed. The prior
+          # form chained one `node --test` per file under `bash -eo pipefail`,
+          # which aborted on the first failing file and silenced the rest — so a
+          # red main caused by a later file was misreported as the first file's
+          # failure. The glob also auto-includes any future workflow test files.
+          node --test .github/workflows/__tests__/*.test.mjs
 
       # Consolidate the two step outcomes into a single job output.
       - name: Determine test outcome
