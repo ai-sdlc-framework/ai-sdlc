@@ -69,7 +69,7 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 | `/ai-sdlc review` | Standalone review pass on the current branch |
 | `/ai-sdlc rebase <pr>` | Mechanical rebase + re-sign of an open PR |
 | `/ai-sdlc triage` | Issue triage (DOR evaluation + PPA trust) |
-| `/ai-sdlc status` | Pipeline status summary |
+| `/ai-sdlc pipeline-status` | Pipeline status summary |
 | `/ai-sdlc cleanup [<task-id>]` | Remove stale worktrees |
 
 ## Skills (`skills/`)

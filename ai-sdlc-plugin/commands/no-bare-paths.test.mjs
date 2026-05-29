@@ -8,7 +8,7 @@
  * Why this exists: per the AISDLC-245.4 code-reviewer MAJOR finding, the
  * per-body regression tests in execute.test.mjs and orchestrator-tick.test.mjs
  * only catch the body they're paired with. A future dev adding a NEW slash
- * command could re-introduce bare paths in fix-pr.md, status.md, etc. This
+ * command could re-introduce bare paths in fix-pr.md, pipeline-status.md, etc. This
  * cross-body scan blocks that drift.
  *
  * Allowed (these are NOT executable invocations, they're prose):
