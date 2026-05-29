@@ -73,10 +73,14 @@ describe('evaluateIssue (Stage A only)', () => {
     expect(v.gates.find((g) => g.gateId === 5)?.verdict).toBe('fail');
   });
 
-  it('blocks on invisible dependency (gate 7)', async () => {
+  it('blocks on invisible dependency (gate 7) — tracked-work id in body but not in frontmatter', async () => {
+    // AISDLC-457: gate 7 now flags only dep-phrase + tracked-work-id pairs
+    // where the captured id is not in the explicit references[] list. A
+    // body that names "depends on AISDLC-999" without listing it in
+    // `dependencies:` (the references[] input here) trips the gate.
     const v = await evaluateIssue(
       input(
-        '## Description\nDepends on the auth rewrite. `path/to/file.ts`\n- [ ] #1 Update auth flow',
+        '## Description\nDepends on AISDLC-999 finishing. `path/to/file.ts`\n- [ ] #1 Update auth flow',
       ),
       { hermetic: true },
     );
