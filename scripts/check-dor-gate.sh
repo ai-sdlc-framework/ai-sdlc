@@ -56,8 +56,14 @@ while read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
     RANGE_BASE="$REMOTE_SHA"
   fi
 
-  # Collect changed task files in this range
-  RANGE_FILES=$(git diff --name-only --diff-filter=AMR "${RANGE_BASE}..${LOCAL_SHA}" -- 'backlog/tasks/**.md' 'backlog/completed/**.md' 2>/dev/null || true)
+  # Collect changed task files in this range.
+  # AISDLC-476: scan ONLY backlog/tasks/ — Definition-of-Ready is an ADMISSION
+  # gate (it enforces readiness BEFORE the orchestrator dispatches a task).
+  # Tasks already in backlog/completed/ have shipped; re-gating them on DoR is
+  # philosophically backwards and blocks routine finalSummary/notes edits. This
+  # also matches the CI-side scope (.github/workflows/dor-ingress.yml only
+  # triggers on backlog/tasks/*.md).
+  RANGE_FILES=$(git diff --name-only --diff-filter=AMR "${RANGE_BASE}..${LOCAL_SHA}" -- 'backlog/tasks/**.md' 2>/dev/null || true)
   if [ -n "$RANGE_FILES" ]; then
     TASK_FILES="${TASK_FILES}${RANGE_FILES}
 "

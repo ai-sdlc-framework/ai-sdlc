@@ -3,7 +3,7 @@
  *
  * The script is invoked from `.husky/pre-push` AFTER attestation-bundle-sync
  * and BEFORE attestation-sign. It reads git's pre-push stdin protocol,
- * computes the push range, finds touched `backlog/{tasks,completed}/*.md`
+ * computes the push range, finds touched `backlog/tasks/*.md`
  * files, and runs `cli-dor-check --task <path>` against each. Non-zero
  * exit aborts the push.
  *
@@ -237,6 +237,54 @@ describe('check-dor-gate.sh (AISDLC-370)', () => {
       );
       assert.match(r.stdout, /Gate 2/);
       assert.match(r.stdout, /XXX|placeholder/i);
+    });
+
+    it('exit 0 when a COMPLETED task has a violation — DoR gates admission, not completed work (AISDLC-476)', () => {
+      // A task already in backlog/completed/ has shipped. Editing it (e.g.
+      // adding finalSummary/notes) must NOT trip the DoR gate even if the
+      // body contains a gate-2 marker. Pre-AISDLC-476 the gate scanned
+      // backlog/completed/**.md and rejected such edits.
+      const dir = join(root, 'backlog', 'completed');
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'aisdlc-9003 - test.md');
+      writeFileSync(path, GATE2_MARKER_TASK);
+      git(['add', path], root);
+      git(['commit', '-q', '-m', 'chore: edit completed task'], root);
+      const head = git(['rev-parse', 'HEAD'], root).trim();
+      const base = git(['rev-parse', 'HEAD~1'], root).trim();
+
+      const r = runGate(root, `refs/heads/main ${head} refs/heads/main ${base}\n`);
+      assert.equal(
+        r.code,
+        0,
+        `completed-task edit must not be DoR-gated, got: ${r.stdout}\n${r.stderr}`,
+      );
+    });
+
+    it('mixed push — tasks/ violation IS caught, completed/ violation is ignored (AISDLC-476)', () => {
+      // One push range touching BOTH a violating backlog/tasks/ file AND a
+      // violating backlog/completed/ file. The gate must still BLOCK on the
+      // tasks/ file (exit 1) while the completed/ file is invisible to the
+      // pathspec — proving the scope narrowing didn't disable tasks/ checking.
+      const tasksPath = writeTaskFile(root, 'aisdlc-9004', GATE2_MARKER_TASK);
+      const completedDir = join(root, 'backlog', 'completed');
+      mkdirSync(completedDir, { recursive: true });
+      const completedPath = join(completedDir, 'aisdlc-9005 - test.md');
+      writeFileSync(completedPath, GATE2_MARKER_TASK);
+      git(['add', tasksPath, completedPath], root);
+      git(['commit', '-q', '-m', 'feat: mixed task + completed change'], root);
+      const head = git(['rev-parse', 'HEAD'], root).trim();
+      const base = git(['rev-parse', 'HEAD~1'], root).trim();
+
+      const r = runGate(root, `refs/heads/main ${head} refs/heads/main ${base}\n`);
+      assert.equal(
+        r.code,
+        1,
+        `tasks/ violation must still BLOCK in a mixed push, got: ${r.stdout}\n${r.stderr}`,
+      );
+      // The blocking violation must be the tasks/ file, and the gate should
+      // have checked exactly one file (the completed/ one was skipped).
+      assert.match(r.stdout, /checking 1 backlog task file/);
     });
 
     it('exit 1 when bin/dist missing AND push touches backlog tasks (AISDLC-378)', () => {
