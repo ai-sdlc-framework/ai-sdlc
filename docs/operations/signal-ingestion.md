@@ -741,6 +741,152 @@ adopters who haven't opted in see zero behaviour change.
 
 ---
 
+## 9b. Multi-language signals: when to opt in
+
+**RFC-0030 OQ-13.2 v0.3 resolution (2026-05-26).** The pipeline ships
+English-only by default but supports per-org multi-language opt-in via the
+`spec.acceptedLanguages` list. Language detection is performed by the
+[`franc`](https://github.com/wooorm/franc) library — deterministic, MIT-licensed,
+JS-native, runs in <10ms per signal, 95%+ accurate on text >50 characters,
+returns ISO 639-3 codes.
+
+### Default behaviour (English-only)
+
+```yaml
+spec:
+  # Default — no need to declare; this is the built-in default
+  acceptedLanguages: [en]
+  languageDetection:
+    library: franc
+    minDetectionLength: 50   # franc returns 'und' below this; gate accepts
+    onUndetermined: accept   # short payloads pass through (legitimate bug reports)
+```
+
+Non-English signals are dropped with `Decision:
+signal-language-unsupported` and logged to the catalog as a visible-gap
+metric. The decision payload includes the detected ISO 639-3 code (e.g.
+`'cmn'`, `'fra'`, `'spa'`) so operators can see what's being filtered.
+
+### Opting in to multi-language
+
+To accept additional languages, add their tags to `acceptedLanguages`. The
+matcher accepts BCP-47, ISO 639-1, and ISO 639-3 forms — all equivalent
+for the common-language set:
+
+```yaml
+spec:
+  # Multi-language opt-in — pick what your customer base actually speaks
+  acceptedLanguages: [en, fr, es, de]   # ISO 639-1 (most common)
+  # acceptedLanguages: [eng, fra, spa, deu]  # ISO 639-3 (equivalent)
+  # acceptedLanguages: [en-US, fr-CA, es-MX, de-DE]  # BCP-47 (equivalent)
+```
+
+For uncommon languages not in the built-in ISO 639-1 → 639-3 mapping
+(e.g. Tagalog `tgl`, Northern Pashto `pbu`, Norwegian Bokmål `nob`),
+specify the ISO 639-3 form directly.
+
+### The trade-off: BM25 quality degradation
+
+Adopting multi-language is **not free**. The pipeline's clustering step
+uses BM25 similarity, which is degraded-but-functional in any language
+without per-language stopword + stemming calibration. Per Robertson &
+Zaragoza (2009) §3.5, expect **~15-30% precision drop** on clustering
+quality for non-English signals compared to English baseline.
+
+The three pipeline stages have different multi-language costs:
+
+| Stage | Multi-language cost | Why |
+|---|---|---|
+| Tier classification (RFC-0030 §6.1) | None | Metadata-driven (customerTier, customerId), language-independent |
+| ICP resonance (LLM-based) | None | Modern LLMs (Claude, GPT-4) handle 50+ languages natively |
+| Clustering (BM25 default) | **~15-30% precision drop** | No per-language stopwords / stemming in v1 |
+| Clustering (embedding option, RFC-0019) | Minimal | Multilingual embedding models (`cohere-embed-multilingual-v3`, `openai text-embedding-3-large`, `multilingual-e5-large`) are native multi-language |
+
+**Practical implication:** if your customer base is predominantly
+non-English and clustering quality matters (long-tail demand themes that
+the framework should consolidate), strongly consider configuring the
+embedding-based clustering algorithm:
+
+```yaml
+spec:
+  acceptedLanguages: [en, fr, es]
+  clustering:
+    algorithm: embedding    # multilingual-friendly
+    similarityThreshold: 0.6
+```
+
+Then wire up an RFC-0019 embedding adapter that uses a multilingual model
+(see `docs/operations/embedding-adapter.md` for setup).
+
+### When to opt in (decision rubric)
+
+| Scenario | Recommendation |
+|---|---|
+| English-first product, occasional non-English ticket | Stay default `[en]`. Non-English signals dropped; visible-gap metric tracks the loss. |
+| Bilingual product (e.g. EN + FR Canadian, EN + ES Latin American) | Opt in to both languages. Accept ~20% BM25 precision drop, OR switch to embedding clustering. |
+| Truly multilingual product (5+ languages, no dominant one) | Opt in to top-3 by signal volume. Strongly consider embedding clustering. Track manual-share quality metric (§6) — if it drifts up because clustering loses signal, that's the canary. |
+| Enterprise B2B with multi-region customer base | Opt in per-region — usually one operator covers one region, so the org-wide `acceptedLanguages` covers the union. |
+
+### Operator visibility
+
+The dropped-language gap is observable via the events stream:
+
+```bash
+# Count of signals dropped by detected language over the last 7 days
+find artifacts/_orchestrator -name 'events-*.jsonl' \
+  -newer "$(date -u -v-7d +%Y-%m-%d)" \
+  -exec jq -c 'select(.type == "Decision" and .decision == "signal-language-unsupported")' {} \; \
+  | jq -r '.detectedLanguage' \
+  | sort | uniq -c | sort -rn
+```
+
+If a non-English language consistently shows up (e.g. `fra` 50 drops/week),
+that's the operator's signal to consider opt-in. Per-org configurability
+is the right model for "you know your data better than the framework does."
+
+### Tuning the language gate
+
+Three knobs control behaviour:
+
+```yaml
+spec:
+  languageDetection:
+    library: franc           # or 'none' to disable the gate entirely
+    minDetectionLength: 50   # raise for fewer false-detects on short text
+    onUndetermined: accept   # or 'drop' for strict mode (drops short/ambiguous)
+```
+
+**`minDetectionLength`**: franc's documented accuracy threshold is 50
+chars. Bumping it to 100+ trades coverage for accuracy (more signals fall
+into the `und` bucket and are handled by `onUndetermined`). Lower than 50
+risks misclassification of short technical English as Nordic languages
+(common franc gotcha — see code comment in
+`orchestrator/src/signal-ingestion/classifier.ts` `checkLanguage`).
+
+**`onUndetermined: accept`** (default): conservative, biased toward
+keeping signal. Use this unless you've measured a high false-accept rate
+on actually-foreign short signals.
+
+**`onUndetermined: drop`**: strict, biased toward filtering noise. Use
+when your signal sources produce primarily long-form English (e.g.
+customer-success call transcripts) and you want to flag short ambiguous
+payloads for manual review.
+
+**`library: none`**: disables the gate entirely. Use during integration
+testing or when you have an upstream language filter (e.g. Zendesk's
+per-language ticket views) and want zero double-filtering.
+
+### Why franc instead of LLM-based detection
+
+Per RFC-0030 OQ-13.2 v0.3 rubric: `franc`'s 95%+ accuracy on text >50
+chars is sufficient for the routing decision; LLM-based detection is
+100-500× slower (network round-trip + inference), costs money per signal
+(API tokens), and is less deterministic (model updates change outputs).
+franc is a 270 kB JS bundle with one tiny dependency, runs locally, and
+gives the same answer for the same input forever.
+
+---
+
 ## 10. Common operations
 
 ### Verify the loader sees your edits

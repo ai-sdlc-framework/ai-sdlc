@@ -6601,8 +6601,11 @@ export const signalIngestionConfigV1Schema = {
             minLength: 2,
           },
           description:
-            "BCP-47 language tags accepted by the classifier. Signals in unsupported languages are dropped + logged as a SignalLanguageUnsupported decision (RFC-0030 OQ-13.2 resolution). Default = ['en'] (v1 is English-only; multi-language deferred to v2).",
+            "Language tags accepted by the classifier — BCP-47, ISO 639-1, or ISO 639-3 forms (e.g. 'en', 'eng', 'en-US' all match English; 'fr' / 'fra' / 'fr-CA' all match French; uncommon languages use ISO 639-3 directly like 'tgl' for Tagalog). Signals whose detected language is NOT in this list are dropped + logged as a SignalLanguageUnsupported decision (RFC-0030 OQ-13.2 v0.3 resolution). Default = ['en']. Multi-language opt-in (e.g. ['en', 'fr', 'es']) accepts those languages knowingly — adopters take on documented BM25 quality degradation (~15-30% precision drop without per-language stopwords / stemming — Robertson & Zaragoza §3.5).",
           default: ['en'],
+        },
+        languageDetection: {
+          $ref: '#/$defs/LanguageDetectionConfig',
         },
         residencyEnforcement: {
           $ref: '#/$defs/ResidencyEnforcementConfig',
@@ -6692,6 +6695,35 @@ export const signalIngestionConfigV1Schema = {
           minimum: 0,
           default: 24,
           description: 'Auto-expiry window in hours. Default 24h. Operators can override per-org.',
+        },
+      },
+      additionalProperties: false,
+    },
+    LanguageDetectionConfig: {
+      type: 'object',
+      description:
+        'Language-detection runtime config (RFC-0030 §11 v0.3 / OQ-13.2 re-walkthrough). v0.3 replaces the v0.2 Unicode-script-block heuristic with the `franc` library (deterministic, MIT-licensed, JS-native, runs in <10ms per signal, 95%+ accuracy on text >50 chars).',
+      properties: {
+        library: {
+          type: 'string',
+          enum: ['franc', 'none'],
+          default: 'franc',
+          description:
+            "Detection library identifier. `'franc'` (default) uses the trigram-based franc detector. `'none'` disables the gate entirely — every signal is accepted regardless of acceptedLanguages. Useful for testing or for adopters that pre-filter signals upstream. Forward-compat hook for swapping detectors (e.g. LLM-based detection in v2).",
+        },
+        minDetectionLength: {
+          type: 'number',
+          minimum: 0,
+          default: 50,
+          description:
+            "Minimum character count below which franc returns 'und' (undetermined). Below this length, signals are accepted without language gating (when `onUndetermined: accept`) to avoid dropping legitimate short payloads (e.g. 'Bug: crash on save'). Default 50 — the franc-documented lower bound for accuracy.",
+        },
+        onUndetermined: {
+          type: 'string',
+          enum: ['accept', 'drop'],
+          default: 'accept',
+          description:
+            "Behaviour when franc returns 'und' (text too short OR no script matched). `'accept'` (default) is conservative — pass through to the rest of the pipeline since short payloads + ambiguous scripts have low false-positive risk. `'drop'` is strict — drop and log as `signal-language-unsupported`.",
         },
       },
       additionalProperties: false,

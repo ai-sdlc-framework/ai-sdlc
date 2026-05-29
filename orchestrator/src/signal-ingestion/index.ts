@@ -94,6 +94,7 @@ export {
   type FloodingDetectionConfig,
   type FloodingQuarantineConfig,
   type IcpResonanceWeights,
+  type LanguageDetectionConfig,
   type LoadSignalIngestionConfigOptions,
   type LoadSignalIngestionConfigWithDeprecationsResult,
   type ManualEntryConfig,
