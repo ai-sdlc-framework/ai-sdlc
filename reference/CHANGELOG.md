@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.12.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.11.0...reference-v0.12.0) (2026-05-29)
+
+
+### Features
+
+* **orchestrator:** z-score flooding detector + quarantine for signal ingestion (AISDLC-433) ([#752](https://github.com/ai-sdlc-framework/ai-sdlc/issues/752)) ([fd14423](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd14423aa0e97767c2f2162bab2816b61b7f5603))
+
 ## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.10.0...reference-v0.11.0) (2026-05-28)
 
 
