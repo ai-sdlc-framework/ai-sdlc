@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:install-runtime-deps-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:fork-pr-safety && pnpm test:verify-attestation-workflow && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:drop-stale-envelope && pnpm test:auto-rebase-stale-prs && pnpm test:dor-gate && pnpm test:pre-push-fixups-gate && pnpm test:adopter-facing-strings && pnpm test:patch-coverage-gate && pnpm test:coverage-gate && pnpm test:release-please-config && pnpm test:require-issue-link && pnpm test:substrate-contract-gate",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:install-runtime-deps-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:fork-pr-safety && pnpm test:verify-attestation-workflow && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:drop-stale-envelope && pnpm test:auto-rebase-stale-prs && pnpm test:dor-gate && pnpm test:pre-push-fixups-gate && pnpm test:adopter-facing-strings && pnpm test:patch-coverage-gate && pnpm test:coverage-gate && pnpm test:release-please-config && pnpm test:require-issue-link && pnpm test:supply-chain-hardening && pnpm test:substrate-contract-gate",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -49,6 +49,7 @@
     "test:coverage-gate": "node --test scripts/check-coverage.test.mjs",
     "test:release-please-config": "node --test .github/workflows/__tests__/release-please-config.test.mjs",
     "test:require-issue-link": "node --test .github/workflows/__tests__/require-issue-link.test.mjs",
+    "test:supply-chain-hardening": "node --test .github/workflows/__tests__/action-pinning.test.mjs .github/workflows/__tests__/no-new-pr-gate.test.mjs",
     "test:substrate-contract-gate": "node --test scripts/check-substrate-contract.test.mjs",
     "rfc:check": "node scripts/check-rfc-docs.mjs",
     "rfc:test": "node --test scripts/check-rfc-docs.test.mjs && node --test scripts/check-rfc-lifecycle-transitions.test.mjs",
