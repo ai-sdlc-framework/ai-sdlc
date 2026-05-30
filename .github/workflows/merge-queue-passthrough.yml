@@ -21,6 +21,9 @@ name: Merge Queue Passthrough
 on:
   merge_group:
 
+permissions:
+  contents: read
+
 jobs:
   post-review:
     name: Post Review Results

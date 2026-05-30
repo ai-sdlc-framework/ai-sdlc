@@ -4,6 +4,9 @@ on:
   issues:
     types: [labeled]
 
+permissions:
+  contents: read
+
 jobs:
   route:
     name: Route by Complexity
@@ -15,7 +18,7 @@ jobs:
       issues: write
     steps:
       - name: Parse complexity and route
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           github-token: ${{ secrets.AI_SDLC_PAT }}
           script: |
