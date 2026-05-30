@@ -31,6 +31,9 @@ concurrency:
   group: dor-ingress-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   evaluate-issue:
     name: Evaluate issue against DoR rubric
@@ -40,17 +43,17 @@ jobs:
       issues: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           run_install: false
 
@@ -107,7 +110,7 @@ jobs:
         # Retention 90 days matches the AISDLC-115.8 soak window.
         # `if: always()` so failed evaluations still leave a forensic trail.
         if: always() && hashFiles('/tmp/dor/artifacts/_dor/calibration.jsonl') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dor-calibration-issue-${{ github.event.issue.number }}-${{ github.run_attempt }}
           path: /tmp/dor/artifacts/_dor/calibration.jsonl
@@ -139,7 +142,7 @@ jobs:
 
       - name: Post idempotent clarification comment
         if: steps.evaluate.outputs.verdict == 'needs-clarification'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           DOR_BODY: ${{ steps.render.outputs.body }}
         with:
@@ -197,7 +200,7 @@ jobs:
 
       - name: Remove status:needs-clarification on admit
         if: steps.evaluate.outputs.verdict == 'admit'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const issue_number = context.payload.issue.number;
@@ -226,17 +229,17 @@ jobs:
       pull-requests: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           run_install: false
 
@@ -336,7 +339,7 @@ jobs:
 
       - name: Post idempotent PR summary comment
         if: steps.changed.outputs.no-changes != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           DOR_BODY: ${{ steps.render-pr.outputs.body }}
         with:
@@ -388,7 +391,7 @@ jobs:
         # may contain N entries (one per changed `backlog/tasks/*.md`).
         # `if: always()` so partial failures still leave a trail.
         if: always() && hashFiles('/tmp/dor/artifacts/_dor/calibration.jsonl') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dor-calibration-pr-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
           path: /tmp/dor/artifacts/_dor/calibration.jsonl
