@@ -353,8 +353,16 @@ describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
         encoding: 'utf-8',
         stdio: 'pipe',
         timeout: 10_000,
+        // Pass the full parent env so the subprocess can resolve node_modules
+        // on CI runners (Linux Node 20) where the pnpm-managed PATH must be
+        // inherited for ESM module resolution. Without this, the subprocess
+        // can receive a null exit status (signal kill) on some Linux CI envs.
+        env: process.env,
       });
-      const detail = `\n--- exit ${result.status} ---\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
+      const detail =
+        `\n--- exit ${result.status} signal ${result.signal ?? 'none'} ---` +
+        `\n--- spawn error ---\n${result.error?.code ?? result.error?.message ?? 'none'}` +
+        `\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
       expect(result.status, `node ${binName}.mjs --help did not exit 0:${detail}`).toBe(0);
       const out = result.stdout + result.stderr;
       const looksLikeHelp =
