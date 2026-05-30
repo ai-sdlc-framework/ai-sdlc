@@ -20,34 +20,17 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-// ─── Canonical update_session_state function body ─────────────────────────────
-// Mirrors the function defined in execute.md (the preamble before Step 1).
-// If the execute.md implementation changes, this snippet must be updated too.
-const UPDATE_SESSION_STATE_FUNC = `
-update_session_state() {
-  local task_id_lower="$1" step="$2"
-  local session_file=".ai-sdlc/dispatch/sessions/\${task_id_lower}.session.json"
-  [ -f "$session_file" ] || return 0
-  node -e "
-    const fs = require('fs');
-    const f = process.argv[1];
-    const step = process.argv[2];
-    try {
-      const s = JSON.parse(fs.readFileSync(f, 'utf8'));
-      s.currentStep = step;
-      s.lastHeartbeat = new Date().toISOString();
-      if (step === 'done') s.status = 'done';
-      else if (s.status === 'starting') s.status = 'in-progress';
-      const tmp = f + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
-      fs.renameSync(tmp, f);
-    } catch (e) { /* non-fatal */ }
-  " "\$session_file" "\$step" 2>/dev/null || true
-}
-`;
+// ─── Canonical update_session_state function (single source of truth) ─────────
+// AISDLC-464: rather than copying the function body inline (which silently
+// drifts from the real implementation), the test SOURCES the canonical shell
+// snippet that execute-parallel.md also sources. Any change to the real helper
+// is therefore exercised by these tests automatically.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPDATE_SESSION_STATE_LIB = path.join(__dirname, 'lib', 'update-session-state.sh');
 
 // ─── Helper: set up a temp dir, optionally write a session file, run heartbeat ─
 
@@ -67,7 +50,8 @@ function runHeartbeat({ taskIdLower, step, sessionContent }) {
     '#!/usr/bin/env bash',
     'set -euo pipefail',
     `cd ${JSON.stringify(tmpDir)}`,
-    UPDATE_SESSION_STATE_FUNC,
+    // Source the canonical helper rather than re-declaring it (AISDLC-464).
+    `source ${JSON.stringify(UPDATE_SESSION_STATE_LIB)}`,
     `update_session_state ${JSON.stringify(taskIdLower)} ${JSON.stringify(step)}`,
   ].join('\n');
 
@@ -182,5 +166,29 @@ describe('update_session_state (heartbeat shell function)', () => {
     assert.equal(result.exitCode, 0, `exitCode: ${result.exitCode}\nstderr: ${result.stderr}`);
     assert.equal(result.session?.status, 'done', "status must become 'done' when step === 'done'");
     assert.equal(result.session?.currentStep, 'done');
+  });
+});
+
+// ─── Drift guard: command + test share the canonical helper (AISDLC-464) ──────
+
+describe('update_session_state single-source-of-truth', () => {
+  it('the canonical shell lib defines update_session_state', () => {
+    const lib = readFileSync(UPDATE_SESSION_STATE_LIB, 'utf8');
+    assert.match(lib, /update_session_state\(\)\s*\{/, 'lib must define the function');
+  });
+
+  it('this test sources the canonical lib rather than copying the body', () => {
+    // The test file must reference the lib path and must NOT re-declare the
+    // function body inline (the drift the AISDLC-464 fix removes).
+    const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    assert.match(
+      self,
+      /lib\/update-session-state\.sh/,
+      'heartbeat.test.mjs must source scripts/lib/update-session-state.sh',
+    );
+    assert.ok(
+      !/const UPDATE_SESSION_STATE_FUNC\s*=/.test(self),
+      'heartbeat.test.mjs must NOT inline an UPDATE_SESSION_STATE_FUNC body',
+    );
   });
 });

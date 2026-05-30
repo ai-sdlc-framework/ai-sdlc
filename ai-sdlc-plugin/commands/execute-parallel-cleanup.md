@@ -105,9 +105,17 @@ node -e "
   const tmuxSession = process.argv[3];
   const candidatesJson = process.argv[4];
 
+  // Canonical task-ID shape (e.g. AISDLC-462, ACME-123, RFC-7.2): an alpha-led
+  // alphanumeric prefix, a hyphen, then a dotted numeric run. Used to (a) guard
+  // s.taskId before it is interpolated into a file path, and (b) derive the
+  // tmux window matcher so adopters with a non-aisdlc prefix are not skipped.
+  const TASK_ID_RE = /^[A-Za-z][A-Za-z0-9]*-[0-9]+(\.[0-9]+)*$/;
+
   // Validate tmuxWindow matches the expected pattern (defense-in-depth against
-  // an attacker-controlled session file injecting shell metacharacters).
-  const TMUX_WINDOW_RE = /^exec-aisdlc-[a-z0-9.-]+$/;
+  // an attacker-controlled session file injecting shell metacharacters). The
+  // window name is 'exec-' + taskId.toLowerCase(); derive the matcher from the
+  // task-ID shape rather than hardcoding the 'aisdlc-' prefix (AISDLC-464).
+  const TMUX_WINDOW_RE = /^exec-[a-z][a-z0-9]*-[0-9]+(\.[0-9]+)*$/;
 
   let sessions;
   try { sessions = JSON.parse(candidatesJson); } catch { sessions = []; }
@@ -118,6 +126,14 @@ node -e "
 
   for (const s of sessions) {
     const taskId = s.taskId || '?';
+    // Defense-in-depth: reject a crafted session file whose taskId contains
+    // path separators or '..' segments that would escape the sessions dir when
+    // interpolated into the file path below (AISDLC-464).
+    if (!TASK_ID_RE.test(taskId)) {
+      console.error('[cleanup] SECURITY: taskId ' + JSON.stringify(taskId) + ' does not match the canonical task-ID pattern — skipping to prevent path traversal');
+      errors++;
+      continue;
+    }
     const taskIdLower = taskId.toLowerCase();
     const sessionFile = path.join(sessionsDir, taskIdLower + '.session.json');
     const archiveFile = path.join(archiveDir, taskIdLower + '.session.json');
