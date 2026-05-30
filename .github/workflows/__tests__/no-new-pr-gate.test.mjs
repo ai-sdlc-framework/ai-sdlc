@@ -39,6 +39,10 @@ const PR_TRIGGER_ALLOWLIST = new Map([
   ['rfc-lifecycle-check.yml', 'validates RFC lifecycle transitions on PRs'],
   ['auto-enable-auto-merge.yml', 'arms --auto --squash on same-repo PRs'],
   ['auto-rearm-on-dequeue.yml', 're-arms auto-merge after a merge-queue dequeue'],
+  [
+    'dependency-review.yml',
+    'blocks high+ severity vulnerable deps; paths-filtered to manifest changes (issue #780)',
+  ],
 ]);
 
 const PR_EVENTS = new Set(['pull_request', 'pull_request_target']);
