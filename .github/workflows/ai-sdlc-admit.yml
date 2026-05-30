@@ -18,6 +18,7 @@ jobs:
       !contains(toJSON(github.event.issue.labels.*.name), 'ai-eligible') &&
       !contains(toJSON(github.event.issue.labels.*.name), 'security-rejected')
     permissions:
+      contents: read
       issues: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
