@@ -1,0 +1,45 @@
+# Dependabot configuration — supply-chain hygiene for a low-runtime-dependency
+# pnpm monorepo. Two ecosystems:
+#   - npm: scans the root pnpm-lock.yaml (covers every workspace package) for
+#     vulnerable / outdated dependencies.
+#   - github-actions: keeps the SHA-pinned `uses:` references current and is the
+#     ongoing maintenance mechanism for the commit-SHA pinning landed alongside
+#     this file (Dependabot updates the SHA + the `# vN` comment together).
+#
+# Updates are grouped to keep PR volume low; security updates are never grouped
+# so they surface individually for fast triage.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      production-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: 'ci(actions)'
