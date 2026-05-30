@@ -89,6 +89,13 @@ export interface DispatchVerdict {
   };
   acceptanceCriteriaMet?: number[];
   notes?: string;
+  /**
+   * AISDLC-479 — ISO-8601 dispatch anchor copied from the manifest's
+   * `dispatchedAt` when the Worker emits a timed verdict (via
+   * `writeTimedVerdict` / `populateVerdictTiming`). Optional for backward-
+   * compat with pre-AISDLC-479 verdicts that omitted it.
+   */
+  dispatchedAt?: string;
   completedAt: string;
   workerId: string;
   workerKind?: WorkerKind;

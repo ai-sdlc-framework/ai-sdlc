@@ -82,6 +82,21 @@ export {
   type ReadEventsOpts,
   type WriteEventOpts,
 } from './events.js';
+// AISDLC-479 — parallel-dispatch profiling: emit timed completion/failure
+// events + populate verdict timing fields.
+export {
+  computeDurationMs,
+  emitTaskCompletion,
+  emitTaskFailure,
+  isCompletionOutcome,
+  populateVerdictTiming,
+  writeTimedVerdict,
+  type EmitTaskEventOpts,
+  type PopulateVerdictTimingOpts,
+  type TaskOutcome,
+  type WriteTimedVerdictOpts,
+  type WriteTimedVerdictResult,
+} from './profiling.js';
 export type {
   DispatchFn,
   EscalateFn,

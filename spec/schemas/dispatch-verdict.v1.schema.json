@@ -67,6 +67,11 @@
       "type": "string",
       "description": "Optional Worker-side notes — escalation reason, follow-up tasks, etc."
     },
+    "dispatchedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AISDLC-479 — ISO-8601 dispatch anchor copied from the manifest's dispatchedAt. Populated alongside completedAt + durationMs so the profiling aggregator can derive per-task throughput without re-reading the manifest."
+    },
     "completedAt": {
       "type": "string",
       "format": "date-time",

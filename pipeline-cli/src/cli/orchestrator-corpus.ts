@@ -95,12 +95,26 @@
  * @module cli/orchestrator-corpus
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 import type { OrchestratorEvent } from '../orchestrator/events.js';
+import {
+  aggregateProfile,
+  readBoardVerdicts,
+  readProfilingEvents,
+  type EstimateActualsRecord,
+  type ProfileReport,
+} from './profile-aggregator.js';
 
 // ── Defaults from RFC-0015 §11 Phase 5 + §12 ──────────────────────────
 
@@ -705,6 +719,118 @@ function shortRun(runId: string): string {
   return runId.length > 12 ? runId.slice(0, 8) : runId;
 }
 
+// ── `profile` subcommand (AISDLC-479) ─────────────────────────────────
+
+/**
+ * Append `EstimateActualsRecorded` records to the monthly-rotated
+ * `<artifactsDir>/_estimates/calibration-YYYY-MM.jsonl` (AC-3 / AC-4).
+ * The month key is derived from each record's own `ts` so backfills land
+ * in the correct historical file. Best-effort: write failures throw (the
+ * caller surfaces them) but a missing dir is created on demand.
+ *
+ * Idempotency: records whose `taskId` already appears in the target
+ * month's file are skipped (the aggregator can be re-run over the same
+ * corpus without double-counting). Returns the number of records actually
+ * appended.
+ */
+export function appendActualsToCalibration(
+  artifactsDir: string,
+  actuals: readonly EstimateActualsRecord[],
+): { appended: number; skipped: number } {
+  const estimatesDir = join(artifactsDir, '_estimates');
+  let appended = 0;
+  let skipped = 0;
+
+  // Group by month so we read each target file once.
+  const byMonth = new Map<string, EstimateActualsRecord[]>();
+  for (const rec of actuals) {
+    const monthKey = rec.ts.slice(0, 7); // YYYY-MM
+    const bucket = byMonth.get(monthKey);
+    if (bucket) bucket.push(rec);
+    else byMonth.set(monthKey, [rec]);
+  }
+
+  for (const [monthKey, recs] of byMonth.entries()) {
+    const path = join(estimatesDir, `calibration-${monthKey}.jsonl`);
+    const existingTaskIds = readExistingActualsTaskIds(path);
+    const lines: string[] = [];
+    for (const rec of recs) {
+      if (existingTaskIds.has(rec.taskId)) {
+        skipped += 1;
+        continue;
+      }
+      existingTaskIds.add(rec.taskId);
+      lines.push(JSON.stringify(rec));
+      appended += 1;
+    }
+    if (lines.length === 0) continue;
+    if (!existsSync(dirname(path))) mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, lines.join('\n') + '\n', { encoding: 'utf8' });
+  }
+
+  return { appended, skipped };
+}
+
+/** Read the taskIds already present in a calibration file (idempotency). */
+function readExistingActualsTaskIds(path: string): Set<string> {
+  const out = new Set<string>();
+  if (!existsSync(path)) return out;
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return out;
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const r = JSON.parse(line) as { taskId?: unknown; type?: unknown };
+      if (
+        r &&
+        typeof r === 'object' &&
+        r.type === 'EstimateActualsRecorded' &&
+        typeof r.taskId === 'string'
+      ) {
+        out.add(r.taskId);
+      }
+    } catch {
+      /* skip malformed line */
+    }
+  }
+  return out;
+}
+
+/** Render the profile report as an ASCII table (mirrors `renderTable`). */
+function renderProfileTable(report: ProfileReport): string {
+  const headers = ['taskId', 'durationMs', 'outcome', 'success', 'source'];
+  const rows = report.perTask.map((t) => [
+    t.taskId,
+    t.durationMs === null ? '-' : String(t.durationMs),
+    t.outcome,
+    t.success ? 'yes' : 'no',
+    t.source,
+  ]);
+  if (rows.length === 0) rows.push(['(none)', '-', '-', '-', '-']);
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
+  const fmt = (cells: string[]): string =>
+    cells
+      .map((c, i) => (c ?? '').padEnd(widths[i]))
+      .join('  ')
+      .trimEnd();
+  const sep = widths.map((w) => '-'.repeat(w)).join('  ');
+  const tbl = [fmt(headers), sep, ...rows.map(fmt)].join('\n');
+  const s = report.summary;
+  const summary =
+    `\nTasks: ${s.taskCount}  Success: ${s.successCount}` +
+    `  Success rate: ${(s.successRate * 100).toFixed(1)}%` +
+    `\nDuration samples: ${s.durationSampleCount}` +
+    `  p50: ${s.p50DurationMs === null ? '-' : s.p50DurationMs}ms` +
+    `  p95: ${s.p95DurationMs === null ? '-' : s.p95DurationMs}ms` +
+    `  total: ${s.totalDurationMs}ms` +
+    `\nActuals records: ${report.actuals.length}\n`;
+  return tbl + '\n' + summary;
+}
+
 export function buildOrchestratorCorpusCli(): Argv {
   return yargs(hideBin(process.argv))
     .scriptName('cli-orchestrator-corpus')
@@ -773,9 +899,64 @@ export function buildOrchestratorCorpusCli(): Argv {
         else emit(report);
       },
     )
+    .command(
+      'profile',
+      'Read orchestrator events + Dispatch-Board verdicts and emit a per-task + summary throughput report (count, p50/p95 durationMs, success rate). Optionally append EstimateActualsRecorded records to _estimates/calibration-YYYY-MM.jsonl (AISDLC-479).',
+      (y) =>
+        y
+          .option('artifacts-dir', {
+            type: 'string',
+            describe:
+              'Artifacts directory holding _orchestrator/events-*.jsonl + _estimates/. Defaults to $ARTIFACTS_DIR then ./artifacts.',
+          })
+          .option('board-dir', {
+            type: 'string',
+            describe:
+              'Dispatch Board directory holding done/ + failed/ verdicts. Defaults to .ai-sdlc/dispatch.',
+          })
+          .option('write-actuals', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Append EstimateActualsRecorded records to _estimates/calibration-YYYY-MM.jsonl (idempotent by taskId).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'json' as const,
+          }),
+      async (argv) => {
+        const artifactsDir =
+          (argv['artifacts-dir'] as string | undefined) ??
+          process.env.ARTIFACTS_DIR ??
+          join(process.cwd(), 'artifacts');
+        const boardDir =
+          (argv['board-dir'] as string | undefined) ?? join(process.cwd(), '.ai-sdlc', 'dispatch');
+
+        const events = readProfilingEvents(artifactsDir);
+        const verdicts = readBoardVerdicts(boardDir);
+        const report = aggregateProfile(verdicts, events);
+
+        let actualsWrite: { appended: number; skipped: number } | undefined;
+        if (argv['write-actuals'] as boolean) {
+          actualsWrite = appendActualsToCalibration(artifactsDir, report.actuals);
+        }
+
+        if (String(argv.format) === 'table') {
+          emitText(renderProfileTable(report));
+          if (actualsWrite) {
+            emitText(
+              `Actuals written: appended=${actualsWrite.appended} skipped=${actualsWrite.skipped}\n`,
+            );
+          }
+        } else {
+          emit({ ...report, ...(actualsWrite ? { actualsWrite } : {}) });
+        }
+      },
+    )
     .demandCommand(
       1,
-      'A subcommand is required (currently: aggregate). Run with --help for the list.',
+      'A subcommand is required (currently: aggregate, profile). Run with --help for the list.',
     )
     .strict()
     .help()
