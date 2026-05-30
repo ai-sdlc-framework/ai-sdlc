@@ -1,7 +1,7 @@
 ---
 id: AISDLC-479
 title: "feat: instrument parallel-dispatch profiling — persist per-task timing for throughput + estimation"
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-29 16:55'
 labels:
