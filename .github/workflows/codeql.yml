@@ -11,10 +11,13 @@ name: CodeQL
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: '27 3 * * 1' # Mondays 03:27 UTC
+  workflow_dispatch: # allow manual on-demand analysis
+
+# NOTE: intentionally NOT triggered on pull_request. CodeQL runs on main + a
+# weekly schedule so it provides a security signal without adding per-PR CI
+# friction. Surface it on PRs only after the team explicitly opts in.
 
 permissions:
   contents: read
