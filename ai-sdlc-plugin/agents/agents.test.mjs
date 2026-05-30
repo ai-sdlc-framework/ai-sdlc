@@ -68,13 +68,17 @@ function parseFrontmatter(filePath) {
 // /ai-sdlc execute slash command body for the new home of the pipeline.
 //
 // AISDLC-105: rebase-resolver.md added — the project-wide invariants below
-// (every agent has Read in tools, every agent disallows AgentTool, every
-// agent inherits the model) MUST gate every plugin subagent uniformly,
-// so this list is the source of truth for "all plugin subagents". When
-// a new agent ships, append it here.
+// (every agent has Read in tools, every agent disallows AgentTool) MUST gate
+// every plugin subagent uniformly, so this list is the source of truth for
+// "all plugin subagents". When a new agent ships, append it here.
+//
+// Model pinning (AISDLC cost control, 2026-05-30): model is now ROLE-SPECIFIC,
+// not universally inherit. developer/code-reviewer/test-reviewer pin to sonnet;
+// security-reviewer pins to opus; utility/codex agents inherit. See the
+// 'per-role model split' test below for the complete contract.
 //
 // AISDLC-247: code-reviewer-codex.md + test-reviewer-codex.md added as
-// cross-harness Codex reviewer variants. They share the same invariants
+// cross-harness Codex reviewer variants. They share the core invariants
 // (Read, AgentTool disallowed, model: inherit) but differ from the Claude
 // variants in harness (codex) and tools (Bash instead of Grep/Glob).
 const agentFiles = [
@@ -107,10 +111,13 @@ describe('agent definition tool restrictions', () => {
     );
   });
 
-  it('code-reviewer.md has Write in disallowedTools', () => {
+  it('code-reviewer.md has Write in tools (transcript writing)', () => {
+    // Write is intentionally allowed so the reviewer can append transcript
+    // leaves per RFC-0042 Phase 1 (mandatory proof-of-execution capture).
+    // It is NOT in disallowedTools.
     assert.ok(
-      agents['code-reviewer.md'].disallowedTools.includes('Write'),
-      'code-reviewer should disallow Write',
+      agents['code-reviewer.md'].tools.includes('Write'),
+      'code-reviewer needs Write for transcript capture (RFC-0042)',
     );
   });
 
@@ -128,10 +135,13 @@ describe('agent definition tool restrictions', () => {
     );
   });
 
-  it('test-reviewer.md has Write in disallowedTools', () => {
+  it('test-reviewer.md has Write in tools (transcript writing)', () => {
+    // Write is intentionally allowed so the reviewer can append transcript
+    // leaves per RFC-0042 Phase 1 (mandatory proof-of-execution capture).
+    // It is NOT in disallowedTools.
     assert.ok(
-      agents['test-reviewer.md'].disallowedTools.includes('Write'),
-      'test-reviewer should disallow Write',
+      agents['test-reviewer.md'].tools.includes('Write'),
+      'test-reviewer needs Write for transcript capture (RFC-0042)',
     );
   });
 
@@ -168,12 +178,38 @@ describe('agent definition tool restrictions', () => {
     }
   });
 
-  it('all agents inherit the model from the parent session', () => {
-    for (const file of agentFiles) {
+  it('per-role model split: dev/code/test-reviewer → sonnet, security-reviewer → opus (AISDLC cost control)', () => {
+    // AISDLC cost control: pin models by role to prevent session-model bleed.
+    // Opus session-model inheritance was the root cause of a 26%-weekly-budget
+    // incident (2026-05-30). Security stays on Opus (reasoning-heavy); all
+    // other cost-sensitive roles use Sonnet. Utility agents (rebase, cleanup,
+    // conflict resolution) inherit from the spawning session.
+    const sonnetRoles = ['developer.md', 'code-reviewer.md', 'test-reviewer.md'];
+    for (const file of sonnetRoles) {
+      assert.equal(
+        agents[file].model,
+        'sonnet',
+        `${file} must pin model to sonnet (prevents Opus session-model bleed)`,
+      );
+    }
+    assert.equal(
+      agents['security-reviewer.md'].model,
+      'opus',
+      'security-reviewer must use opus (reasoning-heavy; earns its cost)',
+    );
+    // Utility and codex agents inherit from the spawning session (no pinning needed)
+    const inheritRoles = [
+      'rebase-resolver.md',
+      'refinement-reviewer.md',
+      'code-reviewer-codex.md',
+      'test-reviewer-codex.md',
+      'ci-conflict-resolver.md',
+    ];
+    for (const file of inheritRoles) {
       assert.equal(
         agents[file].model,
         'inherit',
-        `${file} should inherit model — keeps subagent on the orchestrator's tier`,
+        `${file} should inherit model — utility/codex agent, no cost-split needed`,
       );
     }
   });
