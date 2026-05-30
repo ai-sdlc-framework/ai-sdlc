@@ -119,7 +119,8 @@
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/"
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
   },
   "scripts": {
     "build": "pnpm --filter @ai-sdlc/reference build && tsc -p tsconfig.build.json",

@@ -21,6 +21,9 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false # Never cancel in-progress releases
 
+permissions:
+  contents: read
+
 jobs:
   release-please:
     name: Release Please
@@ -39,7 +42,7 @@ jobs:
       sdk-python--release_created: ${{ steps.release.outputs['sdk-python--release_created'] }}
       sdk-python--tag_name: ${{ steps.release.outputs['sdk-python--tag_name'] }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         id: release
         with:
           config-file: release-please-config.json
@@ -64,14 +67,14 @@ jobs:
       contents: write # need write to commit the signed DSSE envelope back
       id-token: write # npm provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Use AI_SDLC_PAT so the post-publish commit triggers CI (same
           # rationale as the release-please step above; GITHUB_TOKEN commits
           # are silently skipped by downstream workflow rules).
           token: ${{ secrets.AI_SDLC_PAT }}
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -90,9 +93,14 @@ jobs:
       # simply ensures the published tarball has an up-to-date copy.
       - name: Regenerate MCP server npm-shrinkwrap.json
         run: node ai-sdlc-plugin/mcp-server/scripts/regen-shrinkwrap.mjs
-      - run: pnpm -r publish --no-git-checks
+      - run: pnpm -r publish --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Mint npm provenance attestations via the job's id-token: write
+          # permission (Sigstore OIDC). publishConfig.provenance:true in each
+          # package.json is the per-package opt-in; this env var is the belt-and
+          # -braces global switch honored by both npm and pnpm.
+          NPM_CONFIG_PROVENANCE: 'true'
 
       # ── AISDLC-439 (DEC-0001): Sign MCP server tarball after publish ──
       #
@@ -202,8 +210,8 @@ jobs:
       run:
         working-directory: sdk-python
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
       - run: pip install -e '.[dev]'
@@ -211,6 +219,6 @@ jobs:
       - name: Build package
         run: pip install build && python -m build
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
           packages-dir: sdk-python/dist/
