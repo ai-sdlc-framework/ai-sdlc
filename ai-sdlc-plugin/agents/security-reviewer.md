@@ -10,7 +10,7 @@ disallowedTools:
   - Bash
   - Edit
   - AgentTool
-model: inherit
+model: opus
 harness: claude-code
 requiresIndependentHarnessFrom:
   - implement

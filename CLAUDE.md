@@ -88,6 +88,15 @@ The `code-reviewer` and `test-reviewer` subagents check for scope-creep candidat
 
 Agents whose role is read-only (exploration, audit, refinement review) MUST NOT use `Write`, `Edit`, task-create MCP tools, or dispatch downstream agents. These constraints are enforced in each agent's frontmatter `disallowedTools` list and are re-stated in the agent body as **Hard rules**.
 
+### Subagent model defaults (AISDLC cost control)
+
+Agent frontmatter pins model by role to prevent session-model bleed (Opus inheritance was the root cause of a 26%-weekly-budget incident on 2026-05-30):
+
+- `developer`, `code-reviewer`, `test-reviewer` → **sonnet** (cost-efficient for mechanical tasks)
+- `security-reviewer` → **opus** (reasoning-heavy; the one role where Opus pays for itself)
+
+On dispatch paths (`/ai-sdlc execute`, `/ai-sdlc orchestrator-tick`), code-review and test-review SHOULD be routed to the `-codex` variants (`code-reviewer-codex` / `test-reviewer-codex`) by default — Codex plan billing is zero Claude usage. Security review stays on the Claude-native `security-reviewer` at opus. Mechanical work (sign, reconcile, rebase) MUST NOT be wrapped in subagents.
+
 ## Subagent Governance — OQ-resolution prohibition (AISDLC-298)
 
 **Dev subagents MUST NOT resolve RFC Open Questions inline during implementation.**

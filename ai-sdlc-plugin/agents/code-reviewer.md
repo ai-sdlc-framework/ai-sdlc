@@ -10,7 +10,7 @@ tools:
 disallowedTools:
   - Edit
   - AgentTool
-model: inherit
+model: sonnet
 harness: claude-code
 requiresIndependentHarnessFrom:
   - implement
