@@ -41,7 +41,7 @@
     "@ai-sdlc/orchestrator": "workspace:*",
     "@ai-sdlc/pipeline-cli": "workspace:*",
     "@ai-sdlc/reference": "workspace:*",
-    "yaml": "^2.7.0"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

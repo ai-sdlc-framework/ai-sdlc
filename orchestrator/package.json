@@ -55,7 +55,7 @@
     "better-sqlite3": "^11.0.0",
     "commander": "^15.0.0",
     "franc": "^6.2.0",
-    "yaml": "^2.7.0"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
