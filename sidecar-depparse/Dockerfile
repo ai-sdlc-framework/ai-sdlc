@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# Digest pin (OpenSSF Scorecard PinnedDependencies): python:3.12-slim multi-arch index, resolved 2026-05-31
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
 
 WORKDIR /app
 
