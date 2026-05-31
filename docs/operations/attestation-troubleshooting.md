@@ -14,7 +14,22 @@ The `verify-attestation.yml` workflow posts this failure when the Merkle root re
 
 **Why local passes:** the local verifier reads the per-patch-id leaves file directly from the filesystem (it exists there, even if untracked). CI only sees committed files.
 
-**How to confirm:** run the following in the worktree (or check the CI log for `leaves source: shared (legacy fallback)` vs `leaves source: per-patch-id`):
+**How to confirm:** run the following in the worktree, or grep the CI log for the
+verifier's `leaves source:` line. The verifier (`scripts/verify-attestation.mjs`)
+emits exactly one such line per run, prefixed `[v6-verifier] leaves source:`:
+
+```bash
+# In the CI log for the verify-attestation job, grep the verifier's source line:
+#   grep 'leaves source:' <ci-log>
+#
+# A healthy v6 PR prints the per-patch-id source, e.g.:
+#   [v6-verifier] leaves source: per-patch-id (.ai-sdlc/transcript-leaves/<patch-id>.jsonl)
+#
+# The bug manifests as the shared legacy-fallback source instead, e.g.:
+#   [v6-verifier] leaves source: shared (.ai-sdlc/transcript-leaves.jsonl) [AISDLC-421 legacy fallback, filtered by taskId=<task-id>]
+# (or "..., full file]" when no taskId filter applied) — the verifier fell back
+# to the shared file because the per-patch-id leaves file was not committed.
+```
 
 ```bash
 # Should print one line with the current patch-id's .jsonl file.

@@ -360,8 +360,12 @@ fi
 # to the legacy shared .ai-sdlc/transcript-leaves.jsonl (which has leaves from
 # OTHER PRs), computes the wrong Merkle root, and fails with
 # "v6: rootSignature did not match any trusted reviewer pubkey".
-# Staging .ai-sdlc/transcript-leaves/ is safe when the directory is empty or
-# does not exist — `git add` of an empty/absent directory is a no-op.
+# The `[ -d ]` guard around the `git add` below (Step 6) is MANDATORY, not
+# merely defensive: this script runs under `set -euo pipefail`, and `git add`
+# on a non-existent path exits 128 (fatal: pathspec did not match), which would
+# abort the push. The guard ensures we only `git add` the directory when it
+# actually exists; callers that have not emitted per-patch-id leaves simply
+# skip the stage and commit only the envelope.
 (
   cd "$WT_ROOT"
   # Always stage the primary file (patch-id or SHA, whichever was produced)
@@ -373,9 +377,12 @@ fi
     git add -- "$ATT_FILE_LEGACY"
   fi
   # AISDLC-471: stage per-patch-id transcript-leaves alongside the envelope.
-  # `git add .ai-sdlc/transcript-leaves/` is a no-op when the directory is
-  # empty or absent, so this is safe for callers that have not yet emitted
-  # per-patch-id leaves (backward-compat: they still just commit the envelope).
+  # The `[ -d ]` guard is REQUIRED: under `set -euo pipefail`, running
+  # `git add .ai-sdlc/transcript-leaves/` when the directory does not exist
+  # exits 128 (`fatal: pathspec '...' did not match any files`) and aborts the
+  # push. The guard makes the stage conditional on the directory existing, so
+  # callers that have not yet emitted per-patch-id leaves are backward-compat:
+  # they skip this stage and still just commit the envelope.
   if [ -d "$WT_ROOT/.ai-sdlc/transcript-leaves" ]; then
     git add -- "$WT_ROOT/.ai-sdlc/transcript-leaves/"
   fi
