@@ -3,7 +3,7 @@ id: AISDLC-463
 title: >-
   feat: route AskUserQuestion through Decision Catalog with timebox + priority —
   unified decision UX
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-28 19:18'
 labels:
@@ -14,6 +14,7 @@ labels:
   - rfc-0035-extension
 dependencies: []
 priority: high
+updated_date: '2026-05-31 03:52'
 ---
 
 ## Description
@@ -112,14 +113,44 @@ This task makes the Decision Catalog the framework's actual decision UX, not jus
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `cli-decisions add` accepts `--priority`, `--timebox-hours`, `--autonomous-fallback`, `--impact-score`, `--context-ref` flags (backward-compat: defaults preserve existing behavior)
-- [ ] #2 `cli-decisions list --ranked` exists and orders by `priority × impact × urgency-decay` formula (documented + tested)
-- [ ] #3 `cli-decisions resolve <id> --option <id>` exists for operator-driven resolution; writes audit event
-- [ ] #4 `cli-decisions auto-expire` subcommand exists: scans pending decisions, picks autonomous-fallback on timebox expiry, writes 'auto-expired' audit event
+- [x] #1 `cli-decisions add` accepts `--priority`, `--timebox-hours`, `--autonomous-fallback`, `--impact-score`, `--context-ref` flags (backward-compat: defaults preserve existing behavior)
+- [x] #2 `cli-decisions list --ranked` exists and orders by `priority × impact × urgency-decay` formula (documented + tested)
+- [x] #3 `cli-decisions resolve <id> --option <id>` exists for operator-driven resolution; writes audit event
+- [x] #4 `cli-decisions auto-expire` subcommand exists: scans pending decisions, picks autonomous-fallback on timebox expiry, writes 'auto-expired' audit event
 - [ ] #5 New skill `decision-queue` (or `cli-decisions ask` subcommand) wraps: file decision + optionally surface inline via AskUserQuestion when priority >= medium AND operator is in-session
 - [ ] #6 All in-tree AskUserQuestion call sites in pipeline-cli + ai-sdlc-plugin migrated to the new decision-queue wrapper (or documented exception)
-- [ ] #7 Decision Catalog audit trail captures: resolver (operator-id | 'auto-expired'), chosen option, rationale, surfacing context (agent + task/PR backlink)
+- [x] #7 Decision Catalog audit trail captures: resolver (operator-id | 'auto-expired'), chosen option, rationale, surfacing context (agent + task/PR backlink)
 - [ ] #8 TUI extension: new Decisions pane in cli-tui.mjs renders ranked queue + resolve action
 - [ ] #9 Documentation: spec/rfcs/RFC-0035 amended with the queue/timebox/auto-expire extension; operator runbook in docs/operations/decision-queue.md
 - [ ] #10 Hermetic tests cover: priority ranking, timebox expiry + fallback selection, audit-trail completeness, in-session vs deferred surfacing logic
 <!-- AC:END -->
+
+## Implementation Progress
+
+### Partial delivery — core CLI + tests slice (operator-scoped 2026-05-30)
+
+The operator scoped this task to the **core CLI + tests** slice for the first PR
+(branch `ai-sdlc/aisdlc-463-feat-route-askuserquestion-through-decision-catalo`).
+Task remains **In Progress** until the deferred slice lands.
+
+**Delivered (ACs #1, #2, #3, #4, #7, and the in-scope portion of #10):**
+- `cli-decisions add` gains `--priority`, `--timebox-hours`, `--autonomous-fallback`,
+  `--impact-score`, `--context-ref` (all backward-compatible; `--timebox-hours` reuses
+  the existing `parseTimebox`/`computeTimeboxExpiresAt` machinery — no duplicate expiry logic).
+- `cli-decisions list --ranked` — orders pending decisions by a documented
+  `priority × impact × urgency-decay` formula (documented in code + `--ranked` describe text).
+- `cli-decisions resolve <id> --option <id>` — operator-driven resolution writing an
+  append-only audit event; validates the option id; refuses already-resolved decisions.
+- `cli-decisions auto-expire` — picks the autonomous-fallback option on timebox expiry,
+  writes an `auto-expired` audit event; `--dry-run`; idempotent; skips decisions without a fallback.
+- Audit trail captures resolver (operator-id | `auto-expired`), chosen option, rationale,
+  and surfacing context (`--context-ref`).
+- Hermetic tests: ranking determinism, auto-expire fallback/skip/idempotency/dry-run,
+  audit-trail completeness, and `add` backward-compat.
+
+**Deferred to follow-up tasks (pending operator authorization):**
+- AC #5 — `decision-queue` skill / `cli-decisions ask` (in-session AskUserQuestion wrapper)
+- AC #6 — migrate in-tree AskUserQuestion call sites
+- AC #8 — TUI Decisions pane in `cli-tui.mjs`
+- AC #9 — RFC-0035 amendment + `docs/operations/decision-queue.md`
+- AC #10 — the "in-session vs deferred surfacing" sub-clause (belongs to the skill work in #5)
