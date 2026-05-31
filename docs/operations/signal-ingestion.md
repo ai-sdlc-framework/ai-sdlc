@@ -128,6 +128,64 @@ right downstream task:
 
 In all cases the pipeline continues with the remaining valid adapters — credential failure is non-blocking per the G0 contract.
 
+> **RFC-0030 §13.1 cross-link:** The v1 env-var-only adapter scope + dual Decision routing are OQ-13.1 v0.3 refinements (AISDLC-430). The v0.2 resolution delegated credential management without specifying which adapters ship in v1 and collapsed both failure states into one `adapter-credential-invalid` Decision. The re-walkthrough surfaced both gaps and resolved them.
+
+---
+
+## 2.5. Multi-language signals: when to opt in
+
+**RFC-0030 §13.2 cross-link:** Per-org `acceptedLanguages` config + `franc` language detection are OQ-13.2 v0.3 refinements (AISDLC-431). The v0.2 resolution deferred multi-language entirely without specifying the detection mechanism or documenting the actual quality impact on each pipeline stage.
+
+The pipeline detects signal language via the `franc` library (deterministic,
+<10ms per signal, JS-native, MIT-licensed, 95%+ accuracy on text >50 chars)
+at the classifier stage, before clustering. Signals in unsupported languages
+are dropped and logged as `Decision: signal-language-unsupported` — they do
+NOT halt the pipeline (G0 routing).
+
+**Default:** English-only (`acceptedLanguages: [en]`).
+
+**When to opt in to multi-language:**
+
+| Scenario | Recommendation |
+|---|---|
+| Your customer base is English-dominant | Keep the default `[en]` — no precision trade-off. |
+| You have significant non-English customer segments (e.g. French-Canadian B2B, Spanish-speaking SMBs) | Add languages: `[en, fr, es]`. Accept the documented BM25 precision degradation. |
+| You use embedding-based clustering (RFC-0019) | Multi-language has minimal impact — embeddings are natively multi-language. BM25 degradation only. |
+| You're testing pipeline coverage for a new market | Temporarily add the language to measure signal volume from that segment before making it permanent. |
+
+**Documented BM25 quality trade-off (OQ-13.2 v0.3 counter-argument surfaced by re-walkthrough):**
+
+BM25 clustering degrades approximately 15–30% precision without per-language
+stopwords and stemming (Robertson & Zaragoza §3.5). This is degraded-but-
+functional — not broken. The relevant question is whether the signal loss from
+dropping non-English signals (default `onUnsupported: drop-and-log`) outweighs
+the clustering-precision cost of including them.
+
+| Pipeline stage | Multi-language impact |
+|---|---|
+| Classification (tier, ICP, recency) | None — operates on structured metadata |
+| Language detection (`franc`) | Deterministic; same speed for any language |
+| BM25 clustering | ~15–30% precision drop without per-language stopwords |
+| Embedding clustering | None — multilingual embeddings (cohere, openai, e5) are native |
+| LLM ICP-resonance disambiguation | None — LLMs handle 50+ languages natively |
+| SA resonance filter | None — operates on cluster-level metadata |
+
+**Configuration:**
+
+```yaml
+spec:
+  acceptedLanguages:
+    - en
+    - fr
+    - es
+    - de
+```
+
+Non-accepted signals emit `Decision: signal-language-unsupported` to the RFC-0035
+catalog, accumulating a visible-gap metric the operator can inspect to see which
+languages are generating dropped signal volume and whether it warrants expanding
+`acceptedLanguages`.
+
 ---
 
 ## 3. Tier-multiplier tuning
@@ -953,6 +1011,64 @@ pre-RFC-0030 backlog-only D1 path; no dispatcher work is rejected.
 See the [Signal-ingestion promotion runbook](signal-ingestion-promotion.md)
 for the procedure to flip `AI_SDLC_SIGNAL_INGESTION` from default-OFF to
 default-ON.
+
+---
+
+## 12. Re-walkthrough provenance (v0.3 refinements, 2026-05-26)
+
+This section documents what changed between the v0.2 operator walkthrough
+(2026-05-16) and the v0.3 re-walkthrough (2026-05-26) that produced the
+AISDLC-430..434 refinement family. Cross-link to RFC-0030 §13 v0.3.
+
+**Why a second walkthrough?**
+
+The 2026-05-16 v0.2 walkthrough resolved all 5 §13 OQs but was
+subsequently flagged as too shallow — "skims over questions and recommends
+authors' recommendations" without sufficient industry research or
+counter-argument. The 2026-05-26 v0.3 re-walkthrough applied the **full
+rigor rubric** per OQ: problem statement → industry research → 3-4 options
+with tradeoffs → recommendation + counter-argument.
+
+**What changed at the architectural level (not just docs):**
+
+| OQ | v0.2 resolution | v0.3 refinement | Task |
+|---|---|---|---|
+| **OQ-13.1** (adapter auth) | "Delegate to future RFC; adapters self-validate" | Added explicit v1 adapter scope (env-var-only); split `adapter-credential-invalid` into `adapter-credential-not-configured` vs `adapter-credential-rejected` | AISDLC-430 |
+| **OQ-13.2** (multi-language) | "English-only v1; defer to v2" | Added per-org `acceptedLanguages` opt-in + specified `franc` for detection + documented BM25 quality degradation explicitly | AISDLC-431 |
+| **OQ-13.3** (residency) | "Delegate to RFC-0022" | Added explicit per-stage enforcement points (fetchSignals, clustering, storage, unified-cost-report) + UNION multi-posture forward-compat | AISDLC-432 |
+| **OQ-13.4** (manual entry) | "Forced attestedBy + attestedAt" | Added per-operator daily rate limit + optional `evidenceUrl` + rolling 7d manual-share quality metric | AISDLC-430 |
+| **OQ-13.5** (flooding) | "Tier 2 significance threshold as partial defense; future RFC for reputation-weighting" | Specified z-score detection algorithm + quarantine state + operator one-click unquarantine + reputation-weighting explicitly deferred to v2 with cold-start rationale | AISDLC-433 |
+
+**What did NOT change:**
+
+The core architecture (adapters → classifier → clusterer → SA filter → D1)
+is unchanged from v0.2. The non-replacement composition (signal pipeline and
+human-authored backlog items both feed D1) is unchanged. The G0 non-blocking
+routing contract (RFC-0035) is unchanged. The phase task breakdown
+(AISDLC-343..348) shipped unmodified; the AISDLC-430..434 family lands on
+top of that substrate.
+
+**How to verify the v0.3 substrate is running:**
+
+```bash
+# Confirm the default config reflects v0.3 defaults
+node -e "
+  import('./orchestrator/dist/signal-ingestion/index.js').then(({DEFAULT_SIGNAL_INGESTION_CONFIG}) => {
+    const c = DEFAULT_SIGNAL_INGESTION_CONFIG;
+    console.log('adapters:', c.adapters);
+    console.log('acceptedLanguages:', c.acceptedLanguages);
+    console.log('manualEntry.dailyCapPerOperator:', c.manualEntry.dailyCapPerOperator);
+    console.log('flooding.detection.algorithm:', c.flooding.detection.algorithm ?? 'z-score');
+    console.log('residencyEnforcement.multiPostureBehavior:', c.residencyEnforcement.multiPostureBehavior);
+  });
+"
+# Expected output:
+# adapters: [ 'signal-source-support-ticket', 'signal-source-community-thread', 'signal-source-in-app-feedback' ]
+# acceptedLanguages: [ 'en' ]
+# manualEntry.dailyCapPerOperator: 10
+# flooding.detection.algorithm: z-score
+# residencyEnforcement.multiPostureBehavior: union
+```
 
 ---
 

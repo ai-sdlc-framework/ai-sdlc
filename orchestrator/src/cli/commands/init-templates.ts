@@ -1142,6 +1142,9 @@ export const SIGNAL_INGESTION_CONFIG_STUB = `# RFC-0030 Signal Ingestion Pipelin
 # Promotion runbook: docs/operations/signal-ingestion-promotion.md
 # Schema: spec/schemas/signal-ingestion-config.v1.schema.json
 # RFC: spec/rfcs/RFC-0030-signal-ingestion-pipeline.md
+# Re-walkthrough (2026-05-26): AISDLC-430..434 rolled up OQ-13.1..13.5
+# refinements onto the shipped Phase 1-6 substrate. All refinements
+# reflected in this stub and the runbook.
 
 apiVersion: ai-sdlc.io/v1alpha1
 kind: SignalIngestionConfig
@@ -1224,26 +1227,93 @@ spec:
   #   signalPipelineWeight: 0.5
   #   backlogItemWeight: 0.5
 
-  # Adapter list (RFC-0030 §5).
-  # Each name must be registered with the SignalSourceRegistry. The shipped
-  # registry includes:
-  #   - signal-source-support-ticket (Tier 1 by default)
-  #   - signal-source-community-thread (Tier 2 by default)
-  #   - signal-source-manual (Tier 1; requires attestedBy + auto-filled
-  #     attestedAt; reuses the RFC-0022 OQ-2 audit-trail pattern)
-  # Adopters can register custom adapters via createDefaultSignalSourceRegistry()
-  # then \`.register(new CustomAdapter())\`.
+  # Adapter list (RFC-0030 §5 / OQ-13.1 v0.3 re-walkthrough — AISDLC-430).
+  # v1 ships env-var-based adapters ONLY. OAuth-required adapters (full
+  # Salesforce / HubSpot, Zendesk-with-OAuth) wait for the credential-mgmt
+  # RFC. Adapters declaring \`requiresOAuth: true\` are refused at
+  # registration with Decision: adapter-requires-credential-mgmt-rfc.
+  #
+  # Shipped adapters and their credential env vars:
+  #   - signal-source-support-ticket  → SIGNAL_ZENDESK_PAT
+  #   - signal-source-community-thread → SIGNAL_COMMUNITY_BOT_TOKEN
+  #   - signal-source-in-app-feedback  → SIGNAL_IN_APP_FEEDBACK_API_KEY
+  #   - signal-source-manual           → no credential (see manualEntry block)
+  #
+  # Credential failure Decisions:
+  #   - adapter-credential-not-configured: env var missing → SET the var
+  #   - adapter-credential-rejected: env var present but auth failed → ROTATE
+  # Pipeline continues with remaining valid adapters in both cases (G0).
   # adapters:
   #   - signal-source-support-ticket
   #   - signal-source-community-thread
+  #   - signal-source-in-app-feedback
 
-  # Accepted languages (RFC-0030 OQ-13.2 resolution).
-  # Signals in unsupported languages are dropped at the classifier and logged
-  # as a SignalLanguageUnsupported decision. v1 ships English-only;
-  # multi-language is deferred to v2. To re-enable a language drop early
-  # (e.g. for testing), narrow this list to a single language.
+  # Language acceptance (RFC-0030 OQ-13.2 v0.3 re-walkthrough — AISDLC-431).
+  # Detection: \`franc\` library (deterministic; <10ms per signal; JS-native;
+  # MIT-licensed; 95%+ accuracy on text >50 chars). Language detection runs
+  # at the classifier before any clustering step.
+  # Default [en] — English-only. Orgs with non-English customer bases can
+  # add languages: [en, fr, es, de, ja, ...]. Note the documented trade-off:
+  # BM25 clustering degrades ~15-30% precision without per-language
+  # stopwords/stemming (Robertson & Zaragoza §3.5). LLM ICP-resonance and
+  # embedding clustering are native multi-language (no degradation there).
+  # Non-accepted signals: Decision: signal-language-unsupported — dropped and
+  # logged to catalog for visible-gap metric; pipeline continues (G0).
+  # Opt in knowingly — see docs/operations/signal-ingestion.md §2.5.
   # acceptedLanguages:
   #   - en
+
+  # Per-stage data residency enforcement (RFC-0030 OQ-13.3 v0.3 — AISDLC-432).
+  # RFC-0022 owns regime DECLARATION (compliance.yaml). This block gates
+  # ENFORCEMENT at each signal-pipeline stage. All points default ON when
+  # any regime is declared; disable selectively only when your regime allows it
+  # (rare — every override emits SignalIngestionConfigChanged).
+  # residencyEnforcement:
+  #   sourceFromCompliancePosture: true   # derive allowedRegions from RFC-0022
+  #   enforcementPoints:
+  #     fetchSignals: true                # refuse out-of-region signals at adapter
+  #     clustering: true                  # prevent cross-region cluster merging
+  #     storage: true                     # persist residencyRegion field; elevate cross-region read audit
+  #     unifiedCostReport: true           # break out per-region cost attribution
+  #   multiPostureBehavior: union         # GDPR+HIPAA: strictest of both applies
+
+  # Manual-entry anti-gaming (RFC-0030 OQ-13.4 v0.3 re-walkthrough — AISDLC-430).
+  # RFC-0022 OQ-2 audit trail pattern preserved (forced attestedBy +
+  # auto-filled attestedAt). Three additional anti-gaming hooks:
+  #   1. Per-operator daily rate limit (default 10/day). Above cap:
+  #      Decision: manual-signal-rate-limit-exceeded.
+  #   2. Optional evidenceUrl (call recording, ticket URL, transcript link).
+  #      When present, audit trail is materially stronger.
+  #   3. Rolling 7d manual-share quality metric. Above 30% sustained:
+  #      Decision: manual-signal-share-elevated (warning, not block).
+  # manualEntry:
+  #   dailyCapPerOperator: 10             # per-operator per-UTC-day; 0 = disabled
+  #   evidenceUrlOptional: true           # framework treats evidenceUrl as optional
+  #   qualityMetric:
+  #     enabled: true
+  #     windowDays: 7
+  #     shareWarningThreshold: 0.30       # >30% rolling 7d triggers Decision
+
+  # Adversarial-injection defense (RFC-0030 OQ-13.5 v0.3 — AISDLC-433).
+  # Two layers:
+  #   1. Tier 2 significance threshold (§8) — structural floor requiring ≥1
+  #      Tier 1 signal per cluster.
+  #   2. Z-score detector — runtime anomaly layer on rolling 7d baseline.
+  # Trigger: volume > 3σ above baseline AND unique sources in window < 3.
+  # Quarantine: flagged signals recorded but NOT fed to D1; auto-expires 24h.
+  # One-click unquarantine logs Decision: signal-flooding-false-positive for
+  # v2 reputation-weighting calibration. Reputation-weighting deferred to v2
+  # (cold-start unsafe — requires 7+ corpus windows of baseline data).
+  # flooding:
+  #   detection:
+  #     algorithm: z-score               # only z-score supported (AISDLC-433)
+  #     zScoreThreshold: 3.0
+  #     windowMinutes: 60
+  #     minUniqueSourcesForSuspicion: 3
+  #     baselineDays: 7
+  #   quarantine:
+  #     enabled: true
+  #     durationHours: 24
 `;
 
 /**

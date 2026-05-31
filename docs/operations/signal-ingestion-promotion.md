@@ -43,6 +43,39 @@ are:
   would have produced for the same set of issues — at most a few
   candidates re-ranked, not a wholesale reshuffle)
 
+**v0.3 re-walkthrough addition (AISDLC-434):** promotion criteria must
+reflect the refinement substrate (AISDLC-430..433). The criteria above
+were written for the v0.2 substrate; the following additional gates
+confirm the v0.3 refinements are running without regressions:
+
+- **No z-score flooding false-positive surge** — the `signal-flooding-detected`
+  Decision rate is < 5% of total signals per week AND at least 80% of
+  flagged signals are NOT unquarantined by the operator within 24h (if
+  80%+ are immediately unquarantined, the z-score threshold is too low
+  for the deployment's baseline; tune `flooding.detection.zScoreThreshold`
+  up before promoting).
+- **Manual-share metric stable** — the rolling 7d `manual-signal-share-elevated`
+  Decision is NOT firing more than once per month (if it fires more often,
+  the pipeline is acting as a data-entry tool rather than automated demand-
+  detection; investigate the manual-entry volume before promoting).
+- **No credential-not-configured backlog accumulation** — `adapter-credential-not-configured`
+  Decisions are resolved within 48h of first fire (unresolved for >48h
+  indicates operators aren't seeing the Decisions; escalate TUI visibility
+  before promoting).
+- **At least one corpus window with the full refinement substrate**: the
+  v0.3 refinements (env-var adapters + franc detection + per-stage residency
+  enforcement + manual rate limits + z-score flooding) must have been running
+  for at least one full `baselineDays` window (default 7 days) to confirm the
+  z-score detector has left its cold-start calibration phase before promotion.
+  Check the flooding detector status:
+
+  ```bash
+  # Confirm z-score detector is live (not in cold-start calibrating state)
+  jq -c 'select(.type == "Decision" and .decision == "signal-flooding-detected") | {ts, source, zScore}' \
+    artifacts/_orchestrator/events-$(date -u +%Y-%m-%d).jsonl | head -5
+  # If no output, detector is either clean (good) or calibrating (check baselineDays window)
+  ```
+
 Whichever path satisfies the criteria first wins. Until enough adopter
 corpus accumulates for confident math, the operator may use the override
 path (eyeball + judgment) so the promotion isn't gated on calendar time.
