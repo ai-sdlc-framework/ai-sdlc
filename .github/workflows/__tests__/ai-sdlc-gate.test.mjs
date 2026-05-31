@@ -186,6 +186,26 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
+  it('attestation-gate is skipped for docs-only AND dependabot[bot] PRs (issue #791)', () => {
+    // Dependabot can't run the local reviewer+sign flow, so its dependency-bump
+    // PRs are exempt from the attestation requirement (gated by build/test +
+    // human review instead). The gate skips → alls-green treats skipped as
+    // success → pr-ready passes. If this exemption is removed, every Dependabot
+    // PR is permanently blocked on a missing envelope.
+    const gate = workflow.jobs['attestation-gate'];
+    assert.ok(gate?.if, 'attestation-gate must have an if: gating expression');
+    assert.match(
+      gate.if,
+      /needs\.detect\.outputs\.docs_only\s*!=\s*'true'/,
+      'attestation-gate must still skip docs-only PRs',
+    );
+    assert.match(
+      gate.if,
+      /github\.event\.pull_request\.user\.login\s*!=\s*'dependabot\[bot\]'/,
+      'attestation-gate must skip dependabot[bot] PRs (issue #791)',
+    );
+  });
+
   it('AC #3 (docs-only): only Detect Changes + Lint & Format are required when docs_only=true', () => {
     // The build-test, coverage, integration jobs must each carry an
     // `if:` that short-circuits when detect.outputs.docs_only == 'true'.

@@ -16,6 +16,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # ci:no-issue-required → require-issue-link.yml bypass (bots have no issue).
+    # The attestation gate exempts dependabot[bot] separately in ai-sdlc-gate.yml.
+    labels:
+      - dependencies
+      - 'ci:no-issue-required'
     groups:
       dev-dependencies:
         dependency-type: development
@@ -37,6 +42,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    labels:
+      - github-actions
+      - 'ci:no-issue-required'
     groups:
       github-actions:
         patterns:

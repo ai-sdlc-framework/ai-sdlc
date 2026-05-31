@@ -268,8 +268,14 @@ jobs:
   attestation-gate:
     name: Attestation gate (code PRs)
     needs: detect
+    # Skipped (→ alls-green treats as success) for:
+    #   - docs-only PRs (no code to attest), and
+    #   - dependabot[bot] PRs — automation can't run the local reviewer+sign
+    #     flow, so dependency bumps are gated by build/test + human review
+    #     instead of a DSSE envelope (operator decision 2026-05-30, issue #791).
     if: >-
       needs.detect.outputs.docs_only != 'true' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     permissions:
