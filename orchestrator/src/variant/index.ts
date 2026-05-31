@@ -1,7 +1,7 @@
 /**
  * RFC-0017 In-Soul Variant Pattern — module barrel.
  *
- * Re-exports the public surfaces for all three phases:
+ * Re-exports the public surfaces for all five phases:
  *
  *   Phase 1 (AISDLC-435):
  *   - Variant inheritance validator + event types
@@ -10,6 +10,12 @@
  *   - Deprecation lifecycle engine (OQ-3)
  *   - Eτ_tessellation_drift variant-scoped extension (AC #4)
  *   - Engineering review routing (OQ-7, AC #5, #6, #7)
+ *
+ *   Phase 4 (AISDLC-437):
+ *   - InternalAdopter three-product reference impl
+ *
+ *   Phase 5 (AISDLC-438):
+ *   - OQ-8 cardinality activation Decision wiring
  */
 
 // Phase 1 — Inheritance validator
@@ -77,6 +83,18 @@ export type {
   ReviewerGateCheckInput,
   ReviewerGateCheckResult,
 } from './engineering-review.js';
+
+// Phase 5 — OQ-8 cardinality activation Decision wiring (AISDLC-438)
+export {
+  trackCardinalityActivationRequest,
+  shouldPromoteToOperatorReview,
+  DEFAULT_CARDINALITY_ACTIVATION_THRESHOLD,
+} from './cardinality-activation.js';
+
+export type {
+  CardinalityActivationRequest,
+  CardinalityActivationResult,
+} from './cardinality-activation.js';
 
 // Phase 4 — InternalAdopter three-product reference impl (AISDLC-437)
 export {

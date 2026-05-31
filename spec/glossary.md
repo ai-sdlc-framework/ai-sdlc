@@ -227,3 +227,19 @@ The separation of user intent (`spec`) from system-observed reality (`status`) i
 ### Transaction Limit {#transaction-limit}
 
 A guardrail field in [AutonomyPolicy](#autonomy-policy) that specifies maximum cost per time period. See autonomy-policy.schema.json.
+
+### Variant {#variant}
+
+A soul-scoped sub-theme within a [Soul DID](#soul-did) that carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's foundational triad (E × P × D) and compliance regime. Variants are declared in `soul.spec.variants[]` and identified by kebab-case `id` (e.g. `small-utility`, `enterprise`). A Variant is NOT a separate Soul — it shares the parent Soul's substrate, compliance floor, and tenant quota. Use a Variant when the same product face targets multiple audience segments with different visual specializations but the same compliance regime. Use a separate Soul when compliance regimes or substrates differ. See [RFC-0017](rfcs/RFC-0017-in-soul-variant-pattern.md) and [docs/concepts/variants.md](../docs/concepts/variants.md).
+
+### targetedVariants {#targeted-variants}
+
+A Work Item field declaring which Soul Variants the work applies to. Uses path-style URI format: `did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}`. When `targetedVariants` is non-empty, admission scoring routes Sα₁ (Audience Resonance) and Sα₂ (Vibe Coherence) through the variant's `targetAudience` and `designImperatives` instead of the parent soul's aggregate values. When empty, scoring proceeds at soul scope unchanged (backward-compatible). See [RFC-0017 §5.4](rfcs/RFC-0017-in-soul-variant-pattern.md) and [docs/tutorials/12-declaring-variants.md](../docs/tutorials/12-declaring-variants.md).
+
+### complianceFloor: inherit {#compliance-floor-inherit}
+
+A locked field on all Variant declarations. Every Variant MUST carry `complianceFloor: inherit` — variants cannot override or loosen the parent Soul's compliance regime (WCAG level, regulatory posture, retention rules). Schema validation rejects any value other than `"inherit"`. This is the core architectural invariant of the In-Soul Variant Pattern: if two configurations require different compliance regimes, they are separate Souls, not Variants. Per RFC-0017 §5.3, `complianceRegimes` is an inherited-locked field enforced at the schema level using the `const: "inherit"` constraint. See [RFC-0017 §5.2](rfcs/RFC-0017-in-soul-variant-pattern.md).
+
+### Eτ_tessellation_drift (variant-scoped) {#e-tau-tessellation-drift-variant}
+
+The design coherence drift detection mechanism extended to operate within a single Soul's Variant set, per RFC-0017 Phase 3. While the base `Eτ_tessellation_drift` detector (RFC-0009 §13) scans substrate code for soul-scoped design-intent drift, the variant-scoped extension additionally scans for variant-specific identifiers in the substrate — code that references a specific variant `id` directly is a signal that variant-specific logic has leaked into the shared substrate, violating the substrate-sharing invariant (§5.3). Findings are emitted as `VariantDesignIntentDrift` events routing through the RFC-0035 G0 non-blocking pipeline. See [RFC-0017 §6.2](rfcs/RFC-0017-in-soul-variant-pattern.md) and `orchestrator/src/variant/drift-extension.ts`.

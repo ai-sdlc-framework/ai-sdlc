@@ -1,7 +1,7 @@
 ---
 id: AISDLC-438
 title: 'docs: RFC-0017 Phase 5 — glossary additions + conformance test suite + adopter doc surfaces'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18'
 labels:
