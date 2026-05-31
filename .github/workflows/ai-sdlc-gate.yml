@@ -371,9 +371,27 @@ jobs:
         uses: re-actors/alls-green@release/v1
         with:
           # `jobs` is the JSON of the `needs` context — the action walks
-          # each job's `result` and decides pass/fail. Default behavior:
-          #   success | skipped → pass
-          #   failure | cancelled → fail
-          # This is correct for archetype-conditional jobs (Q3 in the
-          # redesign memo).
+          # each job's `result` and decides pass/fail.
+          #
+          # Actual alls-green behavior (NOT the same as GitHub's naive needs:):
+          #   jobs in allowed-skips  → success OR skipped → pass
+          #   jobs NOT in allowed-skips → MUST be success (skipped = FAIL)
+          #   failure | cancelled (any job) → fail
+          #
+          # archetype-conditional jobs that legitimately skip must be listed
+          # in allowed-skips so that the aggregator doesn't fail on their skip:
+          #   - build-test / coverage / integration: skip on docs-only PRs
+          #   - attestation-gate: skips on docs-only PRs (paths-ignore)
+          #   - dependency-review-gate: skips on non-dep PRs (deps==false)
+          #
+          # The skipped-job deadlock bug (discovered 2026-05-31): alls-green
+          # treats skipped as FAILURE for jobs not in allowed-skips. Adding
+          # dependency-review-gate to allowed-skips fixes the regression
+          # introduced by PR #794 that blocked all non-dep PRs.
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: >-
+            build-test,
+            coverage,
+            integration,
+            attestation-gate,
+            dependency-review-gate

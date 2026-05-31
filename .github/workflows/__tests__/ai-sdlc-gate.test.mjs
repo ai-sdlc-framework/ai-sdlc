@@ -21,10 +21,11 @@
  *   3. AGGREGATOR SEMANTICS — given simulated `needs` contexts (all
  *      success / docs-only-skipped / one failure / one cancelled),
  *      does the alls-green decision match expectation. We mirror the
- *      action's documented logic in pure JS so a regression in our
- *      understanding of how alls-green treats `skipped` (= success by
- *      default, the load-bearing detail flagged in the research doc)
- *      can't slip through unnoticed.
+ *      action's ACTUAL Python source logic in pure JS so a regression
+ *      in our `allowed-skips:` list (archetype-conditional jobs that
+ *      legitimately skip) can't slip through unnoticed. Note: alls-green
+ *      does NOT treat `skipped` as success by default — skipped jobs
+ *      must be listed in `allowed-skips:` to pass the aggregator.
  *
  * Run with: node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs
  *
@@ -57,18 +58,53 @@ function loadYaml(path) {
 }
 
 // ── Aggregator decision oracle ───────────────────────────────────────────
-// Mirrors `re-actors/alls-green@release/v1`'s default behavior:
-//   - success | skipped → contributes to "all green"
-//   - failure | cancelled → fails the aggregate
-// This is the load-bearing detail flagged in /tmp/research-prior-art.md
-// (and reaffirmed in the AISDLC-140 redesign memo Q3): naive `needs:`
-// alone reports `skipped`, which auto-merge would treat as success;
-// alls-green with `needs` introspection is the canonical fix that
-// PRESERVES "skipped → pass" for archetype-conditional jobs.
+// Mirrors `re-actors/alls-green@release/v1`'s ACTUAL behavior.
+//
+// IMPORTANT: alls-green does NOT treat `skipped` as success by default.
+// The actual Python source logic (normalize_needed_jobs_status.py):
+//
+//   job_matrix_succeeded = all(
+//     job['result'] == 'success'                           ← MUST be success
+//     for name, job in jobs.items()
+//     if name not in (allowed_failures | allowed_skips)   ← except these
+//   ) and all(
+//     job['result'] in {'skipped', 'success'}             ← skipped OK here
+//     for name, job in jobs.items()
+//     if name in allowed_skips
+//   )
+//
+// Therefore jobs that LEGITIMATELY skip (archetype-conditional jobs) MUST
+// be listed in `allowed-skips:` in the workflow, otherwise a skipped job
+// causes alls-green to fail the aggregate.
+//
+// Archetype-conditional jobs in our workflow (must be in allowed-skips):
+//   - build-test, coverage, integration: skip on docs-only PRs
+//   - attestation-gate: skips on docs-only PRs (paths-ignore in verify-attestation.yml)
+//   - dependency-review-gate: skips on non-dep PRs (detect.outputs.deps == false)
+//
+// The incorrect comment "skipped → pass by default" was the root cause of
+// the PR #794 regression (2026-05-31): adding dependency-review-gate to
+// `needs` without `allowed-skips` blocked all non-dep PRs.
+//
+// This oracle matches the workflow's actual `allowed-skips:` list.
+const ALLOWED_SKIPS = new Set([
+  'build-test',
+  'coverage',
+  'integration',
+  'attestation-gate',
+  'dependency-review-gate',
+]);
+
 function allsGreenDecision(needs) {
-  for (const [, job] of Object.entries(needs)) {
+  for (const [name, job] of Object.entries(needs)) {
     if (job.result === 'failure' || job.result === 'cancelled') {
-      return { passed: false, reason: `job result=${job.result}` };
+      return { passed: false, reason: `job result=${job.result} (${name})` };
+    }
+    if (!ALLOWED_SKIPS.has(name) && job.result !== 'success') {
+      return {
+        passed: false,
+        reason: `job result=${job.result} (${name}) — not in allowed-skips and not success`,
+      };
     }
   }
   return { passed: true };
@@ -186,14 +222,32 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       /toJSON\(needs\)/,
       'alls-green must receive needs context via toJSON(needs)',
     );
+    // `allowed-skips` must list all archetype-conditional jobs that legitimately
+    // skip (alls-green treats skipped as FAILURE for jobs not in this list).
+    // Root cause of PR #794 regression: dependency-review-gate was added to
+    // `needs` without being added to `allowed-skips`, blocking all non-dep PRs.
+    const allowedSkips = String(allsGreenStep.with?.['allowed-skips'] ?? '');
+    for (const job of [
+      'build-test',
+      'coverage',
+      'integration',
+      'attestation-gate',
+      'dependency-review-gate',
+    ]) {
+      assert.ok(
+        allowedSkips.includes(job),
+        `alls-green allowed-skips must include "${job}" — jobs not listed here cause alls-green to fail when the job is skipped`,
+      );
+    }
   });
 
   it('attestation-gate is skipped for docs-only AND dependabot[bot] PRs (issue #791)', () => {
     // Dependabot can't run the local reviewer+sign flow, so its dependency-bump
     // PRs are exempt from the attestation requirement (gated by build/test +
-    // human review instead). The gate skips → alls-green treats skipped as
-    // success → pr-ready passes. If this exemption is removed, every Dependabot
-    // PR is permanently blocked on a missing envelope.
+    // human review instead). The gate skips → and because attestation-gate is
+    // listed in allowed-skips, alls-green treats skipped as success → pr-ready
+    // passes. If this exemption is removed, every Dependabot PR is permanently
+    // blocked on a missing envelope.
     const gate = workflow.jobs['attestation-gate'];
     assert.ok(gate?.if, 'attestation-gate must have an if: gating expression');
     assert.match(
@@ -211,14 +265,15 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
   it('dependency-review-gate blocks high+ CVEs, covers npm + github-actions, skips non-dep PRs (issue #791)', () => {
     // Folded into pr-ready so it is a REAL blocking gate (makes Dependabot
     // auto-merge safe: a vulnerable bump fails this → pr-ready fails → no
-    // auto-merge; a clean bump auto-merges). Must skip for non-dep PRs (gated
-    // on detect.outputs.deps) so alls-green treats skipped as success.
+    // auto-merge; a clean bump auto-merges). Skips for non-dep PRs (gated
+    // on detect.outputs.deps). Because dependency-review-gate is listed in
+    // allowed-skips, alls-green allows the skip → pr-ready passes.
     const job = workflow.jobs['dependency-review-gate'];
     assert.ok(job, 'dependency-review-gate job must exist');
     assert.match(
       job.if,
       /needs\.detect\.outputs\.deps\s*==\s*'true'/,
-      'must only run when the PR touches deps/actions (skip otherwise → alls-green success)',
+      'must only run when the PR touches deps/actions (skip otherwise, alls-green allows via allowed-skips)',
     );
     const reviewStep = job.steps.find(
       (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/dependency-review-action@'),
@@ -343,19 +398,42 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
   it('AC #5: docs-only PR (build-test/coverage/integration skipped) → pr-ready PASSES', () => {
     // The docs-only archetype: detect ran (success), lint ran (success),
     // the three code-gated jobs were skipped because `if:` evaluated
-    // false. alls-green must treat skipped as success.
+    // false. These jobs are in ALLOWED_SKIPS so alls-green allows skip.
     const needs = {
       detect: { result: 'success' },
       lint: { result: 'success' },
       'build-test': { result: 'skipped' },
       coverage: { result: 'skipped' },
       integration: { result: 'skipped' },
+      'attestation-gate': { result: 'skipped' },
+      'dependency-review-gate': { result: 'skipped' },
     };
     const decision = allsGreenDecision(needs);
     assert.equal(
       decision.passed,
       true,
       `expected pass on all-green-docs-only; got: ${decision.reason}`,
+    );
+  });
+
+  it('non-dep code PR (dependency-review-gate skipped) → pr-ready PASSES', () => {
+    // Regression test for the PR #794 bug: adding dependency-review-gate to
+    // pr-ready needs WITHOUT adding it to allowed-skips caused all non-dep
+    // PRs to fail. With allowed-skips: dependency-review-gate, a skip is OK.
+    const needs = {
+      detect: { result: 'success' },
+      lint: { result: 'success' },
+      'build-test': { result: 'success' },
+      coverage: { result: 'success' },
+      integration: { result: 'success' },
+      'attestation-gate': { result: 'success' },
+      'dependency-review-gate': { result: 'skipped' },
+    };
+    const decision = allsGreenDecision(needs);
+    assert.equal(
+      decision.passed,
+      true,
+      `expected pass when dependency-review-gate skips (non-dep PR); got: ${decision.reason}`,
     );
   });
 
@@ -412,12 +490,11 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
     assert.equal(allsGreenDecision(needs).passed, true);
   });
 
-  it('all jobs skipped (degenerate empty PR) → pr-ready PASSES (alls-green default)', () => {
-    // Edge case: imagine GH dispatches the workflow but every job is
-    // skipped (e.g. in a `[ci skip]`-equivalent scenario that doesn't
-    // actually trigger the marker check). alls-green's documented
-    // default treats empty-success as success. This is the same
-    // semantic that makes path-filter PRs work — so we lock it in.
+  it('detect/lint skipped → pr-ready FAILS (these jobs are not in allowed-skips)', () => {
+    // detect and lint always run (no archetype-conditional if: guards that
+    // would cause them to skip on normal PRs). If they were skipped, it
+    // would indicate a workflow misconfiguration, not a valid archetype.
+    // Since they're not in allowed-skips, alls-green correctly fails.
     const needs = {
       detect: { result: 'skipped' },
       lint: { result: 'skipped' },
@@ -425,7 +502,12 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       coverage: { result: 'skipped' },
       integration: { result: 'skipped' },
     };
-    assert.equal(allsGreenDecision(needs).passed, true);
+    const decision = allsGreenDecision(needs);
+    assert.equal(
+      decision.passed,
+      false,
+      'detect and lint skipping should fail since they are not in allowed-skips',
+    );
   });
 });
 
