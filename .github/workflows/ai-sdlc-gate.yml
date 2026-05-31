@@ -97,6 +97,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
       docs_only: ${{ steps.filter.outputs.docs_only }}
+      deps: ${{ steps.deps-filter.outputs.deps }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - id: filter
@@ -116,6 +117,21 @@ jobs:
               - 'backlog/tasks/**'
               - 'backlog/completed/**'
               - '*.md'
+      # Second filter (default `some` quantifier): true when the PR touches
+      # dependency manifests OR GitHub Actions workflows/composite actions.
+      # Drives the dependency-review-gate job — covers npm + github-actions
+      # bumps (incl. Dependabot) against the GitHub Advisory DB.
+      - id: deps-filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            deps:
+              - '**/package.json'
+              - 'pnpm-lock.yaml'
+              - 'package-lock.json'
+              - 'yarn.lock'
+              - '.github/workflows/**'
+              - '.github/actions/**'
 
   # ── Lint & Format (always required) ─────────────────────────────────────
   # Runs on every PR archetype. Cheap (~1 min) and catches the long tail of
@@ -307,9 +323,39 @@ jobs:
           echo "::error::[attestation-gate] timed out waiting for ai-sdlc/attestation on $HEAD_SHA — code PR cannot merge without attestation"
           exit 1
 
+  # ── Dependency review gate (npm + github-actions; issue #791 follow-up) ──
+  # Folds dependency-review into the pr-ready rollup so it is a REAL blocking
+  # gate. A path-filtered standalone REQUIRED check would deadlock non-dep PRs
+  # (the check never posts → branch protection waits forever); folding it here
+  # lets alls-green treat this job's `skipped` as success instead. Skips when
+  # the PR touches no dependency manifests / workflow / action files; runs and
+  # blocks on high+ severity advisories otherwise.
+  #
+  # This is what makes Dependabot auto-merge SAFE without a human in the loop:
+  # a vulnerable bump fails here → pr-ready fails → auto-merge can't fire; a
+  # clean bump auto-merges unattended. Covers github-actions SHA bumps too
+  # (not just npm manifests) — the gap flagged in PR #792's security review.
+  dependency-review-gate:
+    name: Dependency review (deps/actions PRs)
+    needs: detect
+    if: >-
+      needs.detect.outputs.deps == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # post the advisory summary comment on failure
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
   pr-ready:
     name: ai-sdlc/pr-ready
-    needs: [detect, lint, build-test, coverage, integration, attestation-gate]
+    needs:
+      [detect, lint, build-test, coverage, integration, attestation-gate, dependency-review-gate]
     # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
     # (per their own draft guards), `re-actors/alls-green` treats all-skipped
     # as failure → posts `ai-sdlc/pr-ready: failure` on every draft sync.

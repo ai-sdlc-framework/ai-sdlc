@@ -128,6 +128,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'coverage',
       'integration',
       'attestation-gate',
+      'dependency-review-gate',
       'pr-ready',
     ];
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());
@@ -164,6 +165,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'coverage',
       'integration',
       'attestation-gate',
+      'dependency-review-gate',
     ]) {
       assert.ok(needs.includes(required), `pr-ready needs: ${required}`);
     }
@@ -203,6 +205,44 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       gate.if,
       /github\.event\.pull_request\.user\.login\s*!=\s*'dependabot\[bot\]'/,
       'attestation-gate must skip dependabot[bot] PRs (issue #791)',
+    );
+  });
+
+  it('dependency-review-gate blocks high+ CVEs, covers npm + github-actions, skips non-dep PRs (issue #791)', () => {
+    // Folded into pr-ready so it is a REAL blocking gate (makes Dependabot
+    // auto-merge safe: a vulnerable bump fails this → pr-ready fails → no
+    // auto-merge; a clean bump auto-merges). Must skip for non-dep PRs (gated
+    // on detect.outputs.deps) so alls-green treats skipped as success.
+    const job = workflow.jobs['dependency-review-gate'];
+    assert.ok(job, 'dependency-review-gate job must exist');
+    assert.match(
+      job.if,
+      /needs\.detect\.outputs\.deps\s*==\s*'true'/,
+      'must only run when the PR touches deps/actions (skip otherwise → alls-green success)',
+    );
+    const reviewStep = job.steps.find(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/dependency-review-action@'),
+    );
+    assert.ok(reviewStep, 'must run actions/dependency-review-action');
+    assert.equal(reviewStep.with?.['fail-on-severity'], 'high', 'must block on high+ severity');
+
+    // detect must expose the `deps` output the gate keys off, and the deps
+    // filter must cover BOTH npm manifests AND github-actions workflows
+    // (the gap PR #792 security review flagged: action SHA bumps were unscanned).
+    const detect = workflow.jobs['detect'];
+    assert.match(
+      String(detect.outputs?.deps ?? ''),
+      /deps-filter\.outputs\.deps/,
+      'detect must expose a `deps` output from the deps-filter step',
+    );
+    const depsFilter = detect.steps.find((s) => s.id === 'deps-filter');
+    assert.ok(depsFilter, 'detect must have a deps-filter step');
+    const filterText = String(depsFilter.with?.filters ?? '');
+    assert.match(filterText, /package\.json/, 'deps filter must cover npm manifests');
+    assert.match(
+      filterText,
+      /\.github\/workflows/,
+      'deps filter must cover github-actions workflows (action bumps)',
     );
   });
 
