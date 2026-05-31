@@ -267,7 +267,11 @@ interface Sa2Raw {
 
 /** Extract the first JSON object from a raw LLM reply. */
 export function extractJson(raw: string): unknown {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  // `[ \t]*\n?` instead of `\s*` so the optional whitespace before the lazy
+  // capture can't overlap the capture's own `[\s\S]` — avoids polynomial
+  // backtracking on adversarial LLM output (CodeQL js/polynomial-redos).
+  // `.trim()` below absorbs any residual leading whitespace in the capture.
+  const fenced = raw.match(/```(?:json)?[ \t]*\n?([\s\S]*?)```/i);
   const candidate = fenced ? fenced[1] : raw;
   try {
     return JSON.parse(candidate.trim());

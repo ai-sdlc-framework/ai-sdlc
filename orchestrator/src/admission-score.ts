@@ -233,7 +233,10 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   const isContributor = assoc === 'CONTRIBUTOR';
 
   // ── Complexity from issue body, AC count, or backlog context ─
-  const complexityMatch = input.body?.match(/###?\s*Complexity\s*\n+\s*(\d+)/i);
+  // Horizontal-whitespace classes ([ \t]) around \n+ so the sub-patterns can't
+  // overlap (\s includes \n) — avoids polynomial backtracking on attacker-
+  // controlled issue bodies (CodeQL js/polynomial-redos).
+  const complexityMatch = input.body?.match(/###?[ \t]*Complexity[ \t]*\n+[ \t]*(\d+)/i);
   let complexity = complexityMatch ? Number(complexityMatch[1]) : undefined;
   // Backlog tasks rarely include a `### Complexity` header — fall back to AC count
   // (each AC is roughly one logical unit; clamp at 10).

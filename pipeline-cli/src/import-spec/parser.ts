@@ -51,9 +51,13 @@ export interface ParseTasksMdResult {
   entries: SpecKitTaskEntry[];
 }
 
-const HEADING_RE = /^###\s+(T-\d+)\s*[—\-:]?\s*(.+?)\s*$/;
-const CHECKBOX_RE = /^-\s*\[[ x]\]\s*(T-\d+)\s*[—\-:]?\s*(.+?)\s*$/i;
-const AC_LINE_RE = /^\s*(?:-\s*)?AC:\s*(.+?)\s*$/i;
+// Trailing title/AC text uses a greedy `(.+)$` (linear) rather than the lazy
+// `(.+?)\s*$` form, whose lazy-capture-then-optional-trailing-whitespace overlap
+// is polynomial (CodeQL js/polynomial-redos) on adversarial imported specs.
+// Callers `.trim()` the captured group to preserve the prior trailing-strip.
+const HEADING_RE = /^###\s+(T-\d+)\s*[—\-:]?\s*(.+)$/;
+const CHECKBOX_RE = /^-\s*\[[ x]\]\s*(T-\d+)\s*[—\-:]?\s*(.+)$/i;
+const AC_LINE_RE = /^\s*(?:-\s*)?AC:\s*(.+)$/i;
 const TASKS_SECTION_RE = /^##\s+Tasks\s*$/i;
 
 /**
@@ -115,7 +119,7 @@ function parseHeadings(lines: string[], startIdx: number): SpecKitTaskEntry[] {
       flush();
       current = {
         taskId: headingMatch[1],
-        title: headingMatch[2],
+        title: headingMatch[2].trim(),
         body: '',
         acceptanceCriteria: [],
       };
@@ -129,7 +133,7 @@ function parseHeadings(lines: string[], startIdx: number): SpecKitTaskEntry[] {
     if (current) {
       const acMatch = AC_LINE_RE.exec(line);
       if (acMatch) {
-        current.acceptanceCriteria.push(acMatch[1]);
+        current.acceptanceCriteria.push(acMatch[1].trim());
       } else {
         current.body += line + '\n';
       }
@@ -157,7 +161,7 @@ function parseCheckboxes(lines: string[], startIdx: number): SpecKitTaskEntry[] 
       flush();
       current = {
         taskId: cbMatch[1],
-        title: cbMatch[2],
+        title: cbMatch[2].trim(),
         body: '',
         acceptanceCriteria: [],
       };
@@ -170,7 +174,7 @@ function parseCheckboxes(lines: string[], startIdx: number): SpecKitTaskEntry[] 
     if (current) {
       const acMatch = AC_LINE_RE.exec(line);
       if (acMatch) {
-        current.acceptanceCriteria.push(acMatch[1]);
+        current.acceptanceCriteria.push(acMatch[1].trim());
       } else if (line.trim().length > 0) {
         current.body += line.trim() + '\n';
       }

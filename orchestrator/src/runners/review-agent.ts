@@ -383,8 +383,12 @@ export class ReviewAgentRunner implements AgentRunner {
   }
 
   parseVerdict(text: string): ReviewVerdict {
-    // Strip markdown fences if the model wraps the JSON
-    const cleaned = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '');
+    // Strip markdown fences if the model wraps the JSON. Horizontal-whitespace
+    // classes ([ \t\r]) instead of \s so the trailing-whitespace group can't
+    // overlap the \n the anchors already consume — avoids polynomial
+    // backtracking on adversarial model output (CodeQL js/polynomial-redos).
+    // JSON.parse tolerates the leading/trailing newline left behind.
+    const cleaned = text.replace(/^```(?:json)?[ \t\r]*/m, '').replace(/[ \t\r]*```$/m, '');
 
     try {
       const parsed = JSON.parse(cleaned);

@@ -32,7 +32,7 @@ function buildEvaluationContext(issue: Issue): EvaluationContext {
       : 0
     : 0;
 
-  const complexityMatch = issue.description?.match(/### Complexity\s*\n+\s*(\d+)/i);
+  const complexityMatch = issue.description?.match(/### Complexity[ \t]*\n+[ \t]*(\d+)/i);
   const complexity = complexityMatch ? Number(complexityMatch[1]) : 0;
 
   return {
@@ -139,6 +139,6 @@ export async function validateIssueWithExtensions(
  */
 export function parseComplexity(issueBody: string | undefined): number {
   if (!issueBody) return 0;
-  const match = issueBody.match(/### Complexity\s*\n+\s*(\d+)/i);
+  const match = issueBody.match(/### Complexity[ \t]*\n+[ \t]*(\d+)/i);
   return match ? Number(match[1]) : 0;
 }

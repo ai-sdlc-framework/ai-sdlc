@@ -114,8 +114,10 @@ function extractAcceptanceCriteria(body: string): string {
   if (beginIdx !== -1 && endIdx !== -1) {
     return body.slice(beginIdx + acBegin.length, endIdx).trim();
   }
-  // Fall back to ## Acceptance Criteria section
-  const acMatch = body.match(/## Acceptance Criteria\s*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
+  // Fall back to ## Acceptance Criteria section. `[ \t]*\n` instead of `\s*\n`
+  // so the optional whitespace can't overlap the pinned newline — avoids
+  // polynomial backtracking on task bodies (CodeQL js/polynomial-redos).
+  const acMatch = body.match(/## Acceptance Criteria[ \t]*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
   return acMatch ? acMatch[1].trim() : '';
 }
 
@@ -125,8 +127,10 @@ function extractDescription(body: string): string {
   const beginIdx = body.indexOf(beginMarker);
   const endIdx = body.indexOf(endMarker);
   if (beginIdx === -1 || endIdx === -1) {
-    // Fall back to first ## Description section content
-    const descMatch = body.match(/## Description\s*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
+    // Fall back to first ## Description section content. `[ \t]*\n` instead of
+    // `\s*\n` so the optional whitespace can't overlap the pinned newline —
+    // avoids polynomial backtracking on task bodies (CodeQL js/polynomial-redos).
+    const descMatch = body.match(/## Description[ \t]*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
     return descMatch ? descMatch[1].trim() : '';
   }
   return body.slice(beginIdx + beginMarker.length, endIdx).trim();

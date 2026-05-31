@@ -31,6 +31,15 @@ import { join } from 'node:path';
 import type { Runner } from '../runtime/exec.js';
 import { defaultRunner } from '../runtime/exec.js';
 
+/**
+ * Upper bound on conflicted-file content fed to the mechanical conflict
+ * resolvers. A file larger than this is never a mechanical CHANGELOG/test
+ * conflict; the resolvers escalate (return null) so a human resolves it. The
+ * cap also bounds the input to the double-lazy conflict regex, neutralising
+ * its polynomial worst case (CodeQL js/polynomial-redos).
+ */
+const MAX_CONFLICT_CONTENT = 1_000_000;
+
 export interface LateRebaseOptions {
   /** Absolute path to the git worktree. */
   worktreePath: string;
@@ -104,6 +113,11 @@ function parseConflictingFiles(porcelain: string): string[] {
 export function resolveChangelogConflict(content: string): string | null {
   // Quick sanity: if no conflict markers, nothing to do
   if (!content.includes('<<<<<<<')) return content;
+  // Bound input before the double-lazy conflict regex. A >1 MB conflicted file
+  // is never a mechanical CHANGELOG bullet conflict — escalate to manual
+  // resolution. Also neutralises the polynomial worst case of the dual
+  // `[\s\S]*?` groups on marker-less input (CodeQL js/polynomial-redos).
+  if (content.length > MAX_CONFLICT_CONTENT) return null;
 
   // We expect exactly one pattern: conflict markers wrapping two sets of
   // `- ` bullet lines inside an `## [Unreleased]` / `## Unreleased` section.
@@ -149,6 +163,10 @@ export function resolveChangelogConflict(content: string): string | null {
  */
 export function resolveTestConflict(content: string): string | null {
   if (!content.includes('<<<<<<<')) return content;
+  // See resolveChangelogConflict: bound input before the double-lazy regex —
+  // escalate oversized conflicts, neutralise the polynomial worst case
+  // (CodeQL js/polynomial-redos).
+  if (content.length > MAX_CONFLICT_CONTENT) return null;
 
   const conflictPattern = /<<<<<<< [^\n]+\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> [^\n]*/g;
 

@@ -87,6 +87,14 @@ export function extractReferences(body: string): Reference[] {
   const seen = new Set<string>();
   const out: Reference[] = [];
 
+  // Bound the input before regex scanning. Task/issue bodies are attacker-
+  // controlled (external contributors); capping at 100 KB neutralises the
+  // polynomial worst case of the link/URL scanners (CodeQL js/polynomial-redos)
+  // while staying far above any legitimate task body. References past 100 KB
+  // are not extracted — an acceptable trade for DoS-safety on the gate path.
+  const MAX_REF_SCAN = 100_000;
+  const text = body.length > MAX_REF_SCAN ? body.slice(0, MAX_REF_SCAN) : body;
+
   function add(raw: string, kind: Reference['kind']): void {
     const key = `${kind}:${raw}`;
     if (seen.has(key)) return;
@@ -95,7 +103,7 @@ export function extractReferences(body: string): Reference[] {
   }
 
   // 1. Markdown links: [label](url) — capture the URL only.
-  for (const m of body.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+  for (const m of text.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
     const url = m[1];
     if (/^https?:\/\//i.test(url)) {
       add(url, classifyUrl(url));
@@ -106,7 +114,7 @@ export function extractReferences(body: string): Reference[] {
   }
 
   // 2. Bare URLs not already captured — `(?<!\()` to skip the markdown-link case.
-  for (const m of body.matchAll(/(?<!\()(https?:\/\/\S+)/g)) {
+  for (const m of text.matchAll(/(?<!\()(https?:\/\/\S+)/g)) {
     const url = m[1].replace(/[)),.;:]+$/g, '');
     add(url, classifyUrl(url));
   }
@@ -119,23 +127,23 @@ export function extractReferences(body: string): Reference[] {
   //    — citations like "see PR #524 for context" are narrative, not references
   //    the gate needs to validate. Authors who want #N validated should use
   //    the closes/fixes/resolves verb or wrap with `gh#42`.
-  for (const m of body.matchAll(/\b(?:closes|fixes|resolves)\s+(#\d+)\b/gi)) {
+  for (const m of text.matchAll(/\b(?:closes|fixes|resolves)\s+(#\d+)\b/gi)) {
     add(m[1], 'github-issue');
   }
-  for (const m of body.matchAll(/(?<![\w/])(gh#\d+)\b/gi)) {
+  for (const m of text.matchAll(/(?<![\w/])(gh#\d+)\b/gi)) {
     add(m[1], 'github-issue');
   }
-  for (const m of body.matchAll(/\b([\w.-]+\/[\w.-]+#\d+)\b/g)) {
+  for (const m of text.matchAll(/\b([\w.-]+\/[\w.-]+#\d+)\b/g)) {
     add(m[1], 'github-issue');
   }
 
   // 4. RFC IDs.
-  for (const m of body.matchAll(/\b(RFC-\d{4})\b/g)) {
+  for (const m of text.matchAll(/\b(RFC-\d{4})\b/g)) {
     add(m[1], 'file-existence');
   }
 
   // 5. AISDLC IDs.
-  for (const m of body.matchAll(/\b(AISDLC-\d+(?:\.\d+)?)\b/g)) {
+  for (const m of text.matchAll(/\b(AISDLC-\d+(?:\.\d+)?)\b/g)) {
     add(m[1], 'file-existence');
   }
 
