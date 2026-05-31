@@ -3,28 +3,36 @@
 # AISDLC-386: Orchestrator hook — collapse pre-push "re-push required" chain
 # into a single pass.
 #
-# Problem: the pre-push chain has up to two hooks that each exit-1 with
-# "re-run git push" after doing mechanical work:
-#   1. check-task-moved.sh  — auto-mv + chore commit
-#   2. check-attestation-sign.sh — sign + chore commit
+# Problem: the pre-push chain has up to one hook that exit-1 with "re-run git
+# push" after doing mechanical work:
+#   1. check-task-moved.sh  — auto-mv + chore commit (still produces new commit)
+#   2. check-attestation-sign.sh — sign + AMEND (AISDLC-490 B+: no new commit,
+#      exits 0, push proceeds immediately without a second `git push`)
 #
 # (check-mcp-bundle-sync.sh was DELETED by AISDLC-385 — the mcp-server bundle
 # is now distributed via the @ai-sdlc/plugin-mcp-server npm package and is no
 # longer committed to git.)
 #
-# Worst case: operator runs `git push` THREE times (one per fixup, then one
-# final push). This orchestrator collapses those into AT MOST TWO: one to
-# trigger fixups, one to actually send.
+# AISDLC-490 B+ note: attestation-sign now uses `git commit --amend --no-edit`
+# instead of a new chore commit. This eliminates the second `git push` for the
+# attestation-sign fixup path. The worst case is now AT MOST TWO pushes: one
+# to trigger task-move (if needed), one to send. When only attestation-sign
+# runs (no task-move), a single `git push` suffices — the hook amends in place
+# and exits 0, allowing the push to proceed with the attestation baked in.
 #
 # How it works:
 #   1. Invoke each sub-hook in dependency order (task-move → attestation-sign)
 #      with AI_SDLC_INTERNAL_NO_EXIT_1=1 set. That env var suppresses the
-#      exit-1-after-fixup in each sub-hook but still does the work.
-#   2. Track whether any fixup made changes (via its stdout sentinel or exit code).
-#   3. After all sub-hooks complete: if ANY fixup ran, exit 1 ONCE with a
-#      consolidated summary. If no fixups ran, exit 0 silently.
+#      exit-1-after-fixup in check-task-moved.sh (attestation-sign no longer
+#      uses it — it exits 0 after amend regardless).
+#   2. Track whether any fixup made changes:
+#      - task-move: detected via HEAD SHA change (adds a new chore commit)
+#      - attestation-sign: detected via COMMIT COUNT change (amend doesn't add
+#        new commits, so count-stable means no re-push needed)
+#   3. After all sub-hooks complete: if task-move ran (commit count grew), exit
+#      1 ONCE. If only attestation-sign ran (amend, no new commit), exit 0.
 #
-# AC-2 consolidated message format:
+# AC-2 consolidated message format (task-move case only after AISDLC-490):
 #   [pre-push-fixups] Auto-fixed: <list>. Re-run `git push` to send.
 #
 # Sub-hook output is prefixed with [<hook-name>] for debuggability (AC-6).
@@ -133,7 +141,14 @@ fi
 # (Sub-hook "mcp-bundle-sync" was here — deleted by AISDLC-385. The mcp-server
 # bundle is now distributed via the @ai-sdlc/plugin-mcp-server npm package.)
 # Dependency: MUST run AFTER task-move so the envelope hashes the moved path.
-HEAD_BEFORE_ATTEST=$(git rev-parse HEAD 2>/dev/null || echo '')
+#
+# AISDLC-490 B+: attestation-sign now AMENDS the current commit (no new chore
+# commit) and exits 0 so the push proceeds immediately. We detect whether it
+# actually ran by comparing commit count (not HEAD SHA) — an amend changes
+# the SHA but NOT the commit count, so a count change means an unexpected new
+# commit was added (defensive; should not happen with B+ hook). A stable count
+# means the hook amended in place (or did nothing) and no re-push is needed.
+COMMIT_COUNT_BEFORE_ATTEST=$(git rev-list --count HEAD 2>/dev/null || echo '0')
 ATTEST_EXIT=0
 run_sub_hook "attestation-sign" "$SCRIPT_DIR/check-attestation-sign.sh" || ATTEST_EXIT=$?
 
@@ -142,8 +157,10 @@ if [ "$ATTEST_EXIT" -ge 2 ]; then
   exit "$ATTEST_EXIT"
 fi
 
-HEAD_AFTER_ATTEST=$(git rev-parse HEAD 2>/dev/null || echo '')
-if [ "$HEAD_BEFORE_ATTEST" != "$HEAD_AFTER_ATTEST" ]; then
+COMMIT_COUNT_AFTER_ATTEST=$(git rev-list --count HEAD 2>/dev/null || echo '0')
+if [ "$COMMIT_COUNT_BEFORE_ATTEST" != "$COMMIT_COUNT_AFTER_ATTEST" ]; then
+  # A new commit was added (unexpected with B+ amend-based hook, but handle
+  # defensively — e.g. operator has an old hook version or bypassed the update).
   FIXED+=("attestation-sign")
 fi
 
@@ -162,6 +179,10 @@ FIXED_LIST=$(IFS=', '; echo "${FIXED[*]}")
   echo "            The following mechanical fixup commit(s) were added on top"
   echo "            of your HEAD. The push you just attempted does NOT include"
   echo "            them — re-run \`git push\` to send all commits."
+  echo ""
+  echo "            Note: attestation-sign (AISDLC-490 B+) amends in place and"
+  echo "            does NOT require a re-push on its own. Only task-move adds"
+  echo "            a new commit that needs a second push."
   echo ""
   echo "            On the next push these sub-hooks are all idempotent (no"
   echo "            fixup needed → exit 0 → push proceeds normally)."

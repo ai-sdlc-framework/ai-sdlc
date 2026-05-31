@@ -319,37 +319,53 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
   });
 
-  it('AC #1+5: signs + commits + exits 1 when sentinel + verdict + no attestation (v6 default)', () => {
+  it('AC #1+5 (AISDLC-490 B+): signs + amends current commit + exits 0 (no re-push needed)', () => {
+    // AISDLC-490 B+ end-state: instead of creating a new chore commit and exiting 1
+    // (requiring a second `git push`), the hook amends the current commit to include
+    // the attestation files and exits 0 (push proceeds immediately).
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     const head = git(['rev-parse', 'HEAD'], root).trim();
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const { cmd } = installFakeSigner(root);
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
-    assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
-    // Re-push message must be actionable.
-    assert.match(r.stderr, /re-run `git push`|re-push required|added an attestation/i);
+    // AISDLC-490 B+: exits 0 (no re-push required — amend in place).
+    assert.equal(r.status, 0, `expected 0 (B+ amend: push proceeds), got ${r.status}: ${r.stderr}`);
+    // Deferral hint must still be actionable.
+    assert.match(r.stderr, /AI_SDLC_SKIP_ATTESTATION_SIGN=1/);
     // RFC-0042 Phase 3: default is v6 → attestation file is <sha>.v6.dsse.json.
-    // Attestation file must be present at the original HEAD.
+    // Attestation file must be present (written before amend).
     const attPath = join(root, '.ai-sdlc', 'attestations', `${head}.v6.dsse.json`);
     assert.equal(existsSync(attPath), true, 'v6 attestation file must exist after sign');
-    // A new commit must have landed on top.
-    const newHead = git(['rev-parse', 'HEAD'], root).trim();
-    assert.notEqual(newHead, head, 'a chore commit must have been added on top of HEAD');
+    // AC-5(a): commit count must NOT increase (amend, not a new commit).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBefore,
+      `AISDLC-490 AC-5(a): commit count must stay the same after amend (was ${commitCountBefore}, got ${commitCountAfter})`,
+    );
+    // AC-5(b): no chore-commit subject in the amended commit.
     const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(newSubject, /chore: auto-sign attestation for AISDLC-133/);
+    assert.doesNotMatch(
+      newSubject,
+      /chore: auto-sign attestation/,
+      `AISDLC-490 AC-5(b): amended commit subject must NOT be a chore-sign subject: ${newSubject}`,
+    );
+    // HEAD SHA changed (amend creates a new commit object).
+    const newHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(newHead, head, 'amend must produce a new commit object (different SHA)');
   });
 
-  it('AC #5: re-push hint stays actionable (mentions the env-var deferral)', () => {
-    // The re-push message must point the operator at the AI_SDLC_SKIP_ATTESTATION_SIGN
-    // escape hatch so they can defer signing if they need to (e.g. they're
-    // about to hand-resign with a different key).
+  it('AC #5 (AISDLC-490 B+): deferral hint is present in stderr (AI_SDLC_SKIP_ATTESTATION_SIGN=1)', () => {
+    // The stderr output must still mention the escape hatch so operators can defer
+    // signing when needed (e.g. hand-resign with a different key).
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     const { cmd } = installFakeSigner(root);
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 0, `expected 0 (B+ exit 0), got ${r.status}: ${r.stderr}`);
     assert.match(r.stderr, /AI_SDLC_SKIP_ATTESTATION_SIGN=1/);
   });
 
@@ -401,7 +417,8 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeVerdictFile(root, 'AISDLC-133'); // writes to aisdlc-133.json
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
-    assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
+    // AISDLC-490 B+: exits 0 (amend, not a new chore commit).
+    assert.equal(r.status, 0, `expected 0 (B+ amend), got ${r.status}: ${r.stderr}`);
     // The signer must have been invoked with the lowercase verdict path.
     const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     assert.match(log, /aisdlc-133\.json/, `signer log must mention lowercase verdict: ${log}`);
@@ -415,130 +432,153 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       AI_SDLC_ITERATION_COUNT: '2',
     });
-    assert.equal(r.status, 1);
+    // AISDLC-490 B+: exits 0 (amend).
+    assert.equal(r.status, 0, `expected 0 (B+ amend), got ${r.status}: ${r.stderr}`);
     const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     assert.match(log, /--iteration-count 2/, `signer log must reflect iteration count: ${log}`);
   });
 
-  it('AISDLC-135: loop prevention — second push with HEAD as auto-sign chore is a no-op', () => {
-    // Reproduction of PR #168's loop. First push:
-    //   HEAD = dev commit, no envelope, no chore subject — hook fires,
-    //   signs envelope, commits chore, exits 1.
-    // Second push (HEAD is now the chore the first push added):
-    //   The envelope-at-HEAD check MISSES (the envelope was bound to the
-    //   parent's SHA, not the chore commit's own SHA — committing the
-    //   envelope changes HEAD). Without the AISDLC-135 subject predicate,
-    //   the hook re-fires here, signs again, commits another chore,
-    //   exits 1 — and loops indefinitely. With the predicate, the second
-    //   push falls through with exit 0 and zero side-effects.
+  it('AISDLC-490 B+ / AISDLC-135: amend approach — second push after amend is idempotent (no re-sign)', () => {
+    // AISDLC-490 B+ end-state: the hook no longer creates a chore commit (which
+    // was the root of the re-sign loop in pre-AISDLC-475 iterations). Instead it
+    // amends HEAD in place. On the second push, the patch-id envelope already
+    // exists (it was baked into the amended commit) → idempotent skip → exit 0.
+    //
+    // This replaces the old AISDLC-135 "second push with HEAD as auto-sign chore
+    // is a no-op" test. With B+, the chore-commit detection is no longer the
+    // primary guard — the patch-id envelope-exists check is.
+    //
+    // IMPORTANT: a code commit is required for patch-id computation. Without one,
+    // the diff origin/main..HEAD has no source changes → patch-id is empty →
+    // idempotency falls back to SHA-based check, which breaks after amend.
     writeFileSync(join(root, '.active-task'), 'AISDLC-135\n');
     writeVerdictFile(root, 'AISDLC-135');
 
-    // ── First push ────────────────────────────────────────────────
+    // Add a code commit so patch-id can be computed.
+    writeFileSync(join(root, 'feature-135.ts'), 'export const x = 135;\n');
+    git(['add', 'feature-135.ts'], root);
+    git(['commit', '-q', '-m', 'feat: add feature-135 for idempotency test'], root);
+
     const devHead = git(['rev-parse', 'HEAD'], root).trim();
-    const { cmd, logPath } = installFakeSigner(root);
-    const r1 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
-    assert.equal(r1.status, 1, `first push: expected 1, got ${r1.status}: ${r1.stderr}`);
-
-    const choreHead = git(['rev-parse', 'HEAD'], root).trim();
-    assert.notEqual(choreHead, devHead, 'first push must add a chore commit');
-    const choreSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(choreSubject, /^chore: auto-sign attestation for AISDLC-135/);
-    // RFC-0042 Phase 3: default v6 → <sha>.v6.dsse.json.
-    const envelopePath = join(root, '.ai-sdlc', 'attestations', `${devHead}.v6.dsse.json`);
-    assert.equal(existsSync(envelopePath), true, 'v6 envelope must exist at dev-commit SHA');
-
-    // Snapshot signer-log size + commit count so we can prove the second
-    // push doesn't write an envelope or add a commit.
-    const logBefore = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
+    const { cmd, logPath } = installFakeSigner(root);
 
-    // ── Second push (HEAD is the chore commit) ────────────────────
+    // ── First push (amend path) ───────────────────────────────────
+    const r1 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    assert.equal(
+      r1.status,
+      0,
+      `AISDLC-490 B+: first push must exit 0 (amend), got ${r1.status}: ${r1.stderr}`,
+    );
+
+    // HEAD SHA changed (amend creates a new commit object) but commit count stays same.
+    const amendedHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(amendedHead, devHead, 'amend must produce a new commit SHA');
+    const commitCountAfterFirst = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfterFirst,
+      commitCountBefore,
+      'amend must NOT add a new commit (commit count stays the same)',
+    );
+
+    // The envelope was written (patch-id-named, since there's a real code commit).
+    // The fake signer writes <patch-id>.v6.dsse.json; check ANY v6 envelope exists.
+    const attDirForIdempotency = join(root, '.ai-sdlc', 'attestations');
+    const envelopeFiles = existsSync(attDirForIdempotency)
+      ? readdirSync(attDirForIdempotency).filter((f) => f.endsWith('.v6.dsse.json'))
+      : [];
+    assert.ok(envelopeFiles.length > 0, 'v6 envelope must exist in attestations/ after sign');
+
+    // Snapshot signer-log size before second push.
+    const logBefore = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    const commitCountBeforeSecond = git(['rev-list', '--count', 'HEAD'], root).trim();
+
+    // ── Second push (idempotent — envelope already baked into amended commit) ──
     const r2 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
     assert.equal(
       r2.status,
       0,
-      `second push (HEAD is auto-sign chore) must be a no-op; got ${r2.status}: ${r2.stderr}`,
+      `second push must be idempotent (exit 0, no re-sign); got ${r2.status}: ${r2.stderr}`,
     );
 
-    // No new commit landed.
-    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    // No new commit or additional amend must occur.
+    const commitCountAfterSecond = git(['rev-list', '--count', 'HEAD'], root).trim();
     assert.equal(
-      commitCountAfter,
-      commitCountBefore,
-      `second push must NOT add another chore commit (${commitCountBefore} -> ${commitCountAfter})`,
+      commitCountAfterSecond,
+      commitCountBeforeSecond,
+      `second push must NOT add or amend any commit (count before=${commitCountBeforeSecond} after=${commitCountAfterSecond})`,
     );
     // Signer was NOT re-invoked.
     const logAfter = execFileSync('cat', [logPath], { encoding: 'utf-8' });
-    assert.equal(
-      logAfter,
-      logBefore,
-      'signer must NOT be invoked on the second push (HEAD is auto-sign chore)',
-    );
-    // No new envelope at the chore-commit SHA (check both v5 and v6 filenames).
-    const choreEnvelopeV5 = join(root, '.ai-sdlc', 'attestations', `${choreHead}.dsse.json`);
-    const choreEnvelopeV6 = join(root, '.ai-sdlc', 'attestations', `${choreHead}.v6.dsse.json`);
-    assert.equal(
-      existsSync(choreEnvelopeV5) || existsSync(choreEnvelopeV6),
-      false,
-      'no envelope must be written at the chore-commit SHA',
-    );
+    assert.equal(logAfter, logBefore, 'signer must NOT be invoked on the second (idempotent) push');
   });
 
-  it('AISDLC-135: hook STILL fires on a brand-new dev commit even when prior auto-sign chore commits exist in history', () => {
-    // History: dev1 → chore1 (auto-sign for dev1) → dev2 (HEAD).
-    // Subject of HEAD is "feat: ..." not "chore: auto-sign ..." so the
-    // AISDLC-135 predicate must NOT short-circuit. The envelope-at-HEAD
-    // check also misses (no envelope at dev2 yet). Hook should fire
-    // normally: sign + commit + exit 1.
+  it('AISDLC-490 B+ / AISDLC-135: hook fires on a brand-new dev commit even with prior signed commits in history', () => {
+    // AISDLC-490 B+ end-state: dev1 → (amend: dev1+envelope) → dev2 (HEAD).
+    // dev2 has a different patch-id → old envelope (for dev1's patch-id) is
+    // not found → hook fires and amends dev2 with a new envelope.
     writeFileSync(join(root, '.active-task'), 'AISDLC-135\n');
     writeVerdictFile(root, 'AISDLC-135');
 
-    // ── Build dev1 → chore1 → dev2 history ────────────────────────
-    // Step 1: dev1 — first sign cycle.
+    // ── Build dev1 → (amend with envelope) → dev2 history ─────────
+    // Step 1: dev1 — first sign cycle (amend path).
     writeFileSync(join(root, 'feature1.txt'), 'first feature\n');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: first feature'], root);
-    const dev1 = git(['rev-parse', 'HEAD'], root).trim();
     const { cmd, logPath } = installFakeSigner(root);
     const rA = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
-    assert.equal(rA.status, 1, `chore1 sign cycle: expected 1, got ${rA.status}: ${rA.stderr}`);
-    const chore1 = git(['rev-parse', 'HEAD'], root).trim();
-    assert.notEqual(chore1, dev1);
-    const chore1Subject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(chore1Subject, /^chore: auto-sign attestation for AISDLC-135/);
+    assert.equal(
+      rA.status,
+      0,
+      `dev1 sign cycle (B+ amend): expected 0, got ${rA.status}: ${rA.stderr}`,
+    );
+    // HEAD changed (amend creates new SHA) but commit count stays same.
+    const amendedDev1 = git(['rev-parse', 'HEAD'], root).trim();
+    const countAfterDev1 = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(countAfterDev1, '2', 'after dev1 amend: baseline + dev1 = 2 commits');
 
-    // Step 2: dev2 — brand-new dev commit ON TOP of chore1.
+    // Step 2: dev2 — brand-new dev commit ON TOP of amended dev1.
     writeFileSync(join(root, 'feature2.txt'), 'second feature\n');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: second feature'], root);
     const dev2 = git(['rev-parse', 'HEAD'], root).trim();
+    const commitCountBeforeDev2Sign = git(['rev-list', '--count', 'HEAD'], root).trim();
     const dev2Subject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
     assert.match(dev2Subject, /^feat: second feature/);
 
-    // ── Hook must fire for dev2 ──────────────────────────────────
-    const logBefore = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    // ── Hook must fire for dev2 ────────────────────────────────────
+    const logBefore = existsSync(logPath)
+      ? execFileSync('cat', [logPath], { encoding: 'utf-8' })
+      : '';
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
     assert.equal(
       r.status,
-      1,
-      `hook must fire on a brand-new dev commit even when chore1 is in history; got ${r.status}: ${r.stderr}`,
+      0,
+      `hook must fire and exit 0 on brand-new dev commit (B+ amend); got ${r.status}: ${r.stderr}`,
     );
 
-    // A new v6 envelope must have been written (AISDLC-475 Fix B: the fake signer
-    // now writes the patch-id file, not the SHA file, so we check for ANY v6
-    // envelope in the attestations directory instead of a specific SHA filename).
+    // A new v6 envelope must have been written for dev2.
     const attDirForDev2 = join(root, '.ai-sdlc', 'attestations');
     const dev2EnvelopeFiles = existsSync(attDirForDev2)
       ? readdirSync(attDirForDev2).filter((f) => f.endsWith('.v6.dsse.json'))
       : [];
     assert.ok(dev2EnvelopeFiles.length > 0, 'a new v6 envelope must exist after dev2 sign cycle');
 
-    // New chore commit on top.
+    // No new commit was added (amend, not new commit).
+    const commitCountAfterDev2Sign = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfterDev2Sign,
+      commitCountBeforeDev2Sign,
+      `dev2 sign (amend) must NOT add a new commit (count ${commitCountBeforeDev2Sign} → ${commitCountAfterDev2Sign})`,
+    );
+
+    // HEAD SHA changed (amend).
     const newHead = git(['rev-parse', 'HEAD'], root).trim();
-    assert.notEqual(newHead, dev2, 'a new chore commit must have been added on top of dev2');
-    const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(newSubject, /^chore: auto-sign attestation for AISDLC-135/);
+    assert.notEqual(newHead, dev2, 'amend must produce a new commit SHA');
+
+    // The amended commit subject is still the feat: commit (not a chore).
+    const amendedSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(amendedSubject, /^feat: second feature/);
 
     // Signer was invoked again (log grew).
     const logAfter = execFileSync('cat', [logPath], { encoding: 'utf-8' });
@@ -601,7 +641,8 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       CODEX_VERSION: 'codex@0.128.0',
     });
-    assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
+    // AISDLC-490 B+: exits 0 (amend, not chore commit).
+    assert.equal(r.status, 0, `expected 0 (B+ amend), got ${r.status}: ${r.stderr}`);
     const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     assert.match(
       log,
@@ -626,7 +667,8 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       // CODEX_VERSION intentionally absent (cleanEnv already deletes it if present)
     });
-    assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
+    // AISDLC-490 B+: exits 0 (amend, not chore commit).
+    assert.equal(r.status, 0, `expected 0 (B+ amend), got ${r.status}: ${r.stderr}`);
     const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     assert.equal(
       log.includes('--harness-name'),
@@ -635,24 +677,31 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
   });
 
-  it('the chore commit body does NOT contain a CI-skip magic token (AISDLC-88 contract)', () => {
-    // The auto-sign chore commit body would re-trigger every workflow on the
-    // resulting PR if it carried [skip ci]/[ci skip]/etc. The check-skip-ci-marker
-    // pre-push gate (AISDLC-88) would also fail the next push. Lock in the
-    // contract here as a guard against a copy-paste regression.
+  it('AISDLC-490 B+: no chore commit is created (AISDLC-88 CI-skip concern eliminated)', () => {
+    // AISDLC-490 B+ end-state: no chore commit is created at all. The attestation
+    // is baked into the dev commit via amend. The CI-skip token concern from
+    // AISDLC-88 is structurally eliminated — there is no separate commit body to
+    // worry about. We verify that the amended commit subject is unchanged from the
+    // baseline (not a chore: auto-sign message).
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
+    const originalSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
     const { cmd } = installFakeSigner(root);
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
-    assert.equal(r.status, 1);
-    const body = git(['log', '-1', '--format=%B', 'HEAD'], root);
-    for (const tok of ['[skip ci]', '[ci skip]', '[no ci]', '[skip actions]', '[actions skip]']) {
-      assert.equal(
-        body.toLowerCase().includes(tok.toLowerCase()),
-        false,
-        `chore commit body must not contain "${tok}": ${body}`,
-      );
-    }
+    assert.equal(r.status, 0, `expected 0 (B+ amend), got ${r.status}: ${r.stderr}`);
+    // The amended commit must NOT have a chore: auto-sign subject.
+    const amendedSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.doesNotMatch(
+      amendedSubject,
+      /chore: auto-sign attestation/,
+      `amended commit must not have a chore-sign subject (B+ invariant): ${amendedSubject}`,
+    );
+    // The amended commit subject must match the original (amend preserves it).
+    assert.equal(
+      amendedSubject,
+      originalSubject,
+      `amended commit subject must be unchanged from original: expected "${originalSubject}", got "${amendedSubject}"`,
+    );
   });
 
   // ── AISDLC-383.7: AISDLC-380 sub-attestation gate tests removed ─────
@@ -678,10 +727,11 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       // AI_SDLC_SCHEMA_VERSION intentionally NOT set (should default to v6).
     });
 
+    // AISDLC-490 B+: exits 0 (amend, not chore commit).
     assert.equal(
       r.status,
-      1,
-      `expected exit 1 (v6 default: signed), got ${r.status}: stderr=${r.stderr}`,
+      0,
+      `expected exit 0 (v6 default: signed + amend), got ${r.status}: stderr=${r.stderr}`,
     );
     const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
     assert.match(
@@ -706,23 +756,30 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
   // The fix: also `git add .ai-sdlc/transcript-leaves/` in the chore commit step
   // so the per-patch-id leaves file travels with the envelope.
 
-  it('AISDLC-471: chore commit includes per-patch-id transcript-leaves file when signer writes it', () => {
-    // Set up: sentinel + verdict + fake signer that writes both the envelope
-    // AND a per-patch-id transcript-leaves file (simulates the real signer's
-    // cli-attestation.mjs emit-leaf step from AISDLC-421).
+  it('AISDLC-471 / AISDLC-490 B+: amend includes per-patch-id transcript-leaves file when signer writes it', () => {
+    // AISDLC-490 B+ end-state: the attestation files (envelope + per-patch-id
+    // leaves) are staged into the dev commit via `git commit --amend --no-edit`
+    // instead of a new chore commit. The hook exits 0 (no re-push needed).
     writeFileSync(join(root, '.active-task'), 'AISDLC-471\n');
     writeVerdictFile(root, 'AISDLC-471');
     const head = git(['rev-parse', 'HEAD'], root).trim();
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const { cmd } = installFakeSigner(root, { withLeaves: true });
-    const r = runHook(root, {
-      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-      AI_SDLC_INTERNAL_NO_EXIT_1: '1',
-    });
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
-    assert.equal(r.status, 0, `expected 0 (orchestrator mode), got ${r.status}: ${r.stderr}`);
+    // AISDLC-490 B+: exits 0 (amend, no re-push needed).
+    assert.equal(r.status, 0, `expected 0 (B+ amend), got ${r.status}: ${r.stderr}`);
 
-    // AC #1: envelope must be committed (pre-existing behavior).
+    // Commit count must stay the same (amend, not new commit).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBefore,
+      `amend must NOT add a new commit (count before=${commitCountBefore} after=${commitCountAfter})`,
+    );
+
+    // AC #1: envelope must be in the amended commit tree.
     const envelopeInTree = spawnSync(
       'git',
       ['ls-tree', 'HEAD', '--', `.ai-sdlc/attestations/${head}.v6.dsse.json`],
@@ -730,10 +787,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
     assert.ok(
       envelopeInTree.stdout.trim().length > 0,
-      `envelope must be committed: git ls-tree output was empty (stderr: ${envelopeInTree.stderr})`,
+      `envelope must be in amended commit tree: git ls-tree output was empty (stderr: ${envelopeInTree.stderr})`,
     );
 
-    // AC #2 (load-bearing for AISDLC-471): per-patch-id leaves file must be committed.
+    // AC #2 (load-bearing for AISDLC-471): per-patch-id leaves file must be in amended commit.
     const leavesInTree = spawnSync(
       'git',
       ['ls-tree', 'HEAD', '--', `.ai-sdlc/transcript-leaves/${head}.jsonl`],
@@ -741,16 +798,16 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
     assert.ok(
       leavesInTree.stdout.trim().length > 0,
-      `per-patch-id leaves file must be committed alongside the envelope — ` +
+      `per-patch-id leaves file must be in amended commit alongside the envelope — ` +
         `this is the AC #2 regression guard for AISDLC-471. ` +
         `git ls-tree output was empty (stderr: ${leavesInTree.stderr})`,
     );
   });
 
-  it('AISDLC-471: backward-compat — hook still works when signer writes no leaves file (empty dir)', () => {
+  it('AISDLC-471 / AISDLC-490 B+: backward-compat — hook still works when signer writes no leaves file', () => {
     // When the signer does not emit per-patch-id leaves (e.g. ad-hoc operator
     // signing, or a caller that has not yet wired cli-attestation.mjs emit-leaf),
-    // the hook must still succeed: just commits the envelope without the leaves
+    // the hook must still succeed: just amends the envelope without the leaves
     // file. `git add` of a non-existent/empty directory is a no-op.
     writeFileSync(join(root, '.active-task'), 'AISDLC-471\n');
     writeVerdictFile(root, 'AISDLC-471');
@@ -758,18 +815,12 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
 
     // withLeaves: false → signer does NOT write .ai-sdlc/transcript-leaves/
     const { cmd } = installFakeSigner(root, { withLeaves: false });
-    const r = runHook(root, {
-      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-      AI_SDLC_INTERNAL_NO_EXIT_1: '1',
-    });
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
-    assert.equal(
-      r.status,
-      0,
-      `expected 0 (orchestrator mode, no leaves), got ${r.status}: ${r.stderr}`,
-    );
+    // AISDLC-490 B+: exits 0 (amend, no re-push needed).
+    assert.equal(r.status, 0, `expected 0 (B+ amend, no leaves), got ${r.status}: ${r.stderr}`);
 
-    // Envelope must still be committed (primary function intact).
+    // Envelope must be in the amended commit tree.
     const envelopeInTree = spawnSync(
       'git',
       ['ls-tree', 'HEAD', '--', `.ai-sdlc/attestations/${head}.v6.dsse.json`],
@@ -777,11 +828,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
     assert.ok(
       envelopeInTree.stdout.trim().length > 0,
-      `envelope must be committed even when no leaves file exists: ${envelopeInTree.stderr}`,
+      `envelope must be in amended commit even when no leaves file exists: ${envelopeInTree.stderr}`,
     );
 
-    // No leaves file must have been sneaked into the commit tree (it simply
-    // doesn't exist — the absence is fine, the hook must not error).
+    // No leaves file must appear in the amended commit tree.
     const leavesInTree = spawnSync(
       'git',
       ['ls-tree', 'HEAD', '--', `.ai-sdlc/transcript-leaves/${head}.jsonl`],
@@ -790,30 +840,47 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.equal(
       leavesInTree.stdout.trim(),
       '',
-      'no leaves file should appear in the commit tree when none was written by the signer',
+      'no leaves file should appear in amended commit tree when none was written by the signer',
     );
   });
 
-  it('AISDLC-472: STANDALONE exit-1 path commits per-patch-id leaves (normal pre-push, no orchestrator)', () => {
-    // The existing withLeaves coverage (AISDLC-471) only exercises orchestrator
-    // mode (AI_SDLC_INTERNAL_NO_EXIT_1=1 → exit 0). This test covers the normal
-    // standalone pre-push invocation: leaves present, NO orchestrator env var,
-    // so the hook signs + commits the envelope + the per-patch-id leaves file
-    // AND exits 1 with the "re-push required" hint. Guards the load-bearing
-    // AISDLC-471 staging behavior on the exit-1 code path operators actually hit.
-    writeFileSync(join(root, '.active-task'), 'AISDLC-472\n');
-    writeVerdictFile(root, 'AISDLC-472');
+  it('AISDLC-490 B+: amend path commits per-patch-id leaves (primary path — exits 0)', () => {
+    // AISDLC-490 B+ replaces the old AISDLC-472 "standalone exit-1 path" with an
+    // "amend + exit 0" path. This test guards the load-bearing AISDLC-471 staging
+    // behavior: envelope + per-patch-id leaves are staged into the amended commit,
+    // and the hook exits 0 (push proceeds immediately, no second `git push` needed).
+    writeFileSync(join(root, '.active-task'), 'AISDLC-490-test\n');
+    writeVerdictFile(root, 'AISDLC-490-test');
     const head = git(['rev-parse', 'HEAD'], root).trim();
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const { cmd } = installFakeSigner(root, { withLeaves: true });
-    // NOTE: no AI_SDLC_INTERNAL_NO_EXIT_1 → standalone mode → exit 1 expected.
+    // No AI_SDLC_INTERNAL_NO_EXIT_1 — B+ exits 0 in both standalone and orchestrator mode.
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
-    assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
-    // Re-push message must be actionable (mirrors the AC #1+5 standalone test).
-    assert.match(r.stderr, /re-run `git push`|re-push required|added an attestation/i);
+    // B+ exits 0 always (amend, push proceeds immediately).
+    assert.equal(r.status, 0, `expected 0 (B+ amend exit 0), got ${r.status}: ${r.stderr}`);
 
-    // Envelope must be committed.
+    // Commit count must stay the same (amend, not new commit).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBefore,
+      `B+ amend must NOT add a new commit (count before=${commitCountBefore} after=${commitCountAfter})`,
+    );
+
+    // AISDLC-490 AC-5(a): single-commit push shape — commit count unchanged.
+    // (checked above)
+
+    // AISDLC-490 AC-5(b): no chore-commit subject in the amended commit.
+    const amendedSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.doesNotMatch(
+      amendedSubject,
+      /chore: auto-sign attestation/,
+      `AISDLC-490 AC-5(b): no chore-sign subject must appear after B+ amend: ${amendedSubject}`,
+    );
+
+    // Envelope must be in the amended commit tree.
     const envelopeInTree = spawnSync(
       'git',
       ['ls-tree', 'HEAD', '--', `.ai-sdlc/attestations/${head}.v6.dsse.json`],
@@ -821,11 +888,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
     assert.ok(
       envelopeInTree.stdout.trim().length > 0,
-      `envelope must be committed on the standalone exit-1 path: ${envelopeInTree.stderr}`,
+      `envelope must be in amended commit tree: ${envelopeInTree.stderr}`,
     );
 
-    // Load-bearing AISDLC-471 guard: per-patch-id leaves file must be committed
-    // alongside the envelope on the standalone exit-1 path too.
+    // Load-bearing AISDLC-471 guard: per-patch-id leaves file must be in amended commit.
     const leavesInTree = spawnSync(
       'git',
       ['ls-tree', 'HEAD', '--', `.ai-sdlc/transcript-leaves/${head}.jsonl`],
@@ -833,16 +899,12 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
     assert.ok(
       leavesInTree.stdout.trim().length > 0,
-      `per-patch-id leaves file must be committed on the standalone exit-1 path — ` +
-        `this is the AISDLC-472 regression guard. ` +
-        `git ls-tree output was empty (stderr: ${leavesInTree.stderr})`,
+      `per-patch-id leaves must be in amended commit (AISDLC-490 B+ / AISDLC-471): ${leavesInTree.stderr}`,
     );
 
-    // A chore commit must have landed on top of the original HEAD.
+    // HEAD SHA changed (amend creates new commit object).
     const newHead = git(['rev-parse', 'HEAD'], root).trim();
-    assert.notEqual(newHead, head, 'a chore commit must have been added on top of HEAD');
-    const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(newSubject, /chore: auto-sign attestation for AISDLC-472/);
+    assert.notEqual(newHead, head, 'amend must produce a new commit SHA');
   });
 
   it('AISDLC-274: hook removes stale envelope + signs fresh after queue-rebase simulation', () => {
@@ -890,11 +952,12 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd } = installFakeSigner(root);
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
-    // Hook must fire (no envelope at new dev HEAD).
+    // AISDLC-490 B+: hook fires (no envelope for new dev HEAD's patch-id),
+    // removes stale envelope, amends, and exits 0.
     assert.equal(
       r.status,
-      1,
-      `expected 1 (signed fresh after rebase), got ${r.status}: stderr=${r.stderr}`,
+      0,
+      `AISDLC-490 B+: expected 0 (amend after stale-envelope removal + fresh sign), got ${r.status}: stderr=${r.stderr}`,
     );
     // Must report stale envelope removal.
     assert.match(r.stderr, /stale envelope/i, `expected stale-envelope message: ${r.stderr}`);
@@ -902,8 +965,6 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     // Stale envelope must be gone.
     assert.equal(existsSync(staleEnvPath), false, 'stale envelope must be removed before new sign');
     // A new envelope must exist in the attestations directory after the sign cycle.
-    // AISDLC-475 Fix B: the fake signer now writes the patch-id-named file (not the
-    // SHA-named file), so we check for ANY v6 envelope instead of the specific SHA.
     const newEnvelopes = existsSync(attDir)
       ? readdirSync(attDir).filter((f) => f.endsWith('.v6.dsse.json'))
       : [];
@@ -1063,31 +1124,138 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       root,
     );
     const newDevHead = git(['rev-parse', 'HEAD'], root).trim();
+    // Capture commit count right before the hook fires on the new dev commit.
+    const commitCountBeforeHook = git(['rev-list', '--count', 'HEAD'], root).trim();
 
-    // Step 4: run the hook. With Fix B, the hook computes a NEW patch-id
+    // Step 4: run the hook. The hook computes a NEW patch-id
     // (different from oldPatchId because the diff changed) → no envelope found
-    // → MUST sign (re-sign). The old envelope at oldPatchId is NOT treated as valid.
+    // → MUST sign (amend with new envelope). The old envelope at oldPatchId is NOT treated as valid.
+    // AISDLC-490 B+: exits 0 (amend in place, not a new chore commit).
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
     assert.equal(
       r.status,
-      1,
-      `AISDLC-475 AC#7(c) SECURITY: genuine source change must force a re-sign (exit 1), ` +
-        `got ${r.status}: ${r.stderr}`,
+      0,
+      `AISDLC-475 AC#7(c) / AISDLC-490 AC-5(c) SECURITY: genuine source change must force ` +
+        `a re-sign and exit 0 (amend), got ${r.status}: ${r.stderr}`,
     );
     // Signer MUST have been invoked (it's a new content state).
     assert.equal(
       existsSync(logPath),
       true,
-      'AISDLC-475 AC#7(c) SECURITY: signer MUST be invoked after a genuine source change',
+      'AISDLC-490 AC-5(c) SECURITY: signer MUST be invoked after a genuine source change',
     );
-    // A new commit must have landed (the new chore-sign commit).
+    // HEAD SHA must change (amend creates new commit object).
     const finalHead = git(['rev-parse', 'HEAD'], root).trim();
     assert.notEqual(
       finalHead,
       newDevHead,
-      'a new chore commit must be added after genuine source change',
+      'AISDLC-490 AC-5(c): amend after genuine source change must produce a new commit SHA',
+    );
+    // CRITICAL AC-5(c): commit count must stay the same (amend, NOT a new commit).
+    // If this assertion fails, a genuine source change caused a chore-commit (pre-B+ behavior)
+    // which means the re-sign loop is NOT structurally eliminated.
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBeforeHook,
+      `AISDLC-490 AC-5(c): commit count must NOT increase after amend (was ${commitCountBeforeHook}, got ${commitCountAfter})`,
+    );
+  });
+
+  it('AISDLC-490 AC-5(c) SECURITY — replay guard: B+ amend does NOT allow old envelope to pass on source change', () => {
+    // This is the critical AC-5(c) test for B+: a genuine source change MUST produce
+    // a different patch-id, making the old envelope at the old patch-id invalid.
+    // The hook must re-sign (amend with new envelope). If the old envelope were
+    // accepted, that would be a critical trust-chain hole.
+    //
+    // STOP condition: if the hook exits 0 WITHOUT invoking the signer on a genuine
+    // source change, that means the old envelope was treated as valid → CRITICAL
+    // security regression. This test guards against that.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-490-replay\n');
+    writeVerdictFile(root, 'AISDLC-490-replay');
+
+    // Step 1: commit initial source, write envelope at patch-id-1.
+    writeFileSync(join(root, 'source-replay-guard.ts'), 'export const v = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: initial source for replay guard test'], root);
+
+    // Compute patch-id-1.
+    const mergeBase = execFileSync('git', ['merge-base', 'origin/main', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+    const diffOut = spawnSync(
+      'git',
+      [
+        'diff-tree',
+        '--no-color',
+        '-p',
+        `${mergeBase}..HEAD`,
+        '--',
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves/',
+        ':!.ai-sdlc/transcript-leaves.jsonl',
+      ],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    const patchIdResult = spawnSync('git', ['patch-id', '--stable'], {
+      input: diffOut.stdout,
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    const patchId1 = patchIdResult.stdout.trim().slice(0, 40);
+    assert.ok(/^[0-9a-f]{40}$/.test(patchId1), `patchId1 must be 40-hex, got: "${patchId1}"`);
+
+    // Bake envelope for patch-id-1 into the commit (simulates a prior successful sign).
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    writeFileSync(
+      join(attDir, `${patchId1}.v6.dsse.json`),
+      '{"_test":"old-envelope","schemaVersion":"v6"}\n',
+    );
+    git(['add', '.'], root);
+    git(['commit', '--amend', '--no-edit', '-q'], root);
+
+    // Step 2: make a GENUINE source change on top.
+    writeFileSync(join(root, 'source-replay-guard.ts'), 'export const v = 999; // CHANGED\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: source change — must invalidate patch-id-1 envelope'], root);
+    const devHead2 = git(['rev-parse', 'HEAD'], root).trim();
+
+    // Step 3: run the hook.
+    // CRITICAL: the hook must NOT short-circuit on the old patchId1 envelope.
+    // It must compute the new patch-id (patchId2), find no envelope there,
+    // invoke the signer, and amend with the new envelope.
+    const { cmd: signerCmd, logPath } = installFakeSigner(root);
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: signerCmd });
+
+    // CRITICAL: exits 0 (amend).
+    assert.equal(
+      r.status,
+      0,
+      `AISDLC-490 AC-5(c): genuine source change must trigger re-sign (exit 0 after amend), got ${r.status}: ${r.stderr}`,
+    );
+    // CRITICAL: signer MUST have been invoked — old envelope is NOT valid for new patch-id.
+    assert.equal(
+      existsSync(logPath),
+      true,
+      `AISDLC-490 AC-5(c) SECURITY CRITICAL: signer MUST be invoked after genuine source change. ` +
+        `If the signer was NOT invoked, the old envelope at patchId1 was accepted for new source content — ` +
+        `this is a trust-chain hole!`,
+    );
+    // HEAD SHA must change (amend).
+    const newHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(newHead, devHead2, 'amend must produce a new commit SHA');
+    // No new commit (amend, not new chore commit).
+    // Commit count: baseline(1) + source-change-dev1(2) + source-change-dev2(3) = 3
+    // The amend of dev1 and dev2 do NOT increase the count.
+    const commitCount = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCount,
+      '3',
+      `expected 3 commits (baseline + dev1 + dev2 = 3, amends don't add), got ${commitCount}`,
     );
   });
 });

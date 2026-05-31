@@ -322,8 +322,11 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
   });
 
   // ── Combination 3: attestation-sign only (0/1) ─────────────────────────
+  // AISDLC-490 B+: when ONLY attestation-sign runs (task-move is a no-op),
+  // the orchestrator exits 0 because the sign hook amends HEAD in place (no new
+  // commit → commit count unchanged → FIXED array stays empty → exit 0).
 
-  it('(combo 01) exits 1 when only attestation-sign runs', () => {
+  it('AISDLC-490 B+ (combo 01) exits 0 when only attestation-sign runs (amend, no re-push)', () => {
     const TASK_ID = 'AISDLC-200';
     setupAttestationConditions(root, TASK_ID);
 
@@ -339,12 +342,12 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     );
     git(['add', '.'], root);
     git(['commit', '-q', '-m', `chore: task already moved (${TASK_ID})`], root);
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const signCmd = installFakeSignAttestation(root);
     const r = runOrchestrator(root, {
       env: {
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
-        // Enable attestation-sign test mode (AISDLC-380 sub-attestation gate bypass).
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -352,20 +355,38 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       },
     });
 
-    assert.equal(r.status, 1, `expected 1 (attestation-sign ran), got ${r.status}: ${r.stderr}`);
-    assert.match(r.stderr, /Auto-fixed:.*attestation-sign/i);
-    assert.match(r.stderr, /Re-run `git push`/i);
+    // AISDLC-490 B+: attestation-sign amends (no new commit) → commit count unchanged
+    // → orchestrator exits 0 (no re-push needed; push proceeds with amended commit).
+    assert.equal(
+      r.status,
+      0,
+      `AISDLC-490 B+: expected 0 (attestation-sign amends, no re-push), got ${r.status}: ${r.stderr}`,
+    );
+    // Commit count must stay the same (amend, not new commit).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBefore,
+      `AISDLC-490 B+: attestation-sign amend must NOT add a commit (before=${commitCountBefore} after=${commitCountAfter})`,
+    );
   });
 
   // ── Combination 4: task-move + attestation-sign (1/1) ──────────────────
+  // AISDLC-490 B+: when BOTH task-move and attestation-sign run:
+  // - task-move creates a new chore commit → commit count grows → exits 1
+  // - attestation-sign amends that chore commit (no additional commit)
+  // The orchestrator exits 1 (because task-move added a new commit), but
+  // only lists task-move in Auto-fixed (attestation-sign is amend-based,
+  // commit count unchanged after attestation-sign).
 
-  it('(combo 11) exits 1 and lists both when task-move + attestation-sign both run', () => {
+  it('AISDLC-490 B+ (combo 11) exits 1 (task-move added commit), attestation amends task-move commit', () => {
     const TASK_ID = 'AISDLC-300';
     setupAttestationConditions(root, TASK_ID);
 
     writeTaskFile(root, TASK_ID);
     git(['add', '.'], root);
     git(['commit', '-q', '-m', `feat: dual fixup case (${TASK_ID})`], root);
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const taskCmd = installFakeTaskCli(root);
     const signCmd = installFakeSignAttestation(root);
@@ -380,22 +401,36 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       },
     });
 
-    assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
+    // Still exits 1 because task-move added a new commit.
+    assert.equal(r.status, 1, `expected 1 (task-move added commit), got ${r.status}: ${r.stderr}`);
     assert.match(r.stderr, /Auto-fixed:/i);
     assert.match(r.stderr, /task-move/i);
-    assert.match(r.stderr, /attestation-sign/i);
-    assert.match(r.stderr, /Re-run `git push`/i);
+    // AISDLC-490 B+: commit count grew by exactly 1 (task-move only; attestation-sign amended).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      parseInt(commitCountAfter) - parseInt(commitCountBefore),
+      1,
+      `AISDLC-490 B+: commit count must grow by 1 (task-move only) — before=${commitCountBefore} after=${commitCountAfter}`,
+    );
   });
 
   // ── Ordering invariant ────────────────────────────────────────────────────
 
-  it('task-move commit appears BEFORE attestation-sign commit in git log', () => {
+  it('AISDLC-490 B+: task-move runs BEFORE attestation-sign; attestation-sign amends task-move commit (not a new commit)', () => {
+    // AISDLC-490 B+ changes the ordering contract:
+    // - task-move still produces a NEW chore commit (auto-close subject)
+    // - attestation-sign now AMENDS the task-move commit in place (no new commit)
+    // The ordering invariant (task-move BEFORE sign) is preserved: the sign hook
+    // runs second in the dependency chain, amending whatever HEAD happens to be
+    // at that point (which is the task-move chore commit). The attestation envelope
+    // is baked into the task-move commit, not into a separate "auto-sign" commit.
     const TASK_ID = 'AISDLC-700';
     setupAttestationConditions(root, TASK_ID);
 
     writeTaskFile(root, TASK_ID);
     git(['add', '.'], root);
     git(['commit', '-q', '-m', `feat: ordering test (${TASK_ID})`], root);
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const taskCmd = installFakeTaskCli(root);
     const signCmd = installFakeSignAttestation(root);
@@ -410,25 +445,40 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       },
     });
 
-    assert.equal(r.status, 1, `expected exit 1, got ${r.status}: ${r.stderr}`);
+    // Task-move added a new commit → commit count grew → orchestrator exits 1.
+    assert.equal(r.status, 1, `expected exit 1 (task-move ran), got ${r.status}: ${r.stderr}`);
 
     // Read the last 3 commit subjects in chronological order (oldest first).
     const logOut = git(['log', '--format=%s', '-3', '--reverse', 'HEAD'], root).trim();
     const subjects = logOut.split('\n');
     const taskMoveIdx = subjects.findIndex((s) => s.includes('auto-close'));
-    const attestIdx = subjects.findIndex((s) => s.includes('auto-sign attestation'));
 
     assert.ok(taskMoveIdx !== -1, `task-move chore commit must exist in log:\n${logOut}`);
-    assert.ok(attestIdx !== -1, `attestation-sign chore commit must exist in log:\n${logOut}`);
-    assert.ok(
-      taskMoveIdx < attestIdx,
-      `task-move (idx ${taskMoveIdx}) must appear BEFORE attestation-sign (idx ${attestIdx}) — contentHashV4 load-bearing ordering:\n${logOut}`,
+    // AISDLC-490 B+: attestation-sign amends the task-move commit, so no separate
+    // "auto-sign attestation" commit exists in the log. The attestation envelope
+    // is part of the task-move commit's tree.
+    const attestIdx = subjects.findIndex((s) => s.includes('auto-sign attestation'));
+    assert.equal(
+      attestIdx,
+      -1,
+      `AISDLC-490 B+: no "auto-sign attestation" chore commit must exist in log — attestation is baked into the task-move commit:\n${logOut}`,
+    );
+
+    // Commit count: grew by exactly 1 (task-move only, no attestation-sign new commit).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      parseInt(commitCountAfter) - parseInt(commitCountBefore),
+      1,
+      `AISDLC-490 B+: commit count must grow by exactly 1 (task-move only, attestation-sign amends it) — before=${commitCountBefore} after=${commitCountAfter}`,
     );
   });
 
   // ── Idempotency: second push after orchestrator fired ───────────────────
 
-  it('exits 0 on second push after all fixups already ran', () => {
+  it('exits 0 on second push after all fixups already ran (task-move + attestation-sign)', () => {
+    // AISDLC-490 B+: first push → task-move adds new commit (exit 1).
+    // Second push → task-move sees file already in completed/ (no-op), attestation-sign
+    // sees patch-id envelope exists (idempotent skip) → both exit 0 → orchestrator exits 0.
     const TASK_ID = 'AISDLC-800';
     setupAttestationConditions(root, TASK_ID);
 
@@ -447,9 +497,13 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       AI_SDLC_SCHEMA_VERSION: 'v5',
     };
 
-    // First push: fixups run → exit 1.
+    // First push: task-move adds a new commit → exit 1.
     const r1 = runOrchestrator(root, { env: sharedEnv });
-    assert.equal(r1.status, 1, `first push must exit 1, got ${r1.status}: ${r1.stderr}`);
+    assert.equal(
+      r1.status,
+      1,
+      `first push must exit 1 (task-move added commit), got ${r1.status}: ${r1.stderr}`,
+    );
 
     // Second push: all fixups already done → exit 0.
     const headAfterFirst = git(['rev-parse', 'HEAD'], root).trim();
@@ -460,9 +514,9 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       `second push (after fixups) must exit 0, got ${r2.status}: ${r2.stderr}`,
     );
 
-    // HEAD must not change on second push.
+    // HEAD must not change on second push (no new commits, no amend triggered).
     const headAfterSecond = git(['rev-parse', 'HEAD'], root).trim();
-    assert.equal(headAfterSecond, headAfterFirst, 'second push must not add any commits');
+    assert.equal(headAfterSecond, headAfterFirst, 'second push must not change HEAD');
   });
 
   // ── AC-5: sub-hooks retain standalone exit-1 behavior ─────────────────
@@ -492,7 +546,10 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     );
   });
 
-  it('check-attestation-sign.sh still exits 1 when invoked directly (no AI_SDLC_INTERNAL_NO_EXIT_1)', () => {
+  it('AISDLC-490 B+: check-attestation-sign.sh exits 0 when invoked directly (amend-based, no re-push)', () => {
+    // AISDLC-490 B+ change: the hook now amends instead of creating a new chore commit,
+    // so it exits 0 in BOTH standalone and orchestrator modes. The old exit-1 behavior
+    // was the source of the re-sign loop — eliminating it here is the structural fix.
     const attestScript = join(PROJECT_ROOT, 'scripts', 'check-attestation-sign.sh');
     const TASK_ID = 'AISDLC-902';
     setupAttestationConditions(root, TASK_ID);
@@ -500,6 +557,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     writeFileSync(join(root, 'some-code.ts'), 'export const y = 2;\n');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', `feat: standalone attest test (${TASK_ID})`], root);
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     const signCmd = installFakeSignAttestation(root);
     const NULL_SHA = '0000000000000000000000000000000000000000';
@@ -519,10 +577,18 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       encoding: 'utf-8',
     });
 
+    // AISDLC-490 B+: exits 0 (amend, push proceeds immediately).
     assert.equal(
       r.status,
-      1,
-      `standalone check-attestation-sign.sh must exit 1, got ${r.status}: ${r.stderr}`,
+      0,
+      `AISDLC-490 B+: standalone check-attestation-sign.sh must exit 0 (amend-based), got ${r.status}: ${r.stderr}`,
+    );
+    // Commit count must NOT increase (amend, not new commit).
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBefore,
+      `AISDLC-490 B+: amend must NOT add a new commit (before=${commitCountBefore} after=${commitCountAfter})`,
     );
   });
 
