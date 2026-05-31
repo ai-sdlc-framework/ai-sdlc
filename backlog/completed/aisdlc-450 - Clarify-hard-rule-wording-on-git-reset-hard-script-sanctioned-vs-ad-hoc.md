@@ -1,7 +1,7 @@
 ---
 id: AISDLC-450
 title: Clarify hard-rule wording on git reset --hard (script-sanctioned vs ad-hoc)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-27 22:09'
 labels:

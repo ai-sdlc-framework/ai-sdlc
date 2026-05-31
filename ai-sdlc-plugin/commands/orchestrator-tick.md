@@ -47,7 +47,7 @@ baseline.
 3. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 4. **Never delete branches.** No `git branch -D` / `-d`.
 5. **Never edit `.ai-sdlc/**`or`.github/workflows/**`.**
-6. **Never run destructive git operations.** No `git reset --hard`.
+6. **Never run `git reset --hard` ad-hoc.** The sanctioned path is `scripts/check-orchestrator-state.sh`, which resets the parent to `origin/main` ONLY when the working tree is clean. Outside that script, `git reset --hard` is forbidden unless the operator explicitly authorizes it in the current session. (AISDLC-450)
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 
 ## Protocol overview (RFC-0041 Phase 1 + Phase 1.5 + AISDLC-396 Pattern X v2 — reconcile flow)
@@ -68,6 +68,9 @@ isn't a JS event loop.
 ```
 /ai-sdlc orchestrator-tick (Conductor)
   │
+  ├── 0. check-orchestrator-state.sh (AISDLC-450):
+  │       clean parent → git reset --hard origin/main (sanctioned path)
+  │       dirty parent → file Decision Catalog entry (1h timebox) + exit 1
   ├── 1. Check AI_SDLC_AUTONOMOUS_ORCHESTRATOR is set
   ├── 1.5. sync-parent + prune-stale-parent-debris (AISDLC-217 / AISDLC-446):
   │       non-fatal hygiene pass; syncs genuinely-new untracked task files +
@@ -133,6 +136,59 @@ else
 fi
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 ```
+
+## Step 0 — Check orchestrator state (parent guard + dirty-parent escalation) (AISDLC-450)
+
+Run `scripts/check-orchestrator-state.sh` before any frontier work. The script:
+
+- Auto-corrects `core.bare=true` → `false`.
+- Fetches `origin/main`.
+- **Clean working tree** → `git reset --hard origin/main` (sanctioned path). Logs recovery. Tick continues.
+- **Dirty working tree (non-backlog tracked changes)** → REFUSES: prints offending paths + manual recovery command, exits non-zero. The tick is ABORTED.
+
+```bash
+bash "$PLUGIN_SCRIPTS_DIR/check-orchestrator-state.sh"
+```
+
+### Dirty-parent escalation → Decision Catalog (AISDLC-447 timebox)
+
+When `check-orchestrator-state.sh` exits non-zero (parent dirty, reset refused), do NOT auto-resolve. Instead, escalate to the Decision Catalog with a 1-hour timebox so the operator is routed the decision promptly:
+
+```bash
+# check-orchestrator-state.sh exited 1 → parent is dirty
+node pipeline-cli/bin/cli-decisions.mjs add \
+  --summary "Parent dirty — operator-authorize reset or triage?" \
+  --scope orchestrator \
+  --option "authorize-reset:Operator stashes/commits parent changes, then re-runs tick" \
+  --option "triage:Investigate dirty paths before proceeding" \
+  --timebox 1h
+echo "[orchestrator-tick] Step 0: parent dirty — filed Decision Catalog entry; tick aborted until resolved"
+exit 1
+```
+
+**Worked example — dirty-parent flow:**
+
+```
+$ /ai-sdlc orchestrator-tick
+
+[orchestrator-state] WARN: parent working tree has uncommitted tracked changes; skipping reset
+[orchestrator-state]   ai-sdlc-plugin/commands/execute.md  (M)
+[orchestrator-state] Resolve manually: stash, commit, or discard. Then re-run.
+
+[orchestrator-tick] Step 0: parent dirty — filed Decision Catalog entry; tick aborted until resolved
+
+$ node pipeline-cli/bin/cli-decisions.mjs list
+# Shows: "Parent dirty — operator-authorize reset or triage?" with 1h timebox
+
+# Operator resolves: stashes changes, then re-runs
+$ git stash
+$ /ai-sdlc orchestrator-tick
+# → Step 0 succeeds (clean tree), tick proceeds normally
+```
+
+The Decision Catalog timebox (`--timebox 1h`) ensures the operator is notified within 1 hour if the tick loop is stalled on a dirty parent. After the operator resolves (stash, commit, or discard), the NEXT tick's Step 0 will succeed and the autonomous drain resumes.
+
+**Key invariant:** the Conductor NEVER calls `git reset --hard` directly. That is exclusively the role of `check-orchestrator-state.sh`, and only when the parent is verifiably clean.
 
 ## Step 1 — Feature-flag guard
 

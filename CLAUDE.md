@@ -432,3 +432,5 @@ Guard logic (two outcomes):
 - **Parent on non-main branch, dirty working tree** → REFUSE. Prints the offending branch name, the dirty paths, and the manual recovery command. Exits non-zero (`check-orchestrator-state.sh`) or throws `ParentNotOnMainError` (TypeScript loop). The orchestrator tick is aborted; no frontier work proceeds.
 
 Recovery (operator): stash or commit your changes in the parent, then run `git checkout main && git reset --hard origin/main`.
+
+**Sanctioned vs. ad-hoc reset (AISDLC-450):** `git reset --hard origin/main` is ONLY permitted when invoked by `scripts/check-orchestrator-state.sh` on a verifiably clean working tree. Ad-hoc `git reset --hard` by the Conductor or a subagent (outside the script) is forbidden — if the script refuses (dirty parent), escalate to the Decision Catalog (see `/ai-sdlc orchestrator-tick` Step 0).
