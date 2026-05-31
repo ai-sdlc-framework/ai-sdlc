@@ -321,17 +321,17 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     }
   });
 
-  it('AC #3 (code/mixed): build-test runs Node 20 AND Node 22 via matrix', () => {
+  it('AC #3 (code/mixed): build-test runs on Node 22 (Node 20 dropped — EOL + deps require >=22.12)', () => {
     const bt = workflow.jobs['build-test'];
     assert.deepEqual(
       bt.strategy?.matrix?.['node-version']?.sort(),
-      [20, 22],
-      'build-test matrix must include both Node 20 and Node 22',
+      [22],
+      'build-test matrix must be [22] — Node 20 dropped (EOL; commander 15 / @commitlint/cli 21 require >=22.12); matches ci.yml',
     );
     assert.equal(
       bt.strategy.matrix['node-version'].length,
-      2,
-      'matrix must be exactly 2 versions; widening adds compute without protection',
+      1,
+      'matrix is a single supported LTS line (22); widening adds compute without protection',
     );
   });
 

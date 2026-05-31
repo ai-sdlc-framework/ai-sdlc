@@ -5,7 +5,7 @@
   "description": "AI-SDLC Framework — open, vendor-neutral governance for AI-augmented software development lifecycles",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=22",
     "pnpm": ">=9"
   },
   "packageManager": "pnpm@9.15.4",
