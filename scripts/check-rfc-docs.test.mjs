@@ -6,7 +6,7 @@
  *
  * Why node:test (not vitest): same rationale as `scripts/docs-sync.test.mjs` —
  * the script lives at workspace root, has no package.json, and node:test ships
- * with Node >=20 which we already require.
+ * with Node >=22 which we already require.
  */
 
 import { describe, it, after } from 'node:test';

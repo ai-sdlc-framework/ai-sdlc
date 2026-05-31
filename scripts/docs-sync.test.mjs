@@ -6,7 +6,7 @@
  *
  * Why node:test and not vitest: this script lives at the workspace root and
  * has no package.json of its own. node:test is zero-config, ships with the
- * Node version we already require (>=20), and matches the convention used
+ * Node version we already require (>=22), and matches the convention used
  * by ai-sdlc-plugin/hooks/*.test.mjs.
  */
 
