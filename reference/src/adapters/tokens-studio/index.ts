@@ -136,7 +136,7 @@ export function createTokensStudioProvider(config: TokensStudioConfig): DesignTo
         const _branchName = options?.branch ?? branch;
         const message = options?.message ?? 'chore: update design tokens';
 
-        gitExec(['add', relative(repoPath, outputPath)]);
+        gitExec(['add', '--', relative(repoPath, outputPath)]);
         gitExec(['commit', '-m', message]);
 
         const sha = gitExec(['rev-parse', 'HEAD']);

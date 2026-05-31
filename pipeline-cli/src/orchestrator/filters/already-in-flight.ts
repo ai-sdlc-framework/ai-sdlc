@@ -94,7 +94,7 @@ export interface CheckAlreadyInFlightOpts {
  * the first in-flight signal found; returns `{ ..., passed: true }` when no
  * signals fire.
  *
- * Async-free: all three probes are synchronous (gh via `execSync`, fs via
+ * Async-free: all three probes are synchronous (gh via `execFileSync`, fs via
  * `existsSync`, ps via `execSync`). The orchestrator loop calls this inside a
  * synchronous filter chain — keeping it sync avoids wrapping the whole chain
  * in async.

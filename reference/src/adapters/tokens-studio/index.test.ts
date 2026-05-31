@@ -395,6 +395,25 @@ describe('createTokensStudioProvider', () => {
     expect(existsSync(join(tmpDir, 'tokens', 'tokens.json'))).toBe(true);
   });
 
+  it('pushTokens does not shell-execute injection payloads in the commit message', async () => {
+    // Regression lock for the gitExec string->array hardening: a commit message
+    // containing shell metacharacters must be passed as a literal `git -m` arg
+    // (execFileSync, no shell), never evaluated. If the old `git commit -m "..."`
+    // shell-string form regressed, the $(...)/backtick payload would create the
+    // sentinel file.
+    setup();
+    const provider = createTokensStudioProvider({ repoPath: tmpDir });
+    const sentinel = join(tmpdir(), `tokens-studio-injected-${Date.now()}-${process.pid}`);
+    const payload = `pwn $(touch ${sentinel}) \`touch ${sentinel}\` ; touch ${sentinel}`;
+    const result = await provider.pushTokens(
+      { color: { primary: { $type: 'color', $value: '#FF0000' } } },
+      { message: payload },
+    );
+    expect(result.success).toBe(true);
+    expect(result.message).toBe(payload); // round-trips literally
+    expect(existsSync(sentinel)).toBe(false); // metacharacters were NOT shell-evaluated
+  });
+
   it('pushTokens uses default message when none provided', async () => {
     setup();
     const provider = createTokensStudioProvider({ repoPath: tmpDir });
