@@ -114,6 +114,14 @@ import {
   removeBgAgentRequest,
   writeBgAgentRequest,
 } from '../orchestrator/dispatch-bg-agent.js';
+import {
+  type BlockedPrSignature,
+  classifyReverifyBatch,
+  readPassiveTickState,
+  resolveReverifyK,
+  updatePassiveTickState,
+  writePassiveTickState,
+} from '../orchestrator/stale-cache-reverify.js';
 
 /**
  * Minimal argv parser — yargs would be overkill for a JSON-out CLI.
@@ -479,6 +487,98 @@ export async function runDispatchCli(
       return 0;
     }
 
+    // -----------------------------------------------------------------------
+    // Stale-cache reverify (AISDLC-449) — Step 6.5 of orchestrator-tick.
+    //
+    // The skill body passes the blocked-PR observation it gathered this tick
+    // (PR numbers + per-PR failing-check signatures) plus the dispatch count.
+    // This subcommand reads/updates the persisted passive-tick counter and
+    // tells the skill body whether the reverify gate should fire (K
+    // consecutive no-change ticks with no new dispatch). When `--fresh` is
+    // also supplied (a freshly-fetched check-signature map from a `gh pr
+    // checks` re-fetch), it ALSO classifies each blocked PR as `new-signal`
+    // (AC-3 — surface via Decision Catalog / AskUserQuestion) vs
+    // `same-blocker` (AC-4 — escalate timebox urgency).
+    // -----------------------------------------------------------------------
+    case 'reverify-blocked-prs': {
+      // `--blocked-prs` is a JSON array of {prNumber, checkSignature}.
+      // Default to an empty observation so a tick with nothing blocked
+      // simply resets the counter.
+      let blockedPrs: BlockedPrSignature[] = [];
+      if (flags['blocked-prs']) {
+        try {
+          const parsed = JSON.parse(flags['blocked-prs']) as unknown;
+          if (Array.isArray(parsed)) {
+            blockedPrs = parsed
+              .filter(
+                (p): p is BlockedPrSignature =>
+                  p !== null &&
+                  typeof p === 'object' &&
+                  typeof (p as BlockedPrSignature).prNumber === 'string' &&
+                  typeof (p as BlockedPrSignature).checkSignature === 'string',
+              )
+              .map((p) => ({ prNumber: p.prNumber, checkSignature: p.checkSignature }));
+          }
+        } catch (err) {
+          out({ ok: false, error: `invalid --blocked-prs JSON: ${(err as Error).message}` });
+          return 1;
+        }
+      }
+      const dispatchCount = flags['dispatch-count']
+        ? Number.parseInt(flags['dispatch-count'], 10)
+        : 0;
+      const kOverride = flags['k'] ? Number.parseInt(flags['k'], 10) : undefined;
+      const prev = readPassiveTickState(boardDir);
+      const { next, shouldReverify, k } = updatePassiveTickState(
+        prev,
+        {
+          blockedPrs,
+          dispatchCount: Number.isFinite(dispatchCount) ? dispatchCount : 0,
+        },
+        kOverride !== undefined && Number.isFinite(kOverride) ? { k: kOverride } : {},
+      );
+      // Persist unless the caller asked for a dry-run probe (used by the
+      // skill body to peek without advancing the counter — rare).
+      if (flags['dry-run'] !== 'true') {
+        writePassiveTickState(boardDir, next);
+      }
+
+      // Optional classification when a fresh signature map is supplied.
+      let classifications: ReturnType<typeof classifyReverifyBatch> | undefined;
+      if (flags['fresh']) {
+        try {
+          const fresh = JSON.parse(flags['fresh']) as Record<string, string>;
+          // Classify against the PREVIOUS observation's cached signatures —
+          // those are the "cached blockers" we're reverifying.
+          classifications = classifyReverifyBatch(prev.lastBlockedPrs, fresh);
+        } catch (err) {
+          out({ ok: false, error: `invalid --fresh JSON: ${(err as Error).message}` });
+          return 1;
+        }
+      }
+
+      out({
+        ok: true,
+        shouldReverify,
+        k,
+        consecutiveNoChangeTicks: next.consecutiveNoChangeTicks,
+        blockedPrs,
+        ...(classifications ? { classifications } : {}),
+      });
+      return 0;
+    }
+
+    case 'reverify-k': {
+      // Convenience probe: print the resolved K (env + default). The skill
+      // body uses this to log the active grace window.
+      const kOverride = flags['k'] ? Number.parseInt(flags['k'], 10) : undefined;
+      const k = resolveReverifyK(
+        kOverride !== undefined && Number.isFinite(kOverride) ? { override: kOverride } : {},
+      );
+      out({ ok: true, k });
+      return 0;
+    }
+
     case '':
     case 'help':
     case '--help':
@@ -590,4 +690,9 @@ Pattern X (AISDLC-396) — in-session background Agent dispatch:
   remove-bg-agent-request --task-id <id>
   prune-orphaned-bg-agent-requests
   count-in-flight-bg-agents
+
+Stale-cache reverify (AISDLC-449) — Step 6.5 of orchestrator-tick:
+  reverify-blocked-prs [--blocked-prs <json>] [--dispatch-count <n>]
+                       [--k <n>] [--fresh <json>] [--dry-run]
+  reverify-k [--k <n>]
 `;
