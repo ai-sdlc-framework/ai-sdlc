@@ -88,6 +88,15 @@ describe('extractReferences', () => {
   it('returns empty array for plain text', () => {
     expect(extractReferences('the sky is blue.')).toEqual([]);
   });
+
+  it('caps scanning at 100 KB (ReDoS guard): finds refs before the cap, drops refs past it', () => {
+    // A ref well within the first 100 KB is still extracted...
+    const early = `depends on RFC-0011\n${'x'.repeat(50_000)}`;
+    expect(extractReferences(early).some((r) => r.raw === 'RFC-0011')).toBe(true);
+    // ...but a ref pushed past the 100 KB cap is not scanned (DoS-safety trade).
+    const late = `${'x'.repeat(100_001)} RFC-0099`;
+    expect(extractReferences(late).some((r) => r.raw === 'RFC-0099')).toBe(false);
+  });
 });
 
 describe('resolveReference', () => {

@@ -65,6 +65,13 @@ describe('resolveChangelogConflict', () => {
     const content = '## [Unreleased]\n- some bullet\n';
     expect(resolveChangelogConflict(content)).toBe(content);
   });
+
+  it('escalates (returns null) when conflicted content exceeds 1 MB (ReDoS guard)', () => {
+    // Oversized conflict → manual resolution; also bounds the double-lazy regex.
+    const content = `<<<<<<< HEAD\n${'a'.repeat(1_000_001)}\n=======\nb\n>>>>>>> origin/main\n`;
+    expect(content.length).toBeGreaterThan(1_000_000);
+    expect(resolveChangelogConflict(content)).toBeNull();
+  });
 });
 
 // ── Unit: resolveTestConflict ────────────────────────────────────────────────
@@ -98,6 +105,12 @@ describe('resolveTestConflict', () => {
 
   it('returns null when conflict does not contain test calls (not a test conflict)', () => {
     const content = `<<<<<<< HEAD\nconst x = 1;\n=======\nconst x = 2;\n>>>>>>> origin/main\n`;
+    expect(resolveTestConflict(content)).toBeNull();
+  });
+
+  it('escalates (returns null) when conflicted content exceeds 1 MB (ReDoS guard)', () => {
+    const content = `<<<<<<< HEAD\n${'a'.repeat(1_000_001)}\n=======\nb\n>>>>>>> origin/main\n`;
+    expect(content.length).toBeGreaterThan(1_000_000);
     expect(resolveTestConflict(content)).toBeNull();
   });
 });

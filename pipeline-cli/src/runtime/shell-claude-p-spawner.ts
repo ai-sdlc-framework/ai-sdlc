@@ -419,10 +419,12 @@ export function tryParseJsonWithFenceStripping(s: string): unknown | undefined {
 
   // Strategy 2: strip markdown code fence. Match `\`\`\`json\n` or `\`\`\`\n`
   // at the start and `\n\`\`\`` at the end.
-  // Horizontal-whitespace classes ([ \t]) around the literal \n so the optional
-  // whitespace can't overlap the newline the pattern already pins — avoids
-  // polynomial backtracking on adversarial model output (CodeQL js/polynomial-redos).
-  const fenceMatch = s.match(/^[ \t]*```(?:[a-zA-Z]+)?[ \t]*\n([\s\S]*?)\n```[ \t]*$/);
+  // Only the INTERIOR `\s*\n` was the ReDoS vector (`\s` includes `\n`, so it
+  // overlapped the pinned newline). Use `[ \t]*\n` there. The `^\s*` / `\s*$`
+  // anchors are single unbounded quantifiers before a literal/anchor (linear,
+  // not polynomial) so they stay `\s*` — preserving the prior behavior of
+  // matching a fence wrapped in surrounding newlines (CodeQL js/polynomial-redos).
+  const fenceMatch = s.match(/^\s*```(?:[a-zA-Z]+)?[ \t]*\n([\s\S]*?)\n```\s*$/);
   if (fenceMatch && fenceMatch[1]) {
     try {
       return JSON.parse(fenceMatch[1]);

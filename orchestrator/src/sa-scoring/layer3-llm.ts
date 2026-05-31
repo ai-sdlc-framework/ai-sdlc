@@ -267,11 +267,12 @@ interface Sa2Raw {
 
 /** Extract the first JSON object from a raw LLM reply. */
 export function extractJson(raw: string): unknown {
-  // `[ \t]*\n?` instead of `\s*` so the optional whitespace before the lazy
-  // capture can't overlap the capture's own `[\s\S]` — avoids polynomial
-  // backtracking on adversarial LLM output (CodeQL js/polynomial-redos).
-  // `.trim()` below absorbs any residual leading whitespace in the capture.
-  const fenced = raw.match(/```(?:json)?[ \t]*\n?([\s\S]*?)```/i);
+  // Drop the leading optional-whitespace group entirely: any `[ \t]*`/`\s*`
+  // before the lazy `[\s\S]*?` capture overlaps it (both match space/tab),
+  // which is the polynomial-backtracking source (CodeQL js/polynomial-redos).
+  // The bounded `\n?` (0-or-1, not a `*`) is safe, and `.trim()` below absorbs
+  // any residual leading whitespace the capture picks up.
+  const fenced = raw.match(/```(?:json)?\n?([\s\S]*?)```/i);
   const candidate = fenced ? fenced[1] : raw;
   try {
     return JSON.parse(candidate.trim());

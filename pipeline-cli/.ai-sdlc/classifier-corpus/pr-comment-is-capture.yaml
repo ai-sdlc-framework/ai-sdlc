@@ -1,0 +1,75 @@
+- id: 73bd0548-4053-4c07-909b-e2116ed4d70d
+  timestamp: '2026-05-31T22:26:28.946Z'
+  taskType: pr-comment-is-capture
+  input:
+    text: arch concern
+    context:
+      author: alice
+      prNumber: 1
+      commentUrl: http://x/1
+  model: claude-haiku-4-5
+  classification: pending
+  confidence: 0
+  reasoning: '(invoker error: no invoker supplied)'
+  threshold: 0.5
+  metBehindThreshold: false
+  polarity: pending
+- id: 84c25ead-3d7b-4852-bf27-98a07bc7baee
+  timestamp: '2026-05-31T22:26:28.948Z'
+  taskType: pr-comment-is-capture
+  input:
+    text: typo nit
+    context:
+      author: bob
+      prNumber: 1
+      commentUrl: http://x/2
+  model: claude-haiku-4-5
+  classification: pending
+  confidence: 0
+  reasoning: '(invoker error: no invoker supplied)'
+  threshold: 0.5
+  metBehindThreshold: false
+  polarity: pending
+- id: ebf9e489-bd8d-49de-8a84-405ba5baef79
+  timestamp: '2026-05-31T22:26:28.951Z'
+  taskType: pr-comment-is-capture
+  input:
+    text: x
+    context:
+      author: a
+  model: claude-haiku-4-5
+  classification: pending
+  confidence: 0
+  reasoning: '(invoker error: no invoker supplied)'
+  threshold: 0
+  metBehindThreshold: false
+  polarity: pending
+- id: 212b37dc-0d3a-4f2c-8fe4-2b31f283e726
+  timestamp: '2026-05-31T22:26:28.952Z'
+  taskType: pr-comment-is-capture
+  input:
+    text: unmarked comment
+    context:
+      author: alice
+      commentUrl: http://x/1
+  model: claude-haiku-4-5
+  classification: pending
+  confidence: 0
+  reasoning: '(invoker error: no invoker supplied)'
+  threshold: 0.5
+  metBehindThreshold: false
+  polarity: pending
+- id: bd467e67-cd0d-4f58-b951-8d305222cc54
+  timestamp: '2026-05-31T22:26:29.105Z'
+  taskType: pr-comment-is-capture
+  input:
+    text: x
+    context:
+      author: a
+  model: claude-haiku-4-5
+  classification: pending
+  confidence: 0
+  reasoning: '(invoker error: no invoker supplied)'
+  threshold: 0.5
+  metBehindThreshold: false
+  polarity: pending
