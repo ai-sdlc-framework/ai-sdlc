@@ -21,7 +21,7 @@ references:
   - ai-sdlc-plugin/agents/test-reviewer.md
   - ai-sdlc-plugin/agents/security-reviewer.md
   - ai-sdlc-plugin/commands/triage.md
-  - ai-sdlc-plugin/commands/review.md
+  - ai-sdlc-plugin/commands/review-pr.md
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.sh
   - ai-sdlc-plugin/plugin.json
   - scripts/check-task-moved.sh
