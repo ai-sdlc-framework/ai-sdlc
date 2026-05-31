@@ -81,10 +81,16 @@ jobs:
           #   Closes #123
           #   Fixes #45
           #   Resolves #7
-          #   closes org/repo#123   (cross-repo)
+          #   closes org/repo#123       (cross-repo)
           #   FIXES #99
+          #   References AISDLC-393      (backlog-task track, AISDLC-477)
+          #   Closes AISDLC-100.5        (hierarchical backlog sub-task)
           # Case-insensitive. Scans both PR title and PR body.
-          PATTERN='(closes|fixes|resolves)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+)'
+          # AISDLC-477: the backlog-task track references AISDLC-N (not a GH
+          # issue #N), so the pattern accepts both the `#N` GitHub form and the
+          # `AISDLC-N[.M]` backlog form, plus the `references` keyword used by
+          # backlog PR bodies.
+          PATTERN='(closes|fixes|resolves|references)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+|AISDLC-[0-9]+(\.[0-9]+)?)'
 
           COMBINED="$PR_TITLE
           $PR_BODY"

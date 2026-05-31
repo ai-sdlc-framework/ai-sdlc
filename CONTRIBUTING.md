@@ -38,7 +38,10 @@ Contrast this with the issue-first path:
 
 ### The CI check
 
-Every PR automatically receives an `ai-sdlc/issue-link` status check that scans the PR title and body for a GitHub-linked-issue reference (`Closes #N`, `Fixes #N`, `Resolves #N`, or cross-repo `org/repo#N`).
+Every PR automatically receives an `ai-sdlc/issue-link` status check that scans the PR title and body for a linked-issue reference. Accepted forms:
+
+- GitHub-issue keywords: `Closes #N`, `Fixes #N`, `Resolves #N`, or cross-repo `org/repo#N`
+- Backlog-task references (for backlog-track PRs): `References AISDLC-N`, `Closes AISDLC-N`, or hierarchical `AISDLC-N.M`
 
 - **Success** — a reference was found, or the PR carries the `ci:no-issue-required` label.
 - **Failure** — no reference found. The check is informational; it will NOT block your PR from merging unless a maintainer has made it required in branch protection settings.
@@ -51,7 +54,7 @@ The bypass label `ci:no-issue-required` is intended for:
 
 ### What if I already opened a PR without an issue?
 
-That's okay — add `Closes #N` to your PR body (after opening the matching issue) and re-sync your PR. The check will re-run on the next push.
+That's okay — add `Closes #N` (GitHub-issue path) or `References AISDLC-N` (backlog-task path) to your PR body and re-sync your PR. The check will re-run on the next push.
 
 ## Types of Contributions
 
