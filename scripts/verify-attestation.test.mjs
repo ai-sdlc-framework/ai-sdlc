@@ -4238,6 +4238,78 @@ describe('runVerifier — v6 integration', () => {
     assert.equal(out.status, 'invalid');
     assert.match(out.reason, /rootSignature did not match any trusted reviewer pubkey/);
   });
+
+  it('AISDLC-492: SHA-named-only envelope (subject.sha1 === headSha) still verifies via isAttestationOnlyDescendant', () => {
+    // After removing the per-SHA fallback, an envelope whose filename is
+    // `${headSha}.v6.dsse.json` with subject.sha1 === headSha must STILL be
+    // accepted. isAttestationOnlyDescendant(headSha, headSha, ...) short-circuits
+    // to true (equal-SHA early return), surfacing the envelope to the candidate
+    // set even without the per-SHA filename check. This confirms the removal
+    // does not break the current-era signing shape where the chore commit
+    // makes HEAD === the signed subject.
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    // Envelope is SHA-named (headSha = subjectSha) — exactly the bridge shape
+    // that existed before AISDLC-475 wrote the patch-id-named primary.
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, v6Keys.privateKeyPem);
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid (SHA-named envelope surfaced via isAttestationOnlyDescendant equal-SHA path), got: ${out.reason}`,
+    );
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AISDLC-492: envelope named for a non-ancestor SHA is not surfaced (per-SHA fallback removed)', () => {
+    // Confirms the per-SHA fallback is gone: an envelope whose filename is a
+    // random 40-hex string that is NOT the current HEAD and whose subject.sha1
+    // is also NOT an ancestor of HEAD must NOT be accepted. Without the fallback,
+    // the broadened filter can only surface this envelope if its subject.sha1 is
+    // an attestation-only ancestor or a tree-equivalent orphan — neither holds here.
+    // Result: no v6 envelope is surfaced, verifier falls through to legacy (none
+    // present), returns invalid.
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    // Write an envelope that binds to fixture.baseSha (an ancestor, but
+    // NOT an attestation-only ancestor — the diff includes source files).
+    // Name it with a random hex to simulate a stale per-SHA bridge file.
+    const staleHex = '0'.repeat(40);
+    const envBytes = JSON.stringify(
+      buildValidV6Envelope(fixture.baseSha, leaves, v6Keys.privateKeyPem),
+      null,
+      2,
+    );
+    writeFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${staleHex}.v6.dsse.json`),
+      envBytes + '\n',
+    );
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    // The stale envelope must not be accepted: it binds to baseSha, which IS an
+    // ancestor of headSha but the diff from baseSha→headSha includes feature.txt
+    // (a non-attestation file), so isAttestationOnlyDescendant returns false.
+    // isTreeEquivalentModuloAttestation also returns false (different trees).
+    // No v6 envelope is surfaced → falls to legacy → no legacy envelope → invalid.
+    assert.equal(
+      out.status,
+      'invalid',
+      `expected invalid (stale non-ancestor envelope must not surface without per-SHA fallback), got: ${out.reason}`,
+    );
+  });
 });
 
 // ── AISDLC-398 fix #3: v5 fast-path content-hash recompute ───────────────────
