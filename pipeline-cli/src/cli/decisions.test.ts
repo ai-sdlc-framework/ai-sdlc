@@ -6,9 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { buildDecisionsCli } from './decisions.js';
 import { resolveEventLogPath } from '../decisions/event-log.js';
@@ -1760,5 +1760,341 @@ describe('Phase 10 — summary subcommand (AISDLC-294)', () => {
     const r = stdoutJson<{ enabled: boolean; summary: null }>();
     expect(r.enabled).toBe(false);
     expect(r.summary).toBeNull();
+  });
+});
+
+// ── AISDLC-463 — add backward-compat + new author flags ──────────────────────
+
+describe('AISDLC-463 — add new flags + backward-compat', () => {
+  async function addDecision(...extra: string[]): Promise<Decision> {
+    setArgv(
+      'add',
+      '--summary',
+      's',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--option',
+      'opt-b:B',
+      '--format',
+      'json',
+      ...extra,
+    );
+    await buildDecisionsCli().parseAsync();
+    return stdoutJson<{ decision: Decision }>().decision;
+  }
+
+  it('AC#10(d) — add with NONE of the new flags behaves identically (no new spec fields)', async () => {
+    const d = await addDecision();
+    expect(d.spec.priority).toBeUndefined();
+    expect(d.spec.impactScore).toBeUndefined();
+    expect(d.spec.autonomousFallbackOptionId).toBeUndefined();
+    expect(d.spec.contextRef).toBeUndefined();
+    expect(d.spec.timebox).toBeUndefined();
+    expect(d.spec.summary).toBe('s');
+    expect(d.spec.options).toHaveLength(2);
+  });
+
+  it('AC#1 — captures priority / impact-score / autonomous-fallback / context-ref', async () => {
+    const d = await addDecision(
+      '--priority',
+      'high',
+      '--impact-score',
+      '80',
+      '--autonomous-fallback',
+      'opt-a',
+      '--context-ref',
+      'pr:1234',
+    );
+    expect(d.spec.priority).toBe('high');
+    expect(d.spec.impactScore).toBe(80);
+    expect(d.spec.autonomousFallbackOptionId).toBe('opt-a');
+    expect(d.spec.contextRef).toBe('pr:1234');
+  });
+
+  it('AC#1 — --timebox-hours maps onto the existing timebox machinery (PT4H)', async () => {
+    const d = await addDecision('--timebox-hours', '4');
+    expect(d.spec.timebox).toBe('PT4H');
+    expect(d.status.timeboxExpiresAt).toBeTruthy();
+  });
+
+  it('AC#1 — --timebox and --timebox-hours are mutually exclusive', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      's',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--timebox',
+      'PT4H',
+      '--timebox-hours',
+      '4',
+      '--format',
+      'json',
+    );
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/mutually exclusive/);
+  });
+
+  it('AC#1 — rejects an --autonomous-fallback that is not a declared option', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      's',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--autonomous-fallback',
+      'opt-zzz',
+      '--format',
+      'json',
+    );
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/must reference one of the declared option ids/);
+  });
+
+  it('AC#1 — rejects an out-of-range --impact-score', async () => {
+    setArgv(
+      'add',
+      '--summary',
+      's',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--impact-score',
+      '150',
+      '--format',
+      'json',
+    );
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/\[0,100\]/);
+  });
+});
+
+// ── AISDLC-463 — list --ranked ───────────────────────────────────────────────
+
+describe('AISDLC-463 — list --ranked', () => {
+  async function add(summary: string, ...extra: string[]): Promise<void> {
+    setArgv(
+      'add',
+      '--summary',
+      summary,
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--format',
+      'json',
+      ...extra,
+    );
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+  }
+
+  it('orders pending decisions by priority (critical before low) deterministically', async () => {
+    await add('low-one', '--priority', 'low');
+    await add('crit-one', '--priority', 'critical');
+    setArgv('list', '--ranked', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ decisions: Decision[] }>();
+    expect(r.decisions.map((d) => d.spec.summary)).toEqual(['crit-one', 'low-one']);
+  });
+
+  it('composes with --sort as a distinct mode (ranked != created order)', async () => {
+    await add('first-low', '--priority', 'low');
+    await add('second-critical', '--priority', 'critical');
+    // created order is insertion order
+    setArgv('list', '--sort', 'created', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ decisions: Decision[] }>().decisions.map((d) => d.spec.summary)).toEqual([
+      'first-low',
+      'second-critical',
+    ]);
+    stdoutChunks = [];
+    // ranked order surfaces the critical one first
+    setArgv('list', '--ranked', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ decisions: Decision[] }>().decisions.map((d) => d.spec.summary)).toEqual([
+      'second-critical',
+      'first-low',
+    ]);
+  });
+});
+
+// ── AISDLC-463 — resolve (operator-driven) ───────────────────────────────────
+
+describe('AISDLC-463 — resolve subcommand', () => {
+  async function seed(...extra: string[]): Promise<string> {
+    setArgv(
+      'add',
+      '--summary',
+      's',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--option',
+      'opt-b:B',
+      '--format',
+      'json',
+      ...extra,
+    );
+    await buildDecisionsCli().parseAsync();
+    const id = stdoutJson<{ decisionId: string }>().decisionId;
+    stdoutChunks = [];
+    return id;
+  }
+
+  it('AC#3 + AC#7 — resolves and writes a full audit event (resolver + option + rationale + context)', async () => {
+    const id = await seed('--context-ref', 'pr:42');
+    setArgv(
+      'resolve',
+      id,
+      '--option',
+      'opt-b',
+      '--rationale',
+      'because reasons',
+      '--by',
+      'op@example.com',
+      '--surfacing-agent',
+      'askuserquestion',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ ok: boolean; chosenOptionId: string }>();
+    expect(r.ok).toBe(true);
+    expect(r.chosenOptionId).toBe('opt-b');
+
+    const lines = readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n');
+    const evt = JSON.parse(lines.at(-1) as string);
+    expect(evt.type).toBe('operator-answered');
+    expect(evt.chosenOptionId).toBe('opt-b');
+    expect(evt.by).toBe('op@example.com');
+    expect(evt.rationale).toBe('because reasons');
+    expect(evt.contextRef).toBe('pr:42'); // explicit flag wins
+    expect(evt.surfacingAgent).toBe('askuserquestion');
+  });
+
+  it('AC#7 — falls back to the decision spec contextRef when --context-ref is omitted', async () => {
+    const id = await seed('--context-ref', 'AISDLC-463');
+    setArgv('resolve', id, '--option', 'opt-a', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const lines = readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n');
+    const evt = JSON.parse(lines.at(-1) as string);
+    expect(evt.contextRef).toBe('AISDLC-463');
+  });
+
+  it('AC#3 — rejects an option not declared on the decision', async () => {
+    const id = await seed();
+    setArgv('resolve', id, '--option', 'opt-zzz', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/is not declared on/);
+  });
+
+  it('AC#3 — refuses to resolve an already-resolved decision', async () => {
+    const id = await seed();
+    setArgv('resolve', id, '--option', 'opt-a', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+    setArgv('resolve', id, '--option', 'opt-b', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/already answered/);
+  });
+});
+
+// ── AISDLC-463 — auto-expire ─────────────────────────────────────────────────
+
+describe('AISDLC-463 — auto-expire subcommand', () => {
+  // Seed a decision whose timebox is already in the past by writing the
+  // decision-opened event directly with a stale timeboxExpiresAt.
+  function seedExpired(opts: { id: string; fallback?: string; contextRef?: string }): void {
+    const past = '2000-01-01T00:00:00.000Z';
+    const evt: Record<string, unknown> = {
+      eventVersion: 'v1',
+      type: 'decision-opened',
+      ts: past,
+      decisionId: opts.id,
+      source: 'ad-hoc',
+      scope: 'workspace',
+      summary: opts.id,
+      options: [
+        { id: 'opt-a', description: 'A' },
+        { id: 'opt-b', description: 'B' },
+      ],
+      timebox: 'PT4H',
+      timeboxExpiresAt: past,
+    };
+    if (opts.fallback) evt.autonomousFallbackOptionId = opts.fallback;
+    if (opts.contextRef) evt.contextRef = opts.contextRef;
+    const logPath = resolveEventLogPath(tmp);
+    mkdirSync(dirname(logPath), { recursive: true });
+    writeFileSync(logPath, JSON.stringify(evt) + '\n', { flag: 'a' });
+  }
+
+  it('AC#4 + AC#7 — selects the fallback and writes an auto-expired audit event', async () => {
+    seedExpired({ id: 'DEC-0001', fallback: 'opt-b', contextRef: 'pr:9' });
+    setArgv('auto-expire', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ expired: Array<{ decisionId: string; chosenOptionId: string }> }>();
+    expect(r.expired).toEqual([
+      expect.objectContaining({ decisionId: 'DEC-0001', chosenOptionId: 'opt-b' }),
+    ]);
+    const lines = readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n');
+    const evt = JSON.parse(lines.at(-1) as string);
+    expect(evt.type).toBe('auto-expired');
+    expect(evt.by).toBe('auto-expired');
+    expect(evt.chosenOptionId).toBe('opt-b');
+    expect(evt.rationale).toMatch(/fallback after PT4H timebox/);
+    expect(evt.contextRef).toBe('pr:9');
+  });
+
+  it('AC#4 — skips an expired decision with no autonomous-fallback (left pending)', async () => {
+    seedExpired({ id: 'DEC-0001' }); // no fallback
+    setArgv('auto-expire', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      expired: unknown[];
+      skipped: Array<{ decisionId: string; reason: string }>;
+    }>();
+    expect(r.expired).toEqual([]);
+    expect(r.skipped).toEqual([{ decisionId: 'DEC-0001', reason: 'no-autonomous-fallback' }]);
+  });
+
+  it('AC#4 — idempotent: a second run does not re-expire an already-expired decision', async () => {
+    seedExpired({ id: 'DEC-0001', fallback: 'opt-b' });
+    setArgv('auto-expire', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+    setArgv('auto-expire', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ expired: unknown[] }>();
+    expect(r.expired).toEqual([]);
+    // Only ONE auto-expired event total.
+    const events = readFileSync(resolveEventLogPath(tmp), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events.filter((e) => e.type === 'auto-expired')).toHaveLength(1);
+  });
+
+  it('AC#4 — --dry-run reports what WOULD expire without writing events', async () => {
+    seedExpired({ id: 'DEC-0001', fallback: 'opt-b' });
+    setArgv('auto-expire', '--dry-run', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ dryRun: boolean; expired: Array<{ decisionId: string }> }>();
+    expect(r.dryRun).toBe(true);
+    expect(r.expired).toEqual([expect.objectContaining({ decisionId: 'DEC-0001' })]);
+    // No auto-expired event was appended.
+    const events = readFileSync(resolveEventLogPath(tmp), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events.filter((e) => e.type === 'auto-expired')).toHaveLength(0);
   });
 });

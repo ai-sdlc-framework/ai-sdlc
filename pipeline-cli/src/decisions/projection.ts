@@ -16,15 +16,19 @@
  */
 
 import { readDecisionEvents, type ReadEventsOpts } from './event-log.js';
-import type {
-  Decision,
-  DecisionEvent,
-  DecisionOpenedEvent,
-  RecommendationIssuedEvent,
-  OperatorAnsweredEvent,
-  OverriddenEvent,
-  StageCCompletedEvent,
-  TimeboxExtendedEvent,
+import { msRemainingUntil } from './timebox.js';
+import {
+  DECISION_PRIORITY_WEIGHTS,
+  type AutoExpiredEvent,
+  type Decision,
+  type DecisionEvent,
+  type DecisionOpenedEvent,
+  type DecisionPriority,
+  type RecommendationIssuedEvent,
+  type OperatorAnsweredEvent,
+  type OverriddenEvent,
+  type StageCCompletedEvent,
+  type TimeboxExtendedEvent,
 } from './decision-record.js';
 
 /**
@@ -58,6 +62,13 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
         options: opened.options,
         ...(opened.dependsOn !== undefined ? { dependsOn: opened.dependsOn } : {}),
         ...(opened.timebox !== undefined ? { timebox: opened.timebox } : {}),
+        // AISDLC-463 — operator-authored ranking + fallback + context fields.
+        ...(opened.priority !== undefined ? { priority: opened.priority } : {}),
+        ...(opened.impactScore !== undefined ? { impactScore: opened.impactScore } : {}),
+        ...(opened.autonomousFallbackOptionId !== undefined
+          ? { autonomousFallbackOptionId: opened.autonomousFallbackOptionId }
+          : {}),
+        ...(opened.contextRef !== undefined ? { contextRef: opened.contextRef } : {}),
       },
       status: {
         lifecycle: 'open',
@@ -185,6 +196,27 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
     };
   }
 
+  if (event.type === 'auto-expired') {
+    // AISDLC-463 — autonomous fallback at timebox expiry. The fallback IS the
+    // answer, so the decision lifecycle resolves to 'answered' with
+    // `answeredBy: 'auto-expired'` (the factory hard-codes `by`), distinguishing
+    // it from an operator answer in the audit trail.
+    if (current === null) return null;
+    const expired = event as AutoExpiredEvent;
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: {
+        ...current.status,
+        lifecycle: 'answered',
+        answeredOptionId: expired.chosenOptionId,
+        answeredBy: event.by ?? 'auto-expired',
+        answeredAt: event.ts,
+      },
+      decisionLog: [...current.decisionLog, event],
+    };
+  }
+
   // Unknown / forward-compat events: log only, no state mutation. The
   // projection is intentionally tolerant so a Phase-1 reader can still
   // surface a log written by Phase 2+ without crashing.
@@ -289,4 +321,75 @@ export function filterExpiredDecisions(decisions: Decision[], now: Date = new Da
     const lc = d.status.lifecycle;
     return lc !== 'answered' && lc !== 'archived' && lc !== 'superseded';
   });
+}
+
+// ── Priority ranking (RFC-0035 AISDLC-463) ───────────────────────────────────
+
+/**
+ * AISDLC-463 — `list --ranked` ranking formula.
+ *
+ * `rankScore = priorityWeight × impactFactor × urgencyDecay`
+ *
+ * where:
+ *   - **priorityWeight** — categorical weight (critical=4, high=3, medium=2,
+ *     low=1). Absent priority defaults to `low` (weight 1) so untyped
+ *     decisions rank deterministically last among same-impact peers.
+ *   - **impactFactor** — `impactScore / 100`, mapped from the operator-authored
+ *     [0,100] score into [0,1]. Absent impact defaults to 0.5 (a neutral
+ *     midpoint) so it neither inflates nor suppresses rank relative to scored
+ *     peers. We use `(impactScore / 100) + 1` internally (range [1,2]) so a
+ *     zero impact never collapses the whole product to 0 — priority always
+ *     contributes.
+ *   - **urgencyDecay** — a monotone-increasing-as-deadline-approaches factor
+ *     derived from the timebox. A decision past its expiry gets the maximum
+ *     urgency; a decision far from expiry gets ~1.0; an untimeboxed decision
+ *     gets a neutral 1.0. Concretely:
+ *       expired (msRemaining ≤ 0)            → 3.0  (most urgent)
+ *       within 1h of expiry                  → 2.0
+ *       within 24h of expiry                 → 1.5
+ *       beyond 24h, or untimeboxed           → 1.0
+ *     The step function (rather than a continuous decay) keeps the order
+ *     deterministic and easy to reason about in tests.
+ *
+ * Higher `rankScore` = surfaces sooner. Ties (identical score) break by
+ * `metadata.created` ascending (oldest first) so the order is fully
+ * deterministic and stable across runs.
+ */
+export function computeRankScore(decision: Decision, now: Date = new Date()): number {
+  const priority: DecisionPriority = decision.spec.priority ?? 'low';
+  const priorityWeight = DECISION_PRIORITY_WEIGHTS[priority];
+
+  const impact = typeof decision.spec.impactScore === 'number' ? decision.spec.impactScore : 50;
+  // Map [0,100] → [1,2] so impact modulates but never zeroes the product.
+  const impactFactor = impact / 100 + 1;
+
+  const msRemaining = msRemainingUntil(decision.status.timeboxExpiresAt, now);
+  let urgencyDecay: number;
+  if (msRemaining === null) {
+    urgencyDecay = 1.0; // untimeboxed — neutral
+  } else if (msRemaining <= 0) {
+    urgencyDecay = 3.0; // already expired — most urgent
+  } else if (msRemaining <= 60 * 60 * 1000) {
+    urgencyDecay = 2.0; // within 1h
+  } else if (msRemaining <= 24 * 60 * 60 * 1000) {
+    urgencyDecay = 1.5; // within 24h
+  } else {
+    urgencyDecay = 1.0; // beyond 24h
+  }
+
+  return priorityWeight * impactFactor * urgencyDecay;
+}
+
+/**
+ * AISDLC-463 — order decisions by descending {@link computeRankScore}
+ * (most-urgent first). Ties break by `metadata.created` ascending so the
+ * result is deterministic. Pure: returns a new array, input is not mutated.
+ */
+export function rankDecisions(decisions: Decision[], now: Date = new Date()): Decision[] {
+  const scored = decisions.map((d) => ({ d, score: computeRankScore(d, now) }));
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.d.metadata.created.localeCompare(b.d.metadata.created);
+  });
+  return scored.map((s) => s.d);
 }

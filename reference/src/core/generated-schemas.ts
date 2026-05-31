@@ -1870,6 +1870,30 @@ export const decisionV1Schema = {
           description:
             "RFC-0035 AISDLC-447 — operator-authored timebox as an ISO-8601 duration (e.g. 'PT4H', 'P1D', 'P7D'). Categorical aliases (URGENT/24H/WEEK/BACKLOG) are resolved to ISO-8601 form before persistence.",
         },
+        priority: {
+          type: 'string',
+          enum: ['critical', 'high', 'medium', 'low'],
+          description:
+            'RFC-0035 AISDLC-463 — operator-authored categorical priority. Feeds the `list --ranked` ranking formula.',
+        },
+        impactScore: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description:
+            'RFC-0035 AISDLC-463 — operator-authored impact score in [0,100]. Feeds the `list --ranked` ranking formula.',
+        },
+        autonomousFallbackOptionId: {
+          type: 'string',
+          pattern: '^[a-z0-9][a-z0-9-]*$',
+          description:
+            'RFC-0035 AISDLC-463 — option id the framework auto-selects when the timebox expires unanswered (cli-decisions auto-expire).',
+        },
+        contextRef: {
+          type: 'string',
+          description:
+            "RFC-0035 AISDLC-463 — backlink to the surfacing context (a PR url, 'pr:N', or a task id).",
+        },
       },
     },
     status: {

@@ -159,6 +159,34 @@ export function parseTimebox(input: string): ParsedTimebox {
   return { duration: raw, durationMs: ms };
 }
 
+/**
+ * AISDLC-463 — convert a numeric hours count into a canonical ISO-8601
+ * duration string (`4` → `PT4H`). This is the ergonomic `--timebox-hours`
+ * alias surface: it maps onto the EXISTING timebox machinery (the result is
+ * fed straight through {@link parseTimebox} / {@link computeTimeboxExpiresAt})
+ * rather than duplicating expiry logic.
+ *
+ * Fractional hours are supported by promoting to minutes (`1.5` → `PT90M`)
+ * so the duration stays integer-valued (the ISO parser rejects fractional
+ * designators). Throws on non-positive / non-finite input.
+ */
+export function hoursToIsoDuration(hours: number): string {
+  if (typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0) {
+    throw new Error(
+      `[decisions] --timebox-hours: must be a positive number (got ${String(hours)})`,
+    );
+  }
+  if (Number.isInteger(hours)) return `PT${hours}H`;
+  // Promote fractional hours to integer minutes; reject if still fractional.
+  const minutes = Math.round(hours * 60);
+  if (!Number.isInteger(minutes) || minutes <= 0) {
+    throw new Error(
+      `[decisions] --timebox-hours: ${hours} does not resolve to a whole number of minutes`,
+    );
+  }
+  return `PT${minutes}M`;
+}
+
 // ── Expiry math ──────────────────────────────────────────────────────────────
 
 /**

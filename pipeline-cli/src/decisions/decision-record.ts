@@ -52,11 +52,37 @@ export const DECISION_EVENT_TYPES = [
   'archived',
   'dedup-merged',
   'routing-changed',
+  // AISDLC-463 — operator-driven resolve + autonomous timebox-expiry fallback.
+  'auto-expired',
 ] as const;
 export type DecisionEventType = (typeof DECISION_EVENT_TYPES)[number];
 
 export const DECISION_TIERS = ['xs', 's', 'm', 'l', 'xl'] as const;
 export type DecisionTier = (typeof DECISION_TIERS)[number];
+
+/**
+ * AISDLC-463 — categorical operator-authored priority for a Decision. Drives
+ * the `list --ranked` ordering (priority × impact × urgency-decay). Higher
+ * priority surfaces a decision sooner. Distinct from the numeric Stage-A/B
+ * `status.priority` signal — this is the operator's declared intent at author
+ * time, the numeric `status.priority` is the framework's computed signal.
+ */
+export const DECISION_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
+export type DecisionPriority = (typeof DECISION_PRIORITIES)[number];
+
+/**
+ * AISDLC-463 — numeric weight per categorical priority, used by the
+ * `list --ranked` ranking formula. Higher = more urgent. The gaps between
+ * tiers are intentionally wide (4 / 3 / 2 / 1) so priority dominates impact
+ * and urgency as the primary sort key while still letting the other factors
+ * break ties within a tier.
+ */
+export const DECISION_PRIORITY_WEIGHTS: Record<DecisionPriority, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
 
 // ── Decision option (the choices the operator picks from) ────────────────────
 
@@ -105,6 +131,33 @@ export interface DecisionSpec {
    * resolves to `PT4H` at write time).
    */
   timebox?: string;
+  /**
+   * AISDLC-463 — operator-authored categorical priority (critical/high/
+   * medium/low). Feeds the `list --ranked` formula. Undefined when the
+   * author did not declare one; ranking treats absent priority as the
+   * lowest tier (`low`) so untyped decisions sort deterministically last.
+   */
+  priority?: DecisionPriority;
+  /**
+   * AISDLC-463 — operator-authored impact score in [0,100]. Higher = more
+   * downstream blast-radius. Feeds the `list --ranked` formula. Undefined
+   * when absent; ranking treats absent impact as a neutral default (50) so
+   * it neither inflates nor suppresses the rank relative to scored peers.
+   */
+  impactScore?: number;
+  /**
+   * AISDLC-463 — option id the framework auto-selects when the timebox
+   * expires unanswered (`cli-decisions auto-expire`). Must reference one of
+   * `options[].id`. Undefined when the author wants the decision to stay
+   * pending past expiry (operator must answer manually).
+   */
+  autonomousFallbackOptionId?: string;
+  /**
+   * AISDLC-463 — backlink to the surfacing context (a PR url, `pr:1234`, or
+   * a task id like `AISDLC-463`). Recorded for the audit trail so a resolved
+   * decision points back at what raised it.
+   */
+  contextRef?: string;
 }
 
 export interface DecisionRouting {
@@ -213,6 +266,14 @@ export interface DecisionOpenedEvent extends DecisionEventEnvelope {
    * decision expires).
    */
   timeboxExpiresAt?: string;
+  /** AISDLC-463 — operator-authored categorical priority (see DecisionSpec). */
+  priority?: DecisionPriority;
+  /** AISDLC-463 — operator-authored impact score [0,100] (see DecisionSpec). */
+  impactScore?: number;
+  /** AISDLC-463 — autonomous-fallback option id chosen at timebox expiry. */
+  autonomousFallbackOptionId?: string;
+  /** AISDLC-463 — surfacing-context backlink (PR url / `pr:N` / task id). */
+  contextRef?: string;
 }
 
 /**
@@ -248,6 +309,41 @@ export interface OperatorAnsweredEvent extends DecisionEventEnvelope {
   chosenOptionId: string;
   /** Optional free-text rationale for the choice. */
   rationale?: string;
+  /**
+   * AISDLC-463 — surfacing-context backlink captured at resolve time (the
+   * `--context-ref` value: a PR url, `pr:N`, or task id). Falls back to the
+   * decision's `spec.contextRef` when the resolver doesn't override it.
+   */
+  contextRef?: string;
+  /**
+   * AISDLC-463 — the agent / surface that raised the decision, where known
+   * (e.g. an in-session AskUserQuestion wrapper). Recorded for audit
+   * completeness; absent for operator-initiated resolves with no surfacing
+   * agent.
+   */
+  surfacingAgent?: string;
+}
+
+/**
+ * AISDLC-463 — `auto-expired` event.
+ *
+ * Emitted by `cli-decisions auto-expire` when a pending decision's timebox
+ * has lapsed AND it declared an `autonomousFallbackOptionId`. The framework
+ * picks the fallback option and records the lapse. The projection folds this
+ * into `lifecycle: 'answered'` (the fallback IS the answer) with
+ * `answeredBy: 'auto-expired'` so the audit trail distinguishes an autonomous
+ * fallback from an operator answer.
+ */
+export interface AutoExpiredEvent extends DecisionEventEnvelope {
+  type: 'auto-expired';
+  /** The fallback option id the framework selected (== spec.autonomousFallbackOptionId). */
+  chosenOptionId: string;
+  /** Fallback reason, e.g. `"fallback after PT4H timebox"`. Recorded as the audit rationale. */
+  rationale: string;
+  /** The expiry timestamp that triggered the fallback (ISO-8601 UTC). */
+  expiredAt: string;
+  /** AISDLC-463 — surfacing-context backlink carried over from spec.contextRef. */
+  contextRef?: string;
 }
 
 /**
@@ -263,6 +359,7 @@ export type DecisionEvent =
   | StageCCompletedEvent
   | OverriddenEvent
   | TimeboxExtendedEvent
+  | AutoExpiredEvent
   | (DecisionEventEnvelope & {
       type: Exclude<
         DecisionEventType,
@@ -272,6 +369,7 @@ export type DecisionEvent =
         | 'stage-c-completed'
         | 'overridden'
         | 'timebox-extended'
+        | 'auto-expired'
       >;
     } & Record<string, unknown>);
 
@@ -718,9 +816,41 @@ export function validateDecisionEvent(raw: unknown): string | null {
     }
   }
 
+  if (r.type === 'auto-expired') {
+    if (typeof r.chosenOptionId !== 'string' || r.chosenOptionId.length === 0) {
+      return 'auto-expired: chosenOptionId is required';
+    }
+    if (typeof r.rationale !== 'string' || r.rationale.length === 0) {
+      return 'auto-expired: rationale is required';
+    }
+    if (typeof r.expiredAt !== 'string' || r.expiredAt.length === 0) {
+      return 'auto-expired: expiredAt is required';
+    }
+  }
+
   if (r.type === 'decision-opened') {
     if (typeof r.summary !== 'string' || r.summary.length === 0) {
       return 'decision-opened: summary is required';
+    }
+    // AISDLC-463 — validate the new optional author fields when present.
+    if (r.priority !== undefined && !DECISION_PRIORITIES.includes(r.priority as DecisionPriority)) {
+      return `decision-opened: priority must be one of ${DECISION_PRIORITIES.join('|')}`;
+    }
+    if (
+      r.impactScore !== undefined &&
+      (typeof r.impactScore !== 'number' ||
+        !Number.isFinite(r.impactScore) ||
+        r.impactScore < 0 ||
+        r.impactScore > 100)
+    ) {
+      return 'decision-opened: impactScore must be a number in [0,100]';
+    }
+    if (
+      r.autonomousFallbackOptionId !== undefined &&
+      (typeof r.autonomousFallbackOptionId !== 'string' ||
+        !OPTION_ID_PATTERN.test(r.autonomousFallbackOptionId))
+    ) {
+      return `decision-opened: autonomousFallbackOptionId must match ${OPTION_ID_PATTERN}`;
     }
     if (typeof r.source !== 'string' || !DECISION_SOURCES.includes(r.source as DecisionSource)) {
       return `decision-opened: source must be one of ${DECISION_SOURCES.join('|')}`;

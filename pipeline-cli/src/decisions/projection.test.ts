@@ -9,18 +9,22 @@ import { join } from 'node:path';
 
 import {
   appendDecisionEvent,
+  makeAutoExpiredEvent,
   makeDecisionOpenedEvent,
   makeTimeboxExtendedEvent,
 } from './event-log.js';
 import {
+  computeRankScore,
   filterExpiredDecisions,
   isDecisionTimeboxExpired,
   listDecisions,
   projectAll,
   projectDecision,
+  rankDecisions,
   sortDecisionsByTimeboxUrgency,
 } from './projection.js';
 import { computeTimeboxExpiresAt, parseTimebox } from './timebox.js';
+import type { DecisionPriority } from './decision-record.js';
 
 let workDir: string;
 
@@ -280,5 +284,144 @@ describe('AISDLC-447 — isDecisionTimeboxExpired + filterExpiredDecisions', () 
     const { decisions } = listDecisions({ workDir });
     const expired = filterExpiredDecisions(decisions, new Date('2026-05-27T15:00:00Z'));
     expect(expired.map((d) => d.metadata.id)).toEqual(['DEC-0001']);
+  });
+});
+
+// ── AISDLC-463 — priority ranking ────────────────────────────────────────────
+
+describe('AISDLC-463 — computeRankScore + rankDecisions', () => {
+  function openRanked(
+    id: string,
+    opts: {
+      created: string;
+      priority?: DecisionPriority;
+      impactScore?: number;
+      timebox?: string;
+    },
+  ): void {
+    const createdDate = new Date(opts.created);
+    let timeboxExpiresAt: string | undefined;
+    if (opts.timebox) {
+      const parsed = parseTimebox(opts.timebox);
+      timeboxExpiresAt = computeTimeboxExpiresAt(parsed.durationMs, createdDate);
+    }
+    appendDecisionEvent(
+      makeDecisionOpenedEvent({
+        decisionId: id,
+        source: 'ad-hoc',
+        scope: 'workspace',
+        summary: id,
+        options: [
+          { id: 'opt-a', description: 'A' },
+          { id: 'opt-b', description: 'B' },
+        ],
+        ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
+        ...(opts.impactScore !== undefined ? { impactScore: opts.impactScore } : {}),
+        ...(opts.timebox ? { timebox: opts.timebox } : {}),
+        ...(timeboxExpiresAt ? { timeboxExpiresAt } : {}),
+        now: createdDate,
+      }),
+      { workDir },
+    );
+  }
+
+  it('weights critical above low at equal impact + no timebox', () => {
+    openRanked('DEC-0001', { created: '2026-05-15T10:00:00Z', priority: 'low', impactScore: 50 });
+    openRanked('DEC-0002', {
+      created: '2026-05-15T10:00:00Z',
+      priority: 'critical',
+      impactScore: 50,
+    });
+    const { decisions } = listDecisions({ workDir });
+    const ranked = rankDecisions(decisions, new Date('2026-05-15T11:00:00Z'));
+    expect(ranked.map((d) => d.metadata.id)).toEqual(['DEC-0002', 'DEC-0001']);
+  });
+
+  it('treats absent priority as low and absent impact as 50 (deterministic defaults)', () => {
+    openRanked('DEC-0001', { created: '2026-05-15T10:00:00Z' }); // no priority, no impact
+    const { decisions } = listDecisions({ workDir });
+    // priorityWeight(low=1) × impactFactor(50/100+1=1.5) × urgencyDecay(untimeboxed=1) = 1.5
+    expect(computeRankScore(decisions[0], new Date('2026-05-15T11:00:00Z'))).toBeCloseTo(1.5, 10);
+  });
+
+  it('urgency-decay escalates an expired decision above a not-yet-expired peer', () => {
+    // Same priority + impact; DEC-0001 expired, DEC-0002 far from expiry.
+    openRanked('DEC-0001', {
+      created: '2026-05-15T10:00:00Z',
+      priority: 'medium',
+      impactScore: 50,
+      timebox: 'PT4H', // expires 14:00
+    });
+    openRanked('DEC-0002', {
+      created: '2026-05-15T10:00:00Z',
+      priority: 'medium',
+      impactScore: 50,
+      timebox: 'P30D', // expires far out
+    });
+    const { decisions } = listDecisions({ workDir });
+    const now = new Date('2026-05-15T15:00:00Z'); // past DEC-0001's expiry
+    const ranked = rankDecisions(decisions, now);
+    expect(ranked.map((d) => d.metadata.id)).toEqual(['DEC-0001', 'DEC-0002']);
+    // expired urgencyDecay 3.0 vs beyond-24h 1.0.
+    expect(computeRankScore(decisions[0], now)).toBeGreaterThan(
+      computeRankScore(decisions[1], now),
+    );
+  });
+
+  it('breaks ties on created ascending (determinism)', () => {
+    openRanked('DEC-0001', {
+      created: '2026-05-15T12:00:00Z',
+      priority: 'high',
+      impactScore: 80,
+    });
+    openRanked('DEC-0002', {
+      created: '2026-05-15T10:00:00Z',
+      priority: 'high',
+      impactScore: 80,
+    });
+    const { decisions } = listDecisions({ workDir });
+    const now = new Date('2026-05-15T13:00:00Z');
+    // Identical scores → older (DEC-0002) first.
+    expect(computeRankScore(decisions[0], now)).toBe(computeRankScore(decisions[1], now));
+    const ranked = rankDecisions(decisions, now);
+    expect(ranked.map((d) => d.metadata.id)).toEqual(['DEC-0002', 'DEC-0001']);
+  });
+
+  it('is a pure function — does not mutate its input array', () => {
+    openRanked('DEC-0001', { created: '2026-05-15T10:00:00Z', priority: 'low' });
+    openRanked('DEC-0002', { created: '2026-05-15T10:00:00Z', priority: 'critical' });
+    const { decisions } = listDecisions({ workDir });
+    const before = decisions.map((d) => d.metadata.id);
+    rankDecisions(decisions);
+    expect(decisions.map((d) => d.metadata.id)).toEqual(before);
+  });
+});
+
+// ── AISDLC-463 — auto-expired event fold ─────────────────────────────────────
+
+describe('AISDLC-463 — auto-expired projection fold', () => {
+  it('folds an auto-expired event into lifecycle answered with answeredBy=auto-expired', () => {
+    openDecision('DEC-0001', 'fallback decision', '2026-05-15T10:00:00Z');
+    appendDecisionEvent(
+      makeAutoExpiredEvent({
+        decisionId: 'DEC-0001',
+        chosenOptionId: 'opt-a',
+        rationale: 'fallback after PT4H timebox',
+        expiredAt: '2026-05-15T14:00:00.000Z',
+        contextRef: 'pr:1234',
+        now: new Date('2026-05-15T14:01:00Z'),
+      }),
+      { workDir },
+    );
+    const d = projectDecision('DEC-0001', { workDir });
+    expect(d?.status.lifecycle).toBe('answered');
+    expect(d?.status.answeredOptionId).toBe('opt-a');
+    expect(d?.status.answeredBy).toBe('auto-expired');
+    expect(d?.status.answeredAt).toBe('2026-05-15T14:01:00.000Z');
+    // The event is preserved in the audit log with full surfacing context.
+    const last = d?.decisionLog.at(-1) as Record<string, unknown>;
+    expect(last.type).toBe('auto-expired');
+    expect(last.rationale).toBe('fallback after PT4H timebox');
+    expect(last.contextRef).toBe('pr:1234');
   });
 });

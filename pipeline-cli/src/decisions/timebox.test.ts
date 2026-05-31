@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TIMEBOX_CATEGORICAL_ALIASES,
   computeTimeboxExpiresAt,
+  hoursToIsoDuration,
   isTimeboxExpired,
   msRemainingUntil,
   parseIsoDurationToMs,
@@ -164,5 +165,25 @@ describe('isTimeboxExpired', () => {
   it('returns false when expiry equals now (not yet past)', () => {
     const t = '2026-05-27T12:00:00.000Z';
     expect(isTimeboxExpired(t, new Date(t))).toBe(false);
+  });
+});
+
+describe('AISDLC-463 — hoursToIsoDuration', () => {
+  it('maps an integer hours count to PTnH (the --timebox-hours alias)', () => {
+    expect(hoursToIsoDuration(4)).toBe('PT4H');
+    expect(hoursToIsoDuration(1)).toBe('PT1H');
+    expect(hoursToIsoDuration(24)).toBe('PT24H');
+  });
+  it('round-trips through parseTimebox to the same milliseconds as --timebox PT4H', () => {
+    expect(parseTimebox(hoursToIsoDuration(4)).durationMs).toBe(parseTimebox('PT4H').durationMs);
+  });
+  it('promotes fractional hours to whole minutes', () => {
+    expect(hoursToIsoDuration(1.5)).toBe('PT90M');
+    expect(parseTimebox(hoursToIsoDuration(1.5)).durationMs).toBe(90 * 60 * 1000);
+  });
+  it('throws on non-positive / non-finite input', () => {
+    expect(() => hoursToIsoDuration(0)).toThrow(/positive number/);
+    expect(() => hoursToIsoDuration(-3)).toThrow(/positive number/);
+    expect(() => hoursToIsoDuration(Number.NaN)).toThrow(/positive number/);
   });
 });

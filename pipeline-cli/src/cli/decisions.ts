@@ -32,16 +32,20 @@ import {
   clearFatigue,
   computeStageACoverage,
   computeTimeboxExpiresAt,
+  DECISION_PRIORITIES,
   DECISION_SOURCES,
   decisionCatalogDisabledMessage,
   disposeAndOptionallyPromote,
   filterExpiredDecisions,
   getFatigueStatus,
+  hoursToIsoDuration,
   isDecisionCatalogEnabled,
+  isDecisionTimeboxExpired,
   isNotebookSummariesEnabled,
   isStageCAutoApplyEligible,
   listDecisions,
   loadDecisionsConfig,
+  makeAutoExpiredEvent,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
   makeOverriddenEvent,
@@ -56,6 +60,7 @@ import {
   parseTimebox,
   projectDecision,
   promoteAllDisposedPendingExemplars,
+  rankDecisions,
   readDecisionExemplars,
   readNotebookSummary,
   readPendingExemplars,
@@ -84,6 +89,7 @@ import {
   type AggregateCorpusResult,
   type Decision,
   type DecisionOption,
+  type DecisionPriority,
   type DecisionSource,
   type DecisionSupportView,
   type PendingExemplar,
@@ -279,6 +285,14 @@ interface AddInputs {
    * event log via the `by` field + ts). Undefined when no timebox supplied.
    */
   timebox?: string;
+  /** AISDLC-463 — operator-authored categorical priority. */
+  priority?: DecisionPriority;
+  /** AISDLC-463 — operator-authored impact score [0,100]. */
+  impactScore?: number;
+  /** AISDLC-463 — autonomous-fallback option id (validated against options). */
+  autonomousFallbackOptionId?: string;
+  /** AISDLC-463 — surfacing-context backlink. */
+  contextRef?: string;
 }
 
 async function gatherAddInputsInteractive(): Promise<AddInputs> {
@@ -427,11 +441,57 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
     inputs.assignedActor = String(argv['assigned-actor']);
   }
   if (typeof argv.by === 'string' && argv.by) inputs.by = String(argv.by);
-  if (typeof argv.timebox === 'string' && argv.timebox) {
+
+  // AISDLC-463 — `--timebox-hours <N>` is an ergonomic numeric alias for the
+  // existing `--timebox` ISO-duration flag. We map it to ISO form and feed it
+  // through the SAME parseTimebox / expiry machinery — no duplicate logic.
+  // Passing both is a clear conflict; error rather than silently picking one.
+  const hasTimebox = typeof argv.timebox === 'string' && argv.timebox;
+  const hasTimeboxHours = argv['timebox-hours'] !== undefined && argv['timebox-hours'] !== null;
+  if (hasTimebox && hasTimeboxHours) {
+    throw new Error('--timebox and --timebox-hours are mutually exclusive — pass only one');
+  }
+  if (hasTimebox) {
     // parseTimebox throws on invalid input; the caller catches + fail()s
     // with the operator-friendly message via the surrounding try/catch.
     inputs.timebox = parseTimebox(String(argv.timebox)).duration;
+  } else if (hasTimeboxHours) {
+    const hours = Number(argv['timebox-hours']);
+    inputs.timebox = parseTimebox(hoursToIsoDuration(hours)).duration;
   }
+
+  if (argv.priority !== undefined && argv.priority !== null && String(argv.priority) !== '') {
+    const p = String(argv.priority);
+    if (!DECISION_PRIORITIES.includes(p as DecisionPriority)) {
+      throw new Error(`--priority must be one of ${DECISION_PRIORITIES.join('|')} (got: ${p})`);
+    }
+    inputs.priority = p as DecisionPriority;
+  }
+
+  if (argv['impact-score'] !== undefined && argv['impact-score'] !== null) {
+    const n = Number(argv['impact-score']);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      throw new Error(
+        `--impact-score must be a number in [0,100] (got: ${String(argv['impact-score'])})`,
+      );
+    }
+    inputs.impactScore = n;
+  }
+
+  if (typeof argv['autonomous-fallback'] === 'string' && argv['autonomous-fallback']) {
+    const fb = String(argv['autonomous-fallback']);
+    if (!options.some((o) => o.id === fb)) {
+      throw new Error(
+        `--autonomous-fallback "${fb}" must reference one of the declared option ids: ${options.map((o) => o.id).join(', ')}`,
+      );
+    }
+    inputs.autonomousFallbackOptionId = fb;
+  }
+
+  if (typeof argv['context-ref'] === 'string' && argv['context-ref']) {
+    inputs.contextRef = String(argv['context-ref']);
+  }
+
   return inputs;
 }
 
@@ -465,6 +525,12 @@ export function buildDecisionsCli(): Argv {
             describe:
               'AISDLC-447 — sort order. `timebox` = timebox-remaining ascending (most-urgent first); `created` = legacy creation-order ascending.',
           })
+          .option('ranked', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'AISDLC-463 — rank pending decisions by priority × impact × urgency-decay (most-urgent first). priorityWeight (critical=4/high=3/medium=2/low=1, default low) × impactFactor ((impactScore/100)+1, default impact 50) × urgencyDecay (expired=3 / <1h=2 / <24h=1.5 / else or untimeboxed=1). Ties break by created ascending. Overrides --sort when set.',
+          })
           .option('expired', {
             type: 'boolean',
             default: false,
@@ -487,8 +553,18 @@ export function buildDecisionsCli(): Argv {
         // Apply --expired filter BEFORE sort so the urgency ordering only
         // reflects the visible subset.
         const filtered = argv.expired ? filterExpiredDecisions(rawDecisions) : rawDecisions;
-        const decisions =
-          argv.sort === 'created' ? filtered : sortDecisionsByTimeboxUrgency(filtered);
+        // AISDLC-463 — `--ranked` is a third ordering mode alongside the
+        // AISDLC-447 `--sort timebox|created`. When set it takes precedence
+        // (the priority × impact × urgency formula subsumes the plain
+        // timebox-remaining order).
+        let decisions: Decision[];
+        if (argv.ranked) {
+          decisions = rankDecisions(filtered);
+        } else if (argv.sort === 'created') {
+          decisions = filtered;
+        } else {
+          decisions = sortDecisionsByTimeboxUrgency(filtered);
+        }
         if (String(argv.format) === 'json') {
           emit({ ok: true, enabled: true, decisions, skipped });
         } else {
@@ -612,6 +688,32 @@ export function buildDecisionsCli(): Argv {
             type: 'string',
             describe: `AISDLC-447 — operator-authored timebox. ISO-8601 duration (PT4H, P1D, P7D, P30D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). When set, the decision sorts to the top of \`list\` urgency + expires at created+duration.`,
           })
+          .option('timebox-hours', {
+            type: 'number',
+            describe:
+              'AISDLC-463 — ergonomic numeric timebox alias. `--timebox-hours 4` ≡ `--timebox PT4H`; maps onto the same expiry machinery. Mutually exclusive with --timebox.',
+          })
+          .option('priority', {
+            type: 'string',
+            choices: DECISION_PRIORITIES as unknown as string[],
+            describe:
+              'AISDLC-463 — operator-authored categorical priority (critical/high/medium/low). Feeds `list --ranked`.',
+          })
+          .option('impact-score', {
+            type: 'number',
+            describe:
+              'AISDLC-463 — operator-authored impact score in [0,100] (downstream blast-radius). Feeds `list --ranked`.',
+          })
+          .option('autonomous-fallback', {
+            type: 'string',
+            describe:
+              'AISDLC-463 — option id auto-selected by `auto-expire` when the timebox lapses unanswered. Must reference a declared --option id.',
+          })
+          .option('context-ref', {
+            type: 'string',
+            describe:
+              'AISDLC-463 — surfacing-context backlink (a PR url, `pr:N`, or task id) recorded for the audit trail.',
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -631,6 +733,10 @@ export function buildDecisionsCli(): Argv {
           argv.summary !== undefined ||
           argv.scope !== undefined ||
           (Array.isArray(argv.option) && argv.option.length > 0);
+        // NB: the AISDLC-463 author flags (--priority / --impact-score /
+        // --autonomous-fallback / --context-ref / --timebox-hours) never appear
+        // without --summary/--scope/--option (they decorate an add), so the
+        // interactive-mode trigger above already covers them.
 
         let inputs: AddInputs;
         try {
@@ -681,6 +787,13 @@ export function buildDecisionsCli(): Argv {
           ...(inputs.by !== undefined ? { by: inputs.by } : {}),
           ...(inputs.timebox !== undefined ? { timebox: inputs.timebox } : {}),
           ...(timeboxExpiresAt !== undefined ? { timeboxExpiresAt } : {}),
+          // AISDLC-463 — operator-authored ranking + fallback + context fields.
+          ...(inputs.priority !== undefined ? { priority: inputs.priority } : {}),
+          ...(inputs.impactScore !== undefined ? { impactScore: inputs.impactScore } : {}),
+          ...(inputs.autonomousFallbackOptionId !== undefined
+            ? { autonomousFallbackOptionId: inputs.autonomousFallbackOptionId }
+            : {}),
+          ...(inputs.contextRef !== undefined ? { contextRef: inputs.contextRef } : {}),
           now: eventNow,
         });
 
@@ -697,6 +810,12 @@ export function buildDecisionsCli(): Argv {
           if (inputs.timebox !== undefined && timeboxExpiresAt) {
             emitText(`  timebox:   ${inputs.timebox} (expires ${timeboxExpiresAt})`);
           }
+          if (inputs.priority !== undefined) emitText(`  priority:  ${inputs.priority}`);
+          if (inputs.impactScore !== undefined) emitText(`  impact:    ${inputs.impactScore}`);
+          if (inputs.autonomousFallbackOptionId !== undefined) {
+            emitText(`  fallback:  ${inputs.autonomousFallbackOptionId}`);
+          }
+          if (inputs.contextRef !== undefined) emitText(`  context:   ${inputs.contextRef}`);
         }
       },
     )
@@ -1286,6 +1405,206 @@ export function buildDecisionsCli(): Argv {
           emitText(`decision answered: ${id} → ${optionId}`);
           if (typeof argv.rationale === 'string' && argv.rationale) {
             emitText(`  rationale: ${argv.rationale}`);
+          }
+        }
+      },
+    )
+    .command(
+      'resolve <id>',
+      'AISDLC-463 — operator-driven resolution. Pick an option with --option, recording resolver + chosen option + optional --rationale + surfacing context (--context-ref / --surfacing-agent) as an `operator-answered` audit event. Refuses an already-resolved/archived decision.',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('option', {
+            type: 'string',
+            demandOption: true,
+            describe: "The option id to pick (must be one of the decision's declared option ids).",
+          })
+          .option('rationale', {
+            type: 'string',
+            describe: 'Optional free-text rationale for the choice (audited).',
+          })
+          .option('by', {
+            type: 'string',
+            describe: 'Resolver identifier (operator email / login). Recorded as the audit actor.',
+          })
+          .option('context-ref', {
+            type: 'string',
+            describe:
+              'AISDLC-463 — surfacing-context backlink (PR url / `pr:N` / task id). Falls back to the decision spec contextRef when omitted.',
+          })
+          .option('surfacing-agent', {
+            type: 'string',
+            describe:
+              'AISDLC-463 — the agent / surface that raised the decision, where known. Recorded for audit completeness.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        const optionId = String(argv.option);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          fail(
+            decisionCatalogDisabledMessage() +
+              '\n[cli-decisions] resolve: refusing to mutate the event log while the flag is off.',
+          );
+        }
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) fail(`decision not found: ${id}`);
+        // Refuse to re-resolve a terminal-state decision (AC#3).
+        const lc = decision!.status.lifecycle;
+        if (lc === 'answered' || lc === 'archived' || lc === 'superseded') {
+          fail(
+            `${id} is already ${lc} — refusing to resolve. (answered option: ${decision!.status.answeredOptionId ?? '(none)'})`,
+          );
+        }
+        if (!decision!.spec.options.some((o) => o.id === optionId)) {
+          fail(
+            `option "${optionId}" is not declared on ${id} — valid options: ${decision!.spec.options.map((o) => o.id).join(', ')}`,
+          );
+        }
+
+        // AC#7 — capture surfacing context. The --context-ref override falls
+        // back to the decision's authored spec.contextRef so the audit trail
+        // always backlinks to what raised the decision.
+        const contextRef =
+          typeof argv['context-ref'] === 'string' && argv['context-ref']
+            ? String(argv['context-ref'])
+            : decision!.spec.contextRef;
+
+        const evt = makeOperatorAnsweredEvent({
+          decisionId: id,
+          chosenOptionId: optionId,
+          ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
+          ...(contextRef !== undefined ? { contextRef } : {}),
+          ...(typeof argv['surfacing-agent'] === 'string' && argv['surfacing-agent']
+            ? { surfacingAgent: String(argv['surfacing-agent']) }
+            : {}),
+          ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+        });
+        appendDecisionEvent(evt, { workDir });
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            decisionId: id,
+            chosenOptionId: optionId,
+            resolver: typeof argv.by === 'string' ? String(argv.by) : null,
+            ...(contextRef !== undefined ? { contextRef } : {}),
+            ...(typeof argv['surfacing-agent'] === 'string' && argv['surfacing-agent']
+              ? { surfacingAgent: String(argv['surfacing-agent']) }
+              : {}),
+          });
+        } else {
+          emitText(`decision resolved: ${id} → ${optionId}`);
+          if (typeof argv.by === 'string' && argv.by) emitText(`  resolver:  ${argv.by}`);
+          if (typeof argv.rationale === 'string' && argv.rationale) {
+            emitText(`  rationale: ${argv.rationale}`);
+          }
+          if (contextRef !== undefined) emitText(`  context:   ${contextRef}`);
+          if (typeof argv['surfacing-agent'] === 'string' && argv['surfacing-agent']) {
+            emitText(`  surfacing: ${argv['surfacing-agent']}`);
+          }
+        }
+      },
+    )
+    .command(
+      'auto-expire',
+      'AISDLC-463 — scan pending decisions; for each whose timebox has expired AND that declared an --autonomous-fallback option, pick the fallback and write an `auto-expired` audit event (resolver = "auto-expired"). Decisions without a fallback are left pending (skipped). Idempotent. Use --dry-run to preview.',
+      (y) =>
+        y
+          .option('dry-run', {
+            type: 'boolean',
+            default: false,
+            describe: 'Report what WOULD be auto-expired without writing any events. No mutation.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const dryRun = Boolean(argv['dry-run']);
+        if (!isDecisionCatalogEnabled()) {
+          fail(
+            decisionCatalogDisabledMessage() +
+              '\n[cli-decisions] auto-expire: refusing to mutate the event log while the flag is off.',
+          );
+        }
+        const { decisions } = listDecisions({ workDir });
+        const now = new Date();
+
+        const expired: Array<{ decisionId: string; chosenOptionId: string; rationale: string }> =
+          [];
+        const skipped: Array<{ decisionId: string; reason: string }> = [];
+
+        for (const d of decisions) {
+          const lc = d.status.lifecycle;
+          // Idempotent: a resolved / terminal-state decision is never re-expired.
+          if (lc === 'answered' || lc === 'archived' || lc === 'superseded') {
+            continue;
+          }
+          if (!isDecisionTimeboxExpired(d, now)) {
+            continue; // not yet expired — leave pending silently
+          }
+          const fallback = d.spec.autonomousFallbackOptionId;
+          if (fallback === undefined) {
+            // Expired but no fallback declared — leave pending, log the skip (AC#4).
+            skipped.push({ decisionId: d.metadata.id, reason: 'no-autonomous-fallback' });
+            continue;
+          }
+          // Defensive: a fallback referencing a now-missing option shouldn't
+          // happen (add validates it) but a hand-edited log could; skip rather
+          // than write an invalid answer.
+          if (!d.spec.options.some((o) => o.id === fallback)) {
+            skipped.push({ decisionId: d.metadata.id, reason: 'fallback-option-missing' });
+            continue;
+          }
+          const expiresAt = d.status.timeboxExpiresAt ?? now.toISOString();
+          const rationale = `fallback after ${d.spec.timebox ?? 'expired'} timebox`;
+          expired.push({ decisionId: d.metadata.id, chosenOptionId: fallback, rationale });
+
+          if (!dryRun) {
+            const evt = makeAutoExpiredEvent({
+              decisionId: d.metadata.id,
+              chosenOptionId: fallback,
+              rationale,
+              expiredAt: expiresAt,
+              ...(d.spec.contextRef !== undefined ? { contextRef: d.spec.contextRef } : {}),
+              now,
+            });
+            appendDecisionEvent(evt, { workDir });
+          }
+        }
+
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, dryRun, expired, skipped });
+        } else {
+          if (dryRun) emitText('(dry-run — no events written)');
+          if (expired.length === 0) {
+            emitText('no decisions auto-expired.');
+          } else {
+            emitText(
+              `${dryRun ? 'would auto-expire' : 'auto-expired'} ${expired.length} decision(s):`,
+            );
+            for (const e of expired) {
+              emitText(`  ${e.decisionId} → ${e.chosenOptionId} (${e.rationale})`);
+            }
+          }
+          for (const s of skipped) {
+            emitText(`  skip ${s.decisionId}: ${s.reason}`);
           }
         }
       },

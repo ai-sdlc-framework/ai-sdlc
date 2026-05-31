@@ -361,7 +361,7 @@ describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
       });
       const detail =
         `\n--- exit ${result.status} signal ${result.signal ?? 'none'} ---` +
-        `\n--- spawn error ---\n${result.error?.code ?? result.error?.message ?? 'none'}` +
+        `\n--- spawn error ---\n${(result.error as NodeJS.ErrnoException | undefined)?.code ?? result.error?.message ?? 'none'}` +
         `\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
       expect(result.status, `node ${binName}.mjs --help did not exit 0:${detail}`).toBe(0);
       const out = result.stdout + result.stderr;

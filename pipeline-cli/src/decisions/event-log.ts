@@ -31,8 +31,10 @@ import { dirname, join } from 'node:path';
 import {
   formatDecisionId,
   validateDecisionEvent,
+  type AutoExpiredEvent,
   type DecisionEvent,
   type DecisionOpenedEvent,
+  type DecisionPriority,
   type OperatorAnsweredEvent,
   type TimeboxExtendedEvent,
 } from './decision-record.js';
@@ -269,6 +271,14 @@ export interface OpenDecisionInput {
   timebox?: string;
   /** RFC-0035 AISDLC-447 — pre-computed absolute expiry (ISO-8601 UTC). */
   timeboxExpiresAt?: string;
+  /** AISDLC-463 — operator-authored categorical priority. */
+  priority?: DecisionPriority;
+  /** AISDLC-463 — operator-authored impact score [0,100]. */
+  impactScore?: number;
+  /** AISDLC-463 — autonomous-fallback option id (must reference an option). */
+  autonomousFallbackOptionId?: string;
+  /** AISDLC-463 — surfacing-context backlink. */
+  contextRef?: string;
   by?: string;
   now?: Date;
 }
@@ -298,6 +308,12 @@ export function makeDecisionOpenedEvent(input: OpenDecisionInput): DecisionOpene
   if (input.deadline !== undefined) event.deadline = input.deadline;
   if (input.timebox !== undefined) event.timebox = input.timebox;
   if (input.timeboxExpiresAt !== undefined) event.timeboxExpiresAt = input.timeboxExpiresAt;
+  if (input.priority !== undefined) event.priority = input.priority;
+  if (input.impactScore !== undefined) event.impactScore = input.impactScore;
+  if (input.autonomousFallbackOptionId !== undefined) {
+    event.autonomousFallbackOptionId = input.autonomousFallbackOptionId;
+  }
+  if (input.contextRef !== undefined) event.contextRef = input.contextRef;
   if (input.by !== undefined) event.by = input.by;
   return event;
 }
@@ -345,6 +361,10 @@ export interface AnswerDecisionInput {
   chosenOptionId: string;
   /** Optional free-text rationale for the choice. */
   rationale?: string;
+  /** AISDLC-463 — surfacing-context backlink captured at resolve time. */
+  contextRef?: string;
+  /** AISDLC-463 — surfacing agent / surface that raised the decision. */
+  surfacingAgent?: string;
   /** Actor email / login identifier. */
   by?: string;
   now?: Date;
@@ -367,6 +387,48 @@ export function makeOperatorAnsweredEvent(input: AnswerDecisionInput): OperatorA
     chosenOptionId: input.chosenOptionId,
   };
   if (input.rationale !== undefined) event.rationale = input.rationale;
+  if (input.contextRef !== undefined) event.contextRef = input.contextRef;
+  if (input.surfacingAgent !== undefined) event.surfacingAgent = input.surfacingAgent;
   if (input.by !== undefined) event.by = input.by;
+  return event;
+}
+
+// ── Auto-expired event factory (AISDLC-463) ──────────────────────────────────
+
+export interface AutoExpireDecisionInput {
+  decisionId: string;
+  /** The fallback option id the framework selected. */
+  chosenOptionId: string;
+  /** Fallback reason, e.g. `"fallback after PT4H timebox"`. */
+  rationale: string;
+  /** The expiry timestamp that triggered the fallback (ISO-8601 UTC). */
+  expiredAt: string;
+  /** AISDLC-463 — surfacing-context backlink carried over from spec.contextRef. */
+  contextRef?: string;
+  now?: Date;
+}
+
+/**
+ * Build a well-formed `auto-expired` event without writing it. Call
+ * {@link appendDecisionEvent} afterwards to persist.
+ *
+ * AISDLC-463 — emitted by `cli-decisions auto-expire`. The factory hard-codes
+ * `by: 'auto-expired'` so the audit trail distinguishes the autonomous
+ * fallback from an operator answer, even though the projection also folds the
+ * lifecycle to `answered`.
+ */
+export function makeAutoExpiredEvent(input: AutoExpireDecisionInput): AutoExpiredEvent {
+  const ts = (input.now ?? new Date()).toISOString();
+  const event: AutoExpiredEvent = {
+    eventVersion: 'v1',
+    type: 'auto-expired',
+    ts,
+    decisionId: input.decisionId,
+    chosenOptionId: input.chosenOptionId,
+    rationale: input.rationale,
+    expiredAt: input.expiredAt,
+    by: 'auto-expired',
+  };
+  if (input.contextRef !== undefined) event.contextRef = input.contextRef;
   return event;
 }
