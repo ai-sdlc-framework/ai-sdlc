@@ -140,6 +140,9 @@ const NON_INSTRUMENTED_PATTERNS = [
   /(^|\/)vitest\.config\.(?:ts|mjs|js)$/,
   /(^|\/)tsconfig.*\.json$/,
   /(^|\/)eslint\.config\.(?:ts|mjs|js)$/,
+  // Next.js build config (e.g. dashboard/next.config.mjs). Build config, not a
+  // testable unit — same rationale as vitest.config / eslint.config above.
+  /(^|\/)next\.config\.(?:ts|mjs|js)$/,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────

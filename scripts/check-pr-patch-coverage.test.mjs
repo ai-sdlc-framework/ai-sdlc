@@ -385,6 +385,28 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     assert.equal(parsed.reason, 'no-instrumentable-changes');
     assert.deepEqual(parsed.changedCodeFiles, []);
   });
+
+  it('exits 0 when only next.config.mjs changed (build config, not a testable unit)', () => {
+    // Next.js build config (e.g. dashboard/next.config.mjs) is excluded from the
+    // patch-coverage denominator — same class as vitest.config / eslint.config.
+    // Regression guard: PR #807's next.config change tripped this gate (0/26).
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    const head = commitFile(
+      repo,
+      'dashboard/next.config.mjs',
+      "const nextConfig = { output: 'standalone' };\nexport default nextConfig;\n",
+      'fix(dashboard): adjust next config',
+    );
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 for next.config.mjs, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.reason, 'no-instrumentable-changes');
+    assert.deepEqual(parsed.changedCodeFiles, []);
+  });
 });
 
 // ── AC 4: failure with diagnostic when coverage data missing ─────────────────
