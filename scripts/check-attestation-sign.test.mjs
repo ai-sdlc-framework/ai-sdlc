@@ -111,10 +111,10 @@ function installFakeSigner(root, { fail = false, silent = false, withLeaves = fa
     ? '# silent mode: do not write the file'
     : `mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
 SCHEMA_VERSION_ARG="v6"
+prev_was_schema=0
 for arg in "$@"; do
-  prev_was_schema_version=0
   if [ "$prev_was_schema" = "1" ]; then SCHEMA_VERSION_ARG="$arg"; break; fi
-  if [ "$arg" = "--schema-version" ]; then prev_was_schema=1; fi
+  if [ "$arg" = "--schema-version" ]; then prev_was_schema=1; else prev_was_schema=0; fi
 done
 # Simpler: grep --schema-version arg from $*
 if echo "$*" | grep -q -- "--schema-version v5"; then
@@ -753,6 +753,57 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       '',
       'no leaves file should appear in the commit tree when none was written by the signer',
     );
+  });
+
+  it('AISDLC-472: STANDALONE exit-1 path commits per-patch-id leaves (normal pre-push, no orchestrator)', () => {
+    // The existing withLeaves coverage (AISDLC-471) only exercises orchestrator
+    // mode (AI_SDLC_INTERNAL_NO_EXIT_1=1 → exit 0). This test covers the normal
+    // standalone pre-push invocation: leaves present, NO orchestrator env var,
+    // so the hook signs + commits the envelope + the per-patch-id leaves file
+    // AND exits 1 with the "re-push required" hint. Guards the load-bearing
+    // AISDLC-471 staging behavior on the exit-1 code path operators actually hit.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-472\n');
+    writeVerdictFile(root, 'AISDLC-472');
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd } = installFakeSigner(root, { withLeaves: true });
+    // NOTE: no AI_SDLC_INTERNAL_NO_EXIT_1 → standalone mode → exit 1 expected.
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
+    // Re-push message must be actionable (mirrors the AC #1+5 standalone test).
+    assert.match(r.stderr, /re-run `git push`|re-push required|added an attestation/i);
+
+    // Envelope must be committed.
+    const envelopeInTree = spawnSync(
+      'git',
+      ['ls-tree', 'HEAD', '--', `.ai-sdlc/attestations/${head}.v6.dsse.json`],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    assert.ok(
+      envelopeInTree.stdout.trim().length > 0,
+      `envelope must be committed on the standalone exit-1 path: ${envelopeInTree.stderr}`,
+    );
+
+    // Load-bearing AISDLC-471 guard: per-patch-id leaves file must be committed
+    // alongside the envelope on the standalone exit-1 path too.
+    const leavesInTree = spawnSync(
+      'git',
+      ['ls-tree', 'HEAD', '--', `.ai-sdlc/transcript-leaves/${head}.jsonl`],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    assert.ok(
+      leavesInTree.stdout.trim().length > 0,
+      `per-patch-id leaves file must be committed on the standalone exit-1 path — ` +
+        `this is the AISDLC-472 regression guard. ` +
+        `git ls-tree output was empty (stderr: ${leavesInTree.stderr})`,
+    );
+
+    // A chore commit must have landed on top of the original HEAD.
+    const newHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(newHead, head, 'a chore commit must have been added on top of HEAD');
+    const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(newSubject, /chore: auto-sign attestation for AISDLC-472/);
   });
 
   it('AISDLC-274: hook removes stale envelope + signs fresh after queue-rebase simulation', () => {
