@@ -301,11 +301,17 @@ describe('patch-id helpers (AISDLC-398 AC-4)', () => {
   // against the post-commit HEAD, fail to find leaves at the new name,
   // and abort with "No transcript leaves found".
   describe('AISDLC-422 — transcript-leaves directory exclusion', () => {
-    it('PATCH_ID_EXCLUSIONS includes both attestations AND transcript-leaves dirs', async () => {
+    it('PATCH_ID_EXCLUSIONS includes attestations dir, transcript-leaves dir, AND transcript-leaves.jsonl file (AISDLC-475 AC#6)', async () => {
+      // AISDLC-475 (AC#6): the exclusion list was extended from 2 to 3 entries
+      // to align with ATTESTATION_PATH_EXCLUSIONS in scripts/verify-attestation.mjs.
+      // The transcript-leaves.jsonl shared file must be excluded so the signer
+      // and verifier compute the same patch-id. Asymmetric exclusion reproduces
+      // the AISDLC-421 bug class.
       const mod = await import('./patch-id.js');
       expect(mod.PATCH_ID_EXCLUSIONS).toEqual([
         ':!.ai-sdlc/attestations/',
         ':!.ai-sdlc/transcript-leaves/',
+        ':!.ai-sdlc/transcript-leaves.jsonl',
       ]);
     });
 

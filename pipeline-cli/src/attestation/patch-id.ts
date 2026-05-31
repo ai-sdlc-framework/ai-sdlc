@@ -37,14 +37,22 @@ import { execFileSync, spawnSync } from 'node:child_process';
  * - `.ai-sdlc/attestations/` — the signed envelope itself; excluded since
  *   AISDLC-398 so the chore commit that lands the envelope doesn't change
  *   the patch-id (chicken-and-egg).
- * - `.ai-sdlc/transcript-leaves/` — the per-patch-id leaves file; excluded
- *   per AISDLC-422 because committing `<patch-id>.jsonl` would otherwise
- *   change the diff and therefore the patch-id (self-referential filename).
- *   The signer writes the leaves file BEFORE computing patch-id; if the
- *   leaves directory contributes to the diff, then committing the file
- *   shifts the patch-id and the pre-push attestation-sign hook on the
+ * - `.ai-sdlc/transcript-leaves/` — the per-patch-id leaves directory;
+ *   excluded per AISDLC-422 because committing `<patch-id>.jsonl` would
+ *   otherwise change the diff and therefore the patch-id (self-referential
+ *   filename). The signer writes the leaves file BEFORE computing patch-id;
+ *   if the leaves directory contributes to the diff, then committing the
+ *   file shifts the patch-id and the pre-push attestation-sign hook on the
  *   re-push can't find leaves at the new patch-id name. Exclusion makes
  *   the per-patch-id filename stable across the chore-commit boundary.
+ * - `.ai-sdlc/transcript-leaves.jsonl` — the SHARED legacy transcript-leaves
+ *   file. Excluded per AISDLC-475 (AC#6) to align with
+ *   `ATTESTATION_PATH_EXCLUSIONS` in `scripts/verify-attestation.mjs`.
+ *   Asymmetric exclusion between signer and verifier reproduces the
+ *   AISDLC-421 bug class: when the chore-commit writes both the envelope
+ *   and the `.jsonl` file, the signer and verifier compute different
+ *   patch-ids and the envelope lookup misses. Three-entry set is now
+ *   canonical for both sides.
  *
  * Kept as a tuple so callers spread it into git invocations and adding
  * another exclusion is a one-element append rather than a re-architecture.
@@ -56,6 +64,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 export const PATCH_ID_EXCLUSIONS = [
   ':!.ai-sdlc/attestations/',
   ':!.ai-sdlc/transcript-leaves/',
+  ':!.ai-sdlc/transcript-leaves.jsonl',
 ] as const;
 
 /**

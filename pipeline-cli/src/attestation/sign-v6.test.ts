@@ -17,7 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createPublicKey, generateKeyPairSync, verify as cryptoVerify } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeaf, type TranscriptLeaf } from './merkle.js';
@@ -448,10 +448,14 @@ describe('schema-invalid envelope detection', () => {
   });
 });
 
-// ── AISDLC-398: patchId content-addressed dual-write ─────────────────────────
+// ── AISDLC-398 / AISDLC-475: patchId content-addressed single-write ──────────
+//
+// AISDLC-475 Fix B: when patchId is provided the signer writes ONLY the
+// content-addressed `<patchId>.v6.dsse.json` file (no per-SHA bridge).
+// The bridge was the root cause of the re-sign loop — see sign-v6.ts JSDoc.
 
-describe('signAndWriteV6Envelope — content-addressed dual-write (AISDLC-398 fix #1)', () => {
-  it('writes <patchId>.v6.dsse.json AND <headSha>.v6.dsse.json when patchId is provided', () => {
+describe('signAndWriteV6Envelope — content-addressed single-write (AISDLC-475 Fix B)', () => {
+  it('writes ONLY <patchId>.v6.dsse.json (no per-SHA bridge) when patchId is provided', () => {
     const FAKE_PATCH_ID = 'd'.repeat(40);
     appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-398' }), tmpRoot);
 
@@ -469,10 +473,10 @@ describe('signAndWriteV6Envelope — content-addressed dual-write (AISDLC-398 fi
     const primaryParsed = JSON.parse(primaryContent);
     expect(primaryParsed.schemaVersion).toBe('v6');
 
-    // Legacy bridge file must also exist with identical content.
+    // AISDLC-475 Fix B: per-SHA bridge must NOT be written when patchId is provided.
+    // The bridge was the source of the re-sign loop; its absence is the fix.
     const legacyPath = join(tmpRoot, '.ai-sdlc', 'attestations', `${FAKE_HEAD_SHA}.v6.dsse.json`);
-    const legacyContent = readFileSync(legacyPath, 'utf8');
-    expect(legacyContent).toBe(primaryContent);
+    expect(existsSync(legacyPath)).toBe(false);
   });
 
   it('returns <headSha>.v6.dsse.json path and writes only one file when patchId is absent', () => {

@@ -209,13 +209,24 @@ export interface SignAndWriteV6EnvelopeOptions {
   /**
    * Optional content-addressed patch-id (AISDLC-398).
    *
-   * When provided, the envelope is written to BOTH:
+   * When provided, the envelope is written ONLY to:
    *   - `<patchId>.v6.dsse.json` (primary content-addressed filename)
-   *   - `<headSha>.v6.dsse.json`  (legacy compat bridge)
    *
-   * When absent, only the per-SHA filename is written (pre-AISDLC-398 behaviour).
+   * The per-SHA bridge (`<headSha>.v6.dsse.json`) is NO LONGER written when a
+   * patch-id is available (AISDLC-475 Fix B). The pre-push hook and verifier
+   * both key off the patch-id filename; the per-SHA bridge was the source of
+   * the re-sign loop (hook saw no patch-id envelope after HEAD moved past the
+   * signed dev commit, fell through to the SHA check, missed the bridge because
+   * HEAD had advanced, and re-signed unconditionally). Eliminating the bridge
+   * write makes the idempotency surface unambiguous: patch-id file = signed.
    *
-   * The primary path is returned. The legacy bridge path is written silently.
+   * Legacy soak: the verifier retains a per-SHA fallback lookup for one release
+   * to cover envelopes signed before this change. See AISDLC-475 / AISDLC-490.
+   *
+   * When absent, only the per-SHA filename is written (pre-AISDLC-398 behaviour,
+   * preserved for callers that cannot compute a patch-id at sign time).
+   *
+   * The primary path is returned.
    */
   patchId?: string;
 }
@@ -224,8 +235,9 @@ export interface SignAndWriteV6EnvelopeOptions {
  * Load leaves from the per-patch-id file (AISDLC-421) with a one-release-window
  * fallback to the legacy shared `.ai-sdlc/transcript-leaves.jsonl`, then build
  * + sign the v6 envelope and write it to
- * `.ai-sdlc/attestations/<patch-id>.v6.dsse.json` (primary) +
- * `.ai-sdlc/attestations/<head-sha>.v6.dsse.json` (legacy compat bridge).
+ * `.ai-sdlc/attestations/<patch-id>.v6.dsse.json` (primary, AISDLC-475 Fix B:
+ * NO per-SHA bridge is written when patch-id is available — see JSDoc on
+ * `SignAndWriteV6EnvelopeOptions.patchId` for the full rationale).
  *
  * Returns the absolute path of the written envelope (primary).
  *
@@ -306,19 +318,31 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
   const outDir = join(repoRoot, '.ai-sdlc', 'attestations');
   mkdirSync(outDir, { recursive: true });
 
-  // AISDLC-398: content-addressed dual-write.
-  // When a patch-id is available, write the primary content-addressed file
-  // AND the legacy per-SHA bridge file for backward compat.
-  // When no patch-id is available, write only the per-SHA file (pre-AISDLC-398).
-  const legacyPath = join(outDir, `${headSha}.v6.dsse.json`);
+  // AISDLC-475 Fix B: when a patch-id is available, write ONLY the
+  // content-addressed `<patchId>.v6.dsse.json` file.
+  //
+  // The legacy per-SHA bridge (`<headSha>.v6.dsse.json`) is NO LONGER written
+  // when a patch-id is present. The bridge was the root cause of the re-sign
+  // loop: the pre-push hook saw no valid patch-id envelope after HEAD moved
+  // past the signed dev commit (chore-commit / rebase), fell through to the
+  // per-SHA idempotency check, missed the bridge because HEAD had advanced to
+  // the chore SHA, and re-signed unconditionally — producing an infinite loop.
+  //
+  // The verifier retains a per-SHA fallback lookup (read-only, 1-release soak)
+  // for envelopes signed before this change. See AISDLC-490 for the follow-up
+  // that eliminates the chore-commit class entirely.
+  //
+  // Pre-patch-id fallback: when no patch-id is available (e.g. the diff is
+  // empty after exclusions, or git patch-id failed), write the per-SHA file
+  // as before (pre-AISDLC-398 behaviour — preserves the guarantee that callers
+  // always get back a written file path).
   if (patchId) {
     const primaryPath = join(outDir, `${patchId}.v6.dsse.json`);
     writeFileSync(primaryPath, serialized, { encoding: 'utf8' });
-    // Bridge: same envelope content under the per-SHA name for legacy lookups.
-    writeFileSync(legacyPath, serialized, { encoding: 'utf8' });
     return primaryPath;
   }
 
+  const legacyPath = join(outDir, `${headSha}.v6.dsse.json`);
   writeFileSync(legacyPath, serialized, { encoding: 'utf8' });
   return legacyPath;
 }

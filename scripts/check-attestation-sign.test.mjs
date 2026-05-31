@@ -17,7 +17,15 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  chmodSync,
+  readdirSync,
+} from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -105,8 +113,14 @@ function installFakeSigner(root, { fail = false, silent = false, withLeaves = fa
   const logPath = join(root, 'signer.log');
   const shimPath = join(binDir, 'fake-signer.sh');
   const failBlock = fail ? 'exit 7' : '';
-  // RFC-0042 Phase 3: schema-version-aware fake signer.
-  // v6 → <sha>.v6.dsse.json; v5 (or anything else) → <sha>.dsse.json.
+  // RFC-0042 Phase 3 / AISDLC-475 Fix B: schema-version-aware fake signer.
+  // v6 → write to <patch-id>.v6.dsse.json (primary, AISDLC-475) OR
+  //       fall back to <sha>.v6.dsse.json when no patch-id is computable.
+  // v5 (or anything else) → <sha>.dsse.json.
+  //
+  // AISDLC-475: the real signer now writes ONLY the patch-id file (no SHA bridge).
+  // The fake signer must mirror this so the hook's confirmation check passes.
+  // We compute the patch-id using the same exclusion list as the hook and signer.
   const writeBlock = silent
     ? '# silent mode: do not write the file'
     : `mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
@@ -122,10 +136,30 @@ if echo "$*" | grep -q -- "--schema-version v5"; then
 fi
 if [ "$SCHEMA_VERSION_ARG" = "v6" ]; then
   EXT=".v6.dsse.json"
+  # AISDLC-475 Fix B: compute patch-id using canonical 3-entry exclusion list.
+  # Write to <patch-id>.v6.dsse.json (primary), same as the real signer.
+  FAKE_MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
+  FAKE_PATCH_ID=""
+  if [ -n "$FAKE_MERGE_BASE" ] && [ \${#FAKE_MERGE_BASE} -eq 40 ]; then
+    FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+    if [ -n "$FAKE_DIFF" ]; then
+      FAKE_PATCH_ID_LINE=$(printf '%s' "$FAKE_DIFF" | git patch-id --stable 2>/dev/null | head -1 || echo '')
+      FAKE_PATCH_ID=$(printf '%s' "$FAKE_PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
+      if ! printf '%s' "$FAKE_PATCH_ID" | grep -qE '^[0-9a-f]{40}$'; then
+        FAKE_PATCH_ID=""
+      fi
+    fi
+  fi
+  if [ -n "$FAKE_PATCH_ID" ]; then
+    ENVELOPE_KEY="$FAKE_PATCH_ID"
+  else
+    ENVELOPE_KEY="$HEAD"
+  fi
 else
   EXT=".dsse.json"
+  ENVELOPE_KEY="$HEAD"
 fi
-printf '{"_test":"stub","head":"%s","schemaVersion":"%s"}\\n' "$HEAD" "$SCHEMA_VERSION_ARG" > "$WT_ROOT/.ai-sdlc/attestations/$HEAD$EXT"`;
+printf '{"_test":"stub","head":"%s","schemaVersion":"%s"}\\n' "$HEAD" "$SCHEMA_VERSION_ARG" > "$WT_ROOT/.ai-sdlc/attestations/$ENVELOPE_KEY$EXT"`;
   // AISDLC-471: optionally write a per-patch-id transcript-leaves file so the
   // test can assert that the hook commits it alongside the envelope.
   const leavesBlock = withLeaves
@@ -491,9 +525,14 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       `hook must fire on a brand-new dev commit even when chore1 is in history; got ${r.status}: ${r.stderr}`,
     );
 
-    // New envelope at dev2's SHA (RFC-0042 Phase 3: default v6 → .v6.dsse.json).
-    const dev2Envelope = join(root, '.ai-sdlc', 'attestations', `${dev2}.v6.dsse.json`);
-    assert.equal(existsSync(dev2Envelope), true, 'new v6 envelope must exist at dev2 SHA');
+    // A new v6 envelope must have been written (AISDLC-475 Fix B: the fake signer
+    // now writes the patch-id file, not the SHA file, so we check for ANY v6
+    // envelope in the attestations directory instead of a specific SHA filename).
+    const attDirForDev2 = join(root, '.ai-sdlc', 'attestations');
+    const dev2EnvelopeFiles = existsSync(attDirForDev2)
+      ? readdirSync(attDirForDev2).filter((f) => f.endsWith('.v6.dsse.json'))
+      : [];
+    assert.ok(dev2EnvelopeFiles.length > 0, 'a new v6 envelope must exist after dev2 sign cycle');
 
     // New chore commit on top.
     const newHead = git(['rev-parse', 'HEAD'], root).trim();
@@ -862,9 +901,193 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
 
     // Stale envelope must be gone.
     assert.equal(existsSync(staleEnvPath), false, 'stale envelope must be removed before new sign');
-    // New envelope must exist at the dev commit's SHA (the signer writes it).
-    // RFC-0042 Phase 3: default v6 → .v6.dsse.json.
-    const newEnvPath = join(attDir, `${newDevSha}.v6.dsse.json`);
-    assert.equal(existsSync(newEnvPath), true, `new envelope must exist at ${newDevSha}`);
+    // A new envelope must exist in the attestations directory after the sign cycle.
+    // AISDLC-475 Fix B: the fake signer now writes the patch-id-named file (not the
+    // SHA-named file), so we check for ANY v6 envelope instead of the specific SHA.
+    const newEnvelopes = existsSync(attDir)
+      ? readdirSync(attDir).filter((f) => f.endsWith('.v6.dsse.json'))
+      : [];
+    assert.ok(
+      newEnvelopes.length > 0,
+      `a new v6 envelope must exist after fresh sign (found: ${newEnvelopes.join(', ')})`,
+    );
+  });
+
+  // ── AISDLC-475 (Fix B): patch-id idempotency — eliminate re-sign loop ────
+  //
+  // AC#5 end-to-end: a chore commit on top of a signed dev commit must NOT
+  // trigger a re-sign. The patch-id file stays the same across HEAD movements;
+  // the pre-push hook keys off patch-id and exits 0 (idempotent).
+  //
+  // AC#7(a): chore-commit-on-top → NO re-sign.
+  // AC#7(b): clean-rebase simulation → NO re-sign.
+  // AC#7(c): genuine source change → DOES invalidate + require re-sign (security).
+
+  it('AISDLC-475 AC#7(a): chore-commit-on-top — patch-id envelope already exists → NO re-sign', () => {
+    // Scenario: the signer signed a dev commit (wrote <patch-id>.v6.dsse.json),
+    // then a chore commit landed on top (moving HEAD to the chore SHA).
+    // The hook must see the patch-id envelope and exit 0 without re-signing.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-475\n');
+    writeVerdictFile(root, 'AISDLC-475');
+
+    // Step 1: write a source file and commit it (this becomes the dev commit).
+    writeFileSync(join(root, 'source-475a.ts'), 'export const x = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: add source file (AISDLC-475-ac7a)'], root);
+    const devHead = git(['rev-parse', 'HEAD'], root).trim();
+
+    // Step 2: compute the patch-id the bash hook would compute for this commit.
+    // The bash hook uses: git diff-tree origin/main..HEAD -- exclusions | git patch-id --stable
+    const mergeBase = execFileSync('git', ['merge-base', 'origin/main', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+    const diffOut = spawnSync(
+      'git',
+      [
+        'diff-tree',
+        '--no-color',
+        '-p',
+        `${mergeBase}..HEAD`,
+        '--',
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves/',
+        ':!.ai-sdlc/transcript-leaves.jsonl',
+      ],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    const patchIdResult = spawnSync('git', ['patch-id', '--stable'], {
+      input: diffOut.stdout,
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    const patchId = patchIdResult.stdout.trim().slice(0, 40);
+    assert.ok(
+      /^[0-9a-f]{40}$/.test(patchId),
+      `computed patch-id must be 40-hex, got: "${patchId}"`,
+    );
+
+    // Step 3: write the patch-id envelope (simulating the real signer writing it).
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    const patchIdEnvPath = join(attDir, `${patchId}.v6.dsse.json`);
+    writeFileSync(patchIdEnvPath, '{"_test":"patch-id-envelope","schemaVersion":"v6"}\n');
+
+    // Stage and commit the envelope as a chore commit (simulating the chore that
+    // moves HEAD past the dev commit — exactly the situation Fix B addresses).
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-475 (AISDLC-133)'], root);
+    const choreHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(choreHead, devHead, 'chore commit must advance HEAD');
+
+    // Step 4: run the hook. With Fix B, the hook computes the same patch-id,
+    // finds the patch-id envelope, and exits 0 (idempotent — no re-sign).
+    const { cmd, logPath } = installFakeSigner(root, { fail: true });
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    assert.equal(
+      r.status,
+      0,
+      `AISDLC-475 AC#7(a): hook must exit 0 (idempotent) when patch-id envelope exists, ` +
+        `even though HEAD moved past the signed SHA. Got ${r.status}: ${r.stderr}`,
+    );
+    // Signer must NOT have been invoked.
+    assert.equal(
+      existsSync(logPath),
+      false,
+      'AISDLC-475 AC#7(a): signer must NOT be invoked when patch-id envelope is present',
+    );
+    // No new commit must land.
+    const finalHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(finalHead, choreHead, 'HEAD must not change on idempotent skip');
+  });
+
+  it('AISDLC-475 AC#7(c) SECURITY: genuine source change invalidates the existing patch-id envelope', () => {
+    // This is the security-critical negative test: a real source-file change
+    // MUST produce a different patch-id (because the diff changes), which means
+    // the old envelope at the pre-change patch-id is NOT found, and the hook
+    // MUST re-sign. This guards against Fix B accidentally weakening the trust
+    // chain by treating any existing envelope as valid.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-475\n');
+    writeVerdictFile(root, 'AISDLC-475');
+
+    // Step 1: write initial source file and commit (simulates the dev commit).
+    writeFileSync(join(root, 'source-475c.ts'), 'export const y = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: initial source (AISDLC-475-ac7c)'], root);
+
+    // Step 2: compute patch-id for the INITIAL commit and write a fake envelope.
+    const mergeBase1 = execFileSync('git', ['merge-base', 'origin/main', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+    const diffOut1 = spawnSync(
+      'git',
+      [
+        'diff-tree',
+        '--no-color',
+        '-p',
+        `${mergeBase1}..HEAD`,
+        '--',
+        ':!.ai-sdlc/attestations/',
+        ':!.ai-sdlc/transcript-leaves/',
+        ':!.ai-sdlc/transcript-leaves.jsonl',
+      ],
+      { cwd: root, encoding: 'utf-8' },
+    );
+    const patchIdResult1 = spawnSync('git', ['patch-id', '--stable'], {
+      input: diffOut1.stdout,
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    const oldPatchId = patchIdResult1.stdout.trim().slice(0, 40);
+    assert.ok(
+      /^[0-9a-f]{40}$/.test(oldPatchId),
+      `initial patch-id must be 40-hex, got: "${oldPatchId}"`,
+    );
+
+    // Write the old patch-id envelope.
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    const oldEnvPath = join(attDir, `${oldPatchId}.v6.dsse.json`);
+    writeFileSync(oldEnvPath, '{"_test":"old-patch-id-envelope","schemaVersion":"v6"}\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign for initial source'], root);
+
+    // Step 3: make a GENUINE source change (modifying the source file).
+    // This changes the diff → different patch-id → old envelope is invalid.
+    writeFileSync(join(root, 'source-475c.ts'), 'export const y = 99; // CHANGED\n');
+    git(['add', '.'], root);
+    git(
+      ['commit', '-q', '-m', 'feat: change source (AISDLC-475-ac7c) — MUST invalidate envelope'],
+      root,
+    );
+    const newDevHead = git(['rev-parse', 'HEAD'], root).trim();
+
+    // Step 4: run the hook. With Fix B, the hook computes a NEW patch-id
+    // (different from oldPatchId because the diff changed) → no envelope found
+    // → MUST sign (re-sign). The old envelope at oldPatchId is NOT treated as valid.
+    const { cmd, logPath } = installFakeSigner(root);
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    assert.equal(
+      r.status,
+      1,
+      `AISDLC-475 AC#7(c) SECURITY: genuine source change must force a re-sign (exit 1), ` +
+        `got ${r.status}: ${r.stderr}`,
+    );
+    // Signer MUST have been invoked (it's a new content state).
+    assert.equal(
+      existsSync(logPath),
+      true,
+      'AISDLC-475 AC#7(c) SECURITY: signer MUST be invoked after a genuine source change',
+    );
+    // A new commit must have landed (the new chore-sign commit).
+    const finalHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(
+      finalHead,
+      newDevHead,
+      'a new chore commit must be added after genuine source change',
+    );
   });
 });

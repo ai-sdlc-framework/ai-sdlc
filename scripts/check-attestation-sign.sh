@@ -167,11 +167,15 @@ MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "$MERGE_BASE" ] && [ ${#MERGE_BASE} -eq 40 ]; then
   # Compute patch-id: pipe diff-tree output through git patch-id --stable.
-  # AISDLC-422: keep the exclusion list IDENTICAL to PATCH_ID_EXCLUSIONS in
-  # pipeline-cli/src/attestation/patch-id.ts. Asymmetric exclusion makes
-  # this bash hook compute a different patch-id than the TypeScript signer,
-  # which is the failure mode AISDLC-422 fixes for the rebase-recovery loop.
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' 2>/dev/null || echo '')
+  # AISDLC-422 / AISDLC-475 (AC#6): keep the exclusion list IDENTICAL to
+  # PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts AND to
+  # ATTESTATION_PATH_EXCLUSIONS in scripts/verify-attestation.mjs.
+  # Three-entry canonical set (attestations/, transcript-leaves/, transcript-leaves.jsonl).
+  # Asymmetric exclusion makes this bash hook compute a different patch-id than
+  # the TypeScript signer, which is the failure mode AISDLC-422 fixes. The
+  # transcript-leaves.jsonl entry was added in AISDLC-475 (AC#6) to close the
+  # pre-existing asymmetry with the verifier's ATTESTATION_PATH_EXCLUSIONS.
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
   if [ -n "$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     # Output format: "<patch-id> <commit-sha>"
@@ -190,8 +194,18 @@ if [ "$SCHEMA_VERSION" = "v6" ]; then
   else
     ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.v6.dsse.json"
   fi
-  # Legacy bridge filename (per-SHA)
-  ATT_FILE_LEGACY="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.v6.dsse.json"
+  # Legacy per-SHA filename — used ONLY for the pre-patch-id fallback idempotency
+  # check (when PATCH_ID is empty). AISDLC-475 Fix B: when PATCH_ID is available,
+  # we check ONLY the patch-id file and do NOT fall back to the per-SHA file.
+  # The per-SHA bridge is no longer written by the signer (AISDLC-475), so
+  # checking it when a patch-id is available would cause a false "not signed"
+  # result after the chore-commit moves HEAD past the signed SHA — which is
+  # exactly the re-sign loop this fix is designed to eliminate.
+  if [ -z "$PATCH_ID" ]; then
+    ATT_FILE_LEGACY="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.v6.dsse.json"
+  else
+    ATT_FILE_LEGACY=""
+  fi
 else
   # Primary (content-addressed, AISDLC-398)
   if [ -n "$PATCH_ID" ]; then
@@ -199,18 +213,29 @@ else
   else
     ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.dsse.json"
   fi
-  # Legacy bridge filename (per-SHA)
-  ATT_FILE_LEGACY="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.dsse.json"
+  # Legacy per-SHA filename — same AISDLC-475 Fix B logic for v5 schema.
+  if [ -z "$PATCH_ID" ]; then
+    ATT_FILE_LEGACY="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.dsse.json"
+  else
+    ATT_FILE_LEGACY=""
+  fi
 fi
 
-# Idempotency check: if the primary (patch-id) or legacy (SHA) envelope already
-# exists, nothing to do. This handles both AISDLC-398 signed envelopes and
-# pre-AISDLC-398 per-SHA envelopes from earlier push iterations.
+# Idempotency check: if the primary (patch-id) envelope already exists, nothing
+# to do. When PATCH_ID is available, we check ONLY the patch-id file (AISDLC-475
+# Fix B). When PATCH_ID is absent (pre-AISDLC-398 or patch-id computation failed),
+# we fall back to the per-SHA file (ATT_FILE_LEGACY is set in that case only).
+#
+# This closes the re-sign loop: after a chore-commit moves HEAD past the signed
+# dev commit, HEAD_SHA changes but PATCH_ID stays the same. The patch-id file
+# already exists → idempotent skip. Without this change, the hook would fall
+# through to the per-SHA check (ATT_FILE_LEGACY = <new-chore-SHA>.v6.dsse.json),
+# find it missing, and re-sign unconditionally — looping forever.
 if [ -f "$ATT_FILE" ] || { [ -n "$ATT_FILE_LEGACY" ] && [ -f "$ATT_FILE_LEGACY" ]; }; then
-  # Already signed for this HEAD (via patch-id or per-SHA filename).
-  # Either the previous push aborted (this script set exit 1, operator
-  # re-pushed, and the chore commit is now on HEAD with the envelope present),
-  # or the operator pre-signed manually. Either way: nothing to do.
+  # Already signed for this content (via patch-id filename) or this exact SHA
+  # (legacy per-SHA fallback when patch-id unavailable). Either the previous
+  # push aborted (this script set exit 1, operator re-pushed, chore commit is
+  # on HEAD with the envelope present), or the operator pre-signed manually.
   exit 0
 fi
 
@@ -351,8 +376,10 @@ fi
 # invocation — the operator's re-`git push` will trigger pre-push again,
 # at which point the idempotent check at Step 4 sees the file and exits 0.
 #
-# AISDLC-398: stage both the primary (patch-id) and legacy (SHA) envelope
-# files when both were written by the signer (dual-write compat bridge).
+# AISDLC-475 Fix B: the signer no longer writes the per-SHA bridge
+# (<headSha>.v6.dsse.json) when a patch-id is available. Stage only the
+# primary (patch-id) file. ATT_FILE_LEGACY is set to "" when PATCH_ID is
+# available, so the legacy stage block below is a no-op in that case.
 #
 # AISDLC-471: also stage the per-patch-id transcript-leaves directory so the
 # per-patch-id leaves file travels with the envelope. Without this, CI checks

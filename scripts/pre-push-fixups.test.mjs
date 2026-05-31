@@ -140,7 +140,10 @@ exit 0
 
 /**
  * Install a fake sign-attestation stub. Writes the expected envelope file.
- * When attestSign is true and a verdict file exists, it writes the envelope.
+ * AISDLC-475: the hook now looks for a patch-id-addressed file first
+ * (<patch-id>.dsse.json or <patch-id>.v6.dsse.json). The stub must mirror
+ * the same patch-id computation logic as check-attestation-sign.sh so it
+ * writes to the filename the hook expects.
  */
 function installFakeSignAttestation(root) {
   const binDir = join(root, 'bin');
@@ -157,12 +160,38 @@ while [[ $# -gt 0 ]]; do
 done
 WT_ROOT=$(git rev-parse --show-toplevel)
 HEAD_SHA=$(git rev-parse HEAD)
-if [ "\${SCHEMA:-v5}" = "v6" ]; then
-  ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.v6.dsse.json"
-else
-  ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.dsse.json"
+
+# AISDLC-475: compute patch-id using the same exclusion list as the hook so
+# the signer writes to the patch-id-addressed filename that the hook checks.
+MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
+PATCH_ID=""
+if [ -n "\$MERGE_BASE" ] && [ \${#MERGE_BASE} -eq 40 ]; then
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "\${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+  if [ -n "\$DIFF_OUTPUT" ]; then
+    PATCH_ID_LINE=$(printf '%s' "\$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
+    PATCH_ID=$(printf '%s' "\$PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
+    if ! printf '%s' "\$PATCH_ID" | grep -qE '^[0-9a-f]{40}$'; then
+      PATCH_ID=""
+    fi
+  fi
 fi
-echo '{"fake":"attestation"}' > "$ATT_FILE"
+
+# Determine the envelope filename: patch-id-addressed when available (matches hook),
+# otherwise fall back to per-SHA (matches hook's fallback).
+if [ "\${SCHEMA:-v5}" = "v6" ]; then
+  if [ -n "\$PATCH_ID" ]; then
+    ATT_FILE="\$WT_ROOT/.ai-sdlc/attestations/\$PATCH_ID.v6.dsse.json"
+  else
+    ATT_FILE="\$WT_ROOT/.ai-sdlc/attestations/\$HEAD_SHA.v6.dsse.json"
+  fi
+else
+  if [ -n "\$PATCH_ID" ]; then
+    ATT_FILE="\$WT_ROOT/.ai-sdlc/attestations/\$PATCH_ID.dsse.json"
+  else
+    ATT_FILE="\$WT_ROOT/.ai-sdlc/attestations/\$HEAD_SHA.dsse.json"
+  fi
+fi
+echo '{"fake":"attestation"}' > "\$ATT_FILE"
 exit 0
 `;
   writeFileSync(shimPath, shim);

@@ -96,13 +96,16 @@ function computePatchIdForVerifier(base, head, repoRoot) {
         '-p',
         `${base}..${head}`,
         '--',
-        // AISDLC-422: keep this exclusion list IDENTICAL to
-        // `PATCH_ID_EXCLUSIONS` in pipeline-cli/src/attestation/patch-id.ts.
-        // Asymmetric exclusion = verifier computes a different patch-id than
-        // the signer, so the envelope lookup misses and verification fails
-        // (same bug class as the AISDLC-421 verifier-shared-fallback hotfix).
+        // AISDLC-422 / AISDLC-475 (AC#6): keep this exclusion list IDENTICAL
+        // to `PATCH_ID_EXCLUSIONS` in pipeline-cli/src/attestation/patch-id.ts
+        // AND to `ATTESTATION_PATH_EXCLUSIONS` below. Three-entry canonical set:
+        // (attestations/, transcript-leaves/, transcript-leaves.jsonl).
+        // Asymmetric exclusion = verifier computes a different patch-id than the
+        // signer, so the envelope lookup misses and verification fails (same bug
+        // class as the AISDLC-421 verifier-shared-fallback hotfix).
         ':!.ai-sdlc/attestations/',
         ':!.ai-sdlc/transcript-leaves/',
+        ':!.ai-sdlc/transcript-leaves.jsonl',
       ],
       {
         cwd: repoRoot,
@@ -2103,7 +2106,13 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     const lowerName = entry.fileName.toLowerCase();
     // Patch-id filename (AISDLC-398 preferred)
     if (v6PatchIdFilename && lowerName === v6PatchIdFilename) return true;
-    // Legacy per-SHA filename (pre-AISDLC-398 compat) — current HEAD
+    // Legacy per-SHA filename — READ-ONLY soak for 1 release (AISDLC-475 / AISDLC-490).
+    // The signer no longer writes the per-SHA bridge when a patch-id is available
+    // (AISDLC-475 Fix B), but envelopes signed BEFORE this change may still use
+    // the per-SHA filename. This fallback is retained so pre-AISDLC-475 + in-flight
+    // envelopes remain findable during the transition window.
+    // DELETION FOLLOW-UP: remove this per-SHA lookup in AISDLC-490 after the
+    // 1-release soak period (once B+ lands and the chore-commit class is gone).
     if (lowerName === `${lowerHead}.v6.dsse.json`) return true;
     // AISDLC-419 follow-up: surface envelopes whose internal
     // `subject.digest.sha1` is an attestation-only ancestor of HEAD,
