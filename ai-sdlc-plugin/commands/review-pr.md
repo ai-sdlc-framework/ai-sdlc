@@ -1,5 +1,5 @@
 ---
-name: review
+name: review-pr
 description: Run AI-SDLC review agents on a pull request (testing + critic + security)
 argument-hint: <pr-number>
 allowed-tools: Read, Grep, Glob, Bash
