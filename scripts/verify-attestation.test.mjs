@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildGithubOutputLines,
+  computeSubjectChangedPaths,
   detectOrphanEnvelopes,
   detectQueueRebaseInvalidation,
   findChoreCommitViolations,
@@ -4858,6 +4859,229 @@ describe('isTreeEquivalentModuloAttestation (AISDLC-448)', () => {
       const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
       const fakeSha = 'f'.repeat(40);
       assert.equal(isTreeEquivalentModuloAttestation(fakeSha, sha, tmp), false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  // ── AISDLC-491: patch-scoped tests ──────────────────────────────────────
+
+  it('(a) DISJOINT rebase passes with patch-scoped changedPaths', () => {
+    // AISDLC-491 regression guard test (a): PR-B is signed at subjectSha
+    // touching file X. A disjoint PR-A lands on main, adding file Y. PR-B
+    // rebases onto the new main — its HEAD now contains Y (from PR-A) but
+    // file X is byte-identical. With changedPaths=[X], the tree-equivalence
+    // check must return TRUE (disjoint file Y is ignored).
+    //
+    // This is the EXACT scenario that caused 10+ re-signs on AISDLC-475.
+    const tmp = initRepo();
+    try {
+      // Shared base.
+      const base = commit(tmp, { 'baseline.txt': 'base\n' }, 'baseline');
+      // PR-B's signed commit: touches only src/feature.ts.
+      const subjectSha = commit(tmp, { 'src/feature.ts': 'export const X = 1;\n' }, 'feat: pr-b');
+      // Simulate: disjoint PR-A landed on main, adding src/pr-a.ts.
+      // PR-B rebases → new HEAD has both src/feature.ts AND src/pr-a.ts.
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', base], { cwd: tmp });
+      // Re-apply PR-B's feature (same content, so tree is equivalent for X).
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const X = 1;\n');
+      // PR-A's disjoint file also present in rebased HEAD.
+      writeFileSync(join(tmp, 'src', 'pr-a.ts'), 'export const A = 99;\n');
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: pr-b rebased + pr-a disjoint'], {
+        cwd: tmp,
+      });
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: tmp,
+        encoding: 'utf-8',
+      }).trim();
+
+      // Precondition: whole-tree diff would be non-empty (PR-A's file differs).
+      // isTreeEquivalentModuloAttestation without changedPaths returns FALSE.
+      assert.equal(
+        isTreeEquivalentModuloAttestation(subjectSha, head, tmp),
+        false,
+        'precondition: whole-tree check must fail (PR-A file differs)',
+      );
+
+      // With changedPaths scoped to PR-B's own files, must return TRUE.
+      const changedPaths = ['src/feature.ts'];
+      assert.equal(
+        isTreeEquivalentModuloAttestation(subjectSha, head, tmp, changedPaths),
+        true,
+        'patch-scoped check must accept when PR-B own files are byte-identical',
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('(b) SAME-FILE change invalidates even with patch-scoped changedPaths (replay guard)', () => {
+    // AISDLC-491 regression guard test (b): NON-NEGOTIABLE replay protection.
+    // PR-B is signed at subjectSha (src/feature.ts = v1). The rebased HEAD
+    // has src/feature.ts = v2 (a genuine source change / conflict resolution).
+    // Even with changedPaths=[src/feature.ts], the function MUST return FALSE.
+    const tmp = initRepo();
+    try {
+      const base = commit(tmp, { 'baseline.txt': 'base\n' }, 'baseline');
+      // subjectSha: feature.ts = v1.
+      const subjectSha = commit(
+        tmp,
+        { 'src/feature.ts': 'export const X = 1;\n' },
+        'feat: pr-b v1',
+      );
+      // Rebased branch: feature.ts = v2 (genuine source edit / conflict resolution).
+      execFileSync('git', ['checkout', '-q', '-b', 'tampered', base], { cwd: tmp });
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const X = 2;\n'); // v2 — changed!
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'feat: pr-b v2 (source changed)'], { cwd: tmp });
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: tmp,
+        encoding: 'utf-8',
+      }).trim();
+
+      // Replay guard: even with changedPaths scoped to the PR's own file,
+      // the function MUST return false because that file CHANGED.
+      const changedPaths = ['src/feature.ts'];
+      assert.equal(
+        isTreeEquivalentModuloAttestation(subjectSha, head, tmp, changedPaths),
+        false,
+        'patch-scoped check MUST reject when PR-B own file changed (replay guard)',
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('(c) falls back to whole-tree when changedPaths is null (conservative)', () => {
+    // AISDLC-491 fallback test: when changedPaths is null (subject merge-base
+    // unreachable), the function falls back to the whole-tree diff. A disjoint
+    // file in HEAD means the whole-tree diff is non-empty → returns FALSE
+    // (conservative; does not fail-open).
+    const tmp = initRepo();
+    try {
+      const base = commit(tmp, { 'baseline.txt': 'base\n' }, 'baseline');
+      const subjectSha = commit(tmp, { 'src/feature.ts': 'export const X = 1;\n' }, 'feat: pr-b');
+      execFileSync('git', ['checkout', '-q', '-b', 'rebased', base], { cwd: tmp });
+      mkdirSync(join(tmp, 'src'), { recursive: true });
+      writeFileSync(join(tmp, 'src', 'feature.ts'), 'export const X = 1;\n');
+      writeFileSync(join(tmp, 'src', 'pr-a.ts'), 'export const A = 99;\n');
+      execFileSync('git', ['add', '-A'], { cwd: tmp });
+      execFileSync('git', ['commit', '-q', '-m', 'rebased + disjoint'], { cwd: tmp });
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: tmp,
+        encoding: 'utf-8',
+      }).trim();
+
+      // null changedPaths → conservative whole-tree check → FALSE (disjoint file visible).
+      assert.equal(
+        isTreeEquivalentModuloAttestation(subjectSha, head, tmp, null),
+        false,
+        'null changedPaths must use conservative whole-tree check',
+      );
+      // undefined changedPaths → same conservative behaviour.
+      assert.equal(
+        isTreeEquivalentModuloAttestation(subjectSha, head, tmp, undefined),
+        false,
+        'undefined changedPaths must use conservative whole-tree check',
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('computeSubjectChangedPaths (AISDLC-491)', () => {
+  function initRepo() {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-csp-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+    return tmp;
+  }
+  function commit(repo, files, msg) {
+    for (const [path, content] of Object.entries(files)) {
+      const full = join(repo, path);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, content);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', msg], { cwd: repo });
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf-8' }).trim();
+  }
+
+  it('returns the list of files changed between mergeBase and subjectSha', () => {
+    const tmp = initRepo();
+    try {
+      const mergeBase = commit(tmp, { 'baseline.txt': 'base\n' }, 'baseline');
+      const subjectSha = commit(
+        tmp,
+        { 'src/feature.ts': 'export const X = 1;\n', 'src/util.ts': 'export const U = 2;\n' },
+        'feat: add two files',
+      );
+      const paths = computeSubjectChangedPaths(subjectSha, mergeBase, tmp);
+      assert.ok(Array.isArray(paths), 'must return array');
+      assert.ok(paths.includes('src/feature.ts'), 'must include src/feature.ts');
+      assert.ok(paths.includes('src/util.ts'), 'must include src/util.ts');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes attestation paths from changed files', () => {
+    const tmp = initRepo();
+    try {
+      const mergeBase = commit(tmp, { 'baseline.txt': 'base\n' }, 'baseline');
+      const subjectSha = commit(
+        tmp,
+        {
+          'src/feature.ts': 'export const X = 1;\n',
+          '.ai-sdlc/attestations/abc.v6.dsse.json': '{"attest":true}',
+          '.ai-sdlc/transcript-leaves.jsonl': '{"leaf":1}\n',
+        },
+        'feat: add source + attestation files',
+      );
+      const paths = computeSubjectChangedPaths(subjectSha, mergeBase, tmp);
+      assert.ok(Array.isArray(paths), 'must return array');
+      assert.ok(paths.includes('src/feature.ts'), 'must include src/feature.ts');
+      assert.ok(
+        !paths.includes('.ai-sdlc/attestations/abc.v6.dsse.json'),
+        'must NOT include attestation file',
+      );
+      assert.ok(
+        !paths.includes('.ai-sdlc/transcript-leaves.jsonl'),
+        'must NOT include transcript-leaves.jsonl',
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns null when subjectSha is unreachable', () => {
+    const tmp = initRepo();
+    try {
+      commit(tmp, { 'baseline.txt': 'base\n' }, 'baseline');
+      const mergeBase = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: tmp,
+        encoding: 'utf-8',
+      }).trim();
+      const fakeSubject = 'e'.repeat(40);
+      const result = computeSubjectChangedPaths(fakeSubject, mergeBase, tmp);
+      assert.equal(result, null, 'must return null for unreachable subject SHA');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('returns null for invalid SHA arguments', () => {
+    const tmp = initRepo();
+    try {
+      const sha = commit(tmp, { 'a.txt': 'x' }, 'initial');
+      assert.equal(computeSubjectChangedPaths('not-a-sha', sha, tmp), null);
+      assert.equal(computeSubjectChangedPaths(sha, 'also-not', tmp), null);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

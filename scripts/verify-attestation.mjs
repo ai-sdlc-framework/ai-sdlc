@@ -222,6 +222,58 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
 }
 
 /**
+ * AISDLC-491: compute the set of files changed by an envelope's own patch,
+ * relative to the merge-base of the PR at sign-time.
+ *
+ * Returns an array of file paths (relative to repo root) changed between
+ * `mergeBase` and `subjectSha`, excluding the attestation paths defined in
+ * `ATTESTATION_PATH_EXCLUSIONS`. These are the files that PR-B owns — its
+ * own diff, not any files introduced by sibling PRs that merged to main
+ * while PR-B was in flight.
+ *
+ * Returns null when the computation fails (e.g. SHA unreachable, shallow
+ * clone). Callers must treat null as "unknown" and fall back to the
+ * conservative whole-tree check.
+ *
+ * Exported for hermetic tests.
+ */
+export function computeSubjectChangedPaths(subjectSha, mergeBase, repoRoot) {
+  if (!/^[0-9a-f]{40}$/i.test(subjectSha) || !/^[0-9a-f]{40}$/i.test(mergeBase)) {
+    return null;
+  }
+  try {
+    const out = execFileSync(
+      'git',
+      [
+        'diff-tree',
+        '--no-commit-id',
+        '-r',
+        '--no-renames',
+        '--name-only',
+        mergeBase,
+        subjectSha,
+        '--',
+        ...ATTESTATION_PATH_EXCLUSIONS,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        maxBuffer: 128 * 1024 * 1024,
+      },
+    );
+    const paths = out
+      .split('\n')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    // Empty result (e.g. attestation-only commit) → return empty array, not null.
+    // isTreeEquivalentModuloAttestation treats empty changedPaths as whole-tree fallback.
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * AISDLC-448: detect "tree-equivalent modulo attestation" relationship.
  *
  * Returns true iff the tree state at `subjectSha` and the tree state at
@@ -248,21 +300,48 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
  * tree byte-for-byte (only the commit graph changes), and the chore commit
  * on top only touches `.ai-sdlc/attestations/**` + transcript-leaves.
  *
+ * AISDLC-491: patch-scoped variant. When `changedPaths` is a non-empty
+ * string array, the diff is scoped to ONLY those paths (i.e. the files
+ * that belong to the envelope's own PR patch). This means that files
+ * introduced by a DISJOINT sibling PR (PR-A) that merged to main while
+ * PR-B was in flight are NOT part of the comparison — they are invisible
+ * to PR-B's tree-equivalence check, so PR-A's landing no longer stales
+ * PR-B's attestation. When `changedPaths` is null/undefined or empty, the
+ * function falls back to the original conservative whole-tree diff.
+ *
+ * Replay-protection invariant (NON-NEGOTIABLE): if any file in the
+ * envelope's OWN changed-file set differs between `subjectSha` and
+ * `headSha`, the function MUST return false. The patch-scope narrows what
+ * is compared, but every file within that narrowed scope is still checked
+ * byte-for-byte. A genuine conflict-resolution or source edit on PR-B's
+ * own files correctly invalidates the envelope.
+ *
+ * Fallback safety: when `changedPaths` is null/undefined (subject
+ * merge-base unreachable, git error), the function falls back to the
+ * current conservative WHOLE-TREE behaviour (returns false unless the
+ * whole tree matches). Never fails open.
+ *
  * Security analysis:
  *   - The v6 envelope is signed by a trusted reviewer key over a Merkle
  *     root computed from on-disk transcript leaves. The signature does not
  *     depend on commit-SHA ancestry; it binds to leaf content.
  *   - Cross-PR replay surface: an attacker would need to land HEAD content
- *     whose source-tree (modulo attestation paths) exactly matches a
- *     historic envelope's subject-tree (modulo attestation paths). That
- *     IS the same source tree that was reviewed. Re-using the envelope
- *     does not grant approval for any NEW source content; it merely
- *     re-asserts approval for content that was already reviewed. The
- *     transcript-leaves + Merkle proof + trusted-key signature gates
- *     remain in force (steps 3-7 of `verifyV6Envelope`).
- *   - Tampering surface: any source-tree divergence (a stray comment,
- *     reformatted whitespace, anything outside the attestation paths)
- *     produces non-empty `git diff` output and the function returns false.
+ *     whose source-tree (for PR-B's own files, modulo attestation paths)
+ *     exactly matches a historic envelope's subject-tree for those same
+ *     files. That IS the same source content that was reviewed. Re-using
+ *     the envelope does not grant approval for any NEW source content in
+ *     PR-B's own files; it merely re-asserts approval for content that was
+ *     already reviewed. The transcript-leaves + Merkle proof + trusted-key
+ *     signature gates remain in force (steps 3-7 of `verifyV6Envelope`).
+ *   - Disjoint-file scope: files introduced by PR-A (not in PR-B's set)
+ *     are deliberately excluded from the check. An attacker cannot exploit
+ *     this scope by landing code in PR-A's file namespace and having PR-B's
+ *     attestation cover it — PR-A's files are simply not part of PR-B's
+ *     reviewed content.
+ *   - Tampering surface: any source-tree divergence on PR-B's OWN files
+ *     (a stray comment, reformatted whitespace, anything outside the
+ *     attestation paths within the changed-file set) produces non-empty
+ *     `git diff` output and the function returns false.
  *
  * The two relaxations compose:
  *   - `isAttestationOnlyDescendant` covers the linear case (subject is
@@ -277,8 +356,17 @@ export function isAttestationOnlyDescendant(subjectSha, headSha, repoRoot) {
  * when the ancestor check fails.
  *
  * Exported for hermetic tests.
+ *
+ * @param {string} subjectSha — 40-hex SHA of the signed commit (may be orphaned)
+ * @param {string} headSha — 40-hex SHA of the current PR HEAD
+ * @param {string} repoRoot — absolute path to the repo root
+ * @param {string[]|null|undefined} [changedPaths] — AISDLC-491: optional list
+ *   of file paths (relative to repo root) that constitute the envelope's own
+ *   PR patch. When provided and non-empty, the tree diff is scoped to only
+ *   these paths (plus the shared attestation-path exclusions). When null,
+ *   undefined, or empty, falls back to the conservative whole-tree diff.
  */
-export function isTreeEquivalentModuloAttestation(subjectSha, headSha, repoRoot) {
+export function isTreeEquivalentModuloAttestation(subjectSha, headSha, repoRoot, changedPaths) {
   if (!/^[0-9a-f]{40}$/i.test(subjectSha) || !/^[0-9a-f]{40}$/i.test(headSha)) {
     return false;
   }
@@ -287,6 +375,66 @@ export function isTreeEquivalentModuloAttestation(subjectSha, headSha, repoRoot)
     // relaxation path for this case, but be safe.
     return true;
   }
+
+  // AISDLC-491: patch-scoped check.
+  //
+  // When `changedPaths` is a non-empty array, we compare ONLY the files
+  // belonging to the envelope's own PR patch. Files introduced by disjoint
+  // sibling PRs (not in `changedPaths`) are ignored — they cannot affect
+  // whether the reviewed content is still intact at HEAD.
+  //
+  // The diff uses `git diff --name-only` over the patch paths so we detect
+  // any byte-level divergence between subjectSha and headSha for those files.
+  // Non-empty output means at least one of PR-B's own files changed → reject
+  // (replay guard intact; genuine conflict resolution correctly invalidates).
+  //
+  // Fallback: when changedPaths is null/undefined or empty, we fall through
+  // to the original conservative whole-tree diff below. This means:
+  //   - If the subject merge-base was unreachable (computeSubjectChangedPaths
+  //     returned null), the caller passes null here → conservative.
+  //   - If the PR touched zero non-attestation files (attestation-only PR),
+  //     changedPaths is [], which is empty → also conservative (the ancestor
+  //     check via isAttestationOnlyDescendant should have caught this case
+  //     before we get here, but be safe).
+  if (Array.isArray(changedPaths) && changedPaths.length > 0) {
+    // Scope the diff to ONLY the envelope's own changed paths.
+    // Use `git diff` (not `git diff-tree`) — see comment below for why.
+    let patchedDiffOutput;
+    try {
+      patchedDiffOutput = execFileSync(
+        'git',
+        [
+          'diff',
+          '--no-color',
+          '--name-only',
+          subjectSha,
+          headSha,
+          '--',
+          ...changedPaths,
+          // Also exclude attestation paths within the scoped set.
+          // (changedPaths should not contain attestation paths since
+          // computeSubjectChangedPaths already excludes them, but be safe.)
+          ...ATTESTATION_PATH_EXCLUSIONS,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+          maxBuffer: 128 * 1024 * 1024,
+        },
+      );
+    } catch {
+      // git failure on the scoped diff — fall back to conservative whole-tree
+      // to avoid failing open.
+      return false;
+    }
+    // Replay guard: any non-attestation file in PR-B's own set that differs
+    // between subject and HEAD means a real source change occurred → reject.
+    return !patchedDiffOutput || patchedDiffOutput.trim().length === 0;
+  }
+
+  // Conservative whole-tree fallback (original AISDLC-448 behaviour).
+  // Reached when changedPaths is null, undefined, or empty.
+  //
   // Use `git diff` (not `git diff-tree`) so the comparison works regardless
   // of ancestry — diff-tree assumes a connected commit graph between the
   // two refs. `git diff <A> <B>` only requires both trees to be reachable
@@ -880,6 +1028,13 @@ export function v6ResolveLeavesForEnvelope(repoRoot, envelope, patchIdHint) {
  * @param {string} opts.repoRoot — path to the repo root
  * @param {string} [opts.patchIdHint] — AISDLC-421: optional patch-id (40-hex)
  *   extracted from the envelope filename, when patch-id-named.
+ * @param {string[]|null} [opts.changedPaths] — AISDLC-491: optional list of
+ *   file paths changed by the envelope's own PR patch (computed from
+ *   `git diff-tree <mergeBase>..<subjectSha>`). When provided, the
+ *   `isTreeEquivalentModuloAttestation` check is scoped to only these paths
+ *   so that disjoint sibling PRs merging to main do not stale this PR's
+ *   attestation. When null/undefined, falls back to the conservative
+ *   whole-tree check (AISDLC-448 original behaviour).
  *
  * Exported for hermetic tests.
  */
@@ -890,6 +1045,7 @@ export function verifyV6Envelope({
   trustedReviewers,
   repoRoot,
   patchIdHint,
+  changedPaths,
 }) {
   // ── 1. Schema validation ────────────────────────────────────────────────
   if (typeof envelope.schemaVersion !== 'string' || envelope.schemaVersion !== 'v6') {
@@ -971,13 +1127,19 @@ export function verifyV6Envelope({
         `[v6-verifier] AISDLC-419: accepting envelope (subject=${envelopeSubjectSha.slice(0, 7)}) as attestation-only ancestor of HEAD=${headSha.slice(0, 7)} — no source diff between them.\n`,
       );
       // Fall through to transcript / Merkle / signature verification.
-    } else if (isTreeEquivalentModuloAttestation(envelopeSubjectSha, headSha, repoRoot)) {
+    } else if (
+      isTreeEquivalentModuloAttestation(envelopeSubjectSha, headSha, repoRoot, changedPaths)
+    ) {
       // AISDLC-448: BOTH-mismatch + orphan-ancestor relaxation. Subject is
       // not reachable from HEAD (rebase orphaned it) but the source tree
       // at the orphan and at HEAD agree byte-for-byte modulo attestation
       // paths. The Merkle + signature gates still apply (steps 3-7).
+      //
+      // AISDLC-491: when changedPaths is provided, the check is scoped to
+      // only the envelope's own PR files — disjoint sibling files are
+      // ignored. When changedPaths is null, falls back to whole-tree check.
       process.stderr.write(
-        `[v6-verifier] AISDLC-448: accepting envelope (subject=${envelopeSubjectSha.slice(0, 7)}) as tree-equivalent to HEAD=${headSha.slice(0, 7)} modulo attestation paths (orphan-ancestor relaxation; subject not reachable from HEAD).\n`,
+        `[v6-verifier] AISDLC-448: accepting envelope (subject=${envelopeSubjectSha.slice(0, 7)}) as tree-equivalent to HEAD=${headSha.slice(0, 7)} modulo attestation paths (orphan-ancestor relaxation; subject not reachable from HEAD${changedPaths != null ? `; patch-scoped to ${changedPaths.length} file(s)` : ''}).\n`,
       );
       // Fall through to transcript / Merkle / signature verification.
     } else if (fileNameMismatch) {
@@ -2172,6 +2334,59 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     // and verifyV6Envelope falls back to the directory scan + shared-file path.
     const patchIdMatch = chosen.fileName.toLowerCase().match(/^([0-9a-f]{40})\.v6\.dsse\.json$/);
     const patchIdHint = patchIdMatch && patchIdMatch[1] !== lowerHead ? patchIdMatch[1] : null;
+
+    // AISDLC-491: compute the envelope's own changed-file set so that
+    // isTreeEquivalentModuloAttestation can scope its diff to only PR-B's
+    // own files — disjoint files from sibling PRs that merged to main while
+    // PR-B was in flight are excluded from the check.
+    //
+    // We use patchIdMergeBase (merge-base of baseSha and headSha) as the
+    // base, but for the orphaned subjectSha we need the merge-base of baseSha
+    // and subjectSha specifically. `patchIdMergeBase` was the shared ancestor
+    // at the time the PR was first opened; for a clean rebase it is still the
+    // correct ancestor of the orphaned subjectSha (the rebase replays commits
+    // on top of the NEW main, but the orphaned SHA's ancestor chain still
+    // passes through the OLD main — patchIdMergeBase is on the OLD main and
+    // therefore reachable from subjectSha).
+    //
+    // Fallback: when patchIdMergeBase is null (baseSha unreachable, shallow
+    // clone), we pass null → isTreeEquivalentModuloAttestation falls back to
+    // the conservative whole-tree check. Never fails open.
+    let envelopeChangedPaths = null;
+    if (patchIdMergeBase && envelopeSubjectSha && envelopeSubjectSha !== lowerHead) {
+      // Attempt to find the merge-base of baseSha relative to subjectSha
+      // directly (may differ from patchIdMergeBase when the orphaned subject
+      // diverged from a different main tip than headSha).
+      let subjectMergeBase = null;
+      try {
+        const mb = execFileSync('git', ['merge-base', baseSha, envelopeSubjectSha], {
+          cwd: repoRoot,
+          encoding: 'utf-8',
+        }).trim();
+        if (/^[0-9a-f]{40}$/i.test(mb)) subjectMergeBase = mb.toLowerCase();
+      } catch {
+        // Use patchIdMergeBase as fallback — it's the best approximation
+        // of the merge-base that the signer saw at sign time.
+        subjectMergeBase = patchIdMergeBase;
+      }
+      if (subjectMergeBase) {
+        envelopeChangedPaths = computeSubjectChangedPaths(
+          envelopeSubjectSha,
+          subjectMergeBase,
+          repoRoot,
+        );
+        if (envelopeChangedPaths !== null) {
+          process.stderr.write(
+            `[verify-attestation] AISDLC-491: computed ${envelopeChangedPaths.length} changed path(s) for patch-scoped tree-equivalence check.\n`,
+          );
+        } else {
+          process.stderr.write(
+            `[verify-attestation] AISDLC-491: could not compute changed paths (subject merge-base unreachable?) — falling back to whole-tree check.\n`,
+          );
+        }
+      }
+    }
+
     return verifyV6Envelope({
       envelope: chosen.envelope,
       envelopeFileName: isPatchIdNamed
@@ -2181,6 +2396,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       trustedReviewers,
       repoRoot,
       patchIdHint,
+      changedPaths: envelopeChangedPaths,
     });
   }
 
