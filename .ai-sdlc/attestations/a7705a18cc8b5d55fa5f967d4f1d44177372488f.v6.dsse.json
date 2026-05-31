@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "0f89a48dba73d84d8c1c9b05994c839875915328"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "dde7a7d70790e53c6bff082a2e1450e24d9fc70f96e28a9b25e60fb37514568d"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": []
+    }
+  ],
+  "rootHash": "c180a1b43a6817a9a44c38d12c50bc4cc323ad906f3f4fef2045cbfbab164f4a",
+  "rootSignature": "uCaSc0jtt0B/+AFcFEJXgLi2TgnA/uvcnEBo6iK9WpzR6BPkIa78b890GqDW42ybqZQW3uzArEGkzmabw36YDQ==",
+  "nonce": "2c16e6d77b187abee091211ecde2433b055bdf3d8b7c4eedcdd09be7836f7943",
+  "leafCount": 1,
+  "signedAt": "2026-05-31T02:14:38.685Z",
+  "signerIdentity": "dominique@local:doms-macbook"
+}
