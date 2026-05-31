@@ -41,12 +41,13 @@ function loadYaml(path) {
 }
 
 // ── Pure-JS port of the workflow's linked-issue regex ────────────────────
-// Mirrors the grep -Eiq pattern from the workflow's check step:
-//   (closes|fixes|resolves)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+)
+// Mirrors the grep -Eiq pattern from the workflow's check step (AISDLC-477):
+//   (closes|fixes|resolves|references)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+|AISDLC-[0-9]+(\.[0-9]+)?)
 // Applied to a combined string of PR title + PR body (newline separated).
 function hasLinkedIssue(title, body) {
   const combined = `${title}\n${body}`;
-  const pattern = /(closes|fixes|resolves)\s+(([a-zA-Z0-9_.\-]+\/[a-zA-Z0-9_.\-]+)?#[0-9]+)/i;
+  const pattern =
+    /(closes|fixes|resolves|references)\s+(([a-zA-Z0-9_.\-]+\/[a-zA-Z0-9_.\-]+)?#[0-9]+|AISDLC-[0-9]+(\.[0-9]+)?)/i;
   return pattern.test(combined);
 }
 
@@ -213,6 +214,27 @@ describe('require-issue-link.yml — regex oracle: PR with issue link → succes
       'More details in the thread.';
     assert.equal(checkResult('fix', body, []), 'success');
   });
+
+  // AISDLC-477: backlog-task reference forms
+  it('References AISDLC-477 in body → success (backlog-task ref, AC #1)', () => {
+    assert.equal(checkResult('fix', 'References AISDLC-477', []), 'success');
+  });
+
+  it('Closes AISDLC-100 in body → success (backlog-task ref, AC #1)', () => {
+    assert.equal(checkResult('fix', 'Closes AISDLC-100', []), 'success');
+  });
+
+  it('Closes AISDLC-100.5 (hierarchical) in body → success (AC #1)', () => {
+    assert.equal(checkResult('fix', 'Closes AISDLC-100.5', []), 'success');
+  });
+
+  it('resolves AISDLC-9 (lowercase) → success (case-insensitive, AC #1)', () => {
+    assert.equal(checkResult('fix', 'resolves AISDLC-9', []), 'success');
+  });
+
+  it('REFERENCES AISDLC-477 (all-caps keyword) → success (case-insensitive, AC #1)', () => {
+    assert.equal(checkResult('fix', 'REFERENCES AISDLC-477', []), 'success');
+  });
 });
 
 describe('require-issue-link.yml — regex oracle: PR without issue link → failure (AC #2, #6)', () => {
@@ -286,6 +308,23 @@ describe('require-issue-link.yml — script body sanity (AC #2, #5)', () => {
       'run script must contain the closes/fixes/resolves keyword pattern',
     );
     assert.match(run, /#[0-9]/, 'run script must reference the #N issue number pattern');
+  });
+
+  // AISDLC-477: verify the extended pattern is present in the workflow script
+  it('check step run script contains references keyword (AISDLC-477, AC #1)', () => {
+    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
+    const run = String(checkStep.run ?? '');
+    assert.match(
+      run,
+      /references/i,
+      'run script must contain the "references" keyword (AISDLC-477)',
+    );
+  });
+
+  it('check step run script contains AISDLC backlog-ref pattern (AISDLC-477, AC #1)', () => {
+    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
+    const run = String(checkStep.run ?? '');
+    assert.match(run, /AISDLC/, 'run script must reference the AISDLC-N backlog pattern');
   });
 
   it('check step run script contains bypass label grep for ci:no-issue-required (AC #3)', () => {
