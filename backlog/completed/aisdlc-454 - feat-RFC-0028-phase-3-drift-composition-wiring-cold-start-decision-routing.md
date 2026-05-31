@@ -1,7 +1,7 @@
 ---
 id: AISDLC-454
 title: 'feat: RFC-0028 Phase 3 — structural + statistical drift composition wiring + cold-start handling + Decision routing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-27'
 labels:
