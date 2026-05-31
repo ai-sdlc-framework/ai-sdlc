@@ -59,14 +59,21 @@ before(() => {
 });
 
 describe('ai-sdlc-review.yml — workflow structure (AISDLC-147)', () => {
-  it('parses as valid YAML with all 5 jobs', () => {
+  it('parses as valid YAML with all 6 jobs', () => {
     assert.ok(workflow, 'workflow must parse');
     assert.equal(workflow.name, 'AI-SDLC PR Review');
     const jobs = Object.keys(workflow.jobs).sort();
     assert.deepEqual(
       jobs,
-      ['analyze', 'attestation-precheck', 'docs-only-check', 'post-skip-results', 'report'],
-      'must have exactly 5 jobs after AISDLC-214 adds docs-only-check',
+      [
+        'analyze',
+        'attestation-precheck',
+        'automation-review-skip',
+        'docs-only-check',
+        'post-skip-results',
+        'report',
+      ],
+      'must have exactly 6 jobs (issue #791 adds automation-review-skip for Dependabot)',
     );
   });
 });
@@ -562,12 +569,19 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
       }
     });
 
-    it('workflow has 5 jobs total after AISDLC-214 adds docs-only-check', () => {
+    it('workflow has 6 jobs total (issue #791 adds automation-review-skip)', () => {
       const jobs = Object.keys(reviewWorkflow.jobs).sort();
       assert.deepEqual(
         jobs,
-        ['analyze', 'attestation-precheck', 'docs-only-check', 'post-skip-results', 'report'],
-        'must have exactly 5 jobs after AISDLC-214 adds docs-only-check',
+        [
+          'analyze',
+          'attestation-precheck',
+          'automation-review-skip',
+          'docs-only-check',
+          'post-skip-results',
+          'report',
+        ],
+        'must have exactly 6 jobs (issue #791 adds automation-review-skip for Dependabot)',
       );
     });
   });

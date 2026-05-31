@@ -397,7 +397,10 @@ jobs:
     # AISDLC-381 iter-2 CRITICAL fix: same fork-source guard as
     # attestation-precheck. A fork PR named `release-please--evil` must
     # NOT be skipped here under pull_request_target.
-    if: "(github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) && needs.attestation-precheck.outputs.skip != 'true'"
+    # Dependabot PRs are exempt from CI-side LLM review (issue #791 model):
+    # gated by build/test + the dependency-review CVE gate in pr-ready instead.
+    # The automation-review-skip job posts the success status + APPROVE.
+    if: "(github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) && needs.attestation-precheck.outputs.skip != 'true' && github.event.pull_request.user.login != 'dependabot[bot]'"
     # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
     # comments for the incremental-review marker. Read-only — write happens
     # in the `report` job (which already has `pull-requests: write`).
@@ -916,13 +919,67 @@ jobs:
   # ── Job 2: Post Reviews (write access, no LLM) ──────────────────
   # Has GitHub write access but NO ANTHROPIC_API_KEY.
   # Defense: this job only reads structured JSON — no LLM interaction.
+  # Dependabot review exemption (issue #791). Bot dependency bumps are gated by
+  # build/test + the dependency-review CVE gate in pr-ready, NOT by CI-side LLM
+  # review (analyze + report skip for dependabot[bot]). This self-contained job
+  # posts `Post Review Results: success` + an APPROVE so no stale
+  # CHANGES_REQUESTED blocks the PR. Mirrors the docs-only / attestation-skip
+  # short-circuit pattern.
+  automation-review-skip:
+    name: Auto-approve automation PR (Dependabot)
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Post Review Results status (success, automation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context='Post Review Results' \
+            -f description='automation PR — gated by build/test + dependency-review' \
+            -f target_url="${PR_URL}"
+          echo "Posted Post Review Results: success (Dependabot review exemption) on ${HEAD_SHA}"
+      - name: Post APPROVE review (clears any stale CHANGES_REQUESTED)
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              event: 'APPROVE',
+              body: [
+                '<!-- ai-sdlc:automation-review-exempt -->',
+                '## AI-SDLC: Automation PR — CI review skipped (issue #791)',
+                '',
+                'Dependabot dependency bumps are exempt from the CI-side LLM review.',
+                'They are gated by **build/test** + the **dependency-review** CVE gate',
+                '(high+ severity blocks `ai-sdlc/pr-ready`) instead of an LLM opinion.',
+              ].join('\n'),
+            });
+
   report:
     name: Post Review Results
     runs-on: ubuntu-latest
     needs: [analyze]
     # AISDLC-214: only run on PR events; merge_group is handled by docs-only-check.
     # AISDLC-381: gate matches both pull_request and pull_request_target.
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
+    # Dependabot PRs skip the verdict-posting (no CHANGES_REQUESTED) — see analyze
+    # job + the automation-review-skip job (issue #791 Dependabot review exemption).
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && github.event.pull_request.user.login != 'dependabot[bot]'
     permissions:
       pull-requests: write
       issues: read
