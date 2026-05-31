@@ -152,7 +152,9 @@ describe('OQ-1: Variant count limits (soft warn at 5, hard limit at 20)', () => 
       now: FIXED_TS,
       limits: { softWarnAt: 10, hardLimit: 30 },
     });
-    expect(eventsBelow.find((e: VariantEvent) => e.kind === 'VariantCountSoftWarning')).toBeUndefined();
+    expect(
+      eventsBelow.find((e: VariantEvent) => e.kind === 'VariantCountSoftWarning'),
+    ).toBeUndefined();
 
     // 10 variants: at custom soft threshold
     const eventsAt = validateVariantDeclarations({
@@ -535,8 +537,16 @@ describe('OQ-6: Variant ID path-style URI parsing', () => {
     const ctx: VariantContext = {
       variantsBySoul: {
         'spry-engage': [
-          { id: 'small-utility', audienceCharacteristics: { segments: ['municipal-small'] }, designImperatives: [] },
-          { id: 'enterprise', audienceCharacteristics: { segments: ['municipal-large'] }, designImperatives: [] },
+          {
+            id: 'small-utility',
+            audienceCharacteristics: { segments: ['municipal-small'] },
+            designImperatives: [],
+          },
+          {
+            id: 'enterprise',
+            audienceCharacteristics: { segments: ['municipal-large'] },
+            designImperatives: [],
+          },
         ],
       },
       variantScores: {
@@ -674,8 +684,20 @@ describe('OQ-8: Cardinality activation Decision wiring (Stage A counter + auto-p
 
   it('deduplicates requests from the same adopter (one distinct signal per adopter)', () => {
     const requests: CardinalityActivationRequest[] = [
-      { requestedBy: 'acme-corp', soulId: 'acme-engage', variantId: 'enterprise', rationale: 'first', requestedAt: FIXED_TS },
-      { requestedBy: 'acme-corp', soulId: 'acme-engage', variantId: 'trial', rationale: 'second', requestedAt: FIXED_TS },
+      {
+        requestedBy: 'acme-corp',
+        soulId: 'acme-engage',
+        variantId: 'enterprise',
+        rationale: 'first',
+        requestedAt: FIXED_TS,
+      },
+      {
+        requestedBy: 'acme-corp',
+        soulId: 'acme-engage',
+        variantId: 'trial',
+        rationale: 'second',
+        requestedAt: FIXED_TS,
+      },
     ];
     const result = trackCardinalityActivationRequest(requests);
     expect(result.totalRequests).toBe(2); // raw count
@@ -685,23 +707,53 @@ describe('OQ-8: Cardinality activation Decision wiring (Stage A counter + auto-p
 
   it('promotes at ≥3 requests if threshold overridden to 3', () => {
     const requests: CardinalityActivationRequest[] = [
-      { requestedBy: 'adopter-1', soulId: 's1', variantId: 'v1', rationale: 'r1', requestedAt: FIXED_TS },
-      { requestedBy: 'adopter-2', soulId: 's2', variantId: 'v2', rationale: 'r2', requestedAt: FIXED_TS },
+      {
+        requestedBy: 'adopter-1',
+        soulId: 's1',
+        variantId: 'v1',
+        rationale: 'r1',
+        requestedAt: FIXED_TS,
+      },
+      {
+        requestedBy: 'adopter-2',
+        soulId: 's2',
+        variantId: 'v2',
+        rationale: 'r2',
+        requestedAt: FIXED_TS,
+      },
     ];
     // 2 adopters, threshold 3 — should NOT promote
     const resultBelow = trackCardinalityActivationRequest(requests, 3);
     expect(shouldPromoteToOperatorReview(resultBelow)).toBe(false);
 
     // Add third
-    requests.push({ requestedBy: 'adopter-3', soulId: 's3', variantId: 'v3', rationale: 'r3', requestedAt: FIXED_TS });
+    requests.push({
+      requestedBy: 'adopter-3',
+      soulId: 's3',
+      variantId: 'v3',
+      rationale: 'r3',
+      requestedAt: FIXED_TS,
+    });
     const resultAt = trackCardinalityActivationRequest(requests, 3);
     expect(shouldPromoteToOperatorReview(resultAt)).toBe(true);
   });
 
   it('recommendation includes the adopter list when promoted', () => {
     const result = trackCardinalityActivationRequest([
-      { requestedBy: 'acme-corp', soulId: 's1', variantId: 'v1', rationale: 'r1', requestedAt: FIXED_TS },
-      { requestedBy: 'beta-inc', soulId: 's2', variantId: 'v2', rationale: 'r2', requestedAt: FIXED_TS },
+      {
+        requestedBy: 'acme-corp',
+        soulId: 's1',
+        variantId: 'v1',
+        rationale: 'r1',
+        requestedAt: FIXED_TS,
+      },
+      {
+        requestedBy: 'beta-inc',
+        soulId: 's2',
+        variantId: 'v2',
+        rationale: 'r2',
+        requestedAt: FIXED_TS,
+      },
     ]);
     expect(result.recommendation).toContain('acme-corp');
     expect(result.recommendation).toContain('beta-inc');
@@ -719,9 +771,7 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
   it('emits VariantInheritanceViolation when a variant attempts to override complianceRegimes', () => {
     const events = validateVariantDeclarations({
       soulId: 'spry-engage',
-      variants: [
-        makeVariant('bad-variant', { complianceRegimes: ['HIPAA'] }),
-      ],
+      variants: [makeVariant('bad-variant', { complianceRegimes: ['HIPAA'] })],
       now: FIXED_TS,
     });
     const violation = events.find((e: VariantEvent) => e.kind === 'VariantInheritanceViolation');
@@ -732,9 +782,7 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
   it('emits VariantInheritanceViolation when a variant overrides substrateInvariants', () => {
     const events = validateVariantDeclarations({
       soulId: 'spry-engage',
-      variants: [
-        makeVariant('bad-variant', { substrateInvariants: { eventBus: 'kafka-v2' } }),
-      ],
+      variants: [makeVariant('bad-variant', { substrateInvariants: { eventBus: 'kafka-v2' } })],
       now: FIXED_TS,
     });
     const violation = events.find((e: VariantEvent) => e.kind === 'VariantInheritanceViolation');
@@ -744,12 +792,12 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
   it('emits VariantInheritanceViolation when tenantQuotaShare is overridden', () => {
     const events = validateVariantDeclarations({
       soulId: 'spry-engage',
-      variants: [
-        makeVariant('bad-variant', { tenantQuotaShare: 0.5 }),
-      ],
+      variants: [makeVariant('bad-variant', { tenantQuotaShare: 0.5 })],
       now: FIXED_TS,
     });
-    expect(events.find((e: VariantEvent) => e.kind === 'VariantInheritanceViolation')).toBeDefined();
+    expect(
+      events.find((e: VariantEvent) => e.kind === 'VariantInheritanceViolation'),
+    ).toBeDefined();
   });
 
   it('clean variant with only specializable fields emits no violations', () => {
@@ -759,12 +807,17 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
         makeVariant('clean-variant', {
           designOverrides: { densityProfile: 'comfortable', motionProfile: 'reduced' },
           designImperatives: ['low-tech-fluency'],
-          targetAudience: { segments: ['municipal-small'], sizeRange: { minStaff: 1, maxStaff: 50 } },
+          targetAudience: {
+            segments: ['municipal-small'],
+            sizeRange: { minStaff: 1, maxStaff: 50 },
+          },
         }),
       ],
       now: FIXED_TS,
     });
-    expect(events.filter((e: VariantEvent) => e.kind === 'VariantInheritanceViolation')).toHaveLength(0);
+    expect(
+      events.filter((e: VariantEvent) => e.kind === 'VariantInheritanceViolation'),
+    ).toHaveLength(0);
     expect(hasBlockingViolations(events)).toBe(false);
   });
 
@@ -791,7 +844,9 @@ describe('Inheritance enforcement: complianceFloor escape + substrate divergence
     // by the schema's const constraint. The validator-level test below confirms
     // locked-field inheritance violations for fields in INHERITED_LOCKED_FIELDS.
     // This test verifies the in-memory validator handles the declared locked fields.
-    const lockedFieldViolations = events.filter((e: VariantEvent) => e.kind === 'VariantInheritanceViolation');
+    const lockedFieldViolations = events.filter(
+      (e: VariantEvent) => e.kind === 'VariantInheritanceViolation',
+    );
     // complianceFloor itself is not in INHERITED_LOCKED_FIELDS (it's checked by schema)
     // but the test still passes if no other violations are emitted for a clean spec
     expect(lockedFieldViolations.length).toBeGreaterThanOrEqual(0); // no false positives
