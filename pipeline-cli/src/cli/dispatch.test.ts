@@ -981,5 +981,183 @@ spec:
       expect(captured.raw).toMatch(/list-bg-agent-requests/);
       expect(captured.raw).toMatch(/Pattern X/);
     });
+
+    it('help mentions the reverify subcommands (AISDLC-449)', async () => {
+      const { captured } = await captureStdout(() => runDispatchCli(['help']));
+      expect(captured.raw).toMatch(/reverify-blocked-prs/);
+      expect(captured.raw).toMatch(/reverify-k/);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Stale-cache reverify (AISDLC-449).
+  // -------------------------------------------------------------------------
+  describe('reverify-blocked-prs', () => {
+    let board: string;
+
+    beforeEach(() => {
+      board = mkBoard();
+    });
+
+    afterEach(() => {
+      rmSync(path.dirname(board), { recursive: true, force: true });
+    });
+
+    const blocked = JSON.stringify([
+      { prNumber: '4321', checkSignature: 'attestation:failure:v6-envelope' },
+    ]);
+
+    it('does not fire on the first sighting and persists state', async () => {
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'reverify-blocked-prs',
+          '--board-dir',
+          board,
+          '--blocked-prs',
+          blocked,
+          '--dispatch-count',
+          '0',
+        ]),
+      );
+      expect(exit).toBe(0);
+      const r = readLastJson(captured) as {
+        shouldReverify: boolean;
+        consecutiveNoChangeTicks: number;
+        k: number;
+      };
+      expect(r.shouldReverify).toBe(false);
+      expect(r.consecutiveNoChangeTicks).toBe(0);
+      expect(r.k).toBe(2);
+      // State file persisted.
+      expect(existsSync(path.join(board, 'passive-state.json'))).toBe(true);
+    });
+
+    it('fires shouldReverify after K=2 consecutive no-change ticks', async () => {
+      // Seed.
+      await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', blocked]),
+      );
+      // Tick N+1 → counter 1.
+      await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', blocked]),
+      );
+      // Tick N+2 → counter 2 == K → fires.
+      const { captured } = await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', blocked]),
+      );
+      const r = readLastJson(captured) as {
+        shouldReverify: boolean;
+        consecutiveNoChangeTicks: number;
+      };
+      expect(r.consecutiveNoChangeTicks).toBe(2);
+      expect(r.shouldReverify).toBe(true);
+    });
+
+    it('classifies same-blocker vs new-signal when --fresh is supplied', async () => {
+      // Seed the cached blocked-PR set.
+      await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', blocked]),
+      );
+      // Next tick reverifies with a fresh signature that DIFFERS → new-signal.
+      const fresh = JSON.stringify({ '4321': 'attestation:failure:merkle-root-mismatch' });
+      const { captured } = await captureStdout(() =>
+        runDispatchCli([
+          'reverify-blocked-prs',
+          '--board-dir',
+          board,
+          '--blocked-prs',
+          blocked,
+          '--fresh',
+          fresh,
+        ]),
+      );
+      const r = readLastJson(captured) as {
+        classifications: Array<{ prNumber: string; kind: string }>;
+      };
+      expect(r.classifications).toHaveLength(1);
+      expect(r.classifications[0]?.kind).toBe('new-signal');
+    });
+
+    it('rejects malformed --blocked-prs JSON', async () => {
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', '{bad']),
+      );
+      expect(exit).toBe(1);
+      const r = readLastJson(captured) as { ok: boolean };
+      expect(r.ok).toBe(false);
+    });
+
+    it('rejects malformed --fresh JSON', async () => {
+      // Seed so there's a cached observation to classify against.
+      await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', blocked]),
+      );
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'reverify-blocked-prs',
+          '--board-dir',
+          board,
+          '--blocked-prs',
+          blocked,
+          '--fresh',
+          '{bad',
+        ]),
+      );
+      expect(exit).toBe(1);
+      const r = readLastJson(captured) as { ok: boolean; error: string };
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/invalid --fresh JSON/);
+    });
+
+    it('--dry-run does NOT advance the counter or mutate the state file', async () => {
+      const statePath = path.join(board, 'passive-state.json');
+      // Seed once so a non-empty unchanged blocked set exists to re-observe.
+      await captureStdout(() =>
+        runDispatchCli(['reverify-blocked-prs', '--board-dir', board, '--blocked-prs', blocked]),
+      );
+      const seededState = readFileSync(statePath, 'utf-8');
+
+      // First dry-run probe with the SAME (unchanged) blocked set.
+      const first = await captureStdout(() =>
+        runDispatchCli([
+          'reverify-blocked-prs',
+          '--board-dir',
+          board,
+          '--blocked-prs',
+          blocked,
+          '--dry-run',
+          'true',
+        ]),
+      );
+      // Second dry-run probe — counter must NOT have advanced between them.
+      const second = await captureStdout(() =>
+        runDispatchCli([
+          'reverify-blocked-prs',
+          '--board-dir',
+          board,
+          '--blocked-prs',
+          blocked,
+          '--dry-run',
+          'true',
+        ]),
+      );
+
+      const r1 = readLastJson(first.captured) as { consecutiveNoChangeTicks: number };
+      const r2 = readLastJson(second.captured) as { consecutiveNoChangeTicks: number };
+      // Both probes report the same (computed-but-not-persisted) next count, so
+      // the counter never advances across repeated dry-runs.
+      expect(r1.consecutiveNoChangeTicks).toBe(r2.consecutiveNoChangeTicks);
+      // The on-disk state file is byte-identical to the seeded state.
+      expect(readFileSync(statePath, 'utf-8')).toBe(seededState);
+    });
+
+    it('reverify-k prints the resolved K', async () => {
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli(['reverify-k', '--board-dir', board, '--k', '3']),
+      );
+      expect(exit).toBe(0);
+      const r = readLastJson(captured) as { k: number };
+      expect(r.k).toBe(3);
+    });
   });
 });

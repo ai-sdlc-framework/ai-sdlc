@@ -764,6 +764,223 @@ Patterns coexist — the same Dispatch Board accepts manifests from any
 mix of Workers. The `bg-agent-request/` subdir only governs Pattern X
 dispatch; Pattern Y/Z Workers ignore it.
 
+## Step 6.5 — Stale-cache reverify (AISDLC-449)
+
+**Rule (AC-1):** after **K consecutive ticks** with no PR state change AND no
+new dispatches, **re-fetch the failing-check details for each BLOCKED PR**
+before scheduling the next passive heartbeat. Do NOT keep heartbeating on a
+cached "blocked on operator sign-off / CI race" summary line — re-investigate
+the actual PR state.
+
+### Why this gate exists
+
+On 2026-05-26 → 27 the orchestrator sat in an **18h passive monitoring loop**.
+After a context compaction it trusted cached task-summary lines without
+re-investigating actual PR state. The real blocker — a v6 envelope filename
+issue — was always fixable, but nothing forced a re-investigation. This gate
+makes silent rot impossible: VISION.md §4 ("Honest failure modes — no silent
+rot") is the north star.
+
+### Cadence → K guidance (AC-2)
+
+K is the number of consecutive no-change ticks before reverify fires. The
+grace window before reverify is `cadence × K`. Tune K to keep the grace
+window in the ~1–2h band:
+
+| Wakeup cadence | K   | Grace window before reverify |
+| -------------- | --- | ---------------------------- |
+| 1h             | 2   | 2h (default)                 |
+| 20m            | 3   | 1h                           |
+| 30s (soak)     | 120 | 1h                           |
+
+**Default K = 2.** Configure via the `AI_SDLC_STALE_CACHE_REVERIFY_K` env var
+(or pass `--k <n>` to the CLI helper). A non-positive / unparseable value
+falls back to 2 so a typo never disables the gate.
+
+### Security — check signatures are PR-author-influenced, sanitize them
+
+A blocked PR's `checkSignature` is derived from `gh pr checks` output, and
+check NAMES (and therefore the signature) are influenced by the PR author (a
+malicious PR can name a workflow job to carry arbitrary text). The signature
+flows into shell command arguments (`cli-decisions add/extend`) AND into
+`node -e` blocks. **It MUST be sanitized to a constrained charset BEFORE it
+reaches any shell or `node -e` interpolation**, otherwise a crafted check name
+can break out of quoting (`$(...)`, backticks) or splice into JS source.
+
+The sanitization recipe below pipes every derived signature through
+`tr -cd '[:alnum:]:._-'`, constraining it to `[A-Za-z0-9:._-]` — no spaces, no
+quotes, no `$`, no backticks. This is applied at the single point each
+signature is derived, so **the cached signature (in `--blocked-prs`) and the
+fresh signature (in `--fresh`) are produced by the IDENTICAL derivation
+recipe.** If the two derivations diverged, the same blocker would spuriously
+classify as `new-signal` on every reverify — so a single shared helper
+(`derive_check_signature` below) is the only sanctioned way to build either.
+
+Because the constrained charset cannot contain spaces, the classifier emits
+its three fields on a pipe-delimited line (`KIND|PR|SIG`) read with
+`IFS='|'` — a signature can never silently truncate the way a space-split
+`read -r KIND PR SIG` would.
+
+### Recipe
+
+```bash
+# 0. The ONE sanctioned way to derive a check signature — used for BOTH the
+#    cached observation (step 1) and the fresh re-fetch (step 3) so the two
+#    can never diverge. Reads "name<TAB>state<TAB>bucket" rows on stdin and
+#    emits "name:state:bucket" constrained to [A-Za-z0-9:._-] (tr -cd strips
+#    everything else — spaces, quotes, $, backticks — making the result safe
+#    to splice into a shell arg or pass through process.env).
+derive_check_signature() {
+  local pr="$1"
+  gh pr checks "$pr" --json name,state,bucket \
+    -q '[.[] | select(.state != "SUCCESS")] | sort_by(.name) | map("\(.name):\(.state):\(.bucket)") | join(",")' \
+    2>/dev/null | tr -cd '[:alnum:]:._,-'
+}
+
+# 1. Gather this tick's BLOCKED-PR observation. For each PR that's blocked
+#    (draft awaiting attestation, failing required check, etc.) derive a
+#    STABLE check signature via derive_check_signature. Build a JSON array of
+#    {prNumber, checkSignature} with `node` (NOT string concatenation, so the
+#    sanitized signature is JSON-escaped correctly). (Empty array = nothing
+#    blocked → the counter resets and we just sleep.)
+#
+#    Example for a single blocked PR #4321 (loop over your real blocked set):
+PR="4321"
+SIG="$(derive_check_signature "$PR")"
+BLOCKED_PRS_JSON=$(PR="$PR" SIG="$SIG" node -e "
+  process.stdout.write(JSON.stringify([
+    { prNumber: process.env.PR, checkSignature: process.env.SIG },
+  ]));
+")
+
+# DISPATCH_COUNT = how many bg-agent-requests Step 5 wrote this tick. A
+# non-zero value means progress was attempted, so the no-change counter resets.
+DISPATCH_COUNT="${DISPATCH_COUNT:-0}"
+
+# 2. Update the passive-tick counter and learn whether to reverify.
+REVERIFY_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" reverify-blocked-prs \
+  --board-dir "$BOARD_DIR" \
+  --blocked-prs "$BLOCKED_PRS_JSON" \
+  --dispatch-count "$DISPATCH_COUNT")
+echo "[orchestrator-tick] stale-cache reverify: $REVERIFY_JSON"
+
+SHOULD_REVERIFY=$(echo "$REVERIFY_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    try { process.stdout.write(JSON.parse(d.join('')).shouldReverify ? 'yes' : 'no'); }
+    catch { process.stdout.write('no'); }
+  });
+")
+
+if [ "$SHOULD_REVERIFY" = "yes" ]; then
+  # 3. Re-fetch each blocked PR's CURRENT failing-check signature (no cache),
+  #    using the SAME derive_check_signature helper as step 1 so cached and
+  #    fresh are byte-comparable. Build a fresh map {prNumber: freshSig} with
+  #    `node` (env-passed, never string-spliced). This is the actual
+  #    re-investigation the cached summary skipped.
+  FRESH_SIG="$(derive_check_signature "$PR")"
+  FRESH_JSON=$(PR="$PR" FRESH_SIG="$FRESH_SIG" node -e "
+    const m = {}; m[process.env.PR] = process.env.FRESH_SIG;
+    process.stdout.write(JSON.stringify(m));
+  ")
+
+  # 4. Classify cached-vs-fresh per PR (new-signal vs same-blocker).
+  CLASSIFY_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" reverify-blocked-prs \
+    --board-dir "$BOARD_DIR" \
+    --blocked-prs "$BLOCKED_PRS_JSON" \
+    --dispatch-count "$DISPATCH_COUNT" \
+    --fresh "$FRESH_JSON" \
+    --dry-run)   # --dry-run: classify without double-advancing the counter
+
+  # 5. Branch per AC-3 / AC-4 on each classification. The classifier emits one
+  #    PIPE-DELIMITED line per PR (`KIND|PR|SIG`) read with `IFS='|'`. A pipe
+  #    delimiter (not whitespace) is mandatory: even though derive_check_signature
+  #    strips spaces, IFS='|' makes truncation structurally impossible and keeps
+  #    the read robust if the signature charset is ever widened. `\x1f`-style
+  #    delimiters would work too; `|` is excluded from the signature charset.
+  echo "$CLASSIFY_JSON" | node -e "
+    const d=[]; process.stdin.on('data',c=>d.push(c));
+    process.stdin.on('end',()=>{
+      try {
+        const r = JSON.parse(d.join(''));
+        for (const c of (r.classifications || [])) {
+          const kind = c.kind === 'new-signal' ? 'NEW_SIGNAL' : 'SAME_BLOCKER';
+          // freshSignature is already sanitized to [A-Za-z0-9:._,-] upstream,
+          // so it can never contain the '|' delimiter.
+          process.stdout.write(kind + '|' + c.prNumber + '|' + c.freshSignature + '\n');
+        }
+      } catch {}
+    });
+  " | while IFS='|' read -r KIND PR SIG; do
+    if [ "$KIND" = "NEW_SIGNAL" ]; then
+      # AC-3 — surface via the Decision Catalog (NOT another silent heartbeat).
+      # PR/SIG are sanitized, but still passed as plain args (no node -e splice).
+      node "$PIPELINE_CLI_BIN/cli-decisions.mjs" add \
+        --summary "PR #$PR blocker reason changed on reverify: $SIG" \
+        --scope "pr:$PR" \
+        --option "investigate:Re-investigate PR #$PR — failing check reason changed to $SIG" \
+        --option "ignore:Transient — re-check next tick" \
+        --timebox URGENT || true
+      # (Alternatively, AskUserQuestion if an operator is attached this session.)
+    elif [ "$KIND" = "SAME_BLOCKER" ]; then
+      # AC-4 — same blocker confirmed N ticks running. Escalate urgency on the
+      # existing decision rather than going quiet. cli-decisions extend --timebox
+      # is AISDLC-447's surface (aliases URGENT/24H/WEEK/BACKLOG).
+      #
+      # PR is passed to the scope-match node -e via process.env (NEVER spliced
+      # into JS source) so a crafted PR token can't break out of the string.
+      DEC_ID=$(node "$PIPELINE_CLI_BIN/cli-decisions.mjs" list --format json 2>/dev/null | PR="$PR" node -e "
+        const d=[]; process.stdin.on('data',c=>d.push(c));
+        process.stdin.on('end',()=>{
+          try {
+            const r = JSON.parse(d.join(''));
+            const list = Array.isArray(r) ? r : (r.decisions || []);
+            const needle = 'pr:' + process.env.PR;
+            const hit = list.find((x) => (x.scope||'').includes(needle));
+            process.stdout.write(hit ? hit.id : '');
+          } catch { process.stdout.write(''); }
+        });
+      ")
+      if [ -n "$DEC_ID" ]; then
+        node "$PIPELINE_CLI_BIN/cli-decisions.mjs" extend "$DEC_ID" --timebox URGENT || true
+      else
+        node "$PIPELINE_CLI_BIN/cli-decisions.mjs" add \
+          --summary "PR #$PR still blocked on $SIG after reverify — needs operator action" \
+          --scope "pr:$PR" \
+          --option "fix:Fix the blocker ($SIG) directly" \
+          --option "wait:Continue waiting on external signal" \
+          --timebox URGENT || true
+      fi
+    fi
+  done
+fi
+```
+
+### Worked example — the 2026-05-26 → 27 18h incident (AC-5)
+
+Cadence 1h, K=2 (default). PR #4321 is a draft awaiting attestation; the
+required `ai-sdlc/attestation` check is failing because the v6 envelope
+filename doesn't match HEAD.
+
+| Tick | Observation                                       | `reverify-blocked-prs` result                                | Action                                                                 |
+| ---- | ------------------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| N    | `[{4321, attestation:failure:v6-envelope}]`, 0 dispatches | seeds fingerprint, `consecutiveNoChangeTicks=0`, `shouldReverify=false` | sleep 1h                                                               |
+| N+1  | identical, 0 dispatches                           | `consecutiveNoChangeTicks=1`, `shouldReverify=false`         | sleep 1h                                                               |
+| N+2  | identical, 0 dispatches                           | `consecutiveNoChangeTicks=2 == K`, `shouldReverify=true`     | **reverify fires** → re-fetch `gh pr checks 4321`                      |
+
+At tick N+2 the reverify re-fetches and finds the **same** signature
+(`attestation:failure:v6-envelope`) → `classifyReverifyResult` returns
+`same-blocker` → the skill body runs `cli-decisions extend <DEC> --timebox
+URGENT`, escalating the existing decision to a 4h timebox **instead of sleeping
+another hour**. The operator now sees an URGENT-timeboxed decision the next time
+they glance at `cli-decisions list`, and the v6-envelope fix lands in hours
+rather than the 18h the unchecked passive loop took.
+
+Had the re-fetch instead found a *different* signature (e.g. the check moved to
+`attestation:failure:merkle-root-mismatch`), `classifyReverifyResult` would
+return `new-signal` and the skill body would file a NEW Decision Catalog entry
+(AC-3) describing the changed reason — never a silent re-sleep.
+
 ## Step 6 — ScheduleWakeup
 
 ```bash
