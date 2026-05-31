@@ -956,20 +956,32 @@ jobs:
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-              event: 'APPROVE',
-              body: [
-                '<!-- ai-sdlc:automation-review-exempt -->',
-                '## AI-SDLC: Automation PR — CI review skipped (issue #791)',
-                '',
-                'Dependabot dependency bumps are exempt from the CI-side LLM review.',
-                'They are gated by **build/test** + the **dependency-review** CVE gate',
-                '(high+ severity blocks `ai-sdlc/pr-ready`) instead of an LLM opinion.',
-              ].join('\n'),
-            });
+            // Tolerate the 422 "approve your own PR" failure mode the same way
+            // the report + post-skip-results jobs do (the success status is the
+            // load-bearing signal; the APPROVE just clears stale CHANGES_REQUESTED).
+            try {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                event: 'APPROVE',
+                body: [
+                  '<!-- ai-sdlc:automation-review-exempt -->',
+                  '## AI-SDLC: Automation PR — CI review skipped (issue #791)',
+                  '',
+                  'Dependabot dependency bumps are exempt from the CI-side LLM review.',
+                  'They are gated by **build/test** + the **dependency-review** CVE gate',
+                  '(high+ severity blocks `ai-sdlc/pr-ready`) instead of an LLM opinion.',
+                ].join('\n'),
+              });
+              core.info(`Posted APPROVE review on PR #${prNumber} (Dependabot review exemption)`);
+            } catch (err) {
+              if (err.status === 422 && /approve your own/i.test(err.message)) {
+                core.warning('Cannot self-approve PR — APPROVE skipped (success status still posted)');
+              } else {
+                throw err;
+              }
+            }
 
   report:
     name: Post Review Results
