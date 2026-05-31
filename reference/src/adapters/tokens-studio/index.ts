@@ -8,7 +8,7 @@
 
 import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type {
   DesignTokenProvider,
   DesignTokenSet,
@@ -84,7 +84,10 @@ export function createTokensStudioProvider(config: TokensStudioConfig): DesignTo
     return '0.0.0';
   }
 
-  function gitExec(cmd: string): string {
+  // Array args (no shell) so interpolated values (commit message, file path)
+  // can't inject — `git ... "${message}"` via a shell string was flagged
+  // js/shell-command-constructed-from-input.
+  function gitExec(args: string[]): string {
     // Strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so commands resolve
     // against repoPath's own .git, not whatever a parent process (e.g. a
     // husky hook running from another worktree) leaked into the env.
@@ -94,7 +97,7 @@ export function createTokensStudioProvider(config: TokensStudioConfig): DesignTo
     delete env.GIT_DIR;
     delete env.GIT_WORK_TREE;
     delete env.GIT_INDEX_FILE;
-    return execSync(cmd, { cwd: repoPath, encoding: 'utf-8', env }).trim();
+    return execFileSync('git', args, { cwd: repoPath, encoding: 'utf-8', env }).trim();
   }
 
   return {
@@ -133,10 +136,10 @@ export function createTokensStudioProvider(config: TokensStudioConfig): DesignTo
         const _branchName = options?.branch ?? branch;
         const message = options?.message ?? 'chore: update design tokens';
 
-        gitExec(`git add ${relative(repoPath, outputPath)}`);
-        gitExec(`git commit -m "${message}"`);
+        gitExec(['add', relative(repoPath, outputPath)]);
+        gitExec(['commit', '-m', message]);
 
-        const sha = gitExec('git rev-parse HEAD');
+        const sha = gitExec(['rev-parse', 'HEAD']);
         return { success: true, commitSha: sha, message };
       } catch (err) {
         return {

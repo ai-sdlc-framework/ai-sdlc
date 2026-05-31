@@ -37,7 +37,7 @@
  * @module orchestrator/filters/open-pull-request-exists
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { slugify, readBranchPattern, FALLBACK_SLUG } from '../../steps/02-compute-branch.js';
 import type { FilterResult } from './types.js';
 
@@ -171,8 +171,11 @@ export function checkOpenPullRequestExists(opts: CheckOpenPullRequestExistsOpts)
  * Returns the parsed entries or throws on non-zero exit / parse failure.
  */
 function runGhPRListByBranch(branch: string): OpenPREntry[] {
-  const stdout = execSync(
-    `gh pr list --head ${JSON.stringify(branch)} --state open --json number,isDraft,url`,
+  // execFile (array args, no shell) so `branch` can't inject — `gh pr list`
+  // via a shell string was flagged js/shell-command-constructed-from-input.
+  const stdout = execFileSync(
+    'gh',
+    ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,isDraft,url'],
     { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
   ).trim();
   if (stdout === '' || stdout === '[]') return [];

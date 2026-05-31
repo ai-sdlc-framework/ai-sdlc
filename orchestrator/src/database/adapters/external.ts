@@ -63,7 +63,11 @@ export class ExternalAdapter implements DatabaseBranchAdapter {
     const exec = this.deps.exec ?? ((c, a) => execFileAsync(c, a));
     let stdout: string;
     try {
-      const result = await exec('sh', ['-c', `${cmd} ${branchKey}`]);
+      // Pass branchKey as positional $1 (not string-interpolated) so the shell
+      // quotes it safely — `cmd` is the operator's trusted hook, but branchKey
+      // is pipeline-derived and must not be able to inject (CodeQL
+      // js/shell-command-constructed-from-input).
+      const result = await exec('sh', ['-c', `${cmd} "$1"`, 'sh', branchKey]);
       stdout = result.stdout;
     } catch (err) {
       throw new DatabaseBranchAdapterError(
