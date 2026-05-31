@@ -408,6 +408,47 @@ describe('ExternalAdapter', () => {
     expect(handle.connectionString).toBe('postgres://hook:secret@external/db');
   });
 
+  it('allocate passes branchKey as positional $1, never string-interpolated (injection regression lock)', async () => {
+    // Locks the command-injection-safe calling convention: the untrusted
+    // branchKey MUST be handed to the shell as the positional argument $1
+    // (referenced via "$1" in the -c script), NOT interpolated into the
+    // command string. Guards against a future refactor reverting to
+    // `sh -c "${cmd} ${branchKey}"` (CodeQL js/shell-command-constructed-from-input).
+    let capturedCmd: string | undefined;
+    let capturedArgs: string[] | undefined;
+    const a = new ExternalAdapter({
+      exec: async (cmd: string, args?: string[]) => {
+        capturedCmd = cmd;
+        capturedArgs = args;
+        return { stdout: 'postgres://hook/db\n', stderr: '' };
+      },
+    });
+    // A branchKey laced with shell metacharacters — if interpolated it would
+    // break out; bound as $1 it is inert.
+    const maliciousBranchKey = 'feat-z"; touch /tmp/pwned #';
+    await a.allocate(
+      {
+        name: 'p',
+        adapter: 'external',
+        upstream: { connectionStringEnv: 'X' },
+        injection: { targetEnv: 'X' },
+        credentials: {
+          allocateCommand: 'echo connection-string',
+          reclaimCommand: 'true',
+          acknowledgeUntrusted: true,
+        },
+      },
+      maliciousBranchKey,
+    );
+    expect(capturedCmd).toBe('sh');
+    // argv: ['-c', '<cmd> "$1"', 'sh', branchKey]
+    expect(capturedArgs?.[0]).toBe('-c');
+    expect(capturedArgs?.[1]).toBe('echo connection-string "$1"');
+    expect(capturedArgs?.[1]).not.toContain(maliciousBranchKey); // not interpolated
+    expect(capturedArgs?.[2]).toBe('sh'); // $0
+    expect(capturedArgs?.[3]).toBe(maliciousBranchKey); // $1, passed inert
+  });
+
   it('allocate fails on empty stdout', async () => {
     const a = new ExternalAdapter({
       exec: async () => ({ stdout: '', stderr: '' }),
