@@ -319,30 +319,12 @@ First, classify `$ARGUMENTS` into one of the three forms documented in [Argument
 
 ```bash
 # AISDLC-462: Heartbeat helper for /ai-sdlc execute-parallel coordination.
-# Defined here (before any call site) so every call below finds it already declared.
+# Sourced from scripts/lib/update-session-state.sh (single source of truth — AISDLC-464)
+# so heartbeat.test.mjs exercises the real implementation and drift is caught automatically.
 # Writes currentStep + lastHeartbeat to .ai-sdlc/dispatch/sessions/<task>.session.json
 # when that file exists (created by execute-parallel on spawn). No-op otherwise —
 # backward-compatible with standalone /ai-sdlc execute invocations.
-update_session_state() {
-  local task_id_lower="$1" step="$2"
-  local session_file=".ai-sdlc/dispatch/sessions/${task_id_lower}.session.json"
-  [ -f "$session_file" ] || return 0
-  node -e "
-    const fs = require('fs');
-    const f = process.argv[1];
-    const step = process.argv[2];
-    try {
-      const s = JSON.parse(fs.readFileSync(f, 'utf8'));
-      s.currentStep = step;
-      s.lastHeartbeat = new Date().toISOString();
-      if (step === 'done') s.status = 'done';
-      else if (s.status === 'starting') s.status = 'in-progress';
-      const tmp = f + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
-      fs.renameSync(tmp, f);
-    } catch (e) { /* non-fatal */ }
-  " "$session_file" "$step" 2>/dev/null || true
-}
+source "$PLUGIN_SCRIPTS_DIR/lib/update-session-state.sh"
 
 ARG="$ARGUMENTS"
 # Trim surrounding whitespace (matches parseExecuteArg behaviour).

@@ -191,4 +191,20 @@ describe('update_session_state single-source-of-truth', () => {
       'heartbeat.test.mjs must NOT inline an UPDATE_SESSION_STATE_FUNC body',
     );
   });
+
+  it('execute.md sources the canonical lib rather than inlining the function body', () => {
+    // Verify the single-source-of-truth contract holds for execute.md too:
+    // it must reference the lib path and must NOT inline update_session_state() { ... }.
+    const executeCmd = readFileSync(path.join(__dirname, '..', 'commands', 'execute.md'), 'utf8');
+    assert.match(
+      executeCmd,
+      /lib\/update-session-state\.sh/,
+      'execute.md must source scripts/lib/update-session-state.sh (AISDLC-464)',
+    );
+    // The inline function declaration must be gone — the lib replaces it.
+    assert.ok(
+      !/^update_session_state\(\)\s*\{/m.test(executeCmd),
+      'execute.md must NOT inline the update_session_state function body (AISDLC-464)',
+    );
+  });
 });

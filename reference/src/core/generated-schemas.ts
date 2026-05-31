@@ -3791,9 +3791,9 @@ export const dispatchSessionV1Schema = {
     taskId: {
       type: 'string',
       minLength: 1,
-      pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$',
+      pattern: '^[A-Z][A-Z0-9]+-[0-9]+(\\.[0-9]+)*$',
       description:
-        "Stable backlog task identifier in canonical uppercase form (e.g. 'AISDLC-453').",
+        "Stable backlog task identifier in canonical uppercase form (e.g. 'AISDLC-453'). Pattern mirrors the validate_task_id shell regex in execute-parallel.md — no drift between schema and shell (AISDLC-464).",
     },
     tmuxSession: {
       type: 'string',
