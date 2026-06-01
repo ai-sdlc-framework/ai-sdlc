@@ -438,7 +438,8 @@ describe('execute-parallel spawn logic', () => {
 function extractSpawnCmdBlock() {
   const md = readFileSync(EXECUTE_PARALLEL_MD, 'utf8');
   // Assert the opt-in branch includes the permission-skip flag
-  const optInLine = 'CLAUDE_SPAWN_CMD="claude --dangerously-skip-permissions /ai-sdlc execute $TASK_ID"';
+  const optInLine =
+    'CLAUDE_SPAWN_CMD="claude --dangerously-skip-permissions /ai-sdlc execute $TASK_ID"';
   // Assert the non-opt-in branch is the bare command (no flag)
   const optOutLine = 'CLAUDE_SPAWN_CMD="claude /ai-sdlc execute $TASK_ID"';
   return { md, optInLine, optOutLine };
@@ -487,7 +488,9 @@ describe('execute-parallel spawn command template (AISDLC-485 / DEC-0009)', () =
       'execute-parallel.md confirmation step must mention the permission flag and DEC-0009 decision reference',
     );
     assert.ok(
-      md.includes('Security trade-off') || md.includes('security trade-off') || md.includes('Security'),
+      md.includes('Security trade-off') ||
+        md.includes('security trade-off') ||
+        md.includes('Security'),
       'execute-parallel.md confirmation step must surface the security trade-off to the operator',
     );
   });
