@@ -117,6 +117,7 @@ on:
       - 'docs/**'
       - 'backlog/tasks/**'
       - 'backlog/completed/**'
+      - '.ai-sdlc/_decisions/**'
       - '*.md'
   pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`

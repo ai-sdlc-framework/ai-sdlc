@@ -117,6 +117,27 @@ describe('isDocsOnly() — path category coverage (AC-3)', () => {
     assert.equal(isDocsOnly(['CONTRIBUTING.md']), true);
   });
 
+  // .ai-sdlc/_decisions/ — decision-log entries are docs-only (DEC-0010 follow-up)
+  it('.ai-sdlc/_decisions/ prefix → docs-only (ONLY _decisions, not other .ai-sdlc paths)', () => {
+    assert.equal(isDocsOnly(['.ai-sdlc/_decisions/events.jsonl']), true);
+    assert.equal(isDocsOnly(['.ai-sdlc/_decisions/DEC-0010.md']), true);
+    assert.equal(isDocsOnly(['.ai-sdlc/_decisions/subdirectory/entry.md']), true);
+  });
+
+  it('mixed changeset (.ai-sdlc/_decisions + .ts source) → NOT docs-only', () => {
+    assert.equal(
+      isDocsOnly(['.ai-sdlc/_decisions/events.jsonl', 'pipeline-cli/src/foo.ts']),
+      false,
+    );
+  });
+
+  it('.ai-sdlc/agent-role.yaml → NOT docs-only (security-sensitive; must stay attested)', () => {
+    assert.equal(isDocsOnly(['.ai-sdlc/agent-role.yaml']), false);
+    assert.equal(isDocsOnly(['.ai-sdlc/trusted-reviewers.yaml']), false);
+    assert.equal(isDocsOnly(['.ai-sdlc/review-policy.md']), false);
+    assert.equal(isDocsOnly(['.ai-sdlc/dispatch/queue/task.json']), false);
+  });
+
   // Non-ASCII docs path (e.g. a French-titled RFC)
   it('non-ASCII docs path → docs-only', () => {
     assert.equal(isDocsOnly(['docs/opérations/qualité.md']), true);
@@ -209,12 +230,17 @@ describe('paths-ignore equivalence (AC-4) — DOCS_ONLY_PATTERN mirrors workflow
   // docs-only short-circuit fires inside the workflow instead. ai-sdlc-review.yml
   // KEEPS paths-ignore as a cost-saver — `Post Review Results` is NOT a required
   // check so paths-ignore-skipped is safe there.
-  const WORKFLOW_FILES = ['ai-sdlc-review.yml'];
+  // Note (AISDLC-388): verify-attestation.yml's paths-ignore was REINSTATED.
+  // ai-sdlc/attestation is no longer a direct required check (replaced by the
+  // ai-sdlc/pr-ready rollup), so paths-ignore no longer deadlocks docs-only PRs.
+  // Both workflow files are therefore checked here for paths-ignore equivalence.
+  const WORKFLOW_FILES = ['ai-sdlc-review.yml', 'verify-attestation.yml'];
   const EXPECTED_GLOBS = new Set([
     'spec/rfcs/**',
     'docs/**',
     'backlog/tasks/**',
     'backlog/completed/**',
+    '.ai-sdlc/_decisions/**',
     '*.md',
   ]);
 

@@ -29,6 +29,7 @@
  *   - backlog/tasks/**
  *   - backlog/completed/**
  *   - .ai-sdlc/attestations/<sha>.dsse.json (chore-commit envelope files)
+ *   - .ai-sdlc/_decisions/** (append-only operator governance data; DEC-0010 follow-up)
  *   - *.md  (root-level only — single * does NOT match /)
  *
  * CLI usage (for workflow shell-out):
@@ -48,7 +49,7 @@
  *   - .github/workflows/ai-sdlc-review.yml
  */
 export const DOCS_ONLY_PATTERN =
-  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|[^/]+\.md$)/;
+  /^(spec\/rfcs\/|docs\/|backlog\/tasks\/|backlog\/completed\/|\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$|\.ai-sdlc\/_decisions\/|[^/]+\.md$)/;
 
 /**
  * Returns true iff the file list is non-empty and every file matches the
