@@ -68,6 +68,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # AISDLC-495 / DEC-0010: under strict-false branch protection, proactively
+          # rebasing open PRs onto main is unnecessary (AISDLC-491 made v6 attestation
+          # rebase-invariant for disjoint PRs) and actively harmful — the rebase re-stales
+          # the attestation (envelope signed against a tree without the just-merged changes).
+          # Skip unless branch protection still requires up-to-date.
+          STRICT=$(gh api "repos/$REPO/branches/main/protection/required_status_checks" --jq '.strict' 2>/dev/null || echo "false")
+          if [ "$STRICT" != "true" ]; then
+            echo "branch protection strict=$STRICT — skipping proactive rebase (AISDLC-495 / DEC-0010 trunk-based posture)."
+            exit 0
+          fi
+
           # AISDLC-189: warn if we fell back to GITHUB_TOKEN — the rebase
           # will succeed but downstream workflows won't fire on the new SHA.
           if [ "$USING_FALLBACK_TOKEN" = "true" ]; then
