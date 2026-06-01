@@ -352,7 +352,11 @@ For each request in the `requests` array (parse with `node -e ...`):
    B of a prior tick already fired this Agent; Phase A is waiting on its
    completion).
 2. **Fire a background `Agent` call** to the `developer` subagent with:
-   - `subagent_type`: `developer`
+   - `subagent_type`: `developer` — always Claude-native sonnet (AISDLC-483;
+     the `developer` agent frontmatter pins `model: sonnet`; the dispatch path
+     does NOT override this. To force a different model per invocation, set
+     `AI_SDLC_DEV_MODEL=<model>` before the tick — that env var is forwarded
+     to the agent prompt as a per-invocation hint.)
    - `cwd`: the request's `worktree` value
    - `run_in_background`: `true` — completion notifications arrive on a
      later tick for Phase A to reconcile.
@@ -474,14 +478,57 @@ For each verdict in the array with `outcome === 'success'`:
    done
    ```
 
-3. **Spawn the missed reviewer subagents in parallel** via ONE foreground
-   `Agent` operation (AISDLC-418 AC #2 — single fan-out call, not 3
-   sequential ones). Only reviewers whose cache MISSed need to run.
-   - `code-reviewer` — `Read`/`Bash`/`Grep` tools, reviews the diff
-   - `test-reviewer` — same toolset, focuses on test coverage + ACs
-   - `security-reviewer` — same toolset, security audit
-     Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
-     Foreground `Agent` calls are well-suited regardless of duration.
+3. **Resolve agent names then spawn the missed reviewer subagents in parallel**
+   via ONE foreground `Agent` operation (AISDLC-418 AC #2 — single fan-out
+   call, not 3 sequential ones). Only reviewers whose cache MISSed need to run.
+
+   **AISDLC-483 — default-Codex reviewer routing.** Before spawning, resolve
+   the canonical agent name per role using the same harness-selection logic as
+   `/ai-sdlc execute` Step 7b. Default: code-review and test-review route to
+   `code-reviewer-codex` / `test-reviewer-codex` (Codex plan, zero Claude
+   tokens). Security always stays on `security-reviewer` (claude-native, opus).
+   Override: `AI_SDLC_REVIEWER_HARNESS=claude` forces all three to claude-native.
+
+   ```bash
+   # AISDLC-483: resolve agent name for each role.
+   _resolve_reviewer_agent() {
+     local role="$1"
+     local force_claude="${AI_SDLC_REVIEWER_HARNESS:-}"
+     case "$role" in
+       code-reviewer)
+         if [ "$(echo "$force_claude" | tr '[:upper:]' '[:lower:]')" = "claude" ]; then
+           echo "code-reviewer"
+         else
+           echo "code-reviewer-codex"
+         fi
+         ;;
+       test-reviewer)
+         if [ "$(echo "$force_claude" | tr '[:upper:]' '[:lower:]')" = "claude" ]; then
+           echo "test-reviewer"
+         else
+           echo "test-reviewer-codex"
+         fi
+         ;;
+       security-reviewer)
+         echo "security-reviewer"
+         ;;
+       *)
+         echo "$role"
+         ;;
+     esac
+   }
+   CODE_AGENT=$(_resolve_reviewer_agent code-reviewer)
+   TEST_AGENT=$(_resolve_reviewer_agent test-reviewer)
+   SEC_AGENT=$(_resolve_reviewer_agent security-reviewer)
+   ```
+
+   Roles:
+   - `$CODE_AGENT` (default: `code-reviewer-codex`) — reviews the diff
+   - `$TEST_AGENT` (default: `test-reviewer-codex`) — focuses on test coverage + ACs
+   - `$SEC_AGENT` (always: `security-reviewer`) — security audit
+
+   Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
+   Foreground `Agent` calls are well-suited regardless of duration.
 
    **Iter-2 MAJOR #4 fix — per-reviewer save runs PER-REVIEWER after each
    Agent return, NOT once at end-of-aggregation under the success
@@ -522,7 +569,9 @@ For each verdict in the array with `outcome === 'success'`:
    # so reconcile can salvage transcripts from /private/tmp (AC #3) when
    # the worktree's .ai-sdlc/transcripts/ dir is missing them. The Agent
    # tool returns an agentId per call; capture them into a JSON map.
-   AGENT_IDS_JSON='{"code-reviewer":"<id>","test-reviewer":"<id>","security-reviewer":"<id>"}'
+   # AISDLC-483: use resolved agent names in the ID map so reconcile can
+   # find transcripts under the correct agent name (e.g. code-reviewer-codex).
+   AGENT_IDS_JSON="{\"${CODE_AGENT}\":\"<id>\",\"${TEST_AGENT}\":\"<id>\",\"${SEC_AGENT}\":\"<id>\"}"
    node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reconcile "<task-id>" \
      --reviewer-agent-ids "$AGENT_IDS_JSON" \
      | tee /tmp/reconcile-<task-id>.json
