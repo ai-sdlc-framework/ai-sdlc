@@ -50,9 +50,7 @@ function makeJourney(
     id,
     scope: 'soul',
     states,
-    transitions: [
-      { from: 'state-1', to: `state-${stateCount}`, trigger: 'complete' },
-    ],
+    transitions: [{ from: 'state-1', to: `state-${stateCount}`, trigger: 'complete' }],
     completionCriteria: { kind: 'terminal-success-state', target: `state-${stateCount}` },
     accessibility: { wcagLevel: 'AA', wcagVersion: '2.1', conformanceTarget: 100 },
     ...overrides,
@@ -257,8 +255,8 @@ describe('validateJourneyDeclarations — inheritance violations (AC #5)', () =>
     });
     const violations = events.filter((e) => e.kind === 'JourneyInheritanceViolation');
     expect(violations).toHaveLength(3);
-    const classes = violations.map(
-      (v) => v.kind === 'JourneyInheritanceViolation' ? v.violationClass : null,
+    const classes = violations.map((v) =>
+      v.kind === 'JourneyInheritanceViolation' ? v.violationClass : null,
     );
     expect(classes).toContain('complianceRegimes');
     expect(classes).toContain('targetAudience');
@@ -515,8 +513,8 @@ describe('validateJourneyDeclarations — state count limits (AC #8)', () => {
     });
     const warnings = events.filter((e) => e.kind === 'JourneyStateCountSoftWarning');
     expect(warnings).toHaveLength(2);
-    const journeyIds = warnings.map(
-      (w) => w.kind === 'JourneyStateCountSoftWarning' ? w.journeyId : null,
+    const journeyIds = warnings.map((w) =>
+      w.kind === 'JourneyStateCountSoftWarning' ? w.journeyId : null,
     );
     expect(journeyIds).toContain('flow-a');
     expect(journeyIds).toContain('flow-b');
@@ -641,19 +639,15 @@ describe('trackSubFlowActivationRequests — Stage A counter (AC #10)', () => {
   });
 
   it('respects custom threshold override', () => {
-    const result = trackSubFlowActivationRequests(
-      [{ requestedBy: 'adopter-acme' }],
-      { distinctAdopterRequestsThreshold: 1 },
-    );
+    const result = trackSubFlowActivationRequests([{ requestedBy: 'adopter-acme' }], {
+      distinctAdopterRequestsThreshold: 1,
+    });
     expect(result.threshold).toBe(1);
     expect(result.promotedToOperatorReview).toBe(true);
   });
 
   it('recommendation message references follow-on RFC at promotion threshold', () => {
-    const result = trackSubFlowActivationRequests([
-      { requestedBy: 'a' },
-      { requestedBy: 'b' },
-    ]);
+    const result = trackSubFlowActivationRequests([{ requestedBy: 'a' }, { requestedBy: 'b' }]);
     expect(result.recommendation).toContain('follow-on RFC');
     expect(result.recommendation).toContain('handoff terminal states');
   });

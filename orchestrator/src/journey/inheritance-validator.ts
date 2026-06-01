@@ -479,7 +479,8 @@ export function validateJourneyDeclarations(
     // Rule 3c — complianceFloor check (§5.3)
     // When scope=variant, complianceFloor MUST be 'inherit'.
     // Presence of complianceFloor with any value other than 'inherit' is a violation.
-    const isVariantScoped = typeof journey.scope === 'string' && journey.scope.startsWith('variant:');
+    const isVariantScoped =
+      typeof journey.scope === 'string' && journey.scope.startsWith('variant:');
     if (isVariantScoped && Object.prototype.hasOwnProperty.call(journey, 'complianceFloor')) {
       if (journey.complianceFloor !== 'inherit') {
         events.push({
@@ -619,7 +620,8 @@ export function trackSubFlowActivationRequests(
   requests: SubFlowActivationRequest[],
   config: SubFlowActivationConfig = {},
 ): SubFlowActivationCounterResult {
-  const threshold = config.distinctAdopterRequestsThreshold ?? DEFAULT_SUB_FLOW_ACTIVATION_THRESHOLD;
+  const threshold =
+    config.distinctAdopterRequestsThreshold ?? DEFAULT_SUB_FLOW_ACTIVATION_THRESHOLD;
 
   // Deduplicate by requestedBy — one signal per distinct adopter.
   const distinctAdopters = new Set<string>();
