@@ -25,7 +25,15 @@
 #      dependency phrases, upstream-OQ blocks) fail locally before CI cycles.
 #      Runs before the orchestrator so DoR violations block the push without
 #      spending time on mechanical fixups. Skip: AI_SDLC_SKIP_DOR_GATE=1.
-#   4. Mechanical fixups orchestrator (AISDLC-386) — runs two mechanical
+#   4. Backlog Drift pre-push gate (AISDLC-486) — catches error-severity drift
+#      introduced by renames/moves/deletes BEFORE CI discovers it. Two checks:
+#      (a) for every file renamed/deleted in this push range, grep backlog/ for
+#      references to the old path; (b) run `backlog-drift check --since <base>`
+#      on tasks touched in this push to surface error-severity issues in changed
+#      tasks. Motivating incident: PR #789 renamed commands/review.md without
+#      updating AISDLC-71's reference to the old path — CI failed, manual fix
+#      required. Skip: AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1.
+#   5. Mechanical fixups orchestrator (AISDLC-386) — runs two mechanical
 #      fixup sub-hooks in dependency order in a single pass:
 #        task-move (AISDLC-220) → attestation-sign (AISDLC-133)
 #      (mcp-bundle-sync was DELETED by AISDLC-385 — bundle now distributed via npm)
@@ -35,7 +43,7 @@
 #      MUST run before attestation-sign (attestation's contentHashV4 binds
 #      {path, headBlobSha}; if move happens after sign the envelope references
 #      the old path → verify-attestation rejects).
-#   5-6. Individual sub-hook invocations (task-moved, attestation-sign) remain
+#   6-7. Individual sub-hook invocations (task-moved, attestation-sign) remain
 #      below as defense-in-depth: on the re-push after the orchestrator exits 1,
 #      the orchestrator sees no fixups needed and exits 0. Each sub-hook's
 #      idempotency check then confirms clean state. If the orchestrator is
@@ -46,7 +54,7 @@
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1, AI_SDLC_SKIP_COVERAGE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_DOR_GATE=1,
-# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -66,6 +74,13 @@ fi
 # release-please owns CHANGELOG.md; manual edits cause rebase conflicts.
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-changelog-edit.sh
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
+# AISDLC-486: backlog-drift pre-push gate — catches error-severity drift
+# introduced by renames/moves/deletes before CI discovers it. Specifically
+# checks (a) inbound backlog references to renamed/deleted files and (b)
+# error-severity issues in backlog tasks touched in this push range.
+# Runs AFTER DoR (both block the push) and BEFORE the fixup orchestrator.
+# Skip: AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-backlog-drift-on-push.sh
 # AISDLC-386: orchestrator handles all mechanical fixups (task-move →
 # attestation-sign) in a single pass and exits 1 ONCE if any work was done.
 # (mcp-bundle-sync removed per AISDLC-385 — bundle now distributed via npm.)

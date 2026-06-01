@@ -124,6 +124,34 @@ If the conflict is in a function body or test assertion, picking a side is **gue
 - The task description, acceptance criteria, references, and `permittedExternalPaths` are in your initial prompt.
 - The PreToolUse hook will refuse `Write`/`Edit` on `.ai-sdlc/**`, `.github/workflows/**` and any path outside the worktree that isn't in `permittedExternalPaths`. Don't try to bypass it — it's a hard governance rule.
 
+## Rename / move / delete: update inbound references (AISDLC-486)
+
+**Required before any commit that renames, moves, or deletes a file:**
+
+The "Backlog Drift" check is a REQUIRED CI gate. If you rename, move, or delete a file that is referenced by any backlog task, the CI gate WILL fail and the PR WILL stall until the reference is fixed manually. This class of error is always avoidable by following this two-step contract:
+
+**Step 1 — search for inbound references before renaming.**
+Before renaming or deleting any file, run:
+```bash
+grep -rl "old/path/to/file.md" backlog/
+```
+If any backlog tasks reference the old path, update them in the same commit as the rename. Use `npx backlog-drift fix --task <TASK-ID>` to auto-fix a specific task.
+
+**Step 2 — run the pre-push drift check locally before pushing.**
+After making your changes (especially any rename/move/delete), run:
+```bash
+npx backlog-drift check
+```
+If it reports any `error`-severity issues (`✗ Referenced file no longer exists: ...`), fix them BEFORE pushing. The pre-push gate (`scripts/check-backlog-drift-on-push.sh`) will catch these automatically and block the push, but running it manually as part of your verify step surfaces the issue faster:
+```bash
+# Manual pre-flight (the pre-push gate runs this automatically):
+./scripts/check-backlog-drift-on-push.sh < /dev/null  # no-op when stdin empty
+```
+
+**Escape (emergency only):** `AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1 git push` skips the local pre-push gate but does NOT bypass CI — the Backlog Drift CI gate is still required for merge.
+
+**Motivating incident (AISDLC-486):** PR #789 renamed `ai-sdlc-plugin/commands/review.md` → `review-pr.md`. The backlog task AISDLC-71 referenced the old path. The rename was correct, but the missing reference update caused `backlog-drift check` to fail with `✗ Referenced file no longer exists`, blocking the PR until manually corrected. This rule exists to prevent that class of failure.
+
 ## Hard rules (NEVER violate)
 
 1. **Never merge a PR.** Do not run `gh pr merge` under any circumstance.
