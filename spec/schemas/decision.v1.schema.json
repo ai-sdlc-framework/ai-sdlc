@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.dev/schemas/decision.v1.schema.json",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/decision.v1.schema.json",
   "title": "Decision",
   "description": "RFC-0035 Decision resource. Decisions are projections of an append-only event log at .ai-sdlc/_decisions/events.jsonl (OQ-1). This schema describes the projected (materialized) view; events that compose into it are described by DecisionEvent.",
   "type": "object",
