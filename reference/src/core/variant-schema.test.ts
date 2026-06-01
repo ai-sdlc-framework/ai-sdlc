@@ -13,11 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-import {
-  SCHEMAS,
-  designIntentDocumentSchema,
-  workItemSchema,
-} from './generated-schemas.js';
+import { SCHEMAS, designIntentDocumentSchema, workItemSchema } from './generated-schemas.js';
 import { validate } from './validation.js';
 
 // Handle CJS default export interop
