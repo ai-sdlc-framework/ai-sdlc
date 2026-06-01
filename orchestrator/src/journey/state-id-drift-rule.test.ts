@@ -32,6 +32,9 @@ import { describe, it, expect } from 'vitest';
 import { JourneyStateIdDriftRule, type JourneyStateIdDriftDetails } from './state-id-drift-rule.js';
 import { createTessellation13Registry } from '../tessellation/rule-registry.js';
 import type { RuleScanTarget, ActiveJourneyDeclaration } from '../tessellation/rule-registry.js';
+import { SoulSlugAstScanRule } from '../tessellation/soul-slug-ast-scan-rule.js';
+import { InterSoulEmbeddingDistanceRule } from '../tessellation/inter-soul-embedding-distance-rule.js';
+import { CrossSoulProvenanceRule } from '../tessellation/cross-soul-provenance-rule.js';
 
 // ── Fixture helpers ────────────────────────────────────────────────────
 
@@ -424,37 +427,30 @@ describe('JourneyStateIdDriftRule — AC #7: RFC-0028 OQ-7.2 composition', () =>
 });
 
 // ── AC #8: Regression — existing §13 rules work via registry ─────────
+//
+// AISDLC-489: stubs replaced with real rule instances (SoulSlugAstScanRule,
+// InterSoulEmbeddingDistanceRule, CrossSoulProvenanceRule). Each test now
+// exercises actual rule logic through the registry, not placeholder objects.
 
 describe('JourneyStateIdDriftRule + existing rules — AC #8: registry regression', () => {
-  it('registry dispatches JourneyStateIdDriftRule alongside stub existing rules', async () => {
-    // Simulate the 3 existing §13 rules (stubbed) + new rule #4 all registered
-    const soulSlugAstScanStub = {
-      name: 'soul-slug-ast-scan',
-      description: 'Rule #1 stub',
-      severity: 'warning' as const,
-      scan: (_t: RuleScanTarget) => [] as import('../tessellation/rule-registry.js').DriftEvent[],
-    };
-    const interSoulEmbeddingStub = {
-      name: 'inter-soul-embedding-distance',
-      description: 'Rule #2 stub (deferred)',
-      severity: 'warning' as const,
-      scan: (_t: RuleScanTarget) => [] as import('../tessellation/rule-registry.js').DriftEvent[],
-    };
-    const crossSoulProvenanceStub = {
-      name: 'cross-soul-provenance',
-      description: 'Rule #3 stub',
-      severity: 'warning' as const,
-      scan: (_t: RuleScanTarget) => [] as import('../tessellation/rule-registry.js').DriftEvent[],
-    };
+  it('registry dispatches JourneyStateIdDriftRule alongside real existing rules', async () => {
+    // All 4 §13 rules wired as real TessellationRule instances.
+    // Rule #1: SoulSlugAstScanRule with soul slugs for scan.
+    const soulSlugAstScanRule = new SoulSlugAstScanRule(['soul-a']);
+    // Rule #2: InterSoulEmbeddingDistanceRule (deferred stub — always returns []).
+    const interSoulEmbeddingRule = new InterSoulEmbeddingDistanceRule();
+    // Rule #3: CrossSoulProvenanceRule with no cross-soul provenance entries.
+    const crossSoulProvenanceRule = new CrossSoulProvenanceRule();
+    // Rule #4: JourneyStateIdDriftRule — the new rule from AISDLC-467.
     const stateIdDriftRule = new JourneyStateIdDriftRule();
 
     const registry = createTessellation13Registry();
-    registry.register(soulSlugAstScanStub);
-    registry.register(interSoulEmbeddingStub);
-    registry.register(crossSoulProvenanceStub);
+    registry.register(soulSlugAstScanRule);
+    registry.register(interSoulEmbeddingRule);
+    registry.register(crossSoulProvenanceRule);
     registry.register(stateIdDriftRule);
 
-    // 4 rules registered
+    // 4 rules registered — verify canonical names.
     expect(registry.getRegisteredRules()).toHaveLength(4);
     const names = registry.getRegisteredRules().map((r) => r.name);
     expect(names).toContain('soul-slug-ast-scan');
@@ -462,7 +458,8 @@ describe('JourneyStateIdDriftRule + existing rules — AC #8: registry regressio
     expect(names).toContain('cross-soul-provenance');
     expect(names).toContain('journey-state-id-drift');
 
-    // Dispatch with a target that triggers rule #4
+    // Dispatch with a target that triggers rule #4 (removed journey state ID)
+    // but NOT rule #1 (no soul-slug leakage — 'dead-step' is not a soul slug).
     const target = makeTarget({
       substrateFiles: [{ path: 'src/code.ts', contents: `trackState('dead-step');` }],
       journeysBySoul: {
@@ -472,28 +469,108 @@ describe('JourneyStateIdDriftRule + existing rules — AC #8: registry regressio
     });
 
     const events = await registry.dispatch(target);
-    // Only rule #4 emits an event; stubs return empty arrays
+    // Rule #4 emits an event for the removed journey state ID.
+    // Rule #1 emits nothing (no soul-slug leakage in the substrate).
+    // Rule #2 emits nothing (deferred stub).
+    // Rule #3 emits nothing (no provenance entries).
     expect(events).toHaveLength(1);
     expect(events[0].rule).toBe('journey-state-id-drift');
   });
 
-  it('registry regression: existing rules stub returns empty when no relevant input', async () => {
+  it('registry regression: SoulSlugAstScanRule emits an event when soul slug leaks into substrate', async () => {
+    // Rule #1 real behavior: detects soul slug 'soul-a' in shared substrate.
+    const soulSlugAstScanRule = new SoulSlugAstScanRule(['soul-a', 'soul-b']);
     const registry = createTessellation13Registry();
-    registry.register({
-      name: 'soul-slug-ast-scan',
-      description: 'Rule #1 stub',
-      severity: 'warning',
-      scan: () => [],
+    registry.register(soulSlugAstScanRule);
+
+    const target = makeTarget({
+      substrateFiles: [
+        { path: 'src/shared.ts', contents: `if (soul === 'soul-a') { doThing(); }` },
+      ],
     });
-    registry.register({
-      name: 'cross-soul-provenance',
-      description: 'Rule #3 stub',
-      severity: 'warning',
-      scan: () => [],
+
+    const events = await registry.dispatch(target);
+    // Rule #1 should detect the soul-conditional pattern.
+    expect(events).toHaveLength(1);
+    expect(events[0].rule).toBe('soul-slug-ast-scan');
+    expect(events[0].severity).toBe('warning');
+    expect(events[0].message).toContain('soul-name leakage');
+  });
+
+  it('registry regression: SoulSlugAstScanRule returns empty when no soul slugs leak', async () => {
+    const soulSlugAstScanRule = new SoulSlugAstScanRule(['soul-a', 'soul-b']);
+    const registry = createTessellation13Registry();
+    registry.register(soulSlugAstScanRule);
+
+    // Substrate has no soul slugs — no drift detected.
+    const target = makeTarget({
+      substrateFiles: [{ path: 'src/shared.ts', contents: `console.log('hello world');` }],
     });
+
+    const events = await registry.dispatch(target);
+    expect(events).toHaveLength(0);
+  });
+
+  it('registry regression: InterSoulEmbeddingDistanceRule (deferred stub) always returns empty', async () => {
+    const rule = new InterSoulEmbeddingDistanceRule();
+    const registry = createTessellation13Registry();
+    registry.register(rule);
+
+    // Even with rich target data, the stub returns empty (RFC-0019 deferred).
+    const target = makeTarget({
+      substrateFiles: [{ path: 'src/code.ts', contents: `const x = 'anything';` }],
+    });
+
+    const events = await registry.dispatch(target);
+    expect(events).toHaveLength(0);
+  });
+
+  it('registry regression: CrossSoulProvenanceRule emits event for cross-boundary provenance', async () => {
+    const crossSoulProvenanceRule = new CrossSoulProvenanceRule();
+    const registry = createTessellation13Registry();
+    registry.register(crossSoulProvenanceRule);
+
+    const target = makeTarget({
+      provenance: [
+        {
+          record: {
+            promptHash: 'a'.repeat(64),
+            timestamp: '2026-05-30T00:00:00.000Z',
+            targetedSouls: ['soul-a', 'soul-b'],
+            substrateScoped: false,
+          },
+          amendmentRecorded: false,
+        },
+      ],
+    });
+
+    const events = await registry.dispatch(target);
+    // Rule #3 should detect the cross-boundary-no-amendment finding.
+    expect(events).toHaveLength(1);
+    expect(events[0].rule).toBe('cross-soul-provenance');
+    expect(events[0].severity).toBe('warning');
+    expect(events[0].message).toContain('1 finding(s)');
+  });
+
+  it('registry regression: CrossSoulProvenanceRule returns empty when no provenance', async () => {
+    const crossSoulProvenanceRule = new CrossSoulProvenanceRule();
+    const registry = createTessellation13Registry();
+    registry.register(crossSoulProvenanceRule);
     registry.register(new JourneyStateIdDriftRule());
 
-    // Target with no substrate files and no journeys — all rules return empty
+    // Target with no substrate files and no journeys — all rules return empty.
+    const events = await registry.dispatch(makeTarget());
+    expect(events).toHaveLength(0);
+  });
+
+  it('all 4 real §13 rules return empty for an empty target', async () => {
+    const registry = createTessellation13Registry();
+    registry.register(new SoulSlugAstScanRule(['soul-a']));
+    registry.register(new InterSoulEmbeddingDistanceRule());
+    registry.register(new CrossSoulProvenanceRule());
+    registry.register(new JourneyStateIdDriftRule());
+
+    // No substrate files, no provenance, no journeys — all rules no-op.
     const events = await registry.dispatch(makeTarget());
     expect(events).toHaveLength(0);
   });
@@ -504,6 +581,23 @@ describe('JourneyStateIdDriftRule + existing rules — AC #8: registry regressio
     expect(typeof rule.description).toBe('string');
     expect(['high', 'medium', 'warning']).toContain(rule.severity);
     expect(typeof rule.scan).toBe('function');
+  });
+
+  it('all 3 existing real §13 rules implement TessellationRule interface correctly', () => {
+    const rule1 = new SoulSlugAstScanRule();
+    expect(typeof rule1.name).toBe('string');
+    expect(rule1.name).toBe('soul-slug-ast-scan');
+    expect(typeof rule1.scan).toBe('function');
+
+    const rule2 = new InterSoulEmbeddingDistanceRule();
+    expect(typeof rule2.name).toBe('string');
+    expect(rule2.name).toBe('inter-soul-embedding-distance');
+    expect(typeof rule2.scan).toBe('function');
+
+    const rule3 = new CrossSoulProvenanceRule();
+    expect(typeof rule3.name).toBe('string');
+    expect(rule3.name).toBe('cross-soul-provenance');
+    expect(typeof rule3.scan).toBe('function');
   });
 
   it('JourneyStateIdDriftRule has stable canonical name', () => {

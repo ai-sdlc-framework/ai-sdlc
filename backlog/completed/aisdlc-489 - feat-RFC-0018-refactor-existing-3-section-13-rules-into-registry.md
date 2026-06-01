@@ -1,7 +1,7 @@
 ---
 id: AISDLC-489
 title: 'feat: refactor existing 3 §13 rules into Tessellation13Registry (AISDLC-467 AC#3 follow-up)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-31'
 labels:
