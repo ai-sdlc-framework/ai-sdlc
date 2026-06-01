@@ -34,6 +34,11 @@
           "description": "In-Soul Variant declarations per RFC-0017 §5.1. Each variant carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's compliance regime and substrate invariants.",
           "items": { "$ref": "#/$defs/variantDeclaration" },
           "maxItems": 19
+        },
+        "journeys": {
+          "type": "array",
+          "description": "In-Soul Journey declarations per RFC-0018 §5.1 / §6.1. Each journey is a temporally-ordered user flow with named states, transitions, completion criteria, accessibility requirements, and success metrics. Journeys are scoring scopes (not a runtime workflow engine). Schema-enforced flat: journeys[] cannot contain nested journeys[] (OQ-3 resolution). Per-org count limits enforced by the inheritance validator: soft warn at 10+ journeys, hard reject at 50+ (OQ-1 resolution, configurable via .ai-sdlc/journey-config.yaml).",
+          "items": { "$ref": "journey.v1.schema.json" }
         }
       },
       "additionalProperties": false
@@ -692,6 +697,11 @@
           "type": "string",
           "enum": ["primary", "secondary", "experimental"],
           "description": "RESERVED: future lifecycle hint per RFC-0017 §5.2. v1 ignores; documents the experimental exit ramp (OQ-8)."
+        },
+        "journeys": {
+          "type": "array",
+          "description": "Variant-scoped Journey declarations per RFC-0018 §5.1. A journey scoped to this variant (scope='variant:<id>') MUST carry complianceFloor: 'inherit'. Count limits apply as for soul-scoped journeys (per-org configurable, defaults soft 10 / hard 50).",
+          "items": { "$ref": "journey.v1.schema.json" }
         }
       }
     }
