@@ -41,6 +41,15 @@
         "pattern": "^did(?::[^:]+)+:soul:[a-z][a-z0-9-]*/variant:[a-z][a-z0-9-]*$",
         "description": "Path-style variant URI per RFC-0017 OQ-6: 'did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}'. The explicit 'variant:' keyword preserves the parent/child hierarchy and composes with future RFC-0018 Journey partition types."
       }
+    },
+    "targetedJourneys": {
+      "type": "array",
+      "description": "Journey references this work item targets per RFC-0018 §5.4 / §6.1. When non-empty, admission scoring routes Sα₂ + Cκ + Eρ₅ through journey-level design intent + success metrics. Two URI forms: soul-scoped '<soul-id>/<journey-id>' or variant-scoped '<soul-id>/<variant-id>/<journey-id>'. Empty or absent = soul/variant-aggregate scoring (backward-compatible with RFC-0009 + RFC-0017 baseline).",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$",
+        "description": "Path-style journey URI per RFC-0018 §6.1: '<soul-id>/<journey-id>' (soul-scoped) OR '<soul-id>/<variant-id>/<journey-id>' (variant-scoped). All segments are kebab-case. Examples: 'spry-engage/onboarding', 'spry-engage/annual-test/backflow-submit'."
+      }
     }
   },
   "additionalProperties": true

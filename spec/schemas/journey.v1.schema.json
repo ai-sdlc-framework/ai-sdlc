@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/journey.v1.schema.json",
+  "title": "AI-SDLC Journey v1",
+  "description": "Journey declaration schema per RFC-0018 In-Soul Journey Pattern. A journey is a temporally-ordered user flow within a Soul DID or Variant with named states, transitions, completion criteria, accessibility requirements, and success metrics. Journeys are scoring scopes — not a runtime workflow engine. Schema-enforced flat: journeys[] cannot contain nested journeys[] (OQ-3 resolution). Completion criteria closed enum: terminal-success-state | all-states-reached (OQ-4 resolution). Compliance floor must be 'inherit' when scope=variant (§5.3 bounded inheritance).",
+  "type": "object",
+  "required": ["id", "scope", "states", "transitions", "completionCriteria", "accessibility"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Journey identifier. Kebab-case, unique within parent scope (Soul DID or Variant). Used as the journey-id segment in targetedJourneys URI references.",
+      "minLength": 2,
+      "maxLength": 64
+    },
+    "scope": {
+      "type": "string",
+      "pattern": "^(soul|variant:[a-z][a-z0-9-]*)$",
+      "description": "Whether this journey applies to the whole Soul ('soul') or a specific Variant ('variant:<id>'). Variant-scoped journeys MUST carry complianceFloor: 'inherit'."
+    },
+    "states": {
+      "type": "array",
+      "description": "Named states for this journey. At least 2 states required; at least 1 MUST have terminal: true AND successState: true.",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "terminal"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "State identifier, kebab-case, unique within this journey. Referenced by substrate code and transition 'from'/'to' fields.",
+            "minLength": 2,
+            "maxLength": 64
+          },
+          "terminal": {
+            "type": "boolean",
+            "description": "Whether this state ends the journey flow. Terminal states MUST specify successState."
+          },
+          "successState": {
+            "type": "boolean",
+            "description": "Required when terminal=true. true = journey-success (the completion target); false = explicit failure-state (e.g. abandoned, error-timeout) — surfaces as an analytics signal."
+          }
+        }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "description": "State-to-state transitions. 'from' may be a single state id or an array (any-of). 'to' must be a single state id.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "trigger"],
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Single originating state id."
+              },
+              {
+                "type": "array",
+                "description": "Any-of originating state ids (shorthand for multiple transitions sharing the same trigger and target).",
+                "items": { "type": "string" },
+                "minItems": 1
+              }
+            ]
+          },
+          "to": {
+            "type": "string",
+            "description": "Destination state id."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Event or action that drives this transition (e.g. 'user-signup', 'session-timeout-30d')."
+          }
+        }
+      }
+    },
+    "completionCriteria": {
+      "type": "object",
+      "description": "How 'done' is defined for this journey. OQ-4 resolution: closed enum for v1 (terminal-success-state | all-states-reached). Future activation via Decision: journey-custom-predicate-activation-request (auto-promote at >=2 distinct adopter requests; future language: CEL).",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["terminal-success-state", "all-states-reached"],
+          "description": "Completion kind. 'terminal-success-state' = reaching a state where terminal=true AND successState=true constitutes completion. 'all-states-reached' = all declared states must be visited at least once."
+        },
+        "target": {
+          "type": "string",
+          "description": "Required when kind='terminal-success-state'. The state id of the success terminal state."
+        }
+      }
+    },
+    "accessibility": {
+      "type": "object",
+      "description": "WCAG level, version, and conformance target for this journey. May set a HIGHER wcagLevel than the parent Soul/Variant (RFC-0018 §5.3). MUST NOT lower below parent.",
+      "required": ["wcagLevel", "wcagVersion", "conformanceTarget"],
+      "additionalProperties": false,
+      "properties": {
+        "wcagLevel": {
+          "type": "string",
+          "enum": ["A", "AA", "AAA"],
+          "description": "Minimum WCAG conformance level. Journey may set higher than soul/variant default (e.g. AAA for regulatory-submission journey)."
+        },
+        "wcagVersion": {
+          "type": "string",
+          "enum": ["2.0", "2.1", "2.2", "3.0"],
+          "description": "WCAG specification version. Additive enum per OQ-7 resolution: existing journeys keep their declared version; new journeys can pick the latest. Declaration of 2.0 emits Decision: wcag-version-superseded (advisory, no scoring impact)."
+        },
+        "conformanceTarget": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Percentage of WCAG criteria that must pass for this journey. Assumes binary conformance model (WCAG 2.x). WCAG 3.0 may require a scoringModel discriminant in a future RFC (OQ-7 forward-compat note)."
+        },
+        "auditCadence": {
+          "type": "string",
+          "enum": ["quarterly", "annually", "release-gated", "continuous"],
+          "description": "Required audit frequency. Overdue audits trigger graduated Eρ₅ degradation per OQ-6 resolution: 0-30d warn → 30-60d -25% → 60-90d -50% → 90d+ effective-block. Per-Soul config (accessibility.auditOverdueGracePolicy) can select stricter modes (binary-30d, hard-block) for SOC2/HIPAA shops."
+        }
+      }
+    },
+    "successMetrics": {
+      "type": "array",
+      "description": "Quantified success signals at journey scope. Feeds Sα₂ + Cκ scoring — Cκ boosts work that addresses this journey when completion-rate is below alertBelow threshold.",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Metric identifier (e.g. 'completion-rate', 'median-time-to-first-task-done')."
+          },
+          "target": {
+            "type": "number",
+            "description": "Target metric value (e.g. 0.65 for 65% completion rate)."
+          },
+          "alertBelow": {
+            "type": "number",
+            "description": "When the metric falls below this value, Cκ scoring is boosted for work targeting this journey."
+          },
+          "alertAbove": {
+            "type": "number",
+            "description": "When the metric rises above this value (for time-based metrics), Cκ scoring is boosted."
+          },
+          "targetSeconds": {
+            "type": "number",
+            "minimum": 0,
+            "description": "For time-based metrics: target duration in seconds."
+          }
+        }
+      }
+    },
+    "designImperatives": {
+      "type": "array",
+      "description": "Journey-scoped Sα₂ inputs layered on soul + variant level per most-specific-wins (journey > variant > soul). Feeds Vibe Coherence scoring at journey scope.",
+      "items": { "type": "string" }
+    },
+    "complianceFloor": {
+      "type": "string",
+      "const": "inherit",
+      "description": "Required when scope=variant. MUST be 'inherit' — journeys cannot diverge from parent compliance regime (RFC-0018 §5.3 bounded inheritance). Schema validation rejects any other value."
+    }
+  }
+}
