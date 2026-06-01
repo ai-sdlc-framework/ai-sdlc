@@ -477,7 +477,7 @@ export const agentRoleSchema = {
 
 export const attestationEnvelopeV6Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://ai-sdlc.dev/schemas/attestation-envelope-v6.schema.json',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/attestation-envelope-v6.schema.json',
   title: 'AttestationEnvelopeV6',
   description:
     'RFC-0042 §Design Layer 4 — per-PR proof bundle. Carries per-reviewer transcript hashes, per-leaf Merkle inclusion proofs, the operator-signed root, and the PR-bound nonce. Replaces v5 envelopes (contentHashV3/V4/V5) during RFC-0042 Phase 2.',
@@ -1066,7 +1066,7 @@ export const backlogTaskV1Schema = {
 
 export const captureRecordV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://ai-sdlc.dev/schemas/capture-record.v1.schema.json',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/capture-record.v1.schema.json',
   title: 'CaptureRecord',
   description:
     'RFC-0024 emergent issue capture record. Immutable once written; auditTrail accumulates state transitions.',
@@ -1752,7 +1752,7 @@ export const databaseBranchPoolSchema = {
 
 export const decisionV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://ai-sdlc.dev/schemas/decision.v1.schema.json',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/decision.v1.schema.json',
   title: 'Decision',
   description:
     'RFC-0035 Decision resource. Decisions are projections of an append-only event log at .ai-sdlc/_decisions/events.jsonl (OQ-1). This schema describes the projected (materialized) view; events that compose into it are described by DecisionEvent.',
@@ -4208,7 +4208,7 @@ export const dorConfigV1Schema = {
 
 export const embeddingAdapterV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://ai-sdlc.dev/schemas/embedding-adapter.v1.schema.json',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/embedding-adapter.v1.schema.json',
   title: 'EmbeddingAdapter',
   description:
     'JSON Schema for the EmbeddingAdapter interface per RFC-0019 §5 and §6.2. Used by adopter adapters that want machine-checkable conformance with the embedding provider adapter framework.',
@@ -7490,7 +7490,7 @@ export const signalIngestionConfigV1Schema = {
 
 export const signalSourceAdapterV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://ai-sdlc.dev/schemas/signal-source-adapter.v1.schema.json',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/signal-source-adapter.v1.schema.json',
   title: 'Signal Source Adapter v1',
   type: 'object',
   additionalProperties: false,
@@ -7927,7 +7927,7 @@ export const variantConfigSchema = {
 
 export const vectorStoreEntryV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://ai-sdlc.dev/schemas/vector-store-entry.v1.schema.json',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/vector-store-entry.v1.schema.json',
   title: 'VectorStoreEntry',
   description:
     'JSON Schema for the VectorStoreEntry shape per RFC-0019 §8.1. Defines the format of each line in the JSONL embedding storage backend files at <artifactsDir>/_embeddings/<provider>-<modelVersion>.jsonl.',
