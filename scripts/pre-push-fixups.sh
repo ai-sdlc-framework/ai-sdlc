@@ -105,6 +105,7 @@ run_sub_hook() {
     # Avoid double-prefixing: sub-hook already prefixes with [hook-name] internally.
     echo "$LINE" >&2
   done < "$TMPOUT"
+  [ -n "$TMPOUT" ] || { echo "[pre-push-fixups] refusing rm: TMPOUT empty" >&2; return 1; }
   rm -f "$TMPOUT"
 
   return "$EXIT_CODE"

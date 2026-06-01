@@ -219,6 +219,37 @@ versions) so you can spot drift between a global install and a
 co-located plugin checkout. If the lines disagree, the CLI emits a
 `WARN  versions out of sync` line pointing at the upgrade command.
 
+## Shell Script Safety — Guarding `rm` with Variable Paths
+
+When writing shell scripts (`.sh` files or shell blocks embedded in command `.md` files), any
+`rm -rf` or `rm -f` that uses a variable in the path **MUST** be preceded by a non-empty guard
+on the same variable immediately before the `rm` line. The variable being empty would cause the
+path to expand to a root-relative location (e.g. `rm -rf "/$x"`) and silently delete unintended
+directories. Claude Code's built-in safety prompt also blocks unguarded variable `rm` operations
+in unattended mode, stalling autonomous runs.
+
+**Required pattern:**
+
+```bash
+# Guard immediately before the rm (within 5 lines, same shell block):
+[ -n "$MY_VAR" ] || { echo "refusing rm: MY_VAR empty" >&2; exit 1; }
+rm -rf "$MY_VAR/$subdirectory"
+```
+
+**Rules:**
+
+1. The guard **MUST** appear within 5 lines above the `rm` invocation in the same shell block.
+2. Where the target is a worktree under `.worktrees/`, **prefer `git worktree remove --force`**
+   over raw `rm -rf` — it cleanly unregisters the worktree from git's list and removes its
+   directory atomically. Use guarded `rm -rf` only for non-worktree temp dirs (e.g. mktemp
+   outputs).
+3. Fixed literal paths (no variable expansion) do not need a guard — e.g.
+   `rm -f .worktrees/.active-task` is safe because it cannot expand to a root-relative path.
+
+**Regression gate:** `scripts/check-rm-guard.test.mjs` (run via `node --test scripts/check-rm-guard.test.mjs`)
+scans `ai-sdlc-plugin/` and `scripts/` for unguarded variable `rm` patterns. Adding a new
+`rm -rf "$VAR/..."` without a guard within 5 lines will fail the test and block the PR.
+
 ## Commit Messages
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) enforced by [commitlint](https://commitlint.js.org/). Every commit message must follow this format:

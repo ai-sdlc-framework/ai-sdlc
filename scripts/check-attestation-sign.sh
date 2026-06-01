@@ -273,6 +273,7 @@ if [ -n "$HEAD_PARENT_SHA" ]; then
     # Only remove if it's neither the current HEAD SHA nor the parent SHA.
     if [ "$ENVELOPE_SHA" != "$HEAD_SHA" ] && [ "$ENVELOPE_SHA" != "$HEAD_PARENT_SHA" ]; then
       STALE_ABS="$WT_ROOT/$ENVELOPE_PATH"
+      [ -n "$STALE_ABS" ] || { echo "[attestation-sign] refusing rm: STALE_ABS empty" >&2; continue; }
       if [ -f "$STALE_ABS" ]; then
         rm -f "$STALE_ABS"
         echo "[attestation-sign] removed stale envelope (rebase cycle): $ENVELOPE_PATH" >&2

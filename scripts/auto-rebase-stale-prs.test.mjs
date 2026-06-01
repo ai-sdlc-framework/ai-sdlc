@@ -172,6 +172,7 @@ case "$1" in
     if [ "$2" = "remove" ]; then
       # "git worktree remove --force <tmpDir>"
       TMPDIR_ARG="$4"
+      [ -n "$TMPDIR_ARG" ] || { echo "mock-git: refusing rm: TMPDIR_ARG empty" >&2; exit 1; }
       rm -rf "$TMPDIR_ARG" 2>/dev/null || true
       exit 0
     fi

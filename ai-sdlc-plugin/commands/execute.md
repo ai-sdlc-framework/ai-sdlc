@@ -431,6 +431,7 @@ if [ "$ARG_FORM" = "gh-issue" ]; then
   # so parallel `/ai-sdlc execute` dispatches don't collide). We clean it up
   # right before `exit $?` — `trap` ensures cleanup on signal interruption too.
   SPEC_TMPFILE="${TMPDIR:-/tmp}/aisdlc-393-spec-${GH_ISSUE_NUMBER}-$$.json"
+  [ -n "$SPEC_TMPFILE" ] || { echo "ERROR: SPEC_TMPFILE is empty — refusing rm" >&2; exit 1; }
   # shellcheck disable=SC2064  # we want the variable interpolated NOW, not on EXIT.
   trap "rm -f \"$SPEC_TMPFILE\"" EXIT INT TERM
 
@@ -512,6 +513,7 @@ if [ "$ARG_FORM" = "gh-issue" ]; then
   " "$SPEC_TMPFILE"
 
   DISPATCH_EXIT=$?
+  [ -n "$SPEC_TMPFILE" ] || { echo "ERROR: SPEC_TMPFILE is empty — refusing rm" >&2; exit 1; }
   rm -f "$SPEC_TMPFILE"
   trap - EXIT INT TERM
   exit $DISPATCH_EXIT
@@ -1560,6 +1562,7 @@ If `gh pr ready` fails (network, the PR was already marked ready, etc.), do NOT 
 Always remove the per-worktree active-task sentinel — without this a future invocation reading the worktree could see a stale active task:
 
 ```bash
+[ -n "$WORKTREE_PATH" ] || { echo "ERROR: WORKTREE_PATH is empty — refusing rm of .active-task" >&2; exit 1; }
 rm -f "$WORKTREE_PATH/.active-task"
 ```
 

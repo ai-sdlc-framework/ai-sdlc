@@ -160,6 +160,7 @@ done < <(find "$ROOT" -path "*/coverage/coverage-summary.json" \
   -not -path "*/.next/*" \
   -not -path "*/dist/*")
 
+[ -n "$AFFECTED_PATHS_FILE" ] || { echo "[coverage-gate] refusing rm: AFFECTED_PATHS_FILE empty" >&2; exit 1; }
 rm -f "$AFFECTED_PATHS_FILE"
 
 if [ "$FAILED" = "1" ]; then

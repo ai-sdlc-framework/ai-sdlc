@@ -316,6 +316,8 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-verdict \
   --worker-id "in-session-agent-${TASK_ID}"
 
 # Sentinel consumed — remove so Phase A doesn't re-process next tick.
+[ -n "$BOARD_DIR" ] || { echo "ERROR: BOARD_DIR is empty — refusing rm of pending sentinel" >&2; exit 1; }
+[ -n "$TASK_ID" ] || { echo "ERROR: TASK_ID is empty — refusing rm of pending sentinel" >&2; exit 1; }
 rm -f "$BOARD_DIR/bg-agent-pending/${TASK_ID}.pending.json"
 ```
 
