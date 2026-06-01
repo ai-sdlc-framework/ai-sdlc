@@ -73,6 +73,15 @@ function getAjv(): AjvInstance {
 
     // Load common schema from inline generated module
     ajvInstance.addSchema(commonSchema);
+
+    // Register all other schemas so cross-schema $ref resolution works
+    // (e.g. design-intent-document references journey.v1.schema.json).
+    // Skip common.schema.json — already added above.
+    for (const [filename, schema] of Object.entries(SCHEMAS)) {
+      if (filename !== 'common.schema.json') {
+        ajvInstance.addSchema(schema);
+      }
+    }
   }
   return ajvInstance;
 }

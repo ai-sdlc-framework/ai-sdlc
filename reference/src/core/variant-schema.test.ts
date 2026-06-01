@@ -17,7 +17,6 @@ import {
   SCHEMAS,
   designIntentDocumentSchema,
   workItemSchema,
-  commonSchema,
 } from './generated-schemas.js';
 import { validate } from './validation.js';
 
@@ -30,7 +29,11 @@ const _addFormats = addFormats as unknown as typeof addFormats.default;
 function makeAjv() {
   const ajv = new _Ajv2020({ allErrors: true, strict: false });
   _addFormats(ajv);
-  ajv.addSchema(commonSchema);
+  // Register all schemas so cross-schema $ref resolution works
+  // (e.g. design-intent-document references journey.v1.schema.json).
+  for (const schema of Object.values(SCHEMAS)) {
+    ajv.addSchema(schema);
+  }
   return ajv;
 }
 
