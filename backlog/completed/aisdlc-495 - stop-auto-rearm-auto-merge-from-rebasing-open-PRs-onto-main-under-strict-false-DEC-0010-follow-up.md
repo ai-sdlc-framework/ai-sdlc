@@ -15,7 +15,7 @@ labels:
   - operator-owned
 dependencies: []
 references:
-  - spec/rfcs/RFC-0042-attestation-merkle-transcript.md
+  - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - .github/workflows/auto-rebase-open-prs.yml
   - .github/workflows/auto-rebase-on-queue-kick.yml
   - .github/workflows/auto-rearm-on-dequeue.yml
