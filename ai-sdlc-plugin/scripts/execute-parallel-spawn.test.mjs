@@ -1,5 +1,5 @@
 /**
- * Hermetic tests for execute-parallel spawn logic (AISDLC-462).
+ * Hermetic tests for execute-parallel spawn logic (AISDLC-462, AISDLC-485).
  *
  * Tests the Node.js logic extracted from the execute-parallel slash command
  * body for:
@@ -7,6 +7,8 @@
  *   2. Mutual-awareness skip (already-active session → skip)
  *   3. Session file creation on spawn
  *   4. Session status update to 'failed' on tmux error
+ *   5. (AISDLC-485) Spawn command template includes --dangerously-skip-permissions
+ *      when opt-in path is active (SKIP_PERMISSIONS=true), and omits it otherwise.
  *
  * Since the slash command body is a markdown file with embedded bash, we
  * test the Node.js inline script fragments by extracting and running them
@@ -32,6 +34,9 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Path to the execute-parallel markdown command body.
+const EXECUTE_PARALLEL_MD = path.join(__dirname, '..', 'commands', 'execute-parallel.md');
 
 // ─── Helper: create a temp sessions directory ─────────────────────────────
 
@@ -416,5 +421,74 @@ describe('execute-parallel spawn logic', () => {
       assert.equal(s.taskId, 'AISDLC-701');
       assert.equal(s.tmuxWindow, 'exec-aisdlc-701');
     });
+  });
+});
+
+// ─── AISDLC-485: spawn command includes permission flag when opt-in is active ─
+
+/**
+ * Extract the CLAUDE_SPAWN_CMD construction block from the execute-parallel.md
+ * command body. This tests the actual shell template that ships, not a copy of it,
+ * so the test cannot drift from the real spawn command.
+ *
+ * The extraction targets the `if [ "$SKIP_PERMISSIONS" = "true" ]; then` block
+ * that was introduced by AISDLC-485 / DEC-0009. We look for the two CLAUDE_SPAWN_CMD
+ * assignments and assert both their contents.
+ */
+function extractSpawnCmdBlock() {
+  const md = readFileSync(EXECUTE_PARALLEL_MD, 'utf8');
+  // Assert the opt-in branch includes the permission-skip flag
+  const optInLine = 'CLAUDE_SPAWN_CMD="claude --dangerously-skip-permissions /ai-sdlc execute $TASK_ID"';
+  // Assert the non-opt-in branch is the bare command (no flag)
+  const optOutLine = 'CLAUDE_SPAWN_CMD="claude /ai-sdlc execute $TASK_ID"';
+  return { md, optInLine, optOutLine };
+}
+
+describe('execute-parallel spawn command template (AISDLC-485 / DEC-0009)', () => {
+  it('spawn template includes --dangerously-skip-permissions on the SKIP_PERMISSIONS=true branch', () => {
+    const { md, optInLine } = extractSpawnCmdBlock();
+    assert.ok(
+      md.includes(optInLine),
+      `execute-parallel.md must contain the opt-in spawn line:\n  ${optInLine}\n` +
+        'This line must be present so that spawned sessions skip permission prompts ' +
+        'when the operator explicitly acknowledges DEC-0009 at the confirmation step.',
+    );
+  });
+
+  it('spawn template does NOT include the flag on the SKIP_PERMISSIONS=false (non-opt-in) branch', () => {
+    const { md, optOutLine } = extractSpawnCmdBlock();
+    assert.ok(
+      md.includes(optOutLine),
+      `execute-parallel.md must contain the non-opt-in spawn line:\n  ${optOutLine}\n` +
+        'The non-opt-in branch must use plain claude without the permission flag ' +
+        'so interactive/manual mode sessions behave normally.',
+    );
+  });
+
+  it('the permission flag is gated behind SKIP_PERMISSIONS check — never silently defaulted', () => {
+    const { md } = extractSpawnCmdBlock();
+    // The confirmation step must set SKIP_PERMISSIONS default to "false" to prevent
+    // silent opt-in. Assert that the default assignment is present in the md body.
+    const defaultLine = 'SKIP_PERMISSIONS="${SKIP_PERMISSIONS:-false}"';
+    assert.ok(
+      md.includes(defaultLine),
+      `execute-parallel.md must default SKIP_PERMISSIONS to false:\n  ${defaultLine}\n` +
+        'This ensures the permission flag is never silently applied — the operator ' +
+        'must explicitly reply "yes" at the confirmation step (AC#2, DEC-0009).',
+    );
+  });
+
+  it('the confirmation step prose surfaces the security trade-off to the operator', () => {
+    const { md } = extractSpawnCmdBlock();
+    // The AskUserQuestion block must mention the security trade-off so the operator
+    // makes an informed decision. Check for key phrases from AC#2.
+    assert.ok(
+      md.includes('--dangerously-skip-permissions') && md.includes('DEC-0009'),
+      'execute-parallel.md confirmation step must mention the permission flag and DEC-0009 decision reference',
+    );
+    assert.ok(
+      md.includes('Security trade-off') || md.includes('security trade-off') || md.includes('Security'),
+      'execute-parallel.md confirmation step must surface the security trade-off to the operator',
+    );
   });
 });

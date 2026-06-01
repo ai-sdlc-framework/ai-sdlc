@@ -10,6 +10,7 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 
 - [Overview](#overview)
 - [Prerequisites](#prerequisites)
+- [Permission model for spawned sessions](#permission-model-for-spawned-sessions)
 - [Activation](#activation)
 - [Monitoring](#monitoring)
 - [Cleanup](#cleanup)
@@ -54,6 +55,82 @@ Check with:
 ```bash
 which tmux && which claude && ls ~/.ai-sdlc/signing-key.pem
 ```
+
+---
+
+## Permission model for spawned sessions
+
+**AISDLC-485 / DEC-0009** — This section documents the permission posture for
+sessions spawned by `/ai-sdlc execute-parallel`.
+
+### Why permission handling matters
+
+Each spawned tmux pane runs `claude /ai-sdlc execute <task-id>` in a **detached,
+unattended** context. The default Claude Code interactive mode prompts the operator
+for approval on every Edit/Write/Bash tool call:
+
+```
+Do you want to make this edit to <file>?
+  1. Yes
+  2. Yes, allow all
+  3. No
+```
+
+In an unmanned tmux pane this prompt **blocks forever** — the heartbeat file stalls,
+no PR is opened, and the entire session hangs until the operator manually attaches
+and types an approval. This makes parallel dispatch unusable for autonomous drains.
+
+### The `--dangerously-skip-permissions` flag (opt-in)
+
+The fix is to pass `--dangerously-skip-permissions` to the spawned `claude` invocation.
+This flag tells the Claude CLI to skip per-tool interactive approvals so the session
+can complete end-to-end without operator intervention.
+
+**This flag is OPT-IN.** It is never silently applied. At the confirmation step
+(`/ai-sdlc execute-parallel`), the operator receives an explicit prompt:
+
+> **Permission model for spawned sessions (required acknowledgement):**
+> ...
+> Reply **yes** to confirm spawning WITH `--dangerously-skip-permissions` (recommended)
+> Reply **yes-no-skip** to spawn WITHOUT the flag (sessions may block)
+
+The operator must explicitly reply **yes** to enable the flag. The default (`yes-no-skip`)
+leaves the flag off.
+
+### Security trade-off
+
+| Aspect | With `--dangerously-skip-permissions` | Without |
+|--------|--------------------------------------|---------|
+| Tool prompts (Edit/Write/Bash) | Skipped — sessions complete autonomously | Shown — sessions block in unmanned panes |
+| AskUserQuestion (non-tool) | Routed to Decision Catalog (AISDLC-480) | Shown in tmux pane |
+| Appropriate for | Autonomous drain with trusted backlog tasks in isolated worktrees | Operator-attached interactive sessions |
+| Risk | Spawned claude can edit files within the repo without per-edit approval | Sessions hang on first tool call |
+
+### When to use each mode
+
+**Use `--dangerously-skip-permissions` (reply "yes")** when:
+- Running an overnight or unattended parallel drain
+- Tasks are standard backlog items executed by the AI-SDLC developer subagent
+- Each task runs in its own isolated worktree (Pattern C isolation is active)
+- You trust the task implementations that will be dispatched
+
+**Use interactive mode (reply "yes-no-skip")** when:
+- You plan to stay attached to the tmux session and monitor each pane
+- Tasks involve sensitive operations you want to approve individually
+- You're debugging a specific task implementation
+
+### Composition with AISDLC-480
+
+When AISDLC-480 ships, genuine `AskUserQuestion` calls (non-tool decisions, e.g.
+"which approach should I take for this ambiguous requirement?") inside a spawned
+session are routed to the Decision Catalog rather than blocking in the unmanned
+pane. Until AISDLC-480 is implemented, non-tool decisions will surface in the
+tmux pane — the operator must attach to the pane to answer, or the session will
+eventually time out per its own watchdog.
+
+`--dangerously-skip-permissions` only suppresses **tool-level** permission prompts
+(Edit/Write/Bash). It does NOT suppress `AskUserQuestion` calls — those are a
+different escalation mechanism.
 
 ---
 
@@ -188,6 +265,30 @@ mv .ai-sdlc/dispatch/sessions/aisdlc-462.session.json \
 ---
 
 ## Troubleshooting
+
+### Sessions hang immediately — heartbeat stalls after start
+
+**Symptom:** A session shows `starting` for more than 2 minutes, then transitions to
+`in-progress` for a few seconds, then heartbeats stop. Attaching to the pane reveals
+an interactive prompt like:
+
+```
+Do you want to make this edit to <file>?
+  1. Yes
+  2. Yes, allow all
+  3. No
+```
+
+**Cause:** You spawned sessions WITHOUT `--dangerously-skip-permissions` (replied
+`yes-no-skip` or ran the command before AISDLC-485). Detached pane sessions cannot
+answer interactive tool-permission prompts.
+
+**Fix:** Run `/ai-sdlc execute-parallel-cleanup` to kill the stuck sessions, then
+re-run `/ai-sdlc execute-parallel` and reply **yes** at the confirmation step to
+enable `--dangerously-skip-permissions`. See the
+[permission model section](#permission-model-for-spawned-sessions) for details.
+
+---
 
 ### "Resource gate refused — available memory < 4GB"
 

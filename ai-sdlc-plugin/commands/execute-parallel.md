@@ -226,6 +226,12 @@ done
 
 Present the candidate list and ask for confirmation before spawning. This is a required human-in-the-loop gate — do NOT skip it.
 
+**IMPORTANT — permission model (DEC-0009, AISDLC-485):** Spawned `claude` sessions run
+in detached, unattended tmux panes. Without the `--dangerously-skip-permissions` flag,
+every Edit/Write/Bash tool call in the pane blocks forever waiting for an interactive
+approval that can never come. Passing the flag is opt-in and requires explicit operator
+acknowledgement here — it is NEVER silently defaulted.
+
 Ask the operator:
 
 > I found $CANDIDATE_COUNT task(s) ready for parallel dispatch:
@@ -234,12 +240,27 @@ Ask the operator:
 >
 > I will spawn $CANDIDATE_COUNT tmux window(s) in the 'ai-sdlc-parallel' tmux session, each running `/ai-sdlc execute <task-id>`.
 >
+> **Permission model for spawned sessions (required acknowledgement):**
+> Spawned sessions run in detached, unattended tmux panes. Without `--dangerously-skip-permissions`,
+> every Edit/Write/Bash tool call blocks forever on an interactive prompt — making
+> parallel dispatch unusable. I can pass `--dangerously-skip-permissions` to each spawned
+> `claude` invocation so sessions complete autonomously.
+>
+> **Security trade-off:** with this flag, spawned sessions skip per-tool permission
+> prompts for routine file edits and shell commands within the repo. Genuine
+> AskUserQuestion (non-tool decisions) still surface to the Decision Catalog (AISDLC-480).
+> This flag should only be used when you trust the task implementations running in the
+> panes (e.g. AI-SDLC developer subagent executing backlog tasks in an isolated worktree).
+>
 > **Before I proceed:**
-> - Confirm you want to spawn these sessions (yes/no)
+> - Reply **yes** to confirm spawning WITH `--dangerously-skip-permissions` (recommended for autonomous parallel dispatch)
+> - Reply **yes-no-skip** to spawn WITHOUT the flag (sessions may block on permission prompts; only use if attaching to panes manually)
 > - Or provide alternative task IDs (comma-separated, max 5)
 > - Or type "cancel" to abort
 
 If the operator says "no" or "cancel" → exit 0.
+If the operator says "yes-no-skip" → proceed WITHOUT `--dangerously-skip-permissions` (SKIP_PERMISSIONS=false).
+If the operator says "yes" → proceed WITH `--dangerously-skip-permissions` (SKIP_PERMISSIONS=true).
 If the operator provides alternative task IDs → validate each against the strict regex
 (`^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$`) before use; refuse with a clear error if any
 alternative fails validation.
@@ -248,6 +269,10 @@ Otherwise proceed with the confirmed list.
 ```bash
 # (AskUserQuestion is handled by the slash command harness above this code block)
 # After confirmation, CONFIRMED_TASKS holds the final list (one per line).
+# SKIP_PERMISSIONS is set to "true" when operator replied "yes" (opt-in acknowledged),
+# or "false" when operator replied "yes-no-skip" (manual/interactive mode).
+# NEVER default SKIP_PERMISSIONS to true without explicit operator acknowledgement.
+#
 # If the operator supplied alternative IDs, validate them before use:
 # OPERATOR_ALTERNATIVES="<comma-separated IDs from operator reply>"
 # if [ -n "$OPERATOR_ALTERNATIVES" ]; then
@@ -262,6 +287,15 @@ Otherwise proceed with the confirmed list.
 #   done <<< "$(printf '%s' "$OPERATOR_ALTERNATIVES" | tr ',' '\n')"
 # fi
 CONFIRMED_TASKS="$CANDIDATES"
+# Set based on operator reply above: "true" = skip permissions (recommended),
+# "false" = interactive mode (sessions may block). Default is "false" to ensure
+# the flag is never silently applied.
+SKIP_PERMISSIONS="${SKIP_PERMISSIONS:-false}"
+if [ "$SKIP_PERMISSIONS" = "true" ]; then
+  echo "[execute-parallel] Permission model: --dangerously-skip-permissions ENABLED (operator acknowledged DEC-0009)" >&2
+else
+  echo "[execute-parallel] Permission model: interactive mode — sessions may block on permission prompts" >&2
+fi
 ```
 
 ## Step 6 — Ensure tmux session exists (idempotent)
@@ -357,10 +391,28 @@ while IFS= read -r TASK_ID; do
   # SECURITY: TASK_ID is validated above — safe to interpolate.
   # The window runs in the current working directory so /ai-sdlc execute can
   # find the repo root.
+  #
+  # AISDLC-485 / DEC-0009: --dangerously-skip-permissions is added ONLY when
+  # SKIP_PERMISSIONS=true (operator explicitly acknowledged at Step 5 above).
+  # Without this flag, detached pane sessions block forever on tool-permission
+  # prompts (Edit/Write/Bash) that cannot be answered unattended.
+  #
+  # Composition with AISDLC-480: genuine AskUserQuestion (non-tool decisions)
+  # raised inside a spawned session route to the Decision Catalog rather than
+  # hanging, even when --dangerously-skip-permissions is active. See AISDLC-480
+  # for the routing implementation; if AISDLC-480 is not yet shipped, the
+  # spawned session will still surface non-tool decisions via the session's
+  # tmux pane — operator can attach to answer, or the session times out per
+  # its own watchdog.
+  if [ "$SKIP_PERMISSIONS" = "true" ]; then
+    CLAUDE_SPAWN_CMD="claude --dangerously-skip-permissions /ai-sdlc execute $TASK_ID"
+  else
+    CLAUDE_SPAWN_CMD="claude /ai-sdlc execute $TASK_ID"
+  fi
   tmux new-window \
     -t "$TMUX_SESSION" \
     -n "$TMUX_WINDOW" \
-    "claude /ai-sdlc execute $TASK_ID; read -rp 'Session for $TASK_ID complete. Press Enter to close.' _" \
+    "$CLAUDE_SPAWN_CMD; read -rp 'Session for $TASK_ID complete. Press Enter to close.' _" \
     2>/dev/null || {
     echo "[execute-parallel] ERROR: tmux new-window failed for $TASK_ID" >&2
     # Update session to failed
