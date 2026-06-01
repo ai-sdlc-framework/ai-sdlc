@@ -326,6 +326,57 @@ First, classify `$ARGUMENTS` into one of the three forms documented in [Argument
 # backward-compatible with standalone /ai-sdlc execute invocations.
 source "$PLUGIN_SCRIPTS_DIR/lib/update-session-state.sh"
 
+# AISDLC-481: Cancel back-channel helper. Reads the cancel control signal from
+# .ai-sdlc/dispatch/sessions/<task>.cancel.json. When a signal exists, marks
+# the session as cancelled (updating the session file), removes the signal file,
+# writes a board diagnostic, and exits 1 so the pipeline aborts cleanly.
+# No-op when no signal exists — backward-compatible with sessions that don't
+# use the execute-parallel substrate. V1 scope: cancel-only; pause/resume deferred.
+check_cancel_signal() {
+  local task_id_lower="$1"
+  local cancel_file=".ai-sdlc/dispatch/sessions/${task_id_lower}.cancel.json"
+  [ -f "$cancel_file" ] || return 0
+  echo "[ai-sdlc-progress] cancel: detected cancel signal at step boundary — aborting cleanly" >&2
+  node -e "
+    const fs = require('fs');
+    const boardDir = '.ai-sdlc/dispatch';
+    const taskId = process.argv[1].replace(/-/g, function(m, o) { return o === 0 ? m : m; });
+    // Reconstruct the original-case taskId from the session file if possible.
+    const sessionFile = boardDir + '/sessions/' + process.argv[1] + '.session.json';
+    let realTaskId = process.argv[2] || process.argv[1].toUpperCase();
+    try { realTaskId = JSON.parse(fs.readFileSync(sessionFile, 'utf8')).taskId || realTaskId; } catch {}
+    const cancelFile = boardDir + '/sessions/' + process.argv[1] + '.cancel.json';
+    let reason = 'operator-cancel';
+    let decisionId;
+    try {
+      const sig = JSON.parse(fs.readFileSync(cancelFile, 'utf8'));
+      reason = sig.reason || reason;
+      decisionId = sig.decisionId;
+    } catch {}
+    // Remove signal first (idempotent on restart).
+    try { fs.rmSync(cancelFile); } catch {}
+    // Mark session cancelled.
+    try {
+      const s = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+      s.status = 'cancelled';
+      s.lastHeartbeat = new Date().toISOString();
+      const tmp = sessionFile + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
+      fs.renameSync(tmp, sessionFile);
+    } catch {}
+    // Write board diagnostic.
+    const failedDir = boardDir + '/failed';
+    try { fs.mkdirSync(failedDir, { recursive: true }); } catch {}
+    const notes = ['session cancelled at step boundary', reason ? 'reason: ' + reason : null, decisionId ? 'decision-id: ' + decisionId : null].filter(Boolean).join('; ');
+    const diag = { schemaVersion: 'v1', taskId: realTaskId, outcome: 'failed', completedAt: new Date().toISOString(), workerId: 'session-cancel-handler', cause: 'operator-cancel', notes };
+    const diagPath = failedDir + '/' + realTaskId + '.diagnostic.json';
+    const tmp2 = diagPath + '.tmp';
+    try { fs.writeFileSync(tmp2, JSON.stringify(diag, null, 2)); fs.renameSync(tmp2, diagPath); } catch {}
+  " "$task_id_lower" "$TASK_ID" 2>/dev/null || true
+  echo "[ai-sdlc-progress] cancel: session marked cancelled; pipeline aborted (AISDLC-481 v1 cancel-only)" >&2
+  exit 1
+}
+
 ARG="$ARGUMENTS"
 # Trim surrounding whitespace (matches parseExecuteArg behaviour).
 ARG="$(printf '%s' "$ARG" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
@@ -365,6 +416,8 @@ fi
 
 echo "[ai-sdlc-progress] Step 1: detected ARG_FORM=$ARG_FORM ($ARG)"
 update_session_state "$TASK_ID_LOWER" "01-validated" 2>/dev/null || true
+# AISDLC-481: Check cancel at step boundary (post-validate).
+check_cancel_signal "$TASK_ID_LOWER" 2>/dev/null || true
 ```
 
 ### Step 1.a — GH-issue path branch (AISDLC-393 AC-2, AC-3, AC-4, AC-5)
@@ -714,6 +767,8 @@ When invoking the Agent tool for the developer agent:
 Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them to the user as they appear.
 
 ```bash
+# AISDLC-481: Check cancel before developer invocation (step boundary).
+check_cancel_signal "$TASK_ID_LOWER" 2>/dev/null || true
 # AISDLC-462: Heartbeat before developer invocation.
 update_session_state "$TASK_ID_LOWER" "05-dev-running" 2>/dev/null || true
 ```
@@ -723,6 +778,8 @@ update_session_state "$TASK_ID_LOWER" "05-dev-running" 2>/dev/null || true
 ```bash
 # AISDLC-462: Heartbeat after developer completes.
 update_session_state "$TASK_ID_LOWER" "06-dev-done" 2>/dev/null || true
+# AISDLC-481: Check cancel after developer returns (step boundary).
+check_cancel_signal "$TASK_ID_LOWER" 2>/dev/null || true
 ```
 
 The developer returns a JSON object. Parse it and check:
@@ -1040,6 +1097,8 @@ done
 
 echo "[ai-sdlc-progress] Step 7c: transcript leaf emission complete (leaves at $WORKTREE_PATH/.ai-sdlc/transcript-leaves.jsonl)"
 update_session_state "$TASK_ID_LOWER" "07c-leaves-emitted" 2>/dev/null || true
+# AISDLC-481: Check cancel after reviews complete (step boundary).
+check_cancel_signal "$TASK_ID_LOWER" 2>/dev/null || true
 ```
 
 > **Concurrency note (AISDLC-383.8).** Leaves are emitted sequentially (one per reviewer in the `for` loop) after all reviewer Agent calls complete. This is the safest ordering: leafIndex is determined by the number of lines in `transcript-leaves.jsonl` at emission time, and sequential writes ensure no TOCTOU race. Parallel emission (emitting all three simultaneously via background jobs) would require an advisory lock on the JSONL file — tracked as a follow-up if throughput becomes a bottleneck.

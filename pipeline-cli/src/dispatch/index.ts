@@ -120,12 +120,15 @@ export type {
 // AISDLC-462: Dispatch Session helpers for execute-parallel coordination.
 export {
   archiveSession,
+  cancelFilePath,
   countActiveSessions,
   ensureSessionsDirs,
   isSessionActive,
   listActiveSessions,
   listSessions,
+  readCancelSignal,
   readSession,
+  removeCancelSignal,
   SESSIONS_ARCHIVE_SUBDIR,
   SESSIONS_SUBDIR,
   sessionsArchiveDir,
@@ -133,7 +136,17 @@ export {
   sessionFilename,
   sessionFilePath,
   updateSession,
+  writeCancelSignal,
   writeSession,
 } from './sessions.js';
 
-export type { DispatchSession, SessionStatus } from './sessions.js';
+export type { CancelSignal, DispatchSession, SessionStatus } from './sessions.js';
+
+// AISDLC-481: Session heartbeat reaper + cancel back-channel.
+export {
+  DEFAULT_SESSION_STALE_MS,
+  honorCancelIfRequested,
+  reapStaleSessions,
+} from './session-reaper.js';
+
+export type { ReapedSession, ReaperOptions, SessionReaperResult } from './session-reaper.js';

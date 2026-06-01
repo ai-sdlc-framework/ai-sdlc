@@ -43,7 +43,88 @@ export function sessionsArchiveDir(boardDir: string): string {
 }
 
 /** Session status values (mirrors schema enum). */
-export type SessionStatus = 'starting' | 'in-progress' | 'done' | 'failed';
+export type SessionStatus = 'starting' | 'in-progress' | 'done' | 'failed' | 'cancelled';
+
+/** Filename suffix for cancel control signal files (AISDLC-481). */
+const CANCEL_SUFFIX = '.cancel.json';
+
+/**
+ * AISDLC-481 — cancel control signal written by the orchestrator next to a
+ * session file. A running /ai-sdlc execute session reads this at step
+ * boundaries and performs a clean abort, marking the session cancelled.
+ */
+export interface CancelSignal {
+  schemaVersion: 'v1';
+  taskId: string;
+  /** ISO-8601 timestamp the signal was written. */
+  cancelledAt: string;
+  /** Human-readable reason (audit trail). */
+  reason?: string;
+  /** Orchestrator / operator session that wrote the cancel. */
+  cancelledBy?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Cancel back-channel helpers (AISDLC-481)
+// ---------------------------------------------------------------------------
+
+/** Full path to the cancel signal file for a task. */
+export function cancelFilePath(boardDir: string, taskId: string): string {
+  return path.join(sessionsDir(boardDir), `${taskId.toLowerCase()}${CANCEL_SUFFIX}`);
+}
+
+/**
+ * Orchestrator-side: write a cancel signal for a running session.
+ * Atomic write (tmp + rename). Idempotent — a pre-existing signal is
+ * overwritten (the Conductor is the sole writer; concurrent writes are not
+ * a concern).
+ */
+export function writeCancelSignal(
+  boardDir: string,
+  signal: CancelSignal,
+  opts: { reason?: string; cancelledBy?: string } = {},
+): string {
+  ensureSessionsDirs(boardDir);
+  const full: CancelSignal = {
+    ...signal,
+    reason: opts.reason ?? signal.reason,
+    cancelledBy: opts.cancelledBy ?? signal.cancelledBy,
+  };
+  const target = cancelFilePath(boardDir, signal.taskId);
+  const tmp = target + '.tmp';
+  writeFileSync(tmp, JSON.stringify(full, null, 2), 'utf-8');
+  renameSync(tmp, target);
+  return target;
+}
+
+/**
+ * Worker-side: read the cancel signal for a task. Returns null when no
+ * signal exists (the normal case — sessions only check at step boundaries).
+ */
+export function readCancelSignal(boardDir: string, taskId: string): CancelSignal | null {
+  const target = cancelFilePath(boardDir, taskId);
+  if (!existsSync(target)) return null;
+  try {
+    return JSON.parse(readFileSync(target, 'utf-8')) as CancelSignal;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Worker-side: remove the cancel signal after the session has honored it.
+ * Idempotent on missing files.
+ */
+export function removeCancelSignal(boardDir: string, taskId: string): void {
+  const target = cancelFilePath(boardDir, taskId);
+  if (existsSync(target)) {
+    try {
+      rmSync(target);
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+}
 
 /**
  * In-memory representation of a dispatch session. Matches the JSON shape

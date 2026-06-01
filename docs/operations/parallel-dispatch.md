@@ -13,6 +13,8 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 - [Permission model for spawned sessions](#permission-model-for-spawned-sessions)
 - [Activation](#activation)
 - [Monitoring](#monitoring)
+- [Liveness detection and session reaper](#liveness-detection-and-session-reaper)
+- [Cancel back-channel](#cancel-back-channel)
 - [Cleanup](#cleanup)
 - [Troubleshooting](#troubleshooting)
 - [Session file schema](#session-file-schema)
@@ -228,6 +230,221 @@ cat .ai-sdlc/dispatch/sessions/aisdlc-462.session.json
 
 ---
 
+## Liveness detection and session reaper
+
+**AISDLC-481** — the session reaper detects sessions that have stopped
+heartbeating and marks them `failed` automatically.
+
+### How liveness works
+
+Every `/ai-sdlc execute` session writes `lastHeartbeat` to its session file
+(`.ai-sdlc/dispatch/sessions/<task-id>.session.json`) at each Step 0-13
+transition via `update_session_state`. The reaper (`reapStaleSessions` in
+`pipeline-cli/src/dispatch/session-reaper.ts`) compares the current wall time
+against `lastHeartbeat` (falling back to `spawnedAt` when no heartbeat has
+been written yet).
+
+**Default threshold: 30 minutes.** Sessions whose heartbeat anchor is older
+than 30 minutes are reaped. This matches the Dispatch Board inflight sweeper
+threshold (RFC-0041 OQ-3) so the two substrates have identical liveness
+windows.
+
+### Two-substrate reconciliation
+
+The execute-parallel coordination layer has two independent substrates that
+track session state:
+
+| Substrate | File location | Purpose |
+|-----------|--------------|---------|
+| **Session file substrate** | `.ai-sdlc/dispatch/sessions/<task>.session.json` | tmux/execute-parallel coordination |
+| **Dispatch Board substrate** | `.ai-sdlc/dispatch/inflight/<task>.dispatch.json` + `.state.json` | Conductor/Worker Dispatch Board (RFC-0041) |
+
+When a session dies, both substrates must be updated consistently — an orphan
+in one while the other shows the session alive creates a false-positive
+"still running" state.
+
+The reaper reconciles both:
+
+1. **Session file reap**: when `lastHeartbeat` is stale, marks the session
+   file `status: failed`.
+2. **Board reconcile**: sweeps the Dispatch Board inflight entry for the same
+   `taskId`. If an inflight entry exists, it is moved to `failed/` with a
+   `stale-heartbeat` diagnostic. If no inflight entry exists (the session was
+   a pure tmux session without a board manifest), a diagnostic is still written
+   to `failed/` so the Conductor's verdict poll records the event.
+3. **Board-only orphan sweep**: after the session-file pass, a board-level
+   sweep catches inflight entries that have no corresponding session file
+   (Workers that don't use execute-parallel). These appear in
+   `SessionReaperResult.boardOnlyReaped`.
+
+### When the reaper runs
+
+The reaper is invoked automatically by `execute-parallel-status` on every
+status table refresh. You can also invoke it programmatically:
+
+```typescript
+import { reapStaleSessions } from '@ai-sdlc/pipeline-cli';
+
+const result = reapStaleSessions({
+  boardDir: '.ai-sdlc/dispatch',
+  staleMs: 30 * 60 * 1000, // 30 minutes (default)
+});
+// result.reaped[].taskId — session-file reaped tasks
+// result.boardOnlyReaped[] — board-only reaped task IDs
+```
+
+### Manual inspection
+
+```bash
+# Check a session file's last heartbeat
+cat .ai-sdlc/dispatch/sessions/aisdlc-462.session.json | jq '.lastHeartbeat, .status'
+
+# Check board inflight state
+ls .ai-sdlc/dispatch/inflight/
+cat .ai-sdlc/dispatch/inflight/AISDLC-462.state.json | jq '.lastHeartbeat'
+```
+
+If a session appears stuck (heartbeat age > 30 min), the reaper will clean it
+up on the next status refresh. You can force a reap cycle by running:
+
+```bash
+/ai-sdlc execute-parallel-status
+```
+
+---
+
+## Cancel back-channel
+
+**AISDLC-481 v1 scope: cancel-only.** Full pause/resume is a deliberate
+follow-up. This section documents the cancel mechanism.
+
+### What the cancel back-channel does
+
+The orchestrator (or an operator script) writes a cancel control signal to
+`.ai-sdlc/dispatch/sessions/<task-id>.cancel.json`. A running
+`/ai-sdlc execute` session reads this file at its **step boundaries** (after
+Step 1, before Step 5, after Step 6, after Step 7c) and performs a clean abort
+when the signal is present.
+
+On cancel:
+1. The cancel signal file is removed (idempotent — no spurious re-cancel on restart).
+2. The session file status is updated to `cancelled`.
+3. A board diagnostic is written to `.ai-sdlc/dispatch/failed/` so the
+   Conductor's verdict poll sees the cancellation.
+4. The pipeline exits 1.
+
+### Cancel signal schema
+
+```json
+{
+  "schemaVersion": "v1",
+  "taskId": "AISDLC-462",
+  "cancelledAt": "2026-06-01T10:00:00.000Z",
+  "reason": "operator requested cancel via UI",
+  "cancelledBy": "conductor-session-abc"
+}
+```
+
+Fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `schemaVersion` | Yes | Always `v1` |
+| `taskId` | Yes | Task ID matching the session |
+| `cancelledAt` | Yes | ISO-8601 timestamp of signal write |
+| `reason` | No | Human-readable reason (audit trail) |
+| `cancelledBy` | No | Orchestrator / operator session identifier |
+
+### Writing a cancel signal
+
+#### Via TypeScript (orchestrator-side)
+
+```typescript
+import { writeCancelSignal } from '@ai-sdlc/pipeline-cli';
+
+writeCancelSignal('.ai-sdlc/dispatch', {
+  schemaVersion: 'v1',
+  taskId: 'AISDLC-462',
+  cancelledAt: new Date().toISOString(),
+  reason: 'operator requested cancel',
+  cancelledBy: 'conductor-session-xyz',
+});
+```
+
+#### Via shell (operator script)
+
+```bash
+node -e "
+  const fs = require('fs');
+  const taskId = 'AISDLC-462';
+  const signal = {
+    schemaVersion: 'v1',
+    taskId,
+    cancelledAt: new Date().toISOString(),
+    reason: 'manual operator cancel',
+    cancelledBy: 'operator-shell',
+  };
+  const dir = '.ai-sdlc/dispatch/sessions';
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = dir + '/' + taskId.toLowerCase() + '.cancel.json.tmp';
+  const target = dir + '/' + taskId.toLowerCase() + '.cancel.json';
+  fs.writeFileSync(tmp, JSON.stringify(signal, null, 2));
+  fs.renameSync(tmp, target);
+  console.log('cancel signal written for', taskId);
+"
+```
+
+### When is the cancel signal read?
+
+The session checks for the cancel signal at these step boundaries:
+
+| After step | Why |
+|------------|-----|
+| Step 1 (argument validation) | Earliest safe abort — before any state mutation |
+| Before Step 5 (developer subagent) | Prevent starting a long-running developer invocation |
+| After Step 6 (developer completes) | Before starting expensive review fan-out |
+| After Step 7c (reviews complete) | Before committing / pushing |
+
+The cancel is **clean** — no partial commits are left; the session terminates
+at a safe boundary. The worktree is preserved on disk for operator inspection
+(same behavior as a developer failure).
+
+### Composing with AISDLC-480 (decision routing)
+
+This task's cancel back-channel composes with AISDLC-480's decision routing:
+
+- AISDLC-480 routes an operator question out of a running session to the
+  Decision Catalog.
+- AISDLC-481 (this task) carries back the control signal (cancel or, in a
+  future follow-up, an answer) to the waiting session.
+
+In v1, when a session is waiting for an operator decision (blocked at an
+`AskUserQuestion` boundary), the orchestrator can write a cancel signal to
+abort cleanly while emitting the `decisionId` in the diagnostic so the audit
+trail records which question triggered the cancel.
+
+```bash
+# Cancel a session and record the associated decision ID.
+node -e "
+  const fs = require('fs');
+  const signal = {
+    schemaVersion: 'v1',
+    taskId: 'AISDLC-462',
+    cancelledAt: new Date().toISOString(),
+    reason: 'blocked on DEC-0042 — cancelling while decision is pending',
+    cancelledBy: 'orchestrator',
+    decisionId: 'DEC-0042',
+  };
+  const f = '.ai-sdlc/dispatch/sessions/aisdlc-462.cancel.json';
+  fs.writeFileSync(f, JSON.stringify(signal, null, 2));
+"
+```
+
+Full pause/resume (the session waits, receives the operator answer, and
+resumes from where it was blocked) is tracked as a follow-up to this task.
+
+---
+
 ## Cleanup
 
 ### Cleanup all sessions
@@ -420,7 +637,8 @@ After PR creation:
 | `starting` | tmux window created; `claude` not yet running | Wait 30-60s then check |
 | `in-progress` | Pipeline running; heartbeats flowing | Monitor with status command |
 | `done` | `/ai-sdlc execute` completed; PR opened | Review the PR |
-| `failed` | Session crashed or was killed manually | Run cleanup, then re-dispatch |
+| `failed` | Session crashed, was killed, or heartbeat became stale (reaped) | Run cleanup, then re-dispatch |
+| `cancelled` | Session received and honored a cancel control signal (AISDLC-481) | Review diagnostic in `.ai-sdlc/dispatch/failed/` if needed |
 
 ---
 
