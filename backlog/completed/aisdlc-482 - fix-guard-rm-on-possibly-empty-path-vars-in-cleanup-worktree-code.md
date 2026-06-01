@@ -3,7 +3,7 @@ id: AISDLC-482
 title: >-
   fix: guard rm -rf "$VAR/$x" on possibly-empty path vars so autonomous runs
   aren't blocked by the rm-safety prompt
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-30 20:30'
 labels:
