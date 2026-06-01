@@ -968,17 +968,63 @@ Reviewers ALWAYS read from `/tmp/pr-delta-diff-${TASK_ID}.txt` when `INCR_DELTA_
 
 ### Step 7b — Spawn the selected subset
 
+**AISDLC-483 — default-Codex reviewer routing.** Before spawning, resolve the
+canonical agent name for each reviewer role using the harness-selection logic.
+By default, code-review and test-review route to the Codex variants
+(`code-reviewer-codex` / `test-reviewer-codex`), which run under Codex plan
+billing (zero Claude tokens). Security review always stays on the Claude-native
+`security-reviewer` at opus. Set `AI_SDLC_REVIEWER_HARNESS=claude` to force
+all three onto Claude-native agents (e.g. when Codex is not installed or
+the team has disabled Codex).
+
+```bash
+# AISDLC-483: Resolve agent names for this fan-out.
+# Default: code/test → codex variants; security → claude-native.
+# Override: AI_SDLC_REVIEWER_HARNESS=claude → all three claude-native.
+_resolve_reviewer_agent() {
+  local classifier_name="$1"
+  local force_claude="${AI_SDLC_REVIEWER_HARNESS:-}"
+  case "$classifier_name" in
+    critic)
+      if [ "$(echo "$force_claude" | tr '[:upper:]' '[:lower:]')" = "claude" ]; then
+        echo "code-reviewer"
+      else
+        echo "code-reviewer-codex"
+      fi
+      ;;
+    testing)
+      if [ "$(echo "$force_claude" | tr '[:upper:]' '[:lower:]')" = "claude" ]; then
+        echo "test-reviewer"
+      else
+        echo "test-reviewer-codex"
+      fi
+      ;;
+    security)
+      # Always claude-native — Codex does not handle security review reliably.
+      echo "security-reviewer"
+      ;;
+    *)
+      # Unknown classifier name — pass through unchanged.
+      echo "$classifier_name"
+      ;;
+  esac
+}
+```
+
 Detect Codex availability once (the reviewer agents declare `harness: codex`):
 
 ```bash
-if which codex >/dev/null 2>&1; then
+FORCE_CLAUDE_NATIVE="${AI_SDLC_REVIEWER_HARNESS:-}"
+if [ "$(echo "$FORCE_CLAUDE_NATIVE" | tr '[:upper:]' '[:lower:]')" = "claude" ]; then
+  HARNESS_NOTE="AI_SDLC_REVIEWER_HARNESS=claude — using Claude-native agents for all reviewers"
+elif which codex >/dev/null 2>&1; then
   HARNESS_NOTE=""
 else
   HARNESS_NOTE="⚠ INDEPENDENCE NOT ENFORCED (codex unavailable, fell back to claude-code)"
 fi
 ```
 
-Spawn **only the reviewers in `$SELECTED`** in parallel (single message, N Agent tool calls where 0 ≤ N ≤ 3). For each name in `$SELECTED`, dispatch the matching subagent type per the table above. If `$SELECTED` is empty (e.g. the classifier saw an empty diff), skip Step 7b entirely and treat the gate as APPROVED with zero findings.
+Spawn **only the reviewers in `$SELECTED`** in parallel (single message, N Agent tool calls where 0 ≤ N ≤ 3). For each name in `$SELECTED`, call `_resolve_reviewer_agent "$name"` to get the canonical agent name, then dispatch that agent. If `$SELECTED` is empty (e.g. the classifier saw an empty diff), skip Step 7b entirely and treat the gate as APPROVED with zero findings.
 
 **AISDLC-142 — incremental short-circuit:** if `INCR_SKIP=true`, do NOT spawn any reviewers in `$SELECTED`. Write the auto-approved verdict (from `cli-incremental-decide auto-approved-verdict --reviewed-sha $INCR_LAST_SHA`) for each one and skip directly to Step 8 aggregation. The classifier-skipped reviewers' AISDLC-141 auto-approved verdicts still apply for the others.
 
@@ -1030,40 +1076,42 @@ for REVIEWER_NAME in $SELECTED; do
   fi
 
   # Map classifier name → subagent / transcript name AND choose per-reviewer
-  # harness. security-reviewer is hard-coded to claude-code because no
-  # security-reviewer-codex variant ships today — using codex here would bake
-  # incorrect harness metadata into the Merkle leaf hash (AISDLC-383.8 code
-  # review MAJOR finding).
+  # harness using AISDLC-483 defaults: code/test → codex variants, security →
+  # claude-code. The agent name is obtained via _resolve_reviewer_agent (defined
+  # in Step 7b) so the harness metadata in the Merkle leaf stays consistent with
+  # the agent that actually ran (AISDLC-383.8 code review MAJOR finding).
+  AGENT_NAME=$(_resolve_reviewer_agent "$REVIEWER_NAME")
   case "$REVIEWER_NAME" in
     testing)
-      AGENT_NAME="test-reviewer"
-      REVIEWER_HARNESS="claude-code"
-      [ "$CODEX_AVAILABLE" = "true" ] && REVIEWER_HARNESS="codex"
+      REVIEWER_HARNESS="codex"
+      if [ "$(echo "${AI_SDLC_REVIEWER_HARNESS:-}" | tr '[:upper:]' '[:lower:]')" = "claude" ] || [ "$CODEX_AVAILABLE" = "false" ]; then
+        REVIEWER_HARNESS="claude-code"
+      fi
       ;;
     critic)
-      AGENT_NAME="code-reviewer"
-      REVIEWER_HARNESS="claude-code"
-      [ "$CODEX_AVAILABLE" = "true" ] && REVIEWER_HARNESS="codex"
+      REVIEWER_HARNESS="codex"
+      if [ "$(echo "${AI_SDLC_REVIEWER_HARNESS:-}" | tr '[:upper:]' '[:lower:]')" = "claude" ] || [ "$CODEX_AVAILABLE" = "false" ]; then
+        REVIEWER_HARNESS="claude-code"
+      fi
       ;;
     security)
-      AGENT_NAME="security-reviewer"
       REVIEWER_HARNESS="claude-code"
       ;;
     code-reviewer-codex|test-reviewer-codex)
-      AGENT_NAME="$REVIEWER_NAME"
+      # Explicit codex-variant names (e.g. when REVIEWER_NAME itself is already
+      # resolved to a codex agent). AGENT_NAME was already set above.
       REVIEWER_HARNESS="codex"
       ;;
     security-reviewer)
-      AGENT_NAME="$REVIEWER_NAME"
+      # Explicit security-reviewer name — always claude-code.
       REVIEWER_HARNESS="claude-code"
       ;;
     code-reviewer|test-reviewer)
-      AGENT_NAME="$REVIEWER_NAME"
+      # Explicit claude-native reviewer names — harness is claude-code.
       REVIEWER_HARNESS="claude-code"
-      [ "$CODEX_AVAILABLE" = "true" ] && REVIEWER_HARNESS="codex"
       ;;
     *)
-      AGENT_NAME="$REVIEWER_NAME"
+      # Passthrough for unknown names.
       REVIEWER_HARNESS="claude-code"
       ;;
   esac

@@ -150,3 +150,14 @@ export {
 } from './session-reaper.js';
 
 export type { ReapedSession, ReaperOptions, SessionReaperResult } from './session-reaper.js';
+
+// AISDLC-483: Reviewer-harness selector — routes code/test review to Codex
+// by default, keeps security on claude-native opus, developer on sonnet.
+export {
+  CLAUDE_HARNESS_OVERRIDE,
+  resolveReviewer,
+  resolveReviewerByClassifierName,
+  REVIEWER_HARNESS_ENV,
+} from './reviewer-harness.js';
+
+export type { ResolvedReviewer, ReviewerRole } from './reviewer-harness.js';
