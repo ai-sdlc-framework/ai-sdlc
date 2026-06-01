@@ -23,14 +23,20 @@ addFormats(ajv);
 const files = readdirSync(SCHEMA_DIR).filter((f: string) => f.endsWith('.schema.json'));
 let hasErrors = false;
 
-// Load common schema first so $ref resolution works
-const commonPath = resolve(SCHEMA_DIR, 'common.schema.json');
-const commonSchema = JSON.parse(readFileSync(commonPath, 'utf-8'));
-ajv.addSchema(commonSchema);
-
+// Pass 1: register all schemas so cross-schema $ref resolution works.
+// (e.g. design-intent-document $refs journey.v1.schema.json — alphabetical
+// ordering means 'd' compiles before 'j' is registered in a single pass.)
 for (const file of files) {
-  if (file === 'common.schema.json') continue;
+  const schemaPath = resolve(SCHEMA_DIR, file);
+  const schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
+  // addSchema is idempotent when the $id is already registered; skip silently.
+  if (!ajv.getSchema(schema.$id ?? file)) {
+    ajv.addSchema(schema);
+  }
+}
 
+// Pass 2: compile every schema (validates internal consistency + $ref targets).
+for (const file of files) {
   const schemaPath = resolve(SCHEMA_DIR, file);
   try {
     const schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
