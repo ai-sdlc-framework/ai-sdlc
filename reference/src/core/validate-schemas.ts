@@ -36,11 +36,19 @@ for (const file of files) {
 }
 
 // Pass 2: compile every schema (validates internal consistency + $ref targets).
+// Use getSchema() to retrieve the already-registered validator rather than
+// calling compile() again — compile() re-adds the schema by $id and throws
+// "already exists" when the schema was registered in Pass 1.
+// Invoking the returned validator triggers lazy compilation and surfaces any
+// $ref-resolution or structural errors identical to ajv.compile().
 for (const file of files) {
   const schemaPath = resolve(SCHEMA_DIR, file);
   try {
     const schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
-    ajv.compile(schema);
+    const id = (schema as { $id?: string }).$id ?? file;
+    const validate = ajv.getSchema(id) ?? ajv.compile(schema);
+    // Invoke with a dummy value to trigger lazy compilation; errors surface here.
+    validate({});
     console.log(`  ${file}`);
   } catch (err) {
     hasErrors = true;
