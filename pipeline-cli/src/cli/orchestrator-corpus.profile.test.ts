@@ -172,9 +172,13 @@ describe('cli-orchestrator-corpus profile', () => {
     const out = JSON.parse(stdoutChunks.join(''));
     expect(out.actualsWrite.appended).toBe(2);
     // calibration-YYYY-MM.jsonl now exists with 2 EstimateActualsRecorded rows.
+    // The month is derived from now().toISOString() (UTC) — use a dynamic key so
+    // the test doesn't break on month rollover. Must use UTC to match the
+    // ISO-string slice in appendActualsToCalibration (rec.ts.slice(0, 7)).
+    const monthKey = new Date().toISOString().slice(0, 7);
     const estimatesDir = join(tmp, '_estimates');
     const files = existsSync(estimatesDir)
-      ? readFileSync(join(estimatesDir, 'calibration-2026-05.jsonl'), 'utf8')
+      ? readFileSync(join(estimatesDir, `calibration-${monthKey}.jsonl`), 'utf8')
       : '';
     expect(files.trim().split('\n')).toHaveLength(2);
   });
