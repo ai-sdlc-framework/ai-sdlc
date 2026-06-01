@@ -161,7 +161,27 @@ If it reports any `error`-severity issues (`✗ Referenced file no longer exists
 5. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.** Configuration and CI are out of scope for task work.
 6. **Never run destructive git operations.** No `git reset --hard`, `git checkout -- .`, `git restore .`.
 7. **Never write GitHub Actions CI-skip magic tokens into commit messages.** GitHub Actions parses five literal substrings — `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` — case-insensitively, and SUPPRESSES every workflow on commits that carry any of them. That silently disables AI-SDLC's verify-attestation and ai-sdlc-review in one stroke. If you genuinely need to discuss these tokens in a commit body (e.g. an explanatory paragraph), use the **paren-quoted form** instead: `(skip ci marker)`, `(ci skip marker)`, etc. Backtick-wrapping (`` `[skip ci]` ``) does NOT defeat the parser — the literal substring is still present. The `.husky/pre-push` `check-skip-ci-marker.sh` gate (AISDLC-88) blocks pushes that violate this. The legacy AISDLC-87 CI-side attestor's `chore(ci): sign review attestation [skip ci]` commits (authored by `ai-sdlc-ci-attestor[bot]`) are still exempted by the gate so historical commits replayed via auto-rebase don't strand pushes — but the attestor itself was removed in AISDLC-140 sub-4 (attestation is now audit-only) and AISDLC-152 (this task), so no NEW chore commits should be produced.
-8. **Never resolve RFC Open Questions inline (AISDLC-298).** If you encounter an Open Question (OQ) in an RFC `## Open Questions` section that lacks a `**Resolution:**` marker and it blocks or constrains your implementation, **escalate immediately**: return with `prUrl: null` and a `notes` field naming the RFC, the OQ number, and the options you see. Do NOT write a `**Resolution:**`, `RESOLVED:`, or `✅ RESOLVED` marker yourself — that is exclusively the operator's role after a walkthrough. AISDLC-271 / RFC-0031 established this anti-pattern: an entire RFC's architectural OQs were decided by a subagent inline in one iteration without cross-pillar review. If the OQ is genuinely non-blocking, document your working assumption in the PR body and proceed — do NOT add a Resolution marker to the RFC. The long-term routing mechanism is the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md).
+8. **Never resolve RFC Open Questions inline (AISDLC-298). On escalation, ALSO file a Decision Catalog record (AISDLC-480).** If you encounter an Open Question (OQ) in an RFC `## Open Questions` section that lacks a `**Resolution:**` marker and it blocks or constrains your implementation, you MUST do BOTH of the following:
+
+   **Step A — file the Decision Catalog record** (run this BEFORE returning your JSON):
+   ```bash
+   node pipeline-cli/bin/cli-decisions.mjs escalate \
+     --task-id "AISDLC-NNN" \
+     --source-worktree "$(pwd)" \
+     --summary "<one-line: what decision is blocking>" \
+     --scope "rfc:RFC-XXXX" \
+     --option "opt-a:<first option description>" \
+     --option "opt-b:<second option description>" \
+     --body "OQ reference: RFC-XXXX §OQ-N. <context>" \
+     --format json
+   ```
+   This creates a catalog record visible in `cli-decisions list` so the operator can act on it without reading through PR comments.
+
+   **Step B — return `prUrl: null` with a `notes` field** naming the RFC, the OQ number, the decision-id that was just created, and the options you see.
+
+   Do NOT write a `**Resolution:**`, `RESOLVED:`, or `✅ RESOLVED` marker yourself — that is exclusively the operator's role after a walkthrough. AISDLC-271 / RFC-0031 established this anti-pattern: an entire RFC's architectural OQs were decided by a subagent inline in one iteration without cross-pillar review. If the OQ is genuinely non-blocking, document your working assumption in the PR body and proceed — do NOT add a Resolution marker to the RFC, and do NOT call `cli-decisions escalate` for genuinely non-blocking OQs (catalog is for blockers only).
+
+   The Decision Catalog is the async routing mechanism for OQ-class decisions: `cli-decisions show <id>` gives the operator full context; `cli-decisions answer <id> <optionId>` resolves it. See [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) and the ops runbook at `docs/operations/dispatched-session-decisions.md`.
 9. **Stop at pre-work flags — never self-authorize scope expansion (AISDLC-308).** If the task body contains phrases like "Pre-work required", "Pre-conditions:", "operator walkthrough needed", or references an RFC with unresolved OQs: **STOP**. Return with `prUrl: null` and a `notes` field explaining which precondition is unmet and what the operator must do before implementation can proceed. Do NOT proceed to implement, decide the OQs inline, file follow-up tasks, or dispatch additional subagents on the assumption the precondition is satisfied. The PR #481 audit (2026-05-16) documented how an agent's own written "operator walkthrough required" note was ignored by the same agent 1.5 hours later — this rule closes that gap. Escalate, do not self-authorize.
 
 ## Your workflow

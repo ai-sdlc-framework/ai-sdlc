@@ -2098,3 +2098,244 @@ describe('AISDLC-463 — auto-expire subcommand', () => {
     expect(events.filter((e) => e.type === 'auto-expired')).toHaveLength(0);
   });
 });
+
+// ── AISDLC-480 — dispatched-session escalation (AC-5) ────────────────────────
+// Hermetic tests: (a) escalation creates a catalog record; (b) non-interactive
+// AskUserQuestion routes to catalog and fails cleanly; (c) no catalog write when
+// AI_SDLC_DECISION_CATALOG is off.
+
+describe('AISDLC-480 — escalate subcommand (dispatched-session Decision Catalog routing)', () => {
+  it('AC-5a — escalation creates a catalog record with subagent-escalation source', async () => {
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-480',
+      '--source-worktree',
+      '/tmp/worktrees/aisdlc-480',
+      '--summary',
+      'Which storage backend to use?',
+      '--option',
+      'opt-json:Use JSON file storage',
+      '--option',
+      'opt-sqlite:Use SQLite for better perf',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      ok: boolean;
+      decisionId: string;
+      taskId: string;
+      sourceWorktree: string;
+      path: string;
+      exitCode: number;
+    }>();
+    expect(r.ok).toBe(true);
+    expect(r.decisionId).toMatch(/^DEC-\d{4,}$/);
+    expect(r.taskId).toBe('AISDLC-480');
+    expect(r.sourceWorktree).toBe('/tmp/worktrees/aisdlc-480');
+
+    // Verify the event log was written.
+    const logPath = resolveEventLogPath(tmp);
+    const events = readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events).toHaveLength(1);
+    const evt = events[0];
+    expect(evt.type).toBe('decision-opened');
+    expect(evt.source).toBe('subagent-escalation');
+    expect(evt.summary).toBe('Which storage backend to use?');
+    expect(evt.options).toEqual([
+      { id: 'opt-json', description: 'Use JSON file storage' },
+      { id: 'opt-sqlite', description: 'Use SQLite for better perf' },
+    ]);
+    // Resume context in body.
+    expect(evt.body).toContain('taskId: AISDLC-480');
+    expect(evt.body).toContain('sourceWorktree: /tmp/worktrees/aisdlc-480');
+    // Scope defaults to task:<taskId>.
+    expect(evt.scope).toBe('task:AISDLC-480');
+    // contextRef defaults to taskId.
+    expect(evt.contextRef).toBe('AISDLC-480');
+    // by is machine-readable session id.
+    expect(evt.by).toBe('dispatched-session:AISDLC-480');
+  });
+
+  it('AC-5a — escalation appears in cli-decisions list after creation', async () => {
+    // Create the escalation record.
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-480',
+      '--source-worktree',
+      '/tmp/wt',
+      '--summary',
+      'Scope question',
+      '--option',
+      'opt-a:Option A',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const createResult = stdoutJson<{ decisionId: string }>();
+    stdoutChunks = [];
+
+    // Now list decisions.
+    setArgv('list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const listResult = stdoutJson<{
+      decisions: Array<{ metadata: { id: string; source: string } }>;
+    }>();
+    expect(listResult.decisions).toHaveLength(1);
+    expect(listResult.decisions[0].metadata.id).toBe(createResult.decisionId);
+    expect(listResult.decisions[0].metadata.source).toBe('subagent-escalation');
+  });
+
+  it('AC-5b — --exit-code 1 causes process.exit(1) after writing the record', async () => {
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-999',
+      '--source-worktree',
+      '/tmp/wt',
+      '--summary',
+      'Non-interactive question',
+      '--option',
+      'opt-a:Option A',
+      '--exit-code',
+      '1',
+      '--format',
+      'json',
+    );
+
+    // process.exit throws in test harness — catch it.
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow('process.exit(1)');
+
+    // Verify the record WAS written despite the exit.
+    const logPath = resolveEventLogPath(tmp);
+    const events = readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('decision-opened');
+    expect(events[0].source).toBe('subagent-escalation');
+
+    // Stdout should still carry the JSON (written before exit).
+    const r = stdoutJson<{ ok: boolean; decisionId: string }>();
+    expect(r.ok).toBe(true);
+    expect(r.decisionId).toMatch(/^DEC-\d{4,}$/);
+  });
+
+  it('AC-5c — no catalog write when AI_SDLC_DECISION_CATALOG is off', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off';
+
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-480',
+      '--source-worktree',
+      '/tmp/wt',
+      '--summary',
+      'Should not be written',
+      '--option',
+      'opt-a:Option A',
+      '--format',
+      'json',
+    );
+
+    // When catalog is off, escalate exits cleanly (code 0) with a stderr warning.
+    await buildDecisionsCli().parseAsync();
+
+    // No event log written.
+    const logPath = resolveEventLogPath(tmp);
+    const { existsSync: exists } = await import('node:fs');
+    expect(exists(logPath)).toBe(false);
+
+    // Warning on stderr.
+    expect(stderrText()).toMatch(/AI_SDLC_DECISION_CATALOG/);
+  });
+
+  it('AC-5c — AI_SDLC_DECISION_CATALOG=off with --exit-code 1 still exits 1 (clean-fail contract)', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off';
+
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-480',
+      '--source-worktree',
+      '/tmp/wt',
+      '--summary',
+      'Should not be written',
+      '--option',
+      'opt-a:Option A',
+      '--exit-code',
+      '1',
+    );
+
+    // Even with catalog off, --exit-code 1 must still exit 1.
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow('process.exit(1)');
+
+    // No event log written.
+    const logPath = resolveEventLogPath(tmp);
+    const { existsSync: exists } = await import('node:fs');
+    expect(exists(logPath)).toBe(false);
+  });
+
+  it('AC-4 — custom --scope and --context-ref override defaults', async () => {
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-480',
+      '--source-worktree',
+      '/tmp/wt',
+      '--summary',
+      'RFC scope question',
+      '--scope',
+      'rfc:RFC-0035',
+      '--context-ref',
+      'pr:831',
+      '--option',
+      'opt-a:Option A',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const logPath = resolveEventLogPath(tmp);
+    const events = readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events[0].scope).toBe('rfc:RFC-0035');
+    expect(events[0].contextRef).toBe('pr:831');
+  });
+
+  it('AC-4 — --body text is prepended with machine-readable resume context', async () => {
+    setArgv(
+      'escalate',
+      '--task-id',
+      'AISDLC-480',
+      '--source-worktree',
+      '/tmp/wt',
+      '--summary',
+      'Architecture choice',
+      '--option',
+      'opt-a:Option A',
+      '--body',
+      'This is operator-supplied context.',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const logPath = resolveEventLogPath(tmp);
+    const events = readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const body: string = events[0].body;
+    // Machine-readable resume block comes first.
+    expect(body.startsWith('taskId: AISDLC-480')).toBe(true);
+    // Operator body is appended after a blank line.
+    expect(body).toContain('This is operator-supplied context.');
+  });
+});

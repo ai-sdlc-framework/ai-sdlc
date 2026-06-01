@@ -3817,9 +3817,9 @@ export const dispatchSessionV1Schema = {
     },
     status: {
       type: 'string',
-      enum: ['starting', 'in-progress', 'done', 'failed'],
+      enum: ['starting', 'in-progress', 'done', 'failed', 'cancelled'],
       description:
-        "Current lifecycle state of the session. 'starting' = tmux window spawned, claude not yet running. 'in-progress' = first heartbeat received. 'done' = /ai-sdlc execute reported success + prUrl set. 'failed' = /ai-sdlc execute exited non-zero or was killed.",
+        "Current lifecycle state of the session. 'starting' = tmux window spawned, claude not yet running. 'in-progress' = first heartbeat received. 'done' = /ai-sdlc execute reported success + prUrl set. 'failed' = /ai-sdlc execute exited non-zero, was killed, or heartbeat became stale (reaped by session-reaper). 'cancelled' = session received and honored a cancel control signal (AISDLC-481).",
     },
     currentStep: {
       type: 'string',

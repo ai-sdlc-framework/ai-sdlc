@@ -820,6 +820,166 @@ export function buildDecisionsCli(): Argv {
       },
     )
     .command(
+      'escalate',
+      // AISDLC-480 — machine-friendly path for dispatched sessions.
+      // A developer subagent that hits a blocking decision point (OQ, scope-creep
+      // choice, or AskUserQuestion-class question) calls this subcommand instead
+      // of dead-lettering the question into a PR comment or hanging.
+      //
+      // Differences from plain `add`:
+      //  • Always sets source=subagent-escalation (not configurable).
+      //  • Requires --task-id and --source-worktree for resume context (AC-4).
+      //  • --exit-code 1 flag: after writing the record, exits non-zero so a
+      //    caller can detect the clean-fail and print the decision-id (AC-2).
+      //  • Scope is auto-derived from --task-id when --scope is absent.
+      //  • Gated on AI_SDLC_DECISION_CATALOG like all mutating commands.
+      //
+      // Non-interactive by design (no TTY fallback) — dispatched sessions
+      // always have all context available as flags.
+      'AISDLC-480 — route a dispatched-session escalation to the Decision Catalog. Records a subagent-escalation Decision with resume context (taskId, sourceWorktree) and optionally exits non-zero so the calling script detects the clean-fail.',
+      (y) =>
+        y
+          .option('summary', {
+            type: 'string',
+            demandOption: true,
+            describe: 'One-line description of the decision that is blocking the session.',
+          })
+          .option('task-id', {
+            type: 'string',
+            demandOption: true,
+            describe:
+              'Backlog task id (e.g. AISDLC-480) — carried on the catalog record for resume routing.',
+          })
+          .option('source-worktree', {
+            type: 'string',
+            demandOption: true,
+            describe:
+              'Absolute path of the worktree this session is running in. Recorded for operator resume (e.g. `$(pwd)`).',
+          })
+          .option('option', {
+            type: 'array',
+            string: true,
+            demandOption: true,
+            describe:
+              "Repeat for each option: 'id:description' (e.g. --option opt-a:'proceed with assumption'). At least one required.",
+          })
+          .option('body', {
+            type: 'string',
+            describe: 'Full context or problem statement. Markdown ok.',
+          })
+          .option('scope', {
+            type: 'string',
+            describe:
+              "Scope reference override. Defaults to 'task:<task-id>' when omitted (e.g. 'rfc:RFC-0035', 'workspace').",
+          })
+          .option('context-ref', {
+            type: 'string',
+            describe:
+              'Surfacing-context backlink (PR url, `pr:N`, or task id). Auto-populated from --task-id when absent.',
+          })
+          .option('exit-code', {
+            type: 'number',
+            default: 0,
+            describe:
+              'AISDLC-480 AC-2 — exit code after writing the record. Pass 1 for the AskUserQuestion / non-interactive clean-fail pattern so the calling script detects the escalation.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+
+        if (!isDecisionCatalogEnabled()) {
+          // When the catalog is off: print to stderr and exit with the
+          // requested code anyway so callers that pass --exit-code 1 still
+          // get a non-zero exit (the clean-fail contract, AC-2).
+          warnToStderr(decisionCatalogDisabledMessage());
+          warnToStderr(
+            '[cli-decisions] escalate: catalog off — decision NOT recorded. Set AI_SDLC_DECISION_CATALOG=1 to enable.',
+          );
+          const exitCode = typeof argv['exit-code'] === 'number' ? argv['exit-code'] : 0;
+          if (exitCode !== 0) process.exit(exitCode);
+          return;
+        }
+
+        const taskId = String(argv['task-id']).trim();
+        const sourceWorktree = String(argv['source-worktree']).trim();
+        const scope =
+          typeof argv.scope === 'string' && argv.scope.trim()
+            ? argv.scope.trim()
+            : `task:${taskId}`;
+        const contextRef =
+          typeof argv['context-ref'] === 'string' && argv['context-ref']
+            ? String(argv['context-ref'])
+            : taskId;
+
+        // Parse options — same format as `add` ('id:description' pairs).
+        const optionInputs = (argv.option as string[] | undefined) ?? [];
+        let options: DecisionOption[];
+        try {
+          options = optionInputs.map((raw) => {
+            const idx = raw.indexOf(':');
+            if (idx <= 0) throw new Error(`--option must be 'id:description' (got: ${raw})`);
+            const id = raw.slice(0, idx).trim();
+            const description = raw.slice(idx + 1).trim();
+            if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+              throw new Error(`option id must be a lowercase slug (got: ${id})`);
+            }
+            if (!description) throw new Error(`option description is required (id=${id})`);
+            return { id, description };
+          });
+        } catch (err) {
+          fail((err as Error).message);
+        }
+
+        // Build the body — prepend machine-readable resume context so an
+        // operator doing `cli-decisions show <id>` sees enough to rerun.
+        const userBody = typeof argv.body === 'string' && argv.body ? argv.body : undefined;
+        const resumeBlock = `taskId: ${taskId}\nsourceWorktree: ${sourceWorktree}`;
+        const body = userBody ? `${resumeBlock}\n\n${userBody}` : resumeBlock;
+
+        const decisionId = nextDecisionId({ workDir });
+        const event = makeDecisionOpenedEvent({
+          decisionId,
+          source: 'subagent-escalation',
+          scope,
+          summary: String(argv.summary).trim(),
+          body,
+          reversible: true, // escalations are always reversible (operator picks an option)
+          options: options!,
+          contextRef,
+          by: `dispatched-session:${taskId}`,
+        });
+
+        const path = appendDecisionEvent(event, { workDir });
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            decisionId,
+            taskId,
+            sourceWorktree,
+            path,
+            exitCode: argv['exit-code'],
+          });
+        } else {
+          emitText(`[cli-decisions] escalation recorded: ${decisionId}`);
+          emitText(`  task:     ${taskId}`);
+          emitText(`  worktree: ${sourceWorktree}`);
+          emitText(`  summary:  ${String(argv.summary).trim()}`);
+          emitText(`  options:  ${options!.map((o) => o.id).join(', ')}`);
+          emitText(`  event log: ${path}`);
+          emitText(`  operator: cli-decisions show ${decisionId}`);
+          emitText(`  answer:   cli-decisions answer ${decisionId} <optionId>`);
+        }
+
+        const exitCode = typeof argv['exit-code'] === 'number' ? argv['exit-code'] : 0;
+        if (exitCode !== 0) process.exit(exitCode);
+      },
+    )
+    .command(
       'log-path',
       'Print the resolved event-log path (no read or write).',
       (y) => y,

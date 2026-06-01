@@ -788,6 +788,28 @@ The developer returns a JSON object. Parse it and check:
 - If any of `verifications.{build,test,lint}` is `failed`, treat as developer failure (same rollback as above).
 - Otherwise proceed to review.
 
+### AISDLC-480 — dispatched-session AskUserQuestion routing (AC-2)
+
+When a developer subagent runs in a **non-interactive / detached session** (tmux pane, `claude -p` worker, background Agent) and encounters a question it cannot answer autonomously, it MUST NOT hang waiting for stdin. Instead it routes the question to the Decision Catalog and exits cleanly:
+
+```bash
+# Pattern for non-interactive AskUserQuestion routing in developer subagents:
+node pipeline-cli/bin/cli-decisions.mjs escalate \
+  --task-id "$TASK_ID" \
+  --source-worktree "$(pwd)" \
+  --summary "What approach for <question>?" \
+  --scope "task:$TASK_ID" \
+  --option "opt-a:<first option description>" \
+  --option "opt-b:<second option description>" \
+  --body "<context and trade-offs>" \
+  --format json \
+  --exit-code 1   # exits non-zero so the calling script detects the clean-fail
+```
+
+The `--exit-code 1` flag causes `cli-decisions escalate` to print the `decisionId` on stdout (JSON) and then exit with code 1. The developer subagent returns `prUrl: null` with the decision-id in `notes`. The operator can then run `cli-decisions show <id>` for context and `cli-decisions answer <id> <optionId>` to resolve it before resuming the task.
+
+This mechanism is gated on `AI_SDLC_DECISION_CATALOG` (default-ON). When the flag is off, `cli-decisions escalate` prints a warning on stderr and exits with the same requested code — the clean-fail contract is preserved even when the catalog is disabled. Full operator runbook: `docs/operations/dispatched-session-decisions.md`.
+
 ## Step 7 — Run conditional reviews (classifier-gated subset, incremental delta)
 
 Build the review context once, share across all reviewers:
