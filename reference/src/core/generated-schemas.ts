@@ -2161,6 +2161,12 @@ export const designIntentDocumentSchema = {
           items: { $ref: '#/$defs/variantDeclaration' },
           maxItems: 19,
         },
+        journeys: {
+          type: 'array',
+          description:
+            'In-Soul Journey declarations per RFC-0018 §5.1 / §6.1. Each journey is a temporally-ordered user flow with named states, transitions, completion criteria, accessibility requirements, and success metrics. Journeys are scoring scopes (not a runtime workflow engine). Schema-enforced flat: journeys[] cannot contain nested journeys[] (OQ-3 resolution). Per-org count limits enforced by the inheritance validator: soft warn at 10+ journeys, hard reject at 50+ (OQ-1 resolution, configurable via .ai-sdlc/journey-config.yaml).',
+          items: { $ref: 'journey.v1.schema.json' },
+        },
       },
       additionalProperties: false,
     },
@@ -2857,6 +2863,12 @@ export const designIntentDocumentSchema = {
           enum: ['primary', 'secondary', 'experimental'],
           description:
             'RESERVED: future lifecycle hint per RFC-0017 §5.2. v1 ignores; documents the experimental exit ramp (OQ-8).',
+        },
+        journeys: {
+          type: 'array',
+          description:
+            "Variant-scoped Journey declarations per RFC-0018 §5.1. A journey scoped to this variant (scope='variant:<id>') MUST carry complianceFloor: 'inherit'. Count limits apply as for soul-scoped journeys (per-org configurable, defaults soft 10 / hard 50).",
+          items: { $ref: 'journey.v1.schema.json' },
         },
       },
     },
@@ -4307,6 +4319,573 @@ export const embeddingAdapterV1Schema = {
       description:
         'Canonical name of the adapter operators should migrate to. Included in deprecation warnings/errors.',
       pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
+    },
+  },
+} as const;
+
+export const journeyConfigV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/journey-config.v1.schema.json',
+  title: 'AI-SDLC journey-config.yaml',
+  description:
+    "Per-organization journey configuration schema per RFC-0018 §10.1. Ships as '.ai-sdlc/journey-config.yaml' (per-org defaults). Per-Soul overrides may live in the soul's own spec.journeyConfig block. All OQ resolutions from operator walkthrough 2026-05-28 are encoded here as schema defaults.",
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    journey: {
+      type: 'object',
+      description: 'Top-level journey configuration block.',
+      additionalProperties: false,
+      properties: {
+        limits: {
+          type: 'object',
+          description:
+            'OQ-1 — per-org journey count thresholds. Defaults: softWarnAt=10, hardLimit=50. Higher than variant 5/20 because journey count tracks user-flow surface (typically 10+ per mid-market SaaS) not audience-segment surface.',
+          additionalProperties: false,
+          properties: {
+            softWarnAt: {
+              type: 'integer',
+              minimum: 1,
+              default: 10,
+              description:
+                "Journey count at which a non-blocking Decision 'journey-count-soft-warning' is emitted for operator batch review. Default 10 (Miller 7±2 upper end + industry advisory: Atlassian ~12, Slack ~8, Salesforce 30+; cognitive-load threshold).",
+            },
+            hardLimit: {
+              type: 'integer',
+              minimum: 1,
+              default: 50,
+              description:
+                "Journey count at which declaration is rejected with Decision 'journey-count-hard-limit-exceeded' plus a clarification task. Default 50 (Salesforce-style enterprise ceiling). Per-org override prevents constant-rejecting-RFC friction for enterprise platforms. MUST be greater than softWarnAt.",
+            },
+          },
+        },
+        stateLimits: {
+          type: 'object',
+          description:
+            'OQ-2 — per-org state cardinality thresholds per journey. Defaults: softWarnAt=12, hardLimit=100. The hard limit is a sanity guard (typo / runaway-loop), NOT an architectural constraint.',
+          additionalProperties: false,
+          properties: {
+            softWarnAt: {
+              type: 'integer',
+              minimum: 1,
+              default: 12,
+              description:
+                "State count per journey at which a non-blocking Decision 'journey-state-count-soft-warning' is emitted. Default 12 (Miller 7±2 upper end + XState advisory + IEEE state-diagram readability research: >12 correlates with maintenance issues). Message includes concrete v1 workaround: split into multiple top-level journeys with handoff terminal states.",
+            },
+            hardLimit: {
+              type: 'integer',
+              minimum: 1,
+              default: 100,
+              description:
+                "State count per journey at which declaration is rejected with Decision 'journey-state-count-hard-limit-exceeded'. Default 100 is a sanity guard (typo / runaway-loop guard, NOT an architectural constraint — regulatory-submission journeys with 25-40 states are legitimate).",
+            },
+            softWarnMessage: {
+              type: 'string',
+              description:
+                'Operator-actionable message shown with the soft-warn Decision. Default points at v1 workaround (split journeys) and references OQ-3 sub-journey activation path.',
+              default:
+                'Consider splitting into multiple top-level journeys with handoff terminal states (v1 workaround) OR await OQ-3 sub-journey activation (v2)',
+            },
+          },
+        },
+        subJourneys: {
+          type: 'object',
+          description:
+            'OQ-3 — nested journey (sub-journey) policy. Schema-enforced flat for v1: journeys[] cannot contain journeys[]. Future activation via Decision Catalog on >=2 distinct adopter requests.',
+          additionalProperties: false,
+          properties: {
+            allowed: {
+              type: 'boolean',
+              const: false,
+              default: false,
+              description:
+                'Whether nested journeys are allowed. ALWAYS false for v1 (schema-enforced flat). Value is const=false so validators can reliably expect it.',
+            },
+            futureActivationDecision: {
+              type: 'string',
+              const: 'journey-sub-flow-activation-request',
+              description:
+                'Decision Catalog key for sub-journey activation requests (Stage A counter, auto-promote at >=2 distinct adopter requests).',
+            },
+            futurePromotionThreshold: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                distinctAdopterRequests: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 2,
+                  description:
+                    'Number of distinct adopter requests before the activation Decision auto-promotes to operator batch review.',
+                },
+              },
+            },
+          },
+        },
+        completionCriteria: {
+          type: 'object',
+          description:
+            'OQ-4 — completion-criteria expressiveness. Closed enum for v1. Future activation via Decision Catalog. Future language: CEL (Google Common Expression Language).',
+          additionalProperties: false,
+          properties: {
+            enumValues: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: ['terminal-success-state', 'all-states-reached'],
+              },
+              description:
+                'v1 allowed completion-criteria kinds. custom-predicate is intentionally absent.',
+              default: ['terminal-success-state', 'all-states-reached'],
+            },
+            futureActivationDecision: {
+              type: 'string',
+              const: 'journey-custom-predicate-activation-request',
+              description: 'Decision Catalog key for custom-predicate activation requests.',
+            },
+            futurePromotionThreshold: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                distinctAdopterRequests: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 2,
+                },
+              },
+            },
+            futureLanguage: {
+              type: 'string',
+              const: 'cel',
+              description:
+                'Pre-recommended future expression language: CEL (Google Common Expression Language). Statically typed, statically analyzable, deterministic, no IO. Captures industry consensus per OQ-4 resolution.',
+            },
+          },
+        },
+        successMetrics: {
+          type: 'object',
+          description: 'OQ-5 — success-metrics source and staleness policy.',
+          additionalProperties: false,
+          properties: {
+            contract: {
+              type: 'string',
+              const: 'operator-supplied',
+              description:
+                'v1 contract: operators supply metrics via a typed MetricSnapshot resource. The framework reads completion-rate values; it does not compute them from an analytics backend.',
+            },
+            resource: {
+              type: 'string',
+              const: 'MetricSnapshot',
+              description: 'The operator-supplied resource kind for journey metrics.',
+            },
+            staleness: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                thresholdDays: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 30,
+                  description:
+                    'Days after last MetricSnapshot before the metric is considered stale. Per-Soul configurable. Default 30d.',
+                },
+                onStale: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    decision: {
+                      type: 'string',
+                      const: 'journey-metric-stale',
+                      description:
+                        'Decision Catalog key emitted when metric staleness threshold is exceeded.',
+                    },
+                    scoringBehavior: {
+                      type: 'string',
+                      const: 'warn-and-unknown',
+                      description:
+                        'Stale metrics are treated as unknown inputs for Cκ scoring (warn-and-unknown, NOT fail-closed). The pipeline continues; the Decision surfaces for operator batch review.',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        accessibility: {
+          type: 'object',
+          description: 'OQ-6 — audit cadence enforcement and graduated Eρ₅ degradation policy.',
+          additionalProperties: false,
+          properties: {
+            auditOverdueGracePolicy: {
+              type: 'string',
+              enum: ['graduated', 'binary-30d', 'hard-block'],
+              default: 'graduated',
+              description:
+                "Eρ₅ degradation policy for overdue accessibility audits. 'graduated' (default): progressive reduction matching Vanta/Drata/Secureframe industry pattern. 'binary-30d': no impact within 30d, then fail-closed (SOC2/HIPAA strict). 'hard-block': fail-closed at cadence+0d.",
+            },
+            graduatedThresholds: {
+              type: 'object',
+              description:
+                "Applies when auditOverdueGracePolicy='graduated'. Days past audit cadence at each degradation tier.",
+              additionalProperties: false,
+              properties: {
+                warnAt: {
+                  type: 'integer',
+                  minimum: 0,
+                  default: 0,
+                  description:
+                    'Days past cadence at which Decision: journey-audit-overdue-warn is emitted (no Eρ₅ impact).',
+                },
+                reduced25At: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 30,
+                  description:
+                    'Days past cadence at which Eρ₅ is reduced 25% and Decision: journey-audit-overdue-graduated is emitted.',
+                },
+                reduced50At: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 60,
+                  description:
+                    'Days past cadence at which Eρ₅ is reduced 50% and Decision: journey-audit-overdue-graduated is emitted.',
+                },
+                effectiveBlockAt: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 90,
+                  description:
+                    'Days past cadence at which Eρ₅ reaches effective-block and Decision: journey-audit-overdue-blocking is emitted.',
+                },
+              },
+            },
+            decisions: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                atWarn: {
+                  type: 'string',
+                  const: 'journey-audit-overdue-warn',
+                },
+                atGraduated: {
+                  type: 'string',
+                  const: 'journey-audit-overdue-graduated',
+                },
+                atBlocking: {
+                  type: 'string',
+                  const: 'journey-audit-overdue-blocking',
+                },
+              },
+            },
+          },
+        },
+        wcag: {
+          type: 'object',
+          description:
+            'OQ-7 — WCAG version evolution policy. Additive enum: existing journey declarations stay valid.',
+          additionalProperties: false,
+          properties: {
+            enum: {
+              type: 'string',
+              const: 'additive',
+              description:
+                'Additive enum policy: existing journeys keep their declared WCAG version; new journeys can pick the latest.',
+            },
+            supersededAdvisory: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                enabled: {
+                  type: 'boolean',
+                  default: true,
+                  description:
+                    'Whether to emit Decision: wcag-version-superseded when an adopter declares WCAG 2.0 (advisory, no scoring impact).',
+                },
+                decision: {
+                  type: 'string',
+                  const: 'wcag-version-superseded',
+                },
+              },
+            },
+            forwardCompatNote: {
+              type: 'string',
+              description:
+                "Operator-visible forward-compatibility note about WCAG 3.0's structural shift from binary conformance to Silver framework graduated scoring.",
+            },
+          },
+        },
+        driftDetection: {
+          type: 'object',
+          description:
+            'OQ-8 + OQ-10 — tessellation drift detection configuration for journey state-ID references.',
+          additionalProperties: false,
+          properties: {
+            integration: {
+              type: 'string',
+              const: 'rfc-0009-§13-rule-4',
+              description:
+                '4th rule in same RFC-0009 §13 engine (OQ-10 resolution: unified-engine-with-plugin-rules pattern).',
+            },
+            registry: {
+              type: 'string',
+              const: 'Tessellation§13RuleRegistry',
+              description:
+                'Registry class that holds all §13 rules including JourneyStateIdDriftRule.',
+            },
+            ruleName: {
+              type: 'string',
+              const: 'JourneyStateIdDriftRule',
+              description: 'The concrete rule class implementing journey state-ID drift detection.',
+            },
+            scanTechnology: {
+              type: 'string',
+              const: 'ast',
+              description:
+                'AST scan reusing §13 Rule #1 infrastructure (OQ-8 resolution: NOT string match — engine already exists).',
+            },
+            decisionOnMatch: {
+              type: 'string',
+              const: 'journey-state-id-drift',
+              description:
+                'Decision Catalog key emitted when a removed or undeclared state-ID reference is found in substrate code.',
+            },
+          },
+        },
+        crossSoulCoordination: {
+          type: 'object',
+          description:
+            'OQ-9 — cross-soul journey coordination. v1 limitation: per-soul-with-handoff pattern. Future activation via Decision Catalog.',
+          additionalProperties: false,
+          properties: {
+            v1Mechanism: {
+              type: 'string',
+              const: 'per-soul-with-handoff-pattern',
+              description:
+                "v1 mechanism: each Soul owns its own journey with a 'transitioned-to-soul-B' terminal state; cross-soul correlation via shared userId/sessionId.",
+            },
+            correlationField: {
+              type: 'string',
+              const: 'shared-userId-or-sessionId-in-work-item-metadata',
+              description:
+                'Operator-application owns cross-soul orchestration using shared userId/sessionId in work-item metadata.',
+            },
+            futureActivationDecision: {
+              type: 'string',
+              const: 'cross-soul-journey-coordination-request',
+              description:
+                'Decision Catalog key for cross-soul journey coordination requests (auto-promote at >=2 distinct adopter requests).',
+            },
+            futurePromotionThreshold: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                distinctAdopterRequests: {
+                  type: 'integer',
+                  minimum: 1,
+                  default: 2,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
+export const journeyV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/journey.v1.schema.json',
+  title: 'AI-SDLC Journey v1',
+  description:
+    "Journey declaration schema per RFC-0018 In-Soul Journey Pattern. A journey is a temporally-ordered user flow within a Soul DID or Variant with named states, transitions, completion criteria, accessibility requirements, and success metrics. Journeys are scoring scopes — not a runtime workflow engine. Schema-enforced flat: journeys[] cannot contain nested journeys[] (OQ-3 resolution). Completion criteria closed enum: terminal-success-state | all-states-reached (OQ-4 resolution). Compliance floor must be 'inherit' when scope=variant (§5.3 bounded inheritance).",
+  type: 'object',
+  required: ['id', 'scope', 'states', 'transitions', 'completionCriteria', 'accessibility'],
+  additionalProperties: false,
+  properties: {
+    id: {
+      type: 'string',
+      pattern: '^[a-z][a-z0-9-]*$',
+      description:
+        'Journey identifier. Kebab-case, unique within parent scope (Soul DID or Variant). Used as the journey-id segment in targetedJourneys URI references.',
+      minLength: 2,
+      maxLength: 64,
+    },
+    scope: {
+      type: 'string',
+      pattern: '^(soul|variant:[a-z][a-z0-9-]*)$',
+      description:
+        "Whether this journey applies to the whole Soul ('soul') or a specific Variant ('variant:<id>'). Variant-scoped journeys MUST carry complianceFloor: 'inherit'.",
+    },
+    states: {
+      type: 'array',
+      description:
+        'Named states for this journey. At least 2 states required; at least 1 MUST have terminal: true AND successState: true.',
+      minItems: 2,
+      items: {
+        type: 'object',
+        required: ['id', 'terminal'],
+        additionalProperties: false,
+        properties: {
+          id: {
+            type: 'string',
+            pattern: '^[a-z][a-z0-9-]*$',
+            description:
+              "State identifier, kebab-case, unique within this journey. Referenced by substrate code and transition 'from'/'to' fields.",
+            minLength: 2,
+            maxLength: 64,
+          },
+          terminal: {
+            type: 'boolean',
+            description:
+              'Whether this state ends the journey flow. Terminal states MUST specify successState.',
+          },
+          successState: {
+            type: 'boolean',
+            description:
+              'Required when terminal=true. true = journey-success (the completion target); false = explicit failure-state (e.g. abandoned, error-timeout) — surfaces as an analytics signal.',
+          },
+        },
+      },
+    },
+    transitions: {
+      type: 'array',
+      description:
+        "State-to-state transitions. 'from' may be a single state id or an array (any-of). 'to' must be a single state id.",
+      minItems: 1,
+      items: {
+        type: 'object',
+        required: ['from', 'to', 'trigger'],
+        additionalProperties: false,
+        properties: {
+          from: {
+            oneOf: [
+              {
+                type: 'string',
+                description: 'Single originating state id.',
+              },
+              {
+                type: 'array',
+                description:
+                  'Any-of originating state ids (shorthand for multiple transitions sharing the same trigger and target).',
+                items: { type: 'string' },
+                minItems: 1,
+              },
+            ],
+          },
+          to: {
+            type: 'string',
+            description: 'Destination state id.',
+          },
+          trigger: {
+            type: 'string',
+            description:
+              "Event or action that drives this transition (e.g. 'user-signup', 'session-timeout-30d').",
+          },
+        },
+      },
+    },
+    completionCriteria: {
+      type: 'object',
+      description:
+        "How 'done' is defined for this journey. OQ-4 resolution: closed enum for v1 (terminal-success-state | all-states-reached). Future activation via Decision: journey-custom-predicate-activation-request (auto-promote at >=2 distinct adopter requests; future language: CEL).",
+      required: ['kind'],
+      additionalProperties: false,
+      properties: {
+        kind: {
+          type: 'string',
+          enum: ['terminal-success-state', 'all-states-reached'],
+          description:
+            "Completion kind. 'terminal-success-state' = reaching a state where terminal=true AND successState=true constitutes completion. 'all-states-reached' = all declared states must be visited at least once.",
+        },
+        target: {
+          type: 'string',
+          description:
+            "Required when kind='terminal-success-state'. The state id of the success terminal state.",
+        },
+      },
+    },
+    accessibility: {
+      type: 'object',
+      description:
+        'WCAG level, version, and conformance target for this journey. May set a HIGHER wcagLevel than the parent Soul/Variant (RFC-0018 §5.3). MUST NOT lower below parent.',
+      required: ['wcagLevel', 'wcagVersion', 'conformanceTarget'],
+      additionalProperties: false,
+      properties: {
+        wcagLevel: {
+          type: 'string',
+          enum: ['A', 'AA', 'AAA'],
+          description:
+            'Minimum WCAG conformance level. Journey may set higher than soul/variant default (e.g. AAA for regulatory-submission journey).',
+        },
+        wcagVersion: {
+          type: 'string',
+          enum: ['2.0', '2.1', '2.2', '3.0'],
+          description:
+            'WCAG specification version. Additive enum per OQ-7 resolution: existing journeys keep their declared version; new journeys can pick the latest. Declaration of 2.0 emits Decision: wcag-version-superseded (advisory, no scoring impact).',
+        },
+        conformanceTarget: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description:
+            'Percentage of WCAG criteria that must pass for this journey. Assumes binary conformance model (WCAG 2.x). WCAG 3.0 may require a scoringModel discriminant in a future RFC (OQ-7 forward-compat note).',
+        },
+        auditCadence: {
+          type: 'string',
+          enum: ['quarterly', 'annually', 'release-gated', 'continuous'],
+          description:
+            'Required audit frequency. Overdue audits trigger graduated Eρ₅ degradation per OQ-6 resolution: 0-30d warn → 30-60d -25% → 60-90d -50% → 90d+ effective-block. Per-Soul config (accessibility.auditOverdueGracePolicy) can select stricter modes (binary-30d, hard-block) for SOC2/HIPAA shops.',
+        },
+      },
+    },
+    successMetrics: {
+      type: 'array',
+      description:
+        'Quantified success signals at journey scope. Feeds Sα₂ + Cκ scoring — Cκ boosts work that addresses this journey when completion-rate is below alertBelow threshold.',
+      items: {
+        type: 'object',
+        required: ['id'],
+        additionalProperties: false,
+        properties: {
+          id: {
+            type: 'string',
+            description:
+              "Metric identifier (e.g. 'completion-rate', 'median-time-to-first-task-done').",
+          },
+          target: {
+            type: 'number',
+            description: 'Target metric value (e.g. 0.65 for 65% completion rate).',
+          },
+          alertBelow: {
+            type: 'number',
+            description:
+              'When the metric falls below this value, Cκ scoring is boosted for work targeting this journey.',
+          },
+          alertAbove: {
+            type: 'number',
+            description:
+              'When the metric rises above this value (for time-based metrics), Cκ scoring is boosted.',
+          },
+          targetSeconds: {
+            type: 'number',
+            minimum: 0,
+            description: 'For time-based metrics: target duration in seconds.',
+          },
+        },
+      },
+    },
+    designImperatives: {
+      type: 'array',
+      description:
+        'Journey-scoped Sα₂ inputs layered on soul + variant level per most-specific-wins (journey > variant > soul). Feeds Vibe Coherence scoring at journey scope.',
+      items: { type: 'string' },
+    },
+    complianceFloor: {
+      type: 'string',
+      const: 'inherit',
+      description:
+        "Required when scope=variant. MUST be 'inherit' — journeys cannot diverge from parent compliance regime (RFC-0018 §5.3 bounded inheritance). Schema validation rejects any other value.",
     },
   },
 } as const;
@@ -7460,6 +8039,17 @@ export const workItemSchema = {
           "Path-style variant URI per RFC-0017 OQ-6: 'did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}'. The explicit 'variant:' keyword preserves the parent/child hierarchy and composes with future RFC-0018 Journey partition types.",
       },
     },
+    targetedJourneys: {
+      type: 'array',
+      description:
+        "Journey references this work item targets per RFC-0018 §5.4 / §6.1. When non-empty, admission scoring routes Sα₂ + Cκ + Eρ₅ through journey-level design intent + success metrics. Two URI forms: soul-scoped '<soul-id>/<journey-id>' or variant-scoped '<soul-id>/<variant-id>/<journey-id>'. Empty or absent = soul/variant-aggregate scoring (backward-compatible with RFC-0009 + RFC-0017 baseline).",
+      items: {
+        type: 'string',
+        pattern: '^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$',
+        description:
+          "Path-style journey URI per RFC-0018 §6.1: '<soul-id>/<journey-id>' (soul-scoped) OR '<soul-id>/<variant-id>/<journey-id>' (variant-scoped). All segments are kebab-case. Examples: 'spry-engage/onboarding', 'spry-engage/annual-test/backflow-submit'.",
+      },
+    },
   },
   additionalProperties: true,
 } as const;
@@ -7568,6 +8158,8 @@ export const SCHEMAS: Record<string, object> = {
   'dispatch-verdict.v1.schema.json': dispatchVerdictV1Schema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
   'embedding-adapter.v1.schema.json': embeddingAdapterV1Schema,
+  'journey-config.v1.schema.json': journeyConfigV1Schema,
+  'journey.v1.schema.json': journeyV1Schema,
   'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
