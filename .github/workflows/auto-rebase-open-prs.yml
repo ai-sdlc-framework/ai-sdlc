@@ -75,7 +75,7 @@ jobs:
           # Skip unless branch protection still requires up-to-date.
           STRICT=$(gh api "repos/$REPO/branches/main/protection/required_status_checks" --jq '.strict' 2>/dev/null || echo "false")
           if [ "$STRICT" != "true" ]; then
-            echo "branch protection strict=$STRICT — skipping proactive rebase (AISDLC-495 / DEC-0010 trunk-based posture)."
+            echo "branch protection strict=$STRICT — skipping proactive rebase (trunk-based posture: open PRs are not auto-rebased onto main unless up-to-date is required)."
             exit 0
           fi
 
