@@ -2,7 +2,7 @@
   "schemaVersion": "v6",
   "subject": {
     "digest": {
-      "sha1": "773a63d9ae5f2168c3219e18ca7bbc8922eb1463"
+      "sha1": "fb1e16d79a6d682142f9024ee70651538c201691"
     }
   },
   "transcriptLeaves": [
@@ -26,29 +26,29 @@
     {
       "leafIndex": 0,
       "proof": [
-        "1da0260be427c564013bd5d44959534416b5eb4997acf26d4f425e2c67402e28",
-        "834f71a9b5d0ebb5f2db6bd0258005cbbde5c101d41a8242855dfb5b53c17e59"
+        "a5d0428d364fe69699695e8d1f8db5e287aacd9a99ff9174df95d385a3b131d3",
+        "b96b3c4fcc9216f9f05b30c753f48cb938077fbd25cf0acfa106215593bdf512"
       ]
     },
     {
       "leafIndex": 1,
       "proof": [
-        "8392914e7c70559600542638b084bceacabbaeb201908986f9738b513f4076d7",
-        "834f71a9b5d0ebb5f2db6bd0258005cbbde5c101d41a8242855dfb5b53c17e59"
+        "53d5a363182d6b3ff4b13c5a4bd6c58c22a622d0e44387360198cf6b85e05794",
+        "b96b3c4fcc9216f9f05b30c753f48cb938077fbd25cf0acfa106215593bdf512"
       ]
     },
     {
       "leafIndex": 2,
       "proof": [
-        "9f88f6ef5230a69354177bc41c45d9f5f953d677590808f927d31683d401678c",
-        "b3496f74c41af143cd00f479f8e01e221f9a1281ceacdf3cd3b8d2384a3526a6"
+        "ec9586763c182dfe6130c95cb3272480068076271779f089304dbc067dedce17",
+        "f3c2a214510a593bbe5b08167c93a1880a293d737e890f4baadde9818c3133f9"
       ]
     }
   ],
-  "rootHash": "ab9acac00c382593eeb95f6d5f666602faa064c4aceee6906c4164a89f30c6af",
-  "rootSignature": "RuLgxdH2efYUEsTCSr4pZHpjG3Zy2nbh8JA6KSL76RtajwBkv1JMyeHvauv9NC9f1jaEVQnsdj3LlkdpprECCA==",
-  "nonce": "1d061980ab057db1a6d54f2e205b099541784eb247c21bfc719fdcecdddb42eb",
+  "rootHash": "ff70cf7605212dfe321ce039ca2a2ede3c312aa0225c3060ea0db0c23e6474e7",
+  "rootSignature": "so3kI6FHRZ/1TOIy18CKjoQLl43lkYHj1RMFNfB+ci8NjG2d1ahhWU92+0vsGeTfMax5mKuPxY5QOQW3mjeBCw==",
+  "nonce": "6b2200281f59131be4f2e75453a9912964e05c73c8ab23da166866481871c3d2",
   "leafCount": 3,
-  "signedAt": "2026-06-02T17:25:12.265Z",
+  "signedAt": "2026-06-02T20:18:46.123Z",
   "signerIdentity": "dominique@local:doms-macbook"
 }
