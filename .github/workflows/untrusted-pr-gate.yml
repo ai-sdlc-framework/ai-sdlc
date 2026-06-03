@@ -148,12 +148,15 @@ jobs:
           # Stage 0: deterministic trust classification.
           # Static .ai-sdlc/trusted-reviewers.yaml is the ONLY trust source (OQ-1 resolution).
           # No live GitHub API queries on the critical path.
+          # MAJOR fix #6: capture ONLY stdout for the trust value; route stderr to log,
+          # not into the output var (2>&1 was polluting GITHUB_OUTPUT with multi-line JSON).
           TRUST=$(node pipeline-cli/bin/cli-ucvg.mjs classify \
             --author "$PR_AUTHOR" \
             --is-fork "$PR_IS_FORK" \
             --work-dir . \
-            2>&1)
+            2>/tmp/classify-stderr.log)
           TRUST_CODE=$?
+          cat /tmp/classify-stderr.log >&2
           echo "trust=$TRUST" >> "$GITHUB_OUTPUT"
           echo "[stage-0] author=$PR_AUTHOR is_fork=$PR_IS_FORK trust=$TRUST"
           if [[ $TRUST_CODE -ne 0 ]]; then
@@ -178,21 +181,25 @@ jobs:
           # Stage 1: run the AST gate on the PR diff.
           # Diff is computed from git objects — no fork code executed (fork-PR safety guard #2).
           # pr-content/ was checked out read-only; we compute the diff via git.
+          # CRITICAL fix #1: feed changed paths to CLI via stdin (pipe), NOT via process
+          # substitution (<(echo "$DIFF")) which produces a /dev/fd/<N> arg that the CLI
+          # ignores — the CLI reads changed paths from stdin, not from --changed-files flag.
           git -C pr-content fetch --unshallow 2>/dev/null || true
-          DIFF=$(git -C pr-content diff "$PR_BASE_SHA".."$PR_HEAD_SHA" --name-only 2>/dev/null || \
-                 git -C pr-content diff HEAD~1..HEAD --name-only 2>/dev/null || echo "")
+          CHANGED_FILES=$(git -C pr-content diff "$PR_BASE_SHA".."$PR_HEAD_SHA" --name-only 2>/dev/null || \
+                          git -C pr-content diff HEAD~1..HEAD --name-only 2>/dev/null || echo "")
 
-          OUTCOME=$(node pipeline-cli/bin/cli-ucvg.mjs ast-gate \
+          # Pipe the changed file list to stdin; capture only stdout for JSON parsing.
+          AST_OUTPUT=$(printf '%s\n' "$CHANGED_FILES" | node pipeline-cli/bin/cli-ucvg.mjs ast-gate \
             --pr-number "$PR_NUMBER" \
             --author "$PR_AUTHOR" \
-            --changed-files <(echo "$DIFF") \
             --work-dir . \
-            2>&1)
+            2>/tmp/ast-gate-stderr.log)
           AST_CODE=$?
+          cat /tmp/ast-gate-stderr.log >&2
 
           # Parse outcome from the CLI output (last line = JSON result)
-          GATE_OUTCOME=$(echo "$OUTCOME" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('outcome','abort-protected-path'))" 2>/dev/null || echo "abort-protected-path")
-          OFFENDING=$(echo "$OUTCOME" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('offendingPaths',[])))" 2>/dev/null || echo "")
+          GATE_OUTCOME=$(echo "$AST_OUTPUT" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('outcome','abort-protected-path'))" 2>/dev/null || echo "abort-protected-path")
+          OFFENDING=$(echo "$AST_OUTPUT" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('offendingPaths',[])))" 2>/dev/null || echo "")
 
           echo "outcome=$GATE_OUTCOME" >> "$GITHUB_OUTPUT"
           echo "offending_paths=$OFFENDING" >> "$GITHUB_OUTPUT"
@@ -387,6 +394,19 @@ jobs:
             echo "[stage-2] WARNING: sandbox exited without producing a report artifact"
           fi
 
+      # CRITICAL fix #2 — cross-runner artifact transfer:
+      # sandbox-and-review writes the unsigned report to its LOCAL runner filesystem;
+      # clean-room-sign runs on a SEPARATE runner and cannot read that path.
+      # Upload here; clean-room-sign job downloads before signing.
+      - name: Upload unsigned report artifact (for clean-room-sign cross-runner transfer)
+        if: steps.sandbox.outputs.report_artifact != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ucvg-unsigned-report-${{ github.event.pull_request.number }}
+          path: ${{ steps.sandbox.outputs.report_artifact }}
+          retention-days: 1
+          if-no-files-found: warn
+
       - name: Stage 2 degraded — Local deployment mode (hand off to maintainer)
         if: >
           steps.check-sandbox.outputs.available == 'true' &&
@@ -401,26 +421,48 @@ jobs:
           echo "[stage-2] Run: node pipeline-cli/bin/cli-ucvg.mjs local-review --pr $PR_NUMBER"
           echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
 
-      - name: Stage 3 degraded — Static-diff review only (no sandbox)
+      # CRITICAL fix #3 (fail-closed degradation): when OpenShell is unavailable,
+      # we must NOT proceed to signing/success. Post a failure status + label and exit 1
+      # so this job fails and clean-room-sign cannot run.
+      - name: Stage 2/3 degraded — BLOCK (fail-closed when OpenShell unavailable)
         if: steps.check-sandbox.outputs.degraded == 'true'
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          # Degradation path: Stage 3 reviewers run in degraded mode (static-diff review only).
-          # No differential testing; reviewers run with existing credential model (not sandbox-isolated).
-          # Stage 0+1 deterministic gates already ran — the hardened AST gate provides the primary defense.
-          echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
-          node pipeline-cli/bin/cli-ucvg.mjs review-degraded \
-            --pr-number "$PR_NUMBER" \
-            --head-sha "$PR_HEAD_SHA" \
-            --base-sha "$PR_BASE_SHA" \
-            --pr-content-dir ./pr-content \
-            --work-dir . \
-            --output-dir .ai-sdlc/ucvg/reports \
-            2>&1 || echo "[stage-3-degraded] static review completed (exit code non-zero; check logs)"
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            // Fail-closed degradation: OpenShell unavailable → gate MUST block.
+            // Never auto-pass an untrusted PR when the sandbox cannot run.
+            // Per RFC-0043 §Degradation path: degradation blocks, not degrades to green.
+            const prNumber = context.payload.pull_request.number;
+            const headSha = context.payload.pull_request.head.sha;
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['needs-maintainer-review'],
+              });
+            } catch (e) {
+              console.log(`Warning: could not add label needs-maintainer-review: ${e.message}`);
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: headSha,
+              state: 'failure',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Blocked: OpenShell sandbox unavailable — maintainer review required',
+            });
+
+            // Throw so the job fails and clean-room-sign cannot run (needs: result == 'success').
+            throw new Error(
+              '[stage-2] FAIL-CLOSED: OpenShell sandbox unavailable. ' +
+              'Untrusted PR cannot be auto-approved during degradation. ' +
+              'A maintainer must review this PR manually. ' +
+              'Label needs-maintainer-review has been applied.'
+            );
 
   # ────────────────────────────────────────────────────────────────────────────
   # Stage 4: Clean-Room Attestation
@@ -460,23 +502,32 @@ jobs:
       - name: Build pipeline-cli
         run: pnpm --filter @ai-sdlc/pipeline-cli build
 
+      # CRITICAL fix #2 — cross-runner artifact download:
+      # The unsigned report was produced on the sandbox-and-review runner's local FS.
+      # Download it here so the clean-room signer can read it.
+      - name: Download unsigned report artifact (cross-runner transfer from sandbox-and-review)
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8cef8384b0fb # v4
+        with:
+          name: ucvg-unsigned-report-${{ github.event.pull_request.number }}
+          path: .ai-sdlc/ucvg/reports/
+
       - name: Stage 4 — Clean-room sign (Zod-validate + RFC-0042 v6 Merkle attestation)
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPORT_ARTIFACT: ${{ needs.sandbox-and-review.outputs.report_artifact }}
           # The signing key is available ONLY in this job — the clean room.
           # It was NEVER present in the sandbox-and-review job (Stages 2-3).
           # This is the trust boundary RFC-0043 §Stage 4 formalizes.
           AISDLC_SIGNING_KEY_PATH: ${{ secrets.AISDLC_SIGNING_KEY_PATH }}
         run: |
           # Stage 4: clean-room signer.
-          # 1. Reads the unsigned report artifact from Stages 2-3.
+          # 1. Reads the unsigned report artifact (downloaded from sandbox-and-review job).
           # 2. Zod-validates against UntrustedPrReportSchema (BEFORE key is touched).
-          # 3. Builds RFC-0042 v6 Merkle tree from committed transcript leaves.
-          # 4. Signs Merkle root with operator ed25519 key.
-          # 5. Writes .ai-sdlc/attestations/<patchId>.v6.dsse.json
-          REPORT="${REPORT_ARTIFACT:-.ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json}"
+          # 3. Checks approval: refuses to sign if consensus.approved !== true (CRITICAL fix #4).
+          # 4. Builds RFC-0042 v6 Merkle tree from committed transcript leaves.
+          # 5. Signs Merkle root with operator ed25519 key.
+          # 6. Writes .ai-sdlc/attestations/<patchId>.v6.dsse.json
+          REPORT=".ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json"
           node pipeline-cli/bin/cli-ucvg.mjs clean-room-sign \
             --report-path "$REPORT" \
             --pr-number "$PR_NUMBER" \
@@ -484,12 +535,35 @@ jobs:
             --work-dir . \
             2>&1
 
+      # MINOR fix #8 (defense-in-depth): assert consensus.approved===true before posting success.
+      # Belt-and-suspenders with the signer's approval check (CRITICAL fix #4).
       - name: Post gate success status
         if: success()
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           github-token: ${{ github.token }}
           script: |
+            const prNumber = parseInt(process.env.PR_NUMBER, 10);
+            const fs = require('fs');
+            const reportPath = `.ai-sdlc/ucvg/reports/${prNumber}.unsigned.json`;
+
+            // Defense-in-depth: verify consensus.approved === true before posting success.
+            // The signer already checked this, but belt-and-suspenders here.
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            } catch (e) {
+              throw new Error(`Cannot read report to verify consensus.approved: ${e.message}`);
+            }
+            if (report.consensus?.approved !== true) {
+              throw new Error(
+                `[stage-4] consensus.approved is not true — refusing to post success status. ` +
+                `Report consensus: ${JSON.stringify(report.consensus)}`
+              );
+            }
+
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -501,7 +575,7 @@ jobs:
 
       - name: Post gate failure status
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           github-token: ${{ github.token }}
           script: |
@@ -512,6 +586,64 @@ jobs:
               state: 'failure',
               context: 'ai-sdlc/untrusted-pr-gate',
               description: 'Failed: clean-room attestation could not complete',
+            });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # MAJOR fix #5 — Fail-closed status watchdog: always posts failure when any
+  # pipeline job failed or was skipped due to an upstream failure.
+  # Without this, a classify-and-gate install/build crash leaves NO status posted
+  # and the gate is silently absent (fail-open at the workflow level).
+  # This job ALWAYS runs (if: always()) so it catches every upstream failure path.
+  # ────────────────────────────────────────────────────────────────────────────
+  gate-failure-watchdog:
+    name: 'UCVG: pipeline failure watchdog (always runs)'
+    needs: [classify-and-gate, sandbox-and-review, clean-room-sign]
+    if: >
+      always() &&
+      needs.classify-and-gate.outputs.flag_on == 'true' &&
+      needs.classify-and-gate.outputs.trust != 'trusted' &&
+      (
+        needs.classify-and-gate.result == 'failure' ||
+        needs.sandbox-and-review.result == 'failure' ||
+        needs.clean-room-sign.result == 'failure' ||
+        needs.sandbox-and-review.result == 'cancelled' ||
+        needs.clean-room-sign.result == 'cancelled'
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      issues: write
+
+    steps:
+      - name: Post failure status and label (pipeline failure — fail-closed)
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            // One or more pipeline jobs failed — gate must be BLOCKED, not absent.
+            // Post a failure status and apply needs-maintainer-review so operators
+            // are aware the gate did not complete successfully.
+            const headSha = context.payload.pull_request.head.sha;
+            const prNumber = context.payload.pull_request.number;
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: ['needs-maintainer-review'],
+              });
+            } catch (e) {
+              console.log(`Warning: could not add label needs-maintainer-review: ${e.message}`);
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: headSha,
+              state: 'failure',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Failed: UCVG pipeline error — maintainer review required',
             });
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -527,7 +659,7 @@ jobs:
 
     steps:
       - name: Post skipped status (flag off)
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           github-token: ${{ github.token }}
           script: |
@@ -557,7 +689,7 @@ jobs:
 
     steps:
       - name: Post skipped status (trusted author)
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           github-token: ${{ github.token }}
           script: |

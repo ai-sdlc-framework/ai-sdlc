@@ -550,6 +550,270 @@ describe('AC#11 — Stage 1 blocks protected-path mutations (zero LLM, zero sand
   });
 });
 
+// ── CRITICAL fix #1: Stage 1 stdin wiring (not process-substitution) ──────────
+
+describe('CRITICAL fix #1 — Stage 1 ast-gate fed via stdin pipe (not process substitution)', () => {
+  it('Stage 1 step does NOT use <() process substitution for --changed-files', () => {
+    // Process substitution <(echo "$DIFF") passes a /dev/fd/<N> path which the CLI
+    // ignores (the CLI reads from stdin, not --changed-files). The fix pipes the
+    // changed-file list via printf '%s\n' "$CHANGED_FILES" | node cli-ucvg.mjs ast-gate
+    const stage1Steps = allSteps(wf).filter(
+      ({ step }) =>
+        typeof step.name === 'string' && /stage.?1.*ast.gate|ast.gate.*stage.?1/i.test(step.name),
+    );
+    assert.ok(stage1Steps.length > 0, `${WORKFLOW_NAME} must have a Stage 1 ast-gate step`);
+    for (const { step } of stage1Steps) {
+      const run = String(step.run ?? '');
+      assert.doesNotMatch(
+        run,
+        /--changed-files\s+<\(/,
+        `Stage 1 ast-gate step MUST NOT pass --changed-files <(echo "...") — ` +
+          `use printf | node cli-ucvg.mjs ast-gate (stdin pipe) instead`,
+      );
+    }
+  });
+
+  it('Stage 1 step uses printf or similar to pipe changed files to stdin', () => {
+    const stage1Steps = allSteps(wf).filter(
+      ({ step }) =>
+        typeof step.name === 'string' && /stage.?1.*ast.gate|ast.gate.*stage.?1/i.test(step.name),
+    );
+    const allStepsRaw = stage1Steps.map(({ step }) => String(step.run ?? '')).join('\n');
+    const hasStdinPipe =
+      /printf.*\|\s*node.*ast-gate/.test(allStepsRaw) ||
+      /CHANGED_FILES.*\|\s*node.*ast-gate/.test(allStepsRaw) ||
+      /\|\s*node pipeline-cli\/bin\/cli-ucvg\.mjs\s+ast-gate/.test(allStepsRaw);
+    assert.ok(
+      hasStdinPipe,
+      `Stage 1 must pipe changed file list to stdin of cli-ucvg.mjs ast-gate ` +
+        `(printf '%s\n' "$CHANGED_FILES" | node ... ast-gate)`,
+    );
+  });
+});
+
+// ── CRITICAL fix #2: Report artifact cross-runner transfer ────────────────────
+
+describe('CRITICAL fix #2 — Report artifact upload/download for cross-runner transfer', () => {
+  it('sandbox-and-review job has an upload-artifact step', () => {
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    const steps = sandboxJob?.steps ?? [];
+    const hasUpload = steps.some(
+      (s) => typeof s.uses === 'string' && s.uses.includes('upload-artifact'),
+    );
+    assert.ok(
+      hasUpload,
+      `sandbox-and-review must have an actions/upload-artifact step to transfer the ` +
+        `unsigned report to the clean-room-sign runner (CRITICAL fix #2)`,
+    );
+  });
+
+  it('clean-room-sign job has a download-artifact step', () => {
+    const signJob = wf.jobs?.['clean-room-sign'];
+    const steps = signJob?.steps ?? [];
+    const hasDownload = steps.some(
+      (s) => typeof s.uses === 'string' && s.uses.includes('download-artifact'),
+    );
+    assert.ok(
+      hasDownload,
+      `clean-room-sign must have an actions/download-artifact step to receive the ` +
+        `unsigned report from the sandbox-and-review runner (CRITICAL fix #2)`,
+    );
+  });
+
+  it('upload-artifact step is pinned by SHA (not floating tag)', () => {
+    const allJobSteps = allSteps(wf);
+    const uploadSteps = allJobSteps.filter(
+      ({ step }) => typeof step.uses === 'string' && step.uses.includes('upload-artifact@'),
+    );
+    for (const { step } of uploadSteps) {
+      assert.match(
+        String(step.uses),
+        /upload-artifact@[0-9a-f]{40}/,
+        `upload-artifact must be pinned by full commit SHA (not v4 floating tag) — ` +
+          `found: ${step.uses}`,
+      );
+    }
+  });
+
+  it('download-artifact step is pinned by SHA (not floating tag)', () => {
+    const allJobSteps = allSteps(wf);
+    const downloadSteps = allJobSteps.filter(
+      ({ step }) => typeof step.uses === 'string' && step.uses.includes('download-artifact@'),
+    );
+    for (const { step } of downloadSteps) {
+      assert.match(
+        String(step.uses),
+        /download-artifact@[0-9a-f]{40}/,
+        `download-artifact must be pinned by full commit SHA (not v4 floating tag) — ` +
+          `found: ${step.uses}`,
+      );
+    }
+  });
+});
+
+// ── CRITICAL fix #3: Degradation BLOCKS (fail-closed) ────────────────────────
+
+describe('CRITICAL fix #3 — Degradation path blocks (fail-closed, never green)', () => {
+  it('sandbox-and-review has a degradation-block step (fail-closed guard)', () => {
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    const steps = sandboxJob?.steps ?? [];
+    const hasBlockStep = steps.some(
+      (s) =>
+        (typeof s.name === 'string' && /block|fail.closed|BLOCK/i.test(s.name)) ||
+        (typeof s.run === 'string' && /fail.closed|FAIL.CLOSED/i.test(s.run)) ||
+        (typeof s.with?.script === 'string' && /throw.*Error|FAIL.CLOSED/i.test(s.with.script)),
+    );
+    assert.ok(
+      hasBlockStep,
+      `sandbox-and-review must have a fail-closed step that blocks when OpenShell is unavailable ` +
+        `(CRITICAL fix #3: degradation must never produce a green status)`,
+    );
+  });
+
+  it('degradation block step throws / exits non-zero so job fails', () => {
+    // Verify the block step uses throw new Error or exit 1 (not just echo)
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    const steps = sandboxJob?.steps ?? [];
+    const blockStep = steps.find(
+      (s) => typeof s.name === 'string' && /block|fail.closed/i.test(s.name),
+    );
+    if (!blockStep) {
+      // Check the workflow raw text for the throw/exit pattern
+      assert.match(
+        raw,
+        /throw new Error|exit 1/,
+        `degradation block step must throw new Error or exit 1 so the job fails and ` +
+          `clean-room-sign (needs: sandbox-and-review result == success) cannot run`,
+      );
+      return;
+    }
+    const script = String(blockStep.with?.script ?? blockStep.run ?? '');
+    const hasFailSignal =
+      /throw new Error/.test(script) || /\bexit 1\b/.test(script) || /throw new Error/.test(raw);
+    assert.ok(
+      hasFailSignal,
+      `degradation block step must throw new Error so the job fails ` +
+        `(CRITICAL fix #3: clean-room-sign must not run after degradation)`,
+    );
+  });
+
+  it('degradation block posts failure status (not success)', () => {
+    assert.match(
+      raw,
+      /Blocked.*OpenShell|OpenShell.*unavailable/,
+      `degradation block step must post a failure status describing the OpenShell unavailability`,
+    );
+  });
+});
+
+// ── MAJOR fix #5: Always-post-failure watchdog job ────────────────────────────
+
+describe('MAJOR fix #5 — gate-failure-watchdog job (always posts failure on pipeline error)', () => {
+  it('workflow has a gate-failure-watchdog job', () => {
+    assert.ok(
+      'gate-failure-watchdog' in (wf.jobs ?? {}),
+      `${WORKFLOW_NAME} must have a 'gate-failure-watchdog' job (MAJOR fix #5) ` +
+        `to post failure status when any pipeline job fails`,
+    );
+  });
+
+  it('gate-failure-watchdog uses if: always()', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const cond = String(watchdogJob?.if ?? '');
+    assert.match(
+      cond,
+      /always\(\)/,
+      `gate-failure-watchdog must use 'if: always()' so it runs even when upstream jobs fail`,
+    );
+  });
+
+  it('gate-failure-watchdog depends on classify-and-gate', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const needs = Array.isArray(watchdogJob?.needs) ? watchdogJob.needs : [watchdogJob?.needs];
+    assert.ok(
+      needs.includes('classify-and-gate'),
+      `gate-failure-watchdog must need classify-and-gate to catch Stage 0/1 failures`,
+    );
+  });
+
+  it('gate-failure-watchdog depends on sandbox-and-review', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const needs = Array.isArray(watchdogJob?.needs) ? watchdogJob.needs : [watchdogJob?.needs];
+    assert.ok(
+      needs.includes('sandbox-and-review'),
+      `gate-failure-watchdog must need sandbox-and-review to catch Stage 2/3 failures`,
+    );
+  });
+
+  it('gate-failure-watchdog posts ai-sdlc/untrusted-pr-gate: failure', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const steps = watchdogJob?.steps ?? [];
+    const scriptText = steps.map((s) => String(s.with?.script ?? s.run ?? '')).join('\n');
+    assert.match(
+      scriptText,
+      /state.*failure|failure.*state/,
+      `gate-failure-watchdog must post a 'failure' commit status`,
+    );
+  });
+
+  it('gate-failure-watchdog applies needs-maintainer-review label', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const steps = watchdogJob?.steps ?? [];
+    const scriptText = steps.map((s) => String(s.with?.script ?? s.run ?? '')).join('\n');
+    assert.match(
+      scriptText,
+      /needs-maintainer-review/,
+      `gate-failure-watchdog must apply the needs-maintainer-review label on pipeline failure`,
+    );
+  });
+});
+
+// ── MAJOR fix #6: classify stdout-only for GITHUB_OUTPUT ─────────────────────
+
+describe('MAJOR fix #6 — classify captures ONLY stdout for trust= output', () => {
+  it('Stage 0 classify step routes stderr to log file (not to var with 2>&1)', () => {
+    const classifySteps = allSteps(wf).filter(
+      ({ step }) =>
+        typeof step.name === 'string' && /stage.?0.*classif|classif.*stage.?0/i.test(step.name),
+    );
+    for (const { step } of classifySteps) {
+      const run = String(step.run ?? '');
+      if (!run.includes('cli-ucvg')) continue;
+      // Must NOT use 2>&1 when capturing the TRUST variable
+      assert.doesNotMatch(
+        run,
+        /TRUST=\$\(.*2>&1\)/s,
+        `Stage 0 classify step MUST NOT use 2>&1 when capturing TRUST — ` +
+          `stderr JSON pollutes GITHUB_OUTPUT (MAJOR fix #6)`,
+      );
+      // Must redirect stderr separately (2>/dev/null or 2>/tmp/*)
+      assert.match(
+        run,
+        /2>\/dev\/null|2>\/tmp\//,
+        `Stage 0 classify step must route stderr separately (2>/dev/null or 2>/tmp/<file>) ` +
+          `so only stdout reaches the TRUST variable (MAJOR fix #6)`,
+      );
+    }
+  });
+});
+
+// ── MINOR fix #8: success status asserts consensus.approved ──────────────────
+
+describe('MINOR fix #8 — post-success step asserts consensus.approved===true', () => {
+  it('clean-room-sign success step reads report and checks consensus.approved', () => {
+    const signJob = wf.jobs?.['clean-room-sign'];
+    const steps = signJob?.steps ?? [];
+    const successSteps = steps.filter((s) => typeof s.name === 'string' && /success/i.test(s.name));
+    const allScripts = successSteps.map((s) => String(s.with?.script ?? '')).join('\n');
+    assert.match(
+      allScripts,
+      /consensus.*approved|approved.*consensus/,
+      `clean-room-sign success step must verify consensus.approved === true ` +
+        `before posting success (MINOR fix #8 — belt-and-suspenders)`,
+    );
+  });
+});
+
 // ── Adopter-facing string hygiene ─────────────────────────────────────────────
 
 describe('Adopter-facing string hygiene — no AISDLC-NNN in non-comment lines', () => {

@@ -167,7 +167,13 @@ export interface CleanRoomSignerSuccess {
  */
 export interface CleanRoomSignerFailure {
   success: false;
-  phase: 'isolation-check' | 'artifact-read' | 'zod-validation' | 'key-resolution' | 'signing';
+  phase:
+    | 'isolation-check'
+    | 'artifact-read'
+    | 'zod-validation'
+    | 'consensus-rejected'
+    | 'key-resolution'
+    | 'signing';
   error: string;
 }
 
@@ -258,6 +264,48 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
         `match opts.headSha='${headSha}'. The report artifact was produced for a different ` +
         `commit. Regenerate the report for the correct HEAD.`,
     };
+  }
+
+  // ── Step 3c: Approval gate (CRITICAL fix #4) ────────────────────────────────
+  // The signer MUST refuse to sign reports that are not approved.
+  // Checking here (before key resolution) preserves the Zod-before-key invariant:
+  // the key is never touched for unapproved, injection-flagged, or disapproved reports.
+  //
+  // Conditions that MUST prevent signing:
+  //   (a) consensus.approved !== true — overall gate not met
+  //   (b) any reviewers.*.approved === false — at least one reviewer rejected
+  //   (c) any reviewers.*.promptInjectionDetected === true — injection detected
+  if (report.consensus.approved !== true) {
+    return {
+      success: false,
+      phase: 'consensus-rejected',
+      error:
+        `[clean-room-signer] Signing refused: consensus.approved is not true ` +
+        `(value: ${String(report.consensus.approved)}). Only fully-approved reports may be signed.`,
+    };
+  }
+
+  const reviewerNames = ['code', 'test', 'security'] as const;
+  for (const name of reviewerNames) {
+    const reviewer = report.reviewers[name];
+    if (reviewer.approved === false) {
+      return {
+        success: false,
+        phase: 'consensus-rejected',
+        error:
+          `[clean-room-signer] Signing refused: reviewer '${name}' approved === false. ` +
+          `All reviewers must approve before the report can be signed.`,
+      };
+    }
+    if (reviewer.promptInjectionDetected === true) {
+      return {
+        success: false,
+        phase: 'consensus-rejected',
+        error:
+          `[clean-room-signer] Signing refused: reviewer '${name}' detected prompt injection ` +
+          `(promptInjectionDetected === true). Signing is forbidden when injection is detected.`,
+      };
+    }
   }
 
   // ── Step 4: Key resolution ───────────────────────────────────────────────────

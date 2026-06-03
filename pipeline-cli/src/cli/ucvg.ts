@@ -201,11 +201,13 @@ async function runSandboxAndReview(args: {
   const prDiff = computePrDiff(args.prContentDir, args.baseSha, args.headSha);
 
   // Run Stage 2 differential testing inside the OpenShell sandbox.
+  // MAJOR fix #7: upstreamMainRef must be baseSha (the target-branch base), NOT headSha.
+  // Differential testing compares PR head against the target-branch base, not itself.
   process.stderr.write('[stage-2] running differential tests in OpenShell sandbox...\n');
   const sandboxResult = await runSandbox({
     prNumber: args.prNumber,
     prDiff,
-    upstreamMainRef: args.headSha,
+    upstreamMainRef: args.baseSha,
     config: sandboxConfig,
     workDir: args.workDir,
   });

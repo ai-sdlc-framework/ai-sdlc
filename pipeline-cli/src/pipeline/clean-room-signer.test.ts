@@ -784,6 +784,132 @@ describe('runCleanRoomSigner — v6 verifier integration (finding #2)', () => {
   });
 });
 
+// ── CRITICAL fix #4 — Approval gate: signer refuses unapproved reports ───────
+
+describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
+  let tmpDir: string;
+  let origSigningKeyPath: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
+    // Point to a non-existent key so we stop at consensus-rejected before key-resolution
+    process.env['AISDLC_SIGNING_KEY_PATH'] = join(tmpDir, 'no-key.pem');
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (origSigningKeyPath !== undefined) {
+      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
+    } else {
+      delete process.env['AISDLC_SIGNING_KEY_PATH'];
+    }
+  });
+
+  it('refuses to sign when consensus.approved === false', () => {
+    const unapprovedReport: UntrustedPrReport = {
+      ...VALID_REPORT,
+      consensus: { approved: false, blockingFindings: 2 },
+    };
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, unapprovedReport);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-501',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Expected failure');
+    expect(result.phase).toBe('consensus-rejected');
+    expect(result.error).toContain('[clean-room-signer]');
+    expect(result.error).toContain('consensus.approved');
+    // Must fail BEFORE key-resolution (approval check is before key touch)
+    expect(result.phase).not.toBe('key-resolution');
+    expect(result.phase).not.toBe('signing');
+  });
+
+  it('refuses to sign when any reviewer.approved === false', () => {
+    const rejectedByCodeReview: UntrustedPrReport = {
+      ...VALID_REPORT,
+      reviewers: {
+        ...VALID_REPORT.reviewers,
+        code: {
+          approved: false,
+          findings: [{ severity: 'critical', message: 'injection risk' }],
+          promptInjectionDetected: false,
+        },
+      },
+      // Note: consensus.approved is still true in VALID_REPORT — this tests that
+      // the signer checks individual reviewer approvals, not only the consensus field.
+    };
+    const reportPath = join(tmpDir, 'report-code-rejected.json');
+    writeJson(reportPath, rejectedByCodeReview);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-501',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Expected failure');
+    expect(result.phase).toBe('consensus-rejected');
+    expect(result.error).toContain('code');
+    expect(result.error).toContain('approved === false');
+  });
+
+  it('refuses to sign when promptInjectionDetected === true (any reviewer)', () => {
+    const injectionFlagged: UntrustedPrReport = {
+      ...VALID_REPORT,
+      reviewers: {
+        ...VALID_REPORT.reviewers,
+        security: { approved: true, findings: [], promptInjectionDetected: true },
+      },
+    };
+    const reportPath = join(tmpDir, 'report-injection.json');
+    writeJson(reportPath, injectionFlagged);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-501',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Expected failure');
+    expect(result.phase).toBe('consensus-rejected');
+    expect(result.error).toContain('promptInjectionDetected');
+    expect(result.error).toContain('security');
+  });
+
+  it('proceeds past approval gate for a fully-approved report (stops at key-resolution)', () => {
+    // VALID_REPORT has all reviewers approved + consensus.approved=true + no injection
+    const reportPath = join(tmpDir, 'report-approved.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-501',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Expected failure');
+    // Approval gate passes → next failure is key-resolution (no key file)
+    expect(result.phase).toBe('key-resolution');
+  });
+});
+
 // ── unsignedReportPath helper ─────────────────────────────────────────────────
 
 describe('unsignedReportPath', () => {
