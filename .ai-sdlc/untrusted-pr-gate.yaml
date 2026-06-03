@@ -1,0 +1,75 @@
+# Untrusted-contributor PR verification gate configuration.
+#
+# RFC-0043 §Stage 1 adopter-configurable settings. Loaded by
+# pipeline-cli/src/pipeline/ast-gate.ts and sandbox-runner.ts.
+#
+# ## Deployment mode (OQ-2 resolution)
+#
+# `deployment: ci`    — reviewers run inside CI-side OpenShell sandbox (default).
+# `deployment: local` — reviewers run inside maintainer's local OpenShell sandbox.
+#
+# CI mode is the default because:
+#   - Hermetic isolation (ephemeral runner; no local-machine state)
+#   - Signing-key distance — signing key never in the same environment that touched
+#     untrusted code
+#   - Contributor latency — reviewers run in parallel to the contributor's CI jobs
+#
+# Local opt-in is available for solo maintainers / small teams without CI sponsorship.
+# Requires OpenShell installed on the maintainer's machine.
+
+deployment: ci
+
+# ── Stage 1: Protected-path rule engine ───────────────────────────────────────
+#
+# Paths matching these globs trigger `abort-protected-path` on mutation.
+# Deny wins — any match aborts immediately without LLM or sandbox spin-up.
+# Per RFC-0043 §Stage 1 and OQ-6 boundary principle.
+
+protectedPaths:
+  - '.github/**'
+  - '**/.github/**'
+  - '**/package.json'
+  - '**/pnpm-lock.yaml'
+  - '**/package-lock.json'
+  - '**/yarn.lock'
+  - '.ai-sdlc/**'
+  - 'ai-sdlc-plugin/agents/**'
+  - '**/*.github/workflows/**'
+
+# Only files matching these globs may change in an untrusted PR.
+# Deny wins: protected-path match takes priority over allowed-mutation match.
+
+allowedMutationGlobs:
+  - '**/*.ts'
+  - '**/*.tsx'
+  - '**/*.js'
+  - '**/*.jsx'
+  - '**/*.md'
+
+# Content-based heuristics run on files that passed path checks.
+# Per OQ-6 boundary principle: only patterns with <1% false-positive AND
+# cheap-deterministic-value over downstream LLM/sandbox detection.
+
+contentHeuristics:
+  packageJsonLifecycleScripts: abort
+  newGithubActionUses: abort
+
+# ── Stage 2/3: Sandbox configuration ─────────────────────────────────────────
+#
+# Compute driver per OQ-5 resolution.
+# docker (default) | kata | gvisor | microvm
+# RFC-0022 compliance regime overrides: HIPAA / FedRAMP High / PCI-DSS Level 1
+# → microvm required automatically.
+
+sandboxDriver: docker
+
+# Resource limits per OQ-3 resolution.
+# Configurable: integration/e2e suites may need higher; strict compliance may need lower.
+# Breach behavior: hard abort + needs-maintainer-review label + Decision G0 routing.
+
+differentialTest:
+  resourceLimits:
+    wallClockSeconds: 600
+    cpuCores: 2
+    memoryGb: 4
+    networkDeny: true

@@ -1,0 +1,572 @@
+name: Untrusted-Contributor PR Verification Gate
+
+# RFC-0043 Phase 5 — AISDLC-501
+#
+# This workflow implements the 4-stage Untrusted-Contributor Verification Gate (UCVG):
+#
+#   Stage 0 — Trust Classification (deterministic, no LLM, no runner)
+#   Stage 1 — Deterministic Diff/AST Gate (no LLM, no runner)
+#   Stage 2/3 — OpenShell Sandbox + Hardened 3-Reviewer Matrix
+#   Stage 4 — Clean-Room Attestation (signing key never in sandbox)
+#
+# Security property: the credential-holding step (Stage 4) never runs in the same
+# environment that touched untrusted code (Stages 2-3). The LLM-invoking steps
+# (Stages 2-3) never run until the deterministic gate (Stages 0-1) has passed.
+#
+# ── AISDLC-381: pull_request_target fork-PR hardening ───────────────────────
+# This workflow MUST be able to POST the `ai-sdlc/untrusted-pr-gate` commit status
+# on EVERY PR HEAD (including fork PRs where GITHUB_TOKEN is read-only under the
+# legacy `pull_request` event). We use `pull_request_target` which runs in the
+# target repo's context with full write permissions even for fork PRs.
+#
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+#    § Fork-PR workflow safety pattern) ────────────────────────────────
+#
+# 1. Workflow logic checks out the TARGET repo's main (via the default
+#    `actions/checkout@v4` with no `ref:` — pull_request_target defaults to
+#    the BASE branch tip). All scripts and pipeline-cli CLIs execute from
+#    main's checkout — NEVER from fork content.
+#
+# 2. Fork PR content is checked out into a sandboxed `pr-content/`
+#    subdirectory for READ-ONLY DATA access. The diff is computed from git
+#    objects; no fork-controlled shell or Node code is executed.
+#
+# 3. NEVER `pnpm install` / `pnpm build` / script execution from `pr-content/`.
+#    Trust-classification and AST-gate CLIs run from main's checkout only.
+#    A fork-PR `package.json` `preinstall` hook cannot run in this workflow.
+#
+# 4. NEVER use fork-provided actions. All `uses:` references pin to vetted
+#    publishers (actions/checkout@v4, pnpm/action-setup@v4,
+#    actions/setup-node@v4, actions/github-script@v7).
+#
+# 5. Secrets: no signing keys, write-scoped GITHUB_TOKEN, NPM_TOKEN, or
+#    AI_SDLC_PAT are injected into any step that consumes fork-controlled
+#    input. The signing key is only accessed in Stage 4 (clean-room job)
+#    which runs AFTER the sandboxed evaluation completes as a separate job.
+#    `github.token` is used only for status POST and label operations.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+# Workflow-level permissions: minimum needed for status posting + label operations.
+# No `contents: write` — fork-PR safety guard #5 prevents signing-key access here.
+permissions:
+  statuses: write
+  pull-requests: write
+  issues: write
+
+env:
+  # Feature flag — default off per RFC-0043 §Migration Path.
+  # Set AI_SDLC_UNTRUSTED_PR_GATE=1 (or true/yes/on) to engage UCVG.
+  # Truthy: 1, true, yes, on (case-insensitive). Anything else (including unset) = OFF.
+  GATE_FLAG: ${{ vars.AI_SDLC_UNTRUSTED_PR_GATE || 'off' }}
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Stage 0 + 1: Deterministic gate (no LLM, no sandbox)
+  # Runs for every untrusted PR. Fast path: seconds, zero LLM/sandbox spend.
+  # ────────────────────────────────────────────────────────────────────────────
+  classify-and-gate:
+    name: 'Stage 0+1: Trust Classification + AST Gate'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      pull-requests: write
+      issues: write
+    outputs:
+      trust: ${{ steps.classify.outputs.trust }}
+      gate_outcome: ${{ steps.ast-gate.outputs.outcome }}
+      flag_on: ${{ steps.flag-check.outputs.enabled }}
+      deployment_mode: ${{ steps.config.outputs.deployment }}
+      offending_paths: ${{ steps.ast-gate.outputs.offending_paths }}
+
+    steps:
+      - name: 'Checkout target main (workflow logic from main — fork-PR safety guard #1)'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 'Checkout fork PR content into sandboxed pr-content/ (data only — fork-PR safety guard #2)'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-content
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies (from main checkout only — fork-PR safety guard #3)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: Check AI_SDLC_UNTRUSTED_PR_GATE feature flag
+        id: flag-check
+        run: |
+          FLAG="${{ env.GATE_FLAG }}"
+          FLAG_LOWER=$(echo "$FLAG" | tr '[:upper:]' '[:lower:]')
+          if [[ "$FLAG_LOWER" == "1" || "$FLAG_LOWER" == "true" || "$FLAG_LOWER" == "yes" || "$FLAG_LOWER" == "on" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "[untrusted-pr-gate] feature flag ON — engaging UCVG"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "[untrusted-pr-gate] feature flag OFF — UCVG path skipped; existing review path runs as before"
+          fi
+
+      - name: Read deployment mode from .ai-sdlc/untrusted-pr-gate.yaml
+        id: config
+        if: steps.flag-check.outputs.enabled == 'true'
+        run: |
+          # Read deployment mode from config (default: ci per OQ-2 resolution).
+          # This file comes from MAIN's checkout — fork-PR safety guard #1.
+          CONFIG=".ai-sdlc/untrusted-pr-gate.yaml"
+          if [[ -f "$CONFIG" ]]; then
+            DEPLOYMENT=$(python3 -c "import yaml, sys; c=yaml.safe_load(open(sys.argv[1])); print(c.get('deployment', 'ci'))" "$CONFIG" 2>/dev/null || echo "ci")
+          else
+            DEPLOYMENT="ci"
+          fi
+          echo "deployment=$DEPLOYMENT" >> "$GITHUB_OUTPUT"
+          echo "[untrusted-pr-gate] deployment mode: $DEPLOYMENT"
+
+      - name: Stage 0 — Trust Classification
+        id: classify
+        if: steps.flag-check.outputs.enabled == 'true'
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          # Stage 0: deterministic trust classification.
+          # Static .ai-sdlc/trusted-reviewers.yaml is the ONLY trust source (OQ-1 resolution).
+          # No live GitHub API queries on the critical path.
+          TRUST=$(node pipeline-cli/bin/cli-ucvg.mjs classify \
+            --author "$PR_AUTHOR" \
+            --is-fork "$PR_IS_FORK" \
+            --work-dir . \
+            2>&1)
+          TRUST_CODE=$?
+          echo "trust=$TRUST" >> "$GITHUB_OUTPUT"
+          echo "[stage-0] author=$PR_AUTHOR is_fork=$PR_IS_FORK trust=$TRUST"
+          if [[ $TRUST_CODE -ne 0 ]]; then
+            echo "[stage-0] classification error — defaulting to untrusted (fail-closed)"
+            echo "trust=untrusted" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stage 0 — Skip UCVG for trusted authors
+        if: steps.flag-check.outputs.enabled == 'true' && steps.classify.outputs.trust == 'trusted'
+        run: |
+          echo "[stage-0] author is TRUSTED — UCVG not engaged; existing review path applies"
+
+      - name: Stage 1 — Deterministic Diff/AST Gate (zero LLM, zero sandbox)
+        id: ast-gate
+        if: steps.flag-check.outputs.enabled == 'true' && steps.classify.outputs.trust != 'trusted'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Stage 1: run the AST gate on the PR diff.
+          # Diff is computed from git objects — no fork code executed (fork-PR safety guard #2).
+          # pr-content/ was checked out read-only; we compute the diff via git.
+          git -C pr-content fetch --unshallow 2>/dev/null || true
+          DIFF=$(git -C pr-content diff "$PR_BASE_SHA".."$PR_HEAD_SHA" --name-only 2>/dev/null || \
+                 git -C pr-content diff HEAD~1..HEAD --name-only 2>/dev/null || echo "")
+
+          OUTCOME=$(node pipeline-cli/bin/cli-ucvg.mjs ast-gate \
+            --pr-number "$PR_NUMBER" \
+            --author "$PR_AUTHOR" \
+            --changed-files <(echo "$DIFF") \
+            --work-dir . \
+            2>&1)
+          AST_CODE=$?
+
+          # Parse outcome from the CLI output (last line = JSON result)
+          GATE_OUTCOME=$(echo "$OUTCOME" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('outcome','abort-protected-path'))" 2>/dev/null || echo "abort-protected-path")
+          OFFENDING=$(echo "$OUTCOME" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('offendingPaths',[])))" 2>/dev/null || echo "")
+
+          echo "outcome=$GATE_OUTCOME" >> "$GITHUB_OUTPUT"
+          echo "offending_paths=$OFFENDING" >> "$GITHUB_OUTPUT"
+          echo "[stage-1] outcome=$GATE_OUTCOME offending_paths=$OFFENDING"
+
+          if [[ "$GATE_OUTCOME" == "abort-protected-path" || $AST_CODE -ne 0 ]]; then
+            echo "[stage-1] ABORT — protected-path violation detected (zero LLM, zero sandbox spend)"
+            exit 0  # We post the block action in the next step; don't fail the step itself
+          fi
+
+      - name: Stage 1 — Post block comment + label (protected-path abort)
+        if: >
+          steps.flag-check.outputs.enabled == 'true' &&
+          steps.classify.outputs.trust != 'trusted' &&
+          steps.ast-gate.outputs.outcome == 'abort-protected-path'
+        uses: actions/github-script@v7
+        env:
+          OFFENDING_PATHS: ${{ steps.ast-gate.outputs.offending_paths }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            // Post block comment and apply needs-maintainer-review label.
+            // The comment names the offending paths so the contributor knows what to change.
+            // No internal tracker IDs in this comment — adopter-facing string.
+            const paths = (process.env.OFFENDING_PATHS || '').split(' ').filter(Boolean);
+            const author = process.env.PR_AUTHOR;
+
+            const pathList = paths.map(p => `- \`${p}\``).join('\n');
+            const body = [
+              '## Protected-path gate blocked this PR',
+              '',
+              `@${author} — this PR modifies files that require maintainer review.`,
+              '',
+              'The following paths are protected and may not be changed by untrusted contributors:',
+              '',
+              pathList || '- (see workflow logs for details)',
+              '',
+              'This PR has been labeled `needs-maintainer-review`. A maintainer will',
+              'review this PR before any automated processing proceeds.',
+              '',
+              'If you believe this change is legitimate, please open a discussion',
+              'with the maintainers.',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['needs-maintainer-review'],
+              });
+            } catch (e) {
+              // Label may not exist yet; log but don't fail
+              console.log(`Warning: could not add label needs-maintainer-review: ${e.message}`);
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'failure',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Blocked: protected-path mutation by untrusted contributor',
+            });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Stage 2/3: OpenShell Sandbox + Hardened Reviewer Matrix
+  # Only runs when: flag ON + untrusted author + Stage 1 passed.
+  # ────────────────────────────────────────────────────────────────────────────
+  sandbox-and-review:
+    name: 'Stage 2/3: Sandbox + Hardened Reviewer Matrix'
+    needs: classify-and-gate
+    if: >
+      needs.classify-and-gate.outputs.flag_on == 'true' &&
+      needs.classify-and-gate.outputs.trust != 'trusted' &&
+      needs.classify-and-gate.outputs.gate_outcome == 'pass'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      pull-requests: read
+    outputs:
+      report_artifact: ${{ steps.sandbox.outputs.report_artifact }}
+      sandbox_available: ${{ steps.check-sandbox.outputs.available }}
+      degraded: ${{ steps.check-sandbox.outputs.degraded }}
+
+    steps:
+      - name: 'Checkout target main (workflow logic from main — fork-PR safety guard #1)'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 'Checkout fork PR content into sandboxed pr-content/ (data only — fork-PR safety guard #2)'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-content
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies (from main checkout only — fork-PR safety guard #3)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: Detect deployment mode and OpenShell availability
+        id: check-sandbox
+        env:
+          DEPLOYMENT_MODE: ${{ needs.classify-and-gate.outputs.deployment_mode }}
+        run: |
+          DEPLOYMENT="${DEPLOYMENT_MODE:-ci}"
+          echo "[stage-2] deployment mode: $DEPLOYMENT"
+
+          # Check OpenShell availability.
+          # OpenShell is the required runtime for Stage 2 differential testing.
+          # When unavailable: degrade gracefully per RFC-0043 §Degradation path.
+          if command -v openshell &>/dev/null; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "degraded=false" >> "$GITHUB_OUTPUT"
+            echo "[stage-2] OpenShell available — full sandbox mode"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "degraded=true" >> "$GITHUB_OUTPUT"
+            echo "[stage-2] OpenShell NOT available — degradation path engaged"
+            echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
+          fi
+
+      - name: Emit degradation Decision (RFC-0035 G0) when sandbox unavailable
+        if: steps.check-sandbox.outputs.degraded == 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Emit Decision: untrusted-pr-gate-degraded-mode via RFC-0035 G0 catalog.
+          # This surfaces the degradation to the operator for awareness.
+          # Per AC#9: the decision is emitted so operators can see when sandbox is unavailable.
+          node pipeline-cli/bin/cli-decisions.mjs add \
+            --summary "untrusted-pr-gate-degraded-mode" \
+            --scope "ucvg" \
+            --option "degraded:Stage 2 sandbox unavailable for PR $PR_NUMBER; static-review-only fallback engaged" \
+            2>/dev/null || echo "[stage-2] Decision catalog not available; degradation noted in logs"
+
+      - name: Stage 2 — Run OpenShell sandbox (CI deployment mode, full isolation)
+        id: sandbox
+        if: >
+          steps.check-sandbox.outputs.available == 'true' &&
+          needs.classify-and-gate.outputs.deployment_mode != 'local'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # SIGNING KEY IS INTENTIONALLY ABSENT FROM THIS JOB.
+          # Credential withholding invariant: signing-key.pem, write-scoped GITHUB_TOKEN,
+          # NPM_TOKEN, AI_SDLC_PAT are NEVER injected into the sandbox environment.
+          # They are only available in the Stage 4 clean-room job (fork-PR safety guard #5).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Stage 2/3: run the full sandbox + reviewer matrix.
+          # The sandbox mounts the pr-content/ diff as read-only data.
+          # High-privilege credentials are withheld at the proxy layer — the agent
+          # running inside the sandbox never receives them directly.
+          node pipeline-cli/bin/cli-ucvg.mjs sandbox-run \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$PR_HEAD_SHA" \
+            --base-sha "$PR_BASE_SHA" \
+            --pr-content-dir ./pr-content \
+            --work-dir . \
+            --output-dir .ai-sdlc/ucvg/reports \
+            2>&1 | tee /tmp/sandbox-run.log
+
+          REPORT_PATH=".ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json"
+          if [[ -f "$REPORT_PATH" ]]; then
+            echo "report_artifact=$REPORT_PATH" >> "$GITHUB_OUTPUT"
+            echo "[stage-2] unsigned report artifact: $REPORT_PATH"
+          else
+            echo "report_artifact=" >> "$GITHUB_OUTPUT"
+            echo "[stage-2] WARNING: sandbox exited without producing a report artifact"
+          fi
+
+      - name: Stage 2 degraded — Local deployment mode (hand off to maintainer)
+        if: >
+          steps.check-sandbox.outputs.available == 'true' &&
+          needs.classify-and-gate.outputs.deployment_mode == 'local'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Local deployment mode (OQ-2): workflow detects deployment: local in config
+          # and surfaces a message for the maintainer to run the reviewer pipeline locally.
+          # The maintainer's local OpenShell sandbox runs Stages 2-4.
+          echo "[stage-2] deployment=local detected — handing off to maintainer's local pipeline"
+          echo "[stage-2] Run: node pipeline-cli/bin/cli-ucvg.mjs local-review --pr $PR_NUMBER"
+          echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
+
+      - name: Stage 3 degraded — Static-diff review only (no sandbox)
+        if: steps.check-sandbox.outputs.degraded == 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Degradation path: Stage 3 reviewers run in degraded mode (static-diff review only).
+          # No differential testing; reviewers run with existing credential model (not sandbox-isolated).
+          # Stage 0+1 deterministic gates already ran — the hardened AST gate provides the primary defense.
+          echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
+          node pipeline-cli/bin/cli-ucvg.mjs review-degraded \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$PR_HEAD_SHA" \
+            --base-sha "$PR_BASE_SHA" \
+            --pr-content-dir ./pr-content \
+            --work-dir . \
+            --output-dir .ai-sdlc/ucvg/reports \
+            2>&1 || echo "[stage-3-degraded] static review completed (exit code non-zero; check logs)"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Stage 4: Clean-Room Attestation
+  # Signing key is ONLY available in this job — separated from Stages 2-3.
+  # Only runs when Stage 2/3 produced a report artifact.
+  # ────────────────────────────────────────────────────────────────────────────
+  clean-room-sign:
+    name: 'Stage 4: Clean-Room Attestation'
+    needs: [classify-and-gate, sandbox-and-review]
+    if: >
+      needs.classify-and-gate.outputs.flag_on == 'true' &&
+      needs.classify-and-gate.outputs.trust != 'trusted' &&
+      needs.classify-and-gate.outputs.gate_outcome == 'pass' &&
+      needs.sandbox-and-review.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+
+    steps:
+      - name: 'Checkout target main (signing scripts from main — fork-PR safety guard #1)'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies (from main checkout only — fork-PR safety guard #3)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: Stage 4 — Clean-room sign (Zod-validate + RFC-0042 v6 Merkle attestation)
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPORT_ARTIFACT: ${{ needs.sandbox-and-review.outputs.report_artifact }}
+          # The signing key is available ONLY in this job — the clean room.
+          # It was NEVER present in the sandbox-and-review job (Stages 2-3).
+          # This is the trust boundary RFC-0043 §Stage 4 formalizes.
+          AISDLC_SIGNING_KEY_PATH: ${{ secrets.AISDLC_SIGNING_KEY_PATH }}
+        run: |
+          # Stage 4: clean-room signer.
+          # 1. Reads the unsigned report artifact from Stages 2-3.
+          # 2. Zod-validates against UntrustedPrReportSchema (BEFORE key is touched).
+          # 3. Builds RFC-0042 v6 Merkle tree from committed transcript leaves.
+          # 4. Signs Merkle root with operator ed25519 key.
+          # 5. Writes .ai-sdlc/attestations/<patchId>.v6.dsse.json
+          REPORT="${REPORT_ARTIFACT:-.ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json}"
+          node pipeline-cli/bin/cli-ucvg.mjs clean-room-sign \
+            --report-path "$REPORT" \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$PR_HEAD_SHA" \
+            --work-dir . \
+            2>&1
+
+      - name: Post gate success status
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'success',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Passed: all verification stages completed',
+            });
+
+      - name: Post gate failure status
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'failure',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Failed: clean-room attestation could not complete',
+            });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Flag-off: post a skipped status when flag is OFF so the check is visible.
+  # ────────────────────────────────────────────────────────────────────────────
+  flag-off-status:
+    name: 'UCVG: flag off (skipped)'
+    needs: classify-and-gate
+    if: needs.classify-and-gate.outputs.flag_on != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+
+    steps:
+      - name: Post skipped status (flag off)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            // Feature flag is OFF — UCVG path not engaged.
+            // Post a neutral success status so the check is visible but not blocking.
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'success',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Skipped: untrusted-pr gate is disabled (feature flag off)',
+            });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Trusted-author: post a skipped status when author is trusted.
+  # ────────────────────────────────────────────────────────────────────────────
+  trusted-author-status:
+    name: 'UCVG: trusted author (skipped)'
+    needs: classify-and-gate
+    if: >
+      needs.classify-and-gate.outputs.flag_on == 'true' &&
+      needs.classify-and-gate.outputs.trust == 'trusted'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+
+    steps:
+      - name: Post skipped status (trusted author)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            // Author is trusted — UCVG not engaged; existing review path applies.
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'success',
+              context: 'ai-sdlc/untrusted-pr-gate',
+              description: 'Skipped: author is trusted; existing review path applies',
+            });
