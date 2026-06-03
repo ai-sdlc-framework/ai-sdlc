@@ -24,6 +24,8 @@ All three reviewer prompts (`code-reviewer.md`, `test-reviewer.md`, `security-re
 2. **Delimiter framing**: diff content is wrapped in `<<<UNTRUSTED_PR_DIFF>>>` ... `<<<END_UNTRUSTED_PR_DIFF>>>` markers when injected via `buildHardenedDiffSection()`
 3. **POST directive**: restates the output contract after the diff to counteract sandwich-attack patterns
 
+**Marker-token breakout protection:** `buildHardenedDiffSection()` sanitizes the untrusted diff before framing it. If the diff contains the literal framing tokens (`<<<UNTRUSTED_PR_DIFF>>>` or `<<<END_UNTRUSTED_PR_DIFF>>>`), those occurrences are escaped (the leading `<<<` is replaced with `&lt;<<`) before wrapping. This prevents an attacker from embedding the closing marker to break out of the data region. The escaped form (`&lt;<<END_UNTRUSTED_PR_DIFF>>>`) is visually obvious during operator inspection.
+
 When a reviewer detects injection, it:
 - Sets `promptInjectionDetected: true` in the verdict JSON
 - Adds a finding starting with `"prompt-injection-attempt:"` at the correct severity
@@ -123,7 +125,7 @@ node pipeline-cli/bin/cli-decisions.mjs add \
   --option "new-pattern:base64-encoded instructions embedded in diff comments"
 ```
 
-The auto-promote threshold is **≥2 distinct adopter requests for the same new pattern category**. When reached, the Decision Catalog routes a follow-on RFC proposal to the operator for corpus extension.
+The auto-promote threshold is **≥2 distinct requesters** (at least 2 different adopter organizations, regardless of how many different pattern descriptions any single adopter submits). Multiple requests from the same requester identity are deduplicated. When the threshold is reached, the Decision Catalog routes a follow-on RFC proposal to the operator for corpus extension.
 
 Corpus categories are defined in `pipeline-cli/src/pipeline/reviewer-matrix.ts` (`InjectionCategory` union type). Extensions via this Decision flow maintain the corpus updateability guarantee (AC-7 / RFC-0035 G0 non-blocking contract).
 
