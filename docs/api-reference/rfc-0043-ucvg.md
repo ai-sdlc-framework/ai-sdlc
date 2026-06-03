@@ -293,12 +293,16 @@ type ResourceBreachType = 'wall-clock' | 'memory' | 'cpu';
 
 /** Emitted when the sandbox breaches a resource limit. */
 interface ResourceBreachEvent {
-  type: 'UntrustedPrResourceExhausted';
-  ts: string;
-  prNumber: number;
+  type: 'ResourceBreach';
   breachType: ResourceBreachType;
-  limitValue: number;
+  /** The configured limit that was exceeded. */
+  limit: number;
+  /** The unit of the limit (seconds, MB, cores). */
   limitUnit: string;
+  /** The observed value at breach time (may be approximate). */
+  observedValue?: number;
+  prNumber: number;
+  ts: string;
 }
 ```
 
@@ -324,18 +328,123 @@ Apply the RFC-0022 regime override to the requested driver. Returns the effectiv
 
 Load config from `.ai-sdlc/untrusted-pr-gate.yaml`. Falls back to `DEFAULT_SANDBOX_CONFIG`.
 
-#### `spawnSandbox(input: SandboxSpawnInput, driver: SandboxDriver): Promise<SandboxRunResult>`
+#### `runSandbox(input: RunSandboxInput): Promise<SandboxResult>`
 
-Spawn a sandbox using the resolved driver. Returns a `SandboxRunResult` with `upstreamTestsPassed`, `newTestsPassed`, `newCodeCoveragePct`, and the unsigned report artifact path.
+High-level sandbox runner orchestrator. Orchestrates the full Stage 2/3 lifecycle:
 
-**Lifecycle hooks** (available on `SandboxDriver` interface):
-- `beforeSpawn(config)` — called before the container/VM starts; used to validate prerequisites.
-- `afterSpawn(result)` — called after sandbox exits; used for cleanup.
-- `onResourceBreach(event)` — called when a resource limit is exceeded; triggers hard abort.
+1. Apply regime override to select the effective driver.
+2. Validate the credential withholding invariant.
+3. Spawn the sandbox (differential test sequence) via `driver.spawn(input)`.
+4. On resource breach: emit breach event; return `{ outcome: 'resource-breach', breach }`.
+5. Teardown (idempotent; always called).
 
-#### `createSandboxDriver(kind: SandboxDriverKind): SandboxDriver`
+Returns a `SandboxResult` discriminated union:
 
-Factory that returns the appropriate driver implementation. `DockerSandboxDriver` is fully implemented. `PodmanSandboxDriver`, `KataSandboxDriver`, `GVisorSandboxDriver`, and `MicroVmSandboxDriver` are pluggable stubs that throw descriptive errors until a concrete implementation is provided.
+```ts
+type SandboxResult =
+  | { outcome: 'success'; differentialTest: DifferentialTestResult; durationMs: number }
+  | { outcome: 'resource-breach'; breach: ResourceBreachEvent }
+  | { outcome: 'error'; error: string };
+
+interface RunSandboxInput {
+  prNumber: number;
+  prDiff: string;
+  upstreamMainRef: string;
+  config: SandboxConfig;
+  workDir?: string;
+  driverOverride?: SandboxDriver;
+  policyFilePath?: string;
+}
+```
+
+The `SandboxDriver` interface has exactly two methods — `spawn()` and `teardown()`:
+
+```ts
+interface SandboxDriver {
+  readonly kind: SandboxDriverKind;
+  spawn(input: SandboxSpawnInput): Promise<SandboxResult>;
+  teardown(): Promise<void>;
+}
+```
+
+There are no `beforeSpawn`, `afterSpawn`, or `onResourceBreach` hooks on `SandboxDriver`. Resource breach detection is handled via `Promise.race` inside `runSandbox`.
+
+#### `createSandboxDriver(config: SandboxConfig, overrideDriver?: SandboxDriver): { driver, regimeOverrideApplied, regimeOverrideReason? }`
+
+Factory that applies the RFC-0022 regime override and returns the appropriate driver. `DockerSandboxDriver` is fully implemented. `PodmanSandboxDriver`, `KataSandboxDriver`, `GVisorSandboxDriver`, and `MicroVmSandboxDriver` are pluggable stubs that return `{ outcome: 'error' }` until a concrete implementation is provided.
+
+---
+
+## `reviewer-matrix.ts`
+
+**Stage 3 — Hardened 3-reviewer matrix + prompt-injection delimiter framing.**
+
+Module: `pipeline-cli/src/pipeline/reviewer-matrix.ts`
+
+### Types
+
+```ts
+/** The three reviewer roles in the RFC-0010 §13 matrix. */
+type ReviewerRole = 'code' | 'test' | 'security';
+
+/** Injection attempt category — maps to the five corpus categories (AC-5). */
+type InjectionCategory =
+  | 'direct-instruction'
+  | 'hidden-content'
+  | 'code-comment'
+  | 'markdown-formatted'
+  | 'multi-language';
+
+interface InjectionMatch {
+  category: InjectionCategory;
+  matchedText: string;   // truncated to 200 chars
+  lineIndex?: number;    // 0-indexed line within the diff
+}
+
+interface InjectionDetectionResult {
+  detected: boolean;
+  matches: InjectionMatch[];
+}
+```
+
+### Constants
+
+```ts
+/** Opening delimiter marker for untrusted PR diff content. */
+const DIFF_OPEN_MARKER: string;   // '<<<UNTRUSTED_PR_DIFF>>>'
+
+/** Closing delimiter marker for untrusted PR diff content. */
+const DIFF_CLOSE_MARKER: string;  // '<<<END_UNTRUSTED_PR_DIFF>>>'
+
+/** Decision Catalog summary for corpus extension requests. */
+const INJECTION_CORPUS_EXTENSION_REQUEST_SUMMARY: string;
+// = 'prompt-injection-corpus-extension-request'
+```
+
+### Functions
+
+#### `buildHardenedDiffSection(prDiff: string): string`
+
+Build the sandwich-framed diff section for embedding in a reviewer prompt. Wraps the untrusted diff between `<<<UNTRUSTED_PR_DIFF>>>` and `<<<END_UNTRUSTED_PR_DIFF>>>` markers. Any embedded framing tokens in the diff are neutralized (`<<<` → `&lt;<<`) to prevent marker breakout.
+
+```ts
+const framedDiff = buildHardenedDiffSection(rawPrDiff);
+const prompt = reviewerTemplateBody.replace('{{PR_DIFF}}', framedDiff);
+```
+
+#### `detectInjectionAttempts(diff: string): InjectionDetectionResult`
+
+Detect prompt-injection attempts in a PR diff string. Runs the diff through all five corpus-category pattern sets and returns a structured result. Reviewers call this to decide whether to set `promptInjectionDetected: true`.
+
+**Note:** This is a heuristic for the hermetic test corpus. In production, the primary defense is the delimiter framing combined with the reviewer's instruction-following behavior.
+
+#### `buildInjectionFinding(role: ReviewerRole, match: InjectionMatch): Finding`
+
+Build a correctly typed `Finding` for a detected injection attempt. Severity per AC-3 contract: `security` → `critical`; `code` → `major`; `test` → `major`.
+
+#### `incrementInjectionCorpusCounter(existing, request): InjectionCorpusExtensionCounter`
+
+RFC-0035 Stage A counter for injection-corpus extension requests. Idempotent per requester identity. Auto-promote threshold: ≥2 distinct adopter organizations.
 
 ---
 
@@ -436,11 +545,22 @@ const report = result.report;
 
 Module: `pipeline-cli/src/pipeline/clean-room-signer.ts`
 
+### Exported constant
+
+```ts
+/** Sentinel file/directory names that indicate an active sandbox environment. */
+const SANDBOX_ARTIFACT_SENTINELS: readonly string[];
+// Values: 'untrusted-pr-eval-active', 'stages-1-3-output', 'sandbox-output',
+//         '.sandbox-pid', 'untrusted-pr-eval.lock'
+```
+
 ### Functions
 
-#### `checkIsolation(workDir?: string): { isolated: boolean; sentinelFound?: string }`
+#### `detectSandboxArtifacts(workDir: string): string | null`
 
-Check whether the working directory contains any sandbox artifact sentinels. Returns `{ isolated: true }` when clean. Returns `{ isolated: false, sentinelFound: '<name>' }` when a sentinel is detected.
+Check whether the working directory contains any sandbox artifact sentinels. Returns the first sentinel name found (for error messaging), or `null` when clean.
+
+This implements AC#8 — the signer refuses to run if any untrusted-PR-eval artifact is present in its environment. Called at the very start of `runCleanRoomSigner`, before any key interaction.
 
 **Sentinel files that trigger rejection:**
 - `untrusted-pr-eval-active`
@@ -449,41 +569,64 @@ Check whether the working directory contains any sandbox artifact sentinels. Ret
 - `.sandbox-pid`
 - `untrusted-pr-eval.lock`
 
-#### `runCleanRoomSigner(input: CleanRoomSignerInput): Promise<CleanRoomSignerResult>`
+#### `runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSignerResult`
 
-Main entry point for Stage 4. Applies the full trust boundary:
+**Synchronous.** Main entry point for Stage 4. Applies the full trust boundary in strict order:
 
-1. Isolation check (refuses if sentinel present).
-2. Read + parse the unsigned report JSON from `input.reportPath`.
-3. Zod-validate against `UntrustedPrReportSchema` (BEFORE key resolution).
-4. Check `consensus.approved === true` (refuses to sign if false).
-5. Resolve signing key via `resolveSigningKeyPath()`.
-6. Load transcript leaves from `.ai-sdlc/transcript-leaves/`.
-7. Build RFC-0042 v6 Merkle tree.
+1. Isolation check (AC#8) — refuses if sentinel detected; key is NEVER touched.
+2. Read + parse the unsigned report JSON from `opts.reportArtifactPath`.
+3. Zod-validate against `UntrustedPrReportSchema` (BEFORE key resolution — AC#5).
+4. Cross-validate `report.headSha` against `opts.headSha` (TOCTOU guard).
+5. Check `consensus.approved === true` and no reviewer rejected/detected injection (AC#4).
+6. Resolve signing key via `resolveSigningKeyPath()`.
+7. Build RFC-0042 v6 Merkle tree from transcript leaves.
 8. Sign Merkle root with operator ed25519 key.
 9. Write `.ai-sdlc/attestations/<patchId>.v6.dsse.json`.
 
+Returns a typed discriminated union — callers MUST check `result.success` before accessing `result.report` / `result.envelopePath`.
+
 ```ts
-interface CleanRoomSignerInput {
-  /** Absolute path to the unsigned report artifact. */
-  reportPath: string;
-  /** PR number (for artifact naming). */
-  prNumber: number;
-  /** PR head SHA (for envelope subject). */
+interface CleanRoomSignerOptions {
+  /** Absolute path to the unsigned report artifact file. */
+  reportArtifactPath: string;
+  /** Absolute path to the repo root. */
+  repoRoot: string;
+  /** Task ID used to select which transcript leaves belong to this PR. */
+  taskId: string;
+  /** Git commit SHA of the PR head. Bound to the envelope subject. */
   headSha: string;
-  /** Repo root. Defaults to process.cwd(). */
+  /** Optional content-addressed patch-id (AISDLC-398). */
+  patchId?: string;
+  /** Optional identity string embedded in the attestation envelope. */
+  signerIdentity?: string;
+  /**
+   * Working directory for the isolation-invariant check (AC#8).
+   * Defaults to `process.cwd()`. MUST be the operator's directory, not the sandbox.
+   */
   workDir?: string;
 }
 
-interface CleanRoomSignerResult {
-  /** true when signing completed successfully. */
-  success: boolean;
-  /** Path to the written DSSE envelope. null on failure. */
-  envelopePath: string | null;
-  /** Reason for failure (null on success). */
-  error: string | null;
+type CleanRoomSignerResult = CleanRoomSignerSuccess | CleanRoomSignerFailure;
+
+interface CleanRoomSignerSuccess {
+  success: true;
+  report: UntrustedPrReport;
+  envelopePath: string;
+}
+
+interface CleanRoomSignerFailure {
+  success: false;
+  phase: 'isolation-check' | 'artifact-read' | 'zod-validation'
+       | 'consensus-rejected' | 'key-resolution' | 'signing';
+  error: string;
 }
 ```
+
+#### `unsignedReportPath(repoRoot: string, prNumber: number): string`
+
+Derive the standard unsigned-report artifact path for a given PR number.
+
+Layout: `<repoRoot>/.ai-sdlc/ucvg/reports/<prNumber>.unsigned.json`. Both the sandbox runner (Stage 2/3) and the clean-room signer (Stage 4) use this function to guarantee path agreement.
 
 ---
 

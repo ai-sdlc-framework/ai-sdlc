@@ -23,11 +23,17 @@ Promotion requires **all** of the following evidence, accumulated via InternalAd
 
 ### 1. Corpus-driven evidence (required)
 
-Run the UCVG corpus aggregator after the soak period:
+After the soak period, collect corpus signals from the Decision Catalog events log and the `ai-sdlc/untrusted-pr-gate` status history. There is no automated `corpus aggregate` subcommand in `cli-ucvg.mjs` at v1alpha1 — aggregation is a manual or operator-scripted step.
+
+The `cli-ucvg.mjs` CLI implements exactly these subcommands: `classify`, `ast-gate`, `sandbox-run`, `review-degraded`, `clean-room-sign`, `local-review`. A `corpus aggregate` subcommand is not shipped; corpus aggregation uses the Decision Catalog events log directly:
 
 ```bash
-# After soak period ends, aggregate corpus signals:
-node pipeline-cli/bin/cli-ucvg.mjs corpus aggregate --since <soak-start-date>
+# Review the Decision Catalog events for UCVG-related entries:
+node pipeline-cli/bin/cli-decisions.mjs list --scope ucvg
+
+# Review the GitHub status history for the gate:
+gh api repos/{owner}/{repo}/commits/{sha}/statuses \
+  | jq '[.[] | select(.context == "ai-sdlc/untrusted-pr-gate")]'
 ```
 
 **Minimum thresholds:**
