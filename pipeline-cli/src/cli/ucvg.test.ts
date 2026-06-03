@@ -8,6 +8,10 @@
  *   - ast-gate CLI reads paths from stdin (CRITICAL fix #1)
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { isUntrustedPrGateEnabled } from './ucvg.js';
@@ -106,6 +110,11 @@ describe('runSandboxAndReview — upstreamMainRef is baseSha (MAJOR fix #7)', ()
     // a real sandbox. Since runSandbox is mocked, the CLI will write a report and emit JSON.
     //
     // We test the correct argument passing by inspecting the mock call args.
+    // Use an isolated temp dir (NOT a shared /tmp) — ucvg writes its report
+    // under <output-dir>/.ai-sdlc/ucvg/, and writing to /tmp would create a
+    // shared /tmp/.ai-sdlc/ that pollutes the ancestor-walk other packages'
+    // tests rely on (dogfood cli-admit's no-.ai-sdlc-ancestor fallback test).
+    const sandboxTmp = mkdtempSync(join(tmpdir(), 'ucvg-sandbox-test-'));
     try {
       await runUcvgCli([
         'sandbox-run',
@@ -116,14 +125,16 @@ describe('runSandboxAndReview — upstreamMainRef is baseSha (MAJOR fix #7)', ()
         '--base-sha',
         baseSha,
         '--pr-content-dir',
-        '/tmp',
+        sandboxTmp,
         '--work-dir',
-        '/tmp',
+        sandboxTmp,
         '--output-dir',
-        '/tmp',
+        sandboxTmp,
       ]);
     } catch {
-      // Ignore errors from file writes in /tmp — we only care about the spy call
+      // Ignore errors from file writes — we only care about the spy call
+    } finally {
+      rmSync(sandboxTmp, { recursive: true, force: true });
     }
 
     // Guard against a vacuous pass: the spy MUST have been invoked, otherwise
