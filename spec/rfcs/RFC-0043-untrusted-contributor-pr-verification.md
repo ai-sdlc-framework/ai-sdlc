@@ -1,11 +1,12 @@
 ---
 id: RFC-0043
 title: Untrusted-Contributor PR Verification — Zero-Trust Gate with OpenShell Sandbox Isolation
-status: Draft
-lifecycle: Ready for Review
+status: Approved
+lifecycle: Signed Off
 author: Dominique Legault
 created: 2026-05-30
 updated: 2026-06-02
+signedOff: 2026-06-02
 targetSpecVersion: v1alpha1
 # Runtime-code dependency: the clean-room signer/verifier in this RFC IMPORTS the
 # RFC-0042 v6 Merkle-transcript signer + verifier as its attestation substrate.
@@ -26,11 +27,12 @@ deferredDocsDeadline: '2026-08-31'
 
 # RFC-0043: Untrusted-Contributor PR Verification — Zero-Trust Gate with OpenShell Sandbox Isolation
 
-**Status:** Draft
-**Lifecycle:** Ready for Review
+**Status:** Approved
+**Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-05-30
 **Updated:** 2026-06-02
+**Signed Off:** 2026-06-02 (Engineering + Operator — Dominique Legault)
 **Target Spec Version:** v1alpha1
 **OQ walkthrough:** Dominique Legault (Operator), 2026-06-02 — full-rubric resolution of all 6 §Open Questions.
 
@@ -632,6 +634,6 @@ Per [`spec/rfcs/README.md`](README.md), this RFC requires sign-off from the
 relevant pillar owners before promotion to Signed Off. Open Questions in §13 must
 be resolved via operator walkthrough first.
 
-- [ ] **Engineering** (Dominique Legault) — design soundness, composition with RFC-0042/0022/0039
+- [x] **Engineering** (Dominique Legault, 2026-06-02) — design soundness verified; composition with RFC-0042 (v6 Merkle attestation substrate) / RFC-0022 (compliance regime override) / RFC-0039 (gate extension) sound; all 6 §Open Questions resolved with full rigor rubric.
 - [ ] **Product** (Alexander Kline) — OSS-adopter positioning, Sigstore OQ-4
-- [ ] **Operator** (Dominique Legault) — runbook + degradation behavior
+- [x] **Operator** (Dominique Legault, 2026-06-02) — runbook + degradation behavior accepted (OQ-2 CI-default, OQ-3 hard-abort + G0 Decision, OQ-5 RFC-0022 regime override); ready for implementation dispatch via AISDLC-497..502.
