@@ -74,7 +74,7 @@ stage best placed to stop it cheaply:
   review, never auto-passes.
 
 The full threat-model table lives in the
-[whitepaper](https://ai-sdlc.io/docs/whitepapers/untrusted-contributor-verification).
+[whitepaper](https://ai-sdlc.io/whitepapers/untrusted-contributor-verification).
 
 ## What this unlocks
 
@@ -102,4 +102,4 @@ review — not a claim of perfection.
 - [Operator runbook](../operations/untrusted-contributor-pr-verification.md)
 - [API reference](../api-reference/rfc-0043-ucvg.md)
 - [RFC-0043](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md) · [RFC-0042](../../spec/rfcs/RFC-0042-proof-of-execution-attestation.md)
-- Whitepaper: [Zero-Trust Untrusted-Contributor PR Verification](https://ai-sdlc.io/docs/whitepapers/untrusted-contributor-verification)
+- Whitepaper: [Zero-Trust Untrusted-Contributor PR Verification](https://ai-sdlc.io/whitepapers/untrusted-contributor-verification)
