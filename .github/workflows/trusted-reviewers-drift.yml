@@ -1,0 +1,270 @@
+name: Trusted Reviewers Drift Detection
+
+# RFC-0043 Phase 1 — OQ-1 resolution: periodic drift-detection workflow.
+#
+# Compares `.ai-sdlc/trusted-reviewers.yaml` (the operator's stated trust
+# intent, the ONLY runtime source of truth) against GitHub repo permissions
+# (who actually has write+ access to the repo today).
+#
+# When drift is detected, emits a `Decision: trusted-reviewers-file-drift-
+# detected` event via the RFC-0035 G0 non-blocking Decision Catalog.
+# The operator reviews + merges a file-update PR at their cadence.
+#
+# Pattern mirrors `backlog-drift` and `main-health-monitor` periodic CI
+# workflows. This is NOT a blocking gate — detecting drift is informational;
+# the static file remains authoritative for trust classification.
+#
+# Schedule: weekly (every Monday at 09:00 UTC). Adopters may customize via
+# repository-level workflow override (fork + modify the cron expression).
+# Daily runs are available via `workflow_dispatch` for operator-triggered
+# one-shot checks.
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      emit_decision:
+        description: 'Emit a Decision event even when no drift is detected (for testing)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+  # `members: read` is implied by `contents: read` for org repos.
+  # The drift check uses `gh api` with GITHUB_TOKEN which has the repo scope.
+
+# No cancel-in-progress: every scheduled check should complete independently.
+concurrency:
+  group: trusted-reviewers-drift
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  drift-check:
+    name: Check trusted-reviewers.yaml vs GitHub permissions
+    runs-on: ubuntu-latest
+    outputs:
+      drift_detected: ${{ steps.compare.outputs.drift_detected }}
+      drift_summary: ${{ steps.compare.outputs.drift_summary }}
+      allowlisted_count: ${{ steps.compare.outputs.allowlisted_count }}
+      github_write_count: ${{ steps.compare.outputs.github_write_count }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      # Extract allowlisted authors from the static file.
+      # This is the deterministic, operator-controlled trust list.
+      - name: Extract allowlisted authors from trusted-reviewers.yaml
+        id: extract-allowlist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          YAML_FILE=".ai-sdlc/trusted-reviewers.yaml"
+
+          if [[ ! -f "$YAML_FILE" ]]; then
+            echo "allowlisted_authors=" >> "$GITHUB_OUTPUT"
+            echo "::warning::$YAML_FILE not found — no allowlisted authors"
+            exit 0
+          fi
+
+          # Extract login values from the allowlist.authors array.
+          # Uses Python for reliable YAML parsing without a separate install.
+          LOGINS=$(python3 -c "
+          import yaml, sys, json
+          with open('$YAML_FILE') as f:
+            doc = yaml.safe_load(f)
+          allowlist = (doc or {}).get('allowlist', {}) or {}
+          authors = allowlist.get('authors', []) or []
+          logins = [a['login'] for a in authors if isinstance(a, dict) and 'login' in a]
+          print(json.dumps(logins))
+          " 2>/dev/null || echo '[]')
+
+          echo "allowlisted_authors=$LOGINS" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$LOGINS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          echo "allowlisted_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "[drift] allowlisted authors ($COUNT): $LOGINS"
+
+      # Fetch GitHub repo collaborators with write+ permission.
+      # This is the live GitHub state that the static file may have drifted from.
+      # Note: this live API call is ONLY in the periodic drift workflow —
+      # NOT in the trust-classification critical path (OQ-1 invariant).
+      - name: Fetch GitHub repo collaborators with write+ permission
+        id: fetch-github-perms
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+
+          # Fetch collaborators with push (write) or admin permissions.
+          # gh api paginates automatically with --paginate.
+          WRITE_PLUS=$(gh api \
+            --paginate \
+            "repos/${REPO}/collaborators?permission=push&affiliation=direct" \
+            --jq '[.[].login]' 2>/dev/null || echo '[]')
+
+          # Merge with admin collaborators
+          ADMIN=$(gh api \
+            --paginate \
+            "repos/${REPO}/collaborators?permission=admin&affiliation=direct" \
+            --jq '[.[].login]' 2>/dev/null || echo '[]')
+
+          # Combine and deduplicate — pass variables via env to avoid shell quoting issues
+          ALL_WRITE=$(WRITE_PLUS="$WRITE_PLUS" ADMIN="$ADMIN" python3 -c "
+          import json, os
+          write = json.loads(os.environ.get('WRITE_PLUS', '[]'))
+          admin = json.loads(os.environ.get('ADMIN', '[]'))
+          combined = sorted(set(write + admin))
+          print(json.dumps(combined))
+          " 2>/dev/null || echo '[]')
+
+          COUNT=$(echo "$ALL_WRITE" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          echo "github_write_logins=$ALL_WRITE" >> "$GITHUB_OUTPUT"
+          echo "github_write_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "[drift] GitHub write+ collaborators ($COUNT): $ALL_WRITE"
+
+      # Compare the two sets and compute drift.
+      # Drift = (in GitHub but not in allowlist) ∪ (in allowlist but not in GitHub)
+      - name: Compare allowlist vs GitHub permissions
+        id: compare
+        env:
+          ALLOWLISTED: ${{ steps.extract-allowlist.outputs.allowlisted_authors }}
+          GITHUB_WRITE: ${{ steps.fetch-github-perms.outputs.github_write_logins }}
+          ALLOWLISTED_COUNT: ${{ steps.extract-allowlist.outputs.allowlisted_count }}
+          GITHUB_WRITE_COUNT: ${{ steps.fetch-github-perms.outputs.github_write_count }}
+          FORCE_EMIT: ${{ inputs.emit_decision || 'false' }}
+        run: |
+          set -euo pipefail
+
+          python3 << 'PYEOF'
+          import json, os, sys
+
+          allowlisted = set(json.loads(os.environ.get('ALLOWLISTED', '[]')))
+          github_write = set(json.loads(os.environ.get('GITHUB_WRITE', '[]')))
+          force_emit = os.environ.get('FORCE_EMIT', 'false').lower() == 'true'
+
+          # Authors with GitHub write+ but NOT in the allowlist
+          # (potential trust gap — they could push but aren't classified as trusted)
+          in_github_not_allowlist = sorted(github_write - allowlisted)
+
+          # Authors in the allowlist but NOT with GitHub write+
+          # (potential stale entry — still trusted by the gate, but no longer has permissions)
+          in_allowlist_not_github = sorted(allowlisted - github_write)
+
+          drift_detected = bool(in_github_not_allowlist or in_allowlist_not_github) or force_emit
+
+          drift_summary_parts = []
+          if in_github_not_allowlist:
+            drift_summary_parts.append(
+              f"GitHub write+ but not in allowlist: {in_github_not_allowlist}"
+            )
+          if in_allowlist_not_github:
+            drift_summary_parts.append(
+              f"In allowlist but lost GitHub write+: {in_allowlist_not_github}"
+            )
+          if force_emit and not drift_summary_parts:
+            drift_summary_parts.append("(forced emit — no actual drift)")
+
+          drift_summary = "; ".join(drift_summary_parts) if drift_summary_parts else "no drift"
+
+          print(f"[drift] detected={drift_detected}")
+          print(f"[drift] summary={drift_summary}")
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"drift_detected={'true' if drift_detected else 'false'}\n")
+            f.write(f"drift_summary={drift_summary}\n")
+            f.write(f"in_github_not_allowlist={json.dumps(in_github_not_allowlist)}\n")
+            f.write(f"in_allowlist_not_github={json.dumps(in_allowlist_not_github)}\n")
+            f.write(f"allowlisted_count={len(allowlisted)}\n")
+            f.write(f"github_write_count={len(github_write)}\n")
+          PYEOF
+
+  # Emit a RFC-0035 G0 Decision when drift is detected.
+  # G0 = non-blocking; operator reviews at their cadence.
+  emit-drift-decision:
+    name: Emit trusted-reviewers-file-drift-detected Decision
+    needs: drift-check
+    if: needs.drift-check.outputs.drift_detected == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      # Emit the Decision via cli-decisions.
+      # Summary: 'trusted-reviewers-file-drift-detected' (no tracker IDs per AISDLC-394)
+      - name: Emit Decision — trusted-reviewers-file-drift-detected
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRIFT_SUMMARY: ${{ needs.drift-check.outputs.drift_summary }}
+          ALLOWLISTED_COUNT: ${{ needs.drift-check.outputs.allowlisted_count }}
+          GITHUB_WRITE_COUNT: ${{ needs.drift-check.outputs.github_write_count }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          BODY="Drift detected between .ai-sdlc/trusted-reviewers.yaml allowlist and GitHub repo permissions.
+
+          Summary: ${DRIFT_SUMMARY}
+          Allowlisted authors: ${ALLOWLISTED_COUNT}
+          GitHub write+ collaborators: ${GITHUB_WRITE_COUNT}
+          CI run: ${RUN_URL}
+
+          Options:
+          - Update .ai-sdlc/trusted-reviewers.yaml to add missing trusted authors
+          - Remove stale entries from the allowlist
+          - No action if the drift is intentional (allowlist is more restrictive than GitHub perms)"
+
+          node pipeline-cli/bin/cli-decisions.mjs add \
+            --summary "trusted-reviewers-file-drift-detected" \
+            --scope "security" \
+            --source "framework-calibration" \
+            --body "${BODY}" \
+            --option "update-allowlist:Update .ai-sdlc/trusted-reviewers.yaml to match current GitHub permissions" \
+            --option "remove-stale:Remove authors from allowlist who no longer have GitHub write+" \
+            --option "no-action:Intentional divergence — allowlist is deliberately more restrictive" \
+            --routing "operator" \
+            2>&1 || echo "[drift] cli-decisions add failed — Decision Catalog may be unavailable; drift logged to stdout above"
+
+          echo "[drift] Decision emitted: trusted-reviewers-file-drift-detected"
+          echo "[drift] Drift summary: ${DRIFT_SUMMARY}"

@@ -54,3 +54,46 @@ reviewers:
       -----BEGIN PUBLIC KEY-----
       MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=
       -----END PUBLIC KEY-----
+
+# ─── RFC-0043 Phase 1 — Author allowlist extension ────────────────────────────
+#
+# The `allowlist.authors` block is read by the RFC-0043 Stage 0 trust
+# classifier (`pipeline-cli/src/pipeline/trust-classifier.ts`).
+#
+# OQ-1 resolution: this file is the ONLY runtime source of trust truth —
+# NO live GitHub API queries on the trust-classification critical path.
+# Drift between this file and GitHub repo permissions is detected by the
+# scheduled `.github/workflows/trusted-reviewers-drift.yml` workflow and
+# surfaced as a RFC-0035 G0 Decision for operator action.
+#
+# Schema (RFC-0043 Phase 1):
+#   allowlist:
+#     authors:
+#       - login:   GitHub login of the trusted author (required)
+#         name:    Display name (optional, human readability only)
+#         addedAt: ISO 8601 date the entry was added (optional)
+#         addedBy: GitHub handle of the approving maintainer (optional)
+#
+# Format note: the allowlist block uses js-yaml (pipeline-cli dep) rather
+# than the hand-rolled loader used for `reviewers:` keys above — richer
+# YAML features (unquoted strings, etc.) are safe here.
+#
+# Adding a trusted author:
+#   1. Open a PR adding an entry below.
+#   2. A maintainer with write+ permission reviews + merges.
+#   3. After merge, the trust classifier will classify the author as TRUSTED.
+#
+# RFC-0022 composition:
+#   - reviewerAuthorityModel: open        → allowlist is unused (everyone trusted)
+#   - reviewerAuthorityModel: allowlist   → only listed authors trusted
+#   - reviewerAuthorityModel: allowlist+role → only listed authors trusted
+#
+# When no .ai-sdlc/compliance.yaml exists, the default model is 'open'
+# (everyone trusted; UCVG opt-in only).
+
+allowlist:
+  authors:
+    - login: deefactorial
+      name: Dominique Legault
+      addedAt: '2026-06-02'
+      addedBy: deefactorial
