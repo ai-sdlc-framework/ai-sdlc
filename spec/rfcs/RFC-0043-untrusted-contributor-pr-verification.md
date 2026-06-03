@@ -2,10 +2,10 @@
 id: RFC-0043
 title: Untrusted-Contributor PR Verification — Zero-Trust Gate with OpenShell Sandbox Isolation
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: Dominique Legault
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-02
 targetSpecVersion: v1alpha1
 # Runtime-code dependency: the clean-room signer/verifier in this RFC IMPORTS the
 # RFC-0042 v6 Merkle-transcript signer + verifier as its attestation substrate.
@@ -27,11 +27,12 @@ deferredDocsDeadline: '2026-08-31'
 # RFC-0043: Untrusted-Contributor PR Verification — Zero-Trust Gate with OpenShell Sandbox Isolation
 
 **Status:** Draft
-**Lifecycle:** Draft
+**Lifecycle:** Ready for Review
 **Author:** Dominique Legault
 **Created:** 2026-05-30
-**Updated:** 2026-05-30
+**Updated:** 2026-06-02
 **Target Spec Version:** v1alpha1
+**OQ walkthrough:** Dominique Legault (Operator), 2026-06-02 — full-rubric resolution of all 6 §Open Questions.
 
 > The bold-style status block above is preserved for human readability. The YAML
 > frontmatter at the top of the file is the source of truth for tooling.
@@ -553,7 +554,9 @@ configured.
    reviewer finding (not obeyed), and the clean-room signer mints a valid RFC-0042
    v6 attestation over the resulting report only after the Zod boundary validates.
 
-## Open Questions
+## Open Questions — resolved (operator walkthrough 2026-06-02 with full rubric)
+
+> **Resolution status (2026-06-02):** All 6 §Open Questions resolved via operator walkthrough with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** operator-impacting events (`trusted-reviewers-file-drift-detected`, `untrusted-pr-resource-exhausted`, `untrusted-pr-sigstore-anchor-request`, `stage-1-content-heuristic-addition-request`) route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md). Engineering + Operator sign-off (Dominique) added; Design Authority review pending. Implementation broken into 6 phase tasks: AISDLC-497..502.
 
 1. **OQ-1 — Trust source of truth.** Should Stage 0 trust be driven solely by
    `.ai-sdlc/trusted-reviewers.yaml` (already read by the v6 verifier), by live
@@ -562,17 +565,23 @@ configured.
    can go stale. Recommended starting position: static file is authoritative,
    API query is an optional enrichment — but this needs an operator decision.
 
+   **Resolution (2026-06-02, full rubric):** **Static `.ai-sdlc/trusted-reviewers.yaml` ONLY + periodic drift-detection workflow via RFC-0035 G0 catalog.** A static file is the only thing the operator unilaterally controls and can git-audit; live API surfaces a permission state the operator may not have set (bot accounts, accidental org-wide grants, transient API spoofing) — trust derivation from non-operator-controlled source is a security regression even when GitHub is the source. Industry research: Kubernetes admission control uses declarative policy file as authoritative; this codebase's `.ai-sdlc/trusted-reviewers.yaml` + `agent-role.yaml` are git-committed source-of-truth declarations; GitHub API rate limits (5000/hr authenticated) + transient API failures = denial-of-service surface on critical path. Drift handling via periodic CI workflow comparing file against GitHub repo permissions → `Decision: trusted-reviewers-file-drift-detected` with diff (matches `backlog-drift` + `main-health-monitor` pattern); separates "operator's stated trust intent" (file) from "current GitHub state" (observable, may drift); operator merges file-update PR at their cadence. **Selected over live-API-only** because network dep + rate-limit surface on critical path AND broader false-negative attack surface (anything GitHub's permission API exposes). **Selected over file + API enrichment** because asymmetric "API can grant but not revoke" still expands false-negative surface — cleanest threat model is operator-controlled file, full stop. **Selected over file + API observability inline** because bundling drift detection into runtime path adds latency + failure mode for marginal benefit over periodic workflow.
+
 2. **OQ-2 — Where reviewers run for untrusted PRs.** Local maintainer machine
    (operator opens a sandbox locally) vs. CI-side ephemeral sandbox. The local
    path reuses the existing subscription-billed reviewer flow but requires the
    maintainer to have OpenShell installed; the CI path is hermetic but draws API
    billing and needs an OpenShell deployment in the runner. Which is the default?
 
+   **Resolution (2026-06-02, full rubric):** **CI default + local opt-in** via `untrusted-pr-gate.yaml: deployment: local|ci` (default `ci`). Operator explicitly distinguishes untrusted-PR review from internal-dogfood: AISDLC-353's subscription-tier cost strategy applies to internal-dogfood reviewer fan-out (high frequency, well-known authors); untrusted-PR review is a different cost surface with different threat-model priorities. For untrusted PRs specifically, CI hermetic isolation + contributor latency + signing-key-distance security all favor CI default. Industry research: most agent-based PR workflows (Devin, OpenHands integrations, Replit agent) run in CI/server because of determinism + parallelism + no per-developer setup. Local path stays supported for solo maintainers / small teams without CI sponsorship. **Selected over local-default** because for untrusted-PR specifically, contributor latency + key-proximity-security argument outweigh cost optimization. **Selected over pure-CI-only / pure-local-only** because the two adopter populations have different needs.
+
 3. **OQ-3 — Differential-test resource ceiling.** Running an untrusted
    contributor's full test suite is a DoS vector (infinite-loop tests, fork
    bombs). Seccomp blocks the worst syscalls, but what are the CPU/memory/wall-
    clock caps, and what is the behavior on breach (abort + label vs. partial
    report)?
+
+   **Resolution (2026-06-02, full rubric):** **Configurable defaults (10min wall-clock / 2 CPU cores / 4GB memory / deny network) + hard-abort on breach + `Decision: untrusted-pr-resource-exhausted` via RFC-0035 G0 catalog.** Industry research: AWS Lambda hard 15min wall-clock + configurable memory; container cgroup limits with deterministic OOM kill; well-engineered JS/TS suites complete in <5min empirically; fuzz testing (AFL, libfuzzer) uses explicit configurable budgets. Configurability via `.ai-sdlc/untrusted-pr-gate.yaml: differentialTest.resourceLimits` is non-negotiable (integration/e2e need higher; HIPAA-strict needs lower). Breach behavior: hard abort + `needs-maintainer-review` label + post-comment naming breached limit + G0-routed Decision so operator can review patterns (frequent breaches → consider raising limits; spike → consider DoS investigation). Per-test timeout available as adopter-optional refinement under same config block. **Selected over fixed limits** because adopter reality varies widely. **Selected over soft-abort + partial report** because conflates resource exhaustion with test failure → misleads contributor debugging. **Selected over per-test-timeout primary** because adds runner complexity for marginal benefit.
 
 4. **OQ-4 — Does the OSS-cross-org case re-open the Sigstore deferral?** RFC-0042
    deferred Rekor because internal audit needs no cross-org verifiability. An OSS
@@ -582,15 +591,27 @@ configured.
    or does the operator-key Merkle model serve both? (This is the one place the
    feature request's Sigstore proposal might genuinely apply.)
 
+   **Resolution (2026-06-02, full rubric):** **Operator-key Merkle ONLY for v1 + future Decision-Catalog auto-promote on ≥2 distinct adopter requests for cross-org verifiability.** RFC-0042's deferral stays in effect. OSS contributor verification behavior in practice is FORENSIC not GATING — contributors verify maintainer trust via GitHub identity + reputation, not cryptographic chains; attestation matters after a security incident. Operator-key Merkle is fully adequate for forensic role. Complexity cost of forking substrate is substantial (two signers/verifiers/formats). Future RFC via `Decision: untrusted-pr-sigstore-anchor-request` Stage A counter; auto-promote at ≥2 distinct adopter requests (matches RFC-0017 OQ-8 + RFC-0018 OQ-3/4/9). **Selected over fork-substrate** because complexity cost is real AND RFC-0042's deferral reasons apply equally. **Selected over hybrid `AI_SDLC_REKOR_ANCHOR=1` flag** because RFC-0042 already deferred Rekor — re-deferring is no-op. **Selected over move-entirely-to-Sigstore** because contradicts RFC-0042 without re-authorization.
+
 5. **OQ-5 — Compute-driver default.** MicroVM gives the strongest isolation for
    untrusted execution but the heaviest setup; Docker/Podman are lighter but
    weaker. What does the framework recommend by default, and does the RFC-0022
    regime override it (e.g. HIPAA → MicroVM required)?
 
+   **Resolution (2026-06-02, full rubric):** **Docker default + RFC-0022 regime override + Kata/gVisor middle-ground opt-in via `.ai-sdlc/untrusted-pr-gate.yaml: sandboxDriver: docker|kata|gvisor|microvm`.** Industry research: AWS Lambda uses Firecracker microVM; Cloudflare Workers / Vercel Edge use V8 isolates; GitHub Codespaces uses Docker on dedicated VMs; Replit + Devin use Docker; Kata Containers + gVisor are middle-ground (~5-15% runtime overhead); container escape CVEs (containerd CVE-2022-23648, runc CVE-2024-21626 "Leaky Vessels") show Docker shared-kernel risk is real. **Regime overrides** (composes with RFC-0022 same shape as RFC-0030 OQ-13.3 residency enforcement): HIPAA / FedRAMP High / PCI-DSS Level 1 → MicroVM required automatically. **Selected over MicroVM-universal-default** because excludes macOS/Windows from local-dev + requires KVM-capable CI runners — friction tax for adopters without compliance needs. **Selected over Docker-only** because excludes compliance-regulated adopters. **Selected over no-default** because operator-friction + defers a real strategic decision.
+
 6. **OQ-6 — Content-heuristic scope creep.** Stage 1's content heuristics
    (`package.json` lifecycle scripts, new `uses:`) are a small allowlist today.
    How far do we go before this becomes a de-facto malware scanner we have to
    maintain (vs. delegating to RFC-0022 `secretScanStrictness` + external SAST)?
+
+   **Resolution (2026-06-02, full rubric):** **Current allowlist + explicit boundary principle + Decision-Catalog request hook for adopter-requested patterns.** Boundary principle codified in the resolution: *"Stage 1 is for patterns where false-positive rate <1% AND deterministic gate provides clear value over downstream LLM/sandbox detection. Sophisticated detection delegates to RFC-0022 `secretScanStrictness` + adopter-integrated SAST (Snyk / Semgrep / CodeQL / etc.)."* Adopter requests route via `Decision: stage-1-content-heuristic-addition-request` Stage A counter; auto-promote at ≥2 distinct adopter requests for same pattern AND false-positive criterion met → RFC amendment adds pattern. Industry research: Snyk / Dependabot / Renovate maintain vulnerability databases with dedicated security-team effort; Stage 1 doesn't have that maintenance budget; Stage 1's value is determined by what it's GOOD at — deterministic + cheap + high-confidence + pre-LLM. **Selected over maximalist scanning** because framework maintenance burden unsustainable + duplicates dedicated SAST tools. **Selected over path-only** because removes useful high-confidence content checks (lifecycle scripts, workflow `uses:`) that ARE cheap + deterministic + high-value. **Selected over per-adopter only** because adopter friction + framework abdicates real defense layer.
+
+### Sign-Off
+
+- [x] **Engineering owner:** Dominique Legault (2026-06-02 — all 6 §Open Questions resolved per operator walkthrough with full rigor rubric)
+- [x] **Operator:** Dominique Legault (2026-06-02 — all 6 §Open Questions resolved per operator walkthrough with full rigor rubric)
+- [ ] **Design owner:** Morgan Hirtle (pending Design Authority review)
 
 ## References
 
