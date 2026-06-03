@@ -245,6 +245,21 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
   }
   const report = validationResult.report;
 
+  // ── Step 3b: Cross-validate report fields against caller-supplied opts ───────
+  // The report's headSha MUST match the headSha the caller believes is current.
+  // A mismatch means the artifact was produced for a DIFFERENT commit than the
+  // one being signed — potential TOCTOU attack or stale artifact.
+  if (report.headSha !== headSha) {
+    return {
+      success: false,
+      phase: 'zod-validation',
+      error:
+        `[clean-room-signer] headSha mismatch: report.headSha='${report.headSha}' does not ` +
+        `match opts.headSha='${headSha}'. The report artifact was produced for a different ` +
+        `commit. Regenerate the report for the correct HEAD.`,
+    };
+  }
+
   // ── Step 4: Key resolution ───────────────────────────────────────────────────
   const signingKeyPath = resolveSigningKeyPath();
   if (!signingKeyPath) {
@@ -258,7 +273,21 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
     };
   }
 
-  const privateKeyPem = readFileSync(signingKeyPath, 'utf8');
+  // ── Step 4b: Read the key file ───────────────────────────────────────────────
+  // readFileSync is inside its own try/catch so TOCTOU/permission races on the
+  // key file (e.g. key deleted or mode-changed between existsSync and readFileSync)
+  // return a structured { success:false, phase:'key-resolution' } rather than
+  // throwing a raw fs error that breaks the no-throw discriminated-union contract.
+  let privateKeyPem: string;
+  try {
+    privateKeyPem = readFileSync(signingKeyPath, 'utf8');
+  } catch (err) {
+    return {
+      success: false,
+      phase: 'key-resolution',
+      error: `[clean-room-signer] Failed to read signing key at '${signingKeyPath}': ${String(err)}`,
+    };
+  }
 
   // ── Steps 5-6: Build Merkle tree + Sign + Write RFC-0042 v6 envelope (AC#6,7) ─
   try {

@@ -34,25 +34,35 @@ import { z } from 'zod';
  * Severity vocabulary is deliberately aligned with the existing AI-SDLC
  * reviewer verdict contract — NOT with the feature-request's PASSED/FAILED
  * or confidence-score vocabulary.
+ *
+ * `.strict()` ensures unknown keys (e.g. injected `signature`, `override`,
+ * `__proto__`) are REJECTED, not silently stripped. This is the trust boundary.
  */
-const FindingSchema = z.object({
-  severity: z.enum(['critical', 'major', 'minor', 'suggestion']),
-  message: z.string().min(1),
-  path: z.string().optional(),
-});
+const FindingSchema = z
+  .object({
+    severity: z.enum(['critical', 'major', 'minor', 'suggestion']),
+    message: z.string().min(1),
+    path: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Single reviewer verdict.
  *
- * `promptInjectionDetected` surfaces injection attempts as a structured
- * finding per RFC-0043 §Stage 3 — the reviewer records the attempt but
- * does NOT obey the injected instruction.
+ * `promptInjectionDetected` is a **required** security signal (aligned with
+ * the JSON schema `required` list). The sandbox MUST always emit a boolean —
+ * omitting it could mask an injection attempt that slipped through. Callers
+ * must explicitly pass `false` rather than relying on a default.
+ *
+ * `.strict()` rejects unknown keys at the trust boundary.
  */
-const ReviewerVerdictSchema = z.object({
-  approved: z.boolean(),
-  findings: z.array(FindingSchema),
-  promptInjectionDetected: z.boolean().default(false),
-});
+const ReviewerVerdictSchema = z
+  .object({
+    approved: z.boolean(),
+    findings: z.array(FindingSchema),
+    promptInjectionDetected: z.boolean(),
+  })
+  .strict();
 
 // ── Root report schema ────────────────────────────────────────────────────────
 
@@ -71,44 +81,56 @@ const ReviewerVerdictSchema = z.object({
  *   reviewers.{code, test, security},
  *   consensus.{approved, blockingFindings}
  */
-export const UntrustedPrReportSchema = z.object({
-  /** Pinned identifier — must be exact literal to prevent cross-version forgery. */
-  schemaVersion: z.literal('untrusted-pr-report.v1'),
-  prNumber: z.number().int().positive(),
-  /** 40-hex-char commit SHA at the PR head. */
-  headSha: z.string().regex(/^[0-9a-f]{40}$/i),
-  /** 40-hex-char commit SHA of the merge base. */
-  baseSha: z.string().regex(/^[0-9a-f]{40}$/i),
-  /** ISO 8601 timestamp when the sandbox produced this report. */
-  generatedAt: z.string().datetime(),
-  /** Stage 0 trust classification result. */
-  trust: z.object({
-    classification: z.enum(['untrusted', 'trusted']),
-    reason: z.string().min(1),
-  }),
-  /** Stage 1 deterministic diff / AST gate result. */
-  astGate: z.object({
-    outcome: z.enum(['pass', 'abort-protected-path']),
-    offendingPaths: z.array(z.string()),
-  }),
-  /** Stage 2 OpenShell differential testing results. */
-  differentialTest: z.object({
-    upstreamSuitePassed: z.boolean(),
-    newTestsPassed: z.boolean(),
-    newCodeCoveragePct: z.number().min(0).max(100),
-  }),
-  /** Stage 3 hardened 3-reviewer matrix verdicts. */
-  reviewers: z.object({
-    code: ReviewerVerdictSchema,
-    test: ReviewerVerdictSchema,
-    security: ReviewerVerdictSchema,
-  }),
-  /** Aggregated consensus across all three reviewers. */
-  consensus: z.object({
-    approved: z.boolean(),
-    blockingFindings: z.number().int().min(0),
-  }),
-});
+export const UntrustedPrReportSchema = z
+  .object({
+    /** Pinned identifier — must be exact literal to prevent cross-version forgery. */
+    schemaVersion: z.literal('untrusted-pr-report.v1'),
+    prNumber: z.number().int().positive(),
+    /** 40-hex-char commit SHA at the PR head. */
+    headSha: z.string().regex(/^[0-9a-f]{40}$/i),
+    /** 40-hex-char commit SHA of the merge base. */
+    baseSha: z.string().regex(/^[0-9a-f]{40}$/i),
+    /** ISO 8601 timestamp when the sandbox produced this report. */
+    generatedAt: z.string().datetime(),
+    /** Stage 0 trust classification result. */
+    trust: z
+      .object({
+        classification: z.enum(['untrusted', 'trusted']),
+        reason: z.string().min(1),
+      })
+      .strict(),
+    /** Stage 1 deterministic diff / AST gate result. */
+    astGate: z
+      .object({
+        outcome: z.enum(['pass', 'abort-protected-path']),
+        offendingPaths: z.array(z.string()),
+      })
+      .strict(),
+    /** Stage 2 OpenShell differential testing results. */
+    differentialTest: z
+      .object({
+        upstreamSuitePassed: z.boolean(),
+        newTestsPassed: z.boolean(),
+        newCodeCoveragePct: z.number().min(0).max(100),
+      })
+      .strict(),
+    /** Stage 3 hardened 3-reviewer matrix verdicts. */
+    reviewers: z
+      .object({
+        code: ReviewerVerdictSchema,
+        test: ReviewerVerdictSchema,
+        security: ReviewerVerdictSchema,
+      })
+      .strict(),
+    /** Aggregated consensus across all three reviewers. */
+    consensus: z
+      .object({
+        approved: z.boolean(),
+        blockingFindings: z.number().int().min(0),
+      })
+      .strict(),
+  })
+  .strict();
 
 // ── Inferred types ────────────────────────────────────────────────────────────
 

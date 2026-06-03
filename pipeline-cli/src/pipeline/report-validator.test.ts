@@ -4,11 +4,39 @@
  * AC#10 coverage:
  *   - Schema round-trip: write report → validate → mutate → re-validate fails
  *   - Tamper rejection: malformed / missing / extra fields rejected
+ *   - Strict Zod: extra/injected keys REJECTED at every object boundary
+ *   - Zod↔JSON-schema agreement: AJV validates the same inputs as Zod
  *   - No confidence-score / cveDetected / complexityDelta fields (AC#4)
  *   - Decision Catalog Stage A counter (AC#9)
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import _Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
+
+// Handle CJS default export interop (mirrors reference/src/core/validation.ts)
+const Ajv2020 = _Ajv2020 as unknown as typeof _Ajv2020.default;
+
+// ── AJV helper ───────────────────────────────────────────────────────────────
+
+const _dirname = fileURLToPath(new URL('.', import.meta.url));
+// From pipeline-cli/src/pipeline/ → up 3 levels = worktree root
+const SCHEMA_PATH = join(_dirname, '../../../spec/schemas/untrusted-pr-report.v1.schema.json');
+
+function buildAjvValidator() {
+  // AJV 2020-12 without format plugins — format: 'date-time' is advisory in
+  // JSON Schema 2020-12 (format assertions are opt-in). We skip ajv-formats to
+  // avoid adding a devDependency that isn't in pipeline-cli's package.json.
+  // The structural properties (required, additionalProperties, enum, const) that
+  // matter for the Zod↔JSON-schema agreement test all work without it.
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  const schema = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8')) as Record<string, unknown>;
+  return ajv.compile(schema);
+}
+
+const ajvValidate = buildAjvValidator();
 import {
   UntrustedPrReportSchema,
   validateReport,
@@ -78,8 +106,10 @@ describe('UntrustedPrReportSchema — round-trip', () => {
     expect(result.report.prNumber).toBe(42);
   });
 
-  it('infers promptInjectionDetected default false', () => {
-    // Use safeParse to check default inference
+  it('rejects when promptInjectionDetected is omitted (required security signal)', () => {
+    // promptInjectionDetected is REQUIRED in both Zod and the JSON schema.
+    // Omitting it could mask an injection attempt — the sandbox must always
+    // emit an explicit boolean, never rely on a default.
     const data = {
       ...VALID_REPORT,
       reviewers: {
@@ -88,10 +118,7 @@ describe('UntrustedPrReportSchema — round-trip', () => {
       },
     };
     const result = UntrustedPrReportSchema.safeParse(data);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.reviewers.code.promptInjectionDetected).toBe(false);
-    }
+    expect(result.success).toBe(false);
   });
 
   it('accepts a report with blocking findings (not approved)', () => {
@@ -311,15 +338,168 @@ describe('UntrustedPrReportSchema — tamper rejection (AC#10)', () => {
   });
 });
 
+// ── Strict boundary: extra/injected keys REJECTED (finding #1) ───────────────
+
+describe('UntrustedPrReportSchema — strict boundary rejects extra/injected keys', () => {
+  it('rejects an extra key at the root level (e.g. injected "override")', () => {
+    const tampered = { ...VALID_REPORT, override: true };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/override/i);
+  });
+
+  it('rejects an injected "__proto__" key at root level', () => {
+    const tampered = { ...VALID_REPORT, __proto__: { isAdmin: true } };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects an injected "signature" key at root level (spoofed attestation field)', () => {
+    const tampered = { ...VALID_REPORT, signature: 'AAAA' };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/signature/i);
+  });
+
+  it('rejects an extra key injected into the trust object', () => {
+    const tampered = {
+      ...VALID_REPORT,
+      trust: { ...VALID_REPORT.trust, injected: 'evil' },
+    };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/injected/i);
+  });
+
+  it('rejects an extra key injected into a ReviewerVerdict (nested)', () => {
+    const tampered = {
+      ...VALID_REPORT,
+      reviewers: {
+        ...VALID_REPORT.reviewers,
+        code: {
+          ...VALID_REPORT.reviewers.code,
+          approved: false, // attacker tries to flip verdict
+          extraKey: 'payload',
+        },
+      },
+    };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/extraKey/i);
+  });
+
+  it('rejects an extra key injected into a Finding (deeply nested)', () => {
+    const tampered = {
+      ...VALID_REPORT,
+      reviewers: {
+        ...VALID_REPORT.reviewers,
+        code: {
+          approved: false,
+          findings: [{ severity: 'major', message: 'real finding', injected: 'payload' }],
+          promptInjectionDetected: false,
+        },
+      },
+    };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/injected/i);
+  });
+
+  it('rejects an extra key injected into the consensus object', () => {
+    const tampered = {
+      ...VALID_REPORT,
+      consensus: { ...VALID_REPORT.consensus, override: 'approve-anyway' },
+    };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/override/i);
+  });
+});
+
+// ── Zod↔JSON-schema agreement via AJV (finding #3) ───────────────────────────
+
+describe('Zod↔JSON-schema agreement (AJV)', () => {
+  it('VALID_REPORT passes the JSON schema via AJV', () => {
+    const valid = ajvValidate(VALID_REPORT);
+    expect(valid).toBe(true);
+    if (!valid) {
+      throw new Error(`AJV validation failed: ${JSON.stringify(ajvValidate.errors)}`);
+    }
+  });
+
+  it('a report with wrong schemaVersion is rejected by both Zod AND AJV', () => {
+    const tampered = { ...VALID_REPORT, schemaVersion: 'untrusted-pr-report.v2' };
+    // Zod
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    // AJV
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+
+  it('a report with an extra root key is rejected by Zod (strict) AND AJV (additionalProperties:false)', () => {
+    const tampered = { ...VALID_REPORT, extra: 'injected' };
+    // Zod
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    // AJV
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+
+  it('a report with an extra ReviewerVerdict key is rejected by both Zod AND AJV', () => {
+    const tampered = {
+      ...VALID_REPORT,
+      reviewers: {
+        ...VALID_REPORT.reviewers,
+        code: { ...VALID_REPORT.reviewers.code, surprise: true },
+      },
+    };
+    // Zod
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    // AJV
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+
+  it('a report missing promptInjectionDetected is rejected by both Zod AND AJV', () => {
+    const { reviewers } = VALID_REPORT;
+    const { promptInjectionDetected: _omit, ...codeWithout } = reviewers.code;
+    const tampered = {
+      ...VALID_REPORT,
+      reviewers: { ...reviewers, code: codeWithout },
+    };
+    // Zod
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    // AJV
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+
+  it('a report with invalid headSha (non-hex) is rejected by both Zod AND AJV', () => {
+    const tampered = { ...VALID_REPORT, headSha: 'Z'.repeat(40) };
+    // Zod
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    // AJV
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+});
+
 // ── AC#4: No confidence-score / cveDetected / complexityDelta ───────────────
 
 describe('UntrustedPrReportSchema — no forbidden fields (AC#4)', () => {
   it('schema does NOT have top-level confidenceScore field', () => {
     // Verify that the inferred type does not include these fields.
-    // We add them as extra props to a valid report and expect them to be
-    // stripped (Zod does NOT use strict mode here — they'll be accepted
-    // but the type won't expose them). The key invariant is that the
-    // authoritative type has no such fields.
     type HasConfidenceScore = 'confidenceScore' extends keyof UntrustedPrReport ? true : false;
     type HasComplexityDelta = 'complexityDelta' extends keyof UntrustedPrReport ? true : false;
     type HasCveDetected = 'cveDetected' extends keyof UntrustedPrReport ? true : false;
@@ -332,6 +512,17 @@ describe('UntrustedPrReportSchema — no forbidden fields (AC#4)', () => {
     expect(noConfidenceScore).toBe(false);
     expect(noComplexityDelta).toBe(false);
     expect(noCveDetected).toBe(false);
+  });
+
+  it('report with a forbidden field (confidenceScore) is REJECTED (not stripped) in strict mode', () => {
+    // With .strict(), extra keys like confidenceScore are REJECTED rather than
+    // silently stripped. This prevents an attacker from embedding a field whose
+    // presence could influence downstream logic in a non-Zod consumer.
+    const tampered = { ...VALID_REPORT, confidenceScore: 0.99 };
+    const result = validateReport(tampered);
+    expect(result.valid).toBe(false);
+    if (result.valid) throw new Error('Expected invalid');
+    expect(result.error).toMatch(/confidenceScore/i);
   });
 
   it('schema keys match the RFC §Design Details specification', () => {
