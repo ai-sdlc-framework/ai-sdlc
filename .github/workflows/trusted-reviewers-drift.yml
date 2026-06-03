@@ -132,11 +132,11 @@ jobs:
             "repos/${REPO}/collaborators?permission=admin&affiliation=direct" \
             --jq '[.[].login]' 2>/dev/null || echo '[]')
 
-          # Combine and deduplicate
-          ALL_WRITE=$(python3 -c "
-          import json, sys
-          write = json.loads('$WRITE_PLUS')
-          admin = json.loads('$ADMIN')
+          # Combine and deduplicate — pass variables via env to avoid shell quoting issues
+          ALL_WRITE=$(WRITE_PLUS="$WRITE_PLUS" ADMIN="$ADMIN" python3 -c "
+          import json, os
+          write = json.loads(os.environ.get('WRITE_PLUS', '[]'))
+          admin = json.loads(os.environ.get('ADMIN', '[]'))
           combined = sorted(set(write + admin))
           print(json.dumps(combined))
           " 2>/dev/null || echo '[]')

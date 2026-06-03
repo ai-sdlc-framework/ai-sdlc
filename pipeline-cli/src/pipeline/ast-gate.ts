@@ -70,13 +70,14 @@ export interface AstGateConfig {
    * Paths that trigger `abort-protected-path` on mutation.
    *
    * RFC-0043 §Stage 1 defaults (deny wins):
-   *   - `.github/**`               CI/CD config — RCE-via-workflow vector
-   *   - `**\/package.json`         lifecycle-script + dependency injection
-   *   - `pnpm-lock.yaml`           dependency lockfile — supply-chain vector
-   *   - `package-lock.json`        dependency lockfile — supply-chain vector
-   *   - `yarn.lock`                dependency lockfile — supply-chain vector
-   *   - `.ai-sdlc/**`              agent roles, gate config, attestation policy
-   *   - `ai-sdlc-plugin/agents/**` reviewer/dev prompt definitions
+   *   - `.github/**`                CI/CD config — RCE-via-workflow vector
+   *   - `**\/.github/**`            nested .github dirs (e.g. packages/sub/.github/)
+   *   - `**\/package.json`          lifecycle-script + dependency injection
+   *   - `**\/pnpm-lock.yaml`        dependency lockfile in any workspace — supply-chain vector
+   *   - `**\/package-lock.json`     dependency lockfile in any workspace — supply-chain vector
+   *   - `**\/yarn.lock`             dependency lockfile in any workspace — supply-chain vector
+   *   - `.ai-sdlc/**`               agent roles, gate config, attestation policy
+   *   - `ai-sdlc-plugin/agents/**`  reviewer/dev prompt definitions
    *   - `**\/*.github/workflows/**` nested workflow configs
    */
   protectedPaths: string[];
@@ -126,10 +127,11 @@ export interface AstGateConfig {
  */
 export const DEFAULT_PROTECTED_PATHS: readonly string[] = [
   '.github/**',
+  '**/.github/**',
   '**/package.json',
-  'pnpm-lock.yaml',
-  'package-lock.json',
-  'yarn.lock',
+  '**/pnpm-lock.yaml',
+  '**/package-lock.json',
+  '**/yarn.lock',
   '.ai-sdlc/**',
   'ai-sdlc-plugin/agents/**',
   '**/*.github/workflows/**',
@@ -247,6 +249,126 @@ function mergeWithDefaults(partial: Partial<AstGateConfig>): AstGateConfig {
     allowedMutationGlobs: partial.allowedMutationGlobs ?? [...DEFAULT_ALLOWED_MUTATION_GLOBS],
     contentHeuristics: partial.contentHeuristics ?? DEFAULT_CONTENT_HEURISTICS,
   };
+}
+
+// ── Path normalization ────────────────────────────────────────────────────────
+
+/**
+ * Normalize a file path before glob matching.
+ *
+ * Security invariant: ambiguous or adversarially-formed paths are DENIED
+ * (treated as protected/blocked) rather than passed. This prevents attackers
+ * from crafting paths that look safe but match unexpected locations.
+ *
+ * Normalization steps:
+ *  1. Reject backslash separators (Windows-style paths are not valid in diffs
+ *     produced by git on our supported platforms; any backslash is suspect).
+ *  2. Unescape git core.quotePath octal/hex escapes in quoted paths
+ *     (git wraps non-ASCII paths in double-quotes and encodes bytes as \\NNN
+ *     or \\xNN — strip the surrounding quotes and unescape the sequences).
+ *  3. Reject paths containing `../` segments (directory traversal).
+ *  4. Strip a single leading `./` (canonical form).
+ *  5. Strip a trailing `/` (file paths never end with /).
+ *
+ * Returns `null` when the path is ambiguous/unresolvable; callers MUST treat
+ * null as "protected" (deny).
+ */
+export function normalizePath(rawPath: string): string | null {
+  let path = rawPath;
+
+  // Step 1: Unescape git core.quotePath quoted paths FIRST.
+  // git wraps non-ASCII paths in double quotes and encodes bytes as \NNN (octal)
+  // or \xNN (hex). Example: `"foo/b\303\251r.ts"` → `foo/bér.ts`.
+  // We must handle this before the backslash-rejection step.
+  // The octal sequences (\NNN) are raw UTF-8 bytes — we collect them as a
+  // Uint8Array and decode via TextDecoder to produce correct Unicode strings.
+  if (path.startsWith('"') && path.endsWith('"')) {
+    const inner = path.slice(1, -1);
+    try {
+      // Two-pass approach:
+      // Pass 1: split the inner string into segments of plain-ASCII chars and
+      //         escape sequences (\NNN, \xNN, or other).
+      // Pass 2: for runs of consecutive byte-valued escapes (\NNN / \xNN),
+      //         collect into a Uint8Array and decode as UTF-8.
+      const segments: Array<{ kind: 'ascii'; text: string } | { kind: 'byte'; value: number }> = [];
+      let remaining = inner;
+      while (remaining.length > 0) {
+        const escIdx = remaining.indexOf('\\');
+        if (escIdx === -1) {
+          segments.push({ kind: 'ascii', text: remaining });
+          break;
+        }
+        if (escIdx > 0) {
+          segments.push({ kind: 'ascii', text: remaining.slice(0, escIdx) });
+        }
+        const afterSlash = remaining.slice(escIdx + 1);
+        const octalMatch = afterSlash.match(/^([0-7]{3})/);
+        const hexMatch = afterSlash.match(/^(x[0-9a-fA-F]{2})/);
+        if (octalMatch) {
+          segments.push({ kind: 'byte', value: parseInt(octalMatch[1], 8) });
+          remaining = afterSlash.slice(3);
+        } else if (hexMatch) {
+          segments.push({ kind: 'byte', value: parseInt(hexMatch[1].slice(1), 16) });
+          remaining = afterSlash.slice(3);
+        } else {
+          // Single-char escape: \n \t \" \\ etc.
+          const escChar = afterSlash[0];
+          const MAP: Record<string, string> = { n: '\n', t: '\t', '"': '"', '\\': '\\' };
+          segments.push({ kind: 'ascii', text: MAP[escChar] ?? escChar });
+          remaining = afterSlash.slice(1);
+        }
+      }
+
+      // Reconstruct string: decode consecutive byte segments as UTF-8
+      let result = '';
+      let i = 0;
+      while (i < segments.length) {
+        const seg = segments[i];
+        if (seg.kind === 'ascii') {
+          result += seg.text;
+          i++;
+        } else {
+          // Collect a run of bytes for UTF-8 decoding
+          const bytes: number[] = [];
+          while (i < segments.length && segments[i].kind === 'byte') {
+            bytes.push((segments[i] as { kind: 'byte'; value: number }).value);
+            i++;
+          }
+          const uint8 = new Uint8Array(bytes);
+          result += new TextDecoder('utf-8').decode(uint8);
+        }
+      }
+      path = result;
+    } catch {
+      // Unescape failed — treat as ambiguous → deny
+      return null;
+    }
+  } else if (rawPath.includes('\\')) {
+    // Step 2: Reject bare backslash separators (Windows-style paths are not valid
+    // in diffs produced by git on our supported platforms; any backslash is suspect).
+    // Only applies to non-quoted paths — quoted paths have backslashes as escape prefix.
+    return null;
+  }
+
+  // Step 3: Reject `../` directory traversal anywhere in the path
+  if (path.includes('../') || path === '..' || path.startsWith('../')) return null;
+  // Also reject encoded traversal that survived the unescape above
+  if (/(^|\/)\.\.($|\/)/.test(path)) return null;
+
+  // Step 4: Strip single leading `./`
+  if (path.startsWith('./')) {
+    path = path.slice(2);
+  }
+
+  // Step 5: Strip trailing `/`
+  if (path.endsWith('/')) {
+    path = path.slice(0, -1);
+  }
+
+  // Reject empty path after normalization
+  if (path.length === 0) return null;
+
+  return path;
 }
 
 // ── Path matching helpers ──────────────────────────────────────────────────────
@@ -376,12 +498,19 @@ export function detectLifecycleScriptAdditions(
 }
 
 /**
- * Check whether a file content contains a new `uses:` reference.
+ * Check whether a file content adds a NEW `uses:` line that was not present before.
  *
  * Applied as a belt-and-suspenders check for content that slipped past
  * protected-path globs (e.g. a `.ts` file embedding raw workflow YAML
  * in a template literal). In practice this fires rarely because the
  * `.github/**` protected-path glob catches workflow files directly.
+ *
+ * Uses LINE-LEVEL diff semantics: a line containing `uses:` that exists in
+ * `afterContent` but NOT in `beforeContent` is treated as a newly-added line.
+ * This prevents the bypass where a file already contains a benign `uses:` line
+ * and an attacker hides a second malicious `uses: actions/evil@v1` line later —
+ * the whole-file presence check would have passed, but the line-level check
+ * catches the net-new line.
  *
  * Boundary: <0.1% false-positive — `uses:` in a `.ts` file is virtually
  * never a legitimate contributor change (it would be in a comment or
@@ -391,20 +520,45 @@ export function detectNewGithubActionUses(
   afterContent: string,
   beforeContent?: string | null,
 ): boolean {
-  // Match `uses:` with optional leading whitespace or a list-item dash prefix.
-  // This covers YAML workflow files (`      - uses: actions/checkout@v4`) as
-  // well as embedded YAML in .ts template literals.
-  const USES_PATTERN = /\buses\s*:/m;
-  const afterHasUses = USES_PATTERN.test(afterContent);
-  if (!afterHasUses) return false;
+  // Match lines containing `uses:` with optional leading whitespace / dash prefix.
+  // Covers YAML workflow lines (`      - uses: actions/checkout@v4`) as well as
+  // embedded YAML in .ts template literals.
+  const USES_PATTERN = /\buses\s*:/;
+
+  const afterLines = afterContent.split('\n');
+  const usesInAfter = afterLines.filter((line) => USES_PATTERN.test(line));
+
+  if (usesInAfter.length === 0) return false;
 
   if (beforeContent) {
-    const beforeHasUses = USES_PATTERN.test(beforeContent);
-    // Only flag if `uses:` is NEW (not present before)
-    return !beforeHasUses;
+    // Build a multiset of uses:-containing lines from the before content.
+    const beforeLines = beforeContent.split('\n');
+    const beforeUsesCounts = new Map<string, number>();
+    for (const line of beforeLines) {
+      if (USES_PATTERN.test(line)) {
+        beforeUsesCounts.set(line, (beforeUsesCounts.get(line) ?? 0) + 1);
+      }
+    }
+
+    // Check whether any uses:-line in after is a NET NEW addition:
+    // if a line appears more times in after than in before, it was added.
+    const afterUsesCounts = new Map<string, number>();
+    for (const line of usesInAfter) {
+      afterUsesCounts.set(line, (afterUsesCounts.get(line) ?? 0) + 1);
+    }
+
+    for (const [line, afterCount] of afterUsesCounts) {
+      const beforeCount = beforeUsesCounts.get(line) ?? 0;
+      if (afterCount > beforeCount) {
+        // At least one net-new uses: line detected
+        return true;
+      }
+    }
+
+    return false;
   }
 
-  // New file with `uses:` — flag it
+  // New file with `uses:` lines — flag it
   return true;
 }
 
@@ -455,15 +609,22 @@ export function runAstGate(
   const heuristicFindings: HeuristicFinding[] = [];
 
   for (const file of changedFiles) {
+    // Step 0: Normalize the path — ambiguous/unresolvable paths are DENIED
+    const normalizedPath = normalizePath(file.path);
+    if (normalizedPath === null) {
+      offendingPaths.push(file.path);
+      continue;
+    }
+
     // Step 1: Protected-path check (deny wins)
-    if (matchesAnyGlob(file.path, config.protectedPaths)) {
+    if (matchesAnyGlob(normalizedPath, config.protectedPaths)) {
       offendingPaths.push(file.path);
       // Continue to collect ALL offending paths (don't abort early)
       continue;
     }
 
     // Step 2: Allowed-mutation check
-    if (!matchesAnyGlob(file.path, config.allowedMutationGlobs)) {
+    if (!matchesAnyGlob(normalizedPath, config.allowedMutationGlobs)) {
       offendingPaths.push(file.path);
       continue;
     }
@@ -472,7 +633,7 @@ export function runAstGate(
     if (file.afterContent !== undefined) {
       // 3a: package.json lifecycle scripts
       if (
-        file.path.endsWith('package.json') &&
+        normalizedPath.endsWith('package.json') &&
         config.contentHeuristics.packageJsonLifecycleScripts === 'abort'
       ) {
         const addedScripts = detectLifecycleScriptAdditions(file.afterContent, file.beforeContent);
@@ -562,12 +723,16 @@ export function buildBlockedComment(gateResult: AstGateResult, author: string): 
     '',
     `@${author} — this PR modifies files that require maintainer review.`,
     '',
-    'The following paths are protected and may not be changed by untrusted contributors:',
-    '',
   ];
 
-  for (const path of gateResult.offendingPaths) {
-    lines.push(`- \`${path}\``);
+  if (gateResult.offendingPaths.length > 0) {
+    lines.push(
+      'The following paths are protected and may not be changed by untrusted contributors:',
+    );
+    lines.push('');
+    for (const path of gateResult.offendingPaths) {
+      lines.push(`- \`${path}\``);
+    }
   }
 
   if (gateResult.heuristicFindings.length > 0) {

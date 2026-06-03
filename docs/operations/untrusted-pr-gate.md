@@ -91,14 +91,15 @@ RFC-0043 §Stage 1 defaults apply:
 ```yaml
 # .ai-sdlc/untrusted-pr-gate.yaml (adopter-configurable)
 protectedPaths:
-  - '.github/**'               # CI/CD config — RCE-via-workflow vector
-  - '**/package.json'          # lifecycle-script + dependency injection
-  - 'pnpm-lock.yaml'
-  - 'package-lock.json'
-  - 'yarn.lock'
-  - '.ai-sdlc/**'              # agent roles, gate config, attestation policy
-  - 'ai-sdlc-plugin/agents/**' # reviewer/dev prompt definitions
-  - '**/*.github/workflows/**' # nested workflow configs
+  - '.github/**'                # CI/CD config — RCE-via-workflow vector
+  - '**/.github/**'             # nested .github dirs (e.g. packages/sub/.github/)
+  - '**/package.json'           # lifecycle-script + dependency injection
+  - '**/pnpm-lock.yaml'         # lockfile in any workspace — supply-chain vector
+  - '**/package-lock.json'      # lockfile in any workspace — supply-chain vector
+  - '**/yarn.lock'              # lockfile in any workspace — supply-chain vector
+  - '.ai-sdlc/**'               # agent roles, gate config, attestation policy
+  - 'ai-sdlc-plugin/agents/**'  # reviewer/dev prompt definitions
+  - '**/*.github/workflows/**'  # nested workflow configs
 allowedMutationGlobs:
   - '**/*.ts'
   - '**/*.tsx'

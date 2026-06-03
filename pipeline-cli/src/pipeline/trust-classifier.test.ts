@@ -343,6 +343,49 @@ describe('classifyTrust', () => {
     expect(result.allowlistedAuthors).toContain('bob');
     expect(result.classification).toBe('untrusted');
   });
+
+  // Finding #8: case-insensitive GitHub login comparison
+  it('classifies author as TRUSTED case-insensitively (Alice == alice)', () => {
+    writeTrustedReviewers(workDir, TRUSTED_REVIEWERS_WITH_ALLOWLIST);
+    // File has `alice` (lowercase), but GitHub may send `Alice` (capitalized)
+    const result = classifyTrust({
+      author: 'Alice', // different casing than allowlist entry `alice`
+      isFork: false,
+      reviewerAuthorityModel: 'allowlist',
+      workDir,
+    });
+    expect(result.classification).toBe('trusted');
+    expect(result.reason).toBe('author-in-allowlist');
+    // Original case is preserved in audit output
+    expect(result.author).toBe('Alice');
+  });
+
+  it('classifies author as TRUSTED case-insensitively (ALICE == alice)', () => {
+    writeTrustedReviewers(workDir, TRUSTED_REVIEWERS_WITH_ALLOWLIST);
+    const result = classifyTrust({
+      author: 'ALICE',
+      isFork: false,
+      reviewerAuthorityModel: 'allowlist',
+      workDir,
+    });
+    expect(result.classification).toBe('trusted');
+    expect(result.reason).toBe('author-in-allowlist');
+    // Original case preserved for audit
+    expect(result.author).toBe('ALICE');
+  });
+
+  it('preserves original-case allowlistedAuthors in audit output when case-folded match used', () => {
+    writeTrustedReviewers(workDir, TRUSTED_REVIEWERS_WITH_ALLOWLIST);
+    const result = classifyTrust({
+      author: 'ALICE',
+      isFork: false,
+      reviewerAuthorityModel: 'allowlist',
+      workDir,
+    });
+    // The allowlistedAuthors field should contain the original-case entries from the file
+    expect(result.allowlistedAuthors).toContain('alice'); // as stored in file
+    expect(result.allowlistedAuthors).toContain('bob');
+  });
 });
 
 // ── shouldEngageUcvg ─────────────────────────────────────────────────────────

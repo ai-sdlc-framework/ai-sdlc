@@ -16,11 +16,58 @@ import {
   detectLifecycleScriptAdditions,
   detectNewGithubActionUses,
   globToRegex,
+  loadAstGateConfig,
   matchesAnyGlob,
+  normalizePath,
   runAstGate,
   type AstGateConfig,
   type ChangedFile,
 } from './ast-gate.js';
+import { afterEach, beforeEach } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// ── normalizePath ────────────────────────────────────────────────────────────
+
+describe('normalizePath', () => {
+  it('strips leading ./ from paths', () => {
+    expect(normalizePath('./src/foo.ts')).toBe('src/foo.ts');
+  });
+
+  it('returns null (deny) for paths with ../ traversal', () => {
+    expect(normalizePath('../etc/passwd')).toBeNull();
+    expect(normalizePath('src/../../../etc/passwd')).toBeNull();
+    expect(normalizePath('foo/../bar')).toBeNull();
+  });
+
+  it('returns null (deny) for paths with backslash separators', () => {
+    expect(normalizePath('src\\foo.ts')).toBeNull();
+    expect(normalizePath('.github\\workflows\\ci.yml')).toBeNull();
+  });
+
+  it('strips trailing slash', () => {
+    expect(normalizePath('src/')).toBe('src');
+    expect(normalizePath('packages/core/')).toBe('packages/core');
+  });
+
+  it('unescapes git core.quotePath quoted paths', () => {
+    // git quotes non-ASCII paths: "foo/b\303\251r.ts" → "foo/bér.ts"
+    const result = normalizePath('"foo/b\\303\\251r.ts"');
+    expect(result).toBe('foo/bér.ts');
+  });
+
+  it('returns null for empty path after normalization', () => {
+    expect(normalizePath('')).toBeNull();
+    expect(normalizePath('./')).toBeNull();
+  });
+
+  it('passes through normal paths unchanged', () => {
+    expect(normalizePath('src/foo.ts')).toBe('src/foo.ts');
+    expect(normalizePath('.github/workflows/ci.yml')).toBe('.github/workflows/ci.yml');
+    expect(normalizePath('packages/core/package.json')).toBe('packages/core/package.json');
+  });
+});
 
 // ── globToRegex ──────────────────────────────────────────────────────────────
 
@@ -148,6 +195,79 @@ describe('runAstGate — protected paths', () => {
     const r = runWithFile('ai-sdlc-plugin/agents/developer.md');
     expect(r.outcome).toBe('abort-protected-path');
     expect(r.offendingPaths).toContain('ai-sdlc-plugin/agents/developer.md');
+  });
+
+  // Finding #1: nested lockfile bypass
+  it('aborts on nested packages/foo/pnpm-lock.yaml (supply-chain bypass fix)', () => {
+    const r = runWithFile('packages/foo/pnpm-lock.yaml');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('packages/foo/pnpm-lock.yaml');
+  });
+
+  it('aborts on nested packages/foo/package-lock.json', () => {
+    const r = runWithFile('packages/foo/package-lock.json');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('packages/foo/package-lock.json');
+  });
+
+  it('aborts on nested packages/foo/yarn.lock', () => {
+    const r = runWithFile('packages/foo/yarn.lock');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('packages/foo/yarn.lock');
+  });
+
+  it('aborts on deeply nested lockfile deep/nested/pnpm-lock.yaml', () => {
+    const r = runWithFile('deep/nested/pnpm-lock.yaml');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('deep/nested/pnpm-lock.yaml');
+  });
+
+  // Finding #6: nested .github coverage
+  it('aborts on nested packages/sub/.github/action.yml', () => {
+    const r = runWithFile('packages/sub/.github/action.yml');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('packages/sub/.github/action.yml');
+  });
+
+  it('aborts on deeply nested .github file', () => {
+    const r = runWithFile('apps/my-app/.github/workflows/deploy.yml');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('apps/my-app/.github/workflows/deploy.yml');
+  });
+
+  // Finding #2: path normalization — adversarial paths are DENIED
+  it('aborts on ./src/foo.ts-prefixed path (strips ./ and matches normally)', () => {
+    const r = runWithFile('./pnpm-lock.yaml');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('./pnpm-lock.yaml');
+  });
+
+  it('aborts on ../-containing path (directory traversal → deny)', () => {
+    const r = runWithFile('../etc/passwd');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('../etc/passwd');
+  });
+
+  it('aborts on trailing-slash path (strips trailing slash, matches protected pattern)', () => {
+    const r = runWithFile('.github/');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('.github/');
+  });
+
+  it('aborts on backslash path (deny ambiguous separators)', () => {
+    const r = runWithFile('src\\foo.ts');
+    expect(r.outcome).toBe('abort-protected-path');
+    expect(r.offendingPaths).toContain('src\\foo.ts');
+  });
+
+  it('aborts on git-quoted non-ASCII protected path', () => {
+    // Simulate git quoting a path that resolves to .github/ci.yml
+    // (In real git, this would be a non-ASCII path — here we test the quoting strips correctly)
+    const r = runWithFile('"pnpm-lock.yaml"');
+    // Quotes are not a valid path format — should be denied or fail to match as non-protected
+    // The normalizePath treats it as a git-quoted path and unescapes it
+    // After unescaping `"pnpm-lock.yaml"` → `pnpm-lock.yaml` → protected
+    expect(r.outcome).toBe('abort-protected-path');
   });
 
   it('collects ALL offending paths (does not stop on first)', () => {
@@ -310,6 +430,26 @@ describe('detectNewGithubActionUses', () => {
     const detected = detectNewGithubActionUses(after, null);
     expect(detected).toBe(true);
   });
+
+  // Finding #5: line-level diff — malicious uses: hidden behind existing benign uses:
+  it('detects malicious uses: hidden after existing benign uses: (whole-file bypass fix)', () => {
+    const before = 'steps:\n  - uses: actions/checkout@v4\n  - run: echo hello\n';
+    // Attacker adds a second, malicious `uses:` — the before already had a uses:
+    const after =
+      'steps:\n  - uses: actions/checkout@v4\n  - run: echo hello\n  - uses: actions/evil@v1\n';
+    const detected = detectNewGithubActionUses(after, before);
+    // Line-level check: `  - uses: actions/evil@v1` is a new line → should flag it
+    expect(detected).toBe(true);
+  });
+
+  it('does not flag when same uses: line count is unchanged', () => {
+    // Reordering without adding new lines should not flag
+    const before = '      - uses: actions/checkout@v4\n      - run: echo hi\n';
+    const after = '      - run: echo hi\n      - uses: actions/checkout@v4\n';
+    // Same uses: lines, just reordered — count is identical
+    const detected = detectNewGithubActionUses(after, before);
+    expect(detected).toBe(false);
+  });
 });
 
 // ── Content heuristics in runAstGate ─────────────────────────────────────────
@@ -457,6 +597,28 @@ describe('buildBlockedComment', () => {
     expect(comment).toContain('content heuristics');
   });
 
+  // Finding #7: header guard — heuristic-only aborts don't show "following paths are protected"
+  it('omits "following paths are protected" header when offendingPaths is empty (heuristic-only abort)', () => {
+    const gateResult = {
+      outcome: 'abort-protected-path' as const,
+      offendingPaths: [],
+      heuristicFindings: [
+        {
+          type: 'packageJsonLifecycleScript' as const,
+          path: 'package.json',
+          detail: 'lifecycle scripts added/modified: preinstall',
+        },
+      ],
+    };
+    const comment = buildBlockedComment(gateResult, 'contributor123');
+
+    // The "following paths are protected" header is factually wrong when offendingPaths is empty
+    expect(comment).not.toContain('following paths are protected');
+    // But the heuristic finding should still appear
+    expect(comment).toContain('preinstall');
+    expect(comment).toContain('content heuristics');
+  });
+
   it('does NOT contain internal tracker IDs (AISDLC-394)', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
@@ -468,6 +630,84 @@ describe('buildBlockedComment', () => {
     // Comments must not include internal tracker IDs
     expect(comment).not.toMatch(/AISDLC-\d+/);
     expect(comment).not.toMatch(/DEC-\d+/);
+  });
+});
+
+// ── loadAstGateConfig (Finding #3) ───────────────────────────────────────────
+
+describe('loadAstGateConfig', () => {
+  let workDir: string;
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-gate-config-test-'));
+    mkdirSync(join(workDir, '.ai-sdlc'), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('falls back to DEFAULT_AST_GATE_CONFIG when config file is absent', () => {
+    // No .ai-sdlc/untrusted-pr-gate.yaml written
+    const config = loadAstGateConfig(workDir);
+    expect(config.protectedPaths).toEqual(DEFAULT_AST_GATE_CONFIG.protectedPaths);
+    expect(config.allowedMutationGlobs).toEqual(DEFAULT_AST_GATE_CONFIG.allowedMutationGlobs);
+    expect(config.contentHeuristics).toEqual(DEFAULT_AST_GATE_CONFIG.contentHeuristics);
+  });
+
+  it('merges partial override (only protectedPaths provided) with defaults', () => {
+    const yaml = `
+protectedPaths:
+  - 'custom-secrets/**'
+  - '.github/**'
+`;
+    writeFileSync(join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml'), yaml, 'utf8');
+    const config = loadAstGateConfig(workDir);
+
+    // protectedPaths is overridden
+    expect(config.protectedPaths).toContain('custom-secrets/**');
+    expect(config.protectedPaths).toContain('.github/**');
+    expect(config.protectedPaths).not.toContain('**/pnpm-lock.yaml'); // not in custom list
+
+    // Other fields fall back to defaults
+    expect(config.allowedMutationGlobs).toEqual(DEFAULT_AST_GATE_CONFIG.allowedMutationGlobs);
+    expect(config.contentHeuristics).toEqual(DEFAULT_AST_GATE_CONFIG.contentHeuristics);
+  });
+
+  it('falls back to safe defaults on malformed YAML (does NOT silently weaken protection)', () => {
+    const malformed = `
+protectedPaths: [unclosed
+  - this is not valid yaml
+`;
+    writeFileSync(join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml'), malformed, 'utf8');
+    const config = loadAstGateConfig(workDir);
+
+    // Must fall back to defaults — a malformed config MUST NOT weaken protection
+    expect(config.protectedPaths).toEqual(DEFAULT_AST_GATE_CONFIG.protectedPaths);
+    expect(config.allowedMutationGlobs).toEqual(DEFAULT_AST_GATE_CONFIG.allowedMutationGlobs);
+    // Crucially, contentHeuristics must not be softened
+    expect(config.contentHeuristics.packageJsonLifecycleScripts).toBe('abort');
+    expect(config.contentHeuristics.newGithubActionUses).toBe('abort');
+  });
+
+  it('applies full override when all fields are provided', () => {
+    const yaml = `
+protectedPaths:
+  - 'custom/**'
+allowedMutationGlobs:
+  - '**/*.ts'
+  - '**/*.py'
+contentHeuristics:
+  packageJsonLifecycleScripts: warn
+  newGithubActionUses: abort
+`;
+    writeFileSync(join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml'), yaml, 'utf8');
+    const config = loadAstGateConfig(workDir);
+
+    expect(config.protectedPaths).toEqual(['custom/**']);
+    expect(config.allowedMutationGlobs).toContain('**/*.py');
+    expect(config.contentHeuristics.packageJsonLifecycleScripts).toBe('warn');
+    expect(config.contentHeuristics.newGithubActionUses).toBe('abort');
   });
 });
 

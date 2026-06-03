@@ -131,84 +131,47 @@ export function loadAllowlistedAuthors(workDir: string = process.cwd()): string[
   if (!existsSync(yamlPath)) return [];
 
   const raw = readFileSync(yamlPath, 'utf8');
-
-  // Use js-yaml for robust parsing (pipeline-cli dep).
-  // Dynamic import is not used here to keep this function synchronous.
-  // We parse with a minimal hand-rolled approach that matches the
-  // constraints documented in trusted-reviewers.yaml's format note.
   return extractAllowlistedAuthorsFromYaml(raw);
 }
 
 /**
  * Extract `allowlist.authors[].login` values from raw YAML text.
  *
- * Uses a minimal hand-rolled parser constrained to the LOAD-BEARING format
- * documented in `trusted-reviewers.yaml`. This avoids a circular dependency
- * on js-yaml's async paths and keeps the function synchronous + testable
- * without filesystem access.
+ * Uses `js-yaml` (a pipeline-cli production dependency) for reliable YAML
+ * parsing — the same library used by the drift workflow's Python `yaml.safe_load`
+ * equivalent. This eliminates the prior parser-divergence risk where the
+ * hand-rolled state machine and the workflow's Python parser could disagree
+ * on a security-critical allowlist (reviewer finding #4).
  *
  * Exported for unit testing (AC#9).
  */
-export function extractAllowlistedAuthorsFromYaml(yaml: string): string[] {
-  // Use the js-yaml library which is a pipeline-cli dependency.
-  // We load it via require-style dynamic eval to keep this function
-  // synchronous. Since this is ESM, we do inline parsing instead.
+export function extractAllowlistedAuthorsFromYaml(yamlText: string): string[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const jsYaml = require('js-yaml') as typeof import('js-yaml');
+    const doc = jsYaml.load(yamlText) as Record<string, unknown> | null;
+    if (!doc || typeof doc !== 'object') return [];
 
-  const logins: string[] = [];
+    const allowlist = doc['allowlist'];
+    if (!allowlist || typeof allowlist !== 'object') return [];
 
-  // State machine: find `allowlist:` section, then `authors:`, then `login:` values.
-  const lines = yaml.split('\n');
-  let inAllowlist = false;
-  let inAuthors = false;
+    const authorsRaw = (allowlist as Record<string, unknown>)['authors'];
+    if (!Array.isArray(authorsRaw)) return [];
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Skip comments and empty lines
-    if (trimmed.startsWith('#') || trimmed === '') continue;
-
-    // Detect `allowlist:` top-level key
-    if (/^allowlist\s*:/.test(trimmed)) {
-      inAllowlist = true;
-      inAuthors = false;
-      continue;
-    }
-
-    // If we're in allowlist section, detect `authors:` sub-key
-    if (inAllowlist && /^\s*authors\s*:/.test(line)) {
-      inAuthors = true;
-      continue;
-    }
-
-    // Top-level key reset (non-indented, non-comment, not allowlist)
-    if (inAllowlist && !line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('-')) {
-      // Check if this is a new top-level key (not indented)
-      if (/^[a-zA-Z]/.test(trimmed) && !trimmed.startsWith('allowlist')) {
-        inAllowlist = false;
-        inAuthors = false;
-        continue;
+    const logins: string[] = [];
+    for (const entry of authorsRaw) {
+      if (entry && typeof entry === 'object') {
+        const login = (entry as Record<string, unknown>)['login'];
+        if (typeof login === 'string' && login.length > 0) {
+          logins.push(login);
+        }
       }
     }
-
-    // Extract login values within allowlist.authors
-    if (inAuthors) {
-      // Match `  - login: 'someuser'` or `    login: 'someuser'` or `  - login: someuser`
-      // The trimmed line may start with `- login:` (list item) or `login:` (key-only)
-      const loginMatch = trimmed.match(/(?:^-\s+)?login\s*:\s*['"]?([^'"#\s]+)['"]?/);
-      if (loginMatch) {
-        logins.push(loginMatch[1]);
-        continue;
-      }
-
-      // If we encounter a line that starts with a top-level key
-      if (!line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('-')) {
-        inAuthors = false;
-        inAllowlist = false;
-      }
-    }
+    return logins;
+  } catch {
+    // Malformed YAML — return empty rather than throwing (conservative: no file = no trust)
+    return [];
   }
-
-  return logins;
 }
 
 // ── Classification logic ─────────────────────────────────────────────────────
@@ -245,14 +208,17 @@ export function classifyTrust(input: TrustClassifierInput): TrustResult {
   // Load allowlist from static file (NO live API — OQ-1 invariant)
   const allowlistedAuthors = loadAllowlistedAuthors(workDir);
 
-  // Rule 2: author in static allowlist → trusted regardless of fork status
-  if (allowlistedAuthors.includes(author)) {
+  // Rule 2: author in static allowlist → trusted regardless of fork status.
+  // GitHub logins are case-insensitive (github.com/Alice == github.com/alice).
+  // We compare case-insensitively but preserve original case in audit output.
+  const authorLower = author.toLowerCase();
+  if (allowlistedAuthors.some((a) => a.toLowerCase() === authorLower)) {
     return {
       classification: 'trusted',
       reason: 'author-in-allowlist',
-      author,
+      author, // original case preserved for audit
       reviewerAuthorityModel,
-      allowlistedAuthors,
+      allowlistedAuthors, // original-case list preserved for audit
     };
   }
 
