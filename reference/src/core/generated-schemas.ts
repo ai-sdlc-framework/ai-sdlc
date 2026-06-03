@@ -7738,6 +7738,200 @@ export const substrateContractV1Schema = {
   },
 } as const;
 
+export const untrustedPrReportV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/untrusted-pr-report.v1.schema.json',
+  title: 'AI-SDLC Untrusted-PR Report (v1)',
+  description:
+    'RFC-0043 §Stage 4 unsigned report artifact produced by the OpenShell sandbox (Stages 2-3) and consumed by the clean-room signer. Deliberately aligned with the existing reviewer verdict contract (severity-gated, NOT confidence-scored). No top-level confidenceScore / complexityDelta / cveDetected fields.',
+  type: 'object',
+  required: [
+    'schemaVersion',
+    'prNumber',
+    'headSha',
+    'baseSha',
+    'generatedAt',
+    'trust',
+    'astGate',
+    'differentialTest',
+    'reviewers',
+    'consensus',
+  ],
+  additionalProperties: false,
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      const: 'untrusted-pr-report.v1',
+      description: 'Pinned schema version identifier — rejected by the signer if mismatched.',
+    },
+    prNumber: {
+      type: 'integer',
+      minimum: 1,
+      description: 'GitHub pull request number.',
+    },
+    headSha: {
+      type: 'string',
+      pattern: '^[0-9a-fA-F]{40}$',
+      description: '40-hex-char commit SHA at the PR head.',
+    },
+    baseSha: {
+      type: 'string',
+      pattern: '^[0-9a-fA-F]{40}$',
+      description: '40-hex-char commit SHA of the merge base.',
+    },
+    generatedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO 8601 timestamp when the sandbox produced this report.',
+    },
+    trust: {
+      type: 'object',
+      required: ['classification', 'reason'],
+      additionalProperties: false,
+      description: 'Stage 0 trust classification result.',
+      properties: {
+        classification: {
+          type: 'string',
+          enum: ['untrusted', 'trusted'],
+          description: 'Trust classification outcome.',
+        },
+        reason: {
+          type: 'string',
+          minLength: 1,
+          description: 'Human-readable reason string for the trust classification.',
+        },
+      },
+    },
+    astGate: {
+      type: 'object',
+      required: ['outcome', 'offendingPaths'],
+      additionalProperties: false,
+      description: 'Stage 1 deterministic diff / AST gate result.',
+      properties: {
+        outcome: {
+          type: 'string',
+          enum: ['pass', 'abort-protected-path'],
+          description: "Gate outcome. Reports reaching Stage 4 should have 'pass'.",
+        },
+        offendingPaths: {
+          type: 'array',
+          items: {
+            type: 'string',
+          },
+          description: "Paths that triggered abort (empty when outcome is 'pass').",
+        },
+      },
+    },
+    differentialTest: {
+      type: 'object',
+      required: ['upstreamSuitePassed', 'newTestsPassed', 'newCodeCoveragePct'],
+      additionalProperties: false,
+      description: 'Stage 2 OpenShell differential testing results.',
+      properties: {
+        upstreamSuitePassed: {
+          type: 'boolean',
+          description: 'True when the trusted upstream test suite passes on the patched tree.',
+        },
+        newTestsPassed: {
+          type: 'boolean',
+          description: "True when the contributor's newly added tests all pass.",
+        },
+        newCodeCoveragePct: {
+          type: 'number',
+          minimum: 0,
+          maximum: 100,
+          description: "Coverage percentage of new code paths by the contributor's new tests.",
+        },
+      },
+    },
+    reviewers: {
+      type: 'object',
+      required: ['code', 'test', 'security'],
+      additionalProperties: false,
+      description: 'Stage 3 hardened 3-reviewer matrix verdicts.',
+      properties: {
+        code: {
+          $ref: '#/$defs/ReviewerVerdict',
+        },
+        test: {
+          $ref: '#/$defs/ReviewerVerdict',
+        },
+        security: {
+          $ref: '#/$defs/ReviewerVerdict',
+        },
+      },
+    },
+    consensus: {
+      type: 'object',
+      required: ['approved', 'blockingFindings'],
+      additionalProperties: false,
+      description: 'Aggregated consensus from all three reviewers.',
+      properties: {
+        approved: {
+          type: 'boolean',
+          description: 'True when no reviewer has blocking (critical or major) findings.',
+        },
+        blockingFindings: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Total count of critical + major findings across all reviewers.',
+        },
+      },
+    },
+  },
+  $defs: {
+    ReviewerVerdict: {
+      type: 'object',
+      required: ['approved', 'findings', 'promptInjectionDetected'],
+      additionalProperties: false,
+      description:
+        'Single reviewer verdict aligned with the existing AI-SDLC verdict contract (severity-gated, not confidence-scored).',
+      properties: {
+        approved: {
+          type: 'boolean',
+          description: 'True when this reviewer has no blocking (critical or major) findings.',
+        },
+        findings: {
+          type: 'array',
+          items: {
+            $ref: '#/$defs/Finding',
+          },
+          description: 'Ordered list of findings from this reviewer.',
+        },
+        promptInjectionDetected: {
+          type: 'boolean',
+          description:
+            'True when this reviewer detected a prompt-injection attempt in the diff. Surfaces the attempt as a finding rather than obeying it.',
+        },
+      },
+    },
+    Finding: {
+      type: 'object',
+      required: ['severity', 'message'],
+      additionalProperties: false,
+      description:
+        'A single finding from a reviewer, aligned with the existing AI-SDLC severity vocabulary.',
+      properties: {
+        severity: {
+          type: 'string',
+          enum: ['critical', 'major', 'minor', 'suggestion'],
+          description:
+            'Severity level. critical + major are blocking; minor + suggestion are informational.',
+        },
+        message: {
+          type: 'string',
+          minLength: 1,
+          description: 'Human-readable finding description.',
+        },
+        path: {
+          type: 'string',
+          description: 'Optional repo-relative file path this finding applies to.',
+        },
+      },
+    },
+  },
+} as const;
+
 export const variantConfigSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/variant-config.schema.json',
@@ -8170,6 +8364,7 @@ export const SCHEMAS: Record<string, object> = {
   'signal-source-adapter.v1.schema.json': signalSourceAdapterV1Schema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
   'substrate-contract.v1.schema.json': substrateContractV1Schema,
+  'untrusted-pr-report.v1.schema.json': untrustedPrReportV1Schema,
   'variant-config.schema.json': variantConfigSchema,
   'vector-store-entry.v1.schema.json': vectorStoreEntryV1Schema,
   'work-item.schema.json': workItemSchema,
