@@ -33,10 +33,11 @@ implementedBy:
 # RFC-0042: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
 
 **Status:** Approved
-**Lifecycle:** Signed Off
+**Lifecycle:** Implemented
 **Author:** Dominique Legault
 **Created:** 2026-05-20
-**Updated:** 2026-05-20
+**Updated:** 2026-05-28
+**Implemented:** 2026-05-23 (AISDLC-409 v6 default-on cutover)
 **Target Spec Version:** v1alpha1
 
 ## Problem
