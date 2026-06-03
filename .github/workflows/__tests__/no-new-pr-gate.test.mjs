@@ -39,6 +39,10 @@ const PR_TRIGGER_ALLOWLIST = new Map([
   ['rfc-lifecycle-check.yml', 'validates RFC lifecycle transitions on PRs'],
   ['auto-enable-auto-merge.yml', 'arms --auto --squash on same-repo PRs'],
   ['auto-rearm-on-dequeue.yml', 're-arms auto-merge after a merge-queue dequeue'],
+  [
+    'untrusted-pr-gate.yml',
+    'zero-trust verification gate for untrusted-contributor PRs (posts the ai-sdlc/untrusted-pr-gate status; gated behind the AI_SDLC_UNTRUSTED_PR_GATE feature flag, default off)',
+  ],
   // NOTE: dependency-review was folded into ai-sdlc-gate.yml's pr-ready rollup
   // (dependency-review-gate job) so it is a real blocking gate — the standalone
   // dependency-review.yml workflow was removed (issue #791 follow-up).
