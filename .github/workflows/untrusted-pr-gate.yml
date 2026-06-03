@@ -84,22 +84,22 @@ jobs:
 
     steps:
       - name: 'Checkout target main (workflow logic from main — fork-PR safety guard #1)'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
       - name: 'Checkout fork PR content into sandboxed pr-content/ (data only — fork-PR safety guard #2)'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-content
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -215,7 +215,7 @@ jobs:
           steps.flag-check.outputs.enabled == 'true' &&
           steps.classify.outputs.trust != 'trusted' &&
           steps.ast-gate.outputs.outcome == 'abort-protected-path'
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         env:
           OFFENDING_PATHS: ${{ steps.ast-gate.outputs.offending_paths }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -295,22 +295,22 @@ jobs:
 
     steps:
       - name: 'Checkout target main (workflow logic from main — fork-PR safety guard #1)'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
       - name: 'Checkout fork PR content into sandboxed pr-content/ (data only — fork-PR safety guard #2)'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-content
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -483,15 +483,15 @@ jobs:
 
     steps:
       - name: 'Checkout target main (signing scripts from main — fork-PR safety guard #1)'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'pnpm'
@@ -598,16 +598,30 @@ jobs:
   gate-failure-watchdog:
     name: 'UCVG: pipeline failure watchdog (always runs)'
     needs: [classify-and-gate, sandbox-and-review, clean-room-sign]
+    # The classify-and-gate crash branch is INTENTIONALLY ungated by flag_on:
+    # flag_on is only set by the flag-check step, which runs AFTER checkout/
+    # install/build. A crash during install/build leaves flag_on empty, so a
+    # flag_on=='true' guard would skip the watchdog in exactly the early-crash
+    # window it exists to cover. We cannot confirm the flag is on after such a
+    # crash, so we fail CLOSED and post a blocking failure status; the operator
+    # re-runs, and if the flag is genuinely off the flag-off-status job posts
+    # the neutral success. Downstream (sandbox/clean-room) failures only occur
+    # when flag_on=='true' (their own if: guards), so they keep the flag guard.
     if: >
       always() &&
-      needs.classify-and-gate.outputs.flag_on == 'true' &&
-      needs.classify-and-gate.outputs.trust != 'trusted' &&
       (
         needs.classify-and-gate.result == 'failure' ||
-        needs.sandbox-and-review.result == 'failure' ||
-        needs.clean-room-sign.result == 'failure' ||
-        needs.sandbox-and-review.result == 'cancelled' ||
-        needs.clean-room-sign.result == 'cancelled'
+        needs.classify-and-gate.result == 'cancelled' ||
+        (
+          needs.classify-and-gate.outputs.flag_on == 'true' &&
+          needs.classify-and-gate.outputs.trust != 'trusted' &&
+          (
+            needs.sandbox-and-review.result == 'failure' ||
+            needs.clean-room-sign.result == 'failure' ||
+            needs.sandbox-and-review.result == 'cancelled' ||
+            needs.clean-room-sign.result == 'cancelled'
+          )
+        )
       )
     runs-on: ubuntu-latest
     permissions:

@@ -126,11 +126,13 @@ describe('runSandboxAndReview — upstreamMainRef is baseSha (MAJOR fix #7)', ()
       // Ignore errors from file writes in /tmp — we only care about the spy call
     }
 
-    if (runSandboxSpy.mock.calls.length > 0) {
-      const callArgs = runSandboxSpy.mock.calls[0][0];
-      expect(callArgs.upstreamMainRef).toBe(baseSha);
-      expect(callArgs.upstreamMainRef).not.toBe(headSha);
-    }
+    // Guard against a vacuous pass: the spy MUST have been invoked, otherwise
+    // an early error in runUcvgCli (swallowed by the try/catch above) would let
+    // the assertions be skipped and the test pass without checking anything.
+    expect(runSandboxSpy.mock.calls.length).toBeGreaterThan(0);
+    const callArgs = runSandboxSpy.mock.calls[0][0];
+    expect(callArgs.upstreamMainRef).toBe(baseSha);
+    expect(callArgs.upstreamMainRef).not.toBe(headSha);
 
     runSandboxSpy.mockRestore();
   });
