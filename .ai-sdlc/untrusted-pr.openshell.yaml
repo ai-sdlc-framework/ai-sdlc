@@ -1,0 +1,80 @@
+# OpenShell sandbox policy for untrusted-contributor PR verification.
+#
+# RFC-0043 Phase 3 — Stage 2/3 sandbox policy declaration.
+# Enforced by the OpenShell policy runtime (out-of-process; agent cannot
+# disable its own guardrails).
+#
+# ## Security model
+# The agent process running inside this sandbox:
+#   - Has NO access to ~/.ai-sdlc/signing-key.pem (signing key never present)
+#   - Has NO access to write-scoped GITHUB_TOKEN
+#   - Has NO access to NPM_TOKEN or AI_SDLC_PAT
+#   - Receives the Anthropic API key via inference.local (proxy injection only)
+#
+# ## Lifecycle
+# This file is read by the sandbox runner (pipeline-cli/src/pipeline/sandbox-runner.ts)
+# when spawning the Stage 2/3 ephemeral sandbox. The "static sections" (filesystem,
+# process, network) are locked at sandbox creation time and cannot be changed by
+# the agent process.
+#
+# ## Regime override
+# When RFC-0022 declares HIPAA / FedRAMP High / PCI-DSS Level 1, the sandbox
+# driver is automatically upgraded to MicroVM regardless of the driver setting
+# in untrusted-pr-gate.yaml. This policy file remains applicable at all driver
+# levels.
+#
+# References:
+#   - NVIDIA OpenShell security model: https://docs.nvidia.com/openshell/latest/security/best-practices
+#   - RFC-0043 §Stage 2
+
+filesystem:
+  # Landlock LSM — kernel-enforced filesystem isolation.
+  # Read-only mounts: standard OS paths; the agent can read tools but not write them.
+  readOnly:
+    - '/usr'
+    - '/lib'
+    - '/lib64'
+    - '/etc'
+    - '/bin'
+    - '/sbin'
+  # Read-write mounts: the clean checkout and temporary work area.
+  # The clean upstream main is cloned here; the PR diff is applied here.
+  readWrite:
+    - '/sandbox'
+    - '/tmp'
+
+process:
+  # seccomp-BPF: privilege escalation vectors are blocked at the syscall layer.
+  # These syscalls are the highest-risk privilege-escalation vectors:
+  #   - mount: cannot remount or bind-mount to escape filesystem restrictions
+  #   - pivot_root: cannot change the root filesystem
+  #   - ptrace: cannot attach to other processes (including the proxy)
+  #   - bpf: cannot load eBPF programs that could intercept network/syscalls
+  blockSyscalls:
+    - mount
+    - pivot_root
+    - ptrace
+    - bpf
+    - unshare
+    - clone # blocks new namespaces (fork still works via clone flags subset)
+
+network:
+  # OPA/Rego deny-by-default egress proxy.
+  # Recommended progression: start with 'audit', review logs, then promote to 'enforce'.
+  # This policy ships with 'enforce' for the production posture.
+  enforcement: enforce
+
+  # Egress allowlist: only these hosts/binaries may make outbound connections.
+  # git clone of the clean upstream main uses a read-only token; no write access.
+  egressAllow:
+    - host: github.com
+      binary: '/usr/bin/git'
+    # npm registry is intentionally NOT in the allowlist for untrusted contributor runs.
+    # The sandbox runs `pnpm test` against the pre-installed workspace; no new
+    # package installs are permitted during the differential test.
+
+inference:
+  # Anthropic API key is injected at the sandbox-local inference proxy.
+  # The agent process connects to inference.local; the proxy forwards to the
+  # Anthropic API using the key it holds. The agent never receives the key.
+  route: inference.local
