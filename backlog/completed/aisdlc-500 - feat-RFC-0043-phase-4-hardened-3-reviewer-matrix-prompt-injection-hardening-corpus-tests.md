@@ -1,7 +1,7 @@
 ---
 id: AISDLC-500
 title: 'feat: RFC-0043 Phase 4 — Hardened 3-reviewer matrix + prompt-injection delimiter framing + injection-corpus tests + injection-attempt detection finding'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-02'
 labels:
