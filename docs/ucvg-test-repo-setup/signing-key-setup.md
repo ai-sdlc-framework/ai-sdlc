@@ -24,28 +24,40 @@ openssl pkey -in aisdlc-signing-key.pem -text -noout
 
 ## Step 2 — Wire the private key as a GitHub secret
 
-The private key must be stored as a GitHub Actions secret named `AISDLC_SIGNING_KEY_PATH`.
-
-> **IMPORTANT**: The workflow passes `AISDLC_SIGNING_KEY_PATH` as the path to the key
-> file — the secret contains the PATH, not the key content itself. The key content is
-> written to a temp file by the workflow and the path is passed to the CLI.
-
-Alternative: store the key content as `AISDLC_SIGNING_KEY_CONTENT` and write it to a
-temp file in a workflow step before calling the signer.
+Store the **key content** (the PEM itself) as a GitHub Actions secret named
+`AISDLC_SIGNING_KEY_CONTENT`. The bundled `untrusted-pr-gate.yml` materializes it into
+a `0600` temp file inside the clean-room (Stage 4) job and passes that path to the
+signer — so you store the key once and the workflow handles the rest.
 
 ```bash
-# Using GitHub CLI to set the secret:
+# Using GitHub CLI to set the secret (reads the PEM content from the file):
 gh secret set AISDLC_SIGNING_KEY_CONTENT < aisdlc-signing-key.pem
 ```
 
-Then in the clean-room-sign workflow step:
+The workflow's clean-room job already contains this materialization step (no edit
+needed — shown here so you can audit it). Note the **secure pattern**: the secret is
+passed via `env:` (never interpolated into the shell body, which would leak it to the
+build log / shell-metacharacter surface), written with `printf` (preserves PEM
+newlines, unlike `echo`), and the file is created `0600`:
+
 ```yaml
-- name: Write signing key to temp file
+- name: Materialize signing key (clean room only)
+  env:
+    AISDLC_SIGNING_KEY_CONTENT: ${{ secrets.AISDLC_SIGNING_KEY_CONTENT }}
   run: |
-    KEYFILE=$(mktemp)
-    echo "${{ secrets.AISDLC_SIGNING_KEY_CONTENT }}" > "$KEYFILE"
+    KEYFILE="$(mktemp)"
+    chmod 600 "$KEYFILE"
+    printf '%s' "$AISDLC_SIGNING_KEY_CONTENT" > "$KEYFILE"
     echo "AISDLC_SIGNING_KEY_PATH=$KEYFILE" >> "$GITHUB_ENV"
 ```
+
+> **Why content, not a path:** a GitHub Secret holding a filesystem *path* is useless on
+> an ephemeral runner (the key file isn't there). Store the PEM content; the workflow
+> writes it to the `AISDLC_SIGNING_KEY_PATH` env at run time, materialized ONLY in the
+> clean-room job — never in the sandbox job (RFC-0043 §Stage 4 boundary).
+>
+> **Never** `echo "${{ secrets.* }}"` a private key into a file or interpolate a secret
+> directly into a `run:` script body — use the `env:`-passing + `printf` pattern above.
 
 ## Step 3 — Store the public key in .ai-sdlc/trusted-reviewers.yaml
 

@@ -18,7 +18,7 @@ Gate (UCVG, RFC-0043).
 1. Copy `.ai-sdlc/untrusted-pr-gate.yaml` → `<test-repo>/.ai-sdlc/untrusted-pr-gate.yaml`
 2. Copy `trusted-reviewers.yaml` → `<test-repo>/.ai-sdlc/trusted-reviewers.yaml`
 3. Copy the workflow: `cp .github/workflows/untrusted-pr-gate.yml <test-repo>/.github/workflows/`
-4. Follow `signing-key-setup.md` to generate an ed25519 key and wire it as `AISDLC_SIGNING_KEY_PATH`
+4. Follow `signing-key-setup.md` to generate an ed25519 key and wire its PEM content as the `AISDLC_SIGNING_KEY_CONTENT` secret
 5. Set repository variable `AI_SDLC_UNTRUSTED_PR_GATE=1` to enable the gate
 6. Open a fork PR from an untrusted account and observe the gate fire
 
@@ -31,7 +31,7 @@ The following acceptance criteria require a live operator-executed run:
 
 These steps cannot be executed by a dev subagent — they require:
 - A configured test repository with real fork PRs
-- A real signing key wired as `AISDLC_SIGNING_KEY_PATH`
+- A real signing key wired as the `AISDLC_SIGNING_KEY_CONTENT` secret
 - A live GitHub Actions runner with Docker enabled
 - `AI_SDLC_SANDBOX_INTEGRATION_TESTS=1` set (or the runner has real Docker access)
 

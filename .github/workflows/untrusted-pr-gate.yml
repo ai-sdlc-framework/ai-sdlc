@@ -523,14 +523,30 @@ jobs:
           name: ucvg-unsigned-report-${{ github.event.pull_request.number }}
           path: .ai-sdlc/ucvg/reports/
 
+      # Materialize the ed25519 signing key into a 0600 temp file. Secure pattern:
+      # pass the secret via env (NEVER interpolate ${{ secrets }} into the shell
+      # body — that exposes it to the log/metacharacter surface), write it with
+      # printf (preserves PEM newlines, unlike echo), and restrict permissions.
+      # Runs ONLY in the clean-room job, AFTER sandboxed evaluation — the key is
+      # never present in the sandbox-and-review job (RFC-0043 §Stage 4 boundary).
+      - name: Materialize signing key (clean room only)
+        env:
+          AISDLC_SIGNING_KEY_CONTENT: ${{ secrets.AISDLC_SIGNING_KEY_CONTENT }}
+        run: |
+          KEYFILE="$(mktemp)"
+          chmod 600 "$KEYFILE"
+          printf '%s' "$AISDLC_SIGNING_KEY_CONTENT" > "$KEYFILE"
+          echo "AISDLC_SIGNING_KEY_PATH=$KEYFILE" >> "$GITHUB_ENV"
+
       - name: Stage 4 — Clean-room sign (Zod-validate + RFC-0042 v6 Merkle attestation)
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # The signing key is available ONLY in this job — the clean room.
-          # It was NEVER present in the sandbox-and-review job (Stages 2-3).
-          # This is the trust boundary RFC-0043 §Stage 4 formalizes.
-          AISDLC_SIGNING_KEY_PATH: ${{ secrets.AISDLC_SIGNING_KEY_PATH }}
+          # AISDLC_SIGNING_KEY_PATH is materialized by the preceding step (a 0600
+          # temp file written from the AISDLC_SIGNING_KEY_CONTENT secret) and
+          # exported via $GITHUB_ENV. The signing key is available ONLY in this
+          # clean-room job — it was NEVER present in the sandbox-and-review job
+          # (Stages 2-3). This is the trust boundary RFC-0043 §Stage 4 formalizes.
         run: |
           # Stage 4: clean-room signer.
           # 1. Reads the unsigned report artifact (downloaded from sandbox-and-review job).
@@ -546,6 +562,14 @@ jobs:
             --head-sha "$PR_HEAD_SHA" \
             --work-dir . \
             2>&1
+
+      # Defense-in-depth: shred the materialized signing key. No-op on ephemeral
+      # GitHub-hosted runners (the VM is destroyed), but prevents a 0600 key from
+      # persisting on self-hosted / reused runners. if: always() so it runs even
+      # when Stage 4 fails.
+      - name: Cleanup signing key
+        if: always()
+        run: rm -f "${AISDLC_SIGNING_KEY_PATH:-}"
 
       # MINOR fix #8 (defense-in-depth): assert consensus.approved===true before posting success.
       # Belt-and-suspenders with the signer's approval check (CRITICAL fix #4).

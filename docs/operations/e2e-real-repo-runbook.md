@@ -29,7 +29,7 @@ Before running the e2e test:
 
 1. A GitHub repository configured with the gate (see `docs/ucvg-test-repo-setup/`)
 2. `AI_SDLC_UNTRUSTED_PR_GATE=1` set as a repository variable
-3. `AISDLC_SIGNING_KEY_CONTENT` (or `AISDLC_SIGNING_KEY_PATH`) set as a repository secret
+3. `AISDLC_SIGNING_KEY_CONTENT` (the ed25519 PEM content) set as a repository secret — the workflow materializes it into `AISDLC_SIGNING_KEY_PATH` at run time
 4. `ANTHROPIC_API_KEY` set as a repository secret (for Stage 2/3 reviewers)
 5. A GitHub account that is NOT in `.ai-sdlc/trusted-reviewers.yaml` (for testing untrusted path)
 6. Docker available on the runner (GitHub-hosted `ubuntu-latest` runners include Docker)
