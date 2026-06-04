@@ -39,6 +39,8 @@ import {
   GVisorSandboxDriver,
   MicroVmSandboxDriver,
   MockSandboxDriver,
+  buildDockerRunArgs,
+  DOCKER_SECCOMP_PROFILE,
   type SandboxConfig,
   type ResourceBreachEvent,
 } from './sandbox-runner.js';
@@ -1189,5 +1191,367 @@ describe('loadOpenShellPolicy — enforcement:audit enum coverage', () => {
     const policy = loadOpenShellPolicy(dir);
     expect(policy).not.toBeNull();
     expect(policy!.network.enforcement).toBe('enforce');
+  });
+});
+
+// ── AISDLC-508: Docker argument construction (AC-1) ──────────────────────────
+
+describe('buildDockerRunArgs — hardened isolation flags (AISDLC-508 AC-1)', () => {
+  const BASE_LIMITS = {
+    wallClockSeconds: 600,
+    cpuCores: 2,
+    memoryMb: 4096,
+  };
+
+  it('includes --network=none for full network deny', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args).toContain('--network=none');
+  });
+
+  it('includes --cap-drop=ALL to drop all Linux capabilities', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args).toContain('--cap-drop=ALL');
+  });
+
+  it('includes --read-only for read-only root filesystem', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args).toContain('--read-only');
+  });
+
+  it('includes --tmpfs for /tmp with noexec,nosuid', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const tmpfsIdx = args.indexOf('--tmpfs');
+    expect(tmpfsIdx).toBeGreaterThanOrEqual(0);
+    const tmpfsVal = args[tmpfsIdx + 1];
+    expect(tmpfsVal).toContain('/tmp');
+    expect(tmpfsVal).toContain('noexec');
+    expect(tmpfsVal).toContain('nosuid');
+  });
+
+  it('includes --tmpfs for /sandbox/workspace', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    // Find all --tmpfs entries
+    const tmpfsEntries: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--tmpfs' && i + 1 < args.length) {
+        tmpfsEntries.push(args[i + 1]!);
+      }
+    }
+    expect(tmpfsEntries.some((e) => e.includes('/sandbox/workspace'))).toBe(true);
+  });
+
+  it('includes --pids-limit 512 to prevent fork bombs', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const pidsIdx = args.indexOf('--pids-limit');
+    expect(pidsIdx).toBeGreaterThanOrEqual(0);
+    expect(args[pidsIdx + 1]).toBe('512');
+  });
+
+  it('wires --memory from resourceLimits.memoryMb', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: { ...BASE_LIMITS, memoryMb: 8192 },
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const memIdx = args.indexOf('--memory');
+    expect(memIdx).toBeGreaterThanOrEqual(0);
+    expect(args[memIdx + 1]).toBe('8192m');
+  });
+
+  it('wires --cpus from resourceLimits.cpuCores', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: { ...BASE_LIMITS, cpuCores: 4 },
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const cpusIdx = args.indexOf('--cpus');
+    expect(cpusIdx).toBeGreaterThanOrEqual(0);
+    expect(args[cpusIdx + 1]).toBe('4');
+  });
+
+  it('runs as non-root user nobody:nogroup (--user 65534:65534)', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const userIdx = args.indexOf('--user');
+    expect(userIdx).toBeGreaterThanOrEqual(0);
+    expect(args[userIdx + 1]).toBe('65534:65534');
+  });
+
+  it('includes --rm for auto-removal', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args).toContain('--rm');
+  });
+
+  it('includes --security-opt no-new-privileges', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args).toContain('no-new-privileges');
+    // Verify it is preceded by --security-opt
+    const idx = args.indexOf('no-new-privileges');
+    expect(args[idx - 1]).toBe('--security-opt');
+  });
+
+  it('injects the seccomp profile via --security-opt seccomp=<json>', () => {
+    const profile = JSON.stringify({ defaultAction: 'SCMP_ACT_ERRNO', syscalls: [] });
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: profile,
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const seccompArg = args.find((a) => a.startsWith('seccomp='));
+    expect(seccompArg).toBeDefined();
+    expect(seccompArg).toBe(`seccomp=${profile}`);
+    // Preceded by --security-opt
+    const idx = args.indexOf(seccompArg!);
+    expect(args[idx - 1]).toBe('--security-opt');
+  });
+
+  it('places the image and command after all flags', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['/bin/sh', '-c', 'echo hi'],
+    });
+    const imageIdx = args.indexOf('node:22-slim');
+    expect(imageIdx).toBeGreaterThan(0);
+    expect(args[imageIdx + 1]).toBe('/bin/sh');
+    expect(args[imageIdx + 2]).toBe('-c');
+    expect(args[imageIdx + 3]).toBe('echo hi');
+  });
+
+  it('first argument is "run"', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args[0]).toBe('run');
+  });
+
+  it('does NOT include --network=host or --privileged (hardening regression guard)', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    expect(args).not.toContain('--privileged');
+    expect(args).not.toContain('--network=host');
+  });
+});
+
+// ── AISDLC-508: DockerSandboxDriver without integration flag (AC-5) ───────────
+
+describe('DockerSandboxDriver — hermetic (no real Docker, AC-5)', () => {
+  it('returns outcome:error when AI_SDLC_SANDBOX_INTEGRATION_TESTS is not set', async () => {
+    const orig = process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'];
+    delete process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'];
+    try {
+      const driver = new DockerSandboxDriver();
+      const result = await driver.spawn({
+        policyFilePath: '/nonexistent',
+        prDiff: 'diff',
+        upstreamMainRef: 'test',
+        resourceLimits: DEFAULT_RESOURCE_LIMITS,
+        prNumber: 1,
+      });
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toContain('DockerSandboxDriver');
+        expect(result.error).toContain('AI_SDLC_SANDBOX_INTEGRATION_TESTS');
+      }
+    } finally {
+      if (orig !== undefined) process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'] = orig;
+    }
+  });
+
+  it('teardown() is idempotent — no throw when containerId is null', async () => {
+    const driver = new DockerSandboxDriver();
+    // Should not throw even with no active container
+    await expect(driver.teardown()).resolves.toBeUndefined();
+    // Second call also safe
+    await expect(driver.teardown()).resolves.toBeUndefined();
+  });
+});
+
+// ── AISDLC-508: WITHHELD_ENV_VARS provably never enter container env (AC-4) ──
+
+describe('Credential withholding — WITHHELD_ENV_VARS provably excluded (AISDLC-508 AC-4)', () => {
+  it('WITHHELD_ENV_VARS includes all four required credentials', () => {
+    expect(WITHHELD_ENV_VARS).toContain('AI_SDLC_SIGNING_KEY');
+    expect(WITHHELD_ENV_VARS).toContain('GITHUB_TOKEN');
+    expect(WITHHELD_ENV_VARS).toContain('NPM_TOKEN');
+    expect(WITHHELD_ENV_VARS).toContain('AI_SDLC_PAT');
+  });
+
+  it('validateSandboxEnv blocks all four withheld credentials individually', () => {
+    const withheld = ['AI_SDLC_SIGNING_KEY', 'GITHUB_TOKEN', 'NPM_TOKEN', 'AI_SDLC_PAT'] as const;
+    for (const key of withheld) {
+      expect(
+        () => validateSandboxEnv({ [key]: 'secret-value' }),
+        `Expected ${key} to be blocked`,
+      ).toThrow(/credential withholding violation/i);
+    }
+  });
+
+  it('error message names each withheld credential', () => {
+    const withheld = ['AI_SDLC_SIGNING_KEY', 'GITHUB_TOKEN', 'NPM_TOKEN', 'AI_SDLC_PAT'] as const;
+    for (const key of withheld) {
+      let err: Error | null = null;
+      try {
+        validateSandboxEnv({ [key]: 'secret' });
+      } catch (e) {
+        err = e as Error;
+      }
+      expect(err, `Expected error for ${key}`).not.toBeNull();
+      expect(err!.message).toContain(key);
+    }
+  });
+
+  it('runSandbox never exposes sandboxEnv as a public API parameter', async () => {
+    // RunSandboxInput has no sandboxEnv field — confirming the API surface
+    // cannot accidentally leak credentials via the high-level entry point.
+    const mockDriver = new MockSandboxDriver('docker', {
+      outcome: 'success',
+      differentialTest: {
+        upstreamSuitePassed: true,
+        upstreamSuiteOutput: '',
+        newTestsPassed: true,
+        newTestsOutput: '',
+        newCodeCoveragePct: 100,
+      },
+      durationMs: 1,
+    });
+    const spawnSpy = vi.spyOn(mockDriver, 'spawn');
+
+    await runSandbox({ ...MINIMAL_SPAWN_INPUT, driverOverride: mockDriver });
+
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    const callArg = spawnSpy.mock.calls[0]?.[0];
+    // runSandbox does not pass sandboxEnv — it must be absent or undefined
+    expect(callArg?.sandboxEnv).toBeUndefined();
+  });
+
+  it('BaseSandboxDriver.spawn rejects withheld credentials even when passed directly', async () => {
+    const driver = new MockSandboxDriver();
+    await expect(
+      driver.spawn({
+        policyFilePath: '/test',
+        prDiff: '',
+        upstreamMainRef: 'test',
+        resourceLimits: DEFAULT_RESOURCE_LIMITS,
+        prNumber: 1,
+        sandboxEnv: { AI_SDLC_SIGNING_KEY: '-----BEGIN PRIVATE KEY-----' },
+      }),
+    ).rejects.toThrow(/credential withholding violation/i);
+  });
+
+  it('accepts safe env vars (CI_JOB_ID, SANDBOX_RUN_ID)', () => {
+    expect(() =>
+      validateSandboxEnv({ CI_JOB_ID: '12345', SANDBOX_RUN_ID: 'abc-123' }),
+    ).not.toThrow();
+  });
+});
+
+// ── AISDLC-508: DOCKER_SECCOMP_PROFILE shape ─────────────────────────────────
+
+describe('DOCKER_SECCOMP_PROFILE — seccomp allowlist shape (AISDLC-508 AC-1)', () => {
+  it('has defaultAction SCMP_ACT_ERRNO (deny by default)', () => {
+    expect(DOCKER_SECCOMP_PROFILE.defaultAction).toBe('SCMP_ACT_ERRNO');
+  });
+
+  it('has a syscalls array with at least one allowlist entry', () => {
+    const syscalls = DOCKER_SECCOMP_PROFILE.syscalls as Array<unknown>;
+    expect(Array.isArray(syscalls)).toBe(true);
+    expect(syscalls.length).toBeGreaterThan(0);
+  });
+
+  it('allows read and write syscalls', () => {
+    const syscalls = DOCKER_SECCOMP_PROFILE.syscalls as Array<{ names: string[]; action: string }>;
+    const allowed = syscalls.filter((s) => s.action === 'SCMP_ACT_ALLOW').flatMap((s) => s.names);
+    expect(allowed).toContain('read');
+    expect(allowed).toContain('write');
+  });
+
+  it('does NOT allow mount (privilege escalation guard)', () => {
+    // mount syscall is explicitly absent — it enables privilege escalation
+    // and container breakout via overlay filesystem manipulation
+    const syscalls = DOCKER_SECCOMP_PROFILE.syscalls as Array<{ names: string[]; action: string }>;
+    const explicitlyAllowed = syscalls
+      .filter((s) => s.action === 'SCMP_ACT_ALLOW')
+      .flatMap((s) => s.names);
+    // mount must not be in the allowlist (defaultAction ERRNO blocks it)
+    expect(explicitlyAllowed).not.toContain('mount');
+  });
+
+  it('does NOT allow ptrace (prevents container debugging / escape)', () => {
+    const syscalls = DOCKER_SECCOMP_PROFILE.syscalls as Array<{ names: string[]; action: string }>;
+    const explicitlyAllowed = syscalls
+      .filter((s) => s.action === 'SCMP_ACT_ALLOW')
+      .flatMap((s) => s.names);
+    expect(explicitlyAllowed).not.toContain('ptrace');
+  });
+
+  it('does NOT allow kexec_load (prevents kernel replacement)', () => {
+    const syscalls = DOCKER_SECCOMP_PROFILE.syscalls as Array<{ names: string[]; action: string }>;
+    const explicitlyAllowed = syscalls
+      .filter((s) => s.action === 'SCMP_ACT_ALLOW')
+      .flatMap((s) => s.names);
+    expect(explicitlyAllowed).not.toContain('kexec_load');
+  });
+
+  it('serializes to valid JSON (required for --security-opt seccomp=<json>)', () => {
+    expect(() => JSON.stringify(DOCKER_SECCOMP_PROFILE)).not.toThrow();
+    const json = JSON.stringify(DOCKER_SECCOMP_PROFILE);
+    expect(json).toContain('SCMP_ACT_ERRNO');
+    expect(json).toContain('SCMP_ACT_ALLOW');
   });
 });
