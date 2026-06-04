@@ -1060,6 +1060,18 @@ describe('extractDifferentialTestResult helper (via sandbox-run success path)', 
     expect(dt['upstreamSuitePassed']).toBe(true);
     expect(dt['newTestsPassed']).toBe(true);
     expect(dt['newCodeCoveragePct']).toBe(95.5);
+    // Regression (AISDLC-511 reconcile): the raw sandbox stdout
+    // (upstreamSuiteOutput / newTestsOutput) must NOT be written into the signed
+    // report. The report's differentialTest sub-schema is `.strict()` with only
+    // these three summary fields — leaking the extra keys would make the Stage-4
+    // clean-room signer reject every real report with a Zod parse error.
+    expect(Object.keys(dt).sort()).toEqual([
+      'newCodeCoveragePct',
+      'newTestsPassed',
+      'upstreamSuitePassed',
+    ]);
+    expect(dt['upstreamSuiteOutput']).toBeUndefined();
+    expect(dt['newTestsOutput']).toBeUndefined();
   });
 
   it('defaults to false/0 when sandbox result has no differentialTestResult field', async () => {

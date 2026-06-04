@@ -472,7 +472,17 @@ function buildUnsignedReport(
       outcome: 'pass',
       offendingPaths: [],
     },
-    differentialTest,
+    // Project to exactly the 3 schema fields. extractDifferentialTestResult
+    // returns the full DifferentialTestResult (which also carries the raw
+    // upstreamSuiteOutput / newTestsOutput sandbox stdout used only as reviewer
+    // context). The signed report's differentialTest sub-schema is `.strict()`
+    // and lists only these three summary fields — writing the raw output strings
+    // through would make the Stage-4 clean-room signer reject the report.
+    differentialTest: {
+      upstreamSuitePassed: differentialTest.upstreamSuitePassed,
+      newTestsPassed: differentialTest.newTestsPassed,
+      newCodeCoveragePct: differentialTest.newCodeCoveragePct,
+    },
     reviewers: reviewerVerdicts,
     consensus: consensusResult,
   };
