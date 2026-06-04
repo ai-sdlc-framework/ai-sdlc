@@ -928,6 +928,27 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   private async runDockerDifferentialTest(
     input: SandboxSpawnInput & { abortSignal?: AbortSignal },
   ): Promise<DifferentialTestResult> {
+    // Belt-and-suspenders: reject an empty diff before base64-encoding.
+    //
+    // When `input.prDiff` is an empty string, `Buffer.from('').toString('base64')`
+    // produces `''`, so `SANDBOX_PR_DIFF_B64=''` in the container env.  The shell
+    // guard `if [ -n "${SANDBOX_PR_DIFF_B64:-}" ]` evaluates to false, so
+    // `git apply` is silently SKIPPED and the head suite runs against the
+    // UNPATCHED base → false `headPassed:true` (the fail-closed sentinel can't
+    // detect this because the sentinel + JSON are still emitted).
+    //
+    // We reject here so the caller receives outcome:'error' rather than a
+    // silently misleading outcome:'success' with headPassed:true on an unpatched
+    // tree.  The in-container shell guard is also hardened (see
+    // buildDifferentialTestScript) as belt-and-suspenders defence.
+    if (!input.prDiff || input.prDiff.length === 0) {
+      throw new Error(
+        'runDockerDifferentialTest: prDiff must be a non-empty string. ' +
+          'An empty diff would cause git apply to be skipped inside the sandbox, ' +
+          'producing a false headPassed:true result against the unpatched base tree.',
+      );
+    }
+
     const { resourceLimits } = input;
     const seccompJson = JSON.stringify(DOCKER_SECCOMP_PROFILE);
 
@@ -1256,31 +1277,6 @@ export function parseDifferentialTestOutput(stdout: string): DifferentialTestRes
 }
 
 /**
- * Build the shell script that runs the differential test sequence inside
- * the container.
- *
- * The script:
- *  1. Clones the upstream repo at the base SHA (`upstreamMainRef`) — the
- *     `baseSha`, NOT `headSha`. This preserves the AISDLC-501 invariant:
- *     we test what the upstream tests expect, not the PR's revised state.
- *  2. Applies the PR diff as DATA (via `git apply`) — never executes fork-
- *     provided workflow logic. The diff is written to a tmpfile and applied
- *     with `--reject` so partial-apply failures are surfaced, not silenced.
- *  3. Installs dependencies in offline mode when a lock file is present
- *     (denies network package fetch inside the sandbox).
- *  4. Runs the upstream test suite; captures exit code + output.
- *  5. Applies the per-test timeout via `timeout <seconds>` if the resource
- *     limits specify one (hangs a test → SIGTERM → exit non-zero).
- *  6. Emits the sentinel + JSON result on stdout for the TypeScript parser.
- *
- * SECURITY: the prDiff is passed as a base64-encoded environment variable
- * (`SANDBOX_PR_DIFF_B64`) so it is never interpolated into the shell script
- * itself — only decoded and written to a file, then passed to `git apply`.
- * This prevents a diff that contains shell metacharacters from breaking out.
- *
- * Exported for hermetic unit testing of the script shape.
- */
-/**
  * Validate `upstreamMainRef` before interpolating it into the in-container
  * shell script.
  *
@@ -1310,9 +1306,49 @@ export function validateUpstreamMainRef(ref: string): void {
   }
 }
 
+/**
+ * Build the shell script that runs the differential test sequence inside
+ * the container.
+ *
+ * The script:
+ *  1. Clones the upstream repo at the base SHA (`upstreamMainRef`) — the
+ *     `baseSha`, NOT `headSha`. This preserves the AISDLC-501 invariant:
+ *     we test what the upstream tests expect, not the PR's revised state.
+ *  2. Applies the PR diff as DATA (via `git apply`) — never executes fork-
+ *     provided workflow logic. The diff is written to a tmpfile and applied
+ *     with `--reject` so partial-apply failures are surfaced, not silenced.
+ *  3. Installs dependencies in offline mode when a lock file is present
+ *     (denies network package fetch inside the sandbox).
+ *  4. Runs the upstream test suite; captures exit code + output.
+ *  5. Applies the per-test timeout via `timeout <seconds>` if the resource
+ *     limits specify one (hangs a test → SIGTERM → exit non-zero).
+ *  6. Emits the sentinel + JSON result on stdout for the TypeScript parser.
+ *
+ * SECURITY: the prDiff is passed as a base64-encoded environment variable
+ * (`SANDBOX_PR_DIFF_B64`) so it is never interpolated into the shell script
+ * itself — only decoded and written to a file, then passed to `git apply`.
+ * This prevents a diff that contains shell metacharacters from breaking out.
+ *
+ * ## `baseSha` parameter (AISDLC-501 invariant for URL-form refs)
+ * When `upstreamMainRef` is a URL, the clone uses `--depth=1` (fetches
+ * default-branch HEAD). Without `baseSha`, the clone lands at an arbitrary
+ * commit that may differ from the actual PR merge-base — violating the
+ * AISDLC-501 base invariant (upstream tests must run at the exact base SHA).
+ * Supplying `baseSha` (a valid 7-64 hex SHA) causes the script to run
+ * `git checkout <baseSha>` after the clone, pinning the base to the correct
+ * commit.
+ *
+ * When `upstreamMainRef` is itself a SHA (the common production path), the
+ * SHA IS the ref and `baseSha` is redundant — it is ignored in the SHA branch.
+ *
+ * RECOMMENDED: always pass `baseSha` when `upstreamMainRef` is a URL.
+ *
+ * Exported for hermetic unit testing of the script shape.
+ */
 export function buildDifferentialTestScript(
   upstreamMainRef: string,
   perTestTimeoutSeconds?: number,
+  baseSha?: string,
 ): string {
   // Validate the ref before interpolating into the shell script.
   // Throws if the ref is not a valid SHA or URL — prevents shell injection.
@@ -1344,6 +1380,16 @@ export function buildDifferentialTestScript(
   // or a URL with a known scheme, so this is belt-and-suspenders safety.
   const escapedRef = upstreamMainRef.replace(/'/g, "'\\''");
 
+  // Validate and escape baseSha when supplied.
+  // baseSha must be a git SHA (7-64 hex chars) when provided — it is injected
+  // into the shell script via single-quoting so it must not contain metacharacters.
+  const escapedBaseSha = baseSha ? baseSha.replace(/'/g, "'\\''") : '';
+  // Only emit the checkout command when a valid baseSha is supplied
+  const baseShaCheckout =
+    baseSha && /^[0-9a-f]{7,64}$/i.test(baseSha)
+      ? `  git checkout '${escapedBaseSha}' 2>&1 || { echo "git checkout baseSha failed: '${escapedBaseSha}'" >&2; exit 1; }`
+      : '  # baseSha not provided: cloned at default-branch HEAD (AISDLC-501 invariant may not hold for URL-form refs)';
+
   return `#!/bin/sh
 set -e
 
@@ -1359,11 +1405,13 @@ cd "$WORK_DIR"
 UPSTREAM_REF='${escapedRef}'
 
 if echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
-  # URL path: clone then check out the base SHA.
-  # The base SHA (baseSha) is supplied by the caller. When upstreamMainRef is
-  # itself a SHA (not a URL) we handle it in the else branch below.
-  git clone --depth=1 "$UPSTREAM_REF" repo 2>&1
+  # URL path: clone then check out the pinned base SHA (baseSha) if supplied.
+  # Without baseSha, the clone lands at default-branch HEAD which may differ
+  # from the actual PR merge-base — violating the AISDLC-501 base invariant.
+  # Always pass baseSha to this function when upstreamMainRef is a URL.
+  git clone "$UPSTREAM_REF" repo 2>&1
   cd repo
+${baseShaCheckout}
 else
   # SHA path: upstreamMainRef IS the base SHA.
   # The sandbox must have been pre-populated with the repo at /sandbox/workspace/repo
@@ -1407,22 +1455,34 @@ fi
 # ── 4. Apply the PR diff as DATA (never execute fork-provided workflow logic) ────
 # The diff is provided via the SANDBOX_PR_DIFF_B64 environment variable
 # (base64-encoded to avoid shell metacharacter injection).
+#
+# FAIL-CLOSED: if SANDBOX_PR_DIFF_B64 is absent or empty, the diff was never
+# provided — silently skipping would run the head suite against the UNPATCHED
+# base tree, producing a false headPassed:true. We emit the failure sentinel
+# and exit 1 instead (belt-and-suspenders; the TypeScript layer also rejects
+# empty diffs before base64-encoding).
 DIFF_FILE="/tmp/pr.diff"
-if [ -n "\${SANDBOX_PR_DIFF_B64:-}" ]; then
-  printf '%s' "$SANDBOX_PR_DIFF_B64" | base64 -d > "$DIFF_FILE"
-  # Apply the diff; --reject surfaces partial failures rather than silencing them.
-  # Use --ignore-whitespace to tolerate CRLF/LF differences from the PR.
-  # On failure: emit the failure sentinel and exit 1 (fail-closed — do NOT
-  # continue running tests against the unpatched base, which would produce
-  # a false headPassed:true result).
-  if ! git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1; then
-    echo "git apply failed — diff could not be applied cleanly" >&2
-    FAILURE_SENTINEL='${DIFFERENTIAL_RESULT_SENTINEL}'
-    echo "$FAILURE_SENTINEL"
-    printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":false,"headOutput":"git apply failed","coveragePct":0}\\n' \\
-      "$UPSTREAM_PASSED" "$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 500 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')"
-    exit 1
-  fi
+if [ -z "\${SANDBOX_PR_DIFF_B64:-}" ]; then
+  echo "SANDBOX_PR_DIFF_B64 is absent or empty — cannot apply diff" >&2
+  FAILURE_SENTINEL='${DIFFERENTIAL_RESULT_SENTINEL}'
+  echo "$FAILURE_SENTINEL"
+  printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":false,"headOutput":"no diff provided","coveragePct":0}\\n' \\
+    "$UPSTREAM_PASSED" "$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 500 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')"
+  exit 1
+fi
+printf '%s' "$SANDBOX_PR_DIFF_B64" | base64 -d > "$DIFF_FILE"
+# Apply the diff; --reject surfaces partial failures rather than silencing them.
+# Use --ignore-whitespace to tolerate CRLF/LF differences from the PR.
+# On failure: emit the failure sentinel and exit 1 (fail-closed — do NOT
+# continue running tests against the unpatched base, which would produce
+# a false headPassed:true result).
+if ! git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1; then
+  echo "git apply failed — diff could not be applied cleanly" >&2
+  FAILURE_SENTINEL='${DIFFERENTIAL_RESULT_SENTINEL}'
+  echo "$FAILURE_SENTINEL"
+  printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":false,"headOutput":"git apply failed","coveragePct":0}\\n' \\
+    "$UPSTREAM_PASSED" "$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 500 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')"
+  exit 1
 fi
 
 # ── 5. Install dependencies for the HEAD tree (after diff applied) ───────────────

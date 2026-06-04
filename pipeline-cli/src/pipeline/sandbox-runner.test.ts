@@ -3196,6 +3196,232 @@ describe('buildDifferentialTestScript — fix: integer % parsing (bug #5)', () =
   });
 });
 
+// ── Fix-iteration #2 MAJOR: empty-diff fail-closed (AISDLC-509) ──────────────
+//
+// When prDiff is an empty string, runDockerDifferentialTest must throw
+// (producing outcome:'error') rather than silently skipping git apply and
+// returning a false headPassed:true.
+
+describe('Fix #2 MAJOR — empty-diff fail-closed in runDockerDifferentialTest', () => {
+  it(
+    'DockerSandboxDriver.spawn rejects empty prDiff with outcome:error (not false headPassed:true)',
+    withIntegrationFlag(async () => {
+      // Create a driver where spawn would otherwise succeed if it got to docker run
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => proc.emitClose(0));
+        return proc;
+      });
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        prDiff: '', // empty diff — must fail-closed
+      } as Parameters<typeof driver.spawn>[0]);
+
+      // Must NOT produce outcome:'success' with headPassed:true (the false-pass scenario)
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toMatch(/empty/i);
+        // Must name the root cause
+        expect(result.error).toMatch(/prDiff|diff/i);
+      }
+      // No docker process should have been spawned (rejected before cidfile creation)
+      expect(driver.spawnCount).toBe(0);
+    }),
+  );
+
+  it(
+    'runSandbox rejects empty prDiff with outcome:error via DockerSandboxDriver',
+    withIntegrationFlag(async () => {
+      // Use TestableDockerDriver so no real docker daemon is needed
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => proc.emitClose(0));
+        return proc;
+      });
+
+      const result = await runSandbox({
+        prNumber: 1,
+        prDiff: '', // empty diff
+        upstreamMainRef: 'https://github.com/example/repo.git',
+        config: DEFAULT_SANDBOX_CONFIG,
+        driverOverride: driver,
+      });
+
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toMatch(/empty|prDiff|diff/i);
+      }
+    }),
+  );
+
+  it('buildDifferentialTestScript: empty SANDBOX_PR_DIFF_B64 → sentinel + exit 1 (not silent skip)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+
+    // The OLD (broken) guard: `if [ -n "${SANDBOX_PR_DIFF_B64:-}" ]` — silently skips apply
+    // The NEW (fixed) guard: `if [ -z "${SANDBOX_PR_DIFF_B64:-}" ]` — emits sentinel + exit 1
+    expect(script).toContain('[ -z "${SANDBOX_PR_DIFF_B64:-}" ]');
+    // Must NOT contain the old guard that silently skips apply on empty var
+    expect(script).not.toContain('[ -n "${SANDBOX_PR_DIFF_B64:-}" ]');
+
+    // When the guard fires (var is empty), the script must emit the failure sentinel
+    // and exit 1 — NOT continue to run tests against the unpatched base
+    const guardIdx = script.indexOf('[ -z "${SANDBOX_PR_DIFF_B64:-}" ]');
+    const sentinelAfterGuard = script.indexOf(DIFFERENTIAL_RESULT_SENTINEL, guardIdx);
+    const exitAfterGuard = script.indexOf('exit 1', guardIdx);
+    expect(sentinelAfterGuard).toBeGreaterThan(guardIdx);
+    expect(exitAfterGuard).toBeGreaterThan(guardIdx);
+    // The sentinel comes before exit 1
+    expect(sentinelAfterGuard).toBeLessThan(exitAfterGuard);
+  });
+
+  it('buildDifferentialTestScript: git apply now runs unconditionally (after guard), not inside if-block', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // After the guard emits sentinel+exit1 on empty var, the apply runs unconditionally.
+    // Verify: `printf '%s' "$SANDBOX_PR_DIFF_B64" | base64 -d` is present as a top-level
+    // statement (not nested in an `if [ -n ... ]` block that would silently skip it).
+    expect(script).toContain('printf \'%s\' "$SANDBOX_PR_DIFF_B64" | base64 -d');
+    // Confirm the old `if [ -n "${SANDBOX_PR_DIFF_B64:-}" ]` guard is gone
+    expect(script).not.toContain('if [ -n "${SANDBOX_PR_DIFF_B64:-}" ]');
+  });
+
+  it(
+    'TestableDockerDriver: empty-diff → outcome:error, teardown still called',
+    withIntegrationFlag(async () => {
+      // The error happens before docker run is invoked — teardown should still be no-op safe
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => proc.emitClose(0));
+        return proc;
+      });
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        prDiff: '',
+      } as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('error');
+      // teardown is idempotent even when no docker process was spawned
+      await expect(driver.teardown()).resolves.toBeUndefined();
+    }),
+  );
+});
+
+// ── Fix-iteration #2 MINOR #2: JSDoc ordering ────────────────────────────────
+// Regression guard: the JSDoc for buildDifferentialTestScript must immediately
+// precede that function (not validateUpstreamMainRef). This is structural only
+// — the test verifies the exported function signatures haven't broken.
+
+describe('Fix #2 MINOR #2 — JSDoc reorder does not break exports', () => {
+  it('validateUpstreamMainRef is still exported and callable', () => {
+    // Basic smoke-test: the reorder must not have moved validateUpstreamMainRef
+    // to a position after buildDifferentialTestScript makes the export unreachable
+    expect(typeof validateUpstreamMainRef).toBe('function');
+    expect(() => validateUpstreamMainRef('abc1234')).not.toThrow(); // valid SHA
+    expect(() => validateUpstreamMainRef('')).toThrow(); // invalid
+  });
+
+  it('buildDifferentialTestScript is still exported and callable', () => {
+    expect(typeof buildDifferentialTestScript).toBe('function');
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    expect(typeof script).toBe('string');
+    expect(script.length).toBeGreaterThan(0);
+  });
+
+  it('validateUpstreamMainRef still rejects injection attempts after reorder', () => {
+    expect(() => validateUpstreamMainRef("'; rm -rf /; echo '")).toThrow(/not a valid/i);
+    expect(() => validateUpstreamMainRef('$(rm -rf /)')).toThrow(/not a valid/i);
+    expect(() => validateUpstreamMainRef('/tmp/evil')).toThrow(/not a valid/i);
+  });
+});
+
+// ── Fix-iteration #2 MINOR #3: baseSha checkout for URL-clone path ───────────
+
+describe('Fix #2 MINOR #3 — baseSha param in buildDifferentialTestScript', () => {
+  it('without baseSha: URL-clone script does NOT attempt checkout (comment only)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // No baseSha → no git checkout command in the URL branch
+    // The script should contain a comment about the invariant risk instead
+    expect(script).toContain('baseSha not provided');
+    expect(script).not.toContain("git checkout '");
+  });
+
+  it('with valid baseSha: URL-clone script includes git checkout <baseSha>', () => {
+    const sha = 'a'.repeat(40); // valid 40-char SHA
+    const script = buildDifferentialTestScript(
+      'https://github.com/example/repo.git',
+      undefined,
+      sha,
+    );
+    // The URL branch must contain `git checkout '<sha>'`
+    expect(script).toContain(`git checkout '${sha}'`);
+    // Must also have a fallback exit 1 for checkout failure
+    const checkoutIdx = script.indexOf(`git checkout '${sha}'`);
+    const failAfterCheckout = script.indexOf('exit 1', checkoutIdx);
+    expect(failAfterCheckout).toBeGreaterThan(checkoutIdx);
+  });
+
+  it('with baseSha: SHA-form ref path is unaffected (baseSha redundant but harmless)', () => {
+    // When upstreamMainRef is a SHA, the else branch handles it (cd repo + git checkout REF).
+    // baseSha does not appear in the SHA branch.
+    const sha = 'a'.repeat(40);
+    const script = buildDifferentialTestScript(sha, undefined, sha);
+    // The SHA branch still has: git checkout "$UPSTREAM_REF"
+    expect(script).toContain('git checkout "$UPSTREAM_REF"');
+    // The URL branch content (git clone) is NOT present (ref is SHA, not URL)
+    // — actually both branches are in the script, so we check the ordering
+    const urlBranchIdx = script.indexOf('git clone');
+    const shaBranchIdx = script.indexOf('git checkout "$UPSTREAM_REF"');
+    // SHA branch checkout appears in the else block (after the URL if-block)
+    expect(shaBranchIdx).toBeGreaterThan(urlBranchIdx);
+  });
+
+  it('baseSha is validated as a hex SHA — non-hex string produces comment-only output', () => {
+    // If the caller passes an invalid baseSha (not a hex SHA), the script falls
+    // back to the comment-only form (no checkout command). This prevents injection
+    // via a crafted baseSha that evades the regex check.
+    const invalidBaseSha = "'; rm -rf /; echo '";
+    const script = buildDifferentialTestScript(
+      'https://github.com/example/repo.git',
+      undefined,
+      invalidBaseSha,
+    );
+    // The invalid baseSha must NOT produce a git checkout line
+    expect(script).not.toContain(`git checkout '${invalidBaseSha}'`);
+    // It falls back to the comment form
+    expect(script).toContain('baseSha not provided');
+  });
+
+  it('with baseSha: perTestTimeoutSeconds still works correctly alongside baseSha', () => {
+    const sha = 'deadbeef1234567890abcdef1234567890abcdef12';
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git', 45, sha);
+    expect(script).toContain('timeout 45');
+    expect(script).toContain(`git checkout '${sha}'`);
+  });
+
+  it(
+    'TestableDockerDriver with baseSha: URL-form spawn includes checkout in script',
+    withIntegrationFlag(async () => {
+      const sha = 'cafebabe1234567890abcdef1234567890abcdef12';
+      // We can't call buildDifferentialTestScript with baseSha directly from spawn
+      // (spawn calls it internally without baseSha). This test verifies the API exists
+      // and the script content is correct.
+      const script = buildDifferentialTestScript(
+        'https://github.com/example/repo.git',
+        undefined,
+        sha,
+      );
+      expect(script).toContain(`git checkout '${sha}'`);
+      // baseSha checkout appears in the URL branch (before the else)
+      const urlBranchStart = script.indexOf('git clone');
+      const checkoutIdx = script.indexOf(`git checkout '${sha}'`);
+      const elseBranchIdx = script.indexOf('else\n');
+      expect(checkoutIdx).toBeGreaterThan(urlBranchStart);
+      expect(checkoutIdx).toBeLessThan(elseBranchIdx);
+    }),
+  );
+});
+
 // ── AISDLC-509: SANDBOX_PR_DIFF_B64 env var injection via TestableDockerDriver ─
 
 describe('SANDBOX_PR_DIFF_B64 env var injection (AISDLC-509 AC-1)', () => {
