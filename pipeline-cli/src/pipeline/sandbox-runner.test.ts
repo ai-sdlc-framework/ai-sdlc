@@ -25,6 +25,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import {
   resolveEffectiveDriver,
   validateSandboxEnv,
+  validateUpstreamMainRef,
   buildResourceBreachEvent,
   buildResourceBreachComment,
   loadSandboxConfig,
@@ -1822,7 +1823,8 @@ function withIntegrationFlag(fn: () => Promise<void>): () => Promise<void> {
 const LIFECYCLE_INPUT = {
   policyFilePath: '/nonexistent',
   prDiff: 'diff --git a/foo.ts b/foo.ts\n+// new line\n',
-  upstreamMainRef: 'test',
+  // Use a valid https URL — 'test' is not a valid SHA or URL (would fail validateUpstreamMainRef)
+  upstreamMainRef: 'https://github.com/example/repo.git',
   resourceLimits: DEFAULT_RESOURCE_LIMITS,
   prNumber: 42,
 };
@@ -2947,6 +2949,250 @@ describe('buildDifferentialTestScript (AISDLC-509 AC-1)', () => {
   it('contains pnpm test as the primary test runner', () => {
     const script = buildDifferentialTestScript('https://github.com/example/repo.git');
     expect(script).toContain('pnpm test');
+  });
+});
+
+// ── Fix-iteration: validateUpstreamMainRef — MINOR #4 (unescaped interpolation) ─
+
+describe('validateUpstreamMainRef (AISDLC-509 fix: unescaped interpolation guard)', () => {
+  it('accepts a full 40-char hex SHA', () => {
+    expect(() => validateUpstreamMainRef('a'.repeat(40))).not.toThrow();
+  });
+
+  it('accepts a short 7-char hex SHA', () => {
+    expect(() => validateUpstreamMainRef('abc1234')).not.toThrow();
+  });
+
+  it('accepts a 64-char hex SHA (upper bound)', () => {
+    expect(() => validateUpstreamMainRef('f'.repeat(64))).not.toThrow();
+  });
+
+  it('accepts https:// URL', () => {
+    expect(() => validateUpstreamMainRef('https://github.com/example/repo.git')).not.toThrow();
+  });
+
+  it('accepts git:// URL', () => {
+    expect(() => validateUpstreamMainRef('git://github.com/example/repo.git')).not.toThrow();
+  });
+
+  it('accepts ssh:// URL', () => {
+    expect(() => validateUpstreamMainRef('ssh://git@github.com/example/repo.git')).not.toThrow();
+  });
+
+  it('accepts git@ (SCP-style) URL', () => {
+    expect(() => validateUpstreamMainRef('git@github.com:example/repo.git')).not.toThrow();
+  });
+
+  it('rejects empty string', () => {
+    expect(() => validateUpstreamMainRef('')).toThrow();
+  });
+
+  it('rejects a local file path (injection risk)', () => {
+    expect(() => validateUpstreamMainRef('/tmp/evil-repo')).toThrow(/not a valid/i);
+  });
+
+  it('rejects a ref with shell metacharacters (injection attempt)', () => {
+    expect(() => validateUpstreamMainRef("'; rm -rf /; echo '")).toThrow(/not a valid/i);
+  });
+
+  it('rejects a ref with $() subshell syntax', () => {
+    expect(() => validateUpstreamMainRef('$(rm -rf /)')).toThrow(/not a valid/i);
+  });
+
+  it('rejects a 6-char hex string (too short for SHA)', () => {
+    // 6 hex chars is below the 7-char minimum
+    expect(() => validateUpstreamMainRef('abc123')).toThrow(/not a valid/i);
+  });
+
+  it('rejects a 65-char hex string (too long for SHA, no URL scheme)', () => {
+    expect(() => validateUpstreamMainRef('a'.repeat(65))).toThrow(/not a valid/i);
+  });
+
+  it('rejects mixed non-hex SHA-like string', () => {
+    // Contains 'g' which is not a hex character
+    expect(() => validateUpstreamMainRef('gabcdef1234567')).toThrow(/not a valid/i);
+  });
+
+  it('buildDifferentialTestScript throws for invalid ref (not a valid SHA/URL)', () => {
+    expect(() => buildDifferentialTestScript('/tmp/evil-path')).toThrow(/not a valid/i);
+  });
+
+  it('buildDifferentialTestScript does NOT throw for a valid SHA ref', () => {
+    expect(() => buildDifferentialTestScript('a'.repeat(40))).not.toThrow();
+  });
+
+  it('buildDifferentialTestScript does NOT throw for a valid https URL', () => {
+    expect(() => buildDifferentialTestScript('https://github.com/example/repo.git')).not.toThrow();
+  });
+});
+
+// ── Fix-iteration: script correctness — bugs 1-3 ─────────────────────────────
+
+describe('buildDifferentialTestScript — fix: coverage flag forwarded (bug #2)', () => {
+  it('head test command includes --coverage as a direct flag (not after --)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // The coverage flag must be passed as a pnpm/npm flag, not after `--`.
+    // The broken form was: `sh -c 'pnpm test ...' -- --coverage`
+    // The correct form: `sh -c 'pnpm test --coverage ...'`
+    expect(script).toContain('pnpm test --coverage');
+  });
+
+  it('head test command: --coverage appears within the sh -c quoted command', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // Must NOT use the `-- --coverage` form (passes --coverage as positional $1 to sh)
+    expect(script).not.toContain("'pnpm test 2>&1 || npm test 2>&1' -- --coverage");
+  });
+
+  it('with perTestTimeoutSeconds: head cmd has coverage inside the sh -c string', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git', 60);
+    expect(script).toContain('pnpm test --coverage');
+    // The timeout prefix must wrap the whole sh -c command, not be inside it
+    expect(script).toMatch(/timeout 60\s+sh\s+-c\s+'pnpm test --coverage/);
+  });
+});
+
+describe('buildDifferentialTestScript — fix: git apply fail-closed (bug #1)', () => {
+  it('git apply failure exits with sentinel + exit 1 (not silently continues)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // Must use `if ! git apply` pattern (fail-closed)
+    expect(script).toContain('if ! git apply');
+    // On failure: must emit sentinel and exit 1
+    expect(script).toContain('exit 1');
+    // Must NOT use the broken `|| { echo ...; }` pattern (which continues silently)
+    expect(script).not.toMatch(/git apply[^;]*\|\|\s*\{[\s\S]*?echo "git apply failed/);
+  });
+
+  it('on git apply failure: script emits the sentinel before exit 1 in the failure block', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // The apply-failure block assigns FAILURE_SENTINEL and emits it before exit 1.
+    // We verify the structure by checking that:
+    // (a) the failure-sentinel variable assignment is present
+    // (b) an `exit 1` follows the apply failure block
+    // (c) the apply-failure block emits coveragePct:0 (fail-closed invariant)
+    expect(script).toContain("FAILURE_SENTINEL='");
+    expect(script).toContain('exit 1');
+    // The apply-failure block is inside `if ! git apply ... fi`
+    const applyFailureIdx = script.indexOf('if ! git apply');
+    const headOutputIdx = script.indexOf('HEAD_OUTPUT=$(');
+    expect(applyFailureIdx).toBeGreaterThan(0);
+    expect(headOutputIdx).toBeGreaterThan(0);
+    // The git apply failure block ends with `exit 1` BEFORE HEAD_OUTPUT
+    // Find the exit 1 that comes AFTER the git apply block
+    const applyBlockEnd = script.indexOf('exit 1', applyFailureIdx);
+    expect(applyBlockEnd).toBeGreaterThan(applyFailureIdx);
+    expect(applyBlockEnd).toBeLessThan(headOutputIdx);
+  });
+
+  it(
+    'TestableDockerDriver: apply failure → sentinel emitted + non-zero exit → outcome:error',
+    withIntegrationFlag(async () => {
+      // Simulate the container running the fixed script: apply fails, script emits
+      // sentinel + failure JSON, then exits 1. The TypeScript layer should receive
+      // outcome:error (non-zero exit) with the failure sentinel in stdout.
+      const failureJson = JSON.stringify({
+        upstreamPassed: false,
+        upstreamOutput: '',
+        headPassed: false,
+        headOutput: 'git apply failed',
+        coveragePct: 0,
+      });
+      const stdout = `git apply failed — diff could not be applied cleanly\n${DIFFERENTIAL_RESULT_SENTINEL}\n${failureJson}\n`;
+
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          proc.emitStdout(stdout);
+          proc.emitClose(1); // exit 1 — the fixed script exits 1 on apply failure
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      // Non-zero exit → outcome:error (the TS layer rejects the Promise)
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toContain('exited with code');
+        expect(result.error).toContain('1');
+      }
+      // The container DID emit the sentinel — it's in the error message (stdout truncated there)
+      // This is the fail-closed guarantee: non-zero exit → never a false pass
+    }),
+  );
+});
+
+describe('buildDifferentialTestScript — fix: base-before-apply ordering (bug #3)', () => {
+  it('upstream test run appears BEFORE git apply in the script', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // Find positions of key lines in the script
+    const upstreamTestPos = script.indexOf('UPSTREAM_OUTPUT=$(');
+    const gitApplyPos = script.indexOf('if ! git apply');
+    expect(upstreamTestPos).toBeGreaterThan(0);
+    expect(gitApplyPos).toBeGreaterThan(0);
+    // Upstream tests must run BEFORE the diff is applied
+    expect(upstreamTestPos).toBeLessThan(gitApplyPos);
+  });
+
+  it('head test run appears AFTER git apply in the script', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    const gitApplyPos = script.indexOf('if ! git apply');
+    const headTestPos = script.indexOf('HEAD_OUTPUT=$(');
+    expect(gitApplyPos).toBeGreaterThan(0);
+    expect(headTestPos).toBeGreaterThan(0);
+    // Head tests must run AFTER the diff is applied
+    expect(headTestPos).toBeGreaterThan(gitApplyPos);
+  });
+
+  it('script has two separate test invocations (base run + head run)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // Both UPSTREAM_OUTPUT and HEAD_OUTPUT capture blocks are present
+    expect(script).toContain('UPSTREAM_OUTPUT=$(');
+    expect(script).toContain('HEAD_OUTPUT=$(');
+    // They must be distinct (not the same variable assignment)
+    const upstreamCount = (script.match(/UPSTREAM_OUTPUT=\$\(/g) ?? []).length;
+    const headCount = (script.match(/HEAD_OUTPUT=\$\(/g) ?? []).length;
+    expect(upstreamCount).toBe(1);
+    expect(headCount).toBe(1);
+  });
+
+  it('base test command does NOT include --coverage (only head suite gets coverage)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // The upstream section runs WITHOUT --coverage
+    const upstreamSection = script.substring(
+      script.indexOf('UPSTREAM_OUTPUT=$('),
+      script.indexOf('if ! git apply'),
+    );
+    expect(upstreamSection).not.toContain('--coverage');
+  });
+});
+
+// ── Fix-iteration: coverage regex — MINOR #5 (integer % support) ─────────────
+
+describe('buildDifferentialTestScript — fix: integer % parsing (bug #5)', () => {
+  it('script uses regex that accepts integer percent (no decimal required)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // The fixed regex is [0-9]+([.][0-9]+)?% — the decimal part is optional
+    // Verify the broken regex [0-9]+\.[0-9]+% is NOT present
+    expect(script).not.toMatch(/\[0-9\]\+\\\.\[0-9\]/);
+    // And the fixed form (optional decimal) IS present
+    expect(script).toMatch(/\[0-9\]\+.*\[0-9\]/);
+  });
+
+  it('parseDifferentialTestOutput: integer % coverage (e.g. 82%) is parsed correctly', () => {
+    // This tests the TypeScript parser, but the shell produces the coveragePct number,
+    // so the shell's regex must accept integers. We test by injecting an integer
+    // coveragePct value directly into the parser:
+    const result = parseDifferentialTestOutput(
+      `${DIFFERENTIAL_RESULT_SENTINEL}\n` +
+        JSON.stringify({
+          upstreamPassed: true,
+          upstreamOutput: '',
+          headPassed: true,
+          headOutput: 'Lines: 82%',
+          coveragePct: 82, // integer — must be accepted
+        }),
+    );
+    expect(result.newCodeCoveragePct).toBe(82);
+    expect(result.newTestsPassed).toBe(true);
   });
 });
 

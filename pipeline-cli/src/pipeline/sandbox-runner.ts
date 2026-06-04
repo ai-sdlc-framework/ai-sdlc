@@ -1280,10 +1280,44 @@ export function parseDifferentialTestOutput(stdout: string): DifferentialTestRes
  *
  * Exported for hermetic unit testing of the script shape.
  */
+/**
+ * Validate `upstreamMainRef` before interpolating it into the in-container
+ * shell script.
+ *
+ * Only two forms are permitted:
+ *  - A full or short git SHA: 7-64 hex characters (e.g. a base commit SHA).
+ *  - A URL: starts with `https://`, `git://`, `ssh://`, or `git@`.
+ *
+ * Reject anything else. This prevents shell-injection via a crafted ref
+ * string that bypasses single-quoting (e.g. a ref containing `'` or `$(…)`).
+ *
+ * Called by `buildDifferentialTestScript` before constructing the script.
+ * Exported for unit-test coverage.
+ */
+export function validateUpstreamMainRef(ref: string): void {
+  if (!ref || typeof ref !== 'string') {
+    throw new Error('upstreamMainRef must be a non-empty string');
+  }
+  // Allow: git SHAs (7–64 hex chars)
+  const isSha = /^[0-9a-f]{7,64}$/i.test(ref);
+  // Allow: URLs (https://, git://, ssh://, git@)
+  const isUrl = /^(https?|git|ssh):\/\//.test(ref) || /^git@/.test(ref);
+  if (!isSha && !isUrl) {
+    throw new Error(
+      `upstreamMainRef "${ref}" is not a valid git SHA or repository URL. ` +
+        `Accepted forms: 7-64 hex characters (SHA) or https?/git/ssh/git@ URL.`,
+    );
+  }
+}
+
 export function buildDifferentialTestScript(
   upstreamMainRef: string,
   perTestTimeoutSeconds?: number,
 ): string {
+  // Validate the ref before interpolating into the shell script.
+  // Throws if the ref is not a valid SHA or URL — prevents shell injection.
+  validateUpstreamMainRef(upstreamMainRef);
+
   // The per-test timeout prefix: `timeout <N>` wraps the test command.
   // If no per-test timeout is configured, the test command runs unwrapped
   // (the wall-clock AbortController handles the overall limit).
@@ -1292,12 +1326,23 @@ export function buildDifferentialTestScript(
       ? `timeout ${String(Math.floor(perTestTimeoutSeconds))}`
       : '';
 
-  // The test runner command. Tries pnpm first, falls back to npm test.
-  // Captures combined stdout+stderr into separate phase variables so the
-  // JSON result can surface them without mixing the two runs.
-  const testCmd = timeoutPrefix
+  // The test runner command for the upstream (base) suite — no coverage needed.
+  // Tries pnpm first, falls back to npm test.
+  const baseTestCmd = timeoutPrefix
     ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
     : "sh -c 'pnpm test 2>&1 || npm test 2>&1'";
+
+  // The test runner command for the head (PR) suite WITH coverage.
+  // Coverage is passed as a direct flag to pnpm/npm, not after `--` (which
+  // would be consumed by the shell, not forwarded to the test runner).
+  const headTestCmd = timeoutPrefix
+    ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
+    : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
+
+  // Single-quote-escape the ref for safe interpolation into the sh script.
+  // `validateUpstreamMainRef` already rejects any ref that isn't a hex SHA
+  // or a URL with a known scheme, so this is belt-and-suspenders safety.
+  const escapedRef = upstreamMainRef.replace(/'/g, "'\\''");
 
   return `#!/bin/sh
 set -e
@@ -1306,48 +1351,38 @@ WORK_DIR="/sandbox/workspace"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# ── 1. Clone the upstream repo at the base SHA (upstreamMainRef = baseSha) ──
-# NOTE: upstreamMainRef is the BASE sha — not headSha. This is the AISDLC-501
-# invariant: we prove the upstream suite passes against base, then confirm the
-# PR diff does not break it.
-UPSTREAM_REF="${upstreamMainRef}"
+# ── 1. Clone the upstream repo ──────────────────────────────────────────────────
+# UPSTREAM_REF is the BASE SHA (or repo URL) — not headSha. This is the
+# AISDLC-501 invariant: we run the upstream suite at the base, THEN apply the
+# diff and run the head suite. upstreamMainRef has been validated to be a git
+# SHA or a known-scheme URL before being interpolated here.
+UPSTREAM_REF='${escapedRef}'
 
-# Shallow clone to avoid fetching history we don't need inside the sandbox.
-# --filter=blob:none + --no-checkout then sparse checkout is not available in
-# all images; use a plain clone with --depth=1 if the ref is a URL, or a
-# local copy if it is a local path.
 if echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
+  # URL path: clone then check out the base SHA.
+  # The base SHA (baseSha) is supplied by the caller. When upstreamMainRef is
+  # itself a SHA (not a URL) we handle it in the else branch below.
   git clone --depth=1 "$UPSTREAM_REF" repo 2>&1
   cd repo
-  # Checkout the specific base SHA (detached HEAD)
-  # When cloning with --depth=1 the exact sha may not be available unless we
-  # fetch it explicitly. Attempt it; if the sha is already HEAD, skip.
-  git fetch --depth=1 origin "$UPSTREAM_REF" 2>/dev/null || true
 else
-  # Local path — copy it
-  cp -a "$UPSTREAM_REF/." repo/
-  cd repo
+  # SHA path: upstreamMainRef IS the base SHA.
+  # The sandbox must have been pre-populated with the repo at /sandbox/workspace/repo
+  # or we clone from a local mirror.  For robustness, if a 'repo' dir already
+  # exists (pre-populated), use it; otherwise fail closed.
+  if [ -d "repo" ]; then
+    cd repo
+    git checkout "$UPSTREAM_REF" 2>&1
+  else
+    echo "SHA-form upstreamMainRef '$UPSTREAM_REF' provided but no pre-cloned repo found at $WORK_DIR/repo" >&2
+    FAILURE_SENTINEL='${DIFFERENTIAL_RESULT_SENTINEL}'
+    echo "$FAILURE_SENTINEL"
+    printf '{"upstreamPassed":false,"upstreamOutput":"base repo not available","headPassed":false,"headOutput":"","coveragePct":0}\\n'
+    exit 1
+  fi
 fi
 
-# ── 2. Apply the PR diff as DATA (never execute fork-provided workflow logic) ──
-# The diff is provided via the SANDBOX_PR_DIFF_B64 environment variable
-# (base64-encoded to avoid shell metacharacter injection).
-DIFF_FILE="/tmp/pr.diff"
-if [ -n "\${SANDBOX_PR_DIFF_B64:-}" ]; then
-  printf '%s' "$SANDBOX_PR_DIFF_B64" | base64 -d > "$DIFF_FILE"
-  # Apply the diff; --reject surfaces partial failures rather than silencing them.
-  # Use --ignore-whitespace to tolerate CRLF/LF differences from the PR.
-  git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1 || {
-    echo "git apply failed — diff could not be applied cleanly" >&2
-  }
-fi
-
-# ── 3. Install dependencies (offline where possible) ──
+# ── 2. Install dependencies for the BASE tree (offline where possible) ──────────
 if [ -f "pnpm-lock.yaml" ]; then
-  # Offline install — denies any new package downloads inside the sandbox.
-  # If the lockfile is intact and the node_modules cache is warm this completes
-  # without network access. When the cache is cold it fails (expected in CI
-  # where each container is ephemeral and the sandbox has --network=none).
   pnpm install --frozen-lockfile --offline 2>&1 || \
   pnpm install --frozen-lockfile 2>&1 || true
 elif [ -f "package-lock.json" ]; then
@@ -1356,23 +1391,59 @@ elif [ -f "yarn.lock" ]; then
   yarn install --frozen-lockfile --offline 2>&1 || true
 fi
 
-# ── 4. Run the upstream (base) test suite ──
+# ── 3. Run the upstream (base) test suite BEFORE applying the diff ───────────────
+# This is the differential invariant: upstreamPassed reflects the BASE tree,
+# not the patched tree. (AISDLC-501)
 UPSTREAM_PASSED=false
 UPSTREAM_OUTPUT=""
 set +e
-UPSTREAM_OUTPUT=$(${testCmd} 2>&1)
+UPSTREAM_OUTPUT=$(${baseTestCmd} 2>&1)
 UPSTREAM_EXIT=$?
 set -e
 if [ "$UPSTREAM_EXIT" -eq 0 ]; then
   UPSTREAM_PASSED=true
 fi
 
-# ── 5. Run the head (PR) test suite with coverage ──
+# ── 4. Apply the PR diff as DATA (never execute fork-provided workflow logic) ────
+# The diff is provided via the SANDBOX_PR_DIFF_B64 environment variable
+# (base64-encoded to avoid shell metacharacter injection).
+DIFF_FILE="/tmp/pr.diff"
+if [ -n "\${SANDBOX_PR_DIFF_B64:-}" ]; then
+  printf '%s' "$SANDBOX_PR_DIFF_B64" | base64 -d > "$DIFF_FILE"
+  # Apply the diff; --reject surfaces partial failures rather than silencing them.
+  # Use --ignore-whitespace to tolerate CRLF/LF differences from the PR.
+  # On failure: emit the failure sentinel and exit 1 (fail-closed — do NOT
+  # continue running tests against the unpatched base, which would produce
+  # a false headPassed:true result).
+  if ! git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1; then
+    echo "git apply failed — diff could not be applied cleanly" >&2
+    FAILURE_SENTINEL='${DIFFERENTIAL_RESULT_SENTINEL}'
+    echo "$FAILURE_SENTINEL"
+    printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":false,"headOutput":"git apply failed","coveragePct":0}\\n' \\
+      "$UPSTREAM_PASSED" "$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 500 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')"
+    exit 1
+  fi
+fi
+
+# ── 5. Install dependencies for the HEAD tree (after diff applied) ───────────────
+# Re-run install in case the PR modified lock files or package.json.
+if [ -f "pnpm-lock.yaml" ]; then
+  pnpm install --frozen-lockfile --offline 2>&1 || \
+  pnpm install --frozen-lockfile 2>&1 || true
+elif [ -f "package-lock.json" ]; then
+  npm ci --prefer-offline 2>&1 || true
+elif [ -f "yarn.lock" ]; then
+  yarn install --frozen-lockfile --offline 2>&1 || true
+fi
+
+# ── 6. Run the head (PR) test suite with coverage ──────────────────────────────
+# headPassed reflects the PATCHED tree (post-apply). Coverage is forwarded as a
+# direct flag to pnpm/npm (not after '--', which sh would consume).
 HEAD_PASSED=false
 HEAD_OUTPUT=""
 COVERAGE_PCT=0
 set +e
-HEAD_OUTPUT=$(${testCmd} -- --coverage 2>&1)
+HEAD_OUTPUT=$(${headTestCmd} 2>&1)
 HEAD_EXIT=$?
 set -e
 if [ "$HEAD_EXIT" -eq 0 ]; then
@@ -1380,13 +1451,14 @@ if [ "$HEAD_EXIT" -eq 0 ]; then
 fi
 
 # Extract coverage percentage from the output.
-# Looks for lines like "Lines       : 82.35%" or "All files | 82.35" (common formats).
-COVERAGE_PCT=$(printf '%s\\n' "$HEAD_OUTPUT" | grep -oE '[0-9]+\\.[0-9]+%' | tail -1 | tr -d '%' || echo "0")
+# Accepts integer or decimal percent (e.g. "82%" or "82.35%") from common
+# coverage reporter formats like "Lines: 82.35%" or "All files | 82.35".
+COVERAGE_PCT=$(printf '%s\\n' "$HEAD_OUTPUT" | grep -oE '[0-9]+([.][0-9]+)?%' | tail -1 | tr -d '%' || echo "0")
 if [ -z "$COVERAGE_PCT" ]; then
   COVERAGE_PCT=0
 fi
 
-# ── 6. Emit the sentinel + JSON result ──
+# ── 7. Emit the sentinel + JSON result ──────────────────────────────────────────
 # The TypeScript parser reads everything AFTER the last sentinel occurrence.
 # Escape the output strings for JSON embedding (strip control chars, escape quotes).
 safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
