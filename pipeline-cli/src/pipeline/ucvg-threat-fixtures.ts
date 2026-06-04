@@ -7,7 +7,7 @@
  *
  * ## Fixture corpus design
  *
- * Seven threat vectors are covered, matching the AC#2 specification:
+ * Eight fixtures are covered (1 benign baseline + 7 adversarial vectors), matching the AC#2 specification:
  *
  *  1. **benign** — Clean TypeScript source change; passes all stages; valid attestation.
  *  2. **protected-path-mutation** — Changes `.github/workflows/ci.yml`; Stage 1 abort.
@@ -15,8 +15,10 @@
  *  4. **github-action-injection** — Embeds `uses:` in a `.ts` file; Stage 1 abort (content heuristic).
  *  5. **prompt-injection** — Diff comment tries to override reviewer instructions; Stage 3 finding.
  *  6. **credential-exfiltration** — Sandbox process cannot reach signing key, write tokens, or
- *     any host beyond inference.local (AC#3).
+ *     any host beyond inference.local (AC#3). Blocked at Stage 2 (sandbox runner) by env-withholding
+ *     + network-deny + read-only filesystem — NOT by an LLM reviewer verdict.
  *  7. **resource-exhaustion** — Sandbox exceeds wall-clock limit; `resource-breach` fail-closed.
+ *     Wall-clock enforcement fires in Stage 2 (sandbox runner), not Stage 3.
  *  8. **report-forgery** — Stage 4 receives a tampered report with injected keys; Zod refusal.
  *
  * ## Usage in the integration harness
@@ -58,10 +60,13 @@ export type ThreatVector =
 /**
  * The stage at which the threat is expected to be blocked.
  * `stage-4-refusal` means the clean-room signer refuses to sign.
+ * `stage-2-sandbox` means the sandbox runner (wall-clock enforcement, env-withholding,
+ * network-deny, read-only filesystem) stops the threat before any LLM reviewer runs.
  */
 export type BlockingStage =
   | 'stage-0-trust'
   | 'stage-1-ast-gate'
+  | 'stage-2-sandbox'
   | 'stage-3-reviewer'
   | 'stage-4-refusal'
   | 'none'; // benign passes all stages
@@ -73,7 +78,8 @@ export type ExpectedOutcome =
   | 'pass' // benign: passes all stages + valid attestation
   | 'abort-protected-path' // Stage 1 block
   | 'promptInjectionDetected' // Stage 3 security finding
-  | 'resource-breach' // Stage 2/3 resource exhaustion
+  | 'resource-breach' // Stage 2 resource exhaustion (wall-clock)
+  | 'credential-exfiltration-blocked' // Stage 2 containment (env-withholding + network-deny + read-only fs)
   | 'zod-refusal'; // Stage 4 Zod parse rejection
 
 /**
@@ -626,15 +632,15 @@ index 0000000..deadbeef
 +  } catch (_e) { /* blocked */ }
 +}
 `,
-  blockingStage: 'stage-3-reviewer',
-  expectedOutcome: 'promptInjectionDetected',
+  blockingStage: 'stage-2-sandbox',
+  expectedOutcome: 'credential-exfiltration-blocked',
   securityNote:
     'The credential-withholding invariant ensures: (1) WITHHELD_ENV_VARS are never injected ' +
     'into the sandbox environment; (2) the signing key path is never mounted or readable from ' +
     'the sandbox (read-only root fs + no host path mounts); (3) --network=none blocks direct ' +
     'exfiltration to external hosts; (4) the inference proxy withholds the provider credential ' +
-    'and only passes a session-scoped token. The security reviewer detects the exfiltration attempt ' +
-    'as a critical finding.',
+    'and only passes a session-scoped token. The defense fires at Stage 2 (sandbox runner) — ' +
+    'env-withholding, network-deny, and read-only fs contain the threat before any LLM reviewer runs.',
   additionalAssertions: [
     {
       name: 'withheld-env-vars-not-injected',
@@ -725,14 +731,14 @@ index 0000000..baadf00d
 +  });
 +});
 `,
-  blockingStage: 'stage-3-reviewer',
+  blockingStage: 'stage-2-sandbox',
   expectedOutcome: 'resource-breach',
   securityNote:
     'Resource exhaustion via infinite-loop tests is a denial-of-service vector. ' +
-    'The sandbox enforces a wall-clock timeout (default 10 minutes) via AbortController. ' +
-    'When the timeout fires, the Docker container is killed via `docker kill` and the runner ' +
-    'returns outcome:resource-breach (fail-closed). The gate never treats a resource breach ' +
-    'as a pass — fail-closed is the invariant.',
+    'The sandbox runner enforces a wall-clock timeout (default 10 minutes) via AbortController ' +
+    'at Stage 2 — before any LLM reviewer runs. When the timeout fires, the Docker container is ' +
+    'killed via `docker kill` and the runner returns outcome:resource-breach (fail-closed). ' +
+    'The gate never treats a resource breach as a pass — fail-closed is the invariant.',
   additionalAssertions: [
     {
       name: 'outcome-resource-breach',
@@ -981,6 +987,17 @@ export function buildBaseReport(prNumber: number): UntrustedPrReport {
 // ── Conformance documentation builder ────────────────────────────────────────
 
 /**
+ * Runtime mode discriminator for a conformance evidence record.
+ *
+ * - `'hermetic'` — test used MockSandboxDriver / pure logic, no Docker container.
+ * - `'contractual'` — test asserts a TypeScript-layer invariant (e.g. validateSandboxEnv)
+ *   via the real validator/type, but does NOT spawn a container or make a real LLM call.
+ * - `'real-docker'` — test spawned a genuine DockerSandboxDriver container AND exercised
+ *   real kernel/network/LLM enforcement paths.
+ */
+export type ConformanceRuntimeMode = 'hermetic' | 'contractual' | 'real-docker';
+
+/**
  * Conformance evidence record for one threat vector.
  * Produced by the harness after running a fixture.
  */
@@ -994,7 +1011,21 @@ export interface ConformanceRecord {
   securityNote: string;
   additionalAssertions: Array<{ name: string; description: string; passed: boolean }>;
   ranAt: string;
-  runtimeMode: 'hermetic' | 'real-docker';
+  /**
+   * Reflects what ACTUALLY ran for this conformance record.
+   * - `'hermetic'` — MockSandboxDriver / pure logic only.
+   * - `'contractual'` — TypeScript-layer enforcement asserted; no real container or LLM call.
+   * - `'real-docker'` — genuine DockerSandboxDriver container ran AND kernel/LLM paths exercised.
+   *
+   * Properties requiring a real container/LLM (network-deny, filesystem isolation, real docker-kill,
+   * real-LLM injection detection) MUST NOT be tagged `'real-docker'` unless those paths actually ran.
+   */
+  runtimeMode: ConformanceRuntimeMode;
+  /**
+   * Properties that could NOT be verified in this run and require a real container/LLM.
+   * Present when `runtimeMode !== 'real-docker'` and unverified kernel/LLM properties exist.
+   */
+  unverifiedProperties?: string[];
 }
 
 /**
@@ -1002,13 +1033,23 @@ export interface ConformanceRecord {
  *
  * The harness calls this after each fixture to build the conformance table
  * referenced by the RFC-0043 whitepaper (AC#5).
+ *
+ * The `runtimeMode` parameter MUST reflect what actually ran:
+ * - Pass `'hermetic'` when only MockSandboxDriver / pure logic was exercised.
+ * - Pass `'contractual'` when the real TypeScript-layer validator ran but no container or LLM call.
+ * - Pass `'real-docker'` ONLY when a genuine DockerSandboxDriver container actually ran AND
+ *   the kernel/network/LLM enforcement paths were exercised.
+ *
+ * When a property is NOT verified (requires a real container/LLM), include it in
+ * `unverifiedProperties` rather than marking it `passed: true`.
  */
 export function buildConformanceRecord(
   fixture: ThreatFixture,
   observedOutcome: string,
   passed: boolean,
   additionalAssertionResults: Array<{ name: string; passed: boolean }>,
-  runtimeMode: 'hermetic' | 'real-docker',
+  runtimeMode: ConformanceRuntimeMode,
+  unverifiedProperties?: string[],
 ): ConformanceRecord {
   const additionalAssertions = (fixture.additionalAssertions ?? []).map((a) => {
     const result = additionalAssertionResults.find((r) => r.name === a.name);
@@ -1019,7 +1060,7 @@ export function buildConformanceRecord(
     };
   });
 
-  return {
+  const record: ConformanceRecord = {
     vector: fixture.vector,
     description: fixture.description,
     blockingStage: fixture.blockingStage,
@@ -1031,6 +1072,12 @@ export function buildConformanceRecord(
     ranAt: new Date().toISOString(),
     runtimeMode,
   };
+
+  if (unverifiedProperties && unverifiedProperties.length > 0) {
+    record.unverifiedProperties = unverifiedProperties;
+  }
+
+  return record;
 }
 
 /**
@@ -1040,6 +1087,8 @@ export function buildConformanceRecord(
  * (conformance evidence referenced by the RFC-0043 whitepaper).
  *
  * The table maps: vector → stage → observed outcome → pass/fail.
+ * Properties that were NOT verified (require a real container/LLM) are listed
+ * under "Unverified properties (integration gap)" to avoid overclaiming.
  */
 export function renderConformanceTable(records: ConformanceRecord[]): string {
   const lines: string[] = [
@@ -1049,14 +1098,14 @@ export function renderConformanceTable(records: ConformanceRecord[]): string {
     '',
     '## Summary',
     '',
-    `| Vector | Blocking Stage | Expected | Observed | Status |`,
-    `|--------|---------------|----------|----------|--------|`,
+    `| Vector | Blocking Stage | Expected | Observed | Runtime Mode | Status |`,
+    `|--------|---------------|----------|----------|--------------|--------|`,
   ];
 
   for (const r of records) {
     const status = r.passed ? 'PASS' : 'FAIL';
     lines.push(
-      `| ${r.vector} | ${r.blockingStage} | ${r.expectedOutcome} | ${r.observedOutcome} | ${status} |`,
+      `| ${r.vector} | ${r.blockingStage} | ${r.expectedOutcome} | ${r.observedOutcome} | ${r.runtimeMode} | ${status} |`,
     );
   }
 
@@ -1077,6 +1126,14 @@ export function renderConformanceTable(records: ConformanceRecord[]): string {
       for (const a of r.additionalAssertions) {
         const mark = a.passed ? '[x]' : '[ ]';
         lines.push(`- ${mark} **${a.name}**: ${a.description}`);
+      }
+      lines.push('');
+    }
+
+    if (r.unverifiedProperties && r.unverifiedProperties.length > 0) {
+      lines.push('**Unverified properties (integration gap — require real container/LLM):**', '');
+      for (const prop of r.unverifiedProperties) {
+        lines.push(`- [ ] ${prop} (NOT-YET-VERIFIED: requires real Docker or live LLM)`);
       }
       lines.push('');
     }

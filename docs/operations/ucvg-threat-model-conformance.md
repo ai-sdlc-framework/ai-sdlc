@@ -8,9 +8,23 @@ referenced by the RFC-0043 threat model.
 
 ## Threat Model Vectors
 
-The UCVG pipeline defends against 7 adversarial vectors (plus 1 benign baseline).
-Each vector is exercised by a fixture in the corpus
+The UCVG pipeline defends against 7 adversarial vectors, covered by 8 fixtures
+(1 benign baseline + 7 adversarial). Each fixture is in the corpus
 (`pipeline-cli/src/pipeline/ucvg-threat-fixtures.ts`).
+
+### Runtime Mode Legend
+
+Conformance records use a `runtimeMode` discriminator to be honest about what ran:
+
+| Mode | Meaning |
+|------|---------|
+| `hermetic` | MockSandboxDriver / pure logic; no Docker container. |
+| `contractual` | Real TypeScript-layer validator/type asserted; no container or LLM call. |
+| `real-docker` | Genuine DockerSandboxDriver container ran AND kernel/LLM paths exercised. |
+
+Properties marked NOT-YET-VERIFIED require a real Docker daemon or live LLM API key.
+They appear in the `unverifiedProperties` field of the conformance JSON and as `[ ]` entries
+in the conformance table — never as `[x] passed: true`.
 
 ---
 
@@ -142,13 +156,20 @@ the primary LLM-threat in an AI-review pipeline. The injection is SURFACED as a
 critical security finding — it is NOT obeyed. The Zod-before-key invariant ensures
 a forged "approved" signal cannot trick the signer even if injection partially succeeds.
 
-**Integration gap:** The real reviewer call (Stage 3) requires a live inference proxy
-+ LLM API key. The hermetic tests verify the PROPERTY contractually; the real-Docker
-harness verifies the proxy lifecycle (port binding, session token withholding).
+**Integration gap (NOT YET VERIFIED — requires live LLM API key):**
+
+- `injection-detected-flag`: the real Stage 3 reviewer detecting `promptInjectionDetected:true`
+  requires a live `ANTHROPIC_API_KEY` and a running model. The harness verifies the proxy
+  lifecycle (port binding, session token withholding) but marks this property as NOT-YET-VERIFIED
+  (`unverifiedProperties` in the conformance JSON).
+- `consensus-rejected`: cannot verify without a real LLM reviewer call.
+
+The harness conformance record for Vector 5 has `passed: false` until a live LLM call is exercised.
+The hermetic tests verify the injection-is-surfaced-as-finding property contractually.
 
 **Test files:**
 - Hermetic: `ucvg-threat-hermetic.test.ts` — `Vector 5: prompt-injection`
-- Integration: `ucvg-threat-harness.test.ts` — `Vector 5 [integration]`
+- Integration: `ucvg-threat-harness.test.ts` — `Vector 5 [integration]` (contractual mode)
 
 ---
 
@@ -157,15 +178,16 @@ harness verifies the proxy lifecycle (port binding, session token withholding).
 **Description:** Sandbox process attempts to read the signing key, write tokens,
 or reach external hosts.
 
-**Blocking stage:** `stage-3-reviewer` (exfil is prevented at the runtime layer)
+**Blocking stage:** `stage-2-sandbox` (env-withholding + network-deny + read-only fs fire
+at Stage 2, the sandbox runner — NOT by an LLM reviewer verdict at Stage 3)
 
-**Expected outcome:** All exfiltration attempts are blocked by:
+**Expected outcome:** `credential-exfiltration-blocked` — all exfiltration attempts are blocked by:
 1. `validateSandboxEnv()` — rejects `GITHUB_TOKEN`/`NPM_TOKEN`/`AI_SDLC_PAT`/signing-key paths
-2. Docker `--network=none` — blocks direct external host calls
-3. Read-only root filesystem — signing key path is not mounted
+2. Docker `--network=none` — blocks direct external host calls (kernel-level)
+3. Read-only root filesystem — signing key path is not mounted (kernel-level)
 4. `InferenceProxy` tool-use refusal — `tools`/`tool_choice` in request → 422
 
-**How the property is asserted (hermetic):**
+**How the property is asserted (contractual — TypeScript-layer):**
 
 1. `validateSandboxEnv({ GITHUB_TOKEN: 'ghs_secret' })` throws — credential not in sandbox env.
 2. `validateSandboxEnv({ AI_SDLC_PAT: 'ghp_...' })` throws.
@@ -176,13 +198,15 @@ or reach external hosts.
    to run if sandbox sentinels are present.
 7. `InferenceProxy` can be constructed with a credential — the proxy withholds it.
 
-**How the property is asserted (real-Docker integration):**
+**Integration gap (NOT YET VERIFIED — requires real Docker daemon):**
 
-- The container env is constructed as `{ PATH, SANDBOX_PR_DIFF_B64 }` only —
-  no host secrets are inherited.
-- `docker run --network=none` blocks any `curl`/`fetch` to external hosts.
-- `docker run --read-only` prevents writes to the host filesystem.
-- The proxy session token is a random hex string, NOT the raw API key.
+- `network-deny`: kernel-level network namespace enforcement (`--network=none` blocks
+  external host calls) requires a real Docker daemon.
+- `signing-key-not-in-env`: filesystem isolation (no host path mounts, read-only root fs,
+  signing key path not accessible from container) requires a real Docker daemon.
+
+These kernel-level properties are documented as NOT-YET-VERIFIED in the generated
+conformance evidence (`unverifiedProperties` field in the conformance JSON).
 
 **Security property (AC#3):** The signing key is never injected into the sandbox
 process environment. The sandbox can only reach `inference.local` (the proxy) —
@@ -190,13 +214,9 @@ no external hosts. The proxy withholds the provider credential and only exposes
 a session-scoped token. Even if the attacker fully controls the sandbox process,
 they cannot extract signing material or reach external exfiltration endpoints.
 
-**Integration gap:** Kernel-level network namespace enforcement (`--network=none`)
-and filesystem isolation can only be tested with a real Docker daemon. The hermetic
-tests verify the TypeScript-layer enforcement (validateSandboxEnv, proxy construction).
-
 **Test files:**
 - Hermetic: `ucvg-threat-hermetic.test.ts` — `Vector 6: credential-exfiltration`
-- Integration: `ucvg-threat-harness.test.ts` — `Vector 6 [integration]`
+- Integration: `ucvg-threat-harness.test.ts` — `Vector 6 [integration]` (contractual mode)
 
 ---
 
@@ -204,11 +224,12 @@ tests verify the TypeScript-layer enforcement (validateSandboxEnv, proxy constru
 
 **Description:** Attacker submits infinite-loop tests to exhaust the sandbox wall-clock budget.
 
-**Blocking stage:** `stage-3-reviewer` (runner level — sandbox kill)
+**Blocking stage:** `stage-2-sandbox` (wall-clock enforcement fires in the sandbox runner
+at Stage 2, before any LLM reviewer call at Stage 3)
 
 **Expected outcome:** `outcome: 'resource-breach'` with `breachType: 'wall-clock'`; fail-closed.
 
-**How the property is asserted:**
+**How the property is asserted (hermetic):**
 
 1. Stage 1 passes (`.ts` file — not a protected path).
 2. `MockSandboxDriver` with `buildResourceBreachSandboxResult()` returns `outcome: 'resource-breach'`.
@@ -217,17 +238,21 @@ tests verify the TypeScript-layer enforcement (validateSandboxEnv, proxy constru
 5. A report produced after a breach has `consensus.approved: false` — signer refuses.
 6. `runSandbox()` with a 1-second config + delayed mock → result is `resource-breach`.
 
-**Security property:** Infinite-loop tests are a DoS vector. The sandbox enforces
-a wall-clock timeout via `AbortController` + `docker kill`. The breach result is
+**Integration gap (NOT YET VERIFIED — requires real Docker daemon):**
+
+- `fail-closed wall-clock kill`: real `AbortController` + `docker kill` enforcement on a running
+  container requires a real Docker daemon and a test fixture repo with an infinite-loop test.
+  The hermetic tests verify the breach-result shape and the signer's response to it, but do NOT
+  exercise the actual OS-level process kill.
+
+**Security property:** Infinite-loop tests are a DoS vector. The sandbox runner enforces
+a wall-clock timeout via `AbortController` + `docker kill` at Stage 2. The breach result is
 ALWAYS treated as `consensus.approved: false` — there is no path from resource breach
 to a signed attestation. Fail-closed is the invariant.
 
-**Integration gap:** Real `docker kill` enforcement requires a running container.
-The hermetic tests verify the breach-result shape and the signer's response to it.
-
 **Test files:**
 - Hermetic: `ucvg-threat-hermetic.test.ts` — `Vector 7: resource-exhaustion`
-- Integration: `ucvg-threat-harness.test.ts` — `Vector 7 [integration]`
+- Integration: `ucvg-threat-harness.test.ts` — `Vector 7 [integration]` (hermetic mode)
 
 ---
 

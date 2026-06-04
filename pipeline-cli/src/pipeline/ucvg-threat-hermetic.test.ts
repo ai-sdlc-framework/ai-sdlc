@@ -119,13 +119,20 @@ describe('THREAT_FIXTURE_CORPUS — completeness', () => {
 
   it('fixture content does not contain AISDLC-NNN tracker IDs', () => {
     for (const f of THREAT_FIXTURE_CORPUS) {
-      // Fixture diffs + file content are adopter-facing strings; must not leak IDs
+      // Fixture diffs + file content + descriptions are adopter-facing strings; must not leak IDs
       expect(f.prDiff, `${f.vector}: prDiff`).not.toMatch(/AISDLC-\d+/);
       expect(f.securityNote, `${f.vector}: securityNote`).not.toMatch(/AISDLC-\d+/);
+      expect(f.description, `${f.vector}: description`).not.toMatch(/AISDLC-\d+/);
       for (const cf of f.changedFiles) {
         if (cf.afterContent) {
           expect(cf.afterContent, `${f.vector}: afterContent`).not.toMatch(/AISDLC-\d+/);
         }
+      }
+      for (const assertion of f.additionalAssertions ?? []) {
+        expect(
+          assertion.description,
+          `${f.vector}: additionalAssertions[${assertion.name}].description`,
+        ).not.toMatch(/AISDLC-\d+/);
       }
     }
   });
@@ -390,8 +397,8 @@ describe('Vector 6: credential-exfiltration — sandbox cannot reach signing key
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('fixture has blockingStage=stage-3-reviewer', () => {
-    expect(FIXTURE_CREDENTIAL_EXFILTRATION.blockingStage).toBe('stage-3-reviewer');
+  it('fixture has blockingStage=stage-2-sandbox (env-withholding + network-deny fire at Stage 2)', () => {
+    expect(FIXTURE_CREDENTIAL_EXFILTRATION.blockingStage).toBe('stage-2-sandbox');
   });
 
   it('validateSandboxEnv throws when GITHUB_TOKEN is in sandbox env (exfil attempt blocked)', () => {
@@ -473,8 +480,8 @@ describe('Vector 6: credential-exfiltration — sandbox cannot reach signing key
 // ── Vector 7: Resource exhaustion ─────────────────────────────────────────────
 
 describe('Vector 7: resource-exhaustion — sandbox wall-clock breach is fail-closed', () => {
-  it('fixture has blockingStage=stage-3-reviewer and expectedOutcome=resource-breach', () => {
-    expect(FIXTURE_RESOURCE_EXHAUSTION.blockingStage).toBe('stage-3-reviewer');
+  it('fixture has blockingStage=stage-2-sandbox and expectedOutcome=resource-breach', () => {
+    expect(FIXTURE_RESOURCE_EXHAUSTION.blockingStage).toBe('stage-2-sandbox');
     expect(FIXTURE_RESOURCE_EXHAUSTION.expectedOutcome).toBe('resource-breach');
   });
 

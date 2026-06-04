@@ -192,6 +192,8 @@ describe('Integration harness — gate verification', () => {
 
 describe('Vector 1 [integration]: benign PR passes all stages against real runtime', () => {
   integrationIt('Stage 1 AST gate passes for .ts + .md files', () => {
+    // Stage 1 is pure TypeScript logic — no container needed.
+    // runtimeMode = 'contractual': real validator, no Docker.
     const result = runAstGate(FIXTURE_BENIGN.changedFiles);
     expect(result.outcome).toBe('pass');
     conformanceRecords.push(
@@ -200,7 +202,7 @@ describe('Vector 1 [integration]: benign PR passes all stages against real runti
         result.outcome,
         result.outcome === 'pass',
         [{ name: 'stage-1-outcome', passed: result.outcome === 'pass' }],
-        'real-docker',
+        'contractual',
       ),
     );
   });
@@ -247,10 +249,12 @@ describe('Vector 1 [integration]: benign PR passes all stages against real runti
   );
 });
 
-// ── Vector 2: Protected-path mutation — real Docker skip (Stage 1 blocks) ─────
+// ── Vector 2: Protected-path mutation — Stage 1 blocks (no Docker needed) ─────
 
 describe('Vector 2 [integration]: protected-path mutation blocked at Stage 1 (no Docker needed)', () => {
   integrationIt('Stage 1 AST gate blocks .github/workflows modification', () => {
+    // Stage 1 is pure TypeScript logic — no container needed.
+    // runtimeMode = 'contractual': real AST gate / validator, no Docker.
     const result = runAstGate(FIXTURE_PROTECTED_PATH_MUTATION.changedFiles);
     const passed = result.outcome === 'abort-protected-path';
     conformanceRecords.push(
@@ -265,7 +269,7 @@ describe('Vector 2 [integration]: protected-path mutation blocked at Stage 1 (no
           },
           { name: 'no-llm-spend', passed: true }, // contractual: Stage 1 abort = no Stage 2
         ],
-        'real-docker',
+        'contractual',
       ),
     );
     expect(result.outcome).toBe('abort-protected-path');
@@ -273,10 +277,12 @@ describe('Vector 2 [integration]: protected-path mutation blocked at Stage 1 (no
   });
 });
 
-// ── Vector 3: Lifecycle-script injection — real Docker skip (Stage 1 blocks) ──
+// ── Vector 3: Lifecycle-script injection — Stage 1 blocks (no Docker needed) ──
 
 describe('Vector 3 [integration]: lifecycle-script injection blocked at Stage 1', () => {
   integrationIt('Stage 1 AST gate blocks package.json lifecycle script addition', () => {
+    // Stage 1 is pure TypeScript logic — no container needed.
+    // runtimeMode = 'contractual': real AST gate / validator, no Docker.
     const result = runAstGate(FIXTURE_LIFECYCLE_SCRIPT_INJECTION.changedFiles);
     const passed = result.outcome === 'abort-protected-path';
     conformanceRecords.push(
@@ -285,17 +291,19 @@ describe('Vector 3 [integration]: lifecycle-script injection blocked at Stage 1'
         result.outcome,
         passed,
         [{ name: 'protected-path-catch', passed: result.offendingPaths.includes('package.json') }],
-        'real-docker',
+        'contractual',
       ),
     );
     expect(result.outcome).toBe('abort-protected-path');
   });
 });
 
-// ── Vector 4: GitHub Action injection — real Docker skip (Stage 1 blocks) ─────
+// ── Vector 4: GitHub Action injection — Stage 1 blocks (no Docker needed) ─────
 
 describe('Vector 4 [integration]: GitHub Action injection blocked at Stage 1 by content heuristic', () => {
   integrationIt('Stage 1 content heuristic catches uses: in .ts file', () => {
+    // Stage 1 is pure TypeScript logic — no container needed.
+    // runtimeMode = 'contractual': real AST gate / heuristic, no Docker.
     const result = runAstGate(FIXTURE_GITHUB_ACTION_INJECTION.changedFiles);
     const heuristicFound = result.heuristicFindings.some((f) => f.type === 'newGithubActionUses');
     const passed = result.outcome === 'abort-protected-path' && heuristicFound;
@@ -311,7 +319,7 @@ describe('Vector 4 [integration]: GitHub Action injection blocked at Stage 1 by 
             passed: result.heuristicFindings.some((f) => f.type === 'newGithubActionUses'),
           },
         ],
-        'real-docker',
+        'contractual',
       ),
     );
     expect(result.outcome).toBe('abort-protected-path');
@@ -319,23 +327,26 @@ describe('Vector 4 [integration]: GitHub Action injection blocked at Stage 1 by 
   });
 });
 
-// ── Vector 5: Prompt injection — real-Docker/real-inference run (gated) ───────
+// ── Vector 5: Prompt injection — proxy lifecycle verified; real-LLM detection is a gap ────
 
-describe('Vector 5 [integration]: prompt injection detected by real reviewer matrix', () => {
+describe('Vector 5 [integration]: prompt injection — proxy lifecycle verified; real-LLM detection is an integration gap', () => {
   integrationIt('Stage 1 passes (injection is in .ts content)', () => {
+    // Stage 1 is pure TypeScript logic — no container needed.
+    // runtimeMode = 'contractual': real AST gate, no Docker.
     const result = runAstGate(FIXTURE_PROMPT_INJECTION.changedFiles);
     expect(result.outcome).toBe('pass');
   });
 
   integrationIt(
-    'Stage 3 reviewer matrix detects prompt injection in real diff',
+    'inference.local proxy lifecycle: starts, issues session token distinct from API key',
     async () => {
-      // NOTE: This test requires a real inference.local proxy AND
-      // AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 + a valid ANTHROPIC_API_KEY / OpenAI key.
+      // NOTE: This test verifies the InferenceProxy start/stop lifecycle and that the
+      // session token is NOT the raw API key. It does NOT make a real LLM call and does
+      // NOT verify that the Stage 3 reviewer matrix detects the injection.
       //
-      // Without a valid key, the InferenceProxy will still start (port bind is
-      // integration-gated), but upstream calls will fail. The test verifies the
-      // proxy start/stop lifecycle and that the session token is NOT the raw API key.
+      // The real reviewer matrix detection (injection-detected-flag) requires a live
+      // ANTHROPIC_API_KEY and a running model. That is an irreducible integration gap —
+      // see the unverifiedProperties field in the conformance record.
 
       const proxy = new (await import('./inference-proxy.js')).InferenceProxy({
         prNumber: FIXTURE_PROMPT_INJECTION.prNumber,
@@ -365,19 +376,28 @@ describe('Vector 5 [integration]: prompt injection detected by real reviewer mat
           `[ucvg-harness] Prompt-injection vector: inference.local proxy started on port ${port}`,
         );
 
-        // For now, we verify the proxy contract hermetically (real LLM call would
-        // require a live API key, adding cost). The real reviewer matrix test is
-        // the irreducible integration gap documented in the task brief.
+        // runtimeMode = 'contractual': proxy port bind + session token logic is TypeScript-layer.
+        // The real LLM call (injection-detected-flag) is an integration gap.
         conformanceRecords.push(
           buildConformanceRecord(
             FIXTURE_PROMPT_INJECTION,
-            'promptInjectionDetected',
-            true,
+            // We cannot observe 'promptInjectionDetected' without a real LLM call.
+            // Record what actually happened: proxy lifecycle verified.
+            'proxy-lifecycle-verified',
+            // passed = false: the primary property (injection-detected-flag) was NOT exercised.
+            false,
             [
-              { name: 'injection-detected-flag', passed: true },
+              // injection-detected-flag: NOT verified here (requires live LLM).
+              { name: 'injection-detected-flag', passed: false },
+              // proxy-withholds-credential: verified — session token != raw API key.
               { name: 'proxy-withholds-credential', passed: true },
             ],
-            'real-docker',
+            'contractual',
+            // Unverified: the real Stage 3 LLM detection path.
+            [
+              'injection-detected-flag: real Stage 3 reviewer detecting promptInjectionDetected:true requires a live LLM API key',
+              'consensus-rejected: cannot verify without real LLM reviewer call',
+            ],
           ),
         );
       } finally {
@@ -388,68 +408,77 @@ describe('Vector 5 [integration]: prompt injection detected by real reviewer mat
   );
 });
 
-// ── Vector 6: Credential exfiltration — real Docker run (gated) ───────────────
+// ── Vector 6: Credential exfiltration — TypeScript-layer invariants (contractual) ────────────
+//
+// NOTE: The "Stage 2 sandbox" defense for credential exfiltration has two layers:
+//  (a) TypeScript-layer enforcement — validateSandboxEnv() blocks withheld vars: CONTRACTUAL
+//  (b) Kernel-level enforcement — --network=none, read-only fs, no host mounts: INTEGRATION GAP
+//
+// The tests below verify layer (a) only. Layer (b) requires a real Docker daemon and is
+// documented as an integration gap in the conformance record's unverifiedProperties field.
 
-describe('Vector 6 [integration]: credential exfiltration blocked at runtime level', () => {
-  integrationIt('sandbox env never contains withheld credentials', () => {
-    // Verify the env construction does not include withheld vars
-    // (validateSandboxEnv is imported at the top of the file)
+describe('Vector 6 [integration]: credential exfiltration — TypeScript-layer containment asserted (kernel-level is an integration gap)', () => {
+  integrationIt(
+    'validateSandboxEnv blocks withheld env vars (TypeScript-layer containment)',
+    () => {
+      // This test asserts the TypeScript-layer invariant via validateSandboxEnv().
+      // runtimeMode = 'contractual': real validator runs, no Docker container.
+      //
+      // The kernel-level enforcement (--network=none, read-only fs, no signing-key mount)
+      // requires a real Docker daemon and is listed as unverifiedProperties.
 
-    // Simulate what the real DockerSandboxDriver would construct:
-    // It uses a clean environment (only PATH + SANDBOX_PR_DIFF_B64)
-    const sandboxEnv = {
-      PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
-      SANDBOX_PR_DIFF_B64: Buffer.from(FIXTURE_CREDENTIAL_EXFILTRATION.prDiff, 'utf8').toString(
-        'base64',
-      ),
-    };
+      const sandboxEnv = {
+        PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
+        SANDBOX_PR_DIFF_B64: Buffer.from(FIXTURE_CREDENTIAL_EXFILTRATION.prDiff, 'utf8').toString(
+          'base64',
+        ),
+      };
 
-    // This must NOT throw (no withheld vars)
-    expect(() => validateSandboxEnv(sandboxEnv)).not.toThrow();
+      // validateSandboxEnv must NOT throw when given a clean env
+      expect(() => validateSandboxEnv(sandboxEnv)).not.toThrow();
 
-    conformanceRecords.push(
-      buildConformanceRecord(
-        FIXTURE_CREDENTIAL_EXFILTRATION,
-        'credential-exfiltration-blocked',
-        true,
-        [
-          { name: 'withheld-env-vars-not-injected', passed: true },
-          { name: 'sandbox-env-clean', passed: true },
-          { name: 'signing-key-not-in-env', passed: true },
-          { name: 'network-deny', passed: true }, // enforced by --network=none at kernel level
-        ],
-        'real-docker',
-      ),
-    );
-  });
+      conformanceRecords.push(
+        buildConformanceRecord(
+          FIXTURE_CREDENTIAL_EXFILTRATION,
+          'credential-exfiltration-blocked',
+          true, // TypeScript-layer containment verified
+          [
+            { name: 'withheld-env-vars-not-injected', passed: true }, // contractual: validateSandboxEnv
+            { name: 'sandbox-env-clean', passed: true }, // contractual: clean env passes
+            // signing-key-not-in-env: contractual (validateSandboxEnv pattern) but not exercised here
+            { name: 'signing-key-not-in-env', passed: false },
+            // network-deny: kernel-level enforcement, NOT tested here
+            { name: 'network-deny', passed: false },
+          ],
+          'contractual',
+          // Properties requiring a real Docker container (kernel/network enforcement):
+          [
+            'network-deny: --network=none kernel-level enforcement requires real Docker daemon',
+            'signing-key-not-in-env: filesystem isolation (no host mounts, read-only root fs) requires real Docker daemon',
+          ],
+        ),
+      );
+    },
+  );
 
   integrationIt(
-    'real Docker container cannot read signing key from host filesystem',
+    'validateSandboxEnv contract: asserts env-withholding invariant via real validator (no container)',
     async () => {
-      // This test runs a real Docker container that tries to cat ~/.ai-sdlc/signing-key.pem
-      // Expected: the file is not accessible (not mounted + read-only fs)
-      // The container exits non-zero, and the harness confirms the credential is not exfiltrated.
+      // This test asserts the env-withholding invariant via the real validateSandboxEnv.
+      // MockSandboxDriver is used to verify the spawn path also validates env.
+      // runtimeMode = 'contractual': real validator, no Docker container.
       //
-      // Implementation: we spawn a minimal container with our hardening flags that
-      // tries to read the signing key. The test passes if the container exits non-zero.
+      // The real Docker signing-key-isolation test (container cannot read ~/.ai-sdlc/signing-key.pem)
+      // requires a running container image and is an irreducible integration gap.
 
-      const config = makeSandboxConfig(30); // 30s timeout for this test
-
-      // Create a fake "exfil diff" that would try to read the signing key
-      // The diff itself is benign (Stage 1 passes), but the test code tries to read the key
+      const config = makeSandboxConfig(30);
       const exfilDiff = FIXTURE_CREDENTIAL_EXFILTRATION.prDiff;
 
-      const tmpDir = mkdtempSync(join(tmpdir(), 'ucvg-exfil-real-'));
+      const tmpDir = mkdtempSync(join(tmpdir(), 'ucvg-exfil-contractual-'));
       try {
-        // Use MockSandboxDriver with a simulated credential-withholding breach result
-        // The real Docker test would require a container image with Node.js installed
-        // and a test fixture repo — that's the irreducible integration gap.
-        // For the real-Docker path, we verify the sandbox env is clean.
-        const mockDriver = new MockSandboxDriver(
-          'docker',
-          buildBenignSandboxResult(), // exfil attempt would fail (network deny + no key)
-        );
+        const mockDriver = new MockSandboxDriver('docker', buildBenignSandboxResult());
 
+        // Clean env (only PATH) must succeed
         await expect(
           mockDriver.spawn({
             prNumber: FIXTURE_CREDENTIAL_EXFILTRATION.prNumber,
@@ -458,13 +487,12 @@ describe('Vector 6 [integration]: credential exfiltration blocked at runtime lev
             resourceLimits: config.differentialTest.resourceLimits,
             policyFilePath: '/dev/null',
             sandboxEnv: {
-              // This would throw if we tried to pass a credential
               PATH: '/usr/local/bin:/usr/bin:/bin',
             },
           }),
         ).resolves.toBeDefined();
 
-        // Verify: attempting to add GITHUB_TOKEN would be rejected
+        // Attempting to inject GITHUB_TOKEN must be rejected
         await expect(
           mockDriver.spawn({
             prNumber: FIXTURE_CREDENTIAL_EXFILTRATION.prNumber,
@@ -483,12 +511,20 @@ describe('Vector 6 [integration]: credential exfiltration blocked at runtime lev
   );
 });
 
-// ── Vector 7: Resource exhaustion — real Docker kill (gated) ──────────────────
+// ── Vector 7: Resource exhaustion — breach result shape + runSandbox contract (hermetic) ─────
+//
+// NOTE: Real wall-clock enforcement (AbortController + docker kill on a running container)
+// is an integration gap. These tests verify:
+//  (a) MockSandboxDriver correctly represents a resource-breach result shape (hermetic).
+//  (b) runSandbox() correctly propagates a breach result from a mock driver (hermetic).
+// The real kernel-level kill is documented in unverifiedProperties.
 
-describe('Vector 7 [integration]: resource exhaustion triggers wall-clock kill', () => {
+describe('Vector 7 [integration]: resource exhaustion — breach result shape and runSandbox contract (real docker-kill is an integration gap)', () => {
   integrationIt(
-    'MockSandboxDriver with wall-clock breach simulates runtime enforcement',
+    'MockSandboxDriver wall-clock breach — verifies breach result shape (hermetic)',
     async () => {
+      // runtimeMode = 'hermetic': MockSandboxDriver, no real container.
+      // The 'fail-closed wall-clock kill' property (real docker kill) is NOT verified here.
       const breachResult = buildResourceBreachSandboxResult(FIXTURE_RESOURCE_EXHAUSTION.prNumber);
       const driver = new MockSandboxDriver('docker', breachResult);
 
@@ -498,7 +534,7 @@ describe('Vector 7 [integration]: resource exhaustion triggers wall-clock kill',
         upstreamMainRef: 'https://github.com/example/repo.git',
         resourceLimits: {
           ...DEFAULT_SANDBOX_CONFIG.differentialTest.resourceLimits,
-          wallClockSeconds: 5, // 5s limit (exhausted immediately by mock)
+          wallClockSeconds: 5,
         },
         policyFilePath: '/dev/null',
       });
@@ -516,9 +552,14 @@ describe('Vector 7 [integration]: resource exhaustion triggers wall-clock kill',
               passed:
                 result.outcome === 'resource-breach' && result.breach.breachType === 'wall-clock',
             },
+            // fail-closed: the MockSandboxDriver returns breach; real docker kill not tested here
             { name: 'fail-closed', passed: result.outcome === 'resource-breach' },
           ],
-          'real-docker',
+          'hermetic',
+          // Unverified: real AbortController + docker kill on a running container
+          [
+            'fail-closed wall-clock kill: real docker kill (AbortController + docker kill process) requires a running container',
+          ],
         ),
       );
 
@@ -530,17 +571,12 @@ describe('Vector 7 [integration]: resource exhaustion triggers wall-clock kill',
   );
 
   integrationIt(
-    'real Docker container with infinite-loop test is killed within the wall-clock limit',
+    'runSandbox() propagates resource-breach from mock driver (hermetic — real docker-kill is an integration gap)',
     async () => {
-      // This is the irreducible integration gap:
-      // A real infinite-loop test requires a container image + test fixture repo.
-      //
-      // The test verifies the runSandbox() wall-clock enforcement using a
-      // very short timeout and a MockSandboxDriver that simulates the delay.
-      // The real kernel-level enforcement (AbortController + docker kill) can only
-      // be tested with a real Docker daemon.
-      //
-      // We document this gap in the return JSON: integrationTestGaps.
+      // This test verifies that runSandbox() correctly propagates a resource-breach result
+      // from a MockSandboxDriver. The real kernel-level enforcement (AbortController + docker kill)
+      // can only be tested with a real Docker daemon — that is the irreducible integration gap.
+      // runtimeMode = 'hermetic': MockSandboxDriver with simulated delay, no real container.
 
       const shortTimeoutConfig = makeSandboxConfig(1); // 1 second wall-clock
       const delayedDriver = new MockSandboxDriver(
@@ -560,7 +596,7 @@ describe('Vector 7 [integration]: resource exhaustion triggers wall-clock kill',
         500, // 500ms simulated delay (within the 1s timeout)
       );
 
-      const tmpDir = mkdtempSync(join(tmpdir(), 'ucvg-exhaust-real-'));
+      const tmpDir = mkdtempSync(join(tmpdir(), 'ucvg-exhaust-hermetic-'));
       try {
         const result = await runSandbox({
           prNumber: FIXTURE_RESOURCE_EXHAUSTION.prNumber,
@@ -583,6 +619,8 @@ describe('Vector 7 [integration]: resource exhaustion triggers wall-clock kill',
 
 describe('Vector 8 [integration]: report forgery rejected at Stage 4 Zod boundary', () => {
   integrationIt('forged report with extra keys fails Zod validation', () => {
+    // Stage 4 Zod validation is pure TypeScript logic — no container needed.
+    // runtimeMode = 'contractual': real Zod validator, no Docker.
     const base = buildBaseReport(FIXTURE_REPORT_FORGERY.prNumber);
 
     // Multiple forgery attempts
@@ -615,7 +653,7 @@ describe('Vector 8 [integration]: report forgery rejected at Stage 4 Zod boundar
           { name: 'key-never-resolved', passed: true }, // contractual: validateReport() before resolveSigningKeyPath()
           { name: 'zod-strict-invariant', passed: true }, // contractual: .strict() on all schemas
         ],
-        'real-docker',
+        'contractual',
       ),
     );
   });
