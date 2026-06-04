@@ -547,6 +547,8 @@ export const _ucvgSeams: {
  *     `INFERENCE_PROXY_HOST`, `INFERENCE_PROXY_PORT`, `INFERENCE_PROXY_SESSION`
  *     env vars (set by the sandbox orchestrator after starting the proxy).
  *     Returns an `InferenceProxyClient` pointed at the live proxy.
+ *     **HARD ERROR** if integration mode is set but proxy vars are missing —
+ *     a silent fake-verdict pass-through would mask a real misconfiguration.
  *  3. Default (CI without sandbox): returns a `FakeModelClient` configured
  *     as fail-closed (all reviewers return `approved: false`). The CI path
  *     never holds real model access — the integration gap is documented.
@@ -573,12 +575,18 @@ export function resolveModelClient(_workDir: string): ModelClient {
       return new InferenceProxyClient({ host, port, sessionToken });
     }
 
-    // Integration mode requested but proxy env vars not set — log and fall through
-    process.stderr.write(
+    // Integration mode requested but proxy env vars not set — HARD ERROR.
+    // In integration mode the operator expects REAL model calls. Silently falling
+    // back to a FakeModelClient would produce fake verdicts that look real, masking
+    // a proxy misconfiguration. Fail loudly so the operator sees the problem
+    // immediately rather than discovering it in post-run audit.
+    //
+    // CI (non-integration) callers must NOT set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1.
+    fail(
       '[reviewer-runner] AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 but proxy env vars ' +
         '(INFERENCE_PROXY_HOST, INFERENCE_PROXY_PORT, INFERENCE_PROXY_SESSION) are not set. ' +
-        'Falling back to fail-closed FakeModelClient. ' +
-        'Set these vars from the InferenceProxy start() result to enable real model calls.\n',
+        'Set these vars from the InferenceProxy start() result to enable real model calls, ' +
+        'or unset AI_SDLC_SANDBOX_INTEGRATION_TESTS to use the CI FakeModelClient path.',
     );
   }
 
