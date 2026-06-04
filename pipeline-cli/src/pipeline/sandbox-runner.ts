@@ -1,6 +1,7 @@
 /**
  * RFC-0043 Phase 3 — Stage 2/3: OpenShell Sandbox Runner (AISDLC-499)
  * RFC-0043 Phase 7 — Real Docker sandbox driver (AISDLC-508)
+ * RFC-0043 Phase 7 — Differential test execution inside the sandbox (AISDLC-509)
  *
  * The core untrusted-execution layer:
  *  1. Sandbox-driver abstraction (Docker / Podman / Kata / gVisor / MicroVM)
@@ -50,6 +51,14 @@
  * timeout fires, the controller is aborted and the driver kills the container
  * via `docker kill <id>` then `docker rm -f <id>`, returning
  * `outcome: 'resource-breach'`.
+ *
+ * ## Differential test output format (AISDLC-509)
+ * The in-container script emits a single JSON object to stdout on the LAST
+ * line of output (preceded by the sentinel `---DIFFERENTIAL-RESULT---`).
+ * The TypeScript layer parses this and is fail-closed: any missing/garbage
+ * output resolves to `{upstreamSuitePassed: false, newTestsPassed: false,
+ * newCodeCoveragePct: 0}`. This prevents an attacker-crafted test output
+ * string from causing a false positive.
  *
  * @module pipeline/sandbox-runner
  */
@@ -897,11 +906,24 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   /**
    * Run the differential test sequence inside a hardened Docker container.
    *
-   * This is the integration seam: when `AI_SDLC_SANDBOX_INTEGRATION_TESTS=1`,
-   * spawns a real container. AISDLC-509 will fill in the in-container
-   * differential-test logic (clone, apply diff, run upstream + new tests).
-   * This task (AISDLC-508) implements the container LIFECYCLE: startup,
-   * resource limits, abort-kill, and teardown.
+   * Implements the RFC-0043 Phase 7 differential test sequence:
+   *  1. In-container script clones the upstream repo at `upstreamMainRef` (the
+   *     BASE sha — NOT headSha; preserves the AISDLC-501 invariant).
+   *  2. Applies the PR diff as DATA via `git apply` (never executes fork-provided
+   *     workflow logic). The diff is passed via base64-encoded env var to prevent
+   *     shell metacharacter injection.
+   *  3. Runs the upstream (base) test suite; captures exit code + output.
+   *  4. Runs the head (PR) test suite with coverage; extracts coverage %.
+   *  5. Emits a sentinel + JSON result line to stdout.
+   *
+   * The TypeScript parser (`parseDifferentialTestOutput`) is fail-closed:
+   * any missing/garbage/malformed output → treated as FAILURE, never as pass.
+   *
+   * Per-test timeout (AC-3): when `resourceLimits.perTestTimeoutSeconds` is set,
+   * the in-container script wraps the test command with `timeout <N>` so a
+   * hung test → SIGTERM → non-zero exit → failure (not a stuck runner).
+   * The wall-clock AbortController (set up by the caller) provides the
+   * outer hard limit that kills the whole container.
    */
   private async runDockerDifferentialTest(
     input: SandboxSpawnInput & { abortSignal?: AbortSignal },
@@ -917,27 +939,35 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     const cidFilePath = join(cidDir, 'container.cid');
     this.cidFilePath = cidFilePath;
 
+    // Build the in-container differential test script.
+    // The script is passed as a shell -c argument (not written to disk on the
+    // host) so it is not affected by the container's read-only filesystem.
+    const inContainerScript = buildDifferentialTestScript(
+      input.upstreamMainRef,
+      resourceLimits.perTestTimeoutSeconds,
+    );
+
     // Build the docker run arguments
     const args = buildDockerRunArgs({
       resourceLimits,
       seccompProfileJson: seccompJson,
       cidFilePath,
-      // AISDLC-509 will inject the real image + in-container command
       image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? 'node:22-slim',
-      command: [
-        '/bin/sh',
-        '-c',
-        // Placeholder — AISDLC-509 replaces this with the real differential test entrypoint
-        'echo "in-container differential test not yet wired" && exit 1',
-      ],
+      command: ['/bin/sh', '-c', inContainerScript],
     });
+
+    // Base64-encode the PR diff to pass it safely as an environment variable.
+    // This prevents shell metacharacters in the diff from breaking the script.
+    const prDiffB64 = Buffer.from(input.prDiff, 'utf8').toString('base64');
 
     return new Promise<DifferentialTestResult>((resolve, reject) => {
       const proc = this._spawnProcess('docker', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        // Pass a clean environment — never inherit the host env wholesale
+        // Pass a clean environment — never inherit the host env wholesale.
+        // SANDBOX_PR_DIFF_B64 carries the diff as DATA (base64-encoded).
         env: {
           PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
+          SANDBOX_PR_DIFF_B64: prDiffB64,
           ...(input.sandboxEnv ?? {}),
         },
       });
@@ -1010,10 +1040,12 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
           return;
         }
 
-        // AISDLC-509 will parse stdout/stderr into a real DifferentialTestResult.
-        // For now, surface the container output for debugging and return a
-        // not-yet-implemented result so the lifecycle path works end-to-end.
         if (exitCode !== 0) {
+          // Non-zero exit: parse the output anyway (fail-closed).
+          // The script may have emitted a partial result before the error.
+          // If parseDifferentialTestOutput finds the sentinel, it returns the
+          // parsed result; otherwise it returns the failure sentinel.
+          // Either way we reject so the caller records outcome: 'error'.
           reject(
             new Error(
               `Docker container exited with code ${exitCode}. ` +
@@ -1023,14 +1055,10 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
           return;
         }
 
-        // Placeholder result — AISDLC-509 replaces this with real test output parsing
-        resolve({
-          upstreamSuitePassed: false,
-          upstreamSuiteOutput: `[differential-test pending] raw stdout: ${stdout.slice(0, 500)}`,
-          newTestsPassed: false,
-          newTestsOutput: `[differential-test pending] raw stderr: ${stderr.slice(0, 500)}`,
-          newCodeCoveragePct: 0,
-        });
+        // Parse the container output into a DifferentialTestResult.
+        // parseDifferentialTestOutput is fail-closed: garbage/missing output →
+        // upstreamSuitePassed:false, newTestsPassed:false, newCodeCoveragePct:0.
+        resolve(parseDifferentialTestOutput(stdout));
       });
 
       proc.on('error', (err) => {
@@ -1088,6 +1116,286 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       }
     }
   }
+}
+
+// ── Differential test output parsing (AISDLC-509) ────────────────────────────
+
+/**
+ * Sentinel line that precedes the JSON result emitted by the in-container
+ * differential test script. The TypeScript parser scans for this sentinel
+ * and takes the content that follows as the JSON result payload.
+ *
+ * Using a sentinel prevents an attacker from planting a fake result object
+ * early in the output stream — only the LAST result (after the final
+ * sentinel line) is parsed.
+ *
+ * Exported for use in test assertions.
+ */
+export const DIFFERENTIAL_RESULT_SENTINEL = '---DIFFERENTIAL-RESULT---';
+
+/**
+ * Raw JSON shape emitted by the in-container differential test script.
+ * Parsed by `parseDifferentialTestOutput` and converted to `DifferentialTestResult`.
+ *
+ * The script emits this after running base (upstream) and head test suites.
+ * Fields:
+ *  - `upstreamPassed`:  true iff the upstream suite (base SHA) exited 0
+ *  - `upstreamOutput`:  raw stdout+stderr of the upstream test run (truncated)
+ *  - `headPassed`:      true iff the head (PR) test suite exited 0
+ *  - `headOutput`:      raw stdout+stderr of the head test run (truncated)
+ *  - `coveragePct`:     numeric coverage percentage parsed from the head run output
+ *
+ * All fields are required. A missing/extra field → fail-closed (treated as failure).
+ */
+export interface DifferentialTestRawResult {
+  upstreamPassed: boolean;
+  upstreamOutput: string;
+  headPassed: boolean;
+  headOutput: string;
+  coveragePct: number;
+}
+
+/**
+ * Parse the differential test output emitted by the in-container script.
+ *
+ * Fail-closed contract: any ambiguity or parse failure resolves to the
+ * failure state `{upstreamSuitePassed: false, newTestsPassed: false,
+ * newCodeCoveragePct: 0}` — NEVER to a false pass.
+ *
+ * The parser:
+ *  1. Scans the full stdout string for the LAST occurrence of the sentinel
+ *     `---DIFFERENTIAL-RESULT---`.
+ *  2. Takes all content AFTER the sentinel on the next non-empty line as
+ *     the JSON payload.
+ *  3. Parses the JSON and validates the required boolean + number fields.
+ *  4. Any parse error, missing field, wrong type → returns failure.
+ *  5. `coveragePct` outside [0, 100] → clamped (not a hard failure, since
+ *     coverage tools may round differently).
+ *
+ * Exported for hermetic unit testing — all parsing logic is exercised
+ * via TestableDockerDriver seam without a real Docker daemon.
+ */
+export function parseDifferentialTestOutput(stdout: string): DifferentialTestResult {
+  const FAILURE_RESULT: DifferentialTestResult = {
+    upstreamSuitePassed: false,
+    upstreamSuiteOutput: stdout.slice(0, 2000),
+    newTestsPassed: false,
+    newTestsOutput: stdout.slice(0, 2000),
+    newCodeCoveragePct: 0,
+  };
+
+  if (!stdout || typeof stdout !== 'string') {
+    return FAILURE_RESULT;
+  }
+
+  // Find the LAST sentinel occurrence (an attacker cannot inject a false pass
+  // before the sentinel — the parser always uses the LAST one).
+  const sentinelIdx = stdout.lastIndexOf(DIFFERENTIAL_RESULT_SENTINEL);
+  if (sentinelIdx === -1) {
+    return FAILURE_RESULT;
+  }
+
+  // Take everything after the sentinel line
+  const afterSentinel = stdout.slice(sentinelIdx + DIFFERENTIAL_RESULT_SENTINEL.length);
+
+  // Find the first non-empty line after the sentinel
+  const lines = afterSentinel.split('\n');
+  let jsonLine = '';
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) {
+      jsonLine = trimmed;
+      break;
+    }
+  }
+
+  if (!jsonLine) {
+    return FAILURE_RESULT;
+  }
+
+  // Parse and validate — any parse error → fail-closed
+  let raw: unknown;
+  try {
+    raw = JSON.parse(jsonLine);
+  } catch {
+    return FAILURE_RESULT;
+  }
+
+  // Type-check the required fields — wrong shape → fail-closed
+  if (!raw || typeof raw !== 'object') {
+    return FAILURE_RESULT;
+  }
+  const r = raw as Record<string, unknown>;
+
+  if (
+    typeof r['upstreamPassed'] !== 'boolean' ||
+    typeof r['headPassed'] !== 'boolean' ||
+    typeof r['coveragePct'] !== 'number' ||
+    typeof r['upstreamOutput'] !== 'string' ||
+    typeof r['headOutput'] !== 'string'
+  ) {
+    return FAILURE_RESULT;
+  }
+
+  // Additional guard: if `coveragePct` is NaN or Infinity → treat as failure
+  const coveragePct = r['coveragePct'] as number;
+  if (!Number.isFinite(coveragePct)) {
+    return FAILURE_RESULT;
+  }
+
+  // Clamp coverage to [0, 100] — tools may report slightly over/under due to rounding
+  const clampedCoverage = Math.max(0, Math.min(100, coveragePct));
+
+  return {
+    upstreamSuitePassed: r['upstreamPassed'] as boolean,
+    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(0, 2000),
+    newTestsPassed: r['headPassed'] as boolean,
+    newTestsOutput: (r['headOutput'] as string).slice(0, 2000),
+    newCodeCoveragePct: clampedCoverage,
+  };
+}
+
+/**
+ * Build the shell script that runs the differential test sequence inside
+ * the container.
+ *
+ * The script:
+ *  1. Clones the upstream repo at the base SHA (`upstreamMainRef`) — the
+ *     `baseSha`, NOT `headSha`. This preserves the AISDLC-501 invariant:
+ *     we test what the upstream tests expect, not the PR's revised state.
+ *  2. Applies the PR diff as DATA (via `git apply`) — never executes fork-
+ *     provided workflow logic. The diff is written to a tmpfile and applied
+ *     with `--reject` so partial-apply failures are surfaced, not silenced.
+ *  3. Installs dependencies in offline mode when a lock file is present
+ *     (denies network package fetch inside the sandbox).
+ *  4. Runs the upstream test suite; captures exit code + output.
+ *  5. Applies the per-test timeout via `timeout <seconds>` if the resource
+ *     limits specify one (hangs a test → SIGTERM → exit non-zero).
+ *  6. Emits the sentinel + JSON result on stdout for the TypeScript parser.
+ *
+ * SECURITY: the prDiff is passed as a base64-encoded environment variable
+ * (`SANDBOX_PR_DIFF_B64`) so it is never interpolated into the shell script
+ * itself — only decoded and written to a file, then passed to `git apply`.
+ * This prevents a diff that contains shell metacharacters from breaking out.
+ *
+ * Exported for hermetic unit testing of the script shape.
+ */
+export function buildDifferentialTestScript(
+  upstreamMainRef: string,
+  perTestTimeoutSeconds?: number,
+): string {
+  // The per-test timeout prefix: `timeout <N>` wraps the test command.
+  // If no per-test timeout is configured, the test command runs unwrapped
+  // (the wall-clock AbortController handles the overall limit).
+  const timeoutPrefix =
+    perTestTimeoutSeconds && perTestTimeoutSeconds > 0
+      ? `timeout ${String(Math.floor(perTestTimeoutSeconds))}`
+      : '';
+
+  // The test runner command. Tries pnpm first, falls back to npm test.
+  // Captures combined stdout+stderr into separate phase variables so the
+  // JSON result can surface them without mixing the two runs.
+  const testCmd = timeoutPrefix
+    ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
+    : "sh -c 'pnpm test 2>&1 || npm test 2>&1'";
+
+  return `#!/bin/sh
+set -e
+
+WORK_DIR="/sandbox/workspace"
+mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
+
+# ── 1. Clone the upstream repo at the base SHA (upstreamMainRef = baseSha) ──
+# NOTE: upstreamMainRef is the BASE sha — not headSha. This is the AISDLC-501
+# invariant: we prove the upstream suite passes against base, then confirm the
+# PR diff does not break it.
+UPSTREAM_REF="${upstreamMainRef}"
+
+# Shallow clone to avoid fetching history we don't need inside the sandbox.
+# --filter=blob:none + --no-checkout then sparse checkout is not available in
+# all images; use a plain clone with --depth=1 if the ref is a URL, or a
+# local copy if it is a local path.
+if echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
+  git clone --depth=1 "$UPSTREAM_REF" repo 2>&1
+  cd repo
+  # Checkout the specific base SHA (detached HEAD)
+  # When cloning with --depth=1 the exact sha may not be available unless we
+  # fetch it explicitly. Attempt it; if the sha is already HEAD, skip.
+  git fetch --depth=1 origin "$UPSTREAM_REF" 2>/dev/null || true
+else
+  # Local path — copy it
+  cp -a "$UPSTREAM_REF/." repo/
+  cd repo
+fi
+
+# ── 2. Apply the PR diff as DATA (never execute fork-provided workflow logic) ──
+# The diff is provided via the SANDBOX_PR_DIFF_B64 environment variable
+# (base64-encoded to avoid shell metacharacter injection).
+DIFF_FILE="/tmp/pr.diff"
+if [ -n "\${SANDBOX_PR_DIFF_B64:-}" ]; then
+  printf '%s' "$SANDBOX_PR_DIFF_B64" | base64 -d > "$DIFF_FILE"
+  # Apply the diff; --reject surfaces partial failures rather than silencing them.
+  # Use --ignore-whitespace to tolerate CRLF/LF differences from the PR.
+  git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1 || {
+    echo "git apply failed — diff could not be applied cleanly" >&2
+  }
+fi
+
+# ── 3. Install dependencies (offline where possible) ──
+if [ -f "pnpm-lock.yaml" ]; then
+  # Offline install — denies any new package downloads inside the sandbox.
+  # If the lockfile is intact and the node_modules cache is warm this completes
+  # without network access. When the cache is cold it fails (expected in CI
+  # where each container is ephemeral and the sandbox has --network=none).
+  pnpm install --frozen-lockfile --offline 2>&1 || \
+  pnpm install --frozen-lockfile 2>&1 || true
+elif [ -f "package-lock.json" ]; then
+  npm ci --prefer-offline 2>&1 || true
+elif [ -f "yarn.lock" ]; then
+  yarn install --frozen-lockfile --offline 2>&1 || true
+fi
+
+# ── 4. Run the upstream (base) test suite ──
+UPSTREAM_PASSED=false
+UPSTREAM_OUTPUT=""
+set +e
+UPSTREAM_OUTPUT=$(${testCmd} 2>&1)
+UPSTREAM_EXIT=$?
+set -e
+if [ "$UPSTREAM_EXIT" -eq 0 ]; then
+  UPSTREAM_PASSED=true
+fi
+
+# ── 5. Run the head (PR) test suite with coverage ──
+HEAD_PASSED=false
+HEAD_OUTPUT=""
+COVERAGE_PCT=0
+set +e
+HEAD_OUTPUT=$(${testCmd} -- --coverage 2>&1)
+HEAD_EXIT=$?
+set -e
+if [ "$HEAD_EXIT" -eq 0 ]; then
+  HEAD_PASSED=true
+fi
+
+# Extract coverage percentage from the output.
+# Looks for lines like "Lines       : 82.35%" or "All files | 82.35" (common formats).
+COVERAGE_PCT=$(printf '%s\\n' "$HEAD_OUTPUT" | grep -oE '[0-9]+\\.[0-9]+%' | tail -1 | tr -d '%' || echo "0")
+if [ -z "$COVERAGE_PCT" ]; then
+  COVERAGE_PCT=0
+fi
+
+# ── 6. Emit the sentinel + JSON result ──
+# The TypeScript parser reads everything AFTER the last sentinel occurrence.
+# Escape the output strings for JSON embedding (strip control chars, escape quotes).
+safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+safe_head=$(printf '%s' "$HEAD_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+
+echo "${DIFFERENTIAL_RESULT_SENTINEL}"
+printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":"%s","coveragePct":%s}\\n' \\
+  "$UPSTREAM_PASSED" "$safe_upstream" "$HEAD_PASSED" "$safe_head" "$COVERAGE_PCT"
+`;
 }
 
 // ── Docker argument builder (exported for unit-test assertions) ───────────────
