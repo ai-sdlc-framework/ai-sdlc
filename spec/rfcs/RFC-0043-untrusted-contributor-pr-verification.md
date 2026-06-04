@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: Dominique Legault
 created: 2026-05-30
-updated: 2026-06-02
+updated: 2026-06-04
 signedOff: 2026-06-02
 targetSpecVersion: v1alpha1
 # Runtime-code dependency: the clean-room signer/verifier in this RFC IMPORTS the
@@ -31,10 +31,11 @@ deferredDocsDeadline: '2026-08-31'
 **Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-05-30
-**Updated:** 2026-06-02
+**Updated:** 2026-06-04
 **Signed Off:** 2026-06-02 (Engineering + Operator — Dominique Legault)
 **Target Spec Version:** v1alpha1
 **OQ walkthrough:** Dominique Legault (Operator), 2026-06-02 — full-rubric resolution of all 6 §Open Questions.
+**Amendment (AISDLC-507, 2026-06-04):** Phase 7 — Integration & End-to-End Hardening. Two additional architectural decisions recorded per operator decision-rubric run 2026-06-04: (AQ1) Docker (hardened) named the v1 reference runtime behind the `SandboxDriver` abstraction; gVisor and MicroVM are upgrade drivers; OpenShell demoted to an optional driver pending GitHub-runner install-hang resolution. (AQ2) The 3-reviewer matrix runs inside the sandbox via an `inference.local` credential-withholding proxy. Lifecycle remains Signed Off.
 
 > The bold-style status block above is preserved for human readability. The YAML
 > frontmatter at the top of the file is the source of truth for tooling.
@@ -59,8 +60,9 @@ This RFC defines a **zero-trust verification path for Pull Requests authored by
 untrusted contributors** (external / fork PRs, and any author not on the
 maintainer allowlist). It adds a deterministic, LLM-free **diff classification
 gate** that runs before any agent sees the diff; runs the developer/reviewer
-subagents and the contributor's test suite inside an **NVIDIA OpenShell
-policy-enforced sandbox** that withholds all high-privilege credentials at the
+subagents and the contributor's test suite inside a **policy-enforced sandbox**
+(Docker hardened in v1; gVisor and MicroVM are upgrade drivers behind the
+`SandboxDriver` abstraction) that withholds all high-privilege credentials at the
 proxy layer; **hardens the three reviewer subagents against prompt injection**
 embedded in untrusted diff content; and **decouples the untrusted-evaluation
 environment from the signing environment** so that the cryptographic attestation
@@ -266,34 +268,42 @@ checks. **Deny wins.** Outcome is one of:
 This gate is the single most cost-effective control: a malicious PR that targets
 the CI pipeline is rejected with zero LLM/sandbox spend, satisfying AC-1.
 
-### Stage 2 — OpenShell Sandbox: Containment + Differential Testing
+### Stage 2 — Sandbox: Containment + Differential Testing
 
-The developer/reviewer work for untrusted PRs runs inside an OpenShell sandbox.
-OpenShell wraps the Claude Code agent **without code changes** and enforces
-isolation out-of-process, so the agent cannot disable its own guardrails.
+The developer/reviewer work for untrusted PRs runs inside a sandbox controlled
+by the `SandboxDriver` abstraction. **The v1 reference driver is Docker
+(hardened)**, which requires zero extra infrastructure on stock GitHub-hosted
+runners and is the only viable zero-install path to a working end-to-end gate
+today. gVisor and MicroVM/Firecracker are documented upgrade drivers behind the
+same abstraction: gVisor for stronger kernel isolation on cloud-native stacks,
+and MicroVM for the full RFC-0022 compliance path (HIPAA / FedRAMP High /
+PCI-DSS Level 1 regimes). NVIDIA OpenShell was the original design reference but
+is currently demoted to an optional driver pending resolution of a GitHub-runner
+install-hang; when available it can be wired in as a `SandboxDriver`
+implementation with no changes to the pipeline stages above it.
 
-**Credential stripping is the core property** (and the correction to the feature
-request's framing): OpenShell does not "strip tokens from the prompt" — it
-**withholds them entirely** and injects provider credentials at the proxy. Per
-OpenShell's security model, the proxy intercepts HTTPS `CONNECT` to
-`inference.local` and routes inference through the sandbox-local router; *the
-agent never receives the provider API key.* We extend that to all
+**Credential stripping is the core security property**: provider credentials are
+**withheld entirely** and injected at the `inference.local` proxy layer (see
+§Stage 3 — the reviewers connect out-of-process to `inference.local`; the agent
+process itself never holds the API key). We extend that withholding to all
 high-privilege secrets:
 
 ```yaml
-# untrusted-pr.openshell.yaml  (sandbox policy; static sections locked at create)
-filesystem:                              # Landlock LSM, kernel-enforced
+# .ai-sdlc/untrusted-pr-gate.yaml (sandbox driver and policy configuration)
+sandboxDriver: docker     # v1 reference driver; upgrade to gvisor|microvm behind same abstraction
+# openshell driver is available as an optional alternative when installed on the runner
+filesystem:
   readOnly: ['/usr', '/lib', '/etc']
   readWrite: ['/sandbox', '/tmp']        # the clean checkout + worktree live here
-process:                                 # seccomp-BPF; privilege drop to `sandbox`
+process:
   blockSyscalls: [mount, pivot_root, ptrace, bpf]
-network:                                 # deny-by-default OPA/Rego egress proxy
+network:                                 # deny-by-default egress
   enforcement: enforce                   # (start `audit`, review logs, then enforce)
   egressAllow:
     - host: github.com                   # clone target branch only; read scope
       binary: '/usr/bin/git'
-inference:
-  route: inference.local                 # Anthropic key injected here, NOT in env
+    - host: inference.local              # provider credentials injected HERE via proxy, NOT in env
+      comment: "Anthropic API key injected at proxy layer; agent never receives it"
 # NEVER present in the sandbox env: ~/.ai-sdlc/signing-key.pem, GITHUB_TOKEN(write),
 # NPM_TOKEN, AI_SDLC_PAT. These live only in the Stage-4 clean room.
 ```
@@ -308,16 +318,27 @@ inference:
    code paths actually execute (guards against no-op / coverage-gaming tests).
 5. Emit results to the unsigned report artifact (§Design Details schema).
 
-Compute driver is adopter-configurable (Docker / Podman / MicroVM / Kubernetes);
-MicroVM is recommended for the strongest isolation of untrusted execution.
+Compute driver is adopter-configurable via the `sandboxDriver` field in
+`.ai-sdlc/untrusted-pr-gate.yaml`. **Docker (hardened) is the v1 default**;
+gVisor and MicroVM/Firecracker are upgrade drivers behind the `SandboxDriver`
+abstraction. MicroVM is the required driver for RFC-0022 compliance regimes
+(HIPAA / FedRAMP High / PCI-DSS Level 1). OpenShell is an optional alternative
+driver when available on the runner. All drivers expose the same credential-
+withholding `inference.local` proxy interface.
 
-### Stage 3 — Hardened 3-Reviewer Matrix
+### Stage 3 — Hardened 3-Reviewer Matrix (in-sandbox, inference.local)
 
 The existing `code-reviewer`, `test-reviewer`, and `security-reviewer` subagents
-run **inside the same sandbox** (so they too are credential-stripped), fanned out
-per the RFC-0010 §13 contract. This RFC adds **prompt-injection hardening** to
-their prompt templates — the "sandwich" framing the feature request asked for,
-done correctly:
+run **inside the same sandbox** as Stage 2 (so they too are credential-stripped),
+fanned out per the RFC-0010 §13 contract. **Provider credentials are injected by
+the `inference.local` proxy out-of-process** — the reviewer process connects to
+`inference.local` for model inference and never receives the `ANTHROPIC_API_KEY`
+directly. This satisfies the RFC's original credential-withholding design and
+preserves the agentic-review upgrade path (agentic reviewers with full tool
+access remain within the sandbox boundary; the proxy controls egress).
+
+This RFC adds **prompt-injection hardening** to the reviewer prompt templates —
+the "sandwich" framing the feature request asked for, done correctly:
 
 ```
 [SYSTEM — persona + strict structural directives + output contract]
@@ -532,11 +553,17 @@ configured.
 
 ## Implementation Plan
 
+**Phases 1-6 (AISDLC-497..502):** Initial implementation — trust classifier, AST gate, OpenShell sandbox runner, reviewer prompt hardening, clean-room signer, `untrusted-pr-gate.yml` workflow, and operator runbook.
+
+**Phase 7 (AISDLC-508..515):** Integration & End-to-End Hardening — `SandboxDriver` abstraction layer, Docker v1 runner, `inference.local` credential-withholding proxy, in-sandbox reviewer fan-out, injection corpus tests, end-to-end integration test. See §Phase 7 for the full task table and e2e milestone definition.
+
+Checklist (Phase 1-6 items, for reference):
+
 - [ ] Update normative spec document(s) for the untrusted-PR path
 - [ ] Add `spec/schemas/untrusted-pr-report.v1.schema.json` + Zod mirror
 - [ ] `trust-classifier.ts` (Stage 0) + tests
 - [ ] `ast-gate.ts` (Stage 1) protected-path + content-heuristic engine + tests
-- [ ] `sandbox-runner.ts` (Stage 2/3) OpenShell lifecycle + differential test harness
+- [ ] `sandbox-runner.ts` (Stage 2/3) `SandboxDriver`-based lifecycle + differential test harness
 - [ ] Reviewer prompt injection-hardening template (Stage 3) + injection-corpus tests
 - [ ] Clean-room signer step (Stage 4) wiring to the RFC-0042 v6 signer
 - [ ] `untrusted-pr-gate.yml` workflow (layering on AISDLC-381)
@@ -555,6 +582,47 @@ configured.
 3. A prompt-injection snippet embedded in an untrusted diff is surfaced as a
    reviewer finding (not obeyed), and the clean-room signer mints a valid RFC-0042
    v6 attestation over the resulting report only after the Zod boundary validates.
+
+## Phase 7 — Integration & End-to-End Hardening
+
+> **Amendment added 2026-06-04 (AISDLC-507).** The following implementation phase was planned after the AQ1 (Docker v1 runtime) and AQ2 (in-sandbox reviewer + `inference.local` proxy) decisions were ratified on 2026-06-04. Tasks AISDLC-508..515 implement this phase end-to-end.
+
+### Background decisions (2026-06-04)
+
+Two architectural decisions were recorded via operator decision rubric on 2026-06-04, after the initial Phase 1-6 task breakdown (AISDLC-497..502) was filed. These decisions constrain the implementation:
+
+**AQ1 — v1 reference runtime:** Docker (hardened) is the v1 reference runtime behind the `SandboxDriver` abstraction. Docker is the only zero-install path on stock GitHub-hosted runners (no `/dev/kvm` requirement), making it the only viable route to a working end-to-end gate in the immediate term. The `SandboxDriver` abstraction preserves the upgrade path:
+
+- **Docker** — v1 default; zero extra setup on stock runners.
+- **gVisor** — documented upgrade driver; stronger kernel isolation on cloud-native stacks.
+- **MicroVM/Firecracker** — documented upgrade driver; the RFC-0022 compliance path (HIPAA / FedRAMP High / PCI-DSS Level 1).
+- **NVIDIA OpenShell** — optional driver, demoted from design-reference to alternative pending resolution of a GitHub-runner install-hang; wires into the `SandboxDriver` abstraction without pipeline changes when available.
+
+**AQ2 — In-sandbox reviewer execution via `inference.local`:** The 3-reviewer matrix (code / test / security) runs inside the sandbox (same isolation boundary as Stage 2). Provider credentials are injected by the `inference.local` credential-withholding proxy out-of-process. The reviewer process connects to `inference.local` for model inference and never holds the `ANTHROPIC_API_KEY` directly. This matches the RFC's original credential-withholding design intent and keeps the agentic-review upgrade path open (agentic reviewers with full tool access remain within the sandbox boundary; the proxy controls egress).
+
+### Phase 7 task list (AISDLC-508..515)
+
+| Task | Title | Deliverable |
+|------|-------|-------------|
+| AISDLC-508 | `SandboxDriver` abstraction layer | `pipeline-cli/src/pipeline/sandbox-driver.ts` — `SandboxDriver` interface + `DockerSandboxDriver` (v1 impl) + `gVisorSandboxDriver` (stub) + `MicroVMSandboxDriver` (stub) |
+| AISDLC-509 | Docker (hardened) sandbox runner | Complete `DockerSandboxDriver`: seccomp profile, read-only rootfs, dropped caps, network deny-default, `inference.local` loopback proxy wiring |
+| AISDLC-510 | `inference.local` credential-withholding proxy | Sandbox-local HTTPS proxy that intercepts model-API calls and injects the provider key out-of-process; reviewer containers connect to `inference.local:443` |
+| AISDLC-511 | In-sandbox reviewer fan-out (Stage 3 wiring) | Wire `code-reviewer`, `test-reviewer`, `security-reviewer` to run inside the sandbox connected to `inference.local`; update `untrusted-pr-gate.yml` |
+| AISDLC-512 | Prompt-injection hardening + corpus tests | "Sandwich" framing applied to all three reviewer prompts; injection-corpus tests in `reviewer-matrix-injection.test.ts` |
+| AISDLC-513 | Clean-room signer integration + Stage 4 wiring | `clean-room-signer.ts` integrated with the updated unsigned-report schema; isolation-check sentinel detection |
+| AISDLC-514 | Degradation mode + `untrusted-pr-gate.yml` integration | Full workflow wiring: Stage 0→1→2/3→4 in `untrusted-pr-gate.yml`; degradation-mode fallback; `AI_SDLC_UNTRUSTED_PR_GATE` flag promotion to `off` default |
+| AISDLC-515 | End-to-end (e2e) integration test + promotion gate | Hermetic e2e test driving a synthetic untrusted PR through all four stages; gate: all existing CI green + e2e green → Phase 7 milestone complete |
+
+### End-to-End (e2e) milestone definition
+
+Phase 7 is complete when all of the following hold simultaneously in CI:
+
+1. A synthetic fork PR that modifies only `**/*.ts` files passes Stages 0–1, runs in the Docker sandbox, receives verdicts from all three in-sandbox reviewers (connected via `inference.local`), and produces a valid RFC-0042 v6 DSSE envelope from the clean-room signer.
+2. A synthetic fork PR that modifies `.github/workflows/**` is blocked by Stage 1 with zero LLM and zero sandbox spend.
+3. A synthetic fork PR with an embedded prompt-injection snippet in a code comment is surfaced as a `promptInjectionDetected: true` critical finding and the clean-room signer refuses to sign.
+4. The full pipeline runs on a stock `ubuntu-latest` GitHub-hosted runner (no KVM, no gVisor, no OpenShell) using Docker.
+
+---
 
 ## Open Questions — resolved (operator walkthrough 2026-06-02 with full rubric)
 
@@ -602,6 +670,8 @@ configured.
 
    **Resolution (2026-06-02, full rubric):** **Docker default + RFC-0022 regime override + Kata/gVisor middle-ground opt-in via `.ai-sdlc/untrusted-pr-gate.yaml: sandboxDriver: docker|kata|gvisor|microvm`.** Industry research: AWS Lambda uses Firecracker microVM; Cloudflare Workers / Vercel Edge use V8 isolates; GitHub Codespaces uses Docker on dedicated VMs; Replit + Devin use Docker; Kata Containers + gVisor are middle-ground (~5-15% runtime overhead); container escape CVEs (containerd CVE-2022-23648, runc CVE-2024-21626 "Leaky Vessels") show Docker shared-kernel risk is real. **Regime overrides** (composes with RFC-0022 same shape as RFC-0030 OQ-13.3 residency enforcement): HIPAA / FedRAMP High / PCI-DSS Level 1 → MicroVM required automatically. **Selected over MicroVM-universal-default** because excludes macOS/Windows from local-dev + requires KVM-capable CI runners — friction tax for adopters without compliance needs. **Selected over Docker-only** because excludes compliance-regulated adopters. **Selected over no-default** because operator-friction + defers a real strategic decision.
 
+   > **Phase 7 amendment (AQ1, 2026-06-04):** The OQ-5 Docker-default was further constrained by the Phase 7 decision-rubric run: Docker is now the **v1 reference runtime** in the body of the RFC (not just a default recommendation). gVisor and MicroVM are documented as upgrade drivers behind the `SandboxDriver` abstraction; OpenShell is demoted to an optional driver pending GitHub-runner install-hang resolution. This amendment is recorded in §Phase 7 and the §Amendment block in the header — it does not change the lifecycle or require re-sign-off.
+
 6. **OQ-6 — Content-heuristic scope creep.** Stage 1's content heuristics
    (`package.json` lifecycle scripts, new `uses:`) are a small allowlist today.
    How far do we go before this becomes a de-facto malware scanner we have to
@@ -637,3 +707,4 @@ be resolved via operator walkthrough first.
 - [x] **Engineering** (Dominique Legault, 2026-06-02) — design soundness verified; composition with RFC-0042 (v6 Merkle attestation substrate) / RFC-0022 (compliance regime override) / RFC-0039 (gate extension) sound; all 6 §Open Questions resolved with full rigor rubric.
 - [ ] **Product** (Alexander Kline) — OSS-adopter positioning, Sigstore OQ-4
 - [x] **Operator** (Dominique Legault, 2026-06-02) — runbook + degradation behavior accepted (OQ-2 CI-default, OQ-3 hard-abort + G0 Decision, OQ-5 RFC-0022 regime override); ready for implementation dispatch via AISDLC-497..502.
+- [x] **Operator amendment** (Dominique Legault, 2026-06-04 — AISDLC-507) — Phase 7 AQ1/AQ2 decisions accepted: Docker v1 reference runtime behind `SandboxDriver` abstraction; in-sandbox reviewer fan-out via `inference.local` credential-withholding proxy; Phase 7 tasks AISDLC-508..515 authorized.
