@@ -396,11 +396,26 @@ export function globToRegex(pattern: string): RegExp {
   while (i < pattern.length) {
     const ch = pattern[i];
     if (ch === '*' && pattern[i + 1] === '*') {
-      // `**` matches any sequence of path characters including `/`
-      regexStr += '.*';
-      i += 2;
-      // skip optional trailing slash after `**`
-      if (pattern[i] === '/') i++;
+      // `**` followed by `/` — anchored optional-prefix form so that the
+      // directory separator boundary is respected.
+      //
+      // Example: `**/pnpm-lock.yaml` must match `packages/x/pnpm-lock.yaml`
+      // but MUST NOT match `bad-pnpm-lock.yaml` (false-positive).
+      //
+      // Correct expansion: `(?:.*/)?` — "optionally any path prefix ending
+      // with a `/`".  This keeps `**` from consuming into the next segment
+      // without a separator boundary, fixing the false-positive class.
+      //
+      // `**` without a trailing `/` (e.g. at end of pattern like `dir/**`)
+      // still expands to `.*` which matches any remaining characters.
+      if (pattern[i + 2] === '/') {
+        regexStr += '(?:.*/)?';
+        i += 3; // skip `**/`
+      } else {
+        // `**` at end of pattern (e.g. `.github/**` → `.github/.*`)
+        regexStr += '.*';
+        i += 2;
+      }
     } else if (ch === '*') {
       // `*` matches anything except `/`
       regexStr += '[^/]*';

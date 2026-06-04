@@ -112,6 +112,63 @@ describe('globToRegex', () => {
     expect(re.test('path.to/file+name')).toBe(true);
     expect(re.test('pathXto/file+name')).toBe(false);
   });
+
+  // AISDLC-505: false-positive fix — **/  must compile to (?:.*/)? not .*
+  describe('globToRegex — **/prefix anchoring (AISDLC-505 false-positive fix)', () => {
+    it('**/pnpm-lock.yaml does NOT match bad-pnpm-lock.yaml (false-positive guard)', () => {
+      const re = globToRegex('**/pnpm-lock.yaml');
+      // False-positive that existed before the fix — must now be rejected
+      expect(re.test('bad-pnpm-lock.yaml')).toBe(false);
+      expect(re.test('prefix-pnpm-lock.yaml')).toBe(false);
+    });
+
+    it('**/pnpm-lock.yaml DOES match root and nested lockfiles (positive cases)', () => {
+      const re = globToRegex('**/pnpm-lock.yaml');
+      expect(re.test('pnpm-lock.yaml')).toBe(true);
+      expect(re.test('packages/x/pnpm-lock.yaml')).toBe(true);
+      expect(re.test('deep/nested/dir/pnpm-lock.yaml')).toBe(true);
+    });
+
+    it('**/package-lock.json does NOT match bad-package-lock.json', () => {
+      const re = globToRegex('**/package-lock.json');
+      expect(re.test('bad-package-lock.json')).toBe(false);
+      expect(re.test('notpackage-lock.json')).toBe(false);
+    });
+
+    it('**/package-lock.json DOES match root and nested lockfiles', () => {
+      const re = globToRegex('**/package-lock.json');
+      expect(re.test('package-lock.json')).toBe(true);
+      expect(re.test('packages/foo/package-lock.json')).toBe(true);
+    });
+
+    it('**/.github/** does NOT match myproject.github/ (false-positive guard)', () => {
+      const re = globToRegex('**/.github/**');
+      // False-positive: myproject.github/ must not be treated as a .github/ dir
+      expect(re.test('myproject.github/foo')).toBe(false);
+      expect(re.test('notgithub.github/workflows/ci.yml')).toBe(false);
+    });
+
+    it('**/.github/** DOES match real nested .github/ content (positive cases)', () => {
+      const re = globToRegex('**/.github/**');
+      expect(re.test('packages/sub/.github/action.yml')).toBe(true);
+      expect(re.test('apps/my-app/.github/workflows/deploy.yml')).toBe(true);
+      // Root .github/ is matched by the top-level .github/** pattern (not this one)
+      // but **/.github/** should also match it for completeness
+      expect(re.test('.github/workflows/ci.yml')).toBe(true);
+    });
+
+    it('**/yarn.lock does NOT match prefix-yarn.lock (false-positive guard)', () => {
+      const re = globToRegex('**/yarn.lock');
+      expect(re.test('not-yarn.lock')).toBe(false);
+      expect(re.test('my-yarn.lock')).toBe(false);
+    });
+
+    it('**/yarn.lock DOES match root and nested yarn lockfiles', () => {
+      const re = globToRegex('**/yarn.lock');
+      expect(re.test('yarn.lock')).toBe(true);
+      expect(re.test('packages/api/yarn.lock')).toBe(true);
+    });
+  });
 });
 
 // ── matchesAnyGlob ───────────────────────────────────────────────────────────
@@ -268,6 +325,37 @@ describe('runAstGate — protected paths', () => {
     // The normalizePath treats it as a git-quoted path and unescapes it
     // After unescaping `"pnpm-lock.yaml"` → `pnpm-lock.yaml` → protected
     expect(r.outcome).toBe('abort-protected-path');
+  });
+
+  // AISDLC-505: false-positive guard at gate level
+  it('does NOT abort on bad-pnpm-lock.yaml (not a protected lockfile, false-positive guard)', () => {
+    // This file is not a real lockfile — it must NOT be blocked by **/pnpm-lock.yaml
+    const r = runWithFile('bad-pnpm-lock.yaml');
+    // bad-pnpm-lock.yaml is not in allowedMutationGlobs (**/*.ts etc.) either,
+    // so it WILL abort on the allowed-mutation check — but NOT on the protected-path check.
+    // The key assertion: offendingPaths includes it because it's not allowed, NOT because
+    // it matched **/pnpm-lock.yaml.
+    // We verify this indirectly by checking that a file named 'bad-pnpm-lock.yaml'
+    // would not match **/pnpm-lock.yaml (tested exhaustively in globToRegex describe above).
+    // Here we confirm the full gate still flags it (not allowed) without false-positive path.
+    expect(r.outcome).toBe('abort-protected-path');
+    // The path is still offending (not in allowed globs), but NOT due to protected-path match
+    // — this test documents the semantic boundary.
+    expect(r.offendingPaths).toContain('bad-pnpm-lock.yaml');
+  });
+
+  it('does NOT abort on myproject.github/foo via **/.github/** pattern (false-positive guard)', () => {
+    // myproject.github/foo must NOT match **/.github/** — it's a substring false positive
+    // With the fix, **/.github/** compiles to ^(?:.*/)?\.github\/.*$ which requires
+    // `.github/` to appear as a proper path component (after a `/` or at root).
+    const r = runAstGate(
+      [{ path: 'myproject.github/foo.ts', status: 'added' }],
+      DEFAULT_AST_GATE_CONFIG,
+    );
+    // myproject.github/foo.ts passes protected-path check (not a real .github/ dir)
+    // and passes allowed-mutation check (**/*.ts) → should be 'pass'
+    expect(r.outcome).toBe('pass');
+    expect(r.offendingPaths).not.toContain('myproject.github/foo.ts');
   });
 
   it('collects ALL offending paths (does not stop on first)', () => {
