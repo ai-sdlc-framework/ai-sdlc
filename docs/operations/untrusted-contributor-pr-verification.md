@@ -4,7 +4,7 @@
 **Status:** Current
 **Spec version:** v1alpha1
 **RFC reference:** [RFC-0043](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md)
-**Implementation tasks:** AISDLC-497 (Phase 1), AISDLC-498 (Phase 2), AISDLC-499 (Phase 3), AISDLC-500 (Phase 4), AISDLC-501 (Phase 5), AISDLC-502 (Phase 6)
+**Implementation tasks:** AISDLC-497 (Phase 1), AISDLC-498 (Phase 2), AISDLC-499 (Phase 3), AISDLC-500 (Phase 4), AISDLC-501 (Phase 5), AISDLC-502 (Phase 6), AISDLC-508..515 (Phase 7 — Integration & End-to-End Hardening)
 
 ---
 
@@ -215,37 +215,53 @@ Cross-reference: [RFC-0043 §Stage 1](../../spec/rfcs/RFC-0043-untrusted-contrib
 
 ## Section 4 — Sandbox Driver Selection
 
-### Docker (default)
+All drivers are exposed through the `SandboxDriver` abstraction
+(`pipeline-cli/src/pipeline/sandbox-driver.ts`). You configure the active driver
+via `.ai-sdlc/untrusted-pr-gate.yaml: sandboxDriver:`. Phase 7 (AISDLC-508..515)
+implements the abstraction layer; prior phases used a direct OpenShell reference
+that is now superseded.
 
-The default driver for Stage 2. Uses Docker's container isolation:
+### Docker (hardened) — v1 reference driver
 
-- **Pros:** Widely available on all platforms; zero extra setup for most CI runners; familiar tooling.
+**This is the v1 reference runtime.** It requires zero extra infrastructure on
+stock GitHub-hosted runners (no `/dev/kvm`, no gVisor install) and is the only
+zero-install path to a working end-to-end gate today. Uses Docker's container
+isolation with a hardened seccomp profile, read-only rootfs, dropped capabilities,
+and default-deny network policy enforced at the container level.
+
+- **Pros:** Zero-install on stock runners; familiar tooling; fastest iteration on the e2e path.
 - **Cons:** Shared kernel — container escape CVEs (e.g. `runc` CVE-2024-21626 "Leaky Vessels") have been real. Not suitable for HIPAA/FedRAMP/PCI-DSS Level 1.
-- **Recommended for:** Development environments, low-risk OSS contribution workflows, teams without compliance mandates.
+- **Recommended for:** Development environments, low-risk OSS contribution workflows, teams without compliance mandates, and all Phase 7 integration testing.
 
-### Kata Containers
+### gVisor — upgrade driver
 
-Provides kernel-level isolation via lightweight VMs:
+Google's user-space kernel that intercepts syscalls, providing stronger isolation
+than stock Docker on cloud-native stacks. Available behind the `SandboxDriver`
+abstraction as an upgrade path from Docker when a KVM-free higher-isolation option
+is needed.
 
-- **Pros:** ~5-15% runtime overhead vs Docker; protects against container-escape CVEs; kernel-level isolation.
-- **Cons:** Requires KVM-capable hosts; not available on macOS ARM without additional setup.
-- **Recommended for:** Staging environments; teams that want stronger isolation without full MicroVM overhead.
-
-### gVisor
-
-Google's user-space kernel that intercepts syscalls:
-
-- **Pros:** Strong isolation; works on Docker-compatible runtimes; lower overhead than full VMs.
+- **Pros:** Strong kernel isolation; no KVM requirement; lower overhead than full VMs.
 - **Cons:** gVisor-specific syscall coverage gaps; some packages that use unusual syscalls may fail.
-- **Recommended for:** Cloud-native environments already using gVisor; teams comfortable with occasional compatibility issues.
+- **Recommended for:** Cloud-native environments already using gVisor; teams comfortable with occasional compatibility issues who need stronger isolation than Docker.
 
-### MicroVM (Firecracker-compatible)
+### MicroVM/Firecracker — upgrade driver (RFC-0022 compliance path)
 
-Strongest isolation — each evaluation gets a dedicated microVM:
+Strongest isolation — each evaluation gets a dedicated microVM. This is the
+required driver for RFC-0022 compliance regimes:
 
 - **Pros:** Hardware-level isolation; Firecracker's security model is audited; zero shared-kernel risk.
 - **Cons:** Requires KVM-capable CI runners; higher resource overhead; most expensive per-evaluation.
-- **Recommended for:** HIPAA, FedRAMP High, PCI-DSS Level 1 environments (where it is mandatory — see RFC-0022 override below).
+- **Required for:** HIPAA, FedRAMP High, PCI-DSS Level 1 environments (mandatory via RFC-0022 regime override — see below). Not available on stock GitHub-hosted runners.
+
+### NVIDIA OpenShell — optional driver
+
+OpenShell was the original design reference runtime for the RFC. It is now demoted
+to an **optional driver** pending resolution of a GitHub-runner install-hang. When
+available on the runner, it can be wired in as a `SandboxDriver` implementation
+with no changes to the pipeline stages above it.
+
+- **Configure:** `sandboxDriver: openshell` in `.ai-sdlc/untrusted-pr-gate.yaml`.
+- **Status:** Not recommended for new deployments until the install-hang is resolved; the Docker v1 driver provides equivalent credential-withholding via the `inference.local` proxy.
 
 ### RFC-0022 regime override
 
@@ -454,6 +470,19 @@ Additionally, `promptInjectionDetected: true` is set in the reviewer verdict.
 3. **Review the PR manually.** Inspect the diff for the injection text. Even if the surrounding code change is legitimate, the injection attempt should be communicated to the contributor.
 
 4. **Consider escalating.** A deliberate injection attempt may indicate a malicious contributor. Document the incident and consider adding the author to a blocklist.
+
+### Reviewer execution model (in-sandbox, inference.local)
+
+The three reviewers (`code-reviewer`, `test-reviewer`, `security-reviewer`) run
+**inside the same sandbox as Stage 2** so they are subject to the same
+credential-stripping and network isolation. Provider credentials are injected
+by the `inference.local` proxy out-of-process — the reviewer process connects
+to `inference.local` for model inference and never holds the `ANTHROPIC_API_KEY`
+directly. This matches RFC-0043's credential-withholding design intent and keeps
+the agentic-review upgrade path open.
+
+Implemented in Phase 7 task AISDLC-510 (`inference.local` proxy) and AISDLC-511
+(in-sandbox fan-out wiring).
 
 ### Reviewer prompt hardening (sandwich framing)
 

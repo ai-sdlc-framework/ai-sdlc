@@ -43,7 +43,7 @@ mechanisms:
 |-------|------|------|
 | 0 — Trust classifier | Deterministic allowlist lookup; untrusted authors enter the gate | none |
 | 1 — AST gate | Hard-blocks protected-path edits + dangerous content patterns; deny-wins, fail-closed | none |
-| 2/3 — OpenShell sandbox | Runs reviewers + differential tests with credentials stripped, network denied, resources capped | one capped run |
+| 2/3 — Sandbox (Docker v1 / gVisor / MicroVM upgrade drivers) | Runs reviewers (via `inference.local` proxy) + differential tests with credentials stripped, network denied, resources capped | one capped run |
 | 4 — Clean-room signer | Validates the report through a strict schema boundary, then mints the v6 attestation | one signature |
 
 ### The load-bearing invariant
@@ -82,7 +82,9 @@ The full threat-model table lives in the
   inspectable safety path and a cryptographic record of what was reviewed.
 - **Enterprises** extend an existing trust boundary to vendors, contractors, and
   new hires without weakening it, with compliance-regime-aware isolation
-  (RFC-0022: HIPAA / FedRAMP / PCI-DSS Level 1 → MicroVM driver).
+  (RFC-0022: HIPAA / FedRAMP / PCI-DSS Level 1 → MicroVM driver via the
+  `SandboxDriver` abstraction; Docker hardened is the v1 default and the only
+  zero-install option on stock GitHub-hosted runners).
 
 The trust *decision* stays human and explicit (the allowlist, the regime); the
 review *labor* becomes automatable even for code from outside the boundary.
