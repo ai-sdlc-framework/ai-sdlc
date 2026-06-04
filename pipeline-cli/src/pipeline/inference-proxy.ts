@@ -52,7 +52,7 @@ import {
   type ServerResponse,
   type Server,
 } from 'node:http';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -97,6 +97,7 @@ export interface ProxyAuditEntry {
 export type ProxyDenialReason =
   | 'invalid-session'
   | 'tool-use-refused'
+  | 'non-review-call'
   | 'rate-limit-exceeded'
   | 'body-too-large'
   | 'method-not-allowed'
@@ -137,6 +138,20 @@ export interface InferenceProxyConfig {
    * In integration tests, set to `true` for simpler test setup.
    */
   useHttp?: boolean;
+  /**
+   * Address to bind the proxy server on.
+   * Defaults to `127.0.0.1` (loopback only — safe for host-local use).
+   *
+   * Docker deployment note: a Docker container reaches the host via the
+   * host-gateway / docker0 bridge, NOT the host loopback. Set this to the
+   * host-gateway-reachable interface (e.g. `0.0.0.0` or the docker0 IP) when
+   * the sandbox deployment requires container → host connectivity.
+   *
+   * Only override this in deployment contexts where container access is
+   * required and the network is otherwise isolated (e.g. `--network=none`
+   * with `--add-host=inference.local:<host-ip>`).
+   */
+  bindAddress?: string;
 }
 
 /** Result returned by `proxy.start()`. */
@@ -218,6 +233,19 @@ export function redactCredential(value: string, credential: string): string {
 export function assertEntryClean(entry: ProxyAuditEntry, credential: string): boolean {
   const entryStr = JSON.stringify(entry);
   return !entryStr.includes(credential);
+}
+
+/**
+ * Sanitize an error message string for inclusion in a response body sent to
+ * the in-sandbox caller.
+ *
+ * Strips any occurrence of the credential substring so it cannot be extracted
+ * from error responses by a prompt-injected reviewer process.
+ *
+ * Used on all 500/502 error paths before writing to the response.
+ */
+export function sanitizeErrorMessage(message: string, credential: string): string {
+  return redactCredential(message, credential);
 }
 
 // ── Request body parsing ──────────────────────────────────────────────────────
@@ -302,6 +330,12 @@ export function isReviewShapedCall(body: unknown): boolean {
 // ── Upstream request seam ────────────────────────────────────────────────────
 
 /**
+ * Default upstream request timeout in milliseconds.
+ * A hung upstream cannot pin a handler indefinitely.
+ */
+export const UPSTREAM_TIMEOUT_MS = 30_000; // 30 seconds
+
+/**
  * The upstream connect result — a response-like interface that the proxy reads
  * from after forwarding the request.
  *
@@ -325,11 +359,17 @@ export type UpstreamConnector = (opts: {
   method: string;
   headers: Record<string, string>;
   body: Buffer;
+  /** Maximum bytes to accept from the upstream response (enforced incrementally). */
+  maxResponseBytes: number;
 }) => Promise<UpstreamResponse>;
 
 /**
  * Production upstream connector — makes a real HTTPS request.
  * ONLY reached when `AI_SDLC_SANDBOX_INTEGRATION_TESTS=1`.
+ *
+ * Enforces the response size cap incrementally during streaming (aborts once
+ * exceeded rather than buffering the full response first) and applies an
+ * upstream request timeout so a hung server cannot pin a handler indefinitely.
  *
  * @internal — exposed so subclasses and tests can verify it is not called in unit tests.
  */
@@ -340,6 +380,7 @@ export function defaultUpstreamConnector(opts: {
   method: string;
   headers: Record<string, string>;
   body: Buffer;
+  maxResponseBytes: number;
 }): Promise<UpstreamResponse> {
   return new Promise((resolve, reject) => {
     // Use node:https for real outbound TLS connections to provider APIs.
@@ -358,21 +399,47 @@ export function defaultUpstreamConnector(opts: {
       (res) => {
         const chunks: Buffer[] = [];
         let total = 0;
+        let aborted = false;
+
         res.on('data', (chunk: Buffer) => {
+          if (aborted) return;
           total += chunk.length;
+          if (total > opts.maxResponseBytes) {
+            // Abort incrementally — don't buffer beyond the cap
+            aborted = true;
+            req.destroy();
+            reject(
+              Object.assign(new Error('upstream response exceeded size limit'), {
+                code: 'RESPONSE_TOO_LARGE',
+              }),
+            );
+            return;
+          }
           chunks.push(chunk);
         });
+
         res.on('end', () => {
+          if (aborted) return;
           resolve({
             statusCode: res.statusCode ?? 502,
             headers: res.headers as Record<string, string | string[] | undefined>,
             body: Buffer.concat(chunks),
           });
-          void total; // used only to count — enforce no size cap at connector level
         });
-        res.on('error', reject);
+        res.on('error', (err) => {
+          if (!aborted) reject(err);
+        });
       },
     );
+
+    // Upstream timeout — prevents a hung server from pinning the handler
+    req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+      req.destroy(
+        Object.assign(new Error(`upstream timed out after ${UPSTREAM_TIMEOUT_MS}ms`), {
+          code: 'UPSTREAM_TIMEOUT',
+        }),
+      );
+    });
 
     req.on('error', reject);
     req.write(opts.body);
@@ -434,7 +501,10 @@ interface ProxySessionState {
  *    are accepted; all other paths return 404.
  */
 export class InferenceProxy {
-  private readonly config: InferenceProxyConfig & { provider: InferenceProvider };
+  private readonly config: InferenceProxyConfig & {
+    provider: InferenceProvider;
+    bindAddress: string;
+  };
   private readonly limits: ProxyLimits;
   private readonly upstream: UpstreamEndpoint;
   private session: ProxySessionState | null = null;
@@ -463,6 +533,7 @@ export class InferenceProxy {
       provider: 'anthropic',
       useHttp: true,
       port: 0,
+      bindAddress: '127.0.0.1',
       ...config,
     };
     this.limits = {
@@ -505,7 +576,9 @@ export class InferenceProxy {
         this.emitAudit(entry);
         try {
           res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'internal proxy error', detail: String(err) }));
+          // Sanitize error detail so the credential cannot appear in the 500 response body
+          const safeDetail = sanitizeErrorMessage(String(err), this.config.credential);
+          res.end(JSON.stringify({ error: 'internal proxy error', detail: safeDetail }));
         } catch {
           // best-effort — socket may already be closed
         }
@@ -515,7 +588,7 @@ export class InferenceProxy {
     this.server = server;
 
     return new Promise<ProxyStartResult>((resolve, reject) => {
-      server.listen(this.config.port ?? 0, '127.0.0.1', () => {
+      server.listen(this.config.port ?? 0, this.config.bindAddress ?? '127.0.0.1', () => {
         const addr = server.address();
         if (!addr || typeof addr === 'string') {
           reject(new Error('InferenceProxy: server address is not available'));
@@ -568,18 +641,35 @@ export class InferenceProxy {
       return;
     }
 
-    // 3. Validate session token from X-Proxy-Session header
+    // 3. Validate session token from X-Proxy-Session header using constant-time comparison
+    //    to prevent timing-oracle attacks on the token value.
     const incomingToken = req.headers['x-proxy-session'];
-    if (!incomingToken || incomingToken !== session.sessionToken) {
+    const incomingTokenStr = Array.isArray(incomingToken) ? incomingToken[0] : incomingToken;
+    const expectedToken = session.sessionToken;
+    const tokensMatch = (() => {
+      if (!incomingTokenStr) return false;
+      // Constant-time compare: pad both sides to the same length before comparing.
+      // If lengths differ, a length-leaking short-circuit is acceptable (the token
+      // format is fixed at 64 hex chars; mismatched length is still a rejection).
+      if (incomingTokenStr.length !== expectedToken.length) return false;
+      const a = Buffer.from(incomingTokenStr, 'utf8');
+      const b = Buffer.from(expectedToken, 'utf8');
+      return timingSafeEqual(a, b);
+    })();
+    if (!tokensMatch) {
       this.sendDenial(res, 403, 'invalid-session', req, 0);
       return;
     }
 
-    // 4. Rate limit check (checked before reading body to save resources)
+    // 4. Rate limit check (checked before reading body to save resources).
+    //    Increment the counter IMMEDIATELY after the check passes, before the
+    //    async body read, so concurrent requests cannot both observe count < cap
+    //    and both proceed past the gate (TOCTOU fix).
     if (session.requestCount >= this.limits.maxRequestsPerSession) {
       this.sendDenial(res, 429, 'rate-limit-exceeded', req, 0);
       return;
     }
+    session.requestCount += 1;
 
     // 5. Read and size-check request body
     const rawBody = await readRequestBody(req, this.limits.maxBodyBytes);
@@ -588,12 +678,17 @@ export class InferenceProxy {
       return;
     }
 
-    // 6. Parse body and check for tool-use fields
+    // 6. Parse body and apply content-shape gates:
+    //    a) Reject tool-use fields (prevents tool-execution path reaching upstream).
+    //    b) Reject non-review-shaped bodies (prevents prompt-injected exfiltration via
+    //       arbitrary message content when the body is non-JSON or missing a `messages`
+    //       array). Only genuine review-shaped calls proceed to the upstream.
     let parsedBody: unknown = null;
     try {
       parsedBody = rawBody.length > 0 ? (JSON.parse(rawBody.toString('utf8')) as unknown) : null;
     } catch {
-      // Non-JSON body — treat as a non-review call → forward as-is (provider will reject)
+      // Non-JSON body — falls through to the isReviewShapedCall check below, which
+      // will reject it as non-review-shaped (parsedBody remains null → false).
     }
 
     if (detectToolUse(parsedBody)) {
@@ -601,18 +696,24 @@ export class InferenceProxy {
       return;
     }
 
-    // 7. Increment request count BEFORE forwarding (atomic within the request handler)
-    session.requestCount += 1;
+    if (!isReviewShapedCall(parsedBody)) {
+      // SECURITY: Any call that does not conform to the review shape (JSON object
+      // with a `messages` array) is rejected 422. This includes non-JSON bodies,
+      // missing `messages`, and any other structural deviation. Without this gate,
+      // a prompt-injected reviewer could relay arbitrary content to the upstream
+      // with the real credential injected by the proxy.
+      this.sendDenial(res, 422, 'non-review-call', req, rawBody.length);
+      return;
+    }
 
-    // 8. Forward to upstream
-    await this.forwardToUpstream(req, res, rawBody, session, path);
+    // 7. Forward to upstream
+    await this.forwardToUpstream(req, res, rawBody, path);
   }
 
   private async forwardToUpstream(
     req: IncomingMessage,
     res: ServerResponse,
     body: Buffer,
-    session: ProxySessionState,
     path: string,
   ): Promise<void> {
     // Build upstream headers — inject the credential HERE, not in sandbox env
@@ -642,8 +743,28 @@ export class InferenceProxy {
         method: 'POST',
         headers: upstreamHeaders,
         body,
+        maxResponseBytes: this.limits.maxResponseBytes,
       });
     } catch (err) {
+      // Check if the connector aborted due to size cap (incremental streaming check)
+      const isTooBig =
+        err instanceof Error && (err as NodeJS.ErrnoException).code === 'RESPONSE_TOO_LARGE';
+
+      if (isTooBig) {
+        this.emitAudit(
+          this.makeAuditEntry({
+            req,
+            requestBodyBytes: body.length,
+            responseStatus: 502,
+            forwarded: false,
+            denialReason: 'response-too-large',
+          }),
+        );
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'upstream response exceeded size limit' }));
+        return;
+      }
+
       this.emitAudit(
         this.makeAuditEntry({
           req,
@@ -654,11 +775,16 @@ export class InferenceProxy {
         }),
       );
       res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'upstream connection failed', detail: String(err) }));
+      // Sanitize error detail to ensure the credential cannot appear in the response body
+      const safeDetail = sanitizeErrorMessage(String(err), this.config.credential);
+      res.end(JSON.stringify({ error: 'upstream connection failed', detail: safeDetail }));
       return;
     }
 
-    // Size-check the upstream response
+    // Fallback size-check on the fully-buffered response.
+    // The production connector enforces the cap incrementally (streaming) and
+    // throws RESPONSE_TOO_LARGE before returning. This check covers connectors
+    // (e.g. mock/test seams) that return a fully-buffered body without streaming.
     if (upstreamResponse.body.length > this.limits.maxResponseBytes) {
       this.emitAudit(
         this.makeAuditEntry({
