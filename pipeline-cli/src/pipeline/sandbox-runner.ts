@@ -32,6 +32,7 @@
  *
  * ## Docker hardening (AISDLC-508)
  * The `DockerSandboxDriver` uses the following hardened isolation flags:
+ *   - `--cidfile <tmpfile>`     — per-spawn cidfile; container ID read after start
  *   - `--network=none`          — full network deny (inference.local bridge added in AISDLC-510)
  *   - `--cap-drop=ALL`          — drop all Linux capabilities
  *   - `--read-only`             — read-only root filesystem
@@ -53,9 +54,10 @@
  * @module pipeline/sandbox-runner
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 // ── Sandbox driver types ──────────────────────────────────────────────────────
 
@@ -794,6 +796,7 @@ export const DOCKER_SECCOMP_PROFILE: Record<string, unknown> = {
  * container tests.
  *
  * ## Hardening flags (AISDLC-508)
+ *   - `--cidfile <tmpfile>`                 per-spawn cidfile for kill/rm
  *   - `--network=none`                      full network deny
  *   - `--cap-drop=ALL`                      drop all Linux capabilities
  *   - `--read-only`                         read-only root filesystem
@@ -811,10 +814,17 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   readonly kind: SandboxDriverKind = 'docker';
 
   /**
-   * Container ID assigned once `docker run --cidfile` records it.
-   * Used by `teardown()` for `docker rm -f`.
+   * Container ID read from the cidfile after the container starts.
+   * Written by `docker run --cidfile <path>`; read after spawn begins.
+   * Used by `killContainer()` and `teardown()` for `docker kill`/`docker rm -f`.
    */
   private containerId: string | null = null;
+
+  /**
+   * Path to the cidfile created per spawn invocation.
+   * Lives in an isolated mkdtemp directory; cleaned up in `teardown()`.
+   */
+  private cidFilePath: string | null = null;
 
   protected async doSpawn(
     input: SandboxSpawnInput & { abortSignal?: AbortSignal },
@@ -885,17 +895,26 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     const { resourceLimits } = input;
     const seccompJson = JSON.stringify(DOCKER_SECCOMP_PROFILE);
 
+    // Create an isolated temp directory and cidfile path per spawn invocation.
+    // `docker run --cidfile <path>` writes the full container ID to this file
+    // once the container starts (even in foreground / non-detached mode).
+    // We read the cidfile to obtain the container ID for kill/rm operations.
+    const cidDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-sandbox-'));
+    const cidFilePath = join(cidDir, 'container.cid');
+    this.cidFilePath = cidFilePath;
+
     // Build the docker run arguments
     const args = buildDockerRunArgs({
       resourceLimits,
       seccompProfileJson: seccompJson,
+      cidFilePath,
       // AISDLC-509 will inject the real image + in-container command
       image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? 'node:22-slim',
       command: [
         '/bin/sh',
         '-c',
         // Placeholder — AISDLC-509 replaces this with the real differential test entrypoint
-        'echo "AISDLC-509: in-container differential test not yet wired" && exit 1',
+        'echo "in-container differential test not yet wired" && exit 1',
       ],
     });
 
@@ -909,28 +928,28 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
         },
       });
 
-      // Record the container ID from docker run output (line 1 of stdout
-      // when using --cidfile is empty; docker prints the ID to stdout when
-      // --detach is used; we use --cidfile via buildDockerRunArgs).
-      // The cidfile path is predictable from the containerId slot.
-      // For now, track PID so teardown can use docker ps lookup if needed.
-      const containerPidMarker = `docker-sandbox-pid-${proc.pid ?? 'unknown'}`;
-      void containerPidMarker;
+      // Poll the cidfile for the container ID shortly after spawn.
+      // `docker run --cidfile` writes the ID as soon as the container starts,
+      // before the container's stdout produces any output. We poll with a short
+      // interval so killContainer() can use the real ID on abort.
+      const cidPollInterval = setInterval(() => {
+        if (!this.containerId && existsSync(cidFilePath)) {
+          try {
+            const id = readFileSync(cidFilePath, 'utf8').trim();
+            if (id && /^[0-9a-f]{12,64}$/i.test(id)) {
+              this.containerId = id;
+              clearInterval(cidPollInterval);
+            }
+          } catch {
+            // cidfile may not be fully written yet — retry on next tick
+          }
+        }
+      }, 50);
 
       let stdout = '';
       let stderr = '';
       proc.stdout?.on('data', (chunk: Buffer) => {
-        const line = chunk.toString();
-        stdout += line;
-        // docker run with --cidfile writes the container ID to the cidfile;
-        // we grab the first non-empty line of stdout as the container ID
-        // (when --detach is passed it prints the full container ID)
-        if (!this.containerId) {
-          const firstLine = line.trim().split('\n')[0]?.trim();
-          if (firstLine && /^[0-9a-f]{12,64}$/i.test(firstLine)) {
-            this.containerId = firstLine;
-          }
-        }
+        stdout += chunk.toString();
       });
       proc.stderr?.on('data', (chunk: Buffer) => {
         stderr += chunk.toString();
@@ -938,6 +957,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
 
       // Wire abort signal to kill the container
       const onAbort = () => {
+        clearInterval(cidPollInterval);
         this.killContainer().catch(() => {
           // best-effort kill — teardown() will also attempt rm -f
         });
@@ -953,8 +973,22 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       }
 
       proc.on('close', (exitCode) => {
+        clearInterval(cidPollInterval);
         if (input.abortSignal) {
           input.abortSignal.removeEventListener('abort', onAbort);
+        }
+
+        // Read the container ID from the cidfile on close in case the poll
+        // interval had not yet fired (fast-exiting containers).
+        if (!this.containerId && existsSync(cidFilePath)) {
+          try {
+            const id = readFileSync(cidFilePath, 'utf8').trim();
+            if (id && /^[0-9a-f]{12,64}$/i.test(id)) {
+              this.containerId = id;
+            }
+          } catch {
+            // cidfile may be absent if the container failed before starting
+          }
         }
 
         if (input.abortSignal?.aborted) {
@@ -978,14 +1012,15 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
         // Placeholder result — AISDLC-509 replaces this with real test output parsing
         resolve({
           upstreamSuitePassed: false,
-          upstreamSuiteOutput: `[AISDLC-509 pending] raw stdout: ${stdout.slice(0, 500)}`,
+          upstreamSuiteOutput: `[differential-test pending] raw stdout: ${stdout.slice(0, 500)}`,
           newTestsPassed: false,
-          newTestsOutput: `[AISDLC-509 pending] raw stderr: ${stderr.slice(0, 500)}`,
+          newTestsOutput: `[differential-test pending] raw stderr: ${stderr.slice(0, 500)}`,
           newCodeCoveragePct: 0,
         });
       });
 
       proc.on('error', (err) => {
+        clearInterval(cidPollInterval);
         if (input.abortSignal) {
           input.abortSignal.removeEventListener('abort', onAbort);
         }
@@ -1009,19 +1044,35 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   }
 
   /**
-   * Idempotent teardown — `docker rm -f` the container by ID.
+   * Idempotent teardown — `docker rm -f` the container by ID, then clean up
+   * the cidfile and its temp directory.
    * Called after spawn resolves or rejects (including on wall-clock timeout).
    * Suppresses all errors to prevent masking the original spawn result.
    */
   async teardown(): Promise<void> {
-    if (!this.containerId) return;
     const id = this.containerId;
+    const cidFilePath = this.cidFilePath;
     this.containerId = null;
-    await new Promise<void>((resolve) => {
-      const proc = spawn('docker', ['rm', '-f', id], { stdio: 'ignore' });
-      proc.on('close', () => resolve());
-      proc.on('error', () => resolve());
-    });
+    this.cidFilePath = null;
+
+    if (id) {
+      await new Promise<void>((resolve) => {
+        const proc = spawn('docker', ['rm', '-f', id], { stdio: 'ignore' });
+        proc.on('close', () => resolve());
+        proc.on('error', () => resolve());
+      });
+    }
+
+    // Clean up the cidfile temp directory (best-effort)
+    if (cidFilePath) {
+      try {
+        // Remove the temp dir that contains the cidfile
+        const cidDir = cidFilePath.substring(0, cidFilePath.lastIndexOf('/'));
+        rmSync(cidDir, { recursive: true, force: true });
+      } catch {
+        // suppress — cidfile cleanup is best-effort
+      }
+    }
   }
 }
 
@@ -1032,6 +1083,13 @@ export interface DockerRunArgsInput {
   seccompProfileJson: string;
   image: string;
   command: string[];
+  /**
+   * Path to the cidfile for this spawn invocation.
+   * `docker run --cidfile <path>` writes the full container ID to this file
+   * once the container starts (foreground or detached). Required so that
+   * `killContainer()` and `teardown()` can kill/rm the real container ID.
+   */
+  cidFilePath: string;
 }
 
 /**
@@ -1041,6 +1099,7 @@ export interface DockerRunArgsInput {
  * The exact flags are testable without a real Docker daemon.
  *
  * Hardening applied:
+ *   --cidfile <path>               — write container ID to file (required for kill/rm)
  *   --network=none                 — full network deny (AISDLC-510 adds inference bridge)
  *   --cap-drop=ALL                 — drop all Linux capabilities
  *   --read-only                    — read-only root filesystem
@@ -1055,11 +1114,13 @@ export interface DockerRunArgsInput {
  *   --security-opt no-new-privileges
  */
 export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
-  const { resourceLimits, seccompProfileJson, image, command } = opts;
+  const { resourceLimits, seccompProfileJson, cidFilePath, image, command } = opts;
 
   return [
     'run',
     '--rm',
+    '--cidfile',
+    cidFilePath,
     '--network=none',
     '--cap-drop=ALL',
     '--read-only',
