@@ -1,0 +1,30 @@
+# .ai-sdlc/trusted-reviewers.yaml — Trusted-author allowlist template
+#
+# Copy this file to .ai-sdlc/trusted-reviewers.yaml in your target repository.
+# The `allowlist.authors` block is the ONLY runtime source of trust truth.
+# No live GitHub API queries are made on the classification critical path.
+#
+# RFC-0043 Stage 0 — Trust Classification
+# See docs/operations/e2e-real-repo-runbook.md for full setup instructions.
+
+allowlist:
+  authors:
+    # Add your maintainers here.
+    # Each entry must have:
+    #   - login: the GitHub username (case-sensitive)
+    #   - name:  display name (human-readable; not used for classification)
+    #   - addedAt: ISO date when this entry was added
+    #   - addedBy: GitHub login of the maintainer who added this entry
+    #
+    # Example:
+    # - login: your-github-handle
+    #   name: Your Full Name
+    #   addedAt: '2026-06-04'
+    #   addedBy: your-github-handle
+
+# ── Drift detection ────────────────────────────────────────────────────────────
+#
+# The trusted-reviewers-drift.yml workflow compares this file against GitHub
+# repo permissions weekly and emits a Decision when drift is detected.
+# Drift is informational — it does NOT change classifications.
+# This static file remains authoritative.

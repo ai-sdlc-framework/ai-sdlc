@@ -101,7 +101,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version-file: '.nvmrc'
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies (from main checkout only — fork-PR safety guard #3)
@@ -312,7 +312,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version-file: '.nvmrc'
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies (from main checkout only — fork-PR safety guard #3)
@@ -321,7 +321,7 @@ jobs:
       - name: Build pipeline-cli
         run: pnpm --filter @ai-sdlc/pipeline-cli build
 
-      - name: Detect deployment mode and OpenShell availability
+      - name: Detect deployment mode and Docker sandbox availability
         id: check-sandbox
         env:
           DEPLOYMENT_MODE: ${{ needs.classify-and-gate.outputs.deployment_mode }}
@@ -329,18 +329,25 @@ jobs:
           DEPLOYMENT="${DEPLOYMENT_MODE:-ci}"
           echo "[stage-2] deployment mode: $DEPLOYMENT"
 
-          # Check OpenShell availability.
-          # OpenShell is the required runtime for Stage 2 differential testing.
-          # When unavailable: degrade gracefully per RFC-0043 §Degradation path.
-          if command -v openshell &>/dev/null; then
+          # Check Docker availability — the DockerSandboxDriver (RFC-0043 Phase 7,
+          # AISDLC-507/508) is the default CI runtime. GitHub Actions ubuntu-latest
+          # runners include Docker out-of-the-box; this check also gracefully degrades
+          # on self-hosted runners or environments where Docker is unavailable.
+          # OpenShell was the original planned runtime; Docker is the shipped runtime.
+          # When unavailable: degrade fail-closed per RFC-0043 §Degradation path.
+          if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
             echo "available=true" >> "$GITHUB_OUTPUT"
             echo "degraded=false" >> "$GITHUB_OUTPUT"
-            echo "[stage-2] OpenShell available — full sandbox mode"
+            echo "[stage-2] Docker available — full sandbox mode (DockerSandboxDriver)"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
             echo "degraded=true" >> "$GITHUB_OUTPUT"
-            echo "[stage-2] OpenShell NOT available — degradation path engaged"
+            echo "[stage-2] Docker NOT available — degradation path engaged"
             echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
+            # Also check if OpenShell is available as an alternative runtime
+            if command -v openshell &>/dev/null; then
+              echo "[stage-2] OpenShell detected but Docker is the required CI runtime; degrading"
+            fi
           fi
 
       - name: Emit degradation Decision (RFC-0035 G0) when sandbox unavailable
@@ -357,7 +364,7 @@ jobs:
             --option "degraded:Stage 2 sandbox unavailable for PR $PR_NUMBER; static-review-only fallback engaged" \
             2>/dev/null || echo "[stage-2] Decision catalog not available; degradation noted in logs"
 
-      - name: Stage 2 — Run OpenShell sandbox (CI deployment mode, full isolation)
+      - name: Stage 2 — Run Docker sandbox (CI deployment mode, full isolation)
         id: sandbox
         if: >
           steps.check-sandbox.outputs.available == 'true' &&
@@ -371,8 +378,13 @@ jobs:
           # NPM_TOKEN, AI_SDLC_PAT are NEVER injected into the sandbox environment.
           # They are only available in the Stage 4 clean-room job (fork-PR safety guard #5).
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Docker-specific: set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 to enable real
+          # Docker container runs. The DockerSandboxDriver (RFC-0043 Phase 7) is the
+          # default CI runtime — ubuntu-latest runners include Docker out-of-the-box.
+          AI_SDLC_SANDBOX_INTEGRATION_TESTS: '1'
         run: |
-          # Stage 2/3: run the full sandbox + reviewer matrix.
+          # Stage 2/3: run the full Docker sandbox + reviewer matrix.
+          # Uses DockerSandboxDriver (sandboxDriver: docker in .ai-sdlc/untrusted-pr-gate.yaml).
           # The sandbox mounts the pr-content/ diff as read-only data.
           # High-privilege credentials are withheld at the proxy layer — the agent
           # running inside the sandbox never receives them directly.
@@ -416,21 +428,21 @@ jobs:
         run: |
           # Local deployment mode (OQ-2): workflow detects deployment: local in config
           # and surfaces a message for the maintainer to run the reviewer pipeline locally.
-          # The maintainer's local OpenShell sandbox runs Stages 2-4.
+          # The maintainer's local Docker sandbox runs Stages 2-4.
           echo "[stage-2] deployment=local detected — handing off to maintainer's local pipeline"
           echo "[stage-2] Run: node pipeline-cli/bin/cli-ucvg.mjs local-review --pr $PR_NUMBER"
           echo "[stage-2] Stage 2 unavailable; falling back to static-review-only + hard AST gate"
 
-      # CRITICAL fix #3 (fail-closed degradation): when OpenShell is unavailable,
+      # CRITICAL fix #3 (fail-closed degradation): when Docker is unavailable,
       # we must NOT proceed to signing/success. Post a failure status + label and exit 1
       # so this job fails and clean-room-sign cannot run.
-      - name: Stage 2/3 degraded — BLOCK (fail-closed when OpenShell unavailable)
+      - name: Stage 2/3 degraded — BLOCK (fail-closed when Docker sandbox unavailable)
         if: steps.check-sandbox.outputs.degraded == 'true'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           github-token: ${{ github.token }}
           script: |
-            // Fail-closed degradation: OpenShell unavailable → gate MUST block.
+            // Fail-closed degradation: Docker unavailable → gate MUST block.
             // Never auto-pass an untrusted PR when the sandbox cannot run.
             // Per RFC-0043 §Degradation path: degradation blocks, not degrades to green.
             const prNumber = context.payload.pull_request.number;
@@ -453,12 +465,12 @@ jobs:
               sha: headSha,
               state: 'failure',
               context: 'ai-sdlc/untrusted-pr-gate',
-              description: 'Blocked: OpenShell sandbox unavailable — maintainer review required',
+              description: 'Blocked: Docker sandbox unavailable — maintainer review required',
             });
 
             // Throw so the job fails and clean-room-sign cannot run (needs: result == 'success').
             throw new Error(
-              '[stage-2] FAIL-CLOSED: OpenShell sandbox unavailable. ' +
+              '[stage-2] FAIL-CLOSED: Docker sandbox unavailable. ' +
               'Untrusted PR cannot be auto-approved during degradation. ' +
               'A maintainer must review this PR manually. ' +
               'Label needs-maintainer-review has been applied.'
@@ -493,7 +505,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version-file: '.nvmrc'
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies (from main checkout only — fork-PR safety guard #3)

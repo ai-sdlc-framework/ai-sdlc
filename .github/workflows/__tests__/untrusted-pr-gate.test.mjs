@@ -363,7 +363,7 @@ describe('AC#4 — deployment: local|ci config respected; default ci (OQ-2 resol
 
 // ── AC#5: CI deployment mode ──────────────────────────────────────────────────
 
-describe('AC#5 — CI deployment mode: reviewers in CI-side OpenShell sandbox', () => {
+describe('AC#5 — CI deployment mode: reviewers in CI-side Docker sandbox (DockerSandboxDriver)', () => {
   it('sandbox-and-review job uses sandbox-run CLI', () => {
     assert.match(
       raw,
@@ -446,12 +446,14 @@ describe('AC#7 — AI_SDLC_UNTRUSTED_PR_GATE feature flag (default off)', () => 
 
 // ── AC#8: Degradation path ────────────────────────────────────────────────────
 
-describe('AC#8 — degradation path: missing OpenShell → Stage 0/1 still run', () => {
-  it('workflow checks OpenShell availability', () => {
-    assert.match(
-      raw,
-      /openshell|OpenShell/,
-      `${WORKFLOW_NAME} must check OpenShell availability for the degradation path`,
+describe('AC#8 — degradation path: missing sandbox runtime → Stage 0/1 still run', () => {
+  it('workflow checks Docker or OpenShell availability for the sandbox runtime', () => {
+    // The shipped CI runtime is Docker (DockerSandboxDriver, RFC-0043 Phase 7).
+    // OpenShell was the original planned runtime. The test accepts either reference
+    // so this assertion remains valid across runtime transitions.
+    assert.ok(
+      /docker|Docker/.test(raw) || /openshell|OpenShell/.test(raw),
+      `${WORKFLOW_NAME} must check Docker or OpenShell availability for the degradation path`,
     );
   });
 
@@ -698,10 +700,11 @@ describe('CRITICAL fix #3 — Degradation path blocks (fail-closed, never green)
   });
 
   it('degradation block posts failure status (not success)', () => {
-    assert.match(
-      raw,
-      /Blocked.*OpenShell|OpenShell.*unavailable/,
-      `degradation block step must post a failure status describing the OpenShell unavailability`,
+    // The shipped CI runtime is Docker; description may reference Docker or OpenShell
+    // depending on which runtime the deployment targets.
+    assert.ok(
+      /Blocked.*Docker|Docker.*unavailable|Blocked.*OpenShell|OpenShell.*unavailable/i.test(raw),
+      `degradation block step must post a failure status describing the sandbox unavailability`,
     );
   });
 });
