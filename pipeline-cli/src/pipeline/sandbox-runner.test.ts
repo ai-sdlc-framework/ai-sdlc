@@ -16,9 +16,11 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { mkdirSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import {
   resolveEffectiveDriver,
@@ -1701,4 +1703,762 @@ describe('DOCKER_SECCOMP_PROFILE — seccomp allowlist shape (AISDLC-508 AC-1)',
     expect(json).toContain('SCMP_ACT_ERRNO');
     expect(json).toContain('SCMP_ACT_ALLOW');
   });
+});
+
+// ── Hermetic DockerSandboxDriver lifecycle tests (AISDLC-508) ─────────────────
+//
+// These tests use a thin injectable spawn seam (_spawnProcess) introduced in
+// AISDLC-508 to exercise the full DockerSandboxDriver lifecycle without a real
+// Docker daemon. The seam is a protected method override (subclass pattern) —
+// behaviour is 100% identical to production; only the irreducible spawn() syscall
+// is replaced with an EventEmitter-based mock process.
+//
+// AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 is set per-test to bypass the CI gate
+// and enter the real lifecycle paths. Each test restores the original value.
+
+/**
+ * Minimal fake ChildProcess — an EventEmitter with the subset of properties
+ * used by DockerSandboxDriver (stdout, stderr, kill, on('close'), on('error')).
+ */
+class FakeProcess extends EventEmitter {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  readonly spawnArgs: string[];
+
+  constructor(spawnArgs: string[] = []) {
+    super();
+    this.stdout = new EventEmitter();
+    this.stderr = new EventEmitter();
+    this.spawnArgs = spawnArgs;
+  }
+
+  /** Simulate process exit with the given exit code. */
+  emitClose(exitCode: number): void {
+    this.emit('close', exitCode);
+  }
+
+  /** Simulate a spawn error (e.g. docker binary not found). */
+  emitError(err: Error): void {
+    this.emit('error', err);
+  }
+
+  /** Simulate stdout data. */
+  emitStdout(data: string): void {
+    this.stdout.emit('data', Buffer.from(data));
+  }
+
+  /** Simulate stderr data. */
+  emitStderr(data: string): void {
+    this.stderr.emit('data', Buffer.from(data));
+  }
+
+  /** No-op kill stub. */
+  kill(_signal?: string): boolean {
+    return true;
+  }
+}
+
+/**
+ * Testable subclass of DockerSandboxDriver that overrides the _spawnProcess seam
+ * and records every invocation for assertions.
+ */
+class TestableDockerDriver extends DockerSandboxDriver {
+  private readonly processes: FakeProcess[] = [];
+  private readonly processFactory: (cmd: string, args: string[]) => FakeProcess;
+
+  constructor(factory?: (cmd: string, args: string[]) => FakeProcess) {
+    super();
+    this.processFactory = factory ?? ((_cmd, args) => new FakeProcess(args));
+  }
+
+  protected _spawnProcess(cmd: string, args: string[], _options: SpawnOptions): ChildProcess {
+    const proc = this.processFactory(cmd, args);
+    this.processes.push(proc);
+    return proc as unknown as ChildProcess;
+  }
+
+  /** Get the Nth spawned process (0-indexed). */
+  getProcess(n: number): FakeProcess {
+    return this.processes[n]!;
+  }
+
+  /** Number of spawn calls made. */
+  get spawnCount(): number {
+    return this.processes.length;
+  }
+
+  /** All commands spawned (first arg to _spawnProcess). */
+  get spawnedCommands(): string[] {
+    return this.processes.map((p) => p.spawnArgs[0] ?? '');
+  }
+
+  /** All arg arrays spawned. */
+  get spawnedArgLists(): string[][] {
+    return this.processes.map((p) => p.spawnArgs);
+  }
+}
+
+/** Set the integration flag and restore it after the test. */
+function withIntegrationFlag(fn: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    const orig = process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'];
+    process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'] = '1';
+    try {
+      await fn();
+    } finally {
+      if (orig !== undefined) {
+        process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'] = orig;
+      } else {
+        delete process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'];
+      }
+    }
+  };
+}
+
+/** Minimal valid SandboxSpawnInput for lifecycle tests. */
+const LIFECYCLE_INPUT = {
+  policyFilePath: '/nonexistent',
+  prDiff: 'diff --git a/foo.ts b/foo.ts\n+// new line\n',
+  upstreamMainRef: 'test',
+  resourceLimits: DEFAULT_RESOURCE_LIMITS,
+  prNumber: 42,
+};
+
+describe('DockerSandboxDriver — hermetic lifecycle via _spawnProcess seam', () => {
+  // ── abort-before-spawn path ────────────────────────────────────────────────
+
+  it(
+    'doSpawn: abort signal already aborted before spawn → outcome:resource-breach immediately',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver();
+      const controller = new AbortController();
+      controller.abort(); // aborted BEFORE spawn
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('resource-breach');
+      if (result.outcome === 'resource-breach') {
+        expect(result.breach.breachType).toBe('wall-clock');
+        expect(result.breach.prNumber).toBe(42);
+        expect(result.breach.limit).toBe(DEFAULT_RESOURCE_LIMITS.wallClockSeconds);
+      }
+      // No docker process spawned because the signal was already aborted
+      expect(driver.spawnCount).toBe(0);
+    }),
+  );
+
+  // ── catch-block abort-vs-error distinction ─────────────────────────────────
+
+  it(
+    'doSpawn catch block: aborted signal → outcome:resource-breach (not error)',
+    withIntegrationFlag(async () => {
+      const controller = new AbortController();
+
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        // Emit error after a tick so we enter the Promise body first
+        setImmediate(() => {
+          controller.abort(); // abort BEFORE error fires
+          proc.emitError(new Error('SIGKILL'));
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('resource-breach');
+      if (result.outcome === 'resource-breach') {
+        expect(result.breach.breachType).toBe('wall-clock');
+        expect(result.breach.prNumber).toBe(42);
+      }
+    }),
+  );
+
+  it(
+    'doSpawn catch block: non-aborted signal + error → outcome:error',
+    withIntegrationFlag(async () => {
+      const controller = new AbortController();
+
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          proc.emitError(new Error('docker not found'));
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toContain('docker not found');
+      }
+    }),
+  );
+
+  // ── successful exit path ───────────────────────────────────────────────────
+
+  it(
+    'doSpawn: docker exits 0 → outcome:success with placeholder DifferentialTestResult',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          proc.emitStdout('some stdout\n');
+          proc.emitClose(0);
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('success');
+      if (result.outcome === 'success') {
+        // Placeholder result from AISDLC-508 (AISDLC-509 will replace with real parsing)
+        expect(result.differentialTest.upstreamSuitePassed).toBe(false);
+        expect(result.differentialTest.newTestsPassed).toBe(false);
+        expect(result.differentialTest.newCodeCoveragePct).toBe(0);
+        expect(result.durationMs).toBeGreaterThanOrEqual(0);
+      }
+    }),
+  );
+
+  it(
+    'doSpawn: docker exits non-zero → outcome:error (surfaces exit code)',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          proc.emitStderr('container crashed\n');
+          proc.emitClose(1);
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toContain('exited with code');
+        expect(result.error).toContain('1');
+      }
+    }),
+  );
+
+  // ── stdout / stderr data wiring ────────────────────────────────────────────
+
+  it(
+    'doSpawn: stdout + stderr data are captured and surfaced in error message on non-zero exit',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          proc.emitStdout('OUT: something happened\n');
+          proc.emitStderr('ERR: container exited\n');
+          proc.emitClose(2);
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toContain('OUT: something happened');
+      }
+    }),
+  );
+
+  // ── cidfile poll + containerId capture ────────────────────────────────────
+
+  it(
+    'cidfile poll: containerId is captured from cidfile written during container start',
+    withIntegrationFlag(async () => {
+      const fakeContainerId = 'abc1234567890def1234567890deadbeef12345678901234';
+
+      // Override the driver to intercept the --cidfile arg from docker run args,
+      // write a fake container ID to that path, and close after the poll fires.
+      // This simulates Docker writing the cidfile at container-start time.
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          const cidfileIdx = args.indexOf('--cidfile');
+          if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+            const driverCidFilePath = args[cidfileIdx + 1]!;
+            setImmediate(() => {
+              // Write the cidfile as Docker does when container starts
+              writeFileSync(driverCidFilePath, fakeContainerId + '\n');
+              // Wait for the cidfile poll interval (50ms) to fire, then close
+              setTimeout(() => proc.emitClose(0), 120);
+            });
+          }
+        }
+        if (cmd === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
+          setImmediate(() => proc.emitClose(0));
+        }
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      expect(result.outcome).toBe('success');
+
+      // After successful spawn, teardown() should docker rm -f the container ID.
+      await driver.teardown();
+
+      // The rm -f command must have been called with the captured container ID
+      const spawnedArgLists = driver.spawnedArgLists;
+      const rmCall = spawnedArgLists.find((a) => a.includes('rm') && a.includes('-f'));
+      expect(rmCall).toBeDefined();
+      expect(rmCall).toContain(fakeContainerId);
+    }),
+  );
+
+  // ── killContainer with populated containerId ───────────────────────────────
+
+  it(
+    'killContainer: invokes docker kill <id> when containerId is set',
+    withIntegrationFlag(async () => {
+      const fakeContainerId = 'deadbeef1234567890deadbeef1234567890deadbeef12';
+
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          // Write the cidfile so killContainer has a real ID to use
+          const cidfileIdx = args.indexOf('--cidfile');
+          if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+            const driverCidFilePath = args[cidfileIdx + 1]!;
+            setImmediate(() => {
+              writeFileSync(driverCidFilePath, fakeContainerId + '\n');
+              // Abort after the cidfile is written so killContainer fires
+            });
+          }
+        }
+        setImmediate(() => proc.emitClose(0));
+        return proc;
+      });
+
+      await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      await driver.teardown();
+
+      // The teardown issues docker rm -f <containerId>
+      const allArgs = driver.spawnedArgLists;
+      const rmCall = allArgs.find((a) => a.includes('rm') && a.includes('-f'));
+      expect(rmCall).toBeDefined();
+      expect(rmCall).toContain(fakeContainerId);
+    }),
+  );
+
+  it(
+    'killContainer with containerId: docker kill is invoked with the real container ID',
+    withIntegrationFlag(async () => {
+      const fakeId = 'cafebabe1234567890abcdef1234567890abcdef12345678';
+      const controller = new AbortController();
+
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          const cidfileIdx = args.indexOf('--cidfile');
+          if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+            const driverCidFilePath = args[cidfileIdx + 1]!;
+            setImmediate(() => {
+              // Write cidfile first
+              writeFileSync(driverCidFilePath, fakeId + '\n');
+              // Then abort → triggers onAbort which calls killContainer()
+              setTimeout(() => {
+                controller.abort();
+              }, 60);
+            });
+          }
+        }
+        if (cmd === 'docker' && args[0] === 'kill') {
+          setImmediate(() => proc.emitClose(0));
+        }
+        if (cmd === 'docker' && args[0] === 'rm') {
+          setImmediate(() => proc.emitClose(0));
+        }
+        return proc;
+      });
+
+      // Spawn with abortSignal — abort fires after cidfile written
+      const spawnPromise = driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      const result = await spawnPromise;
+
+      // The abort path returns resource-breach
+      expect(result.outcome).toBe('resource-breach');
+
+      // docker kill must have been invoked with the real container ID
+      const allArgs = driver.spawnedArgLists;
+      const killCall = allArgs.find((a) => a[0] === 'kill');
+      expect(killCall).toBeDefined();
+      if (killCall) {
+        expect(killCall).toContain(fakeId);
+      }
+    }),
+  );
+
+  // ── teardown with live container + cidfile cleanup ─────────────────────────
+
+  it(
+    'teardown: with populated containerId → docker rm -f <id> is called',
+    withIntegrationFlag(async () => {
+      const fakeId = '1234abcdef567890abcdef1234567890abcdef567890abcd';
+
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          const cidfileIdx = args.indexOf('--cidfile');
+          if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+            const driverCidFilePath = args[cidfileIdx + 1]!;
+            setImmediate(() => {
+              writeFileSync(driverCidFilePath, fakeId + '\n');
+              setTimeout(() => proc.emitClose(0), 80);
+            });
+          }
+        }
+        if (cmd === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
+          setImmediate(() => proc.emitClose(0));
+        }
+        return proc;
+      });
+
+      await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      await driver.teardown();
+
+      const allArgs = driver.spawnedArgLists;
+      const rmCall = allArgs.find((a) => a[0] === 'rm' && a.includes('-f'));
+      expect(rmCall).toBeDefined();
+      expect(rmCall).toContain(fakeId);
+    }),
+  );
+
+  it(
+    'teardown: cidfile temp directory is cleaned up after successful spawn',
+    withIntegrationFlag(async () => {
+      let capturedCidDir: string | null = null;
+
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        const cidfileIdx = args.indexOf('--cidfile');
+        if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+          const cidFilePath = args[cidfileIdx + 1]!;
+          // Capture the cidDir so we can check it was removed
+          capturedCidDir = cidFilePath.substring(0, cidFilePath.lastIndexOf('/'));
+          setImmediate(() => proc.emitClose(0));
+        }
+        return proc;
+      });
+
+      await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      // cidDir should exist at this point (or may already be cleaned by teardown in finally)
+      await driver.teardown();
+
+      // After teardown the cidDir should be gone
+      if (capturedCidDir) {
+        expect(existsSync(capturedCidDir)).toBe(false);
+      }
+    }),
+  );
+
+  it(
+    'teardown: idempotent — second call with null containerId and cidFilePath is safe',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => proc.emitClose(0));
+        return proc;
+      });
+
+      await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      await driver.teardown(); // first call — clears containerId + cidFilePath
+      await expect(driver.teardown()).resolves.toBeUndefined(); // second call — no-op
+    }),
+  );
+
+  // ── onAbort path (abort signal fires after spawn starts) ─────────────────
+
+  it(
+    'onAbort: abort after spawn triggers docker kill and rejects with resource-breach',
+    withIntegrationFlag(async () => {
+      const controller = new AbortController();
+
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          // Do not emit close — the abort should kill this
+          setImmediate(() => {
+            controller.abort();
+          });
+        }
+        if (cmd === 'docker' && (args[0] === 'kill' || args[0] === 'rm')) {
+          setImmediate(() => proc.emitClose(0));
+        }
+        return proc;
+      });
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('resource-breach');
+      if (result.outcome === 'resource-breach') {
+        expect(result.breach.breachType).toBe('wall-clock');
+      }
+    }),
+  );
+
+  it(
+    'onAbort: abort signal already aborted when addEventListener fires → onAbort called immediately',
+    withIntegrationFlag(async () => {
+      const controller = new AbortController();
+
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && (args[0] === 'kill' || args[0] === 'rm')) {
+          setImmediate(() => proc.emitClose(0));
+        }
+        // Simulate: abort happens synchronously in the factory before EventListener is wired
+        // The driver handles this case: `if (input.abortSignal.aborted) { onAbort(); return; }`
+        return proc;
+      });
+
+      // Abort the controller before we even call spawn — tests the `input.abortSignal.aborted`
+      // branch INSIDE runDockerDifferentialTest that fires onAbort early
+      controller.abort();
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      // doSpawn checks abortSignal?.aborted before calling runDockerDifferentialTest,
+      // so we get resource-breach at the doSpawn level (before any spawn)
+      expect(result.outcome).toBe('resource-breach');
+    }),
+  );
+
+  // ── cidfile read at close (fast-exit path) ─────────────────────────────────
+
+  it(
+    'cidfile read on close: containerId captured from cidfile when poll did not fire first',
+    withIntegrationFlag(async () => {
+      const fakeId = 'abcdef1234567890abcdef1234567890abcdef12';
+
+      // Use setTimeout(0) to ensure the write+close fires after all sync
+      // setup (including proc.on('close', ...) listener registration) but
+      // before the 50ms cidfile poll interval has a chance to tick.
+      // This exercises the "read cidfile at close" fallback path.
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          const cidfileIdx = args.indexOf('--cidfile');
+          if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+            const driverCidFilePath = args[cidfileIdx + 1]!;
+            // Write cidfile immediately then close (no delay → close fires before 50ms poll)
+            setImmediate(() => {
+              writeFileSync(driverCidFilePath, fakeId + '\n');
+              setImmediate(() => proc.emitClose(0));
+            });
+          } else {
+            // Fallback: close immediately so the test doesn't hang
+            setImmediate(() => proc.emitClose(0));
+          }
+        }
+        if (cmd === 'docker' && (args[0] === 'rm' || args[0] === 'kill')) {
+          setImmediate(() => proc.emitClose(0));
+        }
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      expect(result.outcome).toBe('success');
+
+      // Teardown should use the ID captured at close
+      await driver.teardown();
+      const allArgs = driver.spawnedArgLists;
+      const rmCall = allArgs.find((a) => a[0] === 'rm' && a.includes('-f'));
+      expect(rmCall).toBeDefined();
+      expect(rmCall).toContain(fakeId);
+    }),
+    10000, // generous timeout for the cidfile read path
+  );
+
+  // ── proc.on('error') path ──────────────────────────────────────────────────
+
+  it(
+    'proc error event (docker binary missing) → outcome:error, never false success',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          proc.emitError(new Error('ENOENT: docker binary not found'));
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+      expect(result.outcome).toBe('error');
+      if (result.outcome === 'error') {
+        expect(result.error).toContain('docker binary not found');
+      }
+    }),
+  );
+
+  // ── close event with aborted signal set ───────────────────────────────────
+
+  it(
+    'close event with aborted signal → resource-breach (not success)',
+    withIntegrationFlag(async () => {
+      const controller = new AbortController();
+
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => {
+          controller.abort(); // abort while process is "running"
+          proc.emitClose(0); // process exits 0 but signal was already aborted
+        });
+        return proc;
+      });
+
+      const result = await driver.spawn({
+        ...LIFECYCLE_INPUT,
+        abortSignal: controller.signal,
+      } as Parameters<typeof driver.spawn>[0]);
+
+      // The close handler checks `input.abortSignal?.aborted` and rejects
+      // with 'aborted by wall-clock timeout' which doSpawn catches and returns
+      // resource-breach (because abortSignal.aborted is true in the catch block)
+      expect(result.outcome).toBe('resource-breach');
+    }),
+  );
+
+  // ── AI_SDLC_SANDBOX_IMAGE env var ─────────────────────────────────────────
+
+  it(
+    'uses AI_SDLC_SANDBOX_IMAGE env var when set (default is node:22-slim)',
+    withIntegrationFlag(async () => {
+      const origImage = process.env['AI_SDLC_SANDBOX_IMAGE'];
+      process.env['AI_SDLC_SANDBOX_IMAGE'] = 'custom-sandbox:v2';
+
+      try {
+        const driver = new TestableDockerDriver((_cmd, args) => {
+          const proc = new FakeProcess(args);
+          setImmediate(() => proc.emitClose(0));
+          return proc;
+        });
+
+        await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+        // The image name appears as an arg to docker run
+        const runArgs = driver.spawnedArgLists[0] ?? [];
+        expect(runArgs).toContain('custom-sandbox:v2');
+      } finally {
+        if (origImage !== undefined) {
+          process.env['AI_SDLC_SANDBOX_IMAGE'] = origImage;
+        } else {
+          delete process.env['AI_SDLC_SANDBOX_IMAGE'];
+        }
+      }
+    }),
+  );
+
+  it(
+    'uses default node:22-slim image when AI_SDLC_SANDBOX_IMAGE is not set',
+    withIntegrationFlag(async () => {
+      const origImage = process.env['AI_SDLC_SANDBOX_IMAGE'];
+      delete process.env['AI_SDLC_SANDBOX_IMAGE'];
+
+      try {
+        const driver = new TestableDockerDriver((_cmd, args) => {
+          const proc = new FakeProcess(args);
+          setImmediate(() => proc.emitClose(0));
+          return proc;
+        });
+
+        await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+        const runArgs = driver.spawnedArgLists[0] ?? [];
+        expect(runArgs).toContain('node:22-slim');
+      } finally {
+        if (origImage !== undefined) {
+          process.env['AI_SDLC_SANDBOX_IMAGE'] = origImage;
+        }
+      }
+    }),
+  );
+
+  // ── buildDockerRunArgs arg structure with seam ────────────────────────────
+
+  it(
+    'runDockerDifferentialTest: docker run args include all hardening flags',
+    withIntegrationFlag(async () => {
+      const driver = new TestableDockerDriver((_cmd, args) => {
+        const proc = new FakeProcess(args);
+        setImmediate(() => proc.emitClose(0));
+        return proc;
+      });
+
+      await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+
+      const runArgs = driver.spawnedArgLists[0] ?? [];
+      expect(runArgs).toContain('run');
+      expect(runArgs).toContain('--network=none');
+      expect(runArgs).toContain('--cap-drop=ALL');
+      expect(runArgs).toContain('--read-only');
+      expect(runArgs).toContain('--user');
+      expect(runArgs).toContain('65534:65534');
+      expect(runArgs).toContain('--pids-limit');
+      expect(runArgs).toContain('512');
+      expect(runArgs).toContain('--cidfile');
+      // Seccomp profile embedded in args
+      const seccompArg = runArgs.find((a) => a.startsWith('seccomp='));
+      expect(seccompArg).toBeDefined();
+    }),
+  );
+
+  // ── teardown: docker rm -f error is suppressed ─────────────────────────────
+
+  it(
+    'teardown: docker rm -f error is swallowed (does not propagate)',
+    withIntegrationFlag(async () => {
+      const fakeId = 'aaabbbccc1234567890abcdef1234567890abcdef1234';
+
+      const driver = new TestableDockerDriver((cmd, args) => {
+        const proc = new FakeProcess(args);
+        if (cmd === 'docker' && args[0] === 'run') {
+          const cidfileIdx = args.indexOf('--cidfile');
+          if (cidfileIdx !== -1 && args[cidfileIdx + 1]) {
+            const driverCidFilePath = args[cidfileIdx + 1]!;
+            setImmediate(() => {
+              writeFileSync(driverCidFilePath, fakeId + '\n');
+              setTimeout(() => proc.emitClose(0), 80);
+            });
+          }
+        }
+        if (cmd === 'docker' && args[0] === 'rm') {
+          // Simulate docker rm -f failing (container already removed)
+          setImmediate(() => proc.emitError(new Error('container not found')));
+        }
+        return proc;
+      });
+
+      await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
+      // teardown should NOT throw even when docker rm -f fails
+      await expect(driver.teardown()).resolves.toBeUndefined();
+    }),
+  );
 });

@@ -55,7 +55,7 @@
  */
 
 import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -826,6 +826,20 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
    */
   private cidFilePath: string | null = null;
 
+  /**
+   * Thin spawn seam — wraps `child_process.spawn` so tests can override it
+   * without a real Docker daemon. Override in a subclass or swap via spawnFn
+   * injected in tests.
+   *
+   * All behaviour (arg building, cidfile poll, abort wiring, kill, teardown,
+   * output parse) is exercised by tests; only this line is integration-gated.
+   *
+   * @internal — exported for hermetic testing only; not part of the public API.
+   */
+  protected _spawnProcess(cmd: string, args: string[], options: SpawnOptions): ChildProcess {
+    return spawn(cmd, args, options);
+  }
+
   protected async doSpawn(
     input: SandboxSpawnInput & { abortSignal?: AbortSignal },
   ): Promise<SandboxResult> {
@@ -919,7 +933,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     });
 
     return new Promise<DifferentialTestResult>((resolve, reject) => {
-      const proc = spawn('docker', args, {
+      const proc = this._spawnProcess('docker', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
         // Pass a clean environment — never inherit the host env wholesale
         env: {
@@ -1037,7 +1051,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     if (!this.containerId) return;
     const id = this.containerId;
     await new Promise<void>((resolve) => {
-      const proc = spawn('docker', ['kill', id], { stdio: 'ignore' });
+      const proc = this._spawnProcess('docker', ['kill', id], { stdio: 'ignore' });
       proc.on('close', () => resolve());
       proc.on('error', () => resolve());
     });
@@ -1057,7 +1071,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
 
     if (id) {
       await new Promise<void>((resolve) => {
-        const proc = spawn('docker', ['rm', '-f', id], { stdio: 'ignore' });
+        const proc = this._spawnProcess('docker', ['rm', '-f', id], { stdio: 'ignore' });
         proc.on('close', () => resolve());
         proc.on('error', () => resolve());
       });
