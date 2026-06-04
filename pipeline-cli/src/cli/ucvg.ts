@@ -34,7 +34,15 @@ import { classifyTrust } from '../pipeline/trust-classifier.js';
 import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
 import type { ChangedFile } from '../pipeline/ast-gate.js';
 import { loadSandboxConfig, runSandbox } from '../pipeline/sandbox-runner.js';
+import type { DifferentialTestResult } from '../pipeline/sandbox-runner.js';
 import { runCleanRoomSigner, unsignedReportPath } from '../pipeline/clean-room-signer.js';
+import {
+  runReviewerMatrix,
+  FakeModelClient,
+  InferenceProxyClient,
+  type ModelClient,
+} from '../pipeline/reviewer-runner.js';
+import type { ReviewerVerdict } from '../pipeline/report-validator.js';
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
 
@@ -213,12 +221,33 @@ async function runSandboxAndReview(args: {
   });
 
   // Extract differential test result from sandbox output.
+  // FIX: reads r['differentialTest'] (correct key for outcome:'success'),
+  // falling back to r['differentialTestResult'] for legacy mock shapes.
   const differentialTest = extractDifferentialTestResult(sandboxResult);
 
-  // Emit the unsigned report artifact with the sandbox results.
-  // Stage 3 reviewer matrix runs inside the sandbox and produces verdict fields.
-  // We build the report from the sandbox result data.
-  const report = buildUnsignedReport(args.prNumber, args.headSha, args.baseSha, differentialTest);
+  // Stage 3 — Run the 3-reviewer matrix against the hardened-framed diff.
+  // The modelClient is injectable via the _modelClientFactory seam for tests.
+  // In production (AI_SDLC_SANDBOX_INTEGRATION_TESTS=1), this should be wired
+  // to an InferenceProxyClient pointed at inference.local.
+  // In CI (no real sandbox), the FakeModelClient is used.
+  process.stderr.write('[stage-3] running reviewer matrix...\n');
+  const modelClient = resolveModelClient(args.workDir);
+  const reviewerResult = await runReviewerMatrix({
+    prDiff,
+    prNumber: args.prNumber,
+    differentialTest,
+    modelClient,
+  });
+
+  // Emit the unsigned report artifact with the real reviewer verdicts.
+  const report = buildUnsignedReport(
+    args.prNumber,
+    args.headSha,
+    args.baseSha,
+    differentialTest,
+    reviewerResult.verdicts,
+    reviewerResult.consensus,
+  );
 
   const reportPath = unsignedReportPath(args.workDir, args.prNumber);
   const reportDir = join(args.workDir, '.ai-sdlc', 'ucvg', 'reports');
@@ -359,26 +388,46 @@ function computePrDiff(prContentDir: string, _baseSha: string, _headSha: string)
   return `[diff computed from ${prContentDir} for ${_baseSha}..${_headSha}]`;
 }
 
-function extractDifferentialTestResult(sandboxResult: unknown): {
-  upstreamSuitePassed: boolean;
-  newTestsPassed: boolean;
-  newCodeCoveragePct: number;
-} {
+function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTestResult {
   // Extract differential test data from the sandbox result.
-  // The SandboxResult discriminated union may contain test data.
+  //
+  // FIX (AISDLC-511 — carried-over key-mismatch from 509 security review):
+  // The SandboxResult discriminated union nests the results under `differentialTest`
+  // (not `differentialTestResult`) when `outcome === 'success'`. The previous code
+  // read `r['differentialTestResult']` which is always undefined for real sandbox
+  // results — causing the fail-closed default to fire every time, so real
+  // differential test results never reached the report.
+  //
+  // Correct key for outcome:'success': r['differentialTest'] (per SandboxResult type).
+  // We still check `differentialTestResult` as a secondary fallback for any callers
+  // that might use the legacy key (e.g. mock objects in tests written against the old API).
   const r = sandboxResult as Record<string, unknown>;
-  if (r && typeof r === 'object') {
-    const dt = r['differentialTestResult'] as Record<string, unknown> | undefined;
-    if (dt) {
-      return {
-        upstreamSuitePassed: Boolean(dt['upstreamSuitePassed']),
-        newTestsPassed: Boolean(dt['newTestsPassed']),
-        newCodeCoveragePct:
-          typeof dt['newCodeCoveragePct'] === 'number' ? dt['newCodeCoveragePct'] : 0,
-      };
-    }
+  const FAILURE_RESULT: DifferentialTestResult = {
+    upstreamSuitePassed: false,
+    upstreamSuiteOutput: '',
+    newTestsPassed: false,
+    newTestsOutput: '',
+    newCodeCoveragePct: 0,
+  };
+  if (!r || typeof r !== 'object') return FAILURE_RESULT;
+
+  // Primary key (success outcome shape): r.differentialTest
+  const dt = (r['differentialTest'] ?? r['differentialTestResult']) as
+    | Record<string, unknown>
+    | undefined;
+
+  if (dt && typeof dt === 'object') {
+    return {
+      upstreamSuitePassed: Boolean(dt['upstreamSuitePassed']),
+      upstreamSuiteOutput:
+        typeof dt['upstreamSuiteOutput'] === 'string' ? dt['upstreamSuiteOutput'] : '',
+      newTestsPassed: Boolean(dt['newTestsPassed']),
+      newTestsOutput: typeof dt['newTestsOutput'] === 'string' ? dt['newTestsOutput'] : '',
+      newCodeCoveragePct:
+        typeof dt['newCodeCoveragePct'] === 'number' ? dt['newCodeCoveragePct'] : 0,
+    };
   }
-  return { upstreamSuitePassed: false, newTestsPassed: false, newCodeCoveragePct: 0 };
+  return FAILURE_RESULT;
 }
 
 function buildUnsignedReport(
@@ -390,7 +439,25 @@ function buildUnsignedReport(
     newTestsPassed: boolean;
     newCodeCoveragePct: number;
   },
+  reviewers?: {
+    code: ReviewerVerdict;
+    test: ReviewerVerdict;
+    security: ReviewerVerdict;
+  },
+  consensus?: {
+    approved: boolean;
+    blockingFindings: number;
+  },
 ): unknown {
+  // Use real reviewer verdicts when provided; fall back to fail-closed defaults
+  // only when reviewers were not run (e.g. sandbox error before Stage 3).
+  const reviewerVerdicts = reviewers ?? {
+    code: { approved: false, findings: [], promptInjectionDetected: false },
+    test: { approved: false, findings: [], promptInjectionDetected: false },
+    security: { approved: false, findings: [], promptInjectionDetected: false },
+  };
+  const consensusResult = consensus ?? { approved: false, blockingFindings: 0 };
+
   return {
     schemaVersion: 'untrusted-pr-report.v1',
     prNumber,
@@ -405,16 +472,19 @@ function buildUnsignedReport(
       outcome: 'pass',
       offendingPaths: [],
     },
-    differentialTest,
-    reviewers: {
-      code: { approved: false, findings: [], promptInjectionDetected: false },
-      test: { approved: false, findings: [], promptInjectionDetected: false },
-      security: { approved: false, findings: [], promptInjectionDetected: false },
+    // Project to exactly the 3 schema fields. extractDifferentialTestResult
+    // returns the full DifferentialTestResult (which also carries the raw
+    // upstreamSuiteOutput / newTestsOutput sandbox stdout used only as reviewer
+    // context). The signed report's differentialTest sub-schema is `.strict()`
+    // and lists only these three summary fields — writing the raw output strings
+    // through would make the Stage-4 clean-room signer reject the report.
+    differentialTest: {
+      upstreamSuitePassed: differentialTest.upstreamSuitePassed,
+      newTestsPassed: differentialTest.newTestsPassed,
+      newCodeCoveragePct: differentialTest.newCodeCoveragePct,
     },
-    consensus: {
-      approved: false,
-      blockingFindings: 0,
-    },
+    reviewers: reviewerVerdicts,
+    consensus: consensusResult,
   };
 }
 
@@ -448,6 +518,91 @@ function buildDegradedReport(prNumber: number, headSha: string, baseSha: string)
       blockingFindings: 0,
     },
   };
+}
+
+// ── Model client resolution ───────────────────────────────────────────────────
+
+/**
+ * Injectable model client factory seam container.
+ *
+ * Tests set `_ucvgSeams.modelClientFactory` to inject a `FakeModelClient`
+ * for hermetic coverage of the reviewer orchestration path without spawning
+ * a real proxy or making real model calls.
+ *
+ * Using a mutable object property (rather than a module `let` binding) ensures
+ * the seam is writable in compiled ES modules where named exports are getter-only.
+ *
+ * @internal — for test injection only.
+ */
+export const _ucvgSeams: {
+  modelClientFactory: ((workDir: string) => ModelClient) | null;
+} = { modelClientFactory: null };
+
+/**
+ * Resolve the model client to use for reviewer invocations.
+ *
+ * Resolution order:
+ *  1. Test injection via `_modelClientFactory` (hermetic tests).
+ *  2. Integration mode (`AI_SDLC_SANDBOX_INTEGRATION_TESTS=1`): requires
+ *     `INFERENCE_PROXY_HOST`, `INFERENCE_PROXY_PORT`, `INFERENCE_PROXY_SESSION`
+ *     env vars (set by the sandbox orchestrator after starting the proxy).
+ *     Returns an `InferenceProxyClient` pointed at the live proxy.
+ *  3. Default (CI without sandbox): returns a `FakeModelClient` configured
+ *     as fail-closed (all reviewers return `approved: false`). The CI path
+ *     never holds real model access — the integration gap is documented.
+ *
+ * Real in-sandbox model invocation requires:
+ *  - `AI_SDLC_SANDBOX_INTEGRATION_TESTS=1`
+ *  - A running `InferenceProxy` (from AISDLC-510) with the session env vars set
+ *  - A real Docker container to host the reviewer process
+ * See: pipeline-cli/src/pipeline/inference-proxy.ts
+ */
+export function resolveModelClient(_workDir: string): ModelClient {
+  // 1. Test injection seam
+  if (_ucvgSeams.modelClientFactory) {
+    return _ucvgSeams.modelClientFactory(_workDir);
+  }
+
+  // 2. Integration mode with real proxy
+  if (process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'] === '1') {
+    const host = process.env['INFERENCE_PROXY_HOST'];
+    const port = parseInt(process.env['INFERENCE_PROXY_PORT'] ?? '0', 10);
+    const sessionToken = process.env['INFERENCE_PROXY_SESSION'];
+
+    if (host && port > 0 && sessionToken) {
+      return new InferenceProxyClient({ host, port, sessionToken });
+    }
+
+    // Integration mode requested but proxy env vars not set — log and fall through
+    process.stderr.write(
+      '[reviewer-runner] AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 but proxy env vars ' +
+        '(INFERENCE_PROXY_HOST, INFERENCE_PROXY_PORT, INFERENCE_PROXY_SESSION) are not set. ' +
+        'Falling back to fail-closed FakeModelClient. ' +
+        'Set these vars from the InferenceProxy start() result to enable real model calls.\n',
+    );
+  }
+
+  // 3. CI default — fail-closed FakeModelClient (no real model access)
+  // This is the documented integration gap: real model invocation requires
+  // AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 + a running InferenceProxy.
+  process.stderr.write(
+    '[reviewer-runner] using fail-closed FakeModelClient (no real model access in CI). ' +
+      'Set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 + proxy env vars for real model calls.\n',
+  );
+  return new FakeModelClient(
+    JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'major',
+          message:
+            'reviewer not available: sandbox integration tests disabled. ' +
+            'Set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 and configure the inference proxy.',
+        },
+      ],
+      promptInjectionDetected: false,
+    }),
+  );
 }
 
 // ── CLI entry point ───────────────────────────────────────────────────────────

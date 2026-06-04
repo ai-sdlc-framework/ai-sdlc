@@ -37,7 +37,8 @@ import * as trustClassifierMod from '../pipeline/trust-classifier.js';
 import * as astGateMod from '../pipeline/ast-gate.js';
 import * as sandboxRunnerMod from '../pipeline/sandbox-runner.js';
 import * as cleanRoomSignerMod from '../pipeline/clean-room-signer.js';
-import { runUcvgCli } from './ucvg.js';
+import { runUcvgCli, _ucvgSeams } from './ucvg.js';
+import { FakeModelClient } from '../pipeline/reviewer-runner.js';
 
 // ── isUntrustedPrGateEnabled — MINOR fix #9 ──────────────────────────────────
 
@@ -113,6 +114,18 @@ describe('isUntrustedPrGateEnabled', () => {
 // ── upstreamMainRef=baseSha fix — MAJOR fix #7 ───────────────────────────────
 
 describe('runSandboxAndReview — upstreamMainRef is baseSha (MAJOR fix #7)', () => {
+  beforeEach(() => {
+    // Inject a fail-closed FakeModelClient so runReviewerMatrix doesn't need a real proxy
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: false, findings: [], promptInjectionDetected: false }),
+      );
+  });
+
+  afterEach(() => {
+    _ucvgSeams.modelClientFactory = null;
+  });
+
   it('passes baseSha (not headSha) as upstreamMainRef to runSandbox', async () => {
     // Use vi.mocked() on the auto-mocked module (vi.mock at top hoists the mock).
     const mockResult = { outcome: 'error' as const, error: 'mock-sandbox-not-available' };
@@ -572,10 +585,16 @@ describe('runSandboxAndReview — sandbox-run subcommand additional paths', () =
     vi.mocked(sandboxRunnerMod.loadSandboxConfig).mockReset();
     vi.mocked(sandboxRunnerMod.runSandbox).mockReset();
     vi.mocked(sandboxRunnerMod.loadSandboxConfig).mockReturnValue(defaultSandboxConfig);
+    // Inject a fake model client so reviewer matrix runs without a real proxy
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: true, findings: [], promptInjectionDetected: false }),
+      );
   });
   afterEach(() => {
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
+    _ucvgSeams.modelClientFactory = null;
   });
 
   it('emits ok:true and writes unsigned report on success result', async () => {
@@ -937,10 +956,15 @@ describe('computePrDiff helper (via sandbox-run path)', () => {
     vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockReturnValue(
       join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '1.unsigned.json'),
     );
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: false, findings: [], promptInjectionDetected: false }),
+      );
   });
   afterEach(() => {
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
+    _ucvgSeams.modelClientFactory = null;
   });
 
   it('produces a non-empty diff string describing pr-content dir and SHAs', async () => {
@@ -986,29 +1010,30 @@ describe('extractDifferentialTestResult helper (via sandbox-run success path)', 
     vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockImplementation((_workDir, prNumber) =>
       join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', `${prNumber}.unsigned.json`),
     );
+    // Inject fake model client — reviewer matrix runs during sandbox-run
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: true, findings: [], promptInjectionDetected: false }),
+      );
   });
   afterEach(() => {
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
+    _ucvgSeams.modelClientFactory = null;
   });
 
-  it('extracts differentialTest fields from sandbox result with differentialTestResult key', async () => {
-    // Note: extractDifferentialTestResult() in ucvg.ts reads r['differentialTestResult']
-    // (with 'Result' suffix). The SandboxResult type uses 'differentialTest', but the
-    // extraction function looks for the longer key. We pass a mock with that key to test
-    // the extraction path that returns non-default values.
+  it('extracts differentialTest fields from sandbox result with differentialTest key (AISDLC-511 fix)', async () => {
+    // AISDLC-511 key-mismatch fix: extractDifferentialTestResult() now reads r['differentialTest']
+    // (the correct key per SandboxResult success shape), falling back to r['differentialTestResult']
+    // for legacy mocks. This test verifies the primary (correct) key is read.
     vi.mocked(sandboxRunnerMod.runSandbox).mockResolvedValue({
       outcome: 'success',
-      differentialTestResult: {
-        upstreamSuitePassed: true,
-        newTestsPassed: true,
-        newCodeCoveragePct: 95.5,
-      },
       differentialTest: {
         upstreamSuitePassed: true,
+        upstreamSuiteOutput: 'upstream OK',
         newTestsPassed: true,
+        newTestsOutput: 'head OK',
         newCodeCoveragePct: 95.5,
-        durationMs: 8000,
       },
       durationMs: 8000,
     } as unknown as Awaited<ReturnType<typeof sandboxRunnerMod.runSandbox>>);
@@ -1035,6 +1060,18 @@ describe('extractDifferentialTestResult helper (via sandbox-run success path)', 
     expect(dt['upstreamSuitePassed']).toBe(true);
     expect(dt['newTestsPassed']).toBe(true);
     expect(dt['newCodeCoveragePct']).toBe(95.5);
+    // Regression (AISDLC-511 reconcile): the raw sandbox stdout
+    // (upstreamSuiteOutput / newTestsOutput) must NOT be written into the signed
+    // report. The report's differentialTest sub-schema is `.strict()` with only
+    // these three summary fields — leaking the extra keys would make the Stage-4
+    // clean-room signer reject every real report with a Zod parse error.
+    expect(Object.keys(dt).sort()).toEqual([
+      'newCodeCoveragePct',
+      'newTestsPassed',
+      'upstreamSuitePassed',
+    ]);
+    expect(dt['upstreamSuiteOutput']).toBeUndefined();
+    expect(dt['newTestsOutput']).toBeUndefined();
   });
 
   it('defaults to false/0 when sandbox result has no differentialTestResult field', async () => {
@@ -1082,10 +1119,16 @@ describe('buildUnsignedReport helper (via sandbox-run written report)', () => {
     vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockImplementation((_workDir, prNumber) =>
       join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', `${prNumber}.unsigned.json`),
     );
+    // Inject fake model client
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: false, findings: [], promptInjectionDetected: false }),
+      );
   });
   afterEach(() => {
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
+    _ucvgSeams.modelClientFactory = null;
   });
 
   it('written report has correct schemaVersion, prNumber, headSha, baseSha', async () => {
@@ -1222,10 +1265,15 @@ describe('no /tmp/.ai-sdlc pollution', () => {
     vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockImplementation((_workDir, prNumber) =>
       join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', `${prNumber}.unsigned.json`),
     );
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: false, findings: [], promptInjectionDetected: false }),
+      );
   });
   afterEach(() => {
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
+    _ucvgSeams.modelClientFactory = null;
   });
 
   it('does not write to /tmp/.ai-sdlc when using isolated mkdtempSync dirs', async () => {
