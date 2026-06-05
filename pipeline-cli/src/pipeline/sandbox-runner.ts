@@ -293,6 +293,17 @@ export interface SandboxSpawnInput {
    * never appears here.
    */
   sandboxEnv?: Record<string, string>;
+  /**
+   * Extra `docker run` arguments prepended before the image name.
+   *
+   * RFC-0043 AQ2: pass `buildProxyHostArg(hostIp)` here to expose
+   * `inference.local` to the container so it can reach the host-side proxy
+   * despite `--network=none`. Only the proxy TCP path is opened.
+   *
+   * Used by `DockerSandboxDriver` when building the docker run command.
+   * Drivers other than Docker ignore this field.
+   */
+  extraDockerArgs?: string[];
 }
 
 /**
@@ -968,13 +979,16 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       resourceLimits.perTestTimeoutSeconds,
     );
 
-    // Build the docker run arguments
+    // Build the docker run arguments.
+    // extraDockerArgs carries AQ2 proxy host entries (e.g. --add-host=inference.local:<ip>)
+    // so the container can reach the host-side inference proxy despite --network=none.
     const args = buildDockerRunArgs({
       resourceLimits,
       seccompProfileJson: seccompJson,
       cidFilePath,
       image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? 'node:22-slim',
       command: ['/bin/sh', '-c', inContainerScript],
+      extraDockerArgs: input.extraDockerArgs,
     });
 
     // Base64-encode the PR diff to pass it safely as an environment variable.
@@ -1544,6 +1558,13 @@ export interface DockerRunArgsInput {
    * `killContainer()` and `teardown()` can kill/rm the real container ID.
    */
   cidFilePath: string;
+  /**
+   * Extra `docker run` arguments prepended before the image name.
+   * Used to inject `--add-host=inference.local:<host-ip>` so the sandbox
+   * can reach the inference proxy on the host (RFC-0043 AQ2 wiring).
+   * Built by `buildProxyHostArg` from inference-proxy.ts.
+   */
+  extraDockerArgs?: string[];
 }
 
 /**
@@ -1568,7 +1589,7 @@ export interface DockerRunArgsInput {
  *   --security-opt no-new-privileges
  */
 export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
-  const { resourceLimits, seccompProfileJson, cidFilePath, image, command } = opts;
+  const { resourceLimits, seccompProfileJson, cidFilePath, image, command, extraDockerArgs } = opts;
 
   return [
     'run',
@@ -1594,6 +1615,9 @@ export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
     `seccomp=${seccompProfileJson}`,
     '--security-opt',
     'no-new-privileges',
+    // Extra args (e.g. --add-host=inference.local:host-gateway) injected before image name.
+    // These allow the container to reach the host-side inference proxy despite --network=none.
+    ...(extraDockerArgs ?? []),
     image,
     ...command,
   ];
@@ -1904,6 +1928,27 @@ export interface RunSandboxInput {
   driverOverride?: SandboxDriver;
   /** Optional policy file path override (for tests). */
   policyFilePath?: string;
+  /**
+   * Environment variables to inject into the sandbox container.
+   *
+   * RFC-0043 AQ2: pass `buildReviewerProxyEnv(...)` here (port + session token)
+   * so the in-container process can reach the host-side `inference.local` proxy.
+   *
+   * SECURITY CONSTRAINT: These MUST NOT include any of the withheld credentials
+   * (ANTHROPIC_API_KEY, AI_SDLC_SIGNING_KEY, GITHUB_TOKEN, NPM_TOKEN, AI_SDLC_PAT).
+   * `validateSandboxEnv` enforces this before the driver receives them.
+   */
+  sandboxEnv?: Record<string, string>;
+  /**
+   * Extra `docker run` arguments to pass before the image name.
+   *
+   * RFC-0043 AQ2: pass `buildProxyHostArg(hostIp)` here to inject
+   * `--add-host=inference.local:<host-ip>` so the sandbox can route TCP
+   * connections to `inference.local` despite `--network=none`.
+   *
+   * Only the loopback-to-proxy path is opened; all other egress remains denied.
+   */
+  proxyHostArgs?: string[];
 }
 
 /**
@@ -1944,8 +1989,13 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
     upstreamMainRef: input.upstreamMainRef,
     resourceLimits,
     prNumber: input.prNumber,
-    // sandboxEnv is explicitly left undefined — no withheld credentials.
-    // The inference proxy injects the provider API key at inference.local.
+    // sandboxEnv carries the inference-proxy discovery vars (host, port, session token)
+    // when AQ2 wiring is active. The provider API credential is NEVER included here —
+    // it lives only in the host-side InferenceProxy process.
+    sandboxEnv: input.sandboxEnv,
+    // proxyHostArgs: e.g. ['--add-host', 'inference.local:host-gateway'] — lets the
+    // container reach the host-side proxy despite --network=none.
+    extraDockerArgs: input.proxyHostArgs,
   };
 
   // Hard-abort enforcement via Promise.race.

@@ -390,17 +390,22 @@ jobs:
           # Credential withholding invariant: signing-key.pem, write-scoped GITHUB_TOKEN,
           # NPM_TOKEN, AI_SDLC_PAT are NEVER injected into the sandbox environment.
           # They are only available in the Stage 4 clean-room job (fork-PR safety guard #5).
+          #
+          # ANTHROPIC_API_KEY is passed to THIS step (not the container) so the host-side
+          # InferenceProxy can hold the credential and inject it out-of-process.
+          # The sandbox container never receives ANTHROPIC_API_KEY directly (AQ2 invariant).
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Bug D fix: AI_SDLC_SANDBOX_INTEGRATION_TESTS is NOT set here.
-          # Setting it caused resolveModelClient() to hard-error when the inference
-          # proxy env vars (INFERENCE_PROXY_HOST/PORT/SESSION) are absent, which they
-          # always are in CI before a running InferenceProxy. The hard-error fired
-          # before the report was written, so report_artifact was always empty.
-          # The DockerSandboxDriver runs differential tests inside the container;
-          # the reviewer matrix outside the container uses the FakeModelClient
-          # (fail-closed) by default, which is the correct CI behavior.
-          # Only set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 when a real InferenceProxy
-          # is started and the proxy env vars are available (operator-gated end-to-end).
+          # AQ2 wiring: when ANTHROPIC_API_KEY is configured, set integration mode so
+          # runSandboxAndReview() starts the InferenceProxy and routes reviewers through
+          # it (AC#1 + AC#2). When the credential is absent, the proxy start is skipped
+          # and the fail-closed FakeModelClient path is used instead.
+          #
+          # The resolveModelClient() hard-error on missing proxy vars is bypassed because
+          # the proxy start sets INFERENCE_PROXY_HOST/PORT/SESSION in the process env
+          # BEFORE resolveModelClient() is called — the vars are always present when the
+          # proxy is running. If the proxy fails to start, the code falls back to
+          # FakeModelClient (not hard-error) and clears the integration flag vars.
+          AI_SDLC_SANDBOX_INTEGRATION_TESTS: ${{ secrets.ANTHROPIC_API_KEY != '' && '1' || '' }}
         run: |
           # Bug E fix: set -o pipefail so a sandbox-run failure propagates through the
           # tee pipe. Without pipefail, `node ... | tee` returns tee's exit code (0),

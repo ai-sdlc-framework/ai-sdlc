@@ -42,6 +42,12 @@ import {
   InferenceProxyClient,
   type ModelClient,
 } from '../pipeline/reviewer-runner.js';
+import {
+  createInferenceProxy,
+  buildReviewerProxyEnv,
+  buildProxyHostArg,
+  type InferenceProxy,
+} from '../pipeline/inference-proxy.js';
 import type { ReviewerVerdict } from '../pipeline/report-validator.js';
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
@@ -208,55 +214,130 @@ async function runSandboxAndReview(args: {
   // The diff is derived from git objects; no fork-controlled script is executed.
   const prDiff = computePrDiff(args.prContentDir, args.baseSha, args.headSha);
 
-  // Run Stage 2 differential testing inside the OpenShell sandbox.
-  // MAJOR fix #7: upstreamMainRef must be baseSha (the target-branch base), NOT headSha.
-  // Differential testing compares PR head against the target-branch base, not itself.
-  process.stderr.write('[stage-2] running differential tests in OpenShell sandbox...\n');
-  const sandboxResult = await runSandbox({
-    prNumber: args.prNumber,
-    prDiff,
-    upstreamMainRef: args.baseSha,
-    config: sandboxConfig,
-    workDir: args.workDir,
-  });
+  // ── RFC-0043 AQ2 — InferenceProxy lifecycle ────────────────────────────────
+  //
+  // In integration mode with a real credential, start the host-side inference
+  // proxy BEFORE the sandbox so the container can reach `inference.local`.
+  // The proxy holds the credential and injects it out-of-process; the sandbox
+  // container never receives ANTHROPIC_API_KEY directly.
+  //
+  // In CI (no credential / no integration flag), proxy is skipped and the
+  // FakeModelClient fail-closed path is used instead (existing behaviour).
+  let proxy: InferenceProxy | null = null;
+  let sandboxEnv: Record<string, string> | undefined;
+  let proxyHostArgs: string[] | undefined;
 
-  // Extract differential test result from sandbox output.
-  // FIX: reads r['differentialTest'] (correct key for outcome:'success'),
-  // falling back to r['differentialTestResult'] for legacy mock shapes.
-  const differentialTest = extractDifferentialTestResult(sandboxResult);
+  const isIntegrationMode = process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'] === '1';
+  const credential = process.env['ANTHROPIC_API_KEY'];
 
-  // Stage 3 — Run the 3-reviewer matrix against the hardened-framed diff.
-  // The modelClient is injectable via the _modelClientFactory seam for tests.
-  // In production (AI_SDLC_SANDBOX_INTEGRATION_TESTS=1), this should be wired
-  // to an InferenceProxyClient pointed at inference.local.
-  // In CI (no real sandbox), the FakeModelClient is used.
-  process.stderr.write('[stage-3] running reviewer matrix...\n');
-  const modelClient = resolveModelClient(args.workDir);
-  const reviewerResult = await runReviewerMatrix({
-    prDiff,
-    prNumber: args.prNumber,
-    differentialTest,
-    modelClient,
-  });
+  if (isIntegrationMode && credential) {
+    process.stderr.write('[stage-2] AQ2 wiring: starting InferenceProxy for PR...\n');
+    try {
+      const proxyResult = await _ucvgSeams.inferenceProxyFactory({
+        prNumber: args.prNumber,
+        credential,
+        // Bind on all interfaces so the Docker container can reach the host.
+        // Docker Desktop (macOS): host-gateway alias. Linux: docker0 bridge.
+        // --network=none + --add-host=inference.local:<host-ip> opens only this path.
+        bindAddress: '0.0.0.0',
+        useHttp: true,
+      });
+      proxy = proxyResult.proxy;
+      const { port, sessionToken } = proxyResult;
 
-  // Emit the unsigned report artifact with the real reviewer verdicts.
-  const report = buildUnsignedReport(
-    args.prNumber,
-    args.headSha,
-    args.baseSha,
-    differentialTest,
-    reviewerResult.verdicts,
-    reviewerResult.consensus,
-  );
+      process.stderr.write(
+        `[stage-2] InferenceProxy started on port ${String(port)} for PR #${String(args.prNumber)}\n`,
+      );
 
-  const reportPath = unsignedReportPath(args.workDir, args.prNumber);
-  const reportDir = join(args.workDir, '.ai-sdlc', 'ucvg', 'reports');
-  if (!existsSync(reportDir)) {
-    mkdirSync(reportDir, { recursive: true });
+      // Build the sandbox env (proxy discovery vars, NO credential) and docker host arg.
+      // The container reads INFERENCE_PROXY_HOST/PORT/SESSION to reach the proxy.
+      sandboxEnv = buildReviewerProxyEnv({ port, sessionToken });
+      proxyHostArgs = buildProxyHostArg();
+
+      // Wire the proxy vars into the current process env so resolveModelClient()
+      // builds an InferenceProxyClient pointing at the live proxy (AC#2).
+      // Uses '127.0.0.1' (loopback) because reviewers run on the host side here;
+      // only the in-container differential test process uses 'inference.local'.
+      process.env['INFERENCE_PROXY_HOST'] = '127.0.0.1';
+      process.env['INFERENCE_PROXY_PORT'] = String(port);
+      process.env['INFERENCE_PROXY_SESSION'] = sessionToken;
+    } catch (err) {
+      process.stderr.write(
+        `[stage-2] WARNING: InferenceProxy failed to start — falling back to FakeModelClient: ${(err as Error).message}\n`,
+      );
+      // Proxy failed to start — clear integration flag so resolveModelClient
+      // falls back to the CI FakeModelClient path (fail-closed, not hard-error).
+      delete process.env['INFERENCE_PROXY_HOST'];
+      delete process.env['INFERENCE_PROXY_PORT'];
+      delete process.env['INFERENCE_PROXY_SESSION'];
+    }
   }
-  writeFileSync(reportPath, JSON.stringify(report, null, 2));
-  process.stderr.write(`[stage-2/3] unsigned report written: ${reportPath}\n`);
-  emit({ ok: true, reportPath });
+
+  try {
+    // Run Stage 2 differential testing inside the Docker sandbox.
+    // MAJOR fix #7: upstreamMainRef must be baseSha (the target-branch base), NOT headSha.
+    // Differential testing compares PR head against the target-branch base, not itself.
+    process.stderr.write('[stage-2] running differential tests in OpenShell sandbox...\n');
+    const sandboxResult = await runSandbox({
+      prNumber: args.prNumber,
+      prDiff,
+      upstreamMainRef: args.baseSha,
+      config: sandboxConfig,
+      workDir: args.workDir,
+      // AQ2: pass proxy env (without credential) + host arg to the container.
+      // When proxy is not running, these are undefined (existing CI behaviour).
+      sandboxEnv,
+      proxyHostArgs,
+    });
+
+    // Extract differential test result from sandbox output.
+    // FIX: reads r['differentialTest'] (correct key for outcome:'success'),
+    // falling back to r['differentialTestResult'] for legacy mock shapes.
+    const differentialTest = extractDifferentialTestResult(sandboxResult);
+
+    // Stage 3 — Run the 3-reviewer matrix against the hardened-framed diff.
+    // The modelClient is injectable via the _modelClientFactory seam for tests.
+    // In integration mode with proxy running: resolveModelClient returns an
+    // InferenceProxyClient pointed at the live proxy (proxy env vars set above).
+    // In CI (no proxy): returns the fail-closed FakeModelClient.
+    process.stderr.write('[stage-3] running reviewer matrix...\n');
+    const modelClient = resolveModelClient(args.workDir);
+    const reviewerResult = await runReviewerMatrix({
+      prDiff,
+      prNumber: args.prNumber,
+      differentialTest,
+      modelClient,
+    });
+
+    // Emit the unsigned report artifact with the real reviewer verdicts.
+    const report = buildUnsignedReport(
+      args.prNumber,
+      args.headSha,
+      args.baseSha,
+      differentialTest,
+      reviewerResult.verdicts,
+      reviewerResult.consensus,
+    );
+
+    const reportPath = unsignedReportPath(args.workDir, args.prNumber);
+    const reportDir = join(args.workDir, '.ai-sdlc', 'ucvg', 'reports');
+    if (!existsSync(reportDir)) {
+      mkdirSync(reportDir, { recursive: true });
+    }
+    writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    process.stderr.write(`[stage-2/3] unsigned report written: ${reportPath}\n`);
+    emit({ ok: true, reportPath });
+  } finally {
+    // Always stop the proxy — credential must not linger after the run completes.
+    if (proxy !== null) {
+      await proxy.stop();
+      process.stderr.write('[stage-2] InferenceProxy stopped.\n');
+    }
+    // Clean up the proxy env vars from the current process (defense-in-depth).
+    delete process.env['INFERENCE_PROXY_HOST'];
+    delete process.env['INFERENCE_PROXY_PORT'];
+    delete process.env['INFERENCE_PROXY_SESSION'];
+  }
 }
 
 // ── Subcommand: review-degraded ───────────────────────────────────────────────
@@ -523,11 +604,13 @@ function buildDegradedReport(prNumber: number, headSha: string, baseSha: string)
 // ── Model client resolution ───────────────────────────────────────────────────
 
 /**
- * Injectable model client factory seam container.
+ * Injectable seam container for ucvg.ts.
  *
- * Tests set `_ucvgSeams.modelClientFactory` to inject a `FakeModelClient`
- * for hermetic coverage of the reviewer orchestration path without spawning
- * a real proxy or making real model calls.
+ * Tests inject into these fields to exercise code paths without real network I/O.
+ *
+ * `modelClientFactory`: inject a `FakeModelClient` for hermetic reviewer tests.
+ * `inferenceProxyFactory`: inject a mock proxy factory to test AQ2 wiring without
+ *   actually binding a socket. Default: `createInferenceProxy` from inference-proxy.ts.
  *
  * Using a mutable object property (rather than a module `let` binding) ensures
  * the seam is writable in compiled ES modules where named exports are getter-only.
@@ -536,7 +619,15 @@ function buildDegradedReport(prNumber: number, headSha: string, baseSha: string)
  */
 export const _ucvgSeams: {
   modelClientFactory: ((workDir: string) => ModelClient) | null;
-} = { modelClientFactory: null };
+  /**
+   * Factory for creating an InferenceProxy for a PR.
+   * Defaults to `createInferenceProxy`. Override in tests to avoid socket binding.
+   */
+  inferenceProxyFactory: typeof createInferenceProxy;
+} = {
+  modelClientFactory: null,
+  inferenceProxyFactory: createInferenceProxy,
+};
 
 /**
  * Resolve the model client to use for reviewer invocations.
