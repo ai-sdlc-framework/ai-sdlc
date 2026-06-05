@@ -265,8 +265,13 @@ async function runSandboxAndReview(args: {
       process.stderr.write(
         `[stage-2] WARNING: InferenceProxy failed to start — falling back to FakeModelClient: ${(err as Error).message}\n`,
       );
-      // Proxy failed to start — clear integration flag so resolveModelClient
-      // falls back to the CI FakeModelClient path (fail-closed, not hard-error).
+      // Proxy failed to start — clear the integration flag AND the proxy vars so
+      // resolveModelClient() takes the CI FakeModelClient path (fail-closed,
+      // approved:false report → Stage 4 refuses) rather than the hard-error path.
+      // Deleting only the proxy vars while leaving AI_SDLC_SANDBOX_INTEGRATION_TESTS=1
+      // would make resolveModelClient hit the fail()/process.exit branch (still
+      // fail-closed, but a hard crash instead of the documented graceful fallback).
+      delete process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'];
       delete process.env['INFERENCE_PROXY_HOST'];
       delete process.env['INFERENCE_PROXY_PORT'];
       delete process.env['INFERENCE_PROXY_SESSION'];

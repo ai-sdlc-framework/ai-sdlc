@@ -1474,6 +1474,12 @@ describe('AQ2 proxy lifecycle — runSandboxAndReview via sandbox-run subcommand
     expect(process.env['INFERENCE_PROXY_HOST']).toBeUndefined();
     expect(process.env['INFERENCE_PROXY_PORT']).toBeUndefined();
     expect(process.env['INFERENCE_PROXY_SESSION']).toBeUndefined();
+
+    // REGRESSION (review MAJOR): the catch MUST also clear the integration flag.
+    // If AI_SDLC_SANDBOX_INTEGRATION_TESTS stayed '1' with the proxy vars gone,
+    // resolveModelClient() would hit the fail()/process.exit hard-error branch
+    // instead of the documented graceful FakeModelClient fallback.
+    expect(process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS']).toBeUndefined();
   });
 
   it('(4) non-integration mode (AI_SDLC_SANDBOX_INTEGRATION_TESTS not set): proxy NOT started', async () => {
