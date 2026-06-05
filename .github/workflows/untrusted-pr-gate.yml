@@ -94,6 +94,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-content
           persist-credentials: false
+          # Bug A fix: fetch-depth: 0 so the depth-1 clone has the base SHA and HEAD~1
+          # for the Stage-1 diff computation (git diff BASE..HEAD in pr-content/).
+          # Without this, the shallow clone has neither ref, the diff is empty, and
+          # the gate fail-closes on every untrusted PR with no real signal.
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -197,9 +202,13 @@ jobs:
           AST_CODE=$?
           cat /tmp/ast-gate-stderr.log >&2
 
-          # Parse outcome from the CLI output (last line = JSON result)
-          GATE_OUTCOME=$(echo "$AST_OUTPUT" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('outcome','abort-protected-path'))" 2>/dev/null || echo "abort-protected-path")
-          OFFENDING=$(echo "$AST_OUTPUT" | tail -n1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('offendingPaths',[])))" 2>/dev/null || echo "")
+          # Parse outcome from the CLI output.
+          # Bug B fix: the ast-gate CLI emits pretty-printed multi-line JSON
+          # (JSON.stringify(result, null, 2)), so tail -n1 grabs only '}' and
+          # parse always fails → fallback abort on every untrusted PR.
+          # Fix: parse the FULL stdout blob (remove 'tail -n1 |' from both lines).
+          GATE_OUTCOME=$(echo "$AST_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('outcome','abort-protected-path'))" 2>/dev/null || echo "abort-protected-path")
+          OFFENDING=$(echo "$AST_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('offendingPaths',[])))" 2>/dev/null || echo "")
 
           echo "outcome=$GATE_OUTCOME" >> "$GITHUB_OUTPUT"
           echo "offending_paths=$OFFENDING" >> "$GITHUB_OUTPUT"
@@ -305,6 +314,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-content
           persist-credentials: false
+          # Bug A fix: fetch-depth: 0 so the depth-1 clone has the base SHA
+          # for sandbox differential testing (git checkout baseSha in container).
+          # Without this the shallow clone lacks the base commit reference.
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -378,11 +391,23 @@ jobs:
           # NPM_TOKEN, AI_SDLC_PAT are NEVER injected into the sandbox environment.
           # They are only available in the Stage 4 clean-room job (fork-PR safety guard #5).
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Docker-specific: set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 to enable real
-          # Docker container runs. The DockerSandboxDriver (RFC-0043 Phase 7) is the
-          # default CI runtime — ubuntu-latest runners include Docker out-of-the-box.
-          AI_SDLC_SANDBOX_INTEGRATION_TESTS: '1'
+          # Bug D fix: AI_SDLC_SANDBOX_INTEGRATION_TESTS is NOT set here.
+          # Setting it caused resolveModelClient() to hard-error when the inference
+          # proxy env vars (INFERENCE_PROXY_HOST/PORT/SESSION) are absent, which they
+          # always are in CI before a running InferenceProxy. The hard-error fired
+          # before the report was written, so report_artifact was always empty.
+          # The DockerSandboxDriver runs differential tests inside the container;
+          # the reviewer matrix outside the container uses the FakeModelClient
+          # (fail-closed) by default, which is the correct CI behavior.
+          # Only set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 when a real InferenceProxy
+          # is started and the proxy env vars are available (operator-gated end-to-end).
         run: |
+          # Bug E fix: set -o pipefail so a sandbox-run failure propagates through the
+          # tee pipe. Without pipefail, `node ... | tee` returns tee's exit code (0),
+          # masking a real sandbox-run failure as step success (dangerous false-green).
+          # With pipefail, node's non-zero exit propagates and the step fails correctly.
+          set -o pipefail
+
           # Stage 2/3: run the full Docker sandbox + reviewer matrix.
           # Uses DockerSandboxDriver (sandboxDriver: docker in .ai-sdlc/untrusted-pr-gate.yaml).
           # The sandbox mounts the pr-content/ diff as read-only data.
@@ -404,6 +429,7 @@ jobs:
           else
             echo "report_artifact=" >> "$GITHUB_OUTPUT"
             echo "[stage-2] WARNING: sandbox exited without producing a report artifact"
+            exit 1
           fi
 
       # CRITICAL fix #2 — cross-runner artifact transfer:
@@ -518,7 +544,9 @@ jobs:
       # The unsigned report was produced on the sandbox-and-review runner's local FS.
       # Download it here so the clean-room signer can read it.
       - name: Download unsigned report artifact (cross-runner transfer from sandbox-and-review)
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8cef8384b0fb # v4
+        # Bug C fix: 95815c38cf2ff2164869cbab79da8cef8384b0fb is not a real GitHub commit SHA
+        # (GitHub returns 422 on checkout). Replaced with a real v4 SHA.
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ucvg-unsigned-report-${{ github.event.pull_request.number }}
           path: .ai-sdlc/ucvg/reports/

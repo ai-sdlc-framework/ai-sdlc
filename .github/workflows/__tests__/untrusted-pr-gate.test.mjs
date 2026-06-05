@@ -876,3 +876,201 @@ describe('Permissions — minimum needed; no contents:write (fork-PR safety guar
     );
   });
 });
+
+// ── Bug A fix: fetch-depth:0 on pr-content checkouts ─────────────────────────
+
+describe('Bug A fix — pr-content checkouts use fetch-depth: 0', () => {
+  it('all pr-content checkouts have fetch-depth: 0', () => {
+    // Both classify-and-gate and sandbox-and-review jobs check out pr-content.
+    // Without fetch-depth: 0, the depth-1 clone lacks the base SHA and HEAD~1,
+    // so the Stage-1 diff is empty and the gate fail-closes on every untrusted PR.
+    const prContentCheckouts = [];
+    for (const [jobId, job] of Object.entries(wf.jobs ?? {})) {
+      for (const step of job.steps ?? []) {
+        if (
+          typeof step.uses === 'string' &&
+          step.uses.startsWith('actions/checkout@') &&
+          step.with?.path === 'pr-content'
+        ) {
+          prContentCheckouts.push({ jobId, step });
+        }
+      }
+    }
+    assert.ok(
+      prContentCheckouts.length >= 2,
+      `${WORKFLOW_NAME} must have at least two pr-content checkouts (one per job that uses the fork diff)`,
+    );
+    for (const { jobId, step } of prContentCheckouts) {
+      const fetchDepth = step.with?.['fetch-depth'];
+      // YAML may parse 0 as number 0; accept either form
+      assert.ok(
+        fetchDepth === 0 || fetchDepth === '0',
+        `pr-content checkout in job '${jobId}' MUST have fetch-depth: 0 so the shallow ` +
+          `clone contains the base SHA needed for git diff BASE..HEAD (Bug A fix)`,
+      );
+    }
+  });
+});
+
+// ── Bug B fix: ast-gate JSON parsed from full stdout (not tail -n1) ───────────
+
+describe('Bug B fix — Stage 1 AST gate JSON parsed from full stdout', () => {
+  it('Stage 1 step does NOT use tail -n1 to extract JSON', () => {
+    // tail -n1 grabs only "}" from pretty-printed JSON (JSON.stringify(null, 2))
+    // → parse always fails → fallback abort on every untrusted PR.
+    // Fix: pipe the full AST_OUTPUT blob to python3 (remove "tail -n1 |").
+    const stage1Steps = allSteps(wf).filter(
+      ({ step }) =>
+        typeof step.name === 'string' && /stage.?1.*ast.gate|ast.gate.*stage.?1/i.test(step.name),
+    );
+    for (const { step } of stage1Steps) {
+      const run = String(step.run ?? '');
+      assert.doesNotMatch(
+        run,
+        /tail\s+-n1\s+\|\s*python3/,
+        `Stage 1 ast-gate step MUST NOT use 'tail -n1 | python3' to parse JSON — ` +
+          `the ast-gate CLI emits pretty-printed multi-line JSON so tail -n1 grabs only '}' (Bug B fix)`,
+      );
+    }
+  });
+
+  it('Stage 1 parses AST_OUTPUT directly into python3 (full blob)', () => {
+    const stage1Steps = allSteps(wf).filter(
+      ({ step }) =>
+        typeof step.name === 'string' && /stage.?1.*ast.gate|ast.gate.*stage.?1/i.test(step.name),
+    );
+    const allRuns = stage1Steps.map(({ step }) => String(step.run ?? '')).join('\n');
+    // Must pipe AST_OUTPUT directly to python3 without the tail -n1 intermediate
+    assert.match(
+      allRuns,
+      /AST_OUTPUT.*python3|python3.*AST_OUTPUT/s,
+      `Stage 1 must parse AST_OUTPUT via python3 json.load without a tail -n1 intermediate (Bug B fix)`,
+    );
+  });
+});
+
+// ── Bug C fix: download-artifact pinned to a real SHA ────────────────────────
+
+describe('Bug C fix — download-artifact pinned to a real (non-fabricated) SHA', () => {
+  it('download-artifact is NOT pinned to the fabricated SHA 95815c38cf2ff2164869cbab79da8cef8384b0fb', () => {
+    // 95815c38cf2ff2164869cbab79da8cef8384b0fb is not a real GitHub commit; GitHub
+    // returns 422 on checkout, so Stage 4 always fails with "Artifact not found".
+    assert.doesNotMatch(
+      raw,
+      /download-artifact@95815c38cf2ff2164869cbab79da8cef8384b0fb/,
+      `${WORKFLOW_NAME} must NOT use the fabricated download-artifact SHA ` +
+        `95815c38cf2ff2164869cbab79da8cef8384b0fb (Bug C fix)`,
+    );
+  });
+
+  it('download-artifact is pinned to a real 40-char SHA', () => {
+    const downloadSteps = allSteps(wf).filter(
+      ({ step }) => typeof step.uses === 'string' && step.uses.includes('download-artifact@'),
+    );
+    assert.ok(downloadSteps.length > 0, `${WORKFLOW_NAME} must have a download-artifact step`);
+    for (const { step } of downloadSteps) {
+      assert.match(
+        String(step.uses),
+        /download-artifact@[0-9a-f]{40}/i,
+        `download-artifact must be pinned by a real 40-char commit SHA (Bug C fix) — found: ${step.uses}`,
+      );
+    }
+  });
+});
+
+// ── Bug E fix: pipefail on Stage 2 sandbox run ───────────────────────────────
+
+describe('Bug E fix — Stage 2 sandbox-run step propagates real exit code (pipefail)', () => {
+  it('Stage 2 sandbox-run step includes set -o pipefail', () => {
+    // Without pipefail, `node ... | tee` returns tee's exit (0) even when
+    // node fails — masking a real sandbox failure as step success.
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    // Find the step by id 'sandbox' — the most reliable selector
+    const sandboxStep = sandboxJob?.steps?.find((s) => s.id === 'sandbox');
+    const run = String(sandboxStep?.run ?? '');
+    assert.match(
+      run,
+      /set -o pipefail|pipefail/,
+      `Stage 2 sandbox step (id: sandbox) MUST include 'set -o pipefail' so a sandbox-run failure ` +
+        `propagates through the tee pipe (Bug E fix — prevents dangerous false-green)`,
+    );
+  });
+
+  it('Stage 2 sandbox-run exits non-zero when no report artifact is produced', () => {
+    // The step (id: sandbox) must fail (exit 1) when the report file is absent,
+    // so clean-room-sign (needs: sandbox-and-review result == success) cannot run
+    // without a valid report.
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    // Find the step by id 'sandbox' — the most reliable selector
+    const sandboxStep = sandboxJob?.steps?.find((s) => s.id === 'sandbox');
+    const run = String(sandboxStep?.run ?? '');
+    assert.match(
+      run,
+      /exit 1/,
+      `Stage 2 sandbox step (id: sandbox) MUST exit 1 when no report artifact is produced (Bug E fix)`,
+    );
+  });
+});
+
+// ── Bug D fix: AI_SDLC_SANDBOX_INTEGRATION_TESTS not set in workflow ──────────
+
+describe('Bug D fix — AI_SDLC_SANDBOX_INTEGRATION_TESTS not set in workflow sandbox step', () => {
+  it('Stage 2 sandbox step does NOT set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1', () => {
+    // Setting AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 without the inference proxy env vars
+    // causes resolveModelClient() to hard-error before the report is written.
+    // The workflow must not set this flag; the CI path uses FakeModelClient (fail-closed).
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    const sandboxStep = sandboxJob?.steps?.find(
+      (s) => typeof s.id === 'string' && s.id === 'sandbox',
+    );
+    const env = sandboxStep?.env ?? {};
+    assert.ok(
+      !('AI_SDLC_SANDBOX_INTEGRATION_TESTS' in env),
+      `Stage 2 sandbox step MUST NOT set AI_SDLC_SANDBOX_INTEGRATION_TESTS — ` +
+        `it causes resolveModelClient() to hard-error when proxy env vars are absent, ` +
+        `preventing the report from being written (Bug D fix)`,
+    );
+  });
+});
+
+// ── Artifact name contract (upload name == download name) ─────────────────────
+
+describe('Artifact handoff contract — upload name matches download name', () => {
+  it('upload and download artifact names use the same ucvg-unsigned-report-<pr> template', () => {
+    // The upload and download artifact names must match exactly for the cross-runner
+    // transfer to succeed. A name mismatch causes "Artifact not found" in Stage 4.
+    const ARTIFACT_NAME_PATTERN = /ucvg-unsigned-report-\$\{\{/;
+
+    const sandboxJob = wf.jobs?.['sandbox-and-review'];
+    const uploadStep = sandboxJob?.steps?.find(
+      (s) => typeof s.uses === 'string' && s.uses.includes('upload-artifact'),
+    );
+    const uploadName = String(uploadStep?.with?.name ?? '');
+    assert.match(
+      uploadName,
+      ARTIFACT_NAME_PATTERN,
+      `upload-artifact name must use 'ucvg-unsigned-report-\${{ ... }}' template to match download`,
+    );
+
+    const signJob = wf.jobs?.['clean-room-sign'];
+    const downloadStep = signJob?.steps?.find(
+      (s) => typeof s.uses === 'string' && s.uses.includes('download-artifact'),
+    );
+    const downloadName = String(downloadStep?.with?.name ?? '');
+    assert.match(
+      downloadName,
+      ARTIFACT_NAME_PATTERN,
+      `download-artifact name must use 'ucvg-unsigned-report-\${{ ... }}' template to match upload`,
+    );
+
+    // Strip the GitHub expression parts to compare the static prefix
+    const uploadStatic = uploadName.split('${{')[0];
+    const downloadStatic = downloadName.split('${{')[0];
+    assert.equal(
+      uploadStatic,
+      downloadStatic,
+      `upload and download artifact name prefixes must match exactly (handoff contract): ` +
+        `upload='${uploadStatic}' download='${downloadStatic}'`,
+    );
+  });
+});
