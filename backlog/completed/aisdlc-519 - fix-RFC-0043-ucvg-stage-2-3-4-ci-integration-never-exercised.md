@@ -77,12 +77,12 @@ without touching real ai-sdlc PR flow. (Rotate the test API key per operator ins
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Bugs A, B, C ported to `.github/workflows/untrusted-pr-gate.yml` on ai-sdlc main with the fixes described above.
-- [ ] #2 Bug E fixed: the Stage 2 sandbox step propagates `sandbox-run`'s real exit code (no `| tee` masking) and fails closed on non-zero.
-- [ ] #3 Bug D root-caused and fixed: a benign untrusted PR runs the real Docker sandbox + differential test + 3 reviewers and writes `.ai-sdlc/ucvg/reports/<pr>.unsigned.json`, which uploads + transfers to Stage 4.
-- [ ] #4 A benign untrusted fork PR flows through all 4 stages and produces a v6 attestation that verifies `status=valid` + posts `ai-sdlc/untrusted-pr-gate: success` (AISDLC-514 AC#3, validated on the fork harness).
-- [ ] #5 Adversarial fixtures block at the CORRECT stage with NON-EMPTY offending/finding evidence (not the empty-diff fallback): protected-path, lifecycle-script, action-injection at Stage 1; prompt-injection / credential-exfil / resource-exhaustion / report-forgery at Stage 2/3/4 (AISDLC-514 AC#4).
-- [ ] #6 Add CI-integration coverage so these never-exercised paths can't silently regress: a workflow-level test asserting the diff computation, the JSON-parse, the artifact name/handoff contract, and the exit-code propagation.
+- [x] #1 Bugs A, B, C ported to `.github/workflows/untrusted-pr-gate.yml` on ai-sdlc main with the fixes described above.
+- [x] #2 Bug E fixed: the Stage 2 sandbox step propagates `sandbox-run`'s real exit code (no `| tee` masking) and fails closed on non-zero.
+- [ ] #3 **OPERATOR-GATED** — Bug D root-caused and fixed: a benign untrusted PR runs the real Docker sandbox + differential test + 3 reviewers and writes `.ai-sdlc/ucvg/reports/<pr>.unsigned.json`, which uploads + transfers to Stage 4. Bug D root cause has been identified (AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 caused resolveModelClient() to hard-error because INFERENCE_PROXY_HOST/PORT/SESSION are absent in CI) and fixed mechanically (env var removed from workflow). Full end-to-end validation requires a live Docker runner + inference proxy + ANTHROPIC_API_KEY on the fork harness — cannot be run hermetically.
+- [ ] #4 **OPERATOR-GATED** — A benign untrusted fork PR flows through all 4 stages and produces a v6 attestation that verifies `status=valid` + posts `ai-sdlc/untrusted-pr-gate: success` (AISDLC-514 AC#3, validated on the fork harness). Requires live Docker runner + real signing key + ANTHROPIC_API_KEY.
+- [ ] #5 **OPERATOR-GATED** — Adversarial fixtures block at the CORRECT stage with NON-EMPTY offending/finding evidence (not the empty-diff fallback): protected-path, lifecycle-script, action-injection at Stage 1; prompt-injection / credential-exfil / resource-exhaustion / report-forgery at Stage 2/3/4 (AISDLC-514 AC#4). Requires live end-to-end on the fork harness.
+- [x] #6 CI-integration coverage added in `.github/workflows/__tests__/untrusted-pr-gate.test.mjs` asserting: Stage-1 diff computation (fetch-depth:0), ast-gate JSON parse (full blob, not tail -n1), artifact name/handoff contract (upload name == download name), exit-code propagation (pipefail + exit 1 on missing report), Bug D guard (AI_SDLC_SANDBOX_INTEGRATION_TESTS not set). All 67 workflow tests pass.
 - [ ] #7 Update `docs/operations/e2e-real-repo-runbook.md` + the AISDLC-513 conformance doc with the corrected (real, non-fallback) vector→stage→outcome evidence once green.
 <!-- AC:END -->
 
