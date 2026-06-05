@@ -1012,23 +1012,32 @@ describe('Bug E fix — Stage 2 sandbox-run step propagates real exit code (pipe
   });
 });
 
-// ── Bug D fix: AI_SDLC_SANDBOX_INTEGRATION_TESTS not set in workflow ──────────
+// ── AQ2 (AISDLC-520): AI_SDLC_SANDBOX_INTEGRATION_TESTS gated on credential ───
 
-describe('Bug D fix — AI_SDLC_SANDBOX_INTEGRATION_TESTS not set in workflow sandbox step', () => {
-  it('Stage 2 sandbox step does NOT set AI_SDLC_SANDBOX_INTEGRATION_TESTS=1', () => {
-    // Setting AI_SDLC_SANDBOX_INTEGRATION_TESTS=1 without the inference proxy env vars
-    // causes resolveModelClient() to hard-error before the report is written.
-    // The workflow must not set this flag; the CI path uses FakeModelClient (fail-closed).
+describe('AQ2 — AI_SDLC_SANDBOX_INTEGRATION_TESTS gated on the ANTHROPIC_API_KEY credential', () => {
+  it('Stage 2 sandbox step sets AI_SDLC_SANDBOX_INTEGRATION_TESTS only when a credential is configured', () => {
+    // AISDLC-520 re-enables real in-sandbox reviewers. When ANTHROPIC_API_KEY is set,
+    // sandbox-run starts the InferenceProxy + populates the proxy env, so integration
+    // mode is safe (no hard-error — proxy vars present; and the proxy-start catch falls
+    // back to FakeModelClient if start fails). When no credential is configured the flag
+    // is empty, so resolveModelClient() takes the fail-closed FakeModelClient path.
+    // The value MUST therefore be GATED on the credential — not hardcoded '1' and not
+    // absent. (Supersedes the AISDLC-519 Bug-D stopgap that removed the flag entirely.)
     const sandboxJob = wf.jobs?.['sandbox-and-review'];
     const sandboxStep = sandboxJob?.steps?.find(
       (s) => typeof s.id === 'string' && s.id === 'sandbox',
     );
     const env = sandboxStep?.env ?? {};
     assert.ok(
-      !('AI_SDLC_SANDBOX_INTEGRATION_TESTS' in env),
-      `Stage 2 sandbox step MUST NOT set AI_SDLC_SANDBOX_INTEGRATION_TESTS — ` +
-        `it causes resolveModelClient() to hard-error when proxy env vars are absent, ` +
-        `preventing the report from being written (Bug D fix)`,
+      'AI_SDLC_SANDBOX_INTEGRATION_TESTS' in env,
+      `Stage 2 sandbox step MUST set AI_SDLC_SANDBOX_INTEGRATION_TESTS (credential-gated) ` +
+        `to enable real in-sandbox reviewers (AISDLC-520 AQ2)`,
+    );
+    assert.match(
+      String(env['AI_SDLC_SANDBOX_INTEGRATION_TESTS']),
+      /ANTHROPIC_API_KEY/,
+      `AI_SDLC_SANDBOX_INTEGRATION_TESTS must be gated on secrets.ANTHROPIC_API_KEY — ` +
+        `set only when a credential is configured (else empty → fail-closed FakeModelClient)`,
     );
   });
 });
