@@ -23,7 +23,7 @@
  * No AISDLC-NNN tracker IDs in any adopter-facing string assertions.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -828,6 +828,64 @@ describe('InferenceProxyClient — _httpRequest seam', () => {
 
     await client.complete({ systemPrompt: 'sys', userMessage: 'user' });
     expect(capturedHeaders[0]['anthropic-version']).toBeDefined();
+  });
+});
+
+// ── InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var (AC#5) ─────────────
+
+describe('InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var', () => {
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    savedEnv = process.env['AI_SDLC_REVIEWER_MODEL'];
+  });
+
+  afterEach(() => {
+    if (savedEnv === undefined) {
+      delete process.env['AI_SDLC_REVIEWER_MODEL'];
+    } else {
+      process.env['AI_SDLC_REVIEWER_MODEL'] = savedEnv;
+    }
+  });
+
+  it('uses AI_SDLC_REVIEWER_MODEL env var as the model when set', async () => {
+    process.env['AI_SDLC_REVIEWER_MODEL'] = 'claude-opus-4-9';
+
+    const client = new InferenceProxyClient({
+      host: '127.0.0.1',
+      port: 9999,
+      sessionToken: 'tok',
+    });
+
+    const capturedBodies: string[] = [];
+    client._httpRequest = async (_url, opts) => {
+      capturedBodies.push(opts.body);
+      return JSON.stringify({ content: [{ type: 'text', text: 'ok' }] });
+    };
+
+    await client.complete({ systemPrompt: 'sys', userMessage: 'user' });
+    const body = JSON.parse(capturedBodies[0]) as Record<string, unknown>;
+    expect(body['model']).toBe('claude-opus-4-9');
+  });
+
+  it('defaults to claude-sonnet-4-6 when AI_SDLC_REVIEWER_MODEL is not set', async () => {
+    delete process.env['AI_SDLC_REVIEWER_MODEL'];
+
+    const client = new InferenceProxyClient({
+      host: '127.0.0.1',
+      port: 9999,
+      sessionToken: 'tok',
+    });
+
+    const capturedBodies: string[] = [];
+    client._httpRequest = async (_url, opts) => {
+      capturedBodies.push(opts.body);
+      return JSON.stringify({ content: [{ type: 'text', text: 'ok' }] });
+    };
+
+    await client.complete({ systemPrompt: 'sys', userMessage: 'user' });
+    const body = JSON.parse(capturedBodies[0]) as Record<string, unknown>;
+    expect(body['model']).toBe('claude-sonnet-4-6');
   });
 });
 

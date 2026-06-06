@@ -36,6 +36,7 @@
  * @module pipeline/reviewer-runner
  */
 
+import * as nodeHttp from 'node:http';
 import type { Finding, ReviewerVerdict } from './report-validator.js';
 import {
   buildHardenedDiffSection,
@@ -570,7 +571,7 @@ export class InferenceProxyClient implements ModelClient {
   constructor(config: InferenceProxyClientConfig) {
     this.config = {
       provider: 'anthropic',
-      model: 'claude-3-5-sonnet-20241022',
+      model: process.env['AI_SDLC_REVIEWER_MODEL'] ?? 'claude-sonnet-4-6',
       ...config,
     };
   }
@@ -676,11 +677,10 @@ export function defaultProxyHttpRequest(
   },
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Use dynamic require so the import is only resolved in production.
-    // Tests override `_httpRequest` before calling `.complete()`.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const http = require('node:http') as typeof import('node:http');
-
+    // pipeline-cli is ESM ("type": "module") — `require` is not defined at
+    // runtime, so use the static ESM import of node:http. Tests override
+    // `_httpRequest` before calling `.complete()`, so the real import is only
+    // exercised in production.
     const parsedUrl = new URL(url);
     const reqOpts: import('node:http').RequestOptions = {
       hostname: parsedUrl.hostname,
@@ -690,7 +690,7 @@ export function defaultProxyHttpRequest(
       headers: opts.headers,
     };
 
-    const req = http.request(reqOpts, (res) => {
+    const req = nodeHttp.request(reqOpts, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (chunk: Buffer) => chunks.push(chunk));
       res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));

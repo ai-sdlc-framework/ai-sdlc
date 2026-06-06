@@ -1442,6 +1442,122 @@ describe('buildDockerRunArgs — hardened isolation flags (AISDLC-508 AC-1)', ()
     expect(args).not.toContain('--privileged');
     expect(args).not.toContain('--network=host');
   });
+
+  // ── AISDLC-522 AC-1: env var forwarding ──────────────────────────────────────
+  it('includes -e SANDBOX_PR_DIFF_B64 in the docker run argv (AC-1)', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '/tmp/seccomp.json',
+      cidFilePath: makeCidFilePath(),
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    // The argv must contain both '-e' followed by 'SANDBOX_PR_DIFF_B64'
+    const eIdx = args.findIndex((a, i) => a === '-e' && args[i + 1] === 'SANDBOX_PR_DIFF_B64');
+    expect(eIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it('includes -e SANDBOX_FIXTURE_B64 in the docker run argv (AC-1)', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '/tmp/seccomp.json',
+      cidFilePath: makeCidFilePath(),
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    // The argv must contain both '-e' followed by 'SANDBOX_FIXTURE_B64'
+    const eIdx = args.findIndex((a, i) => a === '-e' && args[i + 1] === 'SANDBOX_FIXTURE_B64');
+    expect(eIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it('SANDBOX_PR_DIFF_B64 and SANDBOX_FIXTURE_B64 both appear before the image name (ordering)', () => {
+    const image = 'node:22-slim';
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '/tmp/seccomp.json',
+      cidFilePath: makeCidFilePath(),
+      image,
+      command: ['echo', 'test'],
+    });
+    const imageIdx = args.indexOf(image);
+    expect(imageIdx).toBeGreaterThan(0);
+
+    const diffIdx = args.findIndex((a, i) => a === '-e' && args[i + 1] === 'SANDBOX_PR_DIFF_B64');
+    const fixtureIdx = args.findIndex(
+      (a, i) => a === '-e' && args[i + 1] === 'SANDBOX_FIXTURE_B64',
+    );
+
+    expect(diffIdx).toBeGreaterThanOrEqual(0);
+    expect(fixtureIdx).toBeGreaterThanOrEqual(0);
+    expect(diffIdx).toBeLessThan(imageIdx);
+    expect(fixtureIdx).toBeLessThan(imageIdx);
+  });
+
+  // ── AISDLC-522 AC-2: seccomp profile is a file path, not inline JSON ─────────
+  it('seccomp arg references a path string (not inline JSON) when a path is passed (AC-2)', () => {
+    const seccompPath = '/tmp/ai-sdlc-sandbox-abc123/seccomp.json';
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: seccompPath,
+      cidFilePath: makeCidFilePath(),
+      image: 'node:22-slim',
+      command: ['echo', 'test'],
+    });
+    const seccompArg = args.find((a) => a.startsWith('seccomp='));
+    expect(seccompArg).toBeDefined();
+    expect(seccompArg).toBe(`seccomp=${seccompPath}`);
+    // Must not contain '{' or '}' — a file path never contains JSON delimiters
+    expect(seccompArg).not.toContain('{');
+    expect(seccompArg).not.toContain('}');
+  });
+});
+
+// ── AISDLC-522 AC-2: seccomp file written to per-spawn temp dir ──────────────
+
+describe('DockerSandboxDriver — seccomp profile written to file (AISDLC-522 AC-2)', () => {
+  it('DOCKER_SECCOMP_PROFILE JSON is non-empty and serializable', () => {
+    // Verify the profile exists and can be serialized to JSON (the writeFileSync call)
+    const json = JSON.stringify(DOCKER_SECCOMP_PROFILE);
+    expect(json).toBeTruthy();
+    expect(json.length).toBeGreaterThan(10);
+    const reparsed = JSON.parse(json) as unknown;
+    expect(typeof reparsed).toBe('object');
+  });
+});
+
+// ── AISDLC-522 AC-6: fixture-demo mode in buildDifferentialTestScript ─────────
+
+describe('buildDifferentialTestScript — fixture-demo mode (AISDLC-522 AC-6)', () => {
+  it('generated script contains SANDBOX_FIXTURE_B64 check before URL check', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    expect(script).toContain('SANDBOX_FIXTURE_B64');
+    // The fixture branch must precede the URL branch
+    const fixtureIdx = script.indexOf('SANDBOX_FIXTURE_B64');
+    const urlIdx = script.indexOf('grep -qE');
+    expect(fixtureIdx).toBeLessThan(urlIdx);
+  });
+
+  it('generated script extracts fixture via base64 -d | tar xz', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    expect(script).toContain('base64 -d | tar xz');
+    expect(script).toContain('mkdir -p repo');
+  });
+
+  it('SANDBOX_FIXTURE_B64 check uses ${VAR:-} form (safe unset-variable test)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    // The shell guard must use -n "${SANDBOX_FIXTURE_B64:-}" to safely test if the var is set
+    expect(script).toContain('${SANDBOX_FIXTURE_B64:-}');
+  });
+
+  it('generated script still contains the URL-clone branch (non-fixture mode)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    expect(script).toContain('git clone');
+  });
+
+  it('generated script still contains the SHA-path branch (non-fixture mode)', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    expect(script).toContain('no pre-cloned repo found');
+  });
 });
 
 // ── AISDLC-508: cidfile-based container ID capture (MAJOR FIX 1) ─────────────

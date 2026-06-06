@@ -143,6 +143,20 @@ function captureIO(): {
   };
 }
 
+// ── File-level seam defaults ──────────────────────────────────────────────────
+//
+// computePrDiff now calls `git diff` via execFileSync. Most tests in this file
+// pass a plain mkdtempSync dir (not a git repo) as prContentDir. Inject a stub
+// computePrDiffFn so these tests don't fail on git errors.
+
+beforeEach(() => {
+  _ucvgSeams.computePrDiffFn = () => 'diff --git a/stub.ts b/stub.ts\n+// stub diff\n';
+});
+
+afterEach(() => {
+  _ucvgSeams.computePrDiffFn = null;
+});
+
 // ── resolveModelClient — integration mode hard error (CARRY-FORWARD FIX) ──────
 
 describe('resolveModelClient — integration mode with missing proxy vars (HARD ERROR)', () => {
@@ -442,7 +456,7 @@ describe('Stage 4 signer — approved report passes all pre-key gates', () => {
     }
   });
 
-  it('runCleanRoomSigner reaches key-resolution or signing phase on a valid approved report (CI has no key)', () => {
+  it('runCleanRoomSigner reaches key-resolution or signing phase (or succeeds) on a valid approved report', () => {
     const tmpDir = mkTmpDir('signer-approved');
     try {
       const reportPath = join(tmpDir, '101.unsigned.json');
@@ -457,23 +471,21 @@ describe('Stage 4 signer — approved report passes all pre-key gates', () => {
         workDir: tmpDir,
       });
 
-      // In CI the signer passes all prior security gates (isolation-check, artifact-read,
-      // zod-validation, consensus-rejected) — which is what we're validating here.
-      // Whether it stops at 'key-resolution' (no key available) or 'signing' (key found
-      // but signing fails — e.g. operator dev machine with no transcript leaves) depends
-      // on the local environment. Both are acceptable "past the security gates" outcomes.
-      // The critical assertion: it must NOT be rejected at consensus-rejected, zod-validation,
-      // isolation-check, or artifact-read — those would indicate a valid approved report
-      // was incorrectly rejected.
-      expect(result.success).toBe(false);
+      // Possible outcomes for a valid approved report:
+      //  - success: true — operator machine has signing key + AISDLC-522 Step 4c emits leaves
+      //  - success: false, phase: 'key-resolution' — CI / fresh machines without signing key
+      //  - success: false, phase: 'signing' — signing key found but signing fails
+      // The critical assertion: it must NOT be rejected at any prior security gate
+      // (isolation-check, artifact-read, zod-validation, consensus-rejected).
+      // Those would indicate a valid approved report was incorrectly rejected.
       if (!result.success) {
         expect(['key-resolution', 'signing']).toContain(result.phase);
-        // Must NOT have been rejected by any security gate for a valid approved report
         expect(result.phase).not.toBe('isolation-check');
         expect(result.phase).not.toBe('artifact-read');
         expect(result.phase).not.toBe('zod-validation');
         expect(result.phase).not.toBe('consensus-rejected');
       }
+      // success: true is also a valid outcome (operator machine with signing key)
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

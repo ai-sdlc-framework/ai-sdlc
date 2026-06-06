@@ -143,6 +143,10 @@ const NON_INSTRUMENTED_PATTERNS = [
   // Next.js build config (e.g. dashboard/next.config.mjs). Build config, not a
   // testable unit — same rationale as vitest.config / eslint.config above.
   /(^|\/)next\.config\.(?:ts|mjs|js)$/,
+  // ucvg-demo/ — zero-dependency `node --test` fixture repo used for RFC-0043
+  // UCVG live-demo differential testing. Runs under `node --test`, not Vitest,
+  // so no istanbul/v8 coverage data is produced for it by Vitest instrumentation.
+  /(^|\/)ucvg-demo\//,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────
