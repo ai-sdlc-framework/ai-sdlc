@@ -1,0 +1,10 @@
+{
+  "name": "ucvg-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-dependency fixture repo for the RFC-0043 UCVG live demo (AISDLC-520 AQ2). Runs entirely offline under the --network=none sandbox via `node --test`.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test --experimental-test-coverage 2>&1 | tee ./ucvg-cov.txt; awk -F'|' '/all files/{gsub(/ /,\"\",$2); if($2!=\"\") print \"Lines: \" $2 \"%\"}' ./ucvg-cov.txt"
+  }
+}

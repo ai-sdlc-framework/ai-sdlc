@@ -63,7 +63,7 @@
  * @module pipeline/sandbox-runner
  */
 
-import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -971,6 +971,14 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     const cidFilePath = join(cidDir, 'container.cid');
     this.cidFilePath = cidFilePath;
 
+    // `docker run --security-opt seccomp=<value>` expects a FILE PATH (or the
+    // literal 'unconfined') — NOT inline JSON. Passing the profile JSON inline
+    // makes docker try to open it as a filename and fail with exit code 125
+    // ("opening seccomp profile"). Write the profile to a file in the per-spawn
+    // temp dir and pass its path. The file is removed with cidDir in teardown.
+    const seccompFilePath = join(cidDir, 'seccomp.json');
+    writeFileSync(seccompFilePath, seccompJson, { mode: 0o600 });
+
     // Build the in-container differential test script.
     // The script is passed as a shell -c argument (not written to disk on the
     // host) so it is not affected by the container's read-only filesystem.
@@ -984,7 +992,9 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     // so the container can reach the host-side inference proxy despite --network=none.
     const args = buildDockerRunArgs({
       resourceLimits,
-      seccompProfileJson: seccompJson,
+      // Pass the seccomp FILE PATH (docker --security-opt seccomp=<path>), not
+      // the inline JSON — see the seccompFilePath comment above.
+      seccompProfileJson: seccompFilePath,
       cidFilePath,
       image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? 'node:22-slim',
       command: ['/bin/sh', '-c', inContainerScript],
@@ -1084,7 +1094,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
           reject(
             new Error(
               `Docker container exited with code ${exitCode}. ` +
-                `stdout: ${stdout.slice(0, 500)} stderr: ${stderr.slice(0, 500)}`,
+                `stdout: ${stdout.slice(0, 4000)} stderr: ${stderr.slice(0, 4000)}`,
             ),
           );
           return;
@@ -1418,7 +1428,21 @@ cd "$WORK_DIR"
 # SHA or a known-scheme URL before being interpolated here.
 UPSTREAM_REF='${escapedRef}'
 
-if echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
+if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
+  # Fixture-demo mode (RFC-0043 AQ2 live demo — option B). The trusted base
+  # tree is a tiny zero-dependency repo supplied as a base64 gzip tarball via
+  # the SANDBOX_FIXTURE_B64 env var. This is offline-safe under --network=none
+  # (no clone, no dependency install). We materialize it into repo/ and let the
+  # existing base-test → git-apply → head-test sequence run against it.
+  # NOTE: 'git apply' applies to plain working files and does NOT require a git
+  # repository, so no 'git init' is needed (keeps the image footprint minimal).
+  mkdir -p repo
+  cd repo
+  if ! printf '%s' "$SANDBOX_FIXTURE_B64" | base64 -d | tar xz; then
+    echo 'fixture extraction failed' >&2
+    exit 1
+  fi
+elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
   # URL path: clone then check out the pinned base SHA (baseSha) if supplied.
   # Without baseSha, the clone lands at default-branch HEAD which may differ
   # from the actual PR merge-base — violating the AISDLC-501 base invariant.
@@ -1615,6 +1639,18 @@ export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
     `seccomp=${seccompProfileJson}`,
     '--security-opt',
     'no-new-privileges',
+    // Forward the data-carrying env vars from the docker CLI process env INTO
+    // the container. `docker run` does NOT inherit the host environment, so the
+    // values set on the spawn() env — SANDBOX_PR_DIFF_B64 (the diff to apply)
+    // and SANDBOX_FIXTURE_B64 (the offline fixture tarball, fixture-demo mode) —
+    // must be passed explicitly with `-e KEY` (value pulled from the docker
+    // process env). Without this the in-container script sees them unset and
+    // fail-closes (the AISDLC-520 "no pre-cloned repo" symptom). `-e KEY` with
+    // KEY absent from the host env is a harmless no-op.
+    '-e',
+    'SANDBOX_PR_DIFF_B64',
+    '-e',
+    'SANDBOX_FIXTURE_B64',
     // Extra args (e.g. --add-host=inference.local:host-gateway) injected before image name.
     // These allow the container to reach the host-side inference proxy despite --network=none.
     ...(extraDockerArgs ?? []),

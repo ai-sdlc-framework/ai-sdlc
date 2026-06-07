@@ -24,6 +24,8 @@ export default tseslint.config(
       'ai-sdlc-plugin/commands/',
       '**/coverage/',
       'pipeline-cli/bin/',
+      // Zero-dep fixture for RFC-0043 UCVG live demo (plain JS, not TypeScript)
+      'ucvg-demo/',
     ],
   },
   eslint.configs.recommended,

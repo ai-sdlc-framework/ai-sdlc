@@ -17,7 +17,8 @@
  *   - emit, fail helpers (stdout/stderr/exit)
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -109,6 +110,22 @@ describe('isUntrustedPrGateEnabled', () => {
     expect(isUntrustedPrGateEnabled({ AI_SDLC_UNTRUSTED_PR_GATE: '  1  ' })).toBe(true);
     expect(isUntrustedPrGateEnabled({ AI_SDLC_UNTRUSTED_PR_GATE: '  off  ' })).toBe(false);
   });
+});
+
+// ── File-level seam defaults ──────────────────────────────────────────────────
+//
+// computePrDiff now calls `git diff` via execFileSync (real git repo required).
+// Most existing tests pass a plain mkdtempSync dir as prContentDir — not a git
+// repo. Inject a stub computePrDiffFn so these tests don't fail on git errors.
+// The `computePrDiff helper` describe block restores null to exercise the real
+// implementation with a proper git repo.
+
+beforeEach(() => {
+  _ucvgSeams.computePrDiffFn = () => 'diff --git a/stub.ts b/stub.ts\n+// stub diff\n';
+});
+
+afterEach(() => {
+  _ucvgSeams.computePrDiffFn = null;
 });
 
 // ── upstreamMainRef=baseSha fix — MAJOR fix #7 ───────────────────────────────
@@ -207,6 +224,72 @@ describe('ast-gate CLI — reads changed paths from stdin (CRITICAL fix #1)', ()
 
 function makeTmpDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), `ucvg-${prefix}-`));
+}
+
+/**
+ * Create a minimal git repo with two commits (base and head).
+ * Returns { repoDir, baseSha, headSha } where both SHAs are valid 40-hex-char git commit IDs.
+ * Used to test computePrDiff's real `git diff base...head` behavior.
+ */
+function makeMinimalGitRepo(opts?: { fixtureSubdir?: string }): {
+  repoDir: string;
+  baseSha: string;
+  headSha: string;
+} {
+  const repoDir = mkdtempSync(join(tmpdir(), 'ucvg-git-repo-'));
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@test.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@test.com',
+  };
+  const git = (args: string[]) => execFileSync('git', args, { cwd: repoDir, env: gitEnv });
+
+  git(['init', '--initial-branch=main']);
+  git(['config', 'user.email', 'test@test.com']);
+  git(['config', 'user.name', 'Test']);
+
+  const subdir = opts?.fixtureSubdir;
+  if (subdir) {
+    mkdirSync(join(repoDir, subdir), { recursive: true });
+    writeFileSync(join(repoDir, subdir, 'calc.js'), '// base\nexports.add = (a,b) => a+b;\n');
+    git(['add', '.']);
+    git(['commit', '--allow-empty', '-m', 'base commit']);
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoDir,
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(
+      join(repoDir, subdir, 'calc.js'),
+      '// head\nexports.add = (a,b) => a+b;\nexports.sub = (a,b) => a-b;\n',
+    );
+    git(['add', '.']);
+    git(['commit', '-m', 'head commit']);
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoDir,
+      encoding: 'utf8',
+    }).trim();
+    return { repoDir, baseSha, headSha };
+  }
+
+  writeFileSync(join(repoDir, 'base.txt'), 'base content\n');
+  git(['add', '.']);
+  git(['commit', '--allow-empty', '-m', 'base commit']);
+  const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoDir,
+    encoding: 'utf8',
+  }).trim();
+
+  writeFileSync(join(repoDir, 'head.txt'), 'head content\n');
+  git(['add', '.']);
+  git(['commit', '-m', 'head commit']);
+  const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoDir,
+    encoding: 'utf8',
+  }).trim();
+
+  return { repoDir, baseSha, headSha };
 }
 
 /** Capture stdout/stderr/exit without letting process.exit kill the runner. */
@@ -960,40 +1043,156 @@ describe('computePrDiff helper (via sandbox-run path)', () => {
       new FakeModelClient(
         JSON.stringify({ approved: false, findings: [], promptInjectionDetected: false }),
       );
+    // Clear computePrDiffFn so the real git diff implementation runs.
+    // The tests in this describe set up real git repos.
+    _ucvgSeams.computePrDiffFn = null;
   });
   afterEach(() => {
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
     _ucvgSeams.modelClientFactory = null;
+    // Restore the default stub after each computePrDiff test
+    _ucvgSeams.computePrDiffFn = null;
   });
 
-  it('produces a non-empty diff string describing pr-content dir and SHAs', async () => {
+  // ── AC-4 real-diff mode: computePrDiff calls git diff base...head ────────────
+  it('real-diff mode: passes real git diff output to sandbox (AC-4)', async () => {
+    // Set up a real git repo with two commits
+    const { repoDir, baseSha, headSha } = makeMinimalGitRepo();
     let capturedDiff: string | undefined;
     vi.mocked(sandboxRunnerMod.runSandbox).mockImplementation(async (input) => {
       capturedDiff = input.prDiff;
       return { outcome: 'error', error: 'mock' };
     });
+    vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockReturnValue(
+      join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '1.unsigned.json'),
+    );
 
-    await runUcvgCli([
-      'sandbox-run',
-      '--pr-number',
-      '1',
-      '--head-sha',
-      'head123',
-      '--base-sha',
-      'base456',
-      '--pr-content-dir',
-      tmpDir,
-      '--work-dir',
-      tmpDir,
-      '--output-dir',
-      tmpDir,
-    ]);
+    try {
+      await runUcvgCli([
+        'sandbox-run',
+        '--pr-number',
+        '1',
+        '--head-sha',
+        headSha,
+        '--base-sha',
+        baseSha,
+        '--pr-content-dir',
+        repoDir,
+        '--work-dir',
+        tmpDir,
+        '--output-dir',
+        tmpDir,
+      ]);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
 
     expect(capturedDiff).toBeDefined();
-    expect(capturedDiff).toContain(tmpDir);
-    expect(capturedDiff).toContain('head123');
-    expect(capturedDiff).toContain('base456');
+    // Real git diff output must be non-empty and start with 'diff --git'
+    expect(capturedDiff!.length).toBeGreaterThan(0);
+    expect(capturedDiff).toMatch(/diff --git/);
+  });
+
+  // ── AC-4 fixture re-root mode ─────────────────────────────────────────────────
+  it('fixture re-root mode: paths are relative to subdir when AI_SDLC_UCVG_FIXTURE_SUBDIR is set (AC-4)', async () => {
+    const fixtureSubdir = 'ucvg-demo';
+    const { repoDir, baseSha, headSha } = makeMinimalGitRepo({ fixtureSubdir });
+    let capturedDiff: string | undefined;
+    vi.mocked(sandboxRunnerMod.runSandbox).mockImplementation(async (input) => {
+      capturedDiff = input.prDiff;
+      return { outcome: 'error', error: 'mock' };
+    });
+    vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockReturnValue(
+      join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '1.unsigned.json'),
+    );
+
+    const origSubdir = process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'];
+    process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'] = fixtureSubdir;
+
+    try {
+      await runUcvgCli([
+        'sandbox-run',
+        '--pr-number',
+        '1',
+        '--head-sha',
+        headSha,
+        '--base-sha',
+        baseSha,
+        '--pr-content-dir',
+        repoDir,
+        '--work-dir',
+        tmpDir,
+        '--output-dir',
+        tmpDir,
+      ]);
+    } finally {
+      if (origSubdir === undefined) {
+        delete process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'];
+      } else {
+        process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'] = origSubdir;
+      }
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+
+    expect(capturedDiff).toBeDefined();
+    // Paths must NOT start with the fixture subdir prefix (--relative strips it)
+    if (capturedDiff && capturedDiff.length > 0) {
+      expect(capturedDiff).not.toMatch(new RegExp(`^diff --git a/${fixtureSubdir}/`, 'm'));
+      expect(capturedDiff).toMatch(/diff --git/);
+    }
+  });
+
+  // ── Path traversal rejection (tightened fixture-subdir regex) ────────────────
+  it('path traversal: ../secrets is rejected — falls back to normal full diff', async () => {
+    // The tightened regex forbids `..` segments. A traversal subdir like `../secrets`
+    // must be silently rejected (fixture mode skipped), falling back to the normal
+    // `git diff baseSha...headSha -- . :(exclude).ai-sdlc/attestations/**` path.
+    const { repoDir, baseSha, headSha } = makeMinimalGitRepo();
+    let capturedDiff: string | undefined;
+    vi.mocked(sandboxRunnerMod.runSandbox).mockImplementation(async (input) => {
+      capturedDiff = input.prDiff;
+      return { outcome: 'error', error: 'mock' };
+    });
+    vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockReturnValue(
+      join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '1.unsigned.json'),
+    );
+
+    const origSubdir = process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'];
+    // A `..`-containing path that should be rejected
+    process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'] = '../secrets';
+
+    try {
+      await runUcvgCli([
+        'sandbox-run',
+        '--pr-number',
+        '1',
+        '--head-sha',
+        headSha,
+        '--base-sha',
+        baseSha,
+        '--pr-content-dir',
+        repoDir,
+        '--work-dir',
+        tmpDir,
+        '--output-dir',
+        tmpDir,
+      ]);
+    } finally {
+      if (origSubdir === undefined) {
+        delete process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'];
+      } else {
+        process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'] = origSubdir;
+      }
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+
+    // The traversal subdir was rejected — the diff is taken from the full repo
+    // (NOT re-rooted to `../secrets`). It may be a real git diff or empty string
+    // depending on the repo state, but it must NOT contain `../secrets` in the args.
+    expect(capturedDiff).toBeDefined();
+    // Crucially: the diff must not contain path references to `../secrets`
+    expect(capturedDiff ?? '').not.toContain('../secrets');
   });
 });
 

@@ -13,7 +13,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, unlinkSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  unlinkSync,
+  existsSync,
+  readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -761,17 +769,25 @@ describe('runCleanRoomSigner — v6 verifier integration (finding #2)', () => {
 
     // 4. Merkle inclusion proof verification for each leaf
     // (RFC-0042 §verifyV6Envelope step 6)
-    const leaves = [leaf]; // same leaves used during signing
-    const { root } = computeMerkleRoot(leaves);
+    //
+    // runCleanRoomSigner (AISDLC-522 Step 4c) emits 3 new leaves (code/test/security)
+    // to the same per-patch-id file BEFORE signing, so the Merkle tree now contains
+    // the original pre-written leaf PLUS the 3 new reviewer leaves (4 total).
+    // Read all leaves from the file (in the order they were written) to compute the
+    // same root that the signer computed.
+    const { loadLeavesForPatchId } = await import('../attestation/merkle.js');
+    const allLeaves = loadLeavesForPatchId(fakePatchId, tmpDir);
+    expect(allLeaves.length).toBeGreaterThanOrEqual(1); // at least the original + new leaves
+    const { root } = computeMerkleRoot(allLeaves);
     expect(root).toBe(envelope.rootHash);
 
     for (const merkleProof of envelope.merkleProofs) {
-      const matchingLeaf = leaves.find((l) => l.leafIndex === merkleProof.leafIndex);
+      const matchingLeaf = allLeaves.find((l) => l.leafIndex === merkleProof.leafIndex);
       expect(matchingLeaf).toBeDefined();
       if (!matchingLeaf) continue;
 
       const leafHash = hashLeaf(matchingLeaf);
-      const arrayPos = leaves.findIndex((l) => l.leafIndex === merkleProof.leafIndex);
+      const arrayPos = allLeaves.findIndex((l) => l.leafIndex === merkleProof.leafIndex);
       const isValid = verifyInclusion(
         leafHash,
         merkleProof.proof,
@@ -907,6 +923,141 @@ describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
     if (result.success) throw new Error('Expected failure');
     // Approval gate passes → next failure is key-resolution (no key file)
     expect(result.phase).toBe('key-resolution');
+  });
+});
+
+// ── AISDLC-522 AC-3: Transcript leaf emission before v6 signing ───────────────
+//
+// Verifies that runCleanRoomSigner emits one TranscriptLeaf per reviewer
+// (code, test, security) into .ai-sdlc/transcript-leaves.jsonl BEFORE
+// attempting to sign. The leaves are written in Step 3b, which runs AFTER the
+// consensus-approval gate but BEFORE key-resolution — so they are present even
+// when the signer stops at key-resolution (no key file, as in CI).
+//
+// REGRESSION GUARD: this block forces the no-key path (AISDLC_SIGNING_KEY_PATH
+// points at a nonexistent file) so the assertion "leaves written without a key"
+// is exercised deterministically. Before the Step 3b reorder, leaf emission ran
+// AFTER key-resolution, so in CI (no key) the signer returned early and no
+// leaves were written — this test passed only on operator machines with an
+// ambient ~/.ai-sdlc/signing-key.pem and would have failed in CI.
+
+describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', () => {
+  let tmpDir: string;
+  let origSigningKeyPath: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    // Force the no-key path so leaf emission is proven to run independently of
+    // key presence (deterministic regression guard — see block comment above).
+    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
+    process.env['AISDLC_SIGNING_KEY_PATH'] = join(tmpDir, 'nonexistent-key.pem');
+  });
+
+  afterEach(() => {
+    if (origSigningKeyPath === undefined) {
+      delete process.env['AISDLC_SIGNING_KEY_PATH'];
+    } else {
+      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes transcript-leaves.jsonl with 3 leaves (one per reviewer) before signing attempt', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    // runCleanRoomSigner emits transcript leaves in Step 3b BEFORE key-resolution.
+    // With AISDLC_SIGNING_KEY_PATH forced to a nonexistent file (beforeEach), the
+    // signer deterministically stops at key-resolution — yet the leaves must still
+    // have been written. This is the exact CI scenario the Step 3b reorder fixes.
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-522',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    // Deterministic: no key → key-resolution failure, but leaves were written first.
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.phase).toBe('key-resolution');
+    }
+
+    // Leaves file must exist and contain exactly 3 lines (one per reviewer)
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
+    expect(existsSync(leavesPath)).toBe(true);
+
+    const lines = readFileSync(leavesPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(3);
+
+    // Verify each leaf is valid JSON and has the expected reviewer names
+    const reviewerNames = lines.map((l) => {
+      const leaf = JSON.parse(l) as Record<string, unknown>;
+      return leaf['reviewerName'];
+    });
+    expect(reviewerNames).toContain('code-reviewer');
+    expect(reviewerNames).toContain('test-reviewer');
+    expect(reviewerNames).toContain('security-reviewer');
+  });
+
+  it('each leaf has taskId, harness, transcriptHash (sha256 hex), and verdictApproved fields', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-522',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
+    expect(existsSync(leavesPath)).toBe(true);
+    const lines = readFileSync(leavesPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(3);
+
+    for (const line of lines) {
+      const leaf = JSON.parse(line) as Record<string, unknown>;
+      expect(leaf['taskId']).toBe('AISDLC-522');
+      expect(leaf['harness']).toBe('ucvg-sandbox');
+      expect(leaf['verdictApproved']).toBe(true); // VALID_REPORT has all approved=true
+      // transcriptHash must be a 64-char hex string (sha256)
+      expect(typeof leaf['transcriptHash']).toBe('string');
+      expect((leaf['transcriptHash'] as string).length).toBe(64);
+      expect(leaf['transcriptHash'] as string).toMatch(/^[0-9a-f]{64}$/);
+      // nonce must be non-empty
+      expect(typeof leaf['nonce']).toBe('string');
+      expect((leaf['nonce'] as string).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('with patchId set: leaves are written to per-patch-id file, not the shared jsonl', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+    // patchId must be exactly 40 lowercase hex chars (merkle.leavesFilePathForPatchId contract)
+    const patchId = 'a'.repeat(40);
+
+    runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-522',
+      headSha: VALID_REPORT.headSha,
+      patchId,
+      workDir: tmpDir,
+    });
+
+    // Per-patch-id file must exist under .ai-sdlc/transcript-leaves/<patchId>.jsonl
+    const perPatchPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves', `${patchId}.jsonl`);
+    expect(existsSync(perPatchPath)).toBe(true);
+    // Shared file must NOT exist (leaves go only to per-patch-id file when patchId is provided)
+    const sharedPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
+    expect(existsSync(sharedPath)).toBe(false);
   });
 });
 

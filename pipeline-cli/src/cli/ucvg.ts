@@ -29,6 +29,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { classifyTrust } from '../pipeline/trust-classifier.js';
 import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
@@ -212,7 +213,10 @@ async function runSandboxAndReview(args: {
 
   // Compute the PR diff from the pr-content/ checkout (data only — fork-PR safety guard #2).
   // The diff is derived from git objects; no fork-controlled script is executed.
-  const prDiff = computePrDiff(args.prContentDir, args.baseSha, args.headSha);
+  // _ucvgSeams.computePrDiffFn allows tests to inject a fake diff without a real git repo.
+  const prDiff = _ucvgSeams.computePrDiffFn
+    ? _ucvgSeams.computePrDiffFn(args.prContentDir, args.baseSha, args.headSha)
+    : computePrDiff(args.prContentDir, args.baseSha, args.headSha);
 
   // ── RFC-0043 AQ2 — InferenceProxy lifecycle ────────────────────────────────
   //
@@ -253,6 +257,30 @@ async function runSandboxAndReview(args: {
       // The container reads INFERENCE_PROXY_HOST/PORT/SESSION to reach the proxy.
       sandboxEnv = buildReviewerProxyEnv({ port, sessionToken });
       proxyHostArgs = buildProxyHostArg();
+
+      // Fixture-demo mode (RFC-0043 AQ2 live demo — option B). When
+      // AI_SDLC_UCVG_FIXTURE_SUBDIR is set, ship the trusted base fixture tree
+      // (a tiny zero-dep repo at <workDir>/<subdir>) into the sandbox as a
+      // base64 gzip tarball via the sandbox env. The in-container differential
+      // test (buildDifferentialTestScript) materializes it offline — no clone,
+      // no install — so the suite runs under --network=none. NO credential is
+      // ever placed in this env; the tarball is source-only fixture data.
+      const fixtureSubdir = process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'];
+      // Tightened regex: same as computePrDiff — forbids `..` segments and bare `/` runs.
+      if (
+        fixtureSubdir &&
+        /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(fixtureSubdir) &&
+        !fixtureSubdir.split('/').some((seg) => seg === '..')
+      ) {
+        const fixtureDir = join(args.workDir, fixtureSubdir.replace(/\/+$/, ''));
+        const tarB64 = execFileSync('tar', ['-C', fixtureDir, '-cz', '.'], {
+          maxBuffer: 32 * 1024 * 1024,
+        }).toString('base64');
+        sandboxEnv['SANDBOX_FIXTURE_B64'] = tarB64;
+        process.stderr.write(
+          `[stage-2] fixture-demo mode: staged ${fixtureSubdir} (${String(tarB64.length)} b64 bytes) for offline differential test\n`,
+        );
+      }
 
       // Wire the proxy vars into the current process env so resolveModelClient()
       // builds an InferenceProxyClient pointing at the live proxy (AC#2).
@@ -299,6 +327,18 @@ async function runSandboxAndReview(args: {
     // FIX: reads r['differentialTest'] (correct key for outcome:'success'),
     // falling back to r['differentialTestResult'] for legacy mock shapes.
     const differentialTest = extractDifferentialTestResult(sandboxResult);
+
+    // Diagnostic: surface the raw sandbox outcome + any error so a failed
+    // differential test (which fail-closes to {false,false,0}) is debuggable
+    // from the CI log instead of silently producing a 0%-coverage report.
+    {
+      const sr = sandboxResult as { outcome?: string; error?: string };
+      process.stderr.write(
+        `[stage-2] sandbox outcome=${sr.outcome ?? 'unknown'}` +
+          (sr.error ? ` error=${sr.error.slice(0, 8000)}` : '') +
+          ` differentialTest=${JSON.stringify(differentialTest)}\n`,
+      );
+    }
 
     // Stage 3 — Run the 3-reviewer matrix against the hardened-framed diff.
     // The modelClient is injectable via the _modelClientFactory seam for tests.
@@ -466,12 +506,72 @@ async function readStdin(): Promise<string> {
   });
 }
 
-function computePrDiff(prContentDir: string, _baseSha: string, _headSha: string): string {
-  // In the CI context, the diff is computed from git objects in the pr-content/ checkout.
-  // This is data-only — no fork code is executed.
-  // For the CLI wrapper, we produce a summary for the sandbox runner.
-  // The actual differential testing happens inside the OpenShell sandbox.
-  return `[diff computed from ${prContentDir} for ${_baseSha}..${_headSha}]`;
+function computePrDiff(prContentDir: string, baseSha: string, headSha: string): string {
+  // Compute the real PR diff from git objects in the pr-content/ checkout.
+  // This is DATA-ONLY (fork-PR safety guard #2): `git diff` reads committed
+  // objects and never executes any fork-provided script. Both baseSha and
+  // headSha are reachable because the pr-content checkout uses fetch-depth: 0.
+  //
+  // Three-dot (`base...head`) yields only the changes the PR introduced since
+  // the merge-base, excluding unrelated base-branch churn. The attestations
+  // directory is excluded from the diff so reviewers focus on source changes.
+  //
+  // Both SHAs are validated to be 7-64 hex chars before interpolation to keep
+  // execFileSync's argv free of any metacharacter risk (defense-in-depth even
+  // though execFileSync does not invoke a shell).
+  const shaRe = /^[0-9a-f]{7,64}$/i;
+  if (!shaRe.test(baseSha) || !shaRe.test(headSha)) {
+    throw new Error(
+      `computePrDiff: baseSha/headSha must be 7-64 hex chars (got base='${baseSha}', head='${headSha}')`,
+    );
+  }
+
+  // Fixture-demo mode (RFC-0043 AQ2 live demo — option B). When
+  // AI_SDLC_UCVG_FIXTURE_SUBDIR is set, the differential test runs against a
+  // standalone zero-dep fixture repo whose root is the *contents* of that
+  // subdir (materialized in-container from a tarball). The diff must therefore
+  // be re-rooted (paths relative to the subdir) so `git apply` lands on the
+  // fixture root. `--relative=<subdir>/` strips the prefix from output paths;
+  // the pathspec scopes the diff to the fixture so unrelated changes are ignored.
+  const fixtureSubdir = process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR'];
+  // Tightened regex: forbids `..` segments and bare `/` runs to block path traversal.
+  // Accepts alphanumeric, dots, underscores, hyphens, and single-slash separators only.
+  if (
+    fixtureSubdir &&
+    /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(fixtureSubdir) &&
+    !fixtureSubdir.split('/').some((seg) => seg === '..')
+  ) {
+    const sub = fixtureSubdir.replace(/\/+$/, '');
+    return execFileSync(
+      'git',
+      [
+        '-C',
+        prContentDir,
+        'diff',
+        '--no-color',
+        `--relative=${sub}/`,
+        `${baseSha}...${headSha}`,
+        '--',
+        `${sub}/`,
+      ],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    );
+  }
+
+  return execFileSync(
+    'git',
+    [
+      '-C',
+      prContentDir,
+      'diff',
+      '--no-color',
+      `${baseSha}...${headSha}`,
+      '--',
+      '.',
+      ':(exclude).ai-sdlc/attestations/**',
+    ],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
 }
 
 function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTestResult {
@@ -629,9 +729,16 @@ export const _ucvgSeams: {
    * Defaults to `createInferenceProxy`. Override in tests to avoid socket binding.
    */
   inferenceProxyFactory: typeof createInferenceProxy;
+  /**
+   * Override for `computePrDiff` (injectable for hermetic tests).
+   * When set, used instead of calling `git diff` via execFileSync.
+   * Defaults to null (uses the real git diff implementation).
+   */
+  computePrDiffFn: ((prContentDir: string, baseSha: string, headSha: string) => string) | null;
 } = {
   modelClientFactory: null,
   inferenceProxyFactory: createInferenceProxy,
+  computePrDiffFn: null,
 };
 
 /**
