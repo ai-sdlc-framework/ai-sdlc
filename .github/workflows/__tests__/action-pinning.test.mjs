@@ -4,7 +4,7 @@
  *   1. Every third-party GitHub Action `uses:` reference is pinned to a full
  *      40-hex commit SHA — EXCEPT a small documented allowlist of actions that
  *      existing tests assert by tag (re-actors/alls-green@release/v1,
- *      dorny/paths-filter@v3).
+ *      dorny/paths-filter@v4).
  *   2. Every workflow declares a top-level `permissions:` block (least-privilege
  *      default; job-level blocks may widen as needed).
  *
@@ -27,7 +27,7 @@ const WORKFLOWS_DIR = resolve(__dirname, '..');
 // Actions intentionally pinned to a tag rather than a SHA. Keep in sync with
 // the rationale in ai-sdlc-gate.test.mjs (alls-green / paths-filter exact-tag
 // assertions). Adding an entry here is a deliberate, reviewed decision.
-const TAG_PINNED_ALLOWLIST = new Set(['re-actors/alls-green@release/v1', 'dorny/paths-filter@v3']);
+const TAG_PINNED_ALLOWLIST = new Set(['re-actors/alls-green@release/v1', 'dorny/paths-filter@v4']);
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 
