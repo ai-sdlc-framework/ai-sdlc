@@ -22,6 +22,17 @@ updates:
       - dependencies
       - 'ci:no-issue-required'
     groups:
+      # React must move in lockstep: react + react-dom require the EXACT same
+      # version (the dashboard build hard-fails otherwise — "Incompatible React
+      # versions"). Listed FIRST so every react package matches here and lands
+      # in ONE PR, regardless of production/development dependency-type (which
+      # otherwise split react and @types/react / react-dom into separate PRs).
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+          - '@types/react'
+          - '@types/react-dom'
       dev-dependencies:
         dependency-type: development
         update-types:
