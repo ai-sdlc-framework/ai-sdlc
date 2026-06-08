@@ -13,7 +13,6 @@ labels:
   - review-follow-up
 dependencies: []
 references:
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/843'
   - pipeline-cli/src/pipeline/ast-gate.ts
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
 priority: medium
