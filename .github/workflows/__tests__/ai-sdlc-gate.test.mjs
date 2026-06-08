@@ -335,13 +335,13 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
-  it('detect job uses dorny/paths-filter@v3 with predicate-quantifier: every', () => {
+  it('detect job uses dorny/paths-filter@v4 with predicate-quantifier: every', () => {
     const detect = workflow.jobs.detect;
     const filterStep = detect.steps.find(
       (s) => typeof s.uses === 'string' && s.uses.startsWith('dorny/paths-filter'),
     );
     assert.ok(filterStep, 'detect must use dorny/paths-filter');
-    assert.match(filterStep.uses, /^dorny\/paths-filter@v3$/);
+    assert.match(filterStep.uses, /^dorny\/paths-filter@v4$/);
     // `every` quantifier is REQUIRED for correct mixed-PR handling.
     // Default (`some`) treats one-docs-one-code PRs as docs-only,
     // which would skip build-test on real code changes — the exact
