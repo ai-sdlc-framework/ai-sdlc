@@ -147,6 +147,38 @@ describe('DecisionsPendingPane — AC#2 actor routing', () => {
 
 // ── AC#3 — Operator can resolve (event appender called) ───────────────────────
 
+// AISDLC-524: ink 5→6 / react 18→19 migration.
+// Under react 19 the passive effect that registers ink's `useInput` listener can
+// run AFTER the first paint, so a single keystroke written immediately after a
+// frame appears may be dropped (the listener isn't attached yet). A fixed
+// setTimeout — or even a waitFor that only checks the rendered frame — therefore
+// races in CI. The robust pattern is to RE-SEND the keystroke inside vi.waitFor
+// until it actually takes effect:
+//   - 'x' opens the OptionPicker (retry until the dialog renders). Repeated 'x'
+//     is a safe no-op: the pane's useInput early-returns while the picker is open.
+//   - Enter confirms (retry until the picker closes). handlePickOption closes the
+//     picker and fires all resolution spies synchronously, so picker-closed ⟹
+//     spies called. A stray extra Enter after close opens the detail view (a
+//     harmless side effect) and never double-fires the spies.
+async function openPickerAndConfirm(
+  stdin: { write: (data: string) => void },
+  lastFrame: () => string | undefined,
+  decisionId: string,
+): Promise<void> {
+  // Pane has rendered the decision row.
+  await vi.waitFor(() => expect(lastFrame()).toContain(decisionId));
+  // Open the option picker (retry 'x' until the dialog renders).
+  await vi.waitFor(() => {
+    stdin.write('x');
+    expect(lastFrame()).toContain('choose an option');
+  });
+  // Confirm with Enter (retry until the picker closes — first option selected by default).
+  await vi.waitFor(() => {
+    stdin.write('\r');
+    expect(lastFrame()).not.toContain('choose an option');
+  });
+}
+
 describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
   it('calls eventAppender with operator-answered event when resolution completes', async () => {
     const decisions = [makeDecision('DEC-0001', 'operator')];
@@ -166,18 +198,9 @@ describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
       />,
     );
 
-    // Wait for the pane to render the decision row (root useInput registered by then).
-    // AISDLC-524: under react 19's effect scheduling, fixed setTimeout waits raced
-    // in CI — vi.waitFor resolving guarantees passive effects (useInput registration)
-    // have flushed before the next keystroke, so this is robust to any environment timing.
-    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0001'));
-    // Navigate to first decision (already selected), open option picker.
-    stdin.write('x');
-    // Wait for the OptionPicker dialog to render (its useInput is registered by then).
-    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
-    // Confirm with Enter (first option is selected by default).
-    stdin.write('\r');
-    await vi.waitFor(() => expect(appender).toHaveBeenCalledOnce());
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0001');
+
+    expect(appender).toHaveBeenCalledOnce();
     const [event] = appender.mock.calls[0] as [{ type: string; chosenOptionId: string }];
     expect(event.type).toBe('operator-answered');
     expect(event.chosenOptionId).toBe('opt-a');
@@ -205,14 +228,10 @@ describe('DecisionsPendingPane — combined resolution spies', () => {
       />,
     );
 
-    // AISDLC-524: vi.waitFor (vs fixed setTimeout) is robust to react 19 effect timing.
-    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0099'));
-    stdin.write('x');
-    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
-    stdin.write('\r');
-    await vi.waitFor(() => expect(appender).toHaveBeenCalledOnce());
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0099');
 
     // All three must be called in the same handlePickOption invocation.
+    expect(appender).toHaveBeenCalledOnce();
     expect(captureWriter).toHaveBeenCalledOnce();
     expect(notificationSender).toHaveBeenCalledOnce();
   });
@@ -239,12 +258,9 @@ describe('DecisionsPendingPane — AC#5 TuiCaptureFiled compose', () => {
       />,
     );
 
-    // AISDLC-524: vi.waitFor (vs fixed setTimeout) is robust to react 19 effect timing.
-    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0042'));
-    stdin.write('x');
-    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
-    stdin.write('\r');
-    await vi.waitFor(() => expect(captureWriter).toHaveBeenCalledOnce());
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0042');
+
+    expect(captureWriter).toHaveBeenCalledOnce();
     const [captureId, opts] = captureWriter.mock.calls[0] as [string, { pane: string }];
     expect(captureId).toBe('DEC-0042');
     expect(opts.pane).toBe('decisions-pending');
@@ -272,12 +288,9 @@ describe('DecisionsPendingPane — AC#4 notification sender', () => {
       />,
     );
 
-    // AISDLC-524: vi.waitFor (vs fixed setTimeout) is robust to react 19 effect timing.
-    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0001'));
-    stdin.write('x');
-    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
-    stdin.write('\r');
-    await vi.waitFor(() => expect(notificationSender).toHaveBeenCalledOnce());
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0001');
+
+    expect(notificationSender).toHaveBeenCalledOnce();
     const [dec, optionId] = notificationSender.mock.calls[0] as [Decision, string];
     expect(dec.metadata.id).toBe('DEC-0001');
     expect(optionId).toBe('opt-a');
