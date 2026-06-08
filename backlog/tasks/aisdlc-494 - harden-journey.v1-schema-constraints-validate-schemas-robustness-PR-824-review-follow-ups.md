@@ -13,7 +13,6 @@ labels:
   - review-follow-up
 dependencies: []
 references:
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/824'
   - spec/schemas/journey.v1.schema.json
   - reference/src/core/validate-schemas.ts
   - spec/rfcs/RFC-0018-in-soul-journey-pattern.md

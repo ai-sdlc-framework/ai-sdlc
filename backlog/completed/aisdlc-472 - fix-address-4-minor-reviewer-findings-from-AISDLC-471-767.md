@@ -12,7 +12,6 @@ labels:
 dependencies:
   - AISDLC-471
 references:
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/767'
   - scripts/check-attestation-sign.sh
   - scripts/check-attestation-sign.test.mjs
   - docs/operations/attestation-troubleshooting.md
