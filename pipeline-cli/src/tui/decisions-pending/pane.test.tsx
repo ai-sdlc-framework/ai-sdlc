@@ -155,7 +155,7 @@ describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -166,17 +166,18 @@ describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
       />,
     );
 
-    // Wait for initial useInput effects to register raw-mode stdin listener.
-    await new Promise((r) => setTimeout(r, 20));
+    // Wait for the pane to render the decision row (root useInput registered by then).
+    // AISDLC-524: under react 19's effect scheduling, fixed setTimeout waits raced
+    // in CI — vi.waitFor resolving guarantees passive effects (useInput registration)
+    // have flushed before the next keystroke, so this is robust to any environment timing.
+    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0001'));
     // Navigate to first decision (already selected), open option picker.
     stdin.write('x');
-    // Wait for OptionPicker's useInput effects to register.
-    await new Promise((r) => setTimeout(r, 20));
+    // Wait for the OptionPicker dialog to render (its useInput is registered by then).
+    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
     // Confirm with Enter (first option is selected by default).
     stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(appender).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(appender).toHaveBeenCalledOnce());
     const [event] = appender.mock.calls[0] as [{ type: string; chosenOptionId: string }];
     expect(event.type).toBe('operator-answered');
     expect(event.chosenOptionId).toBe('opt-a');
@@ -193,7 +194,7 @@ describe('DecisionsPendingPane — combined resolution spies', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -204,14 +205,14 @@ describe('DecisionsPendingPane — combined resolution spies', () => {
       />,
     );
 
-    await new Promise((r) => setTimeout(r, 20)); // wait for initial useInput effects to register
+    // AISDLC-524: vi.waitFor (vs fixed setTimeout) is robust to react 19 effect timing.
+    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0099'));
     stdin.write('x');
-    await new Promise((r) => setTimeout(r, 20)); // wait for OptionPicker's useInput effects to register
+    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
     stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20)); // wait for handlePickOption to complete
+    await vi.waitFor(() => expect(appender).toHaveBeenCalledOnce());
 
     // All three must be called in the same handlePickOption invocation.
-    expect(appender).toHaveBeenCalledOnce();
     expect(captureWriter).toHaveBeenCalledOnce();
     expect(notificationSender).toHaveBeenCalledOnce();
   });
@@ -227,7 +228,7 @@ describe('DecisionsPendingPane — AC#5 TuiCaptureFiled compose', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -238,13 +239,12 @@ describe('DecisionsPendingPane — AC#5 TuiCaptureFiled compose', () => {
       />,
     );
 
-    await new Promise((r) => setTimeout(r, 20)); // wait for initial useInput effects to register
+    // AISDLC-524: vi.waitFor (vs fixed setTimeout) is robust to react 19 effect timing.
+    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0042'));
     stdin.write('x');
-    await new Promise((r) => setTimeout(r, 20)); // wait for OptionPicker's useInput effects to register
+    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
     stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20)); // wait for handlePickOption to complete
-
-    expect(captureWriter).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(captureWriter).toHaveBeenCalledOnce());
     const [captureId, opts] = captureWriter.mock.calls[0] as [string, { pane: string }];
     expect(captureId).toBe('DEC-0042');
     expect(opts.pane).toBe('decisions-pending');
@@ -261,7 +261,7 @@ describe('DecisionsPendingPane — AC#4 notification sender', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -272,13 +272,12 @@ describe('DecisionsPendingPane — AC#4 notification sender', () => {
       />,
     );
 
-    await new Promise((r) => setTimeout(r, 20)); // wait for initial useInput effects to register
+    // AISDLC-524: vi.waitFor (vs fixed setTimeout) is robust to react 19 effect timing.
+    await vi.waitFor(() => expect(lastFrame()).toContain('DEC-0001'));
     stdin.write('x');
-    await new Promise((r) => setTimeout(r, 20)); // wait for OptionPicker's useInput effects to register
+    await vi.waitFor(() => expect(lastFrame()).toContain('choose an option'));
     stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20)); // wait for handlePickOption to complete
-
-    expect(notificationSender).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(notificationSender).toHaveBeenCalledOnce());
     const [dec, optionId] = notificationSender.mock.calls[0] as [Decision, string];
     expect(dec.metadata.id).toBe('DEC-0001');
     expect(optionId).toBe('opt-a');
