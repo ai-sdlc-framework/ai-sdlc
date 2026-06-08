@@ -132,16 +132,16 @@
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
-    "ink": "^5.2.1",
+    "ink": "^6.0.0",
     "js-yaml": "^4.1.0",
-    "react": "^18.3.1",
+    "react": "^19.0.0",
     "yargs": "^17.7.2",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.9.2",
-    "@types/react": "^18.3.18",
+    "@types/react": "^19.0.0",
     "@types/yargs": "^17.0.33",
     "@vitest/coverage-v8": "^3.2.4",
     "ajv": "^8.20.0",

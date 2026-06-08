@@ -147,6 +147,38 @@ describe('DecisionsPendingPane — AC#2 actor routing', () => {
 
 // ── AC#3 — Operator can resolve (event appender called) ───────────────────────
 
+// AISDLC-524: ink 5→6 / react 18→19 migration.
+// Under react 19 the passive effect that registers ink's `useInput` listener can
+// run AFTER the first paint, so a single keystroke written immediately after a
+// frame appears may be dropped (the listener isn't attached yet). A fixed
+// setTimeout — or even a waitFor that only checks the rendered frame — therefore
+// races in CI. The robust pattern is to RE-SEND the keystroke inside vi.waitFor
+// until it actually takes effect:
+//   - 'x' opens the OptionPicker (retry until the dialog renders). Repeated 'x'
+//     is a safe no-op: the pane's useInput early-returns while the picker is open.
+//   - Enter confirms (retry until the picker closes). handlePickOption closes the
+//     picker and fires all resolution spies synchronously, so picker-closed ⟹
+//     spies called. A stray extra Enter after close opens the detail view (a
+//     harmless side effect) and never double-fires the spies.
+async function openPickerAndConfirm(
+  stdin: { write: (data: string) => void },
+  lastFrame: () => string | undefined,
+  decisionId: string,
+): Promise<void> {
+  // Pane has rendered the decision row.
+  await vi.waitFor(() => expect(lastFrame()).toContain(decisionId));
+  // Open the option picker (retry 'x' until the dialog renders).
+  await vi.waitFor(() => {
+    stdin.write('x');
+    expect(lastFrame()).toContain('choose an option');
+  });
+  // Confirm with Enter (retry until the picker closes — first option selected by default).
+  await vi.waitFor(() => {
+    stdin.write('\r');
+    expect(lastFrame()).not.toContain('choose an option');
+  });
+}
+
 describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
   it('calls eventAppender with operator-answered event when resolution completes', async () => {
     const decisions = [makeDecision('DEC-0001', 'operator')];
@@ -155,7 +187,7 @@ describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -166,15 +198,7 @@ describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
       />,
     );
 
-    // Wait for initial useInput effects to register raw-mode stdin listener.
-    await new Promise((r) => setTimeout(r, 20));
-    // Navigate to first decision (already selected), open option picker.
-    stdin.write('x');
-    // Wait for OptionPicker's useInput effects to register.
-    await new Promise((r) => setTimeout(r, 20));
-    // Confirm with Enter (first option is selected by default).
-    stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20));
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0001');
 
     expect(appender).toHaveBeenCalledOnce();
     const [event] = appender.mock.calls[0] as [{ type: string; chosenOptionId: string }];
@@ -193,7 +217,7 @@ describe('DecisionsPendingPane — combined resolution spies', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -204,11 +228,7 @@ describe('DecisionsPendingPane — combined resolution spies', () => {
       />,
     );
 
-    await new Promise((r) => setTimeout(r, 20)); // wait for initial useInput effects to register
-    stdin.write('x');
-    await new Promise((r) => setTimeout(r, 20)); // wait for OptionPicker's useInput effects to register
-    stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20)); // wait for handlePickOption to complete
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0099');
 
     // All three must be called in the same handlePickOption invocation.
     expect(appender).toHaveBeenCalledOnce();
@@ -227,7 +247,7 @@ describe('DecisionsPendingPane — AC#5 TuiCaptureFiled compose', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -238,11 +258,7 @@ describe('DecisionsPendingPane — AC#5 TuiCaptureFiled compose', () => {
       />,
     );
 
-    await new Promise((r) => setTimeout(r, 20)); // wait for initial useInput effects to register
-    stdin.write('x');
-    await new Promise((r) => setTimeout(r, 20)); // wait for OptionPicker's useInput effects to register
-    stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20)); // wait for handlePickOption to complete
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0042');
 
     expect(captureWriter).toHaveBeenCalledOnce();
     const [captureId, opts] = captureWriter.mock.calls[0] as [string, { pane: string }];
@@ -261,7 +277,7 @@ describe('DecisionsPendingPane — AC#4 notification sender', () => {
     const captureWriter = vi.fn().mockReturnValue(true);
     const notificationSender = vi.fn().mockResolvedValue([]);
 
-    const { stdin } = render(
+    const { stdin, lastFrame } = render(
       <DecisionsPendingPane
         lister={lister}
         hookOpts={{ intervalMs: 999_999_999, lister }}
@@ -272,11 +288,7 @@ describe('DecisionsPendingPane — AC#4 notification sender', () => {
       />,
     );
 
-    await new Promise((r) => setTimeout(r, 20)); // wait for initial useInput effects to register
-    stdin.write('x');
-    await new Promise((r) => setTimeout(r, 20)); // wait for OptionPicker's useInput effects to register
-    stdin.write('\r');
-    await new Promise((r) => setTimeout(r, 20)); // wait for handlePickOption to complete
+    await openPickerAndConfirm(stdin, lastFrame, 'DEC-0001');
 
     expect(notificationSender).toHaveBeenCalledOnce();
     const [dec, optionId] = notificationSender.mock.calls[0] as [Decision, string];
