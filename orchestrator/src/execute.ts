@@ -696,10 +696,24 @@ async function executePipelineBody(
   const branchName = interpolateBranchPattern(config.pipeline?.spec.branching?.pattern, branchVars);
   await sc.createBranch({ name: branchName });
   // cleanGitEnv() prevents leaked GIT_DIR from corrupting these calls (AISDLC-72).
-  await execFileAsync('git', ['fetch', 'origin', branchName], {
-    cwd: workDir,
-    env: cleanGitEnv(),
-  });
+  // Guard: skip fetch when no 'origin' remote is configured (local-only repos).
+  // The push step already degrades gracefully for local repos; fetch must too.
+  try {
+    await execFileAsync('git', ['fetch', 'origin', branchName], {
+      cwd: workDir,
+      env: cleanGitEnv(),
+    });
+  } catch (fetchErr) {
+    const fetchMsg =
+      (fetchErr as { stderr?: string; message?: string }).stderr ??
+      (fetchErr as Error).message ??
+      '';
+    if (/no such remote|does not appear to be a git repository|not found/i.test(fetchMsg)) {
+      log.info(`[pipeline] git fetch skipped: no 'origin' remote configured (local-only repo)`);
+    } else {
+      throw fetchErr;
+    }
+  }
   await execFileAsync('git', ['checkout', branchName], { cwd: workDir, env: cleanGitEnv() });
 
   // 8. Resolve agent constraints
@@ -856,7 +870,13 @@ async function executePipelineBody(
         );
         throw new Error(`Agent failed on issue ${formatIssueRef(issueId)}: ${err}`);
       }
-      result = stepOutput;
+      // Guard: ensure filesChanged is always an array even when a runner returns
+      // a partial AgentResult. Downstream consumers (.length, .map, etc.) crash
+      // on undefined — defaulting here keeps all reads safe (AISDLC-527).
+      result = {
+        ...stepOutput,
+        filesChanged: stepOutput.filesChanged ?? [],
+      };
       log.stageEnd('agent');
 
       auditLog.record({
@@ -882,7 +902,10 @@ async function executePipelineBody(
   }
 
   // 10. ABAC authorization check (if write permissions are defined)
-  if (currentLevel.permissions.write.length > 0) {
+  // Guard: default to [] when permissions.write is undefined (minimal/default autonomy configs
+  // may omit the write list, causing .length to throw on undefined — AISDLC-527).
+  const writePermissions = currentLevel.permissions.write ?? [];
+  if (writePermissions.length > 0) {
     authorizeFilesChanged(
       result.filesChanged,
       currentLevel.permissions,
