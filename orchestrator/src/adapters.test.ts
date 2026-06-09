@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createPipelineAdapterRegistry,
   createPipelineWebhookBridge,
@@ -7,6 +7,7 @@ import {
   createPipelineCIAdapter,
   resolveInfrastructure,
   resolveIssueTrackerFromConfig,
+  resolveSourceControlFromConfig,
   // Re-exports
   createGitHubCIPipeline,
   createDockerSandbox,
@@ -489,6 +490,123 @@ describe('Adapter ecosystem', () => {
 
       expect(tracker).toBeDefined();
       expect(typeof tracker.getIssue).toBe('function');
+    });
+  });
+
+  // ── resolveSourceControlFromConfig adapter fixes (AISDLC-530 round-2) ──
+
+  describe('resolveSourceControlFromConfig() — review-round-2 fixes', () => {
+    let savedGhToken: string | undefined;
+    let savedGlToken: string | undefined;
+
+    beforeEach(() => {
+      savedGhToken = process.env.GITHUB_TOKEN;
+      savedGlToken = process.env.GITLAB_TOKEN;
+      process.env.GITHUB_TOKEN = 'ghp_test_token_for_sc_adapter';
+      process.env.GITLAB_TOKEN = 'glpat_test_token_for_sc_adapter';
+    });
+
+    afterEach(() => {
+      if (savedGhToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = savedGhToken;
+      if (savedGlToken === undefined) delete process.env.GITLAB_TOKEN;
+      else process.env.GITLAB_TOKEN = savedGlToken;
+    });
+
+    const scFallback = {
+      org: 'fallback-org',
+      repo: 'fallback-repo',
+      token: { secretRef: 'github-token' },
+    };
+
+    const makeScConfig = (type: string, config?: Record<string, unknown>): AiSdlcConfig => ({
+      adapterBindings: [
+        {
+          apiVersion: 'ai-sdlc.io/v1alpha1',
+          kind: 'AdapterBinding',
+          metadata: { name: `${type}-sc` },
+          spec: {
+            interface: 'SourceControl',
+            type,
+            version: '0.1.0',
+            config,
+          },
+        },
+      ],
+    });
+
+    it('honors spec.config.token.secretRef for github binding (minor fix #2)', () => {
+      // The adapter must be constructed without throwing — the secretRef from
+      // config overrides the fallback secretRef.  We use 'github-token' which
+      // maps to GITHUB_TOKEN (set in beforeEach) so construction succeeds.
+      // Prior to the fix, `token: fallbackGitHubConfig.token` was always used,
+      // ignoring any secretRef in spec.config. Now spec.config.token.secretRef wins.
+      const sc = resolveSourceControlFromConfig(
+        makeScConfig('github', {
+          org: 'custom-org',
+          repo: 'custom-repo',
+          token: { secretRef: 'github-token' }, // maps to GITHUB_TOKEN set in beforeEach
+        }),
+        scFallback,
+      );
+      expect(sc).toBeDefined();
+      expect(typeof sc.createBranch).toBe('function');
+    });
+
+    it('emits a console.warn for unknown SC type (minor fix #3)', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      resolveSourceControlFromConfig(makeScConfig('bitbucket'), scFallback);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('bitbucket'));
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Falling back to the GitHub adapter'),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('throws a clear error when gitlab binding is missing projectId (minor fix #4)', () => {
+      expect(() =>
+        resolveSourceControlFromConfig(
+          makeScConfig('gitlab', { url: 'https://gitlab.example.com' }), // no projectId
+          scFallback,
+        ),
+      ).toThrow(/missing a required.*projectId/i);
+    });
+
+    it('throws a clear error when gitlab binding has empty-string projectId (minor fix #4)', () => {
+      expect(() =>
+        resolveSourceControlFromConfig(
+          makeScConfig('gitlab', { url: 'https://gitlab.example.com', projectId: '' }),
+          scFallback,
+        ),
+      ).toThrow(/missing a required.*projectId/i);
+    });
+
+    it('does NOT throw when gitlab binding has a numeric projectId of 0 (edge case)', () => {
+      // projectId === 0 is falsy but is a valid project ID in GitLab's API.
+      // We accept it to avoid blocking edge-case real usage.
+      expect(() =>
+        resolveSourceControlFromConfig(
+          makeScConfig('gitlab', {
+            url: 'https://gitlab.example.com',
+            projectId: 0,
+            token: { secretRef: 'gitlab-token' },
+          }),
+          scFallback,
+        ),
+      ).not.toThrow();
+    });
+
+    it('accepts a valid gitlab binding with projectId present', () => {
+      const sc = resolveSourceControlFromConfig(
+        makeScConfig('gitlab', {
+          url: 'https://gitlab.example.com',
+          projectId: 'my-namespace/my-project',
+          token: { secretRef: 'gitlab-token' },
+        }),
+        scFallback,
+      );
+      expect(sc).toBeDefined();
+      expect(typeof sc.createBranch).toBe('function');
     });
   });
 });

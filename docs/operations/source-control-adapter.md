@@ -99,12 +99,12 @@ In local-only mode:
 
 ## How auto-detection works
 
-Even without an explicit `type: local` binding, the orchestrator degrades gracefully when there is no `origin` remote:
+When there is no `origin` remote, the orchestrator degrades gracefully on the remote I/O steps:
 
 - **git fetch** (step 7) — skipped with a log message when `origin` is not configured. This was added in AISDLC-527.
 - **git push** (step 12) — skipped with a log message when `origin` is not configured. Extended in AISDLC-530.
 
-The two-phase detection means a pure local-only environment works without any `adapter-binding.yaml` — the pipeline runs the agent, commits locally, and skips the remote steps automatically.
+**Important:** This auto-detection is NOT sufficient for a pure local-only environment on its own. The default adapter (used when no `AdapterBinding` is present) is GitHub, and its constructor eagerly resolves credentials — if `GITHUB_TOKEN` is not set, construction fails before any fetch or push guard runs. For a fully credential-free local environment, add an explicit `type: local` binding (see [Local-only configuration](#local-only-no-remote-development--ci-less-environments) above). If you keep the GitHub default path without a binding, `GITHUB_TOKEN` must still be set even though push and PR creation are skipped.
 
 ---
 

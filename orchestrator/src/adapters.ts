@@ -478,17 +478,32 @@ export function resolveSourceControlFromConfig(
 
   switch (binding.spec.type) {
     case 'github': {
+      // Honor spec.config.token.secretRef when present (consistent with the GitLab case).
+      // Fall back to the fallback token so existing GitHub adopters are unaffected.
+      const tokenSecretRef =
+        (cfg.token as { secretRef?: string } | undefined)?.secretRef ??
+        fallbackGitHubConfig.token.secretRef;
       return createGitHubSourceControl({
         org: (cfg.org as string) ?? fallbackGitHubConfig.org,
         repo: (cfg.repo as string) ?? fallbackGitHubConfig.repo,
-        token: fallbackGitHubConfig.token,
+        token: { secretRef: tokenSecretRef },
       });
     }
 
     case 'gitlab': {
       // `url` is required for self-hosted GitLab; defaults to gitlab.com for SaaS.
       const baseUrl = (cfg.url as string) ?? 'https://gitlab.com';
-      const projectId = (cfg.projectId as string | number) ?? '';
+      // projectId is required — an empty value produces confusing API responses
+      // (encodeURIComponent('') → '' → the request hits /api/v4/projects/ which
+      // returns the list of all projects, not the configured one).
+      const projectId = cfg.projectId as string | number | undefined;
+      if (!projectId && projectId !== 0) {
+        throw new Error(
+          `SourceControl AdapterBinding '${binding.metadata.name}' (type: gitlab) is missing a required ` +
+            `spec.config.projectId. Set it to the numeric project ID or the URL-encoded path ` +
+            `(e.g. "group%2Fsubgroup%2Fproject" or 12345).`,
+        );
+      }
       // Token: use secretRef from config if present, else fall back to env GITLAB_TOKEN.
       const tokenSecretRef =
         (cfg.token as { secretRef?: string } | undefined)?.secretRef ?? 'gitlab-token';
@@ -505,8 +520,13 @@ export function resolveSourceControlFromConfig(
     }
 
     default: {
-      // Unknown type — fall back to GitHub with a warning.
-      // (Adopters who misconfigure 'type' get a working default, not a crash.)
+      // Unknown type — emit a warning so mistyped types (e.g. 'bitbucket') surface
+      // visibly, then fall back to GitHub so the pipeline keeps running.
+      console.warn(
+        `[ai-sdlc] SourceControl AdapterBinding '${binding.metadata.name}' has unknown type ` +
+          `'${binding.spec.type}'. Falling back to the GitHub adapter. ` +
+          `Supported types: github, gitlab, local.`,
+      );
       return createGitHubSourceControl(fallbackGitHubConfig);
     }
   }

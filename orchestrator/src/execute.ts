@@ -761,6 +761,15 @@ async function executePipelineBody(
   // cleanGitEnv() prevents leaked GIT_DIR from corrupting these calls (AISDLC-72).
   // Guard: skip fetch when no 'origin' remote is configured (local-only repos).
   // The push step already degrades gracefully for local repos; fetch must too.
+  //
+  // AISDLC-530 review fix: track whether we are in local-only mode so the checkout
+  // step can use `git checkout -b` (create) instead of `git checkout` (switch to
+  // existing).  Remote paths create the branch via the SC adapter API THEN fetch it
+  // locally — so the branch already exists locally after the fetch, and plain
+  // `git checkout <name>` is correct.  Local-only paths never have a remote, the
+  // SC adapter's createBranch is a no-op, so the branch does NOT exist yet and we
+  // MUST use `-b` to create it in one step.
+  let localOnlyMode = false;
   try {
     await execFileAsync('git', ['fetch', 'origin', branchName], {
       cwd: workDir,
@@ -778,11 +787,23 @@ async function executePipelineBody(
     // (AISDLC-527 code-review finding).
     if (/no such remote|does not appear to be a git repository/i.test(fetchMsg)) {
       log.info(`[pipeline] git fetch skipped: no 'origin' remote configured (local-only repo)`);
+      localOnlyMode = true;
     } else {
       throw fetchErr;
     }
   }
-  await execFileAsync('git', ['checkout', branchName], { cwd: workDir, env: cleanGitEnv() });
+  // Local-only: branch was never pushed to a remote, so we must CREATE it with
+  // `git checkout -b <name>`.  Remote paths: branch was fetched from origin, so
+  // it exists locally as FETCH_HEAD / refs/remotes/origin/<name> — plain
+  // `git checkout <name>` switches to the already-created tracking branch.
+  if (localOnlyMode) {
+    await execFileAsync('git', ['checkout', '-b', branchName], {
+      cwd: workDir,
+      env: cleanGitEnv(),
+    });
+  } else {
+    await execFileAsync('git', ['checkout', branchName], { cwd: workDir, env: cleanGitEnv() });
+  }
 
   // 8. Resolve agent constraints
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
