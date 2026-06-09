@@ -124,7 +124,8 @@ describe('pushBranchWithRebase', () => {
   it('does a plain push when remote is up-to-date (no drift)', async () => {
     active = await setupNoDrift();
     const log = { info: vi.fn() };
-    await pushBranchWithRebase(active.workClone, active.feature, log);
+    const skipped = await pushBranchWithRebase(active.workClone, active.feature, log);
+    expect(skipped).toBe(false);
 
     // Verify origin has our commit
     const seedSha = await git(active.workClone, 'rev-parse', 'HEAD');
@@ -142,7 +143,8 @@ describe('pushBranchWithRebase', () => {
     await git(active.workClone, 'commit', '-q', '-m', 'agent-commit');
 
     const log = { info: vi.fn() };
-    await pushBranchWithRebase(active.workClone, active.feature, log);
+    const skipped = await pushBranchWithRebase(active.workClone, active.feature, log);
+    expect(skipped).toBe(false);
 
     // Verify the agent's commit landed on top of the drift commit on origin.
     const remoteFiles = await git(
@@ -179,17 +181,35 @@ describe('pushBranchWithRebase', () => {
     expect(status).not.toContain('UU');
   });
 
-  it('rethrows non-rebase errors as-is (e.g. auth failure)', async () => {
-    // Origin doesn't exist → push fails with a different error pattern.
-    const tmp = await mkdtemp(join(tmpdir(), 'push-bad-'));
+  it('skips push gracefully when no origin remote is configured (local-only mode, AISDLC-530)', async () => {
+    // Repo has commits + a branch but NO 'origin' remote.
+    // push would fail with "does not appear to be a git repository".
+    // AISDLC-530: this is treated as local-only mode — skip gracefully, return true.
+    const tmp = await mkdtemp(join(tmpdir(), 'push-local-'));
     const wc = join(tmp, 'work');
+    const branch = 'feat/local-test';
     try {
       await execFileAsync('git', ['init', '-q', wc], { env: makeGitEnv() });
+      await git(wc, 'config', 'user.email', 'test@test.invalid');
+      await git(wc, 'config', 'user.name', 'Test');
       await writeFile(join(wc, 'a.md'), 'a\n');
       await git(wc, 'add', 'a.md');
       await git(wc, 'commit', '-q', '-m', 'init');
-      // No remote 'origin' configured at all → push fails with "does not appear to be a git repository"
-      await expect(pushBranchWithRebase(wc, 'main', undefined)).rejects.toThrow();
+      // Rename to ensure a known branch name, then create the feature branch.
+      try {
+        await git(wc, 'branch', '-M', 'main');
+      } catch {
+        /* already main */
+      }
+      await git(wc, 'checkout', '-q', '-b', branch);
+      await writeFile(join(wc, 'b.md'), 'b\n');
+      await git(wc, 'add', 'b.md');
+      await git(wc, 'commit', '-q', '-m', 'feat');
+      // No remote configured — push must be skipped, not throw.
+      const log = { info: vi.fn() };
+      const skipped = await pushBranchWithRebase(wc, branch, log);
+      expect(skipped).toBe(true);
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining("no 'origin' remote"));
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

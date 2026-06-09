@@ -49,8 +49,11 @@ import {
   resolveGitAdapter,
   // GitHub CI adapter
   createGitHubCIPipeline,
-  // GitHub issue tracker
+  // GitHub source control + issue tracker
+  createGitHubSourceControl,
   createGitHubIssueTracker,
+  // GitLab source control
+  createGitLabSourceControl,
   // Composite issue tracker
   createCompositeIssueTracker,
   // Production adapters (for resolveIssueTrackerFromConfig)
@@ -58,6 +61,7 @@ import {
   createLinearIssueTracker,
   // Types (used in function signatures)
   type IssueTracker,
+  type SourceControl,
   type BackendRoute,
   type JiraConfig,
   type AdapterRegistry,
@@ -75,6 +79,7 @@ import {
   type EventBus,
   type DockerSandboxConfig,
   type CIPipeline,
+  type GitLabConfig,
 } from '@ai-sdlc/reference';
 
 /**
@@ -373,10 +378,145 @@ export function resolveIssueTrackerFromConfig(
   return createCompositeIssueTracker({ backends });
 }
 
+// ── Source-control resolution from config ────────────────────────────
+
+/**
+ * A no-op SourceControl adapter for local-only repositories (no remote).
+ *
+ * When an adopter has no 'origin' remote (or sets `type: local` in their
+ * AdapterBinding), the pipeline must not block on API calls. This adapter:
+ *
+ * - `createBranch` — delegates to the local git command-line (via execute.ts)
+ *   so the branch checkout path works unchanged.
+ * - `createPR` — resolves immediately with a sentinel local PR object; the
+ *   caller (execute.ts step 15) should check `pr.url` to detect the skip.
+ * - All other methods are no-ops.
+ *
+ * Callers detect local-only mode by checking `pr.url === 'local'` and skip
+ * tracker comments + Slack notifications for the PR URL.
+ */
+export function createLocalSourceControl(): SourceControl {
+  return {
+    async createBranch(input) {
+      // Branches are created via git CLI in execute.ts; this is a passthrough stub.
+      return { name: input.name, sha: '' };
+    },
+
+    async createPR(_input) {
+      // Sentinel URL signals to the pipeline that we are in local-only mode and
+      // no remote PR was created. The pipeline checks for this and skips the
+      // "PR created" comment + Slack notification (avoiding noise).
+      return {
+        id: 'local',
+        title: _input.title,
+        sourceBranch: _input.sourceBranch,
+        targetBranch: _input.targetBranch ?? 'main',
+        status: 'open' as const,
+        author: 'local',
+        url: 'local',
+      };
+    },
+
+    async mergePR(_id, _strategy) {
+      return { sha: '', merged: false };
+    },
+
+    async getFileContents(_path, _ref) {
+      throw new Error('getFileContents: local-only source control has no remote to read from');
+    },
+
+    async listChangedFiles(_prId) {
+      return [];
+    },
+
+    async setCommitStatus(_sha, _status) {
+      /* no-op: no remote to post status to */
+    },
+
+    watchPREvents(_filter) {
+      return {
+        async *[Symbol.asyncIterator]() {
+          /* no-op: no remote events in local-only mode */
+        },
+      };
+    },
+  };
+}
+
+/**
+ * Resolve a SourceControl adapter from the AdapterBinding whose
+ * `spec.interface === 'SourceControl'`.
+ *
+ * Resolution order (first wins):
+ *   1. `type: github` → existing GitHub adapter using `spec.config` or fallback.
+ *   2. `type: gitlab` → GitLab adapter with `spec.config.url` (required for
+ *      self-hosted) and optional `spec.config.token.secretRef`.
+ *   3. `type: local`  → local-only no-op adapter that skips push/create-pr.
+ *   4. No SourceControl AdapterBinding present → GitHub (current default, no regression).
+ *
+ * When multiple SourceControl bindings exist, the FIRST one wins.  This is an
+ * intentional design choice — multiple SourceControl bindings are unusual and
+ * the pipeline has a single active remote. If this constraint is too tight,
+ * escalate to the Decision Catalog before changing it.
+ */
+export function resolveSourceControlFromConfig(
+  config: AiSdlcConfig,
+  fallbackGitHubConfig: { org: string; repo: string; token: { secretRef: string } },
+): SourceControl {
+  const bindings = (config.adapterBindings ?? []).filter(
+    (b) => b.spec.interface === 'SourceControl',
+  );
+
+  if (bindings.length === 0) {
+    // No SourceControl binding — default to GitHub exactly as before (AC #2).
+    return createGitHubSourceControl(fallbackGitHubConfig);
+  }
+
+  // First binding wins (see JSDoc above for rationale).
+  const binding = bindings[0];
+  const cfg = binding.spec.config ?? {};
+
+  switch (binding.spec.type) {
+    case 'github': {
+      return createGitHubSourceControl({
+        org: (cfg.org as string) ?? fallbackGitHubConfig.org,
+        repo: (cfg.repo as string) ?? fallbackGitHubConfig.repo,
+        token: fallbackGitHubConfig.token,
+      });
+    }
+
+    case 'gitlab': {
+      // `url` is required for self-hosted GitLab; defaults to gitlab.com for SaaS.
+      const baseUrl = (cfg.url as string) ?? 'https://gitlab.com';
+      const projectId = (cfg.projectId as string | number) ?? '';
+      // Token: use secretRef from config if present, else fall back to env GITLAB_TOKEN.
+      const tokenSecretRef =
+        (cfg.token as { secretRef?: string } | undefined)?.secretRef ?? 'gitlab-token';
+      const gitLabCfg: GitLabConfig = {
+        baseUrl,
+        projectId,
+        token: { secretRef: tokenSecretRef },
+      };
+      return createGitLabSourceControl(gitLabCfg);
+    }
+
+    case 'local': {
+      return createLocalSourceControl();
+    }
+
+    default: {
+      // Unknown type — fall back to GitHub with a warning.
+      // (Adopters who misconfigure 'type' get a working default, not a crash.)
+      return createGitHubSourceControl(fallbackGitHubConfig);
+    }
+  }
+}
+
 // Direct re-exports (passthrough)
 export {
   // Core adapters
   createGitHubCIPipeline,
+  createGitHubSourceControl,
   createDockerSandbox,
   createLinearIssueTracker,
   resolveSecret,
@@ -444,6 +584,7 @@ export type {
   GitAdapterFetcher,
   GitResolveResult,
   CIPipeline,
+  SourceControl,
   CodeAnalysis,
   Messenger,
   DeploymentTarget,

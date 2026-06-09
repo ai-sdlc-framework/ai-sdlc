@@ -7,7 +7,6 @@
  */
 
 import {
-  createGitHubSourceControl,
   routeByComplexity,
   evaluatePromotion,
   evaluateComplexity,
@@ -115,6 +114,7 @@ import {
   resolveAdapterFromGit,
   scanPipelineAdapters,
   resolveIssueTrackerFromConfig,
+  resolveSourceControlFromConfig,
 } from './adapters.js';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -365,7 +365,11 @@ export async function executePipeline(
   const ghConfig = { org, repo, token: { secretRef: 'github-token' } };
 
   const tracker = options.tracker ?? resolveIssueTrackerFromConfig(config, ghConfig);
-  const sc = options.sourceControl ?? createGitHubSourceControl(ghConfig);
+  // Resolve the source-control adapter from AdapterBinding config.
+  // options.sourceControl injection still wins (programmatic/testing use).
+  // When no SourceControl AdapterBinding is present, defaults to GitHub exactly
+  // as before — no regression for existing GitHub adopters (AC #2, AISDLC-530).
+  const sc = options.sourceControl ?? resolveSourceControlFromConfig(config, ghConfig);
 
   // 3. Fetch issue
   log.stage('validate-issue');
@@ -506,21 +510,33 @@ export async function restoreOriginalBranch(
  * rebase HEAD onto origin/<branch>, retry once. Rebase conflicts surface as
  * the original error so the operator can resolve manually.
  *
+ * Local-only mode (AISDLC-530 / AISDLC-527): when there is no 'origin' remote,
+ * push is skipped gracefully (returns true to signal the skip). This mirrors the
+ * AISDLC-527 fetch guard at step 7 — we detect the "no such remote" pattern in
+ * the push error and swallow it exactly as the fetch step does.
+ *
+ * @returns `true` when push was skipped (local-only repo), `false` when pushed successfully.
  * @internal — exported for unit tests.
  */
 export async function pushBranchWithRebase(
   workDir: string,
   branchName: string,
   log: { info: (msg: string) => void } | undefined,
-): Promise<void> {
+): Promise<boolean> {
   // cleanGitEnv() ensures these git calls bind to `workDir`'s own .git, not
   // a leaked GIT_DIR from a parent process (AISDLC-72).
   const env = cleanGitEnv();
   try {
     await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir, env });
-    return;
+    return false;
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr ?? (err as Error).message;
+    // Local-only repos: no 'origin' remote configured — skip push gracefully.
+    // Mirror the AISDLC-527 fetch guard pattern exactly.
+    if (/no such remote|does not appear to be a git repository/i.test(stderr)) {
+      log?.info(`[pipeline] git push skipped: no 'origin' remote configured (local-only repo)`);
+      return true;
+    }
     if (!/non-fast-forward|rejected/i.test(stderr)) {
       throw err;
     }
@@ -545,6 +561,7 @@ export async function pushBranchWithRebase(
   }
 
   await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir, env });
+  return false;
 }
 
 async function executePipelineBody(
@@ -1015,8 +1032,13 @@ async function executePipelineBody(
   // cleanly. Without this, re-runs against an existing remote branch (e.g. when
   // the issue branch was updated by another pipeline run or by a hand-edit)
   // reject with non-fast-forward and the agent's work is stranded locally.
+  //
+  // Local-only mode (AISDLC-530): when there's no 'origin' remote, the push
+  // is skipped just like the fetch step at step 7. We detect this by attempting
+  // the push and checking for the "no such remote" pattern — same approach
+  // AISDLC-527 uses for the fetch guard above (build on, not duplicate).
   log.stage('push');
-  await pushBranchWithRebase(workDir, branchName, log);
+  const pushSkipped = await pushBranchWithRebase(workDir, branchName, log);
   log.stageEnd('push');
 
   auditLog.record({
@@ -1024,7 +1046,7 @@ async function executePipelineBody(
     action: 'push',
     resource: `branch/${branchName}`,
     decision: 'allowed',
-    details: { filesChanged: result.filesChanged.length, issueId },
+    details: { filesChanged: result.filesChanged.length, issueId, localOnly: pushSkipped },
   });
 
   // 13. Validate agent output against guardrails (after push)
@@ -1248,29 +1270,45 @@ async function executePipelineBody(
 
       log.stageEnd('create-pr');
 
+      // Local-only mode (AISDLC-530): when the source-control adapter is local,
+      // createPR returns a sentinel pr.url === 'local' — record as skipped.
+      const isLocalPr = prResult.url === 'local';
+      if (isLocalPr) {
+        log.info(
+          `[pipeline] create-pr skipped: local-only mode (no remote). ` +
+            `Branch '${branchName}' is available locally.`,
+        );
+      }
+
       auditLog.record({
         actor: 'system',
         action: 'create',
         resource: 'pull-request',
         decision: 'allowed',
-        details: { prUrl: prResult.url, issueId },
+        details: { prUrl: prResult.url, issueId, localOnly: isLocalPr },
       });
 
       return prResult;
     },
   );
 
-  // 14. Comment on issue with success (use notification template when available)
-  const notifTemplates = config.pipeline?.spec.notifications?.templates;
-  const prCreatedTemplate = notifTemplates?.['pr-created'];
-  const prCreatedComment = prCreatedTemplate
-    ? renderTemplate(prCreatedTemplate, {
-        prUrl: pr.url,
-        issueNumber: issueId,
-      })
-    : { title: NOTIFICATION_TITLES.prCreated, body: `Pull request created: ${pr.url}` };
-  await tracker.addComment(issueId, `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`);
-  await notifySlack(`:pull_request: PR created: ${pr.url}`);
+  // 14. Comment on issue with success (use notification template when available).
+  // Local-only mode (AISDLC-530): skip tracker comment + Slack notification when
+  // there is no remote PR URL — posting "PR created: local" to the tracker would
+  // be misleading and is not actionable.
+  const isLocalOnlyPr = pr.url === 'local';
+  if (!isLocalOnlyPr) {
+    const notifTemplates = config.pipeline?.spec.notifications?.templates;
+    const prCreatedTemplate = notifTemplates?.['pr-created'];
+    const prCreatedComment = prCreatedTemplate
+      ? renderTemplate(prCreatedTemplate, {
+          prUrl: pr.url,
+          issueNumber: issueId,
+        })
+      : { title: NOTIFICATION_TITLES.prCreated, body: `Pull request created: ${pr.url}` };
+    await tracker.addComment(issueId, `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`);
+    await notifySlack(`:pull_request: PR created: ${pr.url}`);
+  }
 
   // 14b. Record cost from agent result
   if (options.costTracker && result.tokenUsage) {
