@@ -83,6 +83,54 @@ export class RunnerRegistry {
   }
 
   /**
+   * Load and register a runner from an external plugin module.
+   *
+   * The module must export a default export or a named `runner` export that
+   * satisfies the `AgentRunner` interface (i.e. has a `run(ctx)` method).
+   *
+   * @param pluginPath - Absolute or resolvable path to the plugin module (e.g. `/path/to/runner.mjs`).
+   * @param name - Registry name for the loaded runner (defaults to the basename of the path).
+   * @throws Error when the module cannot be imported or does not export a valid AgentRunner.
+   */
+  async loadFromPlugin(pluginPath: string, name?: string): Promise<string> {
+    let mod: unknown;
+    try {
+      mod = await import(pluginPath);
+    } catch (err) {
+      throw new Error(
+        `AI_SDLC_RUNNER_PLUGIN: failed to import plugin module "${pluginPath}": ${err instanceof Error ? err.message : String(err)}.\n` +
+          `Ensure the path is correct and the module is a valid ESM/CJS module.`,
+      );
+    }
+
+    // Accept default export or named 'runner' export
+    const exported =
+      (mod as Record<string, unknown>).default ?? (mod as Record<string, unknown>).runner;
+
+    if (!exported || typeof (exported as Record<string, unknown>).run !== 'function') {
+      throw new Error(
+        `AI_SDLC_RUNNER_PLUGIN: plugin module "${pluginPath}" does not export a valid AgentRunner.\n` +
+          `Expected a default export (or named 'runner' export) with a \`run(ctx: AgentContext): Promise<AgentResult>\` method.\n` +
+          `Got: ${JSON.stringify(Object.keys(mod as object))}`,
+      );
+    }
+
+    const runnerName =
+      name ??
+      pluginPath
+        .split('/')
+        .pop()!
+        .replace(/\.(m|c)?[jt]s$/, '');
+    this.runners.set(runnerName, {
+      name: runnerName,
+      runner: exported as AgentRunner,
+      available: true,
+      source: 'manual',
+    });
+    return runnerName;
+  }
+
+  /**
    * Auto-discover runners from environment variables and register them.
    */
   discoverFromEnv(env: Record<string, string | undefined> = process.env): void {
@@ -194,4 +242,67 @@ export function createRunnerRegistry(env?: Record<string, string | undefined>): 
   const registry = new RunnerRegistry();
   registry.discoverFromEnv(env);
   return registry;
+}
+
+/**
+ * Resolve the agent runner to use, applying the full precedence chain:
+ *
+ *   1. `injectedRunner` — programmatic override (options.runner from caller / tests)
+ *   2. `runnerName` — explicit `--runner <name>` flag (must already be registered after discoverFromEnv)
+ *   3. `AI_SDLC_RUNNER_PLUGIN` env — path to a dynamic plugin module (loaded + registered)
+ *   4. env-discovered runners (already in registry after discoverFromEnv)
+ *   5. ClaudeCodeRunner (hard-coded default)
+ *
+ * This function is async because step 3 may dynamically import a module.
+ *
+ * @throws Error when `runnerName` is provided but not registered in the registry.
+ * @throws Error when `AI_SDLC_RUNNER_PLUGIN` points to an invalid module.
+ */
+export async function resolveRunner(
+  registry: RunnerRegistry,
+  opts: {
+    injectedRunner?: AgentRunner;
+    runnerName?: string;
+    env?: Record<string, string | undefined>;
+  } = {},
+): Promise<AgentRunner> {
+  const env = opts.env ?? process.env;
+
+  // 1. Programmatic injection (options.runner / test override) — always wins
+  if (opts.injectedRunner) {
+    return opts.injectedRunner;
+  }
+
+  // 2. Explicit --runner <name> flag
+  if (opts.runnerName) {
+    const named = registry.get(opts.runnerName);
+    if (!named) {
+      const available = registry.listAvailable().map((r) => r.name);
+      throw new Error(
+        `--runner "${opts.runnerName}" is not registered. ` +
+          `Available runners: ${available.length > 0 ? available.join(', ') : '(none)'}.\n` +
+          `Tip: set AI_SDLC_RUNNER_PLUGIN=/path/to/runner.mjs to load a custom runner first.`,
+      );
+    }
+    return named;
+  }
+
+  // 3. AI_SDLC_RUNNER_PLUGIN env — dynamically load + register, then return
+  const pluginPath = env.AI_SDLC_RUNNER_PLUGIN;
+  if (pluginPath) {
+    const registeredName = await registry.loadFromPlugin(pluginPath);
+    const pluginRunner = registry.get(registeredName);
+    // loadFromPlugin throws on invalid module, so pluginRunner is guaranteed to exist here
+    return pluginRunner!;
+  }
+
+  // 4. First env-discovered runner — source === 'env' only (not built-ins like claude-code-sdk)
+  // (discoverFromEnv has already been called before resolveRunner is invoked)
+  const envRunner = registry.listAvailable().find((r) => r.source === 'env');
+  if (envRunner) {
+    return envRunner.runner;
+  }
+
+  // 5. ClaudeCodeRunner default (always in registry after discoverFromEnv)
+  return registry.get('claude-code') ?? new (await import('./claude-code.js')).ClaudeCodeRunner();
 }

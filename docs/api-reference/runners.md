@@ -98,6 +98,64 @@ Invokes any OpenAI-compatible chat completions API over HTTP.
 import { GenericLLMRunner } from '@ai-sdlc/orchestrator';
 ```
 
+## Selecting a Runner
+
+### `--runner <name>` flag
+
+The `ai-sdlc run` command accepts a `--runner <name>` flag to select any registered runner by name:
+
+```bash
+ai-sdlc run --issue 42 --runner copilot
+ai-sdlc run --issue 42 --runner cursor
+ai-sdlc run --issue 42 --runner claude-code   # explicit built-in default
+```
+
+If the specified name is not registered, the command fails immediately with an actionable error listing the available runners — **no silent fallback**.
+
+### `AI_SDLC_RUNNER_PLUGIN` environment variable
+
+To plug in a custom runner (e.g. Kiro, a proprietary agent CLI, or a test double) without forking the package, set `AI_SDLC_RUNNER_PLUGIN` to the path of a module that exports an `AgentRunner`:
+
+```bash
+export AI_SDLC_RUNNER_PLUGIN=/path/to/my-runner.mjs
+ai-sdlc run --issue 42
+```
+
+The module must export a default export **or** a named `runner` export satisfying the `AgentRunner` interface:
+
+```typescript
+// my-runner.mjs  (ESM)
+export default {
+  async run(ctx) {
+    // Invoke your agent, commit changes, return AgentResult
+    return { success: true, filesChanged: ['src/fix.ts'], summary: 'Done.' };
+  },
+};
+```
+
+Or with a named export:
+
+```typescript
+// my-runner.mjs
+export const runner = {
+  async run(ctx) { /* ... */ }
+};
+```
+
+If the module cannot be imported or does not export a valid `AgentRunner`, the pipeline fails immediately with an actionable error — **no silent fallback**.
+
+### Runner precedence
+
+The full precedence chain (first match wins):
+
+| Priority | Source | How to set |
+|---|---|---|
+| 1 (highest) | Programmatic injection | `new Orchestrator({ runner: myRunner })` |
+| 2 | `--runner <name>` flag | `ai-sdlc run --runner copilot` |
+| 3 | `AI_SDLC_RUNNER_PLUGIN` | `export AI_SDLC_RUNNER_PLUGIN=/path/to/runner.mjs` |
+| 4 | Env-discovered runners | `GH_TOKEN`, `OPENAI_API_KEY`, etc. |
+| 5 (default) | `ClaudeCodeRunner` | _(always available)_ |
+
 ## Runner Registry
 
 The `RunnerRegistry` manages discovery and selection of runners:
@@ -183,6 +241,7 @@ All CLI-based runners (Claude Code, Copilot, Cursor, Codex) follow the same subp
 
 | Variable | Default | Description |
 |---|---|---|
+| `AI_SDLC_RUNNER_PLUGIN` | _(none)_ | Path to a custom runner plugin module (ESM/CJS, must export default or named `runner`). Fails fast on invalid module. |
 | `AI_SDLC_MODEL` | `claude-sonnet-4-5-20250929` | Model for ClaudeCodeRunner |
 | `AI_SDLC_COPILOT_MODEL` | _(CLI default)_ | Model override for CopilotRunner |
 | `AI_SDLC_CURSOR_MODEL` | _(CLI default)_ | Model override for CursorRunner |

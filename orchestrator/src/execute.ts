@@ -38,7 +38,7 @@ import {
   createStructuredBufferLogger,
 } from './structured-logger.js';
 import type { AgentRunner, AgentResult } from './runners/types.js';
-import { ClaudeCodeRunner } from './runners/claude-code.js';
+import { createRunnerRegistry, resolveRunner } from './runners/runner-registry.js';
 import {
   execFileAsync,
   getGitHubConfig,
@@ -170,8 +170,14 @@ export interface ExecuteOptions {
   configDir?: string;
   /** Override the working directory (defaults to `process.cwd()`). */
   workDir?: string;
-  /** Inject a custom runner (for testing). */
+  /** Inject a custom runner (for testing). Wins over runnerName and registry. */
   runner?: AgentRunner;
+  /**
+   * Select a runner by name from the registry (maps to `--runner <name>` CLI flag).
+   * Must be registered (built-in, env-discovered, or loaded via AI_SDLC_RUNNER_PLUGIN).
+   * Throws when the name is unknown — no silent fallback.
+   */
+  runnerName?: string;
   /** Inject a custom issue tracker (for testing). */
   tracker?: IssueTracker;
   /** Inject a custom source control adapter (for testing). */
@@ -801,7 +807,17 @@ async function executePipelineBody(
     `:hammer_and_wrench: Agent working on \`${branchName}\` (model: ${selectedModel ?? 'default'}, complexity: ${complexity})`,
   );
 
-  const runner = options.runner ?? new ClaudeCodeRunner();
+  // Resolve runner via registry (after discoverFromEnv):
+  //   1. options.runner injection (tests / programmatic override) — wins
+  //   2. options.runnerName (--runner flag) — must be registered; throws on unknown
+  //   3. AI_SDLC_RUNNER_PLUGIN env — dynamically loaded plugin
+  //   4. env-discovered runners (openai, copilot, etc.) already in registry
+  //   5. ClaudeCodeRunner built-in default
+  const _runnerRegistry = createRunnerRegistry();
+  const runner = await resolveRunner(_runnerRegistry, {
+    injectedRunner: options.runner,
+    runnerName: options.runnerName,
+  });
 
   // Set up progress tracking — collects streaming events for the activity log
   const progressLog: string[] = [];
