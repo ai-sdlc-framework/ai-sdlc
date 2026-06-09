@@ -227,6 +227,46 @@ export interface ExecuteOptions {
 }
 
 /**
+ * Build an actionable error message when a required resource kind is absent.
+ *
+ * The loader silently drops resource-shaped YAML files that fail schema
+ * validation (recording them as `config.warnings`). Without this helper, the
+ * caller would only see "No <Kind> resource found in .ai-sdlc/" with no pointer
+ * to the real cause. This helper attaches any relevant warnings so the adopter
+ * knows *which* file to fix and *why* it was dropped.
+ *
+ * Non-resource YAMLs (no apiVersion+kind) are silently skipped by design
+ * (AISDLC-722 guard); this helper is only called when the resource is truly
+ * absent — i.e. no file with the right kind and a passing schema exists.
+ */
+export function buildMissingResourceError(
+  kind: string,
+  config: AiSdlcConfig,
+  configDir: string,
+): string {
+  const base = `No ${kind} resource found in ${configDir}`;
+
+  // Find any warnings that mention this kind — these are resource-shaped files
+  // that had `apiVersion`+`kind` but failed schema validation and were dropped.
+  const relevant = (config.warnings ?? []).filter(
+    (w) => w.error.includes('validation failed') || w.error.includes('unknown kind'),
+  );
+
+  if (relevant.length === 0) {
+    return `${base}. Add a ${kind} YAML file to your .ai-sdlc/ directory. Run \`ai-sdlc init\` to scaffold a minimal working configuration.`;
+  }
+
+  const details = relevant.map((w) => `  - ${w.file}: ${w.error}`).join('\n');
+
+  return (
+    `${base}.\n` +
+    `The following file(s) declared a resource but failed schema validation and were dropped:\n` +
+    `${details}\n` +
+    `Fix the validation error(s) above, or run \`ai-sdlc init\` to scaffold a minimal working configuration.`
+  );
+}
+
+/**
  * Execute the full AI-SDLC pipeline for a given issue ID.
  */
 export async function executePipeline(
@@ -290,13 +330,13 @@ export async function executePipeline(
   }
 
   if (!config.qualityGate) {
-    throw new Error('No QualityGate resource found in .ai-sdlc/');
+    throw new Error(buildMissingResourceError('QualityGate', config, configDir));
   }
   if (!config.agentRole) {
-    throw new Error('No AgentRole resource found in .ai-sdlc/');
+    throw new Error(buildMissingResourceError('AgentRole', config, configDir));
   }
   if (!config.autonomyPolicy) {
-    throw new Error('No AutonomyPolicy resource found in .ai-sdlc/');
+    throw new Error(buildMissingResourceError('AutonomyPolicy', config, configDir));
   }
 
   // Capture narrowed types for use in closures

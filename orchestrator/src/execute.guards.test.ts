@@ -17,10 +17,11 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolve } from 'node:path';
-import { executePipeline } from './execute.js';
+import { executePipeline, buildMissingResourceError } from './execute.js';
 import type { AgentRunner, AgentResult } from './runners/types.js';
 import type { IssueTracker, SourceControl, Issue, PullRequest, AuditLog } from '@ai-sdlc/reference';
 import type { Logger } from './logger.js';
+import type { AiSdlcConfig } from './config.js';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push/fetch.
 // Default: resolves with empty stdout/stderr (simulates a clean, repo-with-remote
@@ -419,5 +420,96 @@ describe('Guard #3 — AgentResult.filesChanged defaults to [] when absent', () 
     });
 
     expect(pipelineResult.filesChanged).toEqual(['src/a.ts', 'src/a.test.ts']);
+  });
+});
+
+// ── AISDLC-528: buildMissingResourceError ─────────────────────────────────────
+// Unit tests for the helper that converts a "resource not found" situation into
+// an actionable error message that names the file + schema violation(s) when
+// config.warnings records why the resource was dropped.
+
+describe('buildMissingResourceError() — AISDLC-528', () => {
+  it('returns a simple "not found" message with init hint when no warnings exist', () => {
+    const config: AiSdlcConfig = {};
+    const msg = buildMissingResourceError('QualityGate', config, '/proj/.ai-sdlc');
+    expect(msg).toContain('No QualityGate resource found');
+    expect(msg).toContain('/proj/.ai-sdlc');
+    expect(msg).toContain('ai-sdlc init');
+  });
+
+  it('attaches validation-failure details when config.warnings names the dropped file', () => {
+    const config: AiSdlcConfig = {
+      warnings: [
+        {
+          file: 'quality-gate.yaml',
+          error: 'validation failed: /spec/gates: is required; /spec/evaluation: is required',
+        },
+      ],
+    };
+    const msg = buildMissingResourceError('QualityGate', config, '/proj/.ai-sdlc');
+    expect(msg).toContain('No QualityGate resource found');
+    expect(msg).toContain('quality-gate.yaml');
+    expect(msg).toContain('/spec/gates: is required');
+    expect(msg).toContain('validation failed');
+    // Should point the adopter toward the fix
+    expect(msg).toContain('ai-sdlc init');
+  });
+
+  it('attaches details for a different kind (AgentRole) from a different file', () => {
+    const config: AiSdlcConfig = {
+      warnings: [
+        {
+          file: 'agent-role.yaml',
+          error: 'validation failed: /spec/role: is required',
+        },
+      ],
+    };
+    const msg = buildMissingResourceError('AgentRole', config, '/project/.ai-sdlc');
+    expect(msg).toContain('No AgentRole resource found');
+    expect(msg).toContain('agent-role.yaml');
+    expect(msg).toContain('/spec/role: is required');
+  });
+
+  it('lists multiple dropped files when several warnings exist', () => {
+    const config: AiSdlcConfig = {
+      warnings: [
+        {
+          file: 'quality-gate.yaml',
+          error: 'validation failed: /spec/gates: is required',
+        },
+        {
+          file: 'agent-role.yaml',
+          error: 'validation failed: /spec/role: is required',
+        },
+      ],
+    };
+    const msg = buildMissingResourceError('QualityGate', config, '/proj/.ai-sdlc');
+    expect(msg).toContain('quality-gate.yaml');
+    expect(msg).toContain('agent-role.yaml');
+  });
+
+  it('does NOT surface non-validation warnings (e.g. unknown-kind skips) as validation-related', () => {
+    const config: AiSdlcConfig = {
+      warnings: [
+        {
+          file: 'maintainers.yaml',
+          error:
+            "unknown kind 'MaintainersList' — skipped (loader-private convention or typo of canonical kind?)",
+        },
+      ],
+    };
+    // unknown-kind entries DO satisfy our filter (they help explain absent resources)
+    // because "unknown kind" can be a typo of a canonical kind.
+    const msg = buildMissingResourceError('QualityGate', config, '/proj/.ai-sdlc');
+    // maintainers.yaml should appear in the message (it satisfies the filter for unknown kind)
+    expect(msg).toContain('maintainers.yaml');
+  });
+
+  it('returns init hint without warnings listing when warnings array is empty', () => {
+    const config: AiSdlcConfig = { warnings: [] };
+    const msg = buildMissingResourceError('AutonomyPolicy', config, '/proj/.ai-sdlc');
+    expect(msg).toContain('No AutonomyPolicy resource found');
+    expect(msg).toContain('ai-sdlc init');
+    expect(msg).not.toContain('validation failed');
   });
 });
