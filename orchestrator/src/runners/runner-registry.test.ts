@@ -278,11 +278,23 @@ describe('resolveRunner', () => {
     ).rejects.toThrow('AI_SDLC_RUNNER_PLUGIN');
   });
 
-  it('falls back to env-discovered runner when no name/plugin given', async () => {
+  it('does NOT auto-select an env-discovered runner — ambient env var must not override default (AISDLC-529 code review)', async () => {
     const registry = new RunnerRegistry();
     registry.discoverFromEnv({ GH_TOKEN: 'test-token' });
-    // copilot is env-sourced, so it should win over claude-code built-in
+    // GH_TOKEN registers copilot, but with NO explicit --runner/plugin the default
+    // must stay ClaudeCodeRunner — a user who has GH_TOKEN set for the `gh` CLI must
+    // not silently get a different runner.
     const result = await resolveRunner(registry, {});
+    expect(result).toBeInstanceOf(ClaudeCodeRunner);
+  });
+
+  it('env-discovered runner is still selectable by explicit --runner name', async () => {
+    const registry = new RunnerRegistry();
+    registry.discoverFromEnv({ GH_TOKEN: 'test-token' });
+    // The env-discovered copilot runner is registered and selectable explicitly.
+    const copilot = registry.listAvailable().find((r) => r.runner instanceof CopilotRunner);
+    expect(copilot).toBeDefined();
+    const result = await resolveRunner(registry, { runnerName: copilot!.name });
     expect(result).toBeInstanceOf(CopilotRunner);
   });
 

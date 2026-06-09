@@ -153,8 +153,9 @@ The full precedence chain (first match wins):
 | 1 (highest) | Programmatic injection | `new Orchestrator({ runner: myRunner })` |
 | 2 | `--runner <name>` flag | `ai-sdlc run --runner copilot` |
 | 3 | `AI_SDLC_RUNNER_PLUGIN` | `export AI_SDLC_RUNNER_PLUGIN=/path/to/runner.mjs` |
-| 4 | Env-discovered runners | `GH_TOKEN`, `OPENAI_API_KEY`, etc. |
-| 5 (default) | `ClaudeCodeRunner` | _(always available)_ |
+| 4 (default) | `ClaudeCodeRunner` | _(always available)_ |
+
+> **Env-discovered runners do not auto-select.** Setting `GH_TOKEN`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc. **registers** the corresponding runner so it is selectable by name (`--runner copilot`), but the mere presence of an ambient env var does **not** silently switch the default runner — these vars are commonly set for unrelated tools. Absent an explicit `--runner`/`AI_SDLC_RUNNER_PLUGIN`/programmatic selection, the default is always `ClaudeCodeRunner`. Select an env-discovered runner explicitly with `--runner <name>`.
 
 ## Runner Registry
 

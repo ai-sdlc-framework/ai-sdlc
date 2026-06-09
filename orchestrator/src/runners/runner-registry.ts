@@ -250,8 +250,14 @@ export function createRunnerRegistry(env?: Record<string, string | undefined>): 
  *   1. `injectedRunner` — programmatic override (options.runner from caller / tests)
  *   2. `runnerName` — explicit `--runner <name>` flag (must already be registered after discoverFromEnv)
  *   3. `AI_SDLC_RUNNER_PLUGIN` env — path to a dynamic plugin module (loaded + registered)
- *   4. env-discovered runners (already in registry after discoverFromEnv)
- *   5. ClaudeCodeRunner (hard-coded default)
+ *   4. ClaudeCodeRunner (hard-coded default)
+ *
+ * IMPORTANT — env-discovered runners do NOT auto-win (AISDLC-529 code review). They are
+ * registered by `discoverFromEnv()` so they are *selectable by name* via `--runner <name>`,
+ * but the mere PRESENCE of an ambient env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, GH_TOKEN,
+ * etc. — commonly set for unrelated tools) must NOT silently switch the runner. Before this
+ * seam existed the orchestrator always used ClaudeCodeRunner; preserving that as the default
+ * (absent an explicit selector) avoids a breaking, surprising change for existing adopters.
  *
  * This function is async because step 3 may dynamically import a module.
  *
@@ -296,13 +302,9 @@ export async function resolveRunner(
     return pluginRunner!;
   }
 
-  // 4. First env-discovered runner — source === 'env' only (not built-ins like claude-code-sdk)
-  // (discoverFromEnv has already been called before resolveRunner is invoked)
-  const envRunner = registry.listAvailable().find((r) => r.source === 'env');
-  if (envRunner) {
-    return envRunner.runner;
-  }
-
-  // 5. ClaudeCodeRunner default (always in registry after discoverFromEnv)
+  // 4. ClaudeCodeRunner default (always in registry after discoverFromEnv).
+  // Env-discovered runners are intentionally NOT auto-selected here — the mere presence
+  // of an ambient API-key env var must not silently override the default (AISDLC-529 code
+  // review). An adopter selects an env-discovered runner explicitly via `--runner <name>`.
   return registry.get('claude-code') ?? new (await import('./claude-code.js')).ClaudeCodeRunner();
 }

@@ -811,10 +811,11 @@ async function executePipelineBody(
   //   1. options.runner injection (tests / programmatic override) — wins
   //   2. options.runnerName (--runner flag) — must be registered; throws on unknown
   //   3. AI_SDLC_RUNNER_PLUGIN env — dynamically loaded plugin
-  //   4. env-discovered runners (openai, copilot, etc.) already in registry
-  //   5. ClaudeCodeRunner built-in default
-  const _runnerRegistry = createRunnerRegistry();
-  const runner = await resolveRunner(_runnerRegistry, {
+  //   4. ClaudeCodeRunner built-in default
+  // NOTE: env-discovered runners (openai, copilot, etc.) are registered + selectable by
+  // name via --runner, but do NOT auto-win on env-var presence (AISDLC-529 code review).
+  const runnerRegistry = createRunnerRegistry();
+  const runner = await resolveRunner(runnerRegistry, {
     injectedRunner: options.runner,
     runnerName: options.runnerName,
   });
