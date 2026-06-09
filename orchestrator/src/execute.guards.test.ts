@@ -245,6 +245,46 @@ describe('Guard #1 — git fetch degrades gracefully when no origin remote', () 
       }),
     ).rejects.toThrow();
   });
+
+  it('rethrows "repository not found" (origin configured, URL invalid) — NOT swallowed as local-only (AISDLC-527 code-review finding)', async () => {
+    // The no-remote guard must NOT match a bare "not found": "repository not found"
+    // means origin IS configured but the URL is wrong/deleted/inaccessible — a real
+    // config error that must propagate, not be silently skipped.
+    (execFileMockRef as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb?: unknown) => {
+        const isFetch = Array.isArray(args) && args[0] === 'fetch' && args[1] === 'origin';
+        if (typeof cb === 'function') {
+          if (isFetch) {
+            const err = Object.assign(new Error('remote: Repository not found.'), {
+              stderr: 'remote: Repository not found.\nfatal: repository not found',
+              code: 128,
+            });
+            (cb as (err: Error, stdout: string, stderr: string) => void)(err, '', err.message);
+          } else {
+            (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '');
+          }
+        }
+        return { stdout: '', stderr: '' };
+      },
+    );
+
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await expect(
+      executePipeline('99', {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/guard-test-repo',
+        tracker,
+        sourceControl: sc,
+        runner,
+        auditLog,
+      }),
+    ).rejects.toThrow();
+  });
 });
 
 // ── Guard #2: ABAC write-perms nullish guard ─────────────────────────

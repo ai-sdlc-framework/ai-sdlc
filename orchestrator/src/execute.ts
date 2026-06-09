@@ -708,7 +708,12 @@ async function executePipelineBody(
       (fetchErr as { stderr?: string; message?: string }).stderr ??
       (fetchErr as Error).message ??
       '';
-    if (/no such remote|does not appear to be a git repository|not found/i.test(fetchMsg)) {
+    // Only swallow the "origin remote is not configured at all" shape (local-only
+    // repos). Do NOT match a bare "not found" — that also matches "repository not
+    // found" (origin IS configured but the URL is wrong/deleted/inaccessible), which
+    // must propagate as a real config error rather than be silently skipped
+    // (AISDLC-527 code-review finding).
+    if (/no such remote|does not appear to be a git repository/i.test(fetchMsg)) {
       log.info(`[pipeline] git fetch skipped: no 'origin' remote configured (local-only repo)`);
     } else {
       throw fetchErr;
@@ -904,6 +909,18 @@ async function executePipelineBody(
   // 10. ABAC authorization check (if write permissions are defined)
   // Guard: default to [] when permissions.write is undefined (minimal/default autonomy configs
   // may omit the write list, causing .length to throw on undefined — AISDLC-527).
+  //
+  // NOTE on the empty/undefined case (AISDLC-527 security-review finding): per the
+  // framework's existing autonomy-policy semantics, an empty write allowlist means
+  // "no per-file write restriction at this level" (the default autonomy level ships
+  // `write: []`), so this block intentionally SKIPS per-file authorization when the
+  // list is empty. The `?? []` makes a *missing* list behave the same as an explicit
+  // empty one rather than crashing. Because skipping authorization is a permissive
+  // (fail-open) path, we log it so it is auditable rather than silent. Tightening the
+  // empty-allowlist semantics to fail-closed is a framework-wide policy change (it would
+  // change the meaning of the default `write: []` level) and is tracked separately, NOT
+  // resolved in this crash-guard task. Downstream `validateAgentOutput` blocked-paths +
+  // branch protection + human merge remain as defense-in-depth.
   const writePermissions = currentLevel.permissions.write ?? [];
   if (writePermissions.length > 0) {
     authorizeFilesChanged(
@@ -912,6 +929,12 @@ async function executePipelineBody(
       agentRole.spec.constraints,
       auditLog,
       agentRole.metadata.name,
+    );
+  } else {
+    log.info(
+      `[pipeline] ABAC per-file write authorization skipped: autonomy level '${currentLevel.name ?? 'unknown'}' ` +
+        `has an empty/undefined permissions.write allowlist (framework default semantics). ` +
+        `Downstream blocked-paths validation + branch protection still apply.`,
     );
   }
 
