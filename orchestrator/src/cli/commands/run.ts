@@ -10,6 +10,11 @@ export const runCommand = new Command('run')
   .description('Run the AI-SDLC pipeline for a specific issue')
   .requiredOption('-i, --issue <id>', 'Issue ID to process')
   .option('--state <path>', 'SQLite state database path')
+  .option(
+    '--runner <name>',
+    'Select a registered runner by name (e.g. claude-code, copilot, cursor). ' +
+      'Fails fast when the name is not registered — no silent fallback.',
+  )
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent?.opts() ?? {};
     const format = globalOpts.format ?? 'table';
@@ -20,7 +25,13 @@ export const runCommand = new Command('run')
     });
 
     try {
-      const result = await orchestrator.run(opts.issue);
+      // opts.runner maps to ExecuteOptions.runnerName; resolveRunner() in execute.ts
+      // applies the full precedence chain and throws on unknown names.
+      // Only pass overrides when a flag is explicitly set to avoid breaking callers
+      // that match on the exact argument list (e.g. existing tests).
+      const result = opts.runner
+        ? await orchestrator.run(opts.issue, { runnerName: opts.runner as string })
+        : await orchestrator.run(opts.issue);
       console.log(
         formatOutput(format, {
           type: 'run',
