@@ -83,7 +83,7 @@ describe('validateConfigFiles()', () => {
       typeof readdirSync
     >);
     mockedReadFileSync.mockReturnValue('kind: Pipeline');
-    mockedParseYaml.mockReturnValue({ kind: 'Pipeline' });
+    mockedParseYaml.mockReturnValue({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockReturnValue({ valid: true });
 
     const results = validateConfigFiles('/some/dir');
@@ -101,7 +101,7 @@ describe('validateConfigFiles()', () => {
       typeof readdirSync
     >);
     mockedReadFileSync.mockReturnValue('kind: Pipeline');
-    mockedParseYaml.mockReturnValue({ kind: 'Pipeline' });
+    mockedParseYaml.mockReturnValue({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockReturnValue({ valid: true });
 
     const results = validateConfigFiles('/some/dir');
@@ -139,7 +139,7 @@ describe('validateConfigFiles()', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['bad.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('kind: Pipeline');
-    mockedParseYaml.mockReturnValue({ kind: 'Pipeline' });
+    mockedParseYaml.mockReturnValue({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockReturnValue({
       valid: false,
       errors: [
@@ -166,7 +166,7 @@ describe('validateConfigFiles()', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['bad.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('kind: Pipeline');
-    mockedParseYaml.mockReturnValue({ kind: 'Pipeline' });
+    mockedParseYaml.mockReturnValue({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockReturnValue({
       valid: false,
       errors: undefined,
@@ -179,59 +179,74 @@ describe('validateConfigFiles()', () => {
     expect(results[0].errors).toEqual([]);
   });
 
-  // ---------- Document without kind ----------
+  // ---------- Silently skips placeholder / null / non-object content ----------
+  // These tests verify that validateResource is NOT called for non-resource YAMLs.
+  // The guard mirrors config.ts:116.
 
-  it('returns null kind for documents without a kind field', () => {
+  it('silently skips placeholder file with no apiVersion or kind (validateResource not called)', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['config.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('foo: bar');
     mockedParseYaml.mockReturnValue({ foo: 'bar' });
-    mockedValidateResource.mockReturnValue({
-      valid: false,
-      errors: [{ path: '/', message: 'Missing "kind" field', keyword: 'required' }],
-    });
 
     const results = validateConfigFiles('/some/dir');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].kind).toBeNull();
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
   });
 
-  // ---------- Non-object parsed YAML (e.g., a plain string) ----------
-
-  it('returns null kind for non-object YAML content', () => {
+  it('silently skips non-object YAML content (validateResource not called)', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['scalar.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('just a string');
     mockedParseYaml.mockReturnValue('just a string');
-    mockedValidateResource.mockReturnValue({
-      valid: false,
-      errors: [{ path: '/', message: 'not an object', keyword: 'type' }],
-    });
 
     const results = validateConfigFiles('/some/dir');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].kind).toBeNull();
-    expect(results[0].valid).toBe(false);
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
   });
 
-  // ---------- Null parsed YAML ----------
-
-  it('returns null kind for null YAML content', () => {
+  it('silently skips fully-commented / null YAML content (validateResource not called)', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['empty.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('');
     mockedParseYaml.mockReturnValue(null);
-    mockedValidateResource.mockReturnValue({
-      valid: false,
-      errors: [{ path: '/', message: 'empty document', keyword: 'type' }],
-    });
 
     const results = validateConfigFiles('/some/dir');
 
-    expect(results).toHaveLength(1);
-    expect(results[0].kind).toBeNull();
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
+  });
+
+  it('silently skips object YAML missing apiVersion field (validateResource not called)', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue(['no-apiversion.yaml'] as unknown as ReturnType<
+      typeof readdirSync
+    >);
+    mockedReadFileSync.mockReturnValue('kind: Pipeline');
+    // Object has kind but no apiVersion — missing apiVersion branch
+    mockedParseYaml.mockReturnValue({ kind: 'Pipeline' });
+
+    const results = validateConfigFiles('/some/dir');
+
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
+  });
+
+  it('silently skips object YAML missing kind field (validateResource not called)', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue(['no-kind.yaml'] as unknown as ReturnType<
+      typeof readdirSync
+    >);
+    mockedReadFileSync.mockReturnValue('apiVersion: ai-sdlc.io/v1alpha1');
+    // Object has apiVersion but no kind — missing kind branch
+    mockedParseYaml.mockReturnValue({ apiVersion: 'ai-sdlc.io/v1alpha1' });
+
+    const results = validateConfigFiles('/some/dir');
+
+    expect(results).toHaveLength(0);
+    expect(mockedValidateResource).not.toHaveBeenCalled();
   });
 
   // ---------- YAML parse error ----------
@@ -301,7 +316,7 @@ describe('validateConfigFiles()', () => {
       'quality-gate.yaml',
     ] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('kind: AgentRole');
-    mockedParseYaml.mockReturnValue({ kind: 'AgentRole' });
+    mockedParseYaml.mockReturnValue({ kind: 'AgentRole', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockReturnValue({ valid: true });
 
     const results = validateConfigFiles('/some/dir', 'agent-role.yaml');
@@ -350,8 +365,8 @@ describe('validateConfigFiles()', () => {
       .mockReturnValueOnce('invalid yaml');
 
     mockedParseYaml
-      .mockReturnValueOnce({ kind: 'Pipeline' })
-      .mockReturnValueOnce({ kind: 'AgentRole' })
+      .mockReturnValueOnce({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' })
+      .mockReturnValueOnce({ kind: 'AgentRole', apiVersion: 'ai-sdlc.io/v1alpha1' })
       .mockImplementationOnce(() => {
         throw new Error('invalid YAML');
       });
@@ -396,7 +411,7 @@ describe('validateConfigFiles()', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['crash.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('kind: Pipeline');
-    mockedParseYaml.mockReturnValue({ kind: 'Pipeline' });
+    mockedParseYaml.mockReturnValue({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockImplementation(() => {
       throw new Error('schema compilation failed');
     });
@@ -414,7 +429,7 @@ describe('validateConfigFiles()', () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReaddirSync.mockReturnValue(['test.yaml'] as unknown as ReturnType<typeof readdirSync>);
     mockedReadFileSync.mockReturnValue('kind: QualityGate');
-    mockedParseYaml.mockReturnValue({ kind: 'QualityGate' });
+    mockedParseYaml.mockReturnValue({ kind: 'QualityGate', apiVersion: 'ai-sdlc.io/v1alpha1' });
     mockedValidateResource.mockReturnValue({ valid: true });
 
     const results = validateConfigFiles('/some/dir');
@@ -483,7 +498,7 @@ describe('validateConfigFiles()', () => {
       .mockReturnValueOnce('kind: MaintainersList');
 
     mockedParseYaml
-      .mockReturnValueOnce({ kind: 'Pipeline' })
+      .mockReturnValueOnce({ kind: 'Pipeline', apiVersion: 'ai-sdlc.io/v1alpha1' })
       .mockReturnValueOnce({ apiVersion: 'ai-sdlc/v1', kind: 'MaintainersList' });
 
     mockedValidateResource

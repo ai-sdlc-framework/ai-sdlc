@@ -59,6 +59,13 @@ export function validateConfigFiles(
       const raw = readFileSync(resolve(dir, file), 'utf-8');
       const doc: unknown = parseYaml(raw);
 
+      // Skip non-resource YAML files (placeholder/commented-out YAMLs, review-exemplars, etc.)
+      // AI-SDLC resources always have apiVersion + kind fields.
+      // Mirrors the identical guard in config.ts:116 — keep both in sync.
+      if (!doc || typeof doc !== 'object' || !('apiVersion' in doc) || !('kind' in doc)) {
+        continue;
+      }
+
       const result = validateResource(doc);
       const kind =
         typeof doc === 'object' && doc !== null && 'kind' in doc
