@@ -148,6 +148,6 @@
     "ink-testing-library": "^4.0.0",
     "string-width": "^8.2.1",
     "typescript": "^6.0.3",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.8"
   }
 }
