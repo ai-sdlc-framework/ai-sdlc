@@ -198,13 +198,12 @@ export function renderAtWidth(element: React.ReactElement, width: number): Rende
     for (let i = 0; i < lines.length; i++) {
       const stripped = stripAnsi(lines[i] ?? '');
       // Use `string-width` for accurate Unicode/emoji column measurement.
-      // Note: `string-width` v7 counts some "Ambiguous" East Asian Width
-      // characters (e.g. `▶` U+25B6, `⚙` U+2699) as 2 columns, which
-      // matches many modern terminal emulators but differs from Ink's layout
-      // engine which treats them as 1 column. This can produce 1-col false
-      // positives for panes that include such characters in their titles or
-      // row indicators. These findings are documented in test files and
-      // should be tracked for fix in a follow-up task.
+      // Note: `string-width` v8 counts "Ambiguous" East Asian Width
+      // characters (e.g. `▶` U+25B6, `⚙` U+2699, `🛤` U+1F6E4) as 1 column,
+      // matching Ink's Yoga layout engine. (v7 counted them as 2, producing
+      // 1-col false-positive overflow for panes whose titles or row indicators
+      // used such characters — fixed by the AISDLC-524 ink 5→6 / react 18→19
+      // migration that bumped this dep to v8.)
       const w = stringWidth(stripped);
       if (w > width) {
         offenders.push({ lineIdx: i, visible: stripped, measuredWidth: w });
