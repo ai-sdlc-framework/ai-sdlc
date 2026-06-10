@@ -20,6 +20,14 @@ references:
   - .ai-sdlc/untrusted-pr-gate.yaml
   - .github/workflows/untrusted-pr-gate.yml
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
+blocked:
+  reason: >-
+    READY — parked pending the external Kiro-runner PR (GitHub #870 / Fridayana);
+    operator sent the invitation email 2026-06-10. Prerequisite is already done:
+    ANTHROPIC_API_KEY is set + funded (~$23.20), held host-side and withheld from
+    the sandbox via the AQ2 proxy. On PR arrival only two steps remain: (1) add the
+    narrow runner allow-list path to .ai-sdlc/untrusted-pr-gate.yaml; (2) set the
+    AI_SDLC_UNTRUSTED_PR_GATE repo variable to 1.
 ---
 
 ## Description
