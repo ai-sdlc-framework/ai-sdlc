@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Draft
 author: Alexander Kline
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-06-09
 targetSpecVersion: v1alpha1
 requires: [RFC-0010, RFC-0012]
 relatedRFCs: [RFC-0037, RFC-0038, RFC-0022]
@@ -18,7 +18,7 @@ requiresDocs: []
 **Lifecycle:** Draft
 **Author:** Alexander Kline (Product owner contribution)
 **Created:** 2026-05-19
-**Updated:** 2026-05-19
+**Updated:** 2026-06-09
 **Target Spec Version:** v1alpha1
 
 ---
@@ -178,6 +178,10 @@ Heavier proposal — framework curates gate packs adopters can register (e.g., "
 2. **State JSON schema**: what exactly should `AI_SDLC_PIPELINE_STATE` expose? Minimum useful set without over-coupling adopter gates to framework internals.
 3. **Gate timeout**: how long can an adopter gate run before pipeline-cli kills it? Default 30s? Configurable per-gate?
 4. **Gate-against-gate composition**: should adopter gates be able to skip themselves based on other gates' results? Probably no for v1; revisit if it surfaces as adopter pain.
+5. **Concurrent vs sequential same-stage plugin execution**: when multiple in-process `afterRun` plugins are registered and fire at the same stage, should the orchestrator invoke them sequentially (predictable order, simpler error attribution) or concurrently (lower latency but harder to debug conflicting decisions)?
+6. **`AI_SDLC_PIPELINE_STATE` schema stability contract**: what is the versioning and stability contract for the `AI_SDLC_PIPELINE_STATE` JSON file exposed to subprocess gates AND the `AfterRunEvent` exposed to in-process plugins? Should the framework emit a `pipelineStateVersion` field so plugins can self-protect against schema evolution?
+7. **Gate timeout for in-process `afterRun` plugins**: the §4 config-file path has a configurable per-gate timeout for subprocess executables. Should in-process `afterRun` plugins be subject to a similar framework-enforced timeout, or are they trusted to be well-behaved (since they are registered by the adopter at install time)?
+8. **Gate-against-gate composition via `context.store`**: if plugin A writes `auto-merge:<pr>: hold` and plugin B writes `auto-merge:<pr>: permit`, the orchestrator treats the `hold` as blocking. Should the orchestrator also expose the full set of `GatePluginDecision` records to each subsequent plugin (so plugin B can inspect plugin A's decision before writing its own)? Or should each plugin write independently with the orchestrator doing final aggregation?
 
 ## 9. References
 
@@ -185,3 +189,214 @@ Heavier proposal — framework curates gate packs adopters can register (e.g., "
 - pipeline-cli stage structure: `pipeline-cli/src/steps/`
 - Composing RFCs: RFC-0010, RFC-0012, RFC-0037, RFC-0038
 - Related: RFC-0022 (compliance posture)
+- `OrchestratorPlugin` contract: `orchestrator/src/plugin.ts`
+- `CostGovernancePlugin` reference implementation: `orchestrator/src/cost-governance.ts`
+
+## 10. Complementary in-process plugin path
+
+### 10.1 Motivation
+
+The §4 config-file path (`.ai-sdlc/gates.yaml` + stage-hook executables) covers gate concerns that are fire-and-forget at a well-known pipeline stage and need only the env-var pipeline state. It does not serve adopters who need:
+
+- **Cross-cycle decision persistence** via `PluginContext.store` (e.g., accumulating merge eligibility signals across multiple PR iterations)
+- **Unified log capture** via the orchestrator's `Logger` (structured, timestamped, routed to the same sink as framework logs)
+- **Typed event access** to the `AfterRunEvent` shape, including the full `PipelineResult` with reviewer verdicts, classifier decision, and dev verifications
+- **Multi-tier auto-merge arbitration** — e.g., a 6-gate / 3-tier policy with hardcoded forbidden-list invariants that span multiple label dimensions
+
+These adopters benefit from in-process plugin integration via `OrchestratorPlugin.afterRun` with a typed store-decision contract. The §10 path and the §4 path are **non-exclusive** — adopters choose per-gate based on whether the concern is stage-fire-and-forget (config-file executable) or stateful merge-arbitration (in-process plugin).
+
+### 10.2 `afterRun` store-decision contract
+
+`afterRun` SHALL NOT throw to block merge. The run is already complete when `afterRun` fires; throwing is ambiguous semantics (should the framework retry? rollback? the run succeeded — only the merge gate is uncertain). Instead, the plugin SHALL write a typed `GatePluginDecision` record to `context.store` under the canonical key `auto-merge:<pr-number>` (or `auto-merge:<task-id>` for backlog-task pipelines).
+
+The orchestrator's merge step SHALL read the latest decision record(s) under the canonical key and actuate accordingly:
+- If any decision has `decision: 'hold'` or `decision: 'error'`, the merge step is blocked.
+- If all decisions have `decision: 'permit'`, the merge step proceeds (subject to framework gate checks).
+- Multiple plugins MAY write decisions under the same canonical key. The orchestrator MUST aggregate by treating any `hold` or `error` as blocking, regardless of order.
+
+### 10.3 `GatePluginDecision` shape
+
+```typescript
+interface GatePluginDecision {
+  /** Merge-gate outcome. */
+  decision: 'permit' | 'hold' | 'error';
+
+  /**
+   * Optional auto-merge tier. When absent, the plugin's permit/hold applies
+   * at all tiers. When present, the framework applies tier-specific policy
+   * (e.g., 'conservative' requires additional human review; 'aggressive'
+   * permits merge on passing LLM verdicts alone).
+   */
+  tier?: 'conservative' | 'normal' | 'aggressive' | 'off';
+
+  /** Plugin name, for audit trail attribution. */
+  gatePluginName: string;
+
+  /** ISO 8601 timestamp when the decision was written. */
+  timestamp: string;
+
+  /** Human-readable reason for the decision. Surfaces in operator error messages. */
+  reason: string;
+
+  /**
+   * Optional structured gate results for multi-gate policies.
+   * Each entry documents one gate check with its pass/fail outcome and detail.
+   */
+  gateResults?: Array<{
+    gateName: string;
+    passed: boolean;
+    detail: string;
+  }>;
+}
+```
+
+### 10.4 The forbidden-list pattern
+
+A common adopter safety requirement is a **forbidden-list**: a set of label combinations, file paths, or PR attributes that MUST block merge regardless of tier and regardless of reviewer verdicts. The `afterRun` plugin path is the correct layer for implementing forbidden-lists because:
+
+1. The plugin has access to the full `PipelineResult` (including all reviewer verdicts) via `AfterRunEvent.result`
+2. The `decision: 'hold'` outcome is treated as blocking at ALL tiers — it cannot be overridden by framework-level auto-merge tier promotion
+3. The decision record survives across orchestrator restarts via `context.store`
+
+Example forbidden-list pattern:
+
+```typescript
+async afterRun(event: AfterRunEvent): Promise<void> {
+  const pr = event.result.prMeta;
+  const forbidden = this.forbiddenList.check(pr.labels, pr.files);
+  if (forbidden.matched) {
+    await this.store.set(`auto-merge:${pr.number}`, {
+      decision: 'hold',
+      gatePluginName: this.name,
+      timestamp: new Date().toISOString(),
+      reason: `Forbidden-list match: ${forbidden.reason}. Human review required.`,
+      gateResults: forbidden.matches.map((m) => ({
+        gateName: m.ruleId,
+        passed: false,
+        detail: m.detail,
+      })),
+    } satisfies GatePluginDecision);
+    return;
+  }
+  // ... tier evaluation ...
+}
+```
+
+The forbidden-list pattern is a documented adopter primitive. Framework documentation SHOULD include a worked example of this pattern for adopters with hardcoded safety invariants.
+
+### 10.5 Reference TypeScript shim
+
+The following is a reference shape for an in-process merge-gate plugin. It mirrors the `CostGovernancePlugin` pattern in `orchestrator/src/cost-governance.ts`.
+
+```typescript
+// .ai-sdlc/plugins/merge-tier-gate-plugin.ts
+//
+// In-process merge-gate plugin: enforces a 3-tier auto-merge policy with
+// forbidden-list invariants via OrchestratorPlugin.afterRun.
+//
+// Contract: afterRun SHALL NOT throw. Writes GatePluginDecision to store.
+
+import type {
+  OrchestratorPlugin,
+  PluginContext,
+  AfterRunEvent,
+} from '@ai-sdlc/orchestrator';
+
+type AutoMergeTier = 'conservative' | 'normal' | 'aggressive' | 'off';
+
+interface GatePluginDecision {
+  decision: 'permit' | 'hold' | 'error';
+  tier?: AutoMergeTier;
+  gatePluginName: string;
+  timestamp: string;
+  reason: string;
+  gateResults?: Array<{ gateName: string; passed: boolean; detail: string }>;
+}
+
+export class MergeTierGatePlugin implements OrchestratorPlugin {
+  name = 'merge-tier-gate';
+
+  private store!: PluginContext['store'];
+  private log!: PluginContext['log'];
+
+  initialize(ctx: PluginContext): void {
+    this.store = ctx.store;
+    this.log = ctx.log;
+  }
+
+  async afterRun(event: AfterRunEvent): Promise<void> {
+    const prNumber = event.result.prMeta?.number;
+    if (!prNumber) {
+      this.log.info('[merge-tier-gate] no PR number; skipping gate evaluation');
+      return;
+    }
+
+    const storeKey = `auto-merge:${prNumber}`;
+    const timestamp = new Date().toISOString();
+
+    try {
+      const decision = this.evaluateMergeGate(event);
+      await this.store?.set(storeKey, decision);
+      this.log.info(
+        `[merge-tier-gate] wrote decision ${decision.decision} (tier: ${decision.tier ?? 'all'})`,
+      );
+    } catch (err) {
+      // afterRun MUST NOT throw — write an error decision instead
+      const errorDecision: GatePluginDecision = {
+        decision: 'error',
+        gatePluginName: this.name,
+        timestamp,
+        reason: `Plugin evaluation error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+      await this.store?.set(storeKey, errorDecision);
+      this.log.info('[merge-tier-gate] plugin-internal error; wrote error decision to store');
+    }
+  }
+
+  private evaluateMergeGate(event: AfterRunEvent): GatePluginDecision {
+    const timestamp = new Date().toISOString();
+    const prNumber = event.result.prMeta?.number!;
+    const labels = event.result.prMeta?.labels ?? [];
+
+    // Forbidden-list: these label combinations block merge at any tier
+    if (labels.includes('security-review-required')) {
+      return {
+        decision: 'hold',
+        gatePluginName: this.name,
+        timestamp,
+        reason: 'Label security-review-required present; human security review mandatory.',
+        gateResults: [{ gateName: 'forbidden-label-check', passed: false, detail: 'security-review-required' }],
+      };
+    }
+
+    // Tier evaluation (simplified example)
+    const allApproved = event.result.reviewerVerdicts?.every((v) => v.approved) ?? false;
+    return {
+      decision: allApproved ? 'permit' : 'hold',
+      tier: allApproved ? 'normal' : undefined,
+      gatePluginName: this.name,
+      timestamp,
+      reason: allApproved
+        ? 'All reviewer verdicts approved; normal-tier merge permitted.'
+        : 'One or more reviewers requested changes; merge held.',
+    };
+  }
+}
+```
+
+This shim is approximately 80 lines. The `GatePluginDecision` shape is written to `context.store`; the framework's merge step reads it at the appropriate pipeline stage.
+
+### 10.6 Relationship to §4 stage-hook config-file path
+
+The in-process plugin path (§10) and the config-file stage-hook path (§4) are complementary:
+
+| Dimension | §4 config-file stage hook | §10 in-process `afterRun` plugin |
+|-----------|--------------------------|----------------------------------|
+| Invocation point | Well-defined stage hook (pre-push, post-dev, etc.) | `afterRun` — after full pipeline completes |
+| Access to pipeline state | Env-var JSON file (`AI_SDLC_PIPELINE_STATE`) | Typed `AfterRunEvent` + full `PipelineResult` |
+| Cross-cycle persistence | None (stateless per invocation) | `PluginContext.store` (persistent KV) |
+| Authoring surface | Any executable (shell, Python, Go) | TypeScript shim implementing `OrchestratorPlugin` |
+| Merge-gate semantics | Exit code blocks pipeline at stage | `GatePluginDecision` written to store; read at merge step |
+| Forbidden-list support | Expressible (exit non-zero) | First-class documented pattern (§10.4) |
+
+Adopters who need both stage-level pre-checks (§4) and post-pipeline merge arbitration (§10) register both. The framework invokes them independently; their outcomes compose additively (any hold blocks).
