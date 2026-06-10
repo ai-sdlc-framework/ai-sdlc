@@ -19,7 +19,7 @@ dispatchableReason: >-
 references:
   - .ai-sdlc/untrusted-pr-gate.yaml
   - .github/workflows/untrusted-pr-gate.yml
-  - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification-gate.md
+  - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
 ---
 
 ## Description

@@ -42,7 +42,7 @@ Replace the long-lived `NPM_TOKEN` GitHub Actions secret (consumed at `release.y
 - `@ai-sdlc/plugin-mcp-server`
 All are already published, so they are eligible for trusted-publisher config.
 
-**release.yml changes:** `permissions: id-token: write` is ALREADY present (used for provenance today). Remove `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` from the publish step; `--provenance` becomes automatic under trusted publishing (drop the flag); keep `registry-url: 'https://registry.npmjs.org'`.
+**release.yml changes:** `permissions: id-token: write` is ALREADY present (used for provenance today). Remove `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` from the publish step; `--provenance` becomes automatic under trusted publishing (drop the flag); keep the npm `registry-url` setup-node config.
 
 **Rollout sequencing (avoid a broken release):**
 1. Operator configures trusted publishers on npmjs for all 5 packages.
