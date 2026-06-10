@@ -6,42 +6,38 @@
  *   (b) outer border characters are present (border continuity)
  *   (c) title row contains the expected emoji + label text
  *
- * ## Known finding: wide-char / layout-overflow issues in existing panes
+ * ## string-width v8 alignment with ink's layout engine
  *
- * `string-width` v7 correctly counts some Unicode "Ambiguous" characters
- * (e.g. `▶` U+25B6, `⚙` U+2699) as 2 columns — matching what modern
- * terminal emulators render. Ink v5 used its own layout engine which
- * consistently treated those characters as 1 column wide for Yoga layout
- * purposes. Ink v6 uses a more accurate wide-char layout engine that agrees
- * with string-width for emoji (e.g. `🛤` U+1F6E4 is now 2-wide in both),
- * but still treats some "Ambiguous" characters (e.g. `▶` U+25B6, `⚙` U+2699)
- * as 1 column. The result: Ink v6 renders a box line as N characters long,
- * but `string-width` measures the stripped line as N+1 visible columns for
- * those "Ambiguous" characters.
+ * `string-width` v8 now measures Unicode "Ambiguous" characters
+ * (e.g. `▶` U+25B6, `⚙` U+2699, `🛤` U+1F6E4) as **1 column**, which
+ * matches Ink v6's Yoga layout engine. Previously under string-width v7,
+ * these characters were counted as 2 columns, producing false-positive
+ * overflow reports: the assertNoOverflow() assertion would fire because
+ * string-width saw N+1 visible columns while Ink had correctly rendered
+ * the content into N columns.
  *
- * This means `assertNoOverflow()` reports a 1-col overflow on panes that
- * contain `▶`, `⚙`, etc. in fixed-width content. The finding is documented
- * per-pane with an explicit `toThrow()` assertion so that when the upstream
- * issue is fixed, the test fails and needs to be updated.
+ * With v8 both measurements agree, so those false-positive overflow tests
+ * have been flipped to `not.toThrow()`. The per-pane "known overflow"
+ * tests below now document that the overflow was a v7 measurement artifact,
+ * not a real layout defect.
  *
  * Panes without wide-char issues (all clean at 80/120/160):
  *   - Blockers pane: uses ✓/✗ (1-wide), row content doesn't use ▶
  *   - Events pane:   title uses 📡 but Ink's border absorbs the width
  *
- * Panes with known overflow (documented in explicit `toThrow` tests):
+ * Panes previously reported as overflowing (now clean under string-width v8):
  *   - PRs pane:          ▶ focus indicator in rows (any width)
  *   - Critical Path:     ▶ focus indicator in rows (any width)
- *   - Critical Path:     🛤 title (empty state, ink 6 — see note below)
+ *   - Critical Path:     🛤 title (empty state)
  *   - Analytics:         ⚙ in PIPELINE THROUGHPUT heading (any width)
  *   - Config Browser:    ⚙ in CONFIGURATION title (any width)
  *
  * Note: The Critical Path title was previously `🛤️ CRITICAL PATH` (emoji +
  * U+FE0F variation selector). The variation selector is zero-width per
  * string-width but Ink v5 layout counted it as 1 extra cell, causing border
- * misalignment. AISDLC-259 stripped the VS: `🛤`. Under ink 5 the bare `🛤`
- * was 2-wide per both string-width AND Ink layout, so empty state passed.
- * Under ink 6, `🛤` is still 2-wide but the Yoga layout computation changed
- * slightly, causing a 1-col overflow in the empty state too (AISDLC-524).
+ * misalignment. AISDLC-259 stripped the VS: `🛤`. Under string-width v8
+ * the bare `🛤` is now 1-wide (matching Ink's measurement), so the empty
+ * state no longer overflows.
  *
  * Panes tested (AC#2):
  *   - PRs pane       (prs/pane.tsx)           — "📦 PRs IN FLIGHT"
@@ -147,10 +143,10 @@ function makeAnalyticsOpts() {
 
 // ── PRs pane ──────────────────────────────────────────────────────────────────
 //
-// Known issue: the PR row uses a ▶ focus indicator (2-wide in string-width,
-// 1-wide in Ink layout) AND fixed padEnd() values that total > 80 visible
-// cols. Both issues cause assertNoOverflow to report overflow. Tests verify
-// the border + title at all widths; a separate test documents the overflow.
+// Under string-width v7, the PR row's ▶ focus indicator was counted as 2
+// columns (vs. 1 in Ink layout), producing a false-positive overflow. Under
+// string-width v8, ▶ is counted as 1 column — matching Ink — so the pane
+// no longer overflows. The test below documents the v8 no-overflow behavior.
 
 describe('PRs pane — width-pinned rendering (AC#2, AC#3)', () => {
   for (const width of WIDTHS) {
@@ -174,13 +170,13 @@ describe('PRs pane — width-pinned rendering (AC#2, AC#3)', () => {
     });
   }
 
-  it('PR rows with ▶ focus indicator overflow — known layout issue (see file header)', () => {
-    // The ▶ char (U+25B6) is counted as 2 cols by string-width but 1 by Ink.
-    // Additionally, the row's fixed padEnd() values exceed 80 visible cols.
-    // This test documents the known overflow; update when the layout is fixed.
+  it('PR rows with ▶ focus indicator — no overflow under string-width v8 (v7 false-positive resolved)', () => {
+    // Under string-width v7, ▶ (U+25B6) was counted as 2 cols while Ink
+    // measured it as 1 col, producing a false-positive overflow report.
+    // Under string-width v8, ▶ is counted as 1 col — matching Ink's layout.
     const rows = buildPrRows([makePr()]);
     const result = renderAtWidth(<PrsPaneContent rows={rows} error={null} />, 80);
-    expect(() => result.assertNoOverflow()).toThrow(/exceed the pinned width/);
+    expect(() => result.assertNoOverflow()).not.toThrow();
   });
 });
 
@@ -234,15 +230,17 @@ describe('Blockers pane — width-pinned rendering (AC#2, AC#3)', () => {
 
 // ── Critical Path pane ────────────────────────────────────────────────────────
 //
-// Known issue: rows use ▶ focus indicator (2-wide in string-width, 1-wide
-// in Ink) — causes assertNoOverflow to report 1-col overflow at ALL widths.
-// Border + title checks still run at all widths.
+// Under string-width v7, rows using ▶ focus indicator (counted as 2 cols in
+// v7, 1 col in Ink) caused false-positive overflow at ALL widths. Under
+// string-width v8, ▶ is 1 col — matching Ink — so the overflow is gone.
+// Border + title checks run at all widths.
 //
 // Fixed (AISDLC-259): the title emoji `🛤️` (U+1F6E4 + U+FE0F variation
 // selector) was replaced with bare `🛤` (U+1F6E4). The variation selector
 // caused Ink to allocate 1 extra cell, shifting the right border by 1 column
 // and producing the doubled || artifact at the shared boundary in the overview
-// layout. The title overflow issue below is now only from ▶, not the emoji.
+// layout. Under string-width v8, `🛤` is measured as 1 col (same as Ink),
+// so the empty-state no longer overflows either.
 
 describe('Critical Path pane — width-pinned rendering (AC#2, AC#3)', () => {
   const rows = [makeCriticalPathRow('AISDLC-100', 3), makeCriticalPathRow('AISDLC-101', 2)];
@@ -268,34 +266,34 @@ describe('Critical Path pane — width-pinned rendering (AC#2, AC#3)', () => {
     });
   }
 
-  it('empty state — 🛤 title causes 1-col overflow at 80 cols (ink 6 wide-char behavior, AISDLC-524)', () => {
+  it('empty state — 🛤 title no longer overflows under string-width v8 (v7 false-positive resolved, AISDLC-524)', () => {
     const result = renderAtWidth(
       <CriticalPathPaneContent rows={[]} allRecords={[]} error={null} />,
       80,
     );
-    // Under ink 5, the 🛤 emoji (bare U+1F6E4, no variation selector since
-    // AISDLC-259) was 2-wide per both string-width AND Ink's layout, so the
-    // border was correctly placed and assertNoOverflow() passed.
-    // Under ink 6, the Yoga layout computation changed slightly for this emoji,
-    // causing a 1-col overflow even in the empty state (no ▶ rows). This is a
-    // known wide-char / layout-engine discrepancy between ink 6 and string-width.
-    expect(() => result.assertNoOverflow()).toThrow(/exceed the pinned width/);
+    // Under string-width v7, 🛤 (U+1F6E4) was counted as 2 cols while Ink's
+    // Yoga layout measured it as 1 col, causing a false-positive 1-col
+    // overflow in the empty state (AISDLC-524). Under string-width v8, 🛤
+    // is measured as 1 col — matching Ink — so assertNoOverflow() passes.
+    expect(() => result.assertNoOverflow()).not.toThrow();
   });
 
-  it('rows with ▶ focus indicator overflow — known wide-char layout issue (see file header)', () => {
+  it('rows with ▶ focus indicator — no overflow under string-width v8 (v7 false-positive resolved)', () => {
     const result = renderAtWidth(
       <CriticalPathPaneContent rows={rows} allRecords={allRecords} error={null} />,
       80,
     );
-    // ▶ is 2 cols in string-width, 1 col in Ink layout → 1-col overflow.
-    expect(() => result.assertNoOverflow()).toThrow(/exceed the pinned width/);
+    // Under string-width v7, ▶ was 2 cols (vs. 1 col in Ink) → false-positive
+    // overflow. Under string-width v8, ▶ is 1 col — matching Ink's layout.
+    expect(() => result.assertNoOverflow()).not.toThrow();
   });
 });
 
 // ── Analytics pane ────────────────────────────────────────────────────────────
 //
-// Known issue: ⚙ in PIPELINE THROUGHPUT heading is 2-wide in string-width,
-// 1-wide in Ink → assertNoOverflow reports 1-col overflow at ALL widths.
+// Under string-width v7, ⚙ in PIPELINE THROUGHPUT heading was counted as
+// 2 cols (vs. 1 col in Ink), causing a false-positive overflow at ALL widths.
+// Under string-width v8, ⚙ is 1 col — matching Ink — so overflow is gone.
 
 describe('Analytics pane — width-pinned rendering (AC#2, AC#3)', () => {
   for (const width of WIDTHS) {
@@ -314,11 +312,12 @@ describe('Analytics pane — width-pinned rendering (AC#2, AC#3)', () => {
     });
   }
 
-  it('⚙ in PIPELINE THROUGHPUT heading overflows — known wide-char layout issue (see file header)', async () => {
+  it('⚙ in PIPELINE THROUGHPUT heading — no overflow under string-width v8 (v7 false-positive resolved)', async () => {
     const result = renderAtWidth(<AnalyticsPane hookOpts={makeAnalyticsOpts()} />, 80);
     await flush();
-    // ⚙ is 2 cols in string-width, 1 col in Ink layout → 1-col overflow.
-    expect(() => result.assertNoOverflow()).toThrow(/exceed the pinned width/);
+    // Under string-width v7, ⚙ was 2 cols (vs. 1 col in Ink) → false-positive
+    // overflow. Under string-width v8, ⚙ is 1 col — matching Ink's layout.
+    expect(() => result.assertNoOverflow()).not.toThrow();
   });
 });
 
@@ -351,8 +350,9 @@ describe('Events pane — width-pinned rendering (AC#2, AC#3)', () => {
 
 // ── Config Browser pane ───────────────────────────────────────────────────────
 //
-// Known issue: ⚙ in CONFIGURATION title is 2-wide in string-width, 1-wide
-// in Ink → assertNoOverflow reports 1-col overflow at ALL widths.
+// Under string-width v7, ⚙ in CONFIGURATION title was counted as 2 cols
+// (vs. 1 col in Ink), causing a false-positive overflow at ALL widths.
+// Under string-width v8, ⚙ is 1 col — matching Ink — so overflow is gone.
 
 describe('Config Browser pane — width-pinned rendering (AC#2, AC#3)', () => {
   /** Inject a no-op walker so we don't touch the filesystem. */
@@ -386,13 +386,14 @@ describe('Config Browser pane — width-pinned rendering (AC#2, AC#3)', () => {
     });
   }
 
-  it('⚙ in CONFIGURATION title overflows — known wide-char layout issue (see file header)', async () => {
+  it('⚙ in CONFIGURATION title — no overflow under string-width v8 (v7 false-positive resolved)', async () => {
     const result = renderAtWidth(
       <ConfigBrowserPane walker={emptyWalker} schemaValidator={noopSchemaValidator} />,
       80,
     );
     await flush();
-    // ⚙ is 2 cols in string-width, 1 col in Ink layout → 1-col overflow.
-    expect(() => result.assertNoOverflow()).toThrow(/exceed the pinned width/);
+    // Under string-width v7, ⚙ was 2 cols (vs. 1 col in Ink) → false-positive
+    // overflow. Under string-width v8, ⚙ is 1 col — matching Ink's layout.
+    expect(() => result.assertNoOverflow()).not.toThrow();
   });
 });
