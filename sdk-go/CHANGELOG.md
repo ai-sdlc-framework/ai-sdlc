@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.2.0...sdk-go-v0.2.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **security:** pin Docker base images to digests (Scorecard PinnedDependencies) ([#813](https://github.com/ai-sdlc-framework/ai-sdlc/issues/813)) ([f44c426](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f44c42623576ad2404a1b843e96a55b70c8eb546))
+
 ## [0.2.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.1.1...sdk-go-v0.2.0) (2026-03-24)
 
 

@@ -1,5 +1,24 @@
 # @ai-sdlc/reference
 
+## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.12.0...reference-v0.13.0) (2026-06-10)
+
+
+### Features
+
+* AISDLC-464 remaining gaps — execute.md lib sourcing, schema tightening, drift guard ([#805](https://github.com/ai-sdlc-framework/ai-sdlc/issues/805)) ([7bb2191](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7bb2191b7a62f89fd7f123a9cd25cb30c6161f63))
+* AISDLC-480 surface dispatched-session decisions to Decision Catalog (async escape hatch) ([#830](https://github.com/ai-sdlc-framework/ai-sdlc/issues/830)) ([80cd5a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/80cd5a7efb5a336be15aa310a5b2ae8075dc6c55))
+* cli-decisions priority/timebox/resolve/auto-expire — AISDLC-463 core slice ([#797](https://github.com/ai-sdlc-framework/ai-sdlc/issues/797)) ([631d6de](https://github.com/ai-sdlc-framework/ai-sdlc/commit/631d6de22b208f382284887d107e634385d6b123))
+* **orchestrator:** AISDLC-465 RFC-0018 Phase 1 journeys[] schema + limits + inheritance validator ([#824](https://github.com/ai-sdlc-framework/ai-sdlc/issues/824)) ([c8f449a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c8f449a3121771c64260e865ba4dfbf414647926))
+* **orchestrator:** franc-based language gate + multi-lang opt-in (AISDLC-431) ([#756](https://github.com/ai-sdlc-framework/ai-sdlc/issues/756)) ([745a238](https://github.com/ai-sdlc-framework/ai-sdlc/commit/745a23809913173fa33a147061a4dddc37eeb11d))
+* **orchestrator:** instrument parallel-dispatch profiling (AISDLC-479) ([#774](https://github.com/ai-sdlc-framework/ai-sdlc/issues/774)) ([424372e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/424372e06213ab295c0c592a6a371d79fd60293e))
+* rfc-0043 phase 2 — report schema + Zod validator + clean-room signer (AISDLC-498) ([#844](https://github.com/ai-sdlc-framework/ai-sdlc/issues/844)) ([e615cb0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e615cb056ecc629372b861c51da6314fdb5c8ce3))
+
+
+### Bug Fixes
+
+* harden 17 ReDoS-prone regexes (CodeQL js/polynomial-redos) ([#820](https://github.com/ai-sdlc-framework/ai-sdlc/issues/820)) ([070864e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/070864e01bddd88d6fa3175cd80c59792b52318e))
+* **security:** harden command-injection sites (CodeQL js/shell-command-constructed-from-input) ([#812](https://github.com/ai-sdlc-framework/ai-sdlc/issues/812)) ([be944e9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be944e92bd262172408223dbc999a9504e02e8fc))
+
 ## [0.12.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.11.0...reference-v0.12.0) (2026-05-29)
 
 

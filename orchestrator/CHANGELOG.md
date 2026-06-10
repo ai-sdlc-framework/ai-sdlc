@@ -5,6 +5,36 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.12.0...orchestrator-v0.13.0) (2026-06-10)
+
+
+### Features
+
+* **orchestrator:** AISDLC-465 RFC-0018 Phase 1 journeys[] schema + limits + inheritance validator ([#824](https://github.com/ai-sdlc-framework/ai-sdlc/issues/824)) ([c8f449a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c8f449a3121771c64260e865ba4dfbf414647926))
+* **orchestrator:** AISDLC-489 refactor 3 §13 rules into Tessellation13Registry (467 AC[#3](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3) follow-up) ([#825](https://github.com/ai-sdlc-framework/ai-sdlc/issues/825)) ([0becfd2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0becfd234d3c85cd20ff61de92c95b1f6f0e0f4c))
+* **orchestrator:** config-driven source-control adapter (AISDLC-530) ([#889](https://github.com/ai-sdlc-framework/ai-sdlc/issues/889)) ([f4b5e8b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f4b5e8bc119adea04f6bb379cdd7d9e1f75e0620))
+* **orchestrator:** franc-based language gate + multi-lang opt-in (AISDLC-431) ([#756](https://github.com/ai-sdlc-framework/ai-sdlc/issues/756)) ([745a238](https://github.com/ai-sdlc-framework/ai-sdlc/commit/745a23809913173fa33a147061a4dddc37eeb11d))
+* **orchestrator:** rfc-0018 phase 2 journey-scoped admission scorer (AISDLC-466) ([#802](https://github.com/ai-sdlc-framework/ai-sdlc/issues/802)) ([7e1c9a9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7e1c9a93aa3012d328ec3abda26f6017afddf0b2))
+* **orchestrator:** runner-registry consultation + --runner/AI_SDLC_RUNNER_PLUGIN seam (AISDLC-529) ([#888](https://github.com/ai-sdlc-framework/ai-sdlc/issues/888)) ([30812ea](https://github.com/ai-sdlc-framework/ai-sdlc/commit/30812ead86be1c431535dec9f14b5d5695091c49))
+* **orchestrator:** ship §13 rule registry + journey-state-id drift rule (AISDLC-467) ([#803](https://github.com/ai-sdlc-framework/ai-sdlc/issues/803)) ([00550fd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/00550fde29337f16773586ae1b1f58a635fda58b))
+* RFC-0028 Phase 3 — structural + statistical drift composition wiring (AISDLC-454) ([#798](https://github.com/ai-sdlc-framework/ai-sdlc/issues/798)) ([744d566](https://github.com/ai-sdlc-framework/ai-sdlc/commit/744d5669e2a799afeab0ec3da8098418ecb2baaf))
+
+
+### Bug Fixes
+
+* harden 17 ReDoS-prone regexes (CodeQL js/polynomial-redos) ([#820](https://github.com/ai-sdlc-framework/ai-sdlc/issues/820)) ([070864e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/070864e01bddd88d6fa3175cd80c59792b52318e))
+* **orchestrator:** actionable error for schema-invalid resource configs (AISDLC-528) ([#887](https://github.com/ai-sdlc-framework/ai-sdlc/issues/887)) ([b78b609](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b78b6092ba7addd30ebec4b4a4a80e8e3ab65947))
+* **orchestrator:** guard validate-config against null/non-resource docs ([#885](https://github.com/ai-sdlc-framework/ai-sdlc/issues/885)) ([ad36793](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ad36793490a0db7790a5e44249955f8c3a41ae21))
+* **orchestrator:** harden pipeline for local-only repos (AISDLC-527) ([#886](https://github.com/ai-sdlc-framework/ai-sdlc/issues/886)) ([fa025bb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fa025bb544e6a39f3b0a7d1c8f26ab89512289bc))
+* **security:** harden command-injection sites (CodeQL js/shell-command-constructed-from-input) ([#812](https://github.com/ai-sdlc-framework/ai-sdlc/issues/812)) ([be944e9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be944e92bd262172408223dbc999a9504e02e8fc))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.13.0
+
 ## [0.12.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.11.0...orchestrator-v0.12.0) (2026-05-29)
 
 

@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.12.0...pipeline-cli-v0.13.0) (2026-06-10)
+
+
+### Features
+
+* AISDLC-480 surface dispatched-session decisions to Decision Catalog (async escape hatch) ([#830](https://github.com/ai-sdlc-framework/ai-sdlc/issues/830)) ([80cd5a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/80cd5a7efb5a336be15aa310a5b2ae8075dc6c55))
+* AISDLC-481 dispatch-session heartbeat reaper + cancel back-channel (v1 cancel-only) ([#827](https://github.com/ai-sdlc-framework/ai-sdlc/issues/827)) ([9adc050](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9adc0502d748770591e0af956027c8ff9c188e1f))
+* AISDLC-483 default code/test review to Codex harness (cost control) ([#826](https://github.com/ai-sdlc-framework/ai-sdlc/issues/826)) ([6ff5c39](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6ff5c392d9e0c639e60d67b790be56b167841d2e))
+* **ci:** wire RFC-0043 AQ2 InferenceProxy in sandbox-run (AISDLC-520) ([#868](https://github.com/ai-sdlc-framework/ai-sdlc/issues/868)) ([b23d87d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b23d87d4a3acaa296cf881c36e9f3335f3f011ee))
+* cli-decisions priority/timebox/resolve/auto-expire — AISDLC-463 core slice ([#797](https://github.com/ai-sdlc-framework/ai-sdlc/issues/797)) ([631d6de](https://github.com/ai-sdlc-framework/ai-sdlc/commit/631d6de22b208f382284887d107e634385d6b123))
+* inference.local credential-withholding proxy (AISDLC-510) ([#858](https://github.com/ai-sdlc-framework/ai-sdlc/issues/858)) ([19f3583](https://github.com/ai-sdlc-framework/ai-sdlc/commit/19f358306987b35dac281233935af2e416a6a827))
+* **orchestrator:** AISDLC-449 reverify cached blockers before extending passive heartbeat ([#804](https://github.com/ai-sdlc-framework/ai-sdlc/issues/804)) ([93c3671](https://github.com/ai-sdlc-framework/ai-sdlc/commit/93c3671fcd6701106538875d02d973f5e55af981))
+* **orchestrator:** instrument parallel-dispatch profiling (AISDLC-479) ([#774](https://github.com/ai-sdlc-framework/ai-sdlc/issues/774)) ([424372e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/424372e06213ab295c0c592a6a371d79fd60293e))
+* real DockerSandboxDriver — isolation, enforcement, teardown (AISDLC-508) ([#857](https://github.com/ai-sdlc-framework/ai-sdlc/issues/857)) ([5d01aad](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5d01aad169beb5079c55f637a2cee5421512985a))
+* rfc-0043 phase 1 — trust classifier + AST gate + drift workflow (AISDLC-497) ([#843](https://github.com/ai-sdlc-framework/ai-sdlc/issues/843)) ([a94dad8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a94dad812787474760c77f1293c32279a4686faa))
+* rfc-0043 phase 2 — report schema + Zod validator + clean-room signer (AISDLC-498) ([#844](https://github.com/ai-sdlc-framework/ai-sdlc/issues/844)) ([e615cb0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e615cb056ecc629372b861c51da6314fdb5c8ce3))
+* rfc-0043 phase 3 — sandbox runner + driver abstraction + resource limits (AISDLC-499) ([#845](https://github.com/ai-sdlc-framework/ai-sdlc/issues/845)) ([7eeced5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7eeced5d9847cd6bb0d0588d9cd4d8f592a33b68))
+* rfc-0043 phase 4 — hardened reviewer matrix + prompt-injection hardening (AISDLC-500) ([#846](https://github.com/ai-sdlc-framework/ai-sdlc/issues/846)) ([886d640](https://github.com/ai-sdlc-framework/ai-sdlc/commit/886d640c9a27b4a1e1d04217f742787c36164b65))
+* rfc-0043 phase 5 — untrusted-pr-gate workflow + flag + degradation (AISDLC-501) ([#847](https://github.com/ai-sdlc-framework/ai-sdlc/issues/847)) ([5927c3d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5927c3d2cf7b839cdc35f97c2949862b558d777e))
+* rfc-0043 phase 7 — differential test execution in sandbox (AISDLC-509) ([#859](https://github.com/ai-sdlc-framework/ai-sdlc/issues/859)) ([68b84a2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/68b84a24ba8a33a0a6b2ad5a87db66be4ad0a553))
+* rfc-0043 phase 7 — in-sandbox reviewer execution + real verdicts (AISDLC-511) ([#860](https://github.com/ai-sdlc-framework/ai-sdlc/issues/860)) ([fd2ecde](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd2ecde8ba5b899e3513f7de140a8352e417562a))
+* rfc-0043 phase 7 integration glue and resolveModelClient hard error (AISDLC-512) ([#861](https://github.com/ai-sdlc-framework/ai-sdlc/issues/861)) ([44afbb2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/44afbb28791b84dc179bd106a35ddd6d09e111fc))
+
+
+### Bug Fixes
+
+* AISDLC-482 guard rm -rf on possibly-empty path vars (autonomous-run safety) ([#823](https://github.com/ai-sdlc-framework/ai-sdlc/issues/823)) ([afb54d9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afb54d94fc6c86a66c7b1f7e1ef7e48abfafba4e))
+* **ci:** AISDLC-475 remove per-SHA v6 attestation bridge — kill the re-sign loop ([#808](https://github.com/ai-sdlc-framework/ai-sdlc/issues/808)) ([e2f17ad](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e2f17ad5a3d2c6ea7faae4efefa2b0e921f72265))
+* harden 17 ReDoS-prone regexes (CodeQL js/polynomial-redos) ([#820](https://github.com/ai-sdlc-framework/ai-sdlc/issues/820)) ([070864e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/070864e01bddd88d6fa3175cd80c59792b52318e))
+* **orchestrator:** anchor **/ glob prefix to separator boundary (AISDLC-505) ([#855](https://github.com/ai-sdlc-framework/ai-sdlc/issues/855)) ([2ca1bc4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2ca1bc46deae1148542e5595b91759115483ac75))
+* **orchestrator:** narrow DoR Gate 7 regex to dep-phrase + tracked-work-id pairs (AISDLC-457) ([#748](https://github.com/ai-sdlc-framework/ai-sdlc/issues/748)) ([4308763](https://github.com/ai-sdlc-framework/ai-sdlc/commit/430876332fa2d93d92cb88623eb9623c97ebd2fd))
+* **RFC-0043:** port fork-proven UCVG AQ2 fixes to ai-sdlc main (AISDLC-522) ([#871](https://github.com/ai-sdlc-framework/ai-sdlc/issues/871)) ([d6010dd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d6010dd22acd25a8483e2272db9b42d1975817a2))
+* **security:** harden command-injection sites (CodeQL js/shell-command-constructed-from-input) ([#812](https://github.com/ai-sdlc-framework/ai-sdlc/issues/812)) ([be944e9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be944e92bd262172408223dbc999a9504e02e8fc))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.13.0
+
 ## [0.12.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.11.0...pipeline-cli-v0.12.0) (2026-05-29)
 
 

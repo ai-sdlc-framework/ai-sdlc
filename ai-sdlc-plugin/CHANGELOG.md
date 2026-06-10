@@ -5,6 +5,27 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.10.0...ai-sdlc-plugin-v0.11.0) (2026-06-10)
+
+
+### Features
+
+* AISDLC-464 remaining gaps — execute.md lib sourcing, schema tightening, drift guard ([#805](https://github.com/ai-sdlc-framework/ai-sdlc/issues/805)) ([7bb2191](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7bb2191b7a62f89fd7f123a9cd25cb30c6161f63))
+* AISDLC-480 surface dispatched-session decisions to Decision Catalog (async escape hatch) ([#830](https://github.com/ai-sdlc-framework/ai-sdlc/issues/830)) ([80cd5a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/80cd5a7efb5a336be15aa310a5b2ae8075dc6c55))
+* AISDLC-481 dispatch-session heartbeat reaper + cancel back-channel (v1 cancel-only) ([#827](https://github.com/ai-sdlc-framework/ai-sdlc/issues/827)) ([9adc050](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9adc0502d748770591e0af956027c8ff9c188e1f))
+* AISDLC-483 default code/test review to Codex harness (cost control) ([#826](https://github.com/ai-sdlc-framework/ai-sdlc/issues/826)) ([6ff5c39](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6ff5c392d9e0c639e60d67b790be56b167841d2e))
+* **orchestrator:** AISDLC-449 reverify cached blockers before extending passive heartbeat ([#804](https://github.com/ai-sdlc-framework/ai-sdlc/issues/804)) ([93c3671](https://github.com/ai-sdlc-framework/ai-sdlc/commit/93c3671fcd6701106538875d02d973f5e55af981))
+* rfc-0043 phase 4 — hardened reviewer matrix + prompt-injection hardening (AISDLC-500) ([#846](https://github.com/ai-sdlc-framework/ai-sdlc/issues/846)) ([886d640](https://github.com/ai-sdlc-framework/ai-sdlc/commit/886d640c9a27b4a1e1d04217f742787c36164b65))
+
+
+### Bug Fixes
+
+* AISDLC-482 guard rm -rf on possibly-empty path vars (autonomous-run safety) ([#823](https://github.com/ai-sdlc-framework/ai-sdlc/issues/823)) ([afb54d9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afb54d94fc6c86a66c7b1f7e1ef7e48abfafba4e))
+* AISDLC-485 execute-parallel spawned sessions don't hang on permission prompts (DEC-0009 opt-in) ([#822](https://github.com/ai-sdlc-framework/ai-sdlc/issues/822)) ([ddaa78d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ddaa78df1467023b82abaadd8d147c358db5035e))
+* AISDLC-486 dev subagent updates inbound refs on rename (avoid Backlog Drift stall) ([#829](https://github.com/ai-sdlc-framework/ai-sdlc/issues/829)) ([ae8c7a1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ae8c7a13dd57aec838ebcf844a52a765c7f689a5))
+* **plugin:** rename /ai-sdlc:review command to review-pr (AISDLC-474) ([#789](https://github.com/ai-sdlc-framework/ai-sdlc/issues/789)) ([a09b87d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a09b87d6c5a7abe7e65f1ef9826cdb9b30058472))
+* robustness follow-ups to execute-parallel wrapper (AISDLC-464) ([#773](https://github.com/ai-sdlc-framework/ai-sdlc/issues/773)) ([3938e5c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3938e5cd33265dfbec329735bf27ed415d99cccf))
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.2...ai-sdlc-plugin-v0.10.0) (2026-05-28)
 
 
