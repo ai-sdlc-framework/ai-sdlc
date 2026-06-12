@@ -20,6 +20,8 @@ import {
   runAppendCaptureMarkerHandler,
   runParsePrCommentsHandler,
   setStdinReaderForTesting,
+  setPrDetectorForTesting,
+  setOperatorResolverForTesting,
 } from './capture.js';
 import { writeCapture } from '../capture/capture-writer.js';
 import { writeDraftCaptureFile, writeSubmittedCaptureFile } from '../capture/draft-capture.js';
@@ -72,6 +74,22 @@ beforeEach(() => {
   process.env.ARTIFACTS_DIR = tmp;
   process.env.CAPTURE_REPO_ROOT = tmp;
   process.env.USER = 'test-user';
+
+  // Stub the operator identity resolver globally so no test ever shells out
+  // to real `git config user.email`. Tests that need a specific identity
+  // can call setOperatorResolverForTesting() themselves; the default stub
+  // falls back to process.env.USER which is set to 'test-user' above.
+  // This prevents CI flakes caused by slow or unavailable git processes.
+  setOperatorResolverForTesting(async (override?: string) => {
+    if (override) return override;
+    return process.env.USER || 'unknown';
+  });
+
+  // Stub the PR detector globally so no test ever shells out to real
+  // `git branch --show-current` / `gh pr list`. Tests that need a specific
+  // PR number (including the success-path test) call setPrDetectorForTesting()
+  // themselves. Default stub returns null (graceful-fallback path).
+  setPrDetectorForTesting(async () => null);
 });
 
 afterEach(() => {
@@ -103,6 +121,8 @@ afterEach(() => {
 
   rmSync(tmp, { recursive: true, force: true });
   setStdinReaderForTesting(null);
+  setPrDetectorForTesting(null);
+  setOperatorResolverForTesting(null);
   vi.restoreAllMocks();
 });
 
@@ -263,18 +283,15 @@ describe('file subcommand', () => {
   });
 
   it('resolves operator from $USER when --operator is not set', async () => {
-    // We set USER=test-user in beforeEach; stub git spawnSync to fail so it falls back to USER.
-    // Use vi.mock approach is tricky with dynamic import; instead we rely on $USER fallback.
-    // The git config call is dynamic import('node:child_process') — we verify the fallback
-    // by unsetting it temporarily so the code has to fall through to process.env.USER.
+    // The global beforeEach stubs operatorResolver to return `process.env.USER || 'unknown'`
+    // (no real `git config` subprocess). Setting USER here makes the resolved operator
+    // deterministic, so we can assert the exact value rather than just a non-empty string.
     const savedUser = process.env.USER;
     process.env.USER = 'fallback-user';
     setArgv('file', 'operator from USER env', '--format', 'json');
     await buildCaptureCli().parseAsync();
     const rec = stdoutJson<CaptureRecord>();
-    // operator should be either git config result or fallback-user
-    expect(typeof rec.source.operator).toBe('string');
-    expect(rec.source.operator!.length).toBeGreaterThan(0);
+    expect(rec.source.operator).toBe('fallback-user');
     process.env.USER = savedUser;
   });
 
@@ -506,9 +523,10 @@ describe('redact subcommand', () => {
     await buildCaptureCli().parseAsync();
     const result = stdoutJson<CaptureRecord>();
     expect(result.finding).toBe('[REDACTED]');
-    // resolvedBy will be git config or USER fallback
+    // The global beforeEach stubs operatorResolver to return process.env.USER
+    // (set to 'test-user'), so the resolved redactor is deterministic.
     const redactEntry = result.auditTrail[1] as Record<string, unknown>;
-    expect(typeof redactEntry.by).toBe('string');
+    expect(redactEntry.by).toBe('test-user');
   });
 
   it('exits 1 when capture ID does not exist', async () => {
@@ -522,19 +540,37 @@ describe('redact subcommand', () => {
 
 describe('against-current-pr subcommand', () => {
   it('files a capture with a null PR when git/gh are not available (graceful fallback)', async () => {
-    // This test exercises the null-PR branch of detectCurrentPrNumber.
-    // In a test environment with no active git branch / gh CLI, detectCurrentPrNumber returns null.
-    process.env.USER = 'pr-tester';
+    // Drive the null-PR branch via an injected stub that returns null
+    // deterministically and instantly — no real git/gh subprocess.
+    // This is the fix for the 5000ms CI timeout flake (AISDLC-533).
+    setPrDetectorForTesting(async () => null);
+    setOperatorResolverForTesting(async () => 'pr-tester');
     setArgv('against-current-pr', '--finding', 'issue on branch', '--format', 'json');
     await buildCaptureCli().parseAsync();
     const rec = stdoutJson<CaptureRecord>();
     expect(rec.finding).toBe('issue on branch');
-    // prNumber may be null (no real PR) or a number
-    expect(rec.evidence.prNumber == null || typeof rec.evidence.prNumber === 'number').toBe(true);
+    // prNumber is null because the stub returned null — asserts the graceful-fallback path.
+    expect(rec.evidence.prNumber).toBeNull();
+    expect(rec.source.context).toBe('filed from active branch (no PR detected)');
+  });
+
+  it('files a capture with a detected PR number when git/gh are available', async () => {
+    // Drive the non-null PR branch via an injected stub — tests the success path.
+    setPrDetectorForTesting(async () => 42);
+    setOperatorResolverForTesting(async () => 'pr-tester');
+    setArgv('against-current-pr', '--finding', 'issue on branch with pr', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const rec = stdoutJson<CaptureRecord>();
+    expect(rec.finding).toBe('issue on branch with pr');
+    expect(rec.evidence.prNumber).toBe(42);
+    expect(rec.source.context).toBe('filed against PR #42');
   });
 
   it('emits table format with against-current-pr --format table', async () => {
-    process.env.USER = 'pr-tester';
+    // Stub both seams so the test is deterministic and instant regardless
+    // of whether git/gh are available in the CI environment.
+    setPrDetectorForTesting(async () => null);
+    setOperatorResolverForTesting(async () => 'pr-tester');
     setArgv('against-current-pr', '--finding', 'table pr finding', '--format', 'table');
     await buildCaptureCli().parseAsync();
     const out = stdoutText();
@@ -543,6 +579,9 @@ describe('against-current-pr subcommand', () => {
   });
 
   it('uses --context when provided instead of auto-generated context', async () => {
+    // Stub both seams so the test is deterministic and instant.
+    setPrDetectorForTesting(async () => null);
+    setOperatorResolverForTesting(async () => 'context-tester');
     setArgv(
       'against-current-pr',
       '--finding',
