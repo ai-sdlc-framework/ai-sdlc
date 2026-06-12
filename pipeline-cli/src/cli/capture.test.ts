@@ -283,18 +283,15 @@ describe('file subcommand', () => {
   });
 
   it('resolves operator from $USER when --operator is not set', async () => {
-    // We set USER=test-user in beforeEach; stub git spawnSync to fail so it falls back to USER.
-    // Use vi.mock approach is tricky with dynamic import; instead we rely on $USER fallback.
-    // The git config call is dynamic import('node:child_process') — we verify the fallback
-    // by unsetting it temporarily so the code has to fall through to process.env.USER.
+    // The global beforeEach stubs operatorResolver to return `process.env.USER || 'unknown'`
+    // (no real `git config` subprocess). Setting USER here makes the resolved operator
+    // deterministic, so we can assert the exact value rather than just a non-empty string.
     const savedUser = process.env.USER;
     process.env.USER = 'fallback-user';
     setArgv('file', 'operator from USER env', '--format', 'json');
     await buildCaptureCli().parseAsync();
     const rec = stdoutJson<CaptureRecord>();
-    // operator should be either git config result or fallback-user
-    expect(typeof rec.source.operator).toBe('string');
-    expect(rec.source.operator!.length).toBeGreaterThan(0);
+    expect(rec.source.operator).toBe('fallback-user');
     process.env.USER = savedUser;
   });
 
@@ -526,9 +523,10 @@ describe('redact subcommand', () => {
     await buildCaptureCli().parseAsync();
     const result = stdoutJson<CaptureRecord>();
     expect(result.finding).toBe('[REDACTED]');
-    // resolvedBy will be git config or USER fallback
+    // The global beforeEach stubs operatorResolver to return process.env.USER
+    // (set to 'test-user'), so the resolved redactor is deterministic.
     const redactEntry = result.auditTrail[1] as Record<string, unknown>;
-    expect(typeof redactEntry.by).toBe('string');
+    expect(redactEntry.by).toBe('test-user');
   });
 
   it('exits 1 when capture ID does not exist', async () => {
