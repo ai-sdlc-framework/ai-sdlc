@@ -2,9 +2,15 @@
 
 This guide walks you through adopting AI-SDLC in a repository you control — from
 a clean environment with no prior operator state to a working pipeline that
-produces signed, attested pull requests. Every command in this guide was executed
-against a fresh test repository (not the ai-sdlc development repo itself). Hidden
-prerequisites discovered during that clean run are listed in [Found Gaps](#found-gaps).
+produces signed, attested pull requests. Hidden prerequisites and friction points
+discovered during guide development are listed in [Found Gaps](#found-gaps).
+
+> **AC#2 validation status — operator note:** The end-to-end clean-repo validation
+> run required by AISDLC-539 AC#2 was not completed in this iteration. The steps
+> below document the expected behaviour derived from reading the scaffold code and
+> existing operator runbooks. An adopter willing to run through the guide on a
+> brand-new throwaway repo (outside `ai-sdlc/`) and capture a session transcript
+> should link it here so AC#2 can be checked off.
 
 > **Substrate boundary note:** AI-SDLC's pipeline harness — the autonomous
 > orchestrator, three-tier reviewer fan-out, and DSSE attestation signer — requires
@@ -256,8 +262,12 @@ pipeline to its current requirement:
 
 **Adopters on other substrates** (GitHub Copilot, Cursor, Codex, OpenAI API)
 can use the `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` path which
-dispatches via `ANTHROPIC_API_KEY` — but the signing key and attestation signing
-remain operator-machine-local today.
+dispatches via `ANTHROPIC_API_KEY` — but this command is only available inside
+the **ai-sdlc monorepo checkout** (`@ai-sdlc/dogfood` is a private workspace
+package that is not published to npm). Adopters who do not have the monorepo
+checked out locally must use the Claude Code path above or wait for a standalone
+API-key spawner CLI (tracked as a follow-up). The signing key and attestation
+signing also remain operator-machine-local today regardless of substrate.
 
 The framework is designed to be substrate-agnostic at the pipeline orchestration
 level (RFC-0041 Conductor/Worker Architecture). The Claude Code coupling exists
@@ -337,46 +347,84 @@ fully-attested HEAD.
 
 ### Step 6.3 — Alternative: API-key path (no Claude Code required)
 
-If you are not using Claude Code, dispatch via the watcher:
+If you are not using Claude Code and you have the **ai-sdlc monorepo** checked
+out locally, dispatch via the watcher:
 
 ```bash
-ANTHROPIC_API_KEY=sk-... pnpm --filter @ai-sdlc/dogfood watch --issue <github-issue-number>
+# Set the key in your shell environment first (do NOT inline secrets into
+# shell commands — they land in shell history and process lists).
+export ANTHROPIC_API_KEY=sk-ant-...
+pnpm --filter @ai-sdlc/dogfood watch --issue <github-issue-number>
 ```
 
 This path uses the API key spawner and does not require `claude` on PATH.
-Attestation signing is still operator-local; you will need to sign manually after
-the agent commits (see `docs/operations/signing-runbook.md`).
+Note that `@ai-sdlc/dogfood` is a **private workspace package inside the
+ai-sdlc monorepo** — it is not available from npm. Adopters without the
+monorepo checked out must use the Claude Code path in Step 6.2.
+
+Attestation signing is still operator-local; you will need to sign manually
+after the agent commits (see
+[`docs/operations/attestation-troubleshooting.md`](../operations/attestation-troubleshooting.md)
+for diagnostics, and
+[`docs/operations/mcp-server-signing.md`](../operations/mcp-server-signing.md)
+for the signing key setup).
 
 ---
 
 ## Step 7 — Verify the Attested PR
 
-Once the Conductor has signed and flipped the PR to ready-for-review, verify
-the attestation envelope is present:
+### What the scaffold actually gives you today
+
+The `ai-sdlc init` scaffold writes a **audit-only** `verify-attestation.yml`
+workflow. This workflow:
+
+- Checks whether a DSSE attestation envelope exists at
+  `.ai-sdlc/attestations/<head-sha>.dsse.json` on the PR's HEAD commit.
+- Logs the result as a GitHub Actions `::notice::` annotation in the Actions
+  log — it does NOT post an `ai-sdlc/attestation` required commit status.
+- Is therefore **non-blocking**: a missing or invalid envelope does not prevent
+  merge. It is governance-grade audit logging, not a hard gate.
+
+The `scripts/verify-attestation.mjs` script used in the ai-sdlc monorepo is
+**not** included in the scaffold. It is part of the ai-sdlc development tooling
+and is not available in adopter repositories.
+
+### Confirming the envelope was written
+
+Once the Conductor has signed and flipped the PR to ready-for-review, confirm
+the attestation envelope was committed:
 
 ```bash
-# List attestation envelopes for the PR's branch HEAD:
+# Inside the PR's worktree (or after checking out the branch):
 ls .ai-sdlc/attestations/
 
-# Expected: at least one of
-#   <patch-id>.v6.dsse.json   (content-addressed, current schema)
-#   <head-sha>.v6.dsse.json   (per-SHA bridge, written alongside)
+# Expected for a Claude Code / /ai-sdlc execute run:
+#   <head-sha>.dsse.json      (v5 legacy-compat bridge)
+#   <patch-id>.dsse.json      (content-addressed primary, AISDLC-398+)
+#   <head-sha>.v6.dsse.json   (current v6 schema)
 ```
 
-Run the verifier locally:
+### Viewing the audit log in GitHub Actions
 
-```bash
-node scripts/verify-attestation.mjs
-# Expected:
-# [verify-attestation] v6 envelope found
-# [verify-attestation] Merkle proof valid
-# [verify-attestation] Trusted-key signature valid
-# [verify-attestation] result: PASS
+Navigate to the PR's **Checks** tab and open the **AI-SDLC Verify Review
+Attestation** workflow run. The `Log audit result` step emits one of:
+
+```
+::notice::ai-sdlc attestation AUDIT — envelope present at <sha>
+::notice::ai-sdlc attestation AUDIT — no envelope on <sha> (audit-only, not blocking)
 ```
 
-In GitHub, the `ai-sdlc/attestation` check should appear green on the PR. The
-`ai-sdlc/pr-ready` rollup check (the only required check on `main`) turns green
-once both attestation and the Backlog Drift gate pass.
+### Promoting attestation to a hard gate (advanced)
+
+If you want the attestation check to block merges:
+
+1. Edit `.github/workflows/verify-attestation.yml`'s `Log audit result` step to
+   post a `gh api .../statuses` commit status instead of (or alongside) the
+   `::notice::` annotation.
+2. Add `ai-sdlc/attestation` to your branch protection required-checks list.
+3. Refer to the ai-sdlc monorepo's own `verify-attestation.yml` workflow for a
+   production-grade reference implementation (see
+   [`docs/operations/attestation-troubleshooting.md`](../operations/attestation-troubleshooting.md)).
 
 ---
 
@@ -392,11 +440,21 @@ Navigate to `Settings → General → Allow auto-merge` and turn it on.
 ### 8.2 Add the `AI_SDLC_PAT` secret
 
 `auto-enable-auto-merge.yml` needs a GitHub PAT with write access to the
-repository:
+repository. Prefer the interactive form (avoids the token appearing in shell
+history or process lists):
 
 ```bash
-gh secret set AI_SDLC_PAT --body "ghp_..."
+# Interactive — prompts for the value; never lands in shell history
+gh secret set AI_SDLC_PAT
+
+# Or pipe from a file to avoid the token appearing inline:
+gh secret set AI_SDLC_PAT --body-file path/to/token.txt
 ```
+
+> **Shell-history hygiene:** never pass live secrets as inline arguments
+> (`--body "ghp_..."`, `ANTHROPIC_API_KEY=sk-ant-... command`) — they appear in
+> `~/.zsh_history` / `~/.bash_history`, `ps aux`, and OS audit logs. Use the
+> interactive form or environment variables set from a secrets manager.
 
 ### 8.3 Verify branch protection
 
@@ -416,11 +474,11 @@ ai-sdlc init --add branch-protection
 
 Open a PR and confirm these checks fire:
 
-| Check | Workflow | Expected result |
-|---|---|---|
-| `ai-sdlc/pr-ready` | `ai-sdlc-gate.yml` | green (all inputs green) |
-| `ai-sdlc/attestation` | `verify-attestation.yml` | green (envelope present + valid) |
-| `Backlog Drift` | `dor-ingress.yml` | green (no unresolved drift) |
+| Check | Workflow | Expected result | Notes |
+|---|---|---|---|
+| `ai-sdlc/pr-ready` | `ai-sdlc-gate.yml` | green (all inputs green) | The single required merge gate |
+| `Backlog Drift` | `dor-ingress.yml` | green (no unresolved drift) | Required merge gate |
+| Attestation audit log | `verify-attestation.yml` | `::notice::` annotation in Actions log | Audit-only — does NOT post a required status check in the scaffold; see [Step 7](#step-7--verify-the-attested-pr) for how to promote to a hard gate |
 
 ---
 
@@ -436,11 +494,14 @@ clean-run execution of this guide against a fresh repository with no prior
 init`, the generated `pipeline.yaml` used the literal placeholder `your-org`
 instead of the real org and repo name.
 
-**Status:** Architectural — the init command uses `git remote get-url origin` to
-substitute the placeholder. The fix is to add the remote before running init.
-The guide's Step 2 now requires this explicitly. A follow-up task should make
-`ai-sdlc init` detect the missing remote and emit a clear warning (rather than
-silently using the placeholder).
+**Status:** `ai-sdlc init` already emits a warning in this case:
+
+```
+No git origin remote detected — pipeline.yaml will use the 'your-org' placeholder.
+```
+
+(`orchestrator/src/cli/commands/init.ts` ~line 741.) The guide's Step 2 now
+requires adding the remote before running init to avoid the placeholder entirely.
 
 **Workaround:** if you ran `ai-sdlc init` before adding the remote, edit
 `.ai-sdlc/pipeline.yaml` and replace `your-org` with your real org and repo name,
@@ -499,11 +560,12 @@ If the global `node_modules/.bin` is not on your PATH, add it:
 export PATH="$(npm root -g)/../bin:$PATH"
 ```
 
-### `ai-sdlc health` reports "no git origin remote detected"
+### `ai-sdlc init` says "No git origin remote detected"
 
-You ran `ai-sdlc init` before `git remote add origin`. Edit
-`.ai-sdlc/pipeline.yaml` and replace the `your-org` placeholder with your real
-org and repo, then commit the fix.
+You ran `ai-sdlc init` before `git remote add origin`. The message is emitted
+by `ai-sdlc init` (not `ai-sdlc health`). Edit `.ai-sdlc/pipeline.yaml` and
+replace the `your-org` placeholder with your real org and repo, then commit the
+fix.
 
 ### Signing-key not found during attestation
 
@@ -553,8 +615,9 @@ git commit -m "docs: sync MDX from ai-sdlc source"
   reference and idempotency guarantees.
 - **[Operations: Quality Gate](../operations/quality-gate.md)** — `ai-sdlc/pr-ready`
   rollup architecture.
-- **[Operations: Signing Runbook](../operations/signing-runbook.md)** — manual
-  attestation signing for ad-hoc or non-Claude-Code flows.
+- **[Operations: Attestation Troubleshooting](../operations/attestation-troubleshooting.md)** — diagnose
+  and resolve `ai-sdlc/attestation` check failures; includes the manual signing
+  recovery flow for ad-hoc or non-Claude-Code situations.
 - **[Conformance Suite](../../conformance/README.md)** — validate your schema
   resources against the fixture suite.
 - **[Architecture](../architecture.md)** — package structure, data flow, and
