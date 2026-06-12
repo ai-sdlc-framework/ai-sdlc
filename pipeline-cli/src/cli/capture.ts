@@ -316,7 +316,7 @@ export function runAppendCaptureMarkerHandler(opts: { input: string; format: str
 
 // ── Detect current PR number from git branch + gh CLI ─────────────────────────
 
-async function detectCurrentPrNumber(): Promise<number | null> {
+async function detectCurrentPrNumberReal(): Promise<number | null> {
   try {
     const { spawnSync } = await import('node:child_process');
     const branchResult = spawnSync('git', ['branch', '--show-current'], {
@@ -339,9 +339,29 @@ async function detectCurrentPrNumber(): Promise<number | null> {
   }
 }
 
+/**
+ * Module-level PR detector pointer. The `against-current-pr` handler calls
+ * `prDetector()` rather than `detectCurrentPrNumberReal()` directly so tests
+ * can inject a deterministic stub. Production code leaves it pointing at the
+ * real implementation.
+ */
+let prDetector: () => Promise<number | null> = detectCurrentPrNumberReal;
+
+/**
+ * Test hook — override the PR detector the `against-current-pr` subcommand
+ * uses. Pass `null` to restore the production default.
+ */
+export function setPrDetectorForTesting(detector: (() => Promise<number | null>) | null): void {
+  prDetector = detector ?? detectCurrentPrNumberReal;
+}
+
+async function detectCurrentPrNumber(): Promise<number | null> {
+  return prDetector();
+}
+
 // ── Resolve operator identity ─────────────────────────────────────────────────
 
-async function resolveOperatorIdentity(override?: string): Promise<string> {
+async function resolveOperatorIdentityReal(override?: string): Promise<string> {
   if (override) return override;
   try {
     const { spawnSync } = await import('node:child_process');
@@ -350,6 +370,29 @@ async function resolveOperatorIdentity(override?: string): Promise<string> {
   } catch {
     return process.env.USER || 'unknown';
   }
+}
+
+/**
+ * Module-level operator identity resolver pointer. The yargs subcommand
+ * handlers call `operatorResolver(override)` rather than
+ * `resolveOperatorIdentityReal()` directly so tests can inject a
+ * deterministic stub without spawning a real `git` process.
+ * Production code leaves it pointing at the real implementation.
+ */
+let operatorResolver: (override?: string) => Promise<string> = resolveOperatorIdentityReal;
+
+/**
+ * Test hook — override the operator identity resolver. Pass `null` to restore
+ * the production default.
+ */
+export function setOperatorResolverForTesting(
+  resolver: ((override?: string) => Promise<string>) | null,
+): void {
+  operatorResolver = resolver ?? resolveOperatorIdentityReal;
+}
+
+async function resolveOperatorIdentity(override?: string): Promise<string> {
+  return operatorResolver(override);
 }
 
 // ── Render table ──────────────────────────────────────────────────────────────
