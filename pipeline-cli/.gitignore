@@ -1,0 +1,3 @@
+# Runtime artifacts directory — created by capture-writer when ARTIFACTS_DIR is
+# unset; never committed (AISDLC-518).
+_artifacts/

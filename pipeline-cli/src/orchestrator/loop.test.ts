@@ -14,6 +14,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildOrchestratorStatus,
   defaultOrchestratorConfig,
@@ -68,6 +71,20 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
  * Phase 1 tests require a working GitHub API token + network, which breaks
  * offline/CI-isolated runs.
  */
+// Shared isolated tmp dir — created fresh before each test, cleaned up
+// after. Injected into hermeticFilterAdapters so coverage-gap writeCapture
+// calls (triggered by UnknownFailureMode escalations in error-path tests)
+// land in this isolated dir rather than process.cwd()/_artifacts/ (AISDLC-518).
+let _hermeticArtifactsDir: string;
+
+beforeEach(() => {
+  _hermeticArtifactsDir = mkdtempSync(join(tmpdir(), 'aisdlc-loop-test-'));
+});
+
+afterEach(() => {
+  rmSync(_hermeticArtifactsDir, { recursive: true, force: true });
+});
+
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
   | 'graphLoader'
@@ -76,6 +93,7 @@ function hermeticFilterAdapters(): Pick<
   | 'alreadyInFlightOpts'
   | 'openPRExistsOpts'
   | 'parentBranchGuard'
+  | 'artifactsDir'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
@@ -96,6 +114,9 @@ function hermeticFilterAdapters(): Pick<
     },
     // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
     parentBranchGuard: async () => {},
+    // AISDLC-518 — redirect coverage-gap writeCapture calls to an isolated
+    // tmpdir so tests don't pollute process.cwd()/_artifacts/_captures/.
+    artifactsDir: _hermeticArtifactsDir,
   };
 }
 

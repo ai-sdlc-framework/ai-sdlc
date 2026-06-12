@@ -255,6 +255,9 @@ export async function runParsePrCommentsHandler(opts: {
   if (opts.classify === true) {
     const batch = await classifyPrCommentsBatch(comments, {
       threshold: opts.threshold,
+      // Pass repoRoot so the classifier's corpus writes land under the
+      // $CAPTURE_REPO_ROOT-scoped dir rather than process.cwd() (AISDLC-518).
+      repoRoot: resolveRepoRoot(),
     });
     renderClassifierBatch(batch, opts.format);
     return;
