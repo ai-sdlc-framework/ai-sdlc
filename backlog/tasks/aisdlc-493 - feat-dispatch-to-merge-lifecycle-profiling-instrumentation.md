@@ -13,7 +13,7 @@ labels:
   - estimation
 dependencies:
   - AISDLC-479
-priority: medium
+priority: high
 ---
 
 ## Description
