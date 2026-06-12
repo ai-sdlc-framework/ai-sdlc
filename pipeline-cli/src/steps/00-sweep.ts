@@ -31,7 +31,7 @@
  * @module steps/00-sweep
  */
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { SweepResult } from '../types.js';
@@ -39,6 +39,91 @@ import type { SweepResult } from '../types.js';
 export interface SweepOptions {
   workDir: string;
   runner?: Runner;
+  /**
+   * AISDLC-493 — override the board directory for dispatch verdicts.
+   * Defaults to `<workDir>/.ai-sdlc/dispatch`. Tests inject a tmp path.
+   */
+  boardDir?: string;
+}
+
+// ── AISDLC-493 profiling helpers ──────────────────────────────────────────
+
+/**
+ * Try to read `dispatchedAt` from the dispatch verdict JSON for a given
+ * task. Checks both `done/` and `failed/` subdirectories of the board.
+ * Returns `undefined` when no verdict file exists or the field is absent.
+ * Best-effort — parse errors are silently swallowed.
+ */
+export function readDispatchedAtFromVerdict(
+  boardDir: string,
+  taskIdLower: string,
+): string | undefined {
+  for (const sub of ['done', 'failed'] as const) {
+    const p = join(boardDir, sub, `${taskIdLower}.verdict.json`);
+    if (!existsSync(p)) continue;
+    try {
+      const raw = readFileSync(p, 'utf8');
+      const v = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof v.dispatchedAt === 'string' && v.dispatchedAt.length > 0) {
+        return v.dispatchedAt;
+      }
+    } catch {
+      // skip malformed file
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Derive a best-effort CI-wait duration from `gh run list` for the given
+ * branch. Looks for the most-recent CI run that completed around the PR
+ * merge time. Returns `null` when no matching run is found or the runner
+ * returns a non-zero exit.
+ *
+ * This is the "retroactive, no blocking poll, no webhook" CI-wait derivation
+ * described in AISDLC-493 §Scope item 4.
+ */
+export async function deriveCiWaitMs(
+  branch: string,
+  workDir: string,
+  runner: Runner,
+): Promise<number | null> {
+  try {
+    const r = await runner(
+      'gh',
+      [
+        'run',
+        'list',
+        '--branch',
+        branch,
+        '--json',
+        'conclusion,startedAt,completedAt',
+        '--limit',
+        '5',
+      ],
+      { allowFailure: true, cwd: workDir },
+    );
+    if (r.code !== 0) return null;
+    const raw = r.stdout.trim();
+    if (!raw || raw === 'null' || raw === '[]') return null;
+    const runs = JSON.parse(raw) as Array<{
+      conclusion?: string | null;
+      startedAt?: string | null;
+      completedAt?: string | null;
+    }>;
+    // Find the most recent completed run (success or failure — both count
+    // as "CI waited").
+    for (const run of runs) {
+      if (!run.startedAt || !run.completedAt) continue;
+      const start = Date.parse(run.startedAt);
+      const end = Date.parse(run.completedAt);
+      if (Number.isNaN(start) || Number.isNaN(end) || end < start) continue;
+      return end - start;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -86,6 +171,7 @@ export async function lookupPrState(
 export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepResult> {
   const runner = opts.runner ?? defaultRunner;
   const worktreesDir = join(opts.workDir, '.worktrees');
+  const boardDir = opts.boardDir ?? join(opts.workDir, '.ai-sdlc', 'dispatch');
 
   if (!existsSync(worktreesDir)) {
     return { swept: [] };
@@ -171,7 +257,29 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
         cwd: opts.workDir,
         allowFailure: true,
       });
-      swept.push({ worktreePath: wt, branch, mergedAt: mergedAtStr });
+
+      // AISDLC-493 — populate dispatch→merge profiling fields (best-effort).
+      const taskIdLower = entry.toLowerCase();
+      const dispatchedAt = readDispatchedAtFromVerdict(boardDir, taskIdLower);
+      let totalLifecycleMs: number | undefined;
+      if (dispatchedAt && mergedAt) {
+        const dispMs = Date.parse(dispatchedAt);
+        const mergedMs = Date.parse(mergedAt);
+        if (!Number.isNaN(dispMs) && !Number.isNaN(mergedMs) && mergedMs >= dispMs) {
+          totalLifecycleMs = mergedMs - dispMs;
+        }
+      }
+      const ciWaitMs = await deriveCiWaitMs(branch, opts.workDir, runner);
+
+      swept.push({
+        worktreePath: wt,
+        branch,
+        mergedAt: mergedAtStr,
+        taskId: entry, // entry is the directory name = task-id-lower
+        ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
+        ...(totalLifecycleMs !== undefined ? { totalLifecycleMs } : {}),
+        ciWaitMs: ciWaitMs,
+      });
     } catch {
       // remove may fail if path no longer registered — already swept by sibling run
     }

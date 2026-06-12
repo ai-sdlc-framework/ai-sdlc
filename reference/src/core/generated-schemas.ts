@@ -3979,6 +3979,30 @@ export const dispatchVerdictV1Schema = {
       description:
         "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured by a claude-p-shell Worker. Stored on the verdict so the Conductor can promote it onto the next iteration's manifest as manifest.lastSessionId. in-session-agent Workers leave this null.",
     },
+    reviewerStartedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'AISDLC-493 — ISO-8601 timestamp when the reviewer fan-out was initiated (start of Step 7). Populated at the corresponding Step 0-13 point to enable per-phase lifecycle profiling.',
+    },
+    reviewerCompletedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'AISDLC-493 — ISO-8601 timestamp when all reviewer verdicts were collected (end of Step 8). Populated at the corresponding Step 0-13 point.',
+    },
+    signedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'AISDLC-493 — ISO-8601 timestamp when the attestation was signed (Step 10). Populated at the corresponding Step 0-13 point.',
+    },
+    prOpenedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'AISDLC-493 — ISO-8601 timestamp when the GitHub PR was opened (Step 11). Populated at the corresponding Step 0-13 point.',
+    },
   },
   additionalProperties: false,
 } as const;
@@ -5316,13 +5340,53 @@ export const orchestratorEventsV1Schema = {
       description:
         "New `estimateInputHash` for the task — same value as the next `EstimateCaptured` event's hash. Present on `EstimateInputChanged` (AISDLC-280).",
     },
+    prOpenedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 timestamp when the PR was opened. Present on `PrOpened` (AISDLC-493).',
+    },
+    rebased: {
+      type: 'boolean',
+      description:
+        'Whether the reconcile pass performed a git rebase. Present on `ReconcileCompleted` (AISDLC-493).',
+    },
+    reSignCount: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Number of attestation re-sign operations performed during this reconcile pass. Present on `ReconcileCompleted` (AISDLC-493).',
+    },
+    reconcileDurationMs: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Wall-clock duration of the reconcile pass in milliseconds. Present on `ReconcileCompleted` (AISDLC-493).',
+    },
+    dispatchedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'ISO-8601 dispatch timestamp for the task. Present on `DispatchToMergeCompleted` (AISDLC-493).',
+    },
+    totalLifecycleMs: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Total dispatch→merge wall-clock duration in milliseconds. Present on `DispatchToMergeCompleted` (AISDLC-493).',
+    },
+    ciWaitMs: {
+      type: ['integer', 'null'],
+      minimum: 0,
+      description:
+        'Best-effort CI-wait duration in milliseconds derived retroactively from gh run list at merge-discovery time. Null when CI timing data is unavailable. Present on `DispatchToMergeCompleted` (AISDLC-493).',
+    },
   },
   additionalProperties: false,
   $defs: {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -5347,6 +5411,9 @@ export const orchestratorEventsV1Schema = {
         'EstimateCaptured',
         'EstimateInputChanged',
         'SubagentDispatchedWithChainedScope',
+        'PrOpened',
+        'ReconcileCompleted',
+        'DispatchToMergeCompleted',
       ],
     },
   },

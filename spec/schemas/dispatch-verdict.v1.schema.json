@@ -110,6 +110,26 @@
       "type": "string",
       "minLength": 1,
       "description": "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured by a claude-p-shell Worker. Stored on the verdict so the Conductor can promote it onto the next iteration's manifest as manifest.lastSessionId. in-session-agent Workers leave this null."
+    },
+    "reviewerStartedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AISDLC-493 — ISO-8601 timestamp when the reviewer fan-out was initiated (start of Step 7). Populated at the corresponding Step 0-13 point to enable per-phase lifecycle profiling."
+    },
+    "reviewerCompletedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AISDLC-493 — ISO-8601 timestamp when all reviewer verdicts were collected (end of Step 8). Populated at the corresponding Step 0-13 point."
+    },
+    "signedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AISDLC-493 — ISO-8601 timestamp when the attestation was signed (Step 10). Populated at the corresponding Step 0-13 point."
+    },
+    "prOpenedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "AISDLC-493 — ISO-8601 timestamp when the GitHub PR was opened (Step 11). Populated at the corresponding Step 0-13 point."
     }
   },
   "additionalProperties": false

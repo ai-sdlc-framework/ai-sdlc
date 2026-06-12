@@ -78,6 +78,9 @@ import type { EstimateLogRecord } from './log-writer.js';
  *  - `source` — where the actuals came from (`events.jsonl` or `unknown`).
  *  - RFC §8.4 ensemble fields: `estimateInputHash`, `runIndex`,
  *    `estimateVariance`.
+ *  - AISDLC-493 total-lifecycle fields (optional — present when
+ *    `DispatchToMergeCompleted` was observed for the task):
+ *    `totalLifecycleMs`, `totalLifecycleBucket`, `totalLifecycleBucketMiss`.
  */
 export interface CalibrationRecord {
   ts: string;
@@ -100,6 +103,21 @@ export interface CalibrationRecord {
    * (maxBucketIndex − minBucketIndex). 0 for single-run estimates.
    */
   estimateVariance: number;
+  /**
+   * AISDLC-493 — total dispatch→merge wall-clock in ms from
+   * `DispatchToMergeCompleted`. Present when the event was observed.
+   */
+  totalLifecycleMs?: number;
+  /**
+   * AISDLC-493 — total lifecycle mapped to a t-shirt bucket.
+   * Present when `totalLifecycleMs` is available.
+   */
+  totalLifecycleBucket?: Bucket;
+  /**
+   * AISDLC-493 — bucket miss for total lifecycle vs predicted.
+   * Present when `totalLifecycleBucket` is available.
+   */
+  totalLifecycleBucketMiss?: number;
 }
 
 // ── Events shape (minimal) ───────────────────────────────────────────────
@@ -227,6 +245,23 @@ export function recordCalibration(opts: RecordCalibrationOpts): RecordCalibratio
   const bucketMiss = predictedIdx - actualIdx; // positive = overestimate
 
   // Step 6 — build the calibration record.
+  // AISDLC-493: also derive total lifecycle bucket from DispatchToMergeCompleted.
+  const lifecycleEvent = taskEvents.find((e) => e.type === 'DispatchToMergeCompleted');
+  const totalLifecycleMs =
+    lifecycleEvent &&
+    typeof lifecycleEvent['totalLifecycleMs'] === 'number' &&
+    (lifecycleEvent['totalLifecycleMs'] as number) >= 0
+      ? (lifecycleEvent['totalLifecycleMs'] as number)
+      : undefined;
+  const totalLifecycleBucket =
+    totalLifecycleMs !== undefined
+      ? wallClockSecToBucket(Math.round(totalLifecycleMs / 1000))
+      : undefined;
+  const totalLifecycleBucketMiss =
+    totalLifecycleBucket !== undefined
+      ? predictedIdx - BUCKET_INDEX[totalLifecycleBucket]
+      : undefined;
+
   const record: CalibrationRecord = {
     ts,
     taskId: opts.taskId,
@@ -239,6 +274,9 @@ export function recordCalibration(opts: RecordCalibrationOpts): RecordCalibratio
     estimateInputHash: latestLog.estimateInputHash,
     runIndex: latestLog.runIndex,
     estimateVariance,
+    ...(totalLifecycleMs !== undefined ? { totalLifecycleMs } : {}),
+    ...(totalLifecycleBucket !== undefined ? { totalLifecycleBucket } : {}),
+    ...(totalLifecycleBucketMiss !== undefined ? { totalLifecycleBucketMiss } : {}),
   };
 
   // Monthly rotation: use the record's own `ts` for the filename so

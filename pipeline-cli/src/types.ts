@@ -245,7 +245,19 @@ export class StepError extends Error {
 // ── Step 0 — Sweep ───────────────────────────────────────────────────
 
 export interface SweepResult {
-  swept: Array<{ worktreePath: string; branch: string; mergedAt: string }>;
+  swept: Array<{
+    worktreePath: string;
+    branch: string;
+    mergedAt: string;
+    /** AISDLC-493 — task ID derived from the worktree directory name (best-effort). */
+    taskId?: string;
+    /** AISDLC-493 — dispatch anchor from the verdict file (best-effort). */
+    dispatchedAt?: string;
+    /** AISDLC-493 — total dispatch→merge wall-clock in ms (best-effort). */
+    totalLifecycleMs?: number;
+    /** AISDLC-493 — best-effort CI-wait duration in ms from gh run list (null = not available). */
+    ciWaitMs?: number | null;
+  }>;
 }
 
 // ── Step 1 — Validate task ───────────────────────────────────────────

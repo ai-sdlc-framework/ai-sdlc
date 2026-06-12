@@ -77,6 +77,7 @@ import {
   type SubagentSpawner,
 } from '../types.js';
 import { writeEvent, type OrchestratorEvent } from './events.js';
+import { computeDurationMs } from './profiling.js';
 import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-flag.js';
 import {
   applyHcCost,
@@ -570,6 +571,18 @@ export async function runOrchestratorTick(
           branch: entry.branch,
           mergedAt: entry.mergedAt,
         });
+        // AISDLC-493 — emit DispatchToMergeCompleted when we have enough
+        // data to compute the full lifecycle (dispatchedAt + totalLifecycleMs).
+        if (entry.taskId && entry.dispatchedAt && entry.totalLifecycleMs !== undefined) {
+          emit({
+            type: 'DispatchToMergeCompleted',
+            taskId: entry.taskId,
+            dispatchedAt: entry.dispatchedAt,
+            mergedAt: entry.mergedAt,
+            totalLifecycleMs: entry.totalLifecycleMs,
+            ciWaitMs: entry.ciWaitMs ?? null,
+          });
+        }
       }
     } catch (err) {
       logger.warn(`[orchestrator] sweep failed: ${err}; continuing tick`);
@@ -1095,10 +1108,11 @@ export async function runOrchestratorTick(
           pipeline: richResult.pipeline,
           failure: richResult.failure,
           preDispatchStatus,
+          startedAt,
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { taskId, error: message, preDispatchStatus };
+        return { taskId, error: message, preDispatchStatus, startedAt };
       } finally {
         // Only release the slot if THIS call won the claim — otherwise we'd
         // free a slot owned by a concurrent claimer (defensive; today's
@@ -1347,12 +1361,21 @@ export async function runOrchestratorTick(
       };
     }
     outcomes.push(outcomeEntry);
-    emit({
+    // AISDLC-493: fix AISDLC-479 dead wiring — compute and include durationMs so
+    // the profiling aggregator and calibration writer receive actual wall-clock data.
+    const completedEventPayload: Omit<OrchestratorEvent, 'ts'> & { ts?: string } = {
       type: 'OrchestratorCompleted',
       taskId: result.taskId,
       outcome: result.outcome,
       prUrl: result.prUrl,
-    });
+    };
+    if (value.startedAt) {
+      const durationMs = computeDurationMs(value.startedAt, now().toISOString());
+      if (durationMs !== undefined) {
+        completedEventPayload.durationMs = durationMs;
+      }
+    }
+    emit(completedEventPayload);
     // AISDLC-177 — failure outcomes from `executePipeline()` (the
     // witness case: `developer-failed` from a dev subagent that returned
     // commitSha:null, plus the AISDLC-176 `developer-json-contract-violated`)
@@ -1447,11 +1470,18 @@ type DispatchSettledValue =
   | {
       taskId: string;
       preDispatchStatus: string;
+      startedAt: string;
       result: PipelineResult;
       pipeline?: PipelineOutcomeDetail;
       failure?: PipelineFailureDetail;
     }
-  | { taskId: string; preDispatchStatus: string; error: string; result?: undefined };
+  | {
+      taskId: string;
+      preDispatchStatus: string;
+      startedAt: string;
+      error: string;
+      result?: undefined;
+    };
 
 interface MaybeRollbackArgs {
   taskId: string;

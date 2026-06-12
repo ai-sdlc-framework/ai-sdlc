@@ -259,7 +259,30 @@ export type OrchestratorEventType =
    * NOT emitted when `HC_cost === 1.0` (neutral) or `AI_SDLC_HC_COST_ENABLED`
    * is off (degrade-open; no-op when the channel is disabled).
    */
-  | 'OrchestratorCostPolicyApplied';
+  | 'OrchestratorCostPolicyApplied'
+  /**
+   * AISDLC-493 — emitted at Step 11 (gh pr create/ready) when the PR is opened.
+   * Per-event fields: `taskId`, `prUrl`, `prOpenedAt`, optional `runId`.
+   * Anchors the post-dev phase of the dispatch→merge lifecycle so the
+   * aggregator can compute reviewer + reconcile + CI-wait durations.
+   */
+  | 'PrOpened'
+  /**
+   * AISDLC-493 — emitted per reconcile pass in orchestrator/reconcile.ts.
+   * Per-event fields: `taskId`, `prUrl`, `rebased` (bool), `reSignCount` (int),
+   * `reconcileDurationMs`. N reconcile cycles produce N events — directly counts
+   * the PR-resolution overhead that inflated dispatch→merge wall-clock on the
+   * 2026-05-31 attestation re-sign saga.
+   */
+  | 'ReconcileCompleted'
+  /**
+   * AISDLC-493 — emitted by Step-0 sweep (steps/00-sweep.ts) when it discovers
+   * a merged worktree, joining manifest.dispatchedAt with `gh pr view --json
+   * mergedAt` → `totalLifecycleMs`. This is the dispatch→merge DORA "lead time"
+   * event. Per-event fields: `taskId`, `dispatchedAt`, `mergedAt`,
+   * `totalLifecycleMs`, optional `ciWaitMs` (best-effort, null-tolerant).
+   */
+  | 'DispatchToMergeCompleted';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

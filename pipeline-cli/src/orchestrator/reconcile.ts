@@ -63,6 +63,7 @@ import path from 'node:path';
 
 import { collectVerdicts, DEFAULT_BOARD_DIR, removeVerdict } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
+import { writeEvent, type WriteEventOpts } from './events.js';
 
 /** A reviewer the reconcile sub-tick emits + signs for. */
 export type ReviewerName = 'code-reviewer' | 'test-reviewer' | 'security-reviewer';
@@ -168,6 +169,29 @@ export interface RunReconcileOptions {
     args: readonly string[],
     options: { cwd?: string },
   ) => { status: number | null; stdout: string; stderr: string };
+  /**
+   * AISDLC-493 — artifacts directory for the orchestrator events stream.
+   * When set, a `ReconcileCompleted` event is appended to
+   * `<artifactsDir>/_orchestrator/events-YYYY-MM-DD.jsonl` at reconcile end.
+   * Falls back to `ARTIFACTS_DIR` env then `./artifacts` when omitted.
+   */
+  artifactsDir?: string;
+  /**
+   * AISDLC-493 — override clock for the events writer (tests inject a
+   * frozen clock). Falls back to `new Date()` when omitted.
+   */
+  now?: () => Date;
+  /**
+   * AISDLC-493 — override the orchestrator flag predicate for hermetic
+   * tests (bypasses the `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` env check).
+   */
+  isEnabled?: WriteEventOpts['isEnabled'];
+  /**
+   * AISDLC-493 — start timestamp for the reconcile pass (used to compute
+   * `reconcileDurationMs`). When omitted the writer derives it from the
+   * time `runReconcile` is called.
+   */
+  reconcileStartedAt?: string;
 }
 
 /** Result of the /private/tmp transcript salvage probe. */
@@ -316,9 +340,61 @@ export function extractPrNumberFromUrl(url: string | undefined | null): string {
 /**
  * Run the reconcile sub-tick for a single task. See module docstring for
  * the full step list.
+ *
+ * AISDLC-493: emits a `ReconcileCompleted` event on every pass (success,
+ * partial, or failed) so the profiling aggregator can count N-cycle
+ * reconcile overhead and compute per-reconcile wall-clock. Best-effort —
+ * event-write failures are swallowed per the `writeEvent` contract.
  */
 export function runReconcile(options: RunReconcileOptions): ReconcileResult {
   const spawn = options.spawn ?? defaultSpawn;
+  const now = options.now ?? ((): Date => new Date());
+  const reconcileStartedAt = options.reconcileStartedAt ?? now().toISOString();
+  const result = runReconcileInner(options, spawn, now, reconcileStartedAt);
+
+  // AISDLC-493 — emit ReconcileCompleted on every pass.
+  const reconcileEndedAt = now().toISOString();
+  const reconcileDurationMs = (() => {
+    const start = Date.parse(reconcileStartedAt);
+    const end = Date.parse(reconcileEndedAt);
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0;
+    return end - start;
+  })();
+  // Count steps that indicate a rebase was performed.
+  const rebased = result.steps.some((s) => s.name === 'git-rebase' && s.status === 'success');
+  // Count steps that indicate a re-sign was performed.
+  const reSignCount = result.steps.filter(
+    (s) => s.name === 'sign-attestation' && s.status === 'success',
+  ).length;
+  writeEvent(
+    {
+      ts: '',
+      type: 'ReconcileCompleted',
+      taskId: options.taskId,
+      prUrl: result.prUrl ?? null,
+      rebased,
+      reSignCount,
+      reconcileDurationMs,
+    },
+    {
+      ...(options.artifactsDir !== undefined ? { artifactsDir: options.artifactsDir } : {}),
+      now,
+      ...(options.isEnabled !== undefined ? { isEnabled: options.isEnabled } : {}),
+    },
+  );
+
+  return result;
+}
+
+/** Inner implementation without event emission (called by the public wrapper). */
+function runReconcileInner(
+  options: RunReconcileOptions,
+  spawn: NonNullable<RunReconcileOptions['spawn']>,
+  now: () => Date,
+  reconcileStartedAt: string,
+): ReconcileResult {
+  void now; // clock captured above, unused in inner body
+  void reconcileStartedAt; // captured for outer timing
   const workDir = path.resolve(options.workDir);
   const taskId = options.taskId;
   const taskIdLower = taskId.toLowerCase();

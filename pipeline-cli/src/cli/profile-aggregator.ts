@@ -77,6 +77,37 @@ export interface ProfileSummary {
   p95DurationMs: number | null;
   /** Sum of `durationMs` across tasks with duration data. */
   totalDurationMs: number;
+  /**
+   * AISDLC-493 — per-phase percentiles for dispatch→merge lifecycle phases.
+   * Each phase carries `p50` and `p95` in milliseconds (`null` when no data).
+   */
+  phasePercentiles: PhasePercentiles;
+  /**
+   * AISDLC-493 — reconcile cycle counts per task (from `ReconcileCompleted`
+   * events). Key = taskId, value = count of ReconcileCompleted events seen.
+   * Tasks with no reconcile events are absent from the map.
+   */
+  reconcileCycleCounts: Record<string, number>;
+  /**
+   * AISDLC-493 — total dispatch→merge lifecycle percentiles across all tasks
+   * where `DispatchToMergeCompleted` was observed.
+   */
+  lifecycleP50Ms: number | null;
+  lifecycleP95Ms: number | null;
+}
+
+/**
+ * AISDLC-493 — per-phase duration percentiles derived from the new phase events.
+ */
+export interface PhasePercentiles {
+  /** Dev phase duration (OrchestratorDispatched → OrchestratorCompleted). */
+  devMs: { p50: number | null; p95: number | null };
+  /** Reconcile overhead per reconcile pass (from ReconcileCompleted.reconcileDurationMs). */
+  reconcileMs: { p50: number | null; p95: number | null };
+  /** CI-wait duration (from DispatchToMergeCompleted.ciWaitMs, best-effort). */
+  ciWaitMs: { p50: number | null; p95: number | null };
+  /** Total dispatch→merge lifecycle (from DispatchToMergeCompleted.totalLifecycleMs). */
+  totalLifecycleMs: { p50: number | null; p95: number | null };
 }
 
 export interface ProfileReport {
@@ -140,6 +171,10 @@ export function percentile(values: readonly number[], p: number): number | null 
  * happens the VERDICT wins (it carries `dispatchedAt`/`completedAt` the
  * event omits); the event is the fallback for tasks that emitted an event
  * but whose verdict file was already swept by the Conductor.
+ *
+ * AISDLC-493: also computes per-phase percentiles and reconcile-cycle
+ * counts from the new `PrOpened`, `ReconcileCompleted`, and
+ * `DispatchToMergeCompleted` event types.
  */
 export function aggregateProfile(
   verdicts: readonly TimedVerdictRecord[],
@@ -193,6 +228,50 @@ export function aggregateProfile(
   const successCount = perTask.filter((t) => t.success).length;
   const taskCount = perTask.length;
 
+  // AISDLC-493 — extract per-phase samples from the new event types.
+  const reconcileDurations: number[] = [];
+  const ciWaitDurations: number[] = [];
+  const totalLifecycleDurations: number[] = [];
+  const reconcileCycleCounts: Record<string, number> = {};
+
+  for (const e of events) {
+    if (e.type === 'ReconcileCompleted') {
+      if (typeof e.reconcileDurationMs === 'number' && e.reconcileDurationMs >= 0) {
+        reconcileDurations.push(e.reconcileDurationMs as number);
+      }
+      if (typeof e.taskId === 'string' && e.taskId.length > 0) {
+        reconcileCycleCounts[e.taskId] = (reconcileCycleCounts[e.taskId] ?? 0) + 1;
+      }
+    } else if (e.type === 'DispatchToMergeCompleted') {
+      if (typeof e.totalLifecycleMs === 'number' && e.totalLifecycleMs >= 0) {
+        totalLifecycleDurations.push(e.totalLifecycleMs as number);
+      }
+      const ciWait = e.ciWaitMs;
+      if (typeof ciWait === 'number' && ciWait >= 0) {
+        ciWaitDurations.push(ciWait);
+      }
+    }
+  }
+
+  const phasePercentiles: PhasePercentiles = {
+    devMs: {
+      p50: percentile(durations, 0.5),
+      p95: percentile(durations, 0.95),
+    },
+    reconcileMs: {
+      p50: percentile(reconcileDurations, 0.5),
+      p95: percentile(reconcileDurations, 0.95),
+    },
+    ciWaitMs: {
+      p50: percentile(ciWaitDurations, 0.5),
+      p95: percentile(ciWaitDurations, 0.95),
+    },
+    totalLifecycleMs: {
+      p50: percentile(totalLifecycleDurations, 0.5),
+      p95: percentile(totalLifecycleDurations, 0.95),
+    },
+  };
+
   const summary: ProfileSummary = {
     taskCount,
     successCount,
@@ -201,6 +280,10 @@ export function aggregateProfile(
     p50DurationMs: percentile(durations, 0.5),
     p95DurationMs: percentile(durations, 0.95),
     totalDurationMs: durations.reduce((acc, d) => acc + d, 0),
+    phasePercentiles,
+    reconcileCycleCounts,
+    lifecycleP50Ms: percentile(totalLifecycleDurations, 0.5),
+    lifecycleP95Ms: percentile(totalLifecycleDurations, 0.95),
   };
 
   // Build EstimateActualsRecorded records (AC-3 / AC-4) for every task
