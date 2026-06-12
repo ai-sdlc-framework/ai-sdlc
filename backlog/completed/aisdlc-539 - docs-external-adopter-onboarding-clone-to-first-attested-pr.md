@@ -3,7 +3,7 @@ id: AISDLC-539
 title: >-
   docs(adoption): external-adopter onboarding path — clean clone to first
   attested PR, validated end-to-end on a non-author repo
-status: To Do
+status: Done
 assignee: []
 labels:
   - adoption
