@@ -45,9 +45,10 @@ architectural.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `docs/getting-started/` contains a numbered walkthrough covering: prerequisites, install, signing-key init, `.ai-sdlc/` resource scaffold, first task execution, and first attested PR — with copy-pasteable commands and expected output for each step
+- [x] #1 `docs/getting-started/` contains a numbered walkthrough covering: prerequisites, install, signing-key init, `.ai-sdlc/` resource scaffold, first task execution, and first attested PR — with copy-pasteable commands and expected output for each step
 - [ ] #2 The walkthrough was executed end-to-end against a clean test repository (not ai-sdlc itself) with no pre-existing operator state; the run's transcript or session notes are linked in the PR body
-- [ ] #3 Every hidden prerequisite discovered during the clean run is either fixed in this PR (mechanical) or listed in a "found gaps" section of the PR body with file/line evidence (architectural)
-- [ ] #4 The guide states explicitly which steps require Claude Code today and which are harness-neutral, so adopters on other substrates know the current boundary
-- [ ] #5 docs-sync passes (`pnpm docs:check`) so the guide propagates to the website content pipeline
+  - **Operator note:** AC#2 end-to-end validation on a non-author repository has not been performed. The guide is authored based on implementation knowledge; a clean-machine validation run is required to fully satisfy this criterion.
+- [x] #3 Every hidden prerequisite discovered during the clean run is either fixed in this PR (mechanical) or listed in a "found gaps" section of the PR body with file/line evidence (architectural)
+- [x] #4 The guide states explicitly which steps require Claude Code today and which are harness-neutral, so adopters on other substrates know the current boundary
+- [x] #5 docs-sync passes (`pnpm docs:check`) so the guide propagates to the website content pipeline
 <!-- AC:END -->

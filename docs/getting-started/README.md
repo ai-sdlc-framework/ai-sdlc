@@ -4,9 +4,12 @@ Get up and running with the AI-SDLC Framework.
 
 > **New adopter?** Start here:
 > **[Onboarding: Clean Clone to First Attested PR](onboarding.md)** —
-> a numbered walkthrough validated end-to-end on a fresh repository, with
+> a numbered walkthrough covering prerequisites, install, signing-key init,
+> scaffold setup, first task execution, and first attested PR, with
 > copy-pasteable commands, expected output for each step, and a "Found Gaps"
-> section documenting every hidden prerequisite discovered during the clean run.
+> section documenting every hidden prerequisite discovered during development.
+> End-to-end validation on a clean, non-author repository is pending (AC#2 —
+> see the guide for details).
 
 ## What is AI-SDLC?
 
@@ -248,7 +251,7 @@ pnpm test
 
 ## Next Steps
 
-- **[Onboarding guide](onboarding.md)** -- **Start here for new adopters.** Clean clone to first attested PR, validated end-to-end on a non-author repo. Covers prerequisites, install, signing-key init, `.ai-sdlc/` scaffold, first task execution, and first attested PR — including a "Found Gaps" section listing hidden prerequisites discovered during the clean run.
+- **[Onboarding guide](onboarding.md)** -- **Start here for new adopters.** Covers prerequisites, install, signing-key init, `.ai-sdlc/` scaffold, first task execution, and first attested PR — including a "Found Gaps" section listing hidden prerequisites. End-to-end validation on a non-author repository is pending (see guide for AC#2 status).
 - **[Spec-Kit Bridge tutorial](../tutorials/10-spec-kit-bridge.md)** -- **Recommended adopter authoring path.** End-to-end walkthrough: install spec-kit → author spec → import → DoR-at-import → dispatch → ship → handle drift (RFC-0036).
 - **[Concepts: spec-driven development](../concepts/spec-driven.md)** -- The three-tier authoring model (RFC → Spec → Task), Decision-Engine framing, and the seam contract.
 - **[Runners Reference](../api-reference/runners.md)** -- All supported agent runners and configuration

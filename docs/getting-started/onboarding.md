@@ -385,6 +385,26 @@ workflow. This workflow:
 - Is therefore **non-blocking**: a missing or invalid envelope does not prevent
   merge. It is governance-grade audit logging, not a hard gate.
 
+> **Warning — v6 default and the scaffold's audit step.** With the v6 schema
+> default (active since AISDLC-409), the signer writes
+> `<patch-id>.v6.dsse.json` (or `<head-sha>.v6.dsse.json` when no patch-id is
+> available) rather than `<head-sha>.dsse.json`. The scaffolded workflow's `Log
+> audit result` step checks only for the `<head-sha>.dsse.json` path, so it
+> will ALWAYS log "no envelope" even when attestation succeeded. Before
+> trusting the audit log output, update the workflow's audit step to glob
+> `*.v6.dsse.json`:
+>
+> ```bash
+> # In .github/workflows/verify-attestation.yml, replace the current check:
+> if [ -f ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
+>
+> # With a glob that covers v6 (primary) and the legacy path:
+> if ls .ai-sdlc/attestations/*.v6.dsse.json 2>/dev/null | grep -q .; then
+> ```
+>
+> See `.github/workflows/verify-attestation.yml` in the ai-sdlc monorepo for
+> the reference implementation.
+
 The `scripts/verify-attestation.mjs` script used in the ai-sdlc monorepo is
 **not** included in the scaffold. It is part of the ai-sdlc development tooling
 and is not available in adopter repositories.
@@ -398,10 +418,16 @@ the attestation envelope was committed:
 # Inside the PR's worktree (or after checking out the branch):
 ls .ai-sdlc/attestations/
 
-# Expected for a Claude Code / /ai-sdlc execute run:
-#   <head-sha>.dsse.json      (v5 legacy-compat bridge)
-#   <patch-id>.dsse.json      (content-addressed primary, AISDLC-398+)
-#   <head-sha>.v6.dsse.json   (current v6 schema)
+# Expected for a Claude Code / /ai-sdlc execute run (v6 default, AISDLC-409):
+#   <patch-id>.v6.dsse.json   (primary, content-addressed by git patch-id)
+#
+# When no patch-id is available (empty diff after exclusions, or git
+# patch-id failed), the fallback filename is used instead:
+#   <head-sha>.v6.dsse.json   (per-SHA fallback)
+#
+# v5 legacy flows (AI_SDLC_V5_LEGACY=1 or --schema-version v5):
+#   <patch-id>.dsse.json      (v5 primary)
+#   <head-sha>.dsse.json      (v5 per-SHA bridge)
 ```
 
 ### Viewing the audit log in GitHub Actions
