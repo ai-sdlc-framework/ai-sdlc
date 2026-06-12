@@ -1,7 +1,7 @@
 ---
 id: AISDLC-517
 title: 'fix(orchestrator): resolve implicit-any (TS7006) in webhook-manager.ts surfaced on fresh-worktree typecheck'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-04'
 labels:
