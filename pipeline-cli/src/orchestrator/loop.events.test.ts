@@ -19,7 +19,11 @@
  * the injected sink throws — observability MUST NOT crash the loop.
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   defaultOrchestratorConfig,
@@ -28,6 +32,20 @@ import {
 } from './index.js';
 import type { OrchestratorEvent } from './events.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
+
+// Shared isolated tmp dir — created fresh before each test, cleaned up
+// after. Injected into adapter literals whose dispatch throws so that
+// maybeRecordCoverageGap → writeCapture writes land in this isolated
+// dir rather than process.cwd()/_artifacts/ (AISDLC-518).
+let _hermeticArtifactsDir: string;
+
+beforeEach(() => {
+  _hermeticArtifactsDir = mkdtempSync(join(tmpdir(), 'aisdlc-events-test-'));
+});
+
+afterEach(() => {
+  rmSync(_hermeticArtifactsDir, { recursive: true, force: true });
+});
 
 function silentLogger(): PipelineLogger {
   return { info: () => {}, warn: () => {}, error: () => {}, progress: () => {} };
@@ -136,6 +154,9 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       runId: 'r2',
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-518 — redirect coverage-gap writeCapture calls to an isolated
+      // tmpdir so this throwing dispatch doesn't pollute process.cwd()/_artifacts/.
+      artifactsDir: _hermeticArtifactsDir,
     };
     await runOrchestratorTick(config, adapters, 1);
 

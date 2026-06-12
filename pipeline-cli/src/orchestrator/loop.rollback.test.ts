@@ -283,6 +283,9 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       calibrationLogPath: '/nonexistent-bypass.jsonl',
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-518 — redirect coverage-gap writeCapture calls to the per-test
+      // workDir so this throwing dispatch doesn't pollute process.cwd()/_artifacts/.
+      artifactsDir: workDir,
     };
 
     await runOrchestratorTick(config, adapters, 1);

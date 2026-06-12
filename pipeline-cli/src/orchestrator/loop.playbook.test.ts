@@ -15,7 +15,11 @@
  *      operator config wins over defaults.
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   defaultOrchestratorConfig,
@@ -42,6 +46,20 @@ function approvedResult(taskId: string): PipelineResult {
   };
 }
 
+// Shared isolated tmp dir — created fresh before each test, cleaned up
+// after. Injected into adapter literals whose dispatch throws so that
+// maybeRecordCoverageGap → writeCapture writes land in this isolated
+// dir rather than process.cwd()/_artifacts/ (AISDLC-518).
+let _hermeticArtifactsDir: string;
+
+beforeEach(() => {
+  _hermeticArtifactsDir = mkdtempSync(join(tmpdir(), 'aisdlc-playbook-test-'));
+});
+
+afterEach(() => {
+  rmSync(_hermeticArtifactsDir, { recursive: true, force: true });
+});
+
 describe('runOrchestratorTick — playbook integration', () => {
   it('routes a verification failure through the playbook and reports recovered outcome', async () => {
     let dispatches = 0;
@@ -63,6 +81,9 @@ describe('runOrchestratorTick — playbook integration', () => {
       escalate: async () => {},
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-518 — redirect coverage-gap writeCapture calls to an isolated
+      // tmpdir so this throwing dispatch doesn't pollute process.cwd()/_artifacts/.
+      artifactsDir: _hermeticArtifactsDir,
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
@@ -93,6 +114,9 @@ describe('runOrchestratorTick — playbook integration', () => {
       escalate: async () => {},
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-518 — redirect coverage-gap writeCapture calls to an isolated
+      // tmpdir so this throwing dispatch doesn't pollute process.cwd()/_artifacts/.
+      artifactsDir: _hermeticArtifactsDir,
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
@@ -117,6 +141,9 @@ describe('runOrchestratorTick — playbook integration', () => {
       escalate: async () => {},
       // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
+      // AISDLC-518 — redirect coverage-gap writeCapture calls to an isolated
+      // tmpdir so this throwing dispatch doesn't pollute process.cwd()/_artifacts/.
+      artifactsDir: _hermeticArtifactsDir,
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
