@@ -566,6 +566,45 @@ export function writeDiagnostic(boardDir: string, verdict: DispatchVerdict): str
 }
 
 /**
+ * AISDLC-493 — Conductor-side: patch timing fields onto an existing verdict
+ * in `done/`. Used by the reconcile sub-tick to stamp `reviewerStartedAt`,
+ * `reviewerCompletedAt`, `signedAt`, and `prOpenedAt` onto the verdict that
+ * the Worker originally wrote (which has none of those fields, because they
+ * only become known during the Conductor's reconcile pass).
+ *
+ * Atomic write (temp + rename in same dir). No-op when the file doesn't exist.
+ * Returns true when the patch landed; false when the file was absent or
+ * unreadable (caller may log but should not fail the reconcile for this).
+ */
+export function patchDoneVerdict(
+  boardDir: string,
+  taskId: string,
+  patch: Partial<
+    Pick<DispatchVerdict, 'reviewerStartedAt' | 'reviewerCompletedAt' | 'signedAt' | 'prOpenedAt'>
+  >,
+): boolean {
+  ensureBoardDirs(boardDir);
+  const verdictPath = path.join(boardDir, 'done', `${taskId}${VERDICT_SUFFIX}`);
+  if (!existsSync(verdictPath)) return false;
+  const existing = readVerdict(verdictPath);
+  if (!existing) return false;
+  const patched: DispatchVerdict = { ...existing, ...patch };
+  const tmp = `${verdictPath}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(patched, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, verdictPath);
+    return true;
+  } catch {
+    try {
+      rmSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+}
+
+/**
  * Conductor-side: remove a verdict file from `done/` (or `failed/`) once
  * the Conductor has processed it (reviewer fan-out done, attestation
  * signed, PR opened, etc.). Idempotent — missing files are a no-op.

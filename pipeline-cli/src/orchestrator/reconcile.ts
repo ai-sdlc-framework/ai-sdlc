@@ -61,7 +61,12 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSyn
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-import { collectVerdicts, DEFAULT_BOARD_DIR, removeVerdict } from '../dispatch/board.js';
+import {
+  collectVerdicts,
+  DEFAULT_BOARD_DIR,
+  patchDoneVerdict,
+  removeVerdict,
+} from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { writeEvent, type WriteEventOpts } from './events.js';
 
@@ -92,6 +97,26 @@ export interface ReconcileResult {
   pushedBranch?: string;
   commitSha?: string;
   steps: ReconcileStep[];
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the reviewer leaf-emit loop started
+   * (start of reconcile Step 1). Undefined when the step was skipped.
+   */
+  reviewerStartedAt?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the reviewer leaf-emit loop completed
+   * (end of reconcile Step 1). Undefined when the step was skipped.
+   */
+  reviewerCompletedAt?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the attestation was signed
+   * (reconcile Step 2). Undefined when sign was skipped or failed.
+   */
+  signedAt?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the PR was flipped ready-for-review
+   * (reconcile Step 4). Undefined when gh-pr-ready was skipped or failed.
+   */
+  prOpenedAt?: string;
 }
 
 /** Options for {@link runReconcile}. */
@@ -354,10 +379,12 @@ export function runReconcile(options: RunReconcileOptions): ReconcileResult {
 
   // AISDLC-493 — emit ReconcileCompleted on every pass.
   const reconcileEndedAt = now().toISOString();
+  // Minor #4 fix: omit reconcileDurationMs on unparseable or inverted timestamps
+  // so the aggregator gets no sample rather than a zero that drags p50 toward zero.
   const reconcileDurationMs = (() => {
     const start = Date.parse(reconcileStartedAt);
     const end = Date.parse(reconcileEndedAt);
-    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return 0;
+    if (Number.isNaN(start) || Number.isNaN(end) || end < start) return undefined;
     return end - start;
   })();
   // Count steps that indicate a rebase was performed.
@@ -366,22 +393,22 @@ export function runReconcile(options: RunReconcileOptions): ReconcileResult {
   const reSignCount = result.steps.filter(
     (s) => s.name === 'sign-attestation' && s.status === 'success',
   ).length;
-  writeEvent(
-    {
-      ts: '',
-      type: 'ReconcileCompleted',
-      taskId: options.taskId,
-      prUrl: result.prUrl ?? null,
-      rebased,
-      reSignCount,
-      reconcileDurationMs,
-    },
-    {
-      ...(options.artifactsDir !== undefined ? { artifactsDir: options.artifactsDir } : {}),
-      now,
-      ...(options.isEnabled !== undefined ? { isEnabled: options.isEnabled } : {}),
-    },
-  );
+  const reconcileEventPayload: Parameters<typeof writeEvent>[0] = {
+    ts: '',
+    type: 'ReconcileCompleted',
+    taskId: options.taskId,
+    prUrl: result.prUrl ?? null,
+    rebased,
+    reSignCount,
+  };
+  if (reconcileDurationMs !== undefined) {
+    reconcileEventPayload.reconcileDurationMs = reconcileDurationMs;
+  }
+  writeEvent(reconcileEventPayload, {
+    ...(options.artifactsDir !== undefined ? { artifactsDir: options.artifactsDir } : {}),
+    now,
+    ...(options.isEnabled !== undefined ? { isEnabled: options.isEnabled } : {}),
+  });
 
   return result;
 }
@@ -393,7 +420,6 @@ function runReconcileInner(
   now: () => Date,
   reconcileStartedAt: string,
 ): ReconcileResult {
-  void now; // clock captured above, unused in inner body
   void reconcileStartedAt; // captured for outer timing
   const workDir = path.resolve(options.workDir);
   const taskId = options.taskId;
@@ -480,6 +506,9 @@ function runReconcileInner(
   const reviewerModel = options.reviewerModel ?? 'claude-sonnet-4-6';
   const harness = options.harness ?? 'claude-code';
 
+  // AISDLC-493 — capture reviewer fan-out start/end timestamps for verdict patching.
+  const reviewerStartedAt = now().toISOString();
+
   for (const reviewer of RECONCILE_REVIEWERS) {
     const transcriptPath =
       options.reviewerTranscripts?.[reviewer] ??
@@ -558,6 +587,9 @@ function runReconcileInner(
     });
   }
 
+  // AISDLC-493 — reviewer fan-out complete timestamp.
+  const reviewerCompletedAt = now().toISOString();
+
   // -------------------------------------------------------------------------
   // Step 2: sign attestation.
   // -------------------------------------------------------------------------
@@ -584,13 +616,19 @@ function runReconcileInner(
     signArgs.push('--schema-version', options.schemaVersion);
   }
   const sign = spawn('node', signArgs, { cwd: worktreePath });
+  // AISDLC-493 — capture sign timestamp before recording the step so the
+  // timestamp reflects sign completion even if later steps branch off early.
+  const signedAt = sign.status === 0 ? now().toISOString() : undefined;
   steps.push({
     name: 'sign-attestation',
     status: sign.status === 0 ? 'success' : 'failed',
     output: trimOutput(sign.stdout + (sign.stderr ? `\n[stderr] ${sign.stderr}` : '')),
   });
   if (sign.status !== 0) {
-    return finalizeResult(taskId, devVerdict, steps);
+    return finalizeResult(taskId, devVerdict, steps, undefined, {
+      reviewerStartedAt,
+      reviewerCompletedAt,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -604,7 +642,11 @@ function runReconcileInner(
       output: trimOutput(fetch.stdout + (fetch.stderr ? `\n[stderr] ${fetch.stderr}` : '')),
     });
     if (fetch.status !== 0) {
-      return finalizeResult(taskId, devVerdict, steps);
+      return finalizeResult(taskId, devVerdict, steps, undefined, {
+        reviewerStartedAt,
+        reviewerCompletedAt,
+        signedAt,
+      });
     }
     const rebase = spawn('git', ['rebase', 'origin/main'], { cwd: worktreePath });
     steps.push({
@@ -613,7 +655,11 @@ function runReconcileInner(
       output: trimOutput(rebase.stdout + (rebase.stderr ? `\n[stderr] ${rebase.stderr}` : '')),
     });
     if (rebase.status !== 0) {
-      return finalizeResult(taskId, devVerdict, steps);
+      return finalizeResult(taskId, devVerdict, steps, undefined, {
+        reviewerStartedAt,
+        reviewerCompletedAt,
+        signedAt,
+      });
     }
     const push = spawn('git', ['push', '--force-with-lease'], { cwd: worktreePath });
     steps.push({
@@ -622,7 +668,11 @@ function runReconcileInner(
       output: trimOutput(push.stdout + (push.stderr ? `\n[stderr] ${push.stderr}` : '')),
     });
     if (push.status !== 0) {
-      return finalizeResult(taskId, devVerdict, steps);
+      return finalizeResult(taskId, devVerdict, steps, undefined, {
+        reviewerStartedAt,
+        reviewerCompletedAt,
+        signedAt,
+      });
     }
   } else {
     steps.push({
@@ -639,6 +689,8 @@ function runReconcileInner(
   if (!prNumber) {
     prNumber = probePrNumberFromBranch(worktreePath, spawn);
   }
+  // AISDLC-493 — prOpenedAt is captured when gh pr ready succeeds.
+  let prOpenedAt: string | undefined;
   if (!options.skipFlipReady) {
     if (!prNumber) {
       steps.push({
@@ -646,7 +698,11 @@ function runReconcileInner(
         status: 'failed',
         output: 'unable to determine PR number from verdict or branch probe',
       });
-      return finalizeResult(taskId, devVerdict, steps, prNumber);
+      return finalizeResult(taskId, devVerdict, steps, prNumber, {
+        reviewerStartedAt,
+        reviewerCompletedAt,
+        signedAt,
+      });
     }
     const ready = spawn('gh', ['pr', 'ready', prNumber], { cwd: worktreePath });
     steps.push({
@@ -655,8 +711,13 @@ function runReconcileInner(
       output: trimOutput(ready.stdout + (ready.stderr ? `\n[stderr] ${ready.stderr}` : '')),
     });
     if (ready.status !== 0) {
-      return finalizeResult(taskId, devVerdict, steps, prNumber);
+      return finalizeResult(taskId, devVerdict, steps, prNumber, {
+        reviewerStartedAt,
+        reviewerCompletedAt,
+        signedAt,
+      });
     }
+    prOpenedAt = now().toISOString();
   } else {
     steps.push({
       name: 'gh-pr-ready',
@@ -686,8 +747,21 @@ function runReconcileInner(
   }
 
   // -------------------------------------------------------------------------
-  // Step 6: remove the consumed verdict.
+  // Step 6: patch lifecycle timestamps onto the verdict, then remove it.
+  //
+  // AISDLC-493: stamp reviewerStartedAt/reviewerCompletedAt/signedAt/prOpenedAt
+  // onto the done/ verdict so callers that inspect the board record can read
+  // phase timings without cross-referencing the events stream. Best-effort —
+  // a patch failure does NOT abort the reconcile or change its outcome.
+  // The verdict must be patched BEFORE removeVerdict clears it from done/.
   // -------------------------------------------------------------------------
+  patchDoneVerdict(boardDir, taskId, {
+    ...(reviewerStartedAt !== undefined ? { reviewerStartedAt } : {}),
+    ...(reviewerCompletedAt !== undefined ? { reviewerCompletedAt } : {}),
+    ...(signedAt !== undefined ? { signedAt } : {}),
+    ...(prOpenedAt !== undefined ? { prOpenedAt } : {}),
+  });
+
   try {
     removeVerdict(boardDir, taskId, 'done');
     steps.push({
@@ -703,7 +777,24 @@ function runReconcileInner(
     });
   }
 
-  return finalizeResult(taskId, devVerdict, steps, prNumber);
+  return finalizeResult(taskId, devVerdict, steps, prNumber, {
+    reviewerStartedAt,
+    reviewerCompletedAt,
+    signedAt,
+    prOpenedAt,
+  });
+}
+
+/**
+ * AISDLC-493 — lifecycle timestamps captured during the reconcile pass and
+ * threaded through `finalizeResult` for both the `ReconcileResult` return
+ * value and the `patchDoneVerdict` call in `runReconcile`.
+ */
+interface ReconcileTimings {
+  reviewerStartedAt?: string;
+  reviewerCompletedAt?: string;
+  signedAt?: string;
+  prOpenedAt?: string;
 }
 
 /**
@@ -715,6 +806,7 @@ function finalizeResult(
   devVerdict: DispatchVerdict | undefined,
   steps: ReconcileStep[],
   prNumber?: string,
+  timings?: ReconcileTimings,
 ): ReconcileResult {
   // Failed iff there's at least one failed step that isn't a non-blocking
   // optional (today every step we add is blocking — leaf-emit skips don't
@@ -732,6 +824,11 @@ function finalizeResult(
   if (prNumber) result.prNumber = prNumber;
   if (devVerdict?.pushedBranch) result.pushedBranch = devVerdict.pushedBranch;
   if (devVerdict?.commitSha) result.commitSha = devVerdict.commitSha;
+  // AISDLC-493 — stamp timing fields when available.
+  if (timings?.reviewerStartedAt) result.reviewerStartedAt = timings.reviewerStartedAt;
+  if (timings?.reviewerCompletedAt) result.reviewerCompletedAt = timings.reviewerCompletedAt;
+  if (timings?.signedAt) result.signedAt = timings.signedAt;
+  if (timings?.prOpenedAt) result.prOpenedAt = timings.prOpenedAt;
   return result;
 }
 

@@ -28,6 +28,11 @@ import type { OrchestratorEvent } from './events.js';
 import type { TimedVerdictRecord } from '../cli/profile-aggregator.js';
 import { readDispatchedAtFromVerdict, deriveCiWaitMs } from '../steps/00-sweep.js';
 import type { Runner } from '../runtime/exec.js';
+import {
+  defaultOrchestratorConfig,
+  runOrchestratorTick,
+  type OrchestratorAdapters,
+} from './index.js';
 
 let workdir: string;
 
@@ -401,6 +406,59 @@ describe('aggregateProfile — actuals include dispatch-anchor fields for downst
     expect(report.actuals[0]!.dispatchedAt).toBe('2026-05-31T10:00:00.000Z');
     expect(report.actuals[0]!.completedAt).toBe('2026-05-31T10:05:00.000Z');
     expect(report.actuals[0]!.actualWallClockSec).toBe(300); // 300_000ms = 300s
+  });
+});
+
+// ── AC#1: loop-stub proves OrchestratorCompleted carries durationMs ──
+
+describe('OrchestratorCompleted carries non-null durationMs via loop dispatch (AC#1)', () => {
+  function silentLogger() {
+    return { info: () => {}, warn: () => {}, error: () => {}, progress: () => {} };
+  }
+
+  it('OrchestratorCompleted event emitted by loop.ts carries durationMs > 0', async () => {
+    const emittedEvents: OrchestratorEvent[] = [];
+    const config = defaultOrchestratorConfig({
+      workDir: '/tmp',
+      maxConcurrent: 1,
+      maxTicks: 1,
+    });
+    let tickCount = 0;
+    const fakeClock = () => {
+      // Advance clock by 5 minutes on each call so startedAt < completedAt.
+      tickCount++;
+      return new Date(Date.UTC(2026, 4, 31, 10, tickCount, 0));
+    };
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      frontier: () => [{ id: 'AISDLC-X1', title: 'Test task' }],
+      dispatch: async (taskId) => ({
+        taskId,
+        branch: 'ai-sdlc/aisdlc-x1',
+        worktreePath: '.worktrees/aisdlc-x1',
+        outcome: 'approved' as const,
+        prUrl: 'https://github.com/org/repo/pull/1',
+        siblingPrUrls: [],
+        iterations: 1,
+        finalVerdict: null,
+      }),
+      emitEvent: (ev) => emittedEvents.push(ev),
+      now: fakeClock,
+      graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+      taskLabelsLoader: () => [],
+      calibrationLogPath: '/nonexistent-bypass.jsonl',
+      alreadyInFlightOpts: { detectSubprocess: false, listOpenPRs: () => [] },
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
+      parentBranchGuard: async () => {},
+    };
+    await runOrchestratorTick(config, adapters, 1);
+
+    const completedEvent = emittedEvents.find((e) => e.type === 'OrchestratorCompleted');
+    expect(completedEvent, 'OrchestratorCompleted event must be emitted').toBeDefined();
+    expect(
+      (completedEvent as OrchestratorEvent & { durationMs?: number }).durationMs,
+      'OrchestratorCompleted event must carry non-null durationMs',
+    ).toBeGreaterThan(0);
   });
 });
 

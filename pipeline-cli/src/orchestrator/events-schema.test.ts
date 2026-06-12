@@ -325,6 +325,78 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       newHash: 'sha256:' + 'c'.repeat(64),
     });
   });
+
+  // AISDLC-493 — new event types. Doc-comment mandates one representative sample per type.
+  it('accepts PrOpened (AISDLC-493) with required fields only', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'PrOpened',
+      taskId: 'AISDLC-493',
+      prUrl: 'https://github.com/org/repo/pull/909',
+      prOpenedAt: '2026-05-31T10:00:00.000Z',
+    });
+  });
+
+  it('accepts PrOpened (AISDLC-493) with optional runId', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'PrOpened',
+      taskId: 'AISDLC-493',
+      runId,
+      prUrl: 'https://github.com/org/repo/pull/909',
+      prOpenedAt: '2026-05-31T10:00:00.000Z',
+    });
+  });
+
+  it('accepts ReconcileCompleted (AISDLC-493) with all fields', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'ReconcileCompleted',
+      taskId: 'AISDLC-493',
+      runId,
+      prUrl: 'https://github.com/org/repo/pull/909',
+      rebased: true,
+      reSignCount: 1,
+      reconcileDurationMs: 45_000,
+    });
+  });
+
+  it('accepts ReconcileCompleted (AISDLC-493) without optional reconcileDurationMs', () => {
+    // Minor #4 fix: reconcileDurationMs is optional — when timestamps are invalid
+    // the aggregator receives no sample rather than a zero.
+    expectValid({
+      ts: baseTs,
+      type: 'ReconcileCompleted',
+      taskId: 'AISDLC-493',
+      rebased: false,
+      reSignCount: 0,
+    });
+  });
+
+  it('accepts DispatchToMergeCompleted (AISDLC-493) with ciWaitMs', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'DispatchToMergeCompleted',
+      taskId: 'AISDLC-493',
+      runId,
+      dispatchedAt: '2026-05-31T10:00:00.000Z',
+      mergedAt: '2026-05-31T16:00:00.000Z',
+      totalLifecycleMs: 21_600_000,
+      ciWaitMs: 180_000,
+    });
+  });
+
+  it('accepts DispatchToMergeCompleted (AISDLC-493) with ciWaitMs=null', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'DispatchToMergeCompleted',
+      taskId: 'AISDLC-493',
+      dispatchedAt: '2026-05-31T10:00:00.000Z',
+      mergedAt: '2026-05-31T16:00:00.000Z',
+      totalLifecycleMs: 21_600_000,
+      ciWaitMs: null,
+    });
+  });
 });
 
 describe('orchestrator-events.v1.schema.json — rejects malformed events', () => {

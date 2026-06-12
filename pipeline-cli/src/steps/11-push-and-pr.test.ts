@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeBody, composeTitle, pushAndPr, readTitleTemplate } from './11-push-and-pr.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
+import { eventsFilePath } from '../orchestrator/events.js';
 
 let tmp: string;
 beforeEach(() => {
@@ -403,5 +404,58 @@ describe('Step 11 — pushAndPr', () => {
       (c) => c.command === 'git' && c.args.some((a) => a === '--force' || a === '-f'),
     );
     expect(dangerous).toBeUndefined();
+  });
+
+  // AISDLC-493 — PrOpened event must be emitted when gh pr create succeeds.
+  // This test proves the emit call is wired (major finding #1 from iteration-1 review).
+  it('emits PrOpened event to the events stream when gh pr create succeeds (AISDLC-493)', async () => {
+    const frozenDate = new Date('2026-05-31T10:00:00.000Z');
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/42\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+      artifactsDir: tmp,
+      now: () => frozenDate,
+      isEnabled: () => true,
+    });
+    const evPath = eventsFilePath(tmp, frozenDate);
+    expect(existsSync(evPath), `events file must exist at ${evPath}`).toBe(true);
+    const raw = readFileSync(evPath, 'utf8').trim();
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    expect(parsed.type).toBe('PrOpened');
+    expect(parsed.taskId).toBe('AISDLC-1');
+    expect(parsed.prUrl).toBe('https://github.com/x/y/pull/42');
+    expect(typeof parsed.prOpenedAt).toBe('string');
+  });
+
+  it('does NOT emit PrOpened when gh pr create fails (AISDLC-493)', async () => {
+    const frozenDate = new Date('2026-05-31T10:00:00.000Z');
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, fail('auth error', 1));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+      artifactsDir: tmp,
+      now: () => frozenDate,
+      isEnabled: () => true,
+    });
+    const evPath = eventsFilePath(tmp, frozenDate);
+    // No event written when PR creation fails
+    expect(existsSync(evPath)).toBe(false);
   });
 });

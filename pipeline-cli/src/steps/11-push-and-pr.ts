@@ -38,9 +38,27 @@ import {
 } from '../types.js';
 import { parseLegacyKey, parsePipelineBacklogKey } from './02-compute-branch.js';
 import { lateRebase } from './11-late-rebase.js';
+import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
+  /**
+   * AISDLC-493 — artifacts directory for the orchestrator events stream.
+   * When set, a `PrOpened` event is appended to
+   * `<artifactsDir>/_orchestrator/events-YYYY-MM-DD.jsonl` after `gh pr create`
+   * succeeds. Falls back to `ARTIFACTS_DIR` env then `./artifacts` when omitted.
+   */
+  artifactsDir?: string;
+  /**
+   * AISDLC-493 — override clock for the events writer (tests inject a
+   * frozen clock). Falls back to `new Date()` when omitted.
+   */
+  now?: () => Date;
+  /**
+   * AISDLC-493 — override the orchestrator flag predicate for hermetic
+   * tests (bypasses the `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` env check).
+   */
+  isEnabled?: WriteEventOpts['isEnabled'];
   /**
    * Path to sign-attestation.mjs helper (defaults to env-var detection).
    * Passed through from Step 10 (finalizeTask) pattern — the signer reads
@@ -285,5 +303,27 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   }
   // gh pr create prints the URL on stdout
   const prUrl = prResult.stdout.trim().split('\n').pop()?.trim() ?? null;
+
+  // AISDLC-493: emit PrOpened event so the profiling aggregator can anchor
+  // the post-dev phase of the dispatch→merge lifecycle. Best-effort — event
+  // write failures are swallowed per the writeEvent contract.
+  if (prUrl) {
+    const prOpenedAt = new Date().toISOString();
+    writeEvent(
+      {
+        ts: '',
+        type: 'PrOpened',
+        taskId: opts.taskId,
+        prUrl,
+        prOpenedAt,
+      },
+      {
+        ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+        ...(opts.now !== undefined ? { now: opts.now } : {}),
+        ...(opts.isEnabled !== undefined ? { isEnabled: opts.isEnabled } : {}),
+      },
+    );
+  }
+
   return { pushed: true, prUrl };
 }

@@ -305,4 +305,37 @@ describe('dispatch-verdict.v1.schema.json (Phase 1.5 outcomes + iteration fields
     };
     expect(validateVerdict(v)).toBe(false);
   });
+
+  // AISDLC-493 — new lifecycle timestamp fields on the verdict.
+  // Round-trip: accept when present (all four), accept when absent.
+  it('accepts verdict with all four AISDLC-493 timing fields present', () => {
+    const v: DispatchVerdict = {
+      ...verdictBase,
+      reviewerStartedAt: '2026-05-31T11:00:00.000Z',
+      reviewerCompletedAt: '2026-05-31T11:05:00.000Z',
+      signedAt: '2026-05-31T11:06:00.000Z',
+      prOpenedAt: '2026-05-31T11:07:00.000Z',
+    };
+    const ok = validateVerdict(v);
+    if (!ok) {
+      const errs = (validateVerdict.errors ?? [])
+        .map((e) => `${e.instancePath || '(root)'} ${e.message}`)
+        .join('\n  ');
+      throw new Error(`schema rejected verdict with timing fields:\n  ${errs}`);
+    }
+    expect(ok).toBe(true);
+  });
+
+  it('accepts verdict without any AISDLC-493 timing fields (all optional)', () => {
+    // verdictBase has none of the new timing fields — must still validate.
+    expect(validateVerdict(verdictBase)).toBe(true);
+  });
+
+  it('accepts verdict with only signedAt populated (partial timing)', () => {
+    const v: DispatchVerdict = {
+      ...verdictBase,
+      signedAt: '2026-05-31T11:06:00.000Z',
+    };
+    expect(validateVerdict(v)).toBe(true);
+  });
 });

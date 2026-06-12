@@ -119,6 +119,30 @@ export interface DispatchVerdict {
    * Workers leave this undefined (they resume via Agent `continue: true`).
    */
   sessionId?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the reviewer fan-out was initiated
+   * (start of reconcile Step 1 / pipeline Step 7). Populated by the Conductor's
+   * reconcile pass — absent from Worker-written verdicts.
+   */
+  reviewerStartedAt?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when all reviewer leaves were emitted
+   * (end of reconcile Step 1 / pipeline Step 8). Populated by the Conductor's
+   * reconcile pass — absent from Worker-written verdicts.
+   */
+  reviewerCompletedAt?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the attestation was signed
+   * (reconcile Step 2 / pipeline Step 10). Populated by the Conductor's
+   * reconcile pass — absent from Worker-written verdicts.
+   */
+  signedAt?: string;
+  /**
+   * AISDLC-493 — ISO-8601 timestamp when the PR was flipped ready-for-review
+   * (reconcile Step 4 / pipeline Step 11). Populated by the Conductor's
+   * reconcile pass — absent from Worker-written verdicts.
+   */
+  prOpenedAt?: string;
 }
 
 /**
