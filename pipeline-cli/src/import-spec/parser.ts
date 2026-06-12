@@ -51,13 +51,16 @@ export interface ParseTasksMdResult {
   entries: SpecKitTaskEntry[];
 }
 
-// Trailing title/AC text uses a greedy `(.+)$` (linear) rather than the lazy
-// `(.+?)\s*$` form, whose lazy-capture-then-optional-trailing-whitespace overlap
-// is polynomial (CodeQL js/polynomial-redos) on adversarial imported specs.
-// Callers `.trim()` the captured group to preserve the prior trailing-strip.
-const HEADING_RE = /^###\s+(T-\d+)\s*[—\-:]?\s*(.+)$/;
-const CHECKBOX_RE = /^-\s*\[[ x]\]\s*(T-\d+)\s*[—\-:]?\s*(.+)$/i;
-const AC_LINE_RE = /^\s*(?:-\s*)?AC:\s*(.+)$/i;
+// Horizontal-whitespace classes ([ \t]) instead of \s so optional-whitespace
+// groups cannot overlap newline-anchored alternatives — avoids polynomial
+// backtracking on adversarial imported specs (CodeQL js/polynomial-redos).
+// Trailing title/AC text uses a greedy (.+)$ (linear) rather than the lazy
+// (.+?)\s*$ form, whose lazy-capture-then-optional-trailing-whitespace overlap
+// is also polynomial. Callers .trim() the captured group to preserve the
+// prior trailing-strip behaviour.
+const HEADING_RE = /^###[ \t]+(T-\d+)[ \t]*[—\-:]?[ \t]*(.+)$/;
+const CHECKBOX_RE = /^-[ \t]*\[[ x]\][ \t]*(T-\d+)[ \t]*[—\-:]?[ \t]*(.+)$/i;
+const AC_LINE_RE = /^[ \t]*(?:-[ \t]*)?AC:[ \t]*(.+)$/i;
 const TASKS_SECTION_RE = /^##\s+Tasks\s*$/i;
 
 /**

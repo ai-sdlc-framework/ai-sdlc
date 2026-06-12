@@ -57,7 +57,10 @@ function writeFakeCodex({
   rejectUnsupportedFlags = false,
 }) {
   const bin = join(fakeCodexDir, 'codex');
-  const stderrLine = stderr ? `echo "${stderr.replace(/"/g, '\\"')}" >&2\n` : '';
+  // Escape backslashes before double-quotes to produce a valid shell string
+  // literal (CodeQL js/incomplete-sanitization alert #72).
+  const escapedStderr = stderr.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const stderrLine = stderr ? `echo "${escapedStderr}" >&2\n` : '';
   const unsupportedFlagGuard = rejectUnsupportedFlags
     ? `for arg in "$@"; do
   case "$arg" in

@@ -22,6 +22,7 @@ import {
   createAbacPermissionHook,
   createBlockedPathsHook,
   createAuditLoggingHook,
+  validateBranchName,
 } from './shared.js';
 import type { AutonomyPolicy, AuditLog, MetricStore, AuthorizationHook } from '@ai-sdlc/reference';
 
@@ -625,5 +626,33 @@ describe('buildIssueTemplateVars()', () => {
     const vars = buildIssueTemplateVars('AISDLC-68', 'Docs consolidation');
     const title = interpolatePRTitle('feat: {issueTitle} ({issueId})', vars);
     expect(title).toBe('feat: Docs consolidation (AISDLC-68)');
+  });
+});
+
+// ── validateBranchName (CodeQL alert #167 regression tests) ──────────
+
+describe('validateBranchName()', () => {
+  it('accepts valid branch names', () => {
+    expect(() => validateBranchName('ai-sdlc/issue-42')).not.toThrow();
+    expect(() => validateBranchName('fix/codeql-findings')).not.toThrow();
+    expect(() => validateBranchName('feat/some_feature.v2')).not.toThrow();
+    expect(() => validateBranchName('AISDLC-535')).not.toThrow();
+  });
+
+  it('rejects a branch name starting with a hyphen (git-flag injection)', () => {
+    expect(() => validateBranchName('-upload-pack=evil')).toThrow(/starts with '-'/);
+    expect(() => validateBranchName('--upload-pack=evil')).toThrow(/starts with '-'/);
+  });
+
+  it('rejects branch names with shell-special characters', () => {
+    expect(() => validateBranchName('foo;rm -rf /')).toThrow(/safe ref charset/);
+    expect(() => validateBranchName('foo$(evil)')).toThrow(/safe ref charset/);
+    expect(() => validateBranchName('foo bar')).toThrow(/safe ref charset/);
+  });
+
+  it('rejects branch names with characters outside [A-Za-z0-9/_.-]', () => {
+    expect(() => validateBranchName('foo:bar')).toThrow(/safe ref charset/);
+    expect(() => validateBranchName('foo@bar')).toThrow(/safe ref charset/);
+    expect(() => validateBranchName('foo\x00bar')).toThrow(/safe ref charset/);
   });
 });

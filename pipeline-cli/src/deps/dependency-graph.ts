@@ -698,7 +698,11 @@ function escapeMermaidLabel(s: string): string {
 }
 
 function escapeDotLabel(s: string): string {
-  return s.replace(/"/g, '\\"').replace(/\n/g, ' ');
+  // Escape backslashes FIRST, then double-quotes. Escaping only `"` without
+  // first escaping `\` is incomplete sanitization: a label containing `\`
+  // would produce a broken DOT escape sequence in the output
+  // (CodeQL js/incomplete-sanitization alert #71).
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
 }
 
 // ── Pre-flight check (for `/ai-sdlc execute <task-id>`) ──────────────

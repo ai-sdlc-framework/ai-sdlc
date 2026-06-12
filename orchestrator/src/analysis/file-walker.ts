@@ -38,7 +38,12 @@ export interface WalkOptions {
 function matchesGlob(filePath: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
     // Simple glob matching: supports ** and *
+    // Escape backslashes FIRST before any other replacement so that the
+    // subsequent `.replace(/\./g, '\\.')` doesn't produce `\\.` sequences
+    // that are themselves broken when the input contained a `\`
+    // (CodeQL js/incomplete-sanitization alert #67).
     const regex = pattern
+      .replace(/\\/g, '\\\\')
       .replace(/\./g, '\\.')
       .replace(/\*\*/g, '{{GLOBSTAR}}')
       .replace(/\*/g, '[^/]*')

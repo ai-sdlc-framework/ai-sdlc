@@ -33,9 +33,22 @@ export interface CycleCheckResult {
 /**
  * Sanitize template content to prevent markdown/HTML injection.
  * Strips HTML tags and limits length.
+ *
+ * A single-pass `<[^>]*>` strip is flagged by CodeQL as
+ * `js/incomplete-multi-character-sanitization` (alert #65) because a
+ * crafted string like `<scr<script>ipt>` leaves `<script>` after one pass.
+ * We iterate the replacement until stable so any re-introduced bad
+ * substring is eliminated on the next pass — making the sanitization
+ * demonstrably idempotent.
  */
 function sanitizeTemplate(text: string): string {
-  return text.replace(/<[^>]*>/g, '').slice(0, 2000);
+  let prev: string;
+  let current = text;
+  do {
+    prev = current;
+    current = prev.replace(/<[^>]*>/g, '');
+  } while (current !== prev);
+  return current.slice(0, 2000);
 }
 
 /**

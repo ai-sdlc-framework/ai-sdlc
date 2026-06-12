@@ -319,6 +319,18 @@ export interface ComplianceStepResult {
 }
 
 /**
+ * Escape a string for safe embedding inside a YAML double-quoted scalar.
+ * YAML double-quoted strings treat `\` as an escape character, so backslashes
+ * must be escaped first, then double-quotes.  Escaping only `"` (without
+ * first escaping `\`) is an incomplete sanitization — a value like `foo\bar`
+ * would produce `"foo\bar"` where `\b` is a YAML escape sequence.
+ * (CodeQL js/incomplete-sanitization alerts #68, #69, #70.)
+ */
+function escapeYamlDoubleQuoted(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
  * Build the .ai-sdlc/compliance.yaml content for a given compliance declaration.
  *
  * The written file contains the declared `spec.regimes` with attestation metadata.
@@ -340,8 +352,10 @@ export function buildComplianceYaml(opts: {
 
   // AISDLC-324 review fix: quote attestedBy/id/attestedAt so an operator
   // git config user.email containing ": " or other YAML-significant chars
-  // can't break the YAML structure. attestedNotes already quoted+escaped.
-  const quotedAttestedBy = `"${attestedBy.replace(/"/g, '\\"')}"`;
+  // can't break the YAML structure. Use escapeYamlDoubleQuoted() which
+  // escapes backslashes before quotes (incomplete-sanitization fix for
+  // CodeQL alerts #68/#69/#70).
+  const quotedAttestedBy = `"${escapeYamlDoubleQuoted(attestedBy)}"`;
   const regimeItems = regimes
     .map((id) => {
       // id is from hardcoded COMPLIANCE_REGIME_CHOICES (validated upstream)
@@ -352,7 +366,7 @@ export function buildComplianceYaml(opts: {
         `      attestedAt: "${attestedAt}"`,
       ];
       if (attestedNotes) {
-        lines.push(`      attestedNotes: "${attestedNotes.replace(/"/g, '\\"')}"`);
+        lines.push(`      attestedNotes: "${escapeYamlDoubleQuoted(attestedNotes)}"`);
       }
       return lines.join('\n');
     })
@@ -378,7 +392,7 @@ export function buildComplianceYaml(opts: {
     `apiVersion: ai-sdlc.io/v1alpha1`,
     `kind: CompliancePosture`,
     `metadata:`,
-    `  name: "${projectName.replace(/"/g, '\\"')}"`,
+    `  name: "${escapeYamlDoubleQuoted(projectName)}"`,
     `spec:`,
     regimesSection,
     `  auditExports: []`,
