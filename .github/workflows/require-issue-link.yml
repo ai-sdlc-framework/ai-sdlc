@@ -33,8 +33,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
 
 permissions:
-  statuses: write
-  pull-requests: read
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -43,6 +42,9 @@ jobs:
   check-issue-link:
     name: ai-sdlc/issue-link
     runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      pull-requests: read
     # Skip when the PR is a draft — informational only on draft PRs.
     if: github.event.pull_request.draft == false
     steps:

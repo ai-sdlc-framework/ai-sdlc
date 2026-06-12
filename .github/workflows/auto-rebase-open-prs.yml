@@ -42,8 +42,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 # Serialize across overlapping main pushes; do NOT cancel in-progress runs
 # (we want every push's rebase pass to complete).
@@ -55,6 +54,9 @@ jobs:
   rebase:
     name: Rebase open PRs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Rebase all open same-repo non-draft PRs
         # AISDLC-189: prefer secrets.AI_SDLC_PAT so the rebase push

@@ -7,10 +7,9 @@ on:
 # Note: permissions block applies to the default GITHUB_TOKEN.
 # The AI_SDLC_PAT secret is used for git push and PR creation so that
 # the resulting events trigger the CI workflow (GITHUB_TOKEN cannot).
+# Top-level is read-only; write permissions are granted per-job only.
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
   # ── Gate: require security triage before agent execution ──────────
@@ -18,6 +17,9 @@ jobs:
     name: Triage Gate
     runs-on: ubuntu-latest
     if: github.event.label.name == 'ai-eligible'
+    permissions:
+      issues: write
+      pull-requests: read
     outputs:
       approved: ${{ steps.check.outputs.approved }}
     steps:
@@ -52,6 +54,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: triage-gate
     if: needs.triage-gate.outputs.approved == 'true'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:

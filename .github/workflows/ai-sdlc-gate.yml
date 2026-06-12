@@ -79,8 +79,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read
-  checks: write
 
 jobs:
   # ── Archetype detection ─────────────────────────────────────────────────
@@ -101,7 +99,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - id: filter
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           # `predicate-quantifier: every` makes `docs_only` true only when
           # EVERY changed file matches at least one of the listed
@@ -122,7 +120,7 @@ jobs:
       # Drives the dependency-review-gate job — covers npm + github-actions
       # bumps (incl. Dependabot) against the GitHub Advisory DB.
       - id: deps-filter
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
             deps:
@@ -368,6 +366,9 @@ jobs:
       always() &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: read
     steps:
       - name: Aggregate required signals
         uses: re-actors/alls-green@release/v1

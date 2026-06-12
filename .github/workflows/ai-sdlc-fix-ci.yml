@@ -6,10 +6,7 @@ on:
     types: [completed]
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  actions: read
+  contents: read
 
 concurrency:
   group: fix-ci-${{ github.event.workflow_run.head_branch }}
@@ -19,6 +16,11 @@ jobs:
   fix-ci:
     name: Fix CI Failures
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: read
     # SECURITY (issue #780, CodeQL actions/untrusted-checkout): this job runs in
     # the privileged workflow_run context with secrets (AI_SDLC_PAT write token +
     # ANTHROPIC_API_KEY) and checks out + builds the PR-head code. It MUST only

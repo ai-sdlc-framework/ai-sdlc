@@ -50,12 +50,11 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
 
-# Workflow-level permissions: minimum needed for status posting + label operations.
+# Workflow-level permissions: read-only default per Scorecard TokenPermissionsID.
+# Write permissions are granted per-job only where needed.
 # No `contents: write` — fork-PR safety guard #5 prevents signing-key access here.
 permissions:
-  statuses: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 env:
   # Feature flag — default off per RFC-0043 §Migration Path.
