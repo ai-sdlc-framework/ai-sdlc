@@ -1,7 +1,7 @@
 ---
 id: AISDLC-518
 title: 'fix(pipeline-cli): stop test runs leaving _artifacts/_captures debris + mutating tracked classifier-corpus'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-04'
 labels:
