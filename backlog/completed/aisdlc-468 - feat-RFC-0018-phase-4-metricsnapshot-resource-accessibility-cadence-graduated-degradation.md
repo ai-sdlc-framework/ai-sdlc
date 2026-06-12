@@ -1,7 +1,7 @@
 ---
 id: AISDLC-468
 title: 'feat: RFC-0018 Phase 4 — MetricSnapshot resource + stale-metric Decision + accessibility cadence graduated degradation'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-28'
 labels:
