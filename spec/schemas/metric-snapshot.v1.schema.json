@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/metric-snapshot.v1.schema.json",
+  "title": "AI-SDLC MetricSnapshot v1",
+  "description": "Operator-supplied journey success-metric snapshot resource per RFC-0018 §10.1 OQ-5. Operators push MetricSnapshot records from their analytics pipeline (Mixpanel, Amplitude, Heap, internal) to supply completion-rate and other journey-success signals. The framework reads these values for Cκ scoring at journey scope — it does not compute them from an analytics backend.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "ai-sdlc.io/v1alpha1",
+      "description": "API version. Always 'ai-sdlc.io/v1alpha1' for v1."
+    },
+    "kind": {
+      "type": "string",
+      "const": "MetricSnapshot",
+      "description": "Resource kind. Always 'MetricSnapshot'."
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["journey", "metricId"],
+      "additionalProperties": false,
+      "description": "Metadata identifying the journey and metric this snapshot belongs to.",
+      "properties": {
+        "journey": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*/([a-z][a-z0-9-]*/)?[a-z][a-z0-9-]*$",
+          "description": "Path-style journey URI. Soul-scoped: '<soul-id>/<journey-id>'. Variant-scoped: '<soul-id>/<variant-id>/<journey-id>'. Mirrors the targetedJourneys URI format from RFC-0018 §5.4.",
+          "examples": ["spry-engage/onboarding", "spry-engage/annual-test/submit-results"]
+        },
+        "metricId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "minLength": 2,
+          "maxLength": 64,
+          "description": "Metric identifier. Kebab-case. MUST match an id in the parent journey's successMetrics[] array. Examples: 'completion-rate', 'median-time-to-first-task-done'.",
+          "examples": ["completion-rate", "median-time-to-first-task-done", "monthly-active-users"]
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Optional key/value labels for grouping, filtering, or operator tagging."
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Optional key/value annotations (freeform, not used by the framework for scoring)."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["value", "recordedAt", "sourceTool"],
+      "additionalProperties": false,
+      "description": "The metric snapshot value and provenance.",
+      "properties": {
+        "value": {
+          "type": "number",
+          "description": "Metric value. Dimensionless — the caller and schema consumer share the same unit convention declared on the parent journey's successMetrics[].id. Examples: 0.65 for completion-rate (ratio), 1800 for time-based metrics (seconds). The framework does not validate dimensional consistency."
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp when this metric value was recorded / sampled by the analytics source. Used to compute staleness (default 30d, per-Soul configurable via journey.successMetrics.staleness.thresholdDays)."
+        },
+        "sourceTool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Free-text identifier for the analytics tool that produced this metric. Examples: 'mixpanel', 'amplitude', 'heap', 'internal-pipeline', 'dbt-metrics', 'custom-warehouse-query'. Not validated against an allowlist — adopter-supplied tooling names are heterogeneous.",
+          "examples": ["mixpanel", "amplitude", "heap", "internal-pipeline", "dbt-metrics"]
+        },
+        "windowStart": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO 8601 start of the measurement window (e.g. rolling 7-day window start). Informational — not used in staleness computation."
+        },
+        "windowEnd": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional ISO 8601 end of the measurement window. When present, SHOULD equal or precede recordedAt. Informational — not used in staleness computation."
+        }
+      }
+    }
+  }
+}
