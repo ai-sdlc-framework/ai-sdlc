@@ -67,7 +67,7 @@ export function createWebhookManager(config: WebhookManagerConfig): WebhookManag
   const server = createWebhookServer({ port: config.port, host: config.host });
 
   // Create unified bridges
-  const issueBridge = createWebhookBridge<IssueEvent>((payload) => {
+  const issueBridge = createWebhookBridge<IssueEvent>((payload: unknown) => {
     // Try each transformer in order
     return (
       transformIssueEvent(payload) ??
@@ -77,11 +77,11 @@ export function createWebhookManager(config: WebhookManagerConfig): WebhookManag
     );
   });
 
-  const prBridge = createWebhookBridge<PREvent>((payload) => {
+  const prBridge = createWebhookBridge<PREvent>((payload: unknown) => {
     return transformPREvent(payload) ?? transformGitLabMREvent(payload);
   });
 
-  const buildBridge = createWebhookBridge<BuildEvent>((payload) => {
+  const buildBridge = createWebhookBridge<BuildEvent>((payload: unknown) => {
     return transformBuildEvent(payload) ?? transformGitLabPipelineEvent(payload);
   });
 
