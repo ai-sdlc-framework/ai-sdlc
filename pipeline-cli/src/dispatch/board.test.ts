@@ -30,6 +30,7 @@ import {
   collectVerdicts,
   ensureBoardDirs,
   listResumeSignals,
+  patchDoneVerdict,
   peekQueue,
   probeIterationBudget,
   readHeartbeat,
@@ -1335,6 +1336,72 @@ describe('removeVerdict', () => {
   it('is idempotent on missing files', () => {
     const boardDir = mkBoard();
     expect(() => removeVerdict(boardDir, 'NOPE')).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patchDoneVerdict
+// ---------------------------------------------------------------------------
+
+describe('patchDoneVerdict', () => {
+  it('happy path — patches all four timing fields onto an existing done/ verdict', () => {
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-2000'));
+    claimNext(boardDir, 'in-session-agent');
+    writeVerdict(boardDir, mkVerdict('AISDLC-2000'));
+
+    const patch = {
+      reviewerStartedAt: '2026-06-01T10:00:00.000Z',
+      reviewerCompletedAt: '2026-06-01T10:05:00.000Z',
+      signedAt: '2026-06-01T10:06:00.000Z',
+      prOpenedAt: '2026-06-01T10:07:00.000Z',
+    };
+    const result = patchDoneVerdict(boardDir, 'AISDLC-2000', patch);
+    expect(result).toBe(true);
+
+    const verdicts = collectVerdicts(boardDir, { includeFailed: false });
+    const patched = verdicts.find((v) => v.taskId === 'AISDLC-2000');
+    expect(patched).toBeDefined();
+    expect(patched?.reviewerStartedAt).toBe(patch.reviewerStartedAt);
+    expect(patched?.reviewerCompletedAt).toBe(patch.reviewerCompletedAt);
+    expect(patched?.signedAt).toBe(patch.signedAt);
+    expect(patched?.prOpenedAt).toBe(patch.prOpenedAt);
+    // Unchanged fields survive the patch.
+    expect(patched?.outcome).toBe('success');
+    expect(patched?.commitSha).toBe('def5678');
+  });
+
+  it('missing verdict — returns false without throwing', () => {
+    const boardDir = mkBoard();
+    ensureBoardDirs(boardDir);
+    const result = patchDoneVerdict(boardDir, 'AISDLC-NONEXISTENT', {
+      signedAt: '2026-06-01T10:00:00.000Z',
+    });
+    expect(result).toBe(false);
+  });
+
+  it('partial patch — only signedAt provided leaves other timing fields untouched', () => {
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-2001'));
+    claimNext(boardDir, 'in-session-agent');
+    // Write a verdict that already has reviewerStartedAt set.
+    writeVerdict(boardDir, {
+      ...mkVerdict('AISDLC-2001'),
+      reviewerStartedAt: '2026-06-01T09:00:00.000Z',
+    });
+
+    const result = patchDoneVerdict(boardDir, 'AISDLC-2001', {
+      signedAt: '2026-06-01T10:06:00.000Z',
+    });
+    expect(result).toBe(true);
+
+    const verdicts = collectVerdicts(boardDir, { includeFailed: false });
+    const patched = verdicts.find((v) => v.taskId === 'AISDLC-2001');
+    expect(patched?.signedAt).toBe('2026-06-01T10:06:00.000Z');
+    // Fields not in the patch must be preserved.
+    expect(patched?.reviewerStartedAt).toBe('2026-06-01T09:00:00.000Z');
+    expect(patched?.reviewerCompletedAt).toBeUndefined();
+    expect(patched?.prOpenedAt).toBeUndefined();
   });
 });
 

@@ -308,7 +308,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   // the post-dev phase of the dispatch→merge lifecycle. Best-effort — event
   // write failures are swallowed per the writeEvent contract.
   if (prUrl) {
-    const prOpenedAt = new Date().toISOString();
+    const prOpenedAt = (opts.now ?? (() => new Date()))().toISOString();
     writeEvent(
       {
         ts: '',

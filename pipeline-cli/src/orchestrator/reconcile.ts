@@ -375,7 +375,7 @@ export function runReconcile(options: RunReconcileOptions): ReconcileResult {
   const spawn = options.spawn ?? defaultSpawn;
   const now = options.now ?? ((): Date => new Date());
   const reconcileStartedAt = options.reconcileStartedAt ?? now().toISOString();
-  const result = runReconcileInner(options, spawn, now, reconcileStartedAt);
+  const result = runReconcileInner(options, spawn, now);
 
   // AISDLC-493 — emit ReconcileCompleted on every pass.
   const reconcileEndedAt = now().toISOString();
@@ -418,9 +418,7 @@ function runReconcileInner(
   options: RunReconcileOptions,
   spawn: NonNullable<RunReconcileOptions['spawn']>,
   now: () => Date,
-  reconcileStartedAt: string,
 ): ReconcileResult {
-  void reconcileStartedAt; // captured for outer timing
   const workDir = path.resolve(options.workDir);
   const taskId = options.taskId;
   const taskIdLower = taskId.toLowerCase();
