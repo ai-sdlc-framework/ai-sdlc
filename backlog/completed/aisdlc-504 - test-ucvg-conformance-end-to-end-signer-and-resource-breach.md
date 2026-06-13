@@ -1,7 +1,7 @@
 ---
 id: AISDLC-504
 title: 'test: make ucvg conformance AC-3 + resource-breach checks end-to-end (AISDLC-502 reviewer minors)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-03'
 labels:
