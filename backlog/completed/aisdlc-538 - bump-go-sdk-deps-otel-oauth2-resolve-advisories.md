@@ -3,7 +3,7 @@ id: AISDLC-538
 title: >-
   chore(deps): bump Go SDK deps (OpenTelemetry-Go, golang.org/x/oauth2) to
   resolve high-severity advisories
-status: To Do
+status: Done
 assignee: []
 labels:
   - security
