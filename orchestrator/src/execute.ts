@@ -558,6 +558,7 @@ export async function pushBranchWithRebase(
     throw new Error(
       `Push rebase failed for branch ${branchName}: ${(rebaseErr as Error).message}. ` +
         `Resolve conflicts manually and re-run the pipeline.`,
+      { cause: rebaseErr },
     );
   }
 

@@ -344,8 +344,8 @@ export function gcRollingSnapshots(opts: GcOpts = {}): GcResult {
       result.kept.push(path);
       continue;
     }
-    let size = 0;
-    let mtimeMs = 0;
+    let size: number;
+    let mtimeMs: number;
     try {
       const s = statSync(path);
       size = s.size;

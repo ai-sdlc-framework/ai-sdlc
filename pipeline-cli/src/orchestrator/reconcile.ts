@@ -284,7 +284,7 @@ export function salvageReviewerTranscript(
   // after replacing `.` in `.worktrees`) become `--` so we don't
   // over-normalize.
   const encoded = encodeWorktreePathForClaudeTmp(worktreePath);
-  let candidates: string[] = [];
+  let candidates: string[];
   try {
     candidates = readdirSync(tmpRoot).filter((d) => d.startsWith('claude-'));
   } catch {

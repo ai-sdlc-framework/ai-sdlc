@@ -841,7 +841,7 @@ function listManifestCandidates(dir: string): ManifestCandidate[] {
   for (const file of safeReaddir(dir)) {
     if (!file.endsWith(MANIFEST_SUFFIX)) continue;
     const fullPath = path.join(dir, file);
-    let mtimeMs = 0;
+    let mtimeMs: number;
     try {
       mtimeMs = statSync(fullPath).mtimeMs;
     } catch {

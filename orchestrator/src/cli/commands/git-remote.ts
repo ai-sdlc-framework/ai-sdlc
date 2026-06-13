@@ -42,7 +42,7 @@ export function parseRemoteUrl(url: string): RemoteInfo | null {
   }
 
   // SSH or HTTPS with a scheme
-  let parsed: URL | null = null;
+  let parsed: URL | null;
   try {
     parsed = new URL(trimmed);
   } catch {

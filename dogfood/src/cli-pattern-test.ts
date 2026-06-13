@@ -289,7 +289,7 @@ export async function runFieldAgainstText(input: RunFieldAgainstTextInput): Prom
   const layer1 = await runLayer1({ issueText, compiled, depparse });
 
   const matches: PatternMatchResult[] = [];
-  let violation = false;
+  let violation: boolean;
 
   if (field.kind === 'constraint') {
     for (const pattern of field.detectionPatterns) {

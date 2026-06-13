@@ -208,7 +208,9 @@ export function applyTriageUpdate(opts: TriageUpdateOpts): CaptureRecord {
   try {
     raw = readFileSync(filePath, 'utf8');
   } catch (err) {
-    throw new Error(`[cli-capture] cannot read ${filePath}: ${(err as Error).message}`);
+    throw new Error(`[cli-capture] cannot read ${filePath}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 
   let record: CaptureRecord;
@@ -284,7 +286,9 @@ export function redactCapture(opts: RedactCaptureOpts): CaptureRecord {
   try {
     raw = readFileSync(filePath, 'utf8');
   } catch (err) {
-    throw new Error(`[cli-capture] cannot read ${filePath}: ${(err as Error).message}`);
+    throw new Error(`[cli-capture] cannot read ${filePath}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 
   let record: CaptureRecord;

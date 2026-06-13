@@ -270,6 +270,7 @@ export async function fetchGhIssueAsTaskSpec(
       `fetchGhIssueAsTaskSpec: gh returned invalid JSON for issue #${issueNumber}: ${
         (err as Error).message
       }`,
+      { cause: err },
     );
   }
 

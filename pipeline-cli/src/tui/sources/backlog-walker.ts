@@ -177,15 +177,10 @@ export function readBacklogTasks(opts: ReadBacklogTasksOpts = {}): ReadBacklogTa
   // Top-level signal: if `backlog/` itself doesn't exist, the source is
   // unavailable. A missing sub-dir (e.g. only `tasks/` exists) is normal
   // for projects pre-first-completion.
-  let backlogExists = true;
   try {
     statSync(backlogDir);
   } catch (err) {
-    backlogExists = false;
     return { tasks: [], error: classifyFsError(err) };
-  }
-  if (!backlogExists) {
-    return { tasks: [], error: 'source-unavailable' };
   }
 
   const open = walkDir(tasksDir, 'open');

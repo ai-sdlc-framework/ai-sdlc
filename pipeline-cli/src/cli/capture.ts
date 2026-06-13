@@ -184,7 +184,7 @@ export async function readAllStdinSync(): Promise<string> {
   const fd0 = 0;
   const chunks: Buffer[] = [];
   const chunkBuf = Buffer.alloc(65536);
-  let bytesRead = 0;
+  let bytesRead: number;
   do {
     try {
       bytesRead = readSync(fd0, chunkBuf, 0, chunkBuf.length, null);

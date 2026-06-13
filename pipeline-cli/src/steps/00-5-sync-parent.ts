@@ -648,7 +648,7 @@ export async function pruneStaleParentDebris(
     const originContent = await readOriginMainFile(counterpartPath, workDir, runner);
 
     // Read the local file content
-    let localContent: string | null = null;
+    let localContent: string | null;
     const absPath = join(workDir, file);
     try {
       localContent = readFileSync(absPath, 'utf8');

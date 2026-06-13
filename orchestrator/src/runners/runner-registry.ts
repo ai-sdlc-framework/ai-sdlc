@@ -100,6 +100,7 @@ export class RunnerRegistry {
       throw new Error(
         `AI_SDLC_RUNNER_PLUGIN: failed to import plugin module "${pluginPath}": ${err instanceof Error ? err.message : String(err)}.\n` +
           `Ensure the path is correct and the module is a valid ESM/CJS module.`,
+        { cause: err },
       );
     }
 
