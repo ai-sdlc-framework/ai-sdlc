@@ -219,7 +219,9 @@ describe('dispatchToSDK', () => {
 
   it('uses Shape 2 (ClaudeCode + runAgent) when `query` is absent', async () => {
     const runAgent = vi.fn().mockResolvedValue({ output: 'wrapped output' });
-    const ClaudeCode = vi.fn().mockImplementation(() => ({ runAgent }));
+    const ClaudeCode = vi.fn(function () {
+      return { runAgent };
+    });
     const sdk: SDKModule = {
       ClaudeCode: ClaudeCode as unknown as SDKModule['ClaudeCode'],
     };

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { MockedFunction } from 'vitest';
 import { createLinearIssueTracker, type LinearConfig, type LinearClientLike } from './index.js';
 
 vi.mock('../resolve-secret.js', () => ({
@@ -24,12 +25,12 @@ function makeIssueNode(overrides: Record<string, unknown> = {}) {
 }
 
 function createMockClient(): LinearClientLike & {
-  issues: ReturnType<typeof vi.fn>;
-  issue: ReturnType<typeof vi.fn>;
-  createIssue: ReturnType<typeof vi.fn>;
-  updateIssue: ReturnType<typeof vi.fn>;
-  issueLabels: ReturnType<typeof vi.fn>;
-  team: ReturnType<typeof vi.fn>;
+  issues: MockedFunction<LinearClientLike['issues']>;
+  issue: MockedFunction<LinearClientLike['issue']>;
+  createIssue: MockedFunction<LinearClientLike['createIssue']>;
+  updateIssue: MockedFunction<LinearClientLike['updateIssue']>;
+  issueLabels: MockedFunction<LinearClientLike['issueLabels']>;
+  team: MockedFunction<LinearClientLike['team']>;
 } {
   return {
     issues: vi.fn(),

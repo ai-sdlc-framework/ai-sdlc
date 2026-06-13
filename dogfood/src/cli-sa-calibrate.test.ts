@@ -28,7 +28,9 @@ const mocks = vi.hoisted(() => {
     realStore,
     shadowStore,
     stateStoreOpen,
-    SAFeedbackStore: vi.fn().mockImplementation(() => ({ sentinel: 'feedback' })),
+    SAFeedbackStore: vi.fn(function () {
+      return { sentinel: 'feedback' };
+    }),
     autoCalibratePhaseWeights: vi.fn(async () => ({
       diffs: [
         {
@@ -66,8 +68,13 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
 
 describe('cli-sa-calibrate', () => {
   let originalArgv: string[];
-  let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  type AnySpy = {
+    mock: { calls: unknown[][] };
+    mockRestore(): void;
+    mockImplementation(...args: unknown[]): unknown;
+  };
+  let logSpy: AnySpy;
+  let errorSpy: AnySpy;
   let tempDir: string;
 
   beforeEach(() => {

@@ -5,10 +5,9 @@ const mockClose = vi.fn().mockResolvedValue(undefined);
 
 // Mock all orchestrator dependencies before importing cli
 vi.mock('@ai-sdlc/orchestrator', () => ({
-  Orchestrator: vi.fn().mockImplementation(() => ({
-    run: mockRun,
-    close: mockClose,
-  })),
+  Orchestrator: vi.fn(function () {
+    return { run: mockRun, close: mockClose };
+  }),
   executePipeline: vi.fn().mockResolvedValue({ success: true }),
   createPipelineSecurity: vi.fn().mockReturnValue({}),
   createPipelineMetricStore: vi.fn().mockReturnValue({}),

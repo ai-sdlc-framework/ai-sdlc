@@ -205,6 +205,7 @@ describe('checkForUpdates', () => {
     const mockedExistsSync = vi.mocked(existsSync);
     const mockedReadFileSync = vi.mocked(readFileSync);
     const mockedExecSync = vi.mocked(execSync);
+    mockedExecSync.mockClear(); // clear call history from previous tests
 
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);
@@ -244,6 +245,7 @@ describe('checkForUpdates', () => {
     const mockedExistsSync = vi.mocked(existsSync);
     const mockedReadFileSync = vi.mocked(readFileSync);
     const mockedExecSync = vi.mocked(execSync);
+    mockedExecSync.mockClear(); // clear call history from previous tests
 
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);

@@ -59,31 +59,29 @@ vi.mock('./logger.js', () => ({
 
 // Mock AutonomyTracker
 vi.mock('./autonomy-tracker.js', () => ({
-  AutonomyTracker: vi.fn().mockImplementation(() => ({
-    getLevel: vi.fn(),
-    promote: vi.fn(),
-    demote: vi.fn(),
-  })),
+  AutonomyTracker: vi.fn(function () {
+    return { getLevel: vi.fn(), promote: vi.fn(), demote: vi.fn() };
+  }),
 }));
 
 // Mock CostTracker
 vi.mock('./cost-tracker.js', () => ({
-  CostTracker: vi.fn().mockImplementation(() => ({
-    getCostSummary: vi.fn(),
-    getBudgetStatus: vi.fn(),
-    recordCost: vi.fn(),
-  })),
+  CostTracker: vi.fn(function () {
+    return { getCostSummary: vi.fn(), getBudgetStatus: vi.fn(), recordCost: vi.fn() };
+  }),
 }));
 
 // Mock CostGovernancePlugin
 vi.mock('./cost-governance.js', () => ({
-  CostGovernancePlugin: vi.fn().mockImplementation(() => ({
-    name: 'cost-governance',
-    initialize: vi.fn(),
-    beforeRun: vi.fn(),
-    afterRun: vi.fn(),
-    shutdown: vi.fn(),
-  })),
+  CostGovernancePlugin: vi.fn(function () {
+    return {
+      name: 'cost-governance',
+      initialize: vi.fn(),
+      beforeRun: vi.fn(),
+      afterRun: vi.fn(),
+      shutdown: vi.fn(),
+    };
+  }),
 }));
 
 // Mock analyzeCodebase

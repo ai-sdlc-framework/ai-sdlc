@@ -205,10 +205,9 @@ const mockAgentsLedger = vi.fn();
 const mockClose = vi.fn();
 
 vi.mock('../../orchestrator.js', () => ({
-  Orchestrator: vi.fn().mockImplementation(() => ({
-    agents: mockAgentsLedger,
-    close: mockClose,
-  })),
+  Orchestrator: vi.fn(function () {
+    return { agents: mockAgentsLedger, close: mockClose };
+  }),
 }));
 
 vi.mock('../formatters/index.js', () => ({
@@ -216,7 +215,11 @@ vi.mock('../formatters/index.js', () => ({
 }));
 
 describe('agents command — declared + runtime merge (AISDLC-78 AC #10)', () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleSpy: {
+    mock: { calls: unknown[][] };
+    mockRestore(): void;
+    mockImplementation(...args: unknown[]): unknown;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();

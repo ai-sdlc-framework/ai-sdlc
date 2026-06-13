@@ -15,40 +15,48 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
     labelApplied: 'triage:safe',
   }),
   resolveRepoRoot: vi.fn().mockResolvedValue('/tmp/mock-repo'),
-  SecurityTriageRunner: vi.fn().mockImplementation(() => ({
-    run: vi.fn().mockResolvedValue({
-      success: true,
-      summary: JSON.stringify({
-        safe: true,
-        riskScore: 1,
-        findings: [],
-        sanitizedDescription: '',
-        rationale: 'OK',
+  SecurityTriageRunner: vi.fn(function () {
+    return {
+      run: vi.fn().mockResolvedValue({
+        success: true,
+        summary: JSON.stringify({
+          safe: true,
+          riskScore: 1,
+          findings: [],
+          sanitizedDescription: '',
+          rationale: 'OK',
+        }),
       }),
-    }),
-  })),
+    };
+  }),
   // The harness wiring (commit 3d6dcf3) added ClaudeCodeAdapter to cli-triage.ts
   // imports. Without this mock, module init crashes on the missing export and
   // every spy assertion in this file fires zero times.
-  ClaudeCodeAdapter: vi.fn().mockImplementation(() => ({
-    name: 'claude-code',
-    invoke: vi.fn(),
-    isAvailable: vi.fn().mockResolvedValue({ available: true }),
-    getAccountId: vi.fn().mockResolvedValue(null),
-    availableModels: vi.fn().mockResolvedValue([]),
-  })),
+  ClaudeCodeAdapter: vi.fn(function () {
+    return {
+      name: 'claude-code',
+      invoke: vi.fn(),
+      isAvailable: vi.fn().mockResolvedValue({ available: true }),
+      getAccountId: vi.fn().mockResolvedValue(null),
+      availableModels: vi.fn().mockResolvedValue([]),
+    };
+  }),
 }));
 
 describe('cli-triage.ts', () => {
   let originalArgv: string[];
-  let exitSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
-  let logSpy: ReturnType<typeof vi.spyOn>;
+  type AnySpy = {
+    mock: { calls: unknown[][] };
+    mockRestore(): void;
+    mockImplementation(...args: unknown[]): unknown;
+  };
+  let exitSpy: AnySpy;
+  let errorSpy: AnySpy;
+  let logSpy: AnySpy;
 
   beforeEach(() => {
     originalArgv = process.argv;
-    // @ts-expect-error -- mock process.exit for test
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never);
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.resetModules();
@@ -150,16 +158,12 @@ describe('cli-triage.ts', () => {
 
   it('outputs error verdict JSON when analyze-only runner fails', async () => {
     const { SecurityTriageRunner } = await import('@ai-sdlc/orchestrator');
-    vi.mocked(SecurityTriageRunner).mockImplementationOnce(
-      () =>
-        ({
-          run: vi.fn().mockResolvedValue({
-            success: false,
-            error: 'Analysis failed',
-          }),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        }) as any,
-    );
+    // Use a regular function cast to unknown to allow constructor invocation (vitest 4 mock behavior)
+    const mockImpl = function () {
+      return { run: vi.fn().mockResolvedValue({ success: false, error: 'Analysis failed' }) };
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(SecurityTriageRunner).mockImplementationOnce(mockImpl as any);
 
     process.argv = ['node', 'cli-triage.ts', '--title', 'Bad issue', '--dry-run'];
 

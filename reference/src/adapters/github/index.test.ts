@@ -45,14 +45,17 @@ const mockChecks = {
 };
 
 vi.mock('@octokit/rest', () => ({
-  Octokit: vi.fn(() => ({
-    issues: mockIssues,
-    pulls: mockPulls,
-    git: mockGit,
-    repos: mockRepos,
-    actions: mockActions,
-    checks: mockChecks,
-  })),
+  // Use a regular function (not arrow) so it can be used as a constructor with `new`
+  Octokit: vi.fn(function () {
+    return {
+      issues: mockIssues,
+      pulls: mockPulls,
+      git: mockGit,
+      repos: mockRepos,
+      actions: mockActions,
+      checks: mockChecks,
+    };
+  }),
 }));
 
 vi.mock('../resolve-secret.js', () => ({

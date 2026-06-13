@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => {
   };
   return {
     feedbackApi,
-    SAFeedbackStore: vi.fn().mockImplementation(() => feedbackApi),
+    SAFeedbackStore: vi.fn(function () {
+      return feedbackApi;
+    }),
     stateStoreOpen: vi.fn(() => ({ close: vi.fn() })),
     resolveRepoRoot: vi.fn(),
   };
@@ -27,14 +29,18 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
 
 describe('cli-sa-feedback', () => {
   let originalArgv: string[];
-  let exitSpy: ReturnType<typeof vi.spyOn>;
-  let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  type AnySpy = {
+    mock: { calls: unknown[][] };
+    mockRestore(): void;
+    mockImplementation(...args: unknown[]): unknown;
+  };
+  let exitSpy: AnySpy;
+  let logSpy: AnySpy;
+  let errorSpy: AnySpy;
   let tempDir: string;
 
   beforeEach(() => {
     originalArgv = process.argv;
-    // @ts-expect-error — spying on process.exit
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
     });

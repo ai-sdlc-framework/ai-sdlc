@@ -57,7 +57,11 @@ let prevGitDir: string | undefined;
 let prevGitWorkTree: string | undefined;
 let prevGitCommonDir: string | undefined;
 let prevGitIndexFile: string | undefined;
-let consoleSpy: ReturnType<typeof vi.spyOn>;
+let consoleSpy: {
+  mock: { calls: unknown[][] };
+  mockRestore(): void;
+  mockImplementation(...args: unknown[]): unknown;
+};
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), 'init-ws-flaky-'));

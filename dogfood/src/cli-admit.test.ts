@@ -142,16 +142,20 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
 
 describe('cli-admit.ts', () => {
   let originalArgv: string[];
-  let exitSpy: ReturnType<typeof vi.spyOn>;
-  let logSpy: ReturnType<typeof vi.spyOn>;
-  let errorSpy: ReturnType<typeof vi.spyOn>;
+  type AnySpy = {
+    mock: { calls: unknown[][] };
+    mockRestore(): void;
+    mockImplementation(...args: unknown[]): unknown;
+  };
+  let exitSpy: AnySpy;
+  let logSpy: AnySpy;
+  let errorSpy: AnySpy;
   let tempDir: string;
   let bodyFile: string;
 
   beforeEach(() => {
     originalArgv = process.argv;
-    // @ts-expect-error — spying on process.exit in tests
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     tempDir = mkdtempSync(join(tmpdir(), 'admit-test-'));

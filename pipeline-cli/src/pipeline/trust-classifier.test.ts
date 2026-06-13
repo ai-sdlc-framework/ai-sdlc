@@ -146,8 +146,9 @@ describe('loadAllowlistedAuthors', () => {
   // AC#10: enforce no-live-GitHub-API-on-critical-path invariant
   it('makes NO network calls (uses only static file)', () => {
     // Spy on any global fetch or http to ensure none are made
+    // vitest 4: spyOn requires the target to be typed with the property; use globalThis cast
     const fetchSpy = vi
-      .spyOn(global, 'fetch' as never)
+      .spyOn(globalThis, 'fetch')
       .mockRejectedValue(
         new Error('Network calls are forbidden on the trust-classification critical path'),
       );
@@ -288,8 +289,9 @@ describe('classifyTrust', () => {
   it('makes NO network calls (AC#10 — no-live-GitHub-API invariant)', async () => {
     writeTrustedReviewers(workDir, TRUSTED_REVIEWERS_WITH_ALLOWLIST);
 
+    // vitest 4: spyOn requires the target to be typed with the property; use globalThis
     const fetchSpy = vi
-      .spyOn(global, 'fetch' as never)
+      .spyOn(globalThis, 'fetch')
       .mockRejectedValue(
         new Error('No network calls allowed on the trust-classification critical path'),
       );

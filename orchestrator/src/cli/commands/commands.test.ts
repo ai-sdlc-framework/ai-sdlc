@@ -19,18 +19,20 @@ const mockCost = vi.fn();
 const mockDashboard = vi.fn();
 
 vi.mock('../../orchestrator.js', () => ({
-  Orchestrator: vi.fn().mockImplementation(() => ({
-    run: mockRun,
-    close: mockClose,
-    start: mockStart,
-    status: mockStatus,
-    health: mockHealth,
-    agents: mockAgents,
-    routing: mockRouting,
-    complexity: mockComplexity,
-    cost: mockCost,
-    dashboard: mockDashboard,
-  })),
+  Orchestrator: vi.fn(function () {
+    return {
+      run: mockRun,
+      close: mockClose,
+      start: mockStart,
+      status: mockStatus,
+      health: mockHealth,
+      agents: mockAgents,
+      routing: mockRouting,
+      complexity: mockComplexity,
+      cost: mockCost,
+      dashboard: mockDashboard,
+    };
+  }),
 }));
 
 // Mock formatOutput to return JSON for easy assertion
@@ -75,8 +77,16 @@ vi.mock('node:fs', async () => {
   };
 });
 
-let consoleSpy: ReturnType<typeof vi.spyOn>;
-let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+let consoleSpy: {
+  mock: { calls: unknown[][] };
+  mockRestore(): void;
+  mockImplementation(...args: unknown[]): unknown;
+};
+let consoleErrorSpy: {
+  mock: { calls: unknown[][] };
+  mockRestore(): void;
+  mockImplementation(...args: unknown[]): unknown;
+};
 
 beforeEach(() => {
   vi.clearAllMocks();

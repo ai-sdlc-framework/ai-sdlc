@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { MockedFunction } from 'vitest';
 import {
   createOpenShellSandbox,
   isOpenShellAvailable,
   buildSandboxExecPrefix,
 } from './openshell-sandbox.js';
 import type { SandboxConstraints } from './interfaces.js';
+import type { ShellExec } from './openshell-sandbox.js';
 
 function makeConstraints(overrides?: Partial<SandboxConstraints>): SandboxConstraints {
   return {
@@ -31,7 +33,7 @@ describe('isOpenShellAvailable', () => {
 });
 
 describe('createOpenShellSandbox', () => {
-  let exec: ReturnType<typeof vi.fn>;
+  let exec: MockedFunction<ShellExec>;
 
   beforeEach(() => {
     exec = vi.fn().mockResolvedValue('');

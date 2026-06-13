@@ -88,6 +88,8 @@ describe('startWatch()', () => {
 
   it('forwards the enqueued Pipeline to executePipeline as pipelineOverride', async () => {
     const { executePipeline } = await import('./execute.js');
+    // Clear call history so this test is independent of prior test state
+    vi.mocked(executePipeline).mockClear();
     const handle = startWatch({
       reconcilerConfig: { periodicIntervalMs: 60_000 },
     });
