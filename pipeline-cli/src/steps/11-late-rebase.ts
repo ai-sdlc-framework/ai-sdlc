@@ -34,11 +34,77 @@ import { defaultRunner } from '../runtime/exec.js';
 /**
  * Upper bound on conflicted-file content fed to the mechanical conflict
  * resolvers. A file larger than this is never a mechanical CHANGELOG/test
- * conflict; the resolvers escalate (return null) so a human resolves it. The
- * cap also bounds the input to the double-lazy conflict regex, neutralising
- * its polynomial worst case (CodeQL js/polynomial-redos).
+ * conflict; the resolvers escalate (return null) so a human resolves it.
  */
 const MAX_CONFLICT_CONTENT = 1_000_000;
+
+/**
+ * A parsed git conflict block with its head (current branch) and incoming
+ * (from origin/main) sides, plus the byte offsets of the whole block so the
+ * caller can splice it out.
+ */
+interface ConflictBlock {
+  /** Raw text for the `<<<<<<< ...` side (current branch). */
+  headSide: string;
+  /** Raw text for the `>>>>>>> ...` side (incoming / theirs). */
+  incomingSide: string;
+  /** Byte offset in the source string where `<<<<<<< ` starts. */
+  blockStart: number;
+  /** Byte offset immediately after the last char of `>>>>>>> ...\n`. */
+  blockEnd: number;
+}
+
+/**
+ * Extract the first git conflict block from `content` using a linear
+ * line-by-line scan. Returns null when no conflict block is present or
+ * when the block is malformed.
+ *
+ * Replaces the `[\s\S]*?` lazy-regex approach which is polynomial on
+ * adversarial inputs (CodeQL js/polynomial-redos, alerts #54 and #55).
+ */
+function extractFirstConflictBlock(content: string): ConflictBlock | null {
+  const lines = content.split('\n');
+  let state: 'outside' | 'head' | 'incoming' = 'outside';
+  let blockStartOffset = 0;
+  let headLines: string[] = [];
+  let incomingLines: string[] = [];
+  let offset = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineWithNl = line + (i < lines.length - 1 ? '\n' : '');
+
+    if (state === 'outside') {
+      if (line.startsWith('<<<<<<<')) {
+        state = 'head';
+        blockStartOffset = offset;
+        headLines = [];
+        incomingLines = [];
+      }
+    } else if (state === 'head') {
+      if (line.startsWith('=======')) {
+        state = 'incoming';
+      } else {
+        headLines.push(lineWithNl);
+      }
+    } else if (state === 'incoming') {
+      if (line.startsWith('>>>>>>>')) {
+        const blockEnd = offset + lineWithNl.length;
+        return {
+          headSide: headLines.join(''),
+          incomingSide: incomingLines.join(''),
+          blockStart: blockStartOffset,
+          blockEnd,
+        };
+      } else {
+        incomingLines.push(lineWithNl);
+      }
+    }
+
+    offset += lineWithNl.length;
+  }
+  return null; // no well-formed conflict block found
+}
 
 export interface LateRebaseOptions {
   /** Absolute path to the git worktree. */
@@ -113,27 +179,23 @@ function parseConflictingFiles(porcelain: string): string[] {
 export function resolveChangelogConflict(content: string): string | null {
   // Quick sanity: if no conflict markers, nothing to do
   if (!content.includes('<<<<<<<')) return content;
-  // Bound input before the double-lazy conflict regex. A >1 MB conflicted file
-  // is never a mechanical CHANGELOG bullet conflict — escalate to manual
-  // resolution. Also neutralises the polynomial worst case of the dual
-  // `[\s\S]*?` groups on marker-less input (CodeQL js/polynomial-redos).
+  // Bound input: a >1 MB conflicted file is never a mechanical CHANGELOG
+  // bullet conflict — escalate to manual resolution.
   if (content.length > MAX_CONFLICT_CONTENT) return null;
 
   // We expect exactly one pattern: conflict markers wrapping two sets of
   // `- ` bullet lines inside an `## [Unreleased]` / `## Unreleased` section.
-  // Match conflict block: <<<<<<< … ======= … >>>>>>>
-  const conflictPattern = /<<<<<<< [^\n]+\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> [^\n]*/g;
-
+  // Uses the linear line-by-line extractFirstConflictBlock() rather than the
+  // polynomial `[\s\S]*?` regex (CodeQL js/polynomial-redos alerts #54/#55).
   let result = content;
-  let match: RegExpExecArray | null;
-  while ((match = conflictPattern.exec(content)) !== null) {
-    const headSide = match[1]; // current branch (incoming to this branch)
-    const incomingSide = match[2]; // from origin/main (theirs)
+  let block: ConflictBlock | null;
+  while ((block = extractFirstConflictBlock(result)) !== null) {
+    const { headSide, incomingSide, blockStart, blockEnd } = block;
 
     // Only resolve when BOTH sides contain exclusively bullet lines (- prefix)
     // and/or blank lines. Anything else → escalate.
-    // The regex requires lines to be EITHER blank/whitespace-only OR start with
-    // optional whitespace then `- ` (the CHANGELOG bullet prefix). Lines like
+    // Lines must be EITHER blank/whitespace-only OR start with optional
+    // whitespace then `- ` (the CHANGELOG bullet prefix). Lines like
     // `const x = 1;` do NOT match `^\s*-\s` and correctly escalate.
     const isBulletOnly = (text: string) =>
       text.split('\n').every((l) => /^\s*$/.test(l) || /^\s*-\s/.test(l));
@@ -144,10 +206,7 @@ export function resolveChangelogConflict(content: string): string | null {
     // Incoming-from-main lines come FIRST (they already landed on main →
     // chronologically earlier), then the current branch's new additions.
     const resolved = incomingSide.trimEnd() + '\n' + headSide.trimEnd() + '\n';
-    result = result.slice(0, match.index) + resolved + result.slice(match.index + match[0].length);
-    // Reset regex to re-run on the modified string from the start
-    conflictPattern.lastIndex = 0;
-    content = result;
+    result = result.slice(0, blockStart) + resolved + result.slice(blockEnd);
   }
   return result;
 }
@@ -163,18 +222,15 @@ export function resolveChangelogConflict(content: string): string | null {
  */
 export function resolveTestConflict(content: string): string | null {
   if (!content.includes('<<<<<<<')) return content;
-  // See resolveChangelogConflict: bound input before the double-lazy regex —
-  // escalate oversized conflicts, neutralise the polynomial worst case
-  // (CodeQL js/polynomial-redos).
+  // Bound input: escalate oversized conflicts to manual resolution.
   if (content.length > MAX_CONFLICT_CONTENT) return null;
 
-  const conflictPattern = /<<<<<<< [^\n]+\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> [^\n]*/g;
-
+  // Uses the linear line-by-line extractFirstConflictBlock() rather than the
+  // polynomial `[\s\S]*?` regex (CodeQL js/polynomial-redos alerts #54/#55).
   let result = content;
-  let match: RegExpExecArray | null;
-  while ((match = conflictPattern.exec(content)) !== null) {
-    const headSide = match[1];
-    const incomingSide = match[2];
+  let block: ConflictBlock | null;
+  while ((block = extractFirstConflictBlock(result)) !== null) {
+    const { headSide, incomingSide, blockStart, blockEnd } = block;
 
     // Detect test-only additions: both sides contain it()/test()/describe()
     const hasTestCalls = (text: string) => /\b(it|test|describe)\s*\(/.test(text);
@@ -200,9 +256,7 @@ export function resolveTestConflict(content: string): string | null {
 
     // KEEP BOTH: head side first, then incoming side
     const resolved = headSide.trimEnd() + '\n' + incomingSide.trimEnd() + '\n';
-    result = result.slice(0, match.index) + resolved + result.slice(match.index + match[0].length);
-    conflictPattern.lastIndex = 0;
-    content = result;
+    result = result.slice(0, blockStart) + resolved + result.slice(blockEnd);
   }
   return result;
 }

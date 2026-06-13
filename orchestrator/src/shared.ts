@@ -108,6 +108,33 @@ export function interpolateBranchPattern(
 }
 
 /**
+ * Validate that a computed branch name is safe to pass to `git` as a
+ * positional argument (defense against second-order command injection,
+ * CodeQL js/second-order-command-line-injection, alert #167).
+ *
+ * Git ref names MUST:
+ *   - Not start with `-` (would be parsed as a flag, e.g. `--upload-pack=cmd`)
+ *   - Contain only safe characters: alphanumerics, `/`, `-`, `_`, `.`
+ *
+ * Throws `Error` when the name fails validation so the pipeline aborts
+ * before any `git fetch/checkout/push` call uses the tainted value.
+ */
+export function validateBranchName(name: string): void {
+  if (name.startsWith('-')) {
+    throw new Error(
+      `[security] Computed branch name starts with '-' and would be interpreted as a git flag: ${JSON.stringify(name)}`,
+    );
+  }
+  // Allow the chars that appear in all supported branch name templates:
+  // alphanumerics, forward-slash (namespace separator), hyphen, underscore, dot.
+  if (!/^[A-Za-z0-9/_.-]+$/.test(name)) {
+    throw new Error(
+      `[security] Computed branch name contains characters outside the safe ref charset [A-Za-z0-9/_.-]: ${JSON.stringify(name)}`,
+    );
+  }
+}
+
+/**
  * Interpolate a PR title template by replacing `{key}` placeholders.
  * Falls back to `fix: {issueTitle} (#{issueNumber})` when no template is provided.
  */

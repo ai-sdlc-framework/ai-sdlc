@@ -54,6 +54,7 @@ import {
   issueIdToNumber,
   formatIssueRef,
   buildIssueTemplateVars,
+  validateBranchName,
 } from './shared.js';
 import { cleanGitEnv } from './runtime/git-env.js';
 import {
@@ -757,6 +758,10 @@ async function executePipelineBody(
   // 7. Create branch and checkout locally (read pattern from pipeline config)
   const branchVars = buildIssueTemplateVars(issueId, issue.title);
   const branchName = interpolateBranchPattern(config.pipeline?.spec.branching?.pattern, branchVars);
+  // Defense against second-order command injection: reject branch names that
+  // start with '-' (git flag injection) or contain chars outside the safe ref
+  // charset. CodeQL alert #167 (js/second-order-command-line-injection).
+  validateBranchName(branchName);
   await sc.createBranch({ name: branchName });
   // cleanGitEnv() prevents leaked GIT_DIR from corrupting these calls (AISDLC-72).
   // Guard: skip fetch when no 'origin' remote is configured (local-only repos).

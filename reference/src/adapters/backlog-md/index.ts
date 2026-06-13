@@ -114,10 +114,12 @@ function extractAcceptanceCriteria(body: string): string {
   if (beginIdx !== -1 && endIdx !== -1) {
     return body.slice(beginIdx + acBegin.length, endIdx).trim();
   }
-  // Fall back to ## Acceptance Criteria section. `[ \t]*\n` instead of `\s*\n`
-  // so the optional whitespace can't overlap the pinned newline — avoids
-  // polynomial backtracking on task bodies (CodeQL js/polynomial-redos).
-  const acMatch = body.match(/## Acceptance Criteria[ \t]*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
+  // Fall back to ## Acceptance Criteria section.
+  // `[ \t]*\n` avoids `\s*\n` overlap; `(?:(?!\n## |\n<!-- )[\s\S])*` replaces
+  // `[\s\S]*?` with a character-by-character negative lookahead that is linear
+  // rather than polynomial on adversarial task bodies
+  // (CodeQL js/polynomial-redos alerts #139/#140).
+  const acMatch = body.match(/## Acceptance Criteria[ \t]*\n((?:(?!\n## |\n<!-- )[\s\S])*)/);
   return acMatch ? acMatch[1].trim() : '';
 }
 
@@ -127,10 +129,12 @@ function extractDescription(body: string): string {
   const beginIdx = body.indexOf(beginMarker);
   const endIdx = body.indexOf(endMarker);
   if (beginIdx === -1 || endIdx === -1) {
-    // Fall back to first ## Description section content. `[ \t]*\n` instead of
-    // `\s*\n` so the optional whitespace can't overlap the pinned newline —
-    // avoids polynomial backtracking on task bodies (CodeQL js/polynomial-redos).
-    const descMatch = body.match(/## Description[ \t]*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
+    // Fall back to first ## Description section content.
+    // `[ \t]*\n` avoids `\s*\n` overlap; `(?:(?!\n## |\n<!-- )[\s\S])*` replaces
+    // `[\s\S]*?` with a character-by-character negative lookahead that is linear
+    // rather than polynomial on adversarial task bodies
+    // (CodeQL js/polynomial-redos alerts #139/#140).
+    const descMatch = body.match(/## Description[ \t]*\n((?:(?!\n## |\n<!-- )[\s\S])*)/);
     return descMatch ? descMatch[1].trim() : '';
   }
   return body.slice(beginIdx + beginMarker.length, endIdx).trim();

@@ -3,7 +3,7 @@ id: AISDLC-535
 title: >-
   fix(security): resolve CodeQL source-code findings — ReDoS, incomplete
   sanitization, second-order command injection, clear-text logging
-status: To Do
+status: Done
 assignee: []
 labels:
   - security
