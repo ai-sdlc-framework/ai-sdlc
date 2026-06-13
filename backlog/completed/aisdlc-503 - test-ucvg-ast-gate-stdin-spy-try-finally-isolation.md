@@ -1,7 +1,7 @@
 ---
 id: AISDLC-503
 title: 'test: isolate ucvg ast-gate stdin spies in try/finally (AISDLC-501 reviewer minor)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-03'
 labels:
