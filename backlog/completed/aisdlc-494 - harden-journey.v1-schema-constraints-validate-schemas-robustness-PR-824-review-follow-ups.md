@@ -3,7 +3,7 @@ id: AISDLC-494
 title: >-
   harden journey.v1 schema constraints + validate-schemas robustness (PR #824
   review follow-ups)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-06-01 17:18'
 labels:
