@@ -25,9 +25,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = resolve(__dirname, '..');
 
 // Actions intentionally pinned to a tag rather than a SHA. Keep in sync with
-// the rationale in ai-sdlc-gate.test.mjs (alls-green / paths-filter exact-tag
-// assertions). Adding an entry here is a deliberate, reviewed decision.
-const TAG_PINNED_ALLOWLIST = new Set(['re-actors/alls-green@release/v1', 'dorny/paths-filter@v4']);
+// the rationale in ai-sdlc-gate.test.mjs (alls-green exact-tag assertion).
+// Adding an entry here is a deliberate, reviewed decision.
+// Note: dorny/paths-filter was removed from this allowlist when it was pinned
+// to a full SHA (fbd0ab8f3e69293af611ebaee6363fc25e6d187d = v4.0.1) to
+// resolve PinnedDependenciesID CodeQL alerts #164, #165, #166.
+const TAG_PINNED_ALLOWLIST = new Set(['re-actors/alls-green@release/v1']);
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 

@@ -210,7 +210,7 @@ jobs:
     if: needs.drift-check.outputs.drift_detected == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

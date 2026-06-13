@@ -335,13 +335,19 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
-  it('detect job uses dorny/paths-filter@v4 with predicate-quantifier: every', () => {
+  it('detect job uses dorny/paths-filter (SHA-pinned) with predicate-quantifier: every', () => {
     const detect = workflow.jobs.detect;
     const filterStep = detect.steps.find(
       (s) => typeof s.uses === 'string' && s.uses.startsWith('dorny/paths-filter'),
     );
     assert.ok(filterStep, 'detect must use dorny/paths-filter');
-    assert.match(filterStep.uses, /^dorny\/paths-filter@v4$/);
+    // Pin must be a full 40-hex SHA (PinnedDependenciesID CodeQL fix — alerts #164, #165).
+    // fbd0ab8f3e69293af611ebaee6363fc25e6d187d = v4.0.1
+    assert.match(
+      filterStep.uses,
+      /^dorny\/paths-filter@[0-9a-f]{40}$/,
+      'dorny/paths-filter must be pinned to a full SHA (not a tag) to satisfy PinnedDependenciesID',
+    );
     // `every` quantifier is REQUIRED for correct mixed-PR handling.
     // Default (`some`) treats one-docs-one-code PRs as docs-only,
     // which would skip build-test on real code changes — the exact

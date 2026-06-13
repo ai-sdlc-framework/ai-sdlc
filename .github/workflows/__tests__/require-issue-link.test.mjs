@@ -123,18 +123,31 @@ describe('require-issue-link.yml — workflow structure (AISDLC-443)', () => {
     );
   });
 
-  it('workflow permissions include statuses:write and pull-requests:read (AC #2)', () => {
+  it('workflow top-level permissions are least-privilege (contents:read only) (AC #2)', () => {
     const perms = workflow.permissions ?? {};
-    assert.equal(perms.statuses, 'write', 'must have statuses:write to post ai-sdlc/issue-link');
     assert.equal(
-      perms['pull-requests'],
+      perms.contents,
       'read',
-      'must have pull-requests:read to read PR metadata',
+      'top-level permissions must be contents:read (least-privilege default)',
     );
     assert.notEqual(
       perms.contents,
       'write',
-      'must NOT have contents:write (unnecessary; security hygiene)',
+      'must NOT have contents:write at top-level (unnecessary; security hygiene)',
+    );
+  });
+
+  it('check-issue-link job permissions include statuses:write and pull-requests:read (AC #2)', () => {
+    const jobPerms = checkJob.permissions ?? {};
+    assert.equal(
+      jobPerms.statuses,
+      'write',
+      'check-issue-link job must have statuses:write to post ai-sdlc/issue-link',
+    );
+    assert.equal(
+      jobPerms['pull-requests'],
+      'read',
+      'check-issue-link job must have pull-requests:read to read PR metadata',
     );
   });
 
