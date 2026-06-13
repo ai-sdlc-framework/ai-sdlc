@@ -471,6 +471,10 @@ describe('runAstGateCli — ast-gate subcommand', () => {
   let io: ReturnType<typeof captureIO>;
   let tmpDir: string;
   let origIsTTY: boolean | undefined;
+  // Spy handles declared at describe scope so afterEach can always restore them,
+  // even when runUcvgCli rejects unexpectedly before the inline mockRestore() calls.
+  let stdinOnSpy: { mockRestore(): void } | null = null;
+  let setEncodingSpy: { mockRestore(): void } | null = null;
 
   beforeEach(() => {
     io = captureIO();
@@ -479,8 +483,15 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     vi.mocked(astGateMod.runAstGate).mockReset();
     vi.mocked(astGateMod.buildBlockedEvent).mockReset();
     origIsTTY = process.stdin.isTTY;
+    stdinOnSpy = null;
+    setEncodingSpy = null;
   });
   afterEach(() => {
+    // Restore stdin spies first — guarantees isolation even on unexpected rejections.
+    stdinOnSpy?.mockRestore();
+    setEncodingSpy?.mockRestore();
+    stdinOnSpy = null;
+    setEncodingSpy = null;
     io.restore();
     rmSync(tmpDir, { recursive: true, force: true });
     // Restore isTTY
@@ -517,8 +528,10 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     const { Readable } = await import('node:stream');
     // Mock stdin via spyOn to return a stream instead
     const fakeStream = Readable.from(['src/index.ts\n']);
-    // Override process.stdin events by monkeypatching
-    const stdinOnSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((
+    // Override process.stdin events by monkeypatching.
+    // Assign to describe-scope variables so afterEach restores them even on
+    // unexpected rejection (hardened per AISDLC-503).
+    stdinOnSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((
       event: string,
       handler: unknown,
     ) => {
@@ -531,7 +544,9 @@ describe('runAstGateCli — ast-gate subcommand', () => {
       }
       return process.stdin;
     }) as never);
-    vi.spyOn(process.stdin, 'setEncoding').mockImplementation((_enc) => process.stdin);
+    setEncodingSpy = vi
+      .spyOn(process.stdin, 'setEncoding')
+      .mockImplementation((_enc) => process.stdin);
 
     vi.mocked(astGateMod.loadAstGateConfig).mockReturnValue({
       protectedPaths: [],
@@ -548,9 +563,6 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     });
 
     await runUcvgCli(['ast-gate', '--pr-number', '10', '--author', 'alice', '--work-dir', tmpDir]);
-
-    stdinOnSpy.mockRestore();
-    vi.mocked(process.stdin.setEncoding).mockRestore?.();
 
     const parsed = JSON.parse(io.stdoutBuf().trim()) as Record<string, unknown>;
     expect(parsed['outcome']).toBe('pass');
@@ -570,7 +582,9 @@ describe('runAstGateCli — ast-gate subcommand', () => {
 
     const { Readable } = await import('node:stream');
     const fakeStream = Readable.from(['.github/workflows/main.yml\n']);
-    const stdinOnSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((
+    // Assign to describe-scope variables so afterEach restores them even on
+    // unexpected rejection (hardened per AISDLC-503).
+    stdinOnSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((
       event: string,
       handler: unknown,
     ) => {
@@ -579,7 +593,9 @@ describe('runAstGateCli — ast-gate subcommand', () => {
       else if (event === 'error') fakeStream.on('error', handler as (err: Error) => void);
       return process.stdin;
     }) as never);
-    vi.spyOn(process.stdin, 'setEncoding').mockImplementation((_enc) => process.stdin);
+    setEncodingSpy = vi
+      .spyOn(process.stdin, 'setEncoding')
+      .mockImplementation((_enc) => process.stdin);
 
     vi.mocked(astGateMod.loadAstGateConfig).mockReturnValue({
       protectedPaths: ['.github/**'],
@@ -603,9 +619,6 @@ describe('runAstGateCli — ast-gate subcommand', () => {
 
     await runUcvgCli(['ast-gate', '--pr-number', '10', '--author', 'alice', '--work-dir', tmpDir]);
 
-    stdinOnSpy.mockRestore();
-    vi.mocked(process.stdin.setEncoding).mockRestore?.();
-
     const parsed = JSON.parse(io.stdoutBuf().trim()) as Record<string, unknown>;
     expect(parsed['outcome']).toBe('abort-protected-path');
     expect(parsed['offendingPaths']).toContain('.github/workflows/main.yml');
@@ -627,7 +640,9 @@ describe('runAstGateCli — ast-gate subcommand', () => {
 
     const { Readable } = await import('node:stream');
     const fakeStream = Readable.from(['some/file.ts\n']);
-    const stdinOnSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((
+    // Assign to describe-scope variables so afterEach restores them even on
+    // unexpected rejection (hardened per AISDLC-503).
+    stdinOnSpy = vi.spyOn(process.stdin, 'on').mockImplementation(((
       event: string,
       handler: unknown,
     ) => {
@@ -636,7 +651,9 @@ describe('runAstGateCli — ast-gate subcommand', () => {
       else if (event === 'error') fakeStream.on('error', handler as (err: Error) => void);
       return process.stdin;
     }) as never);
-    vi.spyOn(process.stdin, 'setEncoding').mockImplementation((_enc) => process.stdin);
+    setEncodingSpy = vi
+      .spyOn(process.stdin, 'setEncoding')
+      .mockImplementation((_enc) => process.stdin);
 
     vi.mocked(astGateMod.loadAstGateConfig).mockImplementation(() => {
       throw new Error('config parse error');
@@ -645,9 +662,6 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     await expect(
       runUcvgCli(['ast-gate', '--pr-number', '10', '--author', 'alice', '--work-dir', tmpDir]),
     ).rejects.toThrow('process.exit(1)');
-
-    stdinOnSpy.mockRestore();
-    vi.mocked(process.stdin.setEncoding).mockRestore?.();
 
     expect(io.exitCode()).toBe(1);
     const parsed = JSON.parse(io.stdoutBuf().trim()) as Record<string, unknown>;
