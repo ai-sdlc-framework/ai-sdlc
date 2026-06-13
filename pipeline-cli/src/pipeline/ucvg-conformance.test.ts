@@ -52,7 +52,11 @@ import {
   STAGE_1_HEURISTIC_REQUEST_DECISION_SUMMARY,
   type ChangedFile,
 } from './ast-gate.js';
-import { SANDBOX_ARTIFACT_SENTINELS, detectSandboxArtifacts } from './clean-room-signer.js';
+import {
+  SANDBOX_ARTIFACT_SENTINELS,
+  detectSandboxArtifacts,
+  runCleanRoomSigner,
+} from './clean-room-signer.js';
 
 // Stage 3 (sandbox runner types + resource limits)
 import {
@@ -60,13 +64,13 @@ import {
   loadSandboxConfig,
   DEFAULT_RESOURCE_LIMITS,
   DEFAULT_SANDBOX_CONFIG,
+  buildResourceBreachEvent,
+  type ResourceBreachType,
 } from './sandbox-runner.js';
 
 // Stage 4 — Report Validator (Zod boundary)
 import { validateReport, SIGSTORE_ANCHOR_REQUEST_DECISION_SUMMARY } from './report-validator.js';
 import type { UntrustedPrReport } from './report-validator.js';
-
-// (Clean-room signer: detectSandboxArtifacts imported above)
 
 // ── Shared fixtures ────────────────────────────────────────────────────────────
 
@@ -355,7 +359,7 @@ describe('RFC-0043 AC-3 — prompt injection → finding; clean-room signer vali
     expect(result.valid).toBe(false);
   });
 
-  it('signer would reject signing when consensus.approved is false (injection found)', () => {
+  it('signer refuses to sign when consensus.approved is false (injection found)', () => {
     // Simulate a report where the security reviewer detected injection
     const reportWithInjection: UntrustedPrReport = {
       ...VALID_REPORT,
@@ -374,14 +378,40 @@ describe('RFC-0043 AC-3 — prompt injection → finding; clean-room signer vali
       },
       consensus: { approved: false, blockingFindings: 1 },
     };
-    // The report validates (schema is correct)
+
+    // The report validates at the Zod boundary (injection is a finding, not malformed)
     const validationResult = validateReport(reportWithInjection);
     expect(validationResult.valid).toBe(true);
-    // But the signer would refuse to sign because consensus.approved === false
-    if (validationResult.valid) {
-      expect(validationResult.report.consensus.approved).toBe(false);
-      // The signer checks `consensus.approved` before key resolution
-      // This is the contractual assertion — signer MUST refuse to sign this
+
+    // Now exercise the real runCleanRoomSigner() to confirm the signer-refusal path.
+    // Use an isolated mkdtemp work dir with no sandbox sentinels and no signing key,
+    // so the signer progresses through isolation-check + Zod + consensus gate
+    // and fails at consensus-rejected BEFORE ever attempting key resolution.
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ucvg-conformance-signer-'));
+    try {
+      // Write the report artifact into the isolated tmpDir
+      const reportsDir = join(tmpDir, '.ai-sdlc', 'ucvg', 'reports');
+      mkdirSync(reportsDir, { recursive: true });
+      const reportPath = join(reportsDir, '42.unsigned.json');
+      writeFileSync(reportPath, JSON.stringify(reportWithInjection), 'utf8');
+
+      const result = runCleanRoomSigner({
+        reportArtifactPath: reportPath,
+        repoRoot: tmpDir,
+        taskId: 'AISDLC-504',
+        headSha: 'a'.repeat(40), // matches VALID_REPORT.headSha
+        workDir: tmpDir, // no sandbox sentinels → isolation check passes
+      });
+
+      // The signer MUST refuse at the consensus gate, never reaching key-resolution
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.phase).toBe('consensus-rejected');
+        expect(result.error).toContain('[clean-room-signer]');
+        expect(result.error).toContain('consensus.approved');
+      }
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });
@@ -763,18 +793,28 @@ describe('RFC-0043 E2E — synthetic untrusted PR scenarios', () => {
 
   describe('(c) Resource exhaustion → abort shape', () => {
     it('resource breach event shape is correct for wall-clock exhaustion', () => {
-      // The event shape is verified structurally (no live sandbox needed)
-      const event = {
-        type: 'UntrustedPrResourceExhausted' as const,
-        ts: new Date().toISOString(),
-        prNumber: 99,
-        breachType: 'wall-clock' as const,
-        limitValue: 600,
-        limitUnit: 'seconds',
-      };
-      expect(event.type).toBe('UntrustedPrResourceExhausted');
+      // Call the real factory from sandbox-runner.ts — this exercises production
+      // code rather than asserting on a hand-constructed plain object literal.
+      const breachType: ResourceBreachType = 'wall-clock';
+      const prNumber = 99;
+      const limitSeconds = DEFAULT_RESOURCE_LIMITS.wallClockSeconds; // 600
+      const now = new Date('2026-06-02T10:00:00.000Z');
+      const event = buildResourceBreachEvent(
+        prNumber,
+        breachType,
+        limitSeconds,
+        'seconds',
+        undefined,
+        now,
+      );
+
+      // Assert on the real factory output fields
+      expect(event.type).toBe('ResourceBreach');
       expect(event.breachType).toBe('wall-clock');
-      expect(event.prNumber).toBe(99);
+      expect(event.prNumber).toBe(prNumber);
+      expect(event.limit).toBe(limitSeconds);
+      expect(event.limitUnit).toBe('seconds');
+      expect(event.ts).toBe(now.toISOString());
       // The event does NOT contain internal tracker IDs
       expect(JSON.stringify(event)).not.toMatch(/AISDLC-\d+/);
     });
