@@ -3,7 +3,7 @@ id: AISDLC-544
 title: >-
   chore: reviewer minor-findings sweep from the 2026-06-12 drain — boundary
   semantics, regression-test gaps, and hygiene nits across AISDLC-468/535/536
-status: To Do
+status: Done
 assignee: []
 labels:
   - tests
