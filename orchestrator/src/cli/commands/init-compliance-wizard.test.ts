@@ -360,6 +360,46 @@ describe('buildComplianceYaml()', () => {
     });
     expect(yaml).toContain('auditExports: []');
   });
+
+  it('escapes literal backslash in attestedBy before the double-quote (ordering fix)', () => {
+    // A value like 'foo\\bar' must produce '"foo\\\\bar"' (backslash escaped first),
+    // not '"foo\\bar"' (where \b would be a YAML escape sequence).
+    // This verifies the CodeQL js/incomplete-sanitization fix (backslash-first ordering).
+    const yaml = buildComplianceYaml({
+      projectName: 'my-project',
+      regimes: ['HIPAA'],
+      attestedBy: 'user\\name@example.com',
+      attestedAt: '2026-05-18T00:00:00.000Z',
+      derivedGates: computeInitWizardDerivedGates(['HIPAA']),
+    });
+    // The backslash must be doubled in the YAML output
+    expect(yaml).toContain('attestedBy: "user\\\\name@example.com"');
+  });
+
+  it('escapes double-quote in projectName correctly (backslash-first ordering)', () => {
+    const yaml = buildComplianceYaml({
+      projectName: 'my"project',
+      regimes: [],
+      attestedBy: 'test@example.com',
+      attestedAt: '2026-05-18T00:00:00.000Z',
+      derivedGates: { ...BASELINE_DERIVED_GATES },
+    });
+    expect(yaml).toContain('name: "my\\"project"');
+  });
+
+  it('escapes attestedAt when it contains special characters', () => {
+    // attestedAt is now wrapped in escapeYamlDoubleQuoted for uniformity.
+    // Standard ISO 8601 timestamps are safe, but the wrapping ensures
+    // any pathological value (e.g. operator-supplied date with backslash) is safe.
+    const yaml = buildComplianceYaml({
+      projectName: 'my-project',
+      regimes: ['HIPAA'],
+      attestedBy: 'test@example.com',
+      attestedAt: '2026-05-18T12:00:00.000Z',
+      derivedGates: computeInitWizardDerivedGates(['HIPAA']),
+    });
+    expect(yaml).toContain('attestedAt: "2026-05-18T12:00:00.000Z"');
+  });
 });
 
 // ── COMPLIANCE_REGIME_CHOICES ────────────────────────────────────────────

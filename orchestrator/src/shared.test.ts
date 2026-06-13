@@ -655,4 +655,11 @@ describe('validateBranchName()', () => {
     expect(() => validateBranchName('foo@bar')).toThrow(/safe ref charset/);
     expect(() => validateBranchName('foo\x00bar')).toThrow(/safe ref charset/);
   });
+
+  it('rejects empty string (no valid ref characters)', () => {
+    // An empty branch name would be passed as an empty argument to git,
+    // which is a malformed invocation. The regex ^[A-Za-z0-9/_.-]+$ requires
+    // at least one character, so empty string correctly fails.
+    expect(() => validateBranchName('')).toThrow(/safe ref charset/);
+  });
 });

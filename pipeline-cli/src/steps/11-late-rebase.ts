@@ -82,7 +82,7 @@ function extractFirstConflictBlock(content: string): ConflictBlock | null {
         incomingLines = [];
       }
     } else if (state === 'head') {
-      if (line.startsWith('=======')) {
+      if (line === '=======') {
         state = 'incoming';
       } else {
         headLines.push(lineWithNl);

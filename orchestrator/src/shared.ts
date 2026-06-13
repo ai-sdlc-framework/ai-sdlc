@@ -99,6 +99,21 @@ export function slugify(input: string, maxLen = 40): string {
 /**
  * Interpolate a branch name pattern by replacing `{key}` placeholders.
  * Falls back to `ai-sdlc/issue-{issueNumber}` when no pattern is provided.
+ *
+ * **Security advisory — `{issueTitle}` is unsafe in custom branch patterns.**
+ * Issue titles are user-supplied and may contain characters outside the safe
+ * git ref charset `[A-Za-z0-9/_.-]` (e.g. spaces, colons, parentheses, Unicode).
+ * When those characters are interpolated into a custom `branchPattern`, the
+ * resulting branch name fails `validateBranchName()` and the pipeline aborts.
+ * Use `{slug}` instead — it is the output of `slugify(issueTitle)` and is
+ * guaranteed to consist only of lowercase alphanumerics and hyphens.
+ *
+ * @example
+ * // SAFE:
+ * 'ai-sdlc/{issueIdLower}-{slug}'   // slug is pre-sanitized
+ *
+ * // UNSAFE (may throw validateBranchName):
+ * 'ai-sdlc/{issueIdLower}-{issueTitle}'  // issueTitle is raw user input
  */
 export function interpolateBranchPattern(
   pattern: string | undefined,

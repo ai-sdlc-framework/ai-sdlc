@@ -363,7 +363,7 @@ export function buildComplianceYaml(opts: {
       const lines = [
         `    - id: ${id}`,
         `      attestedBy: ${quotedAttestedBy}`,
-        `      attestedAt: "${attestedAt}"`,
+        `      attestedAt: "${escapeYamlDoubleQuoted(attestedAt)}"`,
       ];
       if (attestedNotes) {
         lines.push(`      attestedNotes: "${escapeYamlDoubleQuoted(attestedNotes)}"`);

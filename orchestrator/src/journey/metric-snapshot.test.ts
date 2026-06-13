@@ -232,11 +232,14 @@ describe('computeAuditOverdueErho5 — graduated policy', () => {
   const soul = 'spry-engage';
   const journey = 'onboarding';
 
-  it('returns no impact when audit is not overdue (daysOverdue=0)', () => {
+  it('returns warn at daysOverdue=0 (cadence+0d fires graduated warn, no grace)', () => {
+    // daysOverdue=0 means exactly at the cadence boundary. The graduated policy
+    // warnAt threshold defaults to 0, so a warn Decision is emitted at day 0.
+    // (The early-exit only catches daysOverdue < 0 — truly not-yet-due audits.)
     const result = computeAuditOverdueErho5({ soulId: soul, journeyId: journey, daysOverdue: 0 });
     expect(result.impact).toBe('warn');
     expect(result.erho5Multiplier).toBe(1.0);
-    expect(result.decision).toBeNull();
+    expect(result.decision).toBe('journey-audit-overdue-warn');
   });
 
   it('returns no impact when audit is negative days overdue (not yet due)', () => {
@@ -388,15 +391,18 @@ describe('computeAuditOverdueErho5 — hard-block policy', () => {
   const soul = 'pci-shop';
   const journey = 'payment-checkout';
 
-  it('not overdue: no impact', () => {
+  it('fires effective-block at daysOverdue=0 (cadence+0d, no grace)', () => {
+    // hard-block design: "Immediate Eρ₅ fail at cadence+0d (strictest, no grace)".
+    // daysOverdue=0 means exactly at the cadence boundary → effective-block.
     const result = computeAuditOverdueErho5({
       soulId: soul,
       journeyId: journey,
       daysOverdue: 0,
       policy: 'hard-block',
     });
-    expect(result.erho5Multiplier).toBe(1.0);
-    expect(result.decision).toBeNull();
+    expect(result.impact).toBe('effective-block');
+    expect(result.erho5Multiplier).toBe(0.0);
+    expect(result.decision).toBe('journey-audit-overdue-blocking');
   });
 
   it('even 1 day overdue: immediate effective-block', () => {
@@ -536,6 +542,87 @@ describe('resolveStrictestGracePolicy — RFC-0022 multi-posture composition', (
   });
 });
 
+// ── Future-dated recordedAt guard ─────────────────────────────────────
+
+describe('getLatestMetricSnapshot — future-dated recordedAt guard', () => {
+  it('treats future-dated recordedAt as stale (clamps negative age)', () => {
+    // A snapshot with recordedAt in the future would yield negative ageInDays,
+    // making it appear perpetually fresh. The guard clamps this to stale.
+    const futureDate = new Date(new Date(NOW).getTime() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    const snapshots = [makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.99, futureDate)];
+    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+      snapshots,
+      now: NOW,
+    });
+    expect(result.freshness).toBe('stale');
+    expect(result.decision).toBe('journey-metric-stale');
+  });
+
+  it('treats present-day recordedAt (equal to now) as fresh (age=0, within threshold)', () => {
+    const snapshots = [makeSnapshot('spry-engage/onboarding', 'completion-rate', 0.5, NOW)];
+    const result = getLatestMetricSnapshot('spry-engage/onboarding', 'completion-rate', {
+      snapshots,
+      now: NOW,
+    });
+    expect(result.freshness).toBe('fresh');
+    expect(result.decision).toBeUndefined();
+  });
+});
+
+// ── NaN guard in graduated path ────────────────────────────────────────
+
+describe('computeAuditOverdueErho5 — NaN / non-finite guard', () => {
+  it('treats NaN daysOverdue as effective-block (fail-closed, not fail-open)', () => {
+    const result = computeAuditOverdueErho5({
+      soulId: 'test-soul',
+      journeyId: 'test-journey',
+      daysOverdue: NaN,
+      policy: 'graduated',
+    });
+    expect(result.impact).toBe('effective-block');
+    expect(result.erho5Multiplier).toBe(0.0);
+    expect(result.decision).toBe('journey-audit-overdue-blocking');
+  });
+
+  it('treats Infinity daysOverdue as effective-block', () => {
+    const result = computeAuditOverdueErho5({
+      soulId: 'test-soul',
+      journeyId: 'test-journey',
+      daysOverdue: Infinity,
+      policy: 'graduated',
+    });
+    expect(result.impact).toBe('effective-block');
+    expect(result.erho5Multiplier).toBe(0.0);
+    expect(result.decision).toBe('journey-audit-overdue-blocking');
+  });
+});
+
+// ── Truly-negative daysOverdue (not-yet-due) ──────────────────────────
+
+describe('computeAuditOverdueErho5 — strictly negative (not-yet-due)', () => {
+  it('returns null decision for daysOverdue=-1 (audit not yet due)', () => {
+    const result = computeAuditOverdueErho5({
+      soulId: 'test-soul',
+      journeyId: 'test-journey',
+      daysOverdue: -1,
+      policy: 'graduated',
+    });
+    expect(result.erho5Multiplier).toBe(1.0);
+    expect(result.decision).toBeNull();
+  });
+
+  it('returns null decision for daysOverdue=-10 with hard-block policy', () => {
+    const result = computeAuditOverdueErho5({
+      soulId: 'test-soul',
+      journeyId: 'test-journey',
+      daysOverdue: -10,
+      policy: 'hard-block',
+    });
+    expect(result.erho5Multiplier).toBe(1.0);
+    expect(result.decision).toBeNull();
+  });
+});
+
 // ── Constants and exports sanity checks ───────────────────────────────
 
 describe('exported constants', () => {
@@ -557,3 +644,9 @@ describe('exported constants', () => {
     expect(ERHO5_MULTIPLIERS['effective-block']).toBe(0.0);
   });
 });
+
+// Note: AJV schema round-trip tests for metric-snapshot.v1.schema.json live in
+// reference/src/core/metric-snapshot-schema.test.ts — AJV is a dependency of
+// @ai-sdlc/reference, not @ai-sdlc/orchestrator. The round-trip tests there
+// cover: accept well-formed, reject missing-required, reject wrong apiVersion const,
+// reject metricId pattern violations, and reject unknown properties.

@@ -72,6 +72,53 @@ describe('resolveChangelogConflict', () => {
     expect(content.length).toBeGreaterThan(1_000_000);
     expect(resolveChangelogConflict(content)).toBeNull();
   });
+
+  it('resolves multiple conflict blocks in the same file (while-loop path)', () => {
+    // Two separate conflict blocks in one CHANGELOG — exercises the while-loop
+    // inside resolveChangelogConflict. Each block is a bullet-only conflict.
+    const content = `## [Unreleased]
+### Added
+<<<<<<< HEAD
+- feat A from branch
+=======
+- feat B from main
+>>>>>>> origin/main
+### Fixed
+<<<<<<< HEAD
+- fix X from branch
+=======
+- fix Y from main
+>>>>>>> origin/main
+`;
+    const result = resolveChangelogConflict(content);
+    expect(result).not.toBeNull();
+    // Both conflict blocks must be resolved
+    expect(result).not.toContain('<<<<<<<');
+    expect(result).not.toContain('>>>>>>>');
+    expect(result).not.toContain('=======');
+    // All four bullets preserved
+    expect(result).toContain('- feat A from branch');
+    expect(result).toContain('- feat B from main');
+    expect(result).toContain('- fix X from branch');
+    expect(result).toContain('- fix Y from main');
+  });
+
+  it('exact separator match: line with trailing chars is NOT treated as separator', () => {
+    // The separator line must be exactly '=======' (no trailing content).
+    // '======= trailing' is treated as head-side content, not the separator.
+    // Only the bare '=======' triggers the state transition to incoming.
+    const content = `<<<<<<< HEAD
+- bullet with trailing separator lookalike on next line
+======= trailing
+=======
+- main bullet
+>>>>>>> origin/main
+`;
+    // The head side contains '======= trailing' which is not a pure bullet line
+    // so the resolver escalates (returns null).
+    const result = resolveChangelogConflict(content);
+    expect(result).toBeNull();
+  });
 });
 
 // ── Unit: resolveTestConflict ────────────────────────────────────────────────

@@ -446,6 +446,16 @@ describe('renderGraph', () => {
     expect(dot).toContain('a \\"quoted\\" title');
     expect(dot).toContain('"AISDLC-A" -> "AISDLC-MISSING"');
   });
+
+  it('DOT: escapes literal backslash before double-quote in node title (ordering fix)', () => {
+    // A title containing a backslash must double the backslash BEFORE escaping
+    // the quote. e.g. 'foo\\bar "baz"' → 'foo\\\\bar \\"baz\\"' in DOT output.
+    // This verifies the CodeQL js/incomplete-sanitization fix (alert #71).
+    writeTaskFile(tmp, { id: 'AISDLC-BS', title: 'foo\\bar' });
+    const dot = renderGraph(buildDependencyGraph({ workDir: tmp }), 'dot');
+    // The backslash in the title should be doubled in the DOT label
+    expect(dot).toContain('foo\\\\bar');
+  });
 });
 
 // ── AISDLC-153: status field consulted alongside file location ──────────

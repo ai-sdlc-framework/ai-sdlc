@@ -255,6 +255,49 @@ describe('checkAndHandleCycle()', () => {
     expect(result.cycleMessage).toContain('Title alert("xss")');
   });
 
+  it('sanitizes interleaved HTML that defeats single-pass stripping (<scr<script>ipt>)', async () => {
+    // Regression test: a single-pass strip of `<[^>]*>` against
+    // `<scr<script>ipt>alert(1)</script>` leaves `ipt>alert(1)` after removing
+    // `<scr<script>` and `</script>`. However a subsequent pass has nothing left
+    // to strip (no remaining `<..>` tags), making the result stable. A naive
+    // approach that only strips the literal `<script>` token (without the
+    // enclosing angle-bracket regex) would leave `<scritp>` intact — that
+    // single-literal approach is what this test guards against.
+    const markers = Array.from({ length: 3 }, () => `Comment\n${createStageMarker('agent')}`);
+    const tracker = makeMockTracker(markers);
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
+
+    const result = await checkAndHandleCycle({
+      issueOrPrId: '42',
+      stage: 'agent',
+      tracker,
+      detector,
+      cycleTemplate: {
+        title: '<scr<script>ipt>alert(1)</script>',
+        body: 'safe body',
+      },
+    });
+
+    // After sanitization, no angle-bracket HTML tags should remain.
+    // The interleaved input produces 'ipt>alert(1)' as plain text — the
+    // angle-bracket opener was consumed but a dangling 'ipt>' text fragment
+    // remains. This is safe (no exploitable tag structure), and the important
+    // invariant is that no parseable `<script>` or similar tag remains.
+    expect(result.cycleMessage).not.toContain('<script>');
+    expect(result.cycleMessage).not.toContain('<scr<script>');
+    // No executable open-tag sequence remains (all < that open a tag were consumed)
+    expect(result.cycleMessage).not.toMatch(/<[a-z]/i);
+  });
+
   it('handles Slack notification failure gracefully', async () => {
     const markers = Array.from({ length: 3 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);

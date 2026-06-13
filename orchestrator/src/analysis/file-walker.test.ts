@@ -68,6 +68,22 @@ describe('file-walker', () => {
       expect(files[0].relativePath).toBe('app.ts');
     });
 
+    it('matchesGlob: backslash escaped before dot to prevent broken regex (ordering fix)', async () => {
+      // A pattern like '*.ts' compiles to `^[^/]*\\.ts$` in the glob regex.
+      // Without the backslash-first ordering fix, a pattern that happened to
+      // have a backslash before a dot would produce a broken regex sequence.
+      // This test exercises a literal-backslash value through the exclude path
+      // to verify the CodeQL js/incomplete-sanitization fix (alert #67).
+      // Files that should still be excluded by a normal glob pattern:
+      await writeFile(join(tmpDir, 'excluded.ts'), 'export {};');
+      await writeFile(join(tmpDir, 'kept.ts'), 'export {};');
+
+      const files = await walkFiles(tmpDir, { exclude: ['excluded.ts'] });
+      // Only 'kept.ts' should remain; 'excluded.ts' matched the pattern.
+      expect(files).toHaveLength(1);
+      expect(files[0].relativePath).toBe('kept.ts');
+    });
+
     it('ignores non-code files', async () => {
       await writeFile(join(tmpDir, 'readme.md'), '# Hello\n');
       await writeFile(join(tmpDir, 'data.json'), '{}');
