@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "54c4344c68c0ca8baeb91f6d5372922737df07d1"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "0ae5d8a14507edd05357e1d35913c4a4b4b9d63974a7e021d9cab57604673db5"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "c016d6e32d69d2a7a9db5732933b424fb88d21f8606aa3cc6343d69daf888928"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "483e9de8b7077f51798a2324f58df0279d9b7325a32b27b8e545933e521f979a"
+    },
+    {
+      "leafIndex": 3,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "598c708c2258dd03d17003b3f014ee0ba2f9406fb7700ba8ef6e9c636db9960a"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "ad777b233b9218f40ae30e1df8916d4d09aefd93ceec2daad366782b8bbab9be",
+        "c47617170c20f4dae82ad4659661f7481bfb80ebbb45c02793aca39a551293a8"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "43d151dc00195644554e3acdd6da2dae435a69ee91892d814044a5ec21833850",
+        "c47617170c20f4dae82ad4659661f7481bfb80ebbb45c02793aca39a551293a8"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "f78ba4ea0828a55a957f010d5a8dae79852f2ccf2e932eca974a7fadf26ad25f",
+        "94dd772e64d288604580a82f5a8396f1daad3c1a6d809a9dbae671e257a808b9"
+      ]
+    },
+    {
+      "leafIndex": 3,
+      "proof": [
+        "99fb48a8c373325ddfb5e6bea972460fc83badae0eb3dccbd9ae5a1c7b6e74ce",
+        "94dd772e64d288604580a82f5a8396f1daad3c1a6d809a9dbae671e257a808b9"
+      ]
+    }
+  ],
+  "rootHash": "d5a05c830f901442658c072c022c954db3201cbd9614ad91cb777006ab59bc07",
+  "rootSignature": "x9OHsPcRLMY08C4SvqL2Ps4lm5vaMQ1denfZmK/zVr8QyJSoeyystRK2ZgE05ierVRrprZt5Xy56xS5NJXi9BA==",
+  "nonce": "1d07a992ac821b75b32432d7146998e2185620cb9d702e9b3281ca83f9914b68",
+  "leafCount": 4,
+  "signedAt": "2026-06-13T00:05:41.579Z",
+  "signerIdentity": "dominique@local:doms-macbook"
+}
