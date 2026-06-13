@@ -355,7 +355,8 @@ export interface AuditOverdueResult {
   readonly erho5Multiplier: number;
   /**
    * Decision to emit for this result.
-   * `null` when daysOverdue <= 0 (audit is not yet overdue).
+   * `null` only when daysOverdue < 0 (audit not yet due). At daysOverdue >= 0
+   * (cadence+0d — no grace) a Decision is emitted per the policy.
    */
   readonly decision: AuditOverdueDecision | null;
 }
@@ -402,11 +403,12 @@ export interface ComputeAuditOverdueOptions {
  *   - daysOverdue ≥ 30  → `effective-block` (multiplier 0.0)
  *
  * Policy `hard-block` (HIPAA/PCI-DSS ultra-strict):
- *   - daysOverdue ≤ 0   → no impact (multiplier 1.0, no Decision)
- *   - daysOverdue > 0   → `effective-block` (multiplier 0.0)
+ *   - daysOverdue < 0   → no impact (multiplier 1.0, no Decision; not yet due)
+ *   - daysOverdue ≥ 0   → `effective-block` (multiplier 0.0) — cadence+0d, no grace
  *
- * When `daysOverdue <= 0`, returns multiplier 1.0 and `decision: null`
- * regardless of policy (audit is on-time or not yet due).
+ * When `daysOverdue < 0`, returns multiplier 1.0 and `decision: null`
+ * regardless of policy (audit is not yet due). At daysOverdue ≥ 0 each policy
+ * emits its Decision (no implicit grace day).
  */
 export function computeAuditOverdueErho5(options: ComputeAuditOverdueOptions): AuditOverdueResult {
   const { soulId, journeyId, daysOverdue, policy = 'graduated', graduatedThresholds } = options;
