@@ -183,8 +183,8 @@ async function isSafeToAutoClean(
     console.info(`[step-3] ${taskIdLower}: keeping branch (gh pr list failed; fail-closed)`);
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
   }
-  let hadOpenPR = false;
-  let hadDraftPR = false;
+  let hadOpenPR: boolean;
+  let hadDraftPR: boolean;
   try {
     const parsed = JSON.parse(prResult.stdout.trim() || '[]') as Array<{
       number: number;

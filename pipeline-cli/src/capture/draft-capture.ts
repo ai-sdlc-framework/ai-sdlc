@@ -231,7 +231,10 @@ export function submitDraft(opts: SubmitDraftOpts): CaptureRecord {
   try {
     content = readFileSync(draftPath, 'utf8');
   } catch (err) {
-    throw new Error(`[cli-capture] cannot read draft ${opts.captureId}: ${(err as Error).message}`);
+    throw new Error(
+      `[cli-capture] cannot read draft ${opts.captureId}: ${(err as Error).message}`,
+      { cause: err },
+    );
   }
 
   const record = parseMarkdownCapture(content);
@@ -596,7 +599,9 @@ export function redactSubmittedCapture(opts: RedactSubmittedOpts): CaptureRecord
   try {
     content = readFileSync(filePath, 'utf8');
   } catch (err) {
-    throw new Error(`[cli-capture] cannot read ${filePath}: ${(err as Error).message}`);
+    throw new Error(`[cli-capture] cannot read ${filePath}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 
   const record = parseMarkdownCapture(content);

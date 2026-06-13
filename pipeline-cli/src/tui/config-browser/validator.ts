@@ -90,7 +90,7 @@ export function validateYaml(opts: ValidateYamlOpts): YamlValidationResult {
   const issues: YamlValidationIssue[] = [];
   const validator = opts.schemaValidator ?? NOOP_SCHEMA_VALIDATOR;
 
-  let parsed: unknown = null;
+  let parsed: unknown;
   try {
     parsed = yaml.load(opts.text);
   } catch (err) {

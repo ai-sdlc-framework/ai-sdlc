@@ -183,7 +183,9 @@ export function readAnalyzeMetadataFromDisk(absPath: string): AnalyzeMetadata | 
     parsed = JSON.parse(raw);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`[import-spec] failed to parse analyze metadata at ${absPath}: ${msg}`);
+    throw new Error(`[import-spec] failed to parse analyze metadata at ${absPath}: ${msg}`, {
+      cause: err,
+    });
   }
   if (!parsed || typeof parsed !== 'object') return null;
   const obj = parsed as Record<string, unknown>;

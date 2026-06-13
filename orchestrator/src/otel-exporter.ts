@@ -140,14 +140,10 @@ export function createOTelBridge(
         [ATTRIBUTE_KEYS.PIPELINE]: pipelineType,
       };
 
-      // Use withSpan to create a span (fire-and-forget style)
-      let endFn: (() => void) | undefined;
-
       // Since withSpan is async, we track spans manually
       const handle: OTelSpanHandle = {
         end(_status?: 'ok' | 'error') {
           activeSpans.delete(runId);
-          endFn?.();
         },
         setAttribute(key: string, value: string | number) {
           attributes[key] = value;

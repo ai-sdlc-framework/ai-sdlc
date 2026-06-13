@@ -341,7 +341,7 @@ async function gatherAddInputsInteractive(): Promise<AddInputs> {
       try {
         timebox = parseTimebox(timeboxRaw).duration;
       } catch (err) {
-        throw new Error((err as Error).message);
+        throw new Error((err as Error).message, { cause: err });
       }
     }
 

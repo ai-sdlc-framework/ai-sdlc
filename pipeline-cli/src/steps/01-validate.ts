@@ -141,7 +141,7 @@ export function parseSimpleYaml(raw: string): Record<string, unknown> {
   try {
     parsed = yamlLoad(raw);
   } catch (err) {
-    throw new Error(`YAML parse error: ${(err as Error).message}`);
+    throw new Error(`YAML parse error: ${(err as Error).message}`, { cause: err });
   }
   if (parsed === null || parsed === undefined) return {};
   if (typeof parsed !== 'object' || Array.isArray(parsed)) return {};

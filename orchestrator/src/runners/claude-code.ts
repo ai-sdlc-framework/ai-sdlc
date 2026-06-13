@@ -103,7 +103,7 @@ export function buildPrompt(ctx: AgentContext): string {
     lines.push(
       `${++step}. Write or update tests if needed to cover your fix.`,
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
-      `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      `${step + 1}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   } else if (ctx.reviewFindings) {
     let step = 0;
@@ -123,7 +123,7 @@ export function buildPrompt(ctx: AgentContext): string {
     step = reviewVerify.nextStep;
     lines.push(
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
-      `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      `${step + 1}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   } else {
     let step = 0;
@@ -138,7 +138,7 @@ export function buildPrompt(ctx: AgentContext): string {
     step = defaultVerify.nextStep;
     lines.push(
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
-      `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      `${step + 1}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   }
 

@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   }
 
   const path = join(args.artifactsDir, '_ledger', 'tier-analysis.jsonl');
-  let records: TierAnalysisRecord[] = [];
+  let records: TierAnalysisRecord[];
   try {
     const raw = await readFile(path, 'utf8');
     records = raw

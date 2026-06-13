@@ -120,7 +120,7 @@ export function runStageA(opts: StageAOptions): StageAResult {
   // Dependency depth — run cli-deps blockers in-process via the
   // dependency-graph builder. Total blockers (transitive) is the depth
   // proxy per §5.1 row #5.
-  let dependencyDepth = 0;
+  let dependencyDepth: number;
   try {
     const graph = buildDependencyGraph({ workDir: opts.workDir });
     dependencyDepth = blockers(graph, opts.taskId).length;

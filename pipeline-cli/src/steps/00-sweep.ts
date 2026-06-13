@@ -188,7 +188,7 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
 
   for (const entry of entries) {
     const wt = join(worktreesDir, entry);
-    let isDir = false;
+    let isDir: boolean;
     try {
       isDir = statSync(wt).isDirectory();
     } catch {

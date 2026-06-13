@@ -82,7 +82,9 @@ export function loadExemplarBank(filePath: string): SaExemplarBank {
   try {
     doc = parseYaml(raw);
   } catch (err) {
-    throw new Error(`Failed to parse SA exemplar bank at ${filePath}: ${(err as Error).message}`);
+    throw new Error(`Failed to parse SA exemplar bank at ${filePath}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 
   if (!doc || typeof doc !== 'object' || !('exemplars' in doc)) {

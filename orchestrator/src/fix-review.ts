@@ -159,6 +159,7 @@ export async function fetchReviewFindings(
   } catch (err) {
     throw new Error(
       `Failed to parse review data from gh CLI: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 

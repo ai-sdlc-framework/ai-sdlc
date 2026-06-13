@@ -352,7 +352,7 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
     return { ok: true, conflictingFiles: [], rebaseAttempts: 0, resolvedFiles: [] };
   }
 
-  let attempts = 0;
+  let attempts: number;
   // Accumulate all auto-resolved files across rebase attempts (multi-round
   // rebases can resolve different files in each round).
   const allResolvedFiles: string[] = [];

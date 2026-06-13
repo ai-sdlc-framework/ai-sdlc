@@ -924,7 +924,9 @@ export function collectChangedFileEntriesForV5(
     signedMergeBase = runGit(['merge-base', baseRef, headRef], repoRoot).trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`collectChangedFileEntriesForV5: git merge-base failed: ${msg}`);
+    throw new Error(`collectChangedFileEntriesForV5: git merge-base failed: ${msg}`, {
+      cause: err,
+    });
   }
   if (!/^[0-9a-f]{40}$/i.test(signedMergeBase)) {
     throw new Error(
@@ -952,7 +954,9 @@ export function collectChangedFileEntriesForV5(
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`collectChangedFileEntriesForV5: git diff --name-only failed: ${msg}`);
+    throw new Error(`collectChangedFileEntriesForV5: git diff --name-only failed: ${msg}`, {
+      cause: err,
+    });
   }
 
   const paths = nameOnly.split('\n').filter((p) => p.length > 0);
@@ -1189,7 +1193,9 @@ export function collectChangedFileEntries(
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`collectChangedFileEntries: git diff --name-only failed: ${msg}`);
+    throw new Error(`collectChangedFileEntries: git diff --name-only failed: ${msg}`, {
+      cause: err,
+    });
   }
 
   const paths = nameOnly.split('\n').filter((p) => p.length > 0);
@@ -1420,7 +1426,9 @@ export function collectChangedFileDeltaEntries(
     mergeBase = runGit(['merge-base', baseRef, headRef], repoRoot).trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`collectChangedFileDeltaEntries: git merge-base failed: ${msg}`);
+    throw new Error(`collectChangedFileDeltaEntries: git merge-base failed: ${msg}`, {
+      cause: err,
+    });
   }
   if (!/^[0-9a-f]{40}$/.test(mergeBase)) {
     throw new Error(
@@ -1443,7 +1451,9 @@ export function collectChangedFileDeltaEntries(
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`collectChangedFileDeltaEntries: git diff --name-only failed: ${msg}`);
+    throw new Error(`collectChangedFileDeltaEntries: git diff --name-only failed: ${msg}`, {
+      cause: err,
+    });
   }
 
   const paths = nameOnly.split('\n').filter((p) => p.length > 0);

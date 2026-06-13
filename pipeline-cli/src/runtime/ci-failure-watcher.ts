@@ -519,7 +519,9 @@ export async function fetchOpenPrs(runner: Runner, repo?: string): Promise<PrSna
     if (!Array.isArray(parsed)) return [];
     return parsed.map((raw) => normalizePrSnapshot(raw as Record<string, unknown>));
   } catch (err) {
-    throw new Error(`failed to parse gh pr list JSON: ${(err as Error).message}`);
+    throw new Error(`failed to parse gh pr list JSON: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
 }
 

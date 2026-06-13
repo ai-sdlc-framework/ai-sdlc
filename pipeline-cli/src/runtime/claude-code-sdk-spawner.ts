@@ -270,6 +270,7 @@ export const defaultSDKInvoker: SDKInvoker = async (args) => {
       `Claude Code SDK not installed: \`${pkg}\` could not be imported. ` +
         `Install it with \`pnpm add @anthropic-ai/claude-code\` or pass a custom ` +
         `\`invoker\` to ClaudeCodeSDKSpawner. Original error: ${stringifyError(err)}`,
+      { cause: err },
     );
   }
   return dispatchToSDK(sdk, args, pkg);

@@ -126,7 +126,7 @@ export function loadAdopterAuthoringConfig(
     raw = yaml.load(readFileSync(path, 'utf8'));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`[adopter-authoring] failed to parse ${path}: ${msg}`);
+    throw new Error(`[adopter-authoring] failed to parse ${path}: ${msg}`, { cause: err });
   }
 
   if (raw === null || typeof raw !== 'object') return cloneDefaults();

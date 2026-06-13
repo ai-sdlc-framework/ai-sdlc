@@ -99,7 +99,7 @@ export function resolveRfcDir(
   }
 
   // Config lookup — may fall through to defaults when the file is absent.
-  let configuredRel: string | null = null;
+  let configuredRel: string | null;
   try {
     const cfg = loadAdopterAuthoringConfig({ workDir });
     configuredRel = cfg.rfcScaffold.rfcDir;
@@ -492,7 +492,7 @@ function resolveRfcInitDir(
   if (optsOverride?.rfcDir && optsOverride.rfcDir.trim()) {
     return { rfcDir: join(workDir, optsOverride.rfcDir), source: 'cli-flag' };
   }
-  let configuredRel: string | null = null;
+  let configuredRel: string | null;
   try {
     const cfg = loadAdopterAuthoringConfig({ workDir });
     configuredRel = cfg.rfcScaffold.rfcDir;
@@ -542,6 +542,7 @@ export function initRfc(opts: InitRfcOpts): InitRfcResult {
     ) {
       throw new Error(
         `[cli-rfc init] refusing to overwrite existing file at ${filePath} — pass --force to replace it`,
+        { cause: err },
       );
     }
     throw err;
