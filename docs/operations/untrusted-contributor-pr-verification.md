@@ -439,7 +439,7 @@ The signing key is resolved in this order (matching `resolveSigningKeyPath()` in
 1. `AISDLC_SIGNING_KEY_PATH` environment variable
 2. `~/.ai-sdlc/signing-key.pem` (default operator key location)
 
-The key is **never** present in the sandbox environment (Stages 2-3). In CI, the signing key secret (`AISDLC_SIGNING_KEY_PATH`) is only injected into the `clean-room-sign` job.
+The key is **never** present in the sandbox environment (Stages 2-3). In CI, the signing key secret (`AISDLC_SIGNING_KEY_CONTENT`, the PEM **content** of the key) is only injected into the `clean-room-sign` job, which materializes it to a file (`printf` + `chmod 600`) and points the `AISDLC_SIGNING_KEY_PATH` env var at that file at run time (AISDLC-514). Do **not** store a filesystem path as the secret — paths are meaningless on an ephemeral runner.
 
 Cross-reference: [RFC-0042](../../spec/rfcs/RFC-0042-proof-of-execution-attestation.md), [RFC-0043 §Stage 4](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md#stage-4--clean-room-attestation)
 

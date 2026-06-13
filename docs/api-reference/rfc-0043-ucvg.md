@@ -643,7 +643,7 @@ Layout: `<repoRoot>/.ai-sdlc/ucvg/reports/<prNumber>.unsigned.json`. Both the sa
 | PR event | `github.event.pull_request.head.repo.fork` | boolean | Whether the PR head is from a fork. |
 | PR event | `github.event.pull_request.head.sha` | string | PR head commit SHA. |
 | PR event | `github.event.pull_request.base.sha` | string | PR base commit SHA. |
-| Repository secret | `AISDLC_SIGNING_KEY_PATH` | string | Path to the signing key (only in `clean-room-sign` job). |
+| Repository secret | `AISDLC_SIGNING_KEY_CONTENT` | string | PEM **content** of the signing key (only in `clean-room-sign` job); the workflow materializes it to a file and sets the `AISDLC_SIGNING_KEY_PATH` env var to that path. |
 
 ### Job outputs
 

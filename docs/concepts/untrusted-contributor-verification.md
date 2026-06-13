@@ -177,7 +177,7 @@ No additional configuration is needed — the regime override is applied automat
 | Property | How it is enforced |
 |----------|-------------------|
 | No LLM spend on protected-path mutations | Stage 1 runs deterministically before any LLM is invoked |
-| Signing key never in sandbox | `AISDLC_SIGNING_KEY_PATH` secret only present in Stage 4 CI job |
+| Signing key never in sandbox | `AISDLC_SIGNING_KEY_CONTENT` secret (PEM content) only present in Stage 4 CI job; materialized to the `AISDLC_SIGNING_KEY_PATH` env at run time |
 | Credential withholding | OpenShell withholds tokens at proxy layer; agent never receives them |
 | Tamper-resistant signing | Unsigned report is Zod-validated at Stage 4 boundary before key resolution |
 | Prompt injection resilience | "Sandwich" framing + `promptInjectionDetected` finding in all three reviewer prompts |
