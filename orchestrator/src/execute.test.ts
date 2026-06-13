@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolve } from 'node:path';
 import { executePipeline } from './execute.js';
 import type { AgentRunner, AgentResult } from './runners/types.js';
@@ -128,6 +128,15 @@ describe('executePipeline()', () => {
     vi.clearAllMocks();
     // Set env vars needed for commentOnIssue
     process.env.GITHUB_TOKEN = '';
+  });
+
+  // Belt-and-suspenders teardown: flush any microtasks that may still be pending
+  // after executePipeline returns. Prevents dangling async work from firing into
+  // a closed vitest worker MessagePort and producing ERR_IPC_CHANNEL_CLOSED
+  // (AISDLC-542). The root fix is in execute.ts (runPipelineDiagnostics now
+  // awaits all async ops), but this guard handles any future regressions.
+  afterEach(async () => {
+    await Promise.resolve();
   });
 
   it('runs the full pipeline successfully', async () => {

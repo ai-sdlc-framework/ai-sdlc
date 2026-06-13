@@ -1428,8 +1428,13 @@ async function executePipelineBody(
   });
 
   // 16b. Extended diagnostics (non-blocking)
+  // Awaited so that every async operation started inside the diagnostics pass
+  // completes before executePipeline returns. Without the await, fire-and-forget
+  // promises (resolveAdapterFromGit, scanPipelineAdapters, loadAuditEntries) stay
+  // pending past the function boundary and can fire into a closed vitest worker
+  // MessagePort, producing ERR_IPC_CHANNEL_CLOSED (AISDLC-542).
   try {
-    runPipelineDiagnostics({
+    await runPipelineDiagnostics({
       config,
       qualityGate,
       agentRole,
@@ -1519,9 +1524,16 @@ interface DiagnosticsInput {
 /**
  * Non-blocking diagnostics pass that exercises all previously unwired modules.
  * Runs after the main pipeline succeeds — failures are silently ignored.
+ *
+ * Returns a Promise so the caller can await all async work, preventing dangling
+ * promises from outliving the pipeline call and firing into a closed vitest
+ * worker MessagePort (AISDLC-542: ERR_IPC_CHANNEL_CLOSED teardown race).
  */
-function runPipelineDiagnostics(input: DiagnosticsInput): void {
+async function runPipelineDiagnostics(input: DiagnosticsInput): Promise<void> {
   const { config, qualityGate, agentRole, autonomyPolicy, log } = input;
+
+  // Collect async operations; await all at the end so no promise escapes the function.
+  const asyncOps: Promise<unknown>[] = [];
 
   // Policy evaluators: Rego, CEL, ABAC, gate evaluation, complexity scoring
   const _rego = createPipelineRegoEvaluator();
@@ -1548,9 +1560,12 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
   const adapterRegistry = createPipelineAdapterRegistry();
   log.info(`Adapter registry: ${adapterRegistry.list().length} adapters registered`);
   const _bridge = createPipelineWebhookBridge();
-  // resolveAdapterFromGit and scanPipelineAdapters are async — fire and forget
-  void resolveAdapterFromGit('github:ai-sdlc-framework/ai-sdlc').catch(() => {});
-  void scanPipelineAdapters({ basePath: `${input.workDir}/.ai-sdlc/adapters` }).catch(() => {});
+  // Collect async ops instead of fire-and-forget — awaited below via Promise.allSettled
+  // so no pending promise outlives this function (AISDLC-542).
+  asyncOps.push(resolveAdapterFromGit('github:ai-sdlc-framework/ai-sdlc').catch(() => {}));
+  asyncOps.push(
+    scanPipelineAdapters({ basePath: `${input.workDir}/.ai-sdlc/adapters` }).catch(() => {}),
+  );
 
   // Extended compliance: per-framework checks, control catalog, mappings
   const controlIds = getControlCatalog();
@@ -1615,10 +1630,16 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
       resource: 'pipeline',
       decision: 'allowed',
     });
-    void loadAuditEntries(auditPath).catch(() => {});
+    // Collected into asyncOps — awaited below so the promise doesn't escape (AISDLC-542).
+    asyncOps.push(loadAuditEntries(auditPath).catch(() => {}));
     // Note: rotateAuditLog intentionally omitted — it truncates the file,
     // which would empty it before artifact upload can capture the contents.
   }
+
+  // Await all async diagnostic operations so no promise outlives this function.
+  // allSettled keeps the best-effort semantic: individual failures are silently swallowed,
+  // but the caller can await the diagnostics without unhandled rejections leaking.
+  await Promise.allSettled(asyncOps);
 }
 
 // ── Gitignore helper ─────────────────────────────────────────────────

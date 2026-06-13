@@ -15,7 +15,7 @@
  * execute.test.ts — they do NOT test real git repos (that's push-rebase.test.ts).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolve } from 'node:path';
 import { executePipeline, buildMissingResourceError } from './execute.js';
 import type { AgentRunner, AgentResult } from './runners/types.js';
@@ -161,6 +161,12 @@ describe('Guard #1 — git fetch degrades gracefully when no origin remote', () 
     );
   });
 
+  // Flush pending microtasks so no async work fires into a closed vitest MessagePort
+  // (AISDLC-542: ERR_IPC_CHANNEL_CLOSED teardown race).
+  afterEach(async () => {
+    await Promise.resolve();
+  });
+
   it('logs a skip message and continues when fetch fails with "no such remote"', async () => {
     // Override: fetch fails with "no such remote", all other calls succeed.
     (execFileMockRef as unknown as ReturnType<typeof vi.fn>).mockImplementation(
@@ -304,6 +310,10 @@ describe('Guard #2 — ABAC permissions.write nullish guard', () => {
     );
   });
 
+  afterEach(async () => {
+    await Promise.resolve();
+  });
+
   it('does not crash when autonomy level has no write permissions defined', async () => {
     // The guard is the `?? []` in: `const writePermissions = currentLevel.permissions.write ?? [];`
     // The real autonomy-policy.yaml has write:[] (non-undefined), so this integration
@@ -360,6 +370,10 @@ describe('Guard #3 — AgentResult.filesChanged defaults to [] when absent', () 
         return { stdout: '', stderr: '' };
       },
     );
+  });
+
+  afterEach(async () => {
+    await Promise.resolve();
   });
 
   it('does not crash on undefined.length/map when runner returns AgentResult without filesChanged', async () => {

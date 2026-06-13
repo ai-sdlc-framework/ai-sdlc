@@ -335,6 +335,12 @@ describe('executePipeline with injected local SourceControl (AISDLC-530 AC #3)',
     process.env.GITLAB_TOKEN = 'dummy-gitlab-token';
   });
 
+  // Flush pending microtasks so no async work fires into a closed vitest MessagePort
+  // (AISDLC-542: ERR_IPC_CHANNEL_CLOSED teardown race).
+  afterEach(async () => {
+    await Promise.resolve();
+  });
+
   it('completes the pipeline without throwing when sourceControl is local (AC #3)', async () => {
     const issue = makeIssue();
     const tracker = makeMockTracker(issue);
@@ -404,6 +410,10 @@ describe('options.sourceControl injection wins over AdapterBinding (AISDLC-530 A
     vi.clearAllMocks();
     process.env.GITHUB_TOKEN = 'dummy-test-token';
     process.env.GITLAB_TOKEN = 'dummy-gitlab-token';
+  });
+
+  afterEach(async () => {
+    await Promise.resolve();
   });
 
   it('returns the injected local adapter when a github AdapterBinding is also present', async () => {
