@@ -3,7 +3,7 @@ id: AISDLC-547
 title: >-
   chore(deps): migrate vitest 3 → 4 across the workspace (supersedes Dependabot
   PR #897)
-status: To Do
+status: Done
 assignee: []
 labels:
   - chore
