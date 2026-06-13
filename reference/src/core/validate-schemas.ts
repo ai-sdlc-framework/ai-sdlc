@@ -23,6 +23,25 @@ addFormats(ajv);
 const files = readdirSync(SCHEMA_DIR).filter((f: string) => f.endsWith('.schema.json'));
 let hasErrors = false;
 
+// Pre-pass: assert $id uniqueness across all schema files.
+// Two committed files sharing a $id would cause the idempotency guard in Pass 1
+// to silently skip the second file's well-formedness check, allowing a
+// colliding schema to evade validation entirely.
+const seenIds = new Map<string, string>(); // $id → filename
+for (const file of files) {
+  const schemaPath = resolve(SCHEMA_DIR, file);
+  const schema = JSON.parse(readFileSync(schemaPath, 'utf-8')) as { $id?: string };
+  if (schema.$id) {
+    const prior = seenIds.get(schema.$id);
+    if (prior) {
+      console.error(`  [duplicate-$id] "${schema.$id}" appears in both "${prior}" and "${file}"`);
+      hasErrors = true;
+    } else {
+      seenIds.set(schema.$id, file);
+    }
+  }
+}
+
 // Pass 1: register all schemas so cross-schema $ref resolution works.
 // (e.g. design-intent-document $refs journey.v1.schema.json — alphabetical
 // ordering means 'd' compiles before 'j' is registered in a single pass.)
@@ -47,7 +66,10 @@ for (const file of files) {
     const schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
     const id = (schema as { $id?: string }).$id ?? file;
     const validate = ajv.getSchema(id) ?? ajv.compile(schema);
-    // Invoke with a dummy value to trigger lazy compilation; errors surface here.
+    // Intentionally validate against an empty object to trigger lazy compilation
+    // and surface any $ref-resolution or structural errors. The validation result
+    // is intentionally ignored here — the goal is compilation/$ref-resolution
+    // exceptions only, not instance validation.
     validate({});
     console.log(`  ${file}`);
   } catch (err) {

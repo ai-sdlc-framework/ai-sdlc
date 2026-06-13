@@ -4744,8 +4744,17 @@ export const journeyV1Schema = {
     states: {
       type: 'array',
       description:
-        'Named states for this journey. At least 2 states required; at least 1 MUST have terminal: true AND successState: true.',
+        'Named states for this journey. At least 2 states required; at least 1 MUST have terminal: true AND successState: true. Hard limit: 100 states per journey (sanity guard; regulatory-submission journeys with 25-40 states are legitimate).',
       minItems: 2,
+      maxItems: 100,
+      contains: {
+        type: 'object',
+        required: ['terminal', 'successState'],
+        properties: {
+          terminal: { const: true },
+          successState: { const: true },
+        },
+      },
       items: {
         type: 'object',
         required: ['id', 'terminal'],
@@ -4775,8 +4784,9 @@ export const journeyV1Schema = {
     transitions: {
       type: 'array',
       description:
-        "State-to-state transitions. 'from' may be a single state id or an array (any-of). 'to' must be a single state id.",
+        "State-to-state transitions. 'from' may be a single state id or an array (any-of). 'to' must be a single state id. Hard limit: 500 transitions per journey.",
       minItems: 1,
+      maxItems: 500,
       items: {
         type: 'object',
         required: ['from', 'to', 'trigger'],
@@ -4787,12 +4797,13 @@ export const journeyV1Schema = {
               {
                 type: 'string',
                 description: 'Single originating state id.',
+                maxLength: 64,
               },
               {
                 type: 'array',
                 description:
                   'Any-of originating state ids (shorthand for multiple transitions sharing the same trigger and target).',
-                items: { type: 'string' },
+                items: { type: 'string', maxLength: 64 },
                 minItems: 1,
               },
             ],
@@ -4800,11 +4811,13 @@ export const journeyV1Schema = {
           to: {
             type: 'string',
             description: 'Destination state id.',
+            maxLength: 64,
           },
           trigger: {
             type: 'string',
             description:
               "Event or action that drives this transition (e.g. 'user-signup', 'session-timeout-30d').",
+            maxLength: 128,
           },
         },
       },
@@ -4815,6 +4828,15 @@ export const journeyV1Schema = {
         "How 'done' is defined for this journey. OQ-4 resolution: closed enum for v1 (terminal-success-state | all-states-reached). Future activation via Decision: journey-custom-predicate-activation-request (auto-promote at >=2 distinct adopter requests; future language: CEL).",
       required: ['kind'],
       additionalProperties: false,
+      if: {
+        properties: {
+          kind: { const: 'terminal-success-state' },
+        },
+        required: ['kind'],
+      },
+      then: {
+        required: ['target'],
+      },
       properties: {
         kind: {
           type: 'string',
@@ -4826,6 +4848,7 @@ export const journeyV1Schema = {
           type: 'string',
           description:
             "Required when kind='terminal-success-state'. The state id of the success terminal state.",
+          maxLength: 64,
         },
       },
     },
@@ -4866,7 +4889,8 @@ export const journeyV1Schema = {
     successMetrics: {
       type: 'array',
       description:
-        'Quantified success signals at journey scope. Feeds Sα₂ + Cκ scoring — Cκ boosts work that addresses this journey when completion-rate is below alertBelow threshold.',
+        'Quantified success signals at journey scope. Feeds Sα₂ + Cκ scoring — Cκ boosts work that addresses this journey when completion-rate is below alertBelow threshold. Hard limit: 50 metrics per journey.',
+      maxItems: 50,
       items: {
         type: 'object',
         required: ['id'],
@@ -4902,8 +4926,9 @@ export const journeyV1Schema = {
     designImperatives: {
       type: 'array',
       description:
-        'Journey-scoped Sα₂ inputs layered on soul + variant level per most-specific-wins (journey > variant > soul). Feeds Vibe Coherence scoring at journey scope.',
-      items: { type: 'string' },
+        'Journey-scoped Sα₂ inputs layered on soul + variant level per most-specific-wins (journey > variant > soul). Feeds Vibe Coherence scoring at journey scope. Hard limit: 50 imperatives per journey.',
+      maxItems: 50,
+      items: { type: 'string', maxLength: 512 },
     },
     complianceFloor: {
       type: 'string',
