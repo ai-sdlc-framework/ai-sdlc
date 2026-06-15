@@ -52,7 +52,7 @@
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
     "@inquirer/prompts": "^7.0.0",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.10.1",
     "commander": "^15.0.0",
     "franc": "^6.2.0",
     "yaml": "^2.9.0"
