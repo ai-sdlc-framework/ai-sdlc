@@ -140,15 +140,15 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.9.2",
+    "@types/node": "^25.9.3",
     "@types/react": "^19.2.17",
     "@types/yargs": "^17.0.33",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.9",
     "ajv": "^8.20.0",
     "ink-testing-library": "^4.0.0",
     "string-width": "^8.2.1",
     "typescript": "^6.0.3",
     "vite": "^6.0.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }
