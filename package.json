@@ -91,8 +91,8 @@
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "js-yaml": "^4.2.0",
-    "lint-staged": "^17.0.7",
+    "lint-staged": "^17.0.8",
     "prettier": "^3.8.4",
-    "typescript-eslint": "^8.61.0"
+    "typescript-eslint": "^8.61.1"
   }
 }
