@@ -13,7 +13,7 @@
   "dependencies": {
     "@ai-sdlc/orchestrator": "workspace:*",
     "@ai-sdlc/pipeline-cli": "workspace:*",
-    "better-sqlite3": "^12.10.1",
+    "better-sqlite3": "^12.11.1",
     "next": "^15.5.19",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
