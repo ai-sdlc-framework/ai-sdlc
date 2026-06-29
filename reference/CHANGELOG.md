@@ -1,5 +1,19 @@
 # @ai-sdlc/reference
 
+## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.13.0...reference-v0.14.0) (2026-06-29)
+
+
+### Features
+
+* **orchestrator:** dispatch→merge lifecycle profiling instrumentation (AISDLC-493) ([#909](https://github.com/ai-sdlc-framework/ai-sdlc/issues/909)) ([906f53a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/906f53a9ae2a05389b623873f58e0642de4d1578))
+* **orchestrator:** rfc-0018 phase 4 - MetricSnapshot + graduated Erho5 degradation (AISDLC-468) ([#910](https://github.com/ai-sdlc-framework/ai-sdlc/issues/910)) ([2cfe642](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2cfe642be7dab633e5944992f125c1297f518baa))
+* **reference:** harden journey.v1 constraints + validate-schemas robustness (AISDLC-494) ([#917](https://github.com/ai-sdlc-framework/ai-sdlc/issues/917)) ([8317c39](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8317c399afcb261e4a33bfcabe7510cb9ac17328))
+
+
+### Bug Fixes
+
+* **security:** resolve CodeQL source-code findings — ReDoS, cmd-injection, sanitization (AISDLC-535) ([#913](https://github.com/ai-sdlc-framework/ai-sdlc/issues/913)) ([64f0165](https://github.com/ai-sdlc-framework/ai-sdlc/commit/64f016554ee1cea21cef4ca86c89af1332dd9df9))
+
 ## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.12.0...reference-v0.13.0) (2026-06-10)
 
 

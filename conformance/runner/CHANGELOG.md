@@ -1,5 +1,20 @@
 # @ai-sdlc/conformance
 
+## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.13.0...conformance/runner-v0.14.0) (2026-06-29)
+
+
+### Miscellaneous
+
+* **conformance/runner:** Synchronize node-packages versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.14.0
+    * @ai-sdlc/orchestrator bumped to 0.14.0
+
 ## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.12.0...conformance/runner-v0.13.0) (2026-06-10)
 
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.13.0...pipeline-cli-v0.14.0) (2026-06-29)
+
+
+### Features
+
+* **orchestrator:** dispatch→merge lifecycle profiling instrumentation (AISDLC-493) ([#909](https://github.com/ai-sdlc-framework/ai-sdlc/issues/909)) ([906f53a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/906f53a9ae2a05389b623873f58e0642de4d1578))
+
+
+### Bug Fixes
+
+* de-flake capture.test.ts against-current-pr graceful fallback (AISDLC-533) ([#902](https://github.com/ai-sdlc-framework/ai-sdlc/issues/902)) ([40d652f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/40d652f1a15e36600357d5f8efc4e6519a6f826d))
+* **security:** resolve CodeQL source-code findings — ReDoS, cmd-injection, sanitization (AISDLC-535) ([#913](https://github.com/ai-sdlc-framework/ai-sdlc/issues/913)) ([64f0165](https://github.com/ai-sdlc-framework/ai-sdlc/commit/64f016554ee1cea21cef4ca86c89af1332dd9df9))
+* stop pipeline-cli test runs leaving _artifacts/ and mutating classifier-corpus (AISDLC-518) ([#907](https://github.com/ai-sdlc-framework/ai-sdlc/issues/907)) ([bd5605e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bd5605e904d2cddc1419f0513ee47b137379973f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.14.0
+
 ## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.12.0...pipeline-cli-v0.13.0) (2026-06-10)
 
 
