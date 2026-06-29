@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
-    "@inquirer/prompts": "^7.0.0",
+    "@inquirer/prompts": "^8.5.2",
     "better-sqlite3": "^12.11.1",
     "commander": "^15.0.0",
     "franc": "^6.2.0",
