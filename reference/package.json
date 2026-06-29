@@ -39,7 +39,7 @@
     "validate-schemas": "tsx src/core/validate-schemas.ts"
   },
   "dependencies": {
-    "@linear/sdk": "^37.0.0",
+    "@linear/sdk": "^87.0.0",
     "@octokit/rest": "^22.0.1",
     "@opentelemetry/api": "^1.9.1",
     "ajv": "^8.20.0",
