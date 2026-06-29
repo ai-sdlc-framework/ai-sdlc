@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/pipeline-cli",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "AI-SDLC pipeline shared core library — RFC-0012 Phase 1 (Step 0-13 pure functions + CLI router + composite executePipeline)",
   "license": "Apache-2.0",
   "repository": {

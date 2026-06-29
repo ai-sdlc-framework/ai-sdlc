@@ -5,6 +5,27 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.13.0...orchestrator-v0.14.0) (2026-06-29)
+
+
+### Features
+
+* **orchestrator:** rfc-0018 phase 4 - MetricSnapshot + graduated Erho5 degradation (AISDLC-468) ([#910](https://github.com/ai-sdlc-framework/ai-sdlc/issues/910)) ([2cfe642](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2cfe642be7dab633e5944992f125c1297f518baa))
+
+
+### Bug Fixes
+
+* **orchestrator:** de-flake execute.test.ts IPC teardown race (AISDLC-542) ([#928](https://github.com/ai-sdlc-framework/ai-sdlc/issues/928)) ([d07868e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d07868e4bc46e1d601308eef4e5dbf84e2e537da))
+* **orchestrator:** resolve implicit-any TS7006 in webhook-manager.ts (AISDLC-517) ([#904](https://github.com/ai-sdlc-framework/ai-sdlc/issues/904)) ([a6e3973](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a6e397330ad18f9c1f628c0cf43e3c36befbbe03))
+* **security:** resolve CodeQL source-code findings — ReDoS, cmd-injection, sanitization (AISDLC-535) ([#913](https://github.com/ai-sdlc-framework/ai-sdlc/issues/913)) ([64f0165](https://github.com/ai-sdlc-framework/ai-sdlc/commit/64f016554ee1cea21cef4ca86c89af1332dd9df9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.14.0
+
 ## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.12.0...orchestrator-v0.13.0) (2026-06-10)
 
 
