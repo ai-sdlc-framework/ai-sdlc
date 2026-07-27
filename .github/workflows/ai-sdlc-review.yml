@@ -169,7 +169,7 @@ jobs:
       # script from the fork's tree under pull_request_target would
       # execute fork-controlled code with the elevated GITHUB_TOKEN.
       - name: Checkout target main (workflow logic)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -283,7 +283,7 @@ jobs:
     steps:
       # AISDLC-381 Safety guard #1: checkout MAIN (no `ref:`) — supplies
       # scripts/verify-attestation.mjs + the orchestrator runtime barrel.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -296,7 +296,7 @@ jobs:
       # For same-repo PRs head.repo.full_name == github.repository so
       # the same step works for both same-repo and fork PRs.
       - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
@@ -435,7 +435,7 @@ jobs:
       # AISDLC-381 Safety guard #1: checkout MAIN (no `ref:`) — supplies
       # all reviewer scripts + pipeline-cli + @ai-sdlc/dogfood subagents.
       # Fork content is NEVER the source of any executable code here.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
