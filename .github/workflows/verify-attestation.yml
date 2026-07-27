@@ -194,7 +194,7 @@ jobs:
       # would execute fork-controlled code with the elevated GITHUB_TOKEN
       # (statuses:write, pull-requests:read), which is the exact attack
       # vector pull_request_target is dangerous for if mishandled.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -206,7 +206,7 @@ jobs:
       # safety guards on every subsequent step.
       - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
         if: github.event_name != 'merge_group'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # AISDLC-381 iter-2 MAJOR fix: explicit `repository:` arg.
           # Under pull_request_target, actions/checkout defaults to the
