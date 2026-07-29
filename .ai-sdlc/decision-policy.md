@@ -92,3 +92,22 @@ calibration corpus spans all of them; one override-window setting
 applies to all. Do not duplicate prompt templates, corpus storage, or
 override-window logic in the Decision Catalog — compose with the
 substrate.
+
+## Operator-facing question framing — the decision rubric
+
+When a decision routes to the operator (any of the surface-to-operator rows
+above), the question MUST be framed with the five-part decision rubric shipped
+as the plugin skill
+[`decision-rubric`](../ai-sdlc-plugin/skills/decision-rubric/SKILL.md):
+problem statement → industry research → 3-4 genuinely different options →
+recommendation + steel-manned counter-argument → a 3-4-option mutually
+exclusive question with the recommendation first.
+
+Hard prohibitions carried by the rubric: no "do you agree with the
+recommendation?" fake-consults, no batch-resolving multiple open questions in
+one prompt, and no recording bare answers — every resolution is written back
+with its compressed rationale (problem + recommendation + counter-argument in
+3-5 sentences) so the reasoning survives the person who made it. Stage C
+recommendations surfaced below the confidence threshold inherit the same
+framing requirement: the operator sees options and trade-offs, not a
+rubber-stamp prompt.
