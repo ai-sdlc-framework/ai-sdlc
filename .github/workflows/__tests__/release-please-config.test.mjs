@@ -170,7 +170,7 @@ describe('release-please-config.json — AISDLC-401', () => {
       }
     });
 
-    it("release PRs carry the ci:no-issue-required label (require-issue-link bypass)", () => {
+    it('release PRs carry the ci:no-issue-required label (require-issue-link bypass)', () => {
       if (!config) return;
       // The rolling release PR has no issue to link — require-issue-link.yml's
       // documented bypass for it is the `ci:no-issue-required` label. The
