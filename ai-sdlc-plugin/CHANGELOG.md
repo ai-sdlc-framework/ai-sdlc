@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.12.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.11.0...ai-sdlc-plugin-v0.12.0) (2026-07-29)
+
+
+### Features
+
+* ship decision-rubric plugin skill + wire into decision policy ([#953](https://github.com/ai-sdlc-framework/ai-sdlc/issues/953)) ([4e88e69](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e88e69b37b1decf80554617915b9dbb0e73b8b7))
+
 ## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.10.0...ai-sdlc-plugin-v0.11.0) (2026-06-10)
 
 
