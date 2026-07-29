@@ -1,6 +1,6 @@
 ---
 name: decision-rubric
-description: Apply a rigorous decision rubric when asking the user for a non-trivial design, architectural, or policy choice via AskUserQuestion. Replaces shallow "do you agree with the author's recommendation?" prompts with a full problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument → AskUserQuestion. Invoke whenever the user is being asked to decide an RFC Open Question, pick a library or pattern, set a default, choose a deprecation policy, or make any choice they would later regret if the framing were shallow. Do NOT use for trivial preferences (naming, formatting, which file to edit first) — those get a plain AskUserQuestion.
+description: Apply a rigorous decision rubric when asking the user for a non-trivial design, architectural, or policy choice via AskUserQuestion. Replaces shallow "do you agree with the author's recommendation?" prompts with a full problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument → AskUserQuestion. Invoke whenever the user is being asked to resolve an open question on ANY work item — an RFC, a backlog task, a GitHub/Jira/Linear issue, a design doc — or to pick a library or pattern, set a default, choose a deprecation policy, or make any choice they would later regret if the framing were shallow. Do NOT use for trivial preferences (naming, formatting, which file to edit first) — those get a plain AskUserQuestion.
 ---
 
 # Decision rubric — how to ask the operator a non-trivial design question
@@ -17,7 +17,7 @@ This skill exists so future-you doesn't do that.
 
 **YES — apply the rubric** when the user is choosing:
 
-- An RFC Open Question resolution
+- An open-question or design-decision resolution on any work item — an RFC Open Question, a backlog task's unresolved design point, a GitHub / Jira / Linear issue asking "how should we…", a design-doc comment thread
 - A default value that ships to adopters (timeouts, retry counts, grace periods, batch sizes, severity thresholds)
 - A library, framework, or major dependency
 - An architectural pattern (single-tenant vs multi-tenant, push vs pull, sync vs async, monolith vs split)
@@ -156,5 +156,6 @@ Keep the prose tight — this isn't a research paper. The five parts can fit in 
 ## Compose with other patterns
 
 - After the user answers, **write the resolution to the relevant file with full rationale** (problem statement summary + recommendation + counter-argument compressed to 3-5 sentences). Don't just record "answer: A". The shallow-resolution failure mode is what happens when the file only records the answer, not the reasoning.
-- For multi-question walkthroughs (RFC with N OQs), apply the rubric N times. Do not batch.
+- For multi-question walkthroughs (an RFC, epic, or ticket with N open questions), apply the rubric N times. Do not batch.
+- The rubric is source-agnostic: the same five parts apply whether the question came from an RFC Open Questions section, a backlog task body, a GitHub/Jira/Linear issue, or a design-review thread. Only the write-back target differs — record the resolution wherever that work item's decisions live.
 - Catalog-routed events: if the decision has runtime consequences and the Decision Catalog is enabled (`AI_SDLC_DECISION_CATALOG`, default-ON), frame them as Decision-Catalog events (RFC-0035 G0) so future operators can audit how the resolution was applied — `node pipeline-cli/bin/cli-decisions.mjs add --summary "..." --scope <area> --option "<id>:<description>"`.
