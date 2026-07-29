@@ -77,6 +77,7 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 | Skill | Description |
 |-------|-------------|
 | `ai-sdlc-governance` | Auto-loaded governance rules, blocked actions, and pre-commit checklist |
+| `decision-rubric` | Five-part rubric (problem → research → options → recommendation + counter-argument → question) for putting non-trivial design/policy decisions to the operator; applies to open questions from any work item (RFC, backlog task, GitHub/Jira/Linear issue) |
 
 ## Install topologies + path resolution (AISDLC-245.4, AISDLC-272)
 
