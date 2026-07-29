@@ -169,6 +169,24 @@ describe('release-please-config.json — AISDLC-401', () => {
         );
       }
     });
+
+    it("release PRs carry the ci:no-issue-required label (require-issue-link bypass)", () => {
+      if (!config) return;
+      // The rolling release PR has no issue to link — require-issue-link.yml's
+      // documented bypass for it is the `ci:no-issue-required` label. The
+      // config's `label` option is what applies labels to every PR
+      // release-please opens; without this entry each fresh release PR fails
+      // the `ai-sdlc/issue-link` status until an operator labels it by hand.
+      const labels = (config.label || '').split(',').map((s) => s.trim());
+      assert.ok(
+        labels.includes('ci:no-issue-required'),
+        `release-please-config.json 'label' must include 'ci:no-issue-required' (got: '${config.label}')`,
+      );
+      assert.ok(
+        labels.includes('autorelease: pending'),
+        `release-please-config.json 'label' must retain 'autorelease: pending' — release-please uses it to track pending release PRs (got: '${config.label}')`,
+      );
+    });
   });
 
   // ── AC-5 migration guard: no Unreleased section in tracked CHANGELOG files ──
