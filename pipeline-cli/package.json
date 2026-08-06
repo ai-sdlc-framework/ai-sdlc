@@ -136,7 +136,7 @@
     "js-yaml": "^4.2.0",
     "react": "^19.2.7",
     "yargs": "^18.0.0",
-    "zod": "^3.23.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
