@@ -216,6 +216,44 @@ The closed enum is captured in the JSON schema. Each value maps to a `docs/` sub
 
 For each value listed in an RFC's `requiresDocs`, **at least one file** in the corresponding subdirectory MUST reference the RFC by its `id` (literal text, e.g. `RFC-0006`). The CI script in AISDLC-69.3 enforces this; AISDLC-69.2 (this PR) defines the convention.
 
+### `docsCoverage` — from citation check to coverage check (AISDLC-550)
+
+`requiresDocs` asks only *"does some doc in the right subdirectory mention this
+RFC id?"*. That is a **citation** check, and it is satisfied permanently the day
+the first doc is written. An RFC that later grows — a new addendum, a new
+subsystem — can therefore ship hundreds of normative lines and shipped code with
+no documentation while the gate stays green.
+
+That is exactly what happened to RFC-0006: Addendum A (the four-layer design
+review architecture) added ~800 spec lines and five implemented modules after
+the RFC's three doc surfaces had already been authored, and nothing ever asked
+for prose about it.
+
+To pin coverage of specific concepts, declare `docsCoverage`:
+
+```yaml
+requiresDocs:
+  - api-reference
+docsCoverage:
+  - 'Design CI'
+  - 'exemplar bank'
+  - 'UsabilitySimulationRunner'
+```
+
+Each term MUST appear (case-insensitively) in at least one `.md` under `docs/`
+**that also cites the RFC id** — coverage is credited only to documentation
+that is actually about this RFC. Missing terms fail `pnpm rfc:check` with a
+per-term message.
+
+Conventions:
+
+- Add a term when an RFC introduces a concept an adopter must be able to look
+  up — a layer, a resource, an exported API, a named metric.
+- Prefer stable nouns over sentence fragments; the check is a substring match.
+- When a spec section is withdrawn, drop its term in the same PR.
+- The field is optional and backward-compatible: RFCs without it behave exactly
+  as before. **Amending an RFC after its docs exist is the moment to add it.**
+
 ### Deferred docs escape hatch
 
 Some RFCs are sign-off-finalised before the matching docs can reasonably be authored — for example, when the spec is locked but the reference implementation is still in flight. For those:

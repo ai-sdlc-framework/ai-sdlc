@@ -14,6 +14,19 @@ requiresDocs:
   - tutorial
   - operator-runbook
   - api-reference
+# AISDLC-550: coverage terms for Addendum A (the four-layer design review
+# architecture). Each term must appear in a docs/ file citing RFC-0006 —
+# see spec/rfcs/README.md "docsCoverage". Addendum A shipped ~800 spec lines
+# and five implemented modules while the citation-only check stayed green.
+docsCoverage:
+  - 'Design CI'
+  - 'structural design preprocessor'
+  - 'usability simulation'
+  - 'design review principles'
+  - 'exemplar bank'
+  - 'feedback flywheel'
+  - 'designCiPassRate'
+  - 'UsabilitySimulationRunner'
 # AISDLC-69.4 retroactively authored the three required doc surfaces:
 #   • docs/tutorials/design-system-getting-started.md
 #   • docs/operations/design-system-operator-runbook.md
