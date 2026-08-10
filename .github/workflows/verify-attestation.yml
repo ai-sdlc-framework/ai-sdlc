@@ -581,7 +581,7 @@ jobs:
 
       # Skip the full verify pipeline when EITHER short-circuit already posted
       # the success status above. These steps only run for code PRs or mixed PRs.
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
