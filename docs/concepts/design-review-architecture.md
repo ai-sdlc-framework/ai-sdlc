@@ -52,7 +52,14 @@ section listing exactly which checks automation already handled, and instructs
 the reviewer to skip those categories. This is what stops reviewers
 re-litigating contrast ratios instead of evaluating design.
 
-Deterministic checks run as `QualityGate` rules before any review occurs:
+`reference/src/policy/design-ci.ts` implements all six checks
+(`checkAccessibility`, `checkTouchTargets`, `checkTypographyScale`,
+`checkSpacingGrid`, `checkColorPalette`, `checkStateCompleteness`) plus
+`runDesignCI()` and `generateDesignCIBoundary()` — the function that renders the
+boundary text reviewers receive. That module is currently unwired (see
+[Implementation status](#implementation-status)).
+
+The checks that run declaratively today do so as `QualityGate` rules:
 
 | Category | Method | Enforcement |
 |---|---|---|
@@ -167,14 +174,15 @@ Three states are distinguished:
 | Correction loop + review feedback pipeline | **Implemented, unwired** | `orchestrator/src/design-system-correction-loop.ts` |
 | Design quality trend detector | **Implemented, unwired** | `orchestrator/src/design-quality-trend.ts` |
 | Review / simulation persistence records | **Implemented** | `orchestrator/src/state/types.ts` |
-| Layer 1 accessibility auditing | **Spec-only** — no `accessibilityAudit` rule type exists anywhere in the schema; run axe-core / Pa11y in your own CI | RFC-0006 §A.3.1 |
+| Design CI checks (Layer 1) — accessibility, touch targets, typography scale, spacing grid, colour palette, state completeness, `runDesignCI`, `generateDesignCIBoundary` | **Implemented, unwired** | `reference/src/policy/design-ci.ts` |
+| An `accessibilityAudit` **QualityGate rule type** to invoke those checks from a pipeline gate | **Spec-only** — zero occurrences in the schema; the `checkAccessibility()` function above exists but nothing can call it declaratively. Run axe-core / Pa11y in your own CI meanwhile | RFC-0006 §A.3.1 |
 
 ### What "unwired" means for you
 
-Five Addendum A modules — the structural preprocessor, the exemplar bank, the
-metrics, the correction loop, and the trend detector — are written and unit
-tested but are not exported from `@ai-sdlc/reference` or `@ai-sdlc/orchestrator`
-and are imported by nothing. Practically:
+Six Addendum A modules — Design CI, the structural preprocessor, the exemplar
+bank, the metrics, the correction loop, and the trend detector — are written and
+unit tested but are not exported from `@ai-sdlc/reference` or
+`@ai-sdlc/orchestrator` and are imported by nothing. Practically:
 
 - The layered review **contract** is real and the code is there to read.
 - The end-to-end flow is **not** running for you today; wiring is required
