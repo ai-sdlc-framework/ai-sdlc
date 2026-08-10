@@ -414,6 +414,46 @@ describe('validateRfc — docsCoverage', () => {
     }
   });
 
+  it('enforces coverage even when requiresDocs is empty (AISDLC-550 security review)', () => {
+    // Regression guard: placed after the `requiresDocs.length === 0` early
+    // return, an RFC could silently void a declared coverage promise by
+    // emptying requiresDocs.
+    const root = fixture('# T\n\nRFC-9999 exists.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Approved',
+        requiresDocs: [],
+        docsCoverage: ['exemplar bank'],
+      };
+      const r = validateRfc(fm, { docsDir: root, today: FIXED_TODAY });
+      assert.equal(r.failures.length, 1);
+      assert.match(r.failures[0].reason, /exemplar bank/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('skips coverage under deferredDocs but says so in the warning', () => {
+    const root = fixture('# T\n\nRFC-9999 exists.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Final',
+        requiresDocs: ['tutorial'],
+        docsCoverage: ['exemplar bank'],
+        deferredDocs: true,
+        deferredDocsDeadline: '2026-12-31',
+      };
+      const r = validateRfc(fm, { docsDir: root, today: FIXED_TODAY });
+      assert.deepEqual(r.failures, []);
+      assert.equal(r.warnings.length, 1);
+      assert.match(r.warnings[0].reason, /docsCoverage is also deferred and NOT enforced/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('leaves RFCs without docsCoverage behaving exactly as before', () => {
     const root = fixture('# T\n\nRFC-9999 in action.\n');
     try {

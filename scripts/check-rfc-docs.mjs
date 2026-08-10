@@ -326,6 +326,33 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
     return { failures, warnings };
   }
 
+  // ── docsCoverage: citation check → coverage check (opt-in per RFC) ──
+  //
+  // AISDLC-550 security review: this MUST be evaluated before the
+  // `requiresDocs.length === 0` and `deferredDocs` early returns below.
+  // Placed after them, an RFC could silently drop a declared coverage list
+  // by emptying `requiresDocs` — turning an explicit documentation promise
+  // into a no-op with no failure. `deferredDocs` still skips coverage (docs
+  // are deliberately not written yet), but says so in its warning.
+  const docsCoverage = frontmatter.docsCoverage;
+  if (docsCoverage !== undefined && frontmatter.deferredDocs !== true) {
+    if (!Array.isArray(docsCoverage)) {
+      failures.push({
+        rfc: id,
+        surface: null,
+        reason: `invalid 'docsCoverage' (got ${JSON.stringify(docsCoverage)}; expected an array of strings)`,
+      });
+    } else {
+      for (const term of findCoverageGaps(docsDir, id, docsCoverage)) {
+        failures.push({
+          rfc: id,
+          surface: null,
+          reason: `docsCoverage term '${term}' appears in no docs/ file citing ${id} — document it, or drop the term if the spec section was withdrawn`,
+        });
+      }
+    }
+  }
+
   // Empty requiresDocs is valid (purely strategic / conceptual RFCs) — pass.
   if (requiresDocs.length === 0) return { failures, warnings };
 
@@ -348,7 +375,7 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
         daysRemaining >= 0
           ? `${daysRemaining} day(s) remaining`
           : `OVERDUE by ${-daysRemaining} day(s)`
-      })`,
+      })${docsCoverage !== undefined ? ' — docsCoverage is also deferred and NOT enforced' : ''}`,
     });
     return { failures, warnings };
   }
@@ -370,27 +397,6 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
         surface,
         reason: `no .md file under docs/${subdir}/ references ${id}`,
       });
-    }
-  }
-
-  // ── docsCoverage: citation check → coverage check (opt-in per RFC) ──
-  const docsCoverage = frontmatter.docsCoverage;
-  if (docsCoverage !== undefined) {
-    if (!Array.isArray(docsCoverage)) {
-      failures.push({
-        rfc: id,
-        surface: null,
-        reason: `invalid 'docsCoverage' (got ${JSON.stringify(docsCoverage)}; expected an array of strings)`,
-      });
-    } else {
-      const missing = findCoverageGaps(docsDir, id, docsCoverage);
-      for (const term of missing) {
-        failures.push({
-          rfc: id,
-          surface: null,
-          reason: `docsCoverage term '${term}' appears in no docs/ file citing ${id} — document it, or drop the term if the spec section was withdrawn`,
-        });
-      }
     }
   }
 

@@ -254,6 +254,16 @@ Conventions:
 - The field is optional and backward-compatible: RFCs without it behave exactly
   as before. **Amending an RFC after its docs exist is the moment to add it.**
 
+Interaction with the other frontmatter fields:
+
+- `docsCoverage` is evaluated **independently of `requiresDocs`** — an RFC with
+  `requiresDocs: []` still has its declared terms enforced, so a coverage
+  promise cannot be voided by emptying the surface list.
+- `deferredDocs: true` **also defers coverage** — the terms are not enforced
+  while the deferral is live, and the linter's warning says so explicitly. Add
+  the terms when you declare the deferral anyway; they start enforcing the
+  moment the deferral is lifted.
+
 ### Deferred docs escape hatch
 
 Some RFCs are sign-off-finalised before the matching docs can reasonably be authored — for example, when the spec is locked but the reference implementation is still in flight. For those:
