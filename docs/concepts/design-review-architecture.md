@@ -71,6 +71,11 @@ grid adherence) whose findings are *prepended to the review context* rather than
 gating the pipeline. It gives the later layers evidence instead of asking them
 to derive it.
 
+Implemented as `analyzeStructure()` / `computeComplexityScore()` /
+`triggersDesignReview()` in `reference/src/policy/structural-preprocessor.ts` —
+but not yet exported or called by the pipeline (see
+[Implementation status](#implementation-status)).
+
 ### Layer 3 — AI agent usability simulation
 
 Rather than asking an LLM whether a design "looks good", this layer drives a
@@ -137,26 +142,48 @@ demonstrably work:
 
 ## Implementation status
 
-This architecture is **partially implemented**. The table separates what ships
-today from what remains normative-only, so adopters don't plan against spec
-text that has no runtime behind it.
+This architecture is **partially implemented, and most of it is not yet
+reachable**. The table below was verified against the source tree (barrel
+exports and importers), not against the RFC text — adopters should be able to
+trust it.
+
+Three states are distinguished:
+
+- **Wired** — implemented and reachable from a package's public surface.
+- **Implemented, unwired** — the module exists in-tree with unit tests, but is
+  not re-exported from any package barrel and has **no importers**. It is real
+  code you can read and adapt, but `import { … } from '@ai-sdlc/…'` will not
+  resolve it.
+- **Spec-only** — described in RFC-0006 with no implementation.
 
 | Surface | Status | Where |
 |---|---|---|
-| 7 design review principles | **Shipped** | `reference/src/policy/design-exemplar-bank.ts` |
-| Exemplar bank (create, query, add) | **Shipped** | `reference/src/policy/design-exemplar-bank.ts` |
-| Six design metrics + autonomy wiring | **Shipped** | `orchestrator/src/design-system-metrics.ts` |
-| Correction loop + review feedback pipeline | **Shipped** | `orchestrator/src/design-system-correction-loop.ts` |
-| Review/simulation persistence | **Shipped** | `orchestrator/src/state/types.ts` |
-| Design quality trend detector | **Shipped** | `orchestrator/src/design-quality-trend.ts` |
-| Token compliance / visual regression / story completeness gates | **Shipped** | `QualityGate` rule types |
-| `designReview` human gate | **Shipped** | `QualityGate` rule type (RFC-0006 §8.5) |
-| `UsabilitySimulationRunner` | **Interface only** — no project-owned runner in v1alpha1 | `reference/src/adapters/interfaces.ts` |
-| Layer 1 accessibility auditing | **Spec-only** — no `accessibilityAudit` rule type exists in the schema; run axe-core/Pa11y in your own CI for now | RFC-0006 §A.3.1 |
-| Layer 2 structural design preprocessor | **Spec-only** — no implementation | RFC-0006 §A.4 |
+| Token compliance / visual regression / story completeness gates | **Wired** | `QualityGate` rule types (`designTokenCompliance`, `visualRegression`, `storyCompleteness`) |
+| `designReview` human gate | **Wired** | `QualityGate` rule type (RFC-0006 §8.5) |
+| `UsabilitySimulationRunner` contract (Layer 3) | **Wired** (interface + stub; no production runner in v1alpha1) | `reference/src/adapters/interfaces.ts`, exported via `reference/src/adapters/index.ts` alongside `createStubUsabilitySimulationRunner` |
+| Structural design preprocessor (Layer 2) | **Implemented, unwired** — `analyzeStructure`, `computeComplexityScore`, `triggersDesignReview`, full `StructuralDesignAnalysis` type tree | `reference/src/policy/structural-preprocessor.ts` |
+| 7 design review principles + exemplar bank (Layer 4) | **Implemented, unwired** | `reference/src/policy/design-exemplar-bank.ts` |
+| Six design metrics | **Implemented, unwired** | `orchestrator/src/design-system-metrics.ts` |
+| Correction loop + review feedback pipeline | **Implemented, unwired** | `orchestrator/src/design-system-correction-loop.ts` |
+| Design quality trend detector | **Implemented, unwired** | `orchestrator/src/design-quality-trend.ts` |
+| Review / simulation persistence records | **Implemented** | `orchestrator/src/state/types.ts` |
+| Layer 1 accessibility auditing | **Spec-only** — no `accessibilityAudit` rule type exists anywhere in the schema; run axe-core / Pa11y in your own CI | RFC-0006 §A.3.1 |
 
-Adopters needing Layer 3 today implement `UsabilitySimulationRunner` directly;
-see the [API reference](../api-reference/design-system.md).
+### What "unwired" means for you
+
+Five Addendum A modules — the structural preprocessor, the exemplar bank, the
+metrics, the correction loop, and the trend detector — are written and unit
+tested but are not exported from `@ai-sdlc/reference` or `@ai-sdlc/orchestrator`
+and are imported by nothing. Practically:
+
+- The layered review **contract** is real and the code is there to read.
+- The end-to-end flow is **not** running for you today; wiring is required
+  before Layers 2 and 4 do anything in a live pipeline.
+- Depending on these surfaces means importing by deep path into package
+  internals, which is not a supported API and can change without notice.
+
+Treat this section as the current truth rather than a roadmap promise: the RFC
+describes the intended end state, and the gap above is what actually remains.
 
 ## See also
 

@@ -259,9 +259,18 @@ an adapter but by the design review request flow.
 ## Design review calibration surface (RFC-0006 Addendum A)
 
 The design review layers are calibrated by a principle set plus an exemplar
-bank, both exported from `@ai-sdlc/reference`. See
-[Design Review Architecture](../concepts/design-review-architecture.md) for the
-conceptual model.
+bank. See [Design Review Architecture](../concepts/design-review-architecture.md)
+for the conceptual model.
+
+> **Not on the public surface yet.** These symbols live in
+> `reference/src/policy/design-exemplar-bank.ts` but are **not** re-exported
+> from `@ai-sdlc/reference` — `import { createExemplarBank } from '@ai-sdlc/reference'`
+> does not resolve today, and nothing in the monorepo imports them. The same is
+> true of the structural preprocessor
+> (`reference/src/policy/structural-preprocessor.ts`) and the design metrics
+> below. They are documented here because they are shipped, tested code that
+> defines the calibration contract — but treat the shapes as provisional until
+> they are exported.
 
 ### `DESIGN_REVIEW_PRINCIPLES`
 
@@ -306,9 +315,10 @@ Builds a bank from a list of exemplars (empty by default).
 
 ## Design metrics (`DesignMetrics`)
 
-Computed by `@ai-sdlc/orchestrator` from state-store records and consumed by
-autonomy promotion/demotion (RFC-0006 §13.2 / §A.10). All six are ratios in
-`[0, 1]`.
+Computed from state-store records for autonomy promotion/demotion (RFC-0006
+§13.2 / §A.10) by `orchestrator/src/design-system-metrics.ts`. All six are
+ratios in `[0, 1]`. Like the exemplar bank above, this module is **not**
+re-exported from `@ai-sdlc/orchestrator` and currently has no callers.
 
 | Field | Meaning |
 |---|---|
