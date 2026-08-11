@@ -57,6 +57,22 @@ PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github
 
 Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` directly — never via `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX`. `pnpm exec` does not resolve workspace own-bins, so the latter form silently fails with `Command not found` and any `|| echo <fallback>` safety net fires unconditionally. `pipeline-cli/src/cli/bin-invocation.test.ts` enforces both directions of this rule. See AISDLC-156 + the "Invoking from CI" section of `pipeline-cli/README.md`.
 
+### Dark-code gate (AISDLC-552)
+
+`pnpm dark-code:check` (wired into `pnpm test`) fails when a module has **no
+non-test importer and no barrel re-export** — code that ships with passing unit
+tests, three reviewer approvals, and zero runtime effect. Reachability counts
+static imports, `export … from`, dynamic `import()`, and `.mjs` bin shims —
+resolved to actual file paths, so two same-named modules never mask each other;
+**a module imported only by its own test is dark by definition**.
+
+`.ai-sdlc/dark-code-baseline.json` records the 25 modules that were already dark
+when the gate landed, so it fails only on NEWLY dark modules. It is a **ratchet**:
+shrink it as modules get wired (`--update-baseline` after wiring), never grow it
+by hand. Entry points that are legitimately never imported go in its `allowlist`
+with a required reason. Do NOT silence a finding with a token import — that
+recreates exactly the condition being detected.
+
 ## Feature flags
 
 - **`AI_SDLC_DEPS_COMPOSITION`** (RFC-0014): gates the dependency-graph composition layer. **On by default since AISDLC-410 (2026-05-23, operator override-path promotion).** Opt out via `AI_SDLC_DEPS_COMPOSITION=off` (or `0`/`false`/`no`, case-insensitive); truthy values (`1`/`true`/`yes`/`on`) are honored for backward-compat. Phase 1 surface = `cli-deps snapshot` writes `$ARTIFACTS_DIR/_deps/snapshot.<iso>.<tag>.jsonl`; `cli-deps gc/inspect` operate on those files. See [`docs/operations/deps-composition.md`](docs/operations/deps-composition.md) and [`pipeline-cli/docs/deps.md`](pipeline-cli/docs/deps.md). Phases 2-4 (PPA composition, DoR blast-radius, Slack digest) ship behind the same flag. Phase 5 ships the corpus aggregator (`cli-deps-corpus aggregate`) + operator-override capture (`cli-deps log-override`) + the hybrid promotion runbook at [`docs/operations/deps-composition-promotion.md`](docs/operations/deps-composition-promotion.md).

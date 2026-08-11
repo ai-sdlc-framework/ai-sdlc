@@ -1,0 +1,107 @@
+{
+  "$comment": "Dark-code baseline (AISDLC-552). Modules with no non-test importer and no barrel re-export. The gate fails only on modules NOT listed here, so this file is a ratchet: shrink it as modules get wired, never grow it by hand — growth relative to the base ref fails the gate. Use `allowlist` entries of the form { path, reason } for entry points that are legitimately never imported.",
+  "generatedAt": "2026-08-11",
+  "allowlist": [],
+  "darkModules": [
+    {
+      "path": "orchestrator/src/compliance/composer.ts",
+      "rfc": "RFC-0022"
+    },
+    {
+      "path": "orchestrator/src/design-lookahead.ts",
+      "rfc": "RFC-0008"
+    },
+    {
+      "path": "orchestrator/src/design-quality-trend.ts",
+      "rfc": "RFC-0008"
+    },
+    {
+      "path": "orchestrator/src/design-system-context.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "orchestrator/src/design-system-correction-loop.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "orchestrator/src/design-system-metrics.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "orchestrator/src/design-system-stewardship.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "orchestrator/src/design-system-validation.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "orchestrator/src/journey-sa2-router.ts",
+      "rfc": "RFC-0018"
+    },
+    {
+      "path": "orchestrator/src/journey/inheritance-validator.ts",
+      "rfc": "RFC-0018"
+    },
+    {
+      "path": "orchestrator/src/journey/metric-snapshot.ts",
+      "rfc": "RFC-0018"
+    },
+    {
+      "path": "orchestrator/src/journey/state-id-drift-rule.ts",
+      "rfc": "RFC-0018"
+    },
+    {
+      "path": "orchestrator/src/sa-scoring/exemplar-bank.ts",
+      "rfc": "RFC-0008"
+    },
+    {
+      "path": "orchestrator/src/substrate/drift-tui-surface.ts",
+      "rfc": "RFC-0028"
+    },
+    {
+      "path": "orchestrator/src/substrate/identity-class.ts",
+      "rfc": "RFC-0028"
+    },
+    {
+      "path": "orchestrator/src/tessellation/cross-soul-provenance-rule.ts",
+      "rfc": "RFC-0009"
+    },
+    {
+      "path": "orchestrator/src/tessellation/inter-soul-embedding-distance-rule.ts",
+      "rfc": "RFC-0009"
+    },
+    {
+      "path": "orchestrator/src/tessellation/soul-slug-ast-scan-rule.ts",
+      "rfc": "RFC-0009"
+    },
+    {
+      "path": "pipeline-cli/src/pipeline/ucvg-threat-fixtures.ts",
+      "rfc": "RFC-0043"
+    },
+    {
+      "path": "pipeline-cli/src/tui/corpus/aggregate.ts",
+      "rfc": "RFC-0023"
+    },
+    {
+      "path": "reference/src/adapters/github/demo.ts",
+      "rfc": null
+    },
+    {
+      "path": "reference/src/core/validate-schemas.ts",
+      "rfc": null
+    },
+    {
+      "path": "reference/src/policy/design-ci.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "reference/src/policy/design-exemplar-bank.ts",
+      "rfc": "RFC-0006"
+    },
+    {
+      "path": "reference/src/policy/structural-preprocessor.ts",
+      "rfc": "RFC-0006"
+    }
+  ]
+}
