@@ -12,6 +12,14 @@ labels:
   - ci:no-issue-required
 priority: high
 dependencies: []
+blocked:
+  reason: >-
+    Upstream-OQ gate: this task cites RFC-0006 (whose Addendum A documentation
+    exposed the failure mode) and RFC-0006 OQ-7 / OQ-8 are unresolved, so any
+    citing task trips the gate. Neither OQ has any bearing on a CI gate that
+    detects unwired modules. THIRD task to need this override — walking those
+    two OQs would retire the recurring exception. Operator-acknowledged
+    2026-08-11.
 references:
   - scripts/check-rfc-docs.mjs
   - package.json
@@ -28,7 +36,9 @@ code has zero runtime effect and adopters cannot reach it.
 
 An ad-hoc scan on 2026-08-10 (no importer AND no barrel re-export; excluding
 tests, `index.ts`, `cli/` entry modules and `bin/` shims; `.tsx` and `.mjs` bins
-included in the corpus) found **26 dark modules across 567 candidates**,
+included in the corpus) found 26 dark modules; the corrected path-resolving implementation reports
+**25** (it found 6 the basename scan masked and correctly excludes test
+helpers),
 attributed by the `RFC-NNNN` marker in each module's header docblock:
 
 | RFC | Dark | Examples |
@@ -64,9 +74,9 @@ hermetic `node --test` coverage):
 - **Candidates.** `.ts` / `.tsx` under the configured source roots, excluding
   `*.test.*`, `index.ts` barrels, and `cli/` + `bin/` entry modules (which are
   invoked by shims rather than imported).
-- **Baseline, not big-bang.** The 26 existing dark modules are recorded in a
+- **Baseline, not big-bang.** The existing dark modules are recorded in a
   committed baseline file. The gate fails only on modules that are **newly**
-  dark, so it can land without a 26-module cleanup and still stop new ones. When
+  dark, so it can land without a bulk cleanup and still stop new ones. When
   a baselined module becomes reachable, the gate reports it so the baseline can
   shrink — the baseline is a ratchet, not a permanent exemption.
 - **Allowlist.** Genuinely-unimported entry points (fixtures, demos, generators
@@ -75,9 +85,12 @@ hermetic `node --test` coverage):
 
 ## Scope discipline
 
-Wiring any of the 26 existing dark modules is **out of scope** — that is
-AISDLC-551 and its successors. This task only makes the condition visible and
-stops it growing. Do not "fix" a dark module by adding a token import.
+Wiring any of the existing dark modules is **out of scope** — that is tracked by
+the separate wiring task filed alongside the RFC-0006 Addendum A documentation
+work (its id is not cross-referenced here because that task is not yet on
+`main`, and an unresolvable reference fails the DoR gate). This task only makes
+the condition visible and stops it growing. Do not "fix" a dark module by adding
+a token import.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -89,6 +102,6 @@ stops it growing. Do not "fix" a dark module by adding a token import.
 - [ ] #5 Each dark module is reported with its self-declared `RFC-NNNN` (or `—` when absent) so findings are attributable
 - [ ] #6 Hermetic tests in `scripts/check-dark-code.test.mjs` cover: reachable-via-barrel, reachable-via-dynamic-import, reachable-via-mjs-bin, dark-because-only-test-imports-it, baseline suppression, and newly-dark failure
 - [ ] #7 Wired into the repo test chain (`pnpm test:dark-code-gate`) and documented in CLAUDE.md's hooks/CI section
-- [ ] #8 Running the gate on the current tree exits 0 (baseline covers the existing 26); artificially adding an unimported module makes it exit 1
+- [ ] #8 Running the gate on the current tree exits 0 (the baseline covers the pre-existing set); artificially adding an unimported module makes it exit 1
 - [ ] #9 Full verification passes: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check`
 <!-- AC:END -->
