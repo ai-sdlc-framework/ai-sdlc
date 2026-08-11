@@ -16,6 +16,7 @@ import {
   isCandidate,
   isTestFile,
   extractSpecifiers,
+  stripComments,
   resolveSpecifierTargets,
   validateAllowlist,
   baselineGrowth,
@@ -100,6 +101,45 @@ describe('extractSpecifiers', () => {
 
   it('returns [] when nothing is imported', () => {
     assert.deepEqual(extractSpecifiers('export const a = 1;\n'), []);
+  });
+});
+
+describe('stripComments', () => {
+  it('removes line and block comments but keeps code', () => {
+    assert.equal(stripComments('a; // note\nb;'), 'a; \nb;');
+    assert.equal(stripComments('a; /* note */ b;'), 'a;  b;');
+  });
+
+  it('does not treat // inside a string as a comment', () => {
+    assert.equal(stripComments("const u = 'https://x.dev';"), "const u = 'https://x.dev';");
+  });
+
+  it('honours escaped quotes inside strings', () => {
+    assert.equal(stripComments("const s = 'a\\'b'; // x"), "const s = 'a\\'b'; ");
+  });
+});
+
+describe('extractSpecifiers — comment-only mentions confer nothing', () => {
+  it('ignores a dynamic import written only in a line comment', () => {
+    // Round-3 review repro: a TODO mentioning import('./dark.js') must not
+    // mark dark.ts reachable — this gate tells people not to silence it with a
+    // token import, so honouring a token MENTION would be worse.
+    assert.deepEqual(extractSpecifiers("// TODO: consider import('./dark.js') here"), []);
+  });
+
+  it('ignores a JSDoc usage example referencing another module', () => {
+    const text = [
+      '/**',
+      " * Example: import { x } from './other.js';",
+      ' */',
+      'export const a = 1;',
+    ].join('\n');
+    assert.deepEqual(extractSpecifiers(text), []);
+  });
+
+  it('still collects real imports adjacent to comments', () => {
+    const text = ["// see './ignored.js'", "import { a } from './real.js';"].join('\n');
+    assert.deepEqual(extractSpecifiers(text), ['./real.js']);
   });
 });
 
@@ -311,6 +351,23 @@ describe('findDarkModules — path resolution defects the security review caught
       assert.deepEqual(
         scan(root).map((d) => d.path),
         [join('src', 'two', 'helper.ts')],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let a comment in ANOTHER file mask a dark module (round-3 repro)', () => {
+    const root = fixture({
+      'src/dark.ts': 'export const d = 1;\n',
+      'src/user.ts':
+        "// TODO: consider using import('./dark.js') here eventually\nexport const u = 1;\n",
+      'src/index.ts': "export * from './user.js';\n",
+    });
+    try {
+      assert.deepEqual(
+        scan(root).map((d) => d.path),
+        [join('src', 'dark.ts')],
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

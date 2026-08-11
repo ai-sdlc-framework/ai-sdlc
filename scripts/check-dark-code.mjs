@@ -13,12 +13,15 @@
  * unit tests and three reviewer approvals. This is a live leak, not debt.
  *
  * Reachability is decided by RESOLVING each import specifier to a file path,
- * not by matching basenames. Basename matching (the first implementation) had
- * two defects the security review caught: a new dark `types.ts` was declared
- * reachable because some *other* `types.ts` was imported elsewhere (a false
- * negative — the gate misses real dark code), and a bare mention of
- * `from './x.js'` inside a comment conferred reachability, contradicting this
- * gate's own "don't silence it with a token import" instruction.
+ * not by matching basenames. Basename matching (the first implementation) let a
+ * dark `types.ts` look reachable because some *other* `types.ts` was imported
+ * elsewhere — a false negative, the gate missing real dark code.
+ *
+ * Comments are stripped before specifiers are read. A `from './x.js'` written
+ * only inside a comment must NOT confer reachability: this gate tells people
+ * not to silence it with a token import, so honouring a token *mention* would
+ * be worse. (Round 2 filtered self-references only; the general case was caught
+ * by round-3 code review.)
  *
  * Rules:
  *   - Specifiers are collected from `from '…'`, `export … from '…'` and
@@ -106,15 +109,80 @@ export function isCandidate(path) {
 /**
  * Every module specifier referenced by `text`.
  *
- * Covers `import … from '…'`, `export … from '…'`, and dynamic `import('…')`.
- * Bare/package specifiers are returned too; the resolver ignores them because
- * they address package barrels rather than individual modules.
+ * Covers `import … from '…'`, `export … from '…'`, and dynamic `import('…')`,
+ * after comment removal. Bare/package specifiers are returned too; the resolver
+ * ignores them because they address package barrels rather than modules.
+ *
+ * Known limit: a regex literal containing `//` or `/*` can end a line early for
+ * the scanner. Import statements live on their own lines, so this cannot hide a
+ * real import — it can only drop trailing text on that same line.
  */
+export function stripComments(text) {
+  let out = '';
+  let state = 'code'; // code | line | block | single | double | template
+  for (let i = 0; i < text.length; ) {
+    const c = text[i];
+    const d = text[i + 1];
+    if (state === 'code') {
+      if (c === '/' && d === '/') {
+        state = 'line';
+        i += 2;
+      } else if (c === '/' && d === '*') {
+        state = 'block';
+        i += 2;
+      } else {
+        if (c === "'") state = 'single';
+        else if (c === '"') state = 'double';
+        else if (c === '`') state = 'template';
+        out += c;
+        i += 1;
+      }
+      continue;
+    }
+    if (state === 'line') {
+      if (c === '\n') {
+        state = 'code';
+        out += c;
+      }
+      i += 1;
+      continue;
+    }
+    if (state === 'block') {
+      if (c === '*' && d === '/') {
+        state = 'code';
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+    // Inside a string: honour escapes so an escaped quote doesn't end it.
+    if (c === '\\') {
+      out += c + (d ?? '');
+      i += 2;
+      continue;
+    }
+    if (
+      (state === 'single' && c === "'") ||
+      (state === 'double' && c === '"') ||
+      (state === 'template' && c === '`')
+    ) {
+      state = 'code';
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
 export function extractSpecifiers(text) {
   const out = [];
   const re = /(?:from|import\s*\()\s*['"]([^'"]+)['"]/g;
   let m;
-  while ((m = re.exec(text)) !== null) out.push(m[1]);
+  // Comments are stripped here rather than by callers so no call site can
+  // forget and silently reopen the token-mention hole.
+  const code = stripComments(text);
+  while ((m = re.exec(code)) !== null) out.push(m[1]);
   return out;
 }
 
@@ -362,6 +430,12 @@ function main(argv) {
   const dark = findDarkModules({ workDir, allowlist: baseline.allowlist });
 
   if (argv.includes('--update-baseline')) {
+    if (allowlistErrors.length > 0) {
+      process.stdout.write(
+        `${formatReport({ newlyDark: [], nowReachable: [], totalDark: dark.length, allowlistErrors })}\n`,
+      );
+      return 1;
+    }
     writeBaseline(dark, workDir, BASELINE_PATH, baseline.allowlist);
     process.stdout.write(`[dark-code] baseline updated: ${dark.length} module(s)\n`);
     return 0;
