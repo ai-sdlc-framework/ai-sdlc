@@ -3,7 +3,7 @@ id: AISDLC-552
 title: >-
   feat(ci): dark-code gate — fail CI when a module ships with tests but is never
   exported or imported
-status: To Do
+status: Done
 assignee: []
 labels:
   - ci
