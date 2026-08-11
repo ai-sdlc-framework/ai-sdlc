@@ -62,10 +62,11 @@ Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` 
 `pnpm dark-code:check` (wired into `pnpm test`) fails when a module has **no
 non-test importer and no barrel re-export** — code that ships with passing unit
 tests, three reviewer approvals, and zero runtime effect. Reachability counts
-static imports, `export … from`, dynamic `import()`, and `.mjs` bin shims;
+static imports, `export … from`, dynamic `import()`, and `.mjs` bin shims —
+resolved to actual file paths, so two same-named modules never mask each other;
 **a module imported only by its own test is dark by definition**.
 
-`.ai-sdlc/dark-code-baseline.json` records the 24 modules that were already dark
+`.ai-sdlc/dark-code-baseline.json` records the 25 modules that were already dark
 when the gate landed, so it fails only on NEWLY dark modules. It is a **ratchet**:
 shrink it as modules get wired (`--update-baseline` after wiring), never grow it
 by hand. Entry points that are legitimately never imported go in its `allowlist`

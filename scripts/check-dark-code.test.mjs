@@ -15,7 +15,10 @@ import { join } from 'node:path';
 import {
   isCandidate,
   isTestFile,
-  referenceMatcher,
+  extractSpecifiers,
+  resolveSpecifierTargets,
+  validateAllowlist,
+  baselineGrowth,
   extractRfcMarker,
   findDarkModules,
   loadBaseline,
@@ -64,23 +67,63 @@ describe('isCandidate', () => {
     assert.equal(isCandidate('src/bin/thing.ts'), false);
   });
 
+  it('excludes test-helper infrastructure — being test-only is its job', () => {
+    // Real case: orchestrator/src/__test-helpers/git-env.ts is imported only by
+    // tests, while a DIFFERENT runtime/git-env.ts is imported by production
+    // code. Path resolution correctly separates them; the helper still should
+    // not be reported, because shared test infrastructure is not dark code.
+    assert.equal(isCandidate(join('orchestrator', 'src', '__test-helpers', 'git-env.ts')), false);
+    assert.equal(isCandidate(join('pipeline-cli', 'src', '__fixtures__', 'sample.ts')), false);
+    assert.equal(isCandidate(join('orchestrator', 'src', 'runtime', 'git-env.ts')), true);
+  });
+
   it('excludes .d.ts declarations', () => {
     assert.equal(isCandidate('src/types.d.ts'), false);
   });
 });
 
-describe('referenceMatcher', () => {
-  it('matches static import, re-export, and dynamic import', () => {
-    const re = referenceMatcher('design-ci');
-    assert.ok(re.test("import { runDesignCI } from './policy/design-ci.js';"));
-    assert.ok(re.test("export * from './design-ci.js';"));
-    assert.ok(re.test('const m = await import("../policy/design-ci.js");'));
+describe('extractSpecifiers', () => {
+  it('collects static import, re-export, and dynamic import specifiers', () => {
+    const text = [
+      "import { a } from './policy/design-ci.js';",
+      "export * from './barrel.js';",
+      'const m = await import("../lazy.js");',
+      "import pkg from '@ai-sdlc/reference';",
+    ].join('\n');
+    assert.deepEqual(extractSpecifiers(text), [
+      './policy/design-ci.js',
+      './barrel.js',
+      '../lazy.js',
+      '@ai-sdlc/reference',
+    ]);
   });
 
-  it('does NOT match a bare mention of the name', () => {
-    const re = referenceMatcher('design-ci');
-    assert.equal(re.test('// design-ci is described in RFC-0006'), false);
-    assert.equal(re.test("from './design-ci-helpers.js'"), false);
+  it('returns [] when nothing is imported', () => {
+    assert.deepEqual(extractSpecifiers('export const a = 1;\n'), []);
+  });
+});
+
+describe('resolveSpecifierTargets', () => {
+  it('maps an ESM .js specifier onto its .ts/.tsx source', () => {
+    const targets = resolveSpecifierTargets('/repo/src/a/importer.ts', './thing.js');
+    assert.ok(targets.includes('/repo/src/a/thing.ts'));
+    assert.ok(targets.includes('/repo/src/a/thing.tsx'));
+  });
+
+  it('resolves relative to the IMPORTING file, not the repo root', () => {
+    const targets = resolveSpecifierTargets('/repo/src/deep/nested/importer.ts', '../thing.js');
+    assert.ok(targets.includes('/repo/src/deep/thing.ts'));
+    assert.equal(targets.includes('/repo/src/deep/nested/thing.ts'), false);
+  });
+
+  it('maps a directory specifier onto its index', () => {
+    const targets = resolveSpecifierTargets('/repo/src/importer.ts', './policy');
+    assert.ok(targets.includes('/repo/src/policy/index.ts'));
+  });
+
+  it('ignores bare package specifiers (they address barrels, not modules)', () => {
+    assert.deepEqual(resolveSpecifierTargets('/repo/src/a.ts', '@ai-sdlc/reference'), []);
+    assert.deepEqual(resolveSpecifierTargets('/repo/src/a.ts', 'node:fs'), []);
   });
 });
 
@@ -239,6 +282,92 @@ describe('baseline behaviour', () => {
   });
 });
 
+describe('findDarkModules — path resolution defects the security review caught', () => {
+  it('does NOT let an unrelated same-basename import mask a dark module', () => {
+    // The original basename-matching implementation reported src/b/types.ts as
+    // reachable because src/a/types.ts was imported somewhere. That is a false
+    // NEGATIVE: the gate silently misses real dark code.
+    const root = fixture({
+      'src/a/types.ts': 'export type A = 1;\n',
+      'src/a/user.ts': "import type { A } from './types.js';\nexport const a: A = 1;\n",
+      'src/index.ts': "export * from './a/user.js';\n",
+      'src/b/types.ts': 'export type B = 2;\n',
+    });
+    try {
+      const dark = scan(root).map((d) => d.path);
+      assert.deepEqual(dark, [join('src', 'b', 'types.ts')]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not credit a same-named module in a different directory', () => {
+    const root = fixture({
+      'src/one/helper.ts': 'export const h = 1;\n',
+      'src/two/helper.ts': 'export const h = 2;\n',
+      'src/index.ts': "export * from './one/helper.js';\n",
+    });
+    try {
+      assert.deepEqual(
+        scan(root).map((d) => d.path),
+        [join('src', 'two', 'helper.ts')],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes <pkg>/src/cli entries but NOT a nested directory merely named cli', () => {
+    assert.equal(isCandidate(join('pipeline-cli', 'src', 'cli', 'dor-check.ts')), false);
+    assert.equal(isCandidate(join('orchestrator', 'src', 'features', 'cli', 'sneaky.ts')), true);
+  });
+});
+
+describe('validateAllowlist', () => {
+  it('accepts entries carrying a non-empty reason', () => {
+    assert.deepEqual(
+      validateAllowlist([{ path: 'src/gen.ts', reason: 'codegen entry point' }]),
+      [],
+    );
+  });
+
+  it('rejects a bare string entry — an exemption with no justification', () => {
+    const errors = validateAllowlist(['src/gen.ts']);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /bare string/);
+  });
+
+  it('rejects an entry with a missing or blank reason', () => {
+    assert.match(validateAllowlist([{ path: 'src/gen.ts' }])[0], /missing a non-empty 'reason'/);
+    assert.match(
+      validateAllowlist([{ path: 'src/gen.ts', reason: '   ' }])[0],
+      /missing a non-empty 'reason'/,
+    );
+  });
+
+  it('rejects an entry with no path', () => {
+    assert.match(validateAllowlist([{ reason: 'why' }])[0], /missing a 'path'/);
+  });
+});
+
+describe('baselineGrowth — the ratchet', () => {
+  it('reports paths added relative to the base ref', () => {
+    const grown = baselineGrowth(
+      { darkModules: [{ path: 'src/old.ts' }] },
+      { darkModules: [{ path: 'src/old.ts' }, { path: 'src/absorbed.ts' }] },
+    );
+    assert.deepEqual(grown, ['src/absorbed.ts']);
+  });
+
+  it('allows removals (wiring a module shrinks the baseline)', () => {
+    const grown = baselineGrowth(
+      { darkModules: [{ path: 'src/a.ts' }, { path: 'src/b.ts' }] },
+      { darkModules: [{ path: 'src/a.ts' }] },
+    );
+    assert.deepEqual(grown, []);
+  });
+});
+
 describe('formatReport', () => {
   it('names each newly dark module and refuses the token-import shortcut', () => {
     const out = formatReport({
@@ -248,12 +377,42 @@ describe('formatReport', () => {
     });
     assert.match(out, /FAIL: 1 newly unwired/);
     assert.match(out, /src\/fresh\.ts \(RFC-0018\)/);
+  });
+
+  it("renders '—' for a module with no RFC marker (AC#5)", () => {
+    const out = formatReport({
+      newlyDark: [{ path: 'src/plain.ts', rfc: null }],
+      nowReachable: [],
+      totalDark: 0,
+    });
+    assert.match(out, /src\/plain\.ts \(—\)/);
     assert.match(out, /Do NOT add a token import/);
   });
 
   it('reports OK with the baselined count when nothing is newly dark', () => {
     const out = formatReport({ newlyDark: [], nowReachable: [], totalDark: 24 });
     assert.match(out, /OK: no newly unwired modules \(24 baselined\)/);
+  });
+
+  it('fails loudly when the baseline grew', () => {
+    const out = formatReport({
+      newlyDark: [],
+      nowReachable: [],
+      totalDark: 3,
+      grown: ['src/absorbed.ts'],
+    });
+    assert.match(out, /baseline GREW by 1/);
+    assert.match(out, /may shrink, never grow/);
+  });
+
+  it('renders allowlist validation errors', () => {
+    const out = formatReport({
+      newlyDark: [],
+      nowReachable: [],
+      totalDark: 0,
+      allowlistErrors: ["allowlist[0] is a bare string ('x.ts')"],
+    });
+    assert.match(out, /invalid allowlist entries/);
   });
 
   it('surfaces the ratchet hint when baselined modules became reachable', () => {
