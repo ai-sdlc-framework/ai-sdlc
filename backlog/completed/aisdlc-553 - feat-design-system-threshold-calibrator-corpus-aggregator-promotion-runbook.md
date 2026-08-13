@@ -3,7 +3,7 @@ id: AISDLC-553
 title: >-
   feat(design): design-system autonomy-threshold calibrator — corpus aggregator
   + promotion runbook (RFC-0006 OQ-7 resolution)
-status: To Do
+status: Done
 assignee: []
 labels:
   - rfc-0006
