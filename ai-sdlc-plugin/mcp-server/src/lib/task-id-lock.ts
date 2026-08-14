@@ -18,7 +18,16 @@
  * crashed/killed holder cannot deadlock future allocations forever).
  */
 
-import { closeSync, mkdirSync, openSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 export interface TaskIdLockHandle {
@@ -34,9 +43,22 @@ export interface AcquireTaskIdLockOptions {
   pollMs?: number;
 }
 
-const DEFAULT_STALE_MS = 30_000;
-const DEFAULT_TIMEOUT_MS = 5_000;
+/**
+ * AISDLC-559 review (MAJOR): these two MUST be ordered `staleMs < timeoutMs`,
+ * or crash recovery is unreachable. With the original 30s stale / 5s timeout,
+ * every caller within 30s of a crashed holder hit the 5s deadline and threw
+ * before the stale takeover could ever fire — and neither MCP tool retries.
+ * A crashed holder therefore bricked allocation for half a minute.
+ */
+const DEFAULT_STALE_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_POLL_MS = 50;
+
+if (DEFAULT_STALE_MS >= DEFAULT_TIMEOUT_MS) {
+  throw new Error(
+    'task-id-lock: DEFAULT_STALE_MS must be < DEFAULT_TIMEOUT_MS or stale locks can never be reclaimed',
+  );
+}
 
 export function taskIdLockDir(parentRoot: string): string {
   return join(parentRoot, '.ai-sdlc', 'locks');
@@ -70,14 +92,27 @@ export async function acquireTaskIdLock(
   for (;;) {
     try {
       const fd = openSync(path, 'wx');
-      writeSync(fd, JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }));
+      // AISDLC-559 review (MAJOR): the token is what stops a SUPERSEDED holder
+      // from deleting the current holder's lock. Without it, a holder whose
+      // critical section outran staleMs would have its lock stolen by B, then
+      // its own release() would unlink B's lock and a third caller would walk
+      // straight in — two simultaneous holders, i.e. the exact race this lock
+      // exists to close.
+      const token = randomUUID();
+      writeSync(
+        fd,
+        JSON.stringify({ token, pid: process.pid, acquiredAt: new Date().toISOString() }),
+      );
       closeSync(fd);
       return {
         release: () => {
           try {
-            unlinkSync(path);
+            const held = JSON.parse(readFileSync(path, 'utf-8')) as { token?: string };
+            // Only unlink a lock we still own.
+            if (held.token === token) unlinkSync(path);
           } catch {
-            // Already released or stolen by a stale-lock reaper — nothing to do.
+            // Already released, stolen by a stale-lock reaper, or unreadable —
+            // in every case there is nothing of ours left to remove.
           }
         },
       };
@@ -85,6 +120,7 @@ export async function acquireTaskIdLock(
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
 
       // Someone else holds the lock. If it's stale (crashed holder), steal it.
+      let stolen = false;
       try {
         const age = Date.now() - statSync(path).mtimeMs;
         if (age > staleMs) {
@@ -93,12 +129,16 @@ export async function acquireTaskIdLock(
           } catch {
             // Another waiter already reaped it — loop and retry the create.
           }
-          continue;
+          stolen = true;
         }
       } catch {
-        // Lock file vanished between EEXIST and stat (released concurrently) — retry now.
-        continue;
+        // AISDLC-559 review (MINOR): do NOT `continue` here. A bare continue
+        // skipped both the deadline check and the sleep, so a dangling symlink
+        // at the lock path — where openSync('wx') returns EEXIST forever while
+        // statSync returns ENOENT forever — became an unbounded 100%-CPU spin
+        // that hung the MCP server. Fall through to the bounded wait instead.
       }
+      if (stolen) continue;
 
       if (Date.now() >= deadline) {
         throw new Error(

@@ -4,6 +4,8 @@ import type { ToolDeps } from '../types.js';
 import { pickProjectRoot } from './task-edit.js';
 import {
   computeNextFreeBlock,
+  findUnscannedRequiredSources,
+  prefetchOrigin,
   resolveParentRepoRoot,
   scanClaimedTaskIds,
   DEFAULT_TASK_ID_PREFIX,
@@ -46,8 +48,17 @@ export function registerNextTaskId(server: McpServer, deps: ToolDeps): void {
           'Run `git fetch origin` before scanning to refresh remote-tracking refs. ' +
             'Defaults to false — this tool never fetches silently.',
         ),
+      allowUnscannedSources: z
+        .boolean()
+        .optional()
+        .describe(
+          'Allocate even when a required source (git-refs) could not be scanned. ' +
+            'Defaults to false: without git-refs the scan cannot see unmerged or remote ' +
+            'branches, so allocating risks handing out an ID that is already taken. ' +
+            'Set true ONLY for a repo with no git history yet.',
+        ),
     },
-    async ({ prefix, count, fetch }) => {
+    async ({ prefix, count, fetch, allowUnscannedSources }) => {
       try {
         const projectDir = pickProjectRoot(deps.projectDir);
         if (typeof projectDir !== 'string') return projectDir; // error result
@@ -55,12 +66,45 @@ export function registerNextTaskId(server: McpServer, deps: ToolDeps): void {
         const resolvedPrefix = prefix ?? DEFAULT_TASK_ID_PREFIX;
         const lockRoot = resolveParentRepoRoot(projectDir) ?? projectDir;
 
+        // AISDLC-559 review (MAJOR): fetch OUTSIDE the lock. A slow `git fetch`
+        // inside the critical section could outrun the stale threshold, letting
+        // a second caller steal the lock — producing the two-holders race the
+        // lock exists to prevent.
+        if (fetch) prefetchOrigin(projectDir);
+
         const lock = await acquireTaskIdLock(lockRoot);
         let scan;
         try {
-          scan = scanClaimedTaskIds({ projectDir, prefix: resolvedPrefix, fetch });
+          scan = scanClaimedTaskIds({ projectDir, prefix: resolvedPrefix, fetch: false });
         } finally {
           lock.release();
+        }
+
+        // AISDLC-559 review (CRITICAL): fail CLOSED. Previously a failed
+        // git-refs scan was reported as advisory text below a confidently
+        // allocated ID — so the one source covering unmerged and remote
+        // branches could silently drop out and the tool would hand back a
+        // number that is already claimed. That is the exact bug this tool exists
+        // to prevent, so refuse unless the caller explicitly accepts the risk.
+        const unscanned = findUnscannedRequiredSources(scan.sourceReports);
+        if (unscanned.length > 0 && !allowUnscannedSources) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text' as const,
+                text:
+                  `# next_task_id: REFUSED — cannot guarantee a free ID\n\n` +
+                  unscanned
+                    .map((r) => `- ${r.source}: NOT scanned (${r.detail ?? 'unknown reason'})`)
+                    .join('\n') +
+                  `\n\nWithout git-refs this scan cannot see IDs claimed on unmerged or ` +
+                  `remote branches, so any ID returned could already be taken.\n` +
+                  `Fix the underlying cause, or pass allowUnscannedSources: true if this ` +
+                  `repo genuinely has no git history yet.`,
+              },
+            ],
+          };
         }
 
         const majors = computeNextFreeBlock(scan.claimed, count ?? 1);

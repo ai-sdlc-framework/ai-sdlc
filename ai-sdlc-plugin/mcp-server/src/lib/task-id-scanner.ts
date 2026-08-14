@@ -63,8 +63,13 @@ export interface FreshnessInfo {
 }
 
 export interface TaskIdScanResult {
-  /** Major ID number -> every place it was found claimed. */
+  /** Major ID number -> every place it was found claimed. Drives ALLOCATION. */
   claimed: Map<number, ClaimSource[]>;
+  /**
+   * Normalised exact id (`aisdlc-100.5`) -> every place it was found claimed.
+   * Drives COLLISION REFUSAL — see the note in `scanClaimedTaskIds`.
+   */
+  claimedExact: Map<string, ClaimSource[]>;
   sourceReports: SourceReport[];
   freshness: FreshnessInfo;
 }
@@ -105,6 +110,17 @@ function buildIdRegex(prefix: string): RegExp {
   return new RegExp(`${escapeRegExp(prefix)}-(\\d+)`, 'i');
 }
 
+/** Matches the FULL id including any hierarchical sub-parts (100, 100.5, 100.5.2). */
+function buildExactIdRegex(prefix: string): RegExp {
+  return new RegExp(`${escapeRegExp(prefix)}-(\\d+(?:\\.\\d+)*)`, 'i');
+}
+
+/** Normalised exact id (e.g. `aisdlc-100.5`), or `undefined`. */
+export function extractExactId(text: string, exactRegex: RegExp): string | undefined {
+  const match = exactRegex.exec(text);
+  return match ? match[0].toLowerCase() : undefined;
+}
+
 /** Extract the major ID number from a filename/path/log line, or `undefined`. */
 export function extractMajorId(text: string, idRegex: RegExp): number | undefined {
   const match = idRegex.exec(text);
@@ -136,7 +152,20 @@ function scanGitRefs(
       // without a .git) are handled below via try/catch and must not leak to
       // the parent process' stderr — execFileSync's default otherwise
       // inherits stderr regardless of the overall 'pipe' default.
-      { cwd: gitCwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+      {
+        cwd: gitCwd,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // AISDLC-559 review: Node's default maxBuffer is 1 MiB. This repo's
+        // output is already ~200 KB and the design targets full-history clones
+        // with 700+ refs. On overflow execFileSync THROWS, the catch below sets
+        // scanned:false, and git-refs — the only source covering unmerged and
+        // remote branches — silently drops out. That is precisely the
+        // duplicate-ID condition this module exists to prevent, so give it
+        // headroom and a timeout rather than letting it degrade with scale.
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 60_000,
+      },
     );
     const seen = new Set<number>();
     for (const rawLine of out.split('\n')) {
@@ -290,16 +319,42 @@ export function scanClaimedTaskIds(opts: ScanTaskIdsOptions): TaskIdScanResult {
   const idRegex = buildIdRegex(prefix);
 
   const claimed = new Map<number, ClaimSource[]>();
+  // AISDLC-559 review (CRITICAL): allocation and collision are DIFFERENT
+  // questions. Allocating a new major must reserve on the major number, but
+  // refusing a duplicate must compare the EXACT id — otherwise a legitimate
+  // new sub-ID like AISDLC-100.6 is rejected merely because the epic
+  // AISDLC-100 or a sibling AISDLC-100.5 exists, which breaks the
+  // RFC-walkthrough phase-task pattern this repo uses routinely.
+  const claimedExact = new Map<string, ClaimSource[]>();
+  const exactIdRegex = buildExactIdRegex(prefix);
   const addClaim = (major: number, source: TaskIdSourceName, detail: string): void => {
     const arr = claimed.get(major) ?? [];
     arr.push({ source, detail });
     claimed.set(major, arr);
+
+    // Extract from the BASENAME, never the full path. `detail` is often an
+    // absolute path, and a containing directory can itself carry an id —
+    // a worktree at `.worktrees/aisdlc-234/` or a tmpdir named
+    // `aisdlc-234-fixture-XXXX` would otherwise claim 234 for every file
+    // beneath it, and mask the file's own id.
+    const exact = extractExactId(basename(detail), exactIdRegex);
+    if (exact) {
+      const exactArr = claimedExact.get(exact) ?? [];
+      exactArr.push({ source, detail });
+      claimedExact.set(exact, exactArr);
+    }
   };
 
   let fetched = false;
   if (opts.fetch) {
     try {
-      execFileSync('git', ['fetch', 'origin'], { cwd: gitCwd, stdio: 'ignore' });
+      // Bounded: an unbounded fetch inside a caller's lock window is what let
+      // the stale-takeover produce two simultaneous lock holders.
+      execFileSync('git', ['fetch', 'origin'], {
+        cwd: gitCwd,
+        stdio: 'ignore',
+        timeout: 60_000,
+      });
       fetched = true;
     } catch {
       // Fetch failure is non-fatal — freshness will correctly report stale.
@@ -318,7 +373,35 @@ export function scanClaimedTaskIds(opts: ScanTaskIdsOptions): TaskIdScanResult {
     fetched,
   );
 
-  return { claimed, sourceReports, freshness };
+  return { claimed, claimedExact, sourceReports, freshness };
+}
+
+/**
+ * Sources that MUST have scanned for an allocation/creation decision to be
+ * trustworthy. `git-refs` is the only source covering unmerged and remote
+ * branches, so proceeding without it is exactly the duplicate-ID condition
+ * this module exists to prevent.
+ */
+export const REQUIRED_SCAN_SOURCES: readonly TaskIdSourceName[] = ['git-refs'];
+
+/**
+ * Refresh remote-tracking refs. Exposed separately so callers can fetch
+ * BEFORE taking the allocation lock — a slow fetch inside the critical section
+ * can outrun the stale threshold and let a second caller steal the lock.
+ * Returns true when the fetch succeeded.
+ */
+export function prefetchOrigin(gitCwd: string): boolean {
+  try {
+    execFileSync('git', ['fetch', 'origin'], { cwd: gitCwd, stdio: 'ignore', timeout: 60_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Required sources that failed to scan. Empty means safe to proceed. */
+export function findUnscannedRequiredSources(reports: readonly SourceReport[]): SourceReport[] {
+  return reports.filter((r) => REQUIRED_SCAN_SOURCES.includes(r.source) && !r.scanned);
 }
 
 /**

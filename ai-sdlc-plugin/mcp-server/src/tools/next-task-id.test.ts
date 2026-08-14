@@ -1,9 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerNextTaskId } from './next-task-id.js';
+
+// AISDLC-559 review (CRITICAL): the allocator now fails CLOSED when the
+// git-refs source cannot scan. These fixtures previously used bare mkdtemp
+// dirs with no .git, so git-refs was genuinely unscanned in EVERY test while
+// they all asserted success — the tool's core guarantee was never exercised.
+// Make the fixtures real repos so the scan actually runs.
+function initGitRepoForFixture(dir: string): void {
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'aisdlc-559-fixture@example.invalid'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'AISDLC-559 Fixture'], { cwd: dir });
+}
 
 type Handler = (
   args: Record<string, unknown>,
@@ -18,6 +30,7 @@ describe('next_task_id MCP tool (AISDLC-559)', () => {
 
   beforeEach(() => {
     projectDir = mkdtempSync(join(tmpdir(), 'aisdlc-559-next-id-'));
+    initGitRepoForFixture(projectDir);
     mkdirSync(join(projectDir, 'backlog', 'tasks'), { recursive: true });
     mkdirSync(join(projectDir, 'backlog', 'completed'), { recursive: true });
 
@@ -85,6 +98,7 @@ describe('next_task_id — sees sibling worktree claims (AISDLC-559)', () => {
 
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), 'aisdlc-559-next-id-sibling-'));
+    initGitRepoForFixture(scratch);
   });
 
   afterEach(() => {

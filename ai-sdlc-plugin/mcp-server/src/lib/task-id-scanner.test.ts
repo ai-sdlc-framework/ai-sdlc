@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import {
   computeNextFreeBlock,
   extractMajorId,
+  findUnscannedRequiredSources,
   resolveParentRepoRoot,
   scanClaimedTaskIds,
   DEFAULT_TASK_ID_PREFIX,
@@ -275,5 +276,57 @@ describe('scanClaimedTaskIds — freshness (AISDLC-559)', () => {
     initRepo(repo);
     const result = scanClaimedTaskIds({ projectDir: repo });
     expect(result.freshness.fetched).toBe(false);
+  });
+});
+
+describe('task-id-scanner — round-2 review fixes (AISDLC-559)', () => {
+  let scratch: string;
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'aisdlc-559-r2-'));
+  });
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  // The exact-id map is what makes a legitimate new sub-ID distinguishable
+  // from its epic. Extracting it from a full PATH lets a containing directory
+  // claim ids for every file beneath it — a `.worktrees/aisdlc-234/` isolate
+  // would claim 234 for all of its own task files and mask their real ids.
+  it('extracts ids from the filename, never from a containing directory', () => {
+    const repo = join(scratch, 'aisdlc-234-poisoned-dir');
+    initRepo(repo);
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(repo, 'backlog', 'tasks', 'aisdlc-600 - real.md'), 'x', 'utf-8');
+
+    const result = scanClaimedTaskIds({ projectDir: repo, prefix: 'AISDLC' });
+    expect([...result.claimedExact.keys()]).toEqual(['aisdlc-600']);
+    expect(result.claimedExact.has('aisdlc-234')).toBe(false);
+  });
+
+  it('tracks a hierarchical sub-ID separately from its major', () => {
+    const repo = join(scratch, 'repo');
+    initRepo(repo);
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(repo, 'backlog', 'tasks', 'aisdlc-100 - epic.md'), 'x', 'utf-8');
+    writeFileSync(join(repo, 'backlog', 'tasks', 'aisdlc-100.5 - phase.md'), 'x', 'utf-8');
+
+    const result = scanClaimedTaskIds({ projectDir: repo, prefix: 'AISDLC' });
+    expect(result.claimedExact.has('aisdlc-100')).toBe(true);
+    expect(result.claimedExact.has('aisdlc-100.5')).toBe(true);
+    // A never-claimed sibling sub-ID must NOT appear claimed...
+    expect(result.claimedExact.has('aisdlc-100.6')).toBe(false);
+    // ...while ALLOCATION still reserves on the major, so 100 is not reissued.
+    expect(result.claimed.has(100)).toBe(true);
+  });
+
+  it('reports git-refs as unscanned outside a git repo, and flags it as required', () => {
+    const notARepo = join(scratch, 'plain');
+    mkdirSync(join(notARepo, 'backlog', 'tasks'), { recursive: true });
+    const result = scanClaimedTaskIds({ projectDir: notARepo, prefix: 'AISDLC' });
+    const gitRefs = result.sourceReports.find((r) => r.source === 'git-refs');
+    expect(gitRefs?.scanned).toBe(false);
+    expect(findUnscannedRequiredSources(result.sourceReports).map((r) => r.source)).toEqual([
+      'git-refs',
+    ]);
   });
 });

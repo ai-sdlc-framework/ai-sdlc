@@ -7,6 +7,7 @@ import { pickProjectRoot } from './task-edit.js';
 import {
   type ClaimSource,
   resolveParentRepoRoot,
+  findUnscannedRequiredSources,
   scanClaimedTaskIds,
 } from '../lib/task-id-scanner.js';
 import { acquireTaskIdLock } from '../lib/task-id-lock.js';
@@ -152,14 +153,42 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
             isError: true,
           };
         }
-        const [, idPrefix, majorStr] = idMatch;
-        const major = Number.parseInt(majorStr, 10);
+        const [, idPrefix] = idMatch;
         const lockRoot = resolveParentRepoRoot(projectDir) ?? projectDir;
 
         const lock = await acquireTaskIdLock(lockRoot);
         try {
           const scan = scanClaimedTaskIds({ projectDir, prefix: idPrefix });
-          const claimSources = scan.claimed.get(major);
+
+          // AISDLC-559 review (CRITICAL): fail CLOSED when a required source
+          // could not be scanned. Treating an unscanned git-refs as "no
+          // collisions found" is how a duplicate ID gets written for an ID
+          // already claimed on an unmerged or remote branch.
+          const unscanned = findUnscannedRequiredSources(scan.sourceReports);
+          if (unscanned.length > 0) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    `Refusing to create ${id}: cannot verify it is unclaimed.\n` +
+                    unscanned
+                      .map((r) => `  - ${r.source}: NOT scanned (${r.detail ?? 'unknown reason'})`)
+                      .join('\n') +
+                    `\nWithout git-refs this cannot see IDs claimed on unmerged or remote branches.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          // AISDLC-559 review (CRITICAL): compare the EXACT id, not the major.
+          // Collapsing to the major refused every legitimate new sub-ID —
+          // AISDLC-100.6 was rejected merely because AISDLC-100 or a sibling
+          // AISDLC-100.5 existed — which breaks the RFC-walkthrough phase-task
+          // pattern. Allocation still reserves on the major; only this
+          // duplicate check is exact.
+          const claimSources = scan.claimedExact.get(id.toLowerCase());
           if (claimSources && claimSources.length > 0) {
             return {
               content: [{ type: 'text' as const, text: buildCollisionMessage(id, claimSources) }],

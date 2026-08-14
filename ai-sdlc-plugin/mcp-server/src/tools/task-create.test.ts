@@ -36,6 +36,7 @@ describe('task_create MCP tool (AISDLC-234)', () => {
 
   beforeEach(() => {
     projectDir = mkdtempSync(join(tmpdir(), 'aisdlc-234-task-create-'));
+    initGitRepoForFixture(projectDir);
     mkdirSync(join(projectDir, 'backlog', 'tasks'), { recursive: true });
     mkdirSync(join(projectDir, 'backlog', 'completed'), { recursive: true });
 
@@ -251,6 +252,7 @@ describe('task_create — Pattern C routing (AC #6)', () => {
 
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), 'aisdlc-234-pattern-c-'));
+    initGitRepoForFixture(scratch);
   });
 
   afterEach(() => {
@@ -391,6 +393,7 @@ describe('findExistingTaskFile (AISDLC-234)', () => {
 
   beforeEach(() => {
     projectDir = mkdtempSync(join(tmpdir(), 'aisdlc-234-find-'));
+    initGitRepoForFixture(projectDir);
     mkdirSync(join(projectDir, 'backlog', 'tasks'), { recursive: true });
     mkdirSync(join(projectDir, 'backlog', 'completed'), { recursive: true });
   });
@@ -425,6 +428,7 @@ describe('validateReferences (AISDLC-234)', () => {
 
   beforeEach(() => {
     projectDir = mkdtempSync(join(tmpdir(), 'aisdlc-234-refs-'));
+    initGitRepoForFixture(projectDir);
   });
 
   afterEach(() => rmSync(projectDir, { recursive: true, force: true }));
@@ -554,6 +558,7 @@ describe('task_create — cross-source collision refusal (AISDLC-559)', () => {
 
   beforeEach(() => {
     scratch = mkdtempSync(join(tmpdir(), 'aisdlc-559-task-create-'));
+    initGitRepoForFixture(scratch);
   });
 
   afterEach(() => {
@@ -681,6 +686,80 @@ describe('buildCollisionMessage (AISDLC-559)', () => {
 // ── helpers ──────────────────────────────────────────────────────────────
 
 import { readdirSync } from 'node:fs';
+
+// AISDLC-559 review (CRITICAL): the allocator now fails CLOSED when the
+// git-refs source cannot scan. These fixtures previously used bare mkdtemp
+// dirs with no .git, so git-refs was genuinely unscanned in EVERY test while
+// they all asserted success — the tool's core guarantee was never exercised.
+// Make the fixtures real repos so the scan actually runs.
+function initGitRepoForFixture(dir: string): void {
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'aisdlc-559-fixture@example.invalid'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'AISDLC-559 Fixture'], { cwd: dir });
+}
+
 function require_readdirSync(dir: string): string[] {
   return readdirSync(dir);
 }
+
+describe('task_create — round-2 review fixes (AISDLC-559)', () => {
+  let projectDir: string;
+  let handler: Handler;
+
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), 'aisdlc-559-r2-create-'));
+    initGitRepoForFixture(projectDir);
+    mkdirSync(join(projectDir, 'backlog', 'tasks'), { recursive: true });
+    const server = {
+      tool: vi.fn((_n, _d, _s, registered) => {
+        handler = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    registerTaskCreate(server, { projectDir });
+  });
+
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  // CRITICAL: collapsing the collision check to the MAJOR number refused every
+  // legitimate new sub-ID, breaking the RFC-walkthrough phase-task pattern.
+  it('allows a NEW sub-ID even when the major and a sibling sub-ID exist', async () => {
+    writeFileSync(join(projectDir, 'backlog', 'tasks', 'aisdlc-100 - epic.md'), 'x', 'utf-8');
+    writeFileSync(join(projectDir, 'backlog', 'tasks', 'aisdlc-100.5 - phase.md'), 'x', 'utf-8');
+
+    const result = await handler({ id: 'AISDLC-100.6', title: 'Phase six' });
+    expect(result.isError).toBeUndefined();
+    expect(existsSync(join(projectDir, 'backlog', 'tasks', 'aisdlc-100.6 - Phase-six.md'))).toBe(
+      true,
+    );
+  });
+
+  it('still refuses the EXACT id when it is already claimed', async () => {
+    writeFileSync(join(projectDir, 'backlog', 'tasks', 'aisdlc-100.5 - phase.md'), 'x', 'utf-8');
+    const result = await handler({ id: 'AISDLC-100.5', title: 'Dupe' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('already exists');
+  });
+
+  // CRITICAL: treating an unscanned git-refs as "no collisions" is how a
+  // duplicate gets written for an id claimed on an unmerged/remote branch.
+  it('refuses to create when the git-refs source could not be scanned', async () => {
+    const noGit = mkdtempSync(join(tmpdir(), 'aisdlc-559-nogit-'));
+    mkdirSync(join(noGit, 'backlog', 'tasks'), { recursive: true });
+    let h: Handler;
+    const server = {
+      tool: vi.fn((_n, _d, _s, registered) => {
+        h = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    registerTaskCreate(server, { projectDir: noGit });
+
+    const result = await h!({ id: 'AISDLC-900', title: 'No git here' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('cannot verify it is unclaimed');
+    expect(result.content[0].text).toContain('git-refs');
+    expect(existsSync(join(noGit, 'backlog', 'tasks', 'aisdlc-900 - No-git-here.md'))).toBe(false);
+    rmSync(noGit, { recursive: true, force: true });
+  });
+});
