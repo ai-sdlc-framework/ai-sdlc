@@ -29,7 +29,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, parse as parsePath, resolve } from 'node:path';
 
 export type TaskIdSourceName = 'git-refs' | 'sibling-worktrees' | 'current-worktree';
 
@@ -129,6 +129,29 @@ export function extractMajorId(text: string, idRegex: RegExp): number | undefine
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * Is a git repository discoverable from `startDir`?
+ *
+ * Deliberately a filesystem probe rather than a git invocation: the whole point
+ * is to decide what an *failed* git call meant, so asking git again is
+ * circular. `existsSync` on a `.git` entry succeeds even when that directory is
+ * unreadable (mode 000), which is exactly the degraded case that must NOT be
+ * treated as "no repo".
+ */
+export function isRepositoryDiscoverable(startDir: string): boolean {
+  // An explicitly configured repo exists even with no .git in the tree.
+  if (process.env.GIT_DIR) return true;
+  let dir = resolve(startDir);
+  const { root } = parsePath(dir);
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) return true;
+    if (dir === root) return false;
+    const parent = dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
+
 function scanGitRefs(
   gitCwd: string,
   idRegex: RegExp,
@@ -179,32 +202,29 @@ function scanGitRefs(
     return { source: 'git-refs', scanned: true, idsFound: seen.size };
   } catch (err) {
     const message = (err as Error).message ?? '';
-    // Round-2 review: the two reviewers split on whether task_create should get
-    // an `allowUnscannedSources` escape hatch. Neither is quite right — the
-    // real question is WHY the scan failed.
+    // Round-3 review found the previous message-matching discriminator was
+    // unsound, and reproduced three ways to defeat it: `chmod 000 .git` on a
+    // repo WITH commits emits the byte-identical "(or any of the parent
+    // directories)" string; GIT_CEILING_DIRECTORIES makes discovery stop below
+    // a real repo with the same message; and git echoes attacker-controlled
+    // config text into other fatal errors. Each would have silently minted a
+    // duplicate id — the exact failure this module exists to prevent.
     //
-    // There is exactly ONE vacuous case: no repository exists anywhere up the
-    // tree, so there are no refs for an id to hide on and the scan is complete
-    // rather than degraded. Treating it as a failure would make task_create
-    // unusable in a plain directory with no override.
-    //
-    // The parenthetical is load-bearing. Git emits BOTH:
-    //   "not a git repository (or any of the parent directories): .git"  ← vacuous
-    //   "not a git repository: /nonexistent/place"                       ← BROKEN gitdir
-    // The second is a degraded repo whose refs we genuinely cannot see, so
-    // matching on the bare phrase would fail open on exactly the dangerous case.
-    // (A fresh repo with zero commits needs no special case — git log exits 0.)
-    //
-    // Every other failure — corrupt .git, ENOBUFS from an oversized log, a
-    // timeout — keeps failing closed.
-    if (/not a git repository \(or any of the parent directories\)/i.test(message)) {
+    // So do not infer repo existence from git's prose. Probe the filesystem
+    // directly: vacuous means NO repository is discoverable at all. A `.git`
+    // that exists but cannot be read is a DEGRADED repo and must fail closed.
+    if (!isRepositoryDiscoverable(gitCwd)) {
       return {
         source: 'git-refs',
         scanned: true,
         idsFound: 0,
-        detail: 'no refs exist yet (fresh or non-git directory) — nothing could be claimed',
+        detail: 'no repository exists here or in any parent — no refs could hold a claim',
       };
     }
+    // Round-2 review: the two reviewers split on whether task_create should get
+    // an `allowUnscannedSources` escape hatch. Neither is quite right — the
+    // real question is WHY the scan failed.
+    //
     return { source: 'git-refs', scanned: false, idsFound: 0, detail: message };
   }
 }

@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   computeNextFreeBlock,
   extractMajorId,
   findUnscannedRequiredSources,
+  isRepositoryDiscoverable,
   resolveParentRepoRoot,
   scanClaimedTaskIds,
   DEFAULT_TASK_ID_PREFIX,
@@ -172,6 +173,40 @@ describe('scanClaimedTaskIds — source 1 (git refs) (AISDLC-559)', () => {
     expect(gitReport.scanned).toBe(true);
     expect(gitReport.idsFound).toBe(0);
     expect(findUnscannedRequiredSources(result.sourceReports)).toEqual([]);
+  });
+
+  // Round-3 review reproduced the hole in the previous message-matching
+  // discriminator: a repo WITH COMMITS whose .git is unreadable (mode 000 —
+  // a realistic container/volume ownership mismatch) emits the byte-identical
+  // "(or any of the parent directories)" string as a directory with no repo at
+  // all. Classifying that as vacuous would mint an id already claimed on a
+  // branch. The probe is a filesystem check precisely so git's prose cannot
+  // decide this.
+  it('treats an UNREADABLE .git (mode 000) as degraded, never vacuous', () => {
+    const repo = join(scratch, 'unreadable-git');
+    initRepo(repo);
+    writeFile(repo, 'backlog/tasks/aisdlc-700 - hidden.md', 'x');
+    commitAll(repo, 'feat: add AISDLC-700');
+    chmodSync(join(repo, '.git'), 0o000);
+    try {
+      const result = scanClaimedTaskIds({ projectDir: repo, prefix: 'AISDLC' });
+      const gitReport = result.sourceReports.find((r) => r.source === 'git-refs')!;
+      expect(gitReport.scanned).toBe(false);
+      expect(findUnscannedRequiredSources(result.sourceReports).map((r) => r.source)).toEqual([
+        'git-refs',
+      ]);
+    } finally {
+      chmodSync(join(repo, '.git'), 0o755);
+    }
+  });
+
+  it('isRepositoryDiscoverable finds a repo in a PARENT of the start dir', () => {
+    const repo = join(scratch, 'parent-repo-probe');
+    initRepo(repo);
+    const nested = join(repo, 'a', 'b', 'c');
+    mkdirSync(nested, { recursive: true });
+    expect(isRepositoryDiscoverable(nested)).toBe(true);
+    expect(isRepositoryDiscoverable(join(scratch, 'no-repo-anywhere'))).toBe(false);
   });
 
   // The dangerous lookalike: git says "not a git repository" for BOTH cases,

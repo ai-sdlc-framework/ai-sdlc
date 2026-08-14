@@ -180,9 +180,22 @@ describe('task-id lock — REAL two-process contention (AISDLC-559)', () => {
 
   beforeAll(() => {
     pkgDir = join(__dirnameForTest, '..', '..');
-    // Compile so the children can import the REAL lock module. ~1s. Building
-    // here (rather than trusting dist) keeps the test self-sufficient — a
-    // stale dist would otherwise silently test yesterday's code.
+    // Compile so the children can import the REAL lock module (~1s). Building
+    // here rather than trusting dist keeps this honest: a stale dist would
+    // silently exercise yesterday's code.
+    //
+    // Round-3 review: `tsc` alone is NOT self-sufficient. This package imports
+    // @ai-sdlc/pipeline-cli, so without that workspace package built, tsc dies
+    // with TS2307 and every test in this file fails with an unrelated compile
+    // error. CI only gets away with it because pipeline-cli happens to be
+    // built earlier — an incidental ordering dependency, not a guarantee.
+    const repoRoot = join(pkgDir, '..', '..');
+    if (!existsSync(join(repoRoot, 'pipeline-cli', 'dist', 'index.js'))) {
+      execFileSync('pnpm', ['--filter', '@ai-sdlc/pipeline-cli', 'build'], {
+        cwd: repoRoot,
+        stdio: 'pipe',
+      });
+    }
     execFileSync('pnpm', ['exec', 'tsc'], { cwd: pkgDir, stdio: 'pipe' });
   }, 120_000);
 
@@ -233,6 +246,9 @@ h.release();
     );
     await Promise.all(workers);
 
+    // Relies on appendFileSync issuing one write() per short line — POSIX
+    // O_APPEND makes this atomic in practice on local filesystems, though Node
+    // does not formally guarantee it.
     const events = readFileSync(logPath, 'utf-8').trim().split('\n').filter(Boolean);
     expect(events).toHaveLength(6);
 
