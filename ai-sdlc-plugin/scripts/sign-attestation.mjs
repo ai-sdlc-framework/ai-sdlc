@@ -76,7 +76,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { homedir, hostname, userInfo } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname, parse as parsePath } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 /**
  * AISDLC-398: Compute git patch-id for content-addressed envelope filenames.
@@ -136,6 +137,110 @@ function computePatchIdForFilename(base, head, repoRoot) {
 function fail(msg, code = 1) {
   process.stderr.write(`ERROR: ${msg}\n`);
   process.exit(code);
+}
+
+/**
+ * AISDLC-554 — locate the attestation runtime from a CONSUMER repo.
+ *
+ * The signer must import `buildPredicate` / `signAttestation` from the same
+ * module the verifier uses, so signing and verification share one
+ * canonicalization codepath. Re-implementing the canonicalization here would
+ * produce envelopes that fail the real verifier in a way that looks like
+ * tampering — so this resolves the real module or fails loudly.
+ *
+ * Before AISDLC-554 the only candidate was `<repoRoot>/orchestrator/dist/...`,
+ * a path that exists ONLY inside the ai-sdlc monorepo. Every adopter repo hit
+ * `not found. Run pnpm --filter @ai-sdlc/orchestrator build first` — advice
+ * that cannot work when the repo has no @ai-sdlc packages to build.
+ *
+ * Candidates, in order:
+ *   1. `<repoRoot>/orchestrator/dist/runtime/attestations.js` — the monorepo
+ *      dev path. Kept FIRST so in-repo behaviour is byte-identical: a
+ *      monorepo contributor with a stale build still gets the build-me error,
+ *      never a silently-different installed copy.
+ *   2. `<dir>/node_modules/@ai-sdlc/orchestrator/…` walking upward from
+ *      repoRoot — an adopter who pinned the dependency themselves. Ranked
+ *      above the plugin's own copy so the repo being signed controls the
+ *      version, and so workspace-root hoisting is covered.
+ *   3. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — the
+ *      zero-config path. `@ai-sdlc/orchestrator` is a plugin
+ *      runtimeDependency, so install-runtime-deps.sh puts it here and an
+ *      adopter needs to install nothing at all.
+ *   4. node_modules walking up from THIS script — same plugin install, but
+ *      reached without the env vars, which git hooks do not inherit. The
+ *      pre-push signing hook runs in exactly that context.
+ *
+ * Resolution deliberately does NOT use a bare `import()`: that resolves
+ * relative to this script (under ~/.claude/plugins/), never the repo being
+ * signed, so candidates 1-2 would be unreachable. `createRequire().resolve`
+ * is also unusable — it matches the `require` condition, which the package's
+ * exports map does not define, it is import-only.
+ *
+ * Deep file paths are used throughout, which bypasses the `exports` map, so an
+ * adopter with an already-installed @ai-sdlc/orchestrator can sign today
+ * without waiting for the release that adds the `./runtime` subpath.
+ */
+function nodeModulesWalkUp(from) {
+  const candidates = [];
+  const { root } = parsePath(from);
+  let dir = from;
+  for (;;) {
+    candidates.push(
+      join(dir, 'node_modules', '@ai-sdlc', 'orchestrator', 'dist', 'runtime', 'attestations.js'),
+    );
+    if (dir === root) break;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return candidates;
+}
+
+function attestationRuntimeCandidates(repoRoot) {
+  const candidates = [
+    join(repoRoot, 'orchestrator', 'dist', 'runtime', 'attestations.js'),
+    ...nodeModulesWalkUp(repoRoot),
+  ];
+  for (const pluginDir of [process.env.CLAUDE_PLUGIN_DIR, process.env.CLAUDE_PLUGIN_ROOT]) {
+    if (pluginDir) {
+      candidates.push(
+        join(
+          pluginDir,
+          'node_modules',
+          '@ai-sdlc',
+          'orchestrator',
+          'dist',
+          'runtime',
+          'attestations.js',
+        ),
+      );
+    }
+  }
+  candidates.push(...nodeModulesWalkUp(dirname(dirname(fileURLToPath(import.meta.url)))));
+  return [...new Set(candidates)];
+}
+
+async function loadAttestationRuntime(repoRoot) {
+  const candidates = attestationRuntimeCandidates(repoRoot);
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    fail(
+      'Cannot locate the AI-SDLC attestation runtime.\n' +
+        '       Signing imports the same module the verifier uses, so it will not\n' +
+        '       fall back to a re-implementation: an envelope built from a\n' +
+        '       different canonicalization would fail the real verifier in a way\n' +
+        '       that looks like tampering.\n\n' +
+        '       Inside the ai-sdlc monorepo:\n' +
+        '         pnpm --filter @ai-sdlc/orchestrator build\n\n' +
+        '       In a consumer repo, repair the plugin install:\n' +
+        '         bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh"\n' +
+        '       or pin the dependency in the repo itself:\n' +
+        '         pnpm add -D @ai-sdlc/orchestrator\n\n' +
+        `       Searched (from repo root ${repoRoot}):\n` +
+        candidates.map((candidate) => `         ${candidate}`).join('\n'),
+    );
+  }
+  return import(pathToFileURL(found).href);
 }
 
 function parseArgs(argv) {
@@ -198,21 +303,8 @@ async function main() {
   // contentHashV3 via the same algorithm AISDLC-101 ships and prints it.
   // ──────────────────────────────────────────────────────────────────
   if (args['print-content-hash']) {
-    const orchestratorBarrelRO = join(
-      repoRoot,
-      'orchestrator',
-      'dist',
-      'runtime',
-      'attestations.js',
-    );
-    if (!existsSync(orchestratorBarrelRO)) {
-      fail(
-        `${orchestratorBarrelRO} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
-      );
-    }
-    const { collectChangedFileDeltaEntries: collectRO, computeContentHashV3 } = await import(
-      orchestratorBarrelRO
-    );
+    const { collectChangedFileDeltaEntries: collectRO, computeContentHashV3 } =
+      await loadAttestationRuntime(repoRoot);
     let entriesRO;
     try {
       entriesRO = collectRO('origin/main', 'HEAD', repoRoot);
@@ -356,20 +448,14 @@ async function main() {
     );
   }
 
-  // Lazy-import the runtime barrel so the script can run standalone.
-  // The orchestrator must be built (`pnpm --filter @ai-sdlc/orchestrator build`).
-  const orchestratorBarrel = join(repoRoot, 'orchestrator', 'dist', 'runtime', 'attestations.js');
-  if (!existsSync(orchestratorBarrel)) {
-    fail(
-      `${orchestratorBarrel} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
-    );
-  }
+  // Lazy-import the runtime barrel so the script can run standalone, resolving
+  // it from the repo being signed (monorepo build dir, else installed package).
   const {
     buildPredicate,
     signAttestation,
     collectChangedFileDeltaEntries,
     collectChangedFileEntriesForV5,
-  } = await import(orchestratorBarrel);
+  } = await loadAttestationRuntime(repoRoot);
 
   // Gather inputs.
   const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
