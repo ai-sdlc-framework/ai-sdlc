@@ -4,6 +4,12 @@ import { join, resolve, sep } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from '../types.js';
 import { pickProjectRoot } from './task-edit.js';
+import {
+  type ClaimSource,
+  resolveParentRepoRoot,
+  scanClaimedTaskIds,
+} from '../lib/task-id-scanner.js';
+import { acquireTaskIdLock } from '../lib/task-id-lock.js';
 
 /**
  * MCP tool: `task_create` — Pattern C-aware alternative to `mcp__backlog__task_create`.
@@ -81,25 +87,9 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
           mkdirSync(tasksDir, { recursive: true });
         }
 
-        // Refuse if a file for this task ID already exists (tasks/ or completed/)
-        // so we don't silently clobber existing work.
-        const existing = findExistingTaskFile(projectDir, id);
-        if (existing) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text:
-                  `Task ${id} already exists at ${existing}. ` +
-                  `Use task_edit to modify it or choose a different ID.`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
         // Frontmatter validation: check references resolve (early failure, mirrors
-        // the backlog-drift gate checks for newly created tasks).
+        // the backlog-drift gate checks for newly created tasks). Cheap + doesn't
+        // touch the ID collision surface, so it runs outside the lock.
         const badRefs = validateReferences(references ?? [], projectDir);
         if (badRefs.length > 0) {
           return {
@@ -147,7 +137,39 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
           references,
         });
 
-        writeFileSync(filePath, content, 'utf-8');
+        // AISDLC-559: cross-source collision check (git refs across every
+        // branch/remote/tag, sibling worktree filesystems, and the current
+        // worktree — not just this project dir), guarded by a parent-repo
+        // lock spanning the read-then-create window so two parallel sessions
+        // can't both observe "free" and both write. The write itself IS the
+        // claim: it becomes visible to the next scan's sibling-worktree
+        // source (or current-worktree source) immediately, even uncommitted.
+        const idMatch = /^([A-Z][A-Z0-9]*)-(\d+)/.exec(id);
+        if (!idMatch) {
+          // Unreachable given ID_PATTERN above, but keeps this block self-contained.
+          return {
+            content: [{ type: 'text' as const, text: `Invalid task ID format: "${id}".` }],
+            isError: true,
+          };
+        }
+        const [, idPrefix, majorStr] = idMatch;
+        const major = Number.parseInt(majorStr, 10);
+        const lockRoot = resolveParentRepoRoot(projectDir) ?? projectDir;
+
+        const lock = await acquireTaskIdLock(lockRoot);
+        try {
+          const scan = scanClaimedTaskIds({ projectDir, prefix: idPrefix });
+          const claimSources = scan.claimed.get(major);
+          if (claimSources && claimSources.length > 0) {
+            return {
+              content: [{ type: 'text' as const, text: buildCollisionMessage(id, claimSources) }],
+              isError: true,
+            };
+          }
+          writeFileSync(filePath, content, 'utf-8');
+        } finally {
+          lock.release();
+        }
 
         const summaryParts = [
           `# task_create: ${id}`,
@@ -179,6 +201,21 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
 }
 
 // ── Internals (exported for tests) ─────────────────────────────────────
+
+/**
+ * Build the refusal message for a cross-source ID collision (AISDLC-559).
+ * Names WHERE each conflict was found (which worktree / which ref) so the
+ * caller doesn't have to go re-derive it themselves.
+ */
+export function buildCollisionMessage(id: string, sources: ClaimSource[]): string {
+  const lines = [
+    `Task ${id} already exists (or was previously claimed) — found in:`,
+    ...sources.map((s) => `  - [${s.source}] ${s.detail}`),
+    '',
+    'Use task_edit to modify it, choose a different ID, or call next_task_id to allocate a fresh one.',
+  ];
+  return lines.join('\n');
+}
 
 /**
  * Convert a task title into a URL-safe ASCII slug for use in filenames.

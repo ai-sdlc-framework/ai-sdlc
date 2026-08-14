@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import {
   findExistingTaskFile,
   validateReferences,
   buildTaskContent,
+  buildCollisionMessage,
 } from './task-create.js';
 
 type Handler = (
@@ -535,6 +537,144 @@ describe('buildTaskContent (AISDLC-234)', () => {
     });
     // Title contains ':' so it must be quoted
     expect(content).toMatch(/title: '/);
+  });
+});
+
+/**
+ * AISDLC-559 — cross-source collision refusal.
+ *
+ * `task_create` must refuse an ID collision found in ANY of the 3 scanner
+ * sources (git refs across every branch, sibling worktree filesystems, the
+ * current worktree) — not just an exact filename match in the current
+ * project dir. Fixtures are throwaway git repos / directory trees built
+ * under a `mkdtemp`'d scratch dir, never a shared /tmp path.
+ */
+describe('task_create — cross-source collision refusal (AISDLC-559)', () => {
+  let scratch: string;
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'aisdlc-559-task-create-'));
+  });
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  function git(cwd: string, args: string[]): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf-8' });
+  }
+
+  function initRepo(dir: string): void {
+    mkdirSync(dir, { recursive: true });
+    git(dir, ['init', '-q', '-b', 'main']);
+    git(dir, ['config', 'user.email', 'aisdlc-559-task-create-test@example.invalid']);
+    git(dir, ['config', 'user.name', 'AISDLC-559 task_create Test']);
+  }
+
+  it('refuses when the ID is claimed only on an unmerged branch', async () => {
+    const repo = join(scratch, 'repo');
+    initRepo(repo);
+    writeFileSync(join(repo, 'README.md'), '# repo', 'utf-8');
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'chore: init']);
+
+    git(repo, ['checkout', '-q', '-b', 'feature/x']);
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(repo, 'backlog', 'tasks', 'aisdlc-650 - foo.md'), 'x', 'utf-8');
+    git(repo, ['add', '-A']);
+    git(repo, ['commit', '-q', '-m', 'feat: add AISDLC-650']);
+    git(repo, ['checkout', '-q', 'main']);
+    // On main, backlog/tasks/ doesn't exist in the working tree (only on the
+    // unmerged branch) — recreate the empty dir so pickProjectRoot's
+    // hasBacklogDir() check accepts the injected projectDir directly instead
+    // of falling through to cwd-walk discovery.
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+
+    let handler!: Handler;
+    const server = {
+      tool: vi.fn((_name, _desc, _schema, registered) => {
+        handler = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    registerTaskCreate(server, { projectDir: repo });
+
+    const result = await handler({
+      id: 'AISDLC-650',
+      title: 'Should collide with unmerged branch',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('AISDLC-650');
+    expect(result.content[0].text).toContain('git-refs');
+
+    // The refusal must not have written the file (no false claim on refusal).
+    expect(
+      existsSync(
+        join(repo, 'backlog', 'tasks', 'aisdlc-650 - should-collide-with-unmerged-branch.md'),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses when the ID is claimed only as an uncommitted file in a sibling worktree', async () => {
+    const parent = join(scratch, 'parent-repo');
+    const wtA = join(parent, '.worktrees', 'aisdlc-a');
+    const wtB = join(parent, '.worktrees', 'aisdlc-b');
+    mkdirSync(join(wtA, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(wtB, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(wtB, 'backlog', 'tasks', 'aisdlc-960 - sibling-uncommitted.md'),
+      'x',
+      'utf-8',
+    );
+
+    let handler!: Handler;
+    const server = {
+      tool: vi.fn((_name, _desc, _schema, registered) => {
+        handler = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    registerTaskCreate(server, { projectDir: wtA });
+
+    const result = await handler({
+      id: 'AISDLC-960',
+      title: 'Should collide with sibling worktree',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('sibling-worktrees');
+    expect(result.content[0].text).toContain('aisdlc-b');
+  });
+
+  it('succeeds and writes the file when no source claims the ID', async () => {
+    const repo = join(scratch, 'repo-clean');
+    initRepo(repo);
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+
+    let handler!: Handler;
+    const server = {
+      tool: vi.fn((_name, _desc, _schema, registered) => {
+        handler = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    registerTaskCreate(server, { projectDir: repo });
+
+    const result = await handler({ id: 'AISDLC-970', title: 'No collision' });
+    expect(result.isError).toBeUndefined();
+    const created = readdirSync(join(repo, 'backlog', 'tasks')).find((f) =>
+      f.startsWith('aisdlc-970'),
+    );
+    expect(created).toBeDefined();
+  });
+});
+
+describe('buildCollisionMessage (AISDLC-559)', () => {
+  it('names the source and detail for each claim', () => {
+    const msg = buildCollisionMessage('AISDLC-650', [
+      { source: 'git-refs', detail: 'backlog/tasks/aisdlc-650 - foo.md' },
+      { source: 'sibling-worktrees', detail: '/parent/.worktrees/aisdlc-b/backlog/tasks/x.md' },
+    ]);
+    expect(msg).toContain('AISDLC-650');
+    expect(msg).toContain('[git-refs]');
+    expect(msg).toContain('[sibling-worktrees]');
+    expect(msg).toContain('next_task_id');
   });
 });
 
