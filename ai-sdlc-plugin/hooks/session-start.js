@@ -290,10 +290,31 @@ process.exit(0);
  * and the full governance-banner warnings array so the message text never
  * drifts between the two surfaces.
  */
+/**
+ * Redact credentials and bound the length of text that reaches model-visible
+ * context (AISDLC-557 security review).
+ *
+ * Two reasons this is not paranoia:
+ *   - npm failures quote the registry URL, and a private registry configured
+ *     in .npmrc can embed `https://user:token@host/...`. That would put a
+ *     live credential into session context.
+ *   - This value is read from the ambient environment, not only from what
+ *     this hook itself set, so anyone able to set env for the Claude Code
+ *     process could otherwise inject unbounded instruction-like text.
+ */
+function sanitizeForContext(text, maxLen = 400) {
+  const redacted = String(text)
+    // https://user:pass@host  ->  https://***:***@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1***:***@')
+    // _authToken=... / _auth=... / bearer <token>
+    .replace(/(_authToken|_auth|_password|token|bearer)(\s*[=:]\s*|\s+)\S+/gi, '$1$2***');
+  return redacted.length > maxLen ? `${redacted.slice(0, maxLen)}… (truncated)` : redacted;
+}
+
 function buildRuntimeDepsWarning() {
   if (!process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR) return null;
   return (
-    `⚠ Plugin runtime-dependency install failed — ${process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR}. ` +
+    `⚠ Plugin runtime-dependency install failed — ${sanitizeForContext(process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR)}. ` +
     'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
     'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"'
   );

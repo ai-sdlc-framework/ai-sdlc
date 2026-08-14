@@ -206,8 +206,17 @@ if [ -n "$SELF_PLUGIN_DIR" ]; then
     exit 0
   fi
 
+  # Skip the retry when an earlier topology already self-healed against this
+  # exact directory: resolve-pipeline-cli.sh always lives at
+  # <CLAUDE_PLUGIN_DIR>/scripts/, so when that var is set SELF_PLUGIN_DIR is
+  # the same path topology 1 already tried. Re-running would double the
+  # up-to-120s npm timeout before the final error is printed.
   SELF_HEAL_SCRIPT="$SELF_PLUGIN_DIR/scripts/install-runtime-deps.sh"
-  if [ -f "$SELF_HEAL_SCRIPT" ]; then
+  if [ "$SELF_PLUGIN_DIR" = "${CLAUDE_PLUGIN_DIR:-}" ] || [ "$SELF_PLUGIN_DIR" = "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    SELF_HEAL_SCRIPT=""
+    echo "resolve-pipeline-cli.sh: self-location fallback resolves to a directory already attempted above — not retrying self-heal." >&2
+  fi
+  if [ -n "$SELF_HEAL_SCRIPT" ] && [ -f "$SELF_HEAL_SCRIPT" ]; then
     MISSING="pipeline-cli"
     _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
     echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $SELF_PLUGIN_DIR (self-location fallback — neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT is set) — attempting self-heal..." >&2

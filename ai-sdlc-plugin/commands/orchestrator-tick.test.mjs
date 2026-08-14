@@ -381,8 +381,36 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
     );
     assert.match(
       cmdBody,
-      /NOT the same as a legitimately empty frontier/,
+      /TICK ABORTED/,
       'the loud diagnostic must explicitly distinguish a skipped gate from a passed one (AC#5 core requirement)',
+    );
+  });
+
+  // Round-2 review: a stderr line alone does NOT satisfy AC#5. Logging loudly
+  // and then continuing with an empty frontier gave the SAME control flow,
+  // terminal message and exit code as a legitimately empty frontier, so an
+  // unattended tick could not tell a crashed gate from "no work" — a crashing
+  // cli-deps would stall the pipeline while looking green. The gate failing
+  // must change what the tick DOES, not only what it prints.
+  it('AC#5: a failed gate takes a functionally distinct path, not just a louder one', () => {
+    assert.ok(
+      !cmdBody.includes(`FRONTIER_JSON='{"frontier":[]}'`),
+      'must NOT recover by substituting an empty frontier — that is indistinguishable from "nothing ready" to any automated consumer',
+    );
+    assert.match(
+      cmdBody,
+      /FRONTIER_GATE_FAILED/,
+      'gate failure must be captured in state the control flow can branch on',
+    );
+    assert.match(
+      cmdBody,
+      /exit 3/,
+      'a failed gate must abort with a distinct non-zero status, so exit code alone separates it from the idle path',
+    );
+    assert.match(
+      cmdBody,
+      /Do NOT reschedule as idle/,
+      'must tell an autonomous loop not to treat the abort as "no work" and quietly re-arm',
     );
   });
 });

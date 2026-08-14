@@ -773,12 +773,29 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   # operator (or a downstream automation tailing Conductor stdout) can tell
   # "gate ran, frontier is empty" apart from "gate could not run at all".
   FRONTIER_STDERR_FILE=$(mktemp)
+  FRONTIER_GATE_FAILED=0
   if ! FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>"$FRONTIER_STDERR_FILE"); then
-    echo "[orchestrator-tick] ERROR: dependency-readiness gate (cli-deps frontier) FAILED TO RUN — treating this tick as having NO ready tasks rather than silently proceeding. This is NOT the same as a legitimately empty frontier; investigate before assuming there is no work." >&2
-    echo "[orchestrator-tick]   $(tail -3 "$FRONTIER_STDERR_FILE" 2>/dev/null | tr '\n' ' ')" >&2
-    FRONTIER_JSON='{"frontier":[]}'
+    FRONTIER_GATE_FAILED=1
+    FRONTIER_GATE_ERR="$(tail -3 "$FRONTIER_STDERR_FILE" 2>/dev/null | tr '\n' ' ')"
+    echo "[orchestrator-tick] ERROR: dependency-readiness gate (cli-deps frontier) FAILED TO RUN. Aborting this tick." >&2
+    echo "[orchestrator-tick]   $FRONTIER_GATE_ERR" >&2
   fi
   rm -f "$FRONTIER_STDERR_FILE"
+
+  # AISDLC-557 AC#5 (round-2 review): a stderr line alone does NOT satisfy
+  # "a skipped gate must never be indistinguishable from a passed one".
+  # Logging loudly and then continuing with an empty frontier produced the
+  # SAME control flow, terminal message, and exit code as a legitimately
+  # empty frontier — so an unattended tick, or anyone scanning a long
+  # autonomous-drain log, still could not tell a crashed gate from "no work".
+  # A crashing cli-deps would stall the pipeline indefinitely while looking
+  # green. The gate failing must therefore change what the tick DOES, not
+  # only what it prints: abort with a distinct non-zero status and a distinct
+  # event, never the idle "done" path.
+  if [ "$FRONTIER_GATE_FAILED" = "1" ]; then
+    echo "[orchestrator-tick] TICK ABORTED — dependency gate could not run. This is NOT 'no ready tasks'. Do NOT reschedule as idle; investigate cli-deps first." >&2
+    exit 3
+  fi
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "
     const d=[]; process.stdin.on('data',c=>d.push(c));
     process.stdin.on('end',()=>{

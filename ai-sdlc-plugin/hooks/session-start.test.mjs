@@ -120,6 +120,34 @@ describe('ai-sdlc-plugin session-start hook', () => {
   // node_modules empty with no operator-visible diagnostic: the consumer
   // repo in the adopter's report had no reason to have run `ai-sdlc init`
   // yet, so the pre-fix silent-exit swallowed the failure completely.
+  // AISDLC-557 security review: this text reaches model-visible context, and
+  // it is read from the AMBIENT environment rather than only from what this
+  // hook set. npm quotes the registry URL on failure, so a private registry
+  // configured in .npmrc can carry a live credential into session context.
+  it('AISDLC-557: redacts credentials before putting npm output into model context', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR:
+        'install-runtime-deps.sh exit 1: 401 for https://deploy:s3cr3t-token@registry.internal/@ai-sdlc%2fpipeline-cli _authToken=npm_AAAABBBBCCCC',
+    });
+    const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+    assert.ok(
+      ctx.includes('Plugin runtime-dependency install failed'),
+      'still reports the failure',
+    );
+    assert.ok(!ctx.includes('s3cr3t-token'), 'must not leak the URL password');
+    assert.ok(!ctx.includes('npm_AAAABBBBCCCC'), 'must not leak the auth token');
+    assert.ok(ctx.includes('registry.internal'), 'host is kept so the error stays diagnosable');
+  });
+
+  it('AISDLC-557: bounds ambient-env text so it cannot flood model context', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `exit 1: ${'A'.repeat(5000)}`,
+    });
+    const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+    assert.ok(ctx.includes('(truncated)'), 'should mark the value as truncated');
+    assert.ok(ctx.length < 1500, `context should stay bounded, got ${ctx.length} chars`);
+  });
+
   it('AISDLC-557: surfaces the runtime-deps warning even when no agent-role.yaml exists', () => {
     const result = runHook(tempDirEmpty, {
       __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: 'install-runtime-deps.sh exit 1: network unreachable',
