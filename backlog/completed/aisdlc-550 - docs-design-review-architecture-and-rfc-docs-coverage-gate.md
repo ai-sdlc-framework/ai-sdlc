@@ -12,14 +12,6 @@ labels:
   - ci:no-issue-required
 priority: medium
 dependencies: []
-blocked:
-  reason: >-
-    Upstream-OQ gate: RFC-0006 OQ-7 (automated autonomy-threshold calibration —
-    the RFC itself states this is "a tooling decision, not a spec decision") and
-    OQ-8 (soul purpose document — escalated to and resolved by RFC-0008) are
-    unresolved. Neither constrains documenting Addendum A, whose lifecycle is
-    Implemented and whose code surfaces are already shipped. Operator-acknowledged
-    2026-08-10.
 references:
   - spec/rfcs/RFC-0006-design-system-governance-v5-final.md
   - scripts/check-rfc-docs.mjs

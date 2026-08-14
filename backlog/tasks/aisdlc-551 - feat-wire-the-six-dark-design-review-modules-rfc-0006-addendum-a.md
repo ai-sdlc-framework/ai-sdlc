@@ -13,15 +13,6 @@ labels:
 priority: medium
 dependencies:
   - AISDLC-550
-blocked:
-  reason: >-
-    Upstream-OQ gate: RFC-0006 OQ-7 (automated autonomy-threshold calibration —
-    the RFC states this is "a tooling decision, not a spec decision") and OQ-8
-    (soul purpose document — escalated to and resolved by RFC-0008) are
-    unresolved, so any task citing RFC-0006 trips the gate. Neither OQ
-    constrains wiring already-written Addendum A code. This is the SECOND task
-    to need this override; see the Follow-up note about walking RFC-0006's two
-    OQs so the override stops being required. Operator-acknowledged 2026-08-10.
 references:
   - reference/src/policy/design-ci.ts
   - reference/src/policy/structural-preprocessor.ts
@@ -114,9 +105,10 @@ leaving them stale would recreate exactly the drift AISDLC-550 fixed.
 - [ ] #8 Full verification passes: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check`, `pnpm rfc:check`
 <!-- AC:END -->
 
-## Follow-up (operator decision, not part of this task)
+## Note on the upstream-OQ gate (resolved)
 
-RFC-0006 §18 OQ-7 and OQ-8 are unresolved, so every task citing RFC-0006 needs a
-`blocked.reason` override to clear the upstream-OQ gate — this task is the
-second. Walking those two OQs (or marking them Superseded, since OQ-8 was
-escalated to RFC-0008 which is Implemented) would remove the recurring override.
+Earlier revisions of this task carried a `blocked.reason` override because
+RFC-0006 §18 OQ-7 and OQ-8 were unresolved and the upstream-OQ gate blocked every
+task citing the RFC. Those OQs were closed by operator walkthrough on 2026-08-13
+(§18 is now 0 open), so the override has been removed and this task clears the
+gate on its own merit.
