@@ -340,3 +340,49 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-245.4 path resolution', () 
     );
   });
 });
+
+describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates', () => {
+  it('AC#4: resolves PIPELINE_CLI_BIN via the shared resolve-pipeline-cli.sh (gets self-heal + a named error) instead of an unchecked inline guess', () => {
+    assert.ok(
+      cmdBody.includes('resolve-pipeline-cli.sh'),
+      'Path resolution must delegate to resolve-pipeline-cli.sh so it inherits self-heal (AISDLC-557 AC#3) rather than duplicating an inline resolution that never validates the guessed path',
+    );
+  });
+
+  it('AC#4: fails with a named, actionable error and a non-zero exit when PIPELINE_CLI_BIN cannot be resolved', () => {
+    const pathResolutionSection = cmdBody.split('## Path resolution')[1]?.split('\n## ')[0] ?? '';
+    assert.ok(
+      pathResolutionSection.includes('exit 1'),
+      'Path resolution must exit 1 (not silently continue) when resolve-pipeline-cli.sh fails',
+    );
+    assert.match(
+      pathResolutionSection,
+      /ERROR:.*cannot resolve @ai-sdlc\/pipeline-cli/,
+      'must print a named, actionable error naming the unresolved package — not an opaque failure',
+    );
+    assert.match(
+      pathResolutionSection,
+      /UNREACHABLE/,
+      'error must name WHICH gates become unreachable (cli-deps / cli-dispatch), not just "something failed"',
+    );
+  });
+
+  it('AC#5: the frontier dependency-readiness gate distinguishes "gate failed to run" from "frontier legitimately empty"', () => {
+    assert.ok(
+      !cmdBody.includes(
+        `cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>/dev/null || echo '{"frontier":[]}'`,
+      ),
+      'must NOT silently swallow cli-deps frontier failures into an indistinguishable empty-frontier fallback (pre-AISDLC-557 bug)',
+    );
+    assert.match(
+      cmdBody,
+      /dependency-readiness gate \(cli-deps frontier\) FAILED TO RUN/,
+      'must print a loud, named diagnostic when the frontier gate itself could not run',
+    );
+    assert.match(
+      cmdBody,
+      /NOT the same as a legitimately empty frontier/,
+      'the loud diagnostic must explicitly distinguish a skipped gate from a passed one (AC#5 core requirement)',
+    );
+  });
+});

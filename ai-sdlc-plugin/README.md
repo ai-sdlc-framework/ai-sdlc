@@ -79,19 +79,22 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 | `ai-sdlc-governance` | Auto-loaded governance rules, blocked actions, and pre-commit checklist |
 | `decision-rubric` | Five-part rubric (problem → research → options → recommendation + counter-argument → question) for putting non-trivial design/policy decisions to the operator; applies to open questions from any work item (RFC, backlog task, GitHub/Jira/Linear issue) |
 
-## Install topologies + path resolution (AISDLC-245.4, AISDLC-272)
+## Install topologies + path resolution (AISDLC-245.4, AISDLC-272, AISDLC-557)
 
-Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scripts. They must work across **five distinct install topologies**:
+Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scripts. They must work across **six distinct install topologies**:
 
 | # | Topology | `CLAUDE_PLUGIN_DIR` | `CLAUDE_PLUGIN_ROOT` | `pipeline-cli` location |
 |---|----------|---------------------|----------------------|-------------------------|
 | 1 | Remote marketplace install (bundled deps) | Set — deps present | Set | `$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/` |
 | 2 | Local marketplace install (no npm install) | Set — **deps missing** | Set | Self-heal via `install-runtime-deps.sh`, then probe cache |
 | 3 | Marketplace (env injection variant) | Unset | Set — deps present | `$CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/` |
-| 4 | Plugin cache probe (env unset) | Unset | Unset | `~/.claude/plugins/cache/<mp>/ai-sdlc/<version>/node_modules/@ai-sdlc/pipeline-cli/` |
+| 4 | Plugin cache probe (env unset) | Unset | Unset | `~/.claude/plugins/cache/<mp>/ai-sdlc/<version>/node_modules/@ai-sdlc/pipeline-cli/` (read-only — never self-heals) |
 | 5 | Dogfood monorepo (this repo) | Unset | Unset | `$(pwd)/pipeline-cli/` relative to repo root |
+| 6 | **Self-location fallback (AISDLC-557, last resort)** | Unset | Unset | Self-heal against the directory `resolve-pipeline-cli.sh` itself lives in |
 
 > **Why topology 2 exists:** The local marketplace installer (`/claude plugin install` against a local `marketplace.json`) copies plugin files to `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` but does NOT run `npm install`. So `runtimeDependencies` declared in `plugin.json` are never installed for local marketplace setups. The `scripts/install-runtime-deps.sh` self-heal script fills this gap.
+
+> **Why topology 6 exists (AISDLC-557):** a second adopter report found that when `CLAUDE_PLUGIN_DIR` and `CLAUDE_PLUGIN_ROOT` are BOTH unset, self-heal was completely unreachable — topologies 1-3 are the only ones that ever attempt it, and topology 4 (cache probe) deliberately stays read-only (see the security note in `resolve-pipeline-cli.sh` — that's the PR #482 fix for the cache-WALK vulnerability, which is a different failure mode from this one). Topology 6 derives the plugin dir from `resolve-pipeline-cli.sh`'s own on-disk location as a genuine last resort, so self-heal gets a chance to run even when neither env var made it through. This does NOT reintroduce the PR #482 vulnerability: topology 6 only ever targets the exact directory the currently-executing script lives in — no directory is walked, compared, or selected the way the removed cache-walk topology did.
 
 ### Resolution algorithm
 
@@ -103,7 +106,9 @@ Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scr
 3. $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin exists → use it
 4. ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/... exists → use highest version
 5. $(pwd)/pipeline-cli/bin exists → use it (dogfood monorepo)
-6. Nothing found → exit 1 with actionable error + PIPELINE_CLI_BIN override hint
+6. Self-location fallback: neither env var set → self-heal against the dir
+   this script itself lives in, then retry (AISDLC-557, last resort)
+7. Nothing found → exit 1 with actionable error + PIPELINE_CLI_BIN override hint
 ```
 
 ### Usage in slash command bodies

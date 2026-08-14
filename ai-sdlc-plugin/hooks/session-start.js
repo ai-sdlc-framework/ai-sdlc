@@ -105,7 +105,37 @@ const projectDir =
 // ── Load agent-role.yaml ─────────────────────────────────────────────
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
+
+// AISDLC-557: root-cause fix for a marketplace-cache install silently
+// leaving node_modules empty with zero operator-visible signal.
+//
+// Pre-fix, this function returned `process.exit(0)` right here whenever the
+// consumer project had no `.ai-sdlc/agent-role.yaml` (i.e. before `ai-sdlc
+// init` has ever been run) — which is exactly the state a brand-new adopter
+// repo is in immediately after a marketplace plugin install. That early
+// exit ran BEFORE the `warnings` array (built below) ever got a chance to
+// surface `__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR` — so ANY self-heal failure
+// captured above (network unreachable, npm registry misconfigured, prefix
+// not writable, etc.) was swallowed with no trace. The operator had no way
+// to discover the broken install short of manually invoking
+// resolve-pipeline-cli.sh themselves, which is exactly what the AISDLC-557
+// reporter had to do.
+//
+// Fix: when agent-role.yaml is absent, still emit a minimal hook response
+// carrying ONLY the runtime-deps warning (skip the full governance banner,
+// which legitimately depends on agent-role.yaml existing) instead of exiting
+// fully silently.
 if (!existsSync(agentRolePath)) {
+  const runtimeDepsWarning = buildRuntimeDepsWarning();
+  if (runtimeDepsWarning) {
+    const result = {
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: `### AI-SDLC Setup Warning\n${runtimeDepsWarning}`,
+      },
+    };
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  }
   process.exit(0);
 }
 
@@ -129,13 +159,12 @@ const blockedPaths = parseListField(yaml, 'blockedPaths');
 
 const warnings = [];
 
-// AISDLC-441: surface runtime-deps install failures so the operator sees them.
-if (process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR) {
-  warnings.push(
-    `⚠ Plugin runtime-dependency install failed — ${process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR}. ` +
-      'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
-      'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"',
-  );
+// AISDLC-441 / AISDLC-557: surface runtime-deps install failures so the
+// operator sees them (buildRuntimeDepsWarning() is shared with the
+// pre-agent-role.yaml early-exit path above).
+const runtimeDepsWarning = buildRuntimeDepsWarning();
+if (runtimeDepsWarning) {
+  warnings.push(runtimeDepsWarning);
 }
 
 // Check for vitest without coverage provider
@@ -252,6 +281,23 @@ process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 process.exit(0);
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * AISDLC-441 / AISDLC-557: builds the runtime-deps install-failure warning
+ * string from `__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR` (set above when the
+ * self-heal spawnSync call exits non-zero). Returns `null` when there is no
+ * error to report. Shared by both the pre-agent-role.yaml early-exit path
+ * and the full governance-banner warnings array so the message text never
+ * drifts between the two surfaces.
+ */
+function buildRuntimeDepsWarning() {
+  if (!process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR) return null;
+  return (
+    `⚠ Plugin runtime-dependency install failed — ${process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR}. ` +
+    'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
+    'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"'
+  );
+}
 
 function extractField(yaml, field) {
   const match = yaml.match(new RegExp(`^\\s*${field}:\\s*(.+)$`, 'm'));

@@ -50,13 +50,20 @@ after(() => {
   rmSync(tempDirEmpty, { recursive: true, force: true });
 });
 
-function runHook(projectDir) {
+function runHook(projectDir, extraEnv = {}) {
   const input = JSON.stringify({ session_id: 'test-session-123' });
+  // AISDLC-557: explicitly clear __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR by
+  // default so tests stay hermetic regardless of what the ambient shell
+  // running the suite happens to have set — the hook itself is the only
+  // thing that's supposed to set this var (on a real self-heal failure).
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: projectDir };
+  delete env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;
+  Object.assign(env, extraEnv);
   try {
     const output = execFileSync('node', [hookScript], {
       input,
       encoding: 'utf-8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
+      env,
       timeout: 5000,
     });
     return { output: output.trim(), exitCode: 0 };
@@ -102,6 +109,41 @@ describe('ai-sdlc-plugin session-start hook', () => {
   it('exits silently when no agent-role.yaml exists', () => {
     const result = runHook(tempDirEmpty);
     assert.equal(result.output, '', 'should produce no output');
+    assert.equal(result.exitCode, 0, 'should exit with code 0');
+  });
+
+  // AISDLC-557: root-cause regression test. Pre-fix, this scenario
+  // (no agent-role.yaml + a captured self-heal failure) produced ZERO
+  // output — the runtime-deps warning was built into `warnings` but the
+  // function had already returned at the agent-role.yaml existence check.
+  // This is very likely why a marketplace-cache install can leave
+  // node_modules empty with no operator-visible diagnostic: the consumer
+  // repo in the adopter's report had no reason to have run `ai-sdlc init`
+  // yet, so the pre-fix silent-exit swallowed the failure completely.
+  it('AISDLC-557: surfaces the runtime-deps warning even when no agent-role.yaml exists', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: 'install-runtime-deps.sh exit 1: network unreachable',
+    });
+    assert.equal(result.exitCode, 0, 'should still exit 0 (soft-fail)');
+    assert.ok(result.output, 'should produce output instead of exiting fully silently');
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.hookSpecificOutput?.hookEventName, 'SessionStart');
+    const ctx = parsed.hookSpecificOutput?.additionalContext;
+    assert.ok(ctx, 'should have additionalContext');
+    assert.ok(
+      ctx.includes('Plugin runtime-dependency install failed'),
+      'should surface the runtime-deps failure',
+    );
+    assert.ok(ctx.includes('network unreachable'), 'should include the captured error detail');
+    assert.ok(
+      !ctx.includes('AI-SDLC Governance Active'),
+      'should NOT include the full governance banner (agent-role.yaml is absent)',
+    );
+  });
+
+  it('AISDLC-557: still exits fully silently when no agent-role.yaml AND no runtime-deps error', () => {
+    const result = runHook(tempDirEmpty);
+    assert.equal(result.output, '', 'should produce no output when there is nothing to warn about');
     assert.equal(result.exitCode, 0, 'should exit with code 0');
   });
 });

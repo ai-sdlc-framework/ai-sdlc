@@ -126,13 +126,31 @@ isn't a JS event loop.
 ## Path resolution
 
 ```bash
-# Same convention as /ai-sdlc execute (see ai-sdlc-plugin/README.md).
+# AISDLC-557: resolve via the shared resolve-pipeline-cli.sh (same script
+# /ai-sdlc execute uses) instead of the previous inline two-branch
+# resolution that assumed the guessed path was correct without ever
+# checking it existed. Pre-fix, a broken/unresolvable install proceeded
+# straight into Step 5's frontier loop, where every cli-deps.mjs /
+# cli-dispatch.mjs call silently degrades on failure (e.g.
+# `2>/dev/null || echo '{"frontier":[]}'`) — the tick would appear to run
+# cleanly while never dispatching anything, with no actionable diagnostic
+# anywhere ("Step 1.5 is only fail-closed when the binary exists" — AISDLC-557).
+# resolve-pipeline-cli.sh gives us (a) the full self-heal + fallback chain
+# (including the self-location last resort, AISDLC-557 AC#3) and (b) a
+# NAMED, actionable error at the very top of the tick — before any frontier
+# work — when nothing resolves at all.
 if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
-  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
   PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_DIR/scripts"
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_ROOT/scripts"
 else
-  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
   PLUGIN_SCRIPTS_DIR="$(pwd)/ai-sdlc-plugin/scripts"
+fi
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || {
+    echo "ERROR: orchestrator-tick cannot resolve @ai-sdlc/pipeline-cli — the dependency-readiness gate (cli-deps.mjs) and dispatch (cli-dispatch.mjs) are UNREACHABLE. See the resolve-pipeline-cli.sh diagnostic above for the actionable fix. Refusing to tick rather than silently skip every dependency gate (AISDLC-557)." >&2
+    exit 1
+  }
 fi
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 ```
@@ -747,7 +765,20 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   #    `OrchestratorBlockedByDispatchReadiness` events and surface in the
   #    next Decision Catalog tick as `frontier candidate X is <verdict>
   #    — close task file?` decisions.
-  FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>/dev/null || echo '{"frontier":[]}')
+  # AISDLC-557 AC#5: a skipped dependency gate must never be indistinguishable
+  # from a passed one. Pre-fix, ANY failure of this command (missing binary,
+  # crash, corrupt board state) silently degraded to an empty frontier — same
+  # output shape as "legitimately nothing ready to dispatch". Capture stderr
+  # separately and log LOUDLY when the gate itself failed to run, so the
+  # operator (or a downstream automation tailing Conductor stdout) can tell
+  # "gate ran, frontier is empty" apart from "gate could not run at all".
+  FRONTIER_STDERR_FILE=$(mktemp)
+  if ! FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>"$FRONTIER_STDERR_FILE"); then
+    echo "[orchestrator-tick] ERROR: dependency-readiness gate (cli-deps frontier) FAILED TO RUN — treating this tick as having NO ready tasks rather than silently proceeding. This is NOT the same as a legitimately empty frontier; investigate before assuming there is no work." >&2
+    echo "[orchestrator-tick]   $(tail -3 "$FRONTIER_STDERR_FILE" 2>/dev/null | tr '\n' ' ')" >&2
+    FRONTIER_JSON='{"frontier":[]}'
+  fi
+  rm -f "$FRONTIER_STDERR_FILE"
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "
     const d=[]; process.stdin.on('data',c=>d.push(c));
     process.stdin.on('end',()=>{
