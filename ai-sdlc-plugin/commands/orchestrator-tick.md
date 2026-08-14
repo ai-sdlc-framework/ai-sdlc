@@ -793,7 +793,10 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   # only what it prints: abort with a distinct non-zero status and a distinct
   # event, never the idle "done" path.
   if [ "$FRONTIER_GATE_FAILED" = "1" ]; then
-    echo "[orchestrator-tick] TICK ABORTED — dependency gate could not run. This is NOT 'no ready tasks'. Do NOT reschedule as idle; investigate cli-deps first." >&2
+    echo "[orchestrator-tick] DISPATCH ABORTED (exit 3) — the dependency gate could not run." >&2
+    echo "[orchestrator-tick]   This is NOT 'no ready tasks'. Do NOT dispatch anything this tick." >&2
+    echo "[orchestrator-tick]   Conductor: SKIP the rest of Step 5, but STILL run Step 6.5 (reconcile" >&2
+    echo "[orchestrator-tick]   in-flight work) and STILL schedule a BACKOFF wakeup in Step 6." >&2
     exit 3
   fi
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "

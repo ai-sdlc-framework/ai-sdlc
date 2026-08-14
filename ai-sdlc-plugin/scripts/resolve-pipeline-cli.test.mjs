@@ -24,6 +24,7 @@ import {
   writeFileSync,
   rmSync,
   existsSync,
+  readFileSync,
   mkdtempSync,
   realpathSync,
   copyFileSync,
@@ -384,6 +385,39 @@ describe('Topology 6: Self-location fallback (AISDLC-557, last resort)', () => {
     }
     return scriptCopy;
   }
+
+  // Review round 2: topology 6 derives its plugin dir from the script's own
+  // location, which is exactly where topology 1 already looked when
+  // CLAUDE_PLUGIN_DIR is set. Without a guard it re-runs the same failing
+  // self-heal against the same directory, doubling the npm timeout before the
+  // final error appears.
+  it('does NOT re-run self-heal when the self-location duplicates an already-tried dir', () => {
+    const pluginDir = join(tmpDir, 'selflocation-dedup');
+    const countFile = join(tmpDir, 'selflocation-dedup-count');
+    const scriptCopy = setupSelfLocationPluginDir(pluginDir, {
+      installScriptBody: `#!/usr/bin/env bash
+echo x >> "${countFile}"
+exit 1
+`,
+    });
+    const fakeHome = join(tmpDir, 'selflocation-dedup-home');
+    mkdirSync(fakeHome, { recursive: true });
+    const fakeCwd = join(tmpDir, 'selflocation-dedup-cwd');
+    mkdirSync(fakeCwd, { recursive: true });
+
+    const result = spawnSync('bash', [scriptCopy], {
+      env: { PATH: process.env.PATH, HOME: fakeHome, CLAUDE_PLUGIN_DIR: pluginDir },
+      cwd: fakeCwd,
+      encoding: 'utf-8',
+    });
+
+    assert.notEqual(result.status, 0, 'still fails overall — nothing was installed');
+    const attempts = existsSync(countFile)
+      ? readFileSync(countFile, 'utf-8').trim().split('\n').filter(Boolean).length
+      : 0;
+    assert.equal(attempts, 1, `self-heal must run once, not once per topology (ran ${attempts}x)`);
+    assert.match(result.stderr, /not retrying self-heal/);
+  });
 
   it('AC#3: attempts self-heal even when neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT is set, and resolves on success', () => {
     const pluginDir = join(tmpDir, 'selflocation-success');

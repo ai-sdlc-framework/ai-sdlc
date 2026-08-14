@@ -14,6 +14,13 @@ const { execSync, spawnSync } = require('child_process');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
+/**
+ * Captured install-runtime-deps failure text (AISDLC-557 security review).
+ * Module-local rather than process.env so the UNREDACTED value is never
+ * inherited by child processes; redaction happens where it is rendered.
+ */
+let runtimeDepsError = null;
+
 let input;
 try {
   const raw = readFileSync('/dev/stdin', 'utf-8');
@@ -81,7 +88,13 @@ try {
             .filter((l) => l.trim().length > 0)
             .slice(-3)
             .join(' | ');
-          process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR = `install-runtime-deps.sh exit ${result.status}: ${stderrTail || 'no stderr'}`;
+          // AISDLC-557 security review: keep the UNREDACTED text out of
+          // process.env. Writing it there leaked it into the environment of
+          // every child spawned later in this hook (e.g. the `git rev-parse`
+          // below), since redaction only happens at read time. A module-local
+          // holds it instead; the env var remains a read-only INPUT for tests
+          // and cross-process callers.
+          runtimeDepsError = `install-runtime-deps.sh exit ${result.status}: ${stderrTail || 'no stderr'}`;
         }
       }
     }
@@ -304,17 +317,34 @@ process.exit(0);
  */
 function sanitizeForContext(text, maxLen = 400) {
   const redacted = String(text)
-    // https://user:pass@host  ->  https://***:***@host
+    // https://user:pass@host -> https://***:***@host
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1***:***@')
-    // _authToken=... / _auth=... / bearer <token>
-    .replace(/(_authToken|_auth|_password|token|bearer)(\s*[=:]\s*|\s+)\S+/gi, '$1$2***');
+    // https://<token>@host — userinfo with NO colon still carries a secret.
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+@/gi, '$1***@')
+    // Authorization: Basic <base64> / Bearer <jwt>
+    .replace(/\b(basic|bearer)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ***')
+    // npmrc keys AND bare credential labels. The bare forms matter: review
+    // found `password=`, `secret=`, `apikey=` slipped through when only the
+    // underscore-prefixed npmrc spellings were covered.
+    .replace(
+      /\b(_authToken|_auth|_password|authToken|password|passwd|secret|apikey|api_key|token)(\s*[=:]\s*|\s+)\S+/gi,
+      '$1$2***',
+    )
+    // Newlines and backticks would let injected text forge a heading or code
+    // fence inside the governance banner — flatten them.
+    .replace(/[\r\n`]+/g, ' ');
+  // Truncate AFTER redaction, never before: otherwise a long prefix could push
+  // a credential past the cut and it would survive unredacted.
   return redacted.length > maxLen ? `${redacted.slice(0, maxLen)}… (truncated)` : redacted;
 }
 
 function buildRuntimeDepsWarning() {
-  if (!process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR) return null;
+  // Prefer the module-local capture; the env var remains a read-only input for
+  // tests and cross-process callers. Both are treated as UNTRUSTED data.
+  const raw = runtimeDepsError ?? process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;
+  if (!raw) return null;
   return (
-    `⚠ Plugin runtime-dependency install failed — ${sanitizeForContext(process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR)}. ` +
+    `⚠ Plugin runtime-dependency install failed — [untrusted tool output] ${sanitizeForContext(raw)}. ` +
     'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
     'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"'
   );

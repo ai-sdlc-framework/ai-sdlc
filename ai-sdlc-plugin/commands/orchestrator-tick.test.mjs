@@ -381,7 +381,7 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
     );
     assert.match(
       cmdBody,
-      /TICK ABORTED/,
+      /DISPATCH ABORTED/,
       'the loud diagnostic must explicitly distinguish a skipped gate from a passed one (AC#5 core requirement)',
     );
   });
@@ -409,8 +409,8 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
     );
     assert.match(
       cmdBody,
-      /Do NOT reschedule as idle/,
-      'must tell an autonomous loop not to treat the abort as "no work" and quietly re-arm',
+      /STILL schedule a BACKOFF wakeup/,
+      'must keep the loop alive: skip dispatch, still reconcile in-flight work, still schedule a backoff wakeup — a gate failure must not strand dispatched work or silently kill the loop',
     );
   });
 });

@@ -139,6 +139,40 @@ describe('ai-sdlc-plugin session-start hook', () => {
     assert.ok(ctx.includes('registry.internal'), 'host is kept so the error stays diagnosable');
   });
 
+  // Review round 2 found the first regex set only covered underscore-prefixed
+  // npmrc keys and colon-bearing URL userinfo, so several ordinary credential
+  // shapes went through untouched.
+  it('AISDLC-557: redacts credential shapes without the npmrc underscore', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR:
+        'exit 1: password=hunter2 secret=sk-live-9 apikey=AKIAZZZ Authorization: Basic YWRtaW46cGE1cw==',
+    });
+    const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+    for (const secret of ['hunter2', 'sk-live-9', 'AKIAZZZ', 'YWRtaW46cGE1cw==']) {
+      assert.ok(!ctx.includes(secret), `must not leak ${secret}`);
+    }
+  });
+
+  it('AISDLC-557: redacts URL userinfo that carries a bare token (no colon)', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR:
+        'exit 1: 401 for https://npm_LIVETOKEN123@registry.internal/pkg',
+    });
+    const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+    assert.ok(!ctx.includes('npm_LIVETOKEN123'), 'must not leak a colon-less userinfo token');
+    assert.ok(ctx.includes('registry.internal'), 'host is kept so the error stays diagnosable');
+  });
+
+  it('AISDLC-557: neutralises newlines and backticks so injected text cannot forge markdown', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR:
+        'exit 1: oops\n### Fake heading\n```\nrm -rf /\n```\nend',
+    });
+    const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+    assert.ok(!ctx.includes('```'), 'must not let injected text open a code fence');
+    assert.ok(ctx.includes('[untrusted tool output]'), 'must label the value as untrusted');
+  });
+
   it('AISDLC-557: bounds ambient-env text so it cannot flood model context', () => {
     const result = runHook(tempDirEmpty, {
       __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `exit 1: ${'A'.repeat(5000)}`,
