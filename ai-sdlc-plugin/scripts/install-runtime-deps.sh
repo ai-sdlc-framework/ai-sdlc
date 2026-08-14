@@ -54,6 +54,7 @@ fi
 # For dogfood use, build the local dist first: `pnpm --filter @ai-sdlc/plugin-mcp-server build`.
 PIPELINE_CLI_OK=0
 MCP_SERVER_OK=0
+ORCHESTRATOR_OK=0
 
 if [ -f "$PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs" ]; then
   PIPELINE_CLI_OK=1
@@ -61,8 +62,18 @@ fi
 if [ -f "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js" ]; then
   MCP_SERVER_OK=1
 fi
+# AISDLC-554: @ai-sdlc/orchestrator carries the attestation signing runtime.
+# It MUST participate in the idempotence check — without this line an adopter
+# whose plugin predates AISDLC-554 already has the other two packages, so the
+# early-exit below fires and orchestrator is never installed, leaving the
+# signer unresolvable and attestation silently unavailable. The probed file is
+# the exact module sign-attestation.mjs imports, so a partial install fails the
+# check rather than passing on the package directory alone.
+if [ -f "$PLUGIN_DIR/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js" ]; then
+  ORCHESTRATOR_OK=1
+fi
 
-if [ "$PIPELINE_CLI_OK" = "1" ] && [ "$MCP_SERVER_OK" = "1" ]; then
+if [ "$PIPELINE_CLI_OK" = "1" ] && [ "$MCP_SERVER_OK" = "1" ] && [ "$ORCHESTRATOR_OK" = "1" ]; then
   echo "install-runtime-deps.sh: all runtimeDependencies already installed in $PLUGIN_DIR" >&2
   exit 0
 fi
@@ -182,6 +193,14 @@ if [ ! -f "$PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs" ]; t
 fi
 if [ ! -f "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js" ]; then
   MISSING+=("@ai-sdlc/plugin-mcp-server (expected $PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js)")
+  INSTALL_OK=0
+fi
+# AISDLC-554: the sentinel written below lets session-start skip future
+# installs, so orchestrator must be verified here too — otherwise a run that
+# silently failed to install it still stamps "complete" and the signer stays
+# unresolvable.
+if [ ! -f "$PLUGIN_DIR/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js" ]; then
+  MISSING+=("@ai-sdlc/orchestrator (expected $PLUGIN_DIR/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js)")
   INSTALL_OK=0
 fi
 

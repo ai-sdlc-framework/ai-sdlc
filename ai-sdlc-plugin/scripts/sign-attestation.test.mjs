@@ -41,7 +41,16 @@ before(() => {
 });
 
 function cleanEnv(extra = {}) {
-  const env = { ...process.env, ...extra };
+  const inherited = { ...process.env };
+  // AISDLC-554: these steer the signer's runtime resolution (candidates 3-4),
+  // and Claude Code sets them in exactly the plugin-hook context where tests
+  // may run. Leaking them from the ambient shell silently flips the negative
+  // resolution tests into false passes — the runtime IS found, so
+  // "fails when absent everywhere" stops testing anything. Strip them from the
+  // inherited env, but let a test opt back in explicitly via `extra`.
+  delete inherited.CLAUDE_PLUGIN_DIR;
+  delete inherited.CLAUDE_PLUGIN_ROOT;
+  const env = { ...inherited, ...extra };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
@@ -970,6 +979,13 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
     assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    // Assert WHICH candidate won, not merely that some hash appeared — a
+    // hash alone cannot distinguish "the intended copy resolved" from
+    // "a different valid copy resolved".
+    assert.ok(
+      res.stderr.includes(installedRuntimePath(fixture.root)),
+      `expected the repo-installed copy to resolve; stderr: ${res.stderr}`,
+    );
   });
 
   it('resolves a node_modules hoisted ABOVE the repo root', () => {
@@ -982,6 +998,10 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
     assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.ok(
+      res.stderr.includes(installedRuntimePath(base)),
+      `expected the hoisted copy to resolve; stderr: ${res.stderr}`,
+    );
   });
 
   it('prefers the monorepo build over an installed copy, so a stale build never hides behind a dependency', () => {
@@ -1014,6 +1034,10 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     });
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
     assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.ok(
+      res.stderr.includes(installedRuntimePath(pluginDir)),
+      `expected the plugin copy to resolve; stderr: ${res.stderr}`,
+    );
   });
 
   it('prefers a repo-pinned copy over the plugin copy, so the repo controls the version', () => {
@@ -1046,6 +1070,74 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
       manifest.runtimeDependencies?.['@ai-sdlc/orchestrator'],
       'plugin.json must declare @ai-sdlc/orchestrator in runtimeDependencies',
     );
+  });
+
+  it('resolves via node_modules beside the script when no plugin env vars are set (git-hook context)', () => {
+    // Git hooks do not inherit CLAUDE_PLUGIN_DIR/ROOT, and the pre-push
+    // signing hook runs in exactly that context — so the script must find the
+    // plugin's own install by walking up from its own location.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    // Stage a copy of the signer inside a plugin-shaped directory.
+    const fakePlugin = join(base, 'fakeplugin');
+    mkdirSync(join(fakePlugin, 'scripts'), { recursive: true });
+    const stagedHelper = join(fakePlugin, 'scripts', 'sign-attestation.mjs');
+    writeFileSync(stagedHelper, readFileSync(helperPath, 'utf-8'));
+    writeRuntimeShim(installedRuntimePath(fakePlugin));
+
+    const res = spawnSync(process.execPath, [stagedHelper, '--print-content-hash'], {
+      cwd: fixture.root,
+      env: (() => {
+        const env = cleanEnv({ HOME: tmpHome });
+        delete env.CLAUDE_PLUGIN_DIR;
+        delete env.CLAUDE_PLUGIN_ROOT;
+        return env;
+      })(),
+      encoding: 'utf-8',
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.match(res.stderr, /fakeplugin/);
+  });
+
+  it('rejects an installed copy older than the declared minimum instead of signing with it', () => {
+    // A stale ancestor copy must not win by position alone: a
+    // canonicalization-drifted signer produces envelopes CI rejects as if
+    // tampered. The repo copy is stale; only the plugin copy is current.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(
+      installedRuntimePath(fixture.root),
+      "throw new Error('stale copy must not be loaded');\n",
+    );
+    writeFileSync(
+      join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.13.9' }),
+    );
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0' }),
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator/);
+  });
+
+  it('echoes which runtime copy signed, so resolution is auditable not silent', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /\[sign-attestation\] attestation runtime: .*attestations\.js/);
   });
 
   it('fails with adopter-actionable guidance when the runtime is absent everywhere', () => {

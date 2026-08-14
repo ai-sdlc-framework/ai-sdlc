@@ -140,32 +140,34 @@ function fail(msg, code = 1) {
 }
 
 /**
- * AISDLC-554 — locate the attestation runtime from a CONSUMER repo.
+ * AISDLC-554 — locate a signing runtime module from a CONSUMER repo.
  *
- * The signer must import `buildPredicate` / `signAttestation` from the same
- * module the verifier uses, so signing and verification share one
- * canonicalization codepath. Re-implementing the canonicalization here would
- * produce envelopes that fail the real verifier in a way that looks like
- * tampering — so this resolves the real module or fails loudly.
+ * The signer must import `buildPredicate` / `signAttestation` (v5) and
+ * `signAndWriteV6Envelope` (v6) from the same modules the verifier uses, so
+ * signing and verification share one canonicalization codepath.
+ * Re-implementing the canonicalization here would produce envelopes that fail
+ * the real verifier in a way that looks like tampering — so this resolves the
+ * real module or fails loudly.
  *
- * Before AISDLC-554 the only candidate was `<repoRoot>/orchestrator/dist/...`,
- * a path that exists ONLY inside the ai-sdlc monorepo. Every adopter repo hit
- * `not found. Run pnpm --filter @ai-sdlc/orchestrator build first` — advice
- * that cannot work when the repo has no @ai-sdlc packages to build.
+ * Before AISDLC-554 the only candidates were `<repoRoot>/orchestrator/dist/…`
+ * and `<repoRoot>/pipeline-cli/dist/…`, paths that exist ONLY inside the
+ * ai-sdlc monorepo. Every adopter repo hit `not found. Run pnpm --filter …
+ * build first` — advice that cannot work when the repo has no @ai-sdlc
+ * packages to build.
  *
  * Candidates, in order:
- *   1. `<repoRoot>/orchestrator/dist/runtime/attestations.js` — the monorepo
- *      dev path. Kept FIRST so in-repo behaviour is byte-identical: a
- *      monorepo contributor with a stale build still gets the build-me error,
- *      never a silently-different installed copy.
- *   2. `<dir>/node_modules/@ai-sdlc/orchestrator/…` walking upward from
- *      repoRoot — an adopter who pinned the dependency themselves. Ranked
- *      above the plugin's own copy so the repo being signed controls the
- *      version, and so workspace-root hoisting is covered.
+ *   1. `<repoRoot>/<workspaceDir>/dist/…` — the monorepo dev path. Kept FIRST
+ *      so in-repo behaviour is byte-identical: a monorepo contributor with a
+ *      stale build still gets the build-me error, never a silently-different
+ *      installed copy.
+ *   2. `<dir>/node_modules/<pkg>/dist/…` walking upward from repoRoot — an
+ *      adopter who pinned the dependency themselves. Ranked above the plugin's
+ *      own copy so the repo being signed controls the version, and so
+ *      workspace-root hoisting is covered.
  *   3. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — the
- *      zero-config path. `@ai-sdlc/orchestrator` is a plugin
- *      runtimeDependency, so install-runtime-deps.sh puts it here and an
- *      adopter needs to install nothing at all.
+ *      zero-config path. Both packages are plugin runtimeDependencies, so
+ *      install-runtime-deps.sh puts them here and an adopter needs to install
+ *      nothing at all.
  *   4. node_modules walking up from THIS script — same plugin install, but
  *      reached without the env vars, which git hooks do not inherit. The
  *      pre-push signing hook runs in exactly that context.
@@ -173,21 +175,26 @@ function fail(msg, code = 1) {
  * Resolution deliberately does NOT use a bare `import()`: that resolves
  * relative to this script (under ~/.claude/plugins/), never the repo being
  * signed, so candidates 1-2 would be unreachable. `createRequire().resolve`
- * is also unusable — it matches the `require` condition, which the package's
- * exports map does not define, it is import-only.
+ * is also unusable — it matches the `require` condition, which neither
+ * package's exports map defines, they are import-only.
  *
  * Deep file paths are used throughout, which bypasses the `exports` map, so an
- * adopter with an already-installed @ai-sdlc/orchestrator can sign today
- * without waiting for the release that adds the `./runtime` subpath.
+ * adopter with the packages already installed can sign today without waiting
+ * for the release that adds the `./runtime` subpath.
+ *
+ * SECURITY (AISDLC-554 review): the walk-up spans every ancestor directory, so
+ * a writable ancestor is a code-execution candidate that receives the
+ * operator's private key. This matches Node's own resolution semantics and is
+ * strictly narrower than candidate 1, which the pre-AISDLC-554 signer already
+ * imported from an attacker-controllable in-repo path. The resolved path is
+ * echoed to stderr on every run so the choice is auditable rather than silent.
  */
-function nodeModulesWalkUp(from) {
+function nodeModulesWalkUp(from, pkg, distSubpath) {
   const candidates = [];
   const { root } = parsePath(from);
   let dir = from;
   for (;;) {
-    candidates.push(
-      join(dir, 'node_modules', '@ai-sdlc', 'orchestrator', 'dist', 'runtime', 'attestations.js'),
-    );
+    candidates.push(join(dir, 'node_modules', ...pkg.split('/'), ...distSubpath));
     if (dir === root) break;
     const parent = dirname(dir);
     if (parent === dir) break;
@@ -196,51 +203,160 @@ function nodeModulesWalkUp(from) {
   return candidates;
 }
 
-function attestationRuntimeCandidates(repoRoot) {
+/**
+ * @param repoRoot    the repo being signed
+ * @param workspaceDir monorepo workspace directory name, e.g. 'orchestrator'
+ * @param pkg         published package name, e.g. '@ai-sdlc/orchestrator'
+ * @param distSubpath path segments below the package root, e.g.
+ *                    ['dist','runtime','attestations.js']
+ */
+function runtimeModuleCandidates(repoRoot, workspaceDir, pkg, distSubpath) {
   const candidates = [
-    join(repoRoot, 'orchestrator', 'dist', 'runtime', 'attestations.js'),
-    ...nodeModulesWalkUp(repoRoot),
+    join(repoRoot, workspaceDir, ...distSubpath),
+    ...nodeModulesWalkUp(repoRoot, pkg, distSubpath),
   ];
   for (const pluginDir of [process.env.CLAUDE_PLUGIN_DIR, process.env.CLAUDE_PLUGIN_ROOT]) {
     if (pluginDir) {
-      candidates.push(
-        join(
-          pluginDir,
-          'node_modules',
-          '@ai-sdlc',
-          'orchestrator',
-          'dist',
-          'runtime',
-          'attestations.js',
-        ),
-      );
+      candidates.push(join(pluginDir, 'node_modules', ...pkg.split('/'), ...distSubpath));
     }
   }
-  candidates.push(...nodeModulesWalkUp(dirname(dirname(fileURLToPath(import.meta.url)))));
+  candidates.push(
+    ...nodeModulesWalkUp(dirname(dirname(fileURLToPath(import.meta.url))), pkg, distSubpath),
+  );
   return [...new Set(candidates)];
 }
 
-async function loadAttestationRuntime(repoRoot) {
-  const candidates = attestationRuntimeCandidates(repoRoot);
-  const found = candidates.find((candidate) => existsSync(candidate));
+function attestationRuntimeCandidates(repoRoot) {
+  return runtimeModuleCandidates(repoRoot, 'orchestrator', '@ai-sdlc/orchestrator', [
+    'dist',
+    'runtime',
+    'attestations.js',
+  ]);
+}
+
+function pipelineCliSignV6Candidates(repoRoot) {
+  return runtimeModuleCandidates(repoRoot, 'pipeline-cli', '@ai-sdlc/pipeline-cli', [
+    'dist',
+    'attestation',
+    'sign-v6.js',
+  ]);
+}
+
+/**
+ * Minimum acceptable version for an INSTALLED runtime copy, matching the
+ * ranges plugin.json declares.
+ *
+ * AISDLC-554 review: without this, `nodeModulesWalkUp` would let any stale
+ * @ai-sdlc copy in an ancestor node_modules win purely by position, and a
+ * canonicalization-drifted signer produces envelopes CI rejects "in a way that
+ * looks like tampering" — the exact failure this module exists to prevent,
+ * arrived at through version drift instead of re-implementation.
+ *
+ * The monorepo workspace build (candidate 1) is deliberately NOT version-gated:
+ * it is the contributor's own checkout and must keep behaving byte-identically.
+ */
+const MIN_RUNTIME_VERSIONS = {
+  '@ai-sdlc/orchestrator': [0, 14, 0],
+  '@ai-sdlc/pipeline-cli': [0, 14, 0],
+};
+
+/** Read the version of the installed package a candidate path belongs to. */
+function candidatePackageVersion(candidate, pkg, distSubpath) {
+  // Strip the dist subpath to get the package root.
+  let pkgRoot = candidate;
+  for (let i = 0; i < distSubpath.length; i += 1) pkgRoot = dirname(pkgRoot);
+  try {
+    const manifest = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf-8'));
+    const parts = String(manifest.version ?? '')
+      .split('-')[0]
+      .split('.')
+      .map((n) => Number.parseInt(n, 10));
+    return parts.length === 3 && parts.every((n) => Number.isInteger(n)) ? parts : null;
+  } catch {
+    return null;
+  }
+}
+
+function meetsMinimumVersion(version, minimum) {
+  for (let i = 0; i < 3; i += 1) {
+    if (version[i] > minimum[i]) return true;
+    if (version[i] < minimum[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Import the first existing candidate, or fail loudly. `label` and `pkg` only
+ * shape the error text; the resolution policy is identical for both modules.
+ */
+async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath, workspacePath) {
+  const minimum = MIN_RUNTIME_VERSIONS[pkg];
+  const rejected = [];
+  const found = candidates.find((candidate) => {
+    if (!existsSync(candidate)) return false;
+    // The workspace build is the contributor's own checkout — never gated.
+    if (candidate === workspacePath || !minimum) return true;
+    const version = candidatePackageVersion(candidate, pkg, distSubpath);
+    if (version && !meetsMinimumVersion(version, minimum)) {
+      rejected.push(`${candidate} (v${version.join('.')} < ${minimum.join('.')})`);
+      return false;
+    }
+    return true;
+  });
   if (!found) {
     fail(
-      'Cannot locate the AI-SDLC attestation runtime.\n' +
+      `Cannot locate the AI-SDLC ${label}.\n` +
         '       Signing imports the same module the verifier uses, so it will not\n' +
         '       fall back to a re-implementation: an envelope built from a\n' +
         '       different canonicalization would fail the real verifier in a way\n' +
         '       that looks like tampering.\n\n' +
         '       Inside the ai-sdlc monorepo:\n' +
-        '         pnpm --filter @ai-sdlc/orchestrator build\n\n' +
+        `         pnpm --filter ${pkg} build\n\n` +
         '       In a consumer repo, repair the plugin install:\n' +
         '         bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh"\n' +
         '       or pin the dependency in the repo itself:\n' +
-        '         pnpm add -D @ai-sdlc/orchestrator\n\n' +
+        `         pnpm add -D ${pkg}\n\n` +
         `       Searched (from repo root ${repoRoot}):\n` +
-        candidates.map((candidate) => `         ${candidate}`).join('\n'),
+        candidates.map((candidate) => `         ${candidate}`).join('\n') +
+        (rejected.length
+          ? `\n\n       Rejected as too old (need >= ${minimum.join('.')}):\n` +
+            rejected.map((entry) => `         ${entry}`).join('\n')
+          : ''),
     );
   }
+  // Provenance-critical: record WHICH copy signed, so an unexpected
+  // resolution (version skew, a planted ancestor node_modules) is auditable
+  // after the fact instead of invisible.
+  process.stderr.write(`[sign-attestation] ${label}: ${found}\n`);
+  for (const entry of rejected) {
+    process.stderr.write(`[sign-attestation] skipped stale ${pkg}: ${entry}\n`);
+  }
   return import(pathToFileURL(found).href);
+}
+
+const ORCHESTRATOR_DIST = ['dist', 'runtime', 'attestations.js'];
+const PIPELINE_CLI_DIST = ['dist', 'attestation', 'sign-v6.js'];
+
+async function loadAttestationRuntime(repoRoot) {
+  return loadRuntimeModule(
+    repoRoot,
+    'attestation runtime',
+    '@ai-sdlc/orchestrator',
+    attestationRuntimeCandidates(repoRoot),
+    ORCHESTRATOR_DIST,
+    join(repoRoot, 'orchestrator', ...ORCHESTRATOR_DIST),
+  );
+}
+
+async function loadPipelineCliSignV6(repoRoot) {
+  return loadRuntimeModule(
+    repoRoot,
+    'v6 signer',
+    '@ai-sdlc/pipeline-cli',
+    pipelineCliSignV6Candidates(repoRoot),
+    PIPELINE_CLI_DIST,
+    join(repoRoot, 'pipeline-cli', ...PIPELINE_CLI_DIST),
+  );
 }
 
 function parseArgs(argv) {
@@ -376,14 +492,10 @@ async function main() {
     }
     const privateKeyPem = readFileSync(v6KeyPath, 'utf-8');
 
-    // The pipeline-cli dist must be built for the v6 signer.
-    const pipelineCliSignV6 = join(repoRoot, 'pipeline-cli', 'dist', 'attestation', 'sign-v6.js');
-    if (!existsSync(pipelineCliSignV6)) {
-      fail(
-        `${pipelineCliSignV6} not found. Run \`pnpm --filter @ai-sdlc/pipeline-cli build\` first.`,
-      );
-    }
-    const { signAndWriteV6Envelope } = await import(pipelineCliSignV6);
+    // v6 is the DEFAULT schema (AISDLC-409), so this is the path an adopter
+    // hits first — it must resolve outside the monorepo too, not just the v5
+    // and --print-content-hash paths.
+    const { signAndWriteV6Envelope } = await loadPipelineCliSignV6(repoRoot);
 
     const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
     const identity =

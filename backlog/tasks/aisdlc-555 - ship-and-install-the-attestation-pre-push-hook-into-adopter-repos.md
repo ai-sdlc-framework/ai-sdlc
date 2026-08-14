@@ -50,6 +50,14 @@ unless they hand-write a hook, because nothing invokes signing at push time.
   runs, so this is not one more step they must discover.
 - Handle repos that do not use husky at all — writing `.git/hooks/pre-push`
   directly, or documenting the manual wiring.
+
+A second adopter report (2026-08-14) widened this: the same consumer repo has
+no `.ai-sdlc/verdicts/`, no `dispatch/` board, and no `dispatch-config.yaml`,
+and the shipped command list contains no initializer for any of them. So the
+deliverable is better framed as a single idempotent `/ai-sdlc init` that brings
+a consumer repo to the same state the dogfood monorepo is in, of which the
+pre-push hook is one part.
+
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -66,6 +74,9 @@ unless they hand-write a hook, because nothing invokes signing at push time.
 - [ ] #5 End-to-end on a scratch repo outside the monorepo: verdict file
       present at push time produces a committed DSSE envelope
 - [ ] #6 Hermetic tests cover the idempotence and append-not-clobber cases
+- [ ] #7 The initializer also creates `.ai-sdlc/verdicts/`, the Dispatch Board
+      directories, and `dispatch-config.yaml`, so a consumer repo reaches
+      parity with the dogfood monorepo in one command
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes

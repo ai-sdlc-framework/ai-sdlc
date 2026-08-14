@@ -57,19 +57,41 @@ gets the review half and none of the provenance half — silently, which is the
 worst property for a trust mechanism. A missing attestation is indistinguishable
 from a repo that never ran reviews.
 
+Review surfaced that the same monorepo-only assumption existed on a **second**
+module, and that the zero-config claim had two further holes. All are fixed
+here; none is deferred, because each independently reduces the fix to "works
+only in the monorepo".
+
+- **v6 is the DEFAULT schema** (AISDLC-409) and had its own hardcoded
+  `<repoRoot>/pipeline-cli/dist/attestation/sign-v6.js`. Fixing only the v5 /
+  `--print-content-hash` path would have left every adopter on the default path
+  still broken, and pushed them toward `AI_SDLC_V5_LEGACY=1` — i.e. onto the
+  weaker binding rather than the Merkle-transcript model.
+- **`install-runtime-deps.sh` did not know about the new dependency.** Its
+  idempotence early-exit and post-install verification were hardcoded to
+  pipeline-cli + mcp-server, so an existing install would early-exit and never
+  fetch orchestrator, then stamp its completion sentinel anyway.
+- **The `@ai-sdlc/pipeline-cli` pin was `^0.10.0`,** which on a `0.x` caret can
+  only ever resolve to `0.10.x` — and `0.10.0` does not ship
+  `dist/attestation/sign-v6.js` at all. Verified by unpacking both tarballs.
+
 ### Scope
 
-- Replace both hardcoded call sites with one `loadAttestationRuntime(repoRoot)`
-  resolver, ordered: monorepo build dir → repo `node_modules` walk-up →
+- Replace all three hardcoded call sites with one `runtimeModuleCandidates()`
+  policy, ordered: monorepo build dir → repo `node_modules` walk-up →
   `$CLAUDE_PLUGIN_DIR`/`$CLAUDE_PLUGIN_ROOT` → `node_modules` walk-up from the
   script itself (git hooks do not inherit the plugin env vars).
-- Declare `@ai-sdlc/orchestrator` in `plugin.json` `runtimeDependencies`, so
-  `install-runtime-deps.sh` installs it into the plugin cache and adopters need
-  to install nothing. This reuses the pattern `resolve-pipeline-cli.sh` already
-  established for the classifier CLI.
+- Declare `@ai-sdlc/orchestrator` in `plugin.json` `runtimeDependencies` and
+  bump `@ai-sdlc/pipeline-cli` to `^0.14.0`; teach `install-runtime-deps.sh` to
+  probe and verify the orchestrator runtime. This reuses the pattern
+  `resolve-pipeline-cli.sh` already established for the classifier CLI.
 - Add the `./runtime` subpath to the orchestrator `exports` map.
-- Replace the misleading error with one that names every searched path and both
+- Replace the misleading errors with ones naming every searched path and both
   remedies.
+- Gate installed copies on a minimum version, so a stale ancestor
+  `node_modules` cannot win by position and sign with drifted canonicalization.
+- Echo the resolved module path to stderr — provenance-critical resolution
+  should be auditable, not silent.
 
 Resolution order is load-bearing: the monorepo build ranks first so a
 contributor with a stale build still gets the build-me error rather than
@@ -96,6 +118,20 @@ without waiting for the release that ships item 3.
 - [x] #6 `plugin.json` declares `@ai-sdlc/orchestrator` as a runtimeDependency
 - [x] #7 New tests are mutation-sensitive: reverting the resolver to the
       pre-fix single candidate fails 5 of them
+- [x] #8 The DEFAULT v6 signing path resolves outside the monorepo — proven
+      against the real published `@ai-sdlc/pipeline-cli@0.14.0`, reaching live
+      v6 signing logic rather than a module-not-found error
+- [x] #9 `install-runtime-deps.sh` probes AND verifies the orchestrator
+      runtime, so a pre-existing install cannot early-exit past it
+- [x] #10 The pipeline-cli pin resolves to a version that actually ships
+      `sign-v6.js` (`^0.10.0` could not)
+- [x] #11 An installed copy below the minimum version is skipped, logged, and
+      loses to a current copy
+- [x] #12 The resolved module path is echoed to stderr, and the positive tests
+      assert WHICH candidate won rather than merely that a hash appeared
+- [x] #13 Tests are insulated from ambient `CLAUDE_PLUGIN_DIR`/`ROOT`:
+      verified by re-running under a populated `CLAUDE_PLUGIN_ROOT` (2 failures
+      without the fix, 28/28 with it)
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes
@@ -111,6 +147,20 @@ deep-path import returns the same, and a direct file-path import succeeds with
 which this package's exports map does not define (import-only). A bare
 `import()` is also wrong — it resolves relative to the script under
 `~/.claude/plugins/`, never the repo being signed.
+
+Review round 1 blocked this PR and was right to. Both the code and test
+reviewers found defects that would each have shipped a fix that only appeared
+to work: the default v6 path was still monorepo-only, the installer would never
+have fetched the new dependency, the version pin could not reach a build that
+contains the v6 signer, and the test harness leaked `CLAUDE_PLUGIN_ROOT` from
+the ambient shell — which meant the negative resolution tests could stop
+testing anything inside a plugin session. Every one is fixed in this PR rather
+than filed forward.
+
+The version gate is deliberately lenient when a candidate has no readable
+`package.json`: it fails open to a load rather than blocking signing on
+metadata. Skew is a correctness concern, not a security boundary — forgery
+still requires the operator's trusted key.
 
 This task closes only the signer-reachability half of the report. Three
 reported gaps are deliberately NOT in scope and are filed separately:
