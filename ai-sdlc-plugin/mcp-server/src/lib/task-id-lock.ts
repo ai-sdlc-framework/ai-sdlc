@@ -85,6 +85,14 @@ export async function acquireTaskIdLock(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
 
+  // NOTE: deliberately NOT rejecting staleMs >= timeoutMs at runtime. A caller
+  // that KNOWS the lock is already stale can legitimately pass a large staleMs
+  // with a short timeout — the steal happens on the first iteration, before the
+  // deadline is ever consulted. Adding that guard broke three existing tests
+  // that document exactly this usage. The ordering only matters for the
+  // DEFAULTS, where a lock may go stale mid-wait; that is asserted at module
+  // load instead.
+
   mkdirSync(taskIdLockDir(parentRoot), { recursive: true });
   const path = taskIdLockFilePath(parentRoot);
   const deadline = Date.now() + timeoutMs;
@@ -126,10 +134,16 @@ export async function acquireTaskIdLock(
         if (age > staleMs) {
           try {
             unlinkSync(path);
+            // Only a SUCCESSFUL unlink earns the fast retry. Round-2 review:
+            // setting this after a failed unlink reproduced the same unbounded
+            // 100%-CPU spin the stat-failure fix removed — a stale lock that
+            // cannot be unlinked (path is a directory, immutable flag, EACCES)
+            // would loop forever, skipping both deadline check and sleep.
+            stolen = true;
           } catch {
-            // Another waiter already reaped it — loop and retry the create.
+            // Another waiter reaped it, or we cannot remove it at all. Either
+            // way fall through to the BOUNDED wait rather than spinning.
           }
-          stolen = true;
         }
       } catch {
         // AISDLC-559 review (MINOR): do NOT `continue` here. A bare continue

@@ -178,12 +178,34 @@ function scanGitRefs(
     }
     return { source: 'git-refs', scanned: true, idsFound: seen.size };
   } catch (err) {
-    return {
-      source: 'git-refs',
-      scanned: false,
-      idsFound: 0,
-      detail: (err as Error).message,
-    };
+    const message = (err as Error).message ?? '';
+    // Round-2 review: the two reviewers split on whether task_create should get
+    // an `allowUnscannedSources` escape hatch. Neither is quite right — the
+    // real question is WHY the scan failed.
+    //
+    // There is exactly ONE vacuous case: no repository exists anywhere up the
+    // tree, so there are no refs for an id to hide on and the scan is complete
+    // rather than degraded. Treating it as a failure would make task_create
+    // unusable in a plain directory with no override.
+    //
+    // The parenthetical is load-bearing. Git emits BOTH:
+    //   "not a git repository (or any of the parent directories): .git"  ← vacuous
+    //   "not a git repository: /nonexistent/place"                       ← BROKEN gitdir
+    // The second is a degraded repo whose refs we genuinely cannot see, so
+    // matching on the bare phrase would fail open on exactly the dangerous case.
+    // (A fresh repo with zero commits needs no special case — git log exits 0.)
+    //
+    // Every other failure — corrupt .git, ENOBUFS from an oversized log, a
+    // timeout — keeps failing closed.
+    if (/not a git repository \(or any of the parent directories\)/i.test(message)) {
+      return {
+        source: 'git-refs',
+        scanned: true,
+        idsFound: 0,
+        detail: 'no refs exist yet (fresh or non-git directory) — nothing could be claimed',
+      };
+    }
+    return { source: 'git-refs', scanned: false, idsFound: 0, detail: message };
   }
 }
 

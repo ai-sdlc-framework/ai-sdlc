@@ -125,3 +125,45 @@ describe('next_task_id — sees sibling worktree claims (AISDLC-559)', () => {
     expect(result.content[0].text).toContain('Allocated: AISDLC-901');
   });
 });
+
+describe('next_task_id — fail-closed on unscanned sources (AISDLC-559 round-2 review)', () => {
+  let noGit: string;
+  let handler: Handler;
+
+  beforeEach(() => {
+    // Deliberately NOT a git repo: git-refs is the only source covering
+    // unmerged and remote branches, so this is the state in which an allocated
+    // ID could already be taken.
+    noGit = mkdtempSync(join(tmpdir(), 'aisdlc-559-failclosed-'));
+    mkdirSync(join(noGit, 'backlog', 'tasks'), { recursive: true });
+    // A BROKEN gitdir, not a plain directory: a plain dir has no refs at all
+    // (vacuously complete), whereas this repo's refs genuinely cannot be read.
+    writeFileSync(join(noGit, '.git'), 'gitdir: /nonexistent/aisdlc-559\n', 'utf-8');
+    const server = {
+      tool: vi.fn((_n, _d, _s, registered) => {
+        handler = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    registerNextTaskId(server, { projectDir: noGit });
+  });
+
+  afterEach(() => {
+    rmSync(noGit, { recursive: true, force: true });
+  });
+
+  // Round-2 review: disabling this entire block left all 8 next_task_id tests
+  // green — the tool's own CRITICAL-labelled guarantee was unexercised.
+  it('REFUSES to allocate when git-refs could not be scanned', async () => {
+    const result = await handler({});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('REFUSED');
+    expect(result.content[0].text).toContain('git-refs');
+    expect(result.content[0].text).not.toMatch(/^Allocated:/m);
+  });
+
+  it('allocates anyway when the caller explicitly accepts the risk', async () => {
+    const result = await handler({ allowUnscannedSources: true });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toMatch(/Allocated: AISDLC-\d+/);
+  });
+});

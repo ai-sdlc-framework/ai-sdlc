@@ -7,7 +7,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   registerTaskCreate,
   slugify,
-  findExistingTaskFile,
   validateReferences,
   buildTaskContent,
   buildCollisionMessage,
@@ -388,41 +387,6 @@ describe('slugify (AISDLC-234)', () => {
   });
 });
 
-describe('findExistingTaskFile (AISDLC-234)', () => {
-  let projectDir: string;
-
-  beforeEach(() => {
-    projectDir = mkdtempSync(join(tmpdir(), 'aisdlc-234-find-'));
-    initGitRepoForFixture(projectDir);
-    mkdirSync(join(projectDir, 'backlog', 'tasks'), { recursive: true });
-    mkdirSync(join(projectDir, 'backlog', 'completed'), { recursive: true });
-  });
-
-  afterEach(() => rmSync(projectDir, { recursive: true, force: true }));
-
-  it('returns undefined for unknown IDs', () => {
-    expect(findExistingTaskFile(projectDir, 'AISDLC-9999')).toBeUndefined();
-  });
-
-  it('finds a file in tasks/', () => {
-    const p = join(projectDir, 'backlog', 'tasks', 'aisdlc-42 - example.md');
-    writeFileSync(p, 'x', 'utf-8');
-    expect(findExistingTaskFile(projectDir, 'AISDLC-42')).toBe(p);
-  });
-
-  it('finds a file in completed/', () => {
-    const p = join(projectDir, 'backlog', 'completed', 'aisdlc-42 - done.md');
-    writeFileSync(p, 'x', 'utf-8');
-    expect(findExistingTaskFile(projectDir, 'aisdlc-42')).toBe(p);
-  });
-
-  it('is case-insensitive', () => {
-    const p = join(projectDir, 'backlog', 'tasks', 'aisdlc-10 - x.md');
-    writeFileSync(p, 'x', 'utf-8');
-    expect(findExistingTaskFile(projectDir, 'AISDLC-10')).toBe(p);
-  });
-});
-
 describe('validateReferences (AISDLC-234)', () => {
   let projectDir: string;
 
@@ -747,6 +711,9 @@ describe('task_create — round-2 review fixes (AISDLC-559)', () => {
   it('refuses to create when the git-refs source could not be scanned', async () => {
     const noGit = mkdtempSync(join(tmpdir(), 'aisdlc-559-nogit-'));
     mkdirSync(join(noGit, 'backlog', 'tasks'), { recursive: true });
+    // Broken gitdir = refs exist but are unreadable. A plain directory would be
+    // vacuously complete and must NOT be refused.
+    writeFileSync(join(noGit, '.git'), 'gitdir: /nonexistent/aisdlc-559\n', 'utf-8');
     let h: Handler;
     const server = {
       tool: vi.fn((_n, _d, _s, registered) => {

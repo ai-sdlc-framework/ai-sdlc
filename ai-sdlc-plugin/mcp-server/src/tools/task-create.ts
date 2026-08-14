@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from '../types.js';
@@ -258,28 +258,6 @@ export function slugify(title: string): string {
     .replace(/-+/g, '-') // collapse repeated hyphens
     .replace(/^-|-$/g, '') // strip leading/trailing hyphens
     .slice(0, 60); // reasonable filename length cap
-}
-
-/**
- * Check whether any task file for `id` already exists in backlog/tasks/ or
- * backlog/completed/. Returns the path if found, undefined otherwise.
- */
-export function findExistingTaskFile(projectDir: string, id: string): string | undefined {
-  const idLower = id.toLowerCase();
-  const bucketDirs = [
-    join(projectDir, 'backlog', 'tasks'),
-    join(projectDir, 'backlog', 'completed'),
-  ];
-  for (const dir of bucketDirs) {
-    if (!existsSync(dir)) continue;
-    for (const entry of readdirSync(dir)) {
-      const lower = entry.toLowerCase();
-      if (lower.startsWith(`${idLower} `) || lower.startsWith(`${idLower}.`)) {
-        return join(dir, entry);
-      }
-    }
-  }
-  return undefined;
 }
 
 /**

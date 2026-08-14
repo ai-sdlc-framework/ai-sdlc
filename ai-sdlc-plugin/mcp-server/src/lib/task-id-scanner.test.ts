@@ -161,13 +161,32 @@ describe('scanClaimedTaskIds — source 1 (git refs) (AISDLC-559)', () => {
     expect(source501.every((s) => s.source === 'git-refs')).toBe(true);
   });
 
-  it('marks git-refs unscanned (not a crash) outside a git repo', () => {
+  // Round-2 review: a plain directory has NO refs anywhere, so the git-refs
+  // scan is complete by vacuity — refusing there would make task_create
+  // unusable in a non-git directory with no override.
+  it('treats a plain directory as vacuously scanned, since no refs can exist', () => {
     const dir = join(scratch, 'not-a-repo');
     mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
     const result = scanClaimedTaskIds({ projectDir: dir });
     const gitReport = result.sourceReports.find((r) => r.source === 'git-refs')!;
+    expect(gitReport.scanned).toBe(true);
+    expect(gitReport.idsFound).toBe(0);
+    expect(findUnscannedRequiredSources(result.sourceReports)).toEqual([]);
+  });
+
+  // The dangerous lookalike: git says "not a git repository" for BOTH cases,
+  // but a broken gitdir pointer means refs may exist that we cannot read.
+  // Matching the bare phrase would fail OPEN on exactly this case.
+  it('treats a BROKEN gitdir as unscanned, not vacuous', () => {
+    const dir = join(scratch, 'broken-gitdir');
+    mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(dir, '.git'), 'gitdir: /nonexistent/aisdlc-559\n', 'utf-8');
+    const result = scanClaimedTaskIds({ projectDir: dir });
+    const gitReport = result.sourceReports.find((r) => r.source === 'git-refs')!;
     expect(gitReport.scanned).toBe(false);
-    expect(gitReport.detail).toBeTruthy();
+    expect(findUnscannedRequiredSources(result.sourceReports).map((r) => r.source)).toEqual([
+      'git-refs',
+    ]);
   });
 });
 
@@ -319,10 +338,11 @@ describe('task-id-scanner — round-2 review fixes (AISDLC-559)', () => {
     expect(result.claimed.has(100)).toBe(true);
   });
 
-  it('reports git-refs as unscanned outside a git repo, and flags it as required', () => {
-    const notARepo = join(scratch, 'plain');
-    mkdirSync(join(notARepo, 'backlog', 'tasks'), { recursive: true });
-    const result = scanClaimedTaskIds({ projectDir: notARepo, prefix: 'AISDLC' });
+  it('flags a degraded (unreadable) repo as a required-source failure', () => {
+    const broken = join(scratch, 'plain');
+    mkdirSync(join(broken, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(broken, '.git'), 'gitdir: /nonexistent/aisdlc-559\n', 'utf-8');
+    const result = scanClaimedTaskIds({ projectDir: broken, prefix: 'AISDLC' });
     const gitRefs = result.sourceReports.find((r) => r.source === 'git-refs');
     expect(gitRefs?.scanned).toBe(false);
     expect(findUnscannedRequiredSources(result.sourceReports).map((r) => r.source)).toEqual([
