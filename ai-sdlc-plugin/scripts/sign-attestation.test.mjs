@@ -1132,6 +1132,46 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator/);
   });
 
+  it('treats a prerelease as below its release counterpart (0.14.0-beta.1 < 0.14.0)', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(
+      installedRuntimePath(fixture.root),
+      "throw new Error('prerelease copy must not satisfy the minimum');\n",
+    );
+    writeFileSync(
+      join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0-beta.1' }),
+    );
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0' }),
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator.*0\.14\.0-beta\.1/);
+  });
+
+  it('says so when it accepts a copy whose version it could not verify', () => {
+    // Fail-open is deliberate, but it must be distinguishable in the audit
+    // trail from a copy that was checked and passed.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(installedRuntimePath(fixture.root)); // no package.json alongside
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /WITHOUT version verification/);
+  });
+
   it('echoes which runtime copy signed, so resolution is auditable not silent', () => {
     const root = join(base, 'app');
     const fixture = setupRepo(tmpHome, root);

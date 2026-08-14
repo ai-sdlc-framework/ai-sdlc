@@ -260,18 +260,21 @@ const MIN_RUNTIME_VERSIONS = {
   '@ai-sdlc/pipeline-cli': [0, 14, 0],
 };
 
-/** Read the version of the installed package a candidate path belongs to. */
-function candidatePackageVersion(candidate, pkg, distSubpath) {
+/**
+ * Read the version of the installed package a candidate path belongs to.
+ * Returns `{ parts, prerelease }`, or null when unreadable/malformed.
+ */
+function candidatePackageVersion(candidate, distSubpath) {
   // Strip the dist subpath to get the package root.
   let pkgRoot = candidate;
   for (let i = 0; i < distSubpath.length; i += 1) pkgRoot = dirname(pkgRoot);
   try {
     const manifest = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf-8'));
-    const parts = String(manifest.version ?? '')
-      .split('-')[0]
-      .split('.')
-      .map((n) => Number.parseInt(n, 10));
-    return parts.length === 3 && parts.every((n) => Number.isInteger(n)) ? parts : null;
+    const raw = String(manifest.version ?? '');
+    const [core, ...rest] = raw.split('-');
+    const parts = core.split('.').map((n) => Number.parseInt(n, 10));
+    if (parts.length !== 3 || !parts.every((n) => Number.isInteger(n))) return null;
+    return { parts, prerelease: rest.length > 0, raw };
   } catch {
     return null;
   }
@@ -279,10 +282,13 @@ function candidatePackageVersion(candidate, pkg, distSubpath) {
 
 function meetsMinimumVersion(version, minimum) {
   for (let i = 0; i < 3; i += 1) {
-    if (version[i] > minimum[i]) return true;
-    if (version[i] < minimum[i]) return false;
+    if (version.parts[i] > minimum[i]) return true;
+    if (version.parts[i] < minimum[i]) return false;
   }
-  return true;
+  // Equal core version. Semver ranks a prerelease BELOW its release
+  // counterpart, so 0.14.0-beta.1 must not satisfy a 0.14.0 minimum — it may
+  // carry different canonicalization behaviour than the release it precedes.
+  return !version.prerelease;
 }
 
 /**
@@ -292,13 +298,22 @@ function meetsMinimumVersion(version, minimum) {
 async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath, workspacePath) {
   const minimum = MIN_RUNTIME_VERSIONS[pkg];
   const rejected = [];
+  let unverified = null;
   const found = candidates.find((candidate) => {
     if (!existsSync(candidate)) return false;
     // The workspace build is the contributor's own checkout — never gated.
     if (candidate === workspacePath || !minimum) return true;
-    const version = candidatePackageVersion(candidate, pkg, distSubpath);
-    if (version && !meetsMinimumVersion(version, minimum)) {
-      rejected.push(`${candidate} (v${version.join('.')} < ${minimum.join('.')})`);
+    const version = candidatePackageVersion(candidate, distSubpath);
+    if (!version) {
+      // Fail open: a missing/malformed package.json must not block signing,
+      // since skew is a correctness concern rather than a security boundary.
+      // Record it so stderr distinguishes "version-checked and passed" from
+      // "could not be checked and was accepted anyway".
+      unverified = candidate;
+      return true;
+    }
+    if (!meetsMinimumVersion(version, minimum)) {
+      rejected.push(`${candidate} (v${version.raw} < ${minimum.join('.')})`);
       return false;
     }
     return true;
@@ -328,6 +343,11 @@ async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath, 
   // resolution (version skew, a planted ancestor node_modules) is auditable
   // after the fact instead of invisible.
   process.stderr.write(`[sign-attestation] ${label}: ${found}\n`);
+  if (unverified === found) {
+    process.stderr.write(
+      `[sign-attestation] accepted ${found} WITHOUT version verification: package.json unreadable\n`,
+    );
+  }
   for (const entry of rejected) {
     process.stderr.write(`[sign-attestation] skipped stale ${pkg}: ${entry}\n`);
   }

@@ -185,6 +185,41 @@ after(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+describe('plugin manifests — runtimeDependencies must not drift (AISDLC-554)', () => {
+  // The repo ships TWO manifests: ai-sdlc-plugin/plugin.json (which
+  // install-runtime-deps.sh itself reads, via "$PLUGIN_DIR/plugin.json") and
+  // ai-sdlc-plugin/.claude-plugin/plugin.json (the marketplace-canonical
+  // manifest). Nothing enforced that their runtimeDependencies agree, so a bump
+  // applied to one could silently never reach a marketplace-installed adopter —
+  // which is exactly the production path AISDLC-554 exists to unblock. Whichever
+  // file the installer actually reads, this keeps the answer irrelevant.
+  const pluginRoot = join(__dirname, '..');
+  const topLevel = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf-8'));
+  const marketplace = JSON.parse(
+    readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf-8'),
+  );
+
+  it('both manifests declare identical runtimeDependencies', () => {
+    assert.deepEqual(
+      marketplace.runtimeDependencies,
+      topLevel.runtimeDependencies,
+      'ai-sdlc-plugin/plugin.json and ai-sdlc-plugin/.claude-plugin/plugin.json must declare the same runtimeDependencies',
+    );
+  });
+
+  it('both declare @ai-sdlc/orchestrator, which carries the attestation signing runtime', () => {
+    for (const [label, manifest] of [
+      ['plugin.json', topLevel],
+      ['.claude-plugin/plugin.json', marketplace],
+    ]) {
+      assert.ok(
+        manifest.runtimeDependencies?.['@ai-sdlc/orchestrator'],
+        `${label} must declare @ai-sdlc/orchestrator`,
+      );
+    }
+  });
+});
+
 describe('install-runtime-deps.sh — script exists and is executable', () => {
   it('script file exists', () => {
     assert.ok(existsSync(SCRIPT), `${SCRIPT} must exist`);

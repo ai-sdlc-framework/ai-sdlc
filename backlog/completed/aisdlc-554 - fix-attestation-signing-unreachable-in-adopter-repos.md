@@ -132,6 +132,13 @@ without waiting for the release that ships item 3.
 - [x] #13 Tests are insulated from ambient `CLAUDE_PLUGIN_DIR`/`ROOT`:
       verified by re-running under a populated `CLAUDE_PLUGIN_ROOT` (2 failures
       without the fix, 28/28 with it)
+- [x] #14 BOTH plugin manifests declare the new dependency — the top-level
+      `plugin.json` and the marketplace-canonical
+      `.claude-plugin/plugin.json` — with a test asserting they cannot drift
+- [x] #15 A prerelease does not satisfy an equal release minimum
+      (`0.14.0-beta.1` < `0.14.0`), per semver precedence
+- [x] #16 A copy accepted without a readable `package.json` says so on stderr,
+      so fail-open acceptance is distinguishable from a passed version check
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes
@@ -157,10 +164,27 @@ the ambient shell — which meant the negative resolution tests could stop
 testing anything inside a plugin session. Every one is fixed in this PR rather
 than filed forward.
 
+Round 2 blocked on a defect that would have voided the whole fix for the
+production path it was filed to unblock: the `runtimeDependencies` bump had
+been applied to `ai-sdlc-plugin/plugin.json` but not to the sibling
+`.claude-plugin/plugin.json`, which this repo's history treats as the
+marketplace-canonical manifest. Both are now synced and a test enforces it.
+Reconciling the manifests properly — they also differ in `hooks` — is
+AISDLC-558.
+
 The version gate is deliberately lenient when a candidate has no readable
 `package.json`: it fails open to a load rather than blocking signing on
-metadata. Skew is a correctness concern, not a security boundary — forgery
-still requires the operator's trusted key.
+metadata, and now announces that on stderr so the audit trail distinguishes it
+from a verified pass. Skew is a correctness concern, not a security boundary —
+forgery still requires the operator's trusted key.
+
+One review observation remains unresolved rather than closed: a reviewer saw a
+single unexplained failure of the repo-pinned-vs-plugin precedence test, then
+11 clean repeats. A further 30-run stress pass produced 0 failures (41+ clean
+runs total). The likeliest explanation is that reviewer's own concurrent
+mutation of the resolver during the run, but that is a hypothesis, not a
+diagnosis — if this test ever fails in CI it should be treated as a real
+ordering regression, not written off as flake.
 
 This task closes only the signer-reachability half of the report. Three
 reported gaps are deliberately NOT in scope and are filed separately:
