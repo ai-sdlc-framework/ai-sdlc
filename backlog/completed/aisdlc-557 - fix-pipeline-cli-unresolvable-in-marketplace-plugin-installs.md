@@ -205,13 +205,13 @@ into the same `{"frontier":[]}` shape.
   pre-existing, unrelated to this PR).
 - `node pipeline-cli/bin/cli-dor-check.mjs --task <this file>` — **currently
   fails Gate 3** (named-thing references `AISDLC-554`/555/556 don't resolve
-  to backlog files in this worktree) because AISDLC-554 is a real,
-  in-flight, not-yet-merged sibling dependency (branch
-  `fix/attestation-runtime-consumer-resolution`) per this task's own
-  `dependencies:` frontmatter. This is expected and was anticipated in the
-  dispatch instructions ("If AISDLC-554 lands before you push, rebase onto
-  origin/main and resolve") — not a defect introduced by this PR. It will
-  self-resolve once AISDLC-554 merges to main.
+  to backlog files in this worktree) while AISDLC-554 was still an unmerged
+  sibling dependency (branch `fix/attestation-runtime-consumer-resolution`)
+  per this task's own `dependencies:` frontmatter. That was expected and
+  anticipated in the dispatch instructions ("If AISDLC-554 lands before you
+  push, rebase onto origin/main and resolve") — not a defect introduced by
+  this PR. AISDLC-554 has since landed on main via PR #963, this branch was
+  rebased onto it, and the gate now passes.
 
 ## Follow-up
 
