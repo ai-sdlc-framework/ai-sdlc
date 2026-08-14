@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import {
   existsSync,
   mkdirSync,
@@ -8,8 +8,12 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+
+const __dirnameForTest = dirname(fileURLToPath(import.meta.url));
 import { acquireTaskIdLock, taskIdLockFilePath } from './task-id-lock.js';
 
 /**
@@ -160,4 +164,92 @@ describe('task-id lock — ownership token (AISDLC-559 round-2 review)', () => {
     expect(JSON.parse(readFileSync(path, 'utf-8')).token).not.toEqual('dead');
     h.release();
   });
+});
+
+describe('task-id lock — REAL two-process contention (AISDLC-559)', () => {
+  // Both round-2 reviewers independently found the existing contention tests
+  // are single-process simulations: flipping openSync's 'wx' to 'w', which
+  // disables mutual exclusion outright, was caught by only 1 of 5 and only as
+  // a side effect. Two async calls in one process can interleave cooperatively
+  // without ever racing at the OS level, so they cannot prove exclusion.
+  //
+  // This spawns genuinely separate node processes contending for the same lock
+  // file and asserts their critical sections never overlap.
+  let root: string;
+  let pkgDir: string;
+
+  beforeAll(() => {
+    pkgDir = join(__dirnameForTest, '..', '..');
+    // Compile so the children can import the REAL lock module. ~1s. Building
+    // here (rather than trusting dist) keeps the test self-sufficient — a
+    // stale dist would otherwise silently test yesterday's code.
+    execFileSync('pnpm', ['exec', 'tsc'], { cwd: pkgDir, stdio: 'pipe' });
+  }, 120_000);
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'aisdlc-559-2proc-'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('never lets two processes hold the lock at the same time', async () => {
+    const lockDist = join(pkgDir, 'dist', 'lib', 'task-id-lock.js');
+    expect(existsSync(lockDist)).toBe(true);
+
+    const logPath = join(root, 'critical-section.log');
+    const workerPath = join(root, 'worker.mjs');
+    writeFileSync(
+      workerPath,
+      `
+import { appendFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+const [lockDist, lockRoot, logPath, id] = process.argv.slice(2);
+const { acquireTaskIdLock } = await import(pathToFileURL(lockDist).href);
+const h = await acquireTaskIdLock(lockRoot, { staleMs: 5000, timeoutMs: 20000, pollMs: 5 });
+appendFileSync(logPath, 'ENTER ' + id + '\\n');
+// Hold long enough that an overlap would be unmissable, but well under staleMs
+// so no legitimate steal occurs.
+await new Promise((r) => setTimeout(r, 200));
+appendFileSync(logPath, 'EXIT ' + id + '\\n');
+h.release();
+`,
+      'utf-8',
+    );
+
+    const workers = ['A', 'B', 'C'].map(
+      (id) =>
+        new Promise<number>((resolve, reject) => {
+          const child = spawn(process.execPath, [workerPath, lockDist, root, logPath, id], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let stderr = '';
+          child.stderr.on('data', (d) => (stderr += String(d)));
+          child.on('exit', (code) =>
+            code === 0 ? resolve(code) : reject(new Error(`worker ${id} failed: ${stderr}`)),
+          );
+        }),
+    );
+    await Promise.all(workers);
+
+    const events = readFileSync(logPath, 'utf-8').trim().split('\n').filter(Boolean);
+    expect(events).toHaveLength(6);
+
+    // The load-bearing assertion: every ENTER must be closed by its OWN EXIT
+    // before any other ENTER appears. Any interleaving means two processes
+    // were inside the critical section simultaneously.
+    let held: string | null = null;
+    for (const line of events) {
+      const [kind, id] = line.split(' ');
+      if (kind === 'ENTER') {
+        expect(held, `overlap: ${id} entered while ${held} still held the lock`).toBeNull();
+        held = id;
+      } else {
+        expect(held).toBe(id);
+        held = null;
+      }
+    }
+    expect(held).toBeNull();
+  }, 120_000);
 });
