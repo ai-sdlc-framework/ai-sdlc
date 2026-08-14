@@ -104,8 +104,11 @@ Design CI boundary table has already been resolved.
 
 ## The 7 design review principles
 
-Both AI and human reviewers are calibrated against seven principles, exported as
-`DESIGN_REVIEW_PRINCIPLES` from `@ai-sdlc/reference`:
+Both AI and human reviewers are calibrated against seven principles, defined as
+`DESIGN_REVIEW_PRINCIPLES` in `reference/src/policy/design-exemplar-bank.ts`.
+That module is **not** re-exported from `@ai-sdlc/reference` — see
+[Implementation status](#implementation-status) — so the constant is not
+importable from the package today:
 
 | Principle | Rule |
 |---|---|

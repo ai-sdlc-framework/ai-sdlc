@@ -331,8 +331,10 @@ re-exported from `@ai-sdlc/orchestrator` and currently has no callers.
 
 Per-metric helpers (`computeDesignReviewApprovalRate`,
 `computeDesignReviewFirstPassRate`, `computeUsabilitySimulationPassRate`,
-`computeTokenComplianceTrend`, `computeVisualRegressionPassRate`) are exported
-alongside the aggregate `computeDesignMetrics()`.
+`computeTokenComplianceTrend`, `computeVisualRegressionPassRate`) are declared
+alongside the aggregate `computeDesignMetrics()` **within that module** — like
+the aggregate, they are not reachable from the `@ai-sdlc/orchestrator` package
+surface.
 
 ## See also
 
