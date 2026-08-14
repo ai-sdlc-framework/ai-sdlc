@@ -41,7 +41,16 @@ before(() => {
 });
 
 function cleanEnv(extra = {}) {
-  const env = { ...process.env, ...extra };
+  const inherited = { ...process.env };
+  // AISDLC-554: these steer the signer's runtime resolution (candidates 3-4),
+  // and Claude Code sets them in exactly the plugin-hook context where tests
+  // may run. Leaking them from the ambient shell silently flips the negative
+  // resolution tests into false passes — the runtime IS found, so
+  // "fails when absent everywhere" stops testing anything. Strip them from the
+  // inherited env, but let a test opt back in explicitly via `extra`.
+  delete inherited.CLAUDE_PLUGIN_DIR;
+  delete inherited.CLAUDE_PLUGIN_ROOT;
+  const env = { ...inherited, ...extra };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
@@ -60,8 +69,9 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, env: cleanEnv(), encoding: 'utf-8' });
 }
 
-function setupRepo(tmpHome) {
-  const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-sign-test-'));
+function setupRepo(tmpHome, rootOverride) {
+  const root = rootOverride ?? mkdtempSync(join(tmpdir(), 'ai-sdlc-sign-test-'));
+  mkdirSync(root, { recursive: true });
   git(['init', '-q', '-b', 'main'], root);
   git(['config', 'user.email', 'test@test.com'], root);
   git(['config', 'user.name', 'test'], root);
@@ -907,5 +917,294 @@ describe('sign-attestation.mjs', () => {
       /^[0-9a-f]{40}\.dsse\.json$/i,
       `content-addressed envelope filename should be <40-hex-patch-id>.dsse.json, got: ${patchIdEnvelopes[0]}`,
     );
+  });
+});
+
+// ── AISDLC-554: attestation runtime resolution in ADOPTER repos ──────
+//
+// The signer used to hardcode `<cwd>/orchestrator/dist/runtime/attestations.js`,
+// a path that exists only inside the ai-sdlc monorepo. Every consumer repo got
+// `not found. Run pnpm --filter @ai-sdlc/orchestrator build first` — advice
+// that cannot succeed in a repo with no @ai-sdlc packages to build, so
+// attestation was unreachable for adopters entirely.
+//
+// These tests drive the resolution order from a repo laid out the way an
+// adopter's actually is. `--print-content-hash` is the probe because it
+// exercises the same loader with no signing key required.
+
+const REAL_RUNTIME = join(repoRoot, 'orchestrator', 'dist', 'runtime', 'attestations.js');
+
+/** Write a shim that re-exports the real built runtime at an arbitrary path. */
+function writeRuntimeShim(target, body) {
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, body ?? `export * from '${REAL_RUNTIME.replace(/\\/g, '\\\\')}';\n`);
+}
+
+/** Path an npm/pnpm install would place the runtime at, under `dir`. */
+function installedRuntimePath(dir) {
+  return join(
+    dir,
+    'node_modules',
+    '@ai-sdlc',
+    'orchestrator',
+    'dist',
+    'runtime',
+    'attestations.js',
+  );
+}
+
+describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () => {
+  let tmpHome;
+  let base;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'ai-sdlc-sign-home-'));
+    // A private base dir, so the "hoisted node_modules" case can write a
+    // parent-level node_modules without touching the shared tmpdir root.
+    base = mkdtempSync(join(tmpdir(), 'ai-sdlc-sign-adopter-'));
+  });
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('signs from a consumer repo with @ai-sdlc/orchestrator installed and NO monorepo dir', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    // An adopter repo has no orchestrator/ source tree — only the dependency.
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(installedRuntimePath(fixture.root));
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    // Assert WHICH candidate won, not merely that some hash appeared — a
+    // hash alone cannot distinguish "the intended copy resolved" from
+    // "a different valid copy resolved".
+    assert.ok(
+      res.stderr.includes(installedRuntimePath(fixture.root)),
+      `expected the repo-installed copy to resolve; stderr: ${res.stderr}`,
+    );
+  });
+
+  it('resolves a node_modules hoisted ABOVE the repo root', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    // Installed one level up (workspace-root hoisting), not in the repo.
+    writeRuntimeShim(installedRuntimePath(base));
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.ok(
+      res.stderr.includes(installedRuntimePath(base)),
+      `expected the hoisted copy to resolve; stderr: ${res.stderr}`,
+    );
+  });
+
+  it('prefers the monorepo build over an installed copy, so a stale build never hides behind a dependency', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    // setupRepo already wrote the monorepo-style runtime. Make the installed
+    // copy detonate on import: reaching it at all is the failure being tested.
+    writeRuntimeShim(
+      installedRuntimePath(fixture.root),
+      "throw new Error('installed copy must not win over the monorepo build');\n",
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+  });
+
+  it('resolves the plugin runtimeDependency copy via CLAUDE_PLUGIN_ROOT, with nothing installed in the repo', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    // The adopter installs nothing: install-runtime-deps.sh put the runtime
+    // in the plugin cache dir, which is what makes this zero-config.
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.ok(
+      res.stderr.includes(installedRuntimePath(pluginDir)),
+      `expected the plugin copy to resolve; stderr: ${res.stderr}`,
+    );
+  });
+
+  it('prefers a repo-pinned copy over the plugin copy, so the repo controls the version', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(installedRuntimePath(fixture.root));
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(
+      installedRuntimePath(pluginDir),
+      "throw new Error('plugin copy must not win over the repo-pinned dependency');\n",
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+  });
+
+  it('declares @ai-sdlc/orchestrator as a runtimeDependency so the plugin copy actually gets installed', () => {
+    // The CLAUDE_PLUGIN_ROOT candidate above is only reachable because
+    // install-runtime-deps.sh installs what plugin.json declares. Without this
+    // entry the zero-config path silently degrades to the error case.
+    const manifest = JSON.parse(
+      readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'plugin.json'), 'utf-8'),
+    );
+    assert.ok(
+      manifest.runtimeDependencies?.['@ai-sdlc/orchestrator'],
+      'plugin.json must declare @ai-sdlc/orchestrator in runtimeDependencies',
+    );
+  });
+
+  it('resolves via node_modules beside the script when no plugin env vars are set (git-hook context)', () => {
+    // Git hooks do not inherit CLAUDE_PLUGIN_DIR/ROOT, and the pre-push
+    // signing hook runs in exactly that context — so the script must find the
+    // plugin's own install by walking up from its own location.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    // Stage a copy of the signer inside a plugin-shaped directory.
+    const fakePlugin = join(base, 'fakeplugin');
+    mkdirSync(join(fakePlugin, 'scripts'), { recursive: true });
+    const stagedHelper = join(fakePlugin, 'scripts', 'sign-attestation.mjs');
+    writeFileSync(stagedHelper, readFileSync(helperPath, 'utf-8'));
+    writeRuntimeShim(installedRuntimePath(fakePlugin));
+
+    const res = spawnSync(process.execPath, [stagedHelper, '--print-content-hash'], {
+      cwd: fixture.root,
+      env: (() => {
+        const env = cleanEnv({ HOME: tmpHome });
+        delete env.CLAUDE_PLUGIN_DIR;
+        delete env.CLAUDE_PLUGIN_ROOT;
+        return env;
+      })(),
+      encoding: 'utf-8',
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.match(res.stderr, /fakeplugin/);
+  });
+
+  it('rejects an installed copy older than the declared minimum instead of signing with it', () => {
+    // A stale ancestor copy must not win by position alone: a
+    // canonicalization-drifted signer produces envelopes CI rejects as if
+    // tampered. The repo copy is stale; only the plugin copy is current.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(
+      installedRuntimePath(fixture.root),
+      "throw new Error('stale copy must not be loaded');\n",
+    );
+    writeFileSync(
+      join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.13.9' }),
+    );
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0' }),
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator/);
+  });
+
+  it('treats a prerelease as below its release counterpart (0.14.0-beta.1 < 0.14.0)', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(
+      installedRuntimePath(fixture.root),
+      "throw new Error('prerelease copy must not satisfy the minimum');\n",
+    );
+    writeFileSync(
+      join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0-beta.1' }),
+    );
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0' }),
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator.*0\.14\.0-beta\.1/);
+  });
+
+  it('says so when it accepts a copy whose version it could not verify', () => {
+    // Fail-open is deliberate, but it must be distinguishable in the audit
+    // trail from a copy that was checked and passed.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(installedRuntimePath(fixture.root)); // no package.json alongside
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /WITHOUT version verification/);
+  });
+
+  it('echoes which runtime copy signed, so resolution is auditable not silent', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /\[sign-attestation\] attestation runtime: .*attestations\.js/);
+  });
+
+  it('fails with adopter-actionable guidance when the runtime is absent everywhere', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.notEqual(res.status, 0);
+    // The pre-AISDLC-554 message offered ONLY the monorepo build, which an
+    // adopter cannot run. Both routes must be named.
+    assert.match(res.stderr, /pnpm add -D @ai-sdlc\/orchestrator/);
+    assert.match(res.stderr, /pnpm --filter @ai-sdlc\/orchestrator build/);
+    // And it must show where it looked, so the gap is diagnosable without
+    // reading the signer's source.
+    assert.match(res.stderr, /node_modules[/\\]@ai-sdlc[/\\]orchestrator/);
+  });
+
+  it('never silently substitutes a re-implementation when the runtime is missing', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    // A fallback hash would verify as tampering downstream — the signer must
+    // emit nothing at all rather than an envelope the real verifier rejects.
+    assert.notEqual(res.status, 0);
+    assert.equal(res.stdout.trim(), '');
   });
 });
