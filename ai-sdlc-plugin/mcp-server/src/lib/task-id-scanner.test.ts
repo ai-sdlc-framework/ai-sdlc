@@ -200,6 +200,27 @@ describe('scanClaimedTaskIds — source 1 (git refs) (AISDLC-559)', () => {
     }
   });
 
+  it('GIT_DIR only counts when it actually resolves', () => {
+    const plain = join(scratch, 'gitdir-env');
+    mkdirSync(plain, { recursive: true });
+    const real = join(scratch, 'gitdir-real');
+    mkdirSync(real, { recursive: true });
+    const prev = process.env.GIT_DIR;
+    try {
+      // A stale/leaked GIT_DIR describes no repository — it must not force a
+      // refusal, because task_create has no override to recover with.
+      process.env.GIT_DIR = join(scratch, 'nonexistent-git-dir');
+      expect(isRepositoryDiscoverable(plain)).toBe(false);
+      // A GIT_DIR that resolves DOES mean a repo exists, even with no .git
+      // in the tree — that must still fail closed.
+      process.env.GIT_DIR = real;
+      expect(isRepositoryDiscoverable(plain)).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = prev;
+    }
+  });
+
   it('isRepositoryDiscoverable finds a repo in a PARENT of the start dir', () => {
     const repo = join(scratch, 'parent-repo-probe');
     initRepo(repo);

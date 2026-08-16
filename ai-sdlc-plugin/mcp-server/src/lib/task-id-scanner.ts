@@ -139,8 +139,13 @@ export function extractMajorId(text: string, idRegex: RegExp): number | undefine
  * treated as "no repo".
  */
 export function isRepositoryDiscoverable(startDir: string): boolean {
-  // An explicitly configured repo exists even with no .git in the tree.
-  if (process.env.GIT_DIR) return true;
+  // An explicitly configured repo exists even with no .git in the tree — but
+  // only if it actually resolves. Round-4 review: trusting GIT_DIR blindly
+  // meant a leaked or stale value blocked task_create outright, with no
+  // recovery short of unsetting the env var outside the tool (next_task_id has
+  // an override; task_create deliberately does not). A GIT_DIR pointing
+  // nowhere describes no repository, so it must not force a refusal.
+  if (process.env.GIT_DIR) return existsSync(process.env.GIT_DIR);
   let dir = resolve(startDir);
   const { root } = parsePath(dir);
   for (;;) {
