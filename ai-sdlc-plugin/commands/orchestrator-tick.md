@@ -753,6 +753,12 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
     });
   ")
   if [ "$IN_FLIGHT" -ge "$MAX_SESSIONS" ]; then
+    # Round-4 review: clear the gate-failure backoff here too. This break
+    # short-circuits BEFORE the dependency gate runs, so a stale count from an
+    # earlier failure would otherwise survive and make Step 6 back off up to
+    # 30 min while the gate is perfectly healthy — wedging a busy board into a
+    # slow cadence exactly when reconciliation matters most.
+    rm -f "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count"
     echo "[orchestrator-tick] fill-to-cap: in-flight $IN_FLIGHT >= cap $MAX_SESSIONS; done"
     break
   fi
@@ -798,11 +804,20 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
     # FRONTIER_GATE_FAILED does not survive to be read there. A persistently
     # broken cli-deps would therefore re-tick every 30s forever. Persist the
     # consecutive-failure count so Step 6 can back off mechanically.
-    mkdir -p .ai-sdlc/dispatch
-    GATE_FAILS=$(cat .ai-sdlc/dispatch/gate-failure-count 2>/dev/null || echo 0)
+    GATE_BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
+    mkdir -p "$GATE_BOARD_DIR"
+    GATE_FAILS=$(cat "$GATE_BOARD_DIR/gate-failure-count" 2>/dev/null || echo 0)
     case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
     GATE_FAILS=$((GATE_FAILS + 1))
-    printf '%s\n' "$GATE_FAILS" > .ai-sdlc/dispatch/gate-failure-count
+    # Round-4 review, found independently by two reviewers and reproduced:
+    # capping only the DERIVED WAKE_SECONDS is not enough. bash masks the shift
+    # count mod 64, so `1 << 64` is 1 and `1 << 70` is 64 — the counter keeps
+    # climbing once per capped 30-min tick, and after ~29h of continuous
+    # failure the shift WRAPS, the 1800s cap stops firing, and the backoff
+    # collapses back to the 30s hot loop it exists to prevent. That is inside
+    # this repo's own 24-48h autonomous-drain envelope. Cap the COUNTER.
+    [ "$GATE_FAILS" -gt 6 ] && GATE_FAILS=6
+    printf '%s\n' "$GATE_FAILS" > "$GATE_BOARD_DIR/gate-failure-count"
     echo "[orchestrator-tick] DISPATCH ABORTED (exit 3) — the dependency gate could not run." >&2
     echo "[orchestrator-tick]   This is NOT 'no ready tasks'. Do NOT dispatch anything this tick." >&2
     echo "[orchestrator-tick]   Consecutive gate failures: $GATE_FAILS (Step 6 backs off on this)." >&2
@@ -811,7 +826,7 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
     exit 3
   fi
   # Gate ran: clear any backoff state so the next failure starts from 1.
-  rm -f .ai-sdlc/dispatch/gate-failure-count
+  rm -f "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count"
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "
     const d=[]; process.stdin.on('data',c=>d.push(c));
     process.stdin.on('end',()=>{
@@ -1161,8 +1176,11 @@ if [ "$ONCE_FLAG" != "--once" ]; then
   # this, a persistently broken cli-deps is re-tried every 30s forever — the
   # abort stops it dispatching blind, but nothing stopped it hammering.
   # Doubling from the normal cadence, capped at 30 min.
-  GATE_FAILS=$(cat .ai-sdlc/dispatch/gate-failure-count 2>/dev/null || echo 0)
+  GATE_FAILS=$(cat "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count" 2>/dev/null || echo 0)
   case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
+  # Defence in depth: Step 5 caps this on write, but an out-of-band or
+  # hand-edited file must not be able to wrap the shift either.
+  [ "$GATE_FAILS" -gt 6 ] && GATE_FAILS=6
   if [ "$GATE_FAILS" -gt 0 ]; then
     WAKE_SECONDS=$((30 * (1 << GATE_FAILS)))
     [ "$WAKE_SECONDS" -gt 1800 ] && WAKE_SECONDS=1800

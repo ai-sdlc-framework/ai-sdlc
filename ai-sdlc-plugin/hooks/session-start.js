@@ -318,16 +318,26 @@ process.exit(0);
 function sanitizeForContext(text, maxLen = 400) {
   const redacted = String(text)
     // https://user:pass@host -> https://***:***@host
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1***:***@')
+    //
+    // Round-4 review: the userinfo class must span to the LAST '@' before the
+    // host, not the first. RFC 3986 requires %40 in userinfo, but npm prints
+    // what it was given — so `https://user:p@ss@host/path` previously matched
+    // only up to the first '@' and leaked the `ss` tail of the password.
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:]+:[^/\s]+@(?=[^/\s@]*(?:[/\s]|$))/gi, '$1***:***@')
     // https://<token>@host — userinfo with NO colon still carries a secret.
     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+@/gi, '$1***@')
     // Authorization: Basic <base64> / Bearer <jwt>
     .replace(/\b(basic|bearer)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ***')
-    // npmrc keys AND bare credential labels. The bare forms matter: review
-    // found `password=`, `secret=`, `apikey=` slipped through when only the
-    // underscore-prefixed npmrc spellings were covered.
+    // npmrc keys AND bare credential labels.
+    //
+    // Round-4 review closed two more shapes. `\b` cannot fire between `_` and
+    // `T`, since both are word characters — so `NPM_TOKEN=` and `MY_api_key=`
+    // went through untouched. And the alternation carried `api_key`/`apikey`
+    // but not the hyphenated `x-api-key:` header spelling. The leading
+    // `[\w-]*` and the `[-_]?` separators cover both without needing an
+    // entry per vendor prefix.
     .replace(
-      /\b(_authToken|_auth|_password|authToken|password|passwd|secret|apikey|api_key|token)(\s*[=:]\s*|\s+)\S+/gi,
+      /[\w-]*(_authToken|_auth|_password|authToken|password|passwd|secret|api[-_]?key|token)(\s*[=:]\s*|\s+)\S+/gi,
       '$1$2***',
     )
     // Newlines and backticks would let injected text forge a heading or code

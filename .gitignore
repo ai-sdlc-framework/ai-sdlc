@@ -121,3 +121,6 @@ build/
 *.pyz
 orchestrator/.gitignore
 .worktrees/
+
+# AISDLC-557: orchestrator gate-failure backoff state (runtime, per-machine)
+.ai-sdlc/dispatch/gate-failure-count

@@ -410,8 +410,49 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
     assert.match(cmdBody, /WAKE_SECONDS=1800/, 'backoff must be capped');
     assert.match(
       cmdBody,
-      /rm -f \.ai-sdlc\/dispatch\/gate-failure-count/,
+      /rm -f "\$\{AI_SDLC_DISPATCH_BOARD_DIR:-\$\(pwd\)\/\.ai-sdlc\/dispatch\}\/gate-failure-count"/,
       'a gate that runs again must clear the backoff state, or it never recovers',
+    );
+    assert.match(
+      cmdBody,
+      /AI_SDLC_DISPATCH_BOARD_DIR/,
+      'board state must honour the documented board-dir override, not a hardcoded path',
+    );
+  });
+
+  // Round-4 review: capping only the DERIVED value is not enough. bash masks
+  // the shift count mod 64 (verified: 1<<64 === 1, 1<<70 === 64), so an
+  // uncapped counter wraps after ~29h of continuous failure and the backoff
+  // collapses back into the 30s hot loop it exists to prevent — inside this
+  // repo's own 24-48h drain envelope. Two reviewers found this independently.
+  it('AC#5: the failure COUNTER is capped, not just the derived interval', () => {
+    assert.match(
+      cmdBody,
+      /\[ "\$GATE_FAILS" -gt 6 \] && GATE_FAILS=6/,
+      'GATE_FAILS itself must be clamped before it can wrap the shift',
+    );
+    // The clamp must exist on BOTH the write side and the read side, so a
+    // hand-edited or out-of-band file cannot wrap it either.
+    const clamps = cmdBody.match(/-gt 6 \] && GATE_FAILS=6/g) ?? [];
+    assert.ok(
+      clamps.length >= 2,
+      `clamp must guard both write and read sides, found ${clamps.length}`,
+    );
+  });
+
+  // The test reviewer showed these two mutations slipped past string matching:
+  // a doubled increment, and an inverted cap comparison that turns the cap
+  // into a floor. Assert the operators explicitly.
+  it('AC#5: the increment is +1 and the interval cap is an upper bound', () => {
+    assert.match(
+      cmdBody,
+      /GATE_FAILS=\$\(\(GATE_FAILS \+ 1\)\)/,
+      'consecutive-failure count must step by exactly 1',
+    );
+    assert.match(
+      cmdBody,
+      /\[ "\$WAKE_SECONDS" -gt 1800 \] && WAKE_SECONDS=1800/,
+      'the cap must be an upper bound (-gt); inverting it turns the cap into a floor',
     );
   });
 
