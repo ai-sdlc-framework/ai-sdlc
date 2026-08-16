@@ -793,12 +793,25 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   # only what it prints: abort with a distinct non-zero status and a distinct
   # event, never the idle "done" path.
   if [ "$FRONTIER_GATE_FAILED" = "1" ]; then
+    # Round-3 review: promising a "backoff wakeup" in prose was not enough —
+    # Step 6 is a flat 30s schedule and each Step is a separate Bash call, so
+    # FRONTIER_GATE_FAILED does not survive to be read there. A persistently
+    # broken cli-deps would therefore re-tick every 30s forever. Persist the
+    # consecutive-failure count so Step 6 can back off mechanically.
+    mkdir -p .ai-sdlc/dispatch
+    GATE_FAILS=$(cat .ai-sdlc/dispatch/gate-failure-count 2>/dev/null || echo 0)
+    case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
+    GATE_FAILS=$((GATE_FAILS + 1))
+    printf '%s\n' "$GATE_FAILS" > .ai-sdlc/dispatch/gate-failure-count
     echo "[orchestrator-tick] DISPATCH ABORTED (exit 3) — the dependency gate could not run." >&2
     echo "[orchestrator-tick]   This is NOT 'no ready tasks'. Do NOT dispatch anything this tick." >&2
+    echo "[orchestrator-tick]   Consecutive gate failures: $GATE_FAILS (Step 6 backs off on this)." >&2
     echo "[orchestrator-tick]   Conductor: SKIP the rest of Step 5, but STILL run Step 6.5 (reconcile" >&2
-    echo "[orchestrator-tick]   in-flight work) and STILL schedule a BACKOFF wakeup in Step 6." >&2
+    echo "[orchestrator-tick]   in-flight work) and STILL schedule the wakeup Step 6 computes." >&2
     exit 3
   fi
+  # Gate ran: clear any backoff state so the next failure starts from 1.
+  rm -f .ai-sdlc/dispatch/gate-failure-count
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "
     const d=[]; process.stdin.on('data',c=>d.push(c));
     process.stdin.on('end',()=>{
@@ -1144,8 +1157,21 @@ return `new-signal` and the skill body would file a NEW Decision Catalog entry
 ```bash
 ONCE_FLAG="${ARGUMENTS:-}"
 if [ "$ONCE_FLAG" != "--once" ]; then
-  echo "[orchestrator-tick] scheduling next tick in 30s"
-  # ScheduleWakeup 30s /ai-sdlc orchestrator-tick
+  # AISDLC-557: back off when Step 5's dependency gate could not run. Without
+  # this, a persistently broken cli-deps is re-tried every 30s forever — the
+  # abort stops it dispatching blind, but nothing stopped it hammering.
+  # Doubling from the normal cadence, capped at 30 min.
+  GATE_FAILS=$(cat .ai-sdlc/dispatch/gate-failure-count 2>/dev/null || echo 0)
+  case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
+  if [ "$GATE_FAILS" -gt 0 ]; then
+    WAKE_SECONDS=$((30 * (1 << GATE_FAILS)))
+    [ "$WAKE_SECONDS" -gt 1800 ] && WAKE_SECONDS=1800
+    echo "[orchestrator-tick] dependency gate has failed ${GATE_FAILS}x in a row — backing off"
+  else
+    WAKE_SECONDS=30
+  fi
+  echo "[orchestrator-tick] scheduling next tick in ${WAKE_SECONDS}s"
+  # ScheduleWakeup ${WAKE_SECONDS}s /ai-sdlc orchestrator-tick
 fi
 ```
 

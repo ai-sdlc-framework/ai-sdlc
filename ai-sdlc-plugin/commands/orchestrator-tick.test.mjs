@@ -392,6 +392,29 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
   // unattended tick could not tell a crashed gate from "no work" — a crashing
   // cli-deps would stall the pipeline while looking green. The gate failing
   // must change what the tick DOES, not only what it prints.
+  // Round-3 review: the backoff was PROSE ONLY — Step 6 scheduled a flat 30s
+  // wakeup and never read any failure signal, and each Step is a separate Bash
+  // call so Step 5's variable cannot reach it. A persistently broken cli-deps
+  // would re-tick every 30s forever. Assert the mechanism, not the promise.
+  it('AC#5: the backoff is mechanical — Step 5 persists a count, Step 6 reads it', () => {
+    assert.match(
+      cmdBody,
+      /gate-failure-count/,
+      'gate failure must persist across Steps, since each Step is a separate Bash call',
+    );
+    assert.match(
+      cmdBody,
+      /WAKE_SECONDS=\$\(\(30 \* \(1 << GATE_FAILS\)\)\)/,
+      'Step 6 must compute an escalating interval from the persisted count',
+    );
+    assert.match(cmdBody, /WAKE_SECONDS=1800/, 'backoff must be capped');
+    assert.match(
+      cmdBody,
+      /rm -f \.ai-sdlc\/dispatch\/gate-failure-count/,
+      'a gate that runs again must clear the backoff state, or it never recovers',
+    );
+  });
+
   it('AC#5: a failed gate takes a functionally distinct path, not just a louder one', () => {
     assert.ok(
       !cmdBody.includes(`FRONTIER_JSON='{"frontier":[]}'`),
@@ -409,7 +432,7 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
     );
     assert.match(
       cmdBody,
-      /STILL schedule a BACKOFF wakeup/,
+      /STILL run Step 6\.5/,
       'must keep the loop alive: skip dispatch, still reconcile in-flight work, still schedule a backoff wakeup — a gate failure must not strand dispatched work or silently kill the loop',
     );
   });

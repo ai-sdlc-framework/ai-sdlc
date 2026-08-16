@@ -58,6 +58,18 @@ function runHook(projectDir, extraEnv = {}) {
   // thing that's supposed to set this var (on a real self-heal failure).
   const env = { ...process.env, CLAUDE_PROJECT_DIR: projectDir };
   delete env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;
+  // AISDLC-557 round-3 review: CLAUDE_PLUGIN_ROOT/DIR must go too. The hook's
+  // real self-heal block fires on CLAUDE_PLUGIN_ROOT + a plugin.json at that
+  // path, and sets the module-local runtimeDepsError, which
+  // buildRuntimeDepsWarning() PREFERS over the env fallback via `??`. So an
+  // ambient value silently replaces the fixture a redaction test injected —
+  // the test then asserts against the real self-heal's text instead, which
+  // reproduced as 4 flaky failures. Every genuine plugin session sets this,
+  // including this repo's own dogfood flow, so the leak is the normal case
+  // rather than an edge one. Deleted BEFORE extraEnv so a test can still opt
+  // in deliberately.
+  delete env.CLAUDE_PLUGIN_ROOT;
+  delete env.CLAUDE_PLUGIN_DIR;
   Object.assign(env, extraEnv);
   try {
     const output = execFileSync('node', [hookScript], {
