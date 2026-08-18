@@ -325,13 +325,23 @@ function sanitizeForContext(text, maxLen = 400) {
   // every start position. Measured after this slice: 64k chars goes from
   // ~5.3s to sub-millisecond.
   //
-  // This does NOT reintroduce the truncate-before-redact bug the comment
-  // below guards against. That bug was about a credential surviving because
-  // the CUT landed mid-string in rendered output. Here the dropped text is
-  // never rendered at all (maxLen is 400, far below this bound), and a
-  // credential straddling the boundary still redacts because `\S+` matches
-  // whatever remains on the near side.
-  const bounded = String(text).slice(0, 8192);
+  // Round-6 security review DISPROVED my first version of this reasoning. I
+  // claimed a straddling credential still redacts because `\S+` matches what
+  // remains — true only when the trigger PRECEDES the secret. The two
+  // URL-userinfo patterns trigger on the `@` that FOLLOWS it, so a cut landing
+  // between the password and the `@` leaves both unmatched and `user` matches
+  // no label. Reproduced: 'password=' + 'A'.repeat(8165) + ' https://user:
+  // SUPERSECRET@host/path' rendered `https://user:SUPE` in the banner, because
+  // the leading run collapsed to `password=***` and pulled the fragment inside
+  // the 400-char window.
+  //
+  // So drop the final partial whitespace-delimited token whenever the input
+  // was actually truncated. A straddling credential is ALWAYS that token, so
+  // this closes every straddle shape rather than just the URL one.
+  let bounded = String(text);
+  if (bounded.length > 8192) {
+    bounded = bounded.slice(0, 8192).replace(/\S+$/, '');
+  }
   const redacted = bounded
     // https://user:pass@host -> https://***:***@host
     //

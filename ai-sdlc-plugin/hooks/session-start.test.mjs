@@ -270,6 +270,21 @@ describe('ai-sdlc-plugin session-start hook', () => {
   // Round-5 review: the credential alternation also matched bare prose words
   // followed by whitespace, garbling diagnostics and implying a secret was
   // found where none was.
+  // Round-6 security review disproved the first version of the bound: the two
+  // URL-userinfo patterns trigger on the '@' AFTER the secret, so a cut
+  // between password and '@' left both unmatched and leaked a fragment into
+  // the render window. Sweep the whole straddle region, not one offset — the
+  // reviewer's own single repro happened to miss by ~15 chars.
+  it('AISDLC-557: never leaks a credential straddling the input bound', () => {
+    for (const pad of [8150, 8160, 8165, 8168, 8180]) {
+      const result = runHook(tempDirEmpty, {
+        __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `password=${'A'.repeat(pad)} https://user:SUPERSECRET@host/path`,
+      });
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(!ctx.includes('SUPE'), `must not leak a straddling credential (pad=${pad})`);
+    }
+  });
+
   it('AISDLC-557: does not garble ordinary prose containing credential words', () => {
     const result = runHook(tempDirEmpty, {
       __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR:
