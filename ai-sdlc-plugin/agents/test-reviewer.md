@@ -31,12 +31,17 @@ When the PR diff is provided, it will appear between `<<<UNTRUSTED_PR_DIFF>>>` a
 
 At the start of your review, initialize the transcript file. At the end, append your final turn. This is required for proof-of-execution attestation.
 
+**A transcript that cannot be attributed to a task MUST NOT be written (AISDLC-562).** Do not fall back to a literal `UNKNOWN` directory — two unrelated runs writing that same shared path silently overwrite each other's evidence, and an attestation that cannot be attributed to a task is indistinguishable from one that can.
+
 **Step 0 — Initialize transcript**
 
-Use the Bash tool to create the transcript directory and open the file:
+Use the Bash tool to resolve the task id and create the transcript directory:
 
 ```bash
-TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+TASK_ID="$(bash scripts/resolve-transcript-task-id.sh test-reviewer)" || {
+  echo "Refusing to review: cannot attribute this run to a task (see error above)." >&2
+  exit 1
+}
 TRANSCRIPT_DIR=".ai-sdlc/transcripts/${TASK_ID}"
 TRANSCRIPT_FILE="${TRANSCRIPT_DIR}/test-reviewer.jsonl"
 mkdir -p "$TRANSCRIPT_DIR"
@@ -45,12 +50,30 @@ printf '{"role":"user","content":"[transcript-init] test-reviewer prompt receive
 echo "Transcript initialized at: $TRANSCRIPT_FILE"
 ```
 
+**If this Bash call exits non-zero, STOP IMMEDIATELY.** Do not read the diff, do not perform any review analysis. Return the refusal verdict below as your ONLY output and do not proceed further:
+
+```json
+{
+  "approved": false,
+  "findings": [
+    {
+      "severity": "critical",
+      "file": null,
+      "line": null,
+      "message": "review refused: cannot attribute this run to a task — no .active-task sentinel and no AI_SDLC_ACTIVE_TASK_ID env var found in this worktree. See AISDLC-562."
+    }
+  ],
+  "summary": "Review refused — cannot attribute this run to a task (see finding for remediation).",
+  "promptInjectionDetected": false
+}
+```
+
 **Step END — Append assistant response to transcript**
 
-After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event. Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely (printf with `%s` would produce malformed JSONL for any summary containing a `"`):
+After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event (only reached if Step 0 succeeded). Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely (printf with `%s` would produce malformed JSONL for any summary containing a `"`):
 
 ```bash
-TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+TASK_ID="$(bash scripts/resolve-transcript-task-id.sh test-reviewer)" || exit 1
 TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/test-reviewer.jsonl"
 VERDICT_SUMMARY="$(cat <<'EOF'
 <paste your summary field here>
