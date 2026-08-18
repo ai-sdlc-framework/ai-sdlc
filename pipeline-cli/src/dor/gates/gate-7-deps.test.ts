@@ -277,4 +277,27 @@ describe('Gate 7 declaredDependencyRefs — real reproductions', () => {
     );
     expect(v1.verdict).toBe('pass');
   });
+
+  // AISDLC-563 round-1 review: YAML comments are legal syntax and both shapes
+  // silently reintroduced the false positive this gate fix removes — an inline
+  // comment on an item folded into the string so it never matched the bare id,
+  // and a comment on the field line made the block regex miss entirely.
+  it('ignores YAML comments on list items and on the field line', () => {
+    const withItemComment = ['---', 'dependencies:', '  - AISDLC-100  # the epic', '---'].join(
+      '\n',
+    );
+    expect(extractFrontmatterListField(withItemComment, 'dependencies')).toEqual(['AISDLC-100']);
+
+    const withFieldComment = ['---', 'dependencies: # see below', '  - AISDLC-100', '---'].join(
+      '\n',
+    );
+    expect(extractFrontmatterListField(withFieldComment, 'dependencies')).toEqual(['AISDLC-100']);
+
+    const inlineWithComment = ['---', 'dependencies: [AISDLC-100] # note', '---'].join('\n');
+    expect(extractFrontmatterListField(inlineWithComment, 'dependencies')).toEqual(['AISDLC-100']);
+
+    // A '#' not preceded by whitespace is NOT a YAML comment — keep it.
+    const hashInValue = ['---', 'references:', '  - docs/a#b.md', '---'].join('\n');
+    expect(extractFrontmatterListField(hashInValue, 'references')).toEqual(['docs/a#b.md']);
+  });
 });

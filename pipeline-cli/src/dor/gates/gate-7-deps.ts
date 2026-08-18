@@ -109,6 +109,20 @@ const TRACKED_WORK_ID_RE = new RegExp(TRACKED_WORK_ID, 'i');
  * Gate 7's dependency phrases can pair with any of those shapes too
  * (e.g. "depends on src/foo.ts shipping first").
  */
+/**
+ * Strip a trailing YAML comment. Per YAML, a `#` only opens a comment when
+ * preceded by whitespace or start-of-line, so `docs/a#b` is left intact.
+ *
+ * AISDLC-563 review: without this, `- AISDLC-100  # note` folded the comment
+ * into the extracted string so it never equalled the bare id from the body,
+ * and `dependencies: # note` made the block-list regex miss entirely and
+ * return an empty list — each silently reintroducing the exact false-positive
+ * class this gate fix exists to remove.
+ */
+function stripYamlComment(value: string): string {
+  return value.replace(/(^|\s)#.*$/, '$1').trimEnd();
+}
+
 export function extractFrontmatterListField(
   frontmatter: string,
   field: 'dependencies' | 'references',
@@ -120,18 +134,21 @@ export function extractFrontmatterListField(
   if (inlineMatch) {
     const inner = inlineMatch[1] ?? '';
     for (const raw of inner.split(',')) {
-      const item = raw.trim().replace(/^['"]|['"]$/g, '');
+      const item = stripYamlComment(raw)
+        .trim()
+        .replace(/^['"]|['"]$/g, '');
       if (item) items.push(item);
     }
     return items;
   }
   // Block-list form: `field:\n  - A\n  - B`
-  const blockMatch = frontmatter.match(new RegExp(`^${field}:\\n((?:\\s+-\\s+.+\\n?)*)`, 'm'));
+  const blockMatch = frontmatter.match(
+    new RegExp(`^${field}:[ \\t]*(?:#[^\\n]*)?\\n((?:\\s+-\\s+.+\\n?)*)`, 'm'),
+  );
   if (!blockMatch) return items;
   const lines = blockMatch[1]?.split('\n') ?? [];
   for (const line of lines) {
-    const item = line
-      .replace(/^\s+-\s+/, '')
+    const item = stripYamlComment(line.replace(/^\s+-\s+/, ''))
       .trim()
       .replace(/^['"]|['"]$/g, '');
     if (item) items.push(item);
