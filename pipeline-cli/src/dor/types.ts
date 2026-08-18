@@ -47,6 +47,16 @@ export interface IssueInput {
    * cross-link relations) that aren't in the markdown body.
    */
   references?: string[];
+  /**
+   * Tracked-work ids (AISDLC-N, RFC-NNNN, #N, org/repo#N, or repo-relative
+   * paths) declared in the task's `dependencies:` and `references:`
+   * frontmatter lists (AISDLC-563). Consumed EXCLUSIVELY by Gate 7's
+   * invisible-dependency check — deliberately kept separate from
+   * `references` above, which Gate 3 treats as file-existence resolution
+   * targets. Populating this field can never perturb Gate 3's resolution
+   * of `references`.
+   */
+  declaredDependencyRefs?: string[];
   /** Defaults to the current rubric version ('v1'). */
   rubricVersion?: string;
   /**
