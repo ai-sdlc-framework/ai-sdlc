@@ -223,6 +223,104 @@ TBD - we'll figure it out. Make search faster somehow.
     });
     expect(author.comments.length).toBe(1);
   });
+
+  // ── AISDLC-563 — Gate 7 frontmatter-dependency wiring ─────────────────
+  //
+  // Root cause: this shim built `IssueInput` from the task file WITHOUT
+  // ever reading `dependencies:` / `references:` into a field Gate 7
+  // consults, so a body dep-phrase referencing an already-declared
+  // dependency was always flagged. These tests exercise the fix through
+  // the real `refineBacklogTask()` entry point (not just the gate unit),
+  // using the two real reproductions' exact wording.
+
+  it('AISDLC-557 repro: does not flag "once AISDLC-554 merges" when AISDLC-554 is declared in dependencies:', async () => {
+    writeTask(
+      'AISDLC-2',
+      "id: AISDLC-2\ntitle: 'Repro 557'\ndependencies:\n  - AISDLC-554",
+      `## Description
+
+This task will self-resolve once AISDLC-554 merges to main.
+
+## Acceptance criteria
+
+- [ ] Something testable happens
+`,
+    );
+    const result = await refineBacklogTask('AISDLC-2', {
+      workDir: tmp,
+      config: enforceConfig,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    const gate7 = result.verdict.gates.find((g) => g.gateId === 7);
+    expect(gate7?.verdict).toBe('pass');
+  });
+
+  it('AISDLC-561 repro: does not flag "Depends on AISDLC-560 because ..." when AISDLC-560 is declared', async () => {
+    writeTask(
+      'AISDLC-3',
+      "id: AISDLC-3\ntitle: 'Repro 561'\ndependencies:\n  - AISDLC-560",
+      `## Description
+
+Depends on AISDLC-560 because the doctor command must exist first.
+
+## Acceptance criteria
+
+- [ ] Something testable happens
+`,
+    );
+    const result = await refineBacklogTask('AISDLC-3', {
+      workDir: tmp,
+      config: enforceConfig,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    const gate7 = result.verdict.gates.find((g) => g.gateId === 7);
+    expect(gate7?.verdict).toBe('pass');
+  });
+
+  it('true positive preserved: a body dep-phrase reference with NO frontmatter declaration still fails gate 7', async () => {
+    writeTask(
+      'AISDLC-4',
+      "id: AISDLC-4\ntitle: 'No declaration'",
+      `## Description
+
+Depends on AISDLC-999 because reasons.
+
+## Acceptance criteria
+
+- [ ] Something testable happens
+`,
+    );
+    const result = await refineBacklogTask('AISDLC-4', {
+      workDir: tmp,
+      config: enforceConfig,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    const gate7 = result.verdict.gates.find((g) => g.gateId === 7);
+    expect(gate7?.verdict).toBe('fail');
+    expect(result.shouldRefuseExecution).toBe(true);
+  });
+
+  it('a dependency declared under references: (not dependencies:) also satisfies gate 7', async () => {
+    writeTask(
+      'AISDLC-6',
+      "id: AISDLC-6\ntitle: 'Declared via references'\nreferences:\n  - AISDLC-700",
+      `## Description
+
+Blocked by AISDLC-700 shipping first.
+
+## Acceptance criteria
+
+- [ ] Something testable happens
+`,
+    );
+    const result = await refineBacklogTask('AISDLC-6', {
+      workDir: tmp,
+      config: enforceConfig,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    const gate7 = result.verdict.gates.find((g) => g.gateId === 7);
+    expect(gate7?.verdict).toBe('pass');
+  });
 });
 
 describe('refusalMessage', () => {

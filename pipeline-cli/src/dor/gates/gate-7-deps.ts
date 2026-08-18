@@ -23,6 +23,18 @@
  * gate's regex side only catches the case where the author *names* a
  * tracked-work dependency in the body but doesn't list it in the
  * `dependencies:` frontmatter.
+ *
+ * AISDLC-563 (2026-08-18): the gate's comparison logic was always correct
+ * (extracts the bare tracked-work id, compares case-insensitively against
+ * `input.declaredDependencyRefs` / `input.references`) — the bug was that
+ * `refineBacklogTask()` (`../ingress-claude.ts`) never populated either
+ * field from the task's `dependencies:` / `references:` frontmatter, so
+ * every dep-phrase + id pair in the body was flagged as invisible
+ * regardless of what frontmatter actually declared. Reproduced twice
+ * (AISDLC-557, AISDLC-561): both were "fixed" only by rewording the
+ * sentence, never by adding the (already-present) dependency. See
+ * `extractDeclaredDependencyRefs()` below for the frontmatter parser that
+ * closes the gap.
  */
 
 import type { GateEvaluation, IssueInput } from '../types.js';
@@ -89,16 +101,83 @@ const DEP_PHRASE_WITH_REF_RE = new RegExp(
 const TRACKED_WORK_ID_RE = new RegExp(TRACKED_WORK_ID, 'i');
 
 /**
+ * Extract the raw string items of a YAML frontmatter list field, in
+ * either the inline form (`field: [A, B]`, including empty `field: []`)
+ * or the block-list form (`field:\n  - A\n  - B`). No shape filtering —
+ * unlike the RFC-only helpers in `upstream-oq-gate.ts`, this accepts
+ * ANY item the author wrote (tracked-work ids, file paths, URLs) because
+ * Gate 7's dependency phrases can pair with any of those shapes too
+ * (e.g. "depends on src/foo.ts shipping first").
+ */
+export function extractFrontmatterListField(
+  frontmatter: string,
+  field: 'dependencies' | 'references',
+): string[] {
+  const items: string[] = [];
+  // Inline form: `field: [A, B]` — also matches `field: []` (empty inner
+  // capture, filtered out below by the truthy check).
+  const inlineMatch = frontmatter.match(new RegExp(`^${field}:\\s*\\[([^\\]]*)\\]`, 'm'));
+  if (inlineMatch) {
+    const inner = inlineMatch[1] ?? '';
+    for (const raw of inner.split(',')) {
+      const item = raw.trim().replace(/^['"]|['"]$/g, '');
+      if (item) items.push(item);
+    }
+    return items;
+  }
+  // Block-list form: `field:\n  - A\n  - B`
+  const blockMatch = frontmatter.match(new RegExp(`^${field}:\\n((?:\\s+-\\s+.+\\n?)*)`, 'm'));
+  if (!blockMatch) return items;
+  const lines = blockMatch[1]?.split('\n') ?? [];
+  for (const line of lines) {
+    const item = line
+      .replace(/^\s+-\s+/, '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
+    if (item) items.push(item);
+  }
+  return items;
+}
+
+/**
+ * Extract every tracked-work id / reference declared in a task's
+ * `dependencies:` AND `references:` frontmatter lists (AISDLC-563 scope:
+ * "compare against BOTH `dependencies:` and `references:`, matching the
+ * documented contract"). Feeds `IssueInput.declaredDependencyRefs` — see
+ * that field's doc comment in `../types.ts` for why this is kept separate
+ * from `IssueInput.references` (Gate 3 reuses the latter for
+ * file-existence resolution; mixing tracked-work ids into it would make
+ * Gate 3 try to resolve "AISDLC-554" as a file path).
+ */
+export function extractDeclaredDependencyRefs(frontmatter: string): string[] {
+  return [
+    ...extractFrontmatterListField(frontmatter, 'dependencies'),
+    ...extractFrontmatterListField(frontmatter, 'references'),
+  ];
+}
+
+/**
  * Returns the offending dependency-phrase + tracked-work-id pairs —
  * pairs where the body names a tracked-work dependency that is NOT
- * listed in the `references[]` input (the frontmatter `dependencies:`).
+ * listed in the frontmatter `dependencies:` or `references:` list
+ * (`input.declaredDependencyRefs`, or the legacy `input.references`
+ * caller-supplied override).
  */
 export function findInvisibleDependencies(
   input: IssueInput,
 ): Array<{ phrase: string; sentence: string; ref: string }> {
   const haystack = input.body;
   const sentences = splitIntoSentences(haystack);
-  const explicitRefs = (input.references ?? []).map((r) => r.toLowerCase());
+  // Normalise the extracted body reference to the bare tracked-work id
+  // (already the case — the regex capture group IS the id, never the
+  // phrase) and compare, case-insensitively, against BOTH declared-dependency
+  // sources: the ad-hoc `input.references` override callers can pass
+  // directly (kept for backward compat with existing call sites / tests)
+  // and the frontmatter-derived `input.declaredDependencyRefs` that
+  // `refineBacklogTask()` now populates (AISDLC-563).
+  const explicitRefs = [...(input.references ?? []), ...(input.declaredDependencyRefs ?? [])].map(
+    (r) => r.toLowerCase(),
+  );
 
   const out: Array<{ phrase: string; sentence: string; ref: string }> = [];
   for (const sentence of sentences) {
