@@ -40,6 +40,18 @@ set -euo pipefail
 
 PIPELINE_CLI_REL="node_modules/@ai-sdlc/pipeline-cli/bin"
 
+# AISDLC-557: derive the plugin dir from THIS script's own on-disk location,
+# for use as a last-resort self-heal fallback (topology 4.5 below) when
+# neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT is set. Only meaningful
+# when this script lives at "<plugin-dir>/scripts/resolve-pipeline-cli.sh"
+# (the layout every install topology uses); leaves SELF_PLUGIN_DIR empty
+# otherwise so the fallback is a clean no-op.
+SELF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_PLUGIN_DIR=""
+if [ "$(basename "$SELF_SCRIPT_DIR")" = "scripts" ]; then
+  SELF_PLUGIN_DIR="$(dirname "$SELF_SCRIPT_DIR")"
+fi
+
 # Helper: check if a candidate bin dir is usable (has at least one cli-*.mjs).
 _is_usable() {
   local candidate="$1"
@@ -157,6 +169,68 @@ if _is_usable "$DOGFOOD_BIN"; then
   exit 0
 fi
 
+# ── Topology 6: Self-location fallback (AISDLC-557, last resort) ───────────
+#
+# AISDLC-557: the second adopter report found that when NEITHER
+# CLAUDE_PLUGIN_DIR NOR CLAUDE_PLUGIN_ROOT is set, self-heal was completely
+# unreachable — topologies 1-3 (the only ones that ever attempt self-heal)
+# are gated on one of those two vars being set, and topology 4 (cache probe)
+# deliberately stays read-only (see the security note below). The result:
+# every topology gets tried and the script exits 1 without EVER attempting
+# to fix a broken install, even though a fixable one may be sitting right
+# next to this very script.
+#
+# Fix: as a LAST RESORT, derive the plugin dir from this script's own
+# on-disk location (SELF_PLUGIN_DIR, computed at the top of this file) and
+# run the exact same complete/self-heal/retry sequence topologies 1 and 3
+# use.
+#
+# Security note — this is NOT a reintroduction of the AISDLC-272 / PR #482
+# cache-walk vulnerability that removed self-heal from the old topology 4.
+# That vulnerability was a WALK across ~/.claude/plugins/cache/*/ai-sdlc/*/
+# that picked an arbitrary "highest semver" directory — a directory that
+# might have nothing to do with the one actually in use, so an attacker
+# with local write access to the user-writable cache could plant a crafted
+# install-runtime-deps.sh there and have it auto-exec on someone else's
+# session. This fallback is different in kind, not just degree: it ONLY
+# ever targets SELF_PLUGIN_DIR — the exact directory this script itself
+# lives in. No directory is walked, compared, or selected. By the time this
+# line runs we are already executing arbitrary bash FROM that directory
+# (this script), so invoking install-runtime-deps.sh next to it grants no
+# privilege an attacker didn't already have by planting a malicious
+# resolve-pipeline-cli.sh in the first place.
+if [ -n "$SELF_PLUGIN_DIR" ]; then
+  CANDIDATE="$SELF_PLUGIN_DIR/$PIPELINE_CLI_REL"
+  if _deps_complete "$SELF_PLUGIN_DIR"; then
+    printf '%s' "$CANDIDATE"
+    exit 0
+  fi
+
+  # Skip the retry when an earlier topology already self-healed against this
+  # exact directory: resolve-pipeline-cli.sh always lives at
+  # <CLAUDE_PLUGIN_DIR>/scripts/, so when that var is set SELF_PLUGIN_DIR is
+  # the same path topology 1 already tried. Re-running would double the
+  # up-to-120s npm timeout before the final error is printed.
+  SELF_HEAL_SCRIPT="$SELF_PLUGIN_DIR/scripts/install-runtime-deps.sh"
+  if [ "$SELF_PLUGIN_DIR" = "${CLAUDE_PLUGIN_DIR:-}" ] || [ "$SELF_PLUGIN_DIR" = "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    SELF_HEAL_SCRIPT=""
+    echo "resolve-pipeline-cli.sh: self-location fallback resolves to a directory already attempted above — not retrying self-heal." >&2
+  fi
+  if [ -n "$SELF_HEAL_SCRIPT" ] && [ -f "$SELF_HEAL_SCRIPT" ]; then
+    MISSING="pipeline-cli"
+    _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
+    echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $SELF_PLUGIN_DIR (self-location fallback — neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT is set) — attempting self-heal..." >&2
+    if bash "$SELF_HEAL_SCRIPT" "$SELF_PLUGIN_DIR" >&2; then
+      if _deps_complete "$SELF_PLUGIN_DIR"; then
+        echo "resolve-pipeline-cli.sh: self-heal (self-location) succeeded" >&2
+        printf '%s' "$CANDIDATE"
+        exit 0
+      fi
+    fi
+    echo "resolve-pipeline-cli.sh: self-heal (self-location) did not produce a complete install — continuing fallback chain" >&2
+  fi
+fi
+
 # ── Nothing found (all topologies exhausted) ────────────────────────────────
 #
 # AISDLC-441: surface ROOT CAUSE when we can detect it instead of just
@@ -170,7 +244,10 @@ fi
 # When the self-heal script ran above but didn't produce the deps, that's
 # usually (b) or (c). Run a diagnostic pass to tell the operator which.
 ROOT_CAUSE=""
-DIAG_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-}}"
+# AISDLC-557: fall back to SELF_PLUGIN_DIR for diagnostics too, so the
+# self-location fallback case (neither env var set) still gets a named root
+# cause instead of the generic topology list.
+DIAG_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$SELF_PLUGIN_DIR}}"
 if [ -n "$DIAG_DIR" ] && [ -d "$DIAG_DIR" ]; then
   if [ ! -f "$DIAG_DIR/plugin.json" ]; then
     ROOT_CAUSE="Root cause: $DIAG_DIR/plugin.json is missing — \$CLAUDE_PLUGIN_DIR / \$CLAUDE_PLUGIN_ROOT does not point at a valid plugin install."
@@ -216,6 +293,7 @@ Tried all install topologies:
   2. $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin (plugin root)
   3. ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/@ai-sdlc/pipeline-cli/bin (cache probe, read-only)
   4. $(pwd)/pipeline-cli/bin  (dogfood monorepo)
+  5. <dir this script lives in>/node_modules/@ai-sdlc/pipeline-cli/bin (self-location, self-heal attempted — AISDLC-557)
 
 Fix options (choose one):
   A. Re-install the plugin via your marketplace:

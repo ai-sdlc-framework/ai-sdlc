@@ -340,3 +340,147 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-245.4 path resolution', () 
     );
   });
 });
+
+describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates', () => {
+  it('AC#4: resolves PIPELINE_CLI_BIN via the shared resolve-pipeline-cli.sh (gets self-heal + a named error) instead of an unchecked inline guess', () => {
+    assert.ok(
+      cmdBody.includes('resolve-pipeline-cli.sh'),
+      'Path resolution must delegate to resolve-pipeline-cli.sh so it inherits self-heal (AISDLC-557 AC#3) rather than duplicating an inline resolution that never validates the guessed path',
+    );
+  });
+
+  it('AC#4: fails with a named, actionable error and a non-zero exit when PIPELINE_CLI_BIN cannot be resolved', () => {
+    const pathResolutionSection = cmdBody.split('## Path resolution')[1]?.split('\n## ')[0] ?? '';
+    assert.ok(
+      pathResolutionSection.includes('exit 1'),
+      'Path resolution must exit 1 (not silently continue) when resolve-pipeline-cli.sh fails',
+    );
+    assert.match(
+      pathResolutionSection,
+      /ERROR:.*cannot resolve @ai-sdlc\/pipeline-cli/,
+      'must print a named, actionable error naming the unresolved package — not an opaque failure',
+    );
+    assert.match(
+      pathResolutionSection,
+      /UNREACHABLE/,
+      'error must name WHICH gates become unreachable (cli-deps / cli-dispatch), not just "something failed"',
+    );
+  });
+
+  it('AC#5: the frontier dependency-readiness gate distinguishes "gate failed to run" from "frontier legitimately empty"', () => {
+    assert.ok(
+      !cmdBody.includes(
+        `cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>/dev/null || echo '{"frontier":[]}'`,
+      ),
+      'must NOT silently swallow cli-deps frontier failures into an indistinguishable empty-frontier fallback (pre-AISDLC-557 bug)',
+    );
+    assert.match(
+      cmdBody,
+      /dependency-readiness gate \(cli-deps frontier\) FAILED TO RUN/,
+      'must print a loud, named diagnostic when the frontier gate itself could not run',
+    );
+    assert.match(
+      cmdBody,
+      /DISPATCH ABORTED/,
+      'the loud diagnostic must explicitly distinguish a skipped gate from a passed one (AC#5 core requirement)',
+    );
+  });
+
+  // Round-2 review: a stderr line alone does NOT satisfy AC#5. Logging loudly
+  // and then continuing with an empty frontier gave the SAME control flow,
+  // terminal message and exit code as a legitimately empty frontier, so an
+  // unattended tick could not tell a crashed gate from "no work" — a crashing
+  // cli-deps would stall the pipeline while looking green. The gate failing
+  // must change what the tick DOES, not only what it prints.
+  // Round-3 review: the backoff was PROSE ONLY — Step 6 scheduled a flat 30s
+  // wakeup and never read any failure signal, and each Step is a separate Bash
+  // call so Step 5's variable cannot reach it. A persistently broken cli-deps
+  // would re-tick every 30s forever. Assert the mechanism, not the promise.
+  it('AC#5: the backoff is mechanical — Step 5 persists a count, Step 6 reads it', () => {
+    assert.match(
+      cmdBody,
+      /gate-failure-count/,
+      'gate failure must persist across Steps, since each Step is a separate Bash call',
+    );
+    assert.match(
+      cmdBody,
+      /WAKE_SECONDS=\$\(\(30 \* \(1 << GATE_FAILS\)\)\)/,
+      'Step 6 must compute an escalating interval from the persisted count',
+    );
+    assert.match(cmdBody, /WAKE_SECONDS=1800/, 'backoff must be capped');
+    assert.match(
+      cmdBody,
+      /rm -f "\$\{AI_SDLC_DISPATCH_BOARD_DIR:-\$\(pwd\)\/\.ai-sdlc\/dispatch\}\/gate-failure-count"/,
+      'a gate that runs again must clear the backoff state, or it never recovers',
+    );
+    assert.match(
+      cmdBody,
+      /AI_SDLC_DISPATCH_BOARD_DIR/,
+      'board state must honour the documented board-dir override, not a hardcoded path',
+    );
+  });
+
+  // Round-4 review: capping only the DERIVED value is not enough. bash masks
+  // the shift count mod 64 (verified: 1<<64 === 1, 1<<70 === 64), so an
+  // uncapped counter wraps after ~29h of continuous failure and the backoff
+  // collapses back into the 30s hot loop it exists to prevent — inside this
+  // repo's own 24-48h drain envelope. Two reviewers found this independently.
+  it('AC#5: the failure COUNTER is capped, not just the derived interval', () => {
+    // Round-5 review: the clamp must be a GLOB, not a numeric test. A ~19+
+    // digit value overflows test's integer parsing, test errors "integer
+    // expected", and `&&` cannot distinguish that from a false condition — so
+    // `[ -gt 6 ] && X=6` silently never fires. Reproduced: WAKE_SECONDS=0.
+    assert.match(
+      cmdBody,
+      /case "\$GATE_FAILS" in \[0-6\]\) ;; \*\) GATE_FAILS=6 ;; esac/,
+      'clamp must be a glob match — a numeric test is bypassable by an oversized value',
+    );
+    assert.ok(
+      !/\[ "\$GATE_FAILS" -gt 6 \]/.test(cmdBody),
+      'the bypassable numeric clamp must be gone, not merely supplemented',
+    );
+    const clamps = cmdBody.match(/case "\$GATE_FAILS" in \[0-6\]\)/g) ?? [];
+    assert.ok(
+      clamps.length >= 2,
+      `clamp must guard both write and read sides, found ${clamps.length}`,
+    );
+  });
+
+  // The test reviewer showed these two mutations slipped past string matching:
+  // a doubled increment, and an inverted cap comparison that turns the cap
+  // into a floor. Assert the operators explicitly.
+  it('AC#5: the increment is +1 and the interval cap is an upper bound', () => {
+    assert.match(
+      cmdBody,
+      /GATE_FAILS=\$\(\(GATE_FAILS \+ 1\)\)/,
+      'consecutive-failure count must step by exactly 1',
+    );
+    assert.match(
+      cmdBody,
+      /\[ "\$WAKE_SECONDS" -gt 1800 \] && WAKE_SECONDS=1800/,
+      'the cap must be an upper bound (-gt); inverting it turns the cap into a floor',
+    );
+  });
+
+  it('AC#5: a failed gate takes a functionally distinct path, not just a louder one', () => {
+    assert.ok(
+      !cmdBody.includes(`FRONTIER_JSON='{"frontier":[]}'`),
+      'must NOT recover by substituting an empty frontier — that is indistinguishable from "nothing ready" to any automated consumer',
+    );
+    assert.match(
+      cmdBody,
+      /FRONTIER_GATE_FAILED/,
+      'gate failure must be captured in state the control flow can branch on',
+    );
+    assert.match(
+      cmdBody,
+      /exit 3/,
+      'a failed gate must abort with a distinct non-zero status, so exit code alone separates it from the idle path',
+    );
+    assert.match(
+      cmdBody,
+      /STILL run Step 6\.5/,
+      'must keep the loop alive: skip dispatch, still reconcile in-flight work, still schedule a backoff wakeup — a gate failure must not strand dispatched work or silently kill the loop',
+    );
+  });
+});

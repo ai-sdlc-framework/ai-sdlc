@@ -142,8 +142,14 @@ fi
 
   4. Plugin cache probe (env unset): Walk ~/.claude/plugins/cache/<marketplace>/ai-sdlc/
      <version>/ to find the newest installed version that has pipeline-cli bundled.
+     Read-only — never self-heals (PR #482 security fix).
 
   5. Dogfood monorepo (all env vars unset): $(pwd)/pipeline-cli/bin.
+
+  6. Self-location fallback (AISDLC-557, last resort, all env vars unset): derive the
+     plugin dir from resolve-pipeline-cli.sh's own on-disk location and self-heal
+     against it. Reachable in the exact case topologies 1-3 never attempt self-heal:
+     neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT made it through.
 
   Resolution is delegated to scripts/resolve-pipeline-cli.sh which handles self-heal
   and all fallback steps. The script prints the resolved path to stdout; exit 1 on

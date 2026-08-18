@@ -19,7 +19,17 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync, realpathSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  mkdtempSync,
+  realpathSync,
+  copyFileSync,
+  chmodSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync, spawnSync } from 'node:child_process';
@@ -56,17 +66,46 @@ function createFakeMcpBundle(pluginDir) {
 }
 
 /**
- * Run resolve-pipeline-cli.sh with custom env and optional cwd.
- * Returns { stdout, stderr, exitCode }.
+ * AISDLC-557: copies resolve-pipeline-cli.sh into "<cwd>/scripts/" and
+ * returns the copy's path. The new self-location self-heal fallback
+ * (topology 6) derives its target directory from `${BASH_SOURCE[0]}` — the
+ * on-disk path of the script actually executing. Every test below must run
+ * a COPY inside the test's isolated tmpDir rather than the real path in
+ * this repo's checkout; otherwise any test that leaves both
+ * CLAUDE_PLUGIN_DIR and CLAUDE_PLUGIN_ROOT unset would have the fallback
+ * resolve to the real ai-sdlc-plugin/ directory and attempt a REAL
+ * `install-runtime-deps.sh` (network `npm install`) as a side effect of
+ * running the unit test — breaking hermeticity.
  */
-function runScript(env = {}, cwd = tmpdir()) {
-  const result = spawnSync('bash', [SCRIPT], {
+function installScriptCopy(cwd) {
+  const scriptsDir = join(cwd, 'scripts');
+  mkdirSync(scriptsDir, { recursive: true });
+  const copy = join(scriptsDir, 'resolve-pipeline-cli.sh');
+  copyFileSync(SCRIPT, copy);
+  chmodSync(copy, 0o755);
+  return copy;
+}
+
+/**
+ * Run resolve-pipeline-cli.sh (a hermetic per-test copy — see
+ * installScriptCopy) with custom env and optional cwd.
+ * Returns { stdout, stderr, exitCode }.
+ *
+ * When no `cwd` is given, mkdtemp a fresh isolated dir rather than using
+ * the bare OS tmpdir() root directly — AISDLC-557's installScriptCopy()
+ * writes a "scripts/" subdirectory into `cwd`, and sharing the bare tmpdir()
+ * root across tests would risk collisions between parallel test runs.
+ */
+function runScript(env = {}, cwd) {
+  const resolvedCwd = cwd ?? mkdtempSync(join(tmpdir(), 'aisdlc-272-runScript-'));
+  const scriptCopy = installScriptCopy(resolvedCwd);
+  const result = spawnSync('bash', [scriptCopy], {
     env: {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
       ...env,
     },
-    cwd,
+    cwd: resolvedCwd,
     encoding: 'utf-8',
     timeout: 15000,
   });
@@ -313,5 +352,196 @@ describe('Plugin cache probe — topology 4 (read-only)', () => {
       false,
       'planted install-runtime-deps.sh MUST NOT execute — would be RCE via user-writable cache',
     );
+  });
+});
+
+describe('Topology 6: Self-location fallback (AISDLC-557, last resort)', () => {
+  /**
+   * Plants a "<pluginDir>/scripts/resolve-pipeline-cli.sh" (a copy of the
+   * real script) + "<pluginDir>/plugin.json" + an optional
+   * "<pluginDir>/scripts/install-runtime-deps.sh" self-heal stub, then
+   * returns the copy's path for direct invocation.
+   */
+  function setupSelfLocationPluginDir(pluginDir, { installScriptBody } = {}) {
+    mkdirSync(pluginDir, { recursive: true });
+    const scriptsDir = join(pluginDir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    const scriptCopy = join(scriptsDir, 'resolve-pipeline-cli.sh');
+    copyFileSync(SCRIPT, scriptCopy);
+    chmodSync(scriptCopy, 0o755);
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        runtimeDependencies: {
+          '@ai-sdlc/pipeline-cli': '^0.14.0',
+          '@ai-sdlc/plugin-mcp-server': '0.9.2',
+        },
+      }),
+    );
+    if (installScriptBody) {
+      const installScript = join(scriptsDir, 'install-runtime-deps.sh');
+      writeFileSync(installScript, installScriptBody);
+      chmodSync(installScript, 0o755);
+    }
+    return scriptCopy;
+  }
+
+  // Review round 2: topology 6 derives its plugin dir from the script's own
+  // location, which is exactly where topology 1 already looked when
+  // CLAUDE_PLUGIN_DIR is set. Without a guard it re-runs the same failing
+  // self-heal against the same directory, doubling the npm timeout before the
+  // final error appears.
+  it('does NOT re-run self-heal when the self-location duplicates an already-tried dir', () => {
+    const pluginDir = join(tmpDir, 'selflocation-dedup');
+    const countFile = join(tmpDir, 'selflocation-dedup-count');
+    const scriptCopy = setupSelfLocationPluginDir(pluginDir, {
+      installScriptBody: `#!/usr/bin/env bash
+echo x >> "${countFile}"
+exit 1
+`,
+    });
+    const fakeHome = join(tmpDir, 'selflocation-dedup-home');
+    mkdirSync(fakeHome, { recursive: true });
+    const fakeCwd = join(tmpDir, 'selflocation-dedup-cwd');
+    mkdirSync(fakeCwd, { recursive: true });
+
+    const result = spawnSync('bash', [scriptCopy], {
+      env: { PATH: process.env.PATH, HOME: fakeHome, CLAUDE_PLUGIN_DIR: pluginDir },
+      cwd: fakeCwd,
+      encoding: 'utf-8',
+    });
+
+    assert.notEqual(result.status, 0, 'still fails overall — nothing was installed');
+    const attempts = existsSync(countFile)
+      ? readFileSync(countFile, 'utf-8').trim().split('\n').filter(Boolean).length
+      : 0;
+    assert.equal(attempts, 1, `self-heal must run once, not once per topology (ran ${attempts}x)`);
+    assert.match(result.stderr, /not retrying self-heal/);
+  });
+
+  it('AC#3: attempts self-heal even when neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT is set, and resolves on success', () => {
+    const pluginDir = join(tmpDir, 'selflocation-success');
+    const scriptCopy = setupSelfLocationPluginDir(pluginDir, {
+      // Fake self-heal: stamps out the expected files instead of hitting npm
+      // (hermetic — follows the install-runtime-deps.test.mjs stub pattern).
+      installScriptBody: `#!/usr/bin/env bash
+set -euo pipefail
+PLUGIN_DIR="\${1:?PLUGIN_DIR required}"
+mkdir -p "$PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+printf '#!/usr/bin/env node\\n' > "$PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs"
+mkdir -p "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist"
+printf '#!/usr/bin/env node\\n' > "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js"
+exit 0
+`,
+    });
+    const fakeHome = join(tmpDir, 'selflocation-success-home');
+    mkdirSync(fakeHome, { recursive: true });
+    // Empty cwd so dogfood fallback (topology 5) also fails and we reach
+    // topology 6.
+    const fakeCwd = join(tmpDir, 'selflocation-success-cwd');
+    mkdirSync(fakeCwd, { recursive: true });
+
+    const result = spawnSync('bash', [scriptCopy], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: fakeHome,
+        CLAUDE_PLUGIN_DIR: '',
+        CLAUDE_PLUGIN_ROOT: '',
+      },
+      cwd: fakeCwd,
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+
+    assert.equal(
+      result.status,
+      0,
+      `must exit 0 via self-location self-heal; stderr:\n${result.stderr}`,
+    );
+    const expectedBin = join(pluginDir, PIPELINE_CLI_REL);
+    assert.equal(
+      normPath(result.stdout.trim()),
+      normPath(expectedBin),
+      'must return the self-location bin path',
+    );
+    assert.match(
+      result.stderr,
+      /self-location fallback/,
+      'must log that the self-location fallback (not topologies 1-5) fired',
+    );
+  });
+
+  it('falls through to the final actionable error when self-location self-heal does not produce a complete install', () => {
+    const pluginDir = join(tmpDir, 'selflocation-fail');
+    const scriptCopy = setupSelfLocationPluginDir(pluginDir, {
+      // Simulates a real-world failure mode (network unreachable, registry
+      // misconfigured, etc.) — the install script itself fails.
+      installScriptBody: `#!/usr/bin/env bash\nexit 1\n`,
+    });
+    const fakeHome = join(tmpDir, 'selflocation-fail-home');
+    mkdirSync(fakeHome, { recursive: true });
+    const fakeCwd = join(tmpDir, 'selflocation-fail-cwd');
+    mkdirSync(fakeCwd, { recursive: true });
+
+    const result = spawnSync('bash', [scriptCopy], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: fakeHome,
+        CLAUDE_PLUGIN_DIR: '',
+        CLAUDE_PLUGIN_ROOT: '',
+      },
+      cwd: fakeCwd,
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+
+    assert.equal(
+      result.status,
+      1,
+      'must exit 1 when self-heal fails to produce a complete install',
+    );
+    assert.match(
+      result.stderr,
+      /self-heal \(self-location\) did not produce a complete install/,
+      'must log that self-heal was attempted and failed, not silently skip it',
+    );
+    assert.match(
+      result.stderr,
+      /@ai-sdlc\/pipeline-cli/,
+      'final error must name the missing package',
+    );
+  });
+
+  it('REGRESSION (pre-AISDLC-557 behavior): confirms every other topology genuinely exhausts before self-location fires', () => {
+    // This mirrors "Topology 5: All paths broken" but through the dedicated
+    // setupSelfLocationPluginDir harness, proving the ordering: topology 6
+    // only ever fires as the LAST resort after 1-5 are all tried and fail.
+    const pluginDir = join(tmpDir, 'selflocation-no-heal-script');
+    // No installScriptBody — self-heal script is absent, so topology 6 must
+    // gracefully no-op (file existence check fails) rather than erroring.
+    const scriptCopy = setupSelfLocationPluginDir(pluginDir, {});
+    const fakeHome = join(tmpDir, 'selflocation-no-heal-home');
+    mkdirSync(fakeHome, { recursive: true });
+    const fakeCwd = join(tmpDir, 'selflocation-no-heal-cwd');
+    mkdirSync(fakeCwd, { recursive: true });
+
+    const result = spawnSync('bash', [scriptCopy], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: fakeHome,
+        CLAUDE_PLUGIN_DIR: '',
+        CLAUDE_PLUGIN_ROOT: '',
+      },
+      cwd: fakeCwd,
+      encoding: 'utf-8',
+      timeout: 15000,
+    });
+
+    assert.equal(
+      result.status,
+      1,
+      'must exit 1 when no install-runtime-deps.sh is present to self-heal with',
+    );
+    assert.match(result.stderr, /@ai-sdlc\/pipeline-cli/, 'must name the missing package');
   });
 });

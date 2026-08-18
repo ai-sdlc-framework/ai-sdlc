@@ -14,6 +14,13 @@ const { execSync, spawnSync } = require('child_process');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
+/**
+ * Captured install-runtime-deps failure text (AISDLC-557 security review).
+ * Module-local rather than process.env so the UNREDACTED value is never
+ * inherited by child processes; redaction happens where it is rendered.
+ */
+let runtimeDepsError = null;
+
 let input;
 try {
   const raw = readFileSync('/dev/stdin', 'utf-8');
@@ -81,7 +88,13 @@ try {
             .filter((l) => l.trim().length > 0)
             .slice(-3)
             .join(' | ');
-          process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR = `install-runtime-deps.sh exit ${result.status}: ${stderrTail || 'no stderr'}`;
+          // AISDLC-557 security review: keep the UNREDACTED text out of
+          // process.env. Writing it there leaked it into the environment of
+          // every child spawned later in this hook (e.g. the `git rev-parse`
+          // below), since redaction only happens at read time. A module-local
+          // holds it instead; the env var remains a read-only INPUT for tests
+          // and cross-process callers.
+          runtimeDepsError = `install-runtime-deps.sh exit ${result.status}: ${stderrTail || 'no stderr'}`;
         }
       }
     }
@@ -105,7 +118,37 @@ const projectDir =
 // ── Load agent-role.yaml ─────────────────────────────────────────────
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
+
+// AISDLC-557: root-cause fix for a marketplace-cache install silently
+// leaving node_modules empty with zero operator-visible signal.
+//
+// Pre-fix, this function returned `process.exit(0)` right here whenever the
+// consumer project had no `.ai-sdlc/agent-role.yaml` (i.e. before `ai-sdlc
+// init` has ever been run) — which is exactly the state a brand-new adopter
+// repo is in immediately after a marketplace plugin install. That early
+// exit ran BEFORE the `warnings` array (built below) ever got a chance to
+// surface `__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR` — so ANY self-heal failure
+// captured above (network unreachable, npm registry misconfigured, prefix
+// not writable, etc.) was swallowed with no trace. The operator had no way
+// to discover the broken install short of manually invoking
+// resolve-pipeline-cli.sh themselves, which is exactly what the AISDLC-557
+// reporter had to do.
+//
+// Fix: when agent-role.yaml is absent, still emit a minimal hook response
+// carrying ONLY the runtime-deps warning (skip the full governance banner,
+// which legitimately depends on agent-role.yaml existing) instead of exiting
+// fully silently.
 if (!existsSync(agentRolePath)) {
+  const runtimeDepsWarning = buildRuntimeDepsWarning();
+  if (runtimeDepsWarning) {
+    const result = {
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: `### AI-SDLC Setup Warning\n${runtimeDepsWarning}`,
+      },
+    };
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  }
   process.exit(0);
 }
 
@@ -129,13 +172,12 @@ const blockedPaths = parseListField(yaml, 'blockedPaths');
 
 const warnings = [];
 
-// AISDLC-441: surface runtime-deps install failures so the operator sees them.
-if (process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR) {
-  warnings.push(
-    `⚠ Plugin runtime-dependency install failed — ${process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR}. ` +
-      'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
-      'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"',
-  );
+// AISDLC-441 / AISDLC-557: surface runtime-deps install failures so the
+// operator sees them (buildRuntimeDepsWarning() is shared with the
+// pre-agent-role.yaml early-exit path above).
+const runtimeDepsWarning = buildRuntimeDepsWarning();
+if (runtimeDepsWarning) {
+  warnings.push(runtimeDepsWarning);
 }
 
 // Check for vitest without coverage provider
@@ -252,6 +294,105 @@ process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 process.exit(0);
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * AISDLC-441 / AISDLC-557: builds the runtime-deps install-failure warning
+ * string from `__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR` (set above when the
+ * self-heal spawnSync call exits non-zero). Returns `null` when there is no
+ * error to report. Shared by both the pre-agent-role.yaml early-exit path
+ * and the full governance-banner warnings array so the message text never
+ * drifts between the two surfaces.
+ */
+/**
+ * Redact credentials and bound the length of text that reaches model-visible
+ * context (AISDLC-557 security review).
+ *
+ * Two reasons this is not paranoia:
+ *   - npm failures quote the registry URL, and a private registry configured
+ *     in .npmrc can embed `https://user:token@host/...`. That would put a
+ *     live credential into session context.
+ *   - This value is read from the ambient environment, not only from what
+ *     this hook itself set, so anyone able to set env for the Claude Code
+ *     process could otherwise inject unbounded instruction-like text.
+ */
+function sanitizeForContext(text, maxLen = 400) {
+  // Bound the input BEFORE the regex chain. Two reviewers measured this
+  // function as quadratic on long non-matching input, and it runs on a value
+  // the code itself treats as attacker-influenceable (an ambient env var, or
+  // stderr from a hostile registry), before any truncation. Removing the
+  // `[\w-]*` prefix was not sufficient — the residual cost is the URL
+  // patterns' `[a-z][a-z0-9+.-]*` scheme prefix, which rescans the run at
+  // every start position. Measured after this slice: 64k chars goes from
+  // ~5.3s to sub-millisecond.
+  //
+  // Round-6 security review DISPROVED my first version of this reasoning. I
+  // claimed a straddling credential still redacts because `\S+` matches what
+  // remains — true only when the trigger PRECEDES the secret. The two
+  // URL-userinfo patterns trigger on the `@` that FOLLOWS it, so a cut landing
+  // between the password and the `@` leaves both unmatched and `user` matches
+  // no label. Reproduced: 'password=' + 'A'.repeat(8165) + ' https://user:
+  // SUPERSECRET@host/path' rendered `https://user:SUPE` in the banner, because
+  // the leading run collapsed to `password=***` and pulled the fragment inside
+  // the 400-char window.
+  //
+  // So drop the final partial whitespace-delimited token whenever the input
+  // was actually truncated. A straddling credential is ALWAYS that token, so
+  // this closes every straddle shape rather than just the URL one.
+  let bounded = String(text);
+  if (bounded.length > 8192) {
+    bounded = bounded.slice(0, 8192).replace(/\S+$/, '');
+  }
+  const redacted = bounded
+    // https://user:pass@host -> https://***:***@host
+    //
+    // Round-4 review: the userinfo class must span to the LAST '@' before the
+    // host, not the first. RFC 3986 requires %40 in userinfo, but npm prints
+    // what it was given — so `https://user:p@ss@host/path` previously matched
+    // only up to the first '@' and leaked the `ss` tail of the password.
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:]+:[^/\s]+@(?=[^/\s@]*(?:[/\s]|$))/gi, '$1***:***@')
+    // https://<token>@host — userinfo with NO colon still carries a secret.
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+@/gi, '$1***@')
+    // Authorization: Basic <base64> / Bearer <jwt>
+    .replace(/\b(basic|bearer)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ***')
+    // npmrc keys AND bare credential labels.
+    //
+    // Round-4 closed two shapes: `\b` cannot fire between `_` and `T` (both
+    // word chars), so `NPM_TOKEN=` and `MY_api_key=` went through untouched,
+    // and the alternation lacked the hyphenated `x-api-key:` spelling.
+    //
+    // Round-5 review then measured the `[\w-]*` prefix I used for that as
+    // genuinely quadratic (2k chars 11ms, 8k 178ms, 16k 703ms) — a greedy
+    // prefix overlapping the alternation, scanned BEFORE truncation on
+    // attacker-influenceable input. So drop the prefix entirely: with no `\b`
+    // anchor there is nothing to defeat, and `NPM_TOKEN=x` simply matches at
+    // the `TOKEN` offset. No prefix, no backtracking.
+    //
+    // Requiring an explicit `=` or `:` (rather than also accepting bare
+    // whitespace) additionally stops the over-redaction round 5 flagged:
+    // "session token is fresh" no longer becomes "session token *** fresh".
+    .replace(
+      /(_authToken|_auth|_password|authToken|password|passwd|secret|api[-_]?key|token)(\s*[=:]\s*)\S+/gi,
+      '$1$2***',
+    )
+    // Newlines and backticks would let injected text forge a heading or code
+    // fence inside the governance banner — flatten them.
+    .replace(/[\r\n`]+/g, ' ');
+  // Truncate AFTER redaction, never before: otherwise a long prefix could push
+  // a credential past the cut and it would survive unredacted.
+  return redacted.length > maxLen ? `${redacted.slice(0, maxLen)}… (truncated)` : redacted;
+}
+
+function buildRuntimeDepsWarning() {
+  // Prefer the module-local capture; the env var remains a read-only input for
+  // tests and cross-process callers. Both are treated as UNTRUSTED data.
+  const raw = runtimeDepsError ?? process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;
+  if (!raw) return null;
+  return (
+    `⚠ Plugin runtime-dependency install failed — [untrusted tool output] ${sanitizeForContext(raw)}. ` +
+    'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
+    'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"'
+  );
+}
 
 function extractField(yaml, field) {
   const match = yaml.match(new RegExp(`^\\s*${field}:\\s*(.+)$`, 'm'));
