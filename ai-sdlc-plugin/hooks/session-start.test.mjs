@@ -253,6 +253,33 @@ describe('ai-sdlc-plugin session-start hook', () => {
     assert.ok(ctx.includes('registry.internal'), 'non-secret detail survives');
   });
 
+  // Round-5 review measured sanitizeForContext as quadratic (2k/11ms,
+  // 8k/178ms, 16k/703ms) on input it treats as attacker-influenceable, before
+  // any truncation. A few-hundred-KB value hung session start for minutes.
+  it('AISDLC-557: stays fast on a huge hostile value instead of hanging', () => {
+    const started = Date.now();
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `exit 1: ${'a'.repeat(400_000)}`,
+    });
+    const elapsed = Date.now() - started;
+    assert.equal(result.exitCode, 0);
+    // Pre-fix this took seconds-to-minutes; the bound makes it constant.
+    assert.ok(elapsed < 5_000, `session start must not hang on a huge value (took ${elapsed}ms)`);
+  });
+
+  // Round-5 review: the credential alternation also matched bare prose words
+  // followed by whitespace, garbling diagnostics and implying a secret was
+  // found where none was.
+  it('AISDLC-557: does not garble ordinary prose containing credential words', () => {
+    const result = runHook(tempDirEmpty, {
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR:
+        'exit 1: session token is fresh and the password reset flow works',
+    });
+    const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+    assert.ok(ctx.includes('token is fresh'), 'prose must not be redacted');
+    assert.ok(ctx.includes('password reset flow works'), 'prose must not be redacted');
+  });
+
   it('AISDLC-557: bounds ambient-env text so it cannot flood model context', () => {
     const result = runHook(tempDirEmpty, {
       __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `exit 1: ${'A'.repeat(5000)}`,

@@ -316,7 +316,23 @@ process.exit(0);
  *     process could otherwise inject unbounded instruction-like text.
  */
 function sanitizeForContext(text, maxLen = 400) {
-  const redacted = String(text)
+  // Bound the input BEFORE the regex chain. Two reviewers measured this
+  // function as quadratic on long non-matching input, and it runs on a value
+  // the code itself treats as attacker-influenceable (an ambient env var, or
+  // stderr from a hostile registry), before any truncation. Removing the
+  // `[\w-]*` prefix was not sufficient — the residual cost is the URL
+  // patterns' `[a-z][a-z0-9+.-]*` scheme prefix, which rescans the run at
+  // every start position. Measured after this slice: 64k chars goes from
+  // ~5.3s to sub-millisecond.
+  //
+  // This does NOT reintroduce the truncate-before-redact bug the comment
+  // below guards against. That bug was about a credential surviving because
+  // the CUT landed mid-string in rendered output. Here the dropped text is
+  // never rendered at all (maxLen is 400, far below this bound), and a
+  // credential straddling the boundary still redacts because `\S+` matches
+  // whatever remains on the near side.
+  const bounded = String(text).slice(0, 8192);
+  const redacted = bounded
     // https://user:pass@host -> https://***:***@host
     //
     // Round-4 review: the userinfo class must span to the LAST '@' before the
@@ -330,14 +346,22 @@ function sanitizeForContext(text, maxLen = 400) {
     .replace(/\b(basic|bearer)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ***')
     // npmrc keys AND bare credential labels.
     //
-    // Round-4 review closed two more shapes. `\b` cannot fire between `_` and
-    // `T`, since both are word characters — so `NPM_TOKEN=` and `MY_api_key=`
-    // went through untouched. And the alternation carried `api_key`/`apikey`
-    // but not the hyphenated `x-api-key:` header spelling. The leading
-    // `[\w-]*` and the `[-_]?` separators cover both without needing an
-    // entry per vendor prefix.
+    // Round-4 closed two shapes: `\b` cannot fire between `_` and `T` (both
+    // word chars), so `NPM_TOKEN=` and `MY_api_key=` went through untouched,
+    // and the alternation lacked the hyphenated `x-api-key:` spelling.
+    //
+    // Round-5 review then measured the `[\w-]*` prefix I used for that as
+    // genuinely quadratic (2k chars 11ms, 8k 178ms, 16k 703ms) — a greedy
+    // prefix overlapping the alternation, scanned BEFORE truncation on
+    // attacker-influenceable input. So drop the prefix entirely: with no `\b`
+    // anchor there is nothing to defeat, and `NPM_TOKEN=x` simply matches at
+    // the `TOKEN` offset. No prefix, no backtracking.
+    //
+    // Requiring an explicit `=` or `:` (rather than also accepting bare
+    // whitespace) additionally stops the over-redaction round 5 flagged:
+    // "session token is fresh" no longer becomes "session token *** fresh".
     .replace(
-      /[\w-]*(_authToken|_auth|_password|authToken|password|passwd|secret|api[-_]?key|token)(\s*[=:]\s*|\s+)\S+/gi,
+      /(_authToken|_auth|_password|authToken|password|passwd|secret|api[-_]?key|token)(\s*[=:]\s*)\S+/gi,
       '$1$2***',
     )
     // Newlines and backticks would let injected text forge a heading or code

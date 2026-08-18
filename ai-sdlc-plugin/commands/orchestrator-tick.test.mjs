@@ -426,14 +426,20 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
   // collapses back into the 30s hot loop it exists to prevent — inside this
   // repo's own 24-48h drain envelope. Two reviewers found this independently.
   it('AC#5: the failure COUNTER is capped, not just the derived interval', () => {
+    // Round-5 review: the clamp must be a GLOB, not a numeric test. A ~19+
+    // digit value overflows test's integer parsing, test errors "integer
+    // expected", and `&&` cannot distinguish that from a false condition — so
+    // `[ -gt 6 ] && X=6` silently never fires. Reproduced: WAKE_SECONDS=0.
     assert.match(
       cmdBody,
-      /\[ "\$GATE_FAILS" -gt 6 \] && GATE_FAILS=6/,
-      'GATE_FAILS itself must be clamped before it can wrap the shift',
+      /case "\$GATE_FAILS" in \[0-6\]\) ;; \*\) GATE_FAILS=6 ;; esac/,
+      'clamp must be a glob match — a numeric test is bypassable by an oversized value',
     );
-    // The clamp must exist on BOTH the write side and the read side, so a
-    // hand-edited or out-of-band file cannot wrap it either.
-    const clamps = cmdBody.match(/-gt 6 \] && GATE_FAILS=6/g) ?? [];
+    assert.ok(
+      !/\[ "\$GATE_FAILS" -gt 6 \]/.test(cmdBody),
+      'the bypassable numeric clamp must be gone, not merely supplemented',
+    );
+    const clamps = cmdBody.match(/case "\$GATE_FAILS" in \[0-6\]\)/g) ?? [];
     assert.ok(
       clamps.length >= 2,
       `clamp must guard both write and read sides, found ${clamps.length}`,

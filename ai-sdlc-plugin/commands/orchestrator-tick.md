@@ -816,7 +816,13 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
     # failure the shift WRAPS, the 1800s cap stops firing, and the backoff
     # collapses back to the 30s hot loop it exists to prevent. That is inside
     # this repo's own 24-48h autonomous-drain envelope. Cap the COUNTER.
-    [ "$GATE_FAILS" -gt 6 ] && GATE_FAILS=6
+    #
+    # Round-5 review: the clamp MUST be a glob, not a numeric test. With
+    # `[ "$X" -gt 6 ] && X=6`, a ~19+ digit value overflows test's integer
+    # parsing, test errors "integer expected", and `&&` cannot tell that error
+    # from a false condition — so the clamp silently never fires. Reproduced:
+    # a 26-digit file yielded WAKE_SECONDS=0, the exact collapse this guards.
+    case "$GATE_FAILS" in [0-6]) ;; *) GATE_FAILS=6 ;; esac
     printf '%s\n' "$GATE_FAILS" > "$GATE_BOARD_DIR/gate-failure-count"
     echo "[orchestrator-tick] DISPATCH ABORTED (exit 3) — the dependency gate could not run." >&2
     echo "[orchestrator-tick]   This is NOT 'no ready tasks'. Do NOT dispatch anything this tick." >&2
@@ -1179,8 +1185,9 @@ if [ "$ONCE_FLAG" != "--once" ]; then
   GATE_FAILS=$(cat "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count" 2>/dev/null || echo 0)
   case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
   # Defence in depth: Step 5 caps this on write, but an out-of-band or
-  # hand-edited file must not be able to wrap the shift either.
-  [ "$GATE_FAILS" -gt 6 ] && GATE_FAILS=6
+  # hand-edited file must not be able to wrap the shift either. Glob, not a
+  # numeric test — see the round-5 note in Step 5.
+  case "$GATE_FAILS" in [0-6]) ;; *) GATE_FAILS=6 ;; esac
   if [ "$GATE_FAILS" -gt 0 ]; then
     WAKE_SECONDS=$((30 * (1 << GATE_FAILS)))
     [ "$WAKE_SECONDS" -gt 1800 ] && WAKE_SECONDS=1800
