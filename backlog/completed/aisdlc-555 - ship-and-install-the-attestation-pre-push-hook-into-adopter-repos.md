@@ -151,6 +151,14 @@ on a fully-configured adopter repo).
   **currently have no owning task** — an earlier note cited AISDLC-560, but
   that task covers attestation enforcement/doctor and nothing under
   `backlog/tasks/` mentions `dispatch-config.yaml`. AC#7 left unchecked.
+- The plugin-shipped copy's hermetic suite
+  (`ai-sdlc-plugin/scripts/check-attestation-sign.test.mjs`, 10 tests) is now
+  wired into the root `test` chain via `test:plugin-attestation-sign-gate`,
+  chained immediately after `test:attestation-sign-gate`. It was previously
+  reachable only by invoking `node --test` by hand, so its two regression
+  tests for this PR's fixes — the ungated signer-replacement env var and the
+  unquoted word-split invocation — ran on nobody's `pnpm test`/CI path and
+  could have silently regressed.
 
 **Known-open, deliberately not fixed here** (recorded so they survive the
 merge rather than living only in PR review threads).
