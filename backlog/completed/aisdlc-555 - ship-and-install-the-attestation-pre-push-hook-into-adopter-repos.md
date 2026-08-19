@@ -110,13 +110,23 @@ on a fully-configured adopter repo).
 - `ai-sdlc-plugin/scripts/check-attestation-sign.sh` — a plugin-shipped copy
   that resolves `sign-attestation.mjs` relative to its OWN on-disk directory
   (not `$WT_ROOT/ai-sdlc-plugin/...`), so it works from any install topology.
-  The monorepo's own `scripts/check-attestation-sign.sh` + `.husky/pre-push`
-  are unmodified — the dogfood path keeps working exactly as before.
-- `HUSKY_PREPUSH_SIGN_SNIPPET` (`init-templates.ts`) now resolves the hook
-  script via repo-local copy → `$CLAUDE_PLUGIN_ROOT`/`$CLAUDE_PLUGIN_DIR` →
-  a read-only plugin-cache probe, mirroring `resolve-pipeline-cli.sh`'s
-  topology chain (including its read-only-cache-probe security posture —
-  never self-heals from a user-writable cache dir).
+  The monorepo's own `.husky/pre-push` is unmodified, so the dogfood path keeps
+  working as before. `scripts/check-attestation-sign.sh` received exactly ONE
+  change from this task — the `AI_SDLC_ALLOW_SIGNER_OVERRIDE` gate described
+  below — applied to both copies in lockstep so they do not diverge. (An
+  earlier revision of this note said that file was "unmodified"; that was true
+  when written and stopped being true in round 3.)
+- `HUSKY_PREPUSH_SIGN_SNIPPET` (`init-templates.ts`) resolves the hook script
+  from the PLUGIN INSTALL ONLY: `$CLAUDE_PLUGIN_ROOT`/`$CLAUDE_PLUGIN_DIR` →
+  a read-only plugin-cache probe (never self-heals from a user-writable cache
+  dir). **There is deliberately no repo-local tier.** An earlier revision of
+  this note claimed one; that tier existed in the first cut and was REMOVED in
+  round 1 because it put repo-tracked content on the push-time execution path
+  with the operator's Ed25519 signing key in scope — a contributor could land
+  `scripts/check-attestation-sign.sh` and have it run as the maintainer on the
+  next push. Pinned by `prepush-sign-snippet.test.ts`'s "does NOT execute a
+  signer from the working tree". Documentation that still advertises a removed
+  security control is how it gets restored by a well-meaning future change.
 - `resolveHookTarget()` (`init-features.ts`, AC#4): decides the hook target by
   asking git, not by guessing. `git config --get core.hooksPath` decides
   WHETHER a hooks path is configured; `git rev-parse --git-path hooks`
@@ -150,8 +160,11 @@ merge rather than living only in PR review threads):
   itself) as a symlink to e.g. `~/.bashrc` would have the sign block appended
   there and the exec bit set. Appended content is a fixed snippet, not
   attacker-controlled, and it requires running `init` inside a hostile repo.
-  Pre-existing behaviour, not introduced by this task. **It also weakens the
-  new machine-wide refusal**: `outsideProject` is computed with
+  The symlink-following WRITE/APPEND is pre-existing (`appendOnce`/`writeFile`
+  predate this task); the CHMOD half is not — `chmodExecutable` is new in
+  AISDLC-555, so setting the exec bit through an attacker-planted symlink is a
+  newly introduced action, even though it only ORs in `0o111`. **It also
+  weakens the new machine-wide refusal**: `outsideProject` is computed with
   `path.relative()`, which is purely lexical, so a symlink pointing out of the
   repo still resolves as *inside* it and the refusal never fires. The fix for
   both is one `realpathSync` containment check on the parent directory before

@@ -221,13 +221,15 @@ jobs:
  * failed forever, so `--with-attestation` produced a hook that looked
  * complete but never signed anything — the exact bug this task exists to
  * fix. `check-attestation-sign.sh` now also ships under
- * `ai-sdlc-plugin/scripts/` (AISDLC-555), so this snippet resolves it the
- * same way slash-command bodies resolve plugin-internal scripts: repo-local
- * copy first (back-compat / dogfood), then `$CLAUDE_PLUGIN_ROOT` /
- * `$CLAUDE_PLUGIN_DIR` (the zero-config path when `git push` runs inside a
- * Claude Code session), then a read-only plugin-cache probe (bare-terminal
- * `git push`, which never inherits those env vars) — same three-tier shape
- * as `resolve-pipeline-cli.sh`.
+ * `ai-sdlc-plugin/scripts/` (AISDLC-555), so this snippet resolves it from
+ * the PLUGIN INSTALL ONLY: `$CLAUDE_PLUGIN_ROOT` / `$CLAUDE_PLUGIN_DIR` (the
+ * zero-config path when `git push` runs inside a Claude Code session), then a
+ * read-only plugin-cache probe (bare-terminal `git push`, which never inherits
+ * those env vars).
+ *
+ * There is deliberately NO repo-local tier — see item 2 below. An earlier
+ * revision of this docblock described one, which contradicted the code and,
+ * worse, advertised a resolution order that was removed for security.
  *
  * Review round 1 (AISDLC-555) — TWO deliberate changes here, both correcting
  * the first version of this fix:

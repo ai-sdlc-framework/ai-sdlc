@@ -56,6 +56,11 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_TASK_COMPLETE_CMD;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
+  // Symmetry with the two check-attestation-sign suites (round-6 test review).
+  // Inert today — every call site here sets the sentinel explicitly — but a
+  // future negative test added to this file would otherwise inherit it from the
+  // ambient environment and silently not exercise the gate.
+  delete env.AI_SDLC_ALLOW_SIGNER_OVERRIDE;
   // attestation-sign needs schema version env clean.
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
