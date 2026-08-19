@@ -56,6 +56,11 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_TASK_COMPLETE_CMD;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
+  // Symmetry with the two check-attestation-sign suites (round-6 test review).
+  // Inert today — every call site here sets the sentinel explicitly — but a
+  // future negative test added to this file would otherwise inherit it from the
+  // ambient environment and silently not exercise the gate.
+  delete env.AI_SDLC_ALLOW_SIGNER_OVERRIDE;
   // attestation-sign needs schema version env clean.
   delete env.AI_SDLC_SCHEMA_VERSION;
   delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
@@ -344,6 +349,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     const r = runOrchestrator(root, {
       env: {
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         // Enable attestation-sign test mode (AISDLC-380 sub-attestation gate bypass).
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
@@ -373,6 +379,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       env: {
         AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -403,6 +410,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       env: {
         AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -441,6 +449,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     const sharedEnv = {
       AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
       AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_TEST_MODE: '1',
       AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
       AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -510,6 +519,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       cwd: root,
       env: cleanEnv({
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',

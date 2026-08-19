@@ -5,6 +5,23 @@
 # LLM's responsibility per the "anything mechanical → hook/workflow, never
 # LLM" pattern (2026-05-01 design discussion).
 #
+# AISDLC-555: this is the PLUGIN-SHIPPED copy of `scripts/check-attestation-sign.sh`.
+# It ships under `ai-sdlc-plugin/scripts/` so it reaches adopter repos (the
+# monorepo-root copy at `scripts/check-attestation-sign.sh` never left this
+# repo, so an adopter's pre-push hook had nothing to invoke even after
+# AISDLC-554 made the signer itself reachable). The one behavioural
+# difference from the monorepo copy: Step 5 resolves `sign-attestation.mjs`
+# relative to THIS SCRIPT's own on-disk location (see "SELF_SCRIPT_DIR"
+# below) instead of `<worktree>/ai-sdlc-plugin/scripts/sign-attestation.mjs`
+# — the latter only exists inside the ai-sdlc monorepo. Since this script
+# always ships side-by-side with sign-attestation.mjs (same `scripts/`
+# directory in every install topology: plugin cache, CLAUDE_PLUGIN_ROOT,
+# or this monorepo), self-location resolution works regardless of where
+# the plugin was installed and regardless of which env vars the invoking
+# shell happens to have (git hooks do not inherit CLAUDE_PLUGIN_ROOT /
+# CLAUDE_PLUGIN_DIR from a Claude Code session unless the `git push` itself
+# ran inside that session's Bash tool).
+#
 # Why this exists: `/ai-sdlc execute` Step 10 used to drive signing inline
 # from the slash command body, which (a) consumed model context for a purely
 # deterministic operation and (b) coupled signing to a successful main-session
@@ -27,7 +44,7 @@
 #   4. Idempotency: if `.ai-sdlc/attestations/<head-sha>.dsse.json` already
 #      exists at current HEAD, exit 0 (we already signed this commit).
 #   5. Invoke the signer (default:
-#      `node ai-sdlc-plugin/scripts/sign-attestation.mjs`; overridable via
+#      `node <this-script's-directory>/sign-attestation.mjs`; overridable via
 #      AI_SDLC_SIGN_ATTESTATION_CMD for tests).
 #   6. Stage + commit the new envelope as a chore commit (no --no-verify is
 #      needed: husky's pre-commit + commit-msg hooks pass on the chore body
@@ -40,8 +57,14 @@
 #      again to send it. The next push will skip step 5 entirely (idempotent
 #      check at step 4 sees the attestation already exists for HEAD).
 #
-# Activation: invoked from `.husky/pre-push` AFTER the coverage gate. Wiring
-# is in `.husky/pre-push` itself.
+# Activation: an adopter repo's `.husky/pre-push` (or `.git/hooks/pre-push`
+# for non-husky repos) resolves the path to THIS file across install
+# topologies and invokes it — see the `HUSKY_PREPUSH_SIGN_SNIPPET` template
+# in `orchestrator/src/cli/commands/init-templates.ts`, written by
+# `ai-sdlc init --with-attestation`. Inside this monorepo, the dogfood
+# `.husky/pre-push` continues to call the separate, unmodified
+# `scripts/check-attestation-sign.sh` copy directly (repo-relative path) —
+# unchanged by AISDLC-555 so the dogfood path keeps working exactly as before.
 #
 # Override:
 #   AI_SDLC_SKIP_ATTESTATION_SIGN=1 git push
@@ -315,6 +338,16 @@ fi
 # The default signer is the same script `/ai-sdlc execute` Step 10 used to
 # call directly. Tests inject a stub via AI_SDLC_SIGN_ATTESTATION_CMD so
 # they don't need the orchestrator built.
+#
+# AISDLC-555: resolve sign-attestation.mjs relative to THIS SCRIPT's own
+# on-disk location (not $WT_ROOT). The two files always ship side-by-side
+# in every install topology (plugin cache, CLAUDE_PLUGIN_ROOT checkout, or
+# this monorepo's ai-sdlc-plugin/scripts/), so self-location resolution
+# works everywhere, including bare `git push` invocations outside a Claude
+# Code session that never had CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DIR set.
+SELF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SIGN_ATTESTATION_MJS="$SELF_SCRIPT_DIR/sign-attestation.mjs"
+
 ITERATION_COUNT="${AI_SDLC_ITERATION_COUNT:-1}"
 HARNESS_NOTE="${AI_SDLC_HARNESS_NOTE:-}"
 
@@ -378,14 +411,16 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
     exit 2
   fi
 else
-  if ! node "$WT_ROOT/ai-sdlc-plugin/scripts/sign-attestation.mjs" \
+  if ! node "$SIGN_ATTESTATION_MJS" \
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
       --schema-version "$SCHEMA_VERSION" \
       ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
-    echo "[attestation-sign] ERROR: sign-attestation.mjs failed; aborting push" >&2
-    echo "[attestation-sign]        (run \`pnpm --filter @ai-sdlc/orchestrator build\` if dist is missing)" >&2
+    echo "[attestation-sign] ERROR: $SIGN_ATTESTATION_MJS failed; aborting push" >&2
+    echo "[attestation-sign]        (inside the monorepo: run \`pnpm --filter @ai-sdlc/orchestrator build\`;" >&2
+    echo "[attestation-sign]        in an adopter repo: repair the plugin install via" >&2
+    echo "[attestation-sign]        \`bash \"\$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh\"\`)" >&2
     exit 2
   fi
 fi
