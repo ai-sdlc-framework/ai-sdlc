@@ -175,6 +175,34 @@ describe('ai-sdlc-plugin/scripts/check-attestation-sign.sh (AISDLC-555)', () => 
     assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore);
   });
 
+  // AISDLC-555 round-7: the override used to be an UNQUOTED expansion, so the
+  // shell applied pathname expansion to it. A glob in the command string would
+  // silently resolve to whatever happened to be on disk — i.e. what actually
+  // ran was chosen by the filesystem, not by the caller. `read -r -a` splits on
+  // IFS only and never globs.
+  //
+  // (Honest limit: this makes the split EXPLICIT and glob-free; it does not
+  // make a signer path containing spaces work. That would need a different
+  // contract than "a command in an env var".)
+  it('does NOT glob-expand the override command string', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-555\n');
+    writeVerdictFile(root, 'AISDLC-555');
+    const { logPath } = installFakeSigner(root);
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+    // `<root>/bin/fake-signer.sh` exists, so `fake-signer*.sh` WOULD match it
+    // under the old unquoted expansion.
+    const globbed = `bash ${join(root, 'bin')}/fake-signer*.sh`;
+    const r = runHook(SCRIPT, root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: globbed,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
+
+    assert.equal(existsSync(logPath), false, 'the glob must NOT have resolved to the real signer');
+    assert.equal(r.status, 2, `expected invocation failure exit 2, got ${r.status}: ${r.stderr}`);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore);
+  });
+
   it('exits 0 when the active-task sentinel is absent (chore PR / ad-hoc)', () => {
     const r = runHook(SCRIPT, root);
     assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);

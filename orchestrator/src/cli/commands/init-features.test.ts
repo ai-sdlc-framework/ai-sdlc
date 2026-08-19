@@ -58,6 +58,13 @@ interface StubState {
   textInputAnswers: string[];
   /** AISDLC-555: paths that `chmodExecutable` was called with. */
   chmodCalls: string[];
+  /**
+   * AISDLC-555: simulated symlink resolution, `path -> real path`.
+   * Absent entries resolve to the path itself when it exists as a file,
+   * else to `null` — so the containment check is inert unless a test
+   * deliberately plants a redirect.
+   */
+  realpaths: Map<string, string>;
 }
 
 function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: FeatureAdapters } {
@@ -71,6 +78,7 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
     multiSelectAnswers: opts.multiSelectAnswers ?? [],
     textInputAnswers: opts.textInputAnswers ?? [],
     chmodCalls: opts.chmodCalls ?? [],
+    realpaths: opts.realpaths ?? new Map(),
   };
   const adapters: FeatureAdapters = {
     prompt: async (question, defaultYes) => {
@@ -105,6 +113,7 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
     chmodExecutable: (p) => {
       state.chmodCalls.push(p);
     },
+    realpath: (p) => state.realpaths.get(p) ?? (state.files.has(p) ? p : null),
     runCommand: (cmd, args) => {
       state.runCommandCalls.push({ cmd, args });
       // Look up by `cmd args.join(' ')` prefix so tests can match
@@ -1176,6 +1185,54 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
     expect(note, `expected a worktree note, got ${JSON.stringify(state.log)}`).toBeDefined();
     // Must NOT blame core.hooksPath, which is unset in this shape.
     expect(note).not.toContain('core.hooksPath');
+  });
+
+  // Round-7. `outsideProject` is decided with path.relative, which is LEXICAL:
+  // a repo that commits `.husky` as a symlink pointing out of the tree still
+  // looks inside it, so no string check fires while writeFileSync/chmodSync
+  // follow the link. Appending a shell snippet to ~/.bashrc and marking it
+  // executable is the concrete outcome.
+  it('REFUSES when a symlink redirects the hook path outside the project', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([
+        ['/proj', '/proj'],
+        // `.husky` is a symlink to the operator's home directory.
+        ['/proj/.husky', '/home/operator'],
+      ]),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('REFUSED') && l.includes('symlink'))).toBe(true);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
+    expect(res.skipped).toContain('.husky/pre-push');
+  });
+
+  it('installs normally when the resolved path stays inside the project', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([
+        ['/proj', '/proj'],
+        ['/proj/.husky', '/proj/.husky'],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('REFUSED'))).toBe(false);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(true);
   });
 
   // Round-4 review: the preview must not promise an install the real run

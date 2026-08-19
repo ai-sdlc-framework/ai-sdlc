@@ -118,6 +118,7 @@ function makeComplianceStub(opts: Partial<ComplianceStubState> = {}): {
     chmodExecutable: () => {
       // no-op for stubs — not exercised by the compliance-wizard suite
     },
+    realpath: () => null,
     runCommand: (cmd, args) => {
       state.runCommandCalls.push({ cmd, args });
       const key = `${cmd} ${args.join(' ')}`;

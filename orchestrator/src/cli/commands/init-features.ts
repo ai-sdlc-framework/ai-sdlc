@@ -20,7 +20,15 @@
  * the real adapters.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, dirname, basename, isAbsolute, relative } from 'node:path';
 import { execFileSync, execSync } from 'node:child_process';
 import type { DerivedGates } from '../../compliance/types.js';
@@ -813,6 +821,18 @@ export interface FeatureAdapters {
    * silently never runs it — the AC #2 "working hook" requirement.
    */
   chmodExecutable: (path: string) => void;
+  /**
+   * Resolve `path` through symlinks, or `null` when it does not exist.
+   * Production = `node:fs.realpathSync`.
+   *
+   * AISDLC-555: `outsideProject` is decided with `path.relative`, which is
+   * purely LEXICAL — a repo that commits `.husky` (or `.husky/pre-push`) as a
+   * symlink pointing out of the tree still looks inside it, so neither the
+   * machine-wide refusal nor any string check fires, while `writeFileSync` and
+   * `chmodSync` happily follow the link. Resolving the real path is the only
+   * way to tell those apart.
+   */
+  realpath: (path: string) => string | null;
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /** Run a shell command (used for `gh api`). Production = `execSync`. */
@@ -1015,6 +1035,13 @@ export function buildProductionAdapters(): FeatureAdapters {
         // Best-effort — a chmod failure (e.g. read-only filesystem) should
         // not abort the whole wizard run; the operator sees the created
         // file either way and can chmod it themselves if needed.
+      }
+    },
+    realpath: (path) => {
+      try {
+        return realpathSync(path);
+      } catch {
+        return null; // does not exist (or is unreadable) — caller decides.
       }
     },
     runCommand: (cmd, args) => {
@@ -1554,6 +1581,38 @@ export async function applyFeatureSelection(
           ` repository's shared git hooks directory (linked worktree or submodule),` +
           ` so the sign block also applies to sibling worktrees of the same repo.`,
       );
+    }
+
+    // Symlink containment. Only meaningful when we BELIEVE the target is
+    // inside the project: the worktree-common-dir and explicit
+    // AI_SDLC_ALLOW_GLOBAL_HOOKS cases are knowingly outside and already
+    // handled above. Here the lexical check said "inside", so if the real path
+    // says otherwise, something in the repo is redirecting us — refuse rather
+    // than append a shell snippet to, and set the exec bit on, a file outside
+    // the tree (`~/.bashrc` being the obvious target).
+    if (!refuseHookInstall && !hookOutsideProject) {
+      const realProject = adapters.realpath(projectDir);
+      // Resolve the deepest component that exists: the hook file if it is
+      // already there, otherwise its parent directory (`.husky` itself may be
+      // the symlink).
+      const realTarget =
+        adapters.realpath(hookPath) ?? adapters.realpath(dirname(hookPath)) ?? null;
+      if (realProject !== null && realTarget !== null) {
+        const rel = relative(realProject, realTarget);
+        if (rel.startsWith('..') || isAbsolute(rel)) {
+          adapters.log(
+            `  REFUSED to install the attestation hook: ${hookRelPath} resolves to` +
+              ` ${realTarget}, outside this project. A symlink in the repository is` +
+              ` redirecting the hook path.`,
+          );
+          adapters.log(
+            `    Refusing rather than appending a shell snippet to a file outside the` +
+              ` project and marking it executable. Remove the symlink and re-run.`,
+          );
+          result.skipped.push(hookRelPath);
+          refuseHookInstall = true;
+        }
+      }
     }
 
     if (refuseHookInstall) {

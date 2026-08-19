@@ -153,30 +153,39 @@ on a fully-configured adopter repo).
   `backlog/tasks/` mentions `dispatch-config.yaml`. AC#7 left unchecked.
 
 **Known-open, deliberately not fixed here** (recorded so they survive the
-merge rather than living only in PR review threads):
+merge rather than living only in PR review threads).
 
-- **No symlink/realpath containment before write + chmod.** `writeFileSync`
-  follows symlinks, so a repo that commits `.husky/pre-push` (or `.husky`
-  itself) as a symlink to e.g. `~/.bashrc` would have the sign block appended
-  there and the exec bit set. Appended content is a fixed snippet, not
-  attacker-controlled, and it requires running `init` inside a hostile repo.
-  The symlink-following WRITE/APPEND is pre-existing (`appendOnce`/`writeFile`
-  predate this task); the CHMOD half is not — `chmodExecutable` is new in
-  AISDLC-555, so setting the exec bit through an attacker-planted symlink is a
-  newly introduced action, even though it only ORs in `0o111`. **It also
-  weakens the new machine-wide refusal**: `outsideProject` is computed with
-  `path.relative()`, which is purely lexical, so a symlink pointing out of the
-  repo still resolves as *inside* it and the refusal never fires. The fix for
-  both is one `realpathSync` containment check on the parent directory before
-  writing.
-- **`AI_SDLC_SIGN_ATTESTATION_CMD` is now gated** behind
-  `AI_SDLC_ALLOW_SIGNER_OVERRIDE=1` (this closes the AISDLC-133 note "add a
-  test-mode sentinel guard so prod doesn't honor a stray operator export").
-  The invocation is still word-split by design; converting it to an array is
-  left as a follow-up. Note the honest scope of this gate: the sentinel is
-  itself an environment variable, so anyone who can already set env before a
-  push can set both. It stops stale, inherited, and accidental exports — it is
-  defense-in-depth, **not** a privilege boundary.
+> Two items previously listed here were CLOSED in round 7 at the operator's
+> direction: symlink/realpath containment, and the word-split override
+> invocation. Both are described under "What shipped" above.
+
+- **CLOSED (round 7): symlink/realpath containment.** `outsideProject` is
+  decided with `path.relative`, which is LEXICAL — a repo committing `.husky`
+  (or `.husky/pre-push`) as a symlink out of the tree still looked *inside* it,
+  so neither the machine-wide refusal nor any string check fired while
+  `writeFileSync`/`chmodSync` followed the link. A new `realpath` adapter now
+  resolves the deepest existing component (the hook file, else its parent) and
+  the install is REFUSED when the real path escapes the project. Scoped to the
+  case where the lexical check claimed "inside": the worktree-common-dir and
+  explicit `AI_SDLC_ALLOW_GLOBAL_HOOKS` cases are knowingly outside and are
+  handled separately. Covered by a stub test and a real-filesystem test that
+  plants an actual symlink and asserts the victim file is neither appended to
+  nor made executable.
+- **CLOSED (round 7): the override is gated AND no longer word-split.**
+  `AI_SDLC_SIGN_ATTESTATION_CMD` requires `AI_SDLC_ALLOW_SIGNER_OVERRIDE=1`
+  (closing the AISDLC-133 note "add a test-mode sentinel guard so prod doesn't
+  honor a stray operator export"), and the invocation is now read into a bash
+  array via `read -r -a` instead of being left as an unquoted expansion. The
+  same change fixes `HARNESS_ARGS`, which was unquoted in BOTH the override and
+  the real-signer branches. Empty-array expansions use the
+  `${ARR[@]+"${ARR[@]}"}` idiom because macOS ships bash 3.2, where a bare
+  `"${ARR[@]}"` on an empty array errors under `set -u`.
+  *Honest limit:* `read -r -a` still splits on IFS, so a signer path containing
+  spaces is still unsupported — what this removes is GLOB EXPANSION, i.e. the
+  old form let the filesystem decide what ran. Pinned by a glob test in BOTH
+  script suites. The sentinel remains defense-in-depth against stale exports,
+  **not** a privilege boundary: anyone who can set env before a push can set
+  both variables.
 - **The husky step-up has one repo-controlled disjunct.**
   `looksLikeHuskyInternals` accepts "the project declares husky" (read from the
   repo's own `package.json`) as evidence of a husky layout. A repo that

@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -287,6 +288,32 @@ describe('attestation hook install — real git push, husky v9 layout (AISDLC-55
       push.stderr,
       `expected the installed hook to run on push; stderr was:\n${push.stderr}`,
     ).toContain('NO attestation signer');
+  });
+
+  // Round-7, with a REAL symlink on a real filesystem — the stub test proves
+  // the branch, this proves the production `realpath` adapter resolves the way
+  // the branch assumes.
+  it('refuses to follow a real symlink that escapes the project', async () => {
+    installHuskyV9Layout();
+    const outside = join(repo, '..', 'outside');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'victim.sh'), '# pretend this is ~/.bashrc\n');
+    // The adopter's repo ships `.husky` as a symlink out of the tree.
+    rmSync(join(repo, '.husky', 'pre-push'), { force: true });
+    symlinkSync(join(outside, 'victim.sh'), join(repo, '.husky', 'pre-push'));
+
+    const before = readFileSync(join(outside, 'victim.sh'), 'utf-8');
+    await applyFeatureSelection(
+      repo,
+      { ...NO_FEATURES, attestation: true },
+      { ...E2E_FLAGS },
+      buildProductionAdapters(),
+    );
+
+    // The file outside the project must be untouched — not appended to, and
+    // not made executable.
+    expect(readFileSync(join(outside, 'victim.sh'), 'utf-8')).toBe(before);
+    expect(statSync(join(outside, 'victim.sh')).mode & 0o111).toBe(0);
   });
 
   it('sets the exec bit without widening a restrictive pre-existing mode', async () => {
