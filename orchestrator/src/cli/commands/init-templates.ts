@@ -227,8 +227,31 @@ jobs:
  * `$CLAUDE_PLUGIN_DIR` (the zero-config path when `git push` runs inside a
  * Claude Code session), then a read-only plugin-cache probe (bare-terminal
  * `git push`, which never inherits those env vars) — same three-tier shape
- * as `resolve-pipeline-cli.sh`. If nothing resolves, the hook is a silent
- * no-op (never blocks a push the operator didn't ask it to gate).
+ * as `resolve-pipeline-cli.sh`.
+ *
+ * Review round 1 (AISDLC-555) — TWO deliberate changes here, both correcting
+ * the first version of this fix:
+ *
+ * 1. **It is no longer silent when nothing resolves.** The original ended in a
+ *    bare `if [ -n "$HOOK" ]; then bash ...; fi` with no else, so an adopter
+ *    who installed via `npm i -g @ai-sdlc/orchestrator` (the documented
+ *    getting-started path) and never installed the Claude Code plugin got a
+ *    hook that could never fire and never said so — reproducing the exact
+ *    defect this task exists to close, for a whole adopter persona.
+ *    `ai-sdlc-plugin/` is not published to npm and orchestrator's `files` is
+ *    `["dist"]`, so none of the tiers can resolve in that setup.
+ *
+ *    Silence is still correct when there is nothing to sign, so the diagnostic
+ *    fires only when `.ai-sdlc/verdicts/` is non-empty: reviewers ran, an
+ *    envelope is owed, and none will be produced. That is the state an
+ *    operator must never discover months later.
+ *
+ * 2. **The repo-relative tier was removed.** It previously preferred
+ *    `./scripts/check-attestation-sign.sh` from the working tree, which put
+ *    repo-tracked content on the push-time execution path with the operator's
+ *    Ed25519 signing key in scope — a contributor could land that file and
+ *    have it run as the maintainer on their next push. Resolution is now only
+ *    from the plugin install (env vars, then the read-only cache probe).
  *
  * Adopters typically already have a `.husky/pre-push` from their existing
  * tooling; the wizard appends our snippet behind a sentinel so we can
@@ -239,9 +262,7 @@ export const HUSKY_PREPUSH_SIGN_SNIPPET = `# ai-sdlc:attestation-sign-block
 # files exist. Skip with AI_SDLC_SKIP_ATTESTATION_SIGN=1.
 if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ]; then
   AI_SDLC_ATTESTATION_HOOK=""
-  if [ -x "./scripts/check-attestation-sign.sh" ]; then
-    AI_SDLC_ATTESTATION_HOOK="./scripts/check-attestation-sign.sh"
-  elif [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh" ]; then
+  if [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh" ]; then
     AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh"
   elif [ -n "\${CLAUDE_PLUGIN_DIR:-}" ] && [ -f "\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh" ]; then
     AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh"
@@ -249,11 +270,19 @@ if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ]; then
     for _ai_sdlc_dir in "$HOME"/.claude/plugins/cache/*/ai-sdlc/*/; do
       if [ -f "\${_ai_sdlc_dir}scripts/check-attestation-sign.sh" ]; then
         AI_SDLC_ATTESTATION_HOOK="\${_ai_sdlc_dir}scripts/check-attestation-sign.sh"
+        break
       fi
     done
   fi
   if [ -n "$AI_SDLC_ATTESTATION_HOOK" ]; then
+    echo "[ai-sdlc] attestation signer: $AI_SDLC_ATTESTATION_HOOK" >&2
     bash "$AI_SDLC_ATTESTATION_HOOK"
+  elif [ -n "$(ls -A .ai-sdlc/verdicts 2>/dev/null)" ]; then
+    echo "[ai-sdlc] ERROR: reviewer verdicts exist under .ai-sdlc/verdicts/ but NO attestation signer" >&2
+    echo "[ai-sdlc]   could be found — this push will carry no attestation." >&2
+    echo "[ai-sdlc]   Searched CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DIR, and" >&2
+    echo "[ai-sdlc]   ~/.claude/plugins/cache/*/ai-sdlc/*/scripts/check-attestation-sign.sh" >&2
+    echo "[ai-sdlc]   Install the ai-sdlc Claude Code plugin, or set CLAUDE_PLUGIN_ROOT." >&2
   fi
 fi
 # end ai-sdlc:attestation-sign-block
