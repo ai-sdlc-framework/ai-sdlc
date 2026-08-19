@@ -23,6 +23,7 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -833,6 +834,21 @@ export interface FeatureAdapters {
    * way to tell those apart.
    */
   realpath: (path: string) => string | null;
+  /**
+   * True when `path` itself is a symlink (does NOT follow it). Production =
+   * `node:fs.lstatSync(path).isSymbolicLink()`, `false` when `path` does not
+   * exist or `lstat` throws for any other reason.
+   *
+   * AISDLC-555 follow-up (dangling-symlink escape): `realpath` alone cannot
+   * distinguish "not a symlink" from "a symlink whose final component does
+   * not exist yet" — `realpathSync` throws ENOENT for the latter too, so the
+   * caller's `realpath(hookPath) ?? realpath(dirname(hookPath))` fallback
+   * silently resolves to the (real, in-project) parent directory and
+   * containment passes even though `hookPath` is a symlink pointing
+   * anywhere. `isSymlink` lets the caller ask the orthogonal question
+   * directly and refuse when a symlink's target can't be resolved at all.
+   */
+  isSymlink: (path: string) => boolean;
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /** Run a shell command (used for `gh api`). Production = `execSync`. */
@@ -1042,6 +1058,13 @@ export function buildProductionAdapters(): FeatureAdapters {
         return realpathSync(path);
       } catch {
         return null; // does not exist (or is unreadable) — caller decides.
+      }
+    },
+    isSymlink: (path) => {
+      try {
+        return lstatSync(path).isSymbolicLink();
+      } catch {
+        return false; // does not exist / unreadable — not a symlink to us.
       }
     },
     runCommand: (cmd, args) => {
@@ -1592,14 +1615,71 @@ export async function applyFeatureSelection(
     // the tree (`~/.bashrc` being the obvious target).
     if (!refuseHookInstall && !hookOutsideProject) {
       const realProject = adapters.realpath(projectDir);
-      // Resolve the deepest component that exists: the hook file if it is
-      // already there, otherwise its parent directory (`.husky` itself may be
-      // the symlink).
-      const realTarget =
-        adapters.realpath(hookPath) ?? adapters.realpath(dirname(hookPath)) ?? null;
-      if (realProject !== null && realTarget !== null) {
-        const rel = relative(realProject, realTarget);
-        if (rel.startsWith('..') || isAbsolute(rel)) {
+      const hookDir = dirname(hookPath);
+      // Permissive when `realProject` itself can't be resolved (mirrors the
+      // pre-existing fallback's `realProject !== null` gate): we can only
+      // flag a candidate as "definitely outside" when we actually know what
+      // "inside" means. A NULL `real` here always means "dangling" and is
+      // handled as its own, unconditional refusal below — this helper is
+      // only ever called with a non-null resolved path.
+      const isDefinitelyOutside = (real: string): boolean => {
+        if (realProject === null) return false;
+        const rel = relative(realProject, real);
+        return rel.startsWith('..') || isAbsolute(rel);
+      };
+
+      // Check `hookPath` and its parent directory (`.husky` itself may be the
+      // symlink) EXPLICITLY for symlink-ness, rather than only resolving the
+      // "deepest existing component" as a fallback. A DANGLING final-component
+      // symlink — `.husky/pre-push` (or `.husky` itself) pointing at a path
+      // that does not exist YET — makes `realpath(hookPath)` throw ENOENT just
+      // like "not a symlink at all" does, so falling straight to
+      // `realpath(dirname(hookPath))` silently resolves to the real,
+      // in-project parent and containment passes even though the final
+      // component redirects somewhere unknown. `isSymlink` lets us ask "is
+      // this a symlink" independently of whether it currently resolves, so a
+      // dangling link is refused UNCONDITIONALLY — a symlink we cannot
+      // resolve at all is never treated as "probably fine".
+      const candidates: Array<{ path: string; relPath: string }> = [
+        { path: hookPath, relPath: hookRelPath },
+        { path: hookDir, relPath: relative(projectDir, hookDir) || '.' },
+      ];
+      for (const { path: candidatePath, relPath: candidateRelPath } of candidates) {
+        if (refuseHookInstall) break;
+        if (!adapters.isSymlink(candidatePath)) continue;
+        const realCandidate = adapters.realpath(candidatePath);
+        if (realCandidate === null) {
+          adapters.log(
+            `  REFUSED to install the attestation hook: ${candidateRelPath} is a symlink` +
+              ` whose target does not exist (a "dangling" symlink). Refusing rather than` +
+              ` following it — writing through a dangling symlink would create a new file` +
+              ` (with the exec bit set) at whatever path the link names, anywhere on disk.` +
+              ` Remove the symlink and re-run.`,
+          );
+        } else if (isDefinitelyOutside(realCandidate)) {
+          adapters.log(
+            `  REFUSED to install the attestation hook: ${candidateRelPath} resolves to` +
+              ` ${realCandidate}, outside this project. A symlink in the repository is` +
+              ` redirecting the hook path.`,
+          );
+          adapters.log(
+            `    Refusing rather than appending a shell snippet to a file outside the` +
+              ` project and marking it executable. Remove the symlink and re-run.`,
+          );
+        } else {
+          continue; // resolves, and stays inside the project — fine.
+        }
+        result.skipped.push(hookRelPath);
+        refuseHookInstall = true;
+      }
+
+      // Fallback for the case where neither `hookPath` nor its immediate
+      // parent is itself a symlink, but some other already-existing component
+      // resolves outside the project (e.g. a symlink further up the tree).
+      // Resolve the deepest existing component and check containment.
+      if (!refuseHookInstall) {
+        const realTarget = adapters.realpath(hookPath) ?? adapters.realpath(hookDir) ?? null;
+        if (realTarget !== null && isDefinitelyOutside(realTarget)) {
           adapters.log(
             `  REFUSED to install the attestation hook: ${hookRelPath} resolves to` +
               ` ${realTarget}, outside this project. A symlink in the repository is` +
@@ -1619,14 +1699,33 @@ export async function applyFeatureSelection(
       // Refused above — nothing further to do for the hook.
     } else if (!adapters.exists(hookPath)) {
       // No existing hook — write a minimal one with the sign block.
-      adapters.mkdirp(dirname(hookPath));
-      adapters.writeFile(
-        hookPath,
-        `#!/usr/bin/env bash\nset -euo pipefail\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
-      );
-      adapters.chmodExecutable(hookPath);
-      result.created.push(hookRelPath);
-      adapters.log(`  created ${hookRelPath}`);
+      //
+      // Defense-in-depth: the symlink-containment check above should already
+      // have refused a dangling `.husky` (or `.husky/pre-push`) symlink before
+      // we get here, but `mkdirp` on a path whose parent is a dangling symlink
+      // throws EEXIST (the symlink itself exists; what it points at does not).
+      // Wrap the create sequence so a gap in that check — or a TOCTOU race
+      // where the symlink appears between the check and this write — aborts
+      // only the hook install, not the entire wizard with an unhandled
+      // exception.
+      try {
+        adapters.mkdirp(dirname(hookPath));
+        adapters.writeFile(
+          hookPath,
+          `#!/usr/bin/env bash\nset -euo pipefail\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
+        );
+        adapters.chmodExecutable(hookPath);
+        result.created.push(hookRelPath);
+        adapters.log(`  created ${hookRelPath}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        adapters.log(
+          `  REFUSED to install the attestation hook: could not create ${hookRelPath}` +
+            ` (${message}). This usually means a path component (e.g. \`.husky\`) is a` +
+            ` symlink pointing at a target that does not exist. Remove it and re-run.`,
+        );
+        result.skipped.push(hookRelPath);
+      }
     } else {
       // AISDLC-555 round-1 security review: appending lands at EOF, so an
       // existing hook that ends in a top-level `exit 0` — an extremely common

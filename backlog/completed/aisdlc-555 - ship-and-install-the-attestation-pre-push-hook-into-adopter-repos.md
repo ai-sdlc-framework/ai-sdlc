@@ -164,13 +164,34 @@ merge rather than living only in PR review threads).
   (or `.husky/pre-push`) as a symlink out of the tree still looked *inside* it,
   so neither the machine-wide refusal nor any string check fired while
   `writeFileSync`/`chmodSync` followed the link. A new `realpath` adapter now
-  resolves the deepest existing component (the hook file, else its parent) and
-  the install is REFUSED when the real path escapes the project. Scoped to the
-  case where the lexical check claimed "inside": the worktree-common-dir and
-  explicit `AI_SDLC_ALLOW_GLOBAL_HOOKS` cases are knowingly outside and are
-  handled separately. Covered by a stub test and a real-filesystem test that
-  plants an actual symlink and asserts the victim file is neither appended to
-  nor made executable.
+  resolves the DEEPEST RESOLVING component (the hook file if it currently
+  resolves, else its parent) and the install is REFUSED when that real path
+  escapes the project. Scoped to the case where the lexical check claimed
+  "inside": the worktree-common-dir and explicit `AI_SDLC_ALLOW_GLOBAL_HOOKS`
+  cases are knowingly outside and are handled separately. Covered by a stub
+  test and a real-filesystem test that plants an actual symlink and asserts
+  the victim file is neither appended to nor made executable.
+  **Follow-up hardening:** the "deepest resolving component" fallback alone
+  had a gap — a DANGLING final-component symlink (`.husky/pre-push`, or
+  `.husky` itself, pointing at a path that does not exist YET) makes
+  `realpath(hookPath)` throw ENOENT the same way "hookPath simply doesn't
+  exist" does, so the old fallback silently resolved to the real, in-project
+  parent directory and containment PASSED even though the final component
+  redirected somewhere unverifiable — `writeFileSync`/`chmodSync` would then
+  follow the dangling link and create the target (with the exec bit set)
+  outside the project. A new `isSymlink` adapter (`lstatSync(...).isSymbolicLink()`,
+  which does NOT follow the link) lets the check ask "is this a symlink"
+  independently of whether it currently resolves: `hookPath` and its parent
+  directory are now checked explicitly, and EITHER being a symlink with a
+  non-resolving (dangling) or out-of-project target is refused unconditionally
+  — a dangling symlink is never treated as "probably fine". A `.husky` itself
+  being a dangling symlink previously also crashed the whole wizard with an
+  unhandled `mkdirSync` `ENOENT`/`EEXIST`; the create path is now wrapped so
+  that failure is caught and reported as a clean refusal instead. Covered by
+  two stub tests (hook-path-dangling, parent-dir-dangling) and two
+  real-filesystem tests in `prepush-sign-snippet.test.ts` (a symlink to a
+  path that does not exist, and `.husky` itself as a dangling symlink),
+  mutation-verified against reverting each of the two defenses.
 - **CLOSED (round 7): the override is gated AND no longer word-split.**
   `AI_SDLC_SIGN_ATTESTATION_CMD` requires `AI_SDLC_ALLOW_SIGNER_OVERRIDE=1`
   (closing the AISDLC-133 note "add a test-mode sentinel guard so prod doesn't
@@ -186,6 +207,17 @@ merge rather than living only in PR review threads).
   script suites. The sentinel remains defense-in-depth against stale exports,
   **not** a privilege boundary: anyone who can set env before a push can set
   both variables.
+  *Second, smaller behaviour change:* `read -r -a ARR <<< "$VAR"` (a here-string,
+  with no `-d ''`) reads only the FIRST LINE of `$VAR` — `read` stops at the
+  first newline regardless of `-a`. A `AI_SDLC_SIGN_ATTESTATION_CMD` value that
+  (accidentally or maliciously) contains an embedded newline is silently
+  TRUNCATED to its first line rather than split across the array the way the
+  rest of the value might suggest. This is fail-safe (less of the value is
+  used, not more, and no code beyond the first line can be smuggled in), but it
+  is a behaviour change from the old unquoted `$VAR` expansion, which would
+  have word-split across the newline too. Not separately tested — the
+  glob-expansion tests already cover the array-splitting contract; this note
+  exists so a future reader isn't surprised by the truncation.
 - **The husky step-up has one repo-controlled disjunct.**
   `looksLikeHuskyInternals` accepts "the project declares husky" (read from the
   repo's own `package.json`) as evidence of a husky layout. A repo that

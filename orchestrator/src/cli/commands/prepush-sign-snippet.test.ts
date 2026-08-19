@@ -316,6 +316,61 @@ describe('attestation hook install — real git push, husky v9 layout (AISDLC-55
     expect(statSync(join(outside, 'victim.sh')).mode & 0o111).toBe(0);
   });
 
+  // AISDLC-555 follow-up (dangling-symlink escape). Unlike the test above,
+  // the symlink target here does NOT exist. `realpathSync(hookPath)` throws
+  // ENOENT for a dangling symlink exactly the way it does for "hookPath does
+  // not exist at all" — the old containment check could not tell those apart
+  // and fell through to `realpath(dirname(hookPath))`, which resolves to the
+  // real, in-project `.husky` directory. Containment PASSED, `exists()`
+  // (which follows the link) reported `false`, and the create branch ran
+  // `writeFileSync` + `chmodExecutable` THROUGH the dangling link — creating
+  // the file outside the project with the exec bit set. This is the concrete
+  // repro for that escape.
+  it('refuses to follow a symlink whose target does NOT exist (dangling)', async () => {
+    installHuskyV9Layout();
+    const outsideDir = join(repo, '..', 'outside-dangling');
+    // Deliberately do NOT create `outsideDir` or the target file — the
+    // symlink must point at a path that does not exist yet.
+    const outsideTarget = join(outsideDir, 'victim.sh');
+    rmSync(join(repo, '.husky', 'pre-push'), { force: true });
+    symlinkSync(outsideTarget, join(repo, '.husky', 'pre-push'));
+
+    await applyFeatureSelection(
+      repo,
+      { ...NO_FEATURES, attestation: true },
+      { ...E2E_FLAGS },
+      buildProductionAdapters(),
+    );
+
+    // Nothing must have been created at the dangling target, and the
+    // symlink itself must not have been resolved into a real file.
+    expect(existsSync(outsideDir)).toBe(false);
+    expect(existsSync(outsideTarget)).toBe(false);
+  });
+
+  // AISDLC-555 follow-up: `.husky` itself — the hook's PARENT directory —
+  // can be the dangling symlink, not just the hook file. Before this fix,
+  // `mkdirSync(dirname(hookPath), { recursive: true })` threw EEXIST (the
+  // symlink exists; its target does not) and crashed the whole wizard with
+  // an unhandled exception instead of refusing cleanly.
+  it('refuses cleanly (no thrown exception) when .husky itself is a dangling symlink', async () => {
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({ devDependencies: { husky: '^9' } }));
+    const outsideTarget = join(repo, '..', 'nonexistent-husky-target');
+    symlinkSync(outsideTarget, join(repo, '.husky'));
+
+    await expect(
+      applyFeatureSelection(
+        repo,
+        { ...NO_FEATURES, attestation: true },
+        { ...E2E_FLAGS },
+        buildProductionAdapters(),
+      ),
+    ).resolves.not.toThrow();
+
+    // Nothing was created at the dangling target outside the project.
+    expect(existsSync(outsideTarget)).toBe(false);
+  });
+
   it('sets the exec bit without widening a restrictive pre-existing mode', async () => {
     installHuskyV9Layout();
     // An adopter's deliberately-private hook: owner read/write only.

@@ -119,6 +119,7 @@ function makeComplianceStub(opts: Partial<ComplianceStubState> = {}): {
       // no-op for stubs — not exercised by the compliance-wizard suite
     },
     realpath: () => null,
+    isSymlink: () => false,
     runCommand: (cmd, args) => {
       state.runCommandCalls.push({ cmd, args });
       const key = `${cmd} ${args.join(' ')}`;

@@ -65,6 +65,15 @@ interface StubState {
    * deliberately plants a redirect.
    */
   realpaths: Map<string, string>;
+  /**
+   * AISDLC-555 follow-up (dangling-symlink): set of paths that ARE symlinks,
+   * independent of whether `realpaths` has an entry for them. Lets a test
+   * simulate a DANGLING symlink — `isSymlink(p)` true, `realpath(p)` still
+   * `null` because there is no entry in `realpaths` and `p` is not in
+   * `files` — which is exactly the shape `realpathSync` produces for a
+   * symlink whose target does not exist (ENOENT).
+   */
+  symlinks: Set<string>;
 }
 
 function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: FeatureAdapters } {
@@ -79,6 +88,7 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
     textInputAnswers: opts.textInputAnswers ?? [],
     chmodCalls: opts.chmodCalls ?? [],
     realpaths: opts.realpaths ?? new Map(),
+    symlinks: opts.symlinks ?? new Set(),
   };
   const adapters: FeatureAdapters = {
     prompt: async (question, defaultYes) => {
@@ -114,6 +124,7 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
       state.chmodCalls.push(p);
     },
     realpath: (p) => state.realpaths.get(p) ?? (state.files.has(p) ? p : null),
+    isSymlink: (p) => state.symlinks.has(p),
     runCommand: (cmd, args) => {
       state.runCommandCalls.push({ cmd, args });
       // Look up by `cmd args.join(' ')` prefix so tests can match
@@ -1210,6 +1221,69 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
       adapters,
     );
     expect(state.log.some((l) => l.includes('REFUSED') && l.includes('symlink'))).toBe(true);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
+    expect(res.skipped).toContain('.husky/pre-push');
+  });
+
+  // AISDLC-555 follow-up (dangling-symlink escape): `realpath(hookPath)`
+  // throws ENOENT for a symlink whose FINAL component does not exist yet —
+  // indistinguishable, to the old check, from "hookPath simply doesn't
+  // exist". The old fallback then resolved `realpath(dirname(hookPath))`,
+  // which is the real (in-project) `.husky` directory, so containment
+  // PASSED even though `hookPath` itself is a symlink pointing anywhere.
+  // `isSymlink` closes this: the hook path is a symlink with no `realpaths`
+  // entry (dangling), so `realpath` correctly returns `null` for it too, and
+  // the new check refuses instead of falling through.
+  it('REFUSES when the hook path is a DANGLING symlink (final component missing)', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([['/proj', '/proj']]),
+      // `.husky/pre-push` is a symlink; it has NO entry in `realpaths` and is
+      // NOT in `files`, so `realpath()` returns `null` for it — exactly what
+      // `realpathSync` does for a symlink whose target does not exist.
+      symlinks: new Set([join('/proj', '.husky', 'pre-push')]),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(
+      state.log.some(
+        (l) => l.includes('REFUSED') && l.includes('symlink') && l.includes('dangling'),
+      ),
+    ).toBe(true);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
+    expect(res.skipped).toContain('.husky/pre-push');
+  });
+
+  // AISDLC-555 follow-up: `.husky` itself (the hook's PARENT directory) can
+  // be the dangling symlink, not just the hook file. Same escape, same fix —
+  // the parent is checked via the same `candidates` loop.
+  it('REFUSES when the hook parent directory (.husky) is a DANGLING symlink', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([['/proj', '/proj']]),
+      symlinks: new Set([join('/proj', '.husky')]),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(
+      state.log.some(
+        (l) => l.includes('REFUSED') && l.includes('symlink') && l.includes('dangling'),
+      ),
+    ).toBe(true);
     expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
     expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
     expect(res.skipped).toContain('.husky/pre-push');
