@@ -1178,6 +1178,68 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
     expect(note).not.toContain('core.hooksPath');
   });
 
+  // Round-4 review: the preview must not promise an install the real run
+  // refuses — that is the opposite of making the decision legible.
+  it('--dry-run previews the REFUSAL for a machine-wide hooks dir', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      { ...baseFlags, dryRun: true },
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('would REFUSE'))).toBe(true);
+    expect(res.wouldCreate).not.toContain(join('/etc/team-hooks', 'pre-push'));
+  });
+
+  // Round-3 code review flagged this branch as untested; it stayed untested
+  // through round 4. Not a git repo at all: BOTH probes fail.
+  it('falls back sensibly when the directory is not a git repository', () => {
+    const notARepo = new Map([
+      [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 128 }],
+      [GIT_PATH_HOOKS, { stdout: '', exitCode: 128 }],
+    ]);
+    // husky declared -> the adopter-owned committed location.
+    const withHusky = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: notARepo,
+    });
+    expect(resolveHookTarget('/proj', withHusky.adapters).relPath).toBe('.husky/pre-push');
+
+    // No husky, and git told us nothing -> hand-built .git/hooks is the only
+    // remaining answer, and it must not be reported as outside the project.
+    const noHusky = makeStub({
+      files: new Map([['/proj/package.json', JSON.stringify({ devDependencies: {} })]]),
+      runResponses: notARepo,
+    });
+    const target = resolveHookTarget('/proj', noHusky.adapters);
+    expect(target.path).toBe(join('/proj', '.git', 'hooks', 'pre-push'));
+    expect(target.outsideProject).toBe(false);
+  });
+
+  // `core.hooksPath = ""` exits 0 with empty output, which is neither "set"
+  // nor a clean "unset" — silently treating it as unset is how an inert hook
+  // gets installed, so it must say something.
+  it('reports an empty-string core.hooksPath instead of silently ignoring it', () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: new Map([
+        [GIT_CONFIG_HOOKSPATH, { stdout: '   \n', exitCode: 0 }],
+        [GIT_PATH_HOOKS, { stdout: '.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(state.log.some((l) => l.includes('empty value'))).toBe(true);
+    // Falls through to the husky/.git decision rather than resolving nowhere.
+    expect(target.relPath).toBe('.husky/pre-push');
+  });
+
   it('warns when the resolved hook lives outside the project', async () => {
     const { state, adapters } = makeStub({
       runResponses: hooksPathSet('/etc/team-hooks'),

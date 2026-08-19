@@ -222,6 +222,34 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  // AISDLC-555 round-4 code review, MAJOR. Gating AI_SDLC_SIGN_ATTESTATION_CMD
+  // required adding `AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1'` to ~25 existing call
+  // sites in this file so they stayed green — but the negative test was only
+  // added to the plugin copy's suite. Mutation proved the gap: deleting the
+  // gate from THIS script (the one that guards this monorepo's own pre-push
+  // chain) left all 27 tests passing, so a future weakening of an
+  // arbitrary-command-execution gate would have shipped undetected.
+  //
+  // A bulk edit that keeps tests green is not the same as a tested change.
+  it('REFUSES a substitute signer unless AI_SDLC_ALLOW_SIGNER_OVERRIDE=1', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-555\n');
+    writeVerdictFile(root, 'AISDLC-555');
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd, logPath } = installFakeSigner(root);
+
+    // Identical to the positive-path tests except the sentinel is absent.
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    assert.equal(r.status, 2, `expected refusal exit 2, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_ALLOW_SIGNER_OVERRIDE/);
+    assert.equal(existsSync(logPath), false, 'the substitute signer must NOT have run');
+    assert.equal(
+      git(['rev-parse', 'HEAD'], root).trim(),
+      headBefore,
+      'refusing must not create a commit',
+    );
+  });
+
   it('AI_SDLC_BYPASS_ALL_GATES=1 exits 0 immediately even when ready to sign', () => {
     // Even with a sentinel + verdict + no existing attestation, the master
     // bypass must prevent any sign or commit from happening.

@@ -1611,9 +1611,30 @@ export async function applyFeatureSelection(
       }
     }
   } else if (selection.attestation && flags.dryRun) {
-    const { relPath: hookRelPath } = resolveHookTarget(projectDir, adapters);
-    result.wouldCreate.push(hookRelPath);
-    adapters.log(`  would update ${hookRelPath} (sign block)`);
+    const {
+      relPath: hookRelPath,
+      outsideProject: hookOutsideProject,
+      source: hookSource,
+    } = resolveHookTarget(projectDir, adapters);
+    // Round-4 review (security + code, independently): the preview must mirror
+    // the refusal. Reporting "would update <machine-wide path>" for a run that
+    // will actually refuse is exactly backwards — the point of refusing is to
+    // make this decision legible before anything happens.
+    if (
+      hookOutsideProject &&
+      hookSource === 'core.hooksPath' &&
+      process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS !== '1'
+    ) {
+      result.skipped.push(hookRelPath);
+      adapters.log(
+        `  would REFUSE the attestation hook: core.hooksPath resolves to` +
+          ` ${hookRelPath}, OUTSIDE this project (set AI_SDLC_ALLOW_GLOBAL_HOOKS=1` +
+          ` to install machine-wide anyway).`,
+      );
+    } else {
+      result.wouldCreate.push(hookRelPath);
+      adapters.log(`  would update ${hookRelPath} (sign block)`);
+    }
   }
 
   // Branch protection (always last — depends on the gate workflow being
