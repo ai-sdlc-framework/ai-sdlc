@@ -150,12 +150,40 @@ merge rather than living only in PR review threads):
   itself) as a symlink to e.g. `~/.bashrc` would have the sign block appended
   there and the exec bit set. Appended content is a fixed snippet, not
   attacker-controlled, and it requires running `init` inside a hostile repo.
-  Pre-existing behaviour, not introduced by this task.
+  Pre-existing behaviour, not introduced by this task. **It also weakens the
+  new machine-wide refusal**: `outsideProject` is computed with
+  `path.relative()`, which is purely lexical, so a symlink pointing out of the
+  repo still resolves as *inside* it and the refusal never fires. The fix for
+  both is one `realpathSync` containment check on the parent directory before
+  writing.
 - **`AI_SDLC_SIGN_ATTESTATION_CMD` is now gated** behind
   `AI_SDLC_ALLOW_SIGNER_OVERRIDE=1` (this closes the AISDLC-133 note "add a
   test-mode sentinel guard so prod doesn't honor a stray operator export").
   The invocation is still word-split by design; converting it to an array is
-  left as a follow-up.
+  left as a follow-up. Note the honest scope of this gate: the sentinel is
+  itself an environment variable, so anyone who can already set env before a
+  push can set both. It stops stale, inherited, and accidental exports — it is
+  defense-in-depth, **not** a privilege boundary.
+- **The husky step-up has one repo-controlled disjunct.**
+  `looksLikeHuskyInternals` accepts "the project declares husky" (read from the
+  repo's own `package.json`) as evidence of a husky layout. A repo that
+  declares husky while `core.hooksPath` points at a non-husky directory whose
+  basename is `_` (e.g. `vendor/_`) gets the hook written one level up, where
+  git never reads it — init reports success and no attestation is ever signed.
+  Narrowly gated by the `basename === '_'` requirement, and the
+  husky-not-declared direction has an explicit regression test. Accepted
+  because dropping the disjunct reintroduces the fresh-clone custom-husky-dir
+  miss (`.config/husky/_`, whose internals do not exist until `npm install`).
+- **`--workspace <name>` resolves the hooks dir against the subdirectory.**
+  `projectDir` is then `<git-root>/packages/<name>`, so (a) a relative
+  `core.hooksPath` is joined onto the subdirectory, producing an inert hook
+  under `packages/<name>/.husky/`, and (b) an absolute repo-local hooks path at
+  the git root is lexically outside that subdirectory and, if it came from
+  `core.hooksPath`, is REFUSED with a message telling the operator to scope the
+  hooks path to "this repo" — which it already is. Both outcomes are "no
+  attestation gets signed". Not a regression (pre-555 the hook always went to
+  `<projectDir>/.husky/pre-push`), but resolving against the git root rather
+  than the install dir would close it.
 
 **AC#5 (end-to-end, scratch repo outside the monorepo):** verified via a
 `mkdtemp`-style scratch tree under the scratchpad dir (not a worktree of this

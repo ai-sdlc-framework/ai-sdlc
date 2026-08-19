@@ -43,6 +43,12 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_BYPASS_ALL_GATES;
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
+  // Round-5 security review: strip the sentinel too. Otherwise an operator
+  // or CI runner with AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 exported would have the
+  // gate's own negative test inherit it and never exercise the gate. It fails
+  // loudly rather than false-greening, but coverage of a security gate should
+  // not depend on the ambient environment.
+  delete env.AI_SDLC_ALLOW_SIGNER_OVERRIDE;
   delete env.AI_SDLC_ITERATION_COUNT;
   delete env.AI_SDLC_HARNESS_NOTE;
   // AISDLC-383.6: schema version env vars must not leak from operator shell.
