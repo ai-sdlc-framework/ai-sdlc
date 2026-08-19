@@ -1006,6 +1006,35 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
     expect(target.path).toBe(join('/proj', 'tools', '_', 'pre-push'));
   });
 
+  // `husky <dir>` supports a custom directory, and on a fresh clone the `_`
+  // internals do not exist yet (their .gitignore is `*`), so neither the
+  // parent name nor the wrapper files identify the layout. A declared husky
+  // dependency does. Round-3 security review, low.
+  it('steps up out of a CUSTOM husky dir (.config/husky/_) on a fresh clone', () => {
+    const { adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: hooksPathSet('.config/husky/_'),
+    });
+    expect(resolveHookTarget('/proj', adapters).path).toBe(
+      join('/proj', '.config', 'husky', 'pre-push'),
+    );
+  });
+
+  // ...but a missing package.json is NOT evidence of husky. The `.husky`-vs-
+  // `.git/hooks` default fails open; this step-up must not, or any project
+  // whose hooks dir happens to be named `_` gets its hook installed one
+  // directory too high, where git will never read it.
+  it('does NOT step up out of a dir named _ when husky is not actually declared', () => {
+    const { adapters } = makeStub({
+      runResponses: hooksPathSet('vendor/_'),
+    });
+    expect(resolveHookTarget('/proj', adapters).path).toBe(
+      join('/proj', 'vendor', '_', 'pre-push'),
+    );
+  });
+
   // Recognises husky internals by the wrapper file even when the parent is
   // not literally named `.husky`.
   it('steps up when the husky wrapper is present under a differently-named parent', () => {
@@ -1067,6 +1096,86 @@ describe('AISDLC-555 round-1 security review — hook installation', () => {
     const target = resolveHookTarget('/proj', adapters);
     expect(target.path).toBe(join('/proj', '.git', 'hooks', 'pre-push'));
     expect(target.outsideProject).toBe(false);
+  });
+
+  // Round-3 security review (medium). `git config --get core.hooksPath` reads
+  // ALL scopes, so a global `~/.githooks` makes this fire for a repo whose own
+  // config never opted in — and appending there puts the key-bearing signer on
+  // every push in every repo on the machine, including untrusted clones.
+  it('REFUSES to install into a hooks dir outside the project (machine-wide)', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has(join('/etc/team-hooks', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/etc/team-hooks', 'pre-push'));
+    expect(state.log.some((l) => l.includes('REFUSED'))).toBe(true);
+    expect(res.skipped).toContain(join('/etc/team-hooks', 'pre-push'));
+  });
+
+  it('still scaffolds the other attestation files when the hook is refused', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    // Refusing the hook must not abort the rest of the feature.
+    expect(state.files.has(join('/proj', '.ai-sdlc', 'trusted-reviewers.yaml'))).toBe(true);
+  });
+
+  it('installs machine-wide only under an explicit AI_SDLC_ALLOW_GLOBAL_HOOKS opt-in', async () => {
+    const prev = process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS;
+    process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS = '1';
+    try {
+      const { state, adapters } = makeStub({
+        runResponses: hooksPathSet('/etc/team-hooks'),
+      });
+      await applyFeatureSelection(
+        '/proj',
+        { ...NO_FEATURES, attestation: true },
+        baseFlags,
+        adapters,
+      );
+      expect(state.files.has(join('/etc/team-hooks', 'pre-push'))).toBe(true);
+      expect(state.log.some((l) => l.includes('AI_SDLC_ALLOW_GLOBAL_HOOKS=1'))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS;
+      else process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS = prev;
+    }
+  });
+
+  // A linked worktree's common dir is ALSO outside the project, but it is still
+  // this one repository — refusing there would break a legitimate topology, and
+  // the round-2 wording wrongly blamed core.hooksPath, which is not set here.
+  it('installs into a linked worktree common dir with an accurate note, not a refusal', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([['/proj/package.json', JSON.stringify({ devDependencies: {} })]]),
+      runResponses: new Map([
+        [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 1 }],
+        [GIT_PATH_HOOKS, { stdout: '/repo/main/.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has(join('/repo/main/.git/hooks', 'pre-push'))).toBe(true);
+    expect(state.log.some((l) => l.includes('REFUSED'))).toBe(false);
+    const note = state.log.find((l) => l.includes('outside this working tree'));
+    expect(note, `expected a worktree note, got ${JSON.stringify(state.log)}`).toBeDefined();
+    // Must NOT blame core.hooksPath, which is unset in this shape.
+    expect(note).not.toContain('core.hooksPath');
   });
 
   it('warns when the resolved hook lives outside the project', async () => {

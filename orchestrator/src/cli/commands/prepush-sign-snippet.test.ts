@@ -181,11 +181,14 @@ describe('HUSKY_PREPUSH_SIGN_SNIPPET — executed as bash (AISDLC-555)', () => {
 describe('attestation hook install — real git push, husky v9 layout (AISDLC-555)', () => {
   let repo: string;
   let bare: string;
+  let fakeHome: string;
 
   beforeEach(() => {
     const root = mkdtempSync(join(tmpdir(), 'aisdlc-555-e2e-'));
     repo = join(root, 'work');
     bare = join(root, 'remote.git');
+    fakeHome = join(root, 'fake-home');
+    mkdirSync(fakeHome, { recursive: true });
     mkdirSync(repo, { recursive: true });
     git(['init', '-q', '-b', 'main', bare, '--bare'], root);
     git(['init', '-q', '-b', 'main', '.'], repo);
@@ -198,8 +201,35 @@ describe('attestation hook install — real git push, husky v9 layout (AISDLC-55
     rmSync(join(repo, '..'), { recursive: true, force: true });
   });
 
+  /**
+   * Round-3 test review caught this: the first version of this helper passed
+   * no `env`, so the spawned `git push` inherited the REAL HOME — and the
+   * installed hook's last resort is a glob over the plugin cache under
+   * `$HOME/.claude/plugins/cache`.
+   * On any machine with a cached plugin install (which this very PR causes to
+   * exist) the hook would find and RUN the operator's real signer as a side
+   * effect of `pnpm test`, and the assertion below would flip. It passed only
+   * because no such path happens to exist here — luck, not isolation.
+   *
+   * `spawnSync`'s `env` REPLACES the environment rather than merging, so this
+   * also drops any inherited GIT_DIR / GIT_WORK_TREE (set when the suite runs
+   * under a husky pre-push hook), which would otherwise point git at the real
+   * repository instead of `cwd`.
+   */
   function git(args: string[], cwd: string): { stdout: string; stderr: string; status: number } {
-    const res = spawnSync('git', args, { cwd, encoding: 'utf-8' });
+    const res = spawnSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      env: {
+        PATH: process.env.PATH ?? '',
+        HOME: fakeHome,
+        // Do not read the operator's system/global git config — a global
+        // core.hooksPath would otherwise change what this test exercises.
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: join(fakeHome, '.gitconfig'),
+        GIT_TERMINAL_PROMPT: '0',
+      },
+    });
     return { stdout: res.stdout ?? '', stderr: res.stderr ?? '', status: res.status ?? -1 };
   }
 

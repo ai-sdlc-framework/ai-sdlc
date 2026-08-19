@@ -1196,6 +1196,14 @@ export interface HookTarget {
    * would expect.
    */
   outsideProject: boolean;
+  /**
+   * How the target was decided. Load-bearing, not cosmetic: `core.hooksPath`
+   * resolving outside the project usually means a GLOBAL or SYSTEM git setting
+   * shared by every repository on the machine, which is refused; a
+   * `git-hooks-dir` outside the project is a linked worktree's or submodule's
+   * common dir, which is still this one repository and is fine.
+   */
+  source: 'core.hooksPath' | 'git-hooks-dir' | 'husky-default';
 }
 
 /**
@@ -1247,7 +1255,17 @@ export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters)
     '--get',
     'core.hooksPath',
   ]);
-  const hooksPathIsSet = configured.exitCode === 0 && configured.stdout.trim() !== '';
+  const configuredValue = configured.exitCode === 0 ? configured.stdout.trim() : '';
+  const hooksPathIsSet = configuredValue !== '';
+  if (configured.exitCode === 0 && configuredValue === '') {
+    // `core.hooksPath = ""` — git reports success with an empty value. Treating
+    // it as configured would resolve nowhere; treating it as unset silently is
+    // how an inert hook gets installed. Say so.
+    adapters.log(
+      `  NOTE core.hooksPath is set to an empty value — treating it as unset.` +
+        ` If hooks are not running, unset it explicitly: git config --unset core.hooksPath`,
+    );
+  }
   const probe = adapters.runCommand('git', ['-C', projectDir, 'rev-parse', '--git-path', 'hooks']);
   const gitHooks = probe.exitCode === 0 ? probe.stdout.trim() : '';
 
@@ -1265,11 +1283,18 @@ export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters)
     // and exits 0 when it is absent, so the durable, adopter-owned target is
     // the PARENT directory. Verified against husky 9 by executing a real
     // `git push`, not by reading the wrapper.
+    //
+    // `husky <dir>` supports a custom directory (`core.hooksPath =
+    // .config/husky/_`), and on a fresh clone the `_` internals may not exist
+    // on disk yet — `_/.gitignore` is `*`, so nothing under it is committed.
+    // Neither the `.husky` parent name nor the wrapper files would match, so
+    // also accept "the project declares husky" as evidence of the layout.
     const looksLikeHuskyInternals =
       basename(base) === '_' &&
       (basename(dirname(base)) === '.husky' ||
         adapters.exists(join(base, 'h')) ||
-        adapters.exists(join(base, 'husky.sh')));
+        adapters.exists(join(base, 'husky.sh')) ||
+        projectDeclaresHusky(projectDir, adapters, false));
     if (looksLikeHuskyInternals) {
       base = dirname(base);
     }
@@ -1281,25 +1306,17 @@ export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters)
       // Outside the project there is no meaningful relative path to show, so
       // log the absolute one — an adopter needs to see that it is machine-wide.
       relPath: outsideProject ? join(base, 'pre-push') : join(rel, 'pre-push'),
-      isHusky: base.includes('.husky'),
+      isHusky: base.includes('husky'),
       outsideProject,
+      // Distinguished from the common-dir case below because the remedies and
+      // the risks are completely different: a configured hooks path outside the
+      // project is very likely a GLOBAL or SYSTEM setting shared by every repo
+      // on the machine, whereas a common dir is still this one repository.
+      source: 'core.hooksPath',
     };
   }
 
-  const pkgRaw = adapters.readTextFile(join(projectDir, 'package.json'));
-  let isHusky = true; // fail open — see docblock above.
-  if (pkgRaw !== null) {
-    try {
-      const pkg = JSON.parse(pkgRaw) as {
-        dependencies?: Record<string, unknown>;
-        devDependencies?: Record<string, unknown>;
-      };
-      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
-      isHusky = 'husky' in deps;
-    } catch {
-      isHusky = true; // malformed package.json — fail open.
-    }
-  }
+  const isHusky = projectDeclaresHusky(projectDir, adapters, true);
   if (isHusky) {
     // husky is declared but has not configured core.hooksPath yet (no
     // `husky install` run). `.husky/pre-push` is where husky will look once
@@ -1309,6 +1326,7 @@ export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters)
       relPath: '.husky/pre-push',
       isHusky: true,
       outsideProject: false,
+      source: 'husky-default',
     };
   }
 
@@ -1328,7 +1346,34 @@ export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters)
     relPath: outsideProject ? join(base, 'pre-push') : join(rel, 'pre-push'),
     isHusky: false,
     outsideProject,
+    source: 'git-hooks-dir',
   };
+}
+
+/**
+ * True when the project declares `husky` as a (dev)dependency.
+ *
+ * Fails OPEN (returns true) when package.json is missing or malformed: the
+ * pre-AISDLC-555 default was `.husky/pre-push`, and an adopter-owned committed
+ * file is a safer place to be wrong than git's internal hooks directory.
+ */
+function projectDeclaresHusky(
+  projectDir: string,
+  adapters: FeatureAdapters,
+  whenUnknown: boolean,
+): boolean {
+  const pkgRaw = adapters.readTextFile(join(projectDir, 'package.json'));
+  if (pkgRaw === null) return whenUnknown;
+  try {
+    const pkg = JSON.parse(pkgRaw) as {
+      dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
+    };
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    return 'husky' in deps;
+  } catch {
+    return whenUnknown;
+  }
 }
 
 // ── Dispatcher ───────────────────────────────────────────────────────────
@@ -1449,19 +1494,71 @@ export async function applyFeatureSelection(
       relPath: hookRelPath,
       isHusky: hookIsHusky,
       outsideProject: hookOutsideProject,
+      source: hookSource,
     } = resolveHookTarget(projectDir, adapters);
+    // Set when the target is refused; every other feature still applies, only
+    // the hook install is skipped.
+    let refuseHookInstall = false;
     // Say where the hook landed and why. Round-2 review: the resolution is now
     // non-obvious (git-reported hooks dir, with a husky-internals step-up), so
     // an adopter debugging "why did nothing sign?" needs the decision visible.
     adapters.log(`  hook target ${hookRelPath} (${hookIsHusky ? 'husky' : 'git hooks dir'})`);
-    if (hookOutsideProject) {
+
+    // Round-3 security review (medium): `git config --get core.hooksPath` reads
+    // ALL scopes, so a GLOBAL or SYSTEM value — `~/.githooks`, an org-mandated
+    // `/etc/team-hooks` — makes this fire for a repo whose own config never
+    // opted in. Appending there puts the key-bearing signer on EVERY push in
+    // EVERY repo on the machine, including untrusted clones, where it would
+    // read that repo's `.active-task` and verdicts and invoke the signer with
+    // the operator's Ed25519 key. A per-repo `init` must not silently become a
+    // machine-wide execution surface, and a warning is not a consent gate when
+    // `init --yes` runs non-interactively. So: refuse, and make the opt-in
+    // explicit and auditable.
+    //
+    // Deliberately scoped to `core.hooksPath`. A linked worktree or submodule
+    // also resolves outside the project (git's common dir), but that is still
+    // this one repository — refusing there would break a legitimate topology.
+    if (hookOutsideProject && hookSource === 'core.hooksPath') {
+      if (process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS === '1') {
+        adapters.log(
+          `  WARNING installing into ${hookRelPath}, which is OUTSIDE this project.` +
+            ` core.hooksPath is set globally, so the sign block will run on every` +
+            ` push in every repository on this machine.` +
+            ` Proceeding because AI_SDLC_ALLOW_GLOBAL_HOOKS=1.`,
+        );
+      } else {
+        adapters.log(
+          `  REFUSED to install the attestation hook: core.hooksPath resolves to` +
+            ` ${hookRelPath}, OUTSIDE this project — almost certainly a global or` +
+            ` system git setting shared by every repository on this machine.`,
+        );
+        adapters.log(
+          `    Installing there would run the attestation signer, with your signing` +
+            ` key, on every push in every repo — including ones you do not control.`,
+        );
+        adapters.log(
+          `    Fix by scoping the hooks path to this repo:` +
+            ` git -C . config core.hooksPath .husky` +
+            ` — then re-run. To install machine-wide anyway (rarely what you want):` +
+            ` AI_SDLC_ALLOW_GLOBAL_HOOKS=1 ai-sdlc init --with-attestation`,
+        );
+        result.skipped.push(hookRelPath);
+        refuseHookInstall = true;
+      }
+    } else if (hookOutsideProject) {
+      // Worktree / submodule common dir: real, but a different situation with a
+      // different remedy. Round-3 review flagged the previous shared wording as
+      // factually wrong here — it named core.hooksPath, which is not set.
       adapters.log(
-        `  WARNING ${hookRelPath} is OUTSIDE this project — core.hooksPath points` +
-          ` at a directory shared by every repository on this machine. The sign` +
-          ` block will run for all of them.`,
+        `  NOTE ${hookRelPath} is outside this working tree — it is this` +
+          ` repository's shared git hooks directory (linked worktree or submodule),` +
+          ` so the sign block also applies to sibling worktrees of the same repo.`,
       );
     }
-    if (!adapters.exists(hookPath)) {
+
+    if (refuseHookInstall) {
+      // Refused above — nothing further to do for the hook.
+    } else if (!adapters.exists(hookPath)) {
       // No existing hook — write a minimal one with the sign block.
       adapters.mkdirp(dirname(hookPath));
       adapters.writeFile(

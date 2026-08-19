@@ -344,6 +344,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     const r = runOrchestrator(root, {
       env: {
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         // Enable attestation-sign test mode (AISDLC-380 sub-attestation gate bypass).
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
@@ -373,6 +374,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       env: {
         AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -403,6 +405,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       env: {
         AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -441,6 +444,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     const sharedEnv = {
       AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
       AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_TEST_MODE: '1',
       AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
       AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -510,6 +514,7 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       cwd: root,
       env: cleanEnv({
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',

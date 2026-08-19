@@ -161,6 +161,7 @@ describe('ai-sdlc-plugin/scripts/check-attestation-sign.sh (AISDLC-555)', () => 
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(SCRIPT, root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_BYPASS_ALL_GATES: '1',
     });
     assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
@@ -171,6 +172,30 @@ describe('ai-sdlc-plugin/scripts/check-attestation-sign.sh (AISDLC-555)', () => 
   it('exits 0 when the active-task sentinel is absent (chore PR / ad-hoc)', () => {
     const r = runHook(SCRIPT, root);
     assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
+  });
+
+  // AISDLC-555 round-3 security review. This script is what this PR ships to
+  // adopter repos, so an ungated signer-replacement env var stops being a
+  // monorepo-local test affordance and becomes command execution at `git push`
+  // time on every machine that holds a signing key. AISDLC-133 recorded the
+  // need for this sentinel; shipping the script is what made it urgent.
+  it('REFUSES a substitute signer unless AI_SDLC_ALLOW_SIGNER_OVERRIDE=1', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-555\n');
+    writeVerdictFile(root, 'AISDLC-555');
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd, logPath } = installFakeSigner(root);
+
+    // Same env as the passing tests, minus the sentinel.
+    const r = runHook(SCRIPT, root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    assert.equal(r.status, 2, `expected refusal exit 2, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_ALLOW_SIGNER_OVERRIDE/);
+    assert.equal(existsSync(logPath), false, 'the substitute signer must NOT have run');
+    assert.equal(
+      git(['rev-parse', 'HEAD'], root).trim(),
+      headBefore,
+      'refusing must not create a commit',
+    );
   });
 
   it('exits 0 when sentinel present but verdict file is absent', () => {
@@ -187,7 +212,10 @@ describe('ai-sdlc-plugin/scripts/check-attestation-sign.sh (AISDLC-555)', () => 
     mkdirSync(attDir, { recursive: true });
     writeFileSync(join(attDir, `${head}.v6.dsse.json`), '{"existing":true,"schemaVersion":"v6"}\n');
     const { cmd, logPath } = installFakeSigner(root, { fail: true });
-    const r = runHook(SCRIPT, root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(SCRIPT, root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
     assert.equal(existsSync(logPath), false, 'signer must not run when already signed');
   });
@@ -197,7 +225,10 @@ describe('ai-sdlc-plugin/scripts/check-attestation-sign.sh (AISDLC-555)', () => 
     writeVerdictFile(root, 'AISDLC-555');
     const headBefore = git(['rev-parse', 'HEAD'], root).trim();
     const { cmd, logPath } = installFakeSigner(root);
-    const r = runHook(SCRIPT, root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(SCRIPT, root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
     assert.equal(existsSync(logPath), true, 'signer must have run');
     const headAfter = git(['rev-parse', 'HEAD'], root).trim();
@@ -212,6 +243,7 @@ describe('ai-sdlc-plugin/scripts/check-attestation-sign.sh (AISDLC-555)', () => 
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(SCRIPT, root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_SKIP_ATTESTATION_SIGN: '1',
     });
     assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);

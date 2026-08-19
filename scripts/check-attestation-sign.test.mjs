@@ -232,6 +232,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_BYPASS_ALL_GATES: '1',
     });
 
@@ -289,6 +290,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root, { fail: true });
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_V6_CUTOVER_ACTIVE: '1',
     });
     assert.equal(r.status, 0, `expected 0 for idempotent skip, got ${r.status}: ${r.stderr}`);
@@ -310,7 +312,11 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeFileSync(join(attDir, `${head}.dsse.json`), '{"existing":true,"schemaVersion":"v5"}\n');
     // Even with a "fail-everything" signer, idempotent skip should NOT invoke it.
     const { cmd, logPath } = installFakeSigner(root, { fail: true });
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd, AI_SDLC_SCHEMA_VERSION: 'v5' });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+      AI_SDLC_SCHEMA_VERSION: 'v5',
+    });
     assert.equal(r.status, 0, `expected 0 for v5 idempotent skip, got ${r.status}: ${r.stderr}`);
     assert.equal(
       existsSync(logPath),
@@ -325,7 +331,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const head = git(['rev-parse', 'HEAD'], root).trim();
 
     const { cmd } = installFakeSigner(root);
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
 
     assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
     // Re-push message must be actionable.
@@ -348,7 +357,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     const { cmd } = installFakeSigner(root);
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /AI_SDLC_SKIP_ATTESTATION_SIGN=1/);
   });
@@ -359,6 +371,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_SKIP_ATTESTATION_SIGN: '1',
     });
     assert.equal(r.status, 0, `expected 0 with deferral, got ${r.status}: ${r.stderr}`);
@@ -375,7 +388,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     const { cmd } = installFakeSigner(root, { fail: true });
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r.status, 2, `expected 2 for signer failure, got ${r.status}: ${r.stderr}`);
     assert.match(r.stderr, /signer invocation \(override\) failed/);
   });
@@ -384,7 +400,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     const { cmd } = installFakeSigner(root, { silent: true });
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(
       r.status,
       2,
@@ -400,7 +419,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133'); // writes to aisdlc-133.json
     const { cmd, logPath } = installFakeSigner(root);
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
     // The signer must have been invoked with the lowercase verdict path.
     const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
@@ -413,6 +435,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_ITERATION_COUNT: '2',
     });
     assert.equal(r.status, 1);
@@ -437,7 +460,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     // ── First push ────────────────────────────────────────────────
     const devHead = git(['rev-parse', 'HEAD'], root).trim();
     const { cmd, logPath } = installFakeSigner(root);
-    const r1 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r1 = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r1.status, 1, `first push: expected 1, got ${r1.status}: ${r1.stderr}`);
 
     const choreHead = git(['rev-parse', 'HEAD'], root).trim();
@@ -454,7 +480,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
 
     // ── Second push (HEAD is the chore commit) ────────────────────
-    const r2 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r2 = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(
       r2.status,
       0,
@@ -501,7 +530,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     git(['commit', '-q', '-m', 'feat: first feature'], root);
     const dev1 = git(['rev-parse', 'HEAD'], root).trim();
     const { cmd, logPath } = installFakeSigner(root);
-    const rA = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const rA = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(rA.status, 1, `chore1 sign cycle: expected 1, got ${rA.status}: ${rA.stderr}`);
     const chore1 = git(['rev-parse', 'HEAD'], root).trim();
     assert.notEqual(chore1, dev1);
@@ -518,7 +550,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
 
     // ── Hook must fire for dev2 ──────────────────────────────────
     const logBefore = execFileSync('cat', [logPath], { encoding: 'utf-8' });
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(
       r.status,
       1,
@@ -573,7 +608,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const headBefore = git(['rev-parse', 'HEAD'], root).trim();
     const { cmd, logPath } = installFakeSigner(root);
 
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
 
     // Hook must be a no-op: exits 0, no new commit, no envelope, no signer invocation.
     assert.equal(r.status, 0, `expected exit 0 (no-op), got ${r.status}: ${r.stderr}`);
@@ -599,6 +637,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       CODEX_VERSION: 'codex@0.128.0',
     });
     assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
@@ -624,6 +663,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       // CODEX_VERSION intentionally absent (cleanEnv already deletes it if present)
     });
     assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
@@ -643,7 +683,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
     const { cmd } = installFakeSigner(root);
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
     assert.equal(r.status, 1);
     const body = git(['log', '-1', '--format=%B', 'HEAD'], root);
     for (const tok of ['[skip ci]', '[ci skip]', '[no ci]', '[skip actions]', '[actions skip]']) {
@@ -675,6 +718,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd, logPath } = installFakeSigner(root);
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       // AI_SDLC_SCHEMA_VERSION intentionally NOT set (should default to v6).
     });
 
@@ -717,6 +761,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd } = installFakeSigner(root, { withLeaves: true });
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_INTERNAL_NO_EXIT_1: '1',
     });
 
@@ -760,6 +805,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const { cmd } = installFakeSigner(root, { withLeaves: false });
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_INTERNAL_NO_EXIT_1: '1',
     });
 
@@ -807,7 +853,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
 
     const { cmd } = installFakeSigner(root, { withLeaves: true });
     // NOTE: no AI_SDLC_INTERNAL_NO_EXIT_1 → standalone mode → exit 1 expected.
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
 
     assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
     // Re-push message must be actionable (mirrors the AC #1+5 standalone test).
@@ -888,7 +937,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const newDevSha = git(['rev-parse', 'HEAD'], root).trim();
 
     const { cmd } = installFakeSigner(root);
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
 
     // Hook must fire (no envelope at new dev HEAD).
     assert.equal(
@@ -983,7 +1035,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     // Step 4: run the hook. With Fix B, the hook computes the same patch-id,
     // finds the patch-id envelope, and exits 0 (idempotent — no re-sign).
     const { cmd, logPath } = installFakeSigner(root, { fail: true });
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
 
     assert.equal(
       r.status,
@@ -1068,7 +1123,10 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     // (different from oldPatchId because the diff changed) → no envelope found
     // → MUST sign (re-sign). The old envelope at oldPatchId is NOT treated as valid.
     const { cmd, logPath } = installFakeSigner(root);
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
 
     assert.equal(
       r.status,
