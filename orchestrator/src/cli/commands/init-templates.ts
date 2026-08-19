@@ -210,10 +210,25 @@ jobs:
 `;
 
 /**
- * `.husky/pre-push` snippet that signs an attestation when one is missing
- * for the current HEAD. Installed when `--with-attestation` is opted in;
- * the actual `sign-attestation.mjs` script ships separately with the
- * orchestrator and is referenced by the canonical command stub here.
+ * `.husky/pre-push` (or `.git/hooks/pre-push` for non-husky repos) snippet
+ * that signs an attestation when one is missing for the current HEAD.
+ * Installed when `--with-attestation` is opted in.
+ *
+ * AISDLC-555: pre-fix, this snippet checked ONLY `./scripts/check-attestation-
+ * sign.sh` — a path that exists in the ai-sdlc monorepo (where the hook is
+ * hand-authored, not wizard-generated) but NEVER in an adopter repo, because
+ * nothing ever copied that script there. The `[ -x ... ]` guard silently
+ * failed forever, so `--with-attestation` produced a hook that looked
+ * complete but never signed anything — the exact bug this task exists to
+ * fix. `check-attestation-sign.sh` now also ships under
+ * `ai-sdlc-plugin/scripts/` (AISDLC-555), so this snippet resolves it the
+ * same way slash-command bodies resolve plugin-internal scripts: repo-local
+ * copy first (back-compat / dogfood), then `$CLAUDE_PLUGIN_ROOT` /
+ * `$CLAUDE_PLUGIN_DIR` (the zero-config path when `git push` runs inside a
+ * Claude Code session), then a read-only plugin-cache probe (bare-terminal
+ * `git push`, which never inherits those env vars) — same three-tier shape
+ * as `resolve-pipeline-cli.sh`. If nothing resolves, the hook is a silent
+ * no-op (never blocks a push the operator didn't ask it to gate).
  *
  * Adopters typically already have a `.husky/pre-push` from their existing
  * tooling; the wizard appends our snippet behind a sentinel so we can
@@ -222,8 +237,24 @@ jobs:
 export const HUSKY_PREPUSH_SIGN_SNIPPET = `# ai-sdlc:attestation-sign-block
 # Signs the DSSE attestation envelope for the current HEAD when verdict
 # files exist. Skip with AI_SDLC_SKIP_ATTESTATION_SIGN=1.
-if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ] && [ -x "./scripts/check-attestation-sign.sh" ]; then
-  ./scripts/check-attestation-sign.sh
+if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ]; then
+  AI_SDLC_ATTESTATION_HOOK=""
+  if [ -x "./scripts/check-attestation-sign.sh" ]; then
+    AI_SDLC_ATTESTATION_HOOK="./scripts/check-attestation-sign.sh"
+  elif [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh" ]; then
+    AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh"
+  elif [ -n "\${CLAUDE_PLUGIN_DIR:-}" ] && [ -f "\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh" ]; then
+    AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh"
+  else
+    for _ai_sdlc_dir in "$HOME"/.claude/plugins/cache/*/ai-sdlc/*/; do
+      if [ -f "\${_ai_sdlc_dir}scripts/check-attestation-sign.sh" ]; then
+        AI_SDLC_ATTESTATION_HOOK="\${_ai_sdlc_dir}scripts/check-attestation-sign.sh"
+      fi
+    done
+  fi
+  if [ -n "$AI_SDLC_ATTESTATION_HOOK" ]; then
+    bash "$AI_SDLC_ATTESTATION_HOOK"
+  fi
 fi
 # end ai-sdlc:attestation-sign-block
 `;
@@ -888,6 +919,13 @@ export const ATTESTATION_TEMPLATES: FeatureTemplateSet = {
     // first PR's envelope lands cleanly without "directory does not exist"
     // errors from the signing script.
     '.ai-sdlc/attestations/.gitkeep': '',
+    // AISDLC-555 (partial AC #7): the pre-push hook's gate condition reads
+    // `.ai-sdlc/verdicts/<task-id>.json` — tightly coupled to attestation,
+    // so it's scaffolded here rather than deferred to a separate
+    // init-orchestration task. Dispatch Board directories + dispatch-
+    // config.yaml (the rest of the widened AC #7 scope) are NOT scaffolded
+    // here — see AISDLC-560, which owns the init-time decision for those.
+    '.ai-sdlc/verdicts/.gitkeep': '',
   },
 };
 

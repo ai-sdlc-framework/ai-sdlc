@@ -55,6 +55,8 @@ interface StubState {
   multiSelectAnswers: string[][];
   /** FIFO queue of scripted text-input answers (string); returns '' if exhausted. */
   textInputAnswers: string[];
+  /** AISDLC-555: paths that `chmodExecutable` was called with. */
+  chmodCalls: string[];
 }
 
 function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: FeatureAdapters } {
@@ -67,6 +69,7 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
     runResponses: opts.runResponses ?? new Map(),
     multiSelectAnswers: opts.multiSelectAnswers ?? [],
     textInputAnswers: opts.textInputAnswers ?? [],
+    chmodCalls: opts.chmodCalls ?? [],
   };
   const adapters: FeatureAdapters = {
     prompt: async (question, defaultYes) => {
@@ -97,6 +100,10 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
       // no-op for stubs — file writes are flat key/value
     },
     exists: (p) => state.files.has(p),
+    readTextFile: (p) => state.files.get(p) ?? null,
+    chmodExecutable: (p) => {
+      state.chmodCalls.push(p);
+    },
     runCommand: (cmd, args) => {
       state.runCommandCalls.push({ cmd, args });
       // Look up by `cmd args.join(' ')` prefix so tests can match
@@ -414,6 +421,126 @@ describe('applyFeatureSelection', () => {
     const sentinelCount2 = (afterSecond.match(/# ai-sdlc:attestation-sign-block/g) ?? []).length;
     expect(sentinelCount2).toBe(1);
     expect(result2.skipped).toContain('.husky/pre-push');
+  });
+
+  // ── AISDLC-555: pre-push hook shipping + install (AC #1-#6) ─────────────
+
+  it('AC #2: newly-created .husky/pre-push is chmod +x (a working hook)', async () => {
+    const { state, adapters } = makeStub();
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.chmodCalls).toContain('/proj/.husky/pre-push');
+  });
+
+  it('AC #2: appended (pre-existing) .husky/pre-push is also chmod +x', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/.husky/pre-push', '#!/bin/sh\necho "user gate"\n');
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.chmodCalls).toContain('/proj/.husky/pre-push');
+  });
+
+  it('AC #4: package.json without a husky dependency writes .git/hooks/pre-push instead', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', JSON.stringify({ name: 'x', devDependencies: {} }));
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has('/proj/.git/hooks/pre-push')).toBe(true);
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(false);
+    expect(result.created).toContain('.git/hooks/pre-push');
+    expect(state.chmodCalls).toContain('/proj/.git/hooks/pre-push');
+    const hook = state.files.get('/proj/.git/hooks/pre-push')!;
+    expect(hook).toContain('# ai-sdlc:attestation-sign-block');
+  });
+
+  it('AC #4: .git/hooks/pre-push append-not-clobber + idempotence mirror the husky path', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', JSON.stringify({ name: 'x' }));
+    state.files.set('/proj/.git/hooks/pre-push', '#!/bin/sh\necho "native gate"\n');
+
+    const first = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const afterFirst = state.files.get('/proj/.git/hooks/pre-push')!;
+    expect(afterFirst).toContain('echo "native gate"');
+    expect(afterFirst).toContain('# ai-sdlc:attestation-sign-block');
+    expect(first.created).not.toContain('.git/hooks/pre-push');
+
+    const second = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const afterSecond = state.files.get('/proj/.git/hooks/pre-push')!;
+    const sentinelCount = (afterSecond.match(/# ai-sdlc:attestation-sign-block/g) ?? []).length;
+    expect(sentinelCount).toBe(1);
+    expect(second.skipped).toContain('.git/hooks/pre-push');
+  });
+
+  it('AC #4: package.json declaring husky keeps the .husky/pre-push default', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set(
+      '/proj/package.json',
+      JSON.stringify({ name: 'x', devDependencies: { husky: '^9.0.0' } }),
+    );
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
+    expect(state.files.has('/proj/.git/hooks/pre-push')).toBe(false);
+  });
+
+  it('AC #4: missing package.json (no npm project) defaults to husky (back-compat fail-open)', async () => {
+    const { state, adapters } = makeStub();
+    // No package.json at all — mirrors every pre-AISDLC-555 test above.
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
+  });
+
+  it('AC #4: malformed package.json defaults to husky (fail-open, does not throw)', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', '{not valid json');
+    await expect(
+      applyFeatureSelection('/proj', { ...NO_FEATURES, attestation: true }, baseFlags, adapters),
+    ).resolves.toBeDefined();
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
+  });
+
+  it('AC #6 dry-run: non-husky repo reports .git/hooks/pre-push in wouldCreate', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', JSON.stringify({ name: 'x' }));
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      { ...baseFlags, dryRun: true },
+      adapters,
+    );
+    expect(result.wouldCreate).toContain('.git/hooks/pre-push');
+    expect(state.files.size).toBe(1); // only the package.json seeded above — nothing written
   });
 
   // ── AISDLC-261: workflows feature ───────────────────────────────────────

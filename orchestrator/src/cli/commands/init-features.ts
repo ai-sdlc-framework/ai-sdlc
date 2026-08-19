@@ -20,7 +20,7 @@
  * the real adapters.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { execFileSync, execSync } from 'node:child_process';
 import type { DerivedGates } from '../../compliance/types.js';
@@ -799,6 +799,20 @@ export interface FeatureAdapters {
   appendOnce: (path: string, contents: string, sentinel: string) => 'appended' | 'skipped';
   /** mkdir -p. Production = `node:fs.mkdirSync({ recursive: true })`. */
   mkdirp: (path: string) => void;
+  /**
+   * Read a text file, or `null` if it doesn't exist / can't be read.
+   * Production = `node:fs.readFileSync`. AISDLC-555: used to detect whether
+   * a project declares `husky` in package.json before deciding where to
+   * install the attestation-sign pre-push hook.
+   */
+  readTextFile: (path: string) => string | null;
+  /**
+   * chmod the file executable (0o755). Production =
+   * `node:fs.chmodSync(path, 0o755)`. AISDLC-555: a freshly WRITTEN
+   * `.husky/pre-push` or `.git/hooks/pre-push` must be executable or git
+   * silently never runs it — the AC #2 "working hook" requirement.
+   */
+  chmodExecutable: (path: string) => void;
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /** Run a shell command (used for `gh api`). Production = `execSync`. */
@@ -982,6 +996,22 @@ export function buildProductionAdapters(): FeatureAdapters {
     },
     mkdirp: (path) => mkdirSync(path, { recursive: true }),
     exists: (path) => existsSync(path),
+    readTextFile: (path) => {
+      try {
+        return existsSync(path) ? readFileSync(path, 'utf-8') : null;
+      } catch {
+        return null;
+      }
+    },
+    chmodExecutable: (path) => {
+      try {
+        chmodSync(path, 0o755);
+      } catch {
+        // Best-effort — a chmod failure (e.g. read-only filesystem) should
+        // not abort the whole wizard run; the operator sees the created
+        // file either way and can chmod it themselves if needed.
+      }
+    },
     runCommand: (cmd, args) => {
       try {
         // Use `execFileSync` (no shell) so args are passed as a true
@@ -1143,6 +1173,55 @@ export async function resolveFeatureSelection(
   return sel;
 }
 
+// ── Attestation pre-push hook target resolution (AISDLC-555 AC #4) ───────
+
+/** Resolved target for the attestation-sign pre-push hook. */
+export interface HookTarget {
+  /** Absolute path to the hook file. */
+  path: string;
+  /** Path relative to `projectDir`, for logging/result tracking. */
+  relPath: string;
+  /** True when the target is `.husky/pre-push`; false for `.git/hooks/pre-push`. */
+  isHusky: boolean;
+}
+
+/**
+ * Decide whether the attestation-sign hook belongs at `.husky/pre-push` or
+ * `.git/hooks/pre-push` (AISDLC-555 AC #4 — "handle repos that do not use
+ * husky at all... decided explicitly, not left undefined").
+ *
+ * Signal: read `package.json` at the project root and look for a `husky`
+ * entry in `dependencies` or `devDependencies`.
+ *
+ *   - package.json parses AND does NOT declare `husky`  → `.git/hooks/pre-push`
+ *     (git's native hook path — always executed regardless of husky
+ *     configuration; writing `.husky/pre-push` here would be silently inert
+ *     since nothing ever points `core.hooksPath` at `.husky/`).
+ *   - Every other case (package.json missing, unreadable, malformed, or DOES
+ *     declare husky) → `.husky/pre-push` (the historical default — fails
+ *     open to the common case: most repos running `ai-sdlc init
+ *     --with-attestation` are JS/TS projects that already use, or will
+ *     shortly `npm install` and pick up, husky).
+ */
+export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters): HookTarget {
+  const pkgRaw = adapters.readTextFile(join(projectDir, 'package.json'));
+  let isHusky = true; // fail open — see docblock above.
+  if (pkgRaw !== null) {
+    try {
+      const pkg = JSON.parse(pkgRaw) as {
+        dependencies?: Record<string, unknown>;
+        devDependencies?: Record<string, unknown>;
+      };
+      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+      isHusky = 'husky' in deps;
+    } catch {
+      isHusky = true; // malformed package.json — fail open.
+    }
+  }
+  const relPath = isHusky ? '.husky/pre-push' : '.git/hooks/pre-push';
+  return { path: join(projectDir, ...relPath.split('/')), relPath, isHusky };
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────────
 
 /** Return value of `applyFeatureSelection` — what was actually written. */
@@ -1241,13 +1320,22 @@ export async function applyFeatureSelection(
     }
   }
 
-  // Husky pre-push sign hook is a separate concern from the
-  // FeatureTemplateSet because it's an APPEND (not a write-from-empty)
-  // — adopters often already have a .husky/pre-push from their existing
-  // tooling and we don't want to clobber it. Only fired when attestation
-  // is on.
+  // Pre-push sign hook is a separate concern from the FeatureTemplateSet
+  // because it's an APPEND (not a write-from-empty) — adopters often
+  // already have a pre-push hook from their existing tooling and we don't
+  // want to clobber it. Only fired when attestation is on.
+  //
+  // AISDLC-555 AC #4: decide the hook TARGET explicitly rather than always
+  // assuming husky. `resolveHookTarget` inspects package.json for a
+  // declared `husky` dependency; when the repo positively does NOT declare
+  // husky, the hook is written straight to `.git/hooks/pre-push` — git's
+  // own native hook path, which git always executes regardless of husky
+  // configuration (writing `.husky/pre-push` into a repo that never wires
+  // `core.hooksPath` there would be silently inert). Every other case
+  // (package.json missing/unreadable, or husky declared) keeps the
+  // pre-AISDLC-555 default of `.husky/pre-push`.
   if (selection.attestation && !flags.dryRun) {
-    const hookPath = join(projectDir, '.husky', 'pre-push');
+    const { path: hookPath, relPath: hookRelPath } = resolveHookTarget(projectDir, adapters);
     if (!adapters.exists(hookPath)) {
       // No existing hook — write a minimal one with the sign block.
       adapters.mkdirp(dirname(hookPath));
@@ -1255,24 +1343,31 @@ export async function applyFeatureSelection(
         hookPath,
         `#!/usr/bin/env bash\nset -euo pipefail\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
       );
-      result.created.push('.husky/pre-push');
-      adapters.log(`  created .husky/pre-push`);
+      adapters.chmodExecutable(hookPath);
+      result.created.push(hookRelPath);
+      adapters.log(`  created ${hookRelPath}`);
     } else {
       const status = adapters.appendOnce(
         hookPath,
         HUSKY_PREPUSH_SIGN_SNIPPET,
         '# ai-sdlc:attestation-sign-block',
       );
+      // AC #2 requires a WORKING hook: even when the hook file pre-existed
+      // (append path), make sure it's executable — an adopter's hand-authored
+      // pre-push script may not have had the bit set, and git silently
+      // never runs a non-executable hook.
+      adapters.chmodExecutable(hookPath);
       if (status === 'appended') {
-        adapters.log(`  updated .husky/pre-push (appended sign block)`);
+        adapters.log(`  updated ${hookRelPath} (appended sign block)`);
       } else {
-        result.skipped.push('.husky/pre-push');
-        adapters.log(`  skip .husky/pre-push (sign block already present)`);
+        result.skipped.push(hookRelPath);
+        adapters.log(`  skip ${hookRelPath} (sign block already present)`);
       }
     }
   } else if (selection.attestation && flags.dryRun) {
-    result.wouldCreate.push('.husky/pre-push');
-    adapters.log('  would update .husky/pre-push (sign block)');
+    const { relPath: hookRelPath } = resolveHookTarget(projectDir, adapters);
+    result.wouldCreate.push(hookRelPath);
+    adapters.log(`  would update ${hookRelPath} (sign block)`);
   }
 
   // Branch protection (always last — depends on the gate workflow being
