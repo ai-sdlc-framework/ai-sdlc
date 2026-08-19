@@ -22,6 +22,7 @@ import { complexityCommand } from './commands/complexity.js';
 import { costCommand } from './commands/cost.js';
 import { dashboardCommand } from './commands/dashboard.js';
 import { validateCommand } from './commands/validate.js';
+import { doctorCommand } from './commands/doctor.js';
 import {
   resolveVersions,
   formatVersionBlock,
@@ -84,6 +85,7 @@ export function buildProgram(versions: VersionTriple): Command {
   program.addCommand(costCommand);
   program.addCommand(dashboardCommand);
   program.addCommand(validateCommand);
+  program.addCommand(doctorCommand);
 
   // Unknown-subcommand handler (AC #9): hint at version drift / upgrade so
   // users who installed an outdated CLI find out fast.
