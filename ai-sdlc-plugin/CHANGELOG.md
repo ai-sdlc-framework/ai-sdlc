@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.12.0...ai-sdlc-plugin-v0.13.0) (2026-08-19)
+
+
+### Features
+
+* **orchestrator:** ship check-attestation-sign.sh + fix the pre-push hook installer (AISDLC-555) ([#973](https://github.com/ai-sdlc-framework/ai-sdlc/issues/973)) ([94f2af4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/94f2af4965809a391bc28b8ade46e8c64e00be58))
+* worktree-aware backlog task ID allocator (AISDLC-559) ([#965](https://github.com/ai-sdlc-framework/ai-sdlc/issues/965)) ([4d6e2ee](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4d6e2ee9117e1d5a61daf851c59a53c8d00aa228))
+
+
+### Bug Fixes
+
+* make attestation signing reachable in adopter repos (AISDLC-554) ([#963](https://github.com/ai-sdlc-framework/ai-sdlc/issues/963)) ([2be38fb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2be38fbbc4490686e932e1a4766ba215a03bc55a))
+* make pipeline-cli self-heal reachable + loud dependency gates (AISDLC-557) ([#962](https://github.com/ai-sdlc-framework/ai-sdlc/issues/962)) ([91f4e8b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/91f4e8b569b2e1b2930a74731bb1db71a43c6a30))
+
 ## [0.12.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.11.0...ai-sdlc-plugin-v0.12.0) (2026-07-29)
 
 
