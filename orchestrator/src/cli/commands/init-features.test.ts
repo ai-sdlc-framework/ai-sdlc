@@ -30,6 +30,7 @@ import {
   NO_FEATURES,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
   renderNextSteps,
+  resolveHookTarget,
   resolveFeatureSelection,
   type FeatureAdapters,
   type WizardFlags,
@@ -937,5 +938,78 @@ describe('buildProductionAdapters', () => {
     expect(result.exitCode).toBe(0);
     // Must round-trip the literal — no word-splitting, no $HOME expansion.
     expect(result.stdout).toBe(argWithSpaceAndDollar);
+  });
+});
+
+describe('AISDLC-555 round-1 security review — hook installation', () => {
+  // core.hooksPath wins over both husky and .git/hooks, because git consults
+  // it first. Writing elsewhere installs a hook that is silently inert — the
+  // exact defect class this task closes.
+  it('honours git config core.hooksPath over husky/.git/hooks', () => {
+    const { adapters } = makeStub({
+      runResponses: new Map([
+        ['git -C /proj config --get core.hooksPath', { stdout: '.config/githooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.relPath).toBe(join('.config/githooks', 'pre-push'));
+    expect(target.path).toBe(join('/proj', '.config/githooks', 'pre-push'));
+  });
+
+  it('handles an ABSOLUTE core.hooksPath (global ~/.githooks style)', () => {
+    const { adapters } = makeStub({
+      runResponses: new Map([
+        ['git -C /proj config --get core.hooksPath', { stdout: '/etc/team-hooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.path).toBe(join('/etc/team-hooks', 'pre-push'));
+  });
+
+  it('falls back to the husky/.git decision when core.hooksPath is unset', () => {
+    const { adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+    });
+    // Stub runCommand defaults to exitCode 0 with EMPTY stdout — the unset case.
+    expect(resolveHookTarget('/proj', adapters).relPath).toBe('.husky/pre-push');
+  });
+
+  // Appending lands at EOF, so an existing hook ending in `exit 0` makes our
+  // block unreachable while init reports success.
+  it('warns when the existing hook has a top-level `exit 0` before our block', async () => {
+    const hook = '/proj/.husky/pre-push';
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+        [hook, '#!/usr/bin/env bash\nnpm test\nexit 0\n'],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const warned = state.log.some((l) => l.includes('exit 0') && l.includes('never be reached'));
+    expect(warned, `expected an exit-0 warning, got: ${JSON.stringify(state.log)}`).toBe(true);
+  });
+
+  it('does NOT warn when the existing hook has no top-level exit 0', async () => {
+    const hook = '/proj/.husky/pre-push';
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+        [hook, '#!/usr/bin/env bash\nnpm test\n'],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('never be reached'))).toBe(false);
   });
 });

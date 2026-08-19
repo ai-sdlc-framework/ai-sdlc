@@ -20,8 +20,8 @@
  * the real adapters.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, dirname, basename, isAbsolute } from 'node:path';
 import { execFileSync, execSync } from 'node:child_process';
 import type { DerivedGates } from '../../compliance/types.js';
 import { BASELINE_DERIVED_GATES } from '../../compliance/types.js';
@@ -1005,7 +1005,12 @@ export function buildProductionAdapters(): FeatureAdapters {
     },
     chmodExecutable: (path) => {
       try {
-        chmodSync(path, 0o755);
+        // AISDLC-555 round-1 security review: do NOT force 0o755. That widens
+        // an adopter's deliberately-restrictive mode (0600 → world-readable
+        // and world-executable) on a file that sits in their repo. Add only
+        // the exec bits and preserve everything else they chose.
+        const current = statSync(path).mode & 0o777;
+        chmodSync(path, current | 0o111);
       } catch {
         // Best-effort — a chmod failure (e.g. read-only filesystem) should
         // not abort the whole wizard run; the operator sees the created
@@ -1204,6 +1209,31 @@ export interface HookTarget {
  *     shortly `npm install` and pick up, husky).
  */
 export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters): HookTarget {
+  // AISDLC-555 round-1 security review: `core.hooksPath` wins over BOTH
+  // branches below, because git consults it before looking at `.git/hooks`.
+  // The previous docblock claimed `.git/hooks/pre-push` is "always executed
+  // regardless of husky configuration" — that is false for any repo using
+  // lefthook, a global `~/.githooks`, or husky v9 (which sets core.hooksPath
+  // itself). Writing to the wrong directory there installs a hook that is
+  // silently inert, which is the exact defect class this task exists to close.
+  const configured = adapters.runCommand('git', [
+    '-C',
+    projectDir,
+    'config',
+    '--get',
+    'core.hooksPath',
+  ]);
+  const hooksPath = configured.exitCode === 0 ? configured.stdout.trim() : '';
+  if (hooksPath) {
+    const base = isAbsolute(hooksPath) ? hooksPath : join(projectDir, hooksPath);
+    return {
+      path: join(base, 'pre-push'),
+      relPath: join(hooksPath, 'pre-push'),
+      // Only meaningful for logging; the path above is authoritative.
+      isHusky: hooksPath.includes('.husky'),
+    };
+  }
+
   const pkgRaw = adapters.readTextFile(join(projectDir, 'package.json'));
   let isHusky = true; // fail open — see docblock above.
   if (pkgRaw !== null) {
@@ -1347,6 +1377,24 @@ export async function applyFeatureSelection(
       result.created.push(hookRelPath);
       adapters.log(`  created ${hookRelPath}`);
     } else {
+      // AISDLC-555 round-1 security review: appending lands at EOF, so an
+      // existing hook that ends in a top-level `exit 0` — an extremely common
+      // shape — makes our block permanently unreachable while init happily
+      // reports "appended sign block". Warn rather than silently succeed;
+      // rewriting someone else's hook is not ours to do.
+      const existing = adapters.readTextFile(hookPath) ?? '';
+      if (!existing.includes('# ai-sdlc:attestation-sign-block')) {
+        const hasTopLevelExit = existing
+          .split('\n')
+          .some((line) => /^\s*exit\s+0\s*(#.*)?$/.test(line));
+        if (hasTopLevelExit) {
+          adapters.log(
+            `  WARNING ${hookRelPath} contains a top-level \`exit 0\` — the appended` +
+              ` sign block will never be reached. Move the block above that line,` +
+              ` or the attestation will silently never be signed.`,
+          );
+        }
+      }
       const status = adapters.appendOnce(
         hookPath,
         HUSKY_PREPUSH_SIGN_SNIPPET,
