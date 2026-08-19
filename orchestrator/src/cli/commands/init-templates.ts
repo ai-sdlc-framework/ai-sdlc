@@ -953,7 +953,12 @@ export const ATTESTATION_TEMPLATES: FeatureTemplateSet = {
     // so it's scaffolded here rather than deferred to a separate
     // init-orchestration task. Dispatch Board directories + dispatch-
     // config.yaml (the rest of the widened AC #7 scope) are NOT scaffolded
-    // here — see AISDLC-560, which owns the init-time decision for those.
+    // here, and — confirmed by round-2 review — NO backlog task currently
+    // owns them: nothing under `backlog/tasks/` mentions dispatch-config.yaml.
+    // An earlier revision of this comment cited AISDLC-560; that task covers
+    // attestation enforcement/doctor and says nothing about the Dispatch
+    // Board, so the citation was wrong. Left explicitly unowned rather than
+    // pointed at a task that would not deliver it.
     '.ai-sdlc/verdicts/.gitkeep': '',
   },
 };
