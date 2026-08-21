@@ -484,6 +484,12 @@ describe('applyFeatureSelection', () => {
     expect(state.chmodCalls).toContain('/proj/.git/hooks/pre-push');
     const hook = state.files.get('/proj/.git/hooks/pre-push')!;
     expect(hook).toContain('# ai-sdlc:attestation-sign-block');
+    // AISDLC-565: the fresh-write preamble is shared with the husky path, so
+    // the .git/hooks/pre-push path must also be POSIX `sh` + `set -eu` (no
+    // bash-only `pipefail`). git honours the shebang directly here, but keeping
+    // the preamble portable is correct regardless.
+    expect(hook.startsWith('#!/usr/bin/env sh\nset -eu\n')).toBe(true);
+    expect(hook).not.toContain('pipefail');
   });
 
   it('AC #4: .git/hooks/pre-push append-not-clobber + idempotence mirror the husky path', async () => {

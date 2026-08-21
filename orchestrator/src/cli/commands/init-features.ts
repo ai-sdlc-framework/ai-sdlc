@@ -1710,10 +1710,16 @@ export async function applyFeatureSelection(
       // exception.
       try {
         adapters.mkdirp(dirname(hookPath));
-        adapters.writeFile(
-          hookPath,
-          `#!/usr/bin/env bash\nset -euo pipefail\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
-        );
+        // POSIX `sh`, not bash: husky v9 runs hooks via its `_/pre-push`
+        // wrapper with `sh -e "$hook"`, IGNORING the shebang. On adopters
+        // whose `/bin/sh` is dash (Debian/Ubuntu/CI default), `set -o pipefail`
+        // is not a valid option, so a bash-style `set -euo pipefail` preamble
+        // aborts the hook on line 2 — before the sign block runs — and the
+        // attestation is silently never signed (AISDLC-565). The snippet body
+        // is pure POSIX and never pipes, so `set -eu` under `sh` is correct in
+        // both dash and bash. For the `.git/hooks/pre-push` path git honours
+        // the shebang directly, and `sh` works there too.
+        adapters.writeFile(hookPath, `#!/usr/bin/env sh\nset -eu\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`);
         adapters.chmodExecutable(hookPath);
         result.created.push(hookRelPath);
         adapters.log(`  created ${hookRelPath}`);
