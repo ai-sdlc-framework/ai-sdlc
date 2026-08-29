@@ -42,6 +42,7 @@ import {
   type DorEvaluationMode,
 } from './dor-config.js';
 import { checkUpstreamOqs, type UpstreamOqCheckResult } from './upstream-oq-gate.js';
+import { extractDeclaredDependencyRefs } from './gates/gate-7-deps.js';
 import type { IssueInput, RefinementVerdict } from './types.js';
 
 export interface RefineBacklogTaskOpts {
@@ -200,6 +201,12 @@ export async function refineBacklogTask(
     workDir,
   };
   if (createdBy) input.authorIdentity = createdBy;
+  // AISDLC-563 — Gate 7 was comparing body dep-phrase references against
+  // an always-empty list because nothing ever populated a declared-deps
+  // field from frontmatter. Feed the task's `dependencies:` + `references:`
+  // lists in so a body reference to an already-declared dependency passes.
+  const declaredDependencyRefs = extractDeclaredDependencyRefs(frontmatter);
+  if (declaredDependencyRefs.length > 0) input.declaredDependencyRefs = declaredDependencyRefs;
 
   // Phase 4 (RFC-0011 §6.4 + AISDLC-115.5) — resolve the auto-pass match
   // against the project's configured rules. When a rule matches, fold its

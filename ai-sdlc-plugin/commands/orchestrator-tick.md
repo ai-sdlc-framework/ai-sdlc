@@ -126,13 +126,31 @@ isn't a JS event loop.
 ## Path resolution
 
 ```bash
-# Same convention as /ai-sdlc execute (see ai-sdlc-plugin/README.md).
+# AISDLC-557: resolve via the shared resolve-pipeline-cli.sh (same script
+# /ai-sdlc execute uses) instead of the previous inline two-branch
+# resolution that assumed the guessed path was correct without ever
+# checking it existed. Pre-fix, a broken/unresolvable install proceeded
+# straight into Step 5's frontier loop, where every cli-deps.mjs /
+# cli-dispatch.mjs call silently degrades on failure (e.g.
+# `2>/dev/null || echo '{"frontier":[]}'`) — the tick would appear to run
+# cleanly while never dispatching anything, with no actionable diagnostic
+# anywhere ("Step 1.5 is only fail-closed when the binary exists" — AISDLC-557).
+# resolve-pipeline-cli.sh gives us (a) the full self-heal + fallback chain
+# (including the self-location last resort, AISDLC-557 AC#3) and (b) a
+# NAMED, actionable error at the very top of the tick — before any frontier
+# work — when nothing resolves at all.
 if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
-  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
   PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_DIR/scripts"
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_ROOT/scripts"
 else
-  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
   PLUGIN_SCRIPTS_DIR="$(pwd)/ai-sdlc-plugin/scripts"
+fi
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || {
+    echo "ERROR: orchestrator-tick cannot resolve @ai-sdlc/pipeline-cli — the dependency-readiness gate (cli-deps.mjs) and dispatch (cli-dispatch.mjs) are UNREACHABLE. See the resolve-pipeline-cli.sh diagnostic above for the actionable fix. Refusing to tick rather than silently skip every dependency gate (AISDLC-557)." >&2
+    exit 1
+  }
 fi
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 ```
@@ -735,6 +753,12 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
     });
   ")
   if [ "$IN_FLIGHT" -ge "$MAX_SESSIONS" ]; then
+    # Round-4 review: clear the gate-failure backoff here too. This break
+    # short-circuits BEFORE the dependency gate runs, so a stale count from an
+    # earlier failure would otherwise survive and make Step 6 back off up to
+    # 30 min while the gate is perfectly healthy — wedging a busy board into a
+    # slow cadence exactly when reconciliation matters most.
+    rm -f "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count"
     echo "[orchestrator-tick] fill-to-cap: in-flight $IN_FLIGHT >= cap $MAX_SESSIONS; done"
     break
   fi
@@ -747,7 +771,68 @@ while [ "$ITER" -lt "$MAX_ITER" ]; do
   #    `OrchestratorBlockedByDispatchReadiness` events and surface in the
   #    next Decision Catalog tick as `frontier candidate X is <verdict>
   #    — close task file?` decisions.
-  FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>/dev/null || echo '{"frontier":[]}')
+  # AISDLC-557 AC#5: a skipped dependency gate must never be indistinguishable
+  # from a passed one. Pre-fix, ANY failure of this command (missing binary,
+  # crash, corrupt board state) silently degraded to an empty frontier — same
+  # output shape as "legitimately nothing ready to dispatch". Capture stderr
+  # separately and log LOUDLY when the gate itself failed to run, so the
+  # operator (or a downstream automation tailing Conductor stdout) can tell
+  # "gate ran, frontier is empty" apart from "gate could not run at all".
+  FRONTIER_STDERR_FILE=$(mktemp)
+  FRONTIER_GATE_FAILED=0
+  if ! FRONTIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json --check-dispatch-readiness 2>"$FRONTIER_STDERR_FILE"); then
+    FRONTIER_GATE_FAILED=1
+    FRONTIER_GATE_ERR="$(tail -3 "$FRONTIER_STDERR_FILE" 2>/dev/null | tr '\n' ' ')"
+    echo "[orchestrator-tick] ERROR: dependency-readiness gate (cli-deps frontier) FAILED TO RUN. Aborting this tick." >&2
+    echo "[orchestrator-tick]   $FRONTIER_GATE_ERR" >&2
+  fi
+  rm -f "$FRONTIER_STDERR_FILE"
+
+  # AISDLC-557 AC#5 (round-2 review): a stderr line alone does NOT satisfy
+  # "a skipped gate must never be indistinguishable from a passed one".
+  # Logging loudly and then continuing with an empty frontier produced the
+  # SAME control flow, terminal message, and exit code as a legitimately
+  # empty frontier — so an unattended tick, or anyone scanning a long
+  # autonomous-drain log, still could not tell a crashed gate from "no work".
+  # A crashing cli-deps would stall the pipeline indefinitely while looking
+  # green. The gate failing must therefore change what the tick DOES, not
+  # only what it prints: abort with a distinct non-zero status and a distinct
+  # event, never the idle "done" path.
+  if [ "$FRONTIER_GATE_FAILED" = "1" ]; then
+    # Round-3 review: promising a "backoff wakeup" in prose was not enough —
+    # Step 6 is a flat 30s schedule and each Step is a separate Bash call, so
+    # FRONTIER_GATE_FAILED does not survive to be read there. A persistently
+    # broken cli-deps would therefore re-tick every 30s forever. Persist the
+    # consecutive-failure count so Step 6 can back off mechanically.
+    GATE_BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
+    mkdir -p "$GATE_BOARD_DIR"
+    GATE_FAILS=$(cat "$GATE_BOARD_DIR/gate-failure-count" 2>/dev/null || echo 0)
+    case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
+    GATE_FAILS=$((GATE_FAILS + 1))
+    # Round-4 review, found independently by two reviewers and reproduced:
+    # capping only the DERIVED WAKE_SECONDS is not enough. bash masks the shift
+    # count mod 64, so `1 << 64` is 1 and `1 << 70` is 64 — the counter keeps
+    # climbing once per capped 30-min tick, and after ~29h of continuous
+    # failure the shift WRAPS, the 1800s cap stops firing, and the backoff
+    # collapses back to the 30s hot loop it exists to prevent. That is inside
+    # this repo's own 24-48h autonomous-drain envelope. Cap the COUNTER.
+    #
+    # Round-5 review: the clamp MUST be a glob, not a numeric test. With
+    # `[ "$X" -gt 6 ] && X=6`, a ~19+ digit value overflows test's integer
+    # parsing, test errors "integer expected", and `&&` cannot tell that error
+    # from a false condition — so the clamp silently never fires. Reproduced:
+    # a 26-digit file yielded WAKE_SECONDS=0, the exact collapse this guards.
+    case "$GATE_FAILS" in [0-6]) ;; *) GATE_FAILS=6 ;; esac
+    printf '%s\n' "$GATE_FAILS" > "$GATE_BOARD_DIR/gate-failure-count"
+    echo "[orchestrator-tick] DISPATCH ABORTED (exit 3) — the dependency gate could not run." >&2
+    echo "[orchestrator-tick]   This is NOT 'no ready tasks'. Do NOT dispatch anything this tick." >&2
+    echo "[orchestrator-tick]   Consecutive gate failures: $GATE_FAILS (Step 6 backs off on this)." >&2
+    echo "[orchestrator-tick]   Conductor: SKIP the rest of Step 5, but STILL run Step 6.5 (reconcile" >&2
+    echo "[orchestrator-tick]   in-flight work) and STILL schedule the wakeup Step 6 computes." >&2
+    exit 3
+  fi
+  # Gate ran: clear any backoff state so the next failure starts from 1.
+  rm -f "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count"
   HAS_READY=$(echo "$FRONTIER_JSON" | node -e "
     const d=[]; process.stdin.on('data',c=>d.push(c));
     process.stdin.on('end',()=>{
@@ -1093,8 +1178,25 @@ return `new-signal` and the skill body would file a NEW Decision Catalog entry
 ```bash
 ONCE_FLAG="${ARGUMENTS:-}"
 if [ "$ONCE_FLAG" != "--once" ]; then
-  echo "[orchestrator-tick] scheduling next tick in 30s"
-  # ScheduleWakeup 30s /ai-sdlc orchestrator-tick
+  # AISDLC-557: back off when Step 5's dependency gate could not run. Without
+  # this, a persistently broken cli-deps is re-tried every 30s forever — the
+  # abort stops it dispatching blind, but nothing stopped it hammering.
+  # Doubling from the normal cadence, capped at 30 min.
+  GATE_FAILS=$(cat "${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}/gate-failure-count" 2>/dev/null || echo 0)
+  case "$GATE_FAILS" in ''|*[!0-9]*) GATE_FAILS=0 ;; esac
+  # Defence in depth: Step 5 caps this on write, but an out-of-band or
+  # hand-edited file must not be able to wrap the shift either. Glob, not a
+  # numeric test — see the round-5 note in Step 5.
+  case "$GATE_FAILS" in [0-6]) ;; *) GATE_FAILS=6 ;; esac
+  if [ "$GATE_FAILS" -gt 0 ]; then
+    WAKE_SECONDS=$((30 * (1 << GATE_FAILS)))
+    [ "$WAKE_SECONDS" -gt 1800 ] && WAKE_SECONDS=1800
+    echo "[orchestrator-tick] dependency gate has failed ${GATE_FAILS}x in a row — backing off"
+  else
+    WAKE_SECONDS=30
+  fi
+  echo "[orchestrator-tick] scheduling next tick in ${WAKE_SECONDS}s"
+  # ScheduleWakeup ${WAKE_SECONDS}s /ai-sdlc orchestrator-tick
 fi
 ```
 

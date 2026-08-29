@@ -24,6 +24,7 @@ import {
   reportAndExit,
   listRfcFiles,
   findReferences,
+  findCoverageGaps,
   collectRfcTransitionsFromGit,
   readRfcLifecycle,
   sourceImportsAny,
@@ -278,6 +279,189 @@ describe('validateRfc', () => {
     const r = validateRfc(fm, { docsDir: NO_DOCS_DIR, today: FIXED_TODAY });
     assert.equal(r.failures.length, 1);
     assert.match(r.failures[0].reason, /unknown surface 'mystery-surface'/);
+  });
+});
+
+// ------------------------------------------------------------ docsCoverage
+// AISDLC-550: the citation check ("some doc mentions RFC-0006") is what let
+// RFC-0006 Addendum A ship ~800 spec lines and five implemented modules with
+// no documentation. `docsCoverage` upgrades it to a coverage check for RFCs
+// that opt in.
+
+describe('findCoverageGaps', () => {
+  const withDocs = (files) => {
+    const root = mkdtempSync(join(tmpdir(), 'rfc-check-coverage-'));
+    mkdirSync(join(root, 'concepts'), { recursive: true });
+    for (const [name, body] of Object.entries(files)) {
+      writeFileSync(join(root, 'concepts', name), body);
+    }
+    return root;
+  };
+
+  it('returns [] when every term appears in an RFC-citing doc', () => {
+    const root = withDocs({
+      'arch.md': '# Arch\n\nRFC-0006 defines Design CI and the exemplar bank.\n',
+    });
+    try {
+      assert.deepEqual(findCoverageGaps(root, 'RFC-0006', ['Design CI', 'exemplar bank']), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('is case-insensitive on the term', () => {
+    const root = withDocs({ 'arch.md': '# Arch\n\nRFC-0006: design ci boundary.\n' });
+    try {
+      assert.deepEqual(findCoverageGaps(root, 'RFC-0006', ['Design CI']), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports terms that appear in NO citing doc', () => {
+    const root = withDocs({ 'arch.md': '# Arch\n\nRFC-0006 mentions Design CI only.\n' });
+    try {
+      assert.deepEqual(findCoverageGaps(root, 'RFC-0006', ['Design CI', 'exemplar bank']), [
+        'exemplar bank',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT credit coverage from a doc that never cites the RFC', () => {
+    // The regression this whole mechanism exists for: prose about the concept
+    // living somewhere unrelated must not satisfy the RFC's coverage.
+    const root = withDocs({
+      'cites.md': '# A\n\nRFC-0006 overview.\n',
+      'unrelated.md': '# B\n\nThis page discusses the exemplar bank at length.\n',
+    });
+    try {
+      assert.deepEqual(findCoverageGaps(root, 'RFC-0006', ['exemplar bank']), ['exemplar bank']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns [] for absent/empty coverage lists (backward compatible)', () => {
+    const root = withDocs({ 'arch.md': '# Arch\n\nRFC-0006.\n' });
+    try {
+      assert.deepEqual(findCoverageGaps(root, 'RFC-0006', []), []);
+      assert.deepEqual(findCoverageGaps(root, 'RFC-0006', undefined), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('validateRfc — docsCoverage', () => {
+  const FIXED_TODAY = new Date('2026-05-01T00:00:00Z');
+  const fixture = (docBody) => {
+    const root = mkdtempSync(join(tmpdir(), 'rfc-check-covval-'));
+    mkdirSync(join(root, 'tutorials'), { recursive: true });
+    writeFileSync(join(root, 'tutorials', 'walkthrough.md'), docBody);
+    return root;
+  };
+
+  it('passes when declared terms are covered', () => {
+    const root = fixture('# T\n\nRFC-9999 ships Design CI and an exemplar bank.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Approved',
+        requiresDocs: ['tutorial'],
+        docsCoverage: ['Design CI', 'exemplar bank'],
+      };
+      assert.deepEqual(validateRfc(fm, { docsDir: root, today: FIXED_TODAY }).failures, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails per uncovered term with an actionable reason', () => {
+    const root = fixture('# T\n\nRFC-9999 ships Design CI.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Approved',
+        requiresDocs: ['tutorial'],
+        docsCoverage: ['Design CI', 'exemplar bank'],
+      };
+      const r = validateRfc(fm, { docsDir: root, today: FIXED_TODAY });
+      assert.equal(r.failures.length, 1);
+      assert.equal(r.failures[0].rfc, 'RFC-9999');
+      assert.match(r.failures[0].reason, /exemplar bank/);
+      assert.match(r.failures[0].reason, /document it/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when docsCoverage is present but not an array', () => {
+    const root = fixture('# T\n\nRFC-9999.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Approved',
+        requiresDocs: ['tutorial'],
+        docsCoverage: 'Design CI',
+      };
+      const r = validateRfc(fm, { docsDir: root, today: FIXED_TODAY });
+      assert.equal(r.failures.length, 1);
+      assert.match(r.failures[0].reason, /invalid 'docsCoverage'/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('enforces coverage even when requiresDocs is empty (AISDLC-550 security review)', () => {
+    // Regression guard: placed after the `requiresDocs.length === 0` early
+    // return, an RFC could silently void a declared coverage promise by
+    // emptying requiresDocs.
+    const root = fixture('# T\n\nRFC-9999 exists.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Approved',
+        requiresDocs: [],
+        docsCoverage: ['exemplar bank'],
+      };
+      const r = validateRfc(fm, { docsDir: root, today: FIXED_TODAY });
+      assert.equal(r.failures.length, 1);
+      assert.match(r.failures[0].reason, /exemplar bank/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('skips coverage under deferredDocs but says so in the warning', () => {
+    const root = fixture('# T\n\nRFC-9999 exists.\n');
+    try {
+      const fm = {
+        id: 'RFC-9999',
+        status: 'Final',
+        requiresDocs: ['tutorial'],
+        docsCoverage: ['exemplar bank'],
+        deferredDocs: true,
+        deferredDocsDeadline: '2026-12-31',
+      };
+      const r = validateRfc(fm, { docsDir: root, today: FIXED_TODAY });
+      assert.deepEqual(r.failures, []);
+      assert.equal(r.warnings.length, 1);
+      assert.match(r.warnings[0].reason, /docsCoverage is also deferred and NOT enforced/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves RFCs without docsCoverage behaving exactly as before', () => {
+    const root = fixture('# T\n\nRFC-9999 in action.\n');
+    try {
+      const fm = { id: 'RFC-9999', status: 'Approved', requiresDocs: ['tutorial'] };
+      assert.deepEqual(validateRfc(fm, { docsDir: root, today: FIXED_TODAY }).failures, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -210,10 +210,50 @@ jobs:
 `;
 
 /**
- * `.husky/pre-push` snippet that signs an attestation when one is missing
- * for the current HEAD. Installed when `--with-attestation` is opted in;
- * the actual `sign-attestation.mjs` script ships separately with the
- * orchestrator and is referenced by the canonical command stub here.
+ * `.husky/pre-push` (or `.git/hooks/pre-push` for non-husky repos) snippet
+ * that signs an attestation when one is missing for the current HEAD.
+ * Installed when `--with-attestation` is opted in.
+ *
+ * AISDLC-555: pre-fix, this snippet checked ONLY `./scripts/check-attestation-
+ * sign.sh` — a path that exists in the ai-sdlc monorepo (where the hook is
+ * hand-authored, not wizard-generated) but NEVER in an adopter repo, because
+ * nothing ever copied that script there. The `[ -x ... ]` guard silently
+ * failed forever, so `--with-attestation` produced a hook that looked
+ * complete but never signed anything — the exact bug this task exists to
+ * fix. `check-attestation-sign.sh` now also ships under
+ * `ai-sdlc-plugin/scripts/` (AISDLC-555), so this snippet resolves it from
+ * the PLUGIN INSTALL ONLY: `$CLAUDE_PLUGIN_ROOT` / `$CLAUDE_PLUGIN_DIR` (the
+ * zero-config path when `git push` runs inside a Claude Code session), then a
+ * read-only plugin-cache probe (bare-terminal `git push`, which never inherits
+ * those env vars).
+ *
+ * There is deliberately NO repo-local tier — see item 2 below. An earlier
+ * revision of this docblock described one, which contradicted the code and,
+ * worse, advertised a resolution order that was removed for security.
+ *
+ * Review round 1 (AISDLC-555) — TWO deliberate changes here, both correcting
+ * the first version of this fix:
+ *
+ * 1. **It is no longer silent when nothing resolves.** The original ended in a
+ *    bare `if [ -n "$HOOK" ]; then bash ...; fi` with no else, so an adopter
+ *    who installed via `npm i -g @ai-sdlc/orchestrator` (the documented
+ *    getting-started path) and never installed the Claude Code plugin got a
+ *    hook that could never fire and never said so — reproducing the exact
+ *    defect this task exists to close, for a whole adopter persona.
+ *    `ai-sdlc-plugin/` is not published to npm and orchestrator's `files` is
+ *    `["dist"]`, so none of the tiers can resolve in that setup.
+ *
+ *    Silence is still correct when there is nothing to sign, so the diagnostic
+ *    fires only when `.ai-sdlc/verdicts/` is non-empty: reviewers ran, an
+ *    envelope is owed, and none will be produced. That is the state an
+ *    operator must never discover months later.
+ *
+ * 2. **The repo-relative tier was removed.** It previously preferred
+ *    `./scripts/check-attestation-sign.sh` from the working tree, which put
+ *    repo-tracked content on the push-time execution path with the operator's
+ *    Ed25519 signing key in scope — a contributor could land that file and
+ *    have it run as the maintainer on their next push. Resolution is now only
+ *    from the plugin install (env vars, then the read-only cache probe).
  *
  * Adopters typically already have a `.husky/pre-push` from their existing
  * tooling; the wizard appends our snippet behind a sentinel so we can
@@ -222,8 +262,30 @@ jobs:
 export const HUSKY_PREPUSH_SIGN_SNIPPET = `# ai-sdlc:attestation-sign-block
 # Signs the DSSE attestation envelope for the current HEAD when verdict
 # files exist. Skip with AI_SDLC_SKIP_ATTESTATION_SIGN=1.
-if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ] && [ -x "./scripts/check-attestation-sign.sh" ]; then
-  ./scripts/check-attestation-sign.sh
+if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ]; then
+  AI_SDLC_ATTESTATION_HOOK=""
+  if [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh" ]; then
+    AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh"
+  elif [ -n "\${CLAUDE_PLUGIN_DIR:-}" ] && [ -f "\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh" ]; then
+    AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh"
+  else
+    for _ai_sdlc_dir in "$HOME"/.claude/plugins/cache/*/ai-sdlc/*/; do
+      if [ -f "\${_ai_sdlc_dir}scripts/check-attestation-sign.sh" ]; then
+        AI_SDLC_ATTESTATION_HOOK="\${_ai_sdlc_dir}scripts/check-attestation-sign.sh"
+        break
+      fi
+    done
+  fi
+  if [ -n "$AI_SDLC_ATTESTATION_HOOK" ]; then
+    echo "[ai-sdlc] attestation signer: $AI_SDLC_ATTESTATION_HOOK" >&2
+    bash "$AI_SDLC_ATTESTATION_HOOK"
+  elif [ -n "$(ls -A .ai-sdlc/verdicts 2>/dev/null)" ]; then
+    echo "[ai-sdlc] ERROR: reviewer verdicts exist under .ai-sdlc/verdicts/ but NO attestation signer" >&2
+    echo "[ai-sdlc]   could be found — this push will carry no attestation." >&2
+    echo "[ai-sdlc]   Searched CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DIR, and" >&2
+    echo "[ai-sdlc]   ~/.claude/plugins/cache/*/ai-sdlc/*/scripts/check-attestation-sign.sh" >&2
+    echo "[ai-sdlc]   Install the ai-sdlc Claude Code plugin, or set CLAUDE_PLUGIN_ROOT." >&2
+  fi
 fi
 # end ai-sdlc:attestation-sign-block
 `;
@@ -888,6 +950,18 @@ export const ATTESTATION_TEMPLATES: FeatureTemplateSet = {
     // first PR's envelope lands cleanly without "directory does not exist"
     // errors from the signing script.
     '.ai-sdlc/attestations/.gitkeep': '',
+    // AISDLC-555 (partial AC #7): the pre-push hook's gate condition reads
+    // `.ai-sdlc/verdicts/<task-id>.json` — tightly coupled to attestation,
+    // so it's scaffolded here rather than deferred to a separate
+    // init-orchestration task. Dispatch Board directories + dispatch-
+    // config.yaml (the rest of the widened AC #7 scope) are NOT scaffolded
+    // here, and — confirmed by round-2 review — NO backlog task currently
+    // owns them: nothing under `backlog/tasks/` mentions dispatch-config.yaml.
+    // An earlier revision of this comment cited AISDLC-560; that task covers
+    // attestation enforcement/doctor and says nothing about the Dispatch
+    // Board, so the citation was wrong. Left explicitly unowned rather than
+    // pointed at a task that would not deliver it.
+    '.ai-sdlc/verdicts/.gitkeep': '',
   },
 };
 

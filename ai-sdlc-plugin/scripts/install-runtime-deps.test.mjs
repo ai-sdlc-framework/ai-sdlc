@@ -104,6 +104,10 @@ for spec in "\${specs[@]}"; do
       mkdir -p "$prefix/node_modules/@ai-sdlc/plugin-mcp-server/dist"
       echo "#!/usr/bin/env node" > "$prefix/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js"
       ;;
+    @ai-sdlc/orchestrator)
+      mkdir -p "$prefix/node_modules/@ai-sdlc/orchestrator/dist/runtime"
+      echo "export const x = 1;" > "$prefix/node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js"
+      ;;
   esac
 done
 `
@@ -180,6 +184,41 @@ after(() => {
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('plugin manifests — runtimeDependencies must not drift (AISDLC-554)', () => {
+  // The repo ships TWO manifests: ai-sdlc-plugin/plugin.json (which
+  // install-runtime-deps.sh itself reads, via "$PLUGIN_DIR/plugin.json") and
+  // ai-sdlc-plugin/.claude-plugin/plugin.json (the marketplace-canonical
+  // manifest). Nothing enforced that their runtimeDependencies agree, so a bump
+  // applied to one could silently never reach a marketplace-installed adopter —
+  // which is exactly the production path AISDLC-554 exists to unblock. Whichever
+  // file the installer actually reads, this keeps the answer irrelevant.
+  const pluginRoot = join(__dirname, '..');
+  const topLevel = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf-8'));
+  const marketplace = JSON.parse(
+    readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf-8'),
+  );
+
+  it('both manifests declare identical runtimeDependencies', () => {
+    assert.deepEqual(
+      marketplace.runtimeDependencies,
+      topLevel.runtimeDependencies,
+      'ai-sdlc-plugin/plugin.json and ai-sdlc-plugin/.claude-plugin/plugin.json must declare the same runtimeDependencies',
+    );
+  });
+
+  it('both declare @ai-sdlc/orchestrator, which carries the attestation signing runtime', () => {
+    for (const [label, manifest] of [
+      ['plugin.json', topLevel],
+      ['.claude-plugin/plugin.json', marketplace],
+    ]) {
+      assert.ok(
+        manifest.runtimeDependencies?.['@ai-sdlc/orchestrator'],
+        `${label} must declare @ai-sdlc/orchestrator`,
+      );
+    }
+  });
+});
 
 describe('install-runtime-deps.sh — script exists and is executable', () => {
   it('script file exists', () => {
@@ -264,7 +303,8 @@ describe('install-runtime-deps.sh — npm invocation contract', () => {
   it('passes explicit package specs as positional args (not relying on package.json)', () => {
     const pluginDir = join(workDir, 'invocation-contract');
     writePluginJson(pluginDir, {
-      '@ai-sdlc/pipeline-cli': '^0.10.0',
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
       '@ai-sdlc/plugin-mcp-server': '0.9.2',
     });
     const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
@@ -276,8 +316,12 @@ describe('install-runtime-deps.sh — npm invocation contract', () => {
 
     // Critical: positional specs are present (the AISDLC-441 load-bearing fix).
     assert.ok(
-      args.includes('@ai-sdlc/pipeline-cli@^0.10.0'),
+      args.includes('@ai-sdlc/pipeline-cli@^0.14.0'),
       'must pass pipeline-cli spec as positional arg',
+    );
+    assert.ok(
+      args.includes('@ai-sdlc/orchestrator@^0.14.0'),
+      'must pass orchestrator spec as positional arg (AISDLC-554: carries the signing runtime)',
     );
     assert.ok(
       args.includes('@ai-sdlc/plugin-mcp-server@0.9.2'),
@@ -302,7 +346,8 @@ describe('install-runtime-deps.sh — npm invocation contract', () => {
   it('writes the .ai-sdlc-installed sentinel after successful install', () => {
     const pluginDir = join(workDir, 'sentinel');
     writePluginJson(pluginDir, {
-      '@ai-sdlc/pipeline-cli': '^0.10.0',
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
       '@ai-sdlc/plugin-mcp-server': '0.9.2',
     });
     const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
@@ -320,7 +365,8 @@ describe('install-runtime-deps.sh — idempotence', () => {
   it('skips npm install when both entry-point files already exist', () => {
     const pluginDir = join(workDir, 'idempotent');
     writePluginJson(pluginDir, {
-      '@ai-sdlc/pipeline-cli': '^0.10.0',
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
       '@ai-sdlc/plugin-mcp-server': '0.9.2',
     });
     // Pre-create the entry-point files (simulating a prior successful install).
@@ -328,6 +374,13 @@ describe('install-runtime-deps.sh — idempotence', () => {
     writeFileSync(join(pluginDir, 'node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs'), '');
     mkdirSync(join(pluginDir, 'node_modules/@ai-sdlc/plugin-mcp-server/dist'), { recursive: true });
     writeFileSync(join(pluginDir, 'node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js'), '');
+    mkdirSync(join(pluginDir, 'node_modules/@ai-sdlc/orchestrator/dist/runtime'), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(pluginDir, 'node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js'),
+      '',
+    );
 
     const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: false });
     const { exitCode, stderr, invocations } = runScript({
@@ -338,6 +391,70 @@ describe('install-runtime-deps.sh — idempotence', () => {
     assert.equal(exitCode, 0);
     assert.match(stderr, /already installed/);
     assert.equal(invocations.length, 0, 'idempotence guard must skip npm entirely');
+  });
+
+  it('does NOT early-exit when only the pre-AISDLC-554 packages are installed', () => {
+    // The upgrade path: an adopter whose plugin predates AISDLC-554 already has
+    // pipeline-cli + mcp-server. If the idempotence guard ignores the newly
+    // declared orchestrator dependency, it early-exits, the signing runtime is
+    // never fetched, and attestation stays silently unavailable.
+    const pluginDir = join(workDir, 'idempotent-upgrade');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    mkdirSync(join(pluginDir, 'node_modules/@ai-sdlc/pipeline-cli/bin'), { recursive: true });
+    writeFileSync(join(pluginDir, 'node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs'), '');
+    mkdirSync(join(pluginDir, 'node_modules/@ai-sdlc/plugin-mcp-server/dist'), { recursive: true });
+    writeFileSync(join(pluginDir, 'node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js'), '');
+    // orchestrator deliberately absent.
+
+    const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
+    const { exitCode, invocations } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(
+      exitCode,
+      0,
+      `must heal the missing dependency; invocations=${invocations.length}`,
+    );
+    assert.equal(invocations.length, 1, 'must actually run npm rather than early-exit');
+    assert.ok(
+      existsSync(
+        join(pluginDir, 'node_modules/@ai-sdlc/orchestrator/dist/runtime/attestations.js'),
+      ),
+      'orchestrator runtime must exist after the heal',
+    );
+  });
+
+  it('fails verification when npm exits 0 without producing the orchestrator runtime', () => {
+    // The sentinel below makes future runs skip installing, so a silent
+    // half-install must NOT be stamped as complete.
+    const pluginDir = join(workDir, 'partial-install');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    // Stub npm creates everything EXCEPT orchestrator.
+    const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
+    const npmPath = join(binDir, 'npm');
+    writeFileSync(
+      npmPath,
+      readFileSync(npmPath, 'utf-8').replace(
+        '    @ai-sdlc/orchestrator)',
+        '    @ai-sdlc/orchestrator-disabled)',
+      ),
+    );
+    chmodSync(npmPath, 0o755);
+
+    const { exitCode, stderr } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+    assert.notEqual(exitCode, 0, 'must fail rather than stamp a partial install as complete');
+    assert.match(stderr, /@ai-sdlc\/orchestrator/);
+    assert.ok(
+      !existsSync(join(pluginDir, 'node_modules', '.ai-sdlc-installed')),
+      'must not write the completion sentinel on a failed verification',
+    );
   });
 });
 
@@ -356,7 +473,8 @@ describe('install-runtime-deps.sh — fresh-install simulation (AISDLC-441 happy
     // declared in plugin.json.
     const pluginDir = join(workDir, 'fresh-install');
     writePluginJson(pluginDir, {
-      '@ai-sdlc/pipeline-cli': '^0.10.0',
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
       '@ai-sdlc/plugin-mcp-server': '0.9.2',
     });
     // CRITICAL: no node_modules pre-exists. This is the fresh-install state.
@@ -395,7 +513,8 @@ describe('install-runtime-deps.sh — post-install verification', () => {
     // catch this and surface a helpful error rather than reporting success.
     const pluginDir = join(workDir, 'silent-network-fail');
     writePluginJson(pluginDir, {
-      '@ai-sdlc/pipeline-cli': '^0.10.0',
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.14.0',
       '@ai-sdlc/plugin-mcp-server': '0.9.2',
     });
     const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: false, exitCode: 0 });

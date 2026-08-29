@@ -20,8 +20,17 @@
  * the real adapters.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { join, dirname, basename, isAbsolute, relative } from 'node:path';
 import { execFileSync, execSync } from 'node:child_process';
 import type { DerivedGates } from '../../compliance/types.js';
 import { BASELINE_DERIVED_GATES } from '../../compliance/types.js';
@@ -799,6 +808,47 @@ export interface FeatureAdapters {
   appendOnce: (path: string, contents: string, sentinel: string) => 'appended' | 'skipped';
   /** mkdir -p. Production = `node:fs.mkdirSync({ recursive: true })`. */
   mkdirp: (path: string) => void;
+  /**
+   * Read a text file, or `null` if it doesn't exist / can't be read.
+   * Production = `node:fs.readFileSync`. AISDLC-555: used to detect whether
+   * a project declares `husky` in package.json before deciding where to
+   * install the attestation-sign pre-push hook.
+   */
+  readTextFile: (path: string) => string | null;
+  /**
+   * chmod the file executable (0o755). Production =
+   * `node:fs.chmodSync(path, 0o755)`. AISDLC-555: a freshly WRITTEN
+   * `.husky/pre-push` or `.git/hooks/pre-push` must be executable or git
+   * silently never runs it — the AC #2 "working hook" requirement.
+   */
+  chmodExecutable: (path: string) => void;
+  /**
+   * Resolve `path` through symlinks, or `null` when it does not exist.
+   * Production = `node:fs.realpathSync`.
+   *
+   * AISDLC-555: `outsideProject` is decided with `path.relative`, which is
+   * purely LEXICAL — a repo that commits `.husky` (or `.husky/pre-push`) as a
+   * symlink pointing out of the tree still looks inside it, so neither the
+   * machine-wide refusal nor any string check fires, while `writeFileSync` and
+   * `chmodSync` happily follow the link. Resolving the real path is the only
+   * way to tell those apart.
+   */
+  realpath: (path: string) => string | null;
+  /**
+   * True when `path` itself is a symlink (does NOT follow it). Production =
+   * `node:fs.lstatSync(path).isSymbolicLink()`, `false` when `path` does not
+   * exist or `lstat` throws for any other reason.
+   *
+   * AISDLC-555 follow-up (dangling-symlink escape): `realpath` alone cannot
+   * distinguish "not a symlink" from "a symlink whose final component does
+   * not exist yet" — `realpathSync` throws ENOENT for the latter too, so the
+   * caller's `realpath(hookPath) ?? realpath(dirname(hookPath))` fallback
+   * silently resolves to the (real, in-project) parent directory and
+   * containment passes even though `hookPath` is a symlink pointing
+   * anywhere. `isSymlink` lets the caller ask the orthogonal question
+   * directly and refuse when a symlink's target can't be resolved at all.
+   */
+  isSymlink: (path: string) => boolean;
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /** Run a shell command (used for `gh api`). Production = `execSync`. */
@@ -982,6 +1032,41 @@ export function buildProductionAdapters(): FeatureAdapters {
     },
     mkdirp: (path) => mkdirSync(path, { recursive: true }),
     exists: (path) => existsSync(path),
+    readTextFile: (path) => {
+      try {
+        return existsSync(path) ? readFileSync(path, 'utf-8') : null;
+      } catch {
+        return null;
+      }
+    },
+    chmodExecutable: (path) => {
+      try {
+        // AISDLC-555 round-1 security review: do NOT force 0o755. That widens
+        // an adopter's deliberately-restrictive mode (0600 → world-readable
+        // and world-executable) on a file that sits in their repo. Add only
+        // the exec bits and preserve everything else they chose.
+        const current = statSync(path).mode & 0o777;
+        chmodSync(path, current | 0o111);
+      } catch {
+        // Best-effort — a chmod failure (e.g. read-only filesystem) should
+        // not abort the whole wizard run; the operator sees the created
+        // file either way and can chmod it themselves if needed.
+      }
+    },
+    realpath: (path) => {
+      try {
+        return realpathSync(path);
+      } catch {
+        return null; // does not exist (or is unreadable) — caller decides.
+      }
+    },
+    isSymlink: (path) => {
+      try {
+        return lstatSync(path).isSymbolicLink();
+      } catch {
+        return false; // does not exist / unreadable — not a symlink to us.
+      }
+    },
     runCommand: (cmd, args) => {
       try {
         // Use `execFileSync` (no shell) so args are passed as a true
@@ -1143,6 +1228,204 @@ export async function resolveFeatureSelection(
   return sel;
 }
 
+// ── Attestation pre-push hook target resolution (AISDLC-555 AC #4) ───────
+
+/** Resolved target for the attestation-sign pre-push hook. */
+export interface HookTarget {
+  /** Absolute path to the hook file. */
+  path: string;
+  /** Path relative to `projectDir`, for logging/result tracking. */
+  relPath: string;
+  /** True when the target is `.husky/pre-push`; false for `.git/hooks/pre-push`. */
+  isHusky: boolean;
+  /**
+   * True when the resolved hook lives OUTSIDE `projectDir` — e.g. a global
+   * `core.hooksPath = ~/.githooks`, which is shared by every repository on the
+   * machine. Callers warn before writing there: silently appending to a
+   * machine-wide hook is not something an adopter running `init` on one repo
+   * would expect.
+   */
+  outsideProject: boolean;
+  /**
+   * How the target was decided. Load-bearing, not cosmetic: `core.hooksPath`
+   * resolving outside the project usually means a GLOBAL or SYSTEM git setting
+   * shared by every repository on the machine, which is refused; a
+   * `git-hooks-dir` outside the project is a linked worktree's or submodule's
+   * common dir, which is still this one repository and is fine.
+   */
+  source: 'core.hooksPath' | 'git-hooks-dir' | 'husky-default';
+}
+
+/**
+ * Decide whether the attestation-sign hook belongs at `.husky/pre-push` or
+ * `.git/hooks/pre-push` (AISDLC-555 AC #4 — "handle repos that do not use
+ * husky at all... decided explicitly, not left undefined").
+ *
+ * Signal: read `package.json` at the project root and look for a `husky`
+ * entry in `dependencies` or `devDependencies`.
+ *
+ *   - package.json parses AND does NOT declare `husky`  → `.git/hooks/pre-push`
+ *     (git's native hook path — always executed regardless of husky
+ *     configuration; writing `.husky/pre-push` here would be silently inert
+ *     since nothing ever points `core.hooksPath` at `.husky/`).
+ *   - Every other case (package.json missing, unreadable, malformed, or DOES
+ *     declare husky) → `.husky/pre-push` (the historical default — fails
+ *     open to the common case: most repos running `ai-sdlc init
+ *     --with-attestation` are JS/TS projects that already use, or will
+ *     shortly `npm install` and pick up, husky).
+ */
+export function resolveHookTarget(projectDir: string, adapters: FeatureAdapters): HookTarget {
+  // AISDLC-555 rounds 1-2: ASK git where hooks live rather than guessing.
+  // `rev-parse --git-path hooks` is the only answer that is right in all the
+  // shapes that bit earlier rounds of this task:
+  //
+  //   - it honours `core.hooksPath`, which git consults BEFORE `.git/hooks`
+  //     (lefthook, a global `~/.githooks`, husky v9);
+  //   - it expands a `~`-prefixed value the way git itself does — `isAbsolute`
+  //     says false for `~/.githooks` and `join` would have produced a literal
+  //     `<projectDir>/~/.githooks/pre-push`;
+  //   - it resolves the COMMON dir for linked worktrees and submodules, where
+  //     `.git` is a FILE and `join(dir, '.git/hooks')` fails with ENOTDIR.
+  //
+  // The pre-round-1 docblock claimed `.git/hooks/pre-push` is "always executed
+  // regardless of husky configuration". That is simply false, and believing it
+  // is how this task's own fix shipped a silently-inert hook twice.
+  //
+  // Two git calls, because they answer different questions and conflating them
+  // is itself a bug: `rev-parse --git-path hooks` always returns SOMETHING
+  // (defaulting to `.git/hooks`), so it cannot distinguish "explicitly
+  // configured" from "not configured". A repo that declares husky but has not
+  // run `husky install` yet reports `.git/hooks` — installing there works right
+  // up until husky sets core.hooksPath and git stops reading `.git/hooks` at
+  // all. So: `config --get` decides WHETHER it is set, `rev-parse` RESOLVES it.
+  const configured = adapters.runCommand('git', [
+    '-C',
+    projectDir,
+    'config',
+    '--get',
+    'core.hooksPath',
+  ]);
+  const configuredValue = configured.exitCode === 0 ? configured.stdout.trim() : '';
+  const hooksPathIsSet = configuredValue !== '';
+  if (configured.exitCode === 0 && configuredValue === '') {
+    // `core.hooksPath = ""` — git reports success with an empty value. Treating
+    // it as configured would resolve nowhere; treating it as unset silently is
+    // how an inert hook gets installed. Say so.
+    adapters.log(
+      `  NOTE core.hooksPath is set to an empty value — treating it as unset.` +
+        ` If hooks are not running, unset it explicitly: git config --unset core.hooksPath`,
+    );
+  }
+  const probe = adapters.runCommand('git', ['-C', projectDir, 'rev-parse', '--git-path', 'hooks']);
+  const gitHooks = probe.exitCode === 0 ? probe.stdout.trim() : '';
+
+  if (hooksPathIsSet && gitHooks) {
+    let base = isAbsolute(gitHooks) ? gitHooks : join(projectDir, gitHooks);
+
+    // husky v9 sets `core.hooksPath = .husky/_` — its own generated internals,
+    // whose `.gitignore` is literally `*`, regenerated by every `husky` run
+    // (i.e. every `npm install`, via the `prepare` script). A hook installed
+    // there works exactly until the next install and then vanishes with no
+    // signal — the precise failure this task exists to eliminate, aimed at the
+    // most common adopter topology.
+    //
+    // The v9 wrapper (`.husky/_/h`) runs `$(dirname $(dirname $0))/<hookname>`
+    // and exits 0 when it is absent, so the durable, adopter-owned target is
+    // the PARENT directory. Verified against husky 9 by executing a real
+    // `git push`, not by reading the wrapper.
+    //
+    // `husky <dir>` supports a custom directory (`core.hooksPath =
+    // .config/husky/_`), and on a fresh clone the `_` internals may not exist
+    // on disk yet — `_/.gitignore` is `*`, so nothing under it is committed.
+    // Neither the `.husky` parent name nor the wrapper files would match, so
+    // also accept "the project declares husky" as evidence of the layout.
+    const looksLikeHuskyInternals =
+      basename(base) === '_' &&
+      (basename(dirname(base)) === '.husky' ||
+        adapters.exists(join(base, 'h')) ||
+        adapters.exists(join(base, 'husky.sh')) ||
+        projectDeclaresHusky(projectDir, adapters, false));
+    if (looksLikeHuskyInternals) {
+      base = dirname(base);
+    }
+
+    const rel = relative(projectDir, base);
+    const outsideProject = rel.startsWith('..') || isAbsolute(rel);
+    return {
+      path: join(base, 'pre-push'),
+      // Outside the project there is no meaningful relative path to show, so
+      // log the absolute one — an adopter needs to see that it is machine-wide.
+      relPath: outsideProject ? join(base, 'pre-push') : join(rel, 'pre-push'),
+      isHusky: base.includes('husky'),
+      outsideProject,
+      // Distinguished from the common-dir case below because the remedies and
+      // the risks are completely different: a configured hooks path outside the
+      // project is very likely a GLOBAL or SYSTEM setting shared by every repo
+      // on the machine, whereas a common dir is still this one repository.
+      source: 'core.hooksPath',
+    };
+  }
+
+  const isHusky = projectDeclaresHusky(projectDir, adapters, true);
+  if (isHusky) {
+    // husky is declared but has not configured core.hooksPath yet (no
+    // `husky install` run). `.husky/pre-push` is where husky will look once
+    // it does, and it is the adopter-owned, committed location either way.
+    return {
+      path: join(projectDir, '.husky', 'pre-push'),
+      relPath: '.husky/pre-push',
+      isHusky: true,
+      outsideProject: false,
+      source: 'husky-default',
+    };
+  }
+
+  // No husky, no core.hooksPath: git's own hooks dir. Prefer the path git
+  // reports over hand-building `<dir>/.git/hooks` — in a linked worktree or
+  // submodule `.git` is a FILE, so the hand-built path fails with ENOTDIR and
+  // aborts init, and the real hooks live in the common dir anyway.
+  const base = gitHooks
+    ? isAbsolute(gitHooks)
+      ? gitHooks
+      : join(projectDir, gitHooks)
+    : join(projectDir, '.git', 'hooks');
+  const rel = relative(projectDir, base);
+  const outsideProject = rel.startsWith('..') || isAbsolute(rel);
+  return {
+    path: join(base, 'pre-push'),
+    relPath: outsideProject ? join(base, 'pre-push') : join(rel, 'pre-push'),
+    isHusky: false,
+    outsideProject,
+    source: 'git-hooks-dir',
+  };
+}
+
+/**
+ * True when the project declares `husky` as a (dev)dependency.
+ *
+ * Fails OPEN (returns true) when package.json is missing or malformed: the
+ * pre-AISDLC-555 default was `.husky/pre-push`, and an adopter-owned committed
+ * file is a safer place to be wrong than git's internal hooks directory.
+ */
+function projectDeclaresHusky(
+  projectDir: string,
+  adapters: FeatureAdapters,
+  whenUnknown: boolean,
+): boolean {
+  const pkgRaw = adapters.readTextFile(join(projectDir, 'package.json'));
+  if (pkgRaw === null) return whenUnknown;
+  try {
+    const pkg = JSON.parse(pkgRaw) as {
+      dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
+    };
+    const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    return 'husky' in deps;
+  } catch {
+    return whenUnknown;
+  }
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────────
 
 /** Return value of `applyFeatureSelection` — what was actually written. */
@@ -1241,38 +1524,275 @@ export async function applyFeatureSelection(
     }
   }
 
-  // Husky pre-push sign hook is a separate concern from the
-  // FeatureTemplateSet because it's an APPEND (not a write-from-empty)
-  // — adopters often already have a .husky/pre-push from their existing
-  // tooling and we don't want to clobber it. Only fired when attestation
-  // is on.
+  // Pre-push sign hook is a separate concern from the FeatureTemplateSet
+  // because it's an APPEND (not a write-from-empty) — adopters often
+  // already have a pre-push hook from their existing tooling and we don't
+  // want to clobber it. Only fired when attestation is on.
+  //
+  // AISDLC-555 AC #4: decide the hook TARGET explicitly rather than always
+  // assuming husky. `resolveHookTarget` inspects package.json for a
+  // declared `husky` dependency; when the repo positively does NOT declare
+  // husky, the hook is written straight to `.git/hooks/pre-push` — git's
+  // own native hook path, which git always executes regardless of husky
+  // configuration (writing `.husky/pre-push` into a repo that never wires
+  // `core.hooksPath` there would be silently inert). Every other case
+  // (package.json missing/unreadable, or husky declared) keeps the
+  // pre-AISDLC-555 default of `.husky/pre-push`.
   if (selection.attestation && !flags.dryRun) {
-    const hookPath = join(projectDir, '.husky', 'pre-push');
-    if (!adapters.exists(hookPath)) {
-      // No existing hook — write a minimal one with the sign block.
-      adapters.mkdirp(dirname(hookPath));
-      adapters.writeFile(
-        hookPath,
-        `#!/usr/bin/env bash\nset -euo pipefail\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
+    const {
+      path: hookPath,
+      relPath: hookRelPath,
+      isHusky: hookIsHusky,
+      outsideProject: hookOutsideProject,
+      source: hookSource,
+    } = resolveHookTarget(projectDir, adapters);
+    // Set when the target is refused; every other feature still applies, only
+    // the hook install is skipped.
+    let refuseHookInstall = false;
+    // Say where the hook landed and why. Round-2 review: the resolution is now
+    // non-obvious (git-reported hooks dir, with a husky-internals step-up), so
+    // an adopter debugging "why did nothing sign?" needs the decision visible.
+    adapters.log(`  hook target ${hookRelPath} (${hookIsHusky ? 'husky' : 'git hooks dir'})`);
+
+    // Round-3 security review (medium): `git config --get core.hooksPath` reads
+    // ALL scopes, so a GLOBAL or SYSTEM value — `~/.githooks`, an org-mandated
+    // `/etc/team-hooks` — makes this fire for a repo whose own config never
+    // opted in. Appending there puts the key-bearing signer on EVERY push in
+    // EVERY repo on the machine, including untrusted clones, where it would
+    // read that repo's `.active-task` and verdicts and invoke the signer with
+    // the operator's Ed25519 key. A per-repo `init` must not silently become a
+    // machine-wide execution surface, and a warning is not a consent gate when
+    // `init --yes` runs non-interactively. So: refuse, and make the opt-in
+    // explicit and auditable.
+    //
+    // Deliberately scoped to `core.hooksPath`. A linked worktree or submodule
+    // also resolves outside the project (git's common dir), but that is still
+    // this one repository — refusing there would break a legitimate topology.
+    if (hookOutsideProject && hookSource === 'core.hooksPath') {
+      if (process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS === '1') {
+        adapters.log(
+          `  WARNING installing into ${hookRelPath}, which is OUTSIDE this project.` +
+            ` core.hooksPath is set globally, so the sign block will run on every` +
+            ` push in every repository on this machine.` +
+            ` Proceeding because AI_SDLC_ALLOW_GLOBAL_HOOKS=1.`,
+        );
+      } else {
+        adapters.log(
+          `  REFUSED to install the attestation hook: core.hooksPath resolves to` +
+            ` ${hookRelPath}, OUTSIDE this project — almost certainly a global or` +
+            ` system git setting shared by every repository on this machine.`,
+        );
+        adapters.log(
+          `    Installing there would run the attestation signer, with your signing` +
+            ` key, on every push in every repo — including ones you do not control.`,
+        );
+        adapters.log(
+          `    Fix by scoping the hooks path to this repo:` +
+            ` git -C . config core.hooksPath .husky` +
+            ` — then re-run. To install machine-wide anyway (rarely what you want):` +
+            ` AI_SDLC_ALLOW_GLOBAL_HOOKS=1 ai-sdlc init --with-attestation`,
+        );
+        result.skipped.push(hookRelPath);
+        refuseHookInstall = true;
+      }
+    } else if (hookOutsideProject) {
+      // Worktree / submodule common dir: real, but a different situation with a
+      // different remedy. Round-3 review flagged the previous shared wording as
+      // factually wrong here — it named core.hooksPath, which is not set.
+      adapters.log(
+        `  NOTE ${hookRelPath} is outside this working tree — it is this` +
+          ` repository's shared git hooks directory (linked worktree or submodule),` +
+          ` so the sign block also applies to sibling worktrees of the same repo.`,
       );
-      result.created.push('.husky/pre-push');
-      adapters.log(`  created .husky/pre-push`);
+    }
+
+    // Symlink containment. Only meaningful when we BELIEVE the target is
+    // inside the project: the worktree-common-dir and explicit
+    // AI_SDLC_ALLOW_GLOBAL_HOOKS cases are knowingly outside and already
+    // handled above. Here the lexical check said "inside", so if the real path
+    // says otherwise, something in the repo is redirecting us — refuse rather
+    // than append a shell snippet to, and set the exec bit on, a file outside
+    // the tree (`~/.bashrc` being the obvious target).
+    if (!refuseHookInstall && !hookOutsideProject) {
+      const realProject = adapters.realpath(projectDir);
+      const hookDir = dirname(hookPath);
+      // Permissive when `realProject` itself can't be resolved (mirrors the
+      // pre-existing fallback's `realProject !== null` gate): we can only
+      // flag a candidate as "definitely outside" when we actually know what
+      // "inside" means. A NULL `real` here always means "dangling" and is
+      // handled as its own, unconditional refusal below — this helper is
+      // only ever called with a non-null resolved path.
+      const isDefinitelyOutside = (real: string): boolean => {
+        if (realProject === null) return false;
+        const rel = relative(realProject, real);
+        return rel.startsWith('..') || isAbsolute(rel);
+      };
+
+      // Check `hookPath` and its parent directory (`.husky` itself may be the
+      // symlink) EXPLICITLY for symlink-ness, rather than only resolving the
+      // "deepest existing component" as a fallback. A DANGLING final-component
+      // symlink — `.husky/pre-push` (or `.husky` itself) pointing at a path
+      // that does not exist YET — makes `realpath(hookPath)` throw ENOENT just
+      // like "not a symlink at all" does, so falling straight to
+      // `realpath(dirname(hookPath))` silently resolves to the real,
+      // in-project parent and containment passes even though the final
+      // component redirects somewhere unknown. `isSymlink` lets us ask "is
+      // this a symlink" independently of whether it currently resolves, so a
+      // dangling link is refused UNCONDITIONALLY — a symlink we cannot
+      // resolve at all is never treated as "probably fine".
+      const candidates: Array<{ path: string; relPath: string }> = [
+        { path: hookPath, relPath: hookRelPath },
+        { path: hookDir, relPath: relative(projectDir, hookDir) || '.' },
+      ];
+      for (const { path: candidatePath, relPath: candidateRelPath } of candidates) {
+        if (refuseHookInstall) break;
+        if (!adapters.isSymlink(candidatePath)) continue;
+        const realCandidate = adapters.realpath(candidatePath);
+        if (realCandidate === null) {
+          adapters.log(
+            `  REFUSED to install the attestation hook: ${candidateRelPath} is a symlink` +
+              ` whose target does not exist (a "dangling" symlink). Refusing rather than` +
+              ` following it — writing through a dangling symlink would create a new file` +
+              ` (with the exec bit set) at whatever path the link names, anywhere on disk.` +
+              ` Remove the symlink and re-run.`,
+          );
+        } else if (isDefinitelyOutside(realCandidate)) {
+          adapters.log(
+            `  REFUSED to install the attestation hook: ${candidateRelPath} resolves to` +
+              ` ${realCandidate}, outside this project. A symlink in the repository is` +
+              ` redirecting the hook path.`,
+          );
+          adapters.log(
+            `    Refusing rather than appending a shell snippet to a file outside the` +
+              ` project and marking it executable. Remove the symlink and re-run.`,
+          );
+        } else {
+          continue; // resolves, and stays inside the project — fine.
+        }
+        result.skipped.push(hookRelPath);
+        refuseHookInstall = true;
+      }
+
+      // Fallback for the case where neither `hookPath` nor its immediate
+      // parent is itself a symlink, but some other already-existing component
+      // resolves outside the project (e.g. a symlink further up the tree).
+      // Resolve the deepest existing component and check containment.
+      if (!refuseHookInstall) {
+        const realTarget = adapters.realpath(hookPath) ?? adapters.realpath(hookDir) ?? null;
+        if (realTarget !== null && isDefinitelyOutside(realTarget)) {
+          adapters.log(
+            `  REFUSED to install the attestation hook: ${hookRelPath} resolves to` +
+              ` ${realTarget}, outside this project. A symlink in the repository is` +
+              ` redirecting the hook path.`,
+          );
+          adapters.log(
+            `    Refusing rather than appending a shell snippet to a file outside the` +
+              ` project and marking it executable. Remove the symlink and re-run.`,
+          );
+          result.skipped.push(hookRelPath);
+          refuseHookInstall = true;
+        }
+      }
+    }
+
+    if (refuseHookInstall) {
+      // Refused above — nothing further to do for the hook.
+    } else if (!adapters.exists(hookPath)) {
+      // No existing hook — write a minimal one with the sign block.
+      //
+      // Defense-in-depth: the symlink-containment check above should already
+      // have refused a dangling `.husky` (or `.husky/pre-push`) symlink before
+      // we get here, but `mkdirp` on a path whose parent is a dangling symlink
+      // throws EEXIST (the symlink itself exists; what it points at does not).
+      // Wrap the create sequence so a gap in that check — or a TOCTOU race
+      // where the symlink appears between the check and this write — aborts
+      // only the hook install, not the entire wizard with an unhandled
+      // exception.
+      try {
+        adapters.mkdirp(dirname(hookPath));
+        adapters.writeFile(
+          hookPath,
+          `#!/usr/bin/env bash\nset -euo pipefail\n\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
+        );
+        adapters.chmodExecutable(hookPath);
+        result.created.push(hookRelPath);
+        adapters.log(`  created ${hookRelPath}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        adapters.log(
+          `  REFUSED to install the attestation hook: could not create ${hookRelPath}` +
+            ` (${message}). This usually means a path component (e.g. \`.husky\`) is a` +
+            ` symlink pointing at a target that does not exist. Remove it and re-run.`,
+        );
+        result.skipped.push(hookRelPath);
+      }
     } else {
+      // AISDLC-555 round-1 security review: appending lands at EOF, so an
+      // existing hook that ends in a top-level `exit 0` — an extremely common
+      // shape — makes our block permanently unreachable while init happily
+      // reports "appended sign block". Warn rather than silently succeed;
+      // rewriting someone else's hook is not ours to do.
+      const existing = adapters.readTextFile(hookPath) ?? '';
+      if (!existing.includes('# ai-sdlc:attestation-sign-block')) {
+        const hasTopLevelExit = existing
+          .split('\n')
+          // Best-effort: covers `exit 0`, indented, `;`-terminated, commented,
+          // and CRLF (`\s` eats the trailing `\r`). Deliberately does NOT try
+          // to parse shell — `exit $rc`, `exec other-hook` and same-line
+          // `if ...; then exit 0; fi` are known misses. A missed warning is a
+          // worse hook than it could be; a false one would train adopters to
+          // ignore it.
+          .some((line) => /^\s*exit\s+0\s*;?\s*(#.*)?$/.test(line));
+        if (hasTopLevelExit) {
+          adapters.log(
+            `  WARNING ${hookRelPath} contains a top-level \`exit 0\` — the appended` +
+              ` sign block will never be reached. Move the block above that line,` +
+              ` or the attestation will silently never be signed.`,
+          );
+        }
+      }
       const status = adapters.appendOnce(
         hookPath,
         HUSKY_PREPUSH_SIGN_SNIPPET,
         '# ai-sdlc:attestation-sign-block',
       );
+      // AC #2 requires a WORKING hook: even when the hook file pre-existed
+      // (append path), make sure it's executable — an adopter's hand-authored
+      // pre-push script may not have had the bit set, and git silently
+      // never runs a non-executable hook.
+      adapters.chmodExecutable(hookPath);
       if (status === 'appended') {
-        adapters.log(`  updated .husky/pre-push (appended sign block)`);
+        adapters.log(`  updated ${hookRelPath} (appended sign block)`);
       } else {
-        result.skipped.push('.husky/pre-push');
-        adapters.log(`  skip .husky/pre-push (sign block already present)`);
+        result.skipped.push(hookRelPath);
+        adapters.log(`  skip ${hookRelPath} (sign block already present)`);
       }
     }
   } else if (selection.attestation && flags.dryRun) {
-    result.wouldCreate.push('.husky/pre-push');
-    adapters.log('  would update .husky/pre-push (sign block)');
+    const {
+      relPath: hookRelPath,
+      outsideProject: hookOutsideProject,
+      source: hookSource,
+    } = resolveHookTarget(projectDir, adapters);
+    // Round-4 review (security + code, independently): the preview must mirror
+    // the refusal. Reporting "would update <machine-wide path>" for a run that
+    // will actually refuse is exactly backwards — the point of refusing is to
+    // make this decision legible before anything happens.
+    if (
+      hookOutsideProject &&
+      hookSource === 'core.hooksPath' &&
+      process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS !== '1'
+    ) {
+      result.skipped.push(hookRelPath);
+      adapters.log(
+        `  would REFUSE the attestation hook: core.hooksPath resolves to` +
+          ` ${hookRelPath}, OUTSIDE this project (set AI_SDLC_ALLOW_GLOBAL_HOOKS=1` +
+          ` to install machine-wide anyway).`,
+      );
+    } else {
+      result.wouldCreate.push(hookRelPath);
+      adapters.log(`  would update ${hookRelPath} (sign block)`);
+    }
   }
 
   // Branch protection (always last — depends on the gate workflow being

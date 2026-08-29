@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateGate7, findInvisibleDependencies } from './gate-7-deps.js';
+import {
+  evaluateGate7,
+  extractDeclaredDependencyRefs,
+  extractFrontmatterListField,
+  findInvisibleDependencies,
+} from './gate-7-deps.js';
 import type { IssueInput } from '../types.js';
 
 function input(body: string, references?: string[]): IssueInput {
   return { source: 'backlog', id: 'AISDLC-1', title: 't', body, references };
+}
+
+function inputWithDeclared(body: string, declaredDependencyRefs: string[]): IssueInput {
+  return { source: 'backlog', id: 'AISDLC-1', title: 't', body, declaredDependencyRefs };
 }
 
 describe('findInvisibleDependencies', () => {
@@ -147,5 +156,148 @@ describe('evaluateGate7', () => {
   it('passes when explicit references[] covers the body ref', () => {
     const v = evaluateGate7(input('depends on AISDLC-101', ['AISDLC-101']));
     expect(v.verdict).toBe('pass');
+  });
+});
+
+// ── AISDLC-563 — frontmatter dependency comparison ─────────────────────
+//
+// Root cause: `refineBacklogTask()` never populated `IssueInput.references`
+// (or any other field) from the task's `dependencies:` / `references:`
+// frontmatter, so Gate 7 always compared against an empty list regardless
+// of what was actually declared. These tests exercise the fix at both
+// layers: the frontmatter parser (`extractFrontmatterListField` /
+// `extractDeclaredDependencyRefs`) and the gate's comparison logic once
+// `declaredDependencyRefs` is populated.
+
+describe('extractFrontmatterListField', () => {
+  it('extracts a block-list form field', () => {
+    const fm = 'id: AISDLC-1\ndependencies:\n  - AISDLC-554\n  - RFC-0011\nstatus: To Do\n';
+    expect(extractFrontmatterListField(fm, 'dependencies')).toEqual(['AISDLC-554', 'RFC-0011']);
+  });
+
+  it('extracts an inline-array form field', () => {
+    const fm = 'id: AISDLC-1\ndependencies: [AISDLC-554, RFC-0011]\n';
+    expect(extractFrontmatterListField(fm, 'dependencies')).toEqual(['AISDLC-554', 'RFC-0011']);
+  });
+
+  it('returns empty array for an empty inline array', () => {
+    const fm = 'id: AISDLC-1\ndependencies: []\n';
+    expect(extractFrontmatterListField(fm, 'dependencies')).toEqual([]);
+  });
+
+  it('returns empty array when the field is absent', () => {
+    const fm = 'id: AISDLC-1\nstatus: To Do\n';
+    expect(extractFrontmatterListField(fm, 'dependencies')).toEqual([]);
+  });
+
+  it('strips quotes from block-list items', () => {
+    const fm = 'dependencies:\n  - \'AISDLC-554\'\n  - "RFC-0011"\n';
+    expect(extractFrontmatterListField(fm, 'dependencies')).toEqual(['AISDLC-554', 'RFC-0011']);
+  });
+
+  it('accepts non-tracked-work-id shapes (file paths) in references:', () => {
+    const fm = 'references:\n  - pipeline-cli/src/dor/upstream-oq-gate.ts\n  - src/foo.ts\n';
+    expect(extractFrontmatterListField(fm, 'references')).toEqual([
+      'pipeline-cli/src/dor/upstream-oq-gate.ts',
+      'src/foo.ts',
+    ]);
+  });
+});
+
+describe('extractDeclaredDependencyRefs', () => {
+  it('merges dependencies: and references: lists', () => {
+    const fm = 'dependencies:\n  - AISDLC-554\nreferences:\n  - src/foo.ts\n';
+    expect(extractDeclaredDependencyRefs(fm)).toEqual(['AISDLC-554', 'src/foo.ts']);
+  });
+
+  it('returns empty array when both fields are absent', () => {
+    expect(extractDeclaredDependencyRefs('id: AISDLC-1\n')).toEqual([]);
+  });
+});
+
+describe('Gate 7 declaredDependencyRefs — real reproductions', () => {
+  // AISDLC-557: frontmatter `dependencies: [AISDLC-554]`, body said
+  // "self-resolve once AISDLC-554 merges to main". Pre-fix, Gate 7 flagged
+  // this because `input.references` / `declaredDependencyRefs` were never
+  // populated from frontmatter at all.
+  it('AISDLC-557 repro: "once AISDLC-554 merges" does not violate when AISDLC-554 is declared', () => {
+    const v = evaluateGate7(
+      inputWithDeclared('This task will self-resolve once AISDLC-554 merges to main.', [
+        'AISDLC-554',
+      ]),
+    );
+    expect(v.verdict).toBe('pass');
+  });
+
+  // AISDLC-561: frontmatter `dependencies: [AISDLC-560]`, body said
+  // "Depends on AISDLC-560 because ...".
+  it('AISDLC-561 repro: "Depends on AISDLC-560 because ..." does not violate when AISDLC-560 is declared', () => {
+    const v = evaluateGate7(
+      inputWithDeclared('Depends on AISDLC-560 because the doctor command must exist first.', [
+        'AISDLC-560',
+      ]),
+    );
+    expect(v.verdict).toBe('pass');
+  });
+
+  it('true positive preserved: body reference with NO frontmatter entry still violates', () => {
+    const v = evaluateGate7(inputWithDeclared('Depends on AISDLC-999 because reasons.', []));
+    expect(v.verdict).toBe('fail');
+    expect(v.finding).toMatch(/tracked-work dependency/);
+  });
+
+  it('a reference declared in references: (not dependencies:) still satisfies the gate', () => {
+    // Simulates ingress-claude.ts merging both fields into declaredDependencyRefs.
+    const v = evaluateGate7(
+      inputWithDeclared('Blocked by AISDLC-700 shipping first.', ['AISDLC-700']),
+    );
+    expect(v.verdict).toBe('pass');
+  });
+
+  it('is case-insensitive between body and declaredDependencyRefs', () => {
+    const v = evaluateGate7(inputWithDeclared('depends on aisdlc-554 finishing', ['AISDLC-554']));
+    expect(v.verdict).toBe('pass');
+  });
+
+  it('is insensitive to surrounding words — only the bare id is compared', () => {
+    // The finding text (if any) would quote 'once AISDLC-554', but the
+    // comparison itself must extract and compare only 'AISDLC-554'.
+    const offenders = findInvisibleDependencies(
+      inputWithDeclared('Do this once AISDLC-554 lands.', ['AISDLC-554']),
+    );
+    expect(offenders.length).toBe(0);
+  });
+
+  it('end-to-end: ingress-style merge of dependencies: + references: covers both real repro phrasings', () => {
+    const declared = extractDeclaredDependencyRefs(
+      'dependencies:\n  - AISDLC-554\nreferences:\n  - some/file.ts\n',
+    );
+    const v1 = evaluateGate7(
+      inputWithDeclared('This will self-resolve once AISDLC-554 merges to main.', declared),
+    );
+    expect(v1.verdict).toBe('pass');
+  });
+
+  // AISDLC-563 round-1 review: YAML comments are legal syntax and both shapes
+  // silently reintroduced the false positive this gate fix removes — an inline
+  // comment on an item folded into the string so it never matched the bare id,
+  // and a comment on the field line made the block regex miss entirely.
+  it('ignores YAML comments on list items and on the field line', () => {
+    const withItemComment = ['---', 'dependencies:', '  - AISDLC-100  # the epic', '---'].join(
+      '\n',
+    );
+    expect(extractFrontmatterListField(withItemComment, 'dependencies')).toEqual(['AISDLC-100']);
+
+    const withFieldComment = ['---', 'dependencies: # see below', '  - AISDLC-100', '---'].join(
+      '\n',
+    );
+    expect(extractFrontmatterListField(withFieldComment, 'dependencies')).toEqual(['AISDLC-100']);
+
+    const inlineWithComment = ['---', 'dependencies: [AISDLC-100] # note', '---'].join('\n');
+    expect(extractFrontmatterListField(inlineWithComment, 'dependencies')).toEqual(['AISDLC-100']);
+
+    // A '#' not preceded by whitespace is NOT a YAML comment — keep it.
+    const hashInValue = ['---', 'references:', '  - docs/a#b.md', '---'].join('\n');
+    expect(extractFrontmatterListField(hashInValue, 'references')).toEqual(['docs/a#b.md']);
   });
 });

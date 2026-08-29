@@ -256,6 +256,86 @@ A fourth rule type, `designReview`, is introduced by RFC-0006 §8.5 as a
 human-judgment gate rather than a programmatic rule — it is not implemented by
 an adapter but by the design review request flow.
 
+## Design review calibration surface (RFC-0006 Addendum A)
+
+The design review layers are calibrated by a principle set plus an exemplar
+bank. See [Design Review Architecture](../concepts/design-review-architecture.md)
+for the conceptual model.
+
+> **Not on the public surface yet.** These symbols live in
+> `reference/src/policy/design-exemplar-bank.ts` but are **not** re-exported
+> from `@ai-sdlc/reference` — `import { createExemplarBank } from '@ai-sdlc/reference'`
+> does not resolve today, and nothing in the monorepo imports them. The same is
+> true of the structural preprocessor
+> (`reference/src/policy/structural-preprocessor.ts`) and the design metrics
+> below. They are documented here because they are shipped, tested code that
+> defines the calibration contract — but treat the shapes as provisional until
+> they are exported.
+
+### `DESIGN_REVIEW_PRINCIPLES`
+
+A frozen list of the seven principles every design reviewer (AI or human) is
+anchored to. Each entry is `{ id, name, description }`; `PrincipleId` is the
+union of the seven ids: `evidence-first`, `deterministic-first`,
+`context-awareness`, `severity-honesty`, `signal-over-noise`,
+`persona-grounding`, `scope-discipline`.
+
+### `DesignExemplar`
+
+A labelled review example used to calibrate reviewers.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | Stable exemplar id |
+| `type` | `'true-positive' \| 'false-positive' \| 'borderline'` | Label |
+| `category` | `string` | Grouping key (e.g. a finding class) |
+| `scenario` | `string` | What the reviewer saw |
+| `verdict` | `string` | The calibrated correct answer |
+| `principle` | `PrincipleId` | Which principle the exemplar illustrates |
+| `confidence` | `number?` | Optional confidence associated with the example |
+| `note` | `string?` | Optional rationale |
+
+### `createExemplarBank(exemplars?)` → `ExemplarBank`
+
+Builds a bank from a list of exemplars (empty by default).
+`parseExemplarsFromYaml(data)` loads them from a YAML document.
+
+`ExemplarBank` methods:
+
+| Method | Returns |
+|---|---|
+| `getAll()` | Every exemplar |
+| `getByCategory(category)` | Exemplars in a category |
+| `getByType(type)` | Exemplars by label |
+| `getByPrinciple(principle)` | Exemplars for one principle |
+| `getById(id)` | A single exemplar, or `undefined` |
+| `getPrinciples()` | The seven principles |
+| `addExemplar(exemplar)` | Adds one — the write side of the feedback flywheel |
+| `countByType()` | Counts per label |
+
+## Design metrics (`DesignMetrics`)
+
+Computed from state-store records for autonomy promotion/demotion (RFC-0006
+§13.2 / §A.10) by `orchestrator/src/design-system-metrics.ts`. All six are
+ratios in `[0, 1]`. Like the exemplar bank above, this module is **not**
+re-exported from `@ai-sdlc/orchestrator` and currently has no callers.
+
+| Field | Meaning |
+|---|---|
+| `designCiPassRate` | Design CI runs that pass on first attempt |
+| `usabilitySimulationPassRate` | Usability simulations that complete successfully |
+| `designReviewApprovalRate` | Reviews approved (any decision except rejected) |
+| `designReviewFirstPassRate` | Reviews approved without any rejection cycle |
+| `designCiAutoFixRate` | Design CI failures auto-fixed by the correction loop |
+| `usabilityFindingAccuracy` | Finding precision — accepted / (accepted + dismissed) |
+
+Per-metric helpers (`computeDesignReviewApprovalRate`,
+`computeDesignReviewFirstPassRate`, `computeUsabilitySimulationPassRate`,
+`computeTokenComplianceTrend`, `computeVisualRegressionPassRate`) are declared
+alongside the aggregate `computeDesignMetrics()` **within that module** — like
+the aggregate, they are not reachable from the `@ai-sdlc/orchestrator` package
+surface.
+
 ## See also
 
 - [RFC-0006 Design System Governance Pipeline](../../spec/rfcs/RFC-0006-design-system-governance-v5-final.md) —
@@ -264,5 +344,7 @@ an adapter but by the design review request flow.
 - [Design System Operator Runbook](../operations/design-system-operator-runbook.md).
 - [Adapters API reference](adapters.md) — general adapter framework
   (`AdapterBinding` resource, registry, and lifecycle).
+- [Design Review Architecture](../concepts/design-review-architecture.md) —
+  the four-layer review model (RFC-0006 Addendum A).
 - [Design Intent & Soul Alignment](design-intent.md) — RFC-0008's PPA Triad
   scoring layer that consumes `DesignSystemBinding` outputs.

@@ -30,6 +30,7 @@ import {
   NO_FEATURES,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
   renderNextSteps,
+  resolveHookTarget,
   resolveFeatureSelection,
   type FeatureAdapters,
   type WizardFlags,
@@ -55,6 +56,24 @@ interface StubState {
   multiSelectAnswers: string[][];
   /** FIFO queue of scripted text-input answers (string); returns '' if exhausted. */
   textInputAnswers: string[];
+  /** AISDLC-555: paths that `chmodExecutable` was called with. */
+  chmodCalls: string[];
+  /**
+   * AISDLC-555: simulated symlink resolution, `path -> real path`.
+   * Absent entries resolve to the path itself when it exists as a file,
+   * else to `null` — so the containment check is inert unless a test
+   * deliberately plants a redirect.
+   */
+  realpaths: Map<string, string>;
+  /**
+   * AISDLC-555 follow-up (dangling-symlink): set of paths that ARE symlinks,
+   * independent of whether `realpaths` has an entry for them. Lets a test
+   * simulate a DANGLING symlink — `isSymlink(p)` true, `realpath(p)` still
+   * `null` because there is no entry in `realpaths` and `p` is not in
+   * `files` — which is exactly the shape `realpathSync` produces for a
+   * symlink whose target does not exist (ENOENT).
+   */
+  symlinks: Set<string>;
 }
 
 function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: FeatureAdapters } {
@@ -67,6 +86,9 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
     runResponses: opts.runResponses ?? new Map(),
     multiSelectAnswers: opts.multiSelectAnswers ?? [],
     textInputAnswers: opts.textInputAnswers ?? [],
+    chmodCalls: opts.chmodCalls ?? [],
+    realpaths: opts.realpaths ?? new Map(),
+    symlinks: opts.symlinks ?? new Set(),
   };
   const adapters: FeatureAdapters = {
     prompt: async (question, defaultYes) => {
@@ -97,6 +119,12 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
       // no-op for stubs — file writes are flat key/value
     },
     exists: (p) => state.files.has(p),
+    readTextFile: (p) => state.files.get(p) ?? null,
+    chmodExecutable: (p) => {
+      state.chmodCalls.push(p);
+    },
+    realpath: (p) => state.realpaths.get(p) ?? (state.files.has(p) ? p : null),
+    isSymlink: (p) => state.symlinks.has(p),
     runCommand: (cmd, args) => {
       state.runCommandCalls.push({ cmd, args });
       // Look up by `cmd args.join(' ')` prefix so tests can match
@@ -414,6 +442,126 @@ describe('applyFeatureSelection', () => {
     const sentinelCount2 = (afterSecond.match(/# ai-sdlc:attestation-sign-block/g) ?? []).length;
     expect(sentinelCount2).toBe(1);
     expect(result2.skipped).toContain('.husky/pre-push');
+  });
+
+  // ── AISDLC-555: pre-push hook shipping + install (AC #1-#6) ─────────────
+
+  it('AC #2: newly-created .husky/pre-push is chmod +x (a working hook)', async () => {
+    const { state, adapters } = makeStub();
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.chmodCalls).toContain('/proj/.husky/pre-push');
+  });
+
+  it('AC #2: appended (pre-existing) .husky/pre-push is also chmod +x', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/.husky/pre-push', '#!/bin/sh\necho "user gate"\n');
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.chmodCalls).toContain('/proj/.husky/pre-push');
+  });
+
+  it('AC #4: package.json without a husky dependency writes .git/hooks/pre-push instead', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', JSON.stringify({ name: 'x', devDependencies: {} }));
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has('/proj/.git/hooks/pre-push')).toBe(true);
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(false);
+    expect(result.created).toContain('.git/hooks/pre-push');
+    expect(state.chmodCalls).toContain('/proj/.git/hooks/pre-push');
+    const hook = state.files.get('/proj/.git/hooks/pre-push')!;
+    expect(hook).toContain('# ai-sdlc:attestation-sign-block');
+  });
+
+  it('AC #4: .git/hooks/pre-push append-not-clobber + idempotence mirror the husky path', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', JSON.stringify({ name: 'x' }));
+    state.files.set('/proj/.git/hooks/pre-push', '#!/bin/sh\necho "native gate"\n');
+
+    const first = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const afterFirst = state.files.get('/proj/.git/hooks/pre-push')!;
+    expect(afterFirst).toContain('echo "native gate"');
+    expect(afterFirst).toContain('# ai-sdlc:attestation-sign-block');
+    expect(first.created).not.toContain('.git/hooks/pre-push');
+
+    const second = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const afterSecond = state.files.get('/proj/.git/hooks/pre-push')!;
+    const sentinelCount = (afterSecond.match(/# ai-sdlc:attestation-sign-block/g) ?? []).length;
+    expect(sentinelCount).toBe(1);
+    expect(second.skipped).toContain('.git/hooks/pre-push');
+  });
+
+  it('AC #4: package.json declaring husky keeps the .husky/pre-push default', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set(
+      '/proj/package.json',
+      JSON.stringify({ name: 'x', devDependencies: { husky: '^9.0.0' } }),
+    );
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
+    expect(state.files.has('/proj/.git/hooks/pre-push')).toBe(false);
+  });
+
+  it('AC #4: missing package.json (no npm project) defaults to husky (back-compat fail-open)', async () => {
+    const { state, adapters } = makeStub();
+    // No package.json at all — mirrors every pre-AISDLC-555 test above.
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
+  });
+
+  it('AC #4: malformed package.json defaults to husky (fail-open, does not throw)', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', '{not valid json');
+    await expect(
+      applyFeatureSelection('/proj', { ...NO_FEATURES, attestation: true }, baseFlags, adapters),
+    ).resolves.toBeDefined();
+    expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
+  });
+
+  it('AC #6 dry-run: non-husky repo reports .git/hooks/pre-push in wouldCreate', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', JSON.stringify({ name: 'x' }));
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      { ...baseFlags, dryRun: true },
+      adapters,
+    );
+    expect(result.wouldCreate).toContain('.git/hooks/pre-push');
+    expect(state.files.size).toBe(1); // only the package.json seeded above — nothing written
   });
 
   // ── AISDLC-261: workflows feature ───────────────────────────────────────
@@ -810,5 +958,479 @@ describe('buildProductionAdapters', () => {
     expect(result.exitCode).toBe(0);
     // Must round-trip the literal — no word-splitting, no $HOME expansion.
     expect(result.stdout).toBe(argWithSpaceAndDollar);
+  });
+});
+
+describe('AISDLC-555 round-1 security review — hook installation', () => {
+  // The hooks directory comes from `git rev-parse --git-path hooks`, which
+  // honours core.hooksPath, expands `~`, and resolves the common dir for
+  // linked worktrees. Writing anywhere else installs a silently-inert hook —
+  // the exact defect class this task closes.
+  const GIT_PATH_HOOKS = 'git -C /proj rev-parse --git-path hooks';
+  const GIT_CONFIG_HOOKSPATH = 'git -C /proj config --get core.hooksPath';
+
+  /**
+   * core.hooksPath is SET (so it must be honoured) and git resolves it to
+   * `resolved`. Both calls are stubbed because they answer different
+   * questions: whether it is configured, and what it resolves to.
+   */
+  function hooksPathSet(resolved: string): Map<string, { stdout: string; exitCode: number }> {
+    return new Map([
+      [GIT_CONFIG_HOOKSPATH, { stdout: `${resolved}\n`, exitCode: 0 }],
+      [GIT_PATH_HOOKS, { stdout: `${resolved}\n`, exitCode: 0 }],
+    ]);
+  }
+
+  it('honours the hooks dir git reports (core.hooksPath) over husky/.git/hooks', () => {
+    const { adapters } = makeStub({
+      runResponses: hooksPathSet('.config/githooks'),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.relPath).toBe(join('.config/githooks', 'pre-push'));
+    expect(target.path).toBe(join('/proj', '.config/githooks', 'pre-push'));
+    expect(target.outsideProject).toBe(false);
+  });
+
+  it('handles an ABSOLUTE hooks dir (global ~/.githooks style) and flags it outside', () => {
+    const { adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.path).toBe(join('/etc/team-hooks', 'pre-push'));
+    // Shared by every repo on the machine — the caller must warn.
+    expect(target.outsideProject).toBe(true);
+  });
+
+  // THE husky v9 CASE. v9 sets core.hooksPath=.husky/_ — generated internals
+  // whose own .gitignore is `*`, regenerated by every `npm install`. Installing
+  // there works until the next install, then silently stops. Verified against
+  // real husky 9: the `_/h` wrapper execs `../<hookname>`, and a real `git push`
+  // confirmed top-level `.husky/pre-push` is what actually runs.
+  it('steps up out of husky v9 .husky/_ internals to the durable .husky/pre-push', () => {
+    const { adapters } = makeStub({
+      runResponses: hooksPathSet('.husky/_'),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.path).toBe(join('/proj', '.husky', 'pre-push'));
+    expect(target.relPath).toBe(join('.husky', 'pre-push'));
+    expect(target.isHusky).toBe(true);
+  });
+
+  // The step-up is keyed on husky's layout, not on the bare name `_`, so a
+  // project that legitimately uses a directory called `_` keeps its own path.
+  it('does NOT step up out of a non-husky hooks dir that happens to be named _', () => {
+    const { adapters } = makeStub({
+      runResponses: hooksPathSet('tools/_'),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.path).toBe(join('/proj', 'tools', '_', 'pre-push'));
+  });
+
+  // `husky <dir>` supports a custom directory, and on a fresh clone the `_`
+  // internals do not exist yet (their .gitignore is `*`), so neither the
+  // parent name nor the wrapper files identify the layout. A declared husky
+  // dependency does. Round-3 security review, low.
+  it('steps up out of a CUSTOM husky dir (.config/husky/_) on a fresh clone', () => {
+    const { adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: hooksPathSet('.config/husky/_'),
+    });
+    expect(resolveHookTarget('/proj', adapters).path).toBe(
+      join('/proj', '.config', 'husky', 'pre-push'),
+    );
+  });
+
+  // ...but a missing package.json is NOT evidence of husky. The `.husky`-vs-
+  // `.git/hooks` default fails open; this step-up must not, or any project
+  // whose hooks dir happens to be named `_` gets its hook installed one
+  // directory too high, where git will never read it.
+  it('does NOT step up out of a dir named _ when husky is not actually declared', () => {
+    const { adapters } = makeStub({
+      runResponses: hooksPathSet('vendor/_'),
+    });
+    expect(resolveHookTarget('/proj', adapters).path).toBe(
+      join('/proj', 'vendor', '_', 'pre-push'),
+    );
+  });
+
+  // Recognises husky internals by the wrapper file even when the parent is
+  // not literally named `.husky`.
+  it('steps up when the husky wrapper is present under a differently-named parent', () => {
+    const { adapters } = makeStub({
+      files: new Map([['/proj/hooks-dir/_/h', '#!/usr/bin/env sh\n']]),
+      runResponses: hooksPathSet('hooks-dir/_'),
+    });
+    expect(resolveHookTarget('/proj', adapters).path).toBe(join('/proj', 'hooks-dir', 'pre-push'));
+  });
+
+  // Linked worktrees/submodules: `.git` is a FILE, so hand-building
+  // join(dir, '.git/hooks') fails with ENOTDIR and aborts init. With
+  // core.hooksPath UNSET and no husky, take the absolute common-dir path
+  // git reports instead of building one.
+  it('uses the absolute common-dir hooks path for a linked worktree (no husky)', () => {
+    const { adapters } = makeStub({
+      files: new Map([['/proj/package.json', JSON.stringify({ devDependencies: {} })]]),
+      runResponses: new Map([
+        // core.hooksPath unset — `git config --get` exits 1.
+        [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 1 }],
+        [GIT_PATH_HOOKS, { stdout: '/repo/main/.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.path).toBe(join('/repo/main/.git/hooks', 'pre-push'));
+    expect(target.outsideProject).toBe(true);
+  });
+
+  // REGRESSION GUARD. `rev-parse --git-path hooks` ALWAYS answers, defaulting
+  // to `.git/hooks`, so it cannot tell "configured" from "not configured".
+  // Treating its answer as authoritative sent the hook to `.git/hooks` for a
+  // repo that declares husky but has not run `husky install` yet — which works
+  // until husky sets core.hooksPath and git stops reading `.git/hooks` at all.
+  // That is this task's own bug, re-created from the opposite direction.
+  it('installs to .husky when husky is declared but core.hooksPath is not set yet', () => {
+    const { adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: new Map([
+        [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 1 }],
+        // git still reports a default hooks dir — it must NOT win here.
+        [GIT_PATH_HOOKS, { stdout: '.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.relPath).toBe('.husky/pre-push');
+    expect(target.isHusky).toBe(true);
+  });
+
+  it('falls back to .git/hooks when there is no husky and no core.hooksPath', () => {
+    const { adapters } = makeStub({
+      files: new Map([['/proj/package.json', JSON.stringify({ devDependencies: {} })]]),
+      runResponses: new Map([
+        [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 1 }],
+        [GIT_PATH_HOOKS, { stdout: '.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(target.path).toBe(join('/proj', '.git', 'hooks', 'pre-push'));
+    expect(target.outsideProject).toBe(false);
+  });
+
+  // Round-3 security review (medium). `git config --get core.hooksPath` reads
+  // ALL scopes, so a global `~/.githooks` makes this fire for a repo whose own
+  // config never opted in — and appending there puts the key-bearing signer on
+  // every push in every repo on the machine, including untrusted clones.
+  it('REFUSES to install into a hooks dir outside the project (machine-wide)', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has(join('/etc/team-hooks', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/etc/team-hooks', 'pre-push'));
+    expect(state.log.some((l) => l.includes('REFUSED'))).toBe(true);
+    expect(res.skipped).toContain(join('/etc/team-hooks', 'pre-push'));
+  });
+
+  it('still scaffolds the other attestation files when the hook is refused', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    // Refusing the hook must not abort the rest of the feature.
+    expect(state.files.has(join('/proj', '.ai-sdlc', 'trusted-reviewers.yaml'))).toBe(true);
+  });
+
+  it('installs machine-wide only under an explicit AI_SDLC_ALLOW_GLOBAL_HOOKS opt-in', async () => {
+    const prev = process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS;
+    process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS = '1';
+    try {
+      const { state, adapters } = makeStub({
+        runResponses: hooksPathSet('/etc/team-hooks'),
+      });
+      await applyFeatureSelection(
+        '/proj',
+        { ...NO_FEATURES, attestation: true },
+        baseFlags,
+        adapters,
+      );
+      expect(state.files.has(join('/etc/team-hooks', 'pre-push'))).toBe(true);
+      expect(state.log.some((l) => l.includes('AI_SDLC_ALLOW_GLOBAL_HOOKS=1'))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS;
+      else process.env.AI_SDLC_ALLOW_GLOBAL_HOOKS = prev;
+    }
+  });
+
+  // A linked worktree's common dir is ALSO outside the project, but it is still
+  // this one repository — refusing there would break a legitimate topology, and
+  // the round-2 wording wrongly blamed core.hooksPath, which is not set here.
+  it('installs into a linked worktree common dir with an accurate note, not a refusal', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([['/proj/package.json', JSON.stringify({ devDependencies: {} })]]),
+      runResponses: new Map([
+        [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 1 }],
+        [GIT_PATH_HOOKS, { stdout: '/repo/main/.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.files.has(join('/repo/main/.git/hooks', 'pre-push'))).toBe(true);
+    expect(state.log.some((l) => l.includes('REFUSED'))).toBe(false);
+    const note = state.log.find((l) => l.includes('outside this working tree'));
+    expect(note, `expected a worktree note, got ${JSON.stringify(state.log)}`).toBeDefined();
+    // Must NOT blame core.hooksPath, which is unset in this shape.
+    expect(note).not.toContain('core.hooksPath');
+  });
+
+  // Round-7. `outsideProject` is decided with path.relative, which is LEXICAL:
+  // a repo that commits `.husky` as a symlink pointing out of the tree still
+  // looks inside it, so no string check fires while writeFileSync/chmodSync
+  // follow the link. Appending a shell snippet to ~/.bashrc and marking it
+  // executable is the concrete outcome.
+  it('REFUSES when a symlink redirects the hook path outside the project', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([
+        ['/proj', '/proj'],
+        // `.husky` is a symlink to the operator's home directory.
+        ['/proj/.husky', '/home/operator'],
+      ]),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('REFUSED') && l.includes('symlink'))).toBe(true);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
+    expect(res.skipped).toContain('.husky/pre-push');
+  });
+
+  // AISDLC-555 follow-up (dangling-symlink escape): `realpath(hookPath)`
+  // throws ENOENT for a symlink whose FINAL component does not exist yet —
+  // indistinguishable, to the old check, from "hookPath simply doesn't
+  // exist". The old fallback then resolved `realpath(dirname(hookPath))`,
+  // which is the real (in-project) `.husky` directory, so containment
+  // PASSED even though `hookPath` itself is a symlink pointing anywhere.
+  // `isSymlink` closes this: the hook path is a symlink with no `realpaths`
+  // entry (dangling), so `realpath` correctly returns `null` for it too, and
+  // the new check refuses instead of falling through.
+  it('REFUSES when the hook path is a DANGLING symlink (final component missing)', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([['/proj', '/proj']]),
+      // `.husky/pre-push` is a symlink; it has NO entry in `realpaths` and is
+      // NOT in `files`, so `realpath()` returns `null` for it — exactly what
+      // `realpathSync` does for a symlink whose target does not exist.
+      symlinks: new Set([join('/proj', '.husky', 'pre-push')]),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(
+      state.log.some(
+        (l) => l.includes('REFUSED') && l.includes('symlink') && l.includes('dangling'),
+      ),
+    ).toBe(true);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
+    expect(res.skipped).toContain('.husky/pre-push');
+  });
+
+  // AISDLC-555 follow-up: `.husky` itself (the hook's PARENT directory) can
+  // be the dangling symlink, not just the hook file. Same escape, same fix —
+  // the parent is checked via the same `candidates` loop.
+  it('REFUSES when the hook parent directory (.husky) is a DANGLING symlink', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([['/proj', '/proj']]),
+      symlinks: new Set([join('/proj', '.husky')]),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(
+      state.log.some(
+        (l) => l.includes('REFUSED') && l.includes('symlink') && l.includes('dangling'),
+      ),
+    ).toBe(true);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(false);
+    expect(state.chmodCalls).not.toContain(join('/proj', '.husky', 'pre-push'));
+    expect(res.skipped).toContain('.husky/pre-push');
+  });
+
+  it('installs normally when the resolved path stays inside the project', async () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      realpaths: new Map([
+        ['/proj', '/proj'],
+        ['/proj/.husky', '/proj/.husky'],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('REFUSED'))).toBe(false);
+    expect(state.files.has(join('/proj', '.husky', 'pre-push'))).toBe(true);
+  });
+
+  // Round-4 review: the preview must not promise an install the real run
+  // refuses — that is the opposite of making the decision legible.
+  it('--dry-run previews the REFUSAL for a machine-wide hooks dir', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    const res = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      { ...baseFlags, dryRun: true },
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('would REFUSE'))).toBe(true);
+    expect(res.wouldCreate).not.toContain(join('/etc/team-hooks', 'pre-push'));
+  });
+
+  // Round-3 code review flagged this branch as untested; it stayed untested
+  // through round 4. Not a git repo at all: BOTH probes fail.
+  it('falls back sensibly when the directory is not a git repository', () => {
+    const notARepo = new Map([
+      [GIT_CONFIG_HOOKSPATH, { stdout: '', exitCode: 128 }],
+      [GIT_PATH_HOOKS, { stdout: '', exitCode: 128 }],
+    ]);
+    // husky declared -> the adopter-owned committed location.
+    const withHusky = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: notARepo,
+    });
+    expect(resolveHookTarget('/proj', withHusky.adapters).relPath).toBe('.husky/pre-push');
+
+    // No husky, and git told us nothing -> hand-built .git/hooks is the only
+    // remaining answer, and it must not be reported as outside the project.
+    const noHusky = makeStub({
+      files: new Map([['/proj/package.json', JSON.stringify({ devDependencies: {} })]]),
+      runResponses: notARepo,
+    });
+    const target = resolveHookTarget('/proj', noHusky.adapters);
+    expect(target.path).toBe(join('/proj', '.git', 'hooks', 'pre-push'));
+    expect(target.outsideProject).toBe(false);
+  });
+
+  // `core.hooksPath = ""` exits 0 with empty output, which is neither "set"
+  // nor a clean "unset" — silently treating it as unset is how an inert hook
+  // gets installed, so it must say something.
+  it('reports an empty-string core.hooksPath instead of silently ignoring it', () => {
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+      runResponses: new Map([
+        [GIT_CONFIG_HOOKSPATH, { stdout: '   \n', exitCode: 0 }],
+        [GIT_PATH_HOOKS, { stdout: '.git/hooks\n', exitCode: 0 }],
+      ]),
+    });
+    const target = resolveHookTarget('/proj', adapters);
+    expect(state.log.some((l) => l.includes('empty value'))).toBe(true);
+    // Falls through to the husky/.git decision rather than resolving nowhere.
+    expect(target.relPath).toBe('.husky/pre-push');
+  });
+
+  it('warns when the resolved hook lives outside the project', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: hooksPathSet('/etc/team-hooks'),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const warned = state.log.some((l) => l.includes('OUTSIDE this project'));
+    expect(warned, `expected an outside-project warning, got: ${JSON.stringify(state.log)}`).toBe(
+      true,
+    );
+  });
+
+  it('falls back to the husky/.git decision when core.hooksPath is unset', () => {
+    const { adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+      ]),
+    });
+    // Stub runCommand defaults to exitCode 0 with EMPTY stdout — the unset case.
+    expect(resolveHookTarget('/proj', adapters).relPath).toBe('.husky/pre-push');
+  });
+
+  // Appending lands at EOF, so an existing hook ending in `exit 0` makes our
+  // block unreachable while init reports success.
+  it('warns when the existing hook has a top-level `exit 0` before our block', async () => {
+    const hook = '/proj/.husky/pre-push';
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+        [hook, '#!/usr/bin/env bash\nnpm test\nexit 0\n'],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    const warned = state.log.some((l) => l.includes('exit 0') && l.includes('never be reached'));
+    expect(warned, `expected an exit-0 warning, got: ${JSON.stringify(state.log)}`).toBe(true);
+  });
+
+  it('does NOT warn when the existing hook has no top-level exit 0', async () => {
+    const hook = '/proj/.husky/pre-push';
+    const { state, adapters } = makeStub({
+      files: new Map([
+        ['/proj/package.json', JSON.stringify({ devDependencies: { husky: '^9' } })],
+        [hook, '#!/usr/bin/env bash\nnpm test\n'],
+      ]),
+    });
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, attestation: true },
+      baseFlags,
+      adapters,
+    );
+    expect(state.log.some((l) => l.includes('never be reached'))).toBe(false);
   });
 });

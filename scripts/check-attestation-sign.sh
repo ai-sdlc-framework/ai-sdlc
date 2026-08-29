@@ -325,37 +325,65 @@ HARNESS_NOTE="${AI_SDLC_HARNESS_NOTE:-}"
 # the attestation envelope carries the harness field automatically.
 # Format: "codex@X.Y.Z" → harness-name=codex, harness-version=X.Y.Z.
 # When unset, no extra args are passed (back-compat: harness field absent).
-HARNESS_ARGS=""
+# AISDLC-555: array, not a string. An unquoted $HARNESS_ARGS expansion is
+# word-split by the shell; an array preserves argument boundaries exactly.
+HARNESS_ARGS=()
 if [ -n "${CODEX_VERSION:-}" ]; then
   # Strip the "codex@" prefix to extract the version number.
   CODEX_VERSION_NUM="${CODEX_VERSION#codex@}"
-  HARNESS_ARGS="--harness-name codex --harness-version $CODEX_VERSION_NUM"
+  HARNESS_ARGS=(--harness-name codex --harness-version "$CODEX_VERSION_NUM")
   echo "[attestation-sign] Codex harness detected: name=codex version=$CODEX_VERSION_NUM" >&2
 fi
 
 echo "[attestation-sign] Auto-signing attestation for $TASK_ID against HEAD $HEAD_SHA (schema: $SCHEMA_VERSION)" >&2
 
+if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ] && [ "${AI_SDLC_ALLOW_SIGNER_OVERRIDE:-0}" != "1" ]; then
+  # AISDLC-555 round-3 security review. This override replaces the signer at
+  # `git push` time on a machine where ~/.ai-sdlc/signing-key.pem exists, and
+  # it is expanded UNQUOTED, so anything able to set env before a push — a
+  # repo-committed direnv `.envrc`, an npm script or Makefile target wrapping
+  # `git push`, a CI job env, an IDE run configuration — gets arbitrary command
+  # execution in that context. AISDLC-133 already recorded the need for a
+  # test-mode sentinel; shipping this script to adopter repos is what makes it
+  # urgent, since the blast radius stops being this one monorepo.
+  #
+  # Refuse rather than silently ignore: a stale export that quietly stopped
+  # taking effect would be its own debugging trap.
+  echo "[attestation-sign] ERROR: AI_SDLC_SIGN_ATTESTATION_CMD is set but" >&2
+  echo "[attestation-sign]   AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 is not. Refusing to run a" >&2
+  echo "[attestation-sign]   substitute signer. This override exists for tests only." >&2
+  echo "[attestation-sign]   If you did not set it, something in your environment did —" >&2
+  echo "[attestation-sign]   check direnv, npm scripts, and CI env before re-running." >&2
+  exit 2
+fi
+
 if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
-  # Test override: split on whitespace via word splitting (intentional —
-  # callers can pass multi-word commands like "node /tmp/fake-signer.mjs").
-  # shellcheck disable=SC2086
-  if ! $AI_SDLC_SIGN_ATTESTATION_CMD \
+  # Test override (gated above). Callers pass multi-word commands such as
+  # "node /tmp/stub.mjs", so the string must be split into argv SOMEWHERE --
+  # but do it explicitly into an array rather than by leaving the expansion
+  # unquoted. `read -r -a` splits once, on IFS, under our control; every later
+  # expansion is quoted, so nothing is re-split or glob-expanded.
+  read -r -a _AI_SDLC_SIGN_CMD <<< "$AI_SDLC_SIGN_ATTESTATION_CMD"
+  if [ ${#_AI_SDLC_SIGN_CMD[@]} -eq 0 ]; then
+    echo "[attestation-sign] ERROR: AI_SDLC_SIGN_ATTESTATION_CMD is set but empty" >&2
+    exit 2
+  fi
+  if ! "${_AI_SDLC_SIGN_CMD[@]}" \
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
       --schema-version "$SCHEMA_VERSION" \
-      $HARNESS_ARGS; then
+      ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
     echo "[attestation-sign] ERROR: signer invocation (override) failed; aborting push" >&2
     exit 2
   fi
 else
-  # shellcheck disable=SC2086
   if ! node "$WT_ROOT/ai-sdlc-plugin/scripts/sign-attestation.mjs" \
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
       --schema-version "$SCHEMA_VERSION" \
-      $HARNESS_ARGS; then
+      ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
     echo "[attestation-sign] ERROR: sign-attestation.mjs failed; aborting push" >&2
     echo "[attestation-sign]        (run \`pnpm --filter @ai-sdlc/orchestrator build\` if dist is missing)" >&2
     exit 2

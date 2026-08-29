@@ -82,6 +82,15 @@ pnpm-debug.log*
 .active-task
 .enterprise.yaml
 
+# AISDLC-559: parent-repo lock file for the worktree-aware backlog task ID
+# allocator (`next_task_id` MCP tool + `task_create`'s cross-source collision
+# check). Lives under the PARENT repo's `.ai-sdlc/locks/` — never inside a
+# worktree — so every sibling worktree racing for the same ID sees it. This
+# is the one sanctioned exception to "the parent working tree is read-only";
+# it is ephemeral (created + removed within a single tool call) and must
+# never be committed.
+.ai-sdlc/locks/
+
 # AISDLC-122: pipeline-cli writes the DoR calibration log to
 # `artifacts/_dor/calibration.jsonl` by default. The log captures issue
 # titles + body previews + LLM-derived `finding` / `clarificationQuestion`
@@ -112,3 +121,6 @@ build/
 *.pyz
 orchestrator/.gitignore
 .worktrees/
+
+# AISDLC-557: orchestrator gate-failure backoff state (runtime, per-machine)
+.ai-sdlc/dispatch/gate-failure-count

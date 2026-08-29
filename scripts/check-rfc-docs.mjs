@@ -245,6 +245,39 @@ export function findReferences(surfaceDir, rfcId) {
 }
 
 /**
+ * Return the subset of `coverageTerms` that appears in NO documentation file
+ * citing `rfcId`.
+ *
+ * `findReferences` above answers "is this RFC cited anywhere in the right
+ * docs/ subdirectory" — a CITATION check. That is what allowed RFC-0006's
+ * Addendum A (~800 spec lines, five implemented modules) to ship undocumented:
+ * the three doc surfaces were written once, satisfied the citation check
+ * permanently, and no later spec growth could ever demand new prose.
+ *
+ * `docsCoverage` closes that hole for RFCs that declare it. Each declared term
+ * must appear (case-insensitively) in at least one `.md` under docs/ that also
+ * cites the RFC id — so coverage is credited only to documentation that is
+ * actually about this RFC.
+ *
+ * Absent or empty `docsCoverage` preserves the prior behaviour exactly, so
+ * this is additive for every RFC that has not opted in.
+ */
+export function findCoverageGaps(docsDir, rfcId, coverageTerms) {
+  if (!Array.isArray(coverageTerms) || coverageTerms.length === 0) return [];
+  const citingDocs = [];
+  for (const file of listMarkdownFiles(docsDir)) {
+    const text = readFileSync(file, 'utf-8');
+    if (text.includes(rfcId)) citingDocs.push(text.toLowerCase());
+  }
+  const missing = [];
+  for (const term of coverageTerms) {
+    const needle = String(term).toLowerCase();
+    if (!citingDocs.some((text) => text.includes(needle))) missing.push(term);
+  }
+  return missing;
+}
+
+/**
  * Validate one parsed RFC and return a list of `{ rfc, surface, reason }`
  * failures. Empty list = clean. Also returns warnings for `deferredDocs`
  * (so the caller can surface them in stdout without failing CI).
@@ -293,6 +326,33 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
     return { failures, warnings };
   }
 
+  // ── docsCoverage: citation check → coverage check (opt-in per RFC) ──
+  //
+  // AISDLC-550 security review: this MUST be evaluated before the
+  // `requiresDocs.length === 0` and `deferredDocs` early returns below.
+  // Placed after them, an RFC could silently drop a declared coverage list
+  // by emptying `requiresDocs` — turning an explicit documentation promise
+  // into a no-op with no failure. `deferredDocs` still skips coverage (docs
+  // are deliberately not written yet), but says so in its warning.
+  const docsCoverage = frontmatter.docsCoverage;
+  if (docsCoverage !== undefined && frontmatter.deferredDocs !== true) {
+    if (!Array.isArray(docsCoverage)) {
+      failures.push({
+        rfc: id,
+        surface: null,
+        reason: `invalid 'docsCoverage' (got ${JSON.stringify(docsCoverage)}; expected an array of strings)`,
+      });
+    } else {
+      for (const term of findCoverageGaps(docsDir, id, docsCoverage)) {
+        failures.push({
+          rfc: id,
+          surface: null,
+          reason: `docsCoverage term '${term}' appears in no docs/ file citing ${id} — document it, or drop the term if the spec section was withdrawn`,
+        });
+      }
+    }
+  }
+
   // Empty requiresDocs is valid (purely strategic / conceptual RFCs) — pass.
   if (requiresDocs.length === 0) return { failures, warnings };
 
@@ -315,7 +375,7 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
         daysRemaining >= 0
           ? `${daysRemaining} day(s) remaining`
           : `OVERDUE by ${-daysRemaining} day(s)`
-      })`,
+      })${docsCoverage !== undefined ? ' — docsCoverage is also deferred and NOT enforced' : ''}`,
     });
     return { failures, warnings };
   }
