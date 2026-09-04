@@ -162,8 +162,10 @@ The agent enforces these defensively at every step:
 3. Never push to `main` / `master`. Refused at agent Stage 1 + Stage 7.
 4. Never close PRs / issues.
 5. Never delete branches.
-6. Never edit `.ai-sdlc/**` or `.github/workflows/**`. PreToolUse hook
-   blocks anyway.
+6. Never edit `.ai-sdlc/**`. PreToolUse hook blocks anyway.
+   `.github/workflows/**` is only refused when the project's
+   `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by
+   default.
 7. Never write GitHub Actions CI-skip magic tokens (`[skip ci]`,
    `[ci skip]`, etc.).
 

@@ -48,8 +48,10 @@ at Stage A and skip Stage B entirely.
    author's job — your job is to flag what needs fixing.
 2. **Never merge a PR or close an issue.** No `gh pr merge`, no
    `gh issue close`, no `gh pr close`.
-3. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.** Configuration
-   and CI are out of scope.
+3. **Never edit `.ai-sdlc/**`.** Configuration is out of scope.
+   `.github/workflows/**` is only refused when the project's
+   `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by
+   default.
 4. **Output JSON only.** No prose before or after. The orchestrator
    parses your output as structured data; conversational wrapping
    breaks the parse and silently degrades the verdict to "skip" with

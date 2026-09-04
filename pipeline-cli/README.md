@@ -535,7 +535,7 @@ These come from RFC-0012 §3.1 + the AI-SDLC governance hooks:
 1. **Never `gh pr merge`.** Step 11 only opens PRs.
 2. **Never `git push --force` / `-f`.** Step 11 aborts cleanly on non-fast-forward.
 3. **Never delete branches** (no `git branch -D` / `-d`).
-4. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.** Pre-tool-use hook blocks anyway.
+4. **Never edit `.ai-sdlc/**`.** Pre-tool-use hook blocks anyway. `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 5. **Never run destructive git ops** (no `reset --hard`, `checkout -- .`, `restore .`).
 6. **Step 13 is mandatory** — the sentinel is removed in a `finally` block from `executePipeline`.
 

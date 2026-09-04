@@ -5,9 +5,20 @@
  *
  * 1. **Bash** — checks `tool_input.command` against `blockedActions` patterns.
  * 2. **Write / Edit** — checks `tool_input.file_path` against `blockedPaths` globs
- *    (relative to project root). Paths outside the project root are denied unless
- *    they fall under `permittedExternalPaths` declared in the active task's
- *    frontmatter (active task = `AI_SDLC_ACTIVE_TASK_ID` env var).
+ *    (relative to the agent's "home" — the active worktree when resolvable, else
+ *    the project root; see AISDLC-567). `.ai-sdlc/**` is ALWAYS refused, even if
+ *    a project's `agent-role.yaml` is missing or doesn't list it — this is a
+ *    hardcoded floor, not config-driven. `.github/workflows/**` is NOT blocked
+ *    by default; it is refused only when a project's `agent-role.yaml` lists it
+ *    (or a matching glob) under `blockedPaths` (AISDLC-567 Part A). Paths outside
+ *    the agent's home are denied unless they fall under `permittedExternalPaths`
+ *    declared in the active task's frontmatter (active task =
+ *    `AI_SDLC_ACTIVE_TASK_ID` env var or a per-worktree `.active-task` sentinel) —
+ *    this applies uniformly to loose files AND sibling git repos (AISDLC-567
+ *    Part B); there is no special case that allows writing into another repo.
+ * 3. **Stale-base guard** — before a Write/Edit is allowed to proceed, warns
+ *    (via stderr, non-blocking) when the resolved worktree's HEAD is behind
+ *    `origin/main`, using only locally-cached refs (no network fetch).
  *
  * Returns a deny decision when a tool call matches a guarded pattern.
  * Fail-safe: allows everything on any error — never block a session because
@@ -58,7 +69,10 @@ try {
   blockedActions = parseListField(yaml, 'blockedActions');
   blockedPaths = parseListField(yaml, 'blockedPaths');
 } catch {
-  process.exit(0);
+  // No agent-role.yaml (or unreadable) — fall through with empty config.
+  // `.ai-sdlc/**` and the outside-worktree/permittedExternalPaths rules are
+  // hardcoded floors enforced regardless of config (AISDLC-567), so we must
+  // NOT exit early here the way the Bash-only enforcement used to.
 }
 
 // ── Dispatch by tool ─────────────────────────────────────────────────
@@ -98,12 +112,39 @@ function enforceWriteEdit(filePath) {
   const absPath = isAbsolute(filePath) ? resolve(filePath) : resolve(projectDir, filePath);
 
   const projectAbs = resolve(projectDir);
-  const insideProject = absPath === projectAbs || absPath.startsWith(projectAbs + sep);
+  const searchFrom = toolCwd || process.cwd();
 
-  if (insideProject) {
-    // Path is inside the project root — check against blockedPaths globs.
+  // AISDLC-567 Part B: an agent's "home" is its ACTIVE WORKTREE when one is
+  // resolvable (Pattern C: non-bare parent repo + `.worktrees/<id>/`
+  // isolates), not the whole project root. This closes the isolation gap
+  // where a dev subagent whose cwd is `.worktrees/<id>/` could write into
+  // the parent repo's own working tree (or a sibling worktree) unchecked,
+  // because both live "inside the project root". When no worktree is
+  // resolvable (plain, non-Pattern-C project), home falls back to the
+  // project root — unchanged behavior for those projects.
+  const worktreeDir = resolveActiveWorktreeDir(projectAbs, searchFrom);
+  const homeAbs = worktreeDir || projectAbs;
+  const insideHome = absPath === homeAbs || absPath.startsWith(homeAbs + sep);
+
+  // AISDLC-567: stale-base guard. Non-blocking — warns to stderr only, using
+  // whatever refs are already cached locally (no network fetch from a hook).
+  warnIfStaleBase(homeAbs);
+
+  if (insideHome) {
+    // Path is inside the agent's home — check against the hardcoded
+    // never-editable floor plus the project's configured blockedPaths globs.
     // Relative path uses POSIX separators because globs do.
-    const relPath = relative(projectAbs, absPath).split(sep).join('/');
+    const relPath = relative(homeAbs, absPath).split(sep).join('/');
+
+    // `.ai-sdlc/**` is ALWAYS refused, regardless of agent-role.yaml content
+    // (or its absence) — AISDLC-567 Part A net rule.
+    if (matchGlob('.ai-sdlc/**', relPath) || relPath === '.ai-sdlc') {
+      deny(
+        `path '${relPath}' is under .ai-sdlc/, which is never editable — ` +
+          `pipeline configuration is out of scope for agent edits regardless of project config.`,
+      );
+    }
+
     for (const glob of blockedPaths) {
       if (matchGlob(glob, relPath)) {
         deny(
@@ -115,16 +156,18 @@ function enforceWriteEdit(filePath) {
     return;
   }
 
-  // Path is OUTSIDE the project root — only allowed if the active task's
-  // permittedExternalPaths covers it. The hook resolves "which task is
-  // active" by walking up from the tool's cwd (the developer subagent's
-  // worktree) to find a per-worktree `.active-task` sentinel; if none
-  // is found it falls back to the legacy project-level sentinel.
+  // Path is OUTSIDE the agent's home — only allowed if the active task's
+  // permittedExternalPaths covers it. This applies uniformly whether the
+  // target is a loose file or itself a sibling git repository (AISDLC-567
+  // Part B) — there is no directory-type special case. The hook resolves
+  // "which task is active" by walking up from the tool's cwd (the developer
+  // subagent's worktree) to find a per-worktree `.active-task` sentinel; if
+  // none is found it falls back to the legacy project-level sentinel.
   //
   // We use cwd here rather than the file_path because external writes
   // sit OUTSIDE `.worktrees/<id>/`, so file_path can never contain a
   // worktree ancestor. The cwd of the subagent always does.
-  const allowed = loadPermittedExternalPaths(projectAbs, toolCwd || process.cwd());
+  const allowed = loadPermittedExternalPaths(projectAbs, searchFrom);
   for (const ext of allowed) {
     const extAbs = resolve(projectAbs, ext);
     if (absPath === extAbs || absPath.startsWith(extAbs + sep)) {
@@ -135,15 +178,59 @@ function enforceWriteEdit(filePath) {
   // No allowlist match — deny with a clear, actionable reason.
   if (allowed.length === 0) {
     deny(
-      `path '${absPath}' is outside the project root. ` +
+      `path '${absPath}' is outside the agent's active worktree/project root. ` +
         `To permit cross-repo writes for this task, add 'permittedExternalPaths' to ` +
         `the task frontmatter and set AI_SDLC_ACTIVE_TASK_ID before invoking the agent.`,
     );
   } else {
     deny(
-      `path '${absPath}' is outside the project root and not under the active ` +
-        `task's permittedExternalPaths (${allowed.join(', ')}).`,
+      `path '${absPath}' is outside the agent's active worktree/project root and not under the ` +
+        `active task's permittedExternalPaths (${allowed.join(', ')}).`,
     );
+  }
+}
+
+/**
+ * Resolve the absolute path of the agent's ACTIVE WORKTREE directory by
+ * walking up from `searchFrom` (normally the tool call's cwd) looking for a
+ * `<projectAbs>/.worktrees/<id>/` ancestor. This does NOT require the
+ * `.active-task` sentinel file to exist — only the directory structure — so
+ * it works purely off cwd shape (AISDLC-567 Part B).
+ *
+ * Returns `null` when `searchFrom` is not nested under `<projectAbs>/.worktrees/`,
+ * i.e. plain (non-Pattern-C) projects where the whole project root is home.
+ */
+function resolveActiveWorktreeDir(projectAbs, searchFrom) {
+  const sentinelPath = findWorktreeSentinel(projectAbs, searchFrom);
+  return sentinelPath ? dirname(sentinelPath) : null;
+}
+
+/**
+ * AISDLC-567: warn (non-blocking) when `dir`'s HEAD is behind the locally
+ * cached `origin/main` ref. Deliberately does NOT run `git fetch` — hooks
+ * fire on every Write/Edit and must stay fast and offline-safe; this only
+ * reads whatever `origin/main` state is already cached. Silent on any error
+ * (not a git repo, no `origin/main` ref, git not on PATH, etc.) — this is a
+ * best-effort advisory, never a hard dependency.
+ */
+function warnIfStaleBase(dir) {
+  if (!dir) return;
+  try {
+    const output = execSync('git rev-list --count HEAD..origin/main', {
+      cwd: dir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const behindCount = parseInt(output, 10);
+    if (Number.isFinite(behindCount) && behindCount > 0) {
+      process.stderr.write(
+        `[ai-sdlc governance] warning: this worktree's HEAD is ${behindCount} commit(s) behind ` +
+          `origin/main. Run 'git fetch origin main && git rebase origin/main' before continuing ` +
+          `to avoid stale-base edits that could revert merged work.\n`,
+      );
+    }
+  } catch {
+    // Best-effort only — never block or crash the hook on this check.
   }
 }
 
@@ -293,7 +380,13 @@ function matchGlob(glob, path) {
     .join('')
     .replace(/__DOUBLESTAR__/g, '.*');
 
-  const regex = new RegExp(`^${regexStr}$`);
+  // Case-insensitive: on case-insensitive filesystems (macOS, Windows) a
+  // mixed-case path like `.AI-SDLC/agent-role.yaml` resolves to the SAME
+  // real file as `.ai-sdlc/agent-role.yaml`, so the glob match must not be
+  // case-sensitive or the hardcoded `.ai-sdlc/**` floor (and any configured
+  // blockedPaths glob) can be bypassed by case alone. Matches the `i` flag
+  // already used by enforceBash()'s pattern matching.
+  const regex = new RegExp(`^${regexStr}$`, 'i');
   return regex.test(path);
 }
 

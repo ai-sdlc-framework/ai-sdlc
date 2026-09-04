@@ -85,7 +85,7 @@ When review agents post findings:
 - `dogfood/` — CLI scripts that invoke the orchestrator
 - `.ai-sdlc/` — pipeline configuration (YAML) — agents cannot modify these files
 - `.claude/` — Claude Code hooks, commands, and skills
-- `.github/workflows/` — GitHub Actions — agents cannot modify these files
+- `.github/workflows/` — GitHub Actions — refused only when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` (not blocked by default; check this project's own config)
 - `spec/schemas/` — JSON schemas for YAML validation
 
 ## Cross-harness review (AISDLC-247)

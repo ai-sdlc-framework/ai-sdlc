@@ -46,7 +46,7 @@ baseline.
 2. **Never force-push.** Use `--force-with-lease` only after the mandatory rebase.
 3. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 4. **Never delete branches.** No `git branch -D` / `-d`.
-5. **Never edit `.ai-sdlc/**`or`.github/workflows/**`.**
+5. **Never edit `.ai-sdlc/**`.** `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 6. **Never run `git reset --hard` ad-hoc.** The sanctioned path is `scripts/check-orchestrator-state.sh`, which resets the parent to `origin/main` ONLY when the working tree is clean. Outside that script, `git reset --hard` is forbidden unless the operator explicitly authorizes it in the current session. (AISDLC-450)
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 

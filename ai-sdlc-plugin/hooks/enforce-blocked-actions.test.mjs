@@ -7,7 +7,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -203,8 +203,10 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (Write/Edit)', () => {
     assert.ok(isDenied(result), 'should deny external write without active task');
     const parsed = JSON.parse(result.output);
     assert.ok(
-      parsed.hookSpecificOutput.permissionDecisionReason.includes('outside the project root'),
-      'reason should mention outside project root',
+      parsed.hookSpecificOutput.permissionDecisionReason.includes(
+        "outside the agent's active worktree/project root",
+      ),
+      'reason should mention outside worktree/project root',
     );
   });
 
@@ -534,5 +536,305 @@ Body B.
     } finally {
       rmSync(sentinelLessWorktree, { recursive: true, force: true });
     }
+  });
+});
+
+// ── AISDLC-567 Part A — .github/workflows/** is project-configurable ────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-567 Part A: configurable workflow blocking)', () => {
+  let permissiveDir;
+
+  before(() => {
+    permissiveDir = join(tmpdir(), `enforce-blocked-permissive-${Date.now()}`);
+    mkdirSync(join(permissiveDir, '.ai-sdlc'), { recursive: true });
+    // blockedPaths deliberately omits '.github/workflows/**' — this project
+    // opts agents IN to editing its own CI workflows.
+    writeFileSync(
+      join(permissiveDir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedPaths:
+  - '.ai-sdlc/**'
+blockedActions: []
+`,
+    );
+  });
+
+  after(() => {
+    rmSync(permissiveDir, { recursive: true, force: true });
+  });
+
+  it('allows Edit to .github/workflows/ci.yml when the project does NOT list it in blockedPaths', () => {
+    const input = JSON.stringify({
+      tool_name: 'Edit',
+      tool_input: { file_path: join(permissiveDir, '.github', 'workflows', 'ci.yml') },
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: permissiveDir });
+    assert.ok(!isDenied(result), 'should allow workflow edit when not in blockedPaths');
+  });
+
+  it('still refuses .ai-sdlc/** even though this project only lists it (not workflows)', () => {
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(permissiveDir, '.ai-sdlc', 'agent-role.yaml') },
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: permissiveDir });
+    assert.ok(isDenied(result), 'should deny .ai-sdlc/** regardless');
+  });
+
+  it('refuses .github/workflows/** when blockedPaths lists it (existing fixture)', () => {
+    // Uses the top-level `tempDir` fixture, whose agent-role.yaml DOES list
+    // '.github/workflows/**' under blockedPaths.
+    const result = runHookFile('Edit', join(tempDir, '.github', 'workflows', 'ci.yml'));
+    assert.ok(isDenied(result), 'should deny when project opts in via blockedPaths');
+  });
+
+  it('.ai-sdlc/** is refused even when agent-role.yaml is entirely missing', () => {
+    const noConfigDir = join(tmpdir(), `enforce-blocked-noconfig-${Date.now()}`);
+    mkdirSync(noConfigDir, { recursive: true });
+    try {
+      const input = JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: join(noConfigDir, '.ai-sdlc', 'foo.yaml') },
+      });
+      const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: noConfigDir });
+      assert.ok(isDenied(result), 'hardcoded .ai-sdlc/** floor applies even with no config file');
+    } finally {
+      rmSync(noConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  it('.github/workflows/** is editable when agent-role.yaml is entirely missing (not blocked by default)', () => {
+    const noConfigDir = join(tmpdir(), `enforce-blocked-noconfig2-${Date.now()}`);
+    mkdirSync(noConfigDir, { recursive: true });
+    try {
+      const input = JSON.stringify({
+        tool_name: 'Edit',
+        tool_input: { file_path: join(noConfigDir, '.github', 'workflows', 'ci.yml') },
+      });
+      const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: noConfigDir });
+      assert.ok(!isDenied(result), 'no config => no workflow ban by default');
+    } finally {
+      rmSync(noConfigDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a mixed-case .AI-SDLC/agent-role.yaml write (case-insensitive filesystem bypass regression)', () => {
+    // On case-insensitive filesystems (macOS, Windows) `.AI-SDLC/agent-role.yaml`
+    // resolves to the SAME real file as `.ai-sdlc/agent-role.yaml`. The hardcoded
+    // floor must not be bypassable by case alone — matchGlob() must match
+    // case-insensitively (mirrors enforceBash()'s `i` flag).
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(tempDir, '.AI-SDLC', 'agent-role.yaml') },
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: tempDir });
+    assert.ok(isDenied(result), 'mixed-case .AI-SDLC/** must still be refused');
+  });
+
+  it('refuses an arbitrarily-cased .Ai-Sdlc/ path too', () => {
+    const input = JSON.stringify({
+      tool_name: 'Edit',
+      tool_input: { file_path: join(tempDir, '.Ai-Sdlc', 'verdicts', 'aisdlc-567.json') },
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: tempDir });
+    assert.ok(isDenied(result), 'mixed-case .Ai-Sdlc/ must still be refused');
+  });
+
+  it('fails closed on .ai-sdlc/** when agent-role.yaml is malformed/unparseable', () => {
+    // A syntactically-broken YAML file must not disable the hardcoded
+    // .ai-sdlc/** floor — the hook must fall through to "no config parsed"
+    // (empty blockedPaths/blockedActions) rather than crash or fail open.
+    const malformedDir = join(tmpdir(), `enforce-blocked-malformed-${Date.now()}`);
+    mkdirSync(join(malformedDir, '.ai-sdlc'), { recursive: true });
+    try {
+      writeFileSync(
+        join(malformedDir, '.ai-sdlc', 'agent-role.yaml'),
+        '{ bad: yaml: [unclosed\n  - this is not valid: :::\n',
+      );
+      const input = JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: join(malformedDir, '.ai-sdlc', 'foo.yaml') },
+      });
+      const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: malformedDir });
+      assert.ok(isDenied(result), '.ai-sdlc/** floor must hold even with malformed config');
+    } finally {
+      rmSync(malformedDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── AISDLC-567 Part B — isolate agents from sibling/parent repos ────────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-567 Part B: worktree isolation)', () => {
+  let isoParent;
+  let isoWorktree;
+  let isoSiblingRepo;
+
+  before(() => {
+    isoParent = join(tmpdir(), `enforce-blocked-isolation-${Date.now()}`);
+    isoWorktree = join(isoParent, '.worktrees', 'aisdlc-200');
+    isoSiblingRepo = join(tmpdir(), `enforce-blocked-isolation-sibling-${Date.now()}`);
+
+    mkdirSync(join(isoParent, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(isoWorktree, 'src'), { recursive: true });
+    mkdirSync(join(isoWorktree, '.ai-sdlc'), { recursive: true });
+    mkdirSync(isoSiblingRepo, { recursive: true });
+
+    writeFileSync(
+      join(isoParent, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedPaths:
+  - '.ai-sdlc/**'
+blockedActions: []
+`,
+    );
+
+    // The "sibling repo" really is a git repo, to prove the refusal applies
+    // regardless of whether the outside path is itself a repo (the original
+    // incident: an agent wrote into an unrelated framework checkout because
+    // it happened to be a filesystem sibling).
+    execSync('git init -q', { cwd: isoSiblingRepo });
+    execSync('git config user.email test@example.com', { cwd: isoSiblingRepo });
+    execSync('git config user.name Test', { cwd: isoSiblingRepo });
+  });
+
+  after(() => {
+    rmSync(isoParent, { recursive: true, force: true });
+    rmSync(isoSiblingRepo, { recursive: true, force: true });
+  });
+
+  it('allows Write inside the active worktree that is not under any blockedPaths glob', () => {
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(isoWorktree, 'src', 'foo.ts') },
+      cwd: isoWorktree,
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: isoParent });
+    assert.ok(!isDenied(result), 'ordinary in-worktree write is allowed');
+  });
+
+  it('denies Write into the PARENT project root from a worktree cwd, even though it is "inside the project"', () => {
+    // AISDLC-567 Part B: the agent's home is the worktree, not the whole
+    // project root. A write that targets the parent repo's own working
+    // tree (outside .worktrees/<id>/) must be denied unless it is in
+    // permittedExternalPaths — this is exactly the incident's root cause.
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(isoParent, 'README.md') },
+      cwd: isoWorktree,
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: isoParent });
+    assert.ok(isDenied(result), 'write to parent working tree from inside a worktree is denied');
+  });
+
+  it('denies Write into a sibling git repo outside the active worktree', () => {
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(isoSiblingRepo, 'foo.ts') },
+      cwd: isoWorktree,
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: isoParent });
+    assert.ok(isDenied(result), 'sibling repo write denied without permittedExternalPaths');
+  });
+
+  it('still enforces .ai-sdlc/** relative to the worktree root (not just the project root)', () => {
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(isoWorktree, '.ai-sdlc', 'agent-role.yaml') },
+      cwd: isoWorktree,
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: isoParent });
+    assert.ok(isDenied(result), '.ai-sdlc/** inside the worktree is still refused');
+  });
+});
+
+// ── AISDLC-567 stale-base guard ──────────────────────────────────────────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-567 stale-base guard)', () => {
+  let staleParent;
+  let staleOrigin;
+  let staleWorktree;
+
+  before(() => {
+    staleParent = join(tmpdir(), `enforce-blocked-stale-${Date.now()}`);
+    staleOrigin = join(tmpdir(), `enforce-blocked-stale-origin-${Date.now()}`);
+    staleWorktree = join(staleParent, '.worktrees', 'aisdlc-300');
+
+    mkdirSync(staleOrigin, { recursive: true });
+    mkdirSync(join(staleParent, '.ai-sdlc'), { recursive: true });
+    mkdirSync(staleWorktree, { recursive: true });
+
+    writeFileSync(
+      join(staleParent, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedPaths: []
+blockedActions: []
+`,
+    );
+
+    // Build a local "origin" repo with a main branch — no network involved,
+    // just a second local repo acting as the remote.
+    execSync('git init -q -b main', { cwd: staleOrigin });
+    execSync('git config user.email test@example.com', { cwd: staleOrigin });
+    execSync('git config user.name Test', { cwd: staleOrigin });
+    writeFileSync(join(staleOrigin, 'file.txt'), 'v1\n');
+    execSync('git add file.txt && git commit -q -m "initial"', { cwd: staleOrigin });
+
+    // "Worktree" clones origin at this point — its HEAD matches origin/main.
+    execSync(`git clone -q "${staleOrigin}" "${staleWorktree}"`, { cwd: staleParent });
+    execSync('git config user.email test@example.com', { cwd: staleWorktree });
+    execSync('git config user.name Test', { cwd: staleWorktree });
+
+    // Origin advances further — the worktree's checked-out HEAD is now stale
+    // relative to origin/main.
+    writeFileSync(join(staleOrigin, 'file.txt'), 'v2\n');
+    execSync('git add file.txt && git commit -q -m "second"', { cwd: staleOrigin });
+
+    // Refresh the worktree's LOCAL knowledge of origin/main (a normal
+    // `git fetch`, not a hook-triggered network call) without touching its
+    // own HEAD — this reproduces "operator hasn't rebased yet".
+    execSync('git fetch -q origin main', { cwd: staleWorktree });
+  });
+
+  after(() => {
+    rmSync(staleParent, { recursive: true, force: true });
+    rmSync(staleOrigin, { recursive: true, force: true });
+  });
+
+  function runHookCaptureStderr(payload, env = {}) {
+    const result = spawnSync('node', [hookScript], {
+      input: JSON.stringify(payload),
+      encoding: 'utf-8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: staleParent, ...env },
+      timeout: 5000,
+    });
+    return {
+      stdout: (result.stdout || '').trim(),
+      stderr: result.stderr || '',
+      status: result.status,
+    };
+  }
+
+  it('warns on stderr when the worktree HEAD is behind origin/main, without blocking the write', () => {
+    const result = runHookCaptureStderr({
+      tool_name: 'Write',
+      tool_input: { file_path: join(staleWorktree, 'new-file.ts') },
+      cwd: staleWorktree,
+    });
+    assert.match(result.stderr, /behind origin\/main/i, 'should warn about stale base');
+    assert.ok(!result.stdout.includes('"deny"'), 'must not block the write — warning only');
+  });
+
+  it('does not warn once the worktree is rebased onto origin/main', () => {
+    execSync('git rebase origin/main', { cwd: staleWorktree });
+    const result = runHookCaptureStderr({
+      tool_name: 'Write',
+      tool_input: { file_path: join(staleWorktree, 'new-file2.ts') },
+      cwd: staleWorktree,
+    });
+    assert.doesNotMatch(result.stderr, /behind origin\/main/i, 'no warning once rebased');
   });
 });

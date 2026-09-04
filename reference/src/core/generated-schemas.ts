@@ -192,7 +192,8 @@ export const agentRoleSchema = {
             },
             blockedPaths: {
               type: 'array',
-              description: 'Glob patterns for paths the agent must not modify.',
+              description:
+                "Glob patterns for paths the agent must not modify (e.g. '.github/workflows/**'). Enforced by the PreToolUse hook (ai-sdlc-plugin/hooks/enforce-blocked-actions.js) on Write/Edit calls, relative to the agent's active worktree (or project root when no worktree is resolvable). `.ai-sdlc/**` is ALWAYS refused by the hook regardless of whether it appears here — it is a hardcoded floor, not config-driven. `.github/workflows/**` is NOT blocked by default; list it here to opt a project's agents OUT of editing its own CI workflows (AISDLC-567).",
               items: { type: 'string' },
             },
             blockedActions: {
