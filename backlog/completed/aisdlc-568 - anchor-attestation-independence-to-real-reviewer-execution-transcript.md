@@ -3,7 +3,7 @@ id: aisdlc-568
 title: >-
   Anchor attestation independence to the reviewer's real execution transcript +
   a lower-trust self-review verdict class
-status: To Do
+status: Done
 priority: high
 labels:
   - attestation
