@@ -5,6 +5,26 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.15.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.14.0...orchestrator-v0.15.0) (2026-09-04)
+
+
+### Features
+
+* **orchestrator:** ship check-attestation-sign.sh + fix the pre-push hook installer (AISDLC-555) ([#973](https://github.com/ai-sdlc-framework/ai-sdlc/issues/973)) ([94f2af4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/94f2af4965809a391bc28b8ade46e8c64e00be58))
+
+
+### Bug Fixes
+
+* make attestation signing reachable in adopter repos (AISDLC-554) ([#963](https://github.com/ai-sdlc-framework/ai-sdlc/issues/963)) ([2be38fb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2be38fbbc4490686e932e1a4766ba215a03bc55a))
+* **orchestrator:** pre-push hook must be POSIX sh, not bash+pipefail (AISDLC-565) ([#975](https://github.com/ai-sdlc-framework/ai-sdlc/issues/975)) ([3a44ce1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3a44ce12a8f945bf1eb56ddc0012963c7492a121))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.15.0
+
 ## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.13.0...orchestrator-v0.14.0) (2026-07-29)
 
 
