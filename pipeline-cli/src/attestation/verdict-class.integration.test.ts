@@ -82,6 +82,19 @@ describe('SubagentStart hook -> determineVerdictClass integration (AISDLC-571)',
       },
     });
 
+    // Guard with a clear assertion message rather than letting an empty
+    // stdout fall through to a raw `JSON.parse` SyntaxError. Empty stdout
+    // here means the hook exited before reaching its output-write step —
+    // e.g. the AISDLC-571 CI regression where a Linux-only EAGAIN on the
+    // stdin read caused the top-level fail-safe `catch` to exit(0)
+    // immediately, before ever writing the marker or the governance
+    // context. If this assertion fires, `subagent-start.js`'s stdin read
+    // is failing to actually deliver a payload in this environment.
+    expect(
+      stdout.trim().length,
+      'subagent-start.js produced no stdout — hook exited early',
+    ).toBeGreaterThan(0);
+
     // The hook's SECOND responsibility (governance injection, scope item 3)
     // works once the hook is actually registered/invoked.
     const parsed = JSON.parse(stdout);
