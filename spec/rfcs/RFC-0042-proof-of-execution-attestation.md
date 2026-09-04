@@ -264,6 +264,8 @@ The shape of (1) costs nearly as much as actually running the reviewer LLM (5-10
 
 This is the "make forgery as expensive as compliance" property. Not absolute, but the economic curve flattens.
 
+**What this does NOT prove (honest scope, AISDLC-568).** Forgery resistance is not the same claim as reviewer *independence*. The transcript-capture contract (Step 0 / Step END in each reviewer agent body) is a set of Bash commands the reviewer subagent's own process runs against its own conversation — nothing structurally distinguishes a transcript written by a genuinely separate reviewer subagent from one written by the *same coordinator process* that also drives the developer subagent and makes the ship decision, provided that coordinator is willing to pay the same LLM-token cost to produce the transcript content. PoE raises the cost of an *unexecuted* review to the cost of a real one; it does not, by itself, structurally anchor that the process producing the transcript is independent of the process deciding to merge. See the whitepaper's [§2.2 Out of scope](../../docs/whitepapers/proof-of-execution.md#22-out-of-scope-poe-does-not-defend-against-these) table for the equivalent caveat. AISDLC-568 tracks (a) binding the leaf to the reviewer subagent's real harness-captured execution transcript rather than a subagent-writable summary, and (b) a distinct lower-trust verdict class for coordinator/self-authored attestations — both deferred pending an operator design walkthrough as of this writing.
+
 ### What this collapses
 
 - `check-attestation-sign.sh` pre-push hook → **GONE**. Envelope is staged + committed in the dev subagent's own work commit (or as part of the existing task-move chore). No separate chore-commit cycle.
