@@ -63,18 +63,19 @@ unattributable transcripts under `unknown`).
 
 ## Acceptance Criteria
 
-- [ ] **Deferred (DEC-0012 opt-a, not this task's scope).** Transcript leaf
-      hashes the reviewer subagent's real auto-captured execution JSONL (not a
-      coordinator-writable summary file); a coordinator that only writes a
-      summary cannot produce a passing independent-tier leaf. The escalated
-      decision DEC-0012 (`node pipeline-cli/bin/cli-decisions.mjs show DEC-0012`)
-      was resolved to **opt-b**, not opt-a — opt-a requires locating a
-      subagent's own harness transcript deterministically per invocation,
-      which varies by harness/CLI version and does not exist for CI/headless
-      dispatch. What this task hashes into the leaf is UNCHANGED from before
-      AISDLC-568: the Bash-written `.ai-sdlc/transcripts/<task>/<reviewer>.jsonl`
-      file. Closing this AC requires a harness-coupled follow-up (opt-a) —
-      out of scope for the opt-b implementation below.
+- [ ] **Deferred to [[aisdlc-570]] (DEC-0012 opt-a, not this task's shipped
+      scope).** Transcript leaf hashes the reviewer subagent's real
+      auto-captured execution JSONL (not a coordinator-writable summary
+      file); a coordinator that only writes a summary cannot produce a
+      passing independent-tier leaf. The escalated decision DEC-0012
+      (`node pipeline-cli/bin/cli-decisions.mjs show DEC-0012`) was resolved
+      to **opt-b**, not opt-a — opt-a requires locating a subagent's own
+      harness transcript deterministically per invocation, which varies by
+      harness/CLI version and does not exist for CI/headless dispatch. What
+      this task hashes into the leaf is UNCHANGED from before AISDLC-568:
+      the Bash-written `.ai-sdlc/transcripts/<task>/<reviewer>.jsonl` file.
+      [[aisdlc-570]] tracks the opt-a investigation + implementation as a
+      standalone follow-up.
 - [x] A coordinator/self-authored attestation is recorded and verified as a
       distinct lower-trust verdict class, visibly not equivalent to an
       independent-reviewer verdict. **Shipped (DEC-0012 opt-b):** every v6
@@ -113,9 +114,8 @@ unattributable transcripts under `unknown`).
       `ai-sdlc-plugin/hooks/subagent-start.test.mjs` ("AISDLC-568 marker
       writing").
 
-**Status: partially shipped.** This PR implements DEC-0012 opt-b in full
-(AC#2, AC#3, AC#4 above). AC#1 (opt-a — binding the leaf to the reviewer
-subagent's own harness-captured execution transcript) remains open and is
-tracked as a follow-up; this task file stays in `backlog/tasks/` rather than
-moving to `backlog/completed/` until that follow-up is scoped and either
-completed or explicitly descoped by the operator.
+**Status: DEC-0012 opt-b shipped in full (AC#2, AC#3, AC#4 above).** AC#1
+(opt-a — binding the leaf to the reviewer subagent's own harness-captured
+execution transcript) was, per DEC-0012's own resolution, always the
+harness-coupled follow-up rather than part of this task's immediate scope —
+it is now tracked standalone as [[aisdlc-570]].
