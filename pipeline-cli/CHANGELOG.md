@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.14.0...pipeline-cli-v0.15.0) (2026-09-04)
+
+
+### Bug Fixes
+
+* populate DoR Gate 7 declared-dependency refs from frontmatter (AISDLC-563) ([#969](https://github.com/ai-sdlc-framework/ai-sdlc/issues/969)) ([73ed370](https://github.com/ai-sdlc-framework/ai-sdlc/commit/73ed370b4f2fb5615f5a02a96c782409d13107d0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.15.0
+
 ## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.13.0...pipeline-cli-v0.14.0) (2026-07-29)
 
 
