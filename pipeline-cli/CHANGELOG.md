@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.16.0...pipeline-cli-v0.17.0) (2026-09-04)
+
+
+### Features
+
+* add verdictClass trust class to v6 attestation leaves (AISDLC-568) ([#986](https://github.com/ai-sdlc-framework/ai-sdlc/issues/986)) ([338df4e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/338df4e362cf61c985d8afb16aff7d6e14fce3ee))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.17.0
+
 ## [0.16.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.15.0...pipeline-cli-v0.16.0) (2026-09-04)
 
 
