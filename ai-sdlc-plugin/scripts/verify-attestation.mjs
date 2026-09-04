@@ -19,28 +19,46 @@
  * dependency-free `./verify-attestation-core.mjs`, which `scripts/verify-attestation.mjs`
  * (this monorepo's own CI verifier) ALSO imports — one verification
  * codepath, two drivers. This file only owns:
- *   1. resolving the `@ai-sdlc/orchestrator` runtime module a consumer repo
- *      has installed (below), and
+ *   1. resolving the `@ai-sdlc/orchestrator` runtime module from a TRUSTED
+ *      location (below), and
  *   2. the CLI surface (args / env vars / exit code).
  *
- * ── Runtime resolution ──────────────────────────────────────────────────
- * Deliberately duplicates (not imports) `sign-attestation.mjs`'s
- * `runtimeModuleCandidates` / `nodeModulesWalkUp` / `loadRuntimeModule` /
- * `MIN_RUNTIME_VERSIONS` resolution strategy (AISDLC-554), generalized to
- * just the one module this script needs (`@ai-sdlc/orchestrator/runtime` —
- * verification never needs `@ai-sdlc/pipeline-cli`'s v6 SIGNER). See that
- * file's doc comment for the full candidate-order rationale; it is
- * unchanged here:
- *   1. `<repoRoot>/orchestrator/dist/…` — the monorepo dev path (kept FIRST
- *      so in-repo behaviour, including this monorepo's OWN CI, is
- *      byte-identical to before AISDLC-566).
- *   2. `<dir>/node_modules/@ai-sdlc/orchestrator/dist/…` walking upward from
- *      repoRoot — an adopter who pinned the dependency themselves.
- *   3. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — the
- *      zero-config path (install-runtime-deps.sh's runtimeDependencies).
- *   4. node_modules walking up from THIS script — same plugin install,
- *      reached without the env vars (CI runners / git hooks don't always
- *      inherit them).
+ * ── Runtime resolution — TRUSTED LOCATIONS ONLY (AISDLC-566 security fix) ──
+ *
+ * SECURITY: unlike `sign-attestation.mjs` (which runs on TRUSTED operator
+ * content), this driver runs against UNTRUSTED PR HEAD content — the
+ * adopter CI recipe checks out the PR being verified and sets `repoRoot` to
+ * that checkout. The runtime module resolved here BECOMES the verifier: it
+ * decides whether `runVerifier` reports `status=valid`, and `import()`ing
+ * it executes arbitrary code. A candidate list that includes anything
+ * inside `repoRoot` (a monorepo-dev-style `<repoRoot>/orchestrator/dist/…`
+ * path, or `<repoRoot>/node_modules/@ai-sdlc/orchestrator/…`) lets a
+ * malicious PR commit its OWN forged runtime — one that reports every
+ * envelope valid — and have THIS driver load and trust it. That is a
+ * trust-inversion / RCE hole: the thing being verified controls the
+ * verifier. `sign-attestation.mjs`'s repoRoot-first candidate order is safe
+ * ONLY because it runs on content the operator already trusts (their own
+ * checkout); it must NOT be copied here.
+ *
+ * Candidates, in order — every one resolves OUTSIDE `repoRoot`:
+ *   1. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — the
+ *      zero-config path. The plugin install lives on the CI runner
+ *      (installed fresh by `install-runtime-deps.sh` from the plugin's
+ *      pinned `runtimeDependencies`), never from PR file content.
+ *   2. `node_modules` walking up from THIS SCRIPT's own on-disk location —
+ *      same plugin install, reached without the env vars (some CI/hook
+ *      contexts don't inherit them). This walk starts at the script's
+ *      directory, which lives in the plugin install tree, NOT inside the
+ *      checked-out PR.
+ *
+ * Every resolved candidate is additionally hard-checked to reject any path
+ * that is inside `repoRoot` (`isInsideRepoRoot`), so even a
+ * misconfigured `CLAUDE_PLUGIN_ROOT` pointed at the checkout cannot smuggle
+ * an untrusted runtime through. No candidate is EVER exempt from the
+ * minimum-version guard on this driver (unlike the signer's monorepo-dev
+ * exemption) — there is no "this is my own trusted checkout" case here.
+ * If no trusted runtime is found, this driver FAILS CLOSED (non-zero exit)
+ * rather than falling back to anything repo-local.
  *
  * Usage:
  *   node ai-sdlc-plugin/scripts/verify-attestation.mjs --head <sha> --base <sha>
@@ -65,9 +83,9 @@
  * GitHub Actions recipe.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, resolve, dirname, parse as parsePath } from 'node:path';
+import { join, resolve, dirname, relative, isAbsolute, parse as parsePath } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import * as core from './verify-attestation-core.mjs';
@@ -96,41 +114,77 @@ function nodeModulesWalkUp(from, pkg, distSubpath) {
 }
 
 /**
- * @param repoRoot    the repo being verified
- * @param workspaceDir monorepo workspace directory name, e.g. 'orchestrator'
+ * AISDLC-566 security fix: is `candidate` inside `repoRoot`?
+ *
+ * `repoRoot` is UNTRUSTED (the checked-out PR under verification). A
+ * candidate resolving inside it — even indirectly via a symlink — would let
+ * a malicious PR supply its own "runtime" and have this driver treat it as
+ * the trust root. Resolves both paths to their real (symlink-free) form
+ * before comparing so a symlink planted inside repoRoot that points outside
+ * it doesn't accidentally pass, and — more importantly — so a candidate
+ * that's nominally outside repoRoot but symlinked from inside it can't be
+ * used as a smuggling vector either way: containment is checked on the
+ * REAL path, not the nominal one.
+ */
+function isInsideRepoRoot(candidate, repoRoot) {
+  let realCandidate;
+  let realRoot;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch {
+    // Doesn't exist (yet) — fall back to the nominal path for the check.
+    realCandidate = resolve(candidate);
+  }
+  try {
+    realRoot = realpathSync(repoRoot);
+  } catch {
+    realRoot = resolve(repoRoot);
+  }
+  if (realCandidate === realRoot) return true;
+  const rel = relative(realRoot, realCandidate);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+/**
+ * AISDLC-566 security fix: candidates for the CONSUMER-RUNNABLE verifier
+ * are TRUSTED-LOCATIONS-ONLY — see the file header for the full threat
+ * model. Unlike the signer's `runtimeModuleCandidates` (AISDLC-554), this
+ * list deliberately contains NO path derived from `repoRoot` (no monorepo
+ * dev path, no `node_modules` walk-up starting at repoRoot): `repoRoot` is
+ * the untrusted PR checkout being verified, and a runtime resolved from
+ * inside it would let that PR forge its own verifier.
+ *
  * @param pkg         published package name, e.g. '@ai-sdlc/orchestrator'
  * @param distSubpath path segments below the package root
  */
-function runtimeModuleCandidates(repoRoot, workspaceDir, pkg, distSubpath) {
-  const candidates = [
-    join(repoRoot, workspaceDir, ...distSubpath),
-    ...nodeModulesWalkUp(repoRoot, pkg, distSubpath),
-  ];
+function trustedRuntimeModuleCandidates(pkg, distSubpath) {
+  const candidates = [];
   for (const pluginDir of [process.env.CLAUDE_PLUGIN_DIR, process.env.CLAUDE_PLUGIN_ROOT]) {
     if (pluginDir) {
       candidates.push(join(pluginDir, 'node_modules', ...pkg.split('/'), ...distSubpath));
     }
   }
+  // Walk up from THIS SCRIPT's own on-disk location — the plugin install
+  // tree, not the checked-out PR. (`import.meta.url` always resolves to
+  // where this file physically lives, which is the plugin's `scripts/`
+  // directory on the CI runner, never inside the PR being verified.)
   candidates.push(...nodeModulesWalkUp(dirname(fileURLToPath(import.meta.url)), pkg, distSubpath));
   return [...new Set(candidates)];
 }
 
 const ORCHESTRATOR_DIST = ['dist', 'runtime', 'attestations.js'];
 
-function attestationRuntimeCandidates(repoRoot) {
-  return runtimeModuleCandidates(
-    repoRoot,
-    'orchestrator',
-    '@ai-sdlc/orchestrator',
-    ORCHESTRATOR_DIST,
-  );
+function attestationRuntimeCandidates() {
+  return trustedRuntimeModuleCandidates('@ai-sdlc/orchestrator', ORCHESTRATOR_DIST);
 }
 
 /**
  * Minimum acceptable version for an INSTALLED runtime copy — matches the
  * signer's guard (AISDLC-554) so verification never silently runs against a
  * canonicalization-drifted copy that would reject envelopes the real
- * verifier accepts (or vice versa).
+ * verifier accepts (or vice versa). Unlike the signer, this driver NEVER
+ * exempts a candidate from this check (AISDLC-566) — there is no
+ * "this is my own trusted checkout" case for a consumer verifier.
  */
 const MIN_RUNTIME_VERSIONS = {
   '@ai-sdlc/orchestrator': [0, 14, 0],
@@ -160,16 +214,27 @@ function meetsMinimumVersion(version, minimum) {
 }
 
 /**
- * Import the first existing candidate, or fail loudly with adopter-actionable
- * guidance. Mirrors `sign-attestation.mjs`'s `loadRuntimeModule`.
+ * Import the first existing, IN-BOUNDS (outside repoRoot), version-checked
+ * candidate, or fail closed with adopter-actionable guidance. AISDLC-566:
+ * every candidate is hard-rejected if it resolves inside `repoRoot` — even
+ * one supplied via `$CLAUDE_PLUGIN_ROOT`/`$CLAUDE_PLUGIN_DIR` misconfigured
+ * to point at the checkout — and NO candidate is ever exempt from the
+ * minimum-version guard (unlike `sign-attestation.mjs`'s monorepo-dev
+ * exemption, which is safe there only because that driver runs on trusted
+ * operator content).
  */
-async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath, workspacePath) {
+async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath) {
   const minimum = MIN_RUNTIME_VERSIONS[pkg];
   const rejected = [];
+  const outOfBounds = [];
   let unverified = null;
   const found = candidates.find((candidate) => {
     if (!existsSync(candidate)) return false;
-    if (candidate === workspacePath || !minimum) return true;
+    if (isInsideRepoRoot(candidate, repoRoot)) {
+      outOfBounds.push(candidate);
+      return false;
+    }
+    if (!minimum) return true;
     const version = candidatePackageVersion(candidate, distSubpath);
     if (!version) {
       unverified = candidate;
@@ -183,18 +248,20 @@ async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath, 
   });
   if (!found) {
     fail(
-      `Cannot locate the AI-SDLC ${label}.\n` +
-        '       Verification imports the same module the signer uses, so it will not\n' +
-        '       fall back to a re-implementation: a different canonicalization would\n' +
+      `Cannot locate a TRUSTED AI-SDLC ${label}.\n` +
+        '       The consumer verifier only trusts a runtime copy that lives OUTSIDE\n' +
+        '       the checkout being verified — loading one from inside the PR would let\n' +
+        '       a malicious PR forge its own verifier (AISDLC-566). It will not fall\n' +
+        '       back to a re-implementation either: a different canonicalization would\n' +
         '       produce a false accept/reject that looks like a real tampering result.\n\n' +
-        '       Inside the ai-sdlc monorepo:\n' +
-        `         pnpm --filter ${pkg} build\n\n` +
-        '       In a consumer repo, repair the plugin install:\n' +
-        '         bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh"\n' +
-        '       or pin the dependency in the repo itself:\n' +
-        `         pnpm add -D ${pkg}\n\n` +
-        `       Searched (from repo root ${repoRoot}):\n` +
+        '       Repair the plugin install (installs into the CI runner, not the checkout):\n' +
+        '         bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh"\n\n' +
+        `       Searched (repoRoot is OUT OF BOUNDS: ${repoRoot}):\n` +
         candidates.map((candidate) => `         ${candidate}`).join('\n') +
+        (outOfBounds.length
+          ? `\n\n       Rejected as inside the untrusted checkout (repoRoot):\n` +
+            outOfBounds.map((entry) => `         ${entry}`).join('\n')
+          : '') +
         (rejected.length
           ? `\n\n       Rejected as too old (need >= ${minimum.join('.')}):\n` +
             rejected.map((entry) => `         ${entry}`).join('\n')
@@ -218,9 +285,8 @@ async function loadAttestationRuntime(repoRoot) {
     repoRoot,
     'attestation runtime',
     '@ai-sdlc/orchestrator',
-    attestationRuntimeCandidates(repoRoot),
+    attestationRuntimeCandidates(),
     ORCHESTRATOR_DIST,
-    join(repoRoot, 'orchestrator', ...ORCHESTRATOR_DIST),
   );
 }
 
