@@ -90,3 +90,25 @@ significantly across Claude Code / Codex / Copilot. Do not proceed to
 implementation without first confirming the mechanism exists for at least
 one harness; if none do, this task's outcome may be "documented as
 infeasible, closed with no code change" rather than a shipped feature.
+
+## Concrete residual weaknesses surfaced by the AISDLC-568 opt-b review
+
+The opt-b `verdictClass` heuristic (AISDLC-568, PR #986) is a documented,
+forgeable partial signal. The security + code reviews identified exactly what
+opt-a must close — capture these as the acceptance target:
+
+- **Marker is coordinator-forgeable.** `determineVerdictClass()` derives
+  `independent` solely from the existence of a plain, gitignored JSON marker in
+  `.ai-sdlc/subagent-sessions/` within a time window. Any process with
+  Bash/Write access (the coordinator itself) can fabricate the marker and get
+  `independent` legitimately signed. opt-a must bind the signal to an artifact
+  the coordinator cannot forge without a real harness-level subagent spawn.
+- **Marker is not bound to reviewer identity/role/transcript.** The match is a
+  bidirectional ~2h window; ANY `SubagentStart` (including the developer
+  subagent) qualifies, so accumulating enough real spawns can defeat the
+  weakest-link roll-up. opt-a must bind each marker to the specific reviewer's
+  identity/role and its transcript.
+- **Non-durable consumption (fail-open unlink).** Marker consumption is a
+  best-effort, non-atomic read-then-unlink; a failed unlink can over-credit a
+  later leaf in the window. opt-a must make consumption durable/atomic (or
+  bind-once semantics) so a marker cannot be reused.
