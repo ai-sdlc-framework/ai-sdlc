@@ -39,9 +39,10 @@ const E2E_FLAGS: WizardFlags = {
  * task closes is a hook that installs and then silently never fires, so a
  * test that never EXECUTES the snippet cannot observe it.
  *
- * These tests run the snippet as real bash, in a real temp repo.
+ * These tests run the snippet as real POSIX `sh`, in a real temp repo —
+ * matching how husky v9 actually invokes hooks (`sh -e`), not bash (AISDLC-565).
  */
-describe('HUSKY_PREPUSH_SIGN_SNIPPET — executed as bash (AISDLC-555)', () => {
+describe('HUSKY_PREPUSH_SIGN_SNIPPET — executed as sh (AISDLC-555, AISDLC-565)', () => {
   let repo: string;
 
   beforeEach(() => {
@@ -57,10 +58,13 @@ describe('HUSKY_PREPUSH_SIGN_SNIPPET — executed as bash (AISDLC-555)', () => {
     const hookPath = join(repo, 'hook.sh');
     writeFileSync(
       hookPath,
-      `#!/usr/bin/env bash\nset -euo pipefail\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
+      // Mirror the shipped preamble: POSIX `sh` + `set -eu` (NOT bash +
+      // pipefail). Husky runs hooks via `sh -e`, so exercising the snippet
+      // under `sh` here is what actually matches production (AISDLC-565).
+      `#!/usr/bin/env sh\nset -eu\n${HUSKY_PREPUSH_SIGN_SNIPPET}`,
     );
     chmodSync(hookPath, 0o755);
-    const res = spawnSync('bash', [hookPath], {
+    const res = spawnSync('sh', [hookPath], {
       cwd: repo,
       encoding: 'utf-8',
       // HOME is redirected so the cache-probe glob cannot find the real
@@ -266,9 +270,17 @@ describe('attestation hook install — real git push, husky v9 layout (AISDLC-55
     // Durable, adopter-owned location — NOT the gitignored internals that
     // husky regenerates on the next `npm install`.
     expect(existsSync(join(repo, '.husky', 'pre-push'))).toBe(true);
-    expect(readFileSync(join(repo, '.husky', 'pre-push'), 'utf-8')).toContain(
-      '# ai-sdlc:attestation-sign-block',
-    );
+    const installedHook = readFileSync(join(repo, '.husky', 'pre-push'), 'utf-8');
+    expect(installedHook).toContain('# ai-sdlc:attestation-sign-block');
+    // AISDLC-565 regression lock — deterministic on EVERY platform, not just
+    // dash-based CI: the preamble MUST be POSIX `sh` with no `pipefail`. Husky
+    // runs hooks via `sh -e`; `set -o pipefail` is illegal under dash and
+    // aborts the hook before the sign block. Asserting the file content (rather
+    // than only observing execution under the host's /bin/sh, which is
+    // bash-backed on macOS and would false-green) fails on the old buggy
+    // preamble regardless of which shell the test host resolves for `sh`.
+    expect(installedHook.startsWith('#!/usr/bin/env sh\nset -eu\n')).toBe(true);
+    expect(installedHook).not.toContain('pipefail');
     expect(existsSync(join(repo, '.husky', '_', 'pre-push.ai-sdlc'))).toBe(false);
     expect(readFileSync(join(repo, '.husky', '_', 'pre-push'), 'utf-8')).not.toContain(
       'ai-sdlc:attestation-sign-block',
