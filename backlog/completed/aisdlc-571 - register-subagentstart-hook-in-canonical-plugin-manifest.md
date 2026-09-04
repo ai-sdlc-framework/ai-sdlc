@@ -8,8 +8,8 @@ labels:
   - plugin
   - attestation
   - aisdlc-568-followup
-references:
-  - AISDLC-568
+dependencies:
+  - aisdlc-568
 ---
 
 ## Description
