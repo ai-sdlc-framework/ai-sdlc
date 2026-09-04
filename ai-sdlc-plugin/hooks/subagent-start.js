@@ -21,9 +21,24 @@
  * and its honest, single-machine limits.
  *
  * Fail-safe: exits silently on any error.
+ *
+ * AISDLC-571 CI follow-up: stdin is read via `readStdinSync()` (a bounded
+ * `fs.readSync(0, ...)` retry loop), NOT a single `readFileSync('/dev/stdin')`
+ * call. Node's synchronous read of a piped (non-TTY) fd 0 can throw `EAGAIN`
+ * on Linux when the pipe hasn't fully buffered the writer's output yet at
+ * the moment of the read — a well-known Node/libuv behavior difference from
+ * macOS. This reproduced DETERMINISTICALLY in GitHub Actions (Linux
+ * runners) for the AISDLC-571 integration test while never reproducing on a
+ * macOS dev machine. A single `readFileSync` call treats that transient
+ * `EAGAIN` as a hard failure, and the surrounding fail-safe `catch` exited
+ * the whole hook (including the marker write) at that point — silently
+ * skipping BOTH the marker write and governance injection on EVERY
+ * Linux-hosted real `SubagentStart` firing that raced the same way, not
+ * just under test. Retrying on `EAGAIN` (bounded, so a genuinely closed or
+ * absent stdin still fails safe) fixes the hook itself.
  */
 
-const { readFileSync, existsSync, mkdirSync, writeFileSync } = require('fs');
+const { readFileSync, readSync, existsSync, mkdirSync, writeFileSync } = require('fs');
 const { join } = require('path');
 const { execSync } = require('child_process');
 const { randomUUID } = require('crypto');
@@ -32,7 +47,7 @@ const { randomUUID } = require('crypto');
 
 let stdinRaw;
 try {
-  stdinRaw = readFileSync('/dev/stdin', 'utf-8');
+  stdinRaw = readStdinSync();
 } catch {
   process.exit(0);
 }
@@ -121,6 +136,57 @@ process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 process.exit(0);
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Reads all of fd 0 (stdin) synchronously, retrying on `EAGAIN` instead of
+ * treating it as a terminal failure. See the module-level AISDLC-571 CI
+ * follow-up comment above for why this is necessary on Linux.
+ *
+ * Bounded to ~2s total (200 retries x 10ms) so a genuinely absent/closed
+ * stdin still surfaces an error to the caller's fail-safe `catch` rather
+ * than hanging the hook indefinitely.
+ */
+function readStdinSync() {
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  const MAX_EAGAIN_RETRIES = 200;
+  let eagainRetries = 0;
+
+  for (;;) {
+    let bytesRead;
+    try {
+      bytesRead = readSync(0, buf, 0, buf.length, null);
+    } catch (err) {
+      if (err && err.code === 'EAGAIN') {
+        eagainRetries += 1;
+        if (eagainRetries > MAX_EAGAIN_RETRIES) {
+          throw err;
+        }
+        sleepSync(10);
+        continue;
+      }
+      // EOF is thrown as an error on some platforms when the fd is
+      // already exhausted; treat it the same as a 0-byte read.
+      if (err && err.code === 'EOF') {
+        break;
+      }
+      throw err;
+    }
+    if (bytesRead === 0) {
+      break;
+    }
+    chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
+  }
+
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+/** Blocks the event loop for `ms` milliseconds via a shared-memory wait. */
+function sleepSync(ms) {
+  const sharedBuffer = new SharedArrayBuffer(4);
+  const view = new Int32Array(sharedBuffer);
+  Atomics.wait(view, 0, 0, ms);
+}
 
 function parseListField(yaml, field) {
   const lines = yaml.split('\n');

@@ -220,6 +220,146 @@ describe('plugin manifests — runtimeDependencies must not drift (AISDLC-554)',
   });
 });
 
+describe('plugin manifests — hook event registration must not drift (AISDLC-571)', () => {
+  // AISDLC-571 root cause: .claude-plugin/plugin.json (the marketplace-canonical
+  // manifest) never registered the SubagentStart hook event, even though
+  // hooks/subagent-start.sh ships in the plugin and plugin.json (the top-level
+  // manifest) DOES register it. That silently broke `verdictClass` for every
+  // marketplace-installed adopter — `.ai-sdlc/subagent-sessions/` markers were
+  // never written, so `determineVerdictClass()` could never return
+  // 'independent'. This test generalizes the AISDLC-554 runtimeDependencies
+  // sync check to the `hooks` block: every event name that appears in EITHER
+  // manifest's `hooks` object, and whose command references a script that
+  // actually ships under ai-sdlc-plugin/hooks/, must be registered in BOTH
+  // manifests. It fails on the pre-fix state (SubagentStart present only in
+  // plugin.json) and passes once the two manifests are reconciled.
+  //
+  // AISDLC-571 review follow-up: the event-level check alone would NOT catch
+  // a missing MATCHER within an event that's already present via a different
+  // matcher — exactly the second drift found in this same task, where
+  // .claude-plugin/plugin.json had `PreToolUse` registered (via the `Bash`
+  // matcher) but was missing the `Write|Edit` matcher entry entirely. The
+  // event-name set stayed equal, so an event-level-only test would go green
+  // even with that matcher dropped. `matcherPairsWithShippedScripts` below
+  // extends the comparison to (event, matcher, script) triples so removing
+  // EITHER the SubagentStart event OR the Write|Edit matcher fails the test.
+  const pluginRoot = join(__dirname, '..');
+  const hooksDir = join(pluginRoot, 'hooks');
+  const topLevel = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf-8'));
+  const marketplace = JSON.parse(
+    readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf-8'),
+  );
+
+  /**
+   * Returns the set of hook event names (top-level keys of the `hooks`
+   * object) whose entries reference at least one script that actually
+   * exists under ai-sdlc-plugin/hooks/. Filtering by "script actually
+   * ships" keeps the assertion honest — we only require agreement on
+   * events backed by real, shipped hook scripts, not on any event name
+   * that might appear in a manifest for other reasons.
+   */
+  function eventsWithShippedScripts(manifest) {
+    const events = new Set();
+    for (const [eventName, matcherEntries] of Object.entries(manifest.hooks ?? {})) {
+      for (const matcherEntry of matcherEntries) {
+        for (const hook of matcherEntry.hooks ?? []) {
+          const match = /\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/([^"]+\.sh)/.exec(hook.command ?? '');
+          if (match && existsSync(join(hooksDir, match[1]))) {
+            events.add(eventName);
+          }
+        }
+      }
+    }
+    return events;
+  }
+
+  /**
+   * Returns the set of (event, matcher, script) triples — finer-grained than
+   * `eventsWithShippedScripts`. A matcher entry with no explicit `matcher`
+   * field (e.g. PostToolUse's single unconditional entry) is represented
+   * with matcher `'<none>'` so events that don't use matchers still compare
+   * cleanly. Only pairs backed by a script that actually ships under
+   * ai-sdlc-plugin/hooks/ are included, matching the event-level filter.
+   */
+  function matcherPairsWithShippedScripts(manifest) {
+    const pairs = new Set();
+    for (const [eventName, matcherEntries] of Object.entries(manifest.hooks ?? {})) {
+      for (const matcherEntry of matcherEntries) {
+        const matcher = matcherEntry.matcher ?? '<none>';
+        for (const hook of matcherEntry.hooks ?? []) {
+          const match = /\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/([^"]+\.sh)/.exec(hook.command ?? '');
+          if (match && existsSync(join(hooksDir, match[1]))) {
+            pairs.add(`${eventName}::${matcher}::${match[1]}`);
+          }
+        }
+      }
+    }
+    return pairs;
+  }
+
+  const topLevelEvents = eventsWithShippedScripts(topLevel);
+  const marketplaceEvents = eventsWithShippedScripts(marketplace);
+  const topLevelPairs = matcherPairsWithShippedScripts(topLevel);
+  const marketplacePairs = matcherPairsWithShippedScripts(marketplace);
+
+  it('every shipped-hook-script event registered in plugin.json is also registered in .claude-plugin/plugin.json', () => {
+    for (const eventName of topLevelEvents) {
+      assert.ok(
+        marketplaceEvents.has(eventName),
+        `.claude-plugin/plugin.json is missing the '${eventName}' hook event, ` +
+          `which plugin.json registers against a shipped script under ai-sdlc-plugin/hooks/`,
+      );
+    }
+  });
+
+  it('every shipped-hook-script event registered in .claude-plugin/plugin.json is also registered in plugin.json', () => {
+    for (const eventName of marketplaceEvents) {
+      assert.ok(
+        topLevelEvents.has(eventName),
+        `plugin.json is missing the '${eventName}' hook event, ` +
+          `which .claude-plugin/plugin.json registers against a shipped script under ai-sdlc-plugin/hooks/`,
+      );
+    }
+  });
+
+  it('every shipped-hook-script (event, matcher) pair in plugin.json is also registered in .claude-plugin/plugin.json', () => {
+    for (const pair of topLevelPairs) {
+      assert.ok(
+        marketplacePairs.has(pair),
+        `.claude-plugin/plugin.json is missing the '${pair}' (event::matcher::script) ` +
+          `registration that plugin.json declares against a shipped script`,
+      );
+    }
+  });
+
+  it('every shipped-hook-script (event, matcher) pair in .claude-plugin/plugin.json is also registered in plugin.json', () => {
+    for (const pair of marketplacePairs) {
+      assert.ok(
+        topLevelPairs.has(pair),
+        `plugin.json is missing the '${pair}' (event::matcher::script) ` +
+          `registration that .claude-plugin/plugin.json declares against a shipped script`,
+      );
+    }
+  });
+
+  it('SubagentStart is registered in both manifests (AISDLC-571 regression guard)', () => {
+    assert.ok(topLevelEvents.has('SubagentStart'), 'plugin.json must register SubagentStart');
+    assert.ok(
+      marketplaceEvents.has('SubagentStart'),
+      '.claude-plugin/plugin.json must register SubagentStart',
+    );
+  });
+
+  it('PreToolUse Write|Edit matcher is registered in both manifests (AISDLC-571 regression guard)', () => {
+    const expected = 'PreToolUse::Write|Edit::enforce-blocked-actions.sh';
+    assert.ok(topLevelPairs.has(expected), `plugin.json must register ${expected}`);
+    assert.ok(
+      marketplacePairs.has(expected),
+      `.claude-plugin/plugin.json must register ${expected}`,
+    );
+  });
+});
+
 describe('install-runtime-deps.sh — script exists and is executable', () => {
   it('script file exists', () => {
     assert.ok(existsSync(SCRIPT), `${SCRIPT} must exist`);

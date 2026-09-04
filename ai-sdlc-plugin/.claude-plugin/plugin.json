@@ -33,6 +33,17 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-start.sh\"",
+            "statusMessage": "Injecting AI-SDLC governance into subagent..."
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -42,6 +53,16 @@
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-blocked-actions.sh\"",
             "if": "Bash(*)",
             "statusMessage": "Checking action policy..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-blocked-actions.sh\"",
+            "statusMessage": "Checking write policy..."
           }
         ]
       }
