@@ -33,7 +33,7 @@ command body runs in the main Claude Code session which DOES have
 3. **Never push to `main` or `master`.** Refuse early.
 4. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 5. **Never delete branches.** No `git branch -D` / `-d`.
-6. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.**
+6. **Never edit `.ai-sdlc/**`.** `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 7. **Never write GitHub Actions CI-skip magic tokens** (AISDLC-88) — the
    five literal substrings (`[skip ci]`, `[ci skip]`, `[no ci]`,
    `[skip actions]`, `[actions skip]`) silently disable workflows. The

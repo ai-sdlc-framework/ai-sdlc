@@ -36,7 +36,7 @@ same architecture pattern as `/ai-sdlc rebase` and `/ai-sdlc execute`.
    command also refuses at Step 1.
 4. **Never close PRs or issues.**
 5. **Never delete branches.**
-6. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.**
+6. **Never edit `.ai-sdlc/**`.** `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 7. **Never write GitHub Actions CI-skip magic tokens.** (AISDLC-88.)
 
 ## Step 0 — Validate input

@@ -44,8 +44,10 @@ escalates the rest.
    tip we never own.
 4. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 5. **Never delete branches.** No `git branch -D` / `-d`.
-6. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.** PreToolUse hook
-   blocks anyway, but you must not even try.
+6. **Never edit `.ai-sdlc/**`.** PreToolUse hook blocks anyway, but you must
+   not even try. `.github/workflows/**` is only refused when the project's
+   `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by
+   default; check the project's config before editing it.
 7. **Never run destructive git operations** outside the rebase flow itself.
    No `git reset --hard <ref>`, no `git checkout -- .`, no `git restore .`
    on the working tree. `git rebase --abort` is allowed (it restores the

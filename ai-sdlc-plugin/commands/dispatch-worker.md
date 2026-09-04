@@ -59,7 +59,7 @@ above; the watchdog-avoidance framing has been removed.
 2. **Never force-push.** Use `--force-with-lease` only after the mandatory rebase.
 3. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 4. **Never delete branches.** No `git branch -D` / `-d`.
-5. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.**
+5. **Never edit `.ai-sdlc/**`.** `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 6. **Never run destructive git operations.** No `git reset --hard`.
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 

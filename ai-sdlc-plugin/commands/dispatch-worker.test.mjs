@@ -290,10 +290,12 @@ describe('/ai-sdlc dispatch-worker body — hard rules', () => {
     );
   });
 
-  it('declares the no-edit rule for .ai-sdlc and .github/workflows', () => {
+  it('declares the always-refused .ai-sdlc rule and the configurable .github/workflows scoping', () => {
     assert.ok(
-      cmdBody.includes('.ai-sdlc') && cmdBody.includes('.github/workflows'),
-      'must declare the governance no-edit list',
+      cmdBody.includes('.ai-sdlc') &&
+        cmdBody.includes('.github/workflows') &&
+        cmdBody.includes('blockedPaths'),
+      'must declare the governance no-edit list and blockedPaths scoping for workflows',
     );
   });
 });

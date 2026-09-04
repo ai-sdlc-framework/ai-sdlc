@@ -140,9 +140,10 @@ describe('rebase-resolver body — hard rules', () => {
     assert.match(body, /git branch -D/);
   });
 
-  it('forbids editing .ai-sdlc and .github/workflows', () => {
+  it('forbids editing .ai-sdlc always, and scopes .github/workflows via blockedPaths', () => {
     assert.match(body, /\.ai-sdlc/);
     assert.match(body, /\.github\/workflows/);
+    assert.match(body, /blockedPaths/);
   });
 
   it('forbids GitHub Actions CI-skip magic tokens (AISDLC-88)', () => {
