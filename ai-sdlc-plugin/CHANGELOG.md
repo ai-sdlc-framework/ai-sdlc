@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.15.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.15.0...ai-sdlc-plugin-v0.15.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* register SubagentStart hook in canonical marketplace manifest (AISDLC-571) ([#988](https://github.com/ai-sdlc-framework/ai-sdlc/issues/988)) ([bf37c2b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bf37c2b437d789094733e19527ddbcd52f96fc73))
+
 ## [0.15.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.14.0...ai-sdlc-plugin-v0.15.0) (2026-09-04)
 
 

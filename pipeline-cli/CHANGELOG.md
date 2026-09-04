@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.17.0...pipeline-cli-v0.17.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* register SubagentStart hook in canonical marketplace manifest (AISDLC-571) ([#988](https://github.com/ai-sdlc-framework/ai-sdlc/issues/988)) ([bf37c2b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bf37c2b437d789094733e19527ddbcd52f96fc73))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.17.1
+
 ## [0.17.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.16.0...pipeline-cli-v0.17.0) (2026-09-04)
 
 
