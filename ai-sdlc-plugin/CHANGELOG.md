@@ -5,6 +5,14 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.13.0...ai-sdlc-plugin-v0.14.0) (2026-09-04)
+
+
+### Features
+
+* configurable .github/workflows blocking + worktree isolation (AISDLC-567) ([#982](https://github.com/ai-sdlc-framework/ai-sdlc/issues/982)) ([880538f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/880538f615e923c5e7ad005a42bf3a6e2bab1e05))
+* ship a consumer-runnable v6 attestation verifier (AISDLC-566) ([#981](https://github.com/ai-sdlc-framework/ai-sdlc/issues/981)) ([fe19066](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fe19066e41ad05dbb87a1e5aacf038451bb9289d))
+
 ## [0.13.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.12.0...ai-sdlc-plugin-v0.13.0) (2026-09-04)
 
 
