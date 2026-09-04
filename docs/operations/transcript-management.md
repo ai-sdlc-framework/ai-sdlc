@@ -34,7 +34,7 @@ Fields:
 
 ## Why transcripts?
 
-Transcripts are the proof-of-execution layer for RFC-0042's Merkle attestation design. The transcript's content is content-addressed (SHA-256 hash committed to `.ai-sdlc/transcript-leaves.jsonl`). The hash proves a real reviewer ran — forging it requires generating ~5-10K coherent tokens analyzing the specific diff, which costs as much as actually running the reviewer.
+Transcripts are the proof-of-execution layer for RFC-0042's Merkle attestation design. The transcript's content is content-addressed (SHA-256 hash committed to `.ai-sdlc/transcript-leaves.jsonl`). The hash proves a real review process ran against this exact code state by a process with repo access — forging an *unexecuted* review requires generating ~5-10K coherent tokens analyzing the specific diff, which costs as much as actually running the reviewer. **This does NOT by itself prove reviewer identity or independence**: today's transcript is written by Bash commands the reviewer subagent's own process runs, so a coordinator willing to pay the same token cost could run the review itself and record it as "the reviewer" (tracked as AISDLC-568).
 
 Transcripts are gitignored because:
 

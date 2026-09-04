@@ -33,8 +33,12 @@ maintainers with nothing but "review it yourself." AI-SDLC composes two
 mechanisms:
 
 - **RFC-0042 (Proof of Execution)** — every review is anchored in a
-  Merkle-transcript attestation signed by the operator's key: forgery-resistant
-  by construction and stable across rebases and chore-commits.
+  Merkle-transcript attestation signed by the operator's key: resistant to
+  *unexecuted-review* forgery by construction and stable across rebases and
+  chore-commits. It records that a real review ran against this exact code
+  state by a process with repo access — it does NOT by itself prove reviewer
+  identity or independence from the coordinator that also makes the ship
+  decision (tracked as AISDLC-568).
 - **RFC-0043 (this gate)** — a four-stage zero-trust pipeline in front of it.
 
 ### The four stages
