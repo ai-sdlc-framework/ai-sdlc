@@ -618,6 +618,50 @@ blockedActions: []
       rmSync(noConfigDir, { recursive: true, force: true });
     }
   });
+
+  it('refuses a mixed-case .AI-SDLC/agent-role.yaml write (case-insensitive filesystem bypass regression)', () => {
+    // On case-insensitive filesystems (macOS, Windows) `.AI-SDLC/agent-role.yaml`
+    // resolves to the SAME real file as `.ai-sdlc/agent-role.yaml`. The hardcoded
+    // floor must not be bypassable by case alone — matchGlob() must match
+    // case-insensitively (mirrors enforceBash()'s `i` flag).
+    const input = JSON.stringify({
+      tool_name: 'Write',
+      tool_input: { file_path: join(tempDir, '.AI-SDLC', 'agent-role.yaml') },
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: tempDir });
+    assert.ok(isDenied(result), 'mixed-case .AI-SDLC/** must still be refused');
+  });
+
+  it('refuses an arbitrarily-cased .Ai-Sdlc/ path too', () => {
+    const input = JSON.stringify({
+      tool_name: 'Edit',
+      tool_input: { file_path: join(tempDir, '.Ai-Sdlc', 'verdicts', 'aisdlc-567.json') },
+    });
+    const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: tempDir });
+    assert.ok(isDenied(result), 'mixed-case .Ai-Sdlc/ must still be refused');
+  });
+
+  it('fails closed on .ai-sdlc/** when agent-role.yaml is malformed/unparseable', () => {
+    // A syntactically-broken YAML file must not disable the hardcoded
+    // .ai-sdlc/** floor — the hook must fall through to "no config parsed"
+    // (empty blockedPaths/blockedActions) rather than crash or fail open.
+    const malformedDir = join(tmpdir(), `enforce-blocked-malformed-${Date.now()}`);
+    mkdirSync(join(malformedDir, '.ai-sdlc'), { recursive: true });
+    try {
+      writeFileSync(
+        join(malformedDir, '.ai-sdlc', 'agent-role.yaml'),
+        '{ bad: yaml: [unclosed\n  - this is not valid: :::\n',
+      );
+      const input = JSON.stringify({
+        tool_name: 'Write',
+        tool_input: { file_path: join(malformedDir, '.ai-sdlc', 'foo.yaml') },
+      });
+      const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: malformedDir });
+      assert.ok(isDenied(result), '.ai-sdlc/** floor must hold even with malformed config');
+    } finally {
+      rmSync(malformedDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── AISDLC-567 Part B — isolate agents from sibling/parent repos ────────

@@ -380,7 +380,13 @@ function matchGlob(glob, path) {
     .join('')
     .replace(/__DOUBLESTAR__/g, '.*');
 
-  const regex = new RegExp(`^${regexStr}$`);
+  // Case-insensitive: on case-insensitive filesystems (macOS, Windows) a
+  // mixed-case path like `.AI-SDLC/agent-role.yaml` resolves to the SAME
+  // real file as `.ai-sdlc/agent-role.yaml`, so the glob match must not be
+  // case-sensitive or the hardcoded `.ai-sdlc/**` floor (and any configured
+  // blockedPaths glob) can be bypassed by case alone. Matches the `i` flag
+  // already used by enforceBash()'s pattern matching.
+  const regex = new RegExp(`^${regexStr}$`, 'i');
   return regex.test(path);
 }
 
