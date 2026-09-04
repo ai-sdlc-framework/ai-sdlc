@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.15.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.14.0...ai-sdlc-plugin-v0.15.0) (2026-09-04)
+
+
+### Features
+
+* add verdictClass trust class to v6 attestation leaves (AISDLC-568) ([#986](https://github.com/ai-sdlc-framework/ai-sdlc/issues/986)) ([338df4e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/338df4e362cf61c985d8afb16aff7d6e14fce3ee))
+
 ## [0.14.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.13.0...ai-sdlc-plugin-v0.14.0) (2026-09-04)
 
 
