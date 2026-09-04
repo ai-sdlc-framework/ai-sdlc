@@ -37,8 +37,10 @@ mechanisms:
   *unexecuted-review* forgery by construction and stable across rebases and
   chore-commits. It records that a real review ran against this exact code
   state by a process with repo access — it does NOT by itself prove reviewer
-  identity or independence from the coordinator that also makes the ship
-  decision (tracked as AISDLC-568).
+  identity. Independence is now (partially) structurally anchored via a
+  `verdictClass: 'independent' | 'self-authored'` field on every leaf
+  (AISDLC-568) — a same-process/session heuristic, not a cryptographic proof;
+  see RFC-0042 §Forgery resistance for the mechanism and its limits.
 - **RFC-0043 (this gate)** — a four-stage zero-trust pipeline in front of it.
 
 ### The four stages

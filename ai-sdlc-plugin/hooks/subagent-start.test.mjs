@@ -8,7 +8,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -46,11 +46,13 @@ after(() => {
   rmSync(tempDirEmpty, { recursive: true, force: true });
 });
 
-function runHook(projectDir) {
-  const input = JSON.stringify({
-    hook_event_name: 'SubagentStart',
-    agent_id: 'test-subagent-456',
-  });
+function runHook(projectDir, inputOverride) {
+  const input =
+    inputOverride ??
+    JSON.stringify({
+      hook_event_name: 'SubagentStart',
+      agent_id: 'test-subagent-456',
+    });
   try {
     const output = execFileSync('node', [hookScript], {
       input,
@@ -120,5 +122,76 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
       !ctx.includes('Pre-Commit Checklist'),
       'subagent should not get the lifecycle checklist',
     );
+  });
+});
+
+describe('ai-sdlc-plugin subagent-start hook — AISDLC-568 marker writing', () => {
+  it('writes a marker file keyed by agent_id from the stdin payload', () => {
+    const projectDir = join(tmpdir(), `subagent-start-marker-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      const input = JSON.stringify({
+        hook_event_name: 'SubagentStart',
+        agent_id: 'marker-agent-1',
+      });
+      runHook(projectDir, input);
+
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      assert.ok(existsSync(markerDir), 'marker directory should be created');
+      const files = readdirSync(markerDir);
+      assert.equal(files.length, 1, 'exactly one marker file should be written');
+      assert.equal(files[0], 'marker-agent-1.json');
+
+      const marker = JSON.parse(readFileSync(join(markerDir, files[0]), 'utf-8'));
+      assert.equal(marker.agentId, 'marker-agent-1');
+      assert.ok(
+        typeof marker.firedAt === 'string' && !Number.isNaN(new Date(marker.firedAt).getTime()),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a marker even when agent-role.yaml is absent (no early exit)', () => {
+    const projectDir = join(tmpdir(), `subagent-start-marker-noconfig-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      runHook(projectDir);
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      assert.ok(existsSync(markerDir), 'marker directory should still be created');
+      assert.equal(readdirSync(markerDir).length, 1);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to a random marker name when stdin has no agent_id', () => {
+    const projectDir = join(tmpdir(), `subagent-start-marker-noid-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      runHook(projectDir, JSON.stringify({ hook_event_name: 'SubagentStart' }));
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      assert.ok(existsSync(markerDir));
+      const files = readdirSync(markerDir);
+      assert.equal(files.length, 1);
+      const marker = JSON.parse(readFileSync(join(markerDir, files[0]), 'utf-8'));
+      assert.ok(typeof marker.agentId === 'string' && marker.agentId.length > 0);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not crash when stdin is not JSON', () => {
+    const projectDir = join(tmpdir(), `subagent-start-marker-badjson-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      const result = runHook(projectDir, 'not json at all');
+      assert.equal(result.exitCode, 0, 'hook should still exit 0');
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      assert.ok(existsSync(markerDir), 'marker should still be written from a random id');
+      assert.equal(readdirSync(markerDir).length, 1);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 });

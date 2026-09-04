@@ -88,6 +88,27 @@ describe('hashLeaf', () => {
       hashLeaf(makeLeaf({ taskId: 'AISDLC-2' })),
     );
   });
+
+  // AISDLC-568: verdictClass backward compatibility.
+  it('hashes identically whether verdictClass is omitted or explicitly undefined (legacy leaves)', () => {
+    const withoutField = makeLeaf();
+    delete (withoutField as { verdictClass?: unknown }).verdictClass;
+    const withUndefined = makeLeaf({ verdictClass: undefined });
+    expect(hashLeaf(withoutField)).toBe(hashLeaf(withUndefined));
+  });
+
+  it('differs when verdictClass is set vs. omitted (new leaves are distinguishable)', () => {
+    const legacy = makeLeaf();
+    delete (legacy as { verdictClass?: unknown }).verdictClass;
+    const independent = makeLeaf({ verdictClass: 'independent' });
+    expect(hashLeaf(legacy)).not.toBe(hashLeaf(independent));
+  });
+
+  it('differs between independent and self-authored verdictClass', () => {
+    const independent = makeLeaf({ verdictClass: 'independent' });
+    const selfAuthored = makeLeaf({ verdictClass: 'self-authored' });
+    expect(hashLeaf(independent)).not.toBe(hashLeaf(selfAuthored));
+  });
 });
 
 // ── computeMerkleRoot — empty ─────────────────────────────────────────────────

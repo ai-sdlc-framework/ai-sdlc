@@ -44,5 +44,10 @@ if (invokedDirectly) {
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, core.buildGithubOutputLines(out.status, out.reason));
   }
-  process.stdout.write(`status=${out.status}\nreason=${out.reason}\n`);
+  // AISDLC-568: surface the independence trust class (v6 envelopes only).
+  let output = `status=${out.status}\nreason=${out.reason}\n`;
+  if (out.overallVerdictClass) {
+    output += `verdictClass=${out.overallVerdictClass}\n`;
+  }
+  process.stdout.write(output);
 }

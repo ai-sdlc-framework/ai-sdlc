@@ -125,7 +125,39 @@ describe('buildV6Envelope — happy path', () => {
       leafIndex: 0,
       reviewerName: 'code-reviewer',
       transcriptHash: 'e'.repeat(64),
+      verdictClass: 'self-authored',
     });
+  });
+
+  it('transcriptLeaves array carries the leaf verdictClass when set (AISDLC-568)', () => {
+    const leaf0 = makeLeaf({
+      leafIndex: 0,
+      transcriptHash: 'e'.repeat(64),
+      verdictClass: 'independent',
+    });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+    });
+
+    expect(envelope.transcriptLeaves[0].verdictClass).toBe('independent');
+  });
+
+  it('defaults verdictClass to self-authored when the source leaf omits it (legacy leaf, AISDLC-568)', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0, transcriptHash: 'e'.repeat(64) });
+    delete (leaf0 as { verdictClass?: unknown }).verdictClass;
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+    });
+
+    expect(envelope.transcriptLeaves[0].verdictClass).toBe('self-authored');
   });
 
   it('merkleProofs array carries leafIndex and proof array', () => {
