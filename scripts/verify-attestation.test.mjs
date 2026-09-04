@@ -3615,6 +3615,194 @@ describe('verifyV6Envelope (unit)', () => {
   });
 });
 
+// ── AISDLC-568 — verdictClass (independent / self-authored) ────────────────
+
+describe('verifyV6Envelope (AISDLC-568 — verdictClass)', () => {
+  let keys;
+  const HEAD_SHA = 'a'.repeat(40);
+
+  before(() => {
+    keys = genV6KeyPair();
+  });
+
+  function makeTrustedReviewers(publicKeyPem) {
+    return [
+      {
+        identity: 'test@example.com',
+        machine: 'test',
+        pubkey: publicKeyPem,
+        addedAt: '2026-05-21',
+        addedBy: 'test',
+      },
+    ];
+  }
+
+  it('(a) independent-reviewer leaf: verifies valid and surfaces independent in the class breakdown', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-verdictclass-'));
+    try {
+      const leaves = [{ ...makeLeaf(0, 'code-reviewer'), verdictClass: 'independent' }];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem, {
+        transcriptLeaves: leaves.map((l) => ({
+          leafIndex: l.leafIndex,
+          reviewerName: l.reviewerName,
+          transcriptHash: l.transcriptHash,
+          verdictClass: l.verdictClass,
+        })),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+      assert.equal(result.overallVerdictClass, 'independent');
+      assert.deepEqual(result.verdictClasses, [
+        { reviewerName: 'code-reviewer', verdictClass: 'independent' },
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('(b) self-authored (coordinator) leaf: verifies valid but is downgraded to the lower-trust class', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-verdictclass-'));
+    try {
+      const leaves = [{ ...makeLeaf(0, 'code-reviewer'), verdictClass: 'self-authored' }];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem, {
+        transcriptLeaves: leaves.map((l) => ({
+          leafIndex: l.leafIndex,
+          reviewerName: l.reviewerName,
+          transcriptHash: l.transcriptHash,
+          verdictClass: l.verdictClass,
+        })),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+      assert.equal(result.overallVerdictClass, 'self-authored');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('(c) legacy envelope with no verdictClass anywhere still verifies, defaulting to self-authored', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-verdictclass-legacy-'));
+    try {
+      // makeLeaf() + writeV6Fixture()'s default transcriptLeaves mapping never
+      // set verdictClass — this reproduces a pre-AISDLC-568 envelope exactly.
+      const leaves = [makeLeaf(0, 'code-reviewer'), makeLeaf(1, 'test-reviewer')];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      assert.equal(envelope.transcriptLeaves[0].verdictClass, undefined);
+
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+      assert.equal(result.overallVerdictClass, 'self-authored');
+      assert.deepEqual(result.verdictClasses, [
+        { reviewerName: 'code-reviewer', verdictClass: 'self-authored' },
+        { reviewerName: 'test-reviewer', verdictClass: 'self-authored' },
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('(d) mixed leaves: overall verdictClass is self-authored (weakest-link) when any leaf is self-authored', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-verdictclass-mixed-'));
+    try {
+      const leaves = [
+        { ...makeLeaf(0, 'code-reviewer'), verdictClass: 'independent' },
+        { ...makeLeaf(1, 'test-reviewer'), verdictClass: 'self-authored' },
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem, {
+        transcriptLeaves: leaves.map((l) => ({
+          leafIndex: l.leafIndex,
+          reviewerName: l.reviewerName,
+          transcriptHash: l.transcriptHash,
+          verdictClass: l.verdictClass,
+        })),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid');
+      assert.equal(result.overallVerdictClass, 'self-authored');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects when the envelope claims independent but the on-disk leaf is self-authored (tamper detection)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-verdictclass-tamper-'));
+    try {
+      const leaves = [{ ...makeLeaf(0, 'code-reviewer'), verdictClass: 'self-authored' }];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem, {
+        transcriptLeaves: leaves.map((l) => ({
+          leafIndex: l.leafIndex,
+          reviewerName: l.reviewerName,
+          transcriptHash: l.transcriptHash,
+          // Tampered: envelope claims independent, but the on-disk leaf
+          // (whose hash is Merkle-proved) is self-authored.
+          verdictClass: 'independent',
+        })),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /verdictClass mismatch/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an envelope with a bogus verdictClass value', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-verdictclass-bogus-'));
+    try {
+      const leaves = [{ ...makeLeaf(0, 'code-reviewer'), verdictClass: 'independent' }];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem, {
+        transcriptLeaves: leaves.map((l) => ({
+          leafIndex: l.leafIndex,
+          reviewerName: l.reviewerName,
+          transcriptHash: l.transcriptHash,
+          verdictClass: 'trust-me-bro',
+        })),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /verdictClass must be/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── AISDLC-421 — per-patch-id leaves + legacy shared-file fallback ──────────
 
 describe('verifyV6Envelope (AISDLC-421 — per-patch-id leaves with shared fallback)', () => {

@@ -70,6 +70,17 @@ export interface TranscriptLeaf {
   };
   /** ISO-8601 timestamp when the leaf was signed. */
   signedAt: string;
+  /**
+   * AISDLC-568: trust class for this leaf — 'independent' when a real,
+   * harness-spawned reviewer subagent produced the transcript; 'self-authored'
+   * when the coordinator itself authored it (or the signal was absent/stale).
+   * Optional for backward compatibility: leaves signed before AISDLC-568 omit
+   * this field, and `hashLeaf` treats an `undefined` value identically to an
+   * absent key (JSON.stringify drops `undefined` values), so historical leaf
+   * hashes are unaffected. The verifier and envelope builder both default a
+   * missing value to the lower-trust `'self-authored'` class — never over-claim.
+   */
+  verdictClass?: 'independent' | 'self-authored';
 }
 
 // ── Merkle result shapes ──────────────────────────────────────────────────────
@@ -157,6 +168,10 @@ export function hashLeaf(leaf: TranscriptLeaf): string {
       suggestion: leaf.findings.suggestion,
     },
     signedAt: leaf.signedAt,
+    // Trailing field, AISDLC-568: `undefined` is dropped by JSON.stringify,
+    // so leaves without a verdictClass hash identically to pre-AISDLC-568
+    // leaves (backward compatibility for historical envelopes).
+    verdictClass: leaf.verdictClass,
   };
   return hashLeafData(JSON.stringify(ordered));
 }

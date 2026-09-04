@@ -73,6 +73,11 @@ pnpm-debug.log*
 # `.ai-sdlc/config.yaml transcript_storage_url` (OQ-5).
 # See docs/operations/transcript-management.md for retention + GC runbook.
 .ai-sdlc/transcripts/
+# AISDLC-568: SubagentStart hook markers used for verdictClass detection
+# (independent vs. self-authored transcript leaves). Ephemeral, per-machine,
+# consumed (deleted) by `cli-attestation emit-leaf` on a match — never
+# committed. See pipeline-cli/src/attestation/verdict-class.ts.
+.ai-sdlc/subagent-sessions/
 # AISDLC-155: per-worktree active-task sentinel (AISDLC-81). The sentinel
 # lives INSIDE each worktree at `<worktree>/.active-task` and is read by the
 # PreToolUse hook to resolve which task's `permittedExternalPaths` apply for

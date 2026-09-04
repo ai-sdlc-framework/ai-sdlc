@@ -358,7 +358,14 @@ async function main() {
   core.bindRuntime(runtimeMod);
 
   const out = core.runVerifier({ headSha, baseSha, repoRoot });
-  process.stdout.write(`status=${out.status}\nreason=${out.reason}\n`);
+  let output = `status=${out.status}\nreason=${out.reason}\n`;
+  // AISDLC-568: surface the independence trust class instead of leaving it
+  // silently equivalent to a fully independent review. Only present on v6
+  // envelopes (verifyV6Envelope's success path populates it).
+  if (out.overallVerdictClass) {
+    output += `verdictClass=${out.overallVerdictClass}\n`;
+  }
+  process.stdout.write(output);
   process.exitCode = out.status === 'valid' ? 0 : 1;
 }
 

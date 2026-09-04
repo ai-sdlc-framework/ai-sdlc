@@ -11,17 +11,28 @@
  * Without this hook the developer subagent and reviewers would run with no
  * governance context at all.
  *
+ * AISDLC-568: this hook ALSO writes a marker file to
+ * `.ai-sdlc/subagent-sessions/<agent-id>.json` on every firing. This is the
+ * structural signal `attestation/verdict-class.ts` uses to distinguish a
+ * transcript leaf produced by a REAL, harness-spawned reviewer subagent
+ * (this hook fires) from one a coordinator authored itself by running the
+ * same Bash sequence without ever going through the `Agent`/`Task` tool
+ * (this hook does NOT fire). See that module's JSDoc for the full mechanism
+ * and its honest, single-machine limits.
+ *
  * Fail-safe: exits silently on any error.
  */
 
-const { readFileSync, existsSync } = require('fs');
+const { readFileSync, existsSync, mkdirSync, writeFileSync } = require('fs');
 const { join } = require('path');
 const { execSync } = require('child_process');
+const { randomUUID } = require('crypto');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
+let stdinRaw;
 try {
-  readFileSync('/dev/stdin', 'utf-8');
+  stdinRaw = readFileSync('/dev/stdin', 'utf-8');
 } catch {
   process.exit(0);
 }
@@ -37,6 +48,15 @@ const projectDir =
       return process.cwd();
     }
   })();
+
+// ── Write subagent-session marker (AISDLC-568) ─────────────────────────
+//
+// Independent of agent-role.yaml presence: this marker is the structural
+// signal for verdictClass detection and must be written on EVERY real
+// SubagentStart firing, regardless of whether governance context config
+// exists for this project.
+
+writeSubagentSessionMarker(projectDir, stdinRaw);
 
 // ── Load agent-role.yaml ─────────────────────────────────────────────
 
@@ -121,4 +141,51 @@ function parseListField(yaml, field) {
   }
 
   return items;
+}
+
+/**
+ * AISDLC-568: write a marker file recording that a real SubagentStart hook
+ * firing occurred. `pipeline-cli/src/attestation/verdict-class.ts` reads
+ * these markers to classify a reviewer's transcript leaf as 'independent'
+ * (a genuine subagent was spawned around the time the transcript was
+ * written) vs. 'self-authored' (no such marker — the coordinator likely ran
+ * the transcript-capture Bash steps itself).
+ *
+ * Best-effort / fail-safe: any error here is swallowed. A missing marker
+ * only ever makes the resulting leaf look MORE self-authored, never less —
+ * consistent with the "never over-claim independent" contract.
+ *
+ * `agentId` is read from the hook's stdin JSON payload (`agent_id`) when
+ * present; otherwise a random UUID is used as the marker file name only
+ * (the identifier itself is not load-bearing — the FILE'S EXISTENCE + its
+ * write TIMING, which only the harness can produce, is the signal).
+ */
+function writeSubagentSessionMarker(projectDir, stdinRaw) {
+  try {
+    let agentId;
+    try {
+      const payload = JSON.parse(stdinRaw);
+      if (payload && typeof payload.agent_id === 'string' && payload.agent_id) {
+        agentId = payload.agent_id;
+      }
+    } catch {
+      // stdin wasn't JSON, or had no agent_id — fall through to random id.
+    }
+    if (!agentId) {
+      agentId = randomUUID();
+    }
+
+    const dir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+    mkdirSync(dir, { recursive: true });
+
+    const safeName = agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const markerPath = join(dir, `${safeName}.json`);
+    writeFileSync(
+      markerPath,
+      JSON.stringify({ agentId, firedAt: new Date().toISOString() }) + '\n',
+      { encoding: 'utf-8' },
+    );
+  } catch {
+    // Fail-safe: never let marker-writing errors break the SubagentStart hook.
+  }
 }

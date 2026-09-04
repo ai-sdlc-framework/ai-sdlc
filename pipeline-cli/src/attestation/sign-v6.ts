@@ -42,6 +42,12 @@ export interface V6TranscriptLeafSummary {
   leafIndex: number;
   reviewerName: string;
   transcriptHash: string;
+  /**
+   * AISDLC-568: trust class for this leaf. Always present in envelopes
+   * signed after AISDLC-568 — defaults to the lower-trust `'self-authored'`
+   * when the source leaf predates this field (fail-safe, never over-claim).
+   */
+  verdictClass: 'independent' | 'self-authored';
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -134,10 +140,13 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
   const rootSignature = signRootHash(root, privateKeyPem);
 
   // Build transcriptLeaves summaries (only this PR's reviewer leaves).
+  // AISDLC-568: verdictClass defaults to the lower-trust 'self-authored'
+  // when the source leaf predates this field — fail-safe, never over-claim.
   const transcriptLeaves: V6TranscriptLeafSummary[] = prLeaves.map((leaf) => ({
     leafIndex: leaf.leafIndex,
     reviewerName: leaf.reviewerName,
     transcriptHash: leaf.transcriptHash,
+    verdictClass: leaf.verdictClass ?? 'self-authored',
   }));
 
   // Build merkleProofs for each prLeaf.
@@ -369,10 +378,20 @@ export function formatV6Envelope(envelope: AttestationEnvelopeV6): string {
   lines.push(`Nonce          : ${envelope.nonce}`);
   lines.push(`Transcript leaves (${envelope.transcriptLeaves.length}):`);
   for (const leaf of envelope.transcriptLeaves) {
+    const verdictClass = leaf.verdictClass ?? 'self-authored';
     lines.push(
-      `  [${leaf.leafIndex}] ${leaf.reviewerName.padEnd(22)} transcript: ${leaf.transcriptHash.slice(0, 16)}...`,
+      `  [${leaf.leafIndex}] ${leaf.reviewerName.padEnd(22)} transcript: ${leaf.transcriptHash.slice(0, 16)}... ` +
+        `verdictClass: ${verdictClass}`,
     );
   }
+  const independentCount = envelope.transcriptLeaves.filter(
+    (l) => (l.verdictClass ?? 'self-authored') === 'independent',
+  ).length;
+  const selfAuthoredCount = envelope.transcriptLeaves.length - independentCount;
+  lines.push(
+    `Verdict classes: ${independentCount} independent, ${selfAuthoredCount} self-authored ` +
+      `(self-authored = lower-trust; see AISDLC-568)`,
+  );
   lines.push(`Merkle proofs (${envelope.merkleProofs.length}):`);
   for (const mp of envelope.merkleProofs) {
     lines.push(`  [${mp.leafIndex}] proof depth: ${mp.proof.length}`);

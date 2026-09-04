@@ -63,15 +63,59 @@ unattributable transcripts under `unknown`).
 
 ## Acceptance Criteria
 
-- [ ] Transcript leaf hashes the reviewer subagent's real auto-captured execution
-      JSONL (not a coordinator-writable summary file); a coordinator that only
-      writes a summary cannot produce a passing independent-tier leaf.
-- [ ] A coordinator/self-authored attestation is recorded and verified as a
+- [ ] **Deferred (DEC-0012 opt-a, not this task's scope).** Transcript leaf
+      hashes the reviewer subagent's real auto-captured execution JSONL (not a
+      coordinator-writable summary file); a coordinator that only writes a
+      summary cannot produce a passing independent-tier leaf. The escalated
+      decision DEC-0012 (`node pipeline-cli/bin/cli-decisions.mjs show DEC-0012`)
+      was resolved to **opt-b**, not opt-a — opt-a requires locating a
+      subagent's own harness transcript deterministically per invocation,
+      which varies by harness/CLI version and does not exist for CI/headless
+      dispatch. What this task hashes into the leaf is UNCHANGED from before
+      AISDLC-568: the Bash-written `.ai-sdlc/transcripts/<task>/<reviewer>.jsonl`
+      file. Closing this AC requires a harness-coupled follow-up (opt-a) —
+      out of scope for the opt-b implementation below.
+- [x] A coordinator/self-authored attestation is recorded and verified as a
       distinct lower-trust verdict class, visibly not equivalent to an
-      independent-reviewer verdict.
-- [ ] Claim wording (docs + any emitted human-readable summaries) states the true
+      independent-reviewer verdict. **Shipped (DEC-0012 opt-b):** every v6
+      transcript leaf now carries `verdictClass: 'independent' | 'self-authored'`
+      (`pipeline-cli/src/attestation/verdict-class.ts`), derived from whether a
+      real `SubagentStart` harness hook fired around the time the transcript
+      was written (`ai-sdlc-plugin/hooks/subagent-start.js` writes a
+      `.ai-sdlc/subagent-sessions/<agent-id>.json` marker on every firing — a
+      signal only the harness's own `Agent`/`Task` dispatch can produce, never
+      a coordinator writing files/text alone). `cli-attestation emit-leaf`
+      consumes an unconsumed, in-window marker to classify `independent`;
+      absence/staleness/malformed markers fail safe to `self-authored`. The
+      verifier (`verifyV6Envelope`) cross-checks the envelope's declared class
+      against the on-disk leaf's Merkle-proved value (rejecting mismatches as
+      tampering) and surfaces a per-leaf breakdown + weakest-link
+      `overallVerdictClass`. **Honest limit:** this is a same-process/session
+      heuristic, not a cryptographic proof — it correctly downgrades the
+      common lazy-self-review case (coordinator runs the reviewer's Bash
+      steps itself, no subagent spawned) but does not stop a *deliberately
+      adversarial* coordinator from also fabricating the marker file, since
+      it already has the same repo Bash/Write access. Closing that gap is
+      exactly the opt-a follow-up above.
+- [x] Claim wording (docs + any emitted human-readable summaries) states the true
       guarantee and does not assert independence where it isn't structurally
-      anchored.
-- [ ] Hermetic tests: (a) independent-reviewer path produces an independent-tier
+      anchored. (Shipped in PR #980, AISDLC-568 part 1; extended in this PR to
+      cover the new `verdictClass` field's honest scope across RFC-0042, the
+      whitepaper, transcript-management.md, and
+      zero-trust-untrusted-pr-verification.md.)
+- [x] Hermetic tests: (a) independent-reviewer path produces an independent-tier
       leaf; (b) self-authored path is rejected or downgraded to the lower-trust
-      class; (c) verifier surfaces the trust class.
+      class; (c) verifier surfaces the trust class. Covered by
+      `pipeline-cli/src/attestation/verdict-class.test.ts`,
+      `pipeline-cli/src/cli/attestation.test.ts` ("emit-leaf — verdictClass
+      detection"), `scripts/verify-attestation.test.mjs`
+      ("verifyV6Envelope (AISDLC-568 — verdictClass)"), and
+      `ai-sdlc-plugin/hooks/subagent-start.test.mjs` ("AISDLC-568 marker
+      writing").
+
+**Status: partially shipped.** This PR implements DEC-0012 opt-b in full
+(AC#2, AC#3, AC#4 above). AC#1 (opt-a — binding the leaf to the reviewer
+subagent's own harness-captured execution transcript) remains open and is
+tracked as a follow-up; this task file stays in `backlog/tasks/` rather than
+moving to `backlog/completed/` until that follow-up is scoped and either
+completed or explicitly descoped by the operator.

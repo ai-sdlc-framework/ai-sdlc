@@ -805,6 +805,11 @@ export function v6HashLeaf(leaf) {
       suggestion: leaf.findings.suggestion,
     },
     signedAt: leaf.signedAt,
+    // AISDLC-568: trailing field, mirrors pipeline-cli/src/attestation/merkle.ts
+    // hashLeaf(). `undefined` is dropped by JSON.stringify, so leaves signed
+    // before AISDLC-568 (no verdictClass key) hash identically to before —
+    // backward compatible with every historical v6 envelope.
+    verdictClass: leaf.verdictClass,
   };
   return v6HashLeafData(JSON.stringify(ordered));
 }
@@ -1333,6 +1338,30 @@ export function verifyV6Envelope({
       };
     }
 
+    // ── 7b. Verify verdictClass matches on-disk leaf (AISDLC-568) ─────────
+    // `envelope.transcriptLeaves[i].verdictClass` is a separate copy of the
+    // value baked into the on-disk leaf's Merkle-proved hash. Without this
+    // explicit equality check, the copy could be edited to claim
+    // 'independent' while the authoritative on-disk leaf says
+    // 'self-authored' — nothing else in this loop compares the two.
+    // Legacy envelopes (signed before AISDLC-568) omit the field entirely;
+    // both sides default to the lower-trust 'self-authored' so they remain
+    // verifiable unchanged.
+    const declaredVerdictClass = leafSummary.verdictClass ?? 'self-authored';
+    if (declaredVerdictClass !== 'independent' && declaredVerdictClass !== 'self-authored') {
+      return {
+        status: 'invalid',
+        reason: `v6: transcriptLeaves[${i}].verdictClass must be 'independent' or 'self-authored' (got: ${JSON.stringify(leafSummary.verdictClass)})`,
+      };
+    }
+    const onDiskVerdictClass = onDiskLeaf.verdictClass ?? 'self-authored';
+    if (declaredVerdictClass !== onDiskVerdictClass) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) verdictClass mismatch — envelope claims '${declaredVerdictClass}' but on-disk leaf is '${onDiskVerdictClass}'`,
+      };
+    }
+
     // Compute the leaf hash from the on-disk leaf (the authoritative source).
     const leafHash = v6HashLeaf(onDiskLeaf);
 
@@ -1353,7 +1382,21 @@ export function verifyV6Envelope({
   }
 
   // ── 8. All checks passed ─────────────────────────────────────────────────
-  return { status: 'valid', reason: 'ok' };
+  //
+  // AISDLC-568: surface the per-leaf verdictClass breakdown + an overall
+  // roll-up so the verifier makes independence status visible instead of
+  // silently equivalent. Overall is 'self-authored' if ANY leaf is
+  // self-authored (weakest-link — a PR is only as independently reviewed as
+  // its least-independent reviewer leaf).
+  const verdictClasses = envelope.transcriptLeaves.map((leaf) => ({
+    reviewerName: leaf.reviewerName,
+    verdictClass: leaf.verdictClass ?? 'self-authored',
+  }));
+  const overallVerdictClass = verdictClasses.some((v) => v.verdictClass === 'self-authored')
+    ? 'self-authored'
+    : 'independent';
+
+  return { status: 'valid', reason: 'ok', verdictClasses, overallVerdictClass };
 }
 
 /**

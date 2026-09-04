@@ -504,6 +504,9 @@ describe('emit-leaf — happy path', () => {
     expect(leaf.transcriptHash).toMatch(/^[0-9a-f]{64}$/);
     expect(leaf.nonce).toMatch(/^[0-9a-f]{64}$/);
     expect(leaf.signedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // AISDLC-568: no SubagentStart marker present in this hermetic fixture,
+    // so the leaf must default to the lower-trust class (fail-safe).
+    expect(leaf.verdictClass).toBe('self-authored');
   });
 
   it('transcriptHash is SHA-256 of the transcript file content', async () => {
@@ -620,6 +623,130 @@ describe('emit-leaf — happy path', () => {
 
     const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictApproved).toBe(true);
+  });
+});
+
+// ── CLI: emit-leaf verdictClass detection (AISDLC-568) ─────────────────────────
+
+describe('emit-leaf — verdictClass detection', () => {
+  it('(a) classifies as independent when a fresh SubagentStart marker exists', async () => {
+    makeTranscript('aisdlc-568', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-568',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-independent.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    const markerDir = join(tmpRoot, '.ai-sdlc', 'subagent-sessions');
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      join(markerDir, 'agent-real.json'),
+      JSON.stringify({ agentId: 'agent-real', firedAt: new Date().toISOString() }),
+    );
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-568',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'd'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves[0].verdictClass).toBe('independent');
+  });
+
+  it('(b) classifies as self-authored when no marker exists (coordinator-run Bash)', async () => {
+    makeTranscript('aisdlc-568', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-568',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-self.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-568',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'e'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves[0].verdictClass).toBe('self-authored');
+  });
+
+  it('the emit-leaf confirmation message includes verdictClass', async () => {
+    makeTranscript('aisdlc-568', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-568',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-msg.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-568',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'f'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    expect(flushStdout()).toMatch(/verdictClass=self-authored/);
   });
 });
 

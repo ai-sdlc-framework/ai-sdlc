@@ -21,7 +21,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import yargs, { type Argv } from 'yargs';
@@ -45,6 +45,7 @@ import {
   type AttestationEnvelopeV6,
 } from '../attestation/sign-v6.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
+import { determineVerdictClass } from '../attestation/verdict-class.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
 
@@ -615,6 +616,13 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           const signedAt = new Date().toISOString();
 
+          // AISDLC-568: determine trust class from the SubagentStart marker
+          // signal. Fail-safe — any missing/stale/malformed marker yields the
+          // lower-trust 'self-authored' class. See attestation/verdict-class.ts
+          // for the full mechanism + honest limits.
+          const transcriptMtimeMs = statSync(transcriptPath).mtimeMs;
+          const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
+
           const leaf: TranscriptLeaf = {
             leafIndex,
             taskId,
@@ -626,6 +634,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             verdictApproved,
             findings,
             signedAt,
+            verdictClass,
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
@@ -640,7 +649,8 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           emitText(
             `[cli-attestation] emit-leaf: leaf #${leafIndex} appended to ${filePath} ` +
               `(taskId=${taskId}, reviewer=${reviewerName}, ` +
-              `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved})`,
+              `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved}, ` +
+              `verdictClass=${verdictClass})`,
           );
         },
       )
