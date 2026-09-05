@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.17.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.17.1...reference-v0.17.2) (2026-09-05)
+
+
+### Miscellaneous
+
+* **reference:** Synchronize node-packages versions
+
 ## [0.17.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.17.0...reference-v0.17.1) (2026-09-04)
 
 

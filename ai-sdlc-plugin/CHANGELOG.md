@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.15.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.15.1...ai-sdlc-plugin-v0.15.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* bind verdictClass independent to reviewer role, not just timing (AISDLC-572) ([#990](https://github.com/ai-sdlc-framework/ai-sdlc/issues/990)) ([708abc6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/708abc6cdc8ac6c18e9906a5232990805cef1cb8))
+
 ## [0.15.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.15.0...ai-sdlc-plugin-v0.15.1) (2026-09-04)
 
 
