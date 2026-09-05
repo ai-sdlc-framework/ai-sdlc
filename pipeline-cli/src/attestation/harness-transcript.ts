@@ -102,9 +102,9 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import {
   MARKER_MAX_AGE_MS,
   REVIEWER_AGENT_TYPES,
@@ -206,6 +206,41 @@ export function claudeProjectsDir(): string {
 }
 
 /**
+ * Strict charset a `--claude-session-id` value must match: bare token, no
+ * path separators, no `.` at all (so `..` traversal is impossible by
+ * construction, not just by luck of `path.join` normalization). Real Claude
+ * Code session ids are UUIDs (hex digits + hyphens), so this is not a
+ * functional restriction — it exists purely to close the path-traversal
+ * attack surface documented below.
+ */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9-]+$/;
+
+/**
+ * Return `true` iff `candidate` resolves (after following any symlinks) to a
+ * path contained within `baseDir` (also symlink-resolved). Fails CLOSED
+ * (`false`) if either path cannot be realpath-resolved (e.g. does not exist)
+ * — callers must treat a `false` result as "reject", not "unknown".
+ *
+ * This is the second of two independent defenses against path traversal via
+ * `--claude-session-id` (the first is `SESSION_ID_PATTERN`, which rejects
+ * `..`/`/` lexically before any filesystem access happens at all): even if a
+ * lexically-valid session id were combined with a symlink planted inside
+ * `~/.claude/projects/<slug>/` that points outside the trusted base, the
+ * REALPATH containment check here still refuses it.
+ */
+function isRealPathContained(baseDir: string, candidate: string): boolean {
+  let realBase: string;
+  let realCandidate: string;
+  try {
+    realBase = realpathSync(baseDir);
+    realCandidate = realpathSync(candidate);
+  } catch {
+    return false;
+  }
+  return realCandidate === realBase || realCandidate.startsWith(realBase + sep);
+}
+
+/**
  * Resolve the most-recently-modified session directory under a project-slug
  * directory (the AISDLC-216-style fallback heuristic — see module docblock).
  * Returns `null` when the directory is missing, unreadable, or has no
@@ -254,6 +289,23 @@ export interface ResolveHarnessTranscriptPathResult {
  * SubagentStart marker, not a free-form CLI flag) — this closes design doc
  * §2 attack (c) (pointing `emit-leaf` at an attacker-controlled path) by
  * construction.
+ *
+ * **Path-traversal hardening (defense-in-depth, two independent layers):**
+ * `--claude-session-id` IS a coordinator-controlled CLI flag (unlike
+ * `agentId`), so it gets two independent checks before ever being trusted:
+ * (1) `SESSION_ID_PATTERN` rejects any value containing `/`, `\`, or `.`
+ * lexically, BEFORE it touches the filesystem at all — a value like
+ * `../../../tmp/evil-session` is rejected outright, it never even reaches
+ * `path.join`; (2) after the candidate session dir is joined, its REALPATH
+ * (symlinks resolved) must be contained within the realpath of the trusted
+ * `~/.claude/projects/<slug>/` base — this additionally defeats a symlink
+ * planted inside the project dir that points outside it. Without both
+ * checks, a coordinator (opt-a's actual target threat model — see the
+ * module docblock) could pre-place a directory containing a fabricated
+ * `agent-<agentId>.jsonl` (with the nonce and a reviewer `agentType`
+ * baked in) and pass its path via `--claude-session-id`, defeating the
+ * entire "coordinator cannot cheaply fabricate this" guarantee opt-a exists
+ * to provide.
  */
 export function resolveHarnessTranscriptPath(opts: {
   repoRoot: string;
@@ -277,6 +329,17 @@ export function resolveHarnessTranscriptPath(opts: {
   let sessionDir: string | null;
 
   if (claudeSessionId) {
+    // Layer 1: strict charset — rejects '..' and path separators lexically,
+    // before any filesystem access. Never derived from an existing path, so
+    // this check cannot be bypassed by a symlink.
+    if (!SESSION_ID_PATTERN.test(claudeSessionId)) {
+      return {
+        transcriptPath: null,
+        metaPath: null,
+        usedFallbackHeuristic: false,
+        reason: `--claude-session-id '${claudeSessionId}' contains characters outside the allowed charset [A-Za-z0-9-] — refusing (path-traversal hardening)`,
+      };
+    }
     const candidate = join(slugDir, claudeSessionId);
     if (!existsSync(candidate)) {
       return {
@@ -284,6 +347,16 @@ export function resolveHarnessTranscriptPath(opts: {
         metaPath: null,
         usedFallbackHeuristic: false,
         reason: `explicit --claude-session-id '${claudeSessionId}' not found under ${slugDir}`,
+      };
+    }
+    // Layer 2: realpath containment — defeats a symlink inside slugDir that
+    // resolves outside the trusted base.
+    if (!isRealPathContained(slugDir, candidate)) {
+      return {
+        transcriptPath: null,
+        metaPath: null,
+        usedFallbackHeuristic: false,
+        reason: `--claude-session-id '${claudeSessionId}' resolves outside the trusted project directory ${slugDir} — refusing (path-traversal hardening)`,
       };
     }
     sessionDir = candidate;
@@ -310,6 +383,18 @@ export function resolveHarnessTranscriptPath(opts: {
       metaPath: null,
       usedFallbackHeuristic,
       reason: `harness transcript not found at ${transcriptPath}`,
+    };
+  }
+
+  // Final containment check on the resolved transcript file itself — belt
+  // and suspenders against a symlinked *file* (as opposed to a symlinked
+  // session directory, already covered above).
+  if (!isRealPathContained(slugDir, transcriptPath)) {
+    return {
+      transcriptPath: null,
+      metaPath: null,
+      usedFallbackHeuristic,
+      reason: `resolved transcript path escapes the trusted project directory ${slugDir} — refusing (path-traversal hardening)`,
     };
   }
 

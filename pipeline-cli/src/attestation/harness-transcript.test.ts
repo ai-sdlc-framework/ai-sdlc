@@ -16,7 +16,15 @@
  * `~/.claude/projects/` directory; a fresh mkdtemp fake home is used per test.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -469,13 +477,166 @@ describe('computeHarnessTranscriptHash', () => {
     expect(result.reason).toMatch(/no Claude Code project directory/);
   });
 
-  it('never throws even on wildly malformed input', () => {
-    expect(() =>
-      computeHarnessTranscriptHash({
+  it('never throws even on wildly malformed input, and fails closed', () => {
+    let result: ReturnType<typeof computeHarnessTranscriptHash> | undefined;
+    expect(() => {
+      result = computeHarnessTranscriptHash({
         repoRoot: '',
         transcriptMtimeMs: NaN,
         nonce: '',
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
+    expect(result?.harnessTranscriptHash).toBeNull();
+    expect(typeof result?.reason).toBe('string');
+  });
+
+  it('fails closed (null) when both the marker and the harness .meta.json lack agentType', () => {
+    const now = Date.now();
+    const nonce = 'a1'.repeat(32);
+    writeMarker(repoRoot, 'agent-rev6.json', {
+      agentId: 'rev6',
+      firedAt: new Date(now).toISOString(),
+    });
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    writeHarnessTranscript({
+      projectSlugDir: slugDir,
+      sessionId: 'session-1',
+      agentId: 'rev6',
+      content: `prompt ${nonceMarkerLiteral(nonce)}`,
+      // meta.json present but with no agentType field at all — null-fallback
+      // through both the marker AND the harness claim.
+      meta: { someOtherField: true },
+    });
+
+    const result = computeHarnessTranscriptHash({
+      repoRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: 'session-1',
+    });
+
+    expect(result.harnessTranscriptHash).toBeNull();
+    expect(result.reason).toMatch(/not a reviewer role/);
+    expect(result.reason).toContain('null');
+  });
+});
+
+// ── Path-traversal hardening (security round-2 review) ───────────────────────
+
+describe('resolveHarnessTranscriptPath — path-traversal hardening', () => {
+  it('rejects a --claude-session-id containing ".." before touching the filesystem', () => {
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    mkdirSync(slugDir, { recursive: true });
+
+    const result = resolveHarnessTranscriptPath({
+      repoRoot,
+      agentId: 'abc',
+      claudeSessionId: '../../../tmp/evil-session',
+    });
+    expect(result.transcriptPath).toBeNull();
+    expect(result.reason).toMatch(/outside the allowed charset/);
+  });
+
+  it('rejects a --claude-session-id containing a path separator', () => {
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    mkdirSync(slugDir, { recursive: true });
+
+    const result = resolveHarnessTranscriptPath({
+      repoRoot,
+      agentId: 'abc',
+      claudeSessionId: 'foo/bar',
+    });
+    expect(result.transcriptPath).toBeNull();
+    expect(result.reason).toMatch(/outside the allowed charset/);
+  });
+
+  it('a coordinator cannot use --claude-session-id to point at a self-authored, pre-fabricated transcript outside the trusted base', () => {
+    // Simulate the attack: attacker plants a fully-valid-looking fabricated
+    // transcript (correct nonce, correct reviewer agentType) OUTSIDE
+    // ~/.claude/projects/<slug>/, then tries to point --claude-session-id at
+    // it via a traversal string.
+    const nonce = 'b2'.repeat(32);
+    const evilRoot = mkdtempSync(join(tmpdir(), 'evil-session-'));
+    writeHarnessTranscript({
+      projectSlugDir: evilRoot,
+      sessionId: '.',
+      agentId: 'abc',
+      content: `fabricated prompt ${nonceMarkerLiteral(nonce)}`,
+      meta: { agentType: 'ai-sdlc:code-reviewer' },
+    });
+
+    // Even if the slug dir exists (so the traversal has somewhere to
+    // "escape" from), the attack must still fail.
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    mkdirSync(slugDir, { recursive: true });
+
+    const relativeTraversal = `../../../..${evilRoot}`;
+    const result = resolveHarnessTranscriptPath({
+      repoRoot,
+      agentId: 'abc',
+      claudeSessionId: relativeTraversal,
+    });
+
+    expect(result.transcriptPath).toBeNull();
+    rmSync(evilRoot, { recursive: true, force: true });
+  });
+
+  it('rejects a symlinked session directory that resolves outside the trusted project directory', () => {
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    mkdirSync(slugDir, { recursive: true });
+
+    const evilRoot = mkdtempSync(join(tmpdir(), 'evil-symlink-target-'));
+    writeHarnessTranscript({
+      projectSlugDir: evilRoot,
+      sessionId: 'payload',
+      agentId: 'abc',
+      content: 'fabricated content',
+    });
+
+    // Plant a symlink INSIDE the trusted slugDir that points OUTSIDE it.
+    const symlinkPath = join(slugDir, 'legit-looking-session');
+    symlinkSync(join(evilRoot, 'payload'), symlinkPath, 'dir');
+
+    const result = resolveHarnessTranscriptPath({
+      repoRoot,
+      agentId: 'abc',
+      claudeSessionId: 'legit-looking-session',
+    });
+
+    expect(result.transcriptPath).toBeNull();
+    expect(result.reason).toMatch(/resolves outside the trusted project directory/);
+    rmSync(evilRoot, { recursive: true, force: true });
+  });
+
+  it('computeHarnessTranscriptHash end-to-end: a traversal --claude-session-id never yields a hash even with a valid nonce + marker', () => {
+    const now = Date.now();
+    const nonce = 'c3'.repeat(32);
+    writeMarker(repoRoot, 'agent-rev7.json', {
+      agentId: 'rev7',
+      agentType: 'code-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+
+    // Attacker-controlled fabricated transcript sitting entirely outside
+    // ~/.claude/projects/**, with a matching nonce and reviewer agentType —
+    // everything opt-a checks for, EXCEPT it isn't in the trusted location.
+    const evilRoot = mkdtempSync(join(tmpdir(), 'evil-e2e-'));
+    writeHarnessTranscript({
+      projectSlugDir: evilRoot,
+      sessionId: 'session-1',
+      agentId: 'rev7',
+      content: `prompt ${nonceMarkerLiteral(nonce)}`,
+      meta: { agentType: 'ai-sdlc:code-reviewer' },
+    });
+
+    const result = computeHarnessTranscriptHash({
+      repoRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: `../../../..${evilRoot}/session-1`,
+    });
+
+    expect(result.harnessTranscriptHash).toBeNull();
+    rmSync(evilRoot, { recursive: true, force: true });
   });
 });

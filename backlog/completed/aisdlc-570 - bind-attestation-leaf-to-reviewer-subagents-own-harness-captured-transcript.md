@@ -142,5 +142,11 @@ DEC-0013 → opt1 (sign-time-only, informational). This PR ships:
 generate a nonce before dispatching reviewer subagents nor embed it (via
 `nonceMarkerLiteral()`) in the reviewer's `Task`/`Agent` prompt. Until that
 wiring lands, `harnessTranscriptHash` will resolve `null` for essentially
-every real reviewer invocation (fail-safe — never over-claims). This task
-stays open (not moved to `backlog/completed/`) pending that follow-up.
+every real reviewer invocation (fail-safe — never over-claims). The
+schema/sign-time/nonce-search machinery itself is fully implemented, tested,
+and (per the AISDLC-570 PR #993 round-2 review) verified to populate a
+non-null hash on the positive path through the real marker-consumption flow
+— this task's own pre-push hook auto-moved the file here per the framework's
+standard `(AISDLC-N)`-in-commit-subject convention, but the feature is
+**dormant until the AISDLC-573 orchestration-wiring follow-up lands**; track
+that follow-up separately rather than re-opening this task.

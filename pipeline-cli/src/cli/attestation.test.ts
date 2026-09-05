@@ -10,14 +10,32 @@
  * @see pipeline-cli/src/cli/attestation.ts
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeaf, loadLeavesForPatchId, type TranscriptLeaf } from '../attestation/merkle.js';
+import { subagentSessionsDir } from '../attestation/verdict-class.js';
+import {
+  claudeProjectSlug,
+  claudeProjectsDir,
+  nonceMarkerLiteral,
+} from '../attestation/harness-transcript.js';
 import { buildAttestationCli } from './attestation.js';
+
+/**
+ * AISDLC-570 round-2 review: mocked so the `emit-leaf --claude-session-id`
+ * positive-path test (below) can create a fake `~/.claude/projects/<slug>/`
+ * tree without touching the real home directory. `tmpdir` and every other
+ * `node:os` export pass through unmocked via `importOriginal`.
+ */
+let fakeHomeDirForHarnessTests = '';
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, homedir: () => fakeHomeDirForHarnessTests || actual.homedir() };
+});
 
 /**
  * AISDLC-421: deterministic test patch-id used to drive `emit-leaf` in
@@ -1770,5 +1788,106 @@ describe('emit-leaf — --nonce validation (AISDLC-570)', () => {
     expect(leaves).toHaveLength(1);
     expect(leaves[0].harnessTranscriptHash).toBeNull();
     expect(stderrChunks.join('')).toContain('harnessTranscriptHash=null');
+  });
+});
+
+// ── CLI: emit-leaf harnessTranscriptHash positive path (AISDLC-570 round-2) ────
+//
+// Proves the marker-consumption ORDERING FIX: computeHarnessTranscriptHash
+// reads the SAME SubagentStart marker that determineVerdictClass ALSO
+// consumes (unlinks) — in the SAME emit-leaf invocation, not in isolation.
+// Before the fix, determineVerdictClass ran first and deleted the marker,
+// so computeHarnessTranscriptHash could never find it: harnessTranscriptHash
+// was permanently null even on an otherwise-fully-correct positive path.
+
+describe('emit-leaf — harnessTranscriptHash positive path through real verdictClass consumption (AISDLC-570 round-2)', () => {
+  afterEach(() => {
+    fakeHomeDirForHarnessTests = '';
+  });
+
+  it('resolves a non-null harnessTranscriptHash AND verdictClass=independent from the SAME marker', async () => {
+    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'harness-positive-home-'));
+
+    makeTranscript('aisdlc-570', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-570',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-positive-path.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    // Real SubagentStart marker (as subagent-start.js would write it),
+    // timed to fall within determineVerdictClass's lookback window of
+    // "now" (the transcript's mtime, since makeTranscript just wrote it).
+    const markerDir = subagentSessionsDir(tmpRoot);
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      join(markerDir, 'agent-rev-positive.json'),
+      JSON.stringify({
+        agentId: 'rev-positive',
+        agentType: 'code-reviewer',
+        firedAt: new Date().toISOString(),
+      }),
+    );
+
+    // Real harness-captured transcript fixture: correct nonce literal +
+    // reviewer agentType, at the deterministic path emit-leaf will resolve.
+    const nonce = 'd4'.repeat(32);
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(tmpRoot));
+    const subagentsDir = join(slugDir, 'session-positive', 'subagents');
+    mkdirSync(subagentsDir, { recursive: true });
+    writeFileSync(
+      join(subagentsDir, 'agent-rev-positive.jsonl'),
+      `{"type":"user","message":"Review this diff ${nonceMarkerLiteral(nonce)}"}\n`,
+    );
+    writeFileSync(
+      join(subagentsDir, 'agent-rev-positive.meta.json'),
+      JSON.stringify({ agentType: 'ai-sdlc:code-reviewer' }),
+    );
+
+    await expect(
+      buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-570',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
+        '--nonce',
+        nonce,
+        '--claude-session-id',
+        'session-positive',
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves).toHaveLength(1);
+    // The core assertion: harnessTranscriptHash is set (not null) on the
+    // SAME leaf where verdictClass was ALSO correctly derived from the same
+    // marker — proving the ordering fix, not just isolated unit behavior.
+    expect(leaves[0].harnessTranscriptHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(leaves[0].verdictClass).toBe('independent');
+
+    // The marker was consumed (real determineVerdictClass semantics
+    // preserved) — but only AFTER computeHarnessTranscriptHash read it.
+    expect(readdirSync(markerDir)).toHaveLength(0);
+
+    expect(stderrChunks.join('')).toMatch(/harnessTranscriptHash=[0-9a-f]{16}\.\.\./);
   });
 });

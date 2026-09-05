@@ -667,18 +667,25 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           const signedAt = new Date().toISOString();
 
-          // AISDLC-568: determine trust class from the SubagentStart marker
-          // signal. Fail-safe — any missing/stale/malformed marker yields the
-          // lower-trust 'self-authored' class. See attestation/verdict-class.ts
-          // for the full mechanism + honest limits.
           const transcriptMtimeMs = statSync(transcriptPath).mtimeMs;
-          const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
 
           // AISDLC-570 (DEC-0013 → opt1): sign-time-only, informational
           // binding to the reviewer subagent's own harness-captured
           // transcript. Fail-safe — see attestation/harness-transcript.ts
           // for the full mechanism + honest limits. The `reason` is always
           // logged (even on success) for signer-side observability.
+          //
+          // MUST run BEFORE determineVerdictClass() below: both read the same
+          // `.ai-sdlc/subagent-sessions/<agent-id>.json` SubagentStart marker,
+          // but determineVerdictClass() CONSUMES (unlinks) it on a match.
+          // Ordering it first here would make harnessTranscriptHash resolve
+          // null on every single call, even a fully-correct positive-path
+          // invocation with the nonce wired end-to-end — a dead-on-arrival
+          // regression that would only surface once the (currently
+          // unimplemented) orchestrator-side nonce injection landed. See
+          // `findMatchingSubagentMarker()` in harness-transcript.ts — it is a
+          // deliberately READ-ONLY, non-consuming scan for exactly this
+          // reason.
           const harnessResult = computeHarnessTranscriptHash({
             repoRoot,
             transcriptMtimeMs,
@@ -692,6 +699,14 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 : 'null'
             } (${harnessResult.reason})\n`,
           );
+
+          // AISDLC-568: determine trust class from the SubagentStart marker
+          // signal. Fail-safe — any missing/stale/malformed marker yields the
+          // lower-trust 'self-authored' class. See attestation/verdict-class.ts
+          // for the full mechanism + honest limits. Runs AFTER
+          // computeHarnessTranscriptHash (see comment above) since this call
+          // CONSUMES (deletes) the marker file on a match.
+          const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
 
           const leaf: TranscriptLeaf = {
             leafIndex,
