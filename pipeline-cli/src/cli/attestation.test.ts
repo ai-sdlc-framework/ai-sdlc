@@ -647,7 +647,11 @@ describe('emit-leaf — verdictClass detection', () => {
     mkdirSync(markerDir, { recursive: true });
     writeFileSync(
       join(markerDir, 'agent-real.json'),
-      JSON.stringify({ agentId: 'agent-real', firedAt: new Date().toISOString() }),
+      JSON.stringify({
+        agentId: 'agent-real',
+        agentType: 'code-reviewer',
+        firedAt: new Date().toISOString(),
+      }),
     );
 
     await buildAttestationCli([

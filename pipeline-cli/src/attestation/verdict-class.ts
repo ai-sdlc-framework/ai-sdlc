@@ -17,28 +17,65 @@
  * firing timestamp.
  *
  * `determineVerdictClass()` checks whether an UNCONSUMED marker exists whose
- * `firedAt` timestamp falls within a bounded lookback window ending at the
- * reviewer transcript file's last-write time. A match means a real subagent
- * was spawned during (or shortly before) the window the transcript was
- * written — strong evidence the transcript reflects an actual independent
- * review, not a same-process self-review. On a match the marker is CONSUMED
- * (deleted) so a single subagent spawn cannot be reused to legitimize
- * multiple leaves.
+ * `agentType` is in the REVIEWER allowlist (AISDLC-572) AND whose `firedAt`
+ * timestamp falls within a bounded lookback window ending at the reviewer
+ * transcript file's last-write time. A match means a real REVIEWER-typed
+ * subagent was spawned during (or shortly before) the window the transcript
+ * was written — strong evidence the transcript reflects an actual
+ * independent review, not a same-process self-review. On a match the marker
+ * is CONSUMED (deleted) so a single subagent spawn cannot be reused to
+ * legitimize multiple leaves.
+ *
+ * ## AISDLC-572: role binding (not just timing)
+ *
+ * Prior to this task, `independent` was credited on TIMING ALONE — ANY
+ * subagent dispatched within the window (a `developer`, a
+ * `rebase-resolver`, anything) made a leaf `independent`, because the
+ * marker never recorded which agent role fired the hook. That is a
+ * structural false-positive: a coordinator that dispatches a `developer`
+ * subagent (which writes a marker) and then hand-authors a `code-reviewer`
+ * transcript within the window got `independent` with NO fabrication — an
+ * unrelated real marker was silently reused.
+ *
+ * The fix: the marker (written by `ai-sdlc-plugin/hooks/subagent-start.js`)
+ * now also records `agentType` from the `SubagentStart` payload's
+ * `agent_type` field. BEFORE the time-window check, this module requires
+ * `agentType` to be one of the REVIEWER roles:
+ * `code-reviewer`, `test-reviewer`, `security-reviewer`,
+ * `code-reviewer-codex`, `test-reviewer-codex`. Explicitly excluded:
+ * `developer`, `rebase-resolver`, `ci-conflict-resolver` (none of these
+ * review a diff), and `refinement-reviewer` (a DoR/Definition-of-Ready
+ * evaluator, not a code/test/security review of the diff being merged).
+ * A marker with a non-reviewer `agentType`, or a legacy marker with no
+ * `agentType` at all, fails safe to `self-authored` — exactly like a
+ * missing marker.
+ *
+ * Role-binding is now the PRIMARY defense (raising the forgery floor from
+ * "any subagent ran" to "a reviewer-typed subagent ran"), which is why the
+ * lookback window below was narrowed from 2h to 30 minutes — the timing
+ * check is now a secondary/defense-in-depth bound on an already role-gated
+ * marker, not the sole signal, so a shorter window that closely tracks a
+ * real reviewer subagent's actual runtime is both safer (smaller stale-
+ * marker reuse surface) and still generous for normal review latency.
  *
  * ## Honest limits (documented per AC#3 wording discipline)
  *
  * This is a same-process/session HEURISTIC, not a cryptographic proof:
  *   - Single machine, same repo checkout: a sufficiently determined
  *     coordinator with Bash/Write access could fabricate a marker file
- *     directly, bypassing the need to actually spawn a subagent. This
- *     mechanism raises the bar against ACCIDENTAL or lazy self-review (the
- *     common case: the coordinator running the reviewer's own prescribed
- *     Bash steps itself) — it does not defend against a deliberately
- *     adversarial coordinator. Closing that gap is the harness-coupled
- *     follow-up tracked as DEC-0012 opt-a.
- *   - Fail-safe default: ANY missing, malformed, or stale marker resolves
- *     to the LOWER-trust `self-authored` class — this function never
- *     over-claims `independent`.
+ *     directly — INCLUDING forging a reviewer `agentType` string — bypassing
+ *     the need to actually spawn a subagent. Role-binding (this task) raises
+ *     the bar against ACCIDENTAL or lazy self-review (the common case: the
+ *     coordinator running the reviewer's own prescribed Bash steps itself,
+ *     or reusing an unrelated real marker from a non-reviewer subagent) —
+ *     it does not defend against a deliberately adversarial coordinator
+ *     willing to also forge `agent_type`. Closing that gap requires binding
+ *     the leaf to the reviewer subagent's own harness-captured execution
+ *     transcript — the harness-coupled follow-up tracked as DEC-0012 opt-a
+ *     / AISDLC-570.
+ *   - Fail-safe default: ANY missing, malformed, non-reviewer, or stale
+ *     marker resolves to the LOWER-trust `self-authored` class — this
+ *     function never over-claims `independent`.
  *
  * @module attestation/verdict-class
  */
@@ -56,13 +93,44 @@ export const SUBAGENT_SESSIONS_DIR_RELATIVE = '.ai-sdlc/subagent-sessions';
  * Maximum age (ms) a marker may have relative to the transcript's mtime and
  * still count as evidence of a real subagent spawn. Bounds the window so an
  * unrelated, long-stale marker from an earlier run cannot be reused.
+ *
+ * AISDLC-572: narrowed from 2 hours to 30 minutes now that role-binding
+ * (the `agentType` reviewer-allowlist check below) is the primary defense.
+ * A shorter window shrinks the stale-marker reuse surface for an already
+ * role-gated marker while still comfortably covering normal reviewer
+ * subagent runtimes.
  */
-export const MARKER_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+export const MARKER_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Reviewer agent roles (see `ai-sdlc-plugin/agents/*.md` `name:` frontmatter)
+ * whose `SubagentStart` marker is eligible to back a `verdictClass:
+ * 'independent'` classification. Explicitly excludes `developer`,
+ * `rebase-resolver`, `ci-conflict-resolver` (none review a diff) and
+ * `refinement-reviewer` (a DoR/Definition-of-Ready evaluator, not a
+ * code/test/security review of the diff being merged) — see the module
+ * docblock's AISDLC-572 section for the full rationale.
+ */
+export const REVIEWER_AGENT_TYPES = [
+  'code-reviewer',
+  'test-reviewer',
+  'security-reviewer',
+  'code-reviewer-codex',
+  'test-reviewer-codex',
+] as const;
+
+export type ReviewerAgentType = (typeof REVIEWER_AGENT_TYPES)[number];
 
 /** Shape of a marker file written by `subagent-start.js`. */
 export interface SubagentStartMarker {
   /** The harness-assigned agent identifier (or a random fallback). */
   agentId: string;
+  /**
+   * The harness-assigned agent role (`SubagentStart` payload's `agent_type`),
+   * e.g. `'code-reviewer'`. `null` for legacy markers written before
+   * AISDLC-572, or when the payload omitted/malformed the field.
+   */
+  agentType: string | null;
   /** ISO-8601 timestamp of when the SubagentStart hook fired. */
   firedAt: string;
 }
@@ -105,6 +173,17 @@ export function determineVerdictClass(opts: {
     try {
       const raw = readFileSync(filePath, 'utf8');
       const marker = JSON.parse(raw) as Partial<SubagentStartMarker>;
+
+      // AISDLC-572: role gate BEFORE the timing check. A non-reviewer or
+      // missing/null agentType (including legacy pre-572 markers) never
+      // qualifies, regardless of how well its timing lines up.
+      if (
+        typeof marker.agentType !== 'string' ||
+        !REVIEWER_AGENT_TYPES.includes(marker.agentType as ReviewerAgentType)
+      ) {
+        continue;
+      }
+
       if (typeof marker.firedAt !== 'string') continue;
       const firedAtMs = new Date(marker.firedAt).getTime();
       if (Number.isNaN(firedAtMs)) continue;
@@ -116,7 +195,7 @@ export function determineVerdictClass(opts: {
         // return 'independent' for THIS leaf (the marker existed and
         // matched); a leftover file only risks over-crediting a future
         // leaf, which is the fail-open direction we accept here since the
-        // window is short (2h) and the file is local-disk only.
+        // window is short (30 min, MARKER_MAX_AGE_MS) and the file is local-disk only.
         try {
           unlinkSync(filePath);
         } catch {
