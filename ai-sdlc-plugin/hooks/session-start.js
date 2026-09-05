@@ -66,8 +66,49 @@ try {
       'dist',
       'bin.js',
     );
-    const needsInstall =
+    const needsInstallFileCheck =
       !existsSync(sentinel) || !existsSync(pipelineCliBin) || !existsSync(mcpServerBin);
+
+    // AISDLC-580 review follow-up: file-existence-only is not enough to
+    // decide "is this install correct" — a stale-but-present install (all
+    // three entry-point files AND the sentinel exist, but the installed
+    // version no longer satisfies the plugin.json pin, or a newer satisfying
+    // version has since published upstream) must ALSO trigger the self-heal.
+    // Without this, the AISDLC-580 version-convergence fix in
+    // install-runtime-deps.sh is unreachable on the automatic session-start
+    // path — needsInstallFileCheck computes false, the script is never
+    // invoked, and the operator stays silently stuck on the stale version
+    // exactly as in the original incident. Delegate to
+    // check-stale-runtime-deps.mjs — the SAME script install-runtime-deps.sh
+    // itself now uses — so there is one implementation of "is this stale",
+    // not two independently-drifting copies.
+    //
+    // Fail-open + fast: only runs when the file-existence check already
+    // passed (skip the extra work entirely on a fresh/broken install, which
+    // needs a full install regardless), and is bounded by a short timeout so
+    // a slow/offline registry can never block session start — any
+    // error/timeout here silently falls back to the file-existence result.
+    let staleUpgradeNeeded = false;
+    if (!needsInstallFileCheck) {
+      try {
+        const staleCheckScript = join(pluginRoot, 'scripts', 'check-stale-runtime-deps.mjs');
+        if (existsSync(staleCheckScript)) {
+          const staleResult = spawnSync(process.execPath, [staleCheckScript, pluginRoot, '2000'], {
+            encoding: 'utf-8',
+            // 3 known packages * ~2s npm-view budget each, plus slack for
+            // node startup — still far below the 120s install budget below.
+            timeout: 8_000,
+          });
+          if (staleResult.status === 0 && (staleResult.stdout || '').trim().length > 0) {
+            staleUpgradeNeeded = true;
+          }
+        }
+      } catch {
+        // Fail open — degrade to the plain file-existence result.
+      }
+    }
+
+    const needsInstall = needsInstallFileCheck || staleUpgradeNeeded;
 
     if (needsInstall) {
       const installScript = join(pluginRoot, 'scripts', 'install-runtime-deps.sh');

@@ -545,3 +545,128 @@ exit 0
     assert.match(result.stderr, /@ai-sdlc\/pipeline-cli/, 'must name the missing package');
   });
 });
+
+describe('_deps_complete version-convergence gate (AISDLC-580 review follow-up)', () => {
+  // Root cause reproduced here: pre-fix, `_deps_complete` only checked
+  // `_is_usable` (pipeline-cli bin present) && `_mcp_usable` (mcp-server bin
+  // present) — pure file existence. A stale-but-present install (both files
+  // exist, but the version no longer satisfies the pin, or a newer version
+  // has since published) reported "complete", so the self-heal branch below
+  // was NEVER reached — this script runs on effectively every /ai-sdlc
+  // command invocation, so the AISDLC-580 convergence fix stayed unreachable
+  // here too, not just on the manual entry point.
+
+  /**
+   * Build a plugin dir with BOTH entry-point bins present (the old
+   * file-existence check alone would report "complete"), plus a fake
+   * check-stale-runtime-deps.mjs (deterministic, no npm/network dependency)
+   * and a fake install-runtime-deps.sh that records invocation via a marker
+   * file and materialises fresh entry points so the retry after self-heal
+   * succeeds.
+   */
+  function buildStaleButPresentPluginDir(pluginDir, { staleCheckOutput }) {
+    mkdirSync(pluginDir, { recursive: true });
+    createFakePipelineBin(join(pluginDir, PIPELINE_CLI_REL));
+    createFakeMcpBundle(pluginDir);
+    writeFileSync(join(pluginDir, 'plugin.json'), '{}');
+
+    const scriptsDir = join(pluginDir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    // Report stale ONLY until the fake installer's marker file appears —
+    // mirroring the real script's behavior of reporting "converged" once
+    // the installed version actually matches the registry target after a
+    // real `npm install`. Without this, `_deps_complete`'s POST-heal
+    // recheck would see the same static "stale" output forever and the
+    // resolver would (correctly, but unhelpfully for this test) fall
+    // through the rest of the topology chain and fail.
+    writeFileSync(
+      join(scriptsDir, 'check-stale-runtime-deps.mjs'),
+      `#!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+const pluginDir = process.argv[2];
+if (!existsSync(join(pluginDir, '.install-invoked'))) {
+  process.stdout.write(${JSON.stringify(staleCheckOutput)});
+}
+`,
+    );
+    writeFileSync(
+      join(scriptsDir, 'install-runtime-deps.sh'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+PLUGIN_DIR="\${1:?PLUGIN_DIR required}"
+touch "$PLUGIN_DIR/.install-invoked"
+mkdir -p "$PLUGIN_DIR/${PIPELINE_CLI_REL}"
+echo "#!/usr/bin/env node" > "$PLUGIN_DIR/${PIPELINE_CLI_REL}/cli-deps.mjs"
+mkdir -p "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist"
+echo "#!/usr/bin/env node" > "$PLUGIN_DIR/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js"
+exit 0
+`,
+    );
+    chmodSync(join(scriptsDir, 'install-runtime-deps.sh'), 0o755);
+  }
+
+  it('triggers self-heal when the version-convergence check reports drift, even though both entry-point files already exist', () => {
+    const pluginDir = join(tmpDir, 'deps-complete-stale');
+    buildStaleButPresentPluginDir(pluginDir, {
+      staleCheckOutput: '@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.1\n',
+    });
+    const fakeHome = join(tmpDir, 'deps-complete-stale-home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    const { exitCode, stderr } = runScript({
+      CLAUDE_PLUGIN_DIR: pluginDir,
+      CLAUDE_PLUGIN_ROOT: '',
+      HOME: fakeHome,
+    });
+
+    assert.equal(exitCode, 0, `must resolve after self-heal; stderr=${stderr}`);
+    assert.ok(
+      existsSync(join(pluginDir, '.install-invoked')),
+      'install-runtime-deps.sh must be invoked when the version-convergence check reports drift, ' +
+        'even though both entry-point files were already present',
+    );
+  });
+
+  it('does NOT trigger self-heal when the version-convergence check reports no drift (regression guard)', () => {
+    const pluginDir = join(tmpDir, 'deps-complete-current');
+    buildStaleButPresentPluginDir(pluginDir, { staleCheckOutput: '' });
+    const fakeHome = join(tmpDir, 'deps-complete-current-home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    const { exitCode } = runScript({
+      CLAUDE_PLUGIN_DIR: pluginDir,
+      CLAUDE_PLUGIN_ROOT: '',
+      HOME: fakeHome,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.ok(
+      !existsSync(join(pluginDir, '.install-invoked')),
+      'a converged install (no drift reported) must not trigger a needless self-heal run',
+    );
+  });
+
+  it('fails open (does not force self-heal) when check-stale-runtime-deps.mjs is missing entirely', () => {
+    const pluginDir = join(tmpDir, 'deps-complete-no-stale-script');
+    mkdirSync(pluginDir, { recursive: true });
+    createFakePipelineBin(join(pluginDir, PIPELINE_CLI_REL));
+    createFakeMcpBundle(pluginDir);
+    writeFileSync(join(pluginDir, 'plugin.json'), '{}');
+    // No scripts/check-stale-runtime-deps.mjs at all.
+    const fakeHome = join(tmpDir, 'deps-complete-no-stale-script-home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    const { exitCode } = runScript({
+      CLAUDE_PLUGIN_DIR: pluginDir,
+      CLAUDE_PLUGIN_ROOT: '',
+      HOME: fakeHome,
+    });
+
+    assert.equal(
+      exitCode,
+      0,
+      'must resolve via the plain file-existence fast path when the shared script is absent',
+    );
+  });
+});

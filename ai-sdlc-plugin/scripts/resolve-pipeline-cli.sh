@@ -68,11 +68,37 @@ _mcp_usable() {
   [ -f "$plugin_dir/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js" ]
 }
 
-# Combined self-heal trigger: returns 0 (needs heal) if pipeline-cli OR
-# mcp-server is missing in the plugin dir.
+# AISDLC-580 review follow-up: version-convergence check, shared with
+# install-runtime-deps.sh and session-start.js via
+# check-stale-runtime-deps.mjs (the SINGLE SOURCE for "is this install
+# stale"). Without this, _deps_complete only ever checked file existence —
+# a stale-but-present install (files exist, version no longer satisfies the
+# pin or a newer version has since published) reported "complete", the
+# self-heal call below was never reached, and the AISDLC-580 fix stayed
+# unreachable from this entry point too (this script runs on effectively
+# every /ai-sdlc command invocation, not just session start).
+#
+# Fails open (reports "current"/not-stale) when the shared script is
+# missing, `node` is unavailable, or the check itself errors — never turns a
+# working install into a false failure.
+_version_current() {
+  local plugin_dir="$1"
+  local stale_script="$plugin_dir/scripts/check-stale-runtime-deps.mjs"
+  [ -f "$stale_script" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  local out
+  out=$(node "$stale_script" "$plugin_dir" 2000 2>/dev/null) || return 0
+  [ -z "$out" ]
+}
+
+# Combined self-heal trigger: returns 0 (deps complete) only if pipeline-cli
+# AND mcp-server are present AND neither is stale relative to its pin.
 _deps_complete() {
   local plugin_dir="$1"
-  _is_usable "$plugin_dir/$PIPELINE_CLI_REL" && _mcp_usable "$plugin_dir"
+  _is_usable "$plugin_dir/$PIPELINE_CLI_REL" || return 1
+  _mcp_usable "$plugin_dir" || return 1
+  _version_current "$plugin_dir" || return 1
+  return 0
 }
 
 # ── Topology 1: CLAUDE_PLUGIN_DIR set + deps bundled ────────────────────────

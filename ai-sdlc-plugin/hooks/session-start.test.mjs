@@ -8,7 +8,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
@@ -329,5 +329,120 @@ describe('ai-sdlc-plugin session-start hook', () => {
     const result = runHook(tempDirEmpty);
     assert.equal(result.output, '', 'should produce no output when there is nothing to warn about');
     assert.equal(result.exitCode, 0, 'should exit with code 0');
+  });
+});
+
+describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AISDLC-580 review follow-up)', () => {
+  // Root-cause reproduced here: pre-fix, `needsInstall` was computed purely
+  // from `!existsSync(sentinel) || !existsSync(pipelineCliBin) ||
+  // !existsSync(mcpServerBin)`. A stale-but-present install (all three exist)
+  // computed needsInstall=false and NEVER invoked install-runtime-deps.sh —
+  // so the AISDLC-580 version-convergence fix in that script was completely
+  // unreachable from the automatic session-start path; only a manual `bash
+  // install-runtime-deps.sh` invocation ever exercised it. These tests MUST
+  // fail against a session-start.js that only checks file existence.
+
+  /**
+   * Build a fake plugin dir with the "stale-but-present" shape: sentinel +
+   * both entry-point bins present (so the OLD file-existence check alone
+   * would report needsInstall=false), plus a `check-stale-runtime-deps.mjs`
+   * stub that unconditionally reports one package as stale (isolating this
+   * test from the shared script's own npm-view logic, which is covered by
+   * check-stale-runtime-deps.test.mjs) and an `install-runtime-deps.sh` stub
+   * that records invocation via a marker file.
+   */
+  function buildStaleButPresentPlugin({ staleCheckOutput }) {
+    const pluginDir = mkdtempSync(join(tmpdir(), 'aisdlc-580-session-start-'));
+    mkdirSync(join(pluginDir, 'scripts'), { recursive: true });
+    mkdirSync(join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin'), {
+      recursive: true,
+    });
+    mkdirSync(join(pluginDir, 'node_modules', '@ai-sdlc', 'plugin-mcp-server', 'dist'), {
+      recursive: true,
+    });
+
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name: 'ai-sdlc' }), 'utf-8');
+    // AISDLC-441 sentinel — present, simulating a prior successful install.
+    writeFileSync(join(pluginDir, 'node_modules', '.ai-sdlc-installed'), 'installed\n', 'utf-8');
+    // Both entry-point bins present — the OLD check alone would short-circuit.
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', 'cli-deps.mjs'),
+      '#!/usr/bin/env node\n',
+      'utf-8',
+    );
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'plugin-mcp-server', 'dist', 'bin.js'),
+      '#!/usr/bin/env node\n',
+      'utf-8',
+    );
+
+    // Fake shared version-check script — deterministic, no npm/network dependency.
+    writeFileSync(
+      join(pluginDir, 'scripts', 'check-stale-runtime-deps.mjs'),
+      `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(staleCheckOutput)});\n`,
+      'utf-8',
+    );
+
+    // Fake installer — records invocation via a marker file so the test can
+    // assert it actually ran, without touching npm/network.
+    writeFileSync(
+      join(pluginDir, 'scripts', 'install-runtime-deps.sh'),
+      '#!/usr/bin/env bash\ntouch "$1/.install-invoked"\necho "install-runtime-deps.sh: fake install ran" >&2\nexit 0\n',
+      'utf-8',
+    );
+    chmodSync(join(pluginDir, 'scripts', 'install-runtime-deps.sh'), 0o755);
+
+    return pluginDir;
+  }
+
+  it('a stale-but-present install (sentinel + both bins exist, version check reports drift) still triggers the self-heal', () => {
+    const pluginDir = buildStaleButPresentPlugin({
+      staleCheckOutput: '@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.1\n',
+    });
+    try {
+      runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+      assert.ok(
+        existsSync(join(pluginDir, '.install-invoked')),
+        'install-runtime-deps.sh must be invoked when the version-convergence check reports drift, ' +
+          'even though the file-existence check alone (sentinel + both bins present) would report ' +
+          'the install as complete',
+      );
+    } finally {
+      rmSync(pluginDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT invoke the installer when the version-convergence check reports no drift (regression guard)', () => {
+    const pluginDir = buildStaleButPresentPlugin({ staleCheckOutput: '' });
+    try {
+      runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+      assert.ok(
+        !existsSync(join(pluginDir, '.install-invoked')),
+        'a converged install (no drift reported) must not trigger a needless self-heal run',
+      );
+    } finally {
+      rmSync(pluginDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails open to the file-existence result when check-stale-runtime-deps.mjs itself errors', () => {
+    const pluginDir = buildStaleButPresentPlugin({ staleCheckOutput: '' });
+    // Replace the fake stale-check script with one that throws.
+    writeFileSync(
+      join(pluginDir, 'scripts', 'check-stale-runtime-deps.mjs'),
+      '#!/usr/bin/env node\nthrow new Error("boom");\n',
+      'utf-8',
+    );
+    try {
+      const result = runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+      assert.equal(result.exitCode, 0, 'must never crash session start on a stale-check error');
+      assert.ok(
+        !existsSync(join(pluginDir, '.install-invoked')),
+        'a failing stale-check must fail open (degrade to file-existence result, which was ' +
+          'already "complete" here), not force an install',
+      );
+    } finally {
+      rmSync(pluginDir, { recursive: true, force: true });
+    }
   });
 });

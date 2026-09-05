@@ -115,23 +115,6 @@ if [ "${#RUNTIME_SPECS[@]}" -eq 0 ]; then
   exit 1
 fi
 
-# Look up the pin for a package name from RUNTIME_SPECS. Each spec is
-# "name@version"; split at the LAST '@' so scoped package names like
-# "@ai-sdlc/pipeline-cli" split correctly. Implemented as a scan rather than
-# a `declare -A` associative array — macOS ships bash 3.2 by default, which
-# has no associative-array support, and this script must run under both.
-lookup_pin() {
-  local want="$1" spec spec_name
-  for spec in "${RUNTIME_SPECS[@]}"; do
-    spec_name="${spec%@*}"
-    if [ "$spec_name" = "$want" ]; then
-      printf '%s' "${spec##*@}"
-      return 0
-    fi
-  done
-  return 1
-}
-
 # ── Idempotence check (early-exit when both deps are already present) ────────
 #
 # AISDLC-385: @ai-sdlc/plugin-mcp-server is now a runtimeDependency (replaces
@@ -177,59 +160,50 @@ fi
 # already-fixed-upstream version forever — exactly the AISDLC-579 masking
 # incident this task exists to close.
 #
-# Fix: for every already-present package (per the file-existence flags above)
-# that ships a `package.json` (a real `npm install` always writes one; only
-# the script's own unit-test stubs omit it), resolve the ACTUAL target
-# version npm would install for `name@pin` via `npm view name@pin version`
-# and compare it to the installed version. A mismatch means either (a) the
-# installed version no longer satisfies the pin, or (b) it satisfies the pin
-# but a newer satisfying version is now available — both cases force a clean
-# reinstall of just that package's directory (never assume a partial delete
-# is safe to skip; npm's local resolution treats "directory exists and
-# satisfies range" as done, so removal is what actually forces convergence).
+# Fix: delegate to check-stale-runtime-deps.mjs, which resolves the ACTUAL
+# target version npm would install for `name@pin` via `npm view name@pin
+# version` and compares it to the installed version. That script is the
+# SINGLE SOURCE for this check — session-start.js's automatic self-heal gate
+# and resolve-pipeline-cli.sh's `_deps_complete` gate call the exact same
+# script, so a stale-but-present install is detected uniformly across every
+# caller, not just this manual entry point (AISDLC-580 review follow-up).
 #
-# Fails open: if there is no local `package.json` to compare against, or the
-# registry is unreachable (`npm view` fails/empty), the check is skipped for
-# that package — this keeps offline / already-converged runs exactly as fast
-# and side-effect-free as before (no extra npm invocation), and never blocks
-# plugin usage on a flaky network.
-maybe_upgrade_stale_package() {
-  local pkg_name="$1"
-  local ok_var_name="$2"
-  local pin
-  pin=$(lookup_pin "$pkg_name") || return 0
-  [ -z "$pin" ] && return 0
-
-  local pkg_json="$PLUGIN_DIR/node_modules/$pkg_name/package.json"
-  [ -f "$pkg_json" ] || return 0
-
-  local installed
-  installed=$(node -e '
-    try {
-      const pkg = require(process.argv[1]);
-      if (pkg && typeof pkg.version === "string" && pkg.version) {
-        process.stdout.write(pkg.version);
-      }
-    } catch (e) {
-      // Malformed/missing package.json — nothing to compare, fail open.
-    }
-  ' "$pkg_json" 2>/dev/null) || installed=""
-  [ -z "$installed" ] && return 0
-
-  local target
-  target=$(npm view "${pkg_name}@${pin}" version 2>/dev/null | tail -n1) || target=""
-  [ -z "$target" ] && return 0
-
-  if [ "$target" != "$installed" ]; then
-    echo "install-runtime-deps.sh: upgrading $pkg_name $installed -> $target to satisfy pin $pin" >&2
-    rm -rf "$PLUGIN_DIR/node_modules/$pkg_name"
-    printf -v "$ok_var_name" '%s' '0'
-  fi
-}
-
-maybe_upgrade_stale_package "@ai-sdlc/pipeline-cli" PIPELINE_CLI_OK
-maybe_upgrade_stale_package "@ai-sdlc/plugin-mcp-server" MCP_SERVER_OK
-maybe_upgrade_stale_package "@ai-sdlc/orchestrator" ORCHESTRATOR_OK
+# A mismatch means either (a) the installed version no longer satisfies the
+# pin, or (b) it satisfies the pin but a newer satisfying version is now
+# available — both cases force a clean reinstall of just that package's
+# directory (never assume a partial delete is safe to skip; npm's local
+# resolution treats "directory exists and satisfies range" as done, so
+# removal is what actually forces convergence).
+#
+# Fails open: check-stale-runtime-deps.mjs itself fails open (no local
+# package.json to compare against, or the registry is unreachable/`npm view`
+# times out) — this keeps offline / already-converged runs exactly as fast
+# and side-effect-free as before, and never blocks plugin usage on a flaky
+# network.
+#
+# NOTE: unlike a network drop mid-`npm install` (which self-heals on the very
+# next run since the removed package would simply appear missing again), the
+# `rm -rf` below intentionally happens BEFORE the subsequent `npm install`
+# call, not after a verified fetch. This is a known availability trade-off
+# (a network drop between the `rm -rf` and the `npm install` succeeding would
+# leave that one package briefly absent) — accepted because the failure mode
+# is self-healing (the post-install verification step below will fail loud
+# and the very next invocation retries the same rm+install), not silent.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STALE_CHECK_SCRIPT="$SCRIPT_DIR/check-stale-runtime-deps.mjs"
+if [ -f "$STALE_CHECK_SCRIPT" ]; then
+  STALE_OUTPUT=$(node "$STALE_CHECK_SCRIPT" "$PLUGIN_DIR" 2>/dev/null) || STALE_OUTPUT=""
+  while IFS=' ' read -r stale_name stale_installed stale_target stale_pin; do
+    [ -z "$stale_name" ] && continue
+    echo "install-runtime-deps.sh: upgrading $stale_name $stale_installed -> $stale_target to satisfy pin $stale_pin" >&2
+    rm -rf "$PLUGIN_DIR/node_modules/$stale_name"
+    case "$stale_name" in
+      "@ai-sdlc/pipeline-cli") PIPELINE_CLI_OK=0 ;;
+      "@ai-sdlc/plugin-mcp-server") MCP_SERVER_OK=0 ;;
+      "@ai-sdlc/orchestrator") ORCHESTRATOR_OK=0 ;;
+    esac
+  done <<< "$STALE_OUTPUT"
+fi
 
 if [ "$PIPELINE_CLI_OK" = "1" ] && [ "$MCP_SERVER_OK" = "1" ] && [ "$ORCHESTRATOR_OK" = "1" ]; then
   echo "install-runtime-deps.sh: all runtimeDependencies already installed in $PLUGIN_DIR" >&2

@@ -923,11 +923,20 @@ describe('install-runtime-deps.sh — version convergence on stale installs (AIS
     assert.doesNotMatch(stderr, /upgrading/);
   });
 
-  it('the AISDLC-441 sentinel does not suppress a needed upgrade', () => {
-    // A stale `.ai-sdlc-installed` sentinel from a prior run must not short-
-    // circuit the version-convergence check — the sentinel only records that
-    // SOME install happened, not that it's still current.
-    const pluginDir = join(workDir, 'sentinel-does-not-suppress-upgrade');
+  it('a pre-existing .ai-sdlc-installed sentinel file has no bearing on the version-convergence check', () => {
+    // install-runtime-deps.sh's OWN idempotence early-exit never reads the
+    // `.ai-sdlc-installed` sentinel at all — it only checks the AISDLC-441
+    // per-package existence flags (see the file-existence checks above this
+    // block in the .sh). The sentinel is write-only from this script's own
+    // perspective (written on a successful install, consulted only by
+    // OTHER callers such as hooks/session-start.js's fast path). This test
+    // proves a stale sentinel present alongside a stale-but-existing package
+    // still triggers the upgrade — i.e. confirms the sentinel truly plays no
+    // gating role here, rather than asserting a suppression mechanism that
+    // does not exist in this file. (Previously misnamed as "the sentinel
+    // does not suppress a needed upgrade", which implied the .sh reads the
+    // sentinel as a gate — it doesn't; AISDLC-580 review follow-up.)
+    const pluginDir = join(workDir, 'sentinel-present-has-no-effect-on-upgrade');
     writePluginJson(pluginDir, {
       '@ai-sdlc/orchestrator': '^0.14.0',
       '@ai-sdlc/pipeline-cli': '^0.20.0',
