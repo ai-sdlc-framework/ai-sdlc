@@ -64,15 +64,14 @@
  *   - Single machine, same repo checkout: a sufficiently determined
  *     coordinator with Bash/Write access could fabricate a marker file
  *     directly — INCLUDING forging a reviewer `agentType` string — bypassing
- *     the need to actually spawn a subagent. Role-binding (this task) raises
- *     the bar against ACCIDENTAL or lazy self-review (the common case: the
- *     coordinator running the reviewer's own prescribed Bash steps itself,
- *     or reusing an unrelated real marker from a non-reviewer subagent) —
- *     it does not defend against a deliberately adversarial coordinator
- *     willing to also forge `agent_type`. Closing that gap requires binding
- *     the leaf to the reviewer subagent's own harness-captured execution
- *     transcript — the harness-coupled follow-up tracked as DEC-0012 opt-a
- *     / AISDLC-570.
+ *     the need to actually spawn a subagent. Role-binding (AISDLC-572)
+ *     raises the bar against ACCIDENTAL or lazy self-review (the common
+ *     case: the coordinator running the reviewer's own prescribed Bash
+ *     steps itself, or reusing an unrelated real marker from a non-reviewer
+ *     subagent) — it does not defend against a deliberately adversarial
+ *     coordinator willing to also forge `agent_type`. Closing that gap is
+ *     `harnessTranscriptHash` (AISDLC-570, DEC-0012 opt-a, DEC-0013 → opt1
+ *     sign-time-only trust model) — see `attestation/harness-transcript.ts`.
  *   - Fail-safe default: ANY missing, malformed, non-reviewer, or stale
  *     marker resolves to the LOWER-trust `self-authored` class — this
  *     function never over-claims `independent`.

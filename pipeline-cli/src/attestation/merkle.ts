@@ -81,6 +81,23 @@ export interface TranscriptLeaf {
    * missing value to the lower-trust `'self-authored'` class — never over-claim.
    */
   verdictClass?: 'independent' | 'self-authored';
+  /**
+   * AISDLC-570 (DEC-0013 → opt1): SHA-256 hex of the reviewer subagent's own
+   * harness-captured execution transcript (`~/.claude/projects/.../agent-<id>.jsonl`),
+   * computed and verified ONCE at sign time on the operator's machine. `null`/absent
+   * when no harness signal exists (non-Claude-Code dispatch, unresolvable session,
+   * missing diff-binding nonce, or non-reviewer agentType) — NEVER defaulted to
+   * anything that reads as a pass. This is a SIGN-TIME-ONLY, informational signal:
+   * unlike every other v6 field, a downstream CI verifier cannot independently
+   * RE-DERIVE it (a fresh CI runner has no `~/.claude/projects/`), but because it
+   * is part of this leaf, tampering with a signed value IS still caught by the
+   * Merkle root signature. See `attestation/harness-transcript.ts` for the full
+   * mechanism and honest limits. Optional for backward compatibility: leaves
+   * signed before AISDLC-570 omit this field, and `hashLeaf` treats an
+   * `undefined` value identically to an absent key, so historical leaf hashes
+   * are unaffected.
+   */
+  harnessTranscriptHash?: string | null;
 }
 
 // ── Merkle result shapes ──────────────────────────────────────────────────────
@@ -172,6 +189,10 @@ export function hashLeaf(leaf: TranscriptLeaf): string {
     // so leaves without a verdictClass hash identically to pre-AISDLC-568
     // leaves (backward compatibility for historical envelopes).
     verdictClass: leaf.verdictClass,
+    // Trailing field, AISDLC-570: same backward-compatibility contract —
+    // `undefined` drops out of JSON.stringify, so leaves without a
+    // harnessTranscriptHash hash identically to pre-AISDLC-570 leaves.
+    harnessTranscriptHash: leaf.harnessTranscriptHash,
   };
   return hashLeafData(JSON.stringify(ordered));
 }

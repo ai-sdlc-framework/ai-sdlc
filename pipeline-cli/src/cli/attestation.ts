@@ -46,6 +46,7 @@ import {
 } from '../attestation/sign-v6.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { determineVerdictClass } from '../attestation/verdict-class.js';
+import { computeHarnessTranscriptHash } from '../attestation/harness-transcript.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
 
@@ -77,6 +78,19 @@ function emitJson(value: unknown): void {
  */
 function isValidHeadSha(value: string): boolean {
   return /^[0-9a-f]{40}$/.test(value);
+}
+
+/**
+ * Validate that a string is exactly 64 lowercase-hex characters — the format
+ * `generateNonce()` produces. Used to guard an explicitly-passed `--nonce`
+ * (AISDLC-570): when the orchestrating dispatch pre-generates a nonce and
+ * embeds it in the reviewer's prompt BEFORE the reviewer runs (required for
+ * `harnessTranscriptHash` diff-binding), it must pass that SAME value here
+ * rather than letting `emit-leaf` generate a fresh, never-seen-by-the-
+ * reviewer nonce.
+ */
+function isValidNonce(value: string): boolean {
+  return /^[0-9a-f]{64}$/.test(value);
 }
 
 /**
@@ -454,6 +468,24 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               default: 'origin/main',
               describe:
                 'AISDLC-421: base ref for the auto-computed patch-id (default: origin/main).',
+            })
+            .option('nonce', {
+              type: 'string',
+              describe:
+                'AISDLC-570: 64-char hex nonce to use verbatim instead of generating a fresh ' +
+                'one. Required for harnessTranscriptHash diff-binding — the orchestrating ' +
+                'dispatch must generate this nonce and embed it (via nonceMarkerLiteral()) in ' +
+                "the reviewer's prompt BEFORE the reviewer runs, then pass the SAME value here. " +
+                'Omit to preserve legacy behavior (a fresh nonce is generated per call).',
+            })
+            .option('claude-session-id', {
+              type: 'string',
+              describe:
+                'AISDLC-570: explicit Claude Code session id used to resolve the reviewer ' +
+                "subagent's harness-captured transcript at " +
+                '~/.claude/projects/<slug>/<session-id>/subagents/agent-<agent-id>.jsonl. ' +
+                'When omitted, falls back to the most-recently-modified session directory ' +
+                'under the resolved project slug (disclosed race window, AISDLC-216-style).',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -511,6 +543,19 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             );
             process.exit(1);
           }
+
+          // AISDLC-570: validate --nonce (if provided) and --claude-session-id
+          // (opaque; only used as a path segment, validated by
+          // resolveHarnessTranscriptPath's existsSync check downstream).
+          const explicitNonce = args['nonce'] as string | undefined;
+          if (explicitNonce !== undefined && !isValidNonce(explicitNonce)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --nonce must be exactly 64 lowercase hex characters ` +
+                `(got ${explicitNonce.length}-char value: ${JSON.stringify(explicitNonce.slice(0, 80))})\n`,
+            );
+            process.exit(1);
+          }
+          const claudeSessionId = args['claude-session-id'] as string | undefined;
 
           // Compute SHA-256 of the transcript file.
           const transcriptContent = readFileSync(transcriptPath);
@@ -611,16 +656,56 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // is the right semantic.
           const leafIndex = existingLeaves.length;
 
-          // Generate nonce bound to this PR's head SHA (replay-resistance per RFC-0042 §Nonce binding).
-          const nonce = generateNonce(headSha);
+          // Nonce bound to this PR's head SHA (replay-resistance per RFC-0042
+          // §Nonce binding). AISDLC-570: prefer an explicitly-passed --nonce
+          // (the value the orchestrating dispatch already embedded in the
+          // reviewer's prompt) so harnessTranscriptHash's nonce search can
+          // find it; falls back to generating a fresh one (legacy behavior —
+          // a freshly-generated nonce was never seen by the already-completed
+          // reviewer, so harnessTranscriptHash will correctly resolve null).
+          const nonce = explicitNonce ?? generateNonce(headSha);
 
           const signedAt = new Date().toISOString();
+
+          const transcriptMtimeMs = statSync(transcriptPath).mtimeMs;
+
+          // AISDLC-570 (DEC-0013 → opt1): sign-time-only, informational
+          // binding to the reviewer subagent's own harness-captured
+          // transcript. Fail-safe — see attestation/harness-transcript.ts
+          // for the full mechanism + honest limits. The `reason` is always
+          // logged (even on success) for signer-side observability.
+          //
+          // MUST run BEFORE determineVerdictClass() below: both read the same
+          // `.ai-sdlc/subagent-sessions/<agent-id>.json` SubagentStart marker,
+          // but determineVerdictClass() CONSUMES (unlinks) it on a match.
+          // Ordering it first here would make harnessTranscriptHash resolve
+          // null on every single call, even a fully-correct positive-path
+          // invocation with the nonce wired end-to-end — a dead-on-arrival
+          // regression that would only surface once the (currently
+          // unimplemented) orchestrator-side nonce injection landed. See
+          // `findMatchingSubagentMarker()` in harness-transcript.ts — it is a
+          // deliberately READ-ONLY, non-consuming scan for exactly this
+          // reason.
+          const harnessResult = computeHarnessTranscriptHash({
+            repoRoot,
+            transcriptMtimeMs,
+            nonce,
+            claudeSessionId,
+          });
+          process.stderr.write(
+            `[cli-attestation] emit-leaf: harnessTranscriptHash=${
+              harnessResult.harnessTranscriptHash
+                ? harnessResult.harnessTranscriptHash.slice(0, 16) + '...'
+                : 'null'
+            } (${harnessResult.reason})\n`,
+          );
 
           // AISDLC-568: determine trust class from the SubagentStart marker
           // signal. Fail-safe — any missing/stale/malformed marker yields the
           // lower-trust 'self-authored' class. See attestation/verdict-class.ts
-          // for the full mechanism + honest limits.
-          const transcriptMtimeMs = statSync(transcriptPath).mtimeMs;
+          // for the full mechanism + honest limits. Runs AFTER
+          // computeHarnessTranscriptHash (see comment above) since this call
+          // CONSUMES (deletes) the marker file on a match.
           const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
 
           const leaf: TranscriptLeaf = {
@@ -635,6 +720,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             findings,
             signedAt,
             verdictClass,
+            harnessTranscriptHash: harnessResult.harnessTranscriptHash,
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
@@ -650,7 +736,8 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             `[cli-attestation] emit-leaf: leaf #${leafIndex} appended to ${filePath} ` +
               `(taskId=${taskId}, reviewer=${reviewerName}, ` +
               `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved}, ` +
-              `verdictClass=${verdictClass})`,
+              `verdictClass=${verdictClass}, ` +
+              `harnessTranscriptHash=${harnessResult.harnessTranscriptHash ? 'set' : 'null'})`,
           );
         },
       )

@@ -48,6 +48,14 @@ export interface V6TranscriptLeafSummary {
    * when the source leaf predates this field (fail-safe, never over-claim).
    */
   verdictClass: 'independent' | 'self-authored';
+  /**
+   * AISDLC-570 (DEC-0013 → opt1): SHA-256 hex of the reviewer subagent's own
+   * harness-captured execution transcript, verified ONCE at sign time.
+   * `null`/absent when no harness signal existed for this leaf — see
+   * `attestation/harness-transcript.ts` for the mechanism and its
+   * sign-time-only, non-CI-re-derivable trust model.
+   */
+  harnessTranscriptHash?: string | null;
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -147,6 +155,9 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
     reviewerName: leaf.reviewerName,
     transcriptHash: leaf.transcriptHash,
     verdictClass: leaf.verdictClass ?? 'self-authored',
+    // AISDLC-570: carried through as-is (undefined/null both mean "no
+    // harness signal" — never defaulted to a value that reads as a pass).
+    harnessTranscriptHash: leaf.harnessTranscriptHash ?? null,
   }));
 
   // Build merkleProofs for each prLeaf.
@@ -379,9 +390,12 @@ export function formatV6Envelope(envelope: AttestationEnvelopeV6): string {
   lines.push(`Transcript leaves (${envelope.transcriptLeaves.length}):`);
   for (const leaf of envelope.transcriptLeaves) {
     const verdictClass = leaf.verdictClass ?? 'self-authored';
+    const harnessNote = leaf.harnessTranscriptHash
+      ? `harnessTranscriptHash: ${leaf.harnessTranscriptHash.slice(0, 16)}... (sign-time-only, AISDLC-570)`
+      : 'harnessTranscriptHash: none';
     lines.push(
       `  [${leaf.leafIndex}] ${leaf.reviewerName.padEnd(22)} transcript: ${leaf.transcriptHash.slice(0, 16)}... ` +
-        `verdictClass: ${verdictClass}`,
+        `verdictClass: ${verdictClass} ${harnessNote}`,
     );
   }
   const independentCount = envelope.transcriptLeaves.filter(
