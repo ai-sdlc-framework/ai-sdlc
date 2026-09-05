@@ -3,7 +3,7 @@ id: AISDLC-577
 title: >-
   Auto-sync plugin runtimeDependencies pins inside release-please bump (unblock
   every release PR)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-05 17:09'
 labels:
@@ -52,4 +52,39 @@ Recommend option 1 if release-please's extra-files supports the `^X.Y.0` rewrite
 
 ## Note
 Discovered unblocking PR #1002 (AISDLC-575 release). Composes with [[aisdlc-574]] (introduced the pins + gate) and [[aisdlc-558]] (single-source the two plugin manifests — would halve the surface this sync touches). Until this ships, every release PR needs the manual `sync-plugin-runtime-deps.mjs` + push-to-release-branch step.
+
+## Resolution
+
+Implemented option 3 (release-please's `extra-files` jsonpath rewriter has no
+mechanism to source a SIBLING component's bumped version — cross-component
+version injection isn't supported, so option 1/2 were not viable without a
+custom updater plugin).
+
+Added a new `sync-plugin-runtime-deps-on-pr` job in `.github/workflows/release.yml`
+that runs on every push to `main` (right after `release-please`), checks
+whether an open `release-please--branches--main` PR branch exists, and if so
+checks out that branch, runs `scripts/sync-plugin-runtime-deps.mjs --check`,
+and — only on drift — runs the sync in write mode and pushes a fixup commit
+back onto the SAME release PR branch (never `main`). This lands BEFORE the
+release PR's own CI evaluates the AISDLC-574 gate, so the PR is born green.
+No infinite-loop risk: `release.yml`'s `push` trigger is scoped to `main`
+only, so a push to the release-please branch cannot re-fire this workflow.
+
+The original post-merge `sync-plugin-runtime-deps` job (AISDLC-574) is kept
+as a defense-in-depth fallback in case the pre-merge job fails transiently.
+
+`scripts/sync-plugin-runtime-deps.mjs` (`computeDesiredPins`/`applyPinsToManifest`)
+remains the single source of the pin-computation logic — the new job only
+adds a new invocation site (a different branch/ref), no duplicated math.
+
+New workflow-structure tests in
+`.github/workflows/__tests__/release-yml-pin-sync.test.mjs` (wired into
+`pnpm test:release-please-config`) assert: the job exists, depends on
+`release-please`, targets the release PR branch (not `main`) for both
+checkout and push, is check-then-write, gates its steps on branch existence,
+cannot loop (push trigger excludes the release-please branch), uses
+`AI_SDLC_PAT`, and that the post-merge fallback job is retained. The
+underlying pin-computation logic (a version bump producing synced pins) is
+already covered end-to-end by `scripts/sync-plugin-runtime-deps.test.mjs`
+(AISDLC-574).
 <!-- SECTION:DESCRIPTION:END -->

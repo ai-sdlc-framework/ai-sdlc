@@ -53,7 +53,7 @@
     "test:adopter-facing-strings": "node --test scripts/check-adopter-facing-strings.test.mjs",
     "test:patch-coverage-gate": "node --test scripts/check-pr-patch-coverage.test.mjs",
     "test:coverage-gate": "node --test scripts/check-coverage.test.mjs",
-    "test:release-please-config": "node --test .github/workflows/__tests__/release-please-config.test.mjs",
+    "test:release-please-config": "node --test .github/workflows/__tests__/release-please-config.test.mjs .github/workflows/__tests__/release-yml-pin-sync.test.mjs",
     "test:require-issue-link": "node --test .github/workflows/__tests__/require-issue-link.test.mjs",
     "test:supply-chain-hardening": "node --test .github/workflows/__tests__/action-pinning.test.mjs .github/workflows/__tests__/no-new-pr-gate.test.mjs",
     "test:untrusted-pr-gate-workflow": "node --test .github/workflows/__tests__/untrusted-pr-gate.test.mjs",

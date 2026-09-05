@@ -59,21 +59,81 @@ jobs:
           # for the canonical rationale.
           token: ${{ secrets.AI_SDLC_PAT }}
 
-  sync-plugin-runtime-deps:
-    # AISDLC-574: release-please bumps orchestrator/pipeline-cli's OWN
-    # version (via each component's own `extra-files`), but the plugin's
-    # `runtimeDependencies` pins on those two packages are a SIBLING
-    # component's version — release-please has no cross-component jsonpath
-    # source, so nothing kept the pins in step and they froze at ^0.14.0 for
-    # months while the workspace moved to 0.19.0 (see
-    # scripts/sync-plugin-runtime-deps.mjs for the full root cause).
+  sync-plugin-runtime-deps-on-pr:
+    # AISDLC-577: release-please bumps orchestrator/pipeline-cli's OWN
+    # version on the OPEN `chore: release main` PR branch
+    # (release-please--branches--main), but the plugin's `runtimeDependencies`
+    # pins on those two packages are a SIBLING component's version —
+    # release-please has no cross-component jsonpath source, so the pins are
+    # left stale on that branch too. The release PR's own CI then runs the
+    # AISDLC-574 gate (`pnpm test:install-runtime-deps-gate`) against the
+    # stale pins and FAILS, blocking auto-merge until a human manually runs
+    # scripts/sync-plugin-runtime-deps.mjs and pushes a fixup to the release
+    # branch (hit on PRs #1002 and #1006). This job automates exactly that
+    # manual step, running on every push to main (i.e. before the release
+    # PR's CI has a chance to evaluate the drift) so the PR is born green.
     #
-    # This job runs right after release-please creates a release for either
-    # package, reads the just-bumped workspace versions (source of truth —
-    # the same package.json files release-please itself wrote), and rewrites
-    # the runtimeDependencies pin in both plugin manifests to match. It
-    # commits directly to main, mirroring the MCP-tarball-signing commit
-    # pattern below — there is no meaningful review step for a mechanical
+    # No infinite-loop risk: this job pushes to
+    # `release-please--branches--main`, which is NOT a trigger ref for this
+    # workflow (only `push: branches: [main]` triggers it) — the fixup
+    # commit does not cause this job (or release-please) to re-run.
+    name: Sync plugin runtimeDependencies pins on release PR
+    needs: release-please
+    if: always() && needs.release-please.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_PR_BRANCH: release-please--branches--main
+    steps:
+      - name: Check whether an open release-please PR branch exists
+        id: branch-check
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+        run: |
+          if git ls-remote --exit-code --heads \
+              "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+              "$RELEASE_PR_BRANCH" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "[sync-plugin-runtime-deps-on-pr] no open release-please branch — nothing to sync"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.branch-check.outputs.exists == 'true'
+        with:
+          # AI_SDLC_PAT so this commit triggers downstream CI (GITHUB_TOKEN
+          # commits are silently excluded from workflow triggers) — same
+          # rationale as the release-please step above.
+          token: ${{ secrets.AI_SDLC_PAT }}
+          ref: ${{ env.RELEASE_PR_BRANCH }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.branch-check.outputs.exists == 'true'
+        with:
+          node-version: 22
+      - name: Sync runtimeDependencies pins on the release PR branch
+        if: steps.branch-check.outputs.exists == 'true'
+        run: |
+          set -e
+          if node scripts/sync-plugin-runtime-deps.mjs --check; then
+            echo "[sync-plugin-runtime-deps-on-pr] no drift on ${RELEASE_PR_BRANCH} — nothing to commit"
+            exit 0
+          fi
+          node scripts/sync-plugin-runtime-deps.mjs
+          git config user.email "release-bot@ai-sdlc.io"
+          git config user.name "AI-SDLC Release Bot"
+          git add ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json
+          git commit -m "chore(plugin): sync runtimeDependencies pins for release PR (AISDLC-577)"
+          git push origin "HEAD:${RELEASE_PR_BRANCH}"
+
+  sync-plugin-runtime-deps:
+    # AISDLC-574: defense-in-depth fallback. The pre-merge
+    # sync-plugin-runtime-deps-on-pr job above (AISDLC-577) syncs the pins
+    # INTO the release PR before it merges, so by the time release-please
+    # merges the PR, main should already carry synced pins as part of that
+    # merge commit. This job re-checks post-merge and self-heals in the rare
+    # case the pre-merge job failed transiently (e.g. a race between two
+    # pushes to main) — there is no meaningful review step for a mechanical
     # version-pin sync, and gating it behind a PR would leave adopters on a
     # stale pin for the review window.
     name: Sync plugin runtimeDependencies pins
