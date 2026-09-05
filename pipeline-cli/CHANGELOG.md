@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.17.1...pipeline-cli-v0.17.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* bind verdictClass independent to reviewer role, not just timing (AISDLC-572) ([#990](https://github.com/ai-sdlc-framework/ai-sdlc/issues/990)) ([708abc6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/708abc6cdc8ac6c18e9906a5232990805cef1cb8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.17.2
+
 ## [0.17.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.17.0...pipeline-cli-v0.17.1) (2026-09-04)
 
 
