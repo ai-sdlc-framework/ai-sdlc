@@ -1120,7 +1120,7 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     writeRuntimeShim(installedRuntimePath(pluginDir));
     writeFileSync(
       join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
-      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0' }),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.19.0' }),
     );
 
     const res = runHelper(fixture.root, ['--print-content-hash'], {
@@ -1132,7 +1132,7 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator/);
   });
 
-  it('treats a prerelease as below its release counterpart (0.14.0-beta.1 < 0.14.0)', () => {
+  it('treats a prerelease as below its release counterpart (0.19.0-beta.1 < 0.19.0)', () => {
     const root = join(base, 'app');
     const fixture = setupRepo(tmpHome, root);
     rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
@@ -1142,13 +1142,13 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     );
     writeFileSync(
       join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
-      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0-beta.1' }),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.19.0-beta.1' }),
     );
     const pluginDir = join(base, 'plugin');
     writeRuntimeShim(installedRuntimePath(pluginDir));
     writeFileSync(
       join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
-      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.14.0' }),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.19.0' }),
     );
 
     const res = runHelper(fixture.root, ['--print-content-hash'], {
@@ -1156,7 +1156,7 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
       CLAUDE_PLUGIN_ROOT: pluginDir,
     });
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator.*0\.14\.0-beta\.1/);
+    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator.*0\.19\.0-beta\.1/);
   });
 
   it('says so when it accepts a copy whose version it could not verify', () => {

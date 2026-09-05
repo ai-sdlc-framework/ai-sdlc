@@ -37,6 +37,7 @@ jobs:
       reference--release_created: ${{ steps.release.outputs['reference--release_created'] }}
       sdk-typescript--release_created: ${{ steps.release.outputs['sdk-typescript--release_created'] }}
       orchestrator--release_created: ${{ steps.release.outputs['orchestrator--release_created'] }}
+      pipeline-cli--release_created: ${{ steps.release.outputs['pipeline-cli--release_created'] }}
       mcp-advisor--release_created: ${{ steps.release.outputs['mcp-advisor--release_created'] }}
       conformance-runner--release_created: ${{ steps.release.outputs['conformance/runner--release_created'] }}
       sdk-python--release_created: ${{ steps.release.outputs['sdk-python--release_created'] }}
@@ -57,6 +58,56 @@ jobs:
           # `auto-rebase-open-prs.yml` for the same reason; see AISDLC-189
           # for the canonical rationale.
           token: ${{ secrets.AI_SDLC_PAT }}
+
+  sync-plugin-runtime-deps:
+    # AISDLC-574: release-please bumps orchestrator/pipeline-cli's OWN
+    # version (via each component's own `extra-files`), but the plugin's
+    # `runtimeDependencies` pins on those two packages are a SIBLING
+    # component's version — release-please has no cross-component jsonpath
+    # source, so nothing kept the pins in step and they froze at ^0.14.0 for
+    # months while the workspace moved to 0.19.0 (see
+    # scripts/sync-plugin-runtime-deps.mjs for the full root cause).
+    #
+    # This job runs right after release-please creates a release for either
+    # package, reads the just-bumped workspace versions (source of truth —
+    # the same package.json files release-please itself wrote), and rewrites
+    # the runtimeDependencies pin in both plugin manifests to match. It
+    # commits directly to main, mirroring the MCP-tarball-signing commit
+    # pattern below — there is no meaningful review step for a mechanical
+    # version-pin sync, and gating it behind a PR would leave adopters on a
+    # stale pin for the review window.
+    name: Sync plugin runtimeDependencies pins
+    needs: release-please
+    if: |
+      needs.release-please.outputs['orchestrator--release_created'] == 'true' ||
+      needs.release-please.outputs['pipeline-cli--release_created'] == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # AI_SDLC_PAT so this commit triggers downstream CI (GITHUB_TOKEN
+          # commits are silently excluded from workflow triggers) — same
+          # rationale as the release-please step above.
+          token: ${{ secrets.AI_SDLC_PAT }}
+          ref: main
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Sync runtimeDependencies pins to released versions
+        run: node scripts/sync-plugin-runtime-deps.mjs
+      - name: Commit pin updates if any
+        run: |
+          if git diff --quiet -- ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json; then
+            echo "[sync-plugin-runtime-deps] no drift — nothing to commit"
+            exit 0
+          fi
+          git config user.email "release-bot@ai-sdlc.io"
+          git config user.name "AI-SDLC Release Bot"
+          git add ai-sdlc-plugin/plugin.json ai-sdlc-plugin/.claude-plugin/plugin.json
+          git commit -m "chore(plugin): sync runtimeDependencies pins to released runtime (AISDLC-574)"
+          git push origin HEAD:main
 
   publish-npm:
     name: Publish npm packages
