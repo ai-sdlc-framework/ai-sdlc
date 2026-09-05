@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.19.0...pipeline-cli-v0.20.0) (2026-09-05)
+
+
+### Features
+
+* plugin-less `cli-attestation verify` subcommand (AISDLC-575) ([#1001](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1001)) ([a5fe3ee](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a5fe3ee110e307e8c73c83f9488097a4229db659))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.20.0
+
 ## [0.19.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.18.0...pipeline-cli-v0.19.0) (2026-09-05)
 
 

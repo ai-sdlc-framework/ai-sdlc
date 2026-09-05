@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.17.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.16.1...ai-sdlc-plugin-v0.17.0) (2026-09-05)
+
+
+### Features
+
+* plugin-less `cli-attestation verify` subcommand (AISDLC-575) ([#1001](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1001)) ([a5fe3ee](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a5fe3ee110e307e8c73c83f9488097a4229db659))
+
 ## [0.16.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.16.0...ai-sdlc-plugin-v0.16.1) (2026-09-05)
 
 
