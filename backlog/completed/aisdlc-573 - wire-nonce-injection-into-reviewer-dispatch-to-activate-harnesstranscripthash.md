@@ -1,7 +1,7 @@
 ---
 id: aisdlc-573
 title: Wire nonce injection into reviewer dispatch to activate harnessTranscriptHash (AISDLC-570 activation)
-status: To Do
+status: Done
 priority: high
 labels:
   - attestation
@@ -50,14 +50,14 @@ over-claim). This task activates it.
 
 ## Acceptance Criteria
 
-- [ ] The reviewer-dispatch path(s) generate + embed the diff-binding nonce in each
+- [x] The reviewer-dispatch path(s) generate + embed the diff-binding nonce in each
       reviewer subagent's prompt before dispatch.
-- [ ] After wiring, a genuine reviewer subagent run yields a non-null
+- [x] After wiring, a genuine reviewer subagent run yields a non-null
       `harnessTranscriptHash`; a coordinator-authored (no real subagent) path yields
       `null`. Covered by a hermetic/CI-robust test (not a macOS-only pass — AISDLC-571 lesson).
-- [ ] Session-id resolution finalized (explicit flag if available, else documented fallback).
-- [ ] Docs updated from "dormant" to "active" with honest limits intact.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] Session-id resolution finalized (explicit flag if available, else documented fallback).
+- [x] Docs updated from "dormant" to "active" with honest limits intact.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Note
 
@@ -65,3 +65,40 @@ This is the activation half of AISDLC-570; the schema + emit-leaf + verification
 fail-safe machinery is already merged. Composes with [[aisdlc-572]] (role-binding) and
 sits under the DEC-0013 opt1 sign-time-only trust model. It does NOT change the honest
 limit — the strong-vs-heuristic boundary is documented, not eliminated.
+
+## Final Summary
+
+Wired nonce generation + embedding into both canonical reviewer-dispatch paths:
+
+- Added `cli-attestation generate-nonce --head-sha <sha>` and
+  `cli-attestation nonce-marker --nonce <nonce>` subcommands
+  (`pipeline-cli/src/cli/attestation.ts`) as the bash-callable single source
+  of truth for the nonce format `emit-leaf`/`harness-transcript.ts` already
+  expected (AISDLC-570).
+- `/ai-sdlc execute` Step 7b now generates the nonce and instructs the
+  operator to embed `$PR_NONCE_MARKER` verbatim in each reviewer prompt
+  BEFORE spawning; Step 7c reuses the same nonce (not a fresh one) in its
+  `emit-leaf --nonce` calls. Step 10.5's post-rebase re-review round
+  re-derives the nonce from the new HEAD.
+- `/ai-sdlc orchestrator-tick` Step 3 does the same before its reviewer
+  fan-out, then threads `--reviewer-nonce` through
+  `ai-sdlc-pipeline reconcile`, which passes it to every internal
+  `emit-leaf` call (`pipeline-cli/src/orchestrator/reconcile.ts`,
+  `RunReconcileOptions.reviewerNonce`).
+- Session-id: confirmed (per AISDLC-570 §4.3 opt-i investigation, no new
+  findings) there is no reliable env-var source for a running session's own
+  id; both dispatch paths intentionally omit `--claude-session-id` and rely
+  on the documented most-recently-modified-session-directory fallback
+  (disclosed race, same heuristic as AISDLC-216).
+- Docs: RFC-0042 and the proof-of-execution whitepaper updated from
+  "dormant machinery" / "tracked follow-up" to "ACTIVE (AISDLC-573)",
+  honest limits (sign-time-only, not CI-re-derivable, doesn't prove
+  judgment independence) preserved verbatim.
+- Tests: hermetic end-to-end tests in `pipeline-cli/src/cli/attestation.test.ts`
+  prove `generate-nonce` → `nonce-marker` → simulated reviewer transcript →
+  `emit-leaf --nonce` composes to a non-null `harnessTranscriptHash`, and
+  that a transcript with no nonce embedded still yields `null`. New
+  `reconcile.test.ts` cases prove `reviewerNonce` reaches every `emit-leaf`
+  call verbatim (and is omitted when not provided). `execute.test.mjs` /
+  `orchestrator-tick.test.mjs` assert the nonce-generation + embedding +
+  reuse instructions are present in both command bodies.

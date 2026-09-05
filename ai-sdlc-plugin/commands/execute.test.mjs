@@ -632,6 +632,51 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
   });
 });
 
+// ── AISDLC-573: nonce injection activates harnessTranscriptHash ─────────────
+describe('/ai-sdlc execute — reviewer-dispatch nonce injection (AISDLC-573)', () => {
+  it('Step 7b generates a per-PR nonce via cli-attestation generate-nonce BEFORE spawning reviewers', () => {
+    assert.match(cmdBody, /cli-attestation\.mjs["']?\s+generate-nonce\s+--head-sha/);
+  });
+
+  it('Step 7b renders the embeddable literal via cli-attestation nonce-marker', () => {
+    assert.match(cmdBody, /cli-attestation\.mjs["']?\s+nonce-marker\s+--nonce/);
+  });
+
+  it('instructs each reviewer prompt to include the nonce marker literal verbatim', () => {
+    assert.match(cmdBody, /PR_NONCE_MARKER.*verbatim|verbatim.*PR_NONCE_MARKER/i);
+  });
+
+  it('Step 7c passes --nonce to emit-leaf reusing the Step 7b-generated value (not a fresh one)', () => {
+    const emitLeafBlockMatch = cmdBody.match(
+      /node "\$PIPELINE_CLI_BIN\/cli-attestation\.mjs" emit-leaf[\s\S]*?--nonce "\$PR_NONCE"/,
+    );
+    assert.ok(
+      emitLeafBlockMatch,
+      'Step 7c emit-leaf invocation must pass --nonce "$PR_NONCE" (the same nonce Step 7b generated)',
+    );
+  });
+
+  it('documents why --claude-session-id is intentionally omitted (no reliable env-var source found)', () => {
+    assert.match(cmdBody, /no reliable env-var source/i);
+    assert.match(cmdBody, /most-recently-modified session directory/i);
+  });
+
+  it('re-derives the nonce for post-rebase re-review (Step 10.5) since HEAD moved', () => {
+    const step105Match = cmdBody.match(
+      /re-derive the nonce for this[\s\S]{0,400}generate-nonce --head-sha "\$HEAD_SHA_FOR_NONCE"/,
+    );
+    assert.ok(
+      step105Match,
+      'Step 10.5 re-review round must regenerate the nonce from the post-rebase HEAD, not reuse the stale Step 7b nonce',
+    );
+  });
+
+  it('generate-nonce and nonce-marker invocations use $PIPELINE_CLI_BIN (AISDLC-245.4 consistency)', () => {
+    assert.match(cmdBody, /\$PIPELINE_CLI_BIN\/cli-attestation\.mjs" generate-nonce/);
+    assert.match(cmdBody, /\$PIPELINE_CLI_BIN\/cli-attestation\.mjs" nonce-marker/);
+  });
+});
+
 // ── AISDLC-442: CCR remote-sandbox guard ─────────────────────────────────────
 describe('/ai-sdlc execute — CCR remote-sandbox guard (AISDLC-442)', () => {
   it('detects CLAUDE_CODE_ENV=ccr and refuses with an actionable error', () => {

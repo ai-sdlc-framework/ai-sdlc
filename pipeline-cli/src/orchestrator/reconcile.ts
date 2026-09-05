@@ -175,6 +175,19 @@ export interface RunReconcileOptions {
    */
   harness?: string;
   /**
+   * AISDLC-573 — the diff-binding nonce the slash command body (`Step 3` of
+   * `orchestrator-tick.md`) generated via `cli-attestation generate-nonce`
+   * and embedded (via `nonce-marker`) in EACH reviewer's Agent prompt
+   * BEFORE spawning them. When present, reconcile passes the SAME value to
+   * every `emit-leaf --nonce` call below so `computeHarnessTranscriptHash`
+   * (AISDLC-570) can find it in the reviewer's own harness-captured
+   * transcript. When omitted (legacy caller / pre-573 orchestrator-tick.md),
+   * `emit-leaf` falls back to generating a fresh nonce per call — a nonce
+   * the already-completed reviewer never saw — so `harnessTranscriptHash`
+   * correctly stays `null` (unchanged fail-safe default).
+   */
+  reviewerNonce?: string;
+  /**
    * Override sign-attestation script path. Defaults to
    * `ai-sdlc-plugin/scripts/sign-attestation.mjs` relative to workDir.
    */
@@ -554,30 +567,32 @@ function runReconcileInner(
       continue;
     }
 
-    const emit = spawn(
-      'node',
-      [
-        cliAttestationBin,
-        'emit-leaf',
-        '--repo-root',
-        worktreePath,
-        '--task-id',
-        taskId,
-        '--reviewer',
-        reviewer,
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        headSha,
-        '--harness',
-        harness,
-        '--model',
-        reviewerModel,
-      ],
-      { cwd: worktreePath },
-    );
+    const emitLeafArgs = [
+      cliAttestationBin,
+      'emit-leaf',
+      '--repo-root',
+      worktreePath,
+      '--task-id',
+      taskId,
+      '--reviewer',
+      reviewer,
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      headSha,
+      '--harness',
+      harness,
+      '--model',
+      reviewerModel,
+    ];
+    // AISDLC-573: thread the shared per-PR nonce through, if the caller
+    // (orchestrator-tick.md Step 3) generated + embedded one.
+    if (options.reviewerNonce) {
+      emitLeafArgs.push('--nonce', options.reviewerNonce);
+    }
+    const emit = spawn('node', emitLeafArgs, { cwd: worktreePath });
     steps.push({
       name: `emit-leaf:${reviewer}`,
       status: emit.status === 0 ? 'success' : 'failed',

@@ -1891,3 +1891,249 @@ describe('emit-leaf — harnessTranscriptHash positive path through real verdict
     expect(stderrChunks.join('')).toMatch(/harnessTranscriptHash=[0-9a-f]{16}\.\.\./);
   });
 });
+
+// ── CLI: generate-nonce / nonce-marker (AISDLC-573) ────────────────────────────
+//
+// AISDLC-570 shipped the machinery (`generateNonce`, `nonceMarkerLiteral`,
+// `emit-leaf --nonce`) but had no CLI surface for the orchestrating dispatch
+// to call BEFORE any reviewer subagent is spawned (it doesn't have the
+// TypeScript module graph available — it's a bash-driven slash-command body).
+// These two subcommands are that surface: `generate-nonce` produces the value,
+// `nonce-marker` renders the exact embeddable literal from it.
+
+describe('generate-nonce', () => {
+  it('prints a 64-char hex nonce derived from --head-sha', async () => {
+    await expect(
+      buildAttestationCli(['generate-nonce', '--head-sha', 'a'.repeat(40)]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const output = flushStdout().trim();
+    expect(output).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('produces a different nonce on every call (random component)', async () => {
+    await buildAttestationCli(['generate-nonce', '--head-sha', 'b'.repeat(40)]).parseAsync();
+    const first = flushStdout().trim();
+
+    stdoutChunks = [];
+    await buildAttestationCli(['generate-nonce', '--head-sha', 'b'.repeat(40)]).parseAsync();
+    const second = flushStdout().trim();
+
+    expect(first).not.toBe(second);
+  });
+
+  it('rejects a malformed --head-sha', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(['generate-nonce', '--head-sha', 'not-a-sha']).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toMatch(/--head-sha must be exactly 40 lowercase hex/);
+  });
+});
+
+describe('nonce-marker', () => {
+  it('prints the exact nonceMarkerLiteral() string for a valid nonce', async () => {
+    const nonce = 'c'.repeat(64);
+    await expect(
+      buildAttestationCli(['nonce-marker', '--nonce', nonce]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(flushStdout().trim()).toBe(nonceMarkerLiteral(nonce));
+  });
+
+  it('rejects a malformed --nonce', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(['nonce-marker', '--nonce', 'too-short']).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toMatch(/--nonce must be exactly 64 lowercase hex/);
+  });
+});
+
+// ── End-to-end: reviewer-dispatch nonce injection activates harnessTranscriptHash
+// (AISDLC-573 AC-2) ─────────────────────────────────────────────────────────────
+//
+// Simulates the FULL activated flow the reviewer-dispatch orchestrator now
+// performs: generate-nonce → nonce-marker → embed literal in the (simulated)
+// reviewer harness transcript → emit-leaf --nonce <same value>. Proves the
+// three CLI calls compose end-to-end to a non-null harnessTranscriptHash, and
+// that a coordinator-authored transcript with NO nonce embedded still yields
+// null (fail-closed unchanged).
+
+describe('reviewer-dispatch nonce injection — end-to-end activation (AISDLC-573)', () => {
+  afterEach(() => {
+    fakeHomeDirForHarnessTests = '';
+  });
+
+  it('generate-nonce + nonce-marker + emit-leaf --nonce compose to a non-null harnessTranscriptHash', async () => {
+    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'harness-e2e-home-'));
+    const headSha = 'e'.repeat(40);
+
+    // Step 1: orchestrator generates the nonce ONCE, before any reviewer spawns.
+    await buildAttestationCli(['generate-nonce', '--head-sha', headSha]).parseAsync();
+    const nonce = flushStdout().trim();
+    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
+
+    // Step 2: orchestrator renders the exact literal to embed in the reviewer prompt.
+    stdoutChunks = [];
+    await buildAttestationCli(['nonce-marker', '--nonce', nonce]).parseAsync();
+    const marker = flushStdout().trim();
+    expect(marker).toBe(`[[ai-sdlc-nonce: ${nonce}]]`);
+
+    // Step 3: simulate the reviewer subagent's real harness-captured transcript —
+    // its first-turn prompt (the dispatch prompt) contains the embedded marker,
+    // exactly as it would if the orchestrator had actually injected it.
+    makeTranscript('aisdlc-573', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-573',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-573-e2e.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    const markerDir = subagentSessionsDir(tmpRoot);
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      join(markerDir, 'agent-e2e-573.json'),
+      JSON.stringify({
+        agentId: 'e2e-573',
+        agentType: 'code-reviewer',
+        firedAt: new Date().toISOString(),
+      }),
+    );
+
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(tmpRoot));
+    const subagentsDir = join(slugDir, 'session-e2e-573', 'subagents');
+    mkdirSync(subagentsDir, { recursive: true });
+    writeFileSync(
+      join(subagentsDir, 'agent-e2e-573.jsonl'),
+      `{"type":"user","message":"Review this diff ${marker}"}\n`,
+    );
+    writeFileSync(
+      join(subagentsDir, 'agent-e2e-573.meta.json'),
+      JSON.stringify({ agentType: 'ai-sdlc:code-reviewer' }),
+    );
+
+    // Step 4: emit-leaf, passing the SAME nonce the orchestrator generated
+    // (this is the wiring AISDLC-573 activates — Step 7c now threads the
+    // Step 7b nonce through instead of letting emit-leaf mint a fresh one).
+    await expect(
+      buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-573',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        headSha,
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+        '--patch-id',
+        TEST_PATCH_ID,
+        '--nonce',
+        nonce,
+        '--claude-session-id',
+        'session-e2e-573',
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].harnessTranscriptHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('a coordinator-authored transcript with NO nonce embedded still yields null (fail-closed unchanged)', async () => {
+    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'harness-e2e-negative-home-'));
+    const headSha = 'f'.repeat(40);
+
+    await buildAttestationCli(['generate-nonce', '--head-sha', headSha]).parseAsync();
+    const nonce = flushStdout().trim();
+
+    makeTranscript('aisdlc-573-neg', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-573-neg',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-573-e2e-negative.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    const markerDir = subagentSessionsDir(tmpRoot);
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      join(markerDir, 'agent-e2e-573-neg.json'),
+      JSON.stringify({
+        agentId: 'e2e-573-neg',
+        agentType: 'code-reviewer',
+        firedAt: new Date().toISOString(),
+      }),
+    );
+
+    // A REAL harness transcript exists (a real subagent DID run) but the
+    // coordinator never embedded the nonce in its dispatch prompt — the
+    // pre-AISDLC-573 dormant state, reproduced deliberately here to prove
+    // the fail-closed default still holds even after activation.
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(tmpRoot));
+    const subagentsDir = join(slugDir, 'session-e2e-573-neg', 'subagents');
+    mkdirSync(subagentsDir, { recursive: true });
+    writeFileSync(
+      join(subagentsDir, 'agent-e2e-573-neg.jsonl'),
+      `{"type":"user","message":"Review this diff (no nonce embedded here)"}\n`,
+    );
+    writeFileSync(
+      join(subagentsDir, 'agent-e2e-573-neg.meta.json'),
+      JSON.stringify({ agentType: 'ai-sdlc:code-reviewer' }),
+    );
+
+    await expect(
+      buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-573-NEG',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        headSha,
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+        '--patch-id',
+        '1'.repeat(40),
+        '--nonce',
+        nonce,
+        '--claude-session-id',
+        'session-e2e-573-neg',
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const leaves = loadLeavesUnderTest(tmpRoot, '1'.repeat(40));
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].harnessTranscriptHash).toBeNull();
+  });
+});

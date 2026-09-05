@@ -46,7 +46,10 @@ import {
 } from '../attestation/sign-v6.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { determineVerdictClass } from '../attestation/verdict-class.js';
-import { computeHarnessTranscriptHash } from '../attestation/harness-transcript.js';
+import {
+  computeHarnessTranscriptHash,
+  nonceMarkerLiteral,
+} from '../attestation/harness-transcript.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
 
@@ -741,9 +744,62 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           );
         },
       )
+      // ── generate-nonce (AISDLC-573) ───────────────────────────────────────────
+      .command(
+        'generate-nonce',
+        'Generate a diff-binding nonce for a PR head SHA, printed to stdout. ' +
+          'AISDLC-573: the reviewer-dispatch orchestrator (slash-command body / ' +
+          'orchestrator-tick reconcile) calls this ONCE per PR before spawning any ' +
+          'reviewer subagents, embeds the result (via `nonce-marker`) in EACH ' +
+          "reviewer's prompt, then passes the SAME nonce value to `emit-leaf --nonce` " +
+          'for every reviewer leaf emitted for this PR — all reviewers on one diff ' +
+          'share one nonce.',
+        (y: Argv) =>
+          y.option('head-sha', {
+            type: 'string',
+            demandOption: true,
+            describe: '40-char hex git commit SHA of the PR head.',
+          }),
+        (args) => {
+          const headSha = args['head-sha'] as string;
+          if (!isValidHeadSha(headSha)) {
+            process.stderr.write(
+              `[cli-attestation] generate-nonce: --head-sha must be exactly 40 lowercase hex ` +
+                `characters (got ${headSha.length}-char value: ${JSON.stringify(headSha.slice(0, 80))})\n`,
+            );
+            process.exit(1);
+          }
+          emitText(generateNonce(headSha));
+        },
+      )
+      // ── nonce-marker (AISDLC-573) ─────────────────────────────────────────────
+      .command(
+        'nonce-marker',
+        'Print the EXACT literal string (via nonceMarkerLiteral()) that must be embedded ' +
+          "in a reviewer subagent's prompt for diff-binding (AISDLC-570/573). Wraps the " +
+          'literal-format single source of truth so the orchestrating dispatch never has ' +
+          'to hand-construct or duplicate the format.',
+        (y: Argv) =>
+          y.option('nonce', {
+            type: 'string',
+            demandOption: true,
+            describe: '64-char hex nonce, as produced by `generate-nonce`.',
+          }),
+        (args) => {
+          const nonce = args['nonce'] as string;
+          if (!isValidNonce(nonce)) {
+            process.stderr.write(
+              `[cli-attestation] nonce-marker: --nonce must be exactly 64 lowercase hex ` +
+                `characters (got ${nonce.length}-char value: ${JSON.stringify(nonce.slice(0, 80))})\n`,
+            );
+            process.exit(1);
+          }
+          emitText(nonceMarkerLiteral(nonce));
+        },
+      )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker)',
       )
       .help()
       .alias('h', 'help')
