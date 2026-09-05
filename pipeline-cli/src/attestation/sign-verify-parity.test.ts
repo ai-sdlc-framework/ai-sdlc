@@ -124,6 +124,36 @@ describe('AISDLC-579: sign/verify Merkle root parity', () => {
     expect(result.status).toBe('valid');
   });
 
+  it('2-leaf envelope with an EXPLICIT harnessTranscriptHash: null leaf verifies clean (AISDLC-576/579 exact case)', () => {
+    // The precise value that broke AISDLC-575's attestation and was masked by
+    // the AISDLC-576 strip workaround: emit-leaf writes `harnessTranscriptHash:
+    // null` when no harness transcript is bound. JSON.stringify KEEPS null, so a
+    // verifier whose hashLeaf omitted the field recomputed a different root. With
+    // the single-sourced hashLeaf, sign and verify agree on null by construction.
+    const patchId = '7'.repeat(40);
+    appendLeafForPatchId(
+      makeLeaf({
+        leafIndex: 0,
+        reviewerName: 'code-reviewer',
+        harnessTranscriptHash: null,
+      }),
+      patchId,
+      tmpRoot,
+    );
+    appendLeafForPatchId(
+      makeLeaf({
+        leafIndex: 1,
+        reviewerName: 'security-reviewer',
+        harnessTranscriptHash: null,
+      }),
+      patchId,
+      tmpRoot,
+    );
+
+    const result = signAndVerify(patchId);
+    expect(result.status).toBe('valid');
+  });
+
   it('2-leaf envelope with no harness signal on either leaf verifies clean (baseline regression)', () => {
     const patchId = '3'.repeat(40);
     appendLeafForPatchId(
