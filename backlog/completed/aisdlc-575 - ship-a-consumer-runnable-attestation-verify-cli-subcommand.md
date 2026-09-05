@@ -13,7 +13,9 @@ labels:
 ## Description
 
 AISDLC-566 shipped a consumer-runnable verifier, but ONLY as a plugin-shipped script
-(`ai-sdlc-plugin/scripts/verify-attestation.mjs` + `verify-attestation-core.mjs`). A
+(`ai-sdlc-plugin/scripts/verify-attestation.mjs` + a core module that this task later
+moved to `pipeline-cli/attestation-core/verify-core.mjs` — see Scope/Implementation
+Notes below). A
 consumer's GitHub Actions runner has **no plugin installed** and there is **no
 npm-published verify CLI**: the published `@ai-sdlc/pipeline-cli` `ai-sdlc` bin
 (`pipeline-cli/src/cli/attestation.ts`) exposes `sign-v6`, `emit-leaf`, `inspect-v6`,
@@ -24,9 +26,10 @@ ai-sdlc-plugin/scripts/verify-attestation.mjs`), which doesn't exist on a consum
 
 The verify LOGIC exists in published/near-published form but split:
 - `orchestrator/src/runtime/attestations.ts` exports `verifyAttestation()` (published runtime).
-- `ai-sdlc-plugin/scripts/verify-attestation-core.mjs` exports `verifyV6Envelope()` with
-  the head-binding relaxations (AISDLC-419/448 tree-equivalence), realpath containment
-  (AISDLC-570), etc. — plugin-only.
+- The plugin-only core module (pre-fix location: `ai-sdlc-plugin/scripts/`) exports
+  `verifyV6Envelope()` with the head-binding relaxations (AISDLC-419/448
+  tree-equivalence), realpath containment (AISDLC-570), etc. — moved to
+  `pipeline-cli/attestation-core/verify-core.mjs` by this task.
 - `scripts/verify-attestation.mjs` (repo CI verifier) is monorepo-only.
 
 Goal: a consumer runs `npx @ai-sdlc/pipeline-cli attestation verify --head <sha> --base
