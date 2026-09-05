@@ -2,6 +2,22 @@
  * AISDLC-575 — drift/dup guard: exactly ONE `verifyV6Envelope` implementation
  * ships in this repo.
  *
+ * AISDLC-579 extension: exactly ONE `computeMerkleRoot(` and ONE `hashLeaf(`
+ * implementation (function DECLARATIONS, not re-export/wrapper call sites)
+ * ships in this repo. Before AISDLC-579, `pipeline-cli/src/attestation/
+ * merkle.ts` and `pipeline-cli/attestation-core/verify-core.mjs` each
+ * defined their OWN copy of the RFC-6962 leaf-hash / Merkle-root algorithm.
+ * They drifted — AISDLC-570 added a `harnessTranscriptHash` field to
+ * merkle.ts's `hashLeaf()` but not to verify-core.mjs's inline
+ * `v6HashLeaf()` — causing every multi-reviewer v6 envelope with a
+ * harness-verified leaf to recompute a different Merkle root on the verify
+ * side than the signer produced, and `rootSignature` to fail verification.
+ * The fix moved the canonical implementation into
+ * `pipeline-cli/attestation-core/merkle-core.mjs`; both `merkle.ts` and
+ * `verify-core.mjs` now import (not reimplement) it. This test guards
+ * against a THIRD copy — or an accidental reintroduction of the original
+ * two — ever landing again.
+ *
  * The whole point of AISDLC-575's consolidation is that the plugin-less
  * `cli-attestation verify` subcommand, the plugin-installed
  * `ai-sdlc-plugin/scripts/verify-attestation.mjs`, and the repo CI
@@ -81,5 +97,59 @@ describe('verify-core dup guard (AISDLC-575)', () => {
         `vendored-verifier drift risk — consolidate into pipeline-cli/attestation-core/verify-core.mjs ` +
         `and have every driver import that one file.`,
     ).toEqual(['pipeline-cli/attestation-core/verify-core.mjs']);
+  });
+});
+
+// ── AISDLC-579: single-source merkle primitives guard ───────────────────────
+//
+// `hashLeaf`/`computeMerkleRoot` are RE-EXPORTED (thin wrapper functions) by
+// both `pipeline-cli/src/attestation/merkle.ts` and
+// `pipeline-cli/attestation-core/verify-core.mjs`, so a naive scan for
+// `function hashLeaf(` / `function computeMerkleRoot(` declarations would
+// false-positive on the wrappers themselves. Instead this test looks for the
+// distinctive RFC-6962 domain-separator byte-array literals
+// (`Buffer.from([0x00])` / `Buffer.from([0x01])`) that only appear inside the
+// ACTUAL hashing algorithm body — these must exist in EXACTLY ONE file
+// (`attestation-core/merkle-core.mjs`, the canonical implementation).
+describe('merkle-core dup guard (AISDLC-579)', () => {
+  const LEAF_DOMAIN_LITERAL = /Buffer\.from\(\[0x00\]\)/;
+  const NODE_DOMAIN_LITERAL = /Buffer\.from\(\[0x01\]\)/;
+
+  function findDefiners(pattern: RegExp): string[] {
+    const files: string[] = [];
+    walk(REPO_ROOT, files);
+    return files
+      .filter((f) => {
+        let source: string;
+        try {
+          source = readFileSync(f, 'utf-8');
+        } catch {
+          return false;
+        }
+        return pattern.test(source);
+      })
+      .map((f) => f.slice(REPO_ROOT.length + 1));
+  }
+
+  it('ships exactly one RFC-6962 leaf-domain-separator implementation (0x00), in attestation-core/merkle-core.mjs', () => {
+    const definers = findDefiners(LEAF_DOMAIN_LITERAL);
+    expect(
+      definers,
+      `expected exactly one leaf-hash domain-separator literal (Buffer.from([0x00])), found: ` +
+        `${JSON.stringify(definers)}. A second copy re-introduces the AISDLC-579 sign/verify ` +
+        `Merkle-root drift risk (see that file's header) — consolidate into ` +
+        `pipeline-cli/attestation-core/merkle-core.mjs and have every caller import it.`,
+    ).toEqual(['pipeline-cli/attestation-core/merkle-core.mjs']);
+  });
+
+  it('ships exactly one RFC-6962 node-domain-separator implementation (0x01), in attestation-core/merkle-core.mjs', () => {
+    const definers = findDefiners(NODE_DOMAIN_LITERAL);
+    expect(
+      definers,
+      `expected exactly one internal-node-hash domain-separator literal (Buffer.from([0x01])), found: ` +
+        `${JSON.stringify(definers)}. A second copy re-introduces the AISDLC-579 sign/verify ` +
+        `Merkle-root drift risk (see that file's header) — consolidate into ` +
+        `pipeline-cli/attestation-core/merkle-core.mjs and have every caller import it.`,
+    ).toEqual(['pipeline-cli/attestation-core/merkle-core.mjs']);
   });
 });

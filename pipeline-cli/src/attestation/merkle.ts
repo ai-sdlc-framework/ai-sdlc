@@ -41,6 +41,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import {
+  computeMerkleRoot as coreComputeMerkleRoot,
+  hashLeaf as coreHashLeaf,
+  verifyInclusion as coreVerifyInclusion,
+} from '../../attestation-core/merkle-core.mjs';
 
 // ── Leaf shape (RFC-0042 §Layer 2) ───────────────────────────────────────────
 
@@ -122,170 +127,43 @@ export function sha256(data: string): string {
   return createHash('sha256').update(data, 'utf8').digest('hex');
 }
 
-/**
- * RFC-6962 domain separator bytes.
- *
- * Using 0x00 for leaf hashes and 0x01 for internal node hashes prevents the
- * CVE-2012-2459-class second-preimage attack where an attacker can claim an
- * internal node value as a leaf hash (or vice versa) to forge a proof path.
- */
-const LEAF_DOMAIN = Buffer.from([0x00]);
-const NODE_DOMAIN = Buffer.from([0x01]);
-
-/**
- * RFC-6962 leaf hash: SHA-256(0x00 || canonical_json_utf8).
- *
- * The 0x00 domain separator prevents an internal-node hash from being
- * presented as a valid leaf hash (second-preimage defense).
- *
- * @internal — use `hashLeaf(leaf)` for the public API.
- */
-function hashLeafData(canonicalJson: string): string {
-  return createHash('sha256').update(LEAF_DOMAIN).update(canonicalJson, 'utf8').digest('hex');
-}
-
-/**
- * RFC-6962 internal node hash: SHA-256(0x01 || left_bytes || right_bytes).
- *
- * The 0x01 domain separator prevents a leaf hash from being substituted for
- * an internal node (second-preimage defense).
- */
-function hashPair(left: string, right: string): string {
-  return createHash('sha256')
-    .update(NODE_DOMAIN)
-    .update(Buffer.from(left, 'hex'))
-    .update(Buffer.from(right, 'hex'))
-    .digest('hex');
-}
-
-// ── Leaf hashing ──────────────────────────────────────────────────────────────
+// ── Leaf hashing + Merkle tree computation (AISDLC-579 single-sourced) ───────
+//
+// The actual hashing/root/proof algorithms live in
+// `pipeline-cli/attestation-core/merkle-core.mjs` — a plain, dependency-free
+// ESM module shared with the verifier (`attestation-core/verify-core.mjs`).
+// This file re-exports them so every existing caller of
+// `hashLeaf`/`computeMerkleRoot`/`verifyInclusion` from `./merkle.js` keeps
+// working unchanged. See `merkle-core.mjs`'s header for the full rationale:
+// prior to AISDLC-579 this logic was duplicated in both files and drifted
+// (AISDLC-570's `harnessTranscriptHash` field was added here but never
+// mirrored into the verifier's inline copy), causing every multi-reviewer
+// v6 envelope with at least one harness-verified leaf to recompute a
+// DIFFERENT Merkle root on the verify side than the signer produced.
+//
+// Do NOT reintroduce a second implementation here — import and re-export
+// from `merkle-core.mjs` only.
 
 /**
  * Canonical leaf hash: SHA-256(0x00 || canonical_json_utf8) per RFC-6962.
- *
- * The 0x00 domain prefix prevents second-preimage attacks (CVE-2012-2459).
- * Keys are ordered per RFC-0042 §Layer 2 schema for determinism across
- * implementations.
+ * See `merkle-core.mjs` for the algorithm and field-order contract.
  */
 export function hashLeaf(leaf: TranscriptLeaf): string {
-  // Fixed key order per RFC-0042 §Layer 2 schema.
-  const ordered: TranscriptLeaf = {
-    leafIndex: leaf.leafIndex,
-    taskId: leaf.taskId,
-    reviewerName: leaf.reviewerName,
-    transcriptHash: leaf.transcriptHash,
-    nonce: leaf.nonce,
-    harness: leaf.harness,
-    model: leaf.model,
-    verdictApproved: leaf.verdictApproved,
-    findings: {
-      critical: leaf.findings.critical,
-      major: leaf.findings.major,
-      minor: leaf.findings.minor,
-      suggestion: leaf.findings.suggestion,
-    },
-    signedAt: leaf.signedAt,
-    // Trailing field, AISDLC-568: `undefined` is dropped by JSON.stringify,
-    // so leaves without a verdictClass hash identically to pre-AISDLC-568
-    // leaves (backward compatibility for historical envelopes).
-    verdictClass: leaf.verdictClass,
-    // Trailing field, AISDLC-570: same backward-compatibility contract —
-    // `undefined` drops out of JSON.stringify, so leaves without a
-    // harnessTranscriptHash hash identically to pre-AISDLC-570 leaves.
-    harnessTranscriptHash: leaf.harnessTranscriptHash,
-  };
-  return hashLeafData(JSON.stringify(ordered));
+  return coreHashLeaf(leaf);
 }
-
-// ── Merkle tree computation ───────────────────────────────────────────────────
 
 /**
  * Compute the Merkle root from an array of leaves and return per-leaf
- * inclusion proofs.
- *
- * Empty input returns `{ root: '', proofs: {} }`.
- * Single-leaf input returns the leaf hash as the root with an empty proof.
- *
- * The tree uses standard binary Merkle padding: when a level has an odd number
- * of nodes the last node is paired with itself.
+ * inclusion proofs (keyed by ARRAY POSITION). See `merkle-core.mjs`.
  */
 export function computeMerkleRoot(leaves: TranscriptLeaf[]): MerkleResult {
-  if (leaves.length === 0) {
-    return { root: '', proofs: {} };
-  }
-
-  // Compute leaf hashes.
-  const leafHashes = leaves.map(hashLeaf);
-
-  if (leafHashes.length === 1) {
-    return { root: leafHashes[0], proofs: { 0: [] } };
-  }
-
-  // Build the tree layer by layer.
-  // layers[0] = leaf hashes; layers[layers.length - 1] = [rootHash].
-  const layers: string[][] = [leafHashes];
-
-  let current = leafHashes;
-  while (current.length > 1) {
-    const next: string[] = [];
-    for (let i = 0; i < current.length; i += 2) {
-      const left = current[i];
-      // Odd node: pair it with itself (standard padding).
-      const right = i + 1 < current.length ? current[i + 1] : current[i];
-      next.push(hashPair(left, right));
-    }
-    layers.push(next);
-    current = next;
-  }
-
-  const root = current[0];
-
-  // Generate per-leaf inclusion proofs.
-  // Each proof is an ordered list of sibling hashes from leaf level to root.
-  const proofs: Record<number, string[]> = {};
-  for (let leafIdx = 0; leafIdx < leaves.length; leafIdx++) {
-    const proof: string[] = [];
-    let idx = leafIdx;
-    for (let layerIdx = 0; layerIdx < layers.length - 1; layerIdx++) {
-      const layer = layers[layerIdx];
-      let siblingIdx: number;
-      if (idx % 2 === 0) {
-        // Current is left child — sibling is to the right.
-        siblingIdx = idx + 1 < layer.length ? idx + 1 : idx; // duplicated if odd
-      } else {
-        // Current is right child — sibling is to the left.
-        siblingIdx = idx - 1;
-      }
-      proof.push(layer[siblingIdx]);
-      idx = Math.floor(idx / 2);
-    }
-    proofs[leafIdx] = proof;
-  }
-
-  return { root, proofs };
+  return coreComputeMerkleRoot(leaves);
 }
-
-// ── Inclusion proof verification ──────────────────────────────────────────────
 
 /**
  * Verify that `leafHash` is included in the Merkle tree rooted at `root`,
  * using `proof` as the sibling-hash path and `leafIndex` for direction.
- *
- * `leafIndex` is the 0-based position of the leaf in the leaves array. It is
- * always available from `TranscriptLeaf.leafIndex`.
- *
- * `leafCount` is the total number of leaves in the tree (i.e. the length of
- * the leaves array). It is used to bounds-check `leafIndex` and prevent the
- * CVE-2012-2459 second-preimage attack where an attacker supplies an
- * out-of-bounds `leafIndex` (e.g. equal to `leafCount`) that happens to land
- * on a duplicated padding node, allowing an attacker-controlled hash to pass
- * verification against the real root.
- *
- * Returns:
- *   - `true`  when the reconstructed root matches `root` exactly AND
- *             `leafIndex` is strictly less than `leafCount`.
- *   - `false` for any tampered leaf hash, invalid proof, wrong root,
- *             out-of-bounds index, or empty/missing inputs.
+ * See `merkle-core.mjs` for the CVE-2012-2459 bounds-check contract.
  */
 export function verifyInclusion(
   leafHash: string,
@@ -294,29 +172,7 @@ export function verifyInclusion(
   leafIndex: number,
   leafCount: number,
 ): boolean {
-  if (!root || !leafHash) return false;
-  // Validate leafCount FIRST (catches float / Infinity / non-positive).
-  // Then bound-check leafIndex against it. Reject attacker-supplied
-  // out-of-range indices: without this, claiming leafIndex === leafCount
-  // exploits the odd-leaf duplication padding (CVE-2012-2459-class
-  // second-preimage attack).
-  if (!Number.isInteger(leafCount) || leafCount <= 0) return false;
-  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) return false;
-
-  let current = leafHash;
-  let idx = leafIndex;
-  for (const sibling of proof) {
-    if (idx % 2 === 0) {
-      // Current is a left child — sibling is on the right.
-      current = hashPair(current, sibling);
-    } else {
-      // Current is a right child — sibling is on the left.
-      current = hashPair(sibling, current);
-    }
-    idx = Math.floor(idx / 2);
-  }
-
-  return current === root;
+  return coreVerifyInclusion(leafHash, proof, root, leafIndex, leafCount);
 }
 
 // ── Nonce generation (RFC-0042 §Nonce binding) ────────────────────────────────

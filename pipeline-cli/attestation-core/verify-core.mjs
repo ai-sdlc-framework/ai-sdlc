@@ -110,8 +110,13 @@
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash, randomBytes, verify as cryptoVerify, createPublicKey } from 'node:crypto';
+import { randomBytes, verify as cryptoVerify, createPublicKey } from 'node:crypto';
 import { join } from 'node:path';
+import {
+  hashLeaf as coreHashLeaf,
+  computeMerkleRoot as coreComputeMerkleRoot,
+  verifyInclusion as coreVerifyInclusion,
+} from './merkle-core.mjs';
 
 /**
  * AISDLC-398: Compute the git patch-id for `base..head` with
@@ -764,9 +769,19 @@ export function loadAllAttestations(repoRoot) {
 
 // ── RFC-0042 §Design Layer 5 — v6 Merkle verifier ───────────────────────────
 //
-// These are self-contained implementations of the Merkle primitives so
-// verify-attestation.mjs does NOT need a compiled pipeline-cli dist at
-// runtime. The algorithms are identical to pipeline-cli/src/attestation/merkle.ts.
+// AISDLC-579: the hashing/root/inclusion-proof primitives are now imported
+// from `./merkle-core.mjs` — the ONE canonical implementation shared with
+// `pipeline-cli/src/attestation/merkle.ts` (the signer's primitives). Prior
+// to AISDLC-579 this file carried its OWN inline copy (`v6HashLeaf` /
+// `v6HashPair` / `v6ComputeMerkleRoot`), which drifted from merkle.ts's
+// `hashLeaf()` when AISDLC-570 added a trailing `harnessTranscriptHash`
+// field there but not here — every v6 envelope containing a leaf with a
+// non-null `harnessTranscriptHash` then recomputed a DIFFERENT Merkle root
+// on the verify side than the signer produced, and `rootSignature`
+// verification failed with "did not match any trusted reviewer pubkey" even
+// though nothing had been tampered with. `merkle-core.mjs` is a plain,
+// dependency-free ESM sibling (same directory), so this file still does NOT
+// need a compiled pipeline-cli `dist/` to exist at runtime.
 //
 // CRITICAL SECURITY CONTEXT (AISDLC-383.3 security review):
 // The v6 rootSignature ONLY signs the rootHash bytes. Envelope-level fields
@@ -780,99 +795,25 @@ export function loadAllAttestations(repoRoot) {
 //      the verifier uses findIndex on the loaded leaves array to get the
 //      ARRAY POSITION before calling verifyInclusion.
 
-const V6_LEAF_DOMAIN = Buffer.from([0x00]);
-const V6_NODE_DOMAIN = Buffer.from([0x01]);
-
-/** RFC-6962 leaf hash: SHA-256(0x00 || canonical_json_utf8). */
-function v6HashLeafData(canonicalJson) {
-  return createHash('sha256').update(V6_LEAF_DOMAIN).update(canonicalJson, 'utf8').digest('hex');
-}
-
-/** RFC-6962 internal node hash: SHA-256(0x01 || left_bytes || right_bytes). */
-function v6HashPair(left, right) {
-  return createHash('sha256')
-    .update(V6_NODE_DOMAIN)
-    .update(Buffer.from(left, 'hex'))
-    .update(Buffer.from(right, 'hex'))
-    .digest('hex');
-}
-
 /**
- * Hash a TranscriptLeaf using RFC-6962 domain separation.
- * Keys are in fixed order matching pipeline-cli/src/attestation/merkle.ts.
+ * Hash a TranscriptLeaf using RFC-6962 domain separation. Thin wrapper over
+ * the canonical `hashLeaf()` in `./merkle-core.mjs`.
  *
- * Exported for hermetic tests.
+ * Exported (name retained for backward compat) for hermetic tests.
  */
 export function v6HashLeaf(leaf) {
-  const ordered = {
-    leafIndex: leaf.leafIndex,
-    taskId: leaf.taskId,
-    reviewerName: leaf.reviewerName,
-    transcriptHash: leaf.transcriptHash,
-    nonce: leaf.nonce,
-    harness: leaf.harness,
-    model: leaf.model,
-    verdictApproved: leaf.verdictApproved,
-    findings: {
-      critical: leaf.findings.critical,
-      major: leaf.findings.major,
-      minor: leaf.findings.minor,
-      suggestion: leaf.findings.suggestion,
-    },
-    signedAt: leaf.signedAt,
-    // AISDLC-568: trailing field, mirrors pipeline-cli/src/attestation/merkle.ts
-    // hashLeaf(). `undefined` is dropped by JSON.stringify, so leaves signed
-    // before AISDLC-568 (no verdictClass key) hash identically to before —
-    // backward compatible with every historical v6 envelope.
-    verdictClass: leaf.verdictClass,
-  };
-  return v6HashLeafData(JSON.stringify(ordered));
+  return coreHashLeaf(leaf);
 }
 
 /**
  * Compute the Merkle root from an array of TranscriptLeaf objects.
- * Returns `{ root, proofs }` where proofs is keyed by ARRAY POSITION.
+ * Returns `{ root, proofs }` where proofs is keyed by ARRAY POSITION. Thin
+ * wrapper over the canonical `computeMerkleRoot()` in `./merkle-core.mjs`.
  *
- * Exported for hermetic tests.
+ * Exported (name retained for backward compat) for hermetic tests.
  */
 export function v6ComputeMerkleRoot(leaves) {
-  if (leaves.length === 0) return { root: '', proofs: {} };
-
-  const leafHashes = leaves.map(v6HashLeaf);
-
-  if (leafHashes.length === 1) {
-    return { root: leafHashes[0], proofs: { 0: [] } };
-  }
-
-  const layers = [leafHashes];
-  let current = leafHashes;
-  while (current.length > 1) {
-    const next = [];
-    for (let i = 0; i < current.length; i += 2) {
-      const left = current[i];
-      const right = i + 1 < current.length ? current[i + 1] : current[i];
-      next.push(v6HashPair(left, right));
-    }
-    layers.push(next);
-    current = next;
-  }
-
-  const root = current[0];
-
-  const proofs = {};
-  for (let leafIdx = 0; leafIdx < leaves.length; leafIdx++) {
-    const proof = [];
-    let idx = leafIdx;
-    for (let layerIdx = 0; layerIdx < layers.length - 1; layerIdx++) {
-      const layer = layers[layerIdx];
-      const siblingIdx = idx % 2 === 0 ? (idx + 1 < layer.length ? idx + 1 : idx) : idx - 1;
-      proof.push(layer[siblingIdx]);
-      idx = Math.floor(idx / 2);
-    }
-    proofs[leafIdx] = proof;
-  }
-
-  return { root, proofs };
+  return coreComputeMerkleRoot(leaves);
 }
 
 /**
@@ -880,26 +821,13 @@ export function v6ComputeMerkleRoot(leaves) {
  *
  * `leafIndex` is the 0-based ARRAY POSITION (not TranscriptLeaf.leafIndex).
  * `leafCount` is the TOTAL on-disk leaf count (MUST be from loaded leaves,
- * NOT from the envelope — per AISDLC-383.3 CVE-2012-2459 bound-check).
+ * NOT from the envelope — per AISDLC-383.3 CVE-2012-2459 bound-check). Thin
+ * wrapper over the canonical `verifyInclusion()` in `./merkle-core.mjs`.
  *
- * Exported for hermetic tests.
+ * Exported (name retained for backward compat) for hermetic tests.
  */
 export function v6VerifyInclusion(leafHash, proof, root, leafIndex, leafCount) {
-  if (!root || !leafHash) return false;
-  if (!Number.isInteger(leafCount) || leafCount <= 0) return false;
-  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) return false;
-
-  let current = leafHash;
-  let idx = leafIndex;
-  for (const sibling of proof) {
-    if (idx % 2 === 0) {
-      current = v6HashPair(current, sibling);
-    } else {
-      current = v6HashPair(sibling, current);
-    }
-    idx = Math.floor(idx / 2);
-  }
-  return current === root;
+  return coreVerifyInclusion(leafHash, proof, root, leafIndex, leafCount);
 }
 
 /**
