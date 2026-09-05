@@ -126,6 +126,7 @@ describe('buildV6Envelope — happy path', () => {
       reviewerName: 'code-reviewer',
       transcriptHash: 'e'.repeat(64),
       verdictClass: 'self-authored',
+      harnessTranscriptHash: null,
     });
   });
 
@@ -144,6 +145,39 @@ describe('buildV6Envelope — happy path', () => {
     });
 
     expect(envelope.transcriptLeaves[0].verdictClass).toBe('independent');
+  });
+
+  it('transcriptLeaves carries harnessTranscriptHash when set (AISDLC-570)', () => {
+    const leaf0 = makeLeaf({
+      leafIndex: 0,
+      transcriptHash: 'e'.repeat(64),
+      harnessTranscriptHash: 'c'.repeat(64),
+    });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+    });
+
+    expect(envelope.transcriptLeaves[0].harnessTranscriptHash).toBe('c'.repeat(64));
+  });
+
+  it('transcriptLeaves defaults harnessTranscriptHash to null for legacy pre-AISDLC-570 leaves', () => {
+    // Legacy leaf: no harnessTranscriptHash field at all (predates AISDLC-570).
+    const leaf0 = makeLeaf({ leafIndex: 0, transcriptHash: 'e'.repeat(64) });
+    delete (leaf0 as Partial<TranscriptLeaf>).harnessTranscriptHash;
+
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+    });
+
+    expect(envelope.transcriptLeaves[0].harnessTranscriptHash).toBeNull();
   });
 
   it('defaults verdictClass to self-authored when the source leaf omits it (legacy leaf, AISDLC-568)', () => {

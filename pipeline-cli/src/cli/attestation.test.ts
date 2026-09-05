@@ -1692,3 +1692,83 @@ describe('emit-leaf — auto-compute patch-id branch', () => {
     expect(stderr).toMatch(/(could not compute patch-id|empty diff after attestation exclusion)/);
   });
 });
+
+// ── CLI: emit-leaf harnessTranscriptHash / --nonce (AISDLC-570) ────────────────
+
+describe('emit-leaf — --nonce validation (AISDLC-570)', () => {
+  function buildValidArgs(overrides: Record<string, string> = {}): string[] {
+    makeTranscript('aisdlc-570', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-570',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-nonce-test.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    const argv: Record<string, string> = {
+      '--task-id': 'AISDLC-570',
+      '--reviewer': 'code-reviewer',
+      '--transcript-path': transcriptPath,
+      '--verdict-path': verdictPath,
+      '--head-sha': 'a'.repeat(40),
+      '--harness': 'claude-code',
+      '--model': 'sonnet',
+      '--patch-id': TEST_PATCH_ID,
+      ...overrides,
+    };
+    return ['emit-leaf', ...Object.entries(argv).flatMap(([k, v]) => [k, v])];
+  }
+
+  it('accepts a well-formed 64-hex-char --nonce and uses it verbatim on the leaf', async () => {
+    const nonce = 'b'.repeat(64);
+    await expect(
+      buildAttestationCli(buildValidArgs({ '--nonce': nonce })).parseAsync(),
+    ).resolves.not.toThrow();
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].nonce).toBe(nonce);
+  });
+
+  it('rejects a malformed --nonce (wrong length)', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(buildValidArgs({ '--nonce': 'a'.repeat(63) })).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--nonce must be exactly 64 lowercase hex');
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects a malformed --nonce (non-hex characters)', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(buildValidArgs({ '--nonce': 'z'.repeat(64) })).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--nonce must be exactly 64 lowercase hex');
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+  });
+
+  it('generates a fresh nonce when --nonce is omitted (legacy behavior preserved)', async () => {
+    await expect(buildAttestationCli(buildValidArgs()).parseAsync()).resolves.not.toThrow();
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].nonce).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('sets harnessTranscriptHash to null and logs a reason when no harness signal exists', async () => {
+    await expect(buildAttestationCli(buildValidArgs()).parseAsync()).resolves.not.toThrow();
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves).toHaveLength(1);
+    expect(leaves[0].harnessTranscriptHash).toBeNull();
+    expect(stderrChunks.join('')).toContain('harnessTranscriptHash=null');
+  });
+});

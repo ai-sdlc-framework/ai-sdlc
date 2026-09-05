@@ -109,6 +109,33 @@ describe('hashLeaf', () => {
     const selfAuthored = makeLeaf({ verdictClass: 'self-authored' });
     expect(hashLeaf(independent)).not.toBe(hashLeaf(selfAuthored));
   });
+
+  // AISDLC-570: harnessTranscriptHash backward compatibility.
+  it('hashes identically whether harnessTranscriptHash is omitted or explicitly undefined (legacy leaves)', () => {
+    const withoutField = makeLeaf();
+    delete (withoutField as { harnessTranscriptHash?: unknown }).harnessTranscriptHash;
+    const withUndefined = makeLeaf({ harnessTranscriptHash: undefined });
+    expect(hashLeaf(withoutField)).toBe(hashLeaf(withUndefined));
+  });
+
+  it('differs when harnessTranscriptHash is set vs. omitted (new leaves are distinguishable)', () => {
+    const legacy = makeLeaf();
+    delete (legacy as { harnessTranscriptHash?: unknown }).harnessTranscriptHash;
+    const bound = makeLeaf({ harnessTranscriptHash: 'c'.repeat(64) });
+    expect(hashLeaf(legacy)).not.toBe(hashLeaf(bound));
+  });
+
+  it('differs between two distinct harnessTranscriptHash values', () => {
+    const a = makeLeaf({ harnessTranscriptHash: 'c'.repeat(64) });
+    const b = makeLeaf({ harnessTranscriptHash: 'd'.repeat(64) });
+    expect(hashLeaf(a)).not.toBe(hashLeaf(b));
+  });
+
+  it('treats null harnessTranscriptHash as distinct from a set value', () => {
+    const nullHash = makeLeaf({ harnessTranscriptHash: null });
+    const setHash = makeLeaf({ harnessTranscriptHash: 'c'.repeat(64) });
+    expect(hashLeaf(nullHash)).not.toBe(hashLeaf(setHash));
+  });
 });
 
 // ── computeMerkleRoot — empty ─────────────────────────────────────────────────

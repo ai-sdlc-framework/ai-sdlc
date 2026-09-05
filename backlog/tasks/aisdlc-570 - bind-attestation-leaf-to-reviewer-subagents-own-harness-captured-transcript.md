@@ -3,7 +3,7 @@ id: aisdlc-570
 title: >-
   Bind attestation leaf to the reviewer subagent's own harness-captured
   execution transcript (DEC-0012 opt-a)
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - attestation
@@ -112,3 +112,35 @@ opt-a must close — capture these as the acceptance target:
   best-effort, non-atomic read-then-unlink; a failed unlink can over-credit a
   later leaf in the window. opt-a must make consumption durable/atomic (or
   bind-once semantics) so a marker cannot be reused.
+
+## Implementation status (opt1 per DEC-0013)
+
+Pre-work satisfied by PR #991 (feasibility investigation,
+`docs/design/aisdlc-570-opt-a-feasibility.md`); trust model resolved as
+DEC-0013 → opt1 (sign-time-only, informational). This PR ships:
+
+- `pipeline-cli/src/attestation/harness-transcript.ts` — resolves a reviewer
+  subagent's own harness-captured transcript
+  (`~/.claude/projects/<slug>/<session-id>/subagents/agent-<id>.jsonl`),
+  confirms a reviewer-typed `agentType` (marker or harness `.meta.json`), and
+  confirms the diff-binding nonce literal is present before computing a
+  SHA-256 hash. Fails closed (`null`) on any resolution failure.
+- `TranscriptLeaf.harnessTranscriptHash` (additive, optional) on the leaf
+  schema, carried through `sign-v6.ts`'s envelope builder and
+  `formatV6Envelope`. Legacy leaves without the field verify unchanged.
+- `cli-attestation emit-leaf --nonce` / `--claude-session-id` flags so a
+  future orchestrating dispatch can pass a pre-generated nonce and an
+  explicit session id.
+- Hermetic unit + integration tests
+  (`pipeline-cli/src/attestation/harness-transcript.test.ts` plus CLI/schema
+  coverage in `attestation.test.ts`, `merkle.test.ts`, `sign-v6.test.ts`).
+- RFC-0042 + whitepaper updates describing the mechanism, the sign-time-only
+  trust model, and its honest limits.
+
+**Remaining follow-up (NOT done in this PR):** the orchestrating dispatch
+(the slash-command body / `/ai-sdlc execute` reconcile step) does not yet
+generate a nonce before dispatching reviewer subagents nor embed it (via
+`nonceMarkerLiteral()`) in the reviewer's `Task`/`Agent` prompt. Until that
+wiring lands, `harnessTranscriptHash` will resolve `null` for essentially
+every real reviewer invocation (fail-safe — never over-claims). This task
+stays open (not moved to `backlog/completed/`) pending that follow-up.
