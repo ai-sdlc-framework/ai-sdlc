@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.16.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.16.0...ai-sdlc-plugin-v0.16.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* bump plugin runtimeDependencies pins to ^0.19.0 + sync mechanism (AISDLC-574) ([#999](https://github.com/ai-sdlc-framework/ai-sdlc/issues/999)) ([38b3ae5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/38b3ae5d95325efe878a4f24c2334dd2b8a1b71d))
+
 ## [0.16.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.15.2...ai-sdlc-plugin-v0.16.0) (2026-09-05)
 
 
