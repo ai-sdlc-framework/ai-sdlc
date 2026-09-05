@@ -32,8 +32,11 @@ export function formatMinimal(data: Record<string, unknown>): string {
       return `Cost: $${(summary.totalCostUsd as number).toFixed(2)} | Budget: ${(budget.utilizationPercent as number).toFixed(0)}% used | Runs: ${summary.entryCount}`;
     }
     case 'doctor': {
-      const state = (data.state as string).toUpperCase();
-      return `Doctor: ${state} | enforcement=${data.enforcementConfigured}`;
+      // AISDLC-578: doctor now runs a registry of checks and reports an
+      // aggregate pass/warn/fail summary rather than a single
+      // attestation-governance state.
+      const summary = data.summary as { pass: number; warn: number; fail: number; total: number };
+      return `Doctor: ${summary.pass} pass, ${summary.warn} warn, ${summary.fail} fail (${summary.total} checks)`;
     }
     default:
       return JSON.stringify(data);

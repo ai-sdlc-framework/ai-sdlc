@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from 'commander';
@@ -21,6 +21,7 @@ import {
   createDoctorCommand,
   type DoctorAdapters,
 } from './doctor.js';
+import type { DoctorCheckAdapters } from './doctor-checks.js';
 
 let tmpDir: string;
 
@@ -244,7 +245,7 @@ describe('renderDoctorReport', () => {
   });
 });
 
-describe('doctorCommand — CLI action (end-to-end via the command builder)', () => {
+describe('doctorCommand — CLI action (end-to-end via the command builder, AISDLC-578 registry)', () => {
   let cwdBefore: string;
 
   beforeEach(() => {
@@ -259,7 +260,7 @@ describe('doctorCommand — CLI action (end-to-end via the command builder)', ()
   });
 
   /** Build a `program` wired with the `doctor` subcommand for `parseAsync`. */
-  function buildProgram(buildAdapters: () => DoctorAdapters): Command {
+  function buildProgram(buildAdapters: () => DoctorCheckAdapters): Command {
     const program = new Command();
     program.option('-f, --format <type>', '', 'table');
     program.exitOverride();
@@ -270,98 +271,114 @@ describe('doctorCommand — CLI action (end-to-end via the command builder)', ()
     return program;
   }
 
-  it('--format json prints the full result shape and sets exitCode=1 on state=neither', async () => {
+  /** A minimal, fully-hermetic adapter set — plugin never resolves, gh never available. */
+  function baseAdapters(overrides: Partial<DoctorCheckAdapters> = {}): DoctorCheckAdapters {
+    return {
+      exists: (p) => existsSync(p),
+      readFile: (p) => {
+        try {
+          return existsSync(p) ? readFileSync(p, 'utf-8') : null;
+        } catch {
+          return null;
+        }
+      },
+      writeFile: () => {},
+      listDir: () => [],
+      homeDir: () => join(tmpDir, '__home__'),
+      env: {},
+      runCommand: noGh(),
+      ...overrides,
+    };
+  }
+
+  it('--format json prints results + summary; exits 0 when nothing fails (plugin/gh unavailable = warn, not fail)', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const program = buildProgram(() => ({ exists: existsSync, runCommand: noGh() }));
+    const program = buildProgram(() => baseAdapters());
     await program.parseAsync(['--format', 'json', 'doctor'], { from: 'user' });
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(parsed.state).toBe('neither');
-    expect(parsed.artifactsPresent).toBe(false);
-    expect(parsed.enforcementConfigured).toBe(false);
-    expect(parsed.artifacts).toEqual({
-      trustedReviewers: false,
-      attestationsDir: false,
-      verifyWorkflow: false,
-    });
-    expect(parsed.branchProtection.checked).toBe(false);
-    expect(parsed.gap).toBeTruthy();
-    expect(parsed.closingCommand).toBe('ai-sdlc init --add attestation');
-    expect(process.exitCode).toBe(1);
-
-    logSpy.mockRestore();
-  });
-
-  it('--format json sets exitCode=1 on state=artifacts-only', async () => {
-    mkdirSync(join(tmpDir, '.ai-sdlc', 'attestations'), { recursive: true });
-    writeFileSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'), 'reviewers: []\n');
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    const program = buildProgram(() => ({ exists: existsSync, runCommand: noGh() }));
-    await program.parseAsync(['--format', 'json', 'doctor'], { from: 'user' });
-
-    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(parsed.state).toBe('artifacts-only');
-    expect(process.exitCode).toBe(1);
-
-    logSpy.mockRestore();
-  });
-
-  it('sets exitCode=0 (not 1) on state=fully-configured', async () => {
-    mkdirSync(join(tmpDir, '.ai-sdlc', 'attestations'), { recursive: true });
-    writeFileSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'), 'reviewers: []\n');
-
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    const program = buildProgram(() => ({
-      exists: existsSync,
-      runCommand: ghWithProtection({
-        required_pull_request_reviews: { required_approving_review_count: 1 },
-        required_status_checks: { contexts: ['ai-sdlc/pr-ready'] },
-      }),
-    }));
-    await program.parseAsync(['--format', 'json', 'doctor'], { from: 'user' });
-
-    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
-    expect(parsed.state).toBe('fully-configured');
+    expect(Array.isArray(parsed.results)).toBe(true);
+    expect(parsed.results.length).toBeGreaterThan(0);
+    expect(parsed.summary.total).toBe(parsed.results.length);
+    // No plugin install + no gh + no attestation artifacts on a bare tmpDir
+    // → every check degrades to warn (skip/absent), never fail.
+    expect(parsed.summary.fail).toBe(0);
     expect(process.exitCode).toBeUndefined();
 
     logSpy.mockRestore();
   });
 
-  it('default (table) format renders the human-readable report via renderDoctorReport', async () => {
+  it('--strict promotes warn-only results to a non-zero exit', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const program = buildProgram(() => ({ exists: existsSync, runCommand: noGh() }));
-    await program.parseAsync(['doctor'], { from: 'user' });
+    const program = buildProgram(() => baseAdapters());
+    await program.parseAsync(['--format', 'json', 'doctor', '--strict'], { from: 'user' });
 
-    const allOutput = logSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(allOutput).toContain('AI-SDLC Doctor — Attestation Governance');
-    expect(allOutput).toContain('NEITHER');
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(parsed.summary.warn).toBeGreaterThan(0);
     expect(process.exitCode).toBe(1);
 
     logSpy.mockRestore();
   });
 
-  it('--format minimal routes through formatMinimal (not the full table render)', async () => {
-    mkdirSync(join(tmpDir, '.ai-sdlc', 'attestations'), { recursive: true });
-    writeFileSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'), 'reviewers: []\n');
+  it('exits non-zero when a manifest-agreement check fails', async () => {
+    const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
+    mkdirSync(join(pluginDir, '.claude-plugin'), { recursive: true });
+    mkdirSync(join(pluginDir, 'hooks'), { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ version: '1.0.0' }));
+    writeFileSync(
+      join(pluginDir, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ version: '0.9.0' }),
+    );
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const program = buildProgram(() => baseAdapters());
+    await program.parseAsync(['--format', 'json', 'doctor'], { from: 'user' });
 
-    const program = buildProgram(() => ({ exists: existsSync, runCommand: noGh() }));
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string);
+    expect(parsed.summary.fail).toBeGreaterThan(0);
+    expect(process.exitCode).toBe(1);
+
+    logSpy.mockRestore();
+  });
+
+  it('default (table) format renders the aggregate report via renderFullDoctorReport', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = buildProgram(() => baseAdapters());
+    await program.parseAsync(['doctor'], { from: 'user' });
+
+    const allOutput = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(allOutput).toContain('AI-SDLC Doctor');
+    expect(allOutput).toMatch(/\d+ pass, \d+ warn, \d+ fail/);
+
+    logSpy.mockRestore();
+  });
+
+  it('--format minimal routes through formatMinimal (not the full table render)', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = buildProgram(() => baseAdapters());
     await program.parseAsync(['--format', 'minimal', 'doctor'], { from: 'user' });
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     const out = logSpy.mock.calls[0][0] as string;
-    expect(out).toBe('Doctor: ARTIFACTS-ONLY | enforcement=false');
-    // Must NOT contain the full table-render banner — proves this took the
-    // `formatMinimal` path, not the default table fallthrough.
-    expect(out).not.toContain('AI-SDLC Doctor — Attestation Governance');
-    expect(process.exitCode).toBe(1);
+    expect(out).toMatch(/^Doctor: \d+ pass, \d+ warn, \d+ fail \(\d+ checks\)$/);
+    expect(out).not.toContain('AI-SDLC Doctor');
+
+    logSpy.mockRestore();
+  });
+
+  it('--fix runs registered fixers and prints their outcome before the report', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const program = buildProgram(() => baseAdapters());
+    await program.parseAsync(['doctor', '--fix'], { from: 'user' });
+
+    const allOutput = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(allOutput).toContain('[fix]');
 
     logSpy.mockRestore();
   });

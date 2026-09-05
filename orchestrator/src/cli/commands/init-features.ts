@@ -44,6 +44,10 @@ import {
   WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
 } from './init-templates.js';
+import {
+  RECOMMENDED_BRANCH_PROTECTION_BODY,
+  resolveOwnerRepoSlug,
+} from './branch-protection-shared.js';
 
 // ── Compliance wizard types (RFC-0022 §7 / AISDLC-324) ───────────────────
 
@@ -1830,21 +1834,7 @@ export interface BranchProtectionResult {
  * The body conforms to the GitHub REST API
  * `PUT /repos/{owner}/{repo}/branches/{branch}/protection` schema.
  */
-export const RECOMMENDED_BRANCH_PROTECTION_BODY = {
-  required_status_checks: {
-    strict: true,
-    contexts: ['ai-sdlc/pr-ready', 'codecov/patch'],
-  },
-  enforce_admins: false,
-  required_pull_request_reviews: {
-    dismiss_stale_reviews: true,
-    require_code_owner_reviews: false,
-    required_approving_review_count: 1,
-  },
-  restrictions: null,
-  allow_force_pushes: false,
-  allow_deletions: false,
-};
+export { RECOMMENDED_BRANCH_PROTECTION_BODY };
 
 /**
  * Apply (or print, in dry-run) the recommended branch protection rule
@@ -1874,30 +1864,17 @@ export async function applyBranchProtection(
     return { applied: false, bodyJson };
   }
 
-  // Resolve owner/repo via gh.
-  const ownerRepo = adapters.runCommand('gh', [
-    'repo',
-    'view',
-    '--json',
-    'nameWithOwner',
-    '-q',
-    '.nameWithOwner',
-  ]);
-  if (ownerRepo.exitCode !== 0) {
+  // Resolve owner/repo via gh (shared with doctor.ts's checkBranchProtection —
+  // AISDLC-578 — so the two don't independently drift).
+  const ownerRepo = resolveOwnerRepoSlug(adapters);
+  if (!ownerRepo.slug) {
     return {
       applied: false,
       bodyJson,
-      error: `gh repo view failed: ${ownerRepo.stdout.trim() || 'unknown error'}`,
+      error: ownerRepo.error,
     };
   }
-  const slug = ownerRepo.stdout.trim();
-  if (!slug) {
-    return {
-      applied: false,
-      bodyJson,
-      error: 'gh repo view returned empty owner/repo',
-    };
-  }
+  const slug = ownerRepo.slug;
 
   // Use the file-based input form so we don't have to thread quoted JSON
   // through a shell. We write to a tmpfile, point gh at it, and let the
