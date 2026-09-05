@@ -70,6 +70,21 @@ _mcp_usable() {
 
 # Combined self-heal trigger: returns 0 (needs heal) if pipeline-cli OR
 # mcp-server is missing in the plugin dir.
+#
+# AISDLC-580 review follow-up (round 2): this gate is PURE FILE-EXISTENCE by
+# design — it runs on effectively every /ai-sdlc command invocation, so it
+# must stay a filesystem stat, not a network call. An earlier revision of
+# this fix wired in the shared check-stale-runtime-deps.mjs version check
+# here too (mirroring install-runtime-deps.sh and session-start.js), but
+# that added 1-3 `npm view` network round-trips to EVERY command — up to
+# ~6s of added latency per invocation when offline/slow, an unacceptable
+# regression for a script on this hot path. The version-aware self-heal
+# already runs ONCE PER SESSION in hooks/session-start.js (which IS the
+# sanctioned place for the network check — session start already tolerates
+# multi-second one-time cost) and install-runtime-deps.sh's own convergence
+# check remains the source of truth for the manual/self-heal invocation
+# path. Per-command network checks here would be redundant with both and
+# slow — removed.
 _deps_complete() {
   local plugin_dir="$1"
   _is_usable "$plugin_dir/$PIPELINE_CLI_REL" && _mcp_usable "$plugin_dir"

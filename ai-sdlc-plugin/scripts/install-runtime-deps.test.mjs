@@ -62,11 +62,34 @@ const SCRIPT = join(__dirname, 'install-runtime-deps.sh');
  *
  * Returns: { binDir, logFile, npmPath }
  */
-function buildFakeNpm({ writeEntryPoints, exitCode = 0 }) {
+function buildFakeNpm({ writeEntryPoints, exitCode = 0, viewVersions = {} }) {
   const dir = mkdtempSync(join(tmpdir(), 'aisdlc-441-npm-stub-'));
   const logFile = join(dir, 'npm-invocations.log');
   const binDir = join(dir, 'bin');
   mkdirSync(binDir, { recursive: true });
+
+  // AISDLC-580: `npm view <name>@<pin> version` responses for the
+  // version-convergence check. Keyed by the exact "name@pin" spec string;
+  // an unmatched spec exits 1 (simulating a registry miss / offline), which
+  // the script must fail open on rather than blocking the install.
+  const viewHandlerBash =
+    Object.keys(viewVersions).length > 0
+      ? `
+if [ "$1" = "view" ]; then
+  spec="$2"
+  case "$spec" in
+${Object.entries(viewVersions)
+  .map(([spec, version]) => `    "${spec}") echo "${version}"; exit 0 ;;`)
+  .join('\n')}
+    *) exit 1 ;;
+  esac
+fi
+`
+      : `
+if [ "$1" = "view" ]; then
+  exit 1
+fi
+`;
 
   // The fake npm script writes a JSON line per invocation, then optionally
   // creates entry points for AISDLC's known runtime deps so post-install
@@ -120,6 +143,7 @@ node -e '
   const args = process.argv.slice(1);
   fs.appendFileSync(process.env.LOG_FILE, JSON.stringify({ args, cwd: process.cwd() }) + "\\n");
 ' -- "$@"
+${viewHandlerBash}
 ${writeEntryPointsBash}
 exit ${exitCode}
 `;
@@ -740,5 +764,213 @@ describe('install-runtime-deps.sh — post-install verification', () => {
     assert.match(stderr, /@ai-sdlc\/pipeline-cli/);
     assert.match(stderr, /@ai-sdlc\/plugin-mcp-server/);
     assert.match(stderr, /network|registry/i);
+  });
+});
+
+describe('install-runtime-deps.sh — version convergence on stale installs (AISDLC-580)', () => {
+  // Reproduces the AISDLC-580 incident: pipeline-cli@0.20.0 is already
+  // installed and satisfies the pin, but the script's pre-fix idempotence
+  // check treats "entry-point file exists" as "install is correct" and never
+  // notices a newer version has since become available (or that the pin
+  // itself advanced past what's installed). Both scenarios must converge.
+
+  /** Materialise an already-"installed" package with a real package.json. */
+  function writeInstalledPackage(pluginDir, name, entryRel, version) {
+    const pkgDir = join(pluginDir, 'node_modules', name);
+    mkdirSync(join(pkgDir, dirname(entryRel)), { recursive: true });
+    writeFileSync(join(pkgDir, entryRel), '');
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version }, null, 2));
+  }
+
+  it('upgrades an installed version that still satisfies the pin but is behind the registry (AC-1)', () => {
+    // installed 0.20.0, pin ^0.20.0 (satisfies), registry resolves ^0.20.0 -> 0.20.1.
+    const pluginDir = join(workDir, 'stale-but-satisfying');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.0');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({
+      writeEntryPoints: true,
+      viewVersions: {
+        '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1',
+        '@ai-sdlc/plugin-mcp-server@0.9.2': '0.9.2',
+        '@ai-sdlc/orchestrator@^0.14.0': '0.14.0',
+      },
+    });
+    const { exitCode, stderr } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(exitCode, 0, `must converge and exit 0; stderr=${stderr}`);
+    assert.match(
+      stderr,
+      /upgrading @ai-sdlc\/pipeline-cli 0\.20\.0 -> 0\.20\.1 to satisfy pin \^0\.20\.0/,
+      'must print a visible upgrade line',
+    );
+    assert.ok(
+      existsSync(join(pluginDir, 'node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs')),
+      'pipeline-cli must be reinstalled at the target version',
+    );
+  });
+
+  it('upgrades an installed version that no longer satisfies an advanced pin (AC-2)', () => {
+    // installed 0.20.0, pin advanced to ^0.20.1 (does NOT satisfy) — must upgrade.
+    const pluginDir = join(workDir, 'stale-unsatisfying');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.1',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.0');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({
+      writeEntryPoints: true,
+      viewVersions: {
+        '@ai-sdlc/pipeline-cli@^0.20.1': '0.20.1',
+        '@ai-sdlc/plugin-mcp-server@0.9.2': '0.9.2',
+        '@ai-sdlc/orchestrator@^0.14.0': '0.14.0',
+      },
+    });
+    const { exitCode, stderr, invocations } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(exitCode, 0, `must converge and exit 0; stderr=${stderr}`);
+    assert.match(
+      stderr,
+      /upgrading @ai-sdlc\/pipeline-cli 0\.20\.0 -> 0\.20\.1 to satisfy pin \^0\.20\.1/,
+    );
+    assert.ok(
+      invocations.some((inv) => inv.args.includes('@ai-sdlc/pipeline-cli@^0.20.1')),
+      'must re-run npm install with the advanced pin spec',
+    );
+  });
+
+  it('does NOT reinstall when the installed version already matches the registry-resolved target', () => {
+    // installed 0.20.1, pin ^0.20.0, registry also resolves to 0.20.1 — no drift.
+    const pluginDir = join(workDir, 'already-converged');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.1');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({
+      writeEntryPoints: true,
+      viewVersions: {
+        '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1',
+        '@ai-sdlc/plugin-mcp-server@0.9.2': '0.9.2',
+        '@ai-sdlc/orchestrator@^0.14.0': '0.14.0',
+      },
+    });
+    const { exitCode, stderr, invocations } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(exitCode, 0);
+    assert.match(stderr, /already installed/);
+    assert.doesNotMatch(stderr, /upgrading/);
+    // Only the 3 `npm view` calls — no `npm install`.
+    assert.equal(invocations.length, 3, 'must not invoke npm install when already converged');
+    for (const inv of invocations) {
+      assert.equal(inv.args[0], 'view', 'the only npm invocations should be `npm view`');
+    }
+  });
+
+  it('fails open (does not reinstall) when the registry is unreachable', () => {
+    // npm view returns nothing (simulated offline) — must not block/crash and
+    // must not force an unnecessary reinstall.
+    const pluginDir = join(workDir, 'offline-fail-open');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.0');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    // No viewVersions configured — the stub's `npm view` always exits 1.
+    const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
+    const { exitCode, stderr } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(exitCode, 0, `must fail open, not fail closed; stderr=${stderr}`);
+    assert.match(stderr, /already installed/);
+    assert.doesNotMatch(stderr, /upgrading/);
+  });
+
+  it('a pre-existing .ai-sdlc-installed sentinel file has no bearing on the version-convergence check', () => {
+    // install-runtime-deps.sh's OWN idempotence early-exit never reads the
+    // `.ai-sdlc-installed` sentinel at all — it only checks the AISDLC-441
+    // per-package existence flags (see the file-existence checks above this
+    // block in the .sh). The sentinel is write-only from this script's own
+    // perspective (written on a successful install, consulted only by
+    // OTHER callers such as hooks/session-start.js's fast path). This test
+    // proves a stale sentinel present alongside a stale-but-existing package
+    // still triggers the upgrade — i.e. confirms the sentinel truly plays no
+    // gating role here, rather than asserting a suppression mechanism that
+    // does not exist in this file. (Previously misnamed as "the sentinel
+    // does not suppress a needed upgrade", which implied the .sh reads the
+    // sentinel as a gate — it doesn't; AISDLC-580 review follow-up.)
+    const pluginDir = join(workDir, 'sentinel-present-has-no-effect-on-upgrade');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.0');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+    mkdirSync(join(pluginDir, 'node_modules'), { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'node_modules', '.ai-sdlc-installed'),
+      'installed by ai-sdlc-plugin install-runtime-deps.sh at 2026-01-01T00:00:00Z\n',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({
+      writeEntryPoints: true,
+      viewVersions: {
+        '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1',
+        '@ai-sdlc/plugin-mcp-server@0.9.2': '0.9.2',
+        '@ai-sdlc/orchestrator@^0.14.0': '0.14.0',
+      },
+    });
+    const { exitCode, stderr } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(exitCode, 0);
+    assert.match(
+      stderr,
+      /upgrading @ai-sdlc\/pipeline-cli 0\.20\.0 -> 0\.20\.1/,
+      'a stale sentinel must not suppress the needed upgrade',
+    );
   });
 });

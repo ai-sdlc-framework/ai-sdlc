@@ -545,3 +545,89 @@ exit 0
     assert.match(result.stderr, /@ai-sdlc\/pipeline-cli/, 'must name the missing package');
   });
 });
+
+describe('_deps_complete stays a pure filesystem fast-path (AISDLC-580 review round 2)', () => {
+  // AISDLC-580 review round 2: an earlier revision of this fix wired the
+  // shared check-stale-runtime-deps.mjs version-convergence check into
+  // `_deps_complete` too (mirroring install-runtime-deps.sh and
+  // session-start.js). That was reverted — `_deps_complete` runs on
+  // effectively every /ai-sdlc command invocation, so adding 1-3 `npm view`
+  // network round-trips here regressed hot-path latency by up to ~6s when
+  // offline/slow. The version-aware self-heal already runs ONCE PER SESSION
+  // in hooks/session-start.js (which tolerates that one-time cost), and
+  // install-runtime-deps.sh's own convergence check is the source of truth
+  // for the manual/self-heal path. This test asserts the regression stays
+  // fixed: `_deps_complete` must resolve via pure file existence, with ZERO
+  // node/npm process spawned, even when a check-stale-runtime-deps.mjs is
+  // present and would (if consulted) report drift.
+
+  it('resolves via the fast path without ever invoking check-stale-runtime-deps.mjs, even when one is present and would report drift', () => {
+    const pluginDir = join(tmpDir, 'deps-complete-fast-path-no-network');
+    mkdirSync(pluginDir, { recursive: true });
+    createFakePipelineBin(join(pluginDir, PIPELINE_CLI_REL));
+    createFakeMcpBundle(pluginDir);
+    writeFileSync(join(pluginDir, 'plugin.json'), '{}');
+
+    // A check-stale-runtime-deps.mjs that, if invoked, would (a) report
+    // drift and (b) write a marker file so this test can prove it was
+    // never called. Pre-round-2, `_deps_complete` would have run this and
+    // fallen into the self-heal branch despite both entry-point files
+    // already being present; post-round-2, it must never be invoked at all.
+    const scriptsDir = join(pluginDir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(
+      join(scriptsDir, 'check-stale-runtime-deps.mjs'),
+      `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+writeFileSync(join(process.argv[2], '.stale-check-was-invoked'), '');
+process.stdout.write('@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.1\\n');
+`,
+    );
+
+    const fakeHome = join(tmpDir, 'deps-complete-fast-path-no-network-home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    const { exitCode, stdout, stderr } = runScript({
+      CLAUDE_PLUGIN_DIR: pluginDir,
+      CLAUDE_PLUGIN_ROOT: '',
+      HOME: fakeHome,
+    });
+
+    assert.equal(exitCode, 0, `must resolve via the fast path; stderr=${stderr}`);
+    assert.equal(
+      normPath(stdout),
+      normPath(join(pluginDir, PIPELINE_CLI_REL)),
+      'must resolve immediately to the existing bin dir, not fall into self-heal',
+    );
+    assert.ok(
+      !existsSync(join(pluginDir, '.stale-check-was-invoked')),
+      'check-stale-runtime-deps.mjs must NEVER be invoked from the per-command _deps_complete fast path',
+    );
+  });
+
+  it('does not shell out to node at all when both entry-point files are present (no self-heal branch entered)', () => {
+    // Complementary assertion: even without a check-stale-runtime-deps.mjs
+    // present, prove the happy path resolves purely from `ls`/`[ -f ]`
+    // filesystem checks by NOT creating scripts/install-runtime-deps.sh
+    // either — if the fast path incorrectly fell through to self-heal, the
+    // script would exit 1 (no self-heal script to run) instead of 0.
+    const pluginDir = join(tmpDir, 'deps-complete-fast-path-no-self-heal-script');
+    mkdirSync(pluginDir, { recursive: true });
+    createFakePipelineBin(join(pluginDir, PIPELINE_CLI_REL));
+    createFakeMcpBundle(pluginDir);
+    writeFileSync(join(pluginDir, 'plugin.json'), '{}');
+    // No scripts/ directory at all.
+    const fakeHome = join(tmpDir, 'deps-complete-fast-path-no-self-heal-script-home');
+    mkdirSync(fakeHome, { recursive: true });
+
+    const { exitCode, stdout } = runScript({
+      CLAUDE_PLUGIN_DIR: pluginDir,
+      CLAUDE_PLUGIN_ROOT: '',
+      HOME: fakeHome,
+    });
+
+    assert.equal(exitCode, 0, 'must resolve via the fast path with no scripts/ dir present at all');
+    assert.equal(normPath(stdout), normPath(join(pluginDir, PIPELINE_CLI_REL)));
+  });
+});
