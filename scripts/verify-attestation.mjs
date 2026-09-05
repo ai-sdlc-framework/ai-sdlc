@@ -8,15 +8,24 @@
  *
  * AISDLC-566: this file is now a THIN DRIVER. All verification logic
  * (Merkle primitives, head-binding relaxations, content-hash matching,
- * `runVerifier`, etc.) lives in the shared, monorepo-independent
- * `ai-sdlc-plugin/scripts/verify-attestation-core.mjs`, which this file
- * imports via a monorepo-relative path (unchanged behaviour — this script
- * is only ever run inside this checkout) and binds to the compiled
- * `orchestrator/dist/runtime/attestations.js` runtime, exactly as before
- * AISDLC-566. The consumer-runnable counterpart is
- * `ai-sdlc-plugin/scripts/verify-attestation.mjs`, which imports the SAME
- * core module but resolves the `@ai-sdlc/orchestrator` runtime via the
- * signer's candidate-walk pattern instead of this static path.
+ * `runVerifier`, etc.) lives in the shared, monorepo-independent core
+ * module, which this file imports via a monorepo-relative path (unchanged
+ * behaviour — this script is only ever run inside this checkout) and binds
+ * to the compiled `orchestrator/dist/runtime/attestations.js` runtime,
+ * exactly as before AISDLC-566.
+ *
+ * AISDLC-575: the core module moved from
+ * `ai-sdlc-plugin/scripts/verify-attestation-core.mjs` to
+ * `pipeline-cli/attestation-core/verify-core.mjs` — INSIDE the published
+ * `@ai-sdlc/pipeline-cli` package — so a consumer's CI can run the full
+ * verifier via `cli-attestation verify` with NO Claude Code plugin
+ * installed at all (`pipeline-cli/src/cli/attestation.ts`'s `verify`
+ * subcommand imports the SAME file directly, colocated in its own
+ * package). The plugin-installed consumer counterpart,
+ * `ai-sdlc-plugin/scripts/verify-attestation.mjs`, imports the SAME core
+ * module too, resolved from BOTH `@ai-sdlc/orchestrator` (runtime) and
+ * `@ai-sdlc/pipeline-cli` (core) via the signer's trusted candidate-walk
+ * pattern instead of this static path — three drivers, one implementation.
  *
  * `export *` re-exports every named export of the core module so existing
  * consumers (`scripts/verify-attestation.test.mjs`, other scripts that
@@ -25,12 +34,12 @@
 
 import { appendFileSync } from 'node:fs';
 
-import * as core from '../ai-sdlc-plugin/scripts/verify-attestation-core.mjs';
+import * as core from '../pipeline-cli/attestation-core/verify-core.mjs';
 import * as attestationRuntime from '../orchestrator/dist/runtime/attestations.js';
 
 core.bindRuntime(attestationRuntime);
 
-export * from '../ai-sdlc-plugin/scripts/verify-attestation-core.mjs';
+export * from '../pipeline-cli/attestation-core/verify-core.mjs';
 
 const invokedDirectly = process.argv[1]?.endsWith('verify-attestation.mjs');
 if (invokedDirectly) {

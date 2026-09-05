@@ -363,6 +363,37 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     assert.deepEqual(parsed.changedCodeFiles, []);
   });
 
+  it('exits 0 when only attestation-core/*.mjs changed (AISDLC-575)', () => {
+    // attestation-core/verify-core.mjs is the single-sourced, dependency-free
+    // DSSE verifier consumed by three drivers via subprocess / dynamic import
+    // from a resolved on-disk location; vitest never instruments it in-process
+    // (it is exercised end-to-end). It must be excluded from the enforcement
+    // denominator, regardless of whether coverage data exists — same rationale
+    // as bin/*.mjs above.
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    const head = commitFile(
+      repo,
+      'pipeline-cli/attestation-core/verify-core.mjs',
+      [
+        "import { createHash } from 'node:crypto';",
+        'export function verifyV6Envelope() {',
+        "  return { status: 'valid', _h: createHash('sha256') };",
+        '}',
+      ].join('\n') + '\n',
+      'feat: move verify-core into pipeline-cli',
+    );
+    // No coverage file written — the gate must skip, not fail, for this file.
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 for attestation-core mjs, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.reason, 'no-instrumentable-changes');
+    assert.deepEqual(parsed.changedCodeFiles, []);
+  });
+
   it('exits 0 when only docs/examples/**.ts changed (AISDLC-428)', () => {
     // docs/examples/** are reference scaffolds for adopters (e.g. RFC-0036
     // BYO-translator examples). Exercised via copy-paste into adopter

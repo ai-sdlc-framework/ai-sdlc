@@ -46,6 +46,11 @@ import {
 } from '../attestation/sign-v6.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { determineVerdictClass } from '../attestation/verdict-class.js';
+import { loadVerifyCore } from '../attestation/verify-core-loader.js';
+import {
+  loadAttestationRuntime,
+  TrustedRuntimeResolutionError,
+} from '../attestation/verify-runtime.js';
 import {
   computeHarnessTranscriptHash,
   nonceMarkerLiteral,
@@ -797,9 +802,76 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           emitText(nonceMarkerLiteral(nonce));
         },
       )
+      // ── verify (AISDLC-575) ───────────────────────────────────────────────────
+      .command(
+        'verify',
+        'Run the full v6/v5/v4/v3 DSSE attestation verifier against a PR head/base, ' +
+          'with NO Claude Code plugin required — the plugin-less consumer-CI entrypoint ' +
+          "(AISDLC-575). Mirrors `.github/workflows/verify-attestation.yml`'s " +
+          'PR_HEAD_SHA/PR_BASE_SHA inputs. Resolves the `@ai-sdlc/orchestrator` runtime ' +
+          'ONLY from trusted locations outside the checkout being verified — never from ' +
+          'inside it (AISDLC-566/570 containment preserved) — and FAILS CLOSED (non-zero ' +
+          'exit) when the runtime is unresolvable, too old, or the envelope is invalid/' +
+          'tampered. Prints `status=valid|invalid` + `reason=...` to stdout.',
+        (y: Argv) =>
+          y
+            .option('head', {
+              type: 'string',
+              demandOption: true,
+              describe: '40-char hex git commit SHA of the PR head being verified.',
+            })
+            .option('base', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                "40-char hex git commit SHA of the PR's base (typically origin/main's tip).",
+            }),
+        async (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const headSha = args['head'] as string;
+          const baseSha = args['base'] as string;
+
+          if (!isValidHeadSha(headSha)) {
+            process.stderr.write(
+              `[cli-attestation] verify: --head must be exactly 40 lowercase hex characters ` +
+                `(got ${headSha.length}-char value: ${JSON.stringify(headSha.slice(0, 80))})\n`,
+            );
+            process.exit(2);
+          }
+          if (!isValidHeadSha(baseSha)) {
+            process.stderr.write(
+              `[cli-attestation] verify: --base must be exactly 40 lowercase hex characters ` +
+                `(got ${baseSha.length}-char value: ${JSON.stringify(baseSha.slice(0, 80))})\n`,
+            );
+            process.exit(2);
+          }
+
+          let runtimeMod: unknown;
+          try {
+            runtimeMod = await loadAttestationRuntime(repoRoot);
+          } catch (err) {
+            if (err instanceof TrustedRuntimeResolutionError) {
+              process.stderr.write(`ERROR: ${err.message}\n`);
+              process.exit(2);
+            }
+            throw err;
+          }
+
+          const core = await loadVerifyCore();
+          core.bindRuntime(runtimeMod);
+
+          const out = core.runVerifier({ headSha, baseSha, repoRoot });
+          let output = `status=${out.status}\nreason=${out.reason}\n`;
+          if (out.overallVerdictClass) {
+            output += `verdictClass=${out.overallVerdictClass}\n`;
+          }
+          process.stdout.write(output);
+          process.exitCode = out.status === 'valid' ? 0 : 1;
+        },
+      )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify)',
       )
       .help()
       .alias('h', 'help')

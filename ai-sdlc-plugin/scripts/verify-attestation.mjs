@@ -1,26 +1,37 @@
 #!/usr/bin/env node
 /**
- * AISDLC-566 — consumer-runnable v6/v5/v4/v3 DSSE attestation verifier.
+ * AISDLC-566 / AISDLC-575 — consumer-runnable v6/v5/v4/v3 DSSE attestation
+ * verifier, via the plugin.
  *
  * Ships inside the plugin so an adopter/consumer repo — one that has the
  * plugin installed but does NOT have this monorepo's `orchestrator/dist/`
  * checked out — can independently re-verify a `sign-attestation.mjs`-signed
  * DSSE envelope in its OWN CI, without depending on this monorepo's
- * `scripts/` + sibling `orchestrator/dist/`.
+ * `scripts/` + sibling `orchestrator/dist/`. AISDLC-575 additionally ships a
+ * PLUGIN-LESS entrypoint (`cli-attestation verify` in `@ai-sdlc/pipeline-cli`)
+ * for consumers who do not have the Claude Code plugin installed at all —
+ * see that package's `src/cli/attestation.ts` `verify` subcommand.
  *
- * AISDLC-554 made the SIGNER reachable this way; this closes the matching
- * gap on the VERIFIER side. Root cause this fixes: `scripts/verify-attestation.mjs`
- * had a static, monorepo-relative import —
+ * AISDLC-554 made the SIGNER reachable this way; AISDLC-566 closed the
+ * matching gap on the VERIFIER side. Root cause this fixes:
+ * `scripts/verify-attestation.mjs` had a static, monorepo-relative import —
  * `'../orchestrator/dist/runtime/attestations.js'` — that only resolves
  * inside this checkout.
  *
  * All the actual verification logic (Merkle primitives, head-binding
  * relaxations, content-hash matching, `runVerifier`) lives in the shared,
- * dependency-free `./verify-attestation-core.mjs`, which `scripts/verify-attestation.mjs`
- * (this monorepo's own CI verifier) ALSO imports — one verification
- * codepath, two drivers. This file only owns:
- *   1. resolving the `@ai-sdlc/orchestrator` runtime module from a TRUSTED
- *      location (below), and
+ * dependency-free `verify-core.mjs` module. AISDLC-575 moved that module
+ * OUT of this plugin package and INTO the published `@ai-sdlc/pipeline-cli`
+ * package, at `<pipeline-cli>/attestation-core/verify-core.mjs` — the
+ * single canonical implementation now used by THREE drivers: this file,
+ * `scripts/verify-attestation.mjs` (this monorepo's own CI verifier), and
+ * `@ai-sdlc/pipeline-cli`'s own `cli-attestation verify` subcommand (which
+ * imports it directly, colocated in the same package — no candidate walk
+ * needed there). This file therefore now resolves TWO trusted packages
+ * (`@ai-sdlc/orchestrator` for the runtime primitives, AND
+ * `@ai-sdlc/pipeline-cli` for the verify-core module itself) and otherwise
+ * only owns:
+ *   1. resolving both modules from TRUSTED locations (below), and
  *   2. the CLI surface (args / env vars / exit code).
  *
  * ── Runtime resolution — TRUSTED LOCATIONS ONLY (AISDLC-566 security fix) ──
@@ -87,8 +98,6 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve, dirname, relative, isAbsolute, parse as parsePath } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-
-import * as core from './verify-attestation-core.mjs';
 
 function fail(msg, code = 2) {
   process.stderr.write(`ERROR: ${msg}\n`);
@@ -179,6 +188,21 @@ function attestationRuntimeCandidates() {
 }
 
 /**
+ * AISDLC-575: the shared verify-core module now lives INSIDE the published
+ * `@ai-sdlc/pipeline-cli` package (not this plugin), at
+ * `attestation-core/verify-core.mjs` (not under `dist/` — it's a plain,
+ * dependency-free, uncompiled ESM file shipped as-is). Same
+ * trusted-locations-only candidate walk as the orchestrator runtime above —
+ * this is UNTRUSTED-PR-facing content, so it must never resolve from
+ * `repoRoot`.
+ */
+const VERIFY_CORE_SUBPATH = ['attestation-core', 'verify-core.mjs'];
+
+function verifyCoreCandidates() {
+  return trustedRuntimeModuleCandidates('@ai-sdlc/pipeline-cli', VERIFY_CORE_SUBPATH);
+}
+
+/**
  * Minimum acceptable version for an INSTALLED runtime copy — matches the
  * signer's guard (AISDLC-554) so verification never silently runs against a
  * canonicalization-drifted copy that would reject envelopes the real
@@ -187,7 +211,18 @@ function attestationRuntimeCandidates() {
  * "this is my own trusted checkout" case for a consumer verifier.
  */
 const MIN_RUNTIME_VERSIONS = {
-  '@ai-sdlc/orchestrator': [0, 14, 0],
+  // AISDLC-574: bumped from [0,14,0]. 0.14.0 predates the verdictClass
+  // (0.17.0) and harnessTranscriptHash (0.19.0) modules the plugin's
+  // SubagentStart hook (AISDLC-572) and nonce injection (AISDLC-573)
+  // producers depend on downstream — this driver was previously missed by
+  // that bump (only sign-attestation.mjs was updated); fixed here.
+  '@ai-sdlc/orchestrator': [0, 19, 0],
+  // AISDLC-575: the verify-core module ships starting with the pipeline-cli
+  // release that includes this task. A pre-575 installed copy simply won't
+  // have `attestation-core/verify-core.mjs` on disk at all — the existsSync
+  // candidate filter (not this version gate) is what rejects those, so the
+  // floor here only needs to be a reasonable lower bound, not exact.
+  '@ai-sdlc/pipeline-cli': [0, 19, 0],
 };
 
 function candidatePackageVersion(candidate, distSubpath) {
@@ -290,6 +325,21 @@ async function loadAttestationRuntime(repoRoot) {
   );
 }
 
+/**
+ * AISDLC-575: resolve the single-sourced verify-core module from
+ * `@ai-sdlc/pipeline-cli`, trusted-locations-only (same policy as the
+ * orchestrator runtime above).
+ */
+async function loadVerifyCoreModule(repoRoot) {
+  return loadRuntimeModule(
+    repoRoot,
+    'verify-core module',
+    '@ai-sdlc/pipeline-cli',
+    verifyCoreCandidates(),
+    VERIFY_CORE_SUBPATH,
+  );
+}
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -355,6 +405,7 @@ async function main() {
   }
 
   const runtimeMod = await loadAttestationRuntime(repoRoot);
+  const core = await loadVerifyCoreModule(repoRoot);
   core.bindRuntime(runtimeMod);
 
   const out = core.runVerifier({ headSha, baseSha, repoRoot });

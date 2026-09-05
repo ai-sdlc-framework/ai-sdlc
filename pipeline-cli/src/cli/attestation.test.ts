@@ -24,6 +24,11 @@ import {
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
 import { buildAttestationCli } from './attestation.js';
+import {
+  loadAttestationRuntime,
+  TrustedRuntimeResolutionError,
+} from '../attestation/verify-runtime.js';
+import { loadVerifyCore } from '../attestation/verify-core-loader.js';
 
 /**
  * AISDLC-570 round-2 review: mocked so the `emit-leaf --claude-session-id`
@@ -36,6 +41,27 @@ vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>();
   return { ...actual, homedir: () => fakeHomeDirForHarnessTests || actual.homedir() };
 });
+
+/**
+ * AISDLC-575: the `verify` subcommand's wiring (arg validation + exit-code
+ * mapping) is tested in isolation from the actual trusted-runtime resolution
+ * and Merkle-proof verification logic — both of those have their own
+ * dedicated hermetic test suites (`verify-runtime.test.ts`,
+ * `attestation-core/verify-core.test.mjs`). Mocking these two modules lets
+ * the CLI-level tests below assert purely on `buildAttestationCli`'s own
+ * behavior: which exit code it produces for a given core-verifier result,
+ * and what it prints to stdout.
+ */
+vi.mock('../attestation/verify-runtime.js', () => {
+  class TrustedRuntimeResolutionError extends Error {}
+  return {
+    loadAttestationRuntime: vi.fn(),
+    TrustedRuntimeResolutionError,
+  };
+});
+vi.mock('../attestation/verify-core-loader.js', () => ({
+  loadVerifyCore: vi.fn(),
+}));
 
 /**
  * AISDLC-421: deterministic test patch-id used to drive `emit-leaf` in
@@ -2135,5 +2161,173 @@ describe('reviewer-dispatch nonce injection — end-to-end activation (AISDLC-57
     const leaves = loadLeavesUnderTest(tmpRoot, '1'.repeat(40));
     expect(leaves).toHaveLength(1);
     expect(leaves[0].harnessTranscriptHash).toBeNull();
+  });
+});
+
+// ── CLI: verify (AISDLC-575) ──────────────────────────────────────────────────
+//
+// The trusted-runtime resolution walk (`loadAttestationRuntime`) and the
+// actual v6/v5/v4/v3 verification core (`loadVerifyCore().runVerifier`) are
+// mocked here (see the `vi.mock` calls near the top of this file) so these
+// tests isolate the CLI's OWN wiring: --head/--base shape validation, and the
+// exit-code + stdout mapping from the core verifier's result shape.
+
+const VALID_HEAD_SHA = 'a'.repeat(40);
+const VALID_BASE_SHA = 'b'.repeat(40);
+
+describe('cli-attestation verify — --head/--base shape validation', () => {
+  let savedExitCode: number | string | null | undefined;
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode;
+    process.exitCode = undefined;
+  });
+
+  afterEach(() => {
+    process.exitCode = savedExitCode;
+  });
+
+  it('rejects a non-40-hex --head with exit 2, before touching runtime resolution', async () => {
+    await expect(
+      buildAttestationCli(['verify', '--head', 'not-a-sha', '--base', VALID_BASE_SHA]).parseAsync(),
+    ).rejects.toThrow('process.exit(2)');
+    expect(flushStdout()).toBe('');
+    expect(stderrChunks.join('')).toMatch(/--head must be exactly 40 lowercase hex characters/);
+    expect(loadAttestationRuntime).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-40-hex --base with exit 2, before touching runtime resolution', async () => {
+    await expect(
+      buildAttestationCli(['verify', '--head', VALID_HEAD_SHA, '--base', 'ZZZZ']).parseAsync(),
+    ).rejects.toThrow('process.exit(2)');
+    expect(flushStdout()).toBe('');
+    expect(stderrChunks.join('')).toMatch(/--base must be exactly 40 lowercase hex characters/);
+    expect(loadAttestationRuntime).not.toHaveBeenCalled();
+  });
+
+  it('rejects an uppercase (non-lowercase) --head with exit 2', async () => {
+    await expect(
+      buildAttestationCli([
+        'verify',
+        '--head',
+        VALID_HEAD_SHA.toUpperCase(),
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).rejects.toThrow('process.exit(2)');
+    expect(loadAttestationRuntime).not.toHaveBeenCalled();
+  });
+
+  it('rejects a --head that is 39 characters (one short) with exit 2', async () => {
+    await expect(
+      buildAttestationCli([
+        'verify',
+        '--head',
+        'a'.repeat(39),
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).rejects.toThrow('process.exit(2)');
+    expect(loadAttestationRuntime).not.toHaveBeenCalled();
+  });
+});
+
+describe('cli-attestation verify — exit-code mapping from the core verifier', () => {
+  let savedExitCode: number | string | null | undefined;
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.mocked(loadAttestationRuntime).mockReset();
+    vi.mocked(loadVerifyCore).mockReset();
+  });
+
+  afterEach(() => {
+    process.exitCode = savedExitCode;
+  });
+
+  it('maps status=valid to exit 0 and prints status=/reason= to stdout', async () => {
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi
+      .fn()
+      .mockReturnValue({ status: 'valid', reason: 'ok', overallVerdictClass: 'clean' });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    await expect(
+      buildAttestationCli([
+        'verify',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(0);
+    const out = flushStdout();
+    expect(out).toMatch(/status=valid/);
+    expect(out).toMatch(/reason=ok/);
+    expect(out).toMatch(/verdictClass=clean/);
+    expect(runVerifier).toHaveBeenCalledWith(
+      expect.objectContaining({ headSha: VALID_HEAD_SHA, baseSha: VALID_BASE_SHA }),
+    );
+  });
+
+  it('maps status=invalid to exit 1 and prints status=/reason= to stdout, without a verdictClass line when absent', async () => {
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi.fn().mockReturnValue({ status: 'invalid', reason: 'tampered' });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    await expect(
+      buildAttestationCli([
+        'verify',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(1);
+    const out = flushStdout();
+    expect(out).toMatch(/status=invalid/);
+    expect(out).toMatch(/reason=tampered/);
+    expect(out).not.toMatch(/verdictClass=/);
+  });
+
+  it('maps a TrustedRuntimeResolutionError to exit 2 with the ERROR: message on stderr, never touching stdout', async () => {
+    vi.mocked(loadAttestationRuntime).mockRejectedValue(
+      new TrustedRuntimeResolutionError('Cannot locate a TRUSTED AI-SDLC attestation runtime.'),
+    );
+
+    await expect(
+      buildAttestationCli([
+        'verify',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).rejects.toThrow('process.exit(2)');
+
+    expect(flushStdout()).toBe('');
+    expect(stderrChunks.join('')).toMatch(
+      /ERROR: Cannot locate a TRUSTED AI-SDLC attestation runtime\./,
+    );
+    expect(loadVerifyCore).not.toHaveBeenCalled();
+  });
+
+  it('re-throws a non-TrustedRuntimeResolutionError from runtime resolution rather than swallowing it', async () => {
+    vi.mocked(loadAttestationRuntime).mockRejectedValue(new Error('unexpected boom'));
+
+    await expect(
+      buildAttestationCli([
+        'verify',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).rejects.toThrow('unexpected boom');
   });
 });

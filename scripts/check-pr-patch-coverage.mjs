@@ -129,6 +129,15 @@ const NON_INSTRUMENTED_PATTERNS = [
   // hermetic + integration tests (e.g. AC-2 real-hook test). Vitest can't
   // instrument them. Same rationale as bin/*.mjs above.
   /(^|\/)ai-sdlc-plugin\/hooks\/.+\.(?:js|mjs|cjs)$/,
+  // attestation-core/*.mjs — the single-sourced, dependency-free ESM DSSE
+  // verifier (`verify-core.mjs`, AISDLC-575). Consumed by three drivers (the
+  // cli-attestation verify subcommand, the plugin wrapper, and the repo CI
+  // verifier), each of which invokes it via subprocess / dynamic import from a
+  // resolved on-disk location — so vitest never instruments it in-process. It
+  // is exercised end-to-end by the plugin verify-attestation e2e suite + the
+  // node_modules walk-up tests. Same rationale as bin/*.mjs and hooks above;
+  // it was likewise uninstrumented in its prior home (ai-sdlc-plugin/scripts/).
+  /(^|\/)attestation-core\/.+\.mjs$/,
   // docs/examples/** — reference scaffolds for adopters (e.g. BYO translator
   // examples from RFC-0036 Phase 10). Exercised via copy-paste into adopter
   // projects, not via vitest instrumentation. Same rationale as bin shims +

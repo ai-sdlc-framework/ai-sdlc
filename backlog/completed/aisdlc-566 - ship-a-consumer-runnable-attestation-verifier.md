@@ -79,8 +79,11 @@ counterpart to `scripts/verify-attestation.mjs` (the in-repo CI verifier).
 
 - Extracted the entire v6/v5/v4/v3 verification core (Merkle primitives,
   head-binding relaxations, content-hash matching, `runVerifier`) out of
-  `scripts/verify-attestation.mjs` into a new shared module,
-  `ai-sdlc-plugin/scripts/verify-attestation-core.mjs`. Zero behavioural
+  `scripts/verify-attestation.mjs` into a new shared module inside the
+  plugin package's `scripts/` directory (AISDLC-575 later moved this module
+  to `pipeline-cli/attestation-core/verify-core.mjs` so it's reachable from
+  the published `@ai-sdlc/pipeline-cli` bin — see that task for the current
+  location). Zero behavioural
   changes — every function is byte-for-byte identical except the
   `@ai-sdlc/orchestrator` runtime bindings, which moved from a static
   monorepo-relative import to a `bindRuntime()` call the driver makes once.
