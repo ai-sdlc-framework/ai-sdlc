@@ -195,7 +195,7 @@ export function determineVerdictClass(opts: {
         // return 'independent' for THIS leaf (the marker existed and
         // matched); a leftover file only risks over-crediting a future
         // leaf, which is the fail-open direction we accept here since the
-        // window is short (2h) and the file is local-disk only.
+        // window is short (30 min, MARKER_MAX_AGE_MS) and the file is local-disk only.
         try {
           unlinkSync(filePath);
         } catch {
