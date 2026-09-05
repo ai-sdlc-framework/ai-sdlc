@@ -105,11 +105,20 @@ export interface DoctorAdapters {
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /**
-   * Run a shell command and capture stdout/exitCode. Production shells
-   * out via `execSync`; tests inject a stub. Used only for the
-   * best-effort `gh api` branch-protection lookup.
+   * Run a shell command and capture stdout/exitCode (and stderr, when the
+   * caller needs to classify the failure — e.g. npm E404 vs. an offline
+   * registry). Production shells out via `execFileSync`; tests inject a stub.
+   * `stderr` is optional so existing stubs that return only
+   * `{ stdout, exitCode }` keep compiling.
    */
-  runCommand: (cmd: string, args: string[]) => { stdout: string; exitCode: number };
+  runCommand: (
+    cmd: string,
+    args: string[],
+  ) => {
+    stdout: string;
+    exitCode: number;
+    stderr?: string;
+  };
 }
 
 export function buildProductionDoctorAdapters(): DoctorAdapters {
@@ -123,13 +132,14 @@ export function buildProductionDoctorAdapters(): DoctorAdapters {
       try {
         const stdout = execFileSync(cmd, args, {
           encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-        return { stdout, exitCode: 0 };
+        return { stdout, exitCode: 0, stderr: '' };
       } catch (err) {
-        const e = err as { stdout?: Buffer | string; status?: number };
+        const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
         return {
           stdout: typeof e.stdout === 'string' ? e.stdout : (e.stdout?.toString() ?? ''),
+          stderr: typeof e.stderr === 'string' ? e.stderr : (e.stderr?.toString() ?? ''),
           exitCode: e.status ?? 1,
         };
       }

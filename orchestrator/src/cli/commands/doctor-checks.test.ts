@@ -247,6 +247,21 @@ describe('checkRuntimeDepsPins', () => {
     expect(trap!.title).toContain('^0.19.0');
   });
 
+  it('renders an accurate exact-patch message for a ^0.0.x caret trap', () => {
+    const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(pluginDir, {
+      rootRuntimeDeps: { '@ai-sdlc/orchestrator': '^0.0.5' },
+    });
+    const results = checkRuntimeDepsPins(makeCtx(makeAdapters()));
+    const trap = results.find((r) => r.id.startsWith('runtime-deps-caret-trap'));
+    expect(trap).toBeTruthy();
+    expect(trap!.severity).toBe('warn');
+    expect(trap!.title).toContain('exact patch');
+    expect(trap!.title).toContain('^0.0.5');
+    // Must NOT claim the (inaccurate) "excludes the next minor" framing.
+    expect(trap!.title).not.toContain('next minor');
+  });
+
   it('does NOT flag a >=1.0.0 or ^1.x pin', () => {
     const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
     writePluginManifests(pluginDir, {
@@ -537,14 +552,70 @@ describe('checkNpmDistTagReachability', () => {
     expect(results[0].anonymizableEvidence).toMatchObject({ resolved: '1.2.0' });
   });
 
-  it('fails per-pin when npm view cannot resolve the pin (unpublished/unreachable version)', () => {
+  it('fails per-pin when the registry replies the version does not exist (E404)', () => {
     const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
     writePluginManifests(pluginDir, { rootRuntimeDeps: { '@ai-sdlc/orchestrator': '^99.0.0' } });
     const results = checkNpmDistTagReachability(
-      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) })),
+      makeCtx(
+        makeAdapters({
+          runCommand: () => ({
+            stdout: '',
+            exitCode: 1,
+            stderr: 'npm error code E404\nnpm error 404 Not Found',
+          }),
+        }),
+      ),
     );
     expect(results[0].severity).toBe('fail');
     expect(results[0].id).toBe('npm-dist-tag:@ai-sdlc/orchestrator');
+  });
+
+  it('fails per-pin when npm exits 0 but resolves no version (empty range match)', () => {
+    const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(pluginDir, { rootRuntimeDeps: { '@ai-sdlc/orchestrator': '^99.0.0' } });
+    const results = checkNpmDistTagReachability(
+      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 0, stderr: '' }) })),
+    );
+    expect(results[0].severity).toBe('fail');
+  });
+
+  it('warns (fail-open), not fails, when the npm registry is unreachable (offline/DNS/timeout)', () => {
+    const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(pluginDir, { rootRuntimeDeps: { '@ai-sdlc/orchestrator': '^0.20.0' } });
+    const results = checkNpmDistTagReachability(
+      makeCtx(
+        makeAdapters({
+          runCommand: () => ({
+            stdout: '',
+            exitCode: 1,
+            stderr:
+              'npm error code ENOTFOUND\nnpm error network request to https://registry.npmjs.org failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org',
+          }),
+        }),
+      ),
+    );
+    expect(results[0].severity).toBe('warn');
+    expect(results[0].id).toBe('npm-dist-tag:@ai-sdlc/orchestrator');
+  });
+
+  it('passes "--" to npm view so a name/pin starting with "-" is not parsed as a flag', () => {
+    const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(pluginDir, { rootRuntimeDeps: { '@ai-sdlc/orchestrator': '^1.0.0' } });
+    let capturedArgs: string[] = [];
+    checkNpmDistTagReachability(
+      makeCtx(
+        makeAdapters({
+          runCommand: (_cmd, args) => {
+            capturedArgs = args;
+            return { stdout: '1.2.0\n', exitCode: 0, stderr: '' };
+          },
+        }),
+      ),
+    );
+    expect(capturedArgs).toContain('--');
+    expect(capturedArgs.indexOf('--')).toBeLessThan(
+      capturedArgs.indexOf('@ai-sdlc/orchestrator@^1.0.0'),
+    );
   });
 
   it('reports pass with no pins to check', () => {

@@ -303,10 +303,17 @@ export function checkRuntimeDepsPins(ctx: DoctorRunContext): DoctorCheckResult[]
 
   for (const [name, pin] of Object.entries(deps)) {
     if (typeof pin === 'string' && CARET_ZERO_TRAP.test(pin)) {
+      // Caret semantics differ within 0.x: `^0.m.p` (m>0) locks to the
+      // minor and excludes the next minor (^0.19.0 excludes 0.20.0),
+      // whereas `^0.0.p` locks to the exact patch and excludes the next
+      // patch too. Render an accurate example for each subset.
+      const caretDetail = /^\^0\.0\./.test(pin)
+        ? 'a caret-0.0.x range — locks to the exact patch (e.g. ^0.0.5 excludes 0.0.6)'
+        : 'a caret-0.x range — excludes the next minor (e.g. ^0.19.0 excludes 0.20.0)';
       results.push({
         id: `runtime-deps-caret-trap:${name}`,
         severity: 'warn',
-        title: `${name} pin "${pin}" is a caret-0.x range — excludes the next minor (e.g. ^0.19.0 excludes 0.20.0)`,
+        title: `${name} pin "${pin}" is ${caretDetail}`,
         remediation: `Verify compatibility, then widen the pin for ${name} (AISDLC-574)`,
         anonymizableEvidence: { package: name, pin },
       });
@@ -606,13 +613,37 @@ export function checkNpmDistTagReachability(ctx: DoctorRunContext): DoctorCheckR
 
   for (const [name, pin] of Object.entries(deps)) {
     if (typeof pin !== 'string') continue;
-    const out = ctx.adapters.runCommand('npm', ['view', `${name}@${pin}`, 'version']);
+    // `--` stops npm option parsing so a name/pin that begins with '-'
+    // (from a hand-edited manifest) is never mistaken for a flag.
+    const out = ctx.adapters.runCommand('npm', ['view', '--', `${name}@${pin}`, 'version']);
     const resolved = out.stdout.trim().split('\n').filter(Boolean).pop();
     if (out.exitCode !== 0 || !resolved) {
+      // Distinguish a genuine "the registry replied and this version does
+      // not exist" (E404 → a real pin bug, `fail`) from "npm could not
+      // reach the registry at all" (offline / DNS / timeout / rate-limit →
+      // a transient environment condition, `warn`). Failing closed on the
+      // latter would flip doctor's default exit code to 1 on an air-gapped
+      // CI runner or during a brief npm outage — a false positive unrelated
+      // to repo config. This mirrors the fail-open stance of the other
+      // network-touching checks (plugin-version, marketplace-catalog-drift).
+      const stderr = out.stderr ?? '';
+      const notFound = /\bE404\b|404 Not Found|is not in this registry|no such package/i.test(
+        stderr,
+      );
+      if (out.exitCode !== 0 && !notFound) {
+        results.push({
+          id: `npm-dist-tag:${name}`,
+          severity: 'warn',
+          title: `${name}@${pin} could not be checked — npm registry unreachable (offline, DNS failure, timeout, or rate-limited)`,
+          remediation: `Re-run with network access: npm view ${name}@${pin} version`,
+          anonymizableEvidence: { package: name, pin },
+        });
+        continue;
+      }
       results.push({
         id: `npm-dist-tag:${name}`,
         severity: 'fail',
-        title: `${name}@${pin} did not resolve on the npm registry — pin references an unreachable/unpublished version`,
+        title: `${name}@${pin} did not resolve on the npm registry — pin references an unpublished/non-existent version`,
         remediation: `npm view ${name}@${pin} version`,
         anonymizableEvidence: { package: name, pin },
       });
