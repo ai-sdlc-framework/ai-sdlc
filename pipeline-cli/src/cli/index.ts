@@ -157,6 +157,14 @@ export function buildCli(): Argv {
             .option('harness', {
               type: 'string',
               describe: "Override the harness label (default: 'claude-code').",
+            })
+            .option('reviewer-nonce', {
+              type: 'string',
+              describe:
+                'AISDLC-573: the diff-binding nonce the slash command body generated (via ' +
+                '`cli-attestation generate-nonce`) and embedded in each reviewer prompt ' +
+                'BEFORE spawning them. Passed through verbatim to every `emit-leaf --nonce` ' +
+                'call so harnessTranscriptHash can find it in the reviewer transcripts.',
             }),
         async (argv) => {
           const opts: RunReconcileOptions = {
@@ -173,6 +181,7 @@ export function buildCli(): Argv {
           }
           if (argv['reviewer-model']) opts.reviewerModel = argv['reviewer-model'] as string;
           if (argv['harness']) opts.harness = argv['harness'] as string;
+          if (argv['reviewer-nonce']) opts.reviewerNonce = argv['reviewer-nonce'] as string;
           if (argv['reviewer-agent-ids']) {
             opts.reviewerAgentIds = parseJsonOption(
               argv['reviewer-agent-ids'],

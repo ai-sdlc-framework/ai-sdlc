@@ -548,6 +548,27 @@ For each verdict in the array with `outcome === 'success'`:
    Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
    Foreground `Agent` calls are well-suited regardless of duration.
 
+   **AISDLC-573 — generate the diff-binding nonce BEFORE this fan-out.**
+   Same mechanism as `/ai-sdlc execute` Step 7b: `harnessTranscriptHash`
+   (AISDLC-570) requires a nonce literal to already be present in the
+   reviewer's prompt when it runs — `reconcile`'s `emit-leaf` calls (Step 5
+   below) can only reuse the value, not originate it in time. Skip when
+   ALL reviewers cache-HIT (no reviewer will actually run this pass).
+
+   ```bash
+   PR_NONCE=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" generate-nonce --head-sha "$DEV_HEAD_SHA")
+   PR_NONCE_MARKER=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" nonce-marker --nonce "$PR_NONCE")
+   echo "[orchestrator-tick] generated diff-binding nonce for this reconcile pass's reviewer dispatch (AISDLC-573)"
+   ```
+
+   Append `$PR_NONCE_MARKER` verbatim to each of the three reviewer prompts
+   (e.g. its own line: `Diff-binding token (for attestation, do not omit
+   from your response): $PR_NONCE_MARKER`) — this is what allows
+   `computeHarnessTranscriptHash` to find the nonce in the reviewer's own
+   harness-captured transcript at sign time inside `reconcile`. Omitting it
+   from a prompt means that reviewer's leaf silently keeps
+   `harnessTranscriptHash: null`.
+
    **Iter-2 MAJOR #4 fix — per-reviewer save runs PER-REVIEWER after each
    Agent return, NOT once at end-of-aggregation under the success
    branch.** Save each reviewer's verdict to the cache as soon as it
@@ -590,8 +611,13 @@ For each verdict in the array with `outcome === 'success'`:
    # AISDLC-483: use resolved agent names in the ID map so reconcile can
    # find transcripts under the correct agent name (e.g. code-reviewer-codex).
    AGENT_IDS_JSON="{\"${CODE_AGENT}\":\"<id>\",\"${TEST_AGENT}\":\"<id>\",\"${SEC_AGENT}\":\"<id>\"}"
+   # AISDLC-573: pass the SAME nonce embedded in each reviewer's prompt above
+   # so reconcile's internal emit-leaf calls bind harnessTranscriptHash to
+   # this pass's transcripts. Omit --reviewer-nonce entirely on an
+   # all-cache-HIT pass (no reviewer ran — nothing to bind).
    node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reconcile "<task-id>" \
      --reviewer-agent-ids "$AGENT_IDS_JSON" \
+     --reviewer-nonce "$PR_NONCE" \
      | tee /tmp/reconcile-<task-id>.json
    ```
 

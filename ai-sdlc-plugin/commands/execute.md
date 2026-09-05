@@ -1052,6 +1052,18 @@ else
 fi
 ```
 
+**AISDLC-573 — generate the diff-binding nonce BEFORE any reviewer spawns.** AISDLC-570 built `harnessTranscriptHash` (a sign-time binding of the attestation leaf to the reviewer subagent's own harness-captured transcript) gated on a nonce literal appearing in that transcript. The nonce must exist and be embedded in the reviewer's prompt BEFORE the reviewer runs — `emit-leaf` in Step 7c can only reuse it, not originate it in time. Skip this block when `$SELECTED` is empty or `INCR_SKIP=true` (no reviewer will actually run, so there is nothing to bind).
+
+```bash
+# One nonce per PR, shared by every reviewer spawned in this Step 7b — all
+# reviewers review the SAME diff/head SHA, so one nonce correctly binds all
+# of their transcripts to it (AISDLC-573).
+HEAD_SHA_FOR_NONCE=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
+PR_NONCE=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" generate-nonce --head-sha "$HEAD_SHA_FOR_NONCE")
+PR_NONCE_MARKER=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" nonce-marker --nonce "$PR_NONCE")
+echo "[ai-sdlc-progress] Step 7b: generated diff-binding nonce for this PR's reviewer dispatch (AISDLC-573)"
+```
+
 Spawn **only the reviewers in `$SELECTED`** in parallel (single message, N Agent tool calls where 0 ≤ N ≤ 3). For each name in `$SELECTED`, call `_resolve_reviewer_agent "$name"` to get the canonical agent name, then dispatch that agent. If `$SELECTED` is empty (e.g. the classifier saw an empty diff), skip Step 7b entirely and treat the gate as APPROVED with zero findings.
 
 **AISDLC-142 — incremental short-circuit:** if `INCR_SKIP=true`, do NOT spawn any reviewers in `$SELECTED`. Write the auto-approved verdict (from `cli-incremental-decide auto-approved-verdict --reviewed-sha $INCR_LAST_SHA`) for each one and skip directly to Step 8 aggregation. The classifier-skipped reviewers' AISDLC-141 auto-approved verdicts still apply for the others.
@@ -1065,6 +1077,7 @@ Each spawned-reviewer prompt should contain:
 - The task title, description, AC list
 - Contents of `.ai-sdlc/review-policy.md` if present (project-specific calibration)
 - The branch name + base (`main`)
+- **The diff-binding nonce marker (AISDLC-573):** append the literal value of `$PR_NONCE_MARKER` verbatim to the prompt (e.g. as its own line: `Diff-binding token (for attestation, do not omit from your response): $PR_NONCE_MARKER`). This is what allows `computeHarnessTranscriptHash` (AISDLC-570) to find the nonce in the reviewer's own harness-captured transcript at sign time — omitting it means `harnessTranscriptHash` silently stays `null` for that reviewer's leaf.
 
 Each returns a verdict JSON: `{ approved, findings, summary }`. When the classifier fell open (`fellOpen: true`), spawn ALL 3 — the existing safety semantics are preserved (AC-4).
 
@@ -1076,10 +1089,9 @@ Each returns a verdict JSON: `{ approved, findings, summary }`. When the classif
 
 After all spawned reviewer Agent calls complete and each reviewer's verdict JSON has been written, emit one Merkle leaf per reviewer. This step is **required for v6 signing (the default post-AISDLC-409)** — the v6 signer reads `.ai-sdlc/transcript-leaves.jsonl` and exits 1 if no leaves are found for the task. When `AI_SDLC_V5_LEGACY=1` (or legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0`) is set, the signer falls back to v5 and the leaves become harmless overhead.
 
-```bash
-# Capture the PR's head SHA once; used to derive the nonce.
-HEAD_SHA_FOR_NONCE=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
+**AISDLC-573 — reuse the Step 7b nonce, don't regenerate.** `HEAD_SHA_FOR_NONCE` and `$PR_NONCE` were already computed in Step 7b (before the reviewers were spawned) so the SAME nonce that was embedded in each reviewer's prompt is now passed to `emit-leaf --nonce`. If Step 7b's block was skipped (empty `$SELECTED` or `INCR_SKIP=true`), this loop body never executes either, so the unset variable is never dereferenced.
 
+```bash
 # Emit one leaf per reviewer that actually ran (skip classifier-skipped and
 # INCR_SKIP-skipped reviewers — their auto-approved verdicts are synthetic and
 # have no real transcript file to hash). Each invocation is sequential so the
@@ -1159,6 +1171,14 @@ for REVIEWER_NAME in $SELECTED; do
     continue
   fi
 
+  # AISDLC-573: pass the SAME nonce embedded in this reviewer's prompt in Step
+  # 7b so computeHarnessTranscriptHash (AISDLC-570) can find it in the harness
+  # transcript. No --claude-session-id is passed: no reliable env-var source
+  # for the running session's own id was found on investigation (see
+  # docs/design/aisdlc-570-opt-a-feasibility.md §4.3 opt-i) — emit-leaf falls
+  # back to the most-recently-modified session directory under the resolved
+  # project slug, the same disclosed-race heuristic AISDLC-216 already uses
+  # for `.active-task` sentinel resolution.
   node "$PIPELINE_CLI_BIN/cli-attestation.mjs" emit-leaf \
     --repo-root "$WORKTREE_PATH" \
     --task-id "$TASK_ID" \
@@ -1168,6 +1188,7 @@ for REVIEWER_NAME in $SELECTED; do
     --head-sha "$HEAD_SHA_FOR_NONCE" \
     --harness "$REVIEWER_HARNESS" \
     --model "$EMIT_MODEL" \
+    --nonce "$PR_NONCE" \
     || echo "[ai-sdlc-progress] Step 7c: emit-leaf for ${AGENT_NAME} exited non-zero — non-fatal here, but the v6-default sign step will block (use AI_SDLC_V5_LEGACY=1 to fall back to v5)"
 done
 
@@ -1303,8 +1324,20 @@ else
       git diff --name-only origin/main...HEAD > "/tmp/pr-files-${TASK_ID}.txt"
       cd -
 
+      # AISDLC-573: the rebase moved HEAD, so re-derive the nonce for this
+      # round from the NEW head SHA — a nonce embedded in a stale reviewer
+      # prompt from before the rebase would never match this round's
+      # transcripts. Same generate-nonce/nonce-marker calls as Step 7b.
+      HEAD_SHA_FOR_NONCE=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
+      PR_NONCE=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" generate-nonce --head-sha "$HEAD_SHA_FOR_NONCE")
+      PR_NONCE_MARKER=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" nonce-marker --nonce "$PR_NONCE")
+
       # Spawn 3 reviewers in parallel (single message, three Agent tool calls)
       # exactly as Step 7 did — code-reviewer, test-reviewer, security-reviewer.
+      # Each prompt MUST include $PR_NONCE_MARKER verbatim (AISDLC-573), same
+      # as Step 7b, so the re-review's emit-leaf call (also re-run with
+      # --nonce "$PR_NONCE") can bind harnessTranscriptHash to this round's
+      # transcripts.
       # If all three approve: proceed to Step 10. If any request changes: this
       # round counts toward Step 9's iteration cap (max 2 dev iterations total).
       # If the cap is already at 2, ship as `[needs-human-attention]` per Step 9.

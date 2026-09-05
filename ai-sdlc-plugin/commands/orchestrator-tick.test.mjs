@@ -486,3 +486,36 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-557 loud dependency gates',
     );
   });
 });
+
+// ── AISDLC-573: nonce injection activates harnessTranscriptHash ─────────────
+describe('/ai-sdlc orchestrator-tick body — reviewer-dispatch nonce injection (AISDLC-573)', () => {
+  it('Step 3 generates a per-pass nonce via cli-attestation generate-nonce BEFORE spawning reviewers', () => {
+    assert.match(
+      cmdBody,
+      /cli-attestation\.mjs["']?\s+generate-nonce\s+--head-sha\s+"\$DEV_HEAD_SHA"/,
+    );
+  });
+
+  it('Step 3 renders the embeddable literal via cli-attestation nonce-marker', () => {
+    assert.match(cmdBody, /cli-attestation\.mjs["']?\s+nonce-marker\s+--nonce\s+"\$PR_NONCE"/);
+  });
+
+  it('instructs each reviewer prompt to include the nonce marker literal verbatim', () => {
+    assert.match(cmdBody, /PR_NONCE_MARKER.*verbatim|verbatim.*PR_NONCE_MARKER/i);
+  });
+
+  it('the reconcile invocation passes --reviewer-nonce reusing the Step 3-generated value', () => {
+    const reconcileBlockMatch = cmdBody.match(
+      /reconcile "<task-id>"[\s\S]*?--reviewer-nonce "\$PR_NONCE"/,
+    );
+    assert.ok(
+      reconcileBlockMatch,
+      'the ai-sdlc-pipeline reconcile invocation must pass --reviewer-nonce "$PR_NONCE" (the same nonce embedded in the reviewer prompts)',
+    );
+  });
+
+  it('generate-nonce and nonce-marker invocations use $PIPELINE_CLI_BIN (AISDLC-245.4 consistency)', () => {
+    assert.match(cmdBody, /\$PIPELINE_CLI_BIN\/cli-attestation\.mjs" generate-nonce/);
+    assert.match(cmdBody, /\$PIPELINE_CLI_BIN\/cli-attestation\.mjs" nonce-marker/);
+  });
+});

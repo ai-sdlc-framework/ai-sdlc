@@ -681,6 +681,58 @@ describe('runReconcile — orchestration', () => {
     }
   });
 
+  it('reviewerNonce reaches every emit-leaf invocation verbatim (AISDLC-573)', () => {
+    writeDevVerdict(boardDir);
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const sharedNonce = 'd'.repeat(64);
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      reviewerNonce: sharedNonce,
+      spawn: customSpawn,
+    });
+    expect(emitCalls.length).toBe(3);
+    for (const call of emitCalls) {
+      expect(call).toEqual(expect.arrayContaining(['--nonce', sharedNonce]));
+    }
+  });
+
+  it('omits --nonce from emit-leaf when reviewerNonce is not provided (legacy caller)', () => {
+    writeDevVerdict(boardDir);
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn: customSpawn,
+    });
+    expect(emitCalls.length).toBe(3);
+    for (const call of emitCalls) {
+      expect(call).not.toContain('--nonce');
+    }
+  });
+
   it('caller-supplied transcript + verdict overrides reach the emit-leaf args', () => {
     writeDevVerdict(boardDir);
     const explicitTranscript = path.join(workDir, 'tx', 'override.jsonl');
