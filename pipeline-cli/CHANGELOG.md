@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.20.0...pipeline-cli-v0.20.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* single-source v6 Merkle primitives to fix multi-leaf verify (AISDLC-579) ([#1005](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1005)) ([9042b6e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9042b6efb5ff0402809f067b5015562410d18c3c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.20.1
+
 ## [0.20.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.19.0...pipeline-cli-v0.20.0) (2026-09-05)
 
 
