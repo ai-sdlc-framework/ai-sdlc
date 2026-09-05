@@ -31,6 +31,10 @@ export function formatMinimal(data: Record<string, unknown>): string {
       const budget = data.budget as Record<string, unknown>;
       return `Cost: $${(summary.totalCostUsd as number).toFixed(2)} | Budget: ${(budget.utilizationPercent as number).toFixed(0)}% used | Runs: ${summary.entryCount}`;
     }
+    case 'doctor': {
+      const state = (data.state as string).toUpperCase();
+      return `Doctor: ${state} | enforcement=${data.enforcementConfigured}`;
+    }
     default:
       return JSON.stringify(data);
   }

@@ -315,25 +315,44 @@ export function renderDoctorReport(result: AttestationDoctorResult): string[] {
 
 // ── Command ───────────────────────────────────────────────────────────
 
-export const doctorCommand = new Command('doctor')
-  .description("Report this repo's real attestation-governance state (artifacts vs. enforcement)")
-  .action(async (_opts, cmd) => {
-    const globalOpts = cmd.parent?.opts() ?? {};
-    const format = globalOpts.format ?? 'table';
-    const projectDir = process.cwd();
+/**
+ * Builds the `doctor` Command. `buildAdapters` defaults to the real
+ * filesystem/`gh` adapters; tests inject a stub factory so the
+ * branch-protection state (and therefore the exit-code contract) is
+ * deterministic without shelling out to a real `gh` process.
+ */
+export function createDoctorCommand(
+  buildAdapters: () => DoctorAdapters = buildProductionDoctorAdapters,
+): Command {
+  return new Command('doctor')
+    .description("Report this repo's real attestation-governance state (artifacts vs. enforcement)")
+    .action(async (_opts, cmd) => {
+      const globalOpts = cmd.parent?.opts() ?? {};
+      const format = globalOpts.format ?? 'table';
+      const projectDir = process.cwd();
 
-    const adapters = buildProductionDoctorAdapters();
-    const result = checkAttestationGovernance(projectDir, adapters);
+      const adapters = buildAdapters();
+      const result = checkAttestationGovernance(projectDir, adapters);
 
-    if (format === 'json') {
-      console.log(formatOutput('json', result as unknown as Record<string, unknown>));
-    } else {
-      for (const line of renderDoctorReport(result)) {
-        console.log(line);
+      if (format === 'json') {
+        console.log(formatOutput('json', result as unknown as Record<string, unknown>));
+      } else if (format === 'minimal') {
+        console.log(
+          formatOutput('minimal', {
+            type: 'doctor',
+            ...result,
+          } as unknown as Record<string, unknown>),
+        );
+      } else {
+        for (const line of renderDoctorReport(result)) {
+          console.log(line);
+        }
       }
-    }
 
-    if (result.state !== 'fully-configured') {
-      process.exitCode = 1;
-    }
-  });
+      if (result.state !== 'fully-configured') {
+        process.exitCode = 1;
+      }
+    });
+}
+
+export const doctorCommand = createDoctorCommand();
