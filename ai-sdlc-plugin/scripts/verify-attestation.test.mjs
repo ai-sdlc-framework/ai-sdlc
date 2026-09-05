@@ -107,6 +107,44 @@ function installedSignV6Path(dir) {
   return join(dir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'dist', 'attestation', 'sign-v6.js');
 }
 
+/**
+ * AISDLC-575: the shared verify-core module now lives inside
+ * `@ai-sdlc/pipeline-cli` (not this plugin), at
+ * `attestation-core/verify-core.mjs` (uncompiled — no `dist/` prefix).
+ */
+const REAL_VERIFY_CORE = join(repoRoot, 'pipeline-cli', 'attestation-core', 'verify-core.mjs');
+
+/** Path an npm/pnpm install would place the verify-core module at, under `dir`. */
+function installedVerifyCorePath(dir) {
+  return join(
+    dir,
+    'node_modules',
+    '@ai-sdlc',
+    'pipeline-cli',
+    'attestation-core',
+    'verify-core.mjs',
+  );
+}
+
+/** Write a shim that re-exports the real verify-core module at an arbitrary path. */
+function writeVerifyCoreShim(target) {
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `export * from '${REAL_VERIFY_CORE.replace(/\\/g, '\\\\')}';\n`);
+}
+
+/**
+ * Install BOTH trusted dependencies `verify-attestation.mjs` now needs
+ * (AISDLC-575) at `dir` — the orchestrator runtime AND the pipeline-cli
+ * verify-core module — matching the shape a real `CLAUDE_PLUGIN_ROOT`
+ * install would have. `runtimeBody` is forwarded to `writeRuntimeShim` for
+ * tests that need to plant a hostile/stale runtime while keeping a healthy
+ * verify-core module alongside it.
+ */
+function installTrustedVerifyDeps(dir, runtimeBody) {
+  writeRuntimeShim(installedRuntimePath(dir), runtimeBody);
+  writeVerifyCoreShim(installedVerifyCorePath(dir));
+}
+
 /** Write a shim that re-exports the real built v6 signer at an arbitrary path. */
 function writeSignV6Shim(target) {
   mkdirSync(dirname(target), { recursive: true });
@@ -266,7 +304,7 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     // real adopter CI recipe installs it into $CLAUDE_PLUGIN_ROOT, never
     // into the PR checkout itself.
     const pluginDir = join(base, 'plugin');
-    writeRuntimeShim(installedRuntimePath(pluginDir));
+    installTrustedVerifyDeps(pluginDir);
 
     const verifyRes = runVerify(
       fixture.root,
@@ -344,7 +382,7 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     );
 
     const pluginDir = join(base, 'plugin');
-    writeRuntimeShim(installedRuntimePath(pluginDir));
+    installTrustedVerifyDeps(pluginDir);
 
     const verifyRes = runVerify(
       fixture.root,
@@ -399,7 +437,7 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     const tamperedHeadSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
 
     const pluginDir = join(base, 'plugin');
-    writeRuntimeShim(installedRuntimePath(pluginDir));
+    installTrustedVerifyDeps(pluginDir);
 
     const verifyRes = runVerify(
       fixture.root,
@@ -414,7 +452,7 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     const root = join(base, 'app');
     const fixture = setupAdopterRepo(root);
     const pluginDir = join(base, 'plugin');
-    writeRuntimeShim(installedRuntimePath(pluginDir));
+    installTrustedVerifyDeps(pluginDir);
 
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
@@ -483,7 +521,7 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}`);
 
     const pluginDir = join(base, 'plugin');
-    writeRuntimeShim(installedRuntimePath(pluginDir));
+    installTrustedVerifyDeps(pluginDir);
 
     // No --head/--base, no PR_HEAD_SHA/PR_BASE_SHA — the script must default
     // to `git rev-parse HEAD` and `git merge-base origin/main HEAD`.
@@ -527,6 +565,27 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
     );
     assert.equal(verifyRes.status, 2);
     assert.match(verifyRes.stderr, /Rejected as too old/);
+  });
+
+  it('AISDLC-575: fails closed when the orchestrator runtime resolves but the pipeline-cli verify-core module does not', () => {
+    const root = join(base, 'app');
+    const fixture = setupAdopterRepo(root);
+    const pluginDir = join(base, 'plugin');
+    // Orchestrator runtime IS present and trusted...
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+    // ...but the verify-core module (now hosted in @ai-sdlc/pipeline-cli) is
+    // NOT installed anywhere trusted. This must fail closed, not silently
+    // fall back to some other resolution or crash uninformatively.
+    const verifyRes = runVerify(
+      fixture.root,
+      ['--head', fixture.headSha, '--base', fixture.baseSha],
+      { HOME: tmpHome, CLAUDE_PLUGIN_ROOT: pluginDir },
+    );
+    assert.equal(verifyRes.status, 2, `stdout: ${verifyRes.stdout}\nstderr: ${verifyRes.stderr}`);
+    assert.doesNotMatch(verifyRes.stdout, /status=valid/);
+    assert.match(verifyRes.stderr, /TRUSTED/);
+    assert.match(verifyRes.stderr, /verify-core module/);
+    assert.match(verifyRes.stderr, /node_modules[/\\]@ai-sdlc[/\\]pipeline-cli/);
   });
 });
 
@@ -659,7 +718,7 @@ export function validateTrustedReviewers() {
 
     // The TRUSTED runtime (real, honest) lives outside repoRoot.
     const pluginDir = join(base, 'plugin');
-    writeRuntimeShim(installedRuntimePath(pluginDir));
+    installTrustedVerifyDeps(pluginDir);
 
     const verifyRes = runVerify(
       fixture.root,
@@ -785,9 +844,25 @@ describe('verify-attestation.mjs — module surface', () => {
     const source = readFileSync(rootDriverPath, 'utf-8');
     assert.match(
       source,
-      /verify-attestation-core\.mjs/,
-      'scripts/verify-attestation.mjs must import the shared core so both drivers stay ' +
-        'behaviourally identical (AISDLC-566)',
+      /pipeline-cli\/attestation-core\/verify-core\.mjs/,
+      'scripts/verify-attestation.mjs must import the single-sourced core (AISDLC-575: now ' +
+        'hosted in @ai-sdlc/pipeline-cli) so all drivers stay behaviourally identical (AISDLC-566)',
+    );
+  });
+
+  it('this driver resolves the verify-core module from @ai-sdlc/pipeline-cli, not a local copy (AISDLC-575)', () => {
+    const source = readFileSync(verifyHelperPath, 'utf-8');
+    assert.doesNotMatch(
+      source,
+      /from ['"]\.\/verify-attestation-core\.mjs['"]/,
+      'ai-sdlc-plugin/scripts/verify-attestation.mjs must not statically import a local ' +
+        './verify-attestation-core.mjs copy — the canonical implementation now lives in ' +
+        '@ai-sdlc/pipeline-cli, single-sourced (AISDLC-575)',
+    );
+    assert.match(
+      source,
+      /@ai-sdlc\/pipeline-cli/,
+      'the consumer verifier must resolve the verify-core module from @ai-sdlc/pipeline-cli (AISDLC-575)',
     );
   });
 });

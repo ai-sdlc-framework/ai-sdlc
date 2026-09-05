@@ -24,6 +24,13 @@ export default tseslint.config(
       'ai-sdlc-plugin/commands/',
       '**/coverage/',
       'pipeline-cli/bin/',
+      // AISDLC-575: single-sourced attestation verifier core — plain,
+      // dependency-free ESM (not TypeScript, not part of pipeline-cli's
+      // tsconfig `include`) so the exact same bytes can be imported by the
+      // plugin driver, the repo CI driver, and this package's own CLI
+      // without a build step. Mirrors the prior '**/scripts/' ignore that
+      // covered this file at its old ai-sdlc-plugin/scripts/ location.
+      'pipeline-cli/attestation-core/',
       // Zero-dep fixture for RFC-0043 UCVG live demo (plain JS, not TypeScript)
       'ucvg-demo/',
     ],

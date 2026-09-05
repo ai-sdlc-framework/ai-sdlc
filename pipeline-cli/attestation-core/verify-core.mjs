@@ -1,22 +1,37 @@
 /**
- * AISDLC-566 — Shared v6/v5/v4/v3 DSSE attestation verification core.
+ * AISDLC-566 / AISDLC-575 — Shared v6/v5/v4/v3 DSSE attestation verification core.
  *
  * This module holds ALL of the verification logic that was previously
- * inlined in `scripts/verify-attestation.mjs` (the repo-root CI verifier).
- * It is now shipped INSIDE the plugin package (`ai-sdlc-plugin/scripts/`) so
- * a consumer/adopter repo — which has the plugin installed but does NOT have
- * this monorepo's `orchestrator/dist/` checked out — can import the exact
- * same verification codepath the monorepo's own CI uses.
+ * inlined in `scripts/verify-attestation.mjs` (the repo-root CI verifier),
+ * then (AISDLC-566) shipped inside the plugin package. AISDLC-575 moved it
+ * again — this time into the PUBLISHED `@ai-sdlc/pipeline-cli` package, at
+ * `<pipeline-cli>/attestation-core/verify-core.mjs` — so a consumer's CI can
+ * run the full verifier via `npx`/an installed `cli-attestation` bin with
+ * NO plugin present at all. Before this move, the only consumer-reachable
+ * copy required the Claude Code plugin to be installed (AISDLC-566), which
+ * is unavailable on a plain GitHub Actions runner.
  *
- * Two thin drivers import this module:
- *   - `scripts/verify-attestation.mjs` (repo-root, monorepo-relative import
- *     of `../orchestrator/dist/runtime/attestations.js` — unchanged
- *     behaviour, keeps `.github/workflows/verify-attestation.yml` working).
- *   - `ai-sdlc-plugin/scripts/verify-attestation.mjs` (consumer-runnable,
- *     resolves the `@ai-sdlc/orchestrator` runtime via the SAME candidate
- *     walk `sign-attestation.mjs` uses — published package export /
- *     node_modules walk-up / plugin dirs — instead of a monorepo-relative
- *     path).
+ * This file is intentionally a plain, dependency-free ESM module (no
+ * TypeScript, no build step) so the EXACT SAME bytes can be imported by all
+ * three drivers below without a compile step or a second copy — the
+ * security property this task (AISDLC-575) exists to guarantee: one
+ * verifyV6Envelope implementation, not a vendored/drifting copy that could
+ * false-accept or false-reject.
+ *
+ * Three thin drivers import this module:
+ *   - `pipeline-cli/src/cli/attestation.ts`'s `verify` subcommand (this
+ *     package's OWN published bin — colocated relative import, no candidate
+ *     walk needed; see `pipeline-cli/src/attestation/verify-core-loader.ts`).
+ *   - `ai-sdlc-plugin/scripts/verify-attestation.mjs` (consumer-runnable via
+ *     the plugin; resolves BOTH `@ai-sdlc/orchestrator` AND
+ *     `@ai-sdlc/pipeline-cli`'s `attestation-core/verify-core.mjs` via the
+ *     SAME trusted-locations-only candidate walk `sign-attestation.mjs`
+ *     uses for the v6 signer — published package export / node_modules
+ *     walk-up / plugin dirs — instead of a monorepo-relative path).
+ *   - `scripts/verify-attestation.mjs` (repo-root CI verifier, monorepo-
+ *     relative import of `../pipeline-cli/attestation-core/verify-core.mjs`
+ *     — unchanged behaviour, keeps `.github/workflows/verify-attestation.yml`
+ *     working).
  *
  * This module does NOT statically import `@ai-sdlc/orchestrator/runtime`
  * itself — the small set of functions it needs from that package

@@ -12,8 +12,10 @@
     "dist",
     "bin",
     "templates",
+    "attestation-core",
     "!dist/**/*.test.*",
-    "!dist/**/*.map"
+    "!dist/**/*.map",
+    "!attestation-core/*.test.mjs"
   ],
   "type": "module",
   "main": "dist/index.js",

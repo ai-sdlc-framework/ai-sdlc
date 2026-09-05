@@ -1,17 +1,23 @@
-# Adopter CI recipe — verifying a v6 attestation in a consumer repo (AISDLC-566)
+# Adopter CI recipe — verifying a v6 attestation in a consumer repo (AISDLC-566 / AISDLC-575)
 
 AISDLC-554 made the DSSE attestation **signer** (`sign-attestation.mjs`)
 reachable from a consumer/adopter repo — one that has the AI-SDLC plugin
-installed but does not have this monorepo checked out. AISDLC-566 closes the
-matching gap on the **verifier** side: `ai-sdlc-plugin/scripts/verify-attestation.mjs`
-independently re-verifies a signed envelope in the adopter's own CI, without
-depending on this monorepo's `scripts/` + sibling `orchestrator/dist/`.
+installed but does not have this monorepo checked out. AISDLC-566 closed the
+matching gap on the **verifier** side for plugin-installed adopters. AISDLC-575
+closes the LAST gap: a **plugin-less** verify entrypoint — `cli-attestation
+verify`, published inside `@ai-sdlc/pipeline-cli` — for a consumer's CI that has
+no Claude Code plugin installed at all, only Node and npm.
+
+**Use the plugin-less recipe below unless you already have the plugin
+installed in CI for other reasons** (in which case
+`ai-sdlc-plugin/scripts/verify-attestation.mjs` also works and calls the exact
+same verification code — see "Alternative: plugin-installed recipe" below).
 
 ## Trust boundary — read this before wiring the recipe
 
 The verifier's job is to decide whether **untrusted PR content** should be
-trusted. That means the runtime module the verifier imports to make that
-decision must NOT itself come from the untrusted content being checked —
+trusted. That means the runtime/verifier modules it imports to make that
+decision must NOT themselves come from the untrusted content being checked —
 otherwise a malicious PR could commit its own forged runtime (or an
 `orchestrator/dist/`-shaped tree, or a fake `node_modules/@ai-sdlc/orchestrator`)
 and have the verifier import and trust it, reporting the PR's own forged
@@ -22,50 +28,49 @@ so a malicious runtime is arbitrary code execution in your CI).
 the signer's.** `sign-attestation.mjs` (AISDLC-554) resolves a monorepo dev
 path and a repo-local `node_modules` copy *first*, because the signer only
 ever runs against content the operator already trusts (their own checkout).
-`ai-sdlc-plugin/scripts/verify-attestation.mjs` runs against the PR HEAD
-being verified, so it **only** trusts locations that live outside the
-checkout:
+`cli-attestation verify` and `ai-sdlc-plugin/scripts/verify-attestation.mjs`
+run against the PR HEAD being verified, so they **only** trust locations that
+live outside the checkout:
 
-1. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — the plugin
-   install on the CI runner, populated fresh by `install-runtime-deps.sh`
-   from the plugin's pinned `runtimeDependencies`. Never derived from PR
-   file content.
-2. `node_modules` walking up from the verifier script's OWN on-disk
-   location — the same plugin install, reached without the env vars (some
-   CI/hook contexts don't inherit them).
+1. `$CLAUDE_PLUGIN_DIR` / `$CLAUDE_PLUGIN_ROOT` node_modules — present when
+   running inside a Claude Code plugin session; irrelevant for a plain CI job.
+2. `node_modules` walking up from the resolver's OWN on-disk location — for
+   `cli-attestation verify` this means `@ai-sdlc/orchestrator` installed as a
+   normal sibling npm dependency alongside `@ai-sdlc/pipeline-cli`, never
+   derived from the PR checkout under verification.
 
 Every resolved candidate is additionally hard-rejected if it turns out to
 live inside the checked-out repo (even via a symlink), and no candidate is
 ever exempt from the minimum-version guard. If no trusted copy is found,
 the verifier **fails closed** (`status` is never printed as `valid`; exit
-code `2`) rather than falling back to anything repo-local.
+code `2`) rather than falling back to anything repo-local or re-implementing
+canonicalization.
 
-**Do NOT** `pnpm add -D @ai-sdlc/orchestrator` inside the repo being
-verified and expect the verifier to use it — that copy lives inside
-`repoRoot` and is deliberately never trusted, by design. If you want a
-repo-pinned version, install it into a directory OUTSIDE the checkout (for
-example, a separate `actions/checkout` step into a sibling directory, or a
-global/user-level npm install on the runner) and point `$CLAUDE_PLUGIN_ROOT`
-at it, or simply rely on the plugin's own zero-config install (below).
+**Do NOT** rely on the PR's own committed `package.json`/lockfile to pin the
+runtime version, and don't expect a copy installed *inside* the checkout
+being verified to be trusted — install the runtime as a normal dependency of
+your CI job's OWN environment (e.g. a separate `npm install` step that isn't
+part of the diff under review), matching the "install the pinned runtime,
+don't rely on PR-committed runtime" rule from AISDLC-566/570.
 
 ## Prerequisites
 
-1. The plugin is installed (`.claude/plugins/ai-sdlc/` or wherever your
-   Claude Code plugin cache lives), which declares `@ai-sdlc/orchestrator`
-   as a `runtimeDependency` — `install-runtime-deps.sh` puts a copy in the
-   plugin's own `node_modules/`, OUTSIDE the checked-out repo. This is the
-   zero-config path and the one the recipe below relies on.
-2. A committed `.ai-sdlc/trusted-reviewers.yaml` with the operator's public
+1. Node ≥ 18 on the CI runner. No Claude Code plugin required.
+2. `@ai-sdlc/orchestrator` and `@ai-sdlc/pipeline-cli` installed as pinned
+   dependencies (`^0.19.0` or later) — see the recipe below. Both must be
+   installed OUTSIDE the untrusted PR checkout's own tree (a separate
+   `npm install` step, not something the PR's `package.json` controls).
+3. A committed `.ai-sdlc/trusted-reviewers.yaml` with the operator's public
    key(s) — the same file `/ai-sdlc execute` writes locally. This is the
    ONLY source of truth for which signing key is trusted; nothing the
    runtime module itself claims can override it (see the hostile-runtime
    regression tests in `ai-sdlc-plugin/scripts/verify-attestation.test.mjs`
    for the exact threat this guards against).
-3. A committed DSSE envelope at `.ai-sdlc/attestations/<patch-id>.v6.dsse.json`
+4. A committed DSSE envelope at `.ai-sdlc/attestations/<patch-id>.v6.dsse.json`
    (or the legacy v5/v4/v3 filename shapes) — produced by
    `sign-attestation.mjs` per the AISDLC-554 recipe.
 
-## GitHub Actions recipe
+## GitHub Actions recipe (plugin-less, AISDLC-575)
 
 ```yaml
 name: verify-attestation
@@ -89,17 +94,23 @@ jobs:
         with:
           node-version: 22
 
-      # Install the AI-SDLC plugin's runtime dependency OUTSIDE the checkout
-      # (e.g. via install-runtime-deps.sh into $CLAUDE_PLUGIN_ROOT, or your
-      # own equivalent trusted-install step on the runner). Do NOT install it
-      # into the checked-out repo's own node_modules — the verifier will not
-      # trust a copy that lives inside the PR being verified (see "Trust
-      # boundary" above).
+      # Install the TRUSTED runtime + verify-core into a directory OUTSIDE
+      # the checked-out repo — e.g. a sibling directory, not `${{ github.workspace }}`.
+      # This is what makes both packages resolve from a TRUSTED location per
+      # the "Trust boundary" section above; do NOT `npm install` them into
+      # the checkout being verified.
+      - name: Install trusted verifier runtime
+        working-directory: /tmp
+        run: |
+          mkdir -p ai-sdlc-verifier && cd ai-sdlc-verifier
+          npm init -y >/dev/null
+          npm install --no-save '@ai-sdlc/orchestrator@^0.19.0' '@ai-sdlc/pipeline-cli@^0.19.0'
+          echo "AI_SDLC_VERIFIER_HOME=/tmp/ai-sdlc-verifier" >> "$GITHUB_ENV"
 
       - name: Verify v6 attestation
         id: verify
         run: |
-          node ai-sdlc-plugin/scripts/verify-attestation.mjs \
+          node "$AI_SDLC_VERIFIER_HOME/node_modules/@ai-sdlc/pipeline-cli/bin/cli-attestation.mjs" verify \
             --head "${{ github.event.pull_request.head.sha }}" \
             --base "${{ github.event.pull_request.base.sha }}"
         # Exit code: 0 on status=valid, 1 on status=invalid, 2 when no
@@ -108,19 +119,24 @@ jobs:
         # check / PR comment step to parse if desired.
 ```
 
-## What the script does
+The `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DIR` candidate is irrelevant here
+(unset) — resolution falls through to the `node_modules` walk-up from the
+bin's own on-disk location, which is inside `/tmp/ai-sdlc-verifier/node_modules/`,
+never the checked-out PR.
 
-`ai-sdlc-plugin/scripts/verify-attestation.mjs`:
+## What `cli-attestation verify` does
 
 1. Resolves the `@ai-sdlc/orchestrator` runtime from a TRUSTED location
    only — see "Trust boundary" above for the full resolution order and
-   rationale. Each candidate is version-gated against a minimum (`0.14.0`)
+   rationale. Each candidate is version-gated against a minimum (`0.19.0`)
    so a stale copy can never silently win by directory position, and any
    candidate that resolves inside the checked-out repo is hard-rejected
    even if it otherwise looks legitimate. The resolved path is echoed to
    stderr for auditability.
-2. Runs the SAME verification core (`ai-sdlc-plugin/scripts/verify-attestation-core.mjs`)
-   this monorepo's own `.github/workflows/verify-attestation.yml` uses — the
+2. Runs the SAME verification core — `verify-core.mjs`, shipped inside
+   `@ai-sdlc/pipeline-cli` at `attestation-core/verify-core.mjs` — that this
+   monorepo's own `.github/workflows/verify-attestation.yml` and the
+   plugin-installed driver both use. One implementation, three callers: the
    Merkle-transcript proof + trusted-key signature check for v6 envelopes,
    with fallback support for legacy v5/v4/v3 envelopes.
 3. Prints `status=valid|invalid` and `reason=<detail>` to stdout, and exits
@@ -130,16 +146,35 @@ jobs:
 ## Local dry run
 
 ```bash
-node ai-sdlc-plugin/scripts/verify-attestation.mjs \
+node pipeline-cli/bin/cli-attestation.mjs verify \
   --head "$(git rev-parse HEAD)" \
   --base "$(git merge-base origin/main HEAD)"
 ```
 
-With no `--head`/`--base` (and no `PR_HEAD_SHA`/`PR_BASE_SHA` env vars —
-the workflow's env-var contract also works, matching the in-repo CI
-verifier), the script defaults to `git rev-parse HEAD` and
-`git merge-base origin/main HEAD` in the current working directory. Local
-dry runs from inside this monorepo will resolve the runtime via the
-`ai-sdlc-plugin` package's own `node_modules` (if installed) or `$CLAUDE_PLUGIN_ROOT`
-— NOT via `orchestrator/dist/` in the same checkout, since that path is
-deliberately excluded from this driver's candidate list.
+(From inside a checkout with `@ai-sdlc/orchestrator` reachable via
+`node_modules` walk-up from the bin's own location — this monorepo's own
+workspace `node_modules` symlinks satisfy that automatically after `pnpm
+install`.)
+
+## Alternative: plugin-installed recipe (AISDLC-566)
+
+If your CI already has the AI-SDLC Claude Code plugin installed (for the
+review/dispatch pipeline itself), `ai-sdlc-plugin/scripts/verify-attestation.mjs`
+is a zero-extra-install alternative — it resolves BOTH the orchestrator
+runtime and the (now pipeline-cli-hosted) verify-core module from the
+plugin's own `node_modules`, populated by `install-runtime-deps.sh` from the
+plugin's pinned `runtimeDependencies`:
+
+```yaml
+      - name: Verify v6 attestation
+        id: verify
+        run: |
+          node ai-sdlc-plugin/scripts/verify-attestation.mjs \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --base "${{ github.event.pull_request.base.sha }}"
+```
+
+Both drivers call the identical `verify-core.mjs` — there is only one
+verification implementation, single-sourced inside `@ai-sdlc/pipeline-cli`
+(AISDLC-575); pick whichever entrypoint matches what's already installed in
+your CI environment.
