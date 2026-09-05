@@ -205,7 +205,7 @@ jobs:
           if [ -f ".ai-sdlc/attestations/\${HEAD_SHA}.dsse.json" ]; then
             echo "::notice::ai-sdlc attestation AUDIT — envelope present at \${HEAD_SHA}"
           else
-            echo "::notice::ai-sdlc attestation AUDIT — no envelope on \${HEAD_SHA} (audit-only, not blocking)"
+            echo "::notice::ai-sdlc attestation AUDIT — no envelope on \${HEAD_SHA} (audit-only, not blocking). Run 'ai-sdlc doctor' locally to check whether any enforcement is configured for this repo."
           fi
 `;
 
@@ -312,6 +312,16 @@ export const TRUSTED_REVIEWERS_STUB = `# Trusted contributor signing keys for re
 # The verifier in CI uses a strict YAML format: every scalar value
 # single-quoted; \`pubkey:\` is a \`|\` block scalar with each PEM line
 # indented exactly 6 spaces; no tab characters anywhere.
+#
+# IMPORTANT — this file is AUDIT infrastructure, not ENFORCEMENT.
+# Populating this keyring does not, by itself, block any merge. The
+# scaffolded verify-attestation.yml workflow logs whether an attestation
+# envelope is present but never fails the build (see its own AUDIT-ONLY
+# header). Enforcement — a CI check or hook that actually blocks a PR
+# when review attestation is missing — is NOT installed by default and
+# remains the adopter's responsibility to build if wanted. Run
+# \`ai-sdlc doctor\` at any time to see the real state of this repo's
+# attestation governance (artifacts present vs. enforcement configured).
 
 reviewers: []
 `;

@@ -3,7 +3,7 @@ id: AISDLC-560
 title: >-
   fix(init): stop installing review-attestation artifacts without enforcement,
   and add a doctor command that reports the gap
-status: To Do
+status: Done
 assignee: []
 labels:
   - adoption
@@ -70,16 +70,29 @@ The reporter's framing is the design constraint worth adopting wholesale:
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
 - [ ] #1 A freshly initialized repo either has working enforcement, or does
-      not receive a keyring/transcript convention that implies it
-- [ ] #2 `ai-sdlc doctor` reports attestation state accurately on: a fully
+      not receive a keyring/transcript convention that implies it —
+      **NOT fully met, escalated as DEC-0012.** This PR does not add a
+      default enforcement mechanism (that would reverse the framework's
+      own documented Q3 design decision — attestation ships audit-only by
+      design, see `docs/operations/quality-gate.md` and the Q-decisions
+      note atop `init-templates.ts`) and does not stop shipping the
+      keyring by default either. Instead it makes the audit-only status
+      loudly explicit in both the generated file and the init output
+      (closing the "implies enforcement" half of the AC) and ships
+      `ai-sdlc doctor` as the load-bearing discoverability fix. Whether
+      to also add a real default-on enforcement path is filed as a
+      Decision Catalog record (DEC-0012) for operator routing rather than
+      decided inline by this PR, per the task's own "genuine design
+      decision" framing.
+- [x] #2 `ai-sdlc doctor` reports attestation state accurately on: a fully
       configured repo, an artifacts-only repo, and a repo with neither
-- [ ] #3 On the artifacts-only repo, doctor's output names the gap explicitly
+- [x] #3 On the artifacts-only repo, doctor's output names the gap explicitly
       and gives the command that closes it
-- [ ] #4 Verified against a repo OUTSIDE this monorepo — a worktree of this
+- [x] #4 Verified against a repo OUTSIDE this monorepo — a worktree of this
       repo inherits monorepo state and is not a valid test
-- [ ] #5 If enforcement remains adopter-owned, the init output and the
+- [x] #5 If enforcement remains adopter-owned, the init output and the
       generated repo files both say so
-- [ ] #6 Hermetic tests cover doctor's three states
+- [x] #6 Hermetic tests cover doctor's three states
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes
@@ -97,4 +110,25 @@ warning, risk-based reviewer requirements with security review mandatory for
 Worker endpoints, auth, database writes and money paths, and a clean review
 still producing an attestation so silence and absence stay distinguishable.
 That last property is worth stealing directly.
+
+### Implementation summary (2026-08-18)
+
+Shipped `ai-sdlc doctor` (`orchestrator/src/cli/commands/doctor.ts`) — a new
+CLI subcommand that inspects a repo's real attestation-governance state and
+reports `neither` / `artifacts-only` / `fully-configured`, naming the gap and
+the closing command on `artifacts-only`. The reusable core is
+`checkAttestationGovernance(projectDir, adapters)` (pure, adapter-injected,
+hermetically tested) — **AISDLC-561 should import this directly rather than
+re-implementing the same detection logic** for its SessionStart-hook wording
+fix.
+
+Also strengthened adopter-facing disclosure: `.ai-sdlc/trusted-reviewers.yaml`
+now ships an explicit "this is AUDIT infrastructure, not ENFORCEMENT" block
+pointing at `ai-sdlc doctor`, and `ai-sdlc init`'s next-steps output does the
+same for both the attestation step and the final health-check line.
+
+Did **not** change init's default behavior (no keyring/CI reversal) — that
+tradeoff is escalated as Decision Catalog record **DEC-0012** rather than
+decided inline. See AC #1's note above and the PR body for the three options
+laid out for the operator.
 <!-- SECTION:NOTES:END -->
