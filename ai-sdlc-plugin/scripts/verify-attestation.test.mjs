@@ -589,6 +589,147 @@ describe('verify-attestation.mjs — consumer-runnable verifier (AISDLC-566)', (
   });
 });
 
+/**
+ * AISDLC-575 test-reviewer MAJOR-2 finding: every scenario in the describe
+ * block above resolves the trusted runtime + verify-core via
+ * `$CLAUDE_PLUGIN_ROOT`. This describe block proves the "consumer with no
+ * Claude Code plugin session at all" path also works end-to-end: a bare
+ * `node_modules` walk-up from the SCRIPT's own on-disk location, with
+ * NEITHER `CLAUDE_PLUGIN_DIR` nor `CLAUDE_PLUGIN_ROOT` set.
+ *
+ * `nodeModulesWalkUp`'s starting point is
+ * `dirname(fileURLToPath(import.meta.url))` — wherever THIS SCRIPT FILE
+ * physically lives when node loads it, not a value fixed at authoring time.
+ * Spawning the REAL `ai-sdlc-plugin/scripts/verify-attestation.mjs` in place
+ * would always walk up from this monorepo checkout's own `ai-sdlc-plugin/scripts/`
+ * directory — uncontrollable and non-hermetic (it would depend on whatever
+ * happens to live in this checkout's ancestor directories on the machine
+ * running the test). Instead, these tests COPY the script (verified
+ * self-contained — only `node:*` imports, see the "module surface" describe
+ * block below) into a synthetic install tree inside a fresh `mkdtemp`
+ * directory and spawn `node` directly on that copy — no real ancestor
+ * directory of this checkout is ever read or written.
+ */
+describe('verify-attestation.mjs — bare node_modules walk-up, no plugin session env var (AISDLC-575 AC4)', () => {
+  let tmpHome;
+  let base;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-walkup-home-'));
+    base = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-walkup-adopter-'));
+  });
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  /**
+   * Copies `verify-attestation.mjs` to
+   * `<installRoot>/some/nested/scripts/verify-attestation.mjs` and
+   * returns the copy's path. `node_modules` laid out under `installRoot/some/`
+   * (two ancestor levels above the copy) is therefore reachable by the walk-up,
+   * matching the real script's own `ai-sdlc-plugin/scripts/` depth relative to
+   * a hypothetical plugin install root.
+   */
+  function installScriptCopy(installRoot) {
+    const nestedDir = join(installRoot, 'some', 'nested', 'scripts');
+    mkdirSync(nestedDir, { recursive: true });
+    // AISDLC-575: keep the filename identical to the real script — the
+    // driver's own `invokedDirectly` guard (`process.argv[1]?.endsWith('verify-attestation.mjs')`)
+    // requires it.
+    const copyPath = join(nestedDir, 'verify-attestation.mjs');
+    writeFileSync(copyPath, readFileSync(verifyHelperPath, 'utf-8'));
+    return copyPath;
+  }
+
+  function runVerifyCopy(scriptCopyPath, cwd, args, extraEnv = {}) {
+    return spawnSync(process.execPath, [scriptCopyPath, ...args], {
+      cwd,
+      env: cleanEnv(extraEnv),
+      encoding: 'utf-8',
+    });
+  }
+
+  it('resolves the trusted runtime + verify-core purely via node_modules walk-up, no CLAUDE_PLUGIN_* set', () => {
+    const root = join(base, 'app');
+    const fixture = setupAdopterRepo(root);
+    // Sign-side resolution is unaffected by the walk-up fix (signer runs on
+    // trusted operator content) — a repoRoot-installed copy is fine here.
+    writeRuntimeShim(installedRuntimePath(fixture.root));
+
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const privateKeyPem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+    const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
+    writeSigningKey(tmpHome, privateKeyPem);
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(verdictsPath, STANDARD_VERDICTS);
+    const signRes = runSign(
+      fixture.root,
+      [
+        '--review-verdicts',
+        verdictsPath,
+        '--iteration-count',
+        '1',
+        '--harness-note',
+        '',
+        '--schema-version',
+        'v5',
+      ],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(signRes.status, 0, `sign stderr: ${signRes.stderr}`);
+
+    // Install BOTH trusted deps under a synthetic node_modules ancestor of
+    // the copied script — NOT under fixture.root (the untrusted checkout),
+    // and NOT via $CLAUDE_PLUGIN_ROOT/$CLAUDE_PLUGIN_DIR (deliberately unset
+    // by `cleanEnv`) — the "npm install as a sibling dependency, no plugin
+    // at all" consumer layout.
+    const installRoot = mkdtempSync(join(base, 'install-'));
+    installTrustedVerifyDeps(join(installRoot, 'some'));
+    const scriptCopyPath = installScriptCopy(installRoot);
+
+    const verifyRes = runVerifyCopy(
+      scriptCopyPath,
+      fixture.root,
+      ['--head', fixture.headSha, '--base', fixture.baseSha],
+      { HOME: tmpHome },
+    );
+    assert.equal(
+      verifyRes.status,
+      0,
+      `expected status=valid (exit 0); stderr: ${verifyRes.stderr}\nstdout: ${verifyRes.stdout}`,
+    );
+    assert.match(verifyRes.stdout, /status=valid/);
+    assert.match(verifyRes.stdout, /reason=ok/);
+    assert.ok(
+      verifyRes.stderr.includes(installedRuntimePath(join(installRoot, 'some'))),
+      `expected the walk-up-resolved copy to win; stderr: ${verifyRes.stderr}`,
+    );
+  });
+
+  it('fails closed (exit 2) when the walk-up layout has no trusted runtime installed anywhere', () => {
+    const root = join(base, 'app');
+    const fixture = setupAdopterRepo(root);
+    // No runtime shim written in the fixture, and no trusted deps installed
+    // under the synthetic install tree either.
+    const installRoot = mkdtempSync(join(base, 'install-'));
+    const scriptCopyPath = installScriptCopy(installRoot);
+
+    const verifyRes = runVerifyCopy(
+      scriptCopyPath,
+      fixture.root,
+      ['--head', fixture.headSha, '--base', fixture.baseSha],
+      { HOME: tmpHome },
+    );
+    assert.equal(verifyRes.status, 2, `stdout: ${verifyRes.stdout}\nstderr: ${verifyRes.stderr}`);
+    assert.match(verifyRes.stderr, /TRUSTED/);
+    assert.match(verifyRes.stderr, /node_modules[/\\]@ai-sdlc[/\\]orchestrator/);
+  });
+});
+
 // ── AISDLC-566 security regression: hostile repoRoot runtime is never
 // trusted, even when it would report every envelope as valid ──────────────
 //
