@@ -3,7 +3,7 @@ id: aisdlc-570
 title: >-
   Bind attestation leaf to the reviewer subagent's own harness-captured
   execution transcript (DEC-0012 opt-a)
-status: In Progress
+status: Done
 priority: medium
 labels:
   - attestation
