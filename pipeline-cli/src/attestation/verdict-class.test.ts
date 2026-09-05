@@ -31,11 +31,19 @@ afterEach(() => {
   rmSync(repoRoot, { recursive: true, force: true });
 });
 
-function writeMarker(repoRoot: string, name: string, firedAt: string): string {
+function writeMarker(
+  repoRoot: string,
+  name: string,
+  firedAt: string,
+  agentType: string | null = 'code-reviewer',
+): string {
   const dir = subagentSessionsDir(repoRoot);
   mkdirSync(dir, { recursive: true });
   const filePath = join(dir, name);
-  writeFileSync(filePath, JSON.stringify({ agentId: name.replace(/\.json$/, ''), firedAt }));
+  writeFileSync(
+    filePath,
+    JSON.stringify({ agentId: name.replace(/\.json$/, ''), agentType, firedAt }),
+  );
   return filePath;
 }
 
@@ -122,6 +130,80 @@ describe('determineVerdictClass', () => {
     const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: Date.now() });
 
     expect(result).toBe('self-authored');
+  });
+});
+
+describe('determineVerdictClass — AISDLC-572 role binding', () => {
+  it('a developer-typed marker in-window is NOT credited as independent (reproduces the report)', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'agent-dev.json', new Date(now).toISOString(), 'developer');
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('self-authored');
+  });
+
+  it('a code-reviewer-typed marker in-window IS credited as independent', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'agent-cr.json', new Date(now).toISOString(), 'code-reviewer');
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('independent');
+  });
+
+  it('a null-agentType (legacy) marker in-window falls back to self-authored', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'agent-legacy.json', new Date(now).toISOString(), null);
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('self-authored');
+  });
+
+  it('a rebase-resolver-typed marker in-window is NOT credited as independent', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'agent-rebase.json', new Date(now).toISOString(), 'rebase-resolver');
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('self-authored');
+  });
+
+  it('a refinement-reviewer-typed marker in-window is NOT credited as independent (DoR reviewer, not a diff review)', () => {
+    const now = Date.now();
+    writeMarker(
+      repoRoot,
+      'agent-refinement.json',
+      new Date(now).toISOString(),
+      'refinement-reviewer',
+    );
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('self-authored');
+  });
+
+  it.each(['test-reviewer', 'security-reviewer', 'code-reviewer-codex', 'test-reviewer-codex'])(
+    '%s-typed marker in-window IS credited as independent',
+    (agentType) => {
+      const now = Date.now();
+      writeMarker(repoRoot, `agent-${agentType}.json`, new Date(now).toISOString(), agentType);
+
+      const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+      expect(result).toBe('independent');
+    },
+  );
+
+  it('a developer marker + a separately fired reviewer marker: only the reviewer marker qualifies', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'agent-dev.json', new Date(now).toISOString(), 'developer');
+    writeMarker(repoRoot, 'agent-cr.json', new Date(now).toISOString(), 'code-reviewer');
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('independent');
   });
 });
 

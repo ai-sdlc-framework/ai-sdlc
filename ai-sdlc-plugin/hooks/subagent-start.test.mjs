@@ -195,3 +195,98 @@ describe('ai-sdlc-plugin subagent-start hook — AISDLC-568 marker writing', () 
     }
   });
 });
+
+describe('ai-sdlc-plugin subagent-start hook — AISDLC-572 agent_type capture', () => {
+  it('captures agent_type from the stdin payload into the marker', () => {
+    const projectDir = join(tmpdir(), `subagent-start-agenttype-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      const input = JSON.stringify({
+        hook_event_name: 'SubagentStart',
+        agent_id: 'reviewer-agent-1',
+        agent_type: 'code-reviewer',
+      });
+      runHook(projectDir, input);
+
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      const files = readdirSync(markerDir);
+      assert.equal(files.length, 1);
+      const marker = JSON.parse(readFileSync(join(markerDir, files[0]), 'utf-8'));
+      assert.equal(marker.agentId, 'reviewer-agent-1');
+      assert.equal(marker.agentType, 'code-reviewer');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('records agentType: null when agent_type is absent from the payload', () => {
+    const projectDir = join(tmpdir(), `subagent-start-agenttype-absent-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      const input = JSON.stringify({
+        hook_event_name: 'SubagentStart',
+        agent_id: 'no-type-agent',
+      });
+      runHook(projectDir, input);
+
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      const files = readdirSync(markerDir);
+      assert.equal(files.length, 1);
+      const marker = JSON.parse(readFileSync(join(markerDir, files[0]), 'utf-8'));
+      assert.strictEqual(marker.agentType, null);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('records agentType: null when stdin is not JSON', () => {
+    const projectDir = join(tmpdir(), `subagent-start-agenttype-badjson-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      runHook(projectDir, 'not json at all');
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      const files = readdirSync(markerDir);
+      assert.equal(files.length, 1);
+      const marker = JSON.parse(readFileSync(join(markerDir, files[0]), 'utf-8'));
+      assert.strictEqual(marker.agentType, null);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite an existing reviewer-typed marker with a role-less one for the same agent_id', () => {
+    const projectDir = join(tmpdir(), `subagent-start-agenttype-noclobber-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      runHook(
+        projectDir,
+        JSON.stringify({
+          hook_event_name: 'SubagentStart',
+          agent_id: 'stable-agent',
+          agent_type: 'security-reviewer',
+        }),
+      );
+      // Re-fire for the same agent_id, this time with no agent_type at all
+      // (simulating a duplicate/retried event missing the field).
+      runHook(
+        projectDir,
+        JSON.stringify({
+          hook_event_name: 'SubagentStart',
+          agent_id: 'stable-agent',
+        }),
+      );
+
+      const markerDir = join(projectDir, '.ai-sdlc', 'subagent-sessions');
+      const files = readdirSync(markerDir);
+      assert.equal(files.length, 1);
+      const marker = JSON.parse(readFileSync(join(markerDir, files[0]), 'utf-8'));
+      assert.equal(
+        marker.agentType,
+        'security-reviewer',
+        'the reviewer-typed marker must not be clobbered by a role-less re-fire',
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+});

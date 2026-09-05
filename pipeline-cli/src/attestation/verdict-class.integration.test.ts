@@ -74,7 +74,10 @@ describe('SubagentStart hook -> determineVerdictClass integration (AISDLC-571)',
     // scoped to a fake project dir via CLAUDE_PROJECT_DIR (mirrors the env
     // var subagent-start.js itself reads).
     const stdout = execFileSync('node', [subagentStartHookPath], {
-      input: JSON.stringify({ agent_id: 'integration-test-agent' }),
+      input: JSON.stringify({
+        agent_id: 'integration-test-agent',
+        agent_type: 'code-reviewer',
+      }),
       encoding: 'utf-8',
       env: {
         ...process.env,
@@ -122,6 +125,37 @@ describe('SubagentStart hook -> determineVerdictClass integration (AISDLC-571)',
     // Marker is consumed (deleted) on match, matching AISDLC-568's
     // one-marker-per-leaf contract.
     expect(readdirSync(sessionsDir)).toHaveLength(0);
+  });
+
+  it('AISDLC-572: a real hook invocation for a developer subagent does NOT get credited as independent', () => {
+    // Reproduces the exact bug report: a `developer` subagent dispatched
+    // within the window used to make ANY subsequent transcript leaf
+    // 'independent' purely on timing. The marker now also records
+    // agent_type, and determineVerdictClass gates on the reviewer
+    // allowlist BEFORE the timing check.
+    // No agent-role.yaml in this fake project dir — the hook exits (silently,
+    // with no stdout) after writing the marker, since governance-context
+    // injection is conditional on that file's presence. The marker write
+    // itself is unconditional (see the module docblock), which is what this
+    // test exercises.
+    execFileSync('node', [subagentStartHookPath], {
+      input: JSON.stringify({ agent_id: 'developer-agent', agent_type: 'developer' }),
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: fakeProjectDir,
+      },
+    });
+
+    const sessionsDir = subagentSessionsDir(fakeProjectDir);
+    expect(existsSync(sessionsDir)).toBe(true);
+
+    const verdictClass = determineVerdictClass({
+      repoRoot: fakeProjectDir,
+      transcriptMtimeMs: Date.now(),
+    });
+
+    expect(verdictClass).toBe('self-authored');
   });
 
   it('without a real hook firing (no marker), the same leaf falls back to self-authored', () => {

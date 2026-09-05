@@ -225,17 +225,36 @@ function parseListField(yaml, field) {
  * present; otherwise a random UUID is used as the marker file name only
  * (the identifier itself is not load-bearing — the FILE'S EXISTENCE + its
  * write TIMING, which only the harness can produce, is the signal).
+ *
+ * AISDLC-572: `agentType` is read from the payload's `agent_type` field
+ * (the plugin's own agent names — `code-reviewer`, `security-reviewer`,
+ * `developer`, …) and recorded alongside `agentId`/`firedAt`. This is the
+ * REVIEWER-ROLE signal `verdict-class.ts` now gates on BEFORE its timing
+ * check — see that module's docblock. `agentType` is `null` when absent or
+ * not a string, matching the existing fail-safe posture for `agentId`.
+ *
+ * Single-writer expectation: this hook is the ONLY writer of files under
+ * `.ai-sdlc/subagent-sessions/`, keyed by `agent_id` (or a random fallback
+ * when absent). To avoid a role-less re-fire clobbering an already-written
+ * reviewer-typed marker for the same key (e.g. a duplicate/retried
+ * SubagentStart event for the same `agent_id`), an existing marker whose
+ * `agentType` is already reviewer-eligible-looking (non-null) is not
+ * overwritten with one that has no `agentType`.
  */
 function writeSubagentSessionMarker(projectDir, stdinRaw) {
   try {
     let agentId;
+    let agentType = null;
     try {
       const payload = JSON.parse(stdinRaw);
       if (payload && typeof payload.agent_id === 'string' && payload.agent_id) {
         agentId = payload.agent_id;
       }
+      if (payload && typeof payload.agent_type === 'string' && payload.agent_type) {
+        agentType = payload.agent_type;
+      }
     } catch {
-      // stdin wasn't JSON, or had no agent_id — fall through to random id.
+      // stdin wasn't JSON, or had no agent_id/agent_type — fall through.
     }
     if (!agentId) {
       agentId = randomUUID();
@@ -246,9 +265,23 @@ function writeSubagentSessionMarker(projectDir, stdinRaw) {
 
     const safeName = agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
     const markerPath = join(dir, `${safeName}.json`);
+
+    // Don't clobber an existing marker that already has an agentType with
+    // one that has none — see the single-writer note above.
+    if (agentType === null && existsSync(markerPath)) {
+      try {
+        const existing = JSON.parse(readFileSync(markerPath, 'utf-8'));
+        if (existing && typeof existing.agentType === 'string' && existing.agentType) {
+          return;
+        }
+      } catch {
+        // Existing marker unreadable/malformed — fall through and overwrite.
+      }
+    }
+
     writeFileSync(
       markerPath,
-      JSON.stringify({ agentId, firedAt: new Date().toISOString() }) + '\n',
+      JSON.stringify({ agentId, agentType, firedAt: new Date().toISOString() }) + '\n',
       { encoding: 'utf-8' },
     );
   } catch {
