@@ -115,7 +115,7 @@ describe('check-stale-runtime-deps.mjs — detects drift', () => {
 
     const { exitCode, stdout } = run(pluginDir, npmBinDir);
     assert.equal(exitCode, 0);
-    assert.equal(stdout.trim(), '@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.0');
+    assert.equal(stdout.trim(), '@ai-sdlc/pipeline-cli\t0.20.0\t0.20.1\t^0.20.0');
   });
 
   it('reports a package whose installed version no longer satisfies an advanced pin', () => {
@@ -126,7 +126,7 @@ describe('check-stale-runtime-deps.mjs — detects drift', () => {
 
     const { exitCode, stdout } = run(pluginDir, npmBinDir);
     assert.equal(exitCode, 0);
-    assert.equal(stdout.trim(), '@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.1');
+    assert.equal(stdout.trim(), '@ai-sdlc/pipeline-cli\t0.20.0\t0.20.1\t^0.20.1');
   });
 
   it('reports nothing when the installed version already matches the registry-resolved target', () => {
@@ -157,9 +157,29 @@ describe('check-stale-runtime-deps.mjs — detects drift', () => {
     assert.equal(exitCode, 0);
     const lines = stdout.trim().split('\n').sort();
     assert.deepEqual(lines, [
-      '@ai-sdlc/orchestrator 0.14.0 0.15.0 ^0.14.0',
-      '@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.0',
+      '@ai-sdlc/orchestrator\t0.14.0\t0.15.0\t^0.14.0',
+      '@ai-sdlc/pipeline-cli\t0.20.0\t0.20.1\t^0.20.0',
     ]);
+  });
+
+  it('does not misparse a compound-range pin containing a space (review round-2 hardening)', () => {
+    // A semver range pin can legally contain a space (e.g. a compound range
+    // like ">=0.20.0 <0.21.0"). Output is tab-delimited specifically so a
+    // space embedded in the trailing `pin` field never corrupts the fixed
+    // 4-field split a bash consumer performs — this test proves the pin
+    // survives INTACT (not truncated at the first space) in the output.
+    const pluginDir = join(workDir, 'compound-range-pin');
+    const compoundPin = '>=0.20.0 <0.21.0';
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': compoundPin });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.0');
+    const npmBinDir = buildFakeNpm({
+      [`@ai-sdlc/pipeline-cli@${compoundPin}`]: '0.20.1',
+    });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    const fields = stdout.trim().split('\t');
+    assert.deepEqual(fields, ['@ai-sdlc/pipeline-cli', '0.20.0', '0.20.1', compoundPin]);
   });
 });
 

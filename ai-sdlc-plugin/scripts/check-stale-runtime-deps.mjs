@@ -18,10 +18,18 @@
  * Usage:
  *   node check-stale-runtime-deps.mjs <pluginDir> [timeoutMs]
  *
- * Output: one line per package that needs upgrading, to stdout:
- *   <name> <installedVersion> <targetVersion> <pin>
+ * Output: one line per package that needs upgrading, to stdout, TAB-DELIMITED:
+ *   <name>\t<installedVersion>\t<targetVersion>\t<pin>
  * e.g.
- *   @ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.0
+ *   @ai-sdlc/pipeline-cli\t0.20.0\t0.20.1\t^0.20.0
+ *
+ * Tab-delimited (not space) deliberately: a semver RANGE pin can legally
+ * contain a space (e.g. a compound range like ">=1.0.0 <2.0.0"), which would
+ * silently misparse a space-delimited consumer's fixed 4-field split. `name`,
+ * `installedVersion`, and `targetVersion` never contain whitespace (npm
+ * package names and resolved version strings are whitespace-free by spec),
+ * so only the trailing `pin` field can safely absorb a compound-range space
+ * — tab delimiting keeps the first three fields exact regardless.
  *
  * No output at all means "nothing detected as stale" — this is also what
  * happens when the check cannot be performed (see fail-open behavior below).
@@ -97,7 +105,7 @@ function main() {
     if (!target) continue; // fail open — offline / registry unreachable / npm missing
 
     if (target !== installed) {
-      process.stdout.write(`${name} ${installed} ${target} ${pin}\n`);
+      process.stdout.write(`${name}\t${installed}\t${target}\t${pin}\n`);
     }
   }
 }

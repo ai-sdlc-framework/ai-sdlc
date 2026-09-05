@@ -193,7 +193,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STALE_CHECK_SCRIPT="$SCRIPT_DIR/check-stale-runtime-deps.mjs"
 if [ -f "$STALE_CHECK_SCRIPT" ]; then
   STALE_OUTPUT=$(node "$STALE_CHECK_SCRIPT" "$PLUGIN_DIR" 2>/dev/null) || STALE_OUTPUT=""
-  while IFS=' ' read -r stale_name stale_installed stale_target stale_pin; do
+  # Tab-delimited (not space) — a semver range pin can legally contain a
+  # space (e.g. a compound range like ">=1.0.0 <2.0.0"), which would
+  # misparse a fixed 4-field space-delimited split. See
+  # check-stale-runtime-deps.mjs's own header comment for the full rationale.
+  while IFS=$'\t' read -r stale_name stale_installed stale_target stale_pin; do
     [ -z "$stale_name" ] && continue
     echo "install-runtime-deps.sh: upgrading $stale_name $stale_installed -> $stale_target to satisfy pin $stale_pin" >&2
     rm -rf "$PLUGIN_DIR/node_modules/$stale_name"
