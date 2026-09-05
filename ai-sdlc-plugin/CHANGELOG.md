@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.16.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.15.2...ai-sdlc-plugin-v0.16.0) (2026-09-05)
+
+
+### Features
+
+* wire nonce injection into reviewer dispatch (AISDLC-573) ([#996](https://github.com/ai-sdlc-framework/ai-sdlc/issues/996)) ([575cb69](https://github.com/ai-sdlc-framework/ai-sdlc/commit/575cb69b28435358a63211c43e8b4f8ccce4520e))
+
 ## [0.15.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.15.1...ai-sdlc-plugin-v0.15.2) (2026-09-05)
 
 

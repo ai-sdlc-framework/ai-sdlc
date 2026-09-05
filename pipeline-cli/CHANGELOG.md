@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.18.0...pipeline-cli-v0.19.0) (2026-09-05)
+
+
+### Features
+
+* wire nonce injection into reviewer dispatch (AISDLC-573) ([#996](https://github.com/ai-sdlc-framework/ai-sdlc/issues/996)) ([575cb69](https://github.com/ai-sdlc-framework/ai-sdlc/commit/575cb69b28435358a63211c43e8b4f8ccce4520e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.19.0
+
 ## [0.18.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.17.2...pipeline-cli-v0.18.0) (2026-09-05)
 
 
