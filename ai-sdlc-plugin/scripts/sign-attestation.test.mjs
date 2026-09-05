@@ -1132,6 +1132,60 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator/);
   });
 
+  it('rejects a copy in the AISDLC-574 regression window (0.16.0 passed the old [0,14,0] floor, must fail [0,19,0])', () => {
+    // AISDLC-574: MIN_RUNTIME_VERSIONS was bumped from [0,14,0] to [0,19,0]
+    // because 0.14.0-0.18.x predate the verdictClass/harnessTranscript
+    // modules the plugin's producers depend on. 0.16.0 is the discriminating
+    // case: it satisfied the OLD floor ([0,14,0]) but must be refused under
+    // the NEW floor ([0,19,0]) — without this test, a future accidental
+    // revert of MIN_RUNTIME_VERSIONS back to [0,14,0] would pass every other
+    // boundary test in this file (which all use versions already below
+    // 0.14.0) and go undetected.
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(
+      installedRuntimePath(fixture.root),
+      "throw new Error('0.16.0 copy must not be loaded under the 0.19.0 floor');\n",
+    );
+    writeFileSync(
+      join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.16.0' }),
+    );
+    const pluginDir = join(base, 'plugin');
+    writeRuntimeShim(installedRuntimePath(pluginDir));
+    writeFileSync(
+      join(pluginDir, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.19.0' }),
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+      CLAUDE_PLUGIN_ROOT: pluginDir,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.match(res.stderr, /skipped stale @ai-sdlc\/orchestrator.*0\.16\.0/);
+  });
+
+  it('accepts a copy exactly at the new 0.19.0 floor (positive side of the AISDLC-574 bump)', () => {
+    const root = join(base, 'app');
+    const fixture = setupRepo(tmpHome, root);
+    rmSync(join(fixture.root, 'orchestrator'), { recursive: true, force: true });
+    writeRuntimeShim(installedRuntimePath(fixture.root));
+    writeFileSync(
+      join(fixture.root, 'node_modules', '@ai-sdlc', 'orchestrator', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/orchestrator', version: '0.19.0' }),
+    );
+
+    const res = runHelper(fixture.root, ['--print-content-hash'], {
+      HOME: tmpHome,
+    });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/);
+    assert.doesNotMatch(res.stderr, /skipped stale @ai-sdlc\/orchestrator/);
+  });
+
   it('treats a prerelease as below its release counterpart (0.19.0-beta.1 < 0.19.0)', () => {
     const root = join(base, 'app');
     const fixture = setupRepo(tmpHome, root);
