@@ -256,8 +256,15 @@ function pipelineCliSignV6Candidates(repoRoot) {
  * it is the contributor's own checkout and must keep behaving byte-identically.
  */
 const MIN_RUNTIME_VERSIONS = {
-  '@ai-sdlc/orchestrator': [0, 14, 0],
-  '@ai-sdlc/pipeline-cli': [0, 14, 0],
+  // AISDLC-574: bumped from [0,14,0]. 0.14.0 predates the verdictClass
+  // (0.17.0) and harnessTranscriptHash (0.19.0) modules the plugin's
+  // SubagentStart hook (AISDLC-572) and nonce injection (AISDLC-573)
+  // producers depend on downstream — a runtime below 0.19.0 silently
+  // produces leaves with no verdictClass, and the verifier reads every leaf
+  // as self-authored. Keep in lockstep with runtimeDependencies in both
+  // plugin.json manifests (^0.19.0).
+  '@ai-sdlc/orchestrator': [0, 19, 0],
+  '@ai-sdlc/pipeline-cli': [0, 19, 0],
 };
 
 /**

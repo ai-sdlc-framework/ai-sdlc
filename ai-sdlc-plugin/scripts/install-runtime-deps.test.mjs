@@ -220,6 +220,82 @@ describe('plugin manifests — runtimeDependencies must not drift (AISDLC-554)',
   });
 });
 
+describe('plugin manifests — runtimeDependencies pins must not lag the workspace (AISDLC-574)', () => {
+  // AISDLC-574 root cause: runtimeDependencies pinned @ai-sdlc/orchestrator and
+  // @ai-sdlc/pipeline-cli at ^0.14.0 — a caret-on-0.x range that resolves ONLY
+  // to 0.14.x — while the workspace packages moved to 0.19.0. 0.14.0 has no
+  // verdictClass / harnessTranscript modules, so every marketplace-installed
+  // adopter's signed leaves silently read self-authored. This test fails
+  // whenever the pin's minimum resolvable version falls behind the workspace
+  // package's own version, catching the drift class before it ships again.
+  const repoRoot = join(__dirname, '..', '..');
+  const pluginRoot = join(repoRoot, 'ai-sdlc-plugin');
+  const topLevel = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf-8'));
+  const marketplace = JSON.parse(
+    readFileSync(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf-8'),
+  );
+
+  /** Parse a bare "x.y.z" (optionally "-prerelease") version into number[3]. */
+  function parseVersion(raw) {
+    const core = String(raw).split('-')[0];
+    const parts = core.split('.').map((n) => Number.parseInt(n, 10));
+    if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) {
+      throw new Error(`cannot parse version: ${raw}`);
+    }
+    return parts;
+  }
+
+  /** Strip a leading ^ or >= from a simple single-range pin to its floor version. */
+  function pinFloor(pin) {
+    const stripped = String(pin)
+      .replace(/^[\^~]/, '')
+      .replace(/^>=\s*/, '');
+    return parseVersion(stripped);
+  }
+
+  /** Does `version` satisfy caret-on-0.x semantics (>=floor, <next-minor)? */
+  function satisfiesCaretZero(version, floor) {
+    if (floor[0] !== 0) {
+      // Not the 0.x caret case this repo relies on — compare >= only.
+      return compareVersions(version, floor) >= 0;
+    }
+    if (version[0] !== 0 || version[1] !== floor[1]) return false;
+    return version[2] >= floor[2];
+  }
+
+  function compareVersions(a, b) {
+    for (let i = 0; i < 3; i += 1) {
+      if (a[i] !== b[i]) return a[i] - b[i];
+    }
+    return 0;
+  }
+
+  for (const pkgDir of ['orchestrator', 'pipeline-cli']) {
+    const pkgName = `@ai-sdlc/${pkgDir}`;
+
+    it(`${pkgName} runtimeDependencies pin resolves to >= the workspace package version`, () => {
+      const workspaceVersion = parseVersion(
+        JSON.parse(readFileSync(join(repoRoot, pkgDir, 'package.json'), 'utf-8')).version,
+      );
+
+      for (const [label, manifest] of [
+        ['plugin.json', topLevel],
+        ['.claude-plugin/plugin.json', marketplace],
+      ]) {
+        const pin = manifest.runtimeDependencies?.[pkgName];
+        assert.ok(pin, `${label} must declare ${pkgName} in runtimeDependencies`);
+        const floor = pinFloor(pin);
+        assert.ok(
+          satisfiesCaretZero(workspaceVersion, floor),
+          `${label} pins ${pkgName} at "${pin}" (floor ${floor.join('.')}), which does not ` +
+            `resolve to the current workspace version ${workspaceVersion.join('.')} — the pin ` +
+            `has drifted behind the released runtime (AISDLC-574)`,
+        );
+      }
+    });
+  }
+});
+
 describe('plugin manifests — hook event registration must not drift (AISDLC-571)', () => {
   // AISDLC-571 root cause: .claude-plugin/plugin.json (the marketplace-canonical
   // manifest) never registered the SubagentStart hook event, even though
