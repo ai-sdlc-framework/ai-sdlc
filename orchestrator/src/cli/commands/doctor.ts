@@ -37,6 +37,15 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { formatOutput } from '../formatters/index.js';
+import { fetchBranchProtectionStatus } from './branch-protection-shared.js';
+import {
+  buildProductionCheckAdapters,
+  runDoctorChecks,
+  runDoctorFixes,
+  renderFullDoctorReport,
+  summarizeDoctorResults,
+  type DoctorCheckAdapters,
+} from './doctor-checks.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -63,6 +72,13 @@ export interface BranchProtectionCheck {
   requiresApprovingReview: boolean;
   /** `required_status_checks.contexts` includes `ai-sdlc/pr-ready`. */
   requiresPrReady: boolean;
+  /**
+   * `required_status_checks.contexts` includes `ai-sdlc/attestation` directly
+   * — the AISDLC-388 misconfiguration doctor check #7 flags (attestation is
+   * audit-only; it should feed the `ai-sdlc/pr-ready` rollup, not be
+   * required on its own).
+   */
+  requiresAttestationDirectly?: boolean;
   /** Reason the check could not run, or that the API call failed. */
   error?: string;
 }
@@ -89,11 +105,20 @@ export interface DoctorAdapters {
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /**
-   * Run a shell command and capture stdout/exitCode. Production shells
-   * out via `execSync`; tests inject a stub. Used only for the
-   * best-effort `gh api` branch-protection lookup.
+   * Run a shell command and capture stdout/exitCode (and stderr, when the
+   * caller needs to classify the failure — e.g. npm E404 vs. an offline
+   * registry). Production shells out via `execFileSync`; tests inject a stub.
+   * `stderr` is optional so existing stubs that return only
+   * `{ stdout, exitCode }` keep compiling.
    */
-  runCommand: (cmd: string, args: string[]) => { stdout: string; exitCode: number };
+  runCommand: (
+    cmd: string,
+    args: string[],
+  ) => {
+    stdout: string;
+    exitCode: number;
+    stderr?: string;
+  };
 }
 
 export function buildProductionDoctorAdapters(): DoctorAdapters {
@@ -107,13 +132,14 @@ export function buildProductionDoctorAdapters(): DoctorAdapters {
       try {
         const stdout = execFileSync(cmd, args, {
           encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
-        return { stdout, exitCode: 0 };
+        return { stdout, exitCode: 0, stderr: '' };
       } catch (err) {
-        const e = err as { stdout?: Buffer | string; status?: number };
+        const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
         return {
           stdout: typeof e.stdout === 'string' ? e.stdout : (e.stdout?.toString() ?? ''),
+          stderr: typeof e.stderr === 'string' ? e.stderr : (e.stderr?.toString() ?? ''),
           exitCode: e.status ?? 1,
         };
       }
@@ -151,54 +177,12 @@ export function checkBranchProtection(
   _projectDir: string,
   adapters: Pick<DoctorAdapters, 'runCommand'>,
 ): BranchProtectionCheck {
-  const ownerRepo = adapters.runCommand('gh', [
-    'repo',
-    'view',
-    '--json',
-    'nameWithOwner',
-    '-q',
-    '.nameWithOwner',
-  ]);
-  if (ownerRepo.exitCode !== 0 || !ownerRepo.stdout.trim()) {
-    return {
-      checked: false,
-      requiresApprovingReview: false,
-      requiresPrReady: false,
-      error:
-        'could not resolve owner/repo via `gh repo view` (gh missing, not authenticated, or not a GitHub remote)',
-    };
-  }
-  const slug = ownerRepo.stdout.trim();
-
-  const protection = adapters.runCommand('gh', ['api', `repos/${slug}/branches/main/protection`]);
-  if (protection.exitCode !== 0) {
-    return {
-      checked: false,
-      requiresApprovingReview: false,
-      requiresPrReady: false,
-      error: `gh api repos/${slug}/branches/main/protection failed (branch protection likely not configured)`,
-    };
-  }
-
-  try {
-    const body = JSON.parse(protection.stdout) as {
-      required_pull_request_reviews?: { required_approving_review_count?: number };
-      required_status_checks?: { contexts?: string[] };
-    };
-    const requiresApprovingReview =
-      (body.required_pull_request_reviews?.required_approving_review_count ?? 0) >= 1;
-    const requiresPrReady = (body.required_status_checks?.contexts ?? []).includes(
-      'ai-sdlc/pr-ready',
-    );
-    return { checked: true, requiresApprovingReview, requiresPrReady };
-  } catch {
-    return {
-      checked: false,
-      requiresApprovingReview: false,
-      requiresPrReady: false,
-      error: 'could not parse `gh api .../protection` response as JSON',
-    };
-  }
+  // Delegates to the shared helper (AISDLC-578) so this and
+  // `init-features.ts`'s `applyBranchProtection` can't independently drift.
+  // The error wording differs slightly from the pre-578 inline
+  // implementation (now sourced from `resolveOwnerRepoSlug`'s shared
+  // message) — existing tests assert on substrings, not exact text.
+  return fetchBranchProtectionStatus(adapters);
 }
 
 /**
@@ -316,40 +300,70 @@ export function renderDoctorReport(result: AttestationDoctorResult): string[] {
 // ── Command ───────────────────────────────────────────────────────────
 
 /**
- * Builds the `doctor` Command. `buildAdapters` defaults to the real
- * filesystem/`gh` adapters; tests inject a stub factory so the
- * branch-protection state (and therefore the exit-code contract) is
- * deterministic without shelling out to a real `gh` process.
+ * Builds the `doctor` Command. Runs the full check REGISTRY
+ * (`doctor-checks.ts`, AISDLC-578) — the single attestation-governance
+ * check shipped in AISDLC-560 is now one of several checks in that
+ * registry, reused verbatim via `checkAttestationGovernance`.
+ *
+ * `buildAdapters` defaults to the real filesystem/`gh`/npm adapters;
+ * tests inject a stub factory so every check's outcome (and therefore the
+ * exit-code contract) is deterministic without shelling out to real
+ * subprocesses.
+ *
+ * Exit code contract: non-zero when any check is `fail` severity; `warn`
+ * severity alone exits 0 unless `--strict` is passed (promotes warn to a
+ * blocking exit).
  */
 export function createDoctorCommand(
-  buildAdapters: () => DoctorAdapters = buildProductionDoctorAdapters,
+  buildAdapters: () => DoctorCheckAdapters = buildProductionCheckAdapters,
 ): Command {
   return new Command('doctor')
-    .description("Report this repo's real attestation-governance state (artifacts vs. enforcement)")
-    .action(async (_opts, cmd) => {
+    .description(
+      "Audit this project's ai-sdlc configuration health: plugin/pin versions, manifest agreement, attestation governance, and more",
+    )
+    .option('--fix', 'apply the safe/mechanical auto-fixes, then re-report', false)
+    .option(
+      '--strict',
+      'exit non-zero on warn severity too (default: only fail exits non-zero)',
+      false,
+    )
+    .action(async (opts: { fix?: boolean; strict?: boolean }, cmd) => {
       const globalOpts = cmd.parent?.opts() ?? {};
       const format = globalOpts.format ?? 'table';
       const projectDir = process.cwd();
 
       const adapters = buildAdapters();
-      const result = checkAttestationGovernance(projectDir, adapters);
+      const ctx = { projectDir, adapters };
+
+      if (opts.fix) {
+        const fixes = runDoctorFixes(ctx);
+        for (const fix of fixes) {
+          console.log(`[fix] ${fix.id}: ${fix.applied ? 'applied' : 'skipped'} — ${fix.detail}`);
+        }
+      }
+
+      const results = runDoctorChecks(ctx);
+      const summary = summarizeDoctorResults(results);
 
       if (format === 'json') {
-        console.log(formatOutput('json', result as unknown as Record<string, unknown>));
+        console.log(
+          formatOutput('json', { results, summary } as unknown as Record<string, unknown>),
+        );
       } else if (format === 'minimal') {
         console.log(
           formatOutput('minimal', {
             type: 'doctor',
-            ...result,
+            summary,
           } as unknown as Record<string, unknown>),
         );
       } else {
-        for (const line of renderDoctorReport(result)) {
+        for (const line of renderFullDoctorReport(results)) {
           console.log(line);
         }
       }
 
-      if (result.state !== 'fully-configured') {
+      const shouldFail = summary.fail > 0 || (opts.strict && summary.warn > 0);
+      if (shouldFail) {
         process.exitCode = 1;
       }
     });

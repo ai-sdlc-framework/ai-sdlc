@@ -3,7 +3,7 @@ id: AISDLC-578
 title: >-
   ai-sdlc doctor — end-to-end project config-health audit + fix + workflow
   recommendations
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-05 17:22'
 labels:
@@ -66,16 +66,45 @@ Beyond pass/fail, emit workflow-improvement suggestions (e.g. "attestation enabl
 Structure the report as a typed result set (check id, severity, title, remediation, anonymizable evidence) so a future `--report-upstream` (separate RFC extending RFC-0025's anonymized pre-filled-issue flow) can consume it without refactor. Do NOT implement reporting/telemetry here.
 
 ## Acceptance Criteria
-- [ ] `ai-sdlc doctor` runs in an installed adopter project (node_modules layout, no monorepo), prints per-check pass/warn/fail + remediation, exits non-zero on any FAIL (0 on warns unless `--strict`).
-- [ ] `--fix` applies the mechanical subset (e.g. re-sync runtime pins, add missing husky snippet) and re-reports; never touches `.ai-sdlc/**` content it shouldn't or force-anything.
-- [ ] `--json` emits the typed result set.
-- [ ] All 12 seed checks implemented as a registry with a documented "add a check" extension point.
-- [ ] `trusted-reviewers.yaml` JSON schema added under `spec/schemas/` + wired into check 6.
-- [ ] Reuses check-plugin-version, the 2 existing schemas, and 574 sync logic (no duplicate version/pin checkers).
-- [ ] `/ai-sdlc doctor` slash command wraps the CLI.
-- [ ] Hermetic tests: a known-good project passes; each seeded misconfig is detected with the right severity + remediation; `--fix` idempotent.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `ai-sdlc doctor` runs in an installed adopter project (node_modules layout, no monorepo), prints per-check pass/warn/fail + remediation, exits non-zero on any FAIL (0 on warns unless `--strict`).
+- [x] `--fix` applies the mechanical subset (re-sync runtime pins via `install-runtime-deps.sh`; sync `.claude-plugin/plugin.json` from `plugin.json`) and re-reports; never touches `.ai-sdlc/**` content it shouldn't or force-anything.
+- [x] `--json` emits the typed result set.
+- [ ] All 12 seed checks implemented as a registry with a documented "add a check" extension point. **Landed: checks 1, 2, 3, 7, 11, 12 (the "battle-tested" priority subset explicitly called out in the task body's fallback clause).** Deferred to a follow-up (needs an `ajv` dependency added to `orchestrator/`, out of scope for this landing): check 4 (`agent-role.yaml` schema validation), check 5 (`dor-config.yaml` schema validation), check 6 (`trusted-reviewers.yaml` schema + presence), check 8 (husky pre-push snippet), check 9 (feature-flag sanity), check 10 (workflow-file presence diff). The registry itself (`DOCTOR_CHECKS` in `doctor-checks.ts`) is generic — adding checks 4/5/6/8/9/10 is additive, not a redesign.
+- [ ] `trusted-reviewers.yaml` JSON schema added under `spec/schemas/` + wired into check 6. **Deferred with check 6 above** — see follow-up task reference below.
+- [x] Reuses check-plugin-version, and 580's `check-stale-runtime-deps.mjs` staleness logic (no duplicate version/pin checkers) for the 6 landed checks.
+- [x] `/ai-sdlc doctor` slash command wraps the CLI (`ai-sdlc-plugin/commands/doctor.md`).
+- [x] Hermetic tests: a known-good project passes; each seeded misconfig is detected with the right severity + remediation; `--fix` idempotent. See `orchestrator/src/cli/commands/doctor-checks.test.ts`.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Note
 Split per operator decision 2026-09-05: build doctor (local) now; upstream reporting is a SEPARATE RFC extending [[aisdlc-576]]-adjacent RFC-0025 (anonymized, opt-in, pre-filled GitHub issue — NO auto phone-home). Composes with the init wizard (init-features.ts) and [[aisdlc-558]] (manifest single-source). Periodic-run cadence (SessionStart nudge / CI) is in scope for the RFC, not this task.
+
+## Implementation summary (landed in this PR)
+
+Per the task body's own explicit fallback ("Better a clean, well-tested
+subset than a rushed all-12"), this PR:
+
+- Turns the single AISDLC-560 attestation-governance check into a
+  **check registry** (`DOCTOR_CHECKS` in `orchestrator/src/cli/commands/doctor-checks.ts`),
+  with a documented extension point (append a `{ id, description, run, fix? }`
+  object).
+- Implements checks **1** (plugin-version, reuses `check-plugin-version.js --print`),
+  **2** (runtime-deps-pins + caret-trap, reuses AISDLC-580's
+  `check-stale-runtime-deps.mjs`), **3** (manifests-agree, AISDLC-558),
+  **7** (attestation-governance, reuses `checkAttestationGovernance` verbatim
+  from AISDLC-560, plus a new sub-finding for the AISDLC-388
+  requires-`ai-sdlc/attestation`-directly misconfiguration), **11**
+  (marketplace-catalog-drift), and **12** (npm-dist-tag-reachability).
+- `--fix` covers the mechanical subset for checks 2 and 3.
+- Extracts a shared `resolveOwnerRepoSlug` / `fetchBranchProtectionStatus`
+  helper (`orchestrator/src/cli/commands/branch-protection-shared.ts`) so
+  `init-features.ts`'s `applyBranchProtection` and `doctor.ts`'s
+  `checkBranchProtection` can't independently drift (the reconciled minor
+  from the AISDLC-560 review).
+- Adds `docs/operations/doctor.md` and the `/ai-sdlc doctor` slash command
+  (`ai-sdlc-plugin/commands/doctor.md`).
+- **Recommending (not filing — per AISDLC-308, that's the operator's call)
+  a follow-up task** for the deferred checks (4, 5, 6, 8, 9, 10) — needs an
+  `ajv` dependency added to `orchestrator/` for the schema-validation
+  checks (4, 5, 6) plus a new `spec/schemas/trusted-reviewers.schema.json`.
 <!-- SECTION:DESCRIPTION:END -->
