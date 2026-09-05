@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.17.2...pipeline-cli-v0.18.0) (2026-09-05)
+
+
+### Features
+
+* bind attestation leaf to reviewer's harness transcript, sign-time-only (AISDLC-570) ([#993](https://github.com/ai-sdlc-framework/ai-sdlc/issues/993)) ([be02c44](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be02c44280605532b95468256d5b84899c86798f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.18.0
+
 ## [0.17.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.17.1...pipeline-cli-v0.17.2) (2026-09-05)
 
 
