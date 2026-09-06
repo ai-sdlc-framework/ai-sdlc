@@ -288,6 +288,21 @@ export interface TrustedReviewer {
   addedAt: string;
   /** GitHub handle of the reviewer who approved the entry's PR. */
   addedBy: string;
+  /**
+   * RFC-0047 Phase 1 (AISDLC-593): when `true`, this key is a `ci-only`
+   * anchor — its private half MUST live ONLY in a protected GitHub Actions
+   * environment, never on an operator's machine. The verifier partitions
+   * trusted keys into operator vs. `ci-only` sets (see
+   * `partitionTrustedReviewers` / `isCiOnlyKey` in
+   * `pipeline-cli/attestation-core/verify-core.mjs`) so a later phase can
+   * require the `isolated` independence tier's Merkle root to be signed by
+   * a `ci-only` key specifically — a root signed by the operator's own key
+   * is NOT sufficient proof of CI-only provenance. Absent or `false` means
+   * "operator key" (unchanged, default behavior). This flag does NOT
+   * change any tier-crediting logic by itself (that is RFC-0047 Phase 3) —
+   * it only makes the distinction available to consumers.
+   */
+  ciOnly?: boolean;
 }
 
 /** Result of verifying an attestation. */
@@ -1994,12 +2009,33 @@ export function validateTrustedReviewers(parsed: unknown): TrustedReviewer[] {
         `trusted-reviewers.yaml: reviewers[${i}].pubkey must be a PEM-encoded public key`,
       );
     }
+    // RFC-0047 Phase 1 (AISDLC-593): OPTIONAL `ciOnly` flag. Absent = operator
+    // key (unchanged default). The hand-rolled YAML loader
+    // (`parseTrustedReviewers` in verify-core.mjs) carries scalars through as
+    // raw strings, so an unquoted `ciOnly: true`/`ciOnly: false` scalar
+    // arrives here as the string `'true'`/`'false'` — accept both that and a
+    // real boolean (the latter covers callers that construct the parsed
+    // object directly, e.g. tests).
+    let ciOnly: boolean | undefined;
+    const ciOnlyRaw = r['ciOnly'];
+    if (ciOnlyRaw !== undefined) {
+      if (ciOnlyRaw === true || ciOnlyRaw === 'true') {
+        ciOnly = true;
+      } else if (ciOnlyRaw === false || ciOnlyRaw === 'false' || ciOnlyRaw === '') {
+        ciOnly = false;
+      } else {
+        throw new Error(
+          `trusted-reviewers.yaml: reviewers[${i}].ciOnly must be 'true' or 'false' if present`,
+        );
+      }
+    }
     out.push({
       identity: r['identity'] as string,
       machine: r['machine'] as string,
       pubkey: r['pubkey'] as string,
       addedAt: r['addedAt'] as string,
       addedBy: r['addedBy'] as string,
+      ...(ciOnly !== undefined ? { ciOnly } : {}),
     });
   }
   return out;

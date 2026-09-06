@@ -2,7 +2,7 @@
 id: AISDLC-593
 title: >-
   RFC-0047 Phase 1 — ci-only trust marker + verifier key partitioning
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-06'
 labels:
@@ -29,11 +29,11 @@ RFC-0047 Phase 1 (OQ-1). Introduce the `ci-only` signing-key trust class so the 
 - Document the `ciOnly` flag in the trusted-reviewers.yaml header comment + the operator runbook (how to register a CI-only key, why its private half must live only in a protected GH Actions environment).
 
 ## Acceptance Criteria
-- [ ] `trusted-reviewers.yaml` accepts an optional `ciOnly: true` per entry; the loader parses it; an entry without it defaults to operator (not ci-only).
-- [ ] Verifier exposes a partitioned trusted-key view (operator vs. ci-only); a hermetic test asserts a `ciOnly` entry lands in the ci-only set and a plain entry does not.
-- [ ] No change to existing verification outcomes: an envelope signed by an operator key verifies byte-for-byte as before (regression test over an existing v6 envelope).
-- [ ] trusted-reviewers.yaml header comment + operator runbook updated.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `trusted-reviewers.yaml` accepts an optional `ciOnly: true` per entry; the loader parses it; an entry without it defaults to operator (not ci-only).
+- [x] Verifier exposes a partitioned trusted-key view (operator vs. ci-only); a hermetic test asserts a `ciOnly` entry lands in the ci-only set and a plain entry does not.
+- [x] No change to existing verification outcomes: an envelope signed by an operator key verifies byte-for-byte as before (regression test over an existing v6 envelope).
+- [x] trusted-reviewers.yaml header comment + operator runbook updated.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
 RFC-0047 §Design Details (1) + OQ-1 resolution. Foundational for AISDLC-595/596.

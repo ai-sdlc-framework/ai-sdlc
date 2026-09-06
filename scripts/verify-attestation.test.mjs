@@ -38,9 +38,11 @@ import {
   detectQueueRebaseInvalidation,
   findChoreCommitViolations,
   isAttestationOnlyDescendant,
+  isCiOnlyKey,
   isTreeEquivalentModuloAttestation,
   loadAllAttestations,
   parseTrustedReviewers,
+  partitionTrustedReviewers,
   predicateMatchReason,
   resolveAncestorDepth,
   resolveSubjectShaForEnvelope,
@@ -298,6 +300,99 @@ reviewers:
     assert.equal(reviewers[1].identity, 'b@y.com');
     assert.match(reviewers[0].pubkey, /AAA/);
     assert.match(reviewers[1].pubkey, /BBB/);
+  });
+
+  it('parses an optional unquoted ciOnly: true scalar (AISDLC-593)', () => {
+    const yaml = `reviewers:
+  - identity: 'ci@ai-sdlc.io'
+    machine: 'gha-runner'
+    addedAt: '2026-09-06'
+    addedBy: 'deefactorial'
+    ciOnly: true
+    pubkey: |
+      -----BEGIN PUBLIC KEY-----
+      CCC
+      -----END PUBLIC KEY-----
+`;
+    const { reviewers } = parseTrustedReviewers(yaml);
+    assert.equal(reviewers.length, 1);
+    assert.equal(reviewers[0].ciOnly, 'true');
+  });
+
+  it('leaves ciOnly unset for a plain entry (AISDLC-593)', () => {
+    const yaml = `reviewers:
+  - identity: 'a@b.com'
+    machine: 'laptop'
+    addedAt: '2026-04-27'
+    addedBy: 'reviewer'
+    pubkey: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEA
+      -----END PUBLIC KEY-----
+`;
+    const { reviewers } = parseTrustedReviewers(yaml);
+    assert.equal(reviewers[0].ciOnly, undefined);
+  });
+});
+
+describe('partitionTrustedReviewers / isCiOnlyKey (AISDLC-593, RFC-0047 Phase 1)', () => {
+  const OPERATOR_PEM = '-----BEGIN PUBLIC KEY-----\nOPERATOR\n-----END PUBLIC KEY-----\n';
+  const CI_ONLY_PEM = '-----BEGIN PUBLIC KEY-----\nCIONLY\n-----END PUBLIC KEY-----\n';
+
+  const trustedReviewers = [
+    {
+      identity: 'operator@example.com',
+      machine: 'laptop',
+      pubkey: OPERATOR_PEM,
+      addedAt: '2026-04-27',
+      addedBy: 'maintainer',
+    },
+    {
+      identity: 'ci@ai-sdlc.io',
+      machine: 'gha-runner',
+      pubkey: CI_ONLY_PEM,
+      addedAt: '2026-09-06',
+      addedBy: 'deefactorial',
+      ciOnly: true,
+    },
+  ];
+
+  it('a ciOnly entry lands in the ci-only set; a plain entry does not', () => {
+    const { operatorKeys, ciOnlyKeys } = partitionTrustedReviewers(trustedReviewers);
+    assert.equal(operatorKeys.length, 1);
+    assert.equal(operatorKeys[0].identity, 'operator@example.com');
+    assert.equal(ciOnlyKeys.length, 1);
+    assert.equal(ciOnlyKeys[0].identity, 'ci@ai-sdlc.io');
+  });
+
+  it('treats ciOnly: false explicitly the same as absent', () => {
+    const { operatorKeys, ciOnlyKeys } = partitionTrustedReviewers([
+      { ...trustedReviewers[0], ciOnly: false },
+    ]);
+    assert.equal(operatorKeys.length, 1);
+    assert.equal(ciOnlyKeys.length, 0);
+  });
+
+  it('returns empty partitions for an empty/undefined list', () => {
+    assert.deepEqual(partitionTrustedReviewers([]), { operatorKeys: [], ciOnlyKeys: [] });
+    assert.deepEqual(partitionTrustedReviewers(undefined), { operatorKeys: [], ciOnlyKeys: [] });
+  });
+
+  it('isCiOnlyKey is true for a ci-only pubkey and false for an operator pubkey', () => {
+    assert.equal(isCiOnlyKey(CI_ONLY_PEM, trustedReviewers), true);
+    assert.equal(isCiOnlyKey(OPERATOR_PEM, trustedReviewers), false);
+  });
+
+  it('isCiOnlyKey is false for an unknown or empty pubkey', () => {
+    assert.equal(
+      isCiOnlyKey(
+        '-----BEGIN PUBLIC KEY-----\nUNKNOWN\n-----END PUBLIC KEY-----\n',
+        trustedReviewers,
+      ),
+      false,
+    );
+    assert.equal(isCiOnlyKey('', trustedReviewers), false);
+    assert.equal(isCiOnlyKey(undefined, trustedReviewers), false);
   });
 });
 

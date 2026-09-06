@@ -28,6 +28,22 @@
 # per-reviewer key is required. Any historical entries with `type: 'reviewer'`
 # present in this file are inert and can be removed in a follow-up PR.
 #
+# AISDLC-593 (RFC-0047 Phase 1): an entry may carry an OPTIONAL `ciOnly: true`
+# scalar (unquoted boolean — no quotes, unlike the string fields above).
+# `ciOnly: true` marks a key whose PRIVATE half lives ONLY in a protected
+# GitHub Actions environment (`Settings > Environments`, with required
+# reviewers on the signing job) — never on an operator's machine. This is
+# the anchor RFC-0047's `isolated` independence tier rests on: a Merkle root
+# signed by a `ci-only` key proves CI produced the signature, not a
+# same-machine coordinator holding the operator's own key. Absent or
+# `ciOnly: false` means "operator key" (the existing behavior, unchanged).
+# Registering a `ci-only` key does NOT by itself change what any existing
+# attestation verifies as — Phase 1 (this) only makes the distinction
+# available to the verifier (`partitionTrustedReviewers` / `isCiOnlyKey` in
+# `pipeline-cli/attestation-core/verify-core.mjs`); a later phase teaches
+# the `isolated` tier to require it. See `docs/operations/ci-only-trust-marker.md`
+# for the full runbook on registering a `ci-only` key.
+#
 # REMOVING an entry: open a PR deleting the row. Existing attestations signed
 # by the removed key become invalid retroactively (CI rejects them on the
 # next push), so coordinate with the contributor before removing.

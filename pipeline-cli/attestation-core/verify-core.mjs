@@ -594,6 +594,13 @@ export function buildGithubOutputLines(status, reason) {
  *      shape validation against the parsed object — this loader only
  *      needs to faithfully extract scalars + the PEM block.
  *
+ * RFC-0047 Phase 1 (AISDLC-593): entries may carry an OPTIONAL `ciOnly: true`
+ * scalar (unquoted boolean — the loader's existing scalar-field regex
+ * already handles unquoted values, so no format change is needed). Absent
+ * or `false` means "operator key" (unchanged default). See
+ * `partitionTrustedReviewers` / `isCiOnlyKey` below for how the verifier
+ * consumes the flag.
+ *
  * Exported so unit tests can exercise the parser without spinning up CI.
  */
 export function parseTrustedReviewers(text) {
@@ -645,6 +652,58 @@ export function parseTrustedReviewers(text) {
     reviewers.push(cur);
   }
   return { reviewers };
+}
+
+/**
+ * RFC-0047 Phase 1 (AISDLC-593): partition a validated trusted-reviewers
+ * list into operator vs. `ci-only` sets.
+ *
+ * This is the foundational seam RFC-0047's `isolated` re-derivable anchor
+ * rests on: the security of `isolated` is "the Merkle root was signed by a
+ * key the same-machine coordinator cannot reach" — i.e. a `ci-only` key
+ * whose private half lives ONLY in a protected GitHub Actions environment.
+ * Phase 1 only makes the distinction available; it does NOT change any
+ * tier-crediting logic (that is Phase 3) — a root signed by an operator key
+ * still verifies exactly as before this function exists.
+ *
+ * @param {object[]} trustedReviewers — validated `TrustedReviewer[]` entries
+ *   (output of `validateTrustedReviewers`), each optionally carrying a
+ *   `ciOnly` boolean.
+ * @returns {{ operatorKeys: object[], ciOnlyKeys: object[] }}
+ */
+export function partitionTrustedReviewers(trustedReviewers) {
+  const operatorKeys = [];
+  const ciOnlyKeys = [];
+  for (const reviewer of trustedReviewers ?? []) {
+    if (reviewer && reviewer.ciOnly === true) {
+      ciOnlyKeys.push(reviewer);
+    } else {
+      operatorKeys.push(reviewer);
+    }
+  }
+  return { operatorKeys, ciOnlyKeys };
+}
+
+/**
+ * RFC-0047 Phase 1 (AISDLC-593): does `pubkey` (PEM string, as loaded from
+ * `trusted-reviewers.yaml`) belong to a `ci-only`-marked trusted-reviewer
+ * entry?
+ *
+ * Matches by exact PEM string equality — the same comparison basis the
+ * signature-verification loop (`verifyV6RootSignatureAgainstRoot`) already
+ * uses when trying each trusted pubkey in turn. Phase 3's `isolated`
+ * re-derivation is expected to call this (or consume
+ * `partitionTrustedReviewers` directly) once it knows WHICH trusted pubkey
+ * verified a root signature.
+ *
+ * @param {string} pubkey — PEM-encoded ed25519 public key
+ * @param {object[]} trustedReviewers — validated `TrustedReviewer[]` entries
+ * @returns {boolean}
+ */
+export function isCiOnlyKey(pubkey, trustedReviewers) {
+  if (!pubkey) return false;
+  const { ciOnlyKeys } = partitionTrustedReviewers(trustedReviewers);
+  return ciOnlyKeys.some((reviewer) => reviewer.pubkey === pubkey);
 }
 
 /**
