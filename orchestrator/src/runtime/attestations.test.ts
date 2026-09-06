@@ -534,6 +534,103 @@ describe('validateTrustedReviewers', () => {
       }),
     ).toThrow(/PEM-encoded public key/);
   });
+
+  // RFC-0047 Phase 1 (AISDLC-593): optional `ciOnly` flag.
+  describe('ciOnly flag (AISDLC-593)', () => {
+    it('defaults to absent (undefined) when not specified — operator key, unchanged', () => {
+      const result = validateTrustedReviewers({
+        reviewers: [
+          {
+            identity: 'a@b.com',
+            machine: 'laptop',
+            pubkey: VALID_PEM,
+            addedAt: '2026-04-27',
+            addedBy: 'maintainer',
+          },
+        ],
+      });
+      expect(result[0].ciOnly).toBeUndefined();
+    });
+
+    it('parses ciOnly: true (boolean, as constructed directly)', () => {
+      const result = validateTrustedReviewers({
+        reviewers: [
+          {
+            identity: 'ci@ai-sdlc.io',
+            machine: 'gha-runner',
+            pubkey: VALID_PEM,
+            addedAt: '2026-09-06',
+            addedBy: 'deefactorial',
+            ciOnly: true,
+          },
+        ],
+      });
+      expect(result[0].ciOnly).toBe(true);
+    });
+
+    it("parses ciOnly: 'true' (string, as produced by the hand-rolled YAML loader)", () => {
+      const result = validateTrustedReviewers({
+        reviewers: [
+          {
+            identity: 'ci@ai-sdlc.io',
+            machine: 'gha-runner',
+            pubkey: VALID_PEM,
+            addedAt: '2026-09-06',
+            addedBy: 'deefactorial',
+            ciOnly: 'true',
+          },
+        ],
+      });
+      expect(result[0].ciOnly).toBe(true);
+    });
+
+    it("parses ciOnly: 'false' / false as explicitly not ci-only", () => {
+      const resultString = validateTrustedReviewers({
+        reviewers: [
+          {
+            identity: 'a@b.com',
+            machine: 'laptop',
+            pubkey: VALID_PEM,
+            addedAt: '2026-04-27',
+            addedBy: 'maintainer',
+            ciOnly: 'false',
+          },
+        ],
+      });
+      expect(resultString[0].ciOnly).toBe(false);
+
+      const resultBool = validateTrustedReviewers({
+        reviewers: [
+          {
+            identity: 'a@b.com',
+            machine: 'laptop',
+            pubkey: VALID_PEM,
+            addedAt: '2026-04-27',
+            addedBy: 'maintainer',
+            ciOnly: false,
+          },
+        ],
+      });
+      expect(resultBool[0].ciOnly).toBe(false);
+    });
+
+    it('rejects an invalid ciOnly value', () => {
+      expect(() =>
+        validateTrustedReviewers({
+          reviewers: [
+            {
+              identity: 'a@b.com',
+              machine: 'laptop',
+              pubkey: VALID_PEM,
+              addedAt: '2026-04-27',
+              addedBy: 'maintainer',
+              ciOnly: 'yes',
+            },
+          ],
+        }),
+      ).toThrow(/ciOnly must be 'true' or 'false'/);
+    });
+  });
 });
 
 describe('ACCEPTED_SCHEMA_VERSIONS', () => {
