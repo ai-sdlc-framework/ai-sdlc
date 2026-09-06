@@ -60,7 +60,13 @@ afterEach(() => {
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
-function signAndVerify(patchId: string): V6VerifyResult {
+// RFC-0047 Phase 3 (AISDLC-595): `isolated` is credited by the verifier ONLY
+// when the Merkle root signature verifies under a `ci-only`-marked trusted key;
+// otherwise the leaf downgrades to `attested`. Aggregation tests that want a
+// genuinely-credited `isolated` leaf must therefore mark the signing reviewer
+// `ciOnly: true`. Defaults to false so the attested/none/dual-read/tamper tests
+// are unaffected.
+function signAndVerify(patchId: string, ciOnly = false): V6VerifyResult {
   const outPath = signAndWriteV6Envelope({
     repoRoot: tmpRoot,
     headSha: FAKE_HEAD_SHA,
@@ -69,15 +75,15 @@ function signAndVerify(patchId: string): V6VerifyResult {
     patchId,
   });
   const envelope = JSON.parse(readFileSync(outPath, 'utf8'));
-  return verifyEnvelope(envelope, patchId);
+  return verifyEnvelope(envelope, patchId, ciOnly);
 }
 
-function verifyEnvelope(envelope: unknown, patchId: string): V6VerifyResult {
+function verifyEnvelope(envelope: unknown, patchId: string, ciOnly = false): V6VerifyResult {
   return verifyV6Envelope({
     envelope,
     envelopeFileName: `${FAKE_HEAD_SHA}.v6.dsse.json`,
     headSha: FAKE_HEAD_SHA,
-    trustedReviewers: [{ pubkey: publicKeyPem }],
+    trustedReviewers: [{ pubkey: publicKeyPem, ...(ciOnly ? { ciOnly: true } : {}) }],
     repoRoot: tmpRoot,
     patchIdHint: patchId,
   }) as V6VerifyResult;
@@ -133,7 +139,7 @@ describe('RFC-0046 Phase 1: independenceTier enum + weakest-link aggregation', (
       tmpRoot,
     );
 
-    const result = signAndVerify(patchId);
+    const result = signAndVerify(patchId, true); // ci-only signer ⇒ isolated credited (AISDLC-595)
     expect(result.status).toBe('valid');
     expect(result.overallIndependenceTier).toBe('isolated');
   });
@@ -151,7 +157,7 @@ describe('RFC-0046 Phase 1: independenceTier enum + weakest-link aggregation', (
       tmpRoot,
     );
 
-    const result = signAndVerify(patchId);
+    const result = signAndVerify(patchId, true); // ci-only signer ⇒ isolated leaf genuine; weakest-link ⇒ attested (AISDLC-595)
     expect(result.status).toBe('valid');
     expect(result.overallIndependenceTier).toBe('attested');
   });
@@ -169,7 +175,7 @@ describe('RFC-0046 Phase 1: independenceTier enum + weakest-link aggregation', (
       tmpRoot,
     );
 
-    const result = signAndVerify(patchId);
+    const result = signAndVerify(patchId, true); // ci-only signer ⇒ isolated leaf genuine; weakest-link ⇒ none (AISDLC-595)
     expect(result.status).toBe('valid');
     expect(result.overallIndependenceTier).toBe('none');
   });

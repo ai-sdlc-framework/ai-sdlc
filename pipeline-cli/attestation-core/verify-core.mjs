@@ -1315,8 +1315,18 @@ export function verifyV6Envelope({
   // SOME trusted key; this only asks whether that key was the ci-only one.
   // `trustedReviewers` here is `validateTrustedReviewers()`-normalized (see
   // `runVerifier`), satisfying `partitionTrustedReviewers`'s guard.
+  //
+  // AISDLC-595 review hardening (code + security): decide ci-only-ness from the
+  // SPECIFIC entry whose signature verified — by object identity against the
+  // partitioned ci-only set — NOT via a PEM re-lookup (`isCiOnlyKey`). If
+  // trusted-reviewers.yaml ever listed the same pubkey twice with differing
+  // `ciOnly` flags, a PEM match could credit an operator-key signature as
+  // isolated; the identity check reads exactly the matched entry's own flag.
+  // `partitionTrustedReviewers` still runs, preserving the AISDLC-593 fail-loud
+  // guard against unvalidated (non-boolean) `ciOnly` input.
+  const { ciOnlyKeys } = partitionTrustedReviewers(trustedReviewers);
   const rootSignedByCiOnlyKey = Boolean(
-    sigResult.matchedReviewer && isCiOnlyKey(sigResult.matchedReviewer.pubkey, trustedReviewers),
+    sigResult.matchedReviewer && ciOnlyKeys.includes(sigResult.matchedReviewer),
   );
 
   // ── 6. Verify each Merkle proof ─────────────────────────────────────────
