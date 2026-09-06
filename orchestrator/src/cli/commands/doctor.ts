@@ -44,6 +44,7 @@ import {
   runDoctorFixes,
   renderFullDoctorReport,
   summarizeDoctorResults,
+  resolvePluginInstall,
   type DoctorCheckAdapters,
 } from './doctor-checks.js';
 
@@ -344,10 +345,15 @@ export function createDoctorCommand(
 
       const results = runDoctorChecks(ctx);
       const summary = summarizeDoctorResults(results);
+      const install = resolvePluginInstall(ctx);
 
       if (format === 'json') {
         console.log(
-          formatOutput('json', { results, summary } as unknown as Record<string, unknown>),
+          formatOutput('json', {
+            install,
+            results,
+            summary,
+          } as unknown as Record<string, unknown>),
         );
       } else if (format === 'minimal') {
         console.log(
@@ -357,7 +363,7 @@ export function createDoctorCommand(
           } as unknown as Record<string, unknown>),
         );
       } else {
-        for (const line of renderFullDoctorReport(results)) {
+        for (const line of renderFullDoctorReport(results, install)) {
           console.log(line);
         }
       }
