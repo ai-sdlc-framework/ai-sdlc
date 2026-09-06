@@ -719,10 +719,21 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           // RFC-0046 Phase 1 (AISDLC-588): independenceTier derived from the
           // SAME signal as verdictClass at this phase — 'attested' where
-          // verdictClass would be 'independent', else 'none'. Later phases
-          // (AISDLC-589/590/591) populate 'isolated' from stronger signals.
-          const independenceTier: 'none' | 'attested' =
-            verdictClass === 'independent' ? 'attested' : 'none';
+          // verdictClass would be 'independent'. Later phases (AISDLC-589/590/591)
+          // populate 'isolated' from stronger signals.
+          //
+          // CRITICAL — omit the field for the 'none' (default) case rather than
+          // writing it explicitly. 'none' is the absent-equivalent (dual-read
+          // maps an absent field → 'none'), so leaving it undefined makes the
+          // leaf hash IDENTICALLY under verifiers that predate independenceTier
+          // (the additive-compat guarantee in merkle-core.mjs holds only for an
+          // ABSENT field — an explicit "independenceTier":"none" is bound into
+          // the JSON.stringify preimage and changes the Merkle root, which a
+          // base/consumer verifier still on the pre-RFC-0046 hashing code would
+          // reconstruct differently, producing a spurious "rootSignature did not
+          // match" failure). Only a genuinely non-default tier is bound.
+          const independenceTier: 'attested' | undefined =
+            verdictClass === 'independent' ? 'attested' : undefined;
 
           const leaf: TranscriptLeaf = {
             leafIndex,
