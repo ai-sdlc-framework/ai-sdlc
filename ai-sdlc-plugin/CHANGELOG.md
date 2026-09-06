@@ -5,6 +5,19 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.18.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.17.0...ai-sdlc-plugin-v0.18.0) (2026-09-06)
+
+
+### Features
+
+* **orchestrator:** extend ai-sdlc doctor into a check registry (AISDLC-578) ([#1012](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1012)) ([8e2dee7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8e2dee737e0faa63e1eecbc1b8d4352adf949abb))
+
+
+### Bug Fixes
+
+* **plugin:** converge stale runtime deps to pinned version (AISDLC-580) ([#1009](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1009)) ([32991b3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/32991b3c672f17437e235b076a0126cdb5ce1a0f))
+* resolve reviewer agent-defs from installed plugin, not repo-only path (AISDLC-583) ([#1013](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1013)) ([715e956](https://github.com/ai-sdlc-framework/ai-sdlc/commit/715e9562a658bdcf685a27541bbebd488f560271))
+
 ## [0.17.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.16.1...ai-sdlc-plugin-v0.17.0) (2026-09-05)
 
 

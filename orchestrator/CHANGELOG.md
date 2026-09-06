@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.20.1...orchestrator-v0.21.0) (2026-09-06)
+
+
+### Features
+
+* **orchestrator:** extend ai-sdlc doctor into a check registry (AISDLC-578) ([#1012](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1012)) ([8e2dee7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8e2dee737e0faa63e1eecbc1b8d4352adf949abb))
+* **orchestrator:** ship ai-sdlc doctor + explicit audit-only disclosure (AISDLC-560) ([#971](https://github.com/ai-sdlc-framework/ai-sdlc/issues/971)) ([fb0bf6a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fb0bf6a9839d76ab97659359d5246fc7ac959738))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.21.0
+
 ## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.20.0...orchestrator-v0.20.1) (2026-09-05)
 
 
