@@ -675,6 +675,21 @@ export function partitionTrustedReviewers(trustedReviewers) {
   const operatorKeys = [];
   const ciOnlyKeys = [];
   for (const reviewer of trustedReviewers ?? []) {
+    // RFC-0047 Phase 3 (AISDLC-595) carry-forward guard: this function is
+    // ONLY sound against `validateTrustedReviewers`-normalized input, where
+    // `ciOnly` is a real boolean. Raw `parseTrustedReviewers()` output
+    // carries the YAML scalar as the STRING 'true' — `=== true` would
+    // silently (and safely, since it fails closed) misclassify a ci-only
+    // key as an operator key. Fail loud instead of fail-quiet-but-lucky so
+    // a future caller can't wire this up against unvalidated input by
+    // accident.
+    if (reviewer && reviewer.ciOnly !== undefined && typeof reviewer.ciOnly !== 'boolean') {
+      throw new TypeError(
+        `partitionTrustedReviewers: entry '${reviewer.identity ?? '<unknown>'}' has a non-boolean ` +
+          `ciOnly value (${JSON.stringify(reviewer.ciOnly)}) — pass validateTrustedReviewers()-` +
+          'normalized input, not raw parseTrustedReviewers() output.',
+      );
+    }
     if (reviewer && reviewer.ciOnly === true) {
       ciOnlyKeys.push(reviewer);
     } else {
@@ -1291,6 +1306,19 @@ export function verifyV6Envelope({
     return { status: 'invalid', reason: sigResult.reason };
   }
 
+  // RFC-0047 Phase 3 (AISDLC-595): does the root signature verify under a
+  // `ci-only`-marked trusted key? This is the anchor the `isolated`
+  // independenceTier credit rests on (OQ-1/OQ-3) — a same-machine
+  // coordinator holds only the operator key, never the ci-only key. This is
+  // an INTEGRITY-adjacent, not integrity, distinction: the signature has
+  // already been cryptographically verified above (step 5) against
+  // SOME trusted key; this only asks whether that key was the ci-only one.
+  // `trustedReviewers` here is `validateTrustedReviewers()`-normalized (see
+  // `runVerifier`), satisfying `partitionTrustedReviewers`'s guard.
+  const rootSignedByCiOnlyKey = Boolean(
+    sigResult.matchedReviewer && isCiOnlyKey(sigResult.matchedReviewer.pubkey, trustedReviewers),
+  );
+
   // ── 6. Verify each Merkle proof ─────────────────────────────────────────
   for (let i = 0; i < envelope.transcriptLeaves.length; i++) {
     const leafSummary = envelope.transcriptLeaves[i];
@@ -1435,10 +1463,25 @@ export function verifyV6Envelope({
   // tamper check above (independenceTier when present, else fall back to
   // legacy verdictClass) so pre-RFC-0046 envelopes still get a correct
   // overallIndependenceTier via the fallback.
-  const independenceTiers = envelope.transcriptLeaves.map((leaf) => ({
-    reviewerName: leaf.reviewerName,
-    independenceTier: resolveIndependenceTier(leaf),
-  }));
+  // RFC-0047 Phase 3 (AISDLC-595): a leaf resolving to 'isolated' is credited
+  // ONLY when the root signature verified under a ci-only key
+  // (`rootSignedByCiOnlyKey`, computed at step 5 above). Otherwise the leaf
+  // is DOWNGRADED to its evidence-computed tier — 'attested' — with a
+  // machine-readable `isolatedDowngraded` reason. This does NOT reject the
+  // attestation (integrity already passed the Merkle + signature checks
+  // above); it only prevents an unanchored 'isolated' claim from being
+  // over-reported. See RFC-0047 §Verifier re-derivation contract / OQ-3.
+  const independenceTiers = envelope.transcriptLeaves.map((leaf) => {
+    const declaredTier = resolveIndependenceTier(leaf);
+    if (declaredTier === 'isolated' && !rootSignedByCiOnlyKey) {
+      return {
+        reviewerName: leaf.reviewerName,
+        independenceTier: 'attested',
+        isolatedDowngraded: { reason: 'no ci-only anchor' },
+      };
+    }
+    return { reviewerName: leaf.reviewerName, independenceTier: declaredTier };
+  });
   // Defense-in-depth (AISDLC-588 review): an empty leaf set must resolve to
   // 'none', never round UP via the vacuous-truth of `.every()`. Currently
   // unreachable because verifyV6Envelope rejects transcriptLeaves.length === 0
@@ -1492,16 +1535,23 @@ function resolveIndependenceTier(entry) {
  * Verify the v6 root signature against the RECOMPUTED root hash using any-of-N
  * trusted reviewer pubkeys. Used when transcript-leaves.jsonl is available.
  *
+ * RFC-0047 Phase 3 (AISDLC-595): the return value now also threads out WHICH
+ * trusted-reviewer entry's pubkey matched (`matchedReviewer`), so the caller
+ * can determine whether the root was signed by a `ci-only`-marked key —
+ * the security anchor the `isolated` independenceTier credit rests on. This
+ * is purely additive: `valid`/`reason` semantics are unchanged.
+ *
  * @param {string} rootSignature — base64-encoded ed25519 signature
  * @param {string} recomputedRoot — 64-char hex SHA-256 of the recomputed Merkle root
  * @param {object[]} trustedReviewers — array of { pubkey } entries
- * @returns {{ valid: boolean, reason: string }}
+ * @returns {{ valid: boolean, reason: string, matchedReviewer: object|null }}
  */
 function verifyV6RootSignatureAgainstRoot(rootSignature, recomputedRoot, trustedReviewers) {
   if (!trustedReviewers || trustedReviewers.length === 0) {
     return {
       valid: false,
       reason: 'v6: no trusted reviewers configured — cannot verify rootSignature',
+      matchedReviewer: null,
     };
   }
 
@@ -1509,7 +1559,7 @@ function verifyV6RootSignatureAgainstRoot(rootSignature, recomputedRoot, trusted
   try {
     signatureBuffer = Buffer.from(rootSignature, 'base64');
   } catch {
-    return { valid: false, reason: 'v6: rootSignature is not valid base64' };
+    return { valid: false, reason: 'v6: rootSignature is not valid base64', matchedReviewer: null };
   }
 
   const rootHashData = Buffer.from(recomputedRoot, 'utf8');
@@ -1520,14 +1570,18 @@ function verifyV6RootSignatureAgainstRoot(rootSignature, recomputedRoot, trusted
       const pubKey = createPublicKey(reviewer.pubkey);
       const isValid = cryptoVerify(null, rootHashData, pubKey, signatureBuffer);
       if (isValid) {
-        return { valid: true, reason: 'ok' };
+        return { valid: true, reason: 'ok', matchedReviewer: reviewer };
       }
     } catch {
       // Invalid PEM or key type — try the next reviewer.
       continue;
     }
   }
-  return { valid: false, reason: 'v6: rootSignature did not match any trusted reviewer pubkey' };
+  return {
+    valid: false,
+    reason: 'v6: rootSignature did not match any trusted reviewer pubkey',
+    matchedReviewer: null,
+  };
 }
 
 /**

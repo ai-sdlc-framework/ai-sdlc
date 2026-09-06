@@ -2,7 +2,7 @@
 id: AISDLC-595
 title: >-
   RFC-0047 Phase 3 — verifier isolated re-derivation (credit under ci-only root sig, else downgrade)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-06'
 labels:
@@ -31,13 +31,32 @@ RFC-0047 Phase 3 (OQ-3). Make the verifier CREDIT `independenceTier: 'isolated'`
 - Carry forward the AISDLC-588 security-reviewer precondition where it intersects: the effective-tier computation must not let a leaf be credited `isolated` above what the signer identity proves.
 
 ## Acceptance Criteria
-- [ ] A leaf declaring `isolated` under a root signed by a `ci-only` key ⇒ verifier reports `overallIndependenceTier: 'isolated'`.
-- [ ] **Security-critical negative:** the SAME leaf/envelope re-signed by the OPERATOR key (not ci-only) ⇒ verifier downgrades to `attested`/`none` with a recorded reason, attestation still `status=valid` (does NOT reject).
-- [ ] An integrity failure (tampered leaf / root sig matching no trusted key) still REJECTS.
-- [ ] Verifier makes zero network calls (assert offline).
-- [ ] Hermetic tests for credit, downgrade-with-reason, and integrity-reject paths.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] A leaf declaring `isolated` under a root signed by a `ci-only` key ⇒ verifier reports `overallIndependenceTier: 'isolated'`.
+- [x] **Security-critical negative:** the SAME leaf/envelope re-signed by the OPERATOR key (not ci-only) ⇒ verifier downgrades to `attested`/`none` with a recorded reason, attestation still `status=valid` (does NOT reject).
+- [x] An integrity failure (tampered leaf / root sig matching no trusted key) still REJECTS.
+- [x] Verifier makes zero network calls (assert offline).
+- [x] Hermetic tests for credit, downgrade-with-reason, and integrity-reject paths.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
 RFC-0047 §Design Details (3) + §Verifier re-derivation contract + OQ-3 resolution. Frontmatter `dependencies` (AISDLC-593 ci-only trust set, AISDLC-594 anchorEvidence field) is authoritative.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Threaded "which trusted key matched" out of `verifyV6RootSignatureAgainstRoot`
+(now returns `{ valid, reason, matchedReviewer }`), computed
+`rootSignedByCiOnlyKey` in `verifyV6Envelope` via the existing
+`isCiOnlyKey`/`partitionTrustedReviewers` helpers (AISDLC-593), and gated the
+per-leaf `independenceTier` credit: a leaf resolving to `isolated` is now
+downgraded to `attested` with `isolatedDowngraded: { reason: 'no ci-only anchor' }`
+unless the root signature verified under a `ci-only`-marked key.
+`overallIndependenceTier`'s weakest-link aggregation consumes the
+post-downgrade array unchanged. Integrity failures (tampered leaf, root
+signature matching no trusted key) are untouched and still reject.
+Hardened `partitionTrustedReviewers` with a fail-loud guard against
+non-boolean `ciOnly` (raw, unvalidated `parseTrustedReviewers()` output)
+per the AISDLC-593 review carry-forward. Added an offline-import assertion
+and 6 new hermetic tests (credit, security-critical downgrade, mixed
+weakest-link, 2 integrity-reject paths, offline-network assertion) plus 1
+guard test, in `scripts/verify-attestation.test.mjs`.
