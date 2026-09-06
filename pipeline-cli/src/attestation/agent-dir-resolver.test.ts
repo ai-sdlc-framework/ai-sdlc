@@ -6,9 +6,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveInstalledPluginAgentDir } from './agent-dir-resolver.js';
+import {
+  resolveInstalledPluginAgentDir,
+  highestVersionCacheAgentsDir,
+} from './agent-dir-resolver.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -30,15 +33,12 @@ describe('resolveInstalledPluginAgentDir (AISDLC-583)', () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it('returns null when neither env var is set and no plugin cache exists', () => {
-    // Ensure this doesn't accidentally pick up a REAL ~/.claude/plugins/cache
-    // on the machine running the test — that would make the test flaky
-    // depending on operator machine state. We can't fully sandbox homedir()
-    // without a DI seam, so this test only asserts the env-var-only path is
-    // null when no env vars are set — the cache-probe behavior is covered
-    // by the next test using a real (but throwaway) install shape.
-    expect(process.env['CLAUDE_PLUGIN_DIR']).toBeUndefined();
-    expect(process.env['CLAUDE_PLUGIN_ROOT']).toBeUndefined();
+  it('returns null when neither env var is set and the injected cache root does not exist', () => {
+    // No env vars set + a cache root that does not exist → the whole
+    // resolver degrades to null. Injecting a nonexistent cacheRoot keeps this
+    // deterministic regardless of the machine's real ~/.claude/plugins/cache.
+    const missingCache = join(base, 'no-such-cache');
+    expect(resolveInstalledPluginAgentDir(missingCache)).toBeNull();
   });
 
   it('resolves from $CLAUDE_PLUGIN_ROOT/agents when it exists', () => {
@@ -83,19 +83,77 @@ describe('resolveInstalledPluginAgentDir (AISDLC-583)', () => {
     expect(() => resolveInstalledPluginAgentDir()).not.toThrow();
   });
 
-  // AISDLC-583: cache-probe tier is exercised against the REAL homedir()
-  // cache root read-only (existsSync/readdirSync only) — we don't attempt
-  // to inject a fake HOME here (no DI seam, and monkeypatching homedir()
-  // would require module mocking disproportionate to this small resolver).
-  // The env-var tiers above cover the resolution-order contract; this test
-  // only asserts the function degrades to `null` gracefully rather than
-  // throwing when run in an environment with no matching cache entries and
-  // no env vars set (the common case in CI).
-  it('degrades to null (never throws) when nothing resolves anywhere, including no real cache match', () => {
-    const cacheRoot = join(homedir(), '.claude', 'plugins', 'cache');
-    // Just assert the call is safe regardless of whether a real cache
-    // happens to exist on this machine — the point is "never throws".
-    void cacheRoot;
+  it('degrades to null (never throws) when nothing resolves and the default cache root is used', () => {
+    // No env vars, no cacheRoot arg → falls back to the real
+    // ~/.claude/plugins/cache default. Must be safe regardless of machine
+    // state (the point is "never throws").
     expect(() => resolveInstalledPluginAgentDir()).not.toThrow();
+  });
+});
+
+// ── cache-probe tier (highestVersionCacheAgentsDir) ────────────────────────
+// Injectable cacheRoot makes the walk deterministic on any machine (CI
+// runners have no real ~/.claude/plugins/cache; a dev machine with the plugin
+// installed does — the AISDLC-583 local-vs-CI coverage divergence).
+describe('highestVersionCacheAgentsDir (AISDLC-583)', () => {
+  let cacheRoot: string;
+
+  beforeEach(() => {
+    cacheRoot = mkdtempSync(join(tmpdir(), 'agent-dir-cache-'));
+  });
+  afterEach(() => {
+    rmSync(cacheRoot, { recursive: true, force: true });
+  });
+
+  /** Create `<cacheRoot>/<marketplace>/ai-sdlc/<version>/agents`. */
+  function seed(marketplace: string, version: string): string {
+    const agentsDir = join(cacheRoot, marketplace, 'ai-sdlc', version, 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    return agentsDir;
+  }
+
+  it('returns null when the cache root does not exist', () => {
+    expect(highestVersionCacheAgentsDir(join(cacheRoot, 'missing'))).toBeNull();
+  });
+
+  it('returns null when the cache root exists but has no ai-sdlc/*/agents dirs', () => {
+    mkdirSync(join(cacheRoot, 'some-marketplace', 'other-plugin'), { recursive: true });
+    expect(highestVersionCacheAgentsDir(cacheRoot)).toBeNull();
+  });
+
+  it('resolves the single installed version', () => {
+    const agents = seed('acme-marketplace', '0.20.1');
+    expect(highestVersionCacheAgentsDir(cacheRoot)).toBe(agents);
+  });
+
+  it('picks the highest version across multiple versions (numeric, not lexical)', () => {
+    seed('acme-marketplace', '0.9.0');
+    const newest = seed('acme-marketplace', '0.20.1'); // 0.20.1 > 0.9.0 numerically
+    expect(highestVersionCacheAgentsDir(cacheRoot)).toBe(newest);
+  });
+
+  it('picks the highest version across multiple marketplaces', () => {
+    seed('mp-a', '0.19.0');
+    const newest = seed('mp-b', '0.21.0');
+    expect(highestVersionCacheAgentsDir(cacheRoot)).toBe(newest);
+  });
+
+  it('skips a version dir that has no agents/ subdir', () => {
+    // Higher version present but WITHOUT an agents/ subdir → must fall back
+    // to the lower version that does have one.
+    mkdirSync(join(cacheRoot, 'mp', 'ai-sdlc', '0.22.0'), { recursive: true }); // no agents/
+    const withAgents = seed('mp', '0.20.0');
+    expect(highestVersionCacheAgentsDir(cacheRoot)).toBe(withAgents);
+  });
+
+  it('skips a marketplace with no ai-sdlc/ subdir', () => {
+    mkdirSync(join(cacheRoot, 'unrelated-mp', 'some-other-plugin', '1.0.0'), { recursive: true });
+    const agents = seed('real-mp', '0.20.0');
+    expect(highestVersionCacheAgentsDir(cacheRoot)).toBe(agents);
+  });
+
+  it('is reached via resolveInstalledPluginAgentDir when no env vars are set', () => {
+    const agents = seed('acme-marketplace', '0.20.1');
+    expect(resolveInstalledPluginAgentDir(cacheRoot)).toBe(agents);
   });
 });

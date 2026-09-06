@@ -46,13 +46,25 @@ function compareVersionStrings(a: string, b: string): number {
   return 0;
 }
 
+/** Default plugin-cache root: `~/.claude/plugins/cache`. */
+export function defaultPluginCacheRoot(): string {
+  return join(homedir(), '.claude', 'plugins', 'cache');
+}
+
 /**
- * Walk `~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/agents`
- * across every marketplace cache dir, returning the highest-version match
- * (or `null` when the cache root doesn't exist or nothing matches).
+ * Walk `<cacheRoot>/<marketplace>/ai-sdlc/<version>/agents` across every
+ * marketplace cache dir, returning the highest-version match (or `null` when
+ * the cache root doesn't exist or nothing matches).
+ *
+ * `cacheRoot` is injectable so the walk is testable on any machine (CI
+ * runners have no real `~/.claude/plugins/cache`; a dev machine with the
+ * plugin installed does — testing against the real path produced a
+ * local-vs-CI coverage divergence, AISDLC-583). Defaults to the real cache
+ * root when omitted, so production callers are unaffected.
  */
-function highestVersionCacheAgentsDir(): string | null {
-  const cacheRoot = join(homedir(), '.claude', 'plugins', 'cache');
+export function highestVersionCacheAgentsDir(
+  cacheRoot: string = defaultPluginCacheRoot(),
+): string | null {
   if (!existsSync(cacheRoot)) return null;
 
   let marketplaces: string[];
@@ -87,11 +99,13 @@ function highestVersionCacheAgentsDir(): string | null {
  * Resolve the installed Claude Code plugin's `agents/` directory. See the
  * module header for the full resolution order and rationale.
  */
-export function resolveInstalledPluginAgentDir(): string | null {
+export function resolveInstalledPluginAgentDir(cacheRoot?: string): string | null {
   for (const pluginDir of [process.env['CLAUDE_PLUGIN_ROOT'], process.env['CLAUDE_PLUGIN_DIR']]) {
     if (!pluginDir) continue;
     const candidate = join(pluginDir, 'agents');
     if (existsSync(candidate)) return candidate;
   }
-  return highestVersionCacheAgentsDir();
+  // `cacheRoot` is optional (injectable for hermetic tests); when omitted the
+  // walk falls back to the real `~/.claude/plugins/cache` default.
+  return highestVersionCacheAgentsDir(cacheRoot);
 }
