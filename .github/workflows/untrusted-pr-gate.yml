@@ -795,13 +795,40 @@ jobs:
               console.log(`Warning: could not add label needs-maintainer-review: ${e.message}`);
             }
 
+            // AISDLC-592 (review nit): idempotent upsert. Re-runs of a failed
+            // job (or repeated fork pushes that keep crashing the stage) must
+            // NOT accumulate one near-duplicate comment each. Tag the comment
+            // with a hidden marker, find a prior one, and update it in place.
+            const WATCHDOG_MARKER = '<!-- ai-sdlc:ucvg-watchdog-comment -->';
+            const markedBody = `${WATCHDOG_MARKER}\n${commentBody}`;
             try {
-              await github.rest.issues.createComment({
+              const existing = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
-                body: commentBody,
+                per_page: 100,
               });
+              const prior = existing.find(
+                (c) =>
+                  typeof c.body === 'string' &&
+                  c.body.includes(WATCHDOG_MARKER) &&
+                  c.user?.type === 'Bot',
+              );
+              if (prior) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: prior.id,
+                  body: markedBody,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: markedBody,
+                });
+              }
             } catch (e) {
               console.log(`Warning: could not post failure comment: ${e.message}`);
             }

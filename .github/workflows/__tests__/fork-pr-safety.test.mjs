@@ -446,6 +446,65 @@ describe('AISDLC-381: AC #4 (safety guard #2) — fork checkouts are sandboxed u
   });
 });
 
+describe('AISDLC-592: allow-unsafe-pr-checkout is set on EVERY sandboxed fork checkout and on NO trusted checkout', () => {
+  // actions/checkout v7 refuses `ref: <fork head sha>` under
+  // pull_request_target unless `allow-unsafe-pr-checkout: true`. The flag
+  // is safe ONLY on the sandboxed pr-content/ checkouts (guard #2), so we
+  // lock in both directions: present on every pr-content checkout, absent
+  // on every trusted main checkout. Dropping the flag on any one workflow
+  // silently reproduces the ~6-week fork-PR outage this task fixed.
+  const FORK_CONTENT_WORKFLOWS = [
+    'untrusted-pr-gate.yml',
+    'ai-sdlc-review.yml',
+    'verify-attestation.yml',
+  ];
+
+  for (const name of FORK_CONTENT_WORKFLOWS) {
+    it(`${name}: every path: pr-content checkout sets allow-unsafe-pr-checkout: true + persist-credentials: false`, () => {
+      const wf = loadYaml(name);
+      const sandboxed = allSteps(wf)
+        .filter(
+          ({ step }) =>
+            typeof step.uses === 'string' &&
+            step.uses.startsWith('actions/checkout@') &&
+            step.with?.path === 'pr-content',
+        )
+        .map(({ jobId, step }) => ({ jobId, with: step.with ?? {} }));
+      assert.ok(sandboxed.length > 0, `${name} MUST have at least one pr-content checkout`);
+      for (const { jobId, with: w } of sandboxed) {
+        assert.equal(
+          w['allow-unsafe-pr-checkout'],
+          true,
+          `${name} job ${jobId}: pr-content checkout MUST set allow-unsafe-pr-checkout: true (actions/checkout v7 refuses fork head SHAs otherwise)`,
+        );
+        assert.equal(
+          w['persist-credentials'],
+          false,
+          `${name} job ${jobId}: pr-content checkout MUST pair the flag with persist-credentials: false`,
+        );
+      }
+    });
+
+    it(`${name}: no trusted (non pr-content) checkout sets allow-unsafe-pr-checkout`, () => {
+      const wf = loadYaml(name);
+      const trusted = allSteps(wf).filter(
+        ({ step }) =>
+          typeof step.uses === 'string' &&
+          step.uses.startsWith('actions/checkout@') &&
+          step.with?.path !== 'pr-content',
+      );
+      assert.ok(trusted.length > 0, `${name} MUST have at least one trusted main checkout`);
+      for (const { jobId, step } of trusted) {
+        assert.equal(
+          step.with?.['allow-unsafe-pr-checkout'],
+          undefined,
+          `${name} job ${jobId}: trusted checkout "${step.name}" MUST NOT set allow-unsafe-pr-checkout (fork content must only ever land in pr-content/)`,
+        );
+      }
+    });
+  }
+});
+
 describe('AISDLC-381: AC #4 (safety guards #3 + #4) — no execution against pr-content/', () => {
   // This is the MAIN hermetic test required by AC-4 of the task:
   //   "Hermetic test in .github/workflows/__tests__/ validates the
