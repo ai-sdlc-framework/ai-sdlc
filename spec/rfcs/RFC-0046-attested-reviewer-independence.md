@@ -1,8 +1,8 @@
 ---
 id: RFC-0046
 title: Attested Reviewer Independence
-status: Under Review
-lifecycle: Ready for Review
+status: Approved
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-09-06
 updated: 2026-09-06
@@ -14,8 +14,8 @@ requiresDocs: []
 
 # RFC-0046: Attested Reviewer Independence
 
-**Status:** Under Review — all 5 OQs resolved via operator rubric walkthrough (2026-09-06). Independence is modeled as a re-derivable **tier** (`independenceTier: none | attested | isolated`) anchored on RFC-0043's sandbox + clean-room boundary; defends against a determined same-machine coordinator; ships opt-in with a configurable, gate-topology-agnostic required-tier policy. RFC-0042 `verdictClass` is deprecated (legacy-read only), not amended.
-**Lifecycle:** Ready for Review
+**Status:** Approved (Signed Off 2026-09-06, Engineering + Operator) — all 5 OQs resolved via operator rubric walkthrough. Independence is modeled as a re-derivable **tier** (`independenceTier: none | attested | isolated`) anchored on RFC-0043's sandbox + clean-room boundary; defends against a determined same-machine coordinator; ships opt-in with a configurable, gate-topology-agnostic required-tier policy. RFC-0042 `verdictClass` is deprecated (legacy-read only), not amended.
+**Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-09-06
 **Updated:** 2026-09-06
@@ -301,8 +301,7 @@ Captured as the rejected options in each Open Question resolution below.
 
 | Pillar | Owner | Status |
 |---|---|---|
-| Engineering Authority | Dominique Legault | ⏸ Pending |
-| AI-SDLC Operator | Dominique Legault | ⏸ Pending |
+| CTO / Engineering Authority + AI-SDLC Operator | Dominique Legault | ✅ Signed (2026-09-06 — mint-not-amend design; independence as re-derivable tier on RFC-0043 substrate; defends determined same-machine coordinator) |
 | Product | Alex | ⏸ Pending |
 | Design Authority | Morgan | ⏸ Pending |
 
@@ -312,3 +311,4 @@ Captured as the rejected options in each Open Question resolution below.
 |---|---|---|
 | 2026-09-06 | 0.1 | Initial draft — problem framing + 5 OQs. |
 | 2026-09-06 | 0.2 | All 5 OQs resolved via operator rubric walkthrough. Model: `independenceTier` tier (none/attested/isolated) anchored on RFC-0043 sandbox+clean-room; threat boundary = determined same-machine coordinator; re-derivable hybrid anchor; new field deprecating `verdictClass` (no RFC-0042 amendment); opt-in + configurable gate-agnostic policy. Lifecycle Draft → Ready for Review; `requires: RFC-0043` added. |
+| 2026-09-06 | 1.0 | Signed Off (Engineering + Operator, Dominique Legault). Lifecycle Ready for Review → Signed Off. Phase tasks AISDLC-588..591 generated (Phase 2 supersedes AISDLC-587). |
