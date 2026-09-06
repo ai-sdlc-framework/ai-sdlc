@@ -1380,11 +1380,19 @@ export function verifyV6Envelope({
     reviewerName: leaf.reviewerName,
     independenceTier: resolveIndependenceTier(leaf),
   }));
-  const overallIndependenceTier = independenceTiers.some((v) => v.independenceTier === 'none')
-    ? 'none'
-    : independenceTiers.every((v) => v.independenceTier === 'isolated')
-      ? 'isolated'
-      : 'attested';
+  // Defense-in-depth (AISDLC-588 review): an empty leaf set must resolve to
+  // 'none', never round UP via the vacuous-truth of `.every()`. Currently
+  // unreachable because verifyV6Envelope rejects transcriptLeaves.length === 0
+  // earlier, but explicit here so a future relaxation of that guard can't
+  // silently mis-report 'isolated' for zero leaves.
+  const overallIndependenceTier =
+    independenceTiers.length === 0
+      ? 'none'
+      : independenceTiers.some((v) => v.independenceTier === 'none')
+        ? 'none'
+        : independenceTiers.every((v) => v.independenceTier === 'isolated')
+          ? 'isolated'
+          : 'attested';
 
   return {
     status: 'valid',

@@ -720,6 +720,9 @@ describe('emit-leaf — verdictClass detection', () => {
 
     const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictClass).toBe('independent');
+    // RFC-0046 Phase 1 (AISDLC-588): emit-leaf dual-emits independenceTier from
+    // the SAME signal — verdictClass 'independent' ⇒ 'attested'.
+    expect(leaves[0].independenceTier).toBe('attested');
   });
 
   it('(b) classifies as self-authored when no marker exists (coordinator-run Bash)', async () => {
@@ -758,6 +761,8 @@ describe('emit-leaf — verdictClass detection', () => {
 
     const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictClass).toBe('self-authored');
+    // RFC-0046 Phase 1 (AISDLC-588): verdictClass 'self-authored' ⇒ 'none'.
+    expect(leaves[0].independenceTier).toBe('none');
   });
 
   it('the emit-leaf confirmation message includes verdictClass', async () => {

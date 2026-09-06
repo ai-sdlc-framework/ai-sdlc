@@ -155,6 +155,24 @@ describe('RFC-0046 Phase 1: independenceTier enum + weakest-link aggregation', (
     expect(result.status).toBe('valid');
     expect(result.overallIndependenceTier).toBe('attested');
   });
+
+  it('mixed isolated + none ⇒ overallIndependenceTier=none (none wins over isolated)', () => {
+    const patchId = '9'.repeat(40);
+    appendLeafForPatchId(
+      makeLeaf({ leafIndex: 0, reviewerName: 'code-reviewer', independenceTier: 'isolated' }),
+      patchId,
+      tmpRoot,
+    );
+    appendLeafForPatchId(
+      makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer', independenceTier: 'none' }),
+      patchId,
+      tmpRoot,
+    );
+
+    const result = signAndVerify(patchId);
+    expect(result.status).toBe('valid');
+    expect(result.overallIndependenceTier).toBe('none');
+  });
 });
 
 describe('RFC-0046 Phase 1: dual-read migration (independenceTier <-> legacy verdictClass)', () => {
