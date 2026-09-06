@@ -1017,8 +1017,9 @@ describe('AISDLC-319 AC #5: Operator role platform-scoped, NOT tessellated', () 
   it('design-intent-document.schema.json forbids an operator vertex on triad (additionalProperties: false)', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
     // Walk up from the test file's directory until we find spec/schemas/
-    let dir = path.dirname(new URL(import.meta.url).pathname);
+    let dir = path.dirname(fileURLToPath(import.meta.url));
     let schemaPath: string | null = null;
     for (let i = 0; i < 8; i++) {
       const candidate = path.join(dir, 'spec', 'schemas', 'design-intent-document.schema.json');
