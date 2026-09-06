@@ -720,6 +720,9 @@ describe('emit-leaf — verdictClass detection', () => {
 
     const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictClass).toBe('independent');
+    // RFC-0046 Phase 1 (AISDLC-588): emit-leaf dual-emits independenceTier from
+    // the SAME signal — verdictClass 'independent' ⇒ 'attested'.
+    expect(leaves[0].independenceTier).toBe('attested');
   });
 
   it('(b) classifies as self-authored when no marker exists (coordinator-run Bash)', async () => {
@@ -758,6 +761,12 @@ describe('emit-leaf — verdictClass detection', () => {
 
     const leaves = loadLeavesUnderTest(tmpRoot);
     expect(leaves[0].verdictClass).toBe('self-authored');
+    // RFC-0046 Phase 1 (AISDLC-588): the 'none' (default) case is OMITTED, not
+    // written explicitly, so the leaf hashes identically under verifiers that
+    // predate independenceTier (an explicit "independenceTier":"none" would be
+    // bound into the Merkle preimage and break base/consumer verifiers still on
+    // the pre-RFC-0046 hashing code). Dual-read maps the absent field → 'none'.
+    expect(leaves[0].independenceTier).toBeUndefined();
   });
 
   it('the emit-leaf confirmation message includes verdictClass', async () => {

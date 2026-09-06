@@ -545,6 +545,24 @@ export const attestationEnvelopeV6Schema = {
             pattern: '^[0-9a-f]{64}$',
             description: 'SHA-256 hex of the raw reviewer transcript JSONL file.',
           },
+          verdictClass: {
+            type: 'string',
+            enum: ['independent', 'self-authored'],
+            description:
+              'AISDLC-568 trust class for this leaf. FROZEN / legacy-read as of RFC-0046 (AISDLC-588) — superseded by independenceTier.',
+          },
+          harnessTranscriptHash: {
+            type: ['string', 'null'],
+            pattern: '^[0-9a-f]{64}$',
+            description:
+              'AISDLC-570 sign-time-only harness-captured transcript hash. `null` when no harness signal existed for this leaf.',
+          },
+          independenceTier: {
+            type: 'string',
+            enum: ['none', 'attested', 'isolated'],
+            description:
+              'RFC-0046 Phase 1 (AISDLC-588) independence tier for this leaf. Absent on legacy leaves — verifier falls back to verdictClass via dual-read.',
+          },
         },
       },
     },

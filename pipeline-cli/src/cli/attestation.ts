@@ -717,6 +717,24 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // CONSUMES (deletes) the marker file on a match.
           const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
 
+          // RFC-0046 Phase 1 (AISDLC-588): independenceTier derived from the
+          // SAME signal as verdictClass at this phase — 'attested' where
+          // verdictClass would be 'independent'. Later phases (AISDLC-589/590/591)
+          // populate 'isolated' from stronger signals.
+          //
+          // CRITICAL — omit the field for the 'none' (default) case rather than
+          // writing it explicitly. 'none' is the absent-equivalent (dual-read
+          // maps an absent field → 'none'), so leaving it undefined makes the
+          // leaf hash IDENTICALLY under verifiers that predate independenceTier
+          // (the additive-compat guarantee in merkle-core.mjs holds only for an
+          // ABSENT field — an explicit "independenceTier":"none" is bound into
+          // the JSON.stringify preimage and changes the Merkle root, which a
+          // base/consumer verifier still on the pre-RFC-0046 hashing code would
+          // reconstruct differently, producing a spurious "rootSignature did not
+          // match" failure). Only a genuinely non-default tier is bound.
+          const independenceTier: 'attested' | undefined =
+            verdictClass === 'independent' ? 'attested' : undefined;
+
           const leaf: TranscriptLeaf = {
             leafIndex,
             taskId,
@@ -730,6 +748,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             signedAt,
             verdictClass,
             harnessTranscriptHash: harnessResult.harnessTranscriptHash,
+            independenceTier,
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
@@ -745,7 +764,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             `[cli-attestation] emit-leaf: leaf #${leafIndex} appended to ${filePath} ` +
               `(taskId=${taskId}, reviewer=${reviewerName}, ` +
               `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved}, ` +
-              `verdictClass=${verdictClass}, ` +
+              `verdictClass=${verdictClass}, independenceTier=${independenceTier}, ` +
               `harnessTranscriptHash=${harnessResult.harnessTranscriptHash ? 'set' : 'null'})`,
           );
         },
@@ -875,6 +894,9 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           let output = `status=${out.status}\nreason=${out.reason}\n`;
           if (out.overallVerdictClass) {
             output += `verdictClass=${out.overallVerdictClass}\n`;
+          }
+          if (out.overallIndependenceTier) {
+            output += `independenceTier=${out.overallIndependenceTier}\n`;
           }
           process.stdout.write(output);
           process.exitCode = out.status === 'valid' ? 0 : 1;

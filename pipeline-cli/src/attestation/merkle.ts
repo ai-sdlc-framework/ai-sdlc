@@ -84,8 +84,35 @@ export interface TranscriptLeaf {
    * absent key (JSON.stringify drops `undefined` values), so historical leaf
    * hashes are unaffected. The verifier and envelope builder both default a
    * missing value to the lower-trust `'self-authored'` class — never over-claim.
+   *
+   * **FROZEN / legacy-read (RFC-0046, AISDLC-588):** superseded by
+   * `independenceTier` below as the primary independence signal.
+   * `emit-leaf` continues to populate this field for one release for
+   * back-compat with pre-RFC-0046 consumers, but new code should read
+   * `independenceTier` (with `verdictClass` as the dual-read fallback for
+   * legacy envelopes that predate `independenceTier`). Do NOT add new
+   * call sites that branch on `verdictClass` alone.
    */
   verdictClass?: 'independent' | 'self-authored';
+  /**
+   * RFC-0046 Phase 1 (AISDLC-588): the independence tier for this leaf —
+   * 'none' (no independence signal / coordinator-authored), 'attested'
+   * (structural/harness-attested independence, roughly equivalent to legacy
+   * `verdictClass: 'independent'`), or 'isolated' (stronger isolation
+   * guarantee — populated by later RFC-0046 phases). Supersedes
+   * `verdictClass` as the primary independence signal.
+   *
+   * Optional for backward compatibility: leaves signed before this field
+   * existed omit it, and `hashLeaf` treats an `undefined` value identically
+   * to an absent key (JSON.stringify drops `undefined` values), so
+   * historical leaf hashes are unaffected. Absent ⇒ treated as `'none'` by
+   * both the verifier and any envelope/aggregate reader — never over-claim.
+   * At this phase (Phase 1), `emit-leaf` derives this value from the same
+   * signal as `verdictClass`: `'attested'` where `verdictClass` would be
+   * `'independent'`, else `'none'`. Later phases (AISDLC-589/590/591)
+   * populate `'isolated'` from stronger signals.
+   */
+  independenceTier?: 'none' | 'attested' | 'isolated';
   /**
    * AISDLC-570 (DEC-0013 → opt1): SHA-256 hex of the reviewer subagent's own
    * harness-captured execution transcript (`~/.claude/projects/.../agent-<id>.jsonl`),

@@ -1305,6 +1305,36 @@ export function verifyV6Envelope({
       };
     }
 
+    // ── 7c. Verify independenceTier matches on-disk leaf (RFC-0046 / AISDLC-588) ──
+    // Mirrors the 7b verdictClass check above. `envelope.transcriptLeaves[i]
+    // .independenceTier` is a separate copy of the value baked into the
+    // on-disk leaf's Merkle-proved hash — without this explicit equality
+    // check the copy could be edited to claim a higher tier than the
+    // authoritative on-disk leaf actually carries. Both sides are resolved
+    // through the SAME dual-read helper (independenceTier when present,
+    // else fall back to legacy verdictClass) before comparing, so legacy
+    // envelopes/leaves that only ever had verdictClass remain verifiable
+    // unchanged.
+    if (
+      leafSummary.independenceTier !== undefined &&
+      leafSummary.independenceTier !== 'none' &&
+      leafSummary.independenceTier !== 'attested' &&
+      leafSummary.independenceTier !== 'isolated'
+    ) {
+      return {
+        status: 'invalid',
+        reason: `v6: transcriptLeaves[${i}].independenceTier must be 'none', 'attested', or 'isolated' (got: ${JSON.stringify(leafSummary.independenceTier)})`,
+      };
+    }
+    const declaredIndependenceTier = resolveIndependenceTier(leafSummary);
+    const onDiskIndependenceTier = resolveIndependenceTier(onDiskLeaf);
+    if (declaredIndependenceTier !== onDiskIndependenceTier) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) independenceTier mismatch — envelope claims '${declaredIndependenceTier}' but on-disk leaf resolves to '${onDiskIndependenceTier}'`,
+      };
+    }
+
     // Compute the leaf hash from the on-disk leaf (the authoritative source).
     const leafHash = v6HashLeaf(onDiskLeaf);
 
@@ -1339,7 +1369,64 @@ export function verifyV6Envelope({
     ? 'self-authored'
     : 'independent';
 
-  return { status: 'valid', reason: 'ok', verdictClasses, overallVerdictClass };
+  // RFC-0046 Phase 1 (AISDLC-588): per-leaf independenceTier + weakest-link
+  // overall roll-up. Weakest link: any 'none' leaf pulls the whole PR down
+  // to 'none'; all leaves 'attested' or better ⇒ 'attested'; all leaves
+  // 'isolated' ⇒ 'isolated'. Uses the same dual-read resolution as the
+  // tamper check above (independenceTier when present, else fall back to
+  // legacy verdictClass) so pre-RFC-0046 envelopes still get a correct
+  // overallIndependenceTier via the fallback.
+  const independenceTiers = envelope.transcriptLeaves.map((leaf) => ({
+    reviewerName: leaf.reviewerName,
+    independenceTier: resolveIndependenceTier(leaf),
+  }));
+  // Defense-in-depth (AISDLC-588 review): an empty leaf set must resolve to
+  // 'none', never round UP via the vacuous-truth of `.every()`. Currently
+  // unreachable because verifyV6Envelope rejects transcriptLeaves.length === 0
+  // earlier, but explicit here so a future relaxation of that guard can't
+  // silently mis-report 'isolated' for zero leaves.
+  const overallIndependenceTier =
+    independenceTiers.length === 0
+      ? 'none'
+      : independenceTiers.some((v) => v.independenceTier === 'none')
+        ? 'none'
+        : independenceTiers.every((v) => v.independenceTier === 'isolated')
+          ? 'isolated'
+          : 'attested';
+
+  return {
+    status: 'valid',
+    reason: 'ok',
+    verdictClasses,
+    overallVerdictClass,
+    independenceTiers,
+    overallIndependenceTier,
+  };
+}
+
+/**
+ * RFC-0046 Phase 1 (AISDLC-588) — dual-read resolution of a leaf/summary's
+ * independence tier.
+ *
+ * Reads `independenceTier` when present (new signal); otherwise falls back
+ * to the legacy `verdictClass` mapping: `'independent'` → `'attested'`,
+ * `'self-authored'`/absent → `'none'`. Historical envelopes that only ever
+ * carried `verdictClass` are NOT re-interpreted beyond this mapping — they
+ * simply resolve through the fallback branch every time.
+ *
+ * @param {{ independenceTier?: string, verdictClass?: string }} entry
+ * @returns {'none' | 'attested' | 'isolated'}
+ */
+function resolveIndependenceTier(entry) {
+  if (
+    entry.independenceTier === 'none' ||
+    entry.independenceTier === 'attested' ||
+    entry.independenceTier === 'isolated'
+  ) {
+    return entry.independenceTier;
+  }
+  const verdictClass = entry.verdictClass ?? 'self-authored';
+  return verdictClass === 'independent' ? 'attested' : 'none';
 }
 
 /**

@@ -46,6 +46,9 @@ export interface V6TranscriptLeafSummary {
    * AISDLC-568: trust class for this leaf. Always present in envelopes
    * signed after AISDLC-568 — defaults to the lower-trust `'self-authored'`
    * when the source leaf predates this field (fail-safe, never over-claim).
+   *
+   * FROZEN / legacy-read (RFC-0046, AISDLC-588) — superseded by
+   * `independenceTier` below. Retained for one release for back-compat.
    */
   verdictClass: 'independent' | 'self-authored';
   /**
@@ -56,6 +59,13 @@ export interface V6TranscriptLeafSummary {
    * sign-time-only, non-CI-re-derivable trust model.
    */
   harnessTranscriptHash?: string | null;
+  /**
+   * RFC-0046 Phase 1 (AISDLC-588): independence tier carried through as-is
+   * from the source leaf. `undefined`/absent when the source leaf predates
+   * this field — the verifier's dual-read logic falls back to `verdictClass`
+   * in that case (never defaulted here to avoid masking the fallback path).
+   */
+  independenceTier?: 'none' | 'attested' | 'isolated';
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -158,6 +168,11 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
     // AISDLC-570: carried through as-is (undefined/null both mean "no
     // harness signal" — never defaulted to a value that reads as a pass).
     harnessTranscriptHash: leaf.harnessTranscriptHash ?? null,
+    // RFC-0046 / AISDLC-588: carried through as-is (undefined when the
+    // source leaf predates this field) — the verifier's dual-read fallback
+    // to verdictClass handles the legacy case, so we must NOT default it
+    // here (that would mask which envelopes actually have the new signal).
+    independenceTier: leaf.independenceTier,
   }));
 
   // Build merkleProofs for each prLeaf.
@@ -390,12 +405,13 @@ export function formatV6Envelope(envelope: AttestationEnvelopeV6): string {
   lines.push(`Transcript leaves (${envelope.transcriptLeaves.length}):`);
   for (const leaf of envelope.transcriptLeaves) {
     const verdictClass = leaf.verdictClass ?? 'self-authored';
+    const independenceTier = leaf.independenceTier ?? '(unset, dual-read fallback applies)';
     const harnessNote = leaf.harnessTranscriptHash
       ? `harnessTranscriptHash: ${leaf.harnessTranscriptHash.slice(0, 16)}... (sign-time-only, AISDLC-570)`
       : 'harnessTranscriptHash: none';
     lines.push(
       `  [${leaf.leafIndex}] ${leaf.reviewerName.padEnd(22)} transcript: ${leaf.transcriptHash.slice(0, 16)}... ` +
-        `verdictClass: ${verdictClass} ${harnessNote}`,
+        `verdictClass: ${verdictClass} independenceTier: ${independenceTier} ${harnessNote}`,
     );
   }
   const independentCount = envelope.transcriptLeaves.filter(

@@ -136,6 +136,45 @@ describe('hashLeaf', () => {
     const setHash = makeLeaf({ harnessTranscriptHash: 'c'.repeat(64) });
     expect(hashLeaf(nullHash)).not.toBe(hashLeaf(setHash));
   });
+
+  // RFC-0046 Phase 1 (AISDLC-588): independenceTier backward compatibility.
+  it('hashes identically whether independenceTier is omitted or explicitly undefined (legacy leaves)', () => {
+    const withoutField = makeLeaf();
+    delete (withoutField as { independenceTier?: unknown }).independenceTier;
+    const withUndefined = makeLeaf({ independenceTier: undefined });
+    expect(hashLeaf(withoutField)).toBe(hashLeaf(withUndefined));
+  });
+
+  it('hashes identically to a pre-independenceTier leaf when the field is absent (568-style mirror)', () => {
+    const preExisting = makeLeaf();
+    delete (preExisting as { independenceTier?: unknown }).independenceTier;
+    const stillLegacy = makeLeaf();
+    delete (stillLegacy as { independenceTier?: unknown }).independenceTier;
+    expect(hashLeaf(preExisting)).toBe(hashLeaf(stillLegacy));
+  });
+
+  it('differs when independenceTier is set vs. omitted (new leaves are distinguishable)', () => {
+    const legacy = makeLeaf();
+    delete (legacy as { independenceTier?: unknown }).independenceTier;
+    const attested = makeLeaf({ independenceTier: 'attested' });
+    expect(hashLeaf(legacy)).not.toBe(hashLeaf(attested));
+  });
+
+  it('differs across all three independenceTier enum values', () => {
+    const none = makeLeaf({ independenceTier: 'none' });
+    const attested = makeLeaf({ independenceTier: 'attested' });
+    const isolated = makeLeaf({ independenceTier: 'isolated' });
+    expect(hashLeaf(none)).not.toBe(hashLeaf(attested));
+    expect(hashLeaf(attested)).not.toBe(hashLeaf(isolated));
+    expect(hashLeaf(none)).not.toBe(hashLeaf(isolated));
+  });
+
+  it('independenceTier and verdictClass hash independently (both can be set)', () => {
+    const both = makeLeaf({ verdictClass: 'independent', independenceTier: 'attested' });
+    const onlyVerdictClass = makeLeaf({ verdictClass: 'independent' });
+    delete (onlyVerdictClass as { independenceTier?: unknown }).independenceTier;
+    expect(hashLeaf(both)).not.toBe(hashLeaf(onlyVerdictClass));
+  });
 });
 
 // ── computeMerkleRoot — empty ─────────────────────────────────────────────────
