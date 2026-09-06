@@ -129,6 +129,29 @@ export const UntrustedPrReportSchema = z
         blockingFindings: z.number().int().min(0),
       })
       .strict(),
+    /**
+     * RFC-0046 Phase 3 (AISDLC-590) — optional sandbox execution provenance.
+     *
+     * Populated by the sandbox/reviewer-runner when it produces a report intended
+     * for the `independenceTier: 'isolated'` claim. `deployment: 'ci'` is the
+     * re-derivable anchor (RFC-0046 OQ-2 hybrid resolution): the clean-room
+     * signer REFUSES to stamp `independenceTier: 'isolated'` unless this field is
+     * present with `deployment === 'ci'` — a `local` deployment sandbox still runs
+     * on the same machine as a determined coordinator and does not defend against
+     * OQ-1's threat model. Optional for backward compatibility: reports produced
+     * by the pre-existing untrusted-contributor-PR flow (which never claims
+     * `isolated`) omit this field entirely.
+     */
+    provenance: z
+      .object({
+        deployment: z.enum(['ci', 'local']),
+        /** CI run identifier (e.g. GITHUB_RUN_ID) — informational, aids audit. */
+        runId: z.string().optional(),
+        /** CI workflow ref (e.g. GITHUB_WORKFLOW_REF) — informational, aids audit. */
+        workflowRef: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

@@ -3,12 +3,16 @@
  *
  * Subcommands consumed by `.github/workflows/untrusted-pr-gate.yml`:
  *
- *   classify        — Stage 0 trust classification (wraps trust-classifier.ts)
- *   ast-gate        — Stage 1 deterministic diff/AST gate (wraps ast-gate.ts)
- *   sandbox-run     — Stage 2/3 OpenShell sandbox + reviewer matrix
- *   review-degraded — Stage 3 degraded static-diff review (no sandbox)
- *   clean-room-sign — Stage 4 clean-room attestation (wraps clean-room-signer.ts)
- *   local-review    — Surface the local-deployment path message
+ *   classify                — Stage 0 trust classification (wraps trust-classifier.ts)
+ *   ast-gate                — Stage 1 deterministic diff/AST gate (wraps ast-gate.ts)
+ *   sandbox-run             — Stage 2/3 OpenShell sandbox + reviewer matrix (untrusted-contributor PRs)
+ *   internal-isolated-review — RFC-0046 Phase 3 (AISDLC-590): identical Stage 2/3
+ *                             substrate, opt-in for INTERNAL PRs, stamps
+ *                             trust=trusted + CI provenance for the isolated tier
+ *   review-degraded         — Stage 3 degraded static-diff review (no sandbox)
+ *   clean-room-sign         — Stage 4 clean-room attestation (wraps clean-room-signer.ts);
+ *                             pass --independence-tier isolated for the RFC-0046 claim
+ *   local-review            — Surface the local-deployment path message
  *
  * All subcommands emit JSON on stdout. Errors produce non-zero exit + JSON on stderr.
  *
@@ -50,6 +54,10 @@ import {
   type InferenceProxy,
 } from '../pipeline/inference-proxy.js';
 import type { ReviewerVerdict } from '../pipeline/report-validator.js';
+import {
+  computeCiProvenance,
+  type SandboxProvenance,
+} from '../pipeline/isolated-review-trigger.js';
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
 
@@ -203,6 +211,17 @@ async function runSandboxAndReview(args: {
   prContentDir: string;
   workDir: string;
   outputDir: string;
+  /**
+   * RFC-0046 Phase 3 (AISDLC-590) — when true, this run is an opt-in INTERNAL
+   * review (not an untrusted-contributor PR): the emitted report's `trust`
+   * block is stamped `trusted`/`internal-opt-in-isolated-review`, and
+   * `provenance` is derived from the ambient CI environment
+   * (`computeCiProvenance`) so the clean-room signer's anchor check can later
+   * mint `independenceTier: 'isolated'`. Reuses the identical sandbox +
+   * proxy + reviewer-matrix substrate as the untrusted-contributor path —
+   * only the report metadata differs.
+   */
+  isolatedReview?: boolean;
 }): Promise<void> {
   const sandboxConfig = loadSandboxConfig(args.workDir);
 
@@ -355,6 +374,12 @@ async function runSandboxAndReview(args: {
     });
 
     // Emit the unsigned report artifact with the real reviewer verdicts.
+    // RFC-0046 Phase 3 (AISDLC-590): internal opt-in isolated review stamps a
+    // 'trusted'/internal trust block + CI provenance so the clean-room
+    // signer's anchor check can mint independenceTier: 'isolated'. The
+    // untrusted-contributor path (isolatedReview undefined) is unaffected —
+    // trust stays 'untrusted' and provenance is omitted, matching pre-590
+    // behavior exactly.
     const report = buildUnsignedReport(
       args.prNumber,
       args.headSha,
@@ -362,6 +387,15 @@ async function runSandboxAndReview(args: {
       differentialTest,
       reviewerResult.verdicts,
       reviewerResult.consensus,
+      args.isolatedReview
+        ? {
+            trust: {
+              classification: 'trusted',
+              reason: 'internal-opt-in-isolated-review (RFC-0046 Phase 3)',
+            },
+            provenance: computeCiProvenance(),
+          }
+        : undefined,
     );
 
     const reportPath = unsignedReportPath(args.workDir, args.prNumber);
@@ -444,6 +478,12 @@ async function runCleanRoomSignCli(args: {
   prNumber: number;
   headSha: string;
   workDir: string;
+  /**
+   * RFC-0046 Phase 3 (AISDLC-590) — the independence tier to stamp on the
+   * transcript leaves this run emits. Omitted for the pre-590
+   * untrusted-contributor flow (legacy behavior unchanged).
+   */
+  independenceTier?: 'attested' | 'isolated';
 }): Promise<void> {
   if (!existsSync(args.reportPath)) {
     fail(`report artifact not found: ${args.reportPath}`);
@@ -455,6 +495,7 @@ async function runCleanRoomSignCli(args: {
     taskId: `ucvg-pr-${args.prNumber}`,
     headSha: args.headSha,
     workDir: args.workDir,
+    independenceTier: args.independenceTier,
   });
 
   if (!result.success) {
@@ -634,6 +675,15 @@ function buildUnsignedReport(
     approved: boolean;
     blockingFindings: number;
   },
+  /**
+   * RFC-0046 Phase 3 (AISDLC-590) — optional trust/provenance overrides for
+   * the internal opt-in isolated-review path. Absent (undefined) reproduces
+   * the exact pre-590 untrusted-contributor report shape.
+   */
+  overrides?: {
+    trust?: { classification: 'trusted' | 'untrusted'; reason: string };
+    provenance?: SandboxProvenance;
+  },
 ): unknown {
   // Use real reviewer verdicts when provided; fall back to fail-closed defaults
   // only when reviewers were not run (e.g. sandbox error before Stage 3).
@@ -643,6 +693,7 @@ function buildUnsignedReport(
     security: { approved: false, findings: [], promptInjectionDetected: false },
   };
   const consensusResult = consensus ?? { approved: false, blockingFindings: 0 };
+  const trust = overrides?.trust ?? { classification: 'untrusted', reason: 'pr-processed-by-ucvg' };
 
   return {
     schemaVersion: 'untrusted-pr-report.v1',
@@ -650,10 +701,7 @@ function buildUnsignedReport(
     headSha,
     baseSha,
     generatedAt: new Date().toISOString(),
-    trust: {
-      classification: 'untrusted',
-      reason: 'pr-processed-by-ucvg',
-    },
+    trust,
     astGate: {
       outcome: 'pass',
       offendingPaths: [],
@@ -671,6 +719,7 @@ function buildUnsignedReport(
     },
     reviewers: reviewerVerdicts,
     consensus: consensusResult,
+    ...(overrides?.provenance ? { provenance: overrides.provenance } : {}),
   };
 }
 
@@ -864,6 +913,32 @@ export async function runUcvgCli(argv: string[] = process.argv.slice(2)): Promis
       break;
     }
 
+    case 'internal-isolated-review': {
+      // RFC-0046 Phase 3 (AISDLC-590) — opt-in INTERNAL review path. Identical
+      // wiring to `sandbox-run` (same SandboxDriver + inference.local proxy +
+      // reviewer-matrix substrate — no reimplementation) but stamps the
+      // report as an internal 'trusted' review with CI provenance so the
+      // clean-room signer can later mint independenceTier: 'isolated'.
+      const prNumber = parseInt(flags['pr-number'] ?? '0', 10);
+      const headSha = flags['head-sha'];
+      const baseSha = flags['base-sha'];
+      const prContentDir = flags['pr-content-dir'] ?? './pr-content';
+      const outputDir = flags['output-dir'] ?? '.ai-sdlc/ucvg/reports';
+      if (!prNumber) fail('--pr-number is required');
+      if (!headSha) fail('--head-sha is required');
+      if (!baseSha) fail('--base-sha is required');
+      await runSandboxAndReview({
+        prNumber,
+        headSha,
+        baseSha,
+        prContentDir,
+        workDir,
+        outputDir,
+        isolatedReview: true,
+      });
+      break;
+    }
+
     case 'review-degraded': {
       const prNumber = parseInt(flags['pr-number'] ?? '0', 10);
       const headSha = flags['head-sha'];
@@ -884,7 +959,12 @@ export async function runUcvgCli(argv: string[] = process.argv.slice(2)): Promis
       if (!reportPath) fail('--report-path is required');
       if (!prNumber) fail('--pr-number is required');
       if (!headSha) fail('--head-sha is required');
-      await runCleanRoomSignCli({ reportPath, prNumber, headSha, workDir });
+      const independenceTierRaw = flags['independence-tier'];
+      const independenceTier =
+        independenceTierRaw === 'attested' || independenceTierRaw === 'isolated'
+          ? independenceTierRaw
+          : undefined;
+      await runCleanRoomSignCli({ reportPath, prNumber, headSha, workDir, independenceTier });
       break;
     }
 
@@ -898,7 +978,7 @@ export async function runUcvgCli(argv: string[] = process.argv.slice(2)): Promis
     default:
       fail(
         `Unknown subcommand: ${subcommand ?? '(none)'}. ` +
-          'Available: classify, ast-gate, sandbox-run, review-degraded, clean-room-sign, local-review',
+          'Available: classify, ast-gate, sandbox-run, internal-isolated-review, review-degraded, clean-room-sign, local-review',
       );
   }
 }

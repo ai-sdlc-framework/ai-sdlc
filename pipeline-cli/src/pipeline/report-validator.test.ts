@@ -610,3 +610,60 @@ describe('incrementSigstoreAnchorCounter (AC#9)', () => {
     expect(noEnabled).toBe(false);
   });
 });
+
+// ── RFC-0046 Phase 3 (AISDLC-590): optional `provenance` field ──────────────
+
+describe('UntrustedPrReportSchema — provenance (RFC-0046 Phase 3)', () => {
+  it('accepts a report with no provenance field (pre-590 untrusted-contributor shape)', () => {
+    const zodResult = validateReport(VALID_REPORT);
+    expect(zodResult.valid).toBe(true);
+    const ajvResult = ajvValidate(VALID_REPORT);
+    expect(ajvResult).toBe(true);
+  });
+
+  it('accepts a report with provenance.deployment="ci" (the isolated-tier anchor)', () => {
+    const withProvenance = {
+      ...VALID_REPORT,
+      provenance: { deployment: 'ci', runId: '12345', workflowRef: 'refs/heads/main' },
+    };
+    const zodResult = validateReport(withProvenance);
+    expect(zodResult.valid).toBe(true);
+    const ajvResult = ajvValidate(withProvenance);
+    expect(ajvResult).toBe(true);
+  });
+
+  it('accepts a report with provenance.deployment="local" (not an isolated-tier anchor, but structurally valid)', () => {
+    const withProvenance = { ...VALID_REPORT, provenance: { deployment: 'local' } };
+    const zodResult = validateReport(withProvenance);
+    expect(zodResult.valid).toBe(true);
+    const ajvResult = ajvValidate(withProvenance);
+    expect(ajvResult).toBe(true);
+  });
+
+  it('rejects an invalid provenance.deployment enum value', () => {
+    const tampered = { ...VALID_REPORT, provenance: { deployment: 'operator-laptop' } };
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+
+  it('rejects an extra key injected into provenance (strict boundary)', () => {
+    const tampered = {
+      ...VALID_REPORT,
+      provenance: { deployment: 'ci', injected: 'payload' },
+    };
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+
+  it('rejects provenance missing the required deployment field', () => {
+    const tampered = { ...VALID_REPORT, provenance: { runId: '12345' } };
+    const zodResult = validateReport(tampered);
+    expect(zodResult.valid).toBe(false);
+    const ajvResult = ajvValidate(tampered);
+    expect(ajvResult).toBe(false);
+  });
+});

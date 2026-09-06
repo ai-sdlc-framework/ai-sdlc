@@ -43,6 +43,10 @@ const PR_TRIGGER_ALLOWLIST = new Map([
     'untrusted-pr-gate.yml',
     'zero-trust verification gate for untrusted-contributor PRs (posts the ai-sdlc/untrusted-pr-gate status; gated behind the AI_SDLC_UNTRUSTED_PR_GATE feature flag, default off)',
   ],
+  [
+    'isolated-review-gate.yml',
+    'RFC-0046 Phase 3 (AISDLC-590): opt-in isolated-tier internal review — only engages when a PR carries the isolated-review label (or via workflow_dispatch); zero cost on routine PRs, never a blocking check (informational independenceTier claim only)',
+  ],
   // NOTE: dependency-review was folded into ai-sdlc-gate.yml's pr-ready rollup
   // (dependency-review-gate job) so it is a real blocking gate — the standalone
   // dependency-review.yml workflow was removed (issue #791 follow-up).
