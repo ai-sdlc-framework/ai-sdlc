@@ -280,6 +280,13 @@ jobs:
       - name: Commit + push isolated-tier envelope to PR branch
         env:
           PATCH_ID: ${{ steps.patch-id.outputs.patch_id }}
+          # AISDLC-596 security-review MAJOR: bind the UNTRUSTED head.ref to an env
+          # var and reference "$HEAD_REF" as DATA in the run block — never
+          # interpolate ${{ github.event.* }} directly into a shell command. A
+          # branch named e.g. `x$(cmd)` would otherwise achieve script injection
+          # (RCE) inside this protected, contents:write signing job. (GitHub's
+          # documented script-injection mitigation.)
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           git config user.name "ai-sdlc-isolated-review[bot]"
           git config user.email "ai-sdlc-isolated-review-bot@users.noreply.github.com"
@@ -303,4 +310,4 @@ jobs:
           git commit \
             -m "chore(attestation): sign isolated-tier review (AISDLC-596)" \
             -m "Attestation-only commit (AISDLC-419 attestation-only-descendant head-binding relaxation). No source files touched."
-          git push origin HEAD:"${{ github.event.pull_request.head.ref }}"
+          git push origin "HEAD:$HEAD_REF"
