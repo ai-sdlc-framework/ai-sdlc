@@ -999,6 +999,98 @@ describe('runCleanRoomSignCli — clean-room-sign subcommand', () => {
     ).rejects.toThrow('process.exit(1)');
     expect(io.exitCode()).toBe(1);
   });
+
+  // RFC-0046 Phase 3 (AISDLC-590) — --independence-tier flag passthrough
+  it('passes --independence-tier isolated through to runCleanRoomSigner', async () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify({ ok: true }));
+
+    vi.mocked(cleanRoomSignerMod.runCleanRoomSigner).mockReturnValue({
+      success: false,
+      phase: 'anchor-check',
+      error: '[clean-room-signer] anchor not established',
+    });
+
+    await expect(
+      runUcvgCli([
+        'clean-room-sign',
+        '--report-path',
+        reportPath,
+        '--pr-number',
+        '42',
+        '--head-sha',
+        'a'.repeat(40),
+        '--work-dir',
+        tmpDir,
+        '--independence-tier',
+        'isolated',
+      ]),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(cleanRoomSignerMod.runCleanRoomSigner).toHaveBeenCalledWith(
+      expect.objectContaining({ independenceTier: 'isolated' }),
+    );
+  });
+
+  it('leaves independenceTier undefined when --independence-tier is omitted (legacy flow unaffected)', async () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify({ ok: true }));
+
+    vi.mocked(cleanRoomSignerMod.runCleanRoomSigner).mockReturnValue({
+      success: false,
+      phase: 'key-resolution',
+      error: 'no key',
+    });
+
+    await expect(
+      runUcvgCli([
+        'clean-room-sign',
+        '--report-path',
+        reportPath,
+        '--pr-number',
+        '42',
+        '--head-sha',
+        'a'.repeat(40),
+        '--work-dir',
+        tmpDir,
+      ]),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(cleanRoomSignerMod.runCleanRoomSigner).toHaveBeenCalledWith(
+      expect.objectContaining({ independenceTier: undefined }),
+    );
+  });
+
+  it('ignores an invalid --independence-tier value (only attested/isolated are accepted)', async () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify({ ok: true }));
+
+    vi.mocked(cleanRoomSignerMod.runCleanRoomSigner).mockReturnValue({
+      success: false,
+      phase: 'key-resolution',
+      error: 'no key',
+    });
+
+    await expect(
+      runUcvgCli([
+        'clean-room-sign',
+        '--report-path',
+        reportPath,
+        '--pr-number',
+        '42',
+        '--head-sha',
+        'a'.repeat(40),
+        '--work-dir',
+        tmpDir,
+        '--independence-tier',
+        'super-duper-isolated',
+      ]),
+    ).rejects.toThrow('process.exit(1)');
+
+    expect(cleanRoomSignerMod.runCleanRoomSigner).toHaveBeenCalledWith(
+      expect.objectContaining({ independenceTier: undefined }),
+    );
+  });
 });
 
 // ── runLocalReview ────────────────────────────────────────────────────────────
@@ -1373,6 +1465,132 @@ describe('buildUnsignedReport helper (via sandbox-run written report)', () => {
     });
     expect(report['astGate']).toEqual({ outcome: 'pass', offendingPaths: [] });
     expect(report['generatedAt']).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+// ── internal-isolated-review subcommand (RFC-0046 Phase 3, AISDLC-590) ───────
+
+describe('internal-isolated-review subcommand (RFC-0046 Phase 3, AISDLC-590)', () => {
+  let io: ReturnType<typeof captureIO>;
+  let tmpDir: string;
+  let origGithubActions: string | undefined;
+  let origGithubRunId: string | undefined;
+
+  beforeEach(() => {
+    io = captureIO();
+    tmpDir = makeTmpDir('internal-isolated-review');
+    vi.mocked(sandboxRunnerMod.loadSandboxConfig).mockReturnValue(defaultSandboxConfig);
+    vi.mocked(sandboxRunnerMod.runSandbox).mockResolvedValue({ outcome: 'error', error: 'mock' });
+    vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockImplementation((_workDir, prNumber) =>
+      join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', `${prNumber}.unsigned.json`),
+    );
+    _ucvgSeams.modelClientFactory = () =>
+      new FakeModelClient(
+        JSON.stringify({ approved: true, findings: [], promptInjectionDetected: false }),
+      );
+    origGithubActions = process.env['GITHUB_ACTIONS'];
+    origGithubRunId = process.env['GITHUB_RUN_ID'];
+  });
+  afterEach(() => {
+    io.restore();
+    rmSync(tmpDir, { recursive: true, force: true });
+    _ucvgSeams.modelClientFactory = null;
+    if (origGithubActions === undefined) delete process.env['GITHUB_ACTIONS'];
+    else process.env['GITHUB_ACTIONS'] = origGithubActions;
+    if (origGithubRunId === undefined) delete process.env['GITHUB_RUN_ID'];
+    else process.env['GITHUB_RUN_ID'] = origGithubRunId;
+  });
+
+  it('stamps trust=trusted/internal reason (not the untrusted-contributor default)', async () => {
+    delete process.env['GITHUB_ACTIONS'];
+
+    await runUcvgCli([
+      'internal-isolated-review',
+      '--pr-number',
+      '81',
+      '--head-sha',
+      'h'.repeat(40),
+      '--base-sha',
+      'b'.repeat(40),
+      '--pr-content-dir',
+      tmpDir,
+      '--work-dir',
+      tmpDir,
+      '--output-dir',
+      tmpDir,
+    ]);
+
+    const reportPath = join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '81.unsigned.json');
+    const report = JSON.parse(readFileSync(reportPath, 'utf8')) as Record<string, unknown>;
+    expect(report['trust']).toEqual({
+      classification: 'trusted',
+      reason: 'internal-opt-in-isolated-review (RFC-0046 Phase 3)',
+    });
+    // Not running under GITHUB_ACTIONS in this test — provenance is 'local',
+    // which the clean-room signer's anchor check will refuse to promote to
+    // 'isolated' (verified in clean-room-signer.test.ts).
+    expect(report['provenance']).toEqual({ deployment: 'local' });
+  });
+
+  it("stamps provenance.deployment='ci' + runId when running under GITHUB_ACTIONS (the re-derivable anchor)", async () => {
+    process.env['GITHUB_ACTIONS'] = 'true';
+    process.env['GITHUB_RUN_ID'] = '999888777';
+
+    await runUcvgCli([
+      'internal-isolated-review',
+      '--pr-number',
+      '82',
+      '--head-sha',
+      'h'.repeat(40),
+      '--base-sha',
+      'b'.repeat(40),
+      '--pr-content-dir',
+      tmpDir,
+      '--work-dir',
+      tmpDir,
+      '--output-dir',
+      tmpDir,
+    ]);
+
+    const reportPath = join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '82.unsigned.json');
+    const report = JSON.parse(readFileSync(reportPath, 'utf8')) as Record<string, unknown>;
+    expect(report['provenance']).toEqual({ deployment: 'ci', runId: '999888777' });
+  });
+
+  it('the untrusted-contributor sandbox-run subcommand is unaffected (no provenance, trust stays untrusted)', async () => {
+    process.env['GITHUB_ACTIONS'] = 'true';
+    process.env['GITHUB_RUN_ID'] = '111';
+
+    await runUcvgCli([
+      'sandbox-run',
+      '--pr-number',
+      '83',
+      '--head-sha',
+      'h'.repeat(40),
+      '--base-sha',
+      'b'.repeat(40),
+      '--pr-content-dir',
+      tmpDir,
+      '--work-dir',
+      tmpDir,
+      '--output-dir',
+      tmpDir,
+    ]);
+
+    const reportPath = join(tmpDir, '.ai-sdlc', 'ucvg', 'reports', '83.unsigned.json');
+    const report = JSON.parse(readFileSync(reportPath, 'utf8')) as Record<string, unknown>;
+    expect(report['trust']).toEqual({
+      classification: 'untrusted',
+      reason: 'pr-processed-by-ucvg',
+    });
+    expect(report['provenance']).toBeUndefined();
+  });
+
+  it('fails with exit 1 when required args are missing (same validation as sandbox-run)', async () => {
+    await expect(
+      runUcvgCli(['internal-isolated-review', '--head-sha', 'a'.repeat(40)]),
+    ).rejects.toThrow('process.exit(1)');
+    expect(io.exitCode()).toBe(1);
   });
 });
 

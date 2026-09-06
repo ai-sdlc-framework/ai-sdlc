@@ -1,0 +1,236 @@
+name: Isolated Internal Review (RFC-0046 Phase 3)
+
+# RFC-0046 Phase 3 — AISDLC-590
+#
+# Generalizes RFC-0043's sandbox-isolated reviewer fan-out + clean-room signer
+# (built for untrusted-contributor PRs — see untrusted-pr-gate.yml) to the
+# INTERNAL review path, so an opt-in internal review can be produced in an
+# isolation boundary the coordinator process cannot reach.
+#
+# ── Composition, not reimplementation ────────────────────────────────────────
+# This workflow reuses the EXACT same CLI substrate as untrusted-pr-gate.yml:
+#   - `cli-ucvg internal-isolated-review` (Stage 2/3: SandboxDriver + inference.local
+#     proxy + hardened 3-reviewer matrix — same TypeScript code, only the trust
+#     classification/report metadata differs from `sandbox-run`)
+#   - `cli-ucvg clean-room-sign --independence-tier isolated` (Stage 4: the SAME
+#     clean-room signer — signing key never enters the sandbox job)
+#
+# ── Opt-in trigger (RFC-0046 OQ-5: cost-guard, never default-on) ────────────
+# Only engages when the PR carries the `isolated-review` label. Routine PRs
+# incur ZERO sandbox spin-up cost.
+#
+# ── Re-derivable anchor (RFC-0046 OQ-2 hybrid) ───────────────────────────────
+# `internal-isolated-review` stamps `provenance.deployment: 'ci'` on the report
+# (derived from the ambient GITHUB_ACTIONS env — see
+# `pipeline-cli/src/pipeline/isolated-review-trigger.ts:computeCiProvenance`).
+# The clean-room signer (Stage 4, a SEPARATE job, no access to the sandbox
+# job's filesystem) REFUSES to mint `independenceTier: 'isolated'` unless this
+# provenance is present — see `clean-room-signer.ts`'s anchor check. A
+# coordinator that hand-authors a report, or runs the sandbox on `deployment:
+# 'local'` (same machine as the coordinator), cannot obtain the claim.
+#
+# ── Job separation (the actual isolation boundary) ───────────────────────────
+# The signing key (`AISDLC_SIGNING_KEY_CONTENT`) is ONLY ever materialized in
+# the `clean-room-sign` job, which runs on a SEPARATE GitHub Actions runner
+# from `sandbox-and-review` (no shared filesystem — only the uploaded/
+# downloaded report artifact crosses the boundary). This mirrors
+# RFC-0043 Stage 2/3 → Stage 4 verbatim.
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to run the isolated review against'
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Opt-in gate: only proceed when the `isolated-review` label is present (or
+  # this is a manual workflow_dispatch run).
+  # ────────────────────────────────────────────────────────────────────────────
+  check-opt-in:
+    name: 'Opt-in gate: isolated-review label'
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'isolated-review')
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+    steps:
+      - name: Resolve PR coordinates
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            PR_NUMBER="$DISPATCH_PR_NUMBER"
+            PR_JSON="$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}")"
+            HEAD_SHA="$(echo "$PR_JSON" | jq -r '.head.sha')"
+            BASE_SHA="$(echo "$PR_JSON" | jq -r '.base.sha')"
+          else
+            PR_NUMBER="$PULL_REQUEST_NUMBER"
+            HEAD_SHA="$PULL_REQUEST_HEAD_SHA"
+            BASE_SHA="$PULL_REQUEST_BASE_SHA"
+          fi
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Stage 2/3 (internal variant): SandboxDriver + inference.local proxy +
+  # hardened 3-reviewer matrix. NO signing key in this job.
+  # ────────────────────────────────────────────────────────────────────────────
+  sandbox-and-review:
+    name: 'Stage 2/3: Isolated Internal Review (sandbox + reviewer matrix)'
+    needs: check-opt-in
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      report_artifact: ${{ steps.sandbox.outputs.report_artifact }}
+    steps:
+      - name: Checkout PR content
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.check-opt-in.outputs.head_sha }}
+          path: pr-content
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Checkout workflow logic (main)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: 'Stage 2/3 — internal-isolated-review (SandboxDriver + inference.local)'
+        id: sandbox
+        env:
+          PR_NUMBER: ${{ needs.check-opt-in.outputs.pr_number }}
+          PR_HEAD_SHA: ${{ needs.check-opt-in.outputs.head_sha }}
+          PR_BASE_SHA: ${{ needs.check-opt-in.outputs.base_sha }}
+          # SIGNING KEY IS INTENTIONALLY ABSENT FROM THIS JOB (RFC-0043 Stage 4 boundary).
+          # ANTHROPIC_API_KEY is held by the host-side InferenceProxy only — the
+          # sandbox container never receives it directly (AQ2 invariant).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_SDLC_SANDBOX_INTEGRATION_TESTS: ${{ secrets.ANTHROPIC_API_KEY != '' && '1' || '' }}
+        run: |
+          set -o pipefail
+          node pipeline-cli/bin/cli-ucvg.mjs internal-isolated-review \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$PR_HEAD_SHA" \
+            --base-sha "$PR_BASE_SHA" \
+            --pr-content-dir ./pr-content \
+            --work-dir . \
+            --output-dir .ai-sdlc/ucvg/reports \
+            2>&1 | tee /tmp/isolated-review.log
+
+          REPORT_PATH=".ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json"
+          if [[ -f "$REPORT_PATH" ]]; then
+            echo "report_artifact=$REPORT_PATH" >> "$GITHUB_OUTPUT"
+          else
+            echo "report_artifact=" >> "$GITHUB_OUTPUT"
+            echo "[isolated-review] WARNING: sandbox exited without producing a report artifact"
+            exit 1
+          fi
+
+      - name: Upload unsigned report artifact (cross-runner transfer to clean-room-sign)
+        if: steps.sandbox.outputs.report_artifact != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: isolated-review-unsigned-report-${{ needs.check-opt-in.outputs.pr_number }}
+          path: ${{ steps.sandbox.outputs.report_artifact }}
+          retention-days: 1
+          if-no-files-found: warn
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Stage 4 (internal variant): Clean-Room Attestation — mints
+  # independenceTier: 'isolated'. Runs on a SEPARATE runner from
+  # sandbox-and-review; the signing key is only ever materialized here.
+  # ────────────────────────────────────────────────────────────────────────────
+  clean-room-sign:
+    name: 'Stage 4: Clean-Room Attestation (independenceTier: isolated)'
+    needs: [check-opt-in, sandbox-and-review]
+    if: needs.sandbox-and-review.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build pipeline-cli
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: Download unsigned report artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: isolated-review-unsigned-report-${{ needs.check-opt-in.outputs.pr_number }}
+          path: .ai-sdlc/ucvg/reports/
+
+      - name: Materialize signing key (clean room only)
+        env:
+          AISDLC_SIGNING_KEY_CONTENT: ${{ secrets.AISDLC_SIGNING_KEY_CONTENT }}
+        run: |
+          KEYFILE="$(mktemp)"
+          chmod 600 "$KEYFILE"
+          printf '%s' "$AISDLC_SIGNING_KEY_CONTENT" > "$KEYFILE"
+          echo "AISDLC_SIGNING_KEY_PATH=$KEYFILE" >> "$GITHUB_ENV"
+
+      - name: 'Stage 4 — clean-room sign (independenceTier: isolated)'
+        env:
+          PR_NUMBER: ${{ needs.check-opt-in.outputs.pr_number }}
+          PR_HEAD_SHA: ${{ needs.check-opt-in.outputs.head_sha }}
+        run: |
+          REPORT=".ai-sdlc/ucvg/reports/${PR_NUMBER}.unsigned.json"
+          node pipeline-cli/bin/cli-ucvg.mjs clean-room-sign \
+            --report-path "$REPORT" \
+            --pr-number "$PR_NUMBER" \
+            --head-sha "$PR_HEAD_SHA" \
+            --work-dir . \
+            --independence-tier isolated \
+            2>&1
+
+      - name: Cleanup signing key
+        if: always()
+        run: rm -f "${AISDLC_SIGNING_KEY_PATH:-}"

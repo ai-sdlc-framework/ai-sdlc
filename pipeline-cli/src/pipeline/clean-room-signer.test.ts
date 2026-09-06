@@ -1074,3 +1074,144 @@ describe('unsignedReportPath', () => {
     expect(path).toContain('999.unsigned.json');
   });
 });
+
+// ── RFC-0046 Phase 3 (AISDLC-590) — isolated-tier anchor check ──────────────
+
+describe('runCleanRoomSigner — independenceTier: isolated anchor check (RFC-0046 Phase 3)', () => {
+  let tmpDir: string;
+  let origSigningKeyPath: string | undefined;
+  let privateKeyPem: string;
+
+  beforeEach(async () => {
+    tmpDir = makeTmpDir();
+    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
+
+    const { generateKeyPairSync } = await import('node:crypto');
+    const kp = generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    privateKeyPem = kp.privateKey as unknown as string;
+    const keyPath = join(tmpDir, 'test-signing-key.pem');
+    writeFileSync(keyPath, privateKeyPem, 'utf8');
+    process.env['AISDLC_SIGNING_KEY_PATH'] = keyPath;
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (origSigningKeyPath !== undefined) {
+      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
+    } else {
+      delete process.env['AISDLC_SIGNING_KEY_PATH'];
+    }
+  });
+
+  it('SECURITY NEGATIVE: refuses independenceTier="isolated" for a hand-authored report with no provenance at all', () => {
+    // A coordinator hand-authoring a report outside the sandbox never sets
+    // `provenance` — this is the exact shape VALID_REPORT already has (no
+    // sandbox ever ran). The signer MUST refuse to mint 'isolated' for it.
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-590',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Expected failure');
+    expect(result.phase).toBe('anchor-check');
+    expect(result.error).toContain("independenceTier 'isolated'");
+    expect(result.error).toContain('absent');
+    // Must fail BEFORE key resolution — the key is never touched.
+    expect(result.phase).not.toBe('key-resolution');
+    expect(result.phase).not.toBe('signing');
+  });
+
+  it('SECURITY NEGATIVE: refuses independenceTier="isolated" for a report claiming provenance.deployment=\'local\' (same machine as the coordinator)', () => {
+    // Even a report that DID run through a real sandbox, but on 'local'
+    // deployment (same machine as a determined coordinator), does not
+    // establish the RFC-0046 OQ-1/OQ-2 re-derivable CI anchor.
+    const localReport: UntrustedPrReport = {
+      ...VALID_REPORT,
+      provenance: { deployment: 'local' },
+    };
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, localReport);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-590',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Expected failure');
+    expect(result.phase).toBe('anchor-check');
+    expect(result.error).toContain("'local'");
+  });
+
+  it("mints independenceTier='isolated' leaves when provenance.deployment='ci' (the re-derivable anchor)", () => {
+    const ciReport: UntrustedPrReport = {
+      ...VALID_REPORT,
+      provenance: { deployment: 'ci', runId: '424242', workflowRef: 'refs/heads/main' },
+    };
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, ciReport);
+
+    const patchId = 'f'.repeat(40);
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-590',
+      headSha: VALID_REPORT.headSha,
+      patchId,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(`Expected success, got ${result.phase}: ${result.error}`);
+
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves', `${patchId}.jsonl`);
+    const lines = readFileSync(leavesPath, 'utf8').trim().split('\n');
+    expect(lines.length).toBe(3); // code, test, security
+    for (const line of lines) {
+      const leaf = JSON.parse(line) as { independenceTier?: string };
+      expect(leaf.independenceTier).toBe('isolated');
+    }
+  });
+
+  it('does NOT stamp independenceTier when the option is omitted (legacy/untrusted-contributor flow unaffected)', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    const patchId = 'e'.repeat(40);
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-498',
+      headSha: VALID_REPORT.headSha,
+      patchId,
+      workDir: tmpDir,
+      // independenceTier intentionally omitted
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(`Expected success, got ${result.phase}: ${result.error}`);
+
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves', `${patchId}.jsonl`);
+    const lines = readFileSync(leavesPath, 'utf8').trim().split('\n');
+    for (const line of lines) {
+      const leaf = JSON.parse(line) as { independenceTier?: string };
+      expect(leaf.independenceTier).toBeUndefined();
+    }
+  });
+});

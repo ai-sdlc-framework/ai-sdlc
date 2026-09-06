@@ -145,6 +145,20 @@ export interface CleanRoomSignerOptions {
    * The signer detects if it has been invoked from inside the sandbox.
    */
   workDir?: string;
+  /**
+   * RFC-0046 Phase 3 (AISDLC-590) — the independence tier to stamp on each
+   * emitted transcript leaf. Omit for the pre-RFC-0046 untrusted-contributor
+   * flow (leaves are written without `independenceTier`, i.e. legacy/`none`
+   * behavior, matching AISDLC-588's absent-field-hashes-like-older-verifiers
+   * invariant).
+   *
+   * `'isolated'` is the load-bearing claim and is gated by the anchor check
+   * (Step 3d below): the signer REFUSES to mint `'isolated'` leaves unless
+   * `report.provenance.deployment === 'ci'` — a coordinator that hand-authors
+   * a report (or runs the sandbox with `deployment: 'local'`, same machine as
+   * the coordinator) cannot obtain the claim. See RFC-0046 OQ-1/OQ-2.
+   */
+  independenceTier?: 'attested' | 'isolated';
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -169,6 +183,10 @@ export interface CleanRoomSignerSuccess {
  * - `isolation-check` — sandbox artifacts detected; signing key NOT resolved.
  * - `artifact-read`   — could not read/parse the report artifact file.
  * - `zod-validation`  — report failed Zod boundary validation; key NOT resolved.
+ * - `anchor-check`    — `independenceTier: 'isolated'` was requested but the
+ *                        report's `provenance.deployment !== 'ci'` (or is
+ *                        absent) — the re-derivable anchor (RFC-0046 OQ-2)
+ *                        cannot be established; key NOT resolved.
  * - `key-resolution`  — signing key not found; Zod validation passed.
  * - `signing`         — key found + report valid; Merkle/sign operation failed.
  */
@@ -179,6 +197,7 @@ export interface CleanRoomSignerFailure {
     | 'artifact-read'
     | 'zod-validation'
     | 'consensus-rejected'
+    | 'anchor-check'
     | 'key-resolution'
     | 'signing';
   error: string;
@@ -205,7 +224,15 @@ export type CleanRoomSignerResult = CleanRoomSignerSuccess | CleanRoomSignerFail
  * before accessing `result.report` / `result.envelopePath`.
  */
 export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSignerResult {
-  const { reportArtifactPath, repoRoot, taskId, headSha, patchId, signerIdentity } = opts;
+  const {
+    reportArtifactPath,
+    repoRoot,
+    taskId,
+    headSha,
+    patchId,
+    signerIdentity,
+    independenceTier,
+  } = opts;
   const workDir = opts.workDir ?? process.cwd();
 
   // ── Step 1: Signing-key isolation invariant (AC#8) ──────────────────────────
@@ -315,6 +342,27 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
     }
   }
 
+  // ── Step 3d: Isolated-tier anchor check (RFC-0046 Phase 3, AISDLC-590) ──────
+  // MUST happen BEFORE key resolution (same invariant as the approval gate
+  // above). A coordinator that hand-authors a report — or that runs the
+  // sandbox with `deployment: 'local'` (same machine as the coordinator,
+  // does not defend against RFC-0046 OQ-1's determined-same-machine-coordinator
+  // threat model) — cannot obtain `independenceTier: 'isolated'`. Only a
+  // report whose `provenance.deployment === 'ci'` (different infra, RFC-0046
+  // OQ-2's re-derivable anchor) is eligible.
+  if (independenceTier === 'isolated' && report.provenance?.deployment !== 'ci') {
+    return {
+      success: false,
+      phase: 'anchor-check',
+      error:
+        `[clean-room-signer] Signing refused: independenceTier 'isolated' was requested but ` +
+        `the report's provenance.deployment is ` +
+        `${report.provenance ? `'${report.provenance.deployment}'` : 'absent'} (must be 'ci'). ` +
+        `The 'isolated' tier requires a re-derivable CI anchor (RFC-0046 OQ-2) — a local ` +
+        `sandbox run or a hand-authored report cannot establish it. Never over-claim.`,
+    };
+  }
+
   // ── Step 3b: Emit RFC-0042 v6 transcript leaves from the approved report ─────
   // Ordering is load-bearing: leaf emission runs AFTER the consensus-approval
   // gate (Step 3 above — security invariant: never emit leaves for an
@@ -356,6 +404,7 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
         verdictApproved: rv.approved === true,
         findings,
         signedAt: new Date().toISOString(),
+        ...(independenceTier ? { independenceTier } : {}),
       };
       if (patchId) {
         appendLeafForPatchId(leaf, patchId, repoRoot);

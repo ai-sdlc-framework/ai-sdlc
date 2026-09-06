@@ -8086,6 +8086,29 @@ export const untrustedPrReportV1Schema = {
         },
       },
     },
+    provenance: {
+      type: 'object',
+      required: ['deployment'],
+      additionalProperties: false,
+      description:
+        "RFC-0046 Phase 3 (AISDLC-590) — optional sandbox execution provenance. Required (deployment='ci') for the clean-room signer to stamp independenceTier='isolated'.",
+      properties: {
+        deployment: {
+          type: 'string',
+          enum: ['ci', 'local'],
+          description:
+            "Where the sandbox ran. Only 'ci' (different infra from the coordinator) is a valid anchor for the 'isolated' independence tier.",
+        },
+        runId: {
+          type: 'string',
+          description: 'CI run identifier (e.g. GITHUB_RUN_ID) — informational, aids audit.',
+        },
+        workflowRef: {
+          type: 'string',
+          description: 'CI workflow ref (e.g. GITHUB_WORKFLOW_REF) — informational, aids audit.',
+        },
+      },
+    },
   },
   $defs: {
     ReviewerVerdict: {
