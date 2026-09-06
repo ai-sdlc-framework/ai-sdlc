@@ -444,17 +444,36 @@ async function runCleanRoomSignCli(args: {
   prNumber: number;
   headSha: string;
   workDir: string;
+  patchId?: string;
+  independenceTier?: 'none' | 'attested' | 'isolated';
+  ciOnlyKey?: boolean;
+  runId?: string;
+  workflowRef?: string;
+  signerKeyId?: string;
 }): Promise<void> {
   if (!existsSync(args.reportPath)) {
     fail(`report artifact not found: ${args.reportPath}`);
   }
+
+  // RFC-0047 Phase 4 (AISDLC-596): anchorEvidence is bound ONLY when all
+  // three fields are provided together — a partial triple would be
+  // half-audit-evidence, worse than none (AISDLC-594 precedent: undefined,
+  // never a partial object).
+  const anchorEvidence =
+    args.runId && args.workflowRef && args.signerKeyId
+      ? { runId: args.runId, workflowRef: args.workflowRef, signerKeyId: args.signerKeyId }
+      : undefined;
 
   const result = runCleanRoomSigner({
     reportArtifactPath: args.reportPath,
     repoRoot: args.workDir,
     taskId: `ucvg-pr-${args.prNumber}`,
     headSha: args.headSha,
+    patchId: args.patchId,
     workDir: args.workDir,
+    independenceTier: args.independenceTier,
+    ciOnlyKey: args.ciOnlyKey,
+    anchorEvidence,
   });
 
   if (!result.success) {
@@ -881,10 +900,40 @@ export async function runUcvgCli(argv: string[] = process.argv.slice(2)): Promis
       const reportPath = flags['report-path'];
       const prNumber = parseInt(flags['pr-number'] ?? '0', 10);
       const headSha = flags['head-sha'];
+      const patchId = flags['patch-id'];
+      const independenceTierRaw = flags['independence-tier'];
+      if (
+        independenceTierRaw !== undefined &&
+        independenceTierRaw !== 'none' &&
+        independenceTierRaw !== 'attested' &&
+        independenceTierRaw !== 'isolated'
+      ) {
+        fail(
+          `--independence-tier must be 'none', 'attested', or 'isolated' (got: ${independenceTierRaw})`,
+        );
+      }
+      // RFC-0047 Phase 4 (AISDLC-596): `--ci-only-key` selects the ci-only
+      // signing key (AISDLC_CI_SIGNING_KEY_PATH) instead of the operator
+      // key. Only the protected isolated-review CI job should pass this.
+      const ciOnlyKey = flags['ci-only-key'] === 'true';
+      const runId = flags['run-id'];
+      const workflowRef = flags['workflow-ref'];
+      const signerKeyId = flags['signer-key-id'];
       if (!reportPath) fail('--report-path is required');
       if (!prNumber) fail('--pr-number is required');
       if (!headSha) fail('--head-sha is required');
-      await runCleanRoomSignCli({ reportPath, prNumber, headSha, workDir });
+      await runCleanRoomSignCli({
+        reportPath,
+        prNumber,
+        headSha,
+        workDir,
+        patchId,
+        independenceTier: independenceTierRaw as 'none' | 'attested' | 'isolated' | undefined,
+        ciOnlyKey,
+        runId,
+        workflowRef,
+        signerKeyId,
+      });
       break;
     }
 

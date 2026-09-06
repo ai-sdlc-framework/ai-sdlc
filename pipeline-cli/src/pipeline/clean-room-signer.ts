@@ -156,6 +156,31 @@ export interface CleanRoomSignerOptions {
     workflowRef: string;
     signerKeyId: string;
   };
+  /**
+   * RFC-0047 Phase 4 (AISDLC-596): the independence tier this signing
+   * operation DECLARES for every leaf it emits. `undefined` preserves the
+   * pre-RFC-0047 behavior (no tier stamped — verifier's dual-read falls
+   * back to `verdictClass`). Declaring `'isolated'` here is a CLAIM, not a
+   * guarantee: the RFC-0047 verifier (AISDLC-595) credits `isolated` ONLY
+   * when the Merkle root ends up signed by a `ci-only`-marked trusted key
+   * (see `ciOnlyKey` below); otherwise it downgrades to `attested` with a
+   * recorded reason. This signer does NOT refuse to stamp `isolated` when
+   * `ciOnlyKey` is false/absent — the security invariant lives entirely at
+   * the verifier, by design (RFC-0047 OQ-3): a coordinator who signs
+   * locally with the operator key and declares `isolated` produces a
+   * syntactically valid envelope that the verifier simply does not credit.
+   */
+  independenceTier?: 'none' | 'attested' | 'isolated';
+  /**
+   * RFC-0047 Phase 4 (AISDLC-596): when `true`, resolve the **ci-only**
+   * signing key (`AISDLC_CI_SIGNING_KEY_PATH`) instead of the operator's
+   * key. This MUST be `true` in the protected CI job that mints genuinely
+   * `isolated`-credited envelopes, and MUST be absent/false on an
+   * operator's machine — see `resolveSigningKeyPath`'s
+   * `ResolveSigningKeyPathOptions.ciOnly` doc for the no-fallback security
+   * rationale. Defaults to `false` (operator key — unchanged behavior).
+   */
+  ciOnlyKey?: boolean;
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -216,8 +241,17 @@ export type CleanRoomSignerResult = CleanRoomSignerSuccess | CleanRoomSignerFail
  * before accessing `result.report` / `result.envelopePath`.
  */
 export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSignerResult {
-  const { reportArtifactPath, repoRoot, taskId, headSha, patchId, signerIdentity, anchorEvidence } =
-    opts;
+  const {
+    reportArtifactPath,
+    repoRoot,
+    taskId,
+    headSha,
+    patchId,
+    signerIdentity,
+    anchorEvidence,
+    independenceTier,
+    ciOnlyKey,
+  } = opts;
   const workDir = opts.workDir ?? process.cwd();
 
   // ── Step 1: Signing-key isolation invariant (AC#8) ──────────────────────────
@@ -371,6 +405,11 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
         // RFC-0047 / AISDLC-594: carried through as-is (undefined when the
         // caller has no anchor evidence) — audit-only, never defaulted.
         anchorEvidence,
+        // RFC-0047 Phase 4 / AISDLC-596: carried through as-is (undefined
+        // preserves pre-RFC-0047 behavior). A declared 'isolated' tier is
+        // credited by the verifier ONLY when signed by a ci-only key — see
+        // the `independenceTier` JSDoc on `CleanRoomSignerOptions` above.
+        independenceTier,
       };
       if (patchId) {
         appendLeafForPatchId(leaf, patchId, repoRoot);
@@ -387,15 +426,24 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
   }
 
   // ── Step 4: Key resolution ───────────────────────────────────────────────────
-  const signingKeyPath = resolveSigningKeyPath();
+  // RFC-0047 Phase 4 (AISDLC-596): `ciOnlyKey: true` resolves the ci-only key
+  // (AISDLC_CI_SIGNING_KEY_PATH) ONLY — no fallback to the operator key. This
+  // is what makes the isolated-review CI job's signature unforgeable by a
+  // same-machine coordinator: the coordinator has the operator key but never
+  // the ci-only secret, so it cannot even reach this branch successfully.
+  const signingKeyPath = resolveSigningKeyPath({ ciOnly: ciOnlyKey === true });
   if (!signingKeyPath) {
     return {
       success: false,
       phase: 'key-resolution',
-      error:
-        `[clean-room-signer] No signing key found. Checked AISDLC_SIGNING_KEY_PATH env var ` +
-        `and ~/.ai-sdlc/signing-key.pem. Run 'node ai-sdlc-plugin/scripts/init-signing-key.mjs' ` +
-        `to generate a key.`,
+      error: ciOnlyKey
+        ? `[clean-room-signer] No ci-only signing key found. Checked AISDLC_CI_SIGNING_KEY_PATH ` +
+          `env var only (no fallback to the operator key by design — see RFC-0047 OQ-1). Ensure ` +
+          `the protected CI job materialized AISDLC_CI_SIGNING_KEY_CONTENT to a file and set ` +
+          `AISDLC_CI_SIGNING_KEY_PATH before invoking clean-room-sign --ci-only-key.`
+        : `[clean-room-signer] No signing key found. Checked AISDLC_SIGNING_KEY_PATH env var ` +
+          `and ~/.ai-sdlc/signing-key.pem. Run 'node ai-sdlc-plugin/scripts/init-signing-key.mjs' ` +
+          `to generate a key.`,
     };
   }
 

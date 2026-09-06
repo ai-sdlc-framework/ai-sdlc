@@ -999,6 +999,148 @@ describe('runCleanRoomSignCli — clean-room-sign subcommand', () => {
     ).rejects.toThrow('process.exit(1)');
     expect(io.exitCode()).toBe(1);
   });
+
+  // ── RFC-0047 Phase 4 (AISDLC-596): --independence-tier / --ci-only-key / anchor flags ──
+
+  it('fails with exit 1 for an invalid --independence-tier value', async () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify({ ok: true }));
+
+    await expect(
+      runUcvgCli([
+        'clean-room-sign',
+        '--report-path',
+        reportPath,
+        '--pr-number',
+        '42',
+        '--head-sha',
+        'a'.repeat(40),
+        '--work-dir',
+        tmpDir,
+        '--independence-tier',
+        'bogus',
+      ]),
+    ).rejects.toThrow('process.exit(1)');
+    expect(io.exitCode()).toBe(1);
+    const parsed = JSON.parse(io.stderrBuf().trim()) as Record<string, unknown>;
+    expect(String(parsed['reason'])).toContain('--independence-tier');
+  });
+
+  it('threads --independence-tier isolated, --ci-only-key, and anchor flags through to runCleanRoomSigner', async () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify({ ok: true }));
+
+    vi.mocked(cleanRoomSignerMod.runCleanRoomSigner).mockReturnValue({
+      success: true,
+      envelopePath: join(tmpDir, 'envelope.v6.dsse.json'),
+      report: {
+        schemaVersion: 'untrusted-pr-report.v1',
+        prNumber: 42,
+        headSha: 'a'.repeat(40),
+        baseSha: 'b'.repeat(40),
+        generatedAt: '2026-06-02T10:00:00.000Z',
+        trust: { classification: 'untrusted', reason: 'author-not-in-allowlist' },
+        astGate: { outcome: 'pass', offendingPaths: [] },
+        differentialTest: {
+          upstreamSuitePassed: true,
+          newTestsPassed: true,
+          newCodeCoveragePct: 85,
+        },
+        reviewers: {
+          code: { approved: true, findings: [], promptInjectionDetected: false },
+          test: { approved: true, findings: [], promptInjectionDetected: false },
+          security: { approved: true, findings: [], promptInjectionDetected: false },
+        },
+        consensus: { approved: true, blockingFindings: 0 },
+      },
+    });
+
+    await runUcvgCli([
+      'clean-room-sign',
+      '--report-path',
+      reportPath,
+      '--pr-number',
+      '42',
+      '--head-sha',
+      'a'.repeat(40),
+      '--work-dir',
+      tmpDir,
+      '--patch-id',
+      'f'.repeat(40),
+      '--independence-tier',
+      'isolated',
+      '--ci-only-key',
+      'true',
+      '--run-id',
+      '12345',
+      '--workflow-ref',
+      'owner/repo/.github/workflows/isolated-review.yml@refs/heads/main',
+      '--signer-key-id',
+      'ci-only-key-1',
+    ]);
+
+    expect(cleanRoomSignerMod.runCleanRoomSigner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        independenceTier: 'isolated',
+        ciOnlyKey: true,
+        patchId: 'f'.repeat(40),
+        anchorEvidence: {
+          runId: '12345',
+          workflowRef: 'owner/repo/.github/workflows/isolated-review.yml@refs/heads/main',
+          signerKeyId: 'ci-only-key-1',
+        },
+      }),
+    );
+  });
+
+  it('does not bind a partial anchorEvidence triple (only some of run-id/workflow-ref/signer-key-id given)', async () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify({ ok: true }));
+
+    vi.mocked(cleanRoomSignerMod.runCleanRoomSigner).mockReturnValue({
+      success: true,
+      envelopePath: join(tmpDir, 'envelope.v6.dsse.json'),
+      report: {
+        schemaVersion: 'untrusted-pr-report.v1',
+        prNumber: 42,
+        headSha: 'a'.repeat(40),
+        baseSha: 'b'.repeat(40),
+        generatedAt: '2026-06-02T10:00:00.000Z',
+        trust: { classification: 'untrusted', reason: 'author-not-in-allowlist' },
+        astGate: { outcome: 'pass', offendingPaths: [] },
+        differentialTest: {
+          upstreamSuitePassed: true,
+          newTestsPassed: true,
+          newCodeCoveragePct: 85,
+        },
+        reviewers: {
+          code: { approved: true, findings: [], promptInjectionDetected: false },
+          test: { approved: true, findings: [], promptInjectionDetected: false },
+          security: { approved: true, findings: [], promptInjectionDetected: false },
+        },
+        consensus: { approved: true, blockingFindings: 0 },
+      },
+    });
+
+    await runUcvgCli([
+      'clean-room-sign',
+      '--report-path',
+      reportPath,
+      '--pr-number',
+      '42',
+      '--head-sha',
+      'a'.repeat(40),
+      '--work-dir',
+      tmpDir,
+      '--run-id',
+      '12345',
+      // --workflow-ref and --signer-key-id deliberately omitted
+    ]);
+
+    expect(cleanRoomSignerMod.runCleanRoomSigner).toHaveBeenCalledWith(
+      expect.objectContaining({ anchorEvidence: undefined }),
+    );
+  });
 });
 
 // ── runLocalReview ────────────────────────────────────────────────────────────

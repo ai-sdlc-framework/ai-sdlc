@@ -2,7 +2,7 @@
 id: AISDLC-596
 title: >-
   RFC-0047 Phase 4 — isolated producer + CI workflow (protected ci-only clean-room signer, commit envelope to PR branch)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-06'
 labels:
@@ -37,13 +37,13 @@ RFC-0047 Phase 4 (OQ-1/OQ-4). The load-bearing producer: run the internal review
 This is trust-chain-critical. The negative that MUST hold: a coordinator running `clean-room-sign --independence-tier isolated` LOCALLY (operator key, no ci-only secret) cannot produce an envelope the AISDLC-595 verifier credits as `isolated` — it downgrades. Prove it end-to-end.
 
 ## Acceptance Criteria
-- [ ] Opt-in isolated review runs the 3 reviewers in the RFC-0043 sandbox; the separate protected CI job signs with the ci-only key and stamps `independenceTier: isolated` + `anchorEvidence`.
-- [ ] The signed envelope is COMMITTED to the PR branch (attestation-only) and found by the patch-id verifier; NOT discarded.
-- [ ] Reuses RFC-0043 `SandboxDriver` + `clean-room-signer` (no reimplementation); signing key never enters the sandbox job.
-- [ ] **Security negative (end-to-end):** a local operator-key `clean-room-sign --independence-tier isolated` yields a leaf the AISDLC-595 verifier DOWNGRADES (not credited isolated).
-- [ ] `.github/workflows/` isolated-review workflow uses `node pipeline-cli/bin/cli-*.mjs` invocation, no CI-skip markers, protected environment on the signing job.
-- [ ] Hermetic/integration tests for the isolated produce→sign→commit→verify loop + the negative case.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] Opt-in isolated review runs the 3 reviewers in the RFC-0043 sandbox; the separate protected CI job signs with the ci-only key and stamps `independenceTier: isolated` + `anchorEvidence`.
+- [x] The signed envelope is COMMITTED to the PR branch (attestation-only) and found by the patch-id verifier; NOT discarded.
+- [x] Reuses RFC-0043 `SandboxDriver` + `clean-room-signer` (no reimplementation); signing key never enters the sandbox job.
+- [x] **Security negative (end-to-end):** a local operator-key `clean-room-sign --independence-tier isolated` yields a leaf the AISDLC-595 verifier DOWNGRADES (not credited isolated).
+- [x] `.github/workflows/` isolated-review workflow uses `node pipeline-cli/bin/cli-*.mjs` invocation, no CI-skip markers, protected environment on the signing job.
+- [x] Hermetic/integration tests for the isolated produce→sign→commit→verify loop + the negative case.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
 RFC-0047 §Design Details (4) + OQ-1/OQ-4. Largest phase; reconcile + sign with operator-composed verdicts. Frontmatter `dependencies` (AISDLC-593, AISDLC-594, AISDLC-595) is authoritative.

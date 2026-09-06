@@ -108,15 +108,49 @@ export interface AttestationEnvelopeV6 {
 // ── Key resolution ────────────────────────────────────────────────────────────
 
 /**
- * Resolve the path to the operator's signing key.
+ * Options for `resolveSigningKeyPath`.
+ */
+export interface ResolveSigningKeyPathOptions {
+  /**
+   * RFC-0047 Phase 4 (AISDLC-596): when `true`, resolve the **ci-only**
+   * signing key used for the `isolated` independence tier — a DISTINCT
+   * keypair from the operator's `~/.ai-sdlc/signing-key.pem`.
+   *
+   * Resolution is a single explicit env var (`AISDLC_CI_SIGNING_KEY_PATH`)
+   * with **no filesystem default** — unlike the operator path, there is no
+   * well-known "ci-only key lives here" location, because the private key
+   * MUST NEVER persist on disk outside the ephemeral, protected CI job that
+   * materializes it from the `AISDLC_CI_SIGNING_KEY_CONTENT` secret for the
+   * duration of a single signing step. If the caller asks for the ci-only
+   * key and the env var is unset (or points at a missing file), this
+   * returns `null` — it MUST NOT fall back to the operator key path. A
+   * silent fallback would defeat the entire anchor: a same-machine
+   * coordinator without the CI secret would otherwise get the operator key
+   * and still be able to mint a signature, exactly the AISDLC-590 forgery
+   * this RFC closes.
+   */
+  ciOnly?: boolean;
+}
+
+/**
+ * Resolve the path to a signing key.
  *
- * Resolution order (any-of-N per OQ-4):
+ * Default (operator) resolution order (any-of-N per OQ-4):
  *  1. `AISDLC_SIGNING_KEY_PATH` env var
  *  2. `~/.ai-sdlc/signing-key.pem`
  *
+ * `{ ciOnly: true }` (RFC-0047 Phase 4 / AISDLC-596) resolves the CI-only
+ * key instead — `AISDLC_CI_SIGNING_KEY_PATH` env var ONLY, no filesystem
+ * default and no fallback to the operator path. See
+ * `ResolveSigningKeyPathOptions.ciOnly` for the security rationale.
+ *
  * Returns null when no key is found.
  */
-export function resolveSigningKeyPath(): string | null {
+export function resolveSigningKeyPath(opts: ResolveSigningKeyPathOptions = {}): string | null {
+  if (opts.ciOnly) {
+    const ciPath = process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+    return ciPath && existsSync(ciPath) ? ciPath : null;
+  }
   const envPath = process.env['AISDLC_SIGNING_KEY_PATH'];
   if (envPath) {
     return existsSync(envPath) ? envPath : null;

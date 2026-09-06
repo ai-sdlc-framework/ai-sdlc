@@ -412,6 +412,61 @@ describe('resolveSigningKeyPath', () => {
   });
 });
 
+// ── resolveSigningKeyPath({ ciOnly: true }) — RFC-0047 Phase 4 (AISDLC-596) ────
+
+describe('resolveSigningKeyPath({ ciOnly: true })', () => {
+  let origCiPath: string | undefined;
+
+  beforeEach(() => {
+    origCiPath = process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+  });
+
+  afterEach(() => {
+    if (origCiPath !== undefined) {
+      process.env['AISDLC_CI_SIGNING_KEY_PATH'] = origCiPath;
+    } else {
+      delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+    }
+  });
+
+  it('returns the ci-only key path when AISDLC_CI_SIGNING_KEY_PATH is set and the file exists', () => {
+    const keyPath = join(tmpRoot, 'ci-only-key.pem');
+    writeFileSync(keyPath, 'fake-ci-only-key', 'utf8');
+    process.env['AISDLC_CI_SIGNING_KEY_PATH'] = keyPath;
+
+    expect(resolveSigningKeyPath({ ciOnly: true })).toBe(keyPath);
+  });
+
+  it('returns null when AISDLC_CI_SIGNING_KEY_PATH is unset — no fallback to AISDLC_SIGNING_KEY_PATH', () => {
+    delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+    const operatorKeyPath = join(tmpRoot, 'operator-key.pem');
+    writeFileSync(operatorKeyPath, 'fake-operator-key', 'utf8');
+    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
+
+    // The security-critical assertion: ciOnly:true must NEVER resolve to the
+    // operator key, even though AISDLC_SIGNING_KEY_PATH points at a real file.
+    expect(resolveSigningKeyPath({ ciOnly: true })).toBeNull();
+  });
+
+  it('returns null when AISDLC_CI_SIGNING_KEY_PATH points to a non-existent file', () => {
+    process.env['AISDLC_CI_SIGNING_KEY_PATH'] = join(tmpRoot, 'nonexistent-ci-key.pem');
+
+    expect(resolveSigningKeyPath({ ciOnly: true })).toBeNull();
+  });
+
+  it('default (no opts / ciOnly:false) is unaffected by AISDLC_CI_SIGNING_KEY_PATH', () => {
+    const ciKeyPath = join(tmpRoot, 'ci-only-key.pem');
+    writeFileSync(ciKeyPath, 'fake-ci-only-key', 'utf8');
+    process.env['AISDLC_CI_SIGNING_KEY_PATH'] = ciKeyPath;
+    delete process.env['AISDLC_SIGNING_KEY_PATH'];
+
+    // Without ciOnly, resolution ignores AISDLC_CI_SIGNING_KEY_PATH entirely —
+    // falls through to the operator default (may be null on a clean machine).
+    const result = resolveSigningKeyPath();
+    expect(result).not.toBe(ciKeyPath);
+  });
+});
+
 // ── any-of-N key support ──────────────────────────────────────────────────────
 
 describe('any-of-N key support via AISDLC_SIGNING_KEY_PATH', () => {
