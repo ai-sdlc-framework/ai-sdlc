@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.21.0...pipeline-cli-v0.22.0) (2026-09-06)
+
+
+### Features
+
+* rfc-0046 phase 1 — independenceTier leaf schema + verifier dual-read (AISDLC-588) ([#1018](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1018)) ([aa8409f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aa8409f60e9e2ce1ad33f1b90f0a43ab41e43e4c))
+* rfc-0046 phase 2 — attested tier fixes worktree project-dir + agentType namespace (AISDLC-589) ([#1020](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1020)) ([68f3d14](https://github.com/ai-sdlc-framework/ai-sdlc/commit/68f3d143b5466d56689aece5b124de0488f203a6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.22.0
+
 ## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.20.1...pipeline-cli-v0.21.0) (2026-09-06)
 
 

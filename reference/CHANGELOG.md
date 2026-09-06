@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.21.0...reference-v0.22.0) (2026-09-06)
+
+
+### Features
+
+* rfc-0046 phase 1 — independenceTier leaf schema + verifier dual-read (AISDLC-588) ([#1018](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1018)) ([aa8409f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aa8409f60e9e2ce1ad33f1b90f0a43ab41e43e4c))
+
 ## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.20.1...reference-v0.21.0) (2026-09-06)
 
 
