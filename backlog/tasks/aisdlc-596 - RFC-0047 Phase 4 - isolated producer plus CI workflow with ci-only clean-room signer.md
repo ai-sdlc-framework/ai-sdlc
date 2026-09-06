@@ -46,5 +46,5 @@ This is trust-chain-critical. The negative that MUST hold: a coordinator running
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
-RFC-0047 §Design Details (4) + OQ-1/OQ-4. Largest phase; reconcile + sign with operator-composed verdicts. Depends on AISDLC-593 + 594 + 595.
+RFC-0047 §Design Details (4) + OQ-1/OQ-4. Largest phase; reconcile + sign with operator-composed verdicts. Frontmatter `dependencies` (AISDLC-593, AISDLC-594, AISDLC-595) is authoritative.
 <!-- SECTION:DESCRIPTION:END -->

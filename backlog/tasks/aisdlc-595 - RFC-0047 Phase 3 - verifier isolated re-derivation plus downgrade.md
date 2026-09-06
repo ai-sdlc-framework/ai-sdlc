@@ -39,5 +39,5 @@ RFC-0047 Phase 3 (OQ-3). Make the verifier CREDIT `independenceTier: 'isolated'`
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
-RFC-0047 §Design Details (3) + §Verifier re-derivation contract + OQ-3 resolution. Depends on AISDLC-593 (ci-only set) + AISDLC-594 (anchorEvidence field).
+RFC-0047 §Design Details (3) + §Verifier re-derivation contract + OQ-3 resolution. Frontmatter `dependencies` (AISDLC-593 ci-only trust set, AISDLC-594 anchorEvidence field) is authoritative.
 <!-- SECTION:DESCRIPTION:END -->

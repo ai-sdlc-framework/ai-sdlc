@@ -41,5 +41,5 @@ This REMOVES the `requiredTier: isolated` unsatisfiability warn/reject that AISD
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
-RFC-0047 §Design Details (5) + OQ-5. Composes with RFC-0046 AISDLC-591 (the policy engine). Depends on AISDLC-596.
+RFC-0047 §Design Details (5) + OQ-5. Composes with RFC-0046 AISDLC-591 (the policy engine). Frontmatter `dependencies` (AISDLC-596) is authoritative.
 <!-- SECTION:DESCRIPTION:END -->
