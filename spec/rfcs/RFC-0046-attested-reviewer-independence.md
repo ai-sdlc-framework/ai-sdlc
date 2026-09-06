@@ -150,6 +150,16 @@ leaves hash unchanged, mirroring the AISDLC-568 `verdictClass` additive preceden
   clean-room signer mints the v6 envelope and stamps each leaf `independenceTier:
   isolated`. This path `requires:` RFC-0043's `clean-room-signer` + `SandboxDriver`
   substrate.
+
+  > **Anchor mechanism deferred to [RFC-0047](RFC-0047-re-derivable-isolated-anchor.md).**
+  > The first implementation attempt (AISDLC-590) anchored `isolated` on a
+  > self-asserted `provenance.deployment: 'ci'` string signed with the operator's
+  > own key, which a 3-reviewer reconcile (2026-09-06) found CRITICAL-forgeable by
+  > exactly this RFC's OQ-1 same-machine coordinator. **The `isolated` tier is
+  > NOT yet producible** — RFC-0047 owns the re-derivable anchor design (verifier
+  > re-derivation via a CI identity distinct from the operator key). Until it
+  > ships, only `none`/`attested` (AISDLC-588/589) are live, and a policy
+  > `requiredTier: isolated` MUST be treated as unsatisfiable.
 - **Producer (`attested`).** When the `isolated` tier is not requested/available,
   the existing AISDLC-568 marker heuristic sets `attested` (fixing the AISDLC-587
   produce-side gaps as part of that lower tier — worktree project-dir + `agentType`

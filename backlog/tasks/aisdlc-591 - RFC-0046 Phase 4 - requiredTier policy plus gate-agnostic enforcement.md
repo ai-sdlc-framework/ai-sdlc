@@ -15,8 +15,21 @@ dependencies:
   - AISDLC-590
 references:
   - spec/rfcs/RFC-0046-attested-reviewer-independence.md
+  - spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md
 priority: medium
 ---
+
+> **⚠️ Partially blocked (2026-09-06).** AISDLC-590 (the `isolated` tier) is
+> DEFERRED to [RFC-0047](../../spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md)
+> after a CRITICAL forgeability finding, so `requiredTier: isolated` is currently
+> **unsatisfiable** and MUST warn/reject until RFC-0047 ships. The
+> `requiredTier: none | attested` policy (built on shipped AISDLC-588/589) CAN
+> proceed independently — an operator may choose to reduce this task's scope to
+> the `none`/`attested` policy now and fold `isolated` enforcement into the
+> RFC-0047 implementation. Also carry forward the AISDLC-588 security-reviewer
+> precondition: before `overallIndependenceTier` gates merge, bind the expected
+> reviewer-leaf set/count into the signed material (the current weakest-link
+> aggregation runs over the attacker-choosable envelope leaf subset).
 
 ## Description
 
