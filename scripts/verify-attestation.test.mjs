@@ -464,6 +464,193 @@ describe('runVerifier (happy path + existing AISDLC-74 regressions)', () => {
   });
 });
 
+// ─── AISDLC-583 — consumer-repo agent-dir resolution ────────────────
+//
+// `runVerifier` previously read reviewer agent-definition files from a
+// MONOREPO-ONLY path (`<repoRoot>/ai-sdlc-plugin/agents/*.md`), unguarded.
+// In a consumer/adopter repo that path never exists (the plugin is an
+// npm/marketplace install, never checked into the repo tree), so the read
+// threw ENOENT during verifier SETUP — before any envelope was evaluated —
+// making `verify-attestation` fail closed on 100% of adopter PRs. The fix
+// adds a driver-injectable `agentDir` (mirroring the `bindRuntime()`
+// injection pattern, AISDLC-566) with a three-tier fallback: injected dir →
+// repo-relative monorepo path → guarded, warned downgrade (never a throw).
+
+describe('runVerifier (AISDLC-583 — consumer-repo agent-dir resolution)', () => {
+  let fixture;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('resolves expectedAgentFileHashes from an injected agentDir when repoRoot has no ai-sdlc-plugin/agents (consumer-repo shape) — no ENOENT', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+
+    // Simulate a consumer/adopter repo: the monorepo-relative agents dir
+    // never exists in that shape at all.
+    rmSync(join(fixture.root, 'ai-sdlc-plugin', 'agents'), { recursive: true, force: true });
+
+    // The "installed plugin" lives OUTSIDE repoRoot — this is what the
+    // driver (`pipeline-cli/src/cli/attestation.ts`) resolves and injects.
+    const installedPluginAgentsDir = mkdtempSync(
+      join(tmpdir(), 'ai-sdlc-installed-plugin-agents-'),
+    );
+    try {
+      for (const [name, content] of Object.entries(AGENT_FILES)) {
+        writeFileSync(join(installedPluginAgentsDir, `${name}.md`), content);
+      }
+
+      assert.doesNotThrow(() => {
+        const out = runVerifier({
+          headSha: fixture.headSha,
+          baseSha: fixture.baseSha,
+          repoRoot: fixture.root,
+          agentDir: installedPluginAgentsDir,
+        });
+        assert.equal(out.status, 'valid', `expected valid, got ${out.status}: ${out.reason}`);
+        assert.equal(out.reason, 'ok');
+      });
+    } finally {
+      rmSync(installedPluginAgentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('enforces the binding against the injected agentDir — tampering after sign still rejects', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    rmSync(join(fixture.root, 'ai-sdlc-plugin', 'agents'), { recursive: true, force: true });
+
+    const installedPluginAgentsDir = mkdtempSync(
+      join(tmpdir(), 'ai-sdlc-installed-plugin-agents-'),
+    );
+    try {
+      for (const [name, content] of Object.entries(AGENT_FILES)) {
+        writeFileSync(join(installedPluginAgentsDir, `${name}.md`), content);
+      }
+      // Tamper with the code-reviewer definition in the injected dir AFTER
+      // signing — the binding must still catch this from the installed dir.
+      writeFileSync(
+        join(installedPluginAgentsDir, 'code-reviewer.md'),
+        AGENT_FILES['code-reviewer'] + '\n## TAMPERED AFTER ATTESTATION\n',
+      );
+
+      const out = runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+        agentDir: installedPluginAgentsDir,
+      });
+      assert.equal(out.status, 'invalid');
+      assert.match(
+        out.reason,
+        /agentFileHashes\[code-reviewer\]|agentFileHash mismatch.*code-reviewer/,
+      );
+    } finally {
+      rmSync(installedPluginAgentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT throw ENOENT and skips agentFileHash (with a stderr warning) when neither repoRoot nor an injected agentDir has the agent files', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    rmSync(join(fixture.root, 'ai-sdlc-plugin', 'agents'), { recursive: true, force: true });
+
+    const stderrChunks = [];
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...args) => {
+      stderrChunks.push(String(chunk));
+      return originalWrite(chunk, ...args);
+    };
+    let out;
+    try {
+      assert.doesNotThrow(() => {
+        out = runVerifier({
+          headSha: fixture.headSha,
+          baseSha: fixture.baseSha,
+          repoRoot: fixture.root,
+          // no agentDir injected either — nothing resolves anywhere.
+        });
+      });
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+    // Signature, Merkle/content-hash, diff/policy binding, and
+    // verdictClass are all still evaluated and must still pass — only the
+    // agentFileHash binding is downgraded.
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid (agentFileHash binding downgraded, not fatal), got ${out.status}: ${out.reason}`,
+    );
+    assert.ok(
+      stderrChunks.some((c) => c.includes('AISDLC-583') && c.includes('DOWNGRADED')),
+      `expected a stderr warning naming the downgrade, got: ${JSON.stringify(stderrChunks)}`,
+    );
+  });
+
+  it('regression: monorepo layout (repo-relative ai-sdlc-plugin/agents present) still resolves + enforces exactly as before', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    // No agentDir injected — the fixture's repo-relative
+    // ai-sdlc-plugin/agents/ dir (the monorepo shape) must still resolve
+    // via the tier-2 fallback and enforce the binding, unchanged.
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid, got ${out.status}: ${out.reason}`);
+
+    writeFileSync(
+      join(fixture.root, 'ai-sdlc-plugin', 'agents', 'test-reviewer.md'),
+      AGENT_FILES['test-reviewer'] + '\n## ADDED RULES AFTER ATTESTATION\n',
+    );
+    const tampered = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(tampered.status, 'invalid');
+    assert.match(
+      tampered.reason,
+      /agentFileHashes\[test-reviewer\]|agentFileHash mismatch.*test-reviewer/,
+    );
+  });
+});
+
 // ─── AISDLC-84 — rebase-stable matching ─────────────────────────────
 //
 // The whole point of AISDLC-84: SHA can change for non-content reasons

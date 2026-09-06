@@ -21,7 +21,18 @@
 
 export interface VerifyCoreModule {
   bindRuntime(mod: unknown): void;
-  runVerifier(args: { headSha: string; baseSha: string; repoRoot?: string }): {
+  runVerifier(args: {
+    headSha: string;
+    baseSha: string;
+    repoRoot?: string;
+    /**
+     * AISDLC-583 — driver-resolved installed-plugin `agents/` dir (see
+     * `resolveInstalledPluginAgentDir` in `agent-dir-resolver.ts`).
+     * Falls back to the repo-relative monorepo path, then a guarded
+     * downgrade, when omitted or unresolved.
+     */
+    agentDir?: string;
+  }): {
     status: 'valid' | 'invalid';
     reason: string;
     overallVerdictClass?: string;

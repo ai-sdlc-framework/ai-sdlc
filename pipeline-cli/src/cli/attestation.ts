@@ -44,6 +44,7 @@ import {
   signAndWriteV6Envelope,
   type AttestationEnvelopeV6,
 } from '../attestation/sign-v6.js';
+import { resolveInstalledPluginAgentDir } from '../attestation/agent-dir-resolver.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { determineVerdictClass } from '../attestation/verdict-class.js';
 import { loadVerifyCore } from '../attestation/verify-core-loader.js';
@@ -860,7 +861,17 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const core = await loadVerifyCore();
           core.bindRuntime(runtimeMod);
 
-          const out = core.runVerifier({ headSha, baseSha, repoRoot });
+          // AISDLC-583: resolve the installed plugin's agents/ dir from
+          // OUTSIDE the checkout (never from repoRoot, which may be an
+          // untrusted PR checkout with no plugin present at all) and
+          // inject it — mirrors the runtime-binding injection above.
+          // `verify-core.mjs`'s `runVerifier` falls back to the
+          // repo-relative monorepo path, then to a guarded downgrade, so
+          // `agentDir: undefined` here (adopter with no plugin installed
+          // at all) is a supported, non-throwing case.
+          const agentDir = resolveInstalledPluginAgentDir() ?? undefined;
+
+          const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
           let output = `status=${out.status}\nreason=${out.reason}\n`;
           if (out.overallVerdictClass) {
             output += `verdictClass=${out.overallVerdictClass}\n`;
