@@ -1113,6 +1113,234 @@ describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', ()
   });
 });
 
+// ── RFC-0047 Phase 4 (AISDLC-596) — ci-only key resolution + isolated producer ──
+
+describe('runCleanRoomSigner — RFC-0047 Phase 4 (AISDLC-596): ci-only key + independenceTier', () => {
+  let tmpDir: string;
+  let origSigningKeyPath: string | undefined;
+  let origCiKeyPath: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
+    origCiKeyPath = process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (origSigningKeyPath !== undefined) {
+      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
+    } else {
+      delete process.env['AISDLC_SIGNING_KEY_PATH'];
+    }
+    if (origCiKeyPath !== undefined) {
+      process.env['AISDLC_CI_SIGNING_KEY_PATH'] = origCiKeyPath;
+    } else {
+      delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+    }
+  });
+
+  it('carries independenceTier through to every emitted leaf as-is', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+    delete process.env['AISDLC_SIGNING_KEY_PATH'];
+
+    runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-596',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+    });
+
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
+    const lines = readFileSync(leavesPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      const leaf = JSON.parse(line) as Record<string, unknown>;
+      expect(leaf['independenceTier']).toBe('isolated');
+    }
+  });
+
+  it('ciOnlyKey:true fails with phase:key-resolution when AISDLC_CI_SIGNING_KEY_PATH is unset — no fallback to operator key', async () => {
+    const { generateKeyPairSync } = await import('node:crypto');
+    // An operator key IS present, but must never be used for a ciOnlyKey:true request.
+    const { privateKey } = generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const operatorKeyPath = join(tmpDir, 'operator-key.pem');
+    writeFileSync(operatorKeyPath, privateKey as string, 'utf8');
+    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
+    delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-596',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+      ciOnlyKey: true,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('expected failure');
+    expect(result.phase).toBe('key-resolution');
+    expect(result.error).toContain('AISDLC_CI_SIGNING_KEY_PATH');
+  });
+
+  it('ciOnlyKey:true resolves and signs with the ci-only key when AISDLC_CI_SIGNING_KEY_PATH is set (operator key ignored)', async () => {
+    const { generateKeyPairSync } = await import('node:crypto');
+    const operatorKp = generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const ciKp = generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const operatorKeyPath = join(tmpDir, 'operator-key.pem');
+    const ciKeyPath = join(tmpDir, 'ci-only-key.pem');
+    writeFileSync(operatorKeyPath, operatorKp.privateKey as string, 'utf8');
+    writeFileSync(ciKeyPath, ciKp.privateKey as string, 'utf8');
+    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
+    process.env['AISDLC_CI_SIGNING_KEY_PATH'] = ciKeyPath;
+
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-596',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+      ciOnlyKey: true,
+      anchorEvidence: {
+        runId: '42',
+        workflowRef: 'owner/repo/.github/workflows/isolated-review.yml@refs/heads/main',
+        signerKeyId: 'ci-only-test-key',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(`expected success, got ${result.phase}: ${result.error}`);
+
+    const { createPublicKey, verify: cryptoVerify } = await import('node:crypto');
+    const envelope = JSON.parse(readFileSync(result.envelopePath, 'utf8')) as {
+      rootHash: string;
+      rootSignature: string;
+    };
+    const rootHashBuf = Buffer.from(envelope.rootHash, 'utf8');
+    const signatureBuf = Buffer.from(envelope.rootSignature, 'base64');
+
+    // The root MUST verify under the CI-only public key...
+    const ciPubKeyObj = createPublicKey(ciKp.publicKey as string);
+    expect(cryptoVerify(null, rootHashBuf, ciPubKeyObj, signatureBuf)).toBe(true);
+
+    // ...and MUST NOT verify under the operator's public key (proves the
+    // operator key was never touched for this signing operation).
+    const operatorPubKeyObj = createPublicKey(operatorKp.publicKey as string);
+    expect(cryptoVerify(null, rootHashBuf, operatorPubKeyObj, signatureBuf)).toBe(false);
+  });
+
+  // ── SECURITY-CRITICAL NEGATIVE (AISDLC-596 AC) ──────────────────────────────
+  //
+  // A coordinator running `clean-room-sign --independence-tier isolated` LOCALLY
+  // (operator key, no ci-only secret) must NOT be able to produce an envelope
+  // the RFC-0047 Phase 3 (AISDLC-595) verifier credits as `isolated` — it must
+  // downgrade. This proves the invariant end-to-end: producer (this module) +
+  // verifier (attestation-core/verify-core.mjs), not just the verifier in
+  // isolation.
+  it('SECURITY NEGATIVE: local operator-key --independence-tier isolated downgrades at verify time (not credited isolated)', async () => {
+    const { generateKeyPairSync } = await import('node:crypto');
+    const operatorKp = generateKeyPairSync('ed25519');
+    const operatorPrivatePem = operatorKp.privateKey.export({
+      format: 'pem',
+      type: 'pkcs8',
+    }) as string;
+    const operatorPublicPem = operatorKp.publicKey.export({
+      format: 'pem',
+      type: 'spki',
+    }) as string;
+
+    const operatorKeyPath = join(tmpDir, 'operator-key.pem');
+    writeFileSync(operatorKeyPath, operatorPrivatePem, 'utf8');
+    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
+    delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
+
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+    const patchId = 'e'.repeat(40);
+
+    // The coordinator locally declares `isolated` WITHOUT `ciOnlyKey: true` —
+    // exactly the forgery attempt this RFC closes. The signer does not
+    // refuse (per RFC-0047 OQ-3, the security invariant lives at the
+    // verifier), but the produced envelope must not be credited isolated.
+    const result = runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-596',
+      headSha: VALID_REPORT.headSha,
+      patchId,
+      workDir: tmpDir,
+      independenceTier: 'isolated',
+      // ciOnlyKey deliberately omitted — the coordinator only has the operator key.
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error(`expected success, got ${result.phase}: ${result.error}`);
+
+    const envelope = JSON.parse(readFileSync(result.envelopePath, 'utf8'));
+
+    // Register the operator key as an ORDINARY (non-ci-only) trusted reviewer —
+    // the realistic trusted-reviewers.yaml state: the operator's own key is
+    // registered (so their attested/none-tier reviews verify), but it is
+    // NEVER marked ciOnly: true.
+    // @ts-expect-error -- plain ESM, no type declarations shipped
+    const { verifyV6Envelope } = await import('../../attestation-core/verify-core.mjs');
+    const verifyResult = verifyV6Envelope({
+      envelope,
+      envelopeFileName: `${VALID_REPORT.headSha}.v6.dsse.json`,
+      headSha: VALID_REPORT.headSha,
+      trustedReviewers: [{ pubkey: operatorPublicPem }], // ciOnly absent/false
+      repoRoot: tmpDir,
+      patchIdHint: patchId,
+    }) as {
+      status: string;
+      reason?: string;
+      overallIndependenceTier?: string;
+      independenceTiers?: Array<{ independenceTier: string; isolatedDowngraded?: unknown }>;
+    };
+
+    if (verifyResult.status !== 'valid') {
+      throw new Error(`expected valid, got invalid: ${verifyResult.reason}`);
+    }
+
+    // Integrity still passes (a real key signed a real Merkle root over a
+    // genuinely approved report) — the claim is merely not credited at the
+    // requested tier. This is the documented RFC-0047 OQ-3 behavior:
+    // downgrade with a recorded reason, never reject on anchor grounds alone.
+    expect(verifyResult.status).toBe('valid');
+    expect(verifyResult.overallIndependenceTier).not.toBe('isolated');
+    expect(verifyResult.overallIndependenceTier).toBe('attested');
+    expect(verifyResult.independenceTiers?.every((t) => t.independenceTier !== 'isolated')).toBe(
+      true,
+    );
+    expect(verifyResult.independenceTiers?.some((t) => t.isolatedDowngraded !== undefined)).toBe(
+      true,
+    );
+  });
+});
+
 // ── unsignedReportPath helper ─────────────────────────────────────────────────
 
 describe('unsignedReportPath', () => {
