@@ -56,6 +56,11 @@ import {
   computeHarnessTranscriptHash,
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
+import {
+  evaluateIndependencePolicy,
+  loadIndependencePolicy,
+  type IndependenceTier,
+} from '../attestation/independence-policy.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
 
@@ -963,9 +968,95 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           process.exitCode = out.status === 'valid' ? 0 : 1;
         },
       )
+      // ── independence-policy (RFC-0046 Phase 4, AISDLC-591) ─────────────────────
+      .command(
+        'independence-policy',
+        "Run the same verifier as `verify`, then compare the envelope's " +
+          "`overallIndependenceTier` (AISDLC-588) against the repo's " +
+          '`.ai-sdlc/independence-policy.yaml` `requiredTier` (default `none` — no ' +
+          'behavior change). Gate-topology-agnostic (RFC-0046 §Rollout / OQ-5): this is ' +
+          'the SAME comparison invoked both by the `ai-sdlc/pr-ready` rollup ' +
+          '(branch-protection repos) and by a ship-skill (procedural-gate repos, e.g. ' +
+          'local-trades, before shipping). `requiredTier: isolated` is currently ' +
+          'unsatisfiable regardless of the claimed tier (RFC-0047 / AISDLC-597 flips the ' +
+          'capability). Prints `overallIndependenceTier=`, `requiredTier=`, ' +
+          '`policyOutcome=pass|shortfall|unsatisfiable`, `policyMessage=`. Exits non-zero ' +
+          'when the envelope itself is invalid OR the policy outcome is not `pass`.',
+        (y: Argv) =>
+          y
+            .option('head', {
+              type: 'string',
+              demandOption: true,
+              describe: '40-char hex git commit SHA of the PR/ship head being checked.',
+            })
+            .option('base', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                "40-char hex git commit SHA of the head's base (typically origin/main's tip).",
+            }),
+        async (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const headSha = args['head'] as string;
+          const baseSha = args['base'] as string;
+
+          if (!isValidHeadSha(headSha)) {
+            process.stderr.write(
+              `[cli-attestation] independence-policy: --head must be exactly 40 lowercase hex ` +
+                `characters (got ${headSha.length}-char value: ${JSON.stringify(headSha.slice(0, 80))})\n`,
+            );
+            process.exit(2);
+          }
+          if (!isValidHeadSha(baseSha)) {
+            process.stderr.write(
+              `[cli-attestation] independence-policy: --base must be exactly 40 lowercase hex ` +
+                `characters (got ${baseSha.length}-char value: ${JSON.stringify(baseSha.slice(0, 80))})\n`,
+            );
+            process.exit(2);
+          }
+
+          let runtimeMod: unknown;
+          try {
+            runtimeMod = await loadAttestationRuntime(repoRoot);
+          } catch (err) {
+            if (err instanceof TrustedRuntimeResolutionError) {
+              process.stderr.write(`ERROR: ${err.message}\n`);
+              process.exit(2);
+            }
+            throw err;
+          }
+
+          const core = await loadVerifyCore();
+          core.bindRuntime(runtimeMod);
+          const agentDir = resolveInstalledPluginAgentDir() ?? undefined;
+          const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
+
+          // Absent field (legacy pre-AISDLC-588 envelope, or an invalid
+          // envelope) resolves to 'none' — the honest floor, never assume
+          // a higher tier than the verifier actually reported.
+          const overallIndependenceTier = (out.overallIndependenceTier ??
+            'none') as IndependenceTier;
+          const policy = loadIndependencePolicy({ repoRoot });
+          const outcome = evaluateIndependencePolicy({
+            requiredTier: policy.requiredTier,
+            overallIndependenceTier,
+          });
+
+          let output = `status=${out.status}\nreason=${out.reason}\n`;
+          output += `overallIndependenceTier=${overallIndependenceTier}\n`;
+          output += `requiredTier=${policy.requiredTier}\n`;
+          output += `policyOutcome=${outcome.status}\n`;
+          output += `policyMessage=${outcome.message}\n`;
+          process.stdout.write(output);
+
+          // An invalid envelope can't be trusted to carry an honest tier at
+          // all — fail closed even if the policy itself is `none`.
+          process.exitCode = out.status === 'valid' && outcome.status === 'pass' ? 0 : 1;
+        },
+      )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy)',
       )
       .help()
       .alias('h', 'help')
