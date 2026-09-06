@@ -2,7 +2,7 @@
 id: RFC-0047
 title: Re-Derivable Isolated-Review Anchor
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-09-06
 updated: 2026-09-06
@@ -14,8 +14,8 @@ requiresDocs: []
 
 # RFC-0047: Re-Derivable Isolated-Review Anchor
 
-**Status:** Ready for Review — **all 5 OQs resolved 2026-09-06 via operator rubric
-walkthrough** (sign-off + phase tasks follow in the RtR→Signed Off PR). The `isolated` anchor is a **CI-only ed25519 key** (private half only
+**Status:** Signed Off (2026-09-06, Engineering + Operator) — **all 5 OQs resolved
+2026-09-06 via operator rubric walkthrough.** The `isolated` anchor is a **CI-only ed25519 key** (private half only
 in a protected GitHub Actions environment; pubkey in `trusted-reviewers.yaml` marked
 `ci-only`) — the security anchor is the *root signature by that key*, which a
 same-machine coordinator holding the operator key cannot produce, while the verifier
@@ -31,7 +31,7 @@ MAJOR). Scope split: RFC-0046 keeps the taxonomy + `none`/`attested` + the
 single "isolated producible" capability gate (`requiredTier: isolated` is
 unsatisfiable until this RFC ships). Sigstore/Rekor is the documented forward
 hardening path.
-**Lifecycle:** Ready for Review
+**Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-09-06
 
@@ -212,8 +212,8 @@ producible? Until this RFC ships, `requiredTier: isolated` MUST be unsatisfiable
 
 | Role | Owner | Status |
 | --- | --- | --- |
-| Engineering | Dominique Legault | ⏸ Pending |
-| Operator | Dominique Legault | ⏸ Pending |
+| Engineering | Dominique Legault | ✅ Signed (CI-only-key anchor preserves offline verify + kills the same-machine-coordinator forgery; sound implementation surface; 2026-09-06) |
+| Operator | Dominique Legault | ✅ Signed (engineered the anchor correctly per the "don't tack it on" directive; 593-597 dispatchable; 2026-09-06) |
 | Product | Alex | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
@@ -222,4 +222,5 @@ producible? Until this RFC ships, `requiredTier: isolated` MUST be unsatisfiable
 | Date | Change |
 | --- | --- |
 | 2026-09-06 | Draft minted. Splits the `isolated` anchor mechanism out of RFC-0046 after AISDLC-590 / PR #1021's CRITICAL forgeability finding. 5 OQs for operator walkthrough; no OQ resolved. |
+| 2026-09-06 | **Ready for Review → Signed Off** (Engineering + Operator); generated the 5 phase tasks (AISDLC-593..597). Landed as a separate PR after the Draft→Ready-for-Review PR, per the single-step lifecycle-transition gate. |
 | 2026-09-06 | **OQ walkthrough — all 5 OQs resolved via full rubric; Draft → Ready for Review.** OQ-1: CI-only ed25519 key anchor (offline-preserving, reuses ed25519/trusted-reviewers; Sigstore is the forward hardening path). OQ-2: bind `{runId, workflowRef, signerKeyId}` as an audit-only trailing leaf field (closes the 590 over-claim); signer identity is the security anchor. OQ-3: fully offline; unanchored `isolated` downgrades with a recorded reason (integrity failures still reject). OQ-4: CI commits the attestation-only envelope to the PR branch (fixes the 590 discarded-claim MAJOR). OQ-5: RFC-0046 keeps the taxonomy + `none`/`attested` + policy engine (591 ships now); RFC-0047 owns the `isolated` producer/verifier + a single capability gate; `requiredTier: isolated` unsatisfiable until this RFC ships. Design Details filled. |
