@@ -66,6 +66,18 @@ export interface V6TranscriptLeafSummary {
    * in that case (never defaulted here to avoid masking the fallback path).
    */
   independenceTier?: 'none' | 'attested' | 'isolated';
+  /**
+   * RFC-0047 Phase 2 (AISDLC-594): audit-only CI provenance evidence,
+   * carried through as-is from the source leaf. `undefined`/absent when the
+   * source leaf has no anchor evidence — NEVER defaulted here (this is
+   * audit-only context, not the security anchor; the `ci-only` root
+   * signature is).
+   */
+  anchorEvidence?: {
+    runId: string;
+    workflowRef: string;
+    signerKeyId: string;
+  };
 }
 
 /** A single entry in the `merkleProofs` array of the v6 envelope. */
@@ -173,6 +185,9 @@ export function buildV6Envelope(opts: BuildV6EnvelopeOptions): AttestationEnvelo
     // to verdictClass handles the legacy case, so we must NOT default it
     // here (that would mask which envelopes actually have the new signal).
     independenceTier: leaf.independenceTier,
+    // RFC-0047 / AISDLC-594: carried through as-is (undefined when the
+    // source leaf has no anchor evidence) — audit-only, never defaulted.
+    anchorEvidence: leaf.anchorEvidence,
   }));
 
   // Build merkleProofs for each prLeaf.

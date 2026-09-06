@@ -67,10 +67,10 @@ export function hashPair(left, right) {
  * key-set change is a hash-breaking change for every already-signed leaf).
  *
  * `undefined` values (e.g. `verdictClass`/`harnessTranscriptHash`/
- * `independenceTier` absent on leaves signed before those fields existed)
- * are dropped by `JSON.stringify`, so historical leaves hash identically to
- * before their introducing field was added — backward compatible by
- * construction.
+ * `independenceTier`/`anchorEvidence` absent on leaves signed before those
+ * fields existed) are dropped by `JSON.stringify`, so historical leaves hash
+ * identically to before their introducing field was added — backward
+ * compatible by construction.
  */
 export function hashLeaf(leaf) {
   const ordered = {
@@ -101,6 +101,23 @@ export function hashLeaf(leaf) {
     // pre-independenceTier leaf. Superseded `verdictClass` as the primary
     // independence signal — 'none' | 'attested' | 'isolated'.
     independenceTier: leaf.independenceTier,
+    // RFC-0047 / AISDLC-594: trailing field. AUDIT-ONLY — NOT the security
+    // anchor (the `ci-only` root signature is, per OQ-1/OQ-2). `undefined`
+    // drops out of JSON.stringify, so a leaf omitting it hashes identically
+    // to a pre-anchorEvidence leaf (the AISDLC-588 additive-compat
+    // invariant). MUST be `undefined` when absent — never `null`/`{}` — or
+    // a leaf without genuine anchor evidence would hash differently than a
+    // legacy leaf, breaking older verifiers (the AISDLC-588 base-verifier
+    // hashing-boundary lesson). Nested object uses a FIXED internal key
+    // order (mirrors the `findings` sub-object above) regardless of
+    // construction order.
+    anchorEvidence: leaf.anchorEvidence
+      ? {
+          runId: leaf.anchorEvidence.runId,
+          workflowRef: leaf.anchorEvidence.workflowRef,
+          signerKeyId: leaf.anchorEvidence.signerKeyId,
+        }
+      : undefined,
   };
   return hashLeafData(JSON.stringify(ordered));
 }

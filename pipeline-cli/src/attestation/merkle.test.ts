@@ -175,6 +175,95 @@ describe('hashLeaf', () => {
     delete (onlyVerdictClass as { independenceTier?: unknown }).independenceTier;
     expect(hashLeaf(both)).not.toBe(hashLeaf(onlyVerdictClass));
   });
+
+  // RFC-0047 Phase 2 (AISDLC-594): anchorEvidence backward compatibility
+  // (mirrors the AISDLC-568/588 additive-compat pattern above).
+  const ANCHOR_EVIDENCE = {
+    runId: '123456789',
+    workflowRef: 'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
+    signerKeyId: 'ci-only-key-1',
+  };
+
+  it('hashes identically whether anchorEvidence is omitted or explicitly undefined (legacy leaves)', () => {
+    const withoutField = makeLeaf();
+    delete (withoutField as { anchorEvidence?: unknown }).anchorEvidence;
+    const withUndefined = makeLeaf({ anchorEvidence: undefined });
+    expect(hashLeaf(withoutField)).toBe(hashLeaf(withUndefined));
+  });
+
+  it('hashes identically to a pre-anchorEvidence leaf when the field is absent (568/588-style mirror)', () => {
+    const preExisting = makeLeaf();
+    delete (preExisting as { anchorEvidence?: unknown }).anchorEvidence;
+    const stillLegacy = makeLeaf();
+    delete (stillLegacy as { anchorEvidence?: unknown }).anchorEvidence;
+    expect(hashLeaf(preExisting)).toBe(hashLeaf(stillLegacy));
+  });
+
+  it('a leaf omitting anchorEvidence hashes identically to a leaf that never had the field at all', () => {
+    // Simulates: a leaf produced by a pre-AISDLC-594 signer (field never
+    // existed in the TypeScript type) vs. a post-594 leaf that simply has
+    // no anchor evidence to bind. Both MUST hash the same.
+    const legacyLeaf = makeLeaf();
+    delete (legacyLeaf as { anchorEvidence?: unknown }).anchorEvidence;
+    const modernLeafWithoutEvidence = makeLeaf({ anchorEvidence: undefined });
+    expect(hashLeaf(legacyLeaf)).toBe(hashLeaf(modernLeafWithoutEvidence));
+  });
+
+  it('differs when anchorEvidence is set vs. omitted (new leaves are distinguishable)', () => {
+    const legacy = makeLeaf();
+    delete (legacy as { anchorEvidence?: unknown }).anchorEvidence;
+    const anchored = makeLeaf({ anchorEvidence: ANCHOR_EVIDENCE });
+    expect(hashLeaf(legacy)).not.toBe(hashLeaf(anchored));
+  });
+
+  it('is stable across repeated calls with anchorEvidence set', () => {
+    const anchored = makeLeaf({ anchorEvidence: ANCHOR_EVIDENCE });
+    expect(hashLeaf(anchored)).toBe(hashLeaf(anchored));
+  });
+
+  it('differs when any anchorEvidence sub-field changes', () => {
+    const base = makeLeaf({ anchorEvidence: ANCHOR_EVIDENCE });
+    const diffRunId = makeLeaf({ anchorEvidence: { ...ANCHOR_EVIDENCE, runId: '999999999' } });
+    const diffWorkflowRef = makeLeaf({
+      anchorEvidence: { ...ANCHOR_EVIDENCE, workflowRef: 'owner/repo/.github/workflows/other.yml' },
+    });
+    const diffSignerKeyId = makeLeaf({
+      anchorEvidence: { ...ANCHOR_EVIDENCE, signerKeyId: 'ci-only-key-2' },
+    });
+    expect(hashLeaf(base)).not.toBe(hashLeaf(diffRunId));
+    expect(hashLeaf(base)).not.toBe(hashLeaf(diffWorkflowRef));
+    expect(hashLeaf(base)).not.toBe(hashLeaf(diffSignerKeyId));
+  });
+
+  it('anchorEvidence and independenceTier hash independently (both can be set)', () => {
+    const both = makeLeaf({ independenceTier: 'isolated', anchorEvidence: ANCHOR_EVIDENCE });
+    const onlyIndependenceTier = makeLeaf({ independenceTier: 'isolated' });
+    delete (onlyIndependenceTier as { anchorEvidence?: unknown }).anchorEvidence;
+    expect(hashLeaf(both)).not.toBe(hashLeaf(onlyIndependenceTier));
+  });
+
+  // Nested-object fixed key order: the nested anchorEvidence object must
+  // serialize identically regardless of the order its keys were constructed
+  // in (JS object key insertion order otherwise affects JSON.stringify).
+  it('serializes anchorEvidence with a fixed key order regardless of construction order', () => {
+    const insertedInDeclaredOrder = makeLeaf({
+      anchorEvidence: {
+        runId: ANCHOR_EVIDENCE.runId,
+        workflowRef: ANCHOR_EVIDENCE.workflowRef,
+        signerKeyId: ANCHOR_EVIDENCE.signerKeyId,
+      },
+    });
+    // Construct the same logical object with keys inserted in reverse order.
+    const reversed: { signerKeyId: string; workflowRef: string; runId: string } = {
+      signerKeyId: ANCHOR_EVIDENCE.signerKeyId,
+      workflowRef: ANCHOR_EVIDENCE.workflowRef,
+      runId: ANCHOR_EVIDENCE.runId,
+    };
+    const insertedInReverseOrder = makeLeaf({
+      anchorEvidence: reversed as unknown as TranscriptLeaf['anchorEvidence'],
+    });
+    expect(hashLeaf(insertedInDeclaredOrder)).toBe(hashLeaf(insertedInReverseOrder));
+  });
 });
 
 // ── computeMerkleRoot — empty ─────────────────────────────────────────────────

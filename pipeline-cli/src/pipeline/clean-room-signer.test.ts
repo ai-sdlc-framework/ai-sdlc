@@ -1059,6 +1059,58 @@ describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', ()
     const sharedPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
     expect(existsSync(sharedPath)).toBe(false);
   });
+
+  it('carries anchorEvidence through to every emitted leaf as-is (RFC-0047 Phase 2, AISDLC-594)', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+    const anchorEvidence = {
+      runId: '123456789',
+      workflowRef: 'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
+      signerKeyId: 'ci-only-key-1',
+    };
+
+    runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-522',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+      anchorEvidence,
+    });
+
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
+    const lines = readFileSync(leavesPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      const leaf = JSON.parse(line) as Record<string, unknown>;
+      expect(leaf['anchorEvidence']).toEqual(anchorEvidence);
+    }
+  });
+
+  it('leaves anchorEvidence absent when the caller does not provide it (never defaulted)', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+
+    runCleanRoomSigner({
+      reportArtifactPath: reportPath,
+      repoRoot: tmpDir,
+      taskId: 'AISDLC-522',
+      headSha: VALID_REPORT.headSha,
+      workDir: tmpDir,
+    });
+
+    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
+    const lines = readFileSync(leavesPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      const leaf = JSON.parse(line) as Record<string, unknown>;
+      expect(leaf['anchorEvidence']).toBeUndefined();
+    }
+  });
 });
 
 // ── unsignedReportPath helper ─────────────────────────────────────────────────

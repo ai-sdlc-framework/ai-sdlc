@@ -563,6 +563,31 @@ export const attestationEnvelopeV6Schema = {
             description:
               'RFC-0046 Phase 1 (AISDLC-588) independence tier for this leaf. Absent on legacy leaves — verifier falls back to verdictClass via dual-read.',
           },
+          anchorEvidence: {
+            type: 'object',
+            description:
+              'RFC-0047 Phase 2 (AISDLC-594) audit-only CI provenance evidence bound into this leaf. NOT the security anchor — the ci-only root signature is. Absent when no genuine anchor evidence exists.',
+            required: ['runId', 'workflowRef', 'signerKeyId'],
+            additionalProperties: false,
+            properties: {
+              runId: {
+                type: 'string',
+                minLength: 1,
+                description: 'CI run identifier (e.g. GitHub Actions run_id).',
+              },
+              workflowRef: {
+                type: 'string',
+                minLength: 1,
+                description:
+                  'CI workflow reference (e.g. owner/repo/.github/workflows/x.yml@refs/heads/main).',
+              },
+              signerKeyId: {
+                type: 'string',
+                minLength: 1,
+                description: 'Identifier of the ci-only signing key used to sign the Merkle root.',
+              },
+            },
+          },
         },
       },
     },

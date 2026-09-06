@@ -2,7 +2,7 @@
 id: AISDLC-594
 title: >-
   RFC-0047 Phase 2 — anchorEvidence audit-only leaf field + additive-compat hash test
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-06'
 labels:
@@ -30,10 +30,10 @@ RFC-0047 Phase 2 (OQ-2). Add an OPTIONAL trailing `anchorEvidence` object to the
 This ADDS a trailing field; it does not replace anything. The AISDLC-588 hashing-boundary rule is load-bearing: **do not write anchorEvidence for leaves that don't have it** (an explicit empty object would change the hash and break older verifiers — see the AISDLC-588 base-verifier-boundary lesson).
 
 ## Acceptance Criteria
-- [ ] `anchorEvidence?` added to the hashed leaf, TranscriptLeaf, envelope summary, and v6 schema; `generated-schemas.ts` regenerated in sync (zero-diff on re-run).
-- [ ] Hermetic hash-identity test (mirror the AISDLC-568/588 backward-compat test): a leaf omitting `anchorEvidence` hashes identically to a pre-field leaf; a leaf WITH it hashes differently and stably (fixed nested key order).
-- [ ] The nested object serializes with a fixed key order regardless of construction order (test with keys inserted in a different order).
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `anchorEvidence?` added to the hashed leaf, TranscriptLeaf, envelope summary, and v6 schema; `generated-schemas.ts` regenerated in sync (zero-diff on re-run).
+- [x] Hermetic hash-identity test (mirror the AISDLC-568/588 backward-compat test): a leaf omitting `anchorEvidence` hashes identically to a pre-field leaf; a leaf WITH it hashes differently and stably (fixed nested key order).
+- [x] The nested object serializes with a fixed key order regardless of construction order (test with keys inserted in a different order).
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
 RFC-0047 §Design Details (2) + OQ-2 resolution. Foundational for AISDLC-595/596.

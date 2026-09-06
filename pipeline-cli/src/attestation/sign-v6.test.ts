@@ -194,6 +194,41 @@ describe('buildV6Envelope — happy path', () => {
     expect(envelope.transcriptLeaves[0].verdictClass).toBe('self-authored');
   });
 
+  it('transcriptLeaves carries anchorEvidence when set (RFC-0047 Phase 2, AISDLC-594)', () => {
+    const anchorEvidence = {
+      runId: '123456789',
+      workflowRef: 'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
+      signerKeyId: 'ci-only-key-1',
+    };
+    const leaf0 = makeLeaf({
+      leafIndex: 0,
+      transcriptHash: 'e'.repeat(64),
+      anchorEvidence,
+    });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+    });
+
+    expect(envelope.transcriptLeaves[0].anchorEvidence).toEqual(anchorEvidence);
+  });
+
+  it('transcriptLeaves leaves anchorEvidence undefined when the source leaf omits it (never defaulted)', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0, transcriptHash: 'e'.repeat(64) });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 'f'.repeat(64),
+      privateKeyPem,
+    });
+
+    expect(envelope.transcriptLeaves[0].anchorEvidence).toBeUndefined();
+  });
+
   it('merkleProofs array carries leafIndex and proof array', () => {
     const leaf0 = makeLeaf({ leafIndex: 0 });
     const leaf1 = makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer' });

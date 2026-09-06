@@ -505,6 +505,26 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 "but the Claude Code session's transcripts live under the MAIN checkout's " +
                 'slug. When omitted, the main-checkout root is auto-derived via ' +
                 '`git rev-parse --git-common-dir` (falls back to --repo-root if that fails).',
+            })
+            .option('anchor-run-id', {
+              type: 'string',
+              describe:
+                'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY CI run identifier to bind into ' +
+                'the leaf as anchorEvidence.runId. NOT the security anchor (the ci-only root ' +
+                'signature is — see RFC-0047 Design Details 2/OQ-2). Must be passed together ' +
+                'with --anchor-workflow-ref and --anchor-signer-key-id, or omitted entirely.',
+            })
+            .option('anchor-workflow-ref', {
+              type: 'string',
+              describe:
+                'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY CI workflow reference to bind into ' +
+                'the leaf as anchorEvidence.workflowRef. See --anchor-run-id.',
+            })
+            .option('anchor-signer-key-id', {
+              type: 'string',
+              describe:
+                'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY identifier of the ci-only signing ' +
+                'key to bind into the leaf as anchorEvidence.signerKeyId. See --anchor-run-id.',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -576,6 +596,34 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           }
           const claudeSessionId = args['claude-session-id'] as string | undefined;
           const projectDirOverride = args['project-dir'] as string | undefined;
+
+          // RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY anchor evidence — carried
+          // through as-is, NEVER defaulted. All three fields must be provided
+          // together (or none), or the object would be a lossy partial record.
+          const anchorRunId = args['anchor-run-id'] as string | undefined;
+          const anchorWorkflowRef = args['anchor-workflow-ref'] as string | undefined;
+          const anchorSignerKeyId = args['anchor-signer-key-id'] as string | undefined;
+          const anchorFieldsProvided = [anchorRunId, anchorWorkflowRef, anchorSignerKeyId].filter(
+            (v) => v !== undefined,
+          ).length;
+          if (anchorFieldsProvided > 0 && anchorFieldsProvided < 3) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --anchor-run-id, --anchor-workflow-ref, and ` +
+                `--anchor-signer-key-id must be passed together (or omitted entirely) — ` +
+                `got ${anchorFieldsProvided} of 3.\n`,
+            );
+            process.exit(1);
+          }
+          const anchorEvidence: TranscriptLeaf['anchorEvidence'] =
+            anchorRunId !== undefined &&
+            anchorWorkflowRef !== undefined &&
+            anchorSignerKeyId !== undefined
+              ? {
+                  runId: anchorRunId,
+                  workflowRef: anchorWorkflowRef,
+                  signerKeyId: anchorSignerKeyId,
+                }
+              : undefined;
 
           // Compute SHA-256 of the transcript file.
           const transcriptContent = readFileSync(transcriptPath);
@@ -761,6 +809,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             verdictClass,
             harnessTranscriptHash: harnessResult.harnessTranscriptHash,
             independenceTier,
+            anchorEvidence,
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
