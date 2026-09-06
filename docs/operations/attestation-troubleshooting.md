@@ -110,6 +110,28 @@ git push
 
 ---
 
+## Symptom: `verify-attestation` throws `ENOENT ... ai-sdlc-plugin/agents/<name>.md` in a consumer/adopter repo (fixed by AISDLC-583)
+
+**Root cause (pre-AISDLC-583):** `runVerifier` (`pipeline-cli/attestation-core/verify-core.mjs`) computed `expectedAgentFileHashes` by reading each reviewer agent-definition file from a MONOREPO-ONLY path: `<repoRoot>/ai-sdlc-plugin/agents/<agentId>.md`, unguarded. In a consumer/adopter repo the plugin is an npm/marketplace install and is NEVER present in the checked-out repo tree, so the read threw `ENOENT` during verifier **setup** — before any envelope was even evaluated. This made `verify-attestation` fail closed on 100% of PRs in every repo that adopted v6, independent of whether a valid envelope was present (see local-trades LT-540).
+
+**Fix — three-tier resolution, applied at the ONE shared resolver used by all three `agentFileHash` read-sites in `verify-core.mjs`:**
+
+1. **Driver-injected installed-plugin dir** — `pipeline-cli/src/cli/attestation.ts`'s `verify` subcommand resolves the installed Claude Code plugin's `agents/` directory from OUTSIDE the checkout (`CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DIR` env, or the `~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/agents` cache probe — see `pipeline-cli/src/attestation/agent-dir-resolver.ts`) and passes it to `runVerifier({ agentDir })`. The plugin-installed driver (`ai-sdlc-plugin/scripts/verify-attestation.mjs`) does the same via `CLAUDE_PLUGIN_DIR`/`CLAUDE_PLUGIN_ROOT` env vars only.
+2. **Repo-relative monorepo path** — `<repoRoot>/ai-sdlc-plugin/agents` — kept for this monorepo's own `verify-attestation` CI (unchanged behavior — this repo IS the plugin source).
+3. **Deliberate, documented downgrade** — when neither tier resolves (or an individual agent's `.md` file is missing), `buildExpectedAgentFileHashes` omits that `agentId` from the map instead of throwing. `predicateMatchReason` treats a missing key as "not checked" for that reviewer, so the v6/v5 binding weakens from "this EXACT reviewer-agent file version was used" down to "the reviewer role was present." A `[verify-attestation] AISDLC-583: agentFileHash binding DOWNGRADED for ...` warning is emitted to stderr naming every downgraded agent. **This is expected and non-fatal** in a consumer repo until an installed-plugin `agents/` dir becomes resolvable (e.g. after installing the plugin, or once the resolver's cache probe finds a matching version) — it is NOT a sign of a broken pipeline.
+
+**How to confirm:** grep the CI log for the downgrade warning:
+
+```bash
+grep 'AISDLC-583: agentFileHash binding DOWNGRADED' <ci-log>
+```
+
+If present, `agentFileHash` was not enforced for the named reviewer(s) on that run — the rest of the v6/v5 binding (signature, Merkle root, diff/policy binding, verdictClass) is unaffected and still fully enforced.
+
+**Getting full binding value in a consumer repo:** install the Claude Code `ai-sdlc` plugin so `CLAUDE_PLUGIN_ROOT`/`CLAUDE_PLUGIN_DIR` (or the plugin cache) resolves a real `agents/` directory — see [`docs/operations/adopter-attestation-verify-ci.md`](adopter-attestation-verify-ci.md) for the CI recipe.
+
+---
+
 ## Diagnostic checklist
 
 1. `git ls-tree HEAD -- .ai-sdlc/attestations/` — confirms an envelope is committed.
@@ -124,5 +146,8 @@ git push
 - AISDLC-471 — root cause analysis + fix for the 2026-05-28 PR #752 incident
 - AISDLC-421 — introduced per-patch-id transcript-leaves files
 - AISDLC-398 — content-addressed envelope filenames (patch-id based)
+- AISDLC-583 — fixed `verify-attestation` failing closed in consumer repos on the `agentFileHash` binding; introduced the installed-plugin `agentDir` resolver
+- AISDLC-566 — `bindRuntime()` driver-injection pattern AISDLC-583 mirrors for `agentDir`
+- AISDLC-575 — plugin-less consumer verify (`cli-attestation verify`), the entrypoint AISDLC-583's `agent-dir-resolver.ts` is wired into
 - `scripts/check-attestation-sign.sh` — the pre-push hook that creates the auto-sign chore commit
 - `scripts/verify-attestation.mjs` — the verifier that prefers per-patch-id leaves and falls back to legacy shared leaves

@@ -2245,7 +2245,94 @@ export function detectQueueRebaseInvalidation(mismatchEntry, repoRoot, gitFn = g
  * emit a `[verify-attestation] HINT` line to stderr telling the operator to
  * run `/ai-sdlc rebase <pr>` (the queue-rebase-invalidated case).
  */
-export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
+/**
+ * AISDLC-583 — resolve the reviewer agent-definition directory used to
+ * compute `expectedAgentFileHashes`.
+ *
+ * ALL THREE `agentFileHash` read-sites in this module MUST call this one
+ * resolver (previously two of the three sites carried their own,
+ * unguarded, monorepo-only inline copy of the same lookup — an
+ * AISDLC-421-class drift bug: asymmetric resolution between call sites).
+ *
+ * Resolution order:
+ *
+ *   1. `injectedAgentDir` — a driver-resolved path, mirroring the
+ *      `bindRuntime()` injection pattern (AISDLC-566).
+ *      `pipeline-cli/src/cli/attestation.ts` resolves the INSTALLED
+ *      Claude Code plugin's `agents/` dir from OUTSIDE the checkout being
+ *      verified (`CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DIR` env, or the
+ *      `~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/agents`
+ *      cache probe) and passes it in here. This is the ONLY path that
+ *      resolves correctly in a consumer/adopter repo, where the plugin is
+ *      an npm/marketplace install and NEVER lives inside the checked-out
+ *      repo tree.
+ *   2. `<repoRoot>/ai-sdlc-plugin/agents` — the monorepo-relative path.
+ *      Keeps THIS repo's own `verify-attestation` CI working unchanged
+ *      (regression-critical: this monorepo IS the plugin source, so the
+ *      agent files genuinely live there).
+ *   3. Neither resolves → return `null`. Callers MUST treat `null` as
+ *      "skip the agentFileHash binding, with a warning" — NEVER as
+ *      "throw ENOENT during verifier setup" (see
+ *      `buildExpectedAgentFileHashes` below, which is the only consumer
+ *      of this function's return value).
+ */
+function resolveAgentDefinitionDir(repoRoot, injectedAgentDir) {
+  if (injectedAgentDir && existsSync(injectedAgentDir)) {
+    return injectedAgentDir;
+  }
+  const repoRelative = join(repoRoot, 'ai-sdlc-plugin', 'agents');
+  if (existsSync(repoRelative)) {
+    return repoRelative;
+  }
+  return null;
+}
+
+/**
+ * AISDLC-583 — build the `expectedAgentFileHashes` map from a resolved
+ * agent-definition directory (or `null` when unresolved), tolerating
+ * individual missing files. Mirrors the adjacent `pluginVersion` read's
+ * `existsSync` tolerance ("we tolerate the file being missing in test
+ * fixtures") — that guard was already correct; the agent-file reads were
+ * left on the old monorepo-only assumption and threw ENOENT instead.
+ *
+ * DELIBERATE, DOCUMENTED DOWNGRADE: when `agentDir` is `null` (no tier
+ * above resolved) or an individual agent's `.md` file is missing from a
+ * resolved dir, that `agentId` is OMITTED from the returned map instead of
+ * throwing. `predicateMatchReason`'s completeness check treats a missing
+ * key as "not checked" (see the AISDLC-252 comment at the main call
+ * site below), so omitting an agentId weakens the v6/v5 binding from "this
+ * EXACT reviewer-agent file version was used" down to "the reviewer role
+ * was present" for that agent — a deliberate trade-off, not a bug. See
+ * `docs/operations/attestation-troubleshooting.md` ("Agent-definition binding
+ * downgrade"). This function MUST NEVER throw ENOENT: doing so is exactly
+ * what made `verify-attestation` fail closed during VERIFIER SETUP (before
+ * any envelope was even evaluated) on 100% of PRs in every consumer repo
+ * that adopted v6 (AISDLC-583).
+ */
+function buildExpectedAgentFileHashes(agentDir, agentIds) {
+  const hashes = {};
+  const missing = [];
+  for (const agentId of agentIds) {
+    const filePath = agentDir ? join(agentDir, `${agentId}.md`) : null;
+    if (filePath && existsSync(filePath)) {
+      hashes[agentId] = sha256Hex(readFileSync(filePath, 'utf-8'));
+    } else {
+      missing.push(agentId);
+    }
+  }
+  if (missing.length > 0) {
+    process.stderr.write(
+      `[verify-attestation] AISDLC-583: agentFileHash binding DOWNGRADED for ${missing.join(', ')} ` +
+        `— no reviewer agent-definition file found (agentDir=${agentDir ?? '<unresolved>'}). ` +
+        'Skipping the file-hash check for these reviewers; only "reviewer role present" is ' +
+        'enforced, not the exact agent-definition version. This is expected in a consumer repo ' +
+        'until an installed-plugin agents/ dir is resolvable. See docs/operations/attestation-troubleshooting.md.\n',
+    );
+  }
+  return hashes;
+}
+
+export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentDir } = {}) {
   // --- Load trusted reviewers + ACCEPTED_SCHEMA_VERSIONS first ---------
   // We need the schema-version allowlist for the predicate-content match,
   // and we need trustedReviewers anyway for the signature step.
@@ -2445,7 +2532,11 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   const policyHash = sha256Hex(
     readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
   );
-  const agentDir = join(repoRoot, 'ai-sdlc-plugin', 'agents');
+  // AISDLC-583: resolve the agent-definition dir via the shared resolver
+  // (driver-injected installed-plugin dir → repo-relative monorepo path →
+  // null) instead of an unguarded monorepo-only path — see
+  // `resolveAgentDefinitionDir` for the full resolution-order rationale.
+  const resolvedAgentDir = resolveAgentDefinitionDir(repoRoot, agentDir);
   // AISDLC-252: include codex variants so the agentFileHash check extends
   // to cross-harness reviewers. Envelopes that only have the non-codex
   // variants are not affected (expectedAgentFileHashes is a lookup map;
@@ -2458,9 +2549,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     'test-reviewer-codex',
     'security-reviewer',
   ];
-  const expectedAgentFileHashes = Object.fromEntries(
-    agentIds.map((a) => [a, sha256Hex(readFileSync(join(agentDir, `${a}.md`), 'utf-8'))]),
-  );
+  const expectedAgentFileHashes = buildExpectedAgentFileHashes(resolvedAgentDir, agentIds);
   // pluginVersion: read the manifest if it's there. We tolerate the file
   // being missing in test fixtures (predicateMatchReason skips the check
   // when expected.pluginVersion is falsy).
@@ -2565,20 +2654,9 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
           policyHash: sha256Hex(
             readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
           ),
-          expectedAgentFileHashes: Object.fromEntries(
-            [
-              'code-reviewer',
-              'code-reviewer-codex',
-              'test-reviewer',
-              'test-reviewer-codex',
-              'security-reviewer',
-            ].map((a) => [
-              a,
-              sha256Hex(
-                readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'agents', `${a}.md`), 'utf-8'),
-              ),
-            ]),
-          ),
+          // AISDLC-583: reuse the SAME map computed above via the shared
+          // resolver — no per-call-site re-read, no asymmetric resolution.
+          expectedAgentFileHashes,
           pluginVersion: (() => {
             try {
               const manifest = JSON.parse(
@@ -2606,20 +2684,9 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
             policyHash: sha256Hex(
               readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
             ),
-            expectedAgentFileHashes: Object.fromEntries(
-              [
-                'code-reviewer',
-                'code-reviewer-codex',
-                'test-reviewer',
-                'test-reviewer-codex',
-                'security-reviewer',
-              ].map((a) => [
-                a,
-                sha256Hex(
-                  readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'agents', `${a}.md`), 'utf-8'),
-                ),
-              ]),
-            ),
+            // AISDLC-583: reuse the SAME map computed above via the shared
+            // resolver — no per-call-site re-read, no asymmetric resolution.
+            expectedAgentFileHashes,
           },
         });
         if (fastResult.valid) {

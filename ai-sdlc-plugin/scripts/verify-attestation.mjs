@@ -203,6 +203,38 @@ function verifyCoreCandidates() {
 }
 
 /**
+ * AISDLC-583 — resolve the INSTALLED plugin's `agents/` dir, for injection
+ * into `runVerifier({ agentDir })`. Env-var-only (unlike
+ * `trustedRuntimeModuleCandidates`'s extra node_modules-walk-up candidate):
+ * deliberately does NOT add a "this script's own on-disk location" fallback
+ * here, because in this driver's own hermetic tests the script runs
+ * in-place from the monorepo checkout (not copied into a separate install
+ * tree the way the trusted node_modules candidates are), so a self-location
+ * candidate would resolve to THIS MONOREPO's real `ai-sdlc-plugin/agents/`
+ * instead of the fixture's intended source — a test-environment false
+ * positive that would mask real adopter-repo resolution bugs. When neither
+ * env var resolves, `runVerifier` (`verify-core.mjs`) falls back to the
+ * repo-relative monorepo path, then a guarded, warned downgrade — this
+ * driver never needs to fail closed when nothing here resolves.
+ */
+function agentDirCandidates() {
+  const candidates = [];
+  for (const pluginDir of [process.env.CLAUDE_PLUGIN_DIR, process.env.CLAUDE_PLUGIN_ROOT]) {
+    if (pluginDir) candidates.push(join(pluginDir, 'agents'));
+  }
+  return [...new Set(candidates)];
+}
+
+function resolvePluginAgentDir(repoRoot) {
+  for (const candidate of agentDirCandidates()) {
+    if (!existsSync(candidate)) continue;
+    if (isInsideRepoRoot(candidate, repoRoot)) continue;
+    return candidate;
+  }
+  return null;
+}
+
+/**
  * Minimum acceptable version for an INSTALLED runtime copy — matches the
  * signer's guard (AISDLC-554) so verification never silently runs against a
  * canonicalization-drifted copy that would reject envelopes the real
@@ -408,7 +440,14 @@ async function main() {
   const core = await loadVerifyCoreModule(repoRoot);
   core.bindRuntime(runtimeMod);
 
-  const out = core.runVerifier({ headSha, baseSha, repoRoot });
+  // AISDLC-583: inject the installed plugin's agents/ dir so the
+  // agentFileHash binding resolves in a consumer repo (no
+  // ai-sdlc-plugin/agents/ in repoRoot). `undefined` is a supported,
+  // non-throwing input — verify-core.mjs falls back to the repo-relative
+  // path, then a guarded downgrade.
+  const agentDir = resolvePluginAgentDir(repoRoot) ?? undefined;
+
+  const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
   let output = `status=${out.status}\nreason=${out.reason}\n`;
   // AISDLC-568: surface the independence trust class instead of leaving it
   // silently equivalent to a fully independent review. Only present on v6
