@@ -1,5 +1,19 @@
 # @ai-sdlc/mcp-advisor
 
+## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.20.1...mcp-advisor-v0.21.0) (2026-09-06)
+
+
+### Miscellaneous
+
+* **mcp-advisor:** Synchronize node-packages versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.21.0
+
 ## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.20.0...mcp-advisor-v0.20.1) (2026-09-05)
 
 

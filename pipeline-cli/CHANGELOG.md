@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.20.1...pipeline-cli-v0.21.0) (2026-09-06)
+
+
+### Bug Fixes
+
+* resolve reviewer agent-defs from installed plugin, not repo-only path (AISDLC-583) ([#1013](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1013)) ([715e956](https://github.com/ai-sdlc-framework/ai-sdlc/commit/715e9562a658bdcf685a27541bbebd488f560271))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.21.0
+
 ## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.20.0...pipeline-cli-v0.20.1) (2026-09-05)
 
 
