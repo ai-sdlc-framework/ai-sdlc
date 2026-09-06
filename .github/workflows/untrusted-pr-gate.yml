@@ -98,6 +98,19 @@ jobs:
           # Without this, the shallow clone has neither ref, the diff is empty, and
           # the gate fail-closes on every untrusted PR with no real signal.
           fetch-depth: 0
+          # AISDLC-592: actions/checkout v7.0.1 added a hard refusal for checking out
+          # a fork PR's head SHA under `pull_request_target` (see
+          # https://gh.io/securely-using-pull_request_target) unless this flag is set.
+          # This is acceptable ONLY because fork-PR safety guards #1 and #2 already
+          # contain the risk the refusal exists to prevent: (1) this checkout writes
+          # into the sandboxed `pr-content/` subdirectory, never the job's default
+          # working directory that the trusted workflow scripts run from; (2)
+          # `persist-credentials: false` means no token is ever exposed to fork
+          # content; (3) no script under `pr-content/` is ever executed by this job
+          # (guard #3, enforced by the hermetic test suite) — it is read as
+          # diff/AST-gate DATA only via `git -C pr-content diff`. Opting into this
+          # flag does not weaken the existing trust boundary.
+          allow-unsafe-pr-checkout: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -317,6 +330,11 @@ jobs:
           # for sandbox differential testing (git checkout baseSha in container).
           # Without this the shallow clone lacks the base commit reference.
           fetch-depth: 0
+          # AISDLC-592: see the identical `allow-unsafe-pr-checkout: true` comment
+          # on the classify-and-gate job's pr-content checkout above — same
+          # rationale applies verbatim here (guards #1/#2/#3 unchanged; the
+          # mounted diff is read-only sandbox data, never executed).
+          allow-unsafe-pr-checkout: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -699,14 +717,72 @@ jobs:
     steps:
       - name: Post failure status and label (pipeline failure — fail-closed)
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CLASSIFY_RESULT: ${{ needs.classify-and-gate.result }}
+          SANDBOX_RESULT: ${{ needs.sandbox-and-review.result }}
+          SIGN_RESULT: ${{ needs.clean-room-sign.result }}
         with:
           github-token: ${{ github.token }}
           script: |
             // One or more pipeline jobs failed — gate must be BLOCKED, not absent.
             // Post a failure status and apply needs-maintainer-review so operators
             // are aware the gate did not complete successfully.
+            //
+            // AISDLC-592: distinguish an INFRASTRUCTURE CRASH (a stage job errored
+            // or was cancelled before it could produce a trust/gate result — e.g.
+            // a checkout regression, a `pnpm install` failure, an unhandled
+            // exception) from a GATE REJECTION (the gate ran to completion and
+            // rejected the PR on its merits). Genuine gate rejections already post
+            // their own specific status + comment from inside the job that
+            // evaluated them (see the "Stage 1 — Post block comment + label"
+            // step for the protected-path abort, and the Docker-sandbox
+            // fail-closed throw in sandbox-and-review) — this watchdog only ever
+            // fires when a job failed/was cancelled with NO such signal, which by
+            // construction means the pipeline itself broke. classify-and-gate in
+            // particular runs Stage 0/1 with zero LLM/sandbox spend and never
+            // legitimately job-fails on a rejection (rejections there `exit 0`
+            // and are handled by the block-comment step), so a classify-and-gate
+            // failure/cancellation is always an infrastructure crash. Do not tell
+            // external contributors they failed a security gate when it was our
+            // CI that broke.
+            const classifyResult = process.env.CLASSIFY_RESULT;
+            const sandboxResult = process.env.SANDBOX_RESULT;
+            const signResult = process.env.SIGN_RESULT;
+
+            const isInfraCrash = classifyResult === 'failure' || classifyResult === 'cancelled';
+
             const headSha = context.payload.pull_request.head.sha;
             const prNumber = context.payload.pull_request.number;
+
+            const description = isInfraCrash
+              ? 'Failed: UCVG infrastructure error (not a gate rejection) — maintainer review required'
+              : 'Failed: UCVG verification stage did not complete — maintainer review required';
+
+            const commentBody = isInfraCrash
+              ? [
+                  '## UCVG pipeline infrastructure failure',
+                  '',
+                  'This is **not** a rejection of your changes. The deterministic',
+                  'trust-classification / diff-gate stage crashed before it could',
+                  'evaluate this PR — that is a bug or outage in our CI, not a',
+                  'finding against your code.',
+                  '',
+                  'A maintainer will investigate and re-run the check once the',
+                  'underlying CI issue is fixed.',
+                ].join('\n')
+              : [
+                  '## UCVG pipeline did not complete',
+                  '',
+                  'The sandboxed verification / attestation stage did not finish ' +
+                    `(classify=\`${classifyResult}\`, sandbox=\`${sandboxResult}\`, sign=\`${signResult}\`).`,
+                  '',
+                  'This can be either an infrastructure failure on our side, or a',
+                  'fail-closed safety rejection (for example the sandbox runtime',
+                  'being temporarily unavailable). Either way, this is not',
+                  'necessarily a finding against your changes.',
+                  '',
+                  'A maintainer will review this PR manually before it proceeds.',
+                ].join('\n');
 
             try {
               await github.rest.issues.addLabels({
@@ -719,13 +795,24 @@ jobs:
               console.log(`Warning: could not add label needs-maintainer-review: ${e.message}`);
             }
 
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+            } catch (e) {
+              console.log(`Warning: could not post failure comment: ${e.message}`);
+            }
+
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: headSha,
               state: 'failure',
               context: 'ai-sdlc/untrusted-pr-gate',
-              description: 'Failed: UCVG pipeline error — maintainer review required',
+              description,
             });
 
   # ────────────────────────────────────────────────────────────────────────────
