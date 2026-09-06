@@ -16,8 +16,22 @@ dependencies:
 references:
   - spec/rfcs/RFC-0046-attested-reviewer-independence.md
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
+  - spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md
 priority: high
+dispatchable: false
+dispatchableReason: 'BLOCKED on RFC-0047 anchor design — do not re-dispatch until OQs resolved'
+blocked:
+  reason: 'PR #1021 held (CRITICAL: self-asserted anchor forgeable by same-machine coordinator, 2026-09-06 3-reviewer reconcile). The isolated-tier anchor mechanism is deferred to RFC-0047 (operator decision 2026-09-06). Do NOT re-implement against RFC-0046 as written — the producible design lands after RFC-0047 OQ walkthrough.'
 ---
+
+> **⛔ DEFERRED (2026-09-06).** This task's original approach shipped a
+> **forgeable** `isolated` anchor (self-asserted `provenance.deployment: 'ci'`
+> signed with the operator's own key, no verifier re-derivation) — PR #1021 was
+> held after a 3-reviewer reconcile returned a CRITICAL finding. Per operator
+> decision, the anchor mechanism is being engineered correctly in a dedicated
+> follow-up: **[RFC-0047 — Re-Derivable Isolated-Review Anchor](../../spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md)**.
+> This task is BLOCKED until RFC-0047's OQs are resolved; the eventual
+> implementation task will be filed against RFC-0047, not this one.
 
 ## Description
 
