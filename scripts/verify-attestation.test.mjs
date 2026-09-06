@@ -394,6 +394,17 @@ describe('partitionTrustedReviewers / isCiOnlyKey (AISDLC-593, RFC-0047 Phase 1)
     assert.equal(isCiOnlyKey('', trustedReviewers), false);
     assert.equal(isCiOnlyKey(undefined, trustedReviewers), false);
   });
+
+  it('AISDLC-595 carry-forward guard: throws on unvalidated raw-parser ciOnly (string, not boolean)', () => {
+    // Raw parseTrustedReviewers() output carries the YAML scalar as the
+    // STRING 'true', not a boolean — partitionTrustedReviewers must refuse
+    // this input rather than silently (if safely) misclassifying it as an
+    // operator key.
+    assert.throws(
+      () => partitionTrustedReviewers([{ ...trustedReviewers[1], ciOnly: 'true' }]),
+      /non-boolean ciOnly/,
+    );
+  });
 });
 
 describe('runVerifier (happy path + existing AISDLC-74 regressions)', () => {
@@ -4082,6 +4093,219 @@ describe('verifyV6Envelope (AISDLC-568 — verdictClass)', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+// ── RFC-0047 Phase 3 (AISDLC-595) — isolated re-derivation + downgrade ──────
+//
+// AC traceability:
+//   AC#1 — isolated leaf under a ci-only-signed root ⇒ overallIndependenceTier: isolated
+//   AC#2 — SECURITY-CRITICAL negative: same leaf/envelope under an OPERATOR-
+//          signed root ⇒ downgrades to 'attested' with a recorded reason;
+//          status stays 'valid' (does NOT reject)
+//   AC#3 — integrity reject: tampered leaf / root sig matching no trusted key
+//          still REJECTS (unchanged from pre-existing behaviour)
+//   AC#4 — verifier makes zero network calls (asserted via nock-free/offline
+//          environment — no fetch/http import anywhere in this module)
+
+describe('verifyV6Envelope (RFC-0047 Phase 3 / AISDLC-595 — isolated re-derivation)', () => {
+  let ciOnlyKeys;
+  let operatorKeys;
+  const HEAD_SHA = 'a'.repeat(40);
+
+  before(() => {
+    ciOnlyKeys = genV6KeyPair();
+    operatorKeys = genV6KeyPair();
+  });
+
+  /** @param {{ciOnly?: true}} [ciKeyOverrides] */
+  function makeTrustedReviewers() {
+    return [
+      {
+        identity: 'operator@example.com',
+        machine: 'laptop',
+        pubkey: operatorKeys.publicKeyPem,
+        addedAt: '2026-09-06',
+        addedBy: 'maintainer',
+      },
+      {
+        identity: 'ci@ai-sdlc.io',
+        machine: 'gha-runner',
+        pubkey: ciOnlyKeys.publicKeyPem,
+        addedAt: '2026-09-06',
+        addedBy: 'deefactorial',
+        ciOnly: true,
+      },
+    ];
+  }
+
+  function makeIsolatedLeaf() {
+    return { ...makeLeaf(0, 'security-reviewer'), independenceTier: 'isolated' };
+  }
+
+  function isolatedTranscriptLeafSummary(leaf) {
+    return {
+      leafIndex: leaf.leafIndex,
+      reviewerName: leaf.reviewerName,
+      transcriptHash: leaf.transcriptHash,
+      independenceTier: leaf.independenceTier,
+    };
+  }
+
+  it('AC#1: isolated leaf under a root signed by the ci-only key ⇒ credited as isolated', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-isolated-'));
+    try {
+      const leaves = [makeIsolatedLeaf()];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, ciOnlyKeys.privateKeyPem, {
+        transcriptLeaves: leaves.map(isolatedTranscriptLeafSummary),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+      assert.equal(result.overallIndependenceTier, 'isolated');
+      assert.deepEqual(result.independenceTiers, [
+        { reviewerName: 'security-reviewer', independenceTier: 'isolated' },
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#2 SECURITY-CRITICAL: the SAME leaf/envelope signed by the OPERATOR key downgrades to attested (still valid, not rejected)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-isolated-downgrade-'));
+    try {
+      const leaves = [makeIsolatedLeaf()];
+      // Same shape as AC#1, but signed with the OPERATOR key — the exact
+      // forgery RFC-0047 exists to close: a same-machine coordinator holds
+      // only this key, never the ci-only one.
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, operatorKeys.privateKeyPem, {
+        transcriptLeaves: leaves.map(isolatedTranscriptLeafSummary),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(),
+        repoRoot: tmp,
+      });
+      // Load-bearing distinction (OQ-3): integrity is fine (signature DID
+      // match a trusted key), so status stays 'valid' — only the tier is
+      // downgraded, never a reject.
+      assert.equal(
+        result.status,
+        'valid',
+        `expected valid (downgrade, not reject): ${result.reason}`,
+      );
+      assert.equal(result.overallIndependenceTier, 'attested');
+      assert.deepEqual(result.independenceTiers, [
+        {
+          reviewerName: 'security-reviewer',
+          independenceTier: 'attested',
+          isolatedDowngraded: { reason: 'no ci-only anchor' },
+        },
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#2b: a mix of one ci-only-anchored isolated leaf and one operator-anchored isolated-declaring leaf still aggregates via weakest-link post-downgrade', () => {
+    // Both leaves declare 'isolated' and are committed under the SAME
+    // Merkle root / single root signature — so both are anchored (or not)
+    // by the SAME signer. This exercises that the per-leaf downgrade
+    // correctly feeds the AGGREGATION, not just the per-leaf array.
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-isolated-mixed-'));
+    try {
+      const leaves = [
+        { ...makeLeaf(0, 'security-reviewer'), independenceTier: 'isolated' },
+        { ...makeLeaf(1, 'code-reviewer'), independenceTier: 'attested' },
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, operatorKeys.privateKeyPem, {
+        transcriptLeaves: leaves.map(isolatedTranscriptLeafSummary),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid', `expected valid: ${result.reason}`);
+      // Both leaves resolve to 'attested' post-downgrade → weakest-link 'attested'.
+      assert.equal(result.overallIndependenceTier, 'attested');
+      assert.deepEqual(result.independenceTiers, [
+        {
+          reviewerName: 'security-reviewer',
+          independenceTier: 'attested',
+          isolatedDowngraded: { reason: 'no ci-only anchor' },
+        },
+        { reviewerName: 'code-reviewer', independenceTier: 'attested' },
+      ]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#3a integrity reject: tampered leaf (transcriptHash mismatch) still rejects, regardless of ci-only anchor', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-isolated-tamper-'));
+    try {
+      const leaves = [makeIsolatedLeaf()];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, ciOnlyKeys.privateKeyPem, {
+        transcriptLeaves: leaves.map((l) => ({
+          ...isolatedTranscriptLeafSummary(l),
+          // Tamper: claim a different transcriptHash than the on-disk leaf's
+          // Merkle-proved hash.
+          transcriptHash: 'f'.repeat(64),
+        })),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /transcriptHash mismatch/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#3b integrity reject: root signature matching NO trusted key still rejects', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-isolated-untrusted-'));
+    try {
+      const leaves = [makeIsolatedLeaf()];
+      const unknownKeys = genV6KeyPair();
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, unknownKeys.privateKeyPem, {
+        transcriptLeaves: leaves.map(isolatedTranscriptLeafSummary),
+      });
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /rootSignature did not match any trusted reviewer pubkey/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#4: the offline verifier module imports no network client (fetch/http/https)', () => {
+    const source = readFileSync(
+      join(__dirname, '..', 'pipeline-cli', 'attestation-core', 'verify-core.mjs'),
+      'utf-8',
+    );
+    assert.ok(!/from ['"]node:https?['"]/.test(source), 'must not import node:http(s)');
+    assert.ok(!/\bfetch\(/.test(source), 'must not call fetch()');
   });
 });
 
