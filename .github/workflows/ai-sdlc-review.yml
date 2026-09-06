@@ -303,6 +303,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-content
           persist-credentials: false
+          # AISDLC-592: actions/checkout v7.0.1 added a hard refusal for checking
+          # out a fork PR's head SHA under `pull_request_target` (see
+          # https://gh.io/securely-using-pull_request_target) unless this flag is
+          # set. Acceptable here because AISDLC-381 safety guards #1/#2 already
+          # contain the risk: this checkout is DATA-only, lands solely in the
+          # sandboxed `pr-content/` subdirectory, never persists credentials, and
+          # no fork-controlled script from it is ever executed by this job.
+          allow-unsafe-pr-checkout: true
 
       # AISDLC-381 Safety guard #2 (continued): stage the envelope from
       # the sandbox into main's working tree so the verifier finds it at

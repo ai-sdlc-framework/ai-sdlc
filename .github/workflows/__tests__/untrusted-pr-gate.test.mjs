@@ -1083,3 +1083,75 @@ describe('Artifact handoff contract — upload name matches download name', () =
     );
   });
 });
+
+// ── AISDLC-592: actions/checkout v7 fork-PR checkout regression fix ─────────
+
+describe('AISDLC-592 — fork-content checkouts opt into allow-unsafe-pr-checkout', () => {
+  it('every fork-HEAD checkout (path: pr-content) sets allow-unsafe-pr-checkout: true', () => {
+    // actions/checkout v7.0.1 hard-refuses `ref: <fork head sha>` under
+    // pull_request_target unless this flag is set (observed on PR #998).
+    // Fork-PR safety guards #1/#2/#3 (sandboxed path, no persisted credentials,
+    // no execution from pr-content/) make opting into this flag acceptable.
+    const forkCheckouts = allSteps(wf).filter(
+      ({ step }) =>
+        typeof step.uses === 'string' &&
+        step.uses.startsWith('actions/checkout@') &&
+        step.with?.path === 'pr-content',
+    );
+    assert.ok(
+      forkCheckouts.length >= 2,
+      `${WORKFLOW_NAME} must have at least two fork-content checkouts (AISDLC-592 regression coverage)`,
+    );
+    for (const { jobId, step } of forkCheckouts) {
+      assert.equal(
+        step.with?.['allow-unsafe-pr-checkout'],
+        true,
+        `job '${jobId}' fork-content checkout MUST set allow-unsafe-pr-checkout: true ` +
+          `(AISDLC-592) — without it actions/checkout v7 refuses the checkout entirely`,
+      );
+      // Regression guard: the flag must not weaken the existing safety guards.
+      assert.equal(
+        step.with?.['persist-credentials'],
+        false,
+        `job '${jobId}' fork-content checkout must still set persist-credentials: false ` +
+          `alongside allow-unsafe-pr-checkout: true (AISDLC-592 must not weaken guard #2)`,
+      );
+    }
+  });
+
+  it('workflow documents the AISDLC-592 rationale near allow-unsafe-pr-checkout', () => {
+    assert.match(
+      raw,
+      /AISDLC-592/,
+      `${WORKFLOW_NAME} must reference AISDLC-592 in inline comments explaining the ` +
+        `allow-unsafe-pr-checkout opt-in`,
+    );
+  });
+});
+
+describe('AISDLC-592 — gate-failure-watchdog distinguishes infra crash from gate rejection', () => {
+  it('watchdog script branches on classify-and-gate result to compute isInfraCrash', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const steps = watchdogJob?.steps ?? [];
+    const scriptText = steps.map((s) => String(s.with?.script ?? s.run ?? '')).join('\n');
+    assert.match(
+      scriptText,
+      /isInfraCrash/,
+      `gate-failure-watchdog must compute an infra-crash vs gate-rejection distinction ` +
+        `(AISDLC-592) so external contributors are not told their PR failed a security ` +
+        `gate when CI broke`,
+    );
+  });
+
+  it('watchdog posts a different description for infra crash vs stage-incomplete', () => {
+    const watchdogJob = wf.jobs?.['gate-failure-watchdog'];
+    const steps = watchdogJob?.steps ?? [];
+    const scriptText = steps.map((s) => String(s.with?.script ?? s.run ?? '')).join('\n');
+    assert.match(
+      scriptText,
+      /infrastructure error \(not a gate rejection\)/,
+      `gate-failure-watchdog must post an explicit "infrastructure error, not a gate ` +
+        `rejection" description on classify-and-gate crash (AISDLC-592)`,
+    );
+  });
+});
