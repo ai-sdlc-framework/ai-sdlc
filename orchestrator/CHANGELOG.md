@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.21.0...orchestrator-v0.22.0) (2026-09-06)
+
+
+### Bug Fixes
+
+* doctor audits the loaded plugin install, not a stale dev checkout (AISDLC-586) ([#1015](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1015)) ([cd10662](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd10662e1624dc25c91a2256b15fd1d0eab669df))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.22.0
+
 ## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.20.1...orchestrator-v0.21.0) (2026-09-06)
 
 
