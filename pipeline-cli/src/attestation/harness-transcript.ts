@@ -101,13 +101,15 @@
  * @module attestation/harness-transcript
  */
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
   MARKER_MAX_AGE_MS,
   REVIEWER_AGENT_TYPES,
+  stripAgentTypeNamespace,
   subagentSessionsDir,
   type ReviewerAgentType,
 } from './verdict-class.js';
@@ -203,6 +205,64 @@ export function claudeProjectSlug(repoRoot: string): string {
 /** Absolute path of Claude Code's projects directory (`~/.claude/projects`). */
 export function claudeProjectsDir(): string {
   return join(homedir(), '.claude', 'projects');
+}
+
+/**
+ * Resolve the MAIN checkout root of the repo `repoRoot` belongs to, or
+ * `null` when it cannot be determined (not a git repo, `git` unavailable,
+ * or unexpected `--git-common-dir` output).
+ *
+ * AISDLC-589 Gap A: in a Pattern-C layout (non-bare parent repo +
+ * `.worktrees/<task-id>/` linked worktrees), a reviewer subagent is
+ * dispatched with `repoRoot` pointing at the WORKTREE, but the top-level
+ * Claude Code session — and therefore its `~/.claude/projects/<slug>/`
+ * transcript directory — was launched from the PARENT (main checkout) path.
+ * `claudeProjectSlug(repoRoot)` on the worktree path produces a slug that
+ * has never existed on disk, so every worktree-dispatched reviewer's
+ * `harnessTranscriptHash` silently resolved to `null` even with a genuine
+ * marker + transcript present under the main checkout's slug.
+ *
+ * `git rev-parse --git-common-dir` returns the `.git` directory shared by
+ * every linked worktree of a repo — for a linked worktree this is the MAIN
+ * checkout's `.git` directory (not the worktree's own
+ * `.git/worktrees/<id>` administrative dir), so its parent is the main
+ * checkout root. For a non-worktree checkout (`--git-common-dir` returns
+ * `.git` relative to `repoRoot` itself), this resolves back to `repoRoot`
+ * unchanged — safe no-op.
+ */
+export function resolveMainCheckoutRoot(repoRoot: string): string | null {
+  try {
+    const commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    if (!commonDir) return null;
+    const commonDirAbs = resolve(repoRoot, commonDir);
+    if (basename(commonDirAbs) !== '.git') return null;
+    return dirname(commonDirAbs);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the directory whose slug (`claudeProjectSlug`) should be used to
+ * locate the Claude Code project transcripts directory.
+ *
+ * Precedence: explicit `--project-dir` override (caller-supplied, no git
+ * involved — useful when `git rev-parse` is unavailable/unreliable, or the
+ * caller already knows the exact directory Claude Code was launched from) >
+ * the git-derived main checkout root (`resolveMainCheckoutRoot`) > `repoRoot`
+ * itself (fail-safe fallback preserving pre-AISDLC-589 behavior when the
+ * git lookup fails, e.g. `repoRoot` isn't a git repo at all).
+ */
+export function resolveClaudeProjectRoot(opts: {
+  repoRoot: string;
+  projectDirOverride?: string;
+}): string {
+  if (opts.projectDirOverride) return resolve(opts.projectDirOverride);
+  return resolveMainCheckoutRoot(opts.repoRoot) ?? opts.repoRoot;
 }
 
 /**
@@ -311,9 +371,16 @@ export function resolveHarnessTranscriptPath(opts: {
   repoRoot: string;
   agentId: string;
   claudeSessionId?: string;
+  /**
+   * AISDLC-589 Gap A: explicit override for the directory whose slug is
+   * used to resolve `~/.claude/projects/<slug>/`. When omitted, the
+   * git-derived main-checkout root is used (see `resolveClaudeProjectRoot`).
+   */
+  projectDirOverride?: string;
 }): ResolveHarnessTranscriptPathResult {
-  const { repoRoot, agentId, claudeSessionId } = opts;
-  const slug = claudeProjectSlug(repoRoot);
+  const { repoRoot, agentId, claudeSessionId, projectDirOverride } = opts;
+  const projectRoot = resolveClaudeProjectRoot({ repoRoot, projectDirOverride });
+  const slug = claudeProjectSlug(projectRoot);
   const slugDir = join(claudeProjectsDir(), slug);
 
   if (!existsSync(slugDir)) {
@@ -416,17 +483,17 @@ export function transcriptContainsNonce(transcriptPath: string, nonce: string): 
 }
 
 /**
- * Read `agentType` from a harness `.meta.json` sidecar, stripping the
- * `ai-sdlc:` namespace prefix used by this framework's agent frontmatter
- * `name:` fields (e.g. `"ai-sdlc:code-reviewer"` → `"code-reviewer"`).
- * Returns `null` on any read/parse failure or missing/non-string field.
+ * Read `agentType` from a harness `.meta.json` sidecar, stripping any
+ * plugin namespace prefix via `stripAgentTypeNamespace()` (e.g.
+ * `"ai-sdlc:code-reviewer"` → `"code-reviewer"`). Returns `null` on any
+ * read/parse failure or missing/non-string field.
  */
 export function readHarnessAgentType(metaPath: string | null): string | null {
   if (!metaPath) return null;
   try {
     const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as { agentType?: unknown };
     if (typeof meta.agentType !== 'string') return null;
-    return meta.agentType.replace(/^ai-sdlc:/, '');
+    return stripAgentTypeNamespace(meta.agentType);
   } catch {
     return null;
   }
@@ -440,6 +507,12 @@ export interface ComputeHarnessTranscriptHashOptions {
   nonce: string;
   /** Optional explicit Claude Code session id (preferred over the fallback heuristic). */
   claudeSessionId?: string;
+  /**
+   * AISDLC-589 Gap A: explicit override for the directory whose slug is
+   * used to resolve `~/.claude/projects/<slug>/`. When omitted, the
+   * git-derived main-checkout root is used — see `resolveClaudeProjectRoot`.
+   */
+  projectDirOverride?: string;
 }
 
 export interface ComputeHarnessTranscriptHashResult {
@@ -477,6 +550,7 @@ export function computeHarnessTranscriptHash(
       repoRoot: opts.repoRoot,
       agentId: marker.agentId,
       claudeSessionId: opts.claudeSessionId,
+      projectDirOverride: opts.projectDirOverride,
     });
     if (!resolved.transcriptPath) {
       return {
@@ -487,7 +561,12 @@ export function computeHarnessTranscriptHash(
 
     // Prefer the (AISDLC-572) marker's own agentType; fall back to the
     // harness's own .meta.json claim. See "Composition with AISDLC-572".
-    const agentType = marker.agentType ?? readHarnessAgentType(resolved.metaPath);
+    // AISDLC-589 Gap B: normalize the marker's agentType (may carry a
+    // plugin namespace prefix, e.g. `ai-sdlc:code-reviewer`) before
+    // matching — readHarnessAgentType already normalizes the .meta.json
+    // fallback, so this keeps both paths symmetric.
+    const agentType =
+      stripAgentTypeNamespace(marker.agentType) ?? readHarnessAgentType(resolved.metaPath);
     if (
       !agentType ||
       !HARNESS_REVIEWER_AGENT_TYPES.includes(agentType as HarnessReviewerAgentType)

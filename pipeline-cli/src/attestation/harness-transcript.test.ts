@@ -16,10 +16,12 @@
  * `~/.claude/projects/` directory; a fresh mkdtemp fake home is used per test.
  */
 
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -44,7 +46,9 @@ const {
   findMatchingSubagentMarker,
   nonceMarkerLiteral,
   readHarnessAgentType,
+  resolveClaudeProjectRoot,
   resolveHarnessTranscriptPath,
+  resolveMainCheckoutRoot,
   resolveMostRecentSessionDir,
   transcriptContainsNonce,
 } = await import('./harness-transcript.js');
@@ -518,6 +522,258 @@ describe('computeHarnessTranscriptHash', () => {
     expect(result.harnessTranscriptHash).toBeNull();
     expect(result.reason).toMatch(/not a reviewer role/);
     expect(result.reason).toContain('null');
+  });
+});
+
+// ── AISDLC-589 Gap A: worktree project-dir resolution ────────────────────────
+
+/** Init a throwaway git repo at `dir` with a single commit (needed for `git worktree add`). */
+function initGitRepo(dir: string): void {
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+  writeFileSync(join(dir, 'file.txt'), 'x');
+  execFileSync('git', ['add', '-A'], { cwd: dir });
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
+}
+
+describe('resolveMainCheckoutRoot', () => {
+  let mainRoot: string;
+  let worktreeRoot: string;
+
+  beforeEach(() => {
+    mainRoot = mkdtempSync(join(tmpdir(), 'main-checkout-'));
+    initGitRepo(mainRoot);
+    worktreeRoot = mkdtempSync(join(tmpdir(), 'linked-worktree-'));
+    rmSync(worktreeRoot, { recursive: true, force: true }); // git worktree add requires a non-existent target
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'aisdlc-589-branch', worktreeRoot], {
+      cwd: mainRoot,
+    });
+  });
+
+  afterEach(() => {
+    try {
+      execFileSync('git', ['worktree', 'remove', '--force', worktreeRoot], { cwd: mainRoot });
+    } catch {
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
+    rmSync(mainRoot, { recursive: true, force: true });
+  });
+
+  it('resolves a linked worktree back to the main checkout root', () => {
+    const resolved = resolveMainCheckoutRoot(worktreeRoot);
+    expect(resolved).not.toBeNull();
+    expect(realpathSync(resolved as string)).toBe(realpathSync(mainRoot));
+  });
+
+  it('resolves the main checkout itself back to its own root (no-op)', () => {
+    const resolved = resolveMainCheckoutRoot(mainRoot);
+    expect(resolved).not.toBeNull();
+    expect(realpathSync(resolved as string)).toBe(realpathSync(mainRoot));
+  });
+
+  it('returns null for a directory that is not a git repo at all', () => {
+    const nonRepo = mkdtempSync(join(tmpdir(), 'not-a-repo-'));
+    expect(resolveMainCheckoutRoot(nonRepo)).toBeNull();
+    rmSync(nonRepo, { recursive: true, force: true });
+  });
+});
+
+describe('resolveClaudeProjectRoot', () => {
+  it('prefers an explicit projectDirOverride over any git-derived root', () => {
+    const override = mkdtempSync(join(tmpdir(), 'override-'));
+    const resolved = resolveClaudeProjectRoot({ repoRoot, projectDirOverride: override });
+    expect(realpathSync(resolved)).toBe(realpathSync(override));
+    rmSync(override, { recursive: true, force: true });
+  });
+
+  it('falls back to repoRoot itself when git resolution fails (not a git repo)', () => {
+    const resolved = resolveClaudeProjectRoot({ repoRoot });
+    expect(resolved).toBe(repoRoot);
+  });
+});
+
+describe('computeHarnessTranscriptHash — AISDLC-589 Gap A worktree resolution', () => {
+  let mainRoot: string;
+  let worktreeRoot: string;
+
+  beforeEach(() => {
+    mainRoot = mkdtempSync(join(tmpdir(), 'main-checkout-'));
+    initGitRepo(mainRoot);
+    worktreeRoot = mkdtempSync(join(tmpdir(), 'linked-worktree-'));
+    rmSync(worktreeRoot, { recursive: true, force: true });
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'aisdlc-589-branch-2', worktreeRoot], {
+      cwd: mainRoot,
+    });
+  });
+
+  afterEach(() => {
+    try {
+      execFileSync('git', ['worktree', 'remove', '--force', worktreeRoot], { cwd: mainRoot });
+    } catch {
+      rmSync(worktreeRoot, { recursive: true, force: true });
+    }
+    rmSync(mainRoot, { recursive: true, force: true });
+  });
+
+  it('yields a non-null harnessTranscriptHash for a reviewer dispatched from a worktree, using the MAIN checkout slug', () => {
+    const now = Date.now();
+    const nonce = 'aa'.repeat(32);
+
+    // Marker + transcript are looked up against `repoRoot` (a worktree here),
+    // but the marker file itself is a mundane per-worktree artifact — write
+    // it under the worktree, as the real hook does (CLAUDE_PROJECT_DIR is
+    // the worktree in Pattern C).
+    writeMarker(worktreeRoot, 'agent-w1.json', {
+      agentId: 'w1',
+      agentType: 'ai-sdlc:code-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+
+    // The REAL Claude Code transcript, however, lives under the MAIN
+    // checkout's slug — this is exactly the Gap A mismatch. Use the
+    // resolved main-checkout root (not the raw mkdtemp path) since `git`
+    // may realpath-resolve symlinked tmpdirs (e.g. macOS /var -> /private/var).
+    const resolvedMainRoot = resolveMainCheckoutRoot(worktreeRoot);
+    expect(resolvedMainRoot).not.toBeNull();
+    const mainSlugDir = join(claudeProjectsDir(), claudeProjectSlug(resolvedMainRoot as string));
+    writeHarnessTranscript({
+      projectSlugDir: mainSlugDir,
+      sessionId: 'session-1',
+      agentId: 'w1',
+      content: `prompt ${nonceMarkerLiteral(nonce)}`,
+      meta: { agentType: 'ai-sdlc:code-reviewer' },
+    });
+
+    const result = computeHarnessTranscriptHash({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: 'session-1',
+    });
+
+    expect(result.harnessTranscriptHash).not.toBeNull();
+    expect(result.harnessTranscriptHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('fails closed (no false credit) when no --project-dir override is given and the transcript lives ONLY under the wrong (worktree) slug', () => {
+    const now = Date.now();
+    const nonce = 'bb'.repeat(32);
+
+    writeMarker(worktreeRoot, 'agent-w2.json', {
+      agentId: 'w2',
+      agentType: 'ai-sdlc:code-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+
+    // Nothing written under the main checkout's slug — this simulates the
+    // pre-fix world (or a genuinely absent transcript). Must fail closed,
+    // not fabricate a hash.
+    const result = computeHarnessTranscriptHash({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: 'session-1',
+    });
+
+    expect(result.harnessTranscriptHash).toBeNull();
+  });
+
+  it('honors an explicit --project-dir override, bypassing git resolution entirely', () => {
+    const now = Date.now();
+    const nonce = 'cc'.repeat(32);
+    const overrideRoot = mkdtempSync(join(tmpdir(), 'override-root-'));
+
+    writeMarker(worktreeRoot, 'agent-w3.json', {
+      agentId: 'w3',
+      agentType: 'ai-sdlc:code-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+
+    const overrideSlugDir = join(claudeProjectsDir(), claudeProjectSlug(overrideRoot));
+    writeHarnessTranscript({
+      projectSlugDir: overrideSlugDir,
+      sessionId: 'session-1',
+      agentId: 'w3',
+      content: `prompt ${nonceMarkerLiteral(nonce)}`,
+      meta: { agentType: 'ai-sdlc:code-reviewer' },
+    });
+
+    const result = computeHarnessTranscriptHash({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: 'session-1',
+      projectDirOverride: overrideRoot,
+    });
+
+    expect(result.harnessTranscriptHash).not.toBeNull();
+    rmSync(overrideRoot, { recursive: true, force: true });
+  });
+});
+
+// ── AISDLC-589 Gap B: plugin-namespaced agentType in the marker itself ──────
+
+describe('computeHarnessTranscriptHash — AISDLC-589 Gap B namespaced marker.agentType', () => {
+  it.each([
+    'code-reviewer',
+    'test-reviewer',
+    'security-reviewer',
+    'code-reviewer-codex',
+    'test-reviewer-codex',
+  ])('sets the hash when marker.agentType is namespaced ai-sdlc:%s', (bareRole) => {
+    const now = Date.now();
+    const nonce = 'dd'.repeat(32);
+    writeMarker(repoRoot, `agent-ns-${bareRole}.json`, {
+      agentId: `ns-${bareRole}`,
+      agentType: `ai-sdlc:${bareRole}`,
+      firedAt: new Date(now).toISOString(),
+    });
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    writeHarnessTranscript({
+      projectSlugDir: slugDir,
+      sessionId: 'session-1',
+      agentId: `ns-${bareRole}`,
+      content: `prompt ${nonceMarkerLiteral(nonce)}`,
+      meta: null,
+    });
+
+    const result = computeHarnessTranscriptHash({
+      repoRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: 'session-1',
+    });
+
+    expect(result.harnessTranscriptHash).not.toBeNull();
+  });
+
+  it('fails closed (null) when marker.agentType is a namespaced non-reviewer role (the security-critical negative)', () => {
+    const now = Date.now();
+    const nonce = 'ee'.repeat(32);
+    writeMarker(repoRoot, 'agent-ns-dev.json', {
+      agentId: 'ns-dev',
+      agentType: 'ai-sdlc:developer',
+      firedAt: new Date(now).toISOString(),
+    });
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(repoRoot));
+    writeHarnessTranscript({
+      projectSlugDir: slugDir,
+      sessionId: 'session-1',
+      agentId: 'ns-dev',
+      content: `prompt ${nonceMarkerLiteral(nonce)}`,
+      meta: null,
+    });
+
+    const result = computeHarnessTranscriptHash({
+      repoRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      claudeSessionId: 'session-1',
+    });
+
+    expect(result.harnessTranscriptHash).toBeNull();
+    expect(result.reason).toMatch(/not a reviewer role/);
   });
 });
 

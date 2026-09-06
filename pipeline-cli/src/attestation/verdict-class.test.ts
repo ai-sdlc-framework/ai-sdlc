@@ -18,6 +18,7 @@ import {
   MARKER_MAX_AGE_MS,
   determineVerdictClass,
   fileMtimeMs,
+  stripAgentTypeNamespace,
   subagentSessionsDir,
 } from './verdict-class.js';
 
@@ -204,6 +205,71 @@ describe('determineVerdictClass — AISDLC-572 role binding', () => {
     const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
 
     expect(result).toBe('independent');
+  });
+
+  // ── AISDLC-589 Gap B: plugin-namespaced agentType ──────────────────────────
+
+  it.each([
+    'code-reviewer',
+    'test-reviewer',
+    'security-reviewer',
+    'code-reviewer-codex',
+    'test-reviewer-codex',
+  ])('a plugin-namespaced ai-sdlc:%s marker in-window IS credited as independent', (bareRole) => {
+    const now = Date.now();
+    writeMarker(
+      repoRoot,
+      `agent-${bareRole}-ns.json`,
+      new Date(now).toISOString(),
+      `ai-sdlc:${bareRole}`,
+    );
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('independent');
+  });
+
+  it('a plugin-namespaced ai-sdlc:developer marker is NOT credited as independent (the security-critical negative)', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'agent-dev-ns.json', new Date(now).toISOString(), 'ai-sdlc:developer');
+
+    const result = determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(result).toBe('self-authored');
+  });
+
+  it('consumes a namespaced marker after a match, same as an unnamespaced one', () => {
+    const now = Date.now();
+    const filePath = writeMarker(
+      repoRoot,
+      'agent-ns-consume.json',
+      new Date(now).toISOString(),
+      'ai-sdlc:code-reviewer',
+    );
+
+    determineVerdictClass({ repoRoot, transcriptMtimeMs: now });
+
+    expect(existsSync(filePath)).toBe(false);
+  });
+});
+
+describe('stripAgentTypeNamespace', () => {
+  it('strips the ai-sdlc: namespace prefix', () => {
+    expect(stripAgentTypeNamespace('ai-sdlc:code-reviewer')).toBe('code-reviewer');
+  });
+
+  it('strips a codex-variant role with the namespace prefix', () => {
+    expect(stripAgentTypeNamespace('ai-sdlc:code-reviewer-codex')).toBe('code-reviewer-codex');
+  });
+
+  it('passes a bare, unnamespaced value through unchanged', () => {
+    expect(stripAgentTypeNamespace('code-reviewer')).toBe('code-reviewer');
+  });
+
+  it('returns null for null, undefined, non-string, or empty input', () => {
+    expect(stripAgentTypeNamespace(null)).toBeNull();
+    expect(stripAgentTypeNamespace(undefined)).toBeNull();
+    expect(stripAgentTypeNamespace('')).toBeNull();
   });
 });
 

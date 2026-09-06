@@ -120,6 +120,32 @@ export const REVIEWER_AGENT_TYPES = [
 
 export type ReviewerAgentType = (typeof REVIEWER_AGENT_TYPES)[number];
 
+/**
+ * Strip a plugin namespace prefix from an `agentType` string, e.g.
+ * `"ai-sdlc:code-reviewer"` -> `"code-reviewer"`.
+ *
+ * AISDLC-589 Gap B: the `SubagentStart` hook's `agent_type` payload field
+ * records whatever Claude Code's harness resolved the subagent's name to —
+ * for a plugin-installed agent that is the NAMESPACED form
+ * (`ai-sdlc:code-reviewer`), not the bare `name:` frontmatter value
+ * (`code-reviewer`) `REVIEWER_AGENT_TYPES` is defined against. Without this
+ * normalization, every genuine harness-dispatched reviewer marker fails the
+ * role-gate below and silently falls back to `self-authored` /
+ * `independenceTier: none` — the exact false-negative this task exists to
+ * close.
+ *
+ * `split(':').pop()` handles any namespace (not just `ai-sdlc:`), including
+ * the `-codex` reviewer variants (`ai-sdlc:code-reviewer-codex` ->
+ * `code-reviewer-codex`). A bare, unnamespaced value passes through
+ * unchanged — `'code-reviewer'.split(':')` yields a single-element array,
+ * so `.pop()` returns the original string.
+ */
+export function stripAgentTypeNamespace(agentType: string | null | undefined): string | null {
+  if (typeof agentType !== 'string' || agentType.length === 0) return null;
+  const stripped = agentType.split(':').pop();
+  return stripped && stripped.length > 0 ? stripped : null;
+}
+
 /** Shape of a marker file written by `subagent-start.js`. */
 export interface SubagentStartMarker {
   /** The harness-assigned agent identifier (or a random fallback). */
@@ -176,9 +202,15 @@ export function determineVerdictClass(opts: {
       // AISDLC-572: role gate BEFORE the timing check. A non-reviewer or
       // missing/null agentType (including legacy pre-572 markers) never
       // qualifies, regardless of how well its timing lines up.
+      //
+      // AISDLC-589 Gap B: normalize via stripAgentTypeNamespace() before
+      // matching — the marker's `agentType` may carry a plugin namespace
+      // prefix (`ai-sdlc:code-reviewer`) that REVIEWER_AGENT_TYPES does not.
+      const normalizedAgentType = stripAgentTypeNamespace(marker.agentType);
       if (
         typeof marker.agentType !== 'string' ||
-        !REVIEWER_AGENT_TYPES.includes(marker.agentType as ReviewerAgentType)
+        !normalizedAgentType ||
+        !REVIEWER_AGENT_TYPES.includes(normalizedAgentType as ReviewerAgentType)
       ) {
         continue;
       }

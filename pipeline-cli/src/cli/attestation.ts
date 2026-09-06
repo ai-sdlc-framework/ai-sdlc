@@ -495,6 +495,16 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 '~/.claude/projects/<slug>/<session-id>/subagents/agent-<agent-id>.jsonl. ' +
                 'When omitted, falls back to the most-recently-modified session directory ' +
                 'under the resolved project slug (disclosed race window, AISDLC-216-style).',
+            })
+            .option('project-dir', {
+              type: 'string',
+              describe:
+                'AISDLC-589: explicit override for the directory whose slug is used to ' +
+                'resolve ~/.claude/projects/<slug>/. In a Pattern-C layout (non-bare parent ' +
+                'repo + .worktrees/<task-id>/ isolates), --repo-root points at the WORKTREE ' +
+                "but the Claude Code session's transcripts live under the MAIN checkout's " +
+                'slug. When omitted, the main-checkout root is auto-derived via ' +
+                '`git rev-parse --git-common-dir` (falls back to --repo-root if that fails).',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -565,6 +575,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             process.exit(1);
           }
           const claudeSessionId = args['claude-session-id'] as string | undefined;
+          const projectDirOverride = args['project-dir'] as string | undefined;
 
           // Compute SHA-256 of the transcript file.
           const transcriptContent = readFileSync(transcriptPath);
@@ -700,6 +711,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             transcriptMtimeMs,
             nonce,
             claudeSessionId,
+            projectDirOverride,
           });
           process.stderr.write(
             `[cli-attestation] emit-leaf: harnessTranscriptHash=${
