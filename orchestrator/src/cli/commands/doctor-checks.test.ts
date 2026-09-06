@@ -16,11 +16,14 @@ import { tmpdir } from 'node:os';
 import {
   DOCTOR_CHECKS,
   resolvePluginDir,
+  resolvePluginInstall,
+  describeResolvedPluginInstall,
   checkPluginVersion,
   checkRuntimeDepsPins,
   fixRuntimeDepsPins,
   checkManifestsAgree,
   fixManifestsAgree,
+  checkPluginInstallAmbiguity,
   checkAttestationGovernanceCheck,
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
@@ -140,7 +143,7 @@ describe('resolvePluginDir', () => {
     expect(resolvePluginDir(ctx)).toBe(pluginDir);
   });
 
-  it('scans the marketplace cache as a last resort, picking the highest version dir', () => {
+  it('scans the marketplace cache, picking the SEMVER-highest version dir (not lexical)', () => {
     const homeDir = join(tmpDir, 'home');
     const cacheRoot = join(homeDir, '.claude', 'plugins', 'cache');
     const v1 = join(cacheRoot, 'acme-marketplace', 'ai-sdlc', '0.1.0');
@@ -159,6 +162,181 @@ describe('resolvePluginDir', () => {
       }),
     );
     expect(resolvePluginDir(ctx)).toBe(v2);
+  });
+
+  it('AISDLC-586 regression: picks 0.18.0 over 0.9.0 (lexical sort would pick 0.9.0 since "9">"1")', () => {
+    const homeDir = join(tmpDir, 'home');
+    const cacheRoot = join(homeDir, '.claude', 'plugins', 'cache');
+    const stale = join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc', '0.9.0');
+    const current = join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc', '0.18.0');
+    writePluginManifests(stale, { rootVersion: '0.9.2' });
+    writePluginManifests(current, { rootVersion: '0.18.0' });
+
+    const ctx = makeCtx(
+      makeAdapters({
+        homeDir: () => homeDir,
+        listDir: (p) => {
+          if (p === cacheRoot) return ['ai-sdlc-local'];
+          if (p === join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc')) return ['0.9.0', '0.18.0'];
+          return [];
+        },
+      }),
+    );
+
+    const install = resolvePluginInstall(ctx);
+    expect(install?.path).toBe(current);
+    expect(install?.version).toBe('0.18.0');
+    expect(install?.source).toBe('marketplace');
+  });
+
+  it('AISDLC-586: prefers the marketplace install over a repo-local dev checkout that shares a project root', () => {
+    const homeDir = join(tmpDir, 'home');
+    const cacheRoot = join(homeDir, '.claude', 'plugins', 'cache');
+    const marketplaceDir = join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc', '0.18.0');
+    writePluginManifests(marketplaceDir, { rootVersion: '0.18.0' });
+
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir, { rootVersion: '0.9.2' });
+
+    const ctx = makeCtx(
+      makeAdapters({
+        homeDir: () => homeDir,
+        listDir: (p) => {
+          if (p === cacheRoot) return ['ai-sdlc-local'];
+          if (p === join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc')) return ['0.18.0'];
+          return [];
+        },
+      }),
+    );
+
+    const install = resolvePluginInstall(ctx);
+    expect(install?.source).toBe('marketplace');
+    expect(install?.path).toBe(marketplaceDir);
+  });
+
+  it('AISDLC-586: adopter node_modules install is audited when no env/marketplace candidate exists', () => {
+    const pluginDir = join(tmpDir, 'node_modules', 'ai-sdlc-plugin');
+    writePluginManifests(pluginDir, { rootVersion: '1.5.0' });
+    const ctx = makeCtx(makeAdapters());
+    const install = resolvePluginInstall(ctx);
+    expect(install?.source).toBe('node_modules');
+    expect(install?.path).toBe(pluginDir);
+    expect(install?.version).toBe('1.5.0');
+  });
+
+  it('AISDLC-586: CLAUDE_PLUGIN_ROOT is reported with source "env" and its version', () => {
+    const envRoot = join(tmpDir, 'env-plugin');
+    writePluginManifests(envRoot, { rootVersion: '0.21.0' });
+    const ctx = makeCtx(makeAdapters({ env: { CLAUDE_PLUGIN_ROOT: envRoot } }));
+    const install = resolvePluginInstall(ctx);
+    expect(install).toEqual({ path: envRoot, version: '0.21.0', source: 'env' });
+  });
+
+  it('AISDLC-586: falls back to repo-local dev checkout only when nothing else resolves', () => {
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir, { rootVersion: '0.9.2' });
+    const ctx = makeCtx(makeAdapters());
+    const install = resolvePluginInstall(ctx);
+    expect(install?.source).toBe('repo-local');
+    expect(install?.path).toBe(repoLocalDir);
+  });
+});
+
+// ── checkPluginInstallAmbiguity (AISDLC-586) ──────────────────────────
+
+describe('checkPluginInstallAmbiguity', () => {
+  it('passes when no repo-local checkout exists', () => {
+    const result = checkPluginInstallAmbiguity(makeCtx(makeAdapters()));
+    expect(result.severity).toBe('pass');
+  });
+
+  it('passes when no marketplace install exists (repo-local only)', () => {
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir, { rootVersion: '0.9.2' });
+    const result = checkPluginInstallAmbiguity(makeCtx(makeAdapters()));
+    expect(result.severity).toBe('pass');
+  });
+
+  it('passes when repo-local and marketplace installs agree on version', () => {
+    const homeDir = join(tmpDir, 'home');
+    const cacheRoot = join(homeDir, '.claude', 'plugins', 'cache');
+    const marketplaceDir = join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc', '0.18.0');
+    writePluginManifests(marketplaceDir, { rootVersion: '0.18.0' });
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir, { rootVersion: '0.18.0' });
+
+    const result = checkPluginInstallAmbiguity(
+      makeCtx(
+        makeAdapters({
+          homeDir: () => homeDir,
+          listDir: (p) => {
+            if (p === cacheRoot) return ['ai-sdlc-local'];
+            if (p === join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc')) return ['0.18.0'];
+            return [];
+          },
+        }),
+      ),
+    );
+    expect(result.severity).toBe('pass');
+  });
+
+  it('WARNs naming both paths+versions when repo-local and marketplace disagree', () => {
+    const homeDir = join(tmpDir, 'home');
+    const cacheRoot = join(homeDir, '.claude', 'plugins', 'cache');
+    const marketplaceDir = join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc', '0.18.0');
+    writePluginManifests(marketplaceDir, { rootVersion: '0.18.0' });
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir, { rootVersion: '0.9.2' });
+
+    const result = checkPluginInstallAmbiguity(
+      makeCtx(
+        makeAdapters({
+          homeDir: () => homeDir,
+          listDir: (p) => {
+            if (p === cacheRoot) return ['ai-sdlc-local'];
+            if (p === join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc')) return ['0.18.0'];
+            return [];
+          },
+        }),
+      ),
+    );
+    expect(result.severity).toBe('warn');
+    expect(result.title).toContain(repoLocalDir);
+    expect(result.title).toContain('0.9.2');
+    expect(result.title).toContain(marketplaceDir);
+    expect(result.title).toContain('0.18.0');
+    expect(result.anonymizableEvidence).toEqual({
+      repoLocalVersion: '0.9.2',
+      marketplaceVersion: '0.18.0',
+    });
+  });
+});
+
+// ── describeResolvedPluginInstall / report header (AISDLC-586) ───────
+
+describe('describeResolvedPluginInstall', () => {
+  it('names the audited install path + marketplace version', () => {
+    const line = describeResolvedPluginInstall({
+      path: '/home/op/.claude/plugins/cache/ai-sdlc-local/ai-sdlc/0.18.0',
+      version: '0.18.0',
+      source: 'marketplace',
+    });
+    expect(line).toBe(
+      'Auditing: /home/op/.claude/plugins/cache/ai-sdlc-local/ai-sdlc/0.18.0 (marketplace v0.18.0)',
+    );
+  });
+
+  it('names a dev checkout distinctly from a marketplace install', () => {
+    const line = describeResolvedPluginInstall({
+      path: '/repo/ai-sdlc-plugin',
+      version: '0.9.2',
+      source: 'repo-local',
+    });
+    expect(line).toBe('Auditing: /repo/ai-sdlc-plugin (dev checkout v0.9.2)');
+  });
+
+  it('reports "no plugin install detected" when nothing resolved', () => {
+    expect(describeResolvedPluginInstall(undefined)).toBe('Auditing: no plugin install detected');
   });
 });
 
@@ -636,13 +814,14 @@ describe('DOCTOR_CHECKS registry', () => {
     for (const id of ids) expect(id.length).toBeGreaterThan(0);
   });
 
-  it('covers checks 1, 2, 3, 7, 11, 12 from the AISDLC-578 seed catalog', () => {
+  it('covers checks 1, 2, 3, 7, 11, 12 from the AISDLC-578 seed catalog plus the AISDLC-586 ambiguity check', () => {
     const ids = DOCTOR_CHECKS.map((c) => c.id);
     expect(ids).toEqual(
       expect.arrayContaining([
         'plugin-version',
         'runtime-deps-pins',
         'manifests-agree',
+        'plugin-install-ambiguity',
         'attestation-governance',
         'marketplace-catalog-drift',
         'npm-dist-tag-reachability',
@@ -715,5 +894,27 @@ describe('renderFullDoctorReport', () => {
     for (const result of results) {
       expect(lines.some((l) => l.includes(result.id))).toBe(true);
     }
+  });
+
+  it('names the audited install path + version in the header (AISDLC-586)', () => {
+    const results = runDoctorChecks(makeCtx(makeAdapters()));
+    const lines = renderFullDoctorReport(results, {
+      path: '/home/op/.claude/plugins/cache/ai-sdlc-local/ai-sdlc/0.18.0',
+      version: '0.18.0',
+      source: 'marketplace',
+    });
+    expect(
+      lines.some((l) =>
+        l.includes(
+          'Auditing: /home/op/.claude/plugins/cache/ai-sdlc-local/ai-sdlc/0.18.0 (marketplace v0.18.0)',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('reports "no plugin install detected" in the header when nothing resolved', () => {
+    const results = runDoctorChecks(makeCtx(makeAdapters()));
+    const lines = renderFullDoctorReport(results);
+    expect(lines.some((l) => l === 'Auditing: no plugin install detected')).toBe(true);
   });
 });

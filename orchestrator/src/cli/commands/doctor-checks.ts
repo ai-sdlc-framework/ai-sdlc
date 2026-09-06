@@ -137,55 +137,6 @@ export interface DoctorCheck {
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
-/**
- * Locate the installed `ai-sdlc-plugin` package tree (the directory
- * containing `plugin.json`, `.claude-plugin/plugin.json`, and `hooks/`).
- * Tries, in order:
- *
- *   1. `CLAUDE_PLUGIN_ROOT` env var (set by Claude Code when running
- *      inside a plugin context, or exported manually).
- *   2. `<projectDir>/ai-sdlc-plugin` — the ai-sdlc monorepo itself, or an
- *      adopter using a `directory`-source marketplace pointed at a
- *      checked-out copy.
- *   3. `<projectDir>/node_modules/ai-sdlc-plugin` — an adopter that
- *      vendored the plugin as an npm dependency.
- *   4. A best-effort scan of `~/.claude/plugins/cache/*&#47;ai-sdlc/*` for
- *      the marketplace-installed cache, picking the lexicographically
- *      highest version directory (best-effort; a real semver sort isn't
- *      needed here since this is just "does something exist").
- *
- * Returns `undefined` when none of the candidates look like a real plugin
- * install (checked via presence of `plugin.json`).
- */
-export function resolvePluginDir(ctx: DoctorRunContext): string | undefined {
-  const { adapters, projectDir } = ctx;
-  const candidates: string[] = [];
-
-  const envRoot = adapters.env.CLAUDE_PLUGIN_ROOT;
-  if (envRoot) candidates.push(envRoot);
-
-  candidates.push(join(projectDir, 'ai-sdlc-plugin'));
-  candidates.push(join(projectDir, 'node_modules', 'ai-sdlc-plugin'));
-
-  for (const candidate of candidates) {
-    if (adapters.exists(join(candidate, 'plugin.json'))) return candidate;
-  }
-
-  // Best-effort marketplace-cache scan.
-  const cacheRoot = join(adapters.homeDir(), '.claude', 'plugins', 'cache');
-  const marketplaceDirs = adapters.listDir(cacheRoot);
-  for (const marketplace of marketplaceDirs) {
-    const aiSdlcRoot = join(cacheRoot, marketplace, 'ai-sdlc');
-    const versionDirs = adapters.listDir(aiSdlcRoot).sort().reverse();
-    for (const version of versionDirs) {
-      const candidate = join(aiSdlcRoot, version);
-      if (adapters.exists(join(candidate, 'plugin.json'))) return candidate;
-    }
-  }
-
-  return undefined;
-}
-
 /** Minimal semver-triple comparator. Returns >0 if a>b, <0 if a<b, 0 if equal or unparseable. */
 function compareSemver(a: string, b: string): number {
   const norm = (s: string) =>
@@ -210,6 +161,115 @@ function readJson(ctx: DoctorRunContext, path: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function readPluginVersion(ctx: DoctorRunContext, pluginDir: string): string | undefined {
+  const manifest = readJson(ctx, join(pluginDir, 'plugin.json')) as
+    | { version?: string }
+    | undefined;
+  return manifest?.version;
+}
+
+/** Which resolution branch produced a `ResolvedPluginInstall`. */
+export type PluginInstallSource = 'env' | 'marketplace' | 'node_modules' | 'repo-local';
+
+export interface ResolvedPluginInstall {
+  path: string;
+  version?: string;
+  source: PluginInstallSource;
+}
+
+/**
+ * Scan `~/.claude/plugins/cache/*&#47;ai-sdlc/*` for the marketplace-installed
+ * cache, picking the SEMVER-highest version directory (AISDLC-586: a lexical
+ * string sort previously picked "0.9.0" over "0.18.0" because `9 > 1` as
+ * characters — this cost an adopter a doctor run that audited a plugin
+ * version 9 releases stale). Returns `undefined` when the cache root doesn't
+ * exist or no version directory has a `plugin.json`.
+ */
+function findMarketplaceInstall(ctx: DoctorRunContext): ResolvedPluginInstall | undefined {
+  const { adapters } = ctx;
+  const cacheRoot = join(adapters.homeDir(), '.claude', 'plugins', 'cache');
+  const marketplaceDirs = adapters.listDir(cacheRoot);
+
+  let best: { version: string; dir: string } | undefined;
+  for (const marketplace of marketplaceDirs) {
+    const aiSdlcRoot = join(cacheRoot, marketplace, 'ai-sdlc');
+    const versionDirs = adapters.listDir(aiSdlcRoot);
+    for (const version of versionDirs) {
+      const candidate = join(aiSdlcRoot, version);
+      if (!adapters.exists(join(candidate, 'plugin.json'))) continue;
+      if (!best || compareSemver(version, best.version) > 0) {
+        best = { version, dir: candidate };
+      }
+    }
+  }
+  if (!best) return undefined;
+  return { path: best.dir, version: best.version, source: 'marketplace' };
+}
+
+/**
+ * Resolve the installed `ai-sdlc-plugin` package tree (the directory
+ * containing `plugin.json`, `.claude-plugin/plugin.json`, and `hooks/`),
+ * along with which resolution branch produced it and its declared version.
+ *
+ * Resolution order (AISDLC-586 — reordered to audit the plugin Claude Code
+ * actually LOADED instead of a stale dev checkout that happens to share a
+ * project root):
+ *
+ *   1. `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DIR` env var — set by Claude
+ *      Code when running inside a plugin context, or exported manually.
+ *      This is the harness's own signal for "this is what got loaded" and
+ *      always wins when present.
+ *   2. The marketplace cache (`~/.claude/plugins/cache/*&#47;ai-sdlc/*`),
+ *      SEMVER-highest version directory. This is the real install for the
+ *      overwhelming majority of operators and adopters.
+ *   3. `<projectDir>/node_modules/ai-sdlc-plugin` — an adopter that vendored
+ *      the plugin as an npm dependency.
+ *   4. `<projectDir>/ai-sdlc-plugin` — the ai-sdlc monorepo itself, or an
+ *      adopter using a `directory`-source marketplace pointed at a checked-
+ *      out copy. Demoted to LAST resort: previously this ranked #2, so
+ *      running `ai-sdlc doctor` from (or near) a monorepo checkout silently
+ *      shadowed the marketplace install Claude Code had actually loaded.
+ *
+ * Returns `undefined` when none of the candidates look like a real plugin
+ * install (checked via presence of `plugin.json`).
+ */
+export function resolvePluginInstall(ctx: DoctorRunContext): ResolvedPluginInstall | undefined {
+  const { adapters, projectDir } = ctx;
+
+  const envRoot = adapters.env.CLAUDE_PLUGIN_ROOT || adapters.env.CLAUDE_PLUGIN_DIR;
+  if (envRoot && adapters.exists(join(envRoot, 'plugin.json'))) {
+    return { path: envRoot, version: readPluginVersion(ctx, envRoot), source: 'env' };
+  }
+
+  const marketplace = findMarketplaceInstall(ctx);
+  if (marketplace) return marketplace;
+
+  const nodeModulesDir = join(projectDir, 'node_modules', 'ai-sdlc-plugin');
+  if (adapters.exists(join(nodeModulesDir, 'plugin.json'))) {
+    return {
+      path: nodeModulesDir,
+      version: readPluginVersion(ctx, nodeModulesDir),
+      source: 'node_modules',
+    };
+  }
+
+  const repoLocalDir = join(projectDir, 'ai-sdlc-plugin');
+  if (adapters.exists(join(repoLocalDir, 'plugin.json'))) {
+    return {
+      path: repoLocalDir,
+      version: readPluginVersion(ctx, repoLocalDir),
+      source: 'repo-local',
+    };
+  }
+
+  return undefined;
+}
+
+/** Backward-compat convenience wrapper — every existing check only needs the path. */
+export function resolvePluginDir(ctx: DoctorRunContext): string | undefined {
+  return resolvePluginInstall(ctx)?.path;
 }
 
 // ── Check 1: plugin version ─────────────────────────────────────────────
@@ -499,6 +559,56 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
   };
 }
 
+// ── Check: multi-install ambiguity (AISDLC-586) ───────────────────────────
+
+/**
+ * Detects the exact situation that motivated AISDLC-586: a repo-local dev
+ * checkout (`<projectDir>/ai-sdlc-plugin`) coexisting with a marketplace
+ * cache install that disagree on version. `resolvePluginInstall` now audits
+ * the marketplace install in that case (see its docstring), but a silent
+ * "wrong one used to be audited" bug deserves a visible signal, not just a
+ * quiet behavior change.
+ */
+export function checkPluginInstallAmbiguity(ctx: DoctorRunContext): DoctorCheckResult {
+  const { adapters, projectDir } = ctx;
+  const repoLocalDir = join(projectDir, 'ai-sdlc-plugin');
+  const repoLocalPresent = adapters.exists(join(repoLocalDir, 'plugin.json'));
+  const marketplace = findMarketplaceInstall(ctx);
+
+  if (!repoLocalPresent || !marketplace) {
+    return {
+      id: 'plugin-install-ambiguity',
+      severity: 'pass',
+      title: 'no ambiguous multi-install situation detected',
+    };
+  }
+
+  const repoLocalVersion = readPluginVersion(ctx, repoLocalDir);
+  if (repoLocalVersion === marketplace.version) {
+    return {
+      id: 'plugin-install-ambiguity',
+      severity: 'pass',
+      title: `repo-local dev checkout and marketplace install agree (v${marketplace.version ?? 'unknown'})`,
+    };
+  }
+
+  return {
+    id: 'plugin-install-ambiguity',
+    severity: 'warn',
+    title:
+      `multiple plugin installs detected and disagree on version — ` +
+      `repo-local ${repoLocalDir} (v${repoLocalVersion ?? 'unknown'}) vs. ` +
+      `marketplace ${marketplace.path} (v${marketplace.version ?? 'unknown'}); ` +
+      'doctor audits the marketplace install (the one Claude Code actually loaded)',
+    remediation:
+      'Reconcile the dev checkout with the marketplace version, or remove it if it is stale',
+    anonymizableEvidence: {
+      repoLocalVersion,
+      marketplaceVersion: marketplace.version,
+    },
+  };
+}
+
 // ── Check 11: marketplace-catalog-vs-source version drift ────────────────
 
 function deepFindNamedVersion(node: unknown, name: string, depth = 0): string | undefined {
@@ -693,6 +803,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     fix: fixManifestsAgree,
   },
   {
+    id: 'plugin-install-ambiguity',
+    description:
+      'WARNs when a repo-local dev checkout and a marketplace install coexist and disagree on version (AISDLC-586).',
+    run: checkPluginInstallAmbiguity,
+  },
+  {
     id: 'attestation-governance',
     description: 'Attestation required-but-unconfigured detection (reuses AISDLC-560).',
     run: checkAttestationGovernanceCheck,
@@ -753,10 +869,29 @@ const SEVERITY_GLYPH: Record<CheckSeverity, string> = {
   fail: '✗',
 };
 
-export function renderFullDoctorReport(results: DoctorCheckResult[]): string[] {
+const INSTALL_SOURCE_LABEL: Record<PluginInstallSource, string> = {
+  env: 'CLAUDE_PLUGIN_ROOT/DIR',
+  marketplace: 'marketplace',
+  node_modules: 'adopter node_modules',
+  'repo-local': 'dev checkout',
+};
+
+/** One-line description of which plugin install doctor audited (AISDLC-586). */
+export function describeResolvedPluginInstall(install: ResolvedPluginInstall | undefined): string {
+  if (!install) return 'Auditing: no plugin install detected';
+  const versionSuffix = install.version ? ` v${install.version}` : '';
+  return `Auditing: ${install.path} (${INSTALL_SOURCE_LABEL[install.source]}${versionSuffix})`;
+}
+
+export function renderFullDoctorReport(
+  results: DoctorCheckResult[],
+  install?: ResolvedPluginInstall,
+): string[] {
   const lines: string[] = [];
   lines.push('AI-SDLC Doctor');
   lines.push('─'.repeat(50));
+  lines.push(describeResolvedPluginInstall(install));
+  lines.push('');
 
   for (const r of results) {
     lines.push(`[${SEVERITY_GLYPH[r.severity]} ${r.severity.toUpperCase()}] ${r.id}: ${r.title}`);
