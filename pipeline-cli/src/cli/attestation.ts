@@ -717,6 +717,13 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // CONSUMES (deletes) the marker file on a match.
           const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
 
+          // RFC-0046 Phase 1 (AISDLC-588): independenceTier derived from the
+          // SAME signal as verdictClass at this phase — 'attested' where
+          // verdictClass would be 'independent', else 'none'. Later phases
+          // (AISDLC-589/590/591) populate 'isolated' from stronger signals.
+          const independenceTier: 'none' | 'attested' =
+            verdictClass === 'independent' ? 'attested' : 'none';
+
           const leaf: TranscriptLeaf = {
             leafIndex,
             taskId,
@@ -730,6 +737,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             signedAt,
             verdictClass,
             harnessTranscriptHash: harnessResult.harnessTranscriptHash,
+            independenceTier,
           };
 
           // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
@@ -745,7 +753,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             `[cli-attestation] emit-leaf: leaf #${leafIndex} appended to ${filePath} ` +
               `(taskId=${taskId}, reviewer=${reviewerName}, ` +
               `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved}, ` +
-              `verdictClass=${verdictClass}, ` +
+              `verdictClass=${verdictClass}, independenceTier=${independenceTier}, ` +
               `harnessTranscriptHash=${harnessResult.harnessTranscriptHash ? 'set' : 'null'})`,
           );
         },
@@ -875,6 +883,9 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           let output = `status=${out.status}\nreason=${out.reason}\n`;
           if (out.overallVerdictClass) {
             output += `verdictClass=${out.overallVerdictClass}\n`;
+          }
+          if (out.overallIndependenceTier) {
+            output += `independenceTier=${out.overallIndependenceTier}\n`;
           }
           process.stdout.write(output);
           process.exitCode = out.status === 'valid' ? 0 : 1;

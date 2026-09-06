@@ -36,6 +36,8 @@ export interface VerifyCoreModule {
     status: 'valid' | 'invalid';
     reason: string;
     overallVerdictClass?: string;
+    /** RFC-0046 Phase 1 (AISDLC-588) — weakest-link independence tier. */
+    overallIndependenceTier?: string;
   };
 }
 

@@ -2,7 +2,7 @@
 id: AISDLC-588
 title: >-
   RFC-0046 Phase 1 — independenceTier leaf schema + verifier dual-read + deprecate verdictClass
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-06'
 labels:
@@ -28,12 +28,12 @@ RFC-0046 Phase 1. Introduce the new `independenceTier` property that supersedes 
 - **Deprecate `verdictClass`:** mark it frozen/legacy-read in code comments + RFC-0042 status note is NOT edited (RFC-0046 owns the deprecation record; do NOT amend RFC-0042). `emit-leaf` continues to emit `verdictClass` for one release for back-compat but ALSO emits `independenceTier` (set from the same signal at this phase: `attested` where `verdictClass` would be `independent`, else `none`).
 
 ## Acceptance Criteria
-- [ ] `independenceTier` added to the v6 leaf type + JSON schema; a leaf omitting it hashes identically to a pre-field leaf (hermetic Merkle test, mirroring the 568 backward-compat test).
-- [ ] Verifier emits per-leaf `independenceTier` + weakest-link `overallIndependenceTier`; tamper (declared ≠ Merkle-proved) is rejected.
-- [ ] Dual-read: a legacy envelope with only `verdictClass` yields the correct `overallIndependenceTier` via fallback; a new envelope with `independenceTier` ignores `verdictClass`.
-- [ ] `emit-leaf` emits both fields this phase (independenceTier from the existing signal).
-- [ ] Hermetic tests for the enum, aggregation, dual-read, and tamper-reject paths.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `independenceTier` added to the v6 leaf type + JSON schema; a leaf omitting it hashes identically to a pre-field leaf (hermetic Merkle test, mirroring the 568 backward-compat test).
+- [x] Verifier emits per-leaf `independenceTier` + weakest-link `overallIndependenceTier`; tamper (declared ≠ Merkle-proved) is rejected.
+- [x] Dual-read: a legacy envelope with only `verdictClass` yields the correct `overallIndependenceTier` via fallback; a new envelope with `independenceTier` ignores `verdictClass`.
+- [x] `emit-leaf` emits both fields this phase (independenceTier from the existing signal).
+- [x] Hermetic tests for the enum, aggregation, dual-read, and tamper-reject paths.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## References
 RFC-0046 §Design Details (Schema Changes, Migration Path). Foundational for AISDLC-589/590/591.

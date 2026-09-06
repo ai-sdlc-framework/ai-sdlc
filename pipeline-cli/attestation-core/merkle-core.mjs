@@ -66,10 +66,11 @@ export function hashPair(left, right) {
  * updating every historical envelope's verifiability story (a key-order or
  * key-set change is a hash-breaking change for every already-signed leaf).
  *
- * `undefined` values (e.g. `verdictClass`/`harnessTranscriptHash` absent on
- * leaves signed before those fields existed) are dropped by
- * `JSON.stringify`, so historical leaves hash identically to before their
- * introducing field was added — backward compatible by construction.
+ * `undefined` values (e.g. `verdictClass`/`harnessTranscriptHash`/
+ * `independenceTier` absent on leaves signed before those fields existed)
+ * are dropped by `JSON.stringify`, so historical leaves hash identically to
+ * before their introducing field was added — backward compatible by
+ * construction.
  */
 export function hashLeaf(leaf) {
   const ordered = {
@@ -89,9 +90,17 @@ export function hashLeaf(leaf) {
     },
     signedAt: leaf.signedAt,
     // AISDLC-568: trailing field. `undefined` drops out of JSON.stringify.
+    // FROZEN/legacy-read as of RFC-0046 (AISDLC-588) — superseded by
+    // `independenceTier` below. Retained for backward compatibility; new
+    // leaves should not rely on this field alone (see `independenceTier`).
     verdictClass: leaf.verdictClass,
     // AISDLC-570: trailing field. `undefined` drops out of JSON.stringify.
     harnessTranscriptHash: leaf.harnessTranscriptHash,
+    // RFC-0046 / AISDLC-588: trailing field. `undefined` drops out of
+    // JSON.stringify, so a leaf omitting it hashes identically to a
+    // pre-independenceTier leaf. Superseded `verdictClass` as the primary
+    // independence signal — 'none' | 'attested' | 'isolated'.
+    independenceTier: leaf.independenceTier,
   };
   return hashLeafData(JSON.stringify(ordered));
 }
