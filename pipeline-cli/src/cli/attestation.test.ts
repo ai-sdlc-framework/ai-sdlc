@@ -670,6 +670,81 @@ describe('emit-leaf — happy path', () => {
   });
 });
 
+// ── CLI: emit-leaf anchorEvidence (RFC-0047 Phase 2, AISDLC-594) ──────────────
+
+describe('emit-leaf — anchorEvidence (RFC-0047 Phase 2, AISDLC-594)', () => {
+  function buildBaseArgs(): string[] {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-anchor-evidence.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    return [
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-383.8',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'a'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ];
+  }
+
+  it('leaves anchorEvidence undefined when no anchor flags are passed (never defaulted)', async () => {
+    await buildAttestationCli(buildBaseArgs()).parseAsync();
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves[0].anchorEvidence).toBeUndefined();
+  });
+
+  it('binds anchorEvidence when all three anchor flags are passed', async () => {
+    await buildAttestationCli([
+      ...buildBaseArgs(),
+      '--anchor-run-id',
+      '123456789',
+      '--anchor-workflow-ref',
+      'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
+      '--anchor-signer-key-id',
+      'ci-only-key-1',
+    ]).parseAsync();
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves[0].anchorEvidence).toEqual({
+      runId: '123456789',
+      workflowRef: 'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
+      signerKeyId: 'ci-only-key-1',
+    });
+  });
+
+  it('rejects a partial set of anchor flags (all-or-nothing)', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([...buildBaseArgs(), '--anchor-run-id', '123456789']).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('must be passed together');
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+  });
+});
+
 // ── CLI: emit-leaf verdictClass detection (AISDLC-568) ─────────────────────────
 
 describe('emit-leaf — verdictClass detection', () => {

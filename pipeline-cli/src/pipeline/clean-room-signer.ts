@@ -145,6 +145,17 @@ export interface CleanRoomSignerOptions {
    * The signer detects if it has been invoked from inside the sandbox.
    */
   workDir?: string;
+  /**
+   * RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY CI provenance evidence, carried
+   * through as-is onto every leaf emitted for this PR. NEVER defaulted —
+   * absent when the caller has no anchor evidence to bind. NOT the security
+   * anchor (the `ci-only` root signature is; see RFC-0047 OQ-1/OQ-2).
+   */
+  anchorEvidence?: {
+    runId: string;
+    workflowRef: string;
+    signerKeyId: string;
+  };
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -205,7 +216,8 @@ export type CleanRoomSignerResult = CleanRoomSignerSuccess | CleanRoomSignerFail
  * before accessing `result.report` / `result.envelopePath`.
  */
 export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSignerResult {
-  const { reportArtifactPath, repoRoot, taskId, headSha, patchId, signerIdentity } = opts;
+  const { reportArtifactPath, repoRoot, taskId, headSha, patchId, signerIdentity, anchorEvidence } =
+    opts;
   const workDir = opts.workDir ?? process.cwd();
 
   // ── Step 1: Signing-key isolation invariant (AC#8) ──────────────────────────
@@ -356,6 +368,9 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
         verdictApproved: rv.approved === true,
         findings,
         signedAt: new Date().toISOString(),
+        // RFC-0047 / AISDLC-594: carried through as-is (undefined when the
+        // caller has no anchor evidence) — audit-only, never defaulted.
+        anchorEvidence,
       };
       if (patchId) {
         appendLeafForPatchId(leaf, patchId, repoRoot);

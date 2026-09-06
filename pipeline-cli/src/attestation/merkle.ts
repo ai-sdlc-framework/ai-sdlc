@@ -130,6 +130,32 @@ export interface TranscriptLeaf {
    * are unaffected.
    */
   harnessTranscriptHash?: string | null;
+  /**
+   * RFC-0047 Phase 2 (AISDLC-594): audit-only CI provenance evidence bound
+   * into the leaf — `{ runId, workflowRef, signerKeyId }`. **NOT the
+   * security anchor** — the security anchor is the `ci-only` root signature
+   * (RFC-0047 OQ-1/OQ-3). This makes "which CI run produced this leaf"
+   * tamper-evident and re-derivable for audit, closing the AISDLC-590 gap
+   * where `runId`/`workflowRef` were documented as verification evidence
+   * but never bound or checked.
+   *
+   * Optional for backward compatibility: leaves signed before this field
+   * existed omit it, and `hashLeaf` treats an `undefined` value identically
+   * to an absent key (JSON.stringify drops `undefined` values), so
+   * historical leaf hashes are unaffected. MUST be `undefined` when no
+   * genuine anchor evidence exists — never `null`/`{}` — following the
+   * `independenceTier` precedent (the AISDLC-588 additive-compat
+   * invariant / base-verifier hashing-boundary lesson: an explicit empty
+   * value would change the hash and break older verifiers).
+   */
+  anchorEvidence?: {
+    /** CI run identifier (e.g. GitHub Actions `run_id`). */
+    runId: string;
+    /** CI workflow reference (e.g. `owner/repo/.github/workflows/x.yml@refs/heads/main`). */
+    workflowRef: string;
+    /** Identifier of the `ci-only` signing key used to sign the Merkle root. */
+    signerKeyId: string;
+  };
 }
 
 // ── Merkle result shapes ──────────────────────────────────────────────────────
