@@ -13,7 +13,9 @@ labels:
   - adopter
 dependencies:
   - AISDLC-601
+  - AISDLC-603
 references:
+  - spec/rfcs/RFC-0048-per-repo-configurable-governance.md
   - ai-sdlc-plugin/commands/execute.md
   - ai-sdlc-plugin/commands/execute-parallel.md
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
@@ -51,13 +53,12 @@ resolved policy and fixes the narration/enforcement drift.
   arming `--auto` is NOT merging and must stay allowed under strict, per current
   CLAUDE.md); when the policy permits merge-on-green, the hook allows it. Fix the
   existing `git merge*`-doesn't-cover-`gh pr merge` gap either way.
-- **Preserve the green+CLEAN guardrail:** the merge-on-green policy must be
-  expressible/enforced as "all required CI checks green AND mergeStateStatus CLEAN"
-  (including the repo's real gates: verify-attestation, migration-mutation-gate,
-  workflow-secret-scope-gate, ci), so opting into agent-merge removes only the
-  "human must click" step, not any safety gate. Decide + document where the
-  green+CLEAN check lives (command-body precondition vs. a helper) so it can't be
-  skipped.
+- **Route all merges through the AISDLC-603 `merge-if-eligible` helper (OQ-4
+  resolution):** the hook blocks raw `gh pr merge`; the helper owns the
+  green+CLEAN+trusted-`sourceKind` check. So the reconciled hook's job is (a) block
+  raw `gh pr merge` under strict, and (b) permit ONLY the helper invocation when the
+  policy allows merge — the green+CLEAN logic itself lives in 603, not here or in
+  command-body prose. Arming `--auto` is NOT merging and stays allowed under strict.
 - Keep defaults STRICT: with no governance section, execute's hard rules + the hook
   behave exactly as today (never-merge/never-force-push/never-close/etc.).
 - Hermetic coverage: strict default (merge blocked incl. `gh pr merge`); opted-in
@@ -79,7 +80,8 @@ resolved policy and fixes the narration/enforcement drift.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Notes
-Depends on [[AISDLC-601]] (shares its resolver). Together these fix the existing
+The frontmatter `dependencies` field is authoritative (shares AISDLC-601's resolver;
+composes with AISDLC-603's helper). Together these fix the existing
 inconsistency where the injected prose and `agent-role.yaml` can already disagree,
 and give an adopter one per-repo policy source of truth rendered into every surface.
 Trust boundary from 601 applies: policy honored only from trusted base-branch config.
