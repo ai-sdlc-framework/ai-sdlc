@@ -2,7 +2,7 @@
 id: RFC-0048
 title: Per-Repo Configurable Governance Hard-Rules
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-09-07
 updated: 2026-09-07
@@ -18,7 +18,7 @@ requiresDocs: []
 > five Open Questions gate promotion; they are resolved via an operator rubric
 > walkthrough before sign-off.
 
-**Status:** Ready for Review (2026-09-07) — **all 5 Open Questions resolved via
+**Status:** Signed Off (2026-09-07, Engineering + Operator) — **all 5 Open Questions resolved via
 operator rubric walkthrough.** The plugin hard-codes governance hard-rules ("NEVER
 merge PRs", "NEVER force push", "NEVER close…") into every session, subagent, and
 `execute` command, while the *enforcement* substrate (`agent-role.yaml`
@@ -276,8 +276,8 @@ expansion to the granular schema + the OQ-3 fixed set.
 
 | Role | Owner | Status |
 | --- | --- | --- |
-| Engineering | Dominique Legault | ⏸ Pending |
-| Operator | Dominique Legault | ⏸ Pending |
+| Engineering | Dominique Legault | ✅ Signed (one per-repo policy source of truth rendered to every surface; defaults strict; sound implementation surface across 601/602/603; 2026-09-07) |
+| Operator | Dominique Legault | ✅ Signed (fixes the real narration/enforcement drift; trust boundary follows the internal-vs-external work-item architecture; 2026-09-07) |
 | Product | Alex | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
@@ -287,3 +287,4 @@ expansion to the granular schema + the OQ-3 fixed set.
 | --- | --- |
 | 2026-09-07 | Initial Draft. Problem, Option-1 proposal, 5 Open Questions. Trigger: local-trades adopter (plugin 0.19.0); tasks AISDLC-601/602 filed. |
 | 2026-09-07 | **Draft → Ready for Review.** All 5 OQs resolved via operator rubric walkthrough: (1) dedicated `governance` block; (2) `sourceKind`-provenance tier gating + base-branch-only declaration; (3) operational-configurable / integrity-fixed; (4) deterministic `merge-if-eligible` helper + hook blocks raw `gh pr merge`; (5) granular **+** `operator-trusted` preset (operator override of the granular-only recommendation). Reconciled phase plan to AISDLC-601/602 + new AISDLC-603 (helper). |
+| 2026-09-07 | **Ready for Review → Signed Off** (Engineering + Operator). Phase tasks AISDLC-601/602/603 dispatchable. |
