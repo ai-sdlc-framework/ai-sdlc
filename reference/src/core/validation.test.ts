@@ -227,6 +227,64 @@ describe('validateResource()', () => {
   });
 });
 
+describe('AgentRole spec.governance (RFC-0048 / AISDLC-601)', () => {
+  const baseAgentRole = () => ({
+    apiVersion: 'ai-sdlc.io/v1alpha1',
+    kind: 'AgentRole',
+    metadata: { name: 'gov-test' },
+    spec: { role: 'Dev', goal: 'ship', tools: ['Edit'] },
+  });
+
+  it('accepts a granular governance block', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = {
+      allowMerge: 'onGreenClean',
+      allowForcePush: false,
+      allowClosePrIssue: false,
+      allowBranchDelete: false,
+      allowResetHard: false,
+    };
+    const result = validateResource(doc);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts the operator-trusted preset', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { preset: 'operator-trusted' };
+    expect(validateResource(doc).valid).toBe(true);
+  });
+
+  it('accepts an AgentRole with no governance block (strict-by-default, unchanged)', () => {
+    expect(validateResource(baseAgentRole()).valid).toBe(true);
+  });
+
+  it('rejects an out-of-enum allowMerge value', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { allowMerge: 'always' };
+    const result = validateResource(doc);
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some((e) => e.path.includes('governance/allowMerge'))).toBe(true);
+  });
+
+  it('rejects an unknown preset name', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { preset: 'yolo' };
+    expect(validateResource(doc).valid).toBe(false);
+  });
+
+  it('rejects an unknown governance key (additionalProperties:false)', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { allowMergeeee: 'never' };
+    expect(validateResource(doc).valid).toBe(false);
+  });
+
+  it('rejects a non-boolean allow* value', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { allowForcePush: 'true' };
+    expect(validateResource(doc).valid).toBe(false);
+  });
+});
+
 describe('formatValidationErrors()', () => {
   it('collapses oneOf branch errors into a single message', () => {
     const rawErrors = [
