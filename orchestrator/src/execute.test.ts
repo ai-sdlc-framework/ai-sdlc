@@ -156,7 +156,9 @@ describe('executePipeline()', () => {
     });
 
     expect(tracker.getIssue).toHaveBeenCalledWith('42');
-    expect(sc.createBranch).toHaveBeenCalledWith({ name: 'ai-sdlc/issue-42' });
+    // AISDLC issue #1037: createBranch now also passes `from`, defaulting to
+    // 'main' when spec.branching.targetBranch is unset (no regression, AC #4).
+    expect(sc.createBranch).toHaveBeenCalledWith({ name: 'ai-sdlc/issue-42', from: 'main' });
     expect(runner.run).toHaveBeenCalledWith(
       expect.objectContaining({
         issueNumber: 42,

@@ -763,7 +763,12 @@ async function executePipelineBody(
   // start with '-' (git flag injection) or contain chars outside the safe ref
   // charset. CodeQL alert #167 (js/second-order-command-line-injection).
   validateBranchName(branchName);
-  await sc.createBranch({ name: branchName });
+  // AISDLC issue #1037: fork the issue branch from spec.branching.targetBranch
+  // (e.g. `develop` for gitflow repos) instead of always forking from `main`.
+  // Keeps the branch creation base consistent with the PR base computed below
+  // (see `targetBranch` at the createPR call site).
+  const branchFrom = config.pipeline?.spec.branching?.targetBranch ?? 'main';
+  await sc.createBranch({ name: branchName, from: branchFrom });
   // cleanGitEnv() prevents leaked GIT_DIR from corrupting these calls (AISDLC-72).
   // Guard: skip fetch when no 'origin' remote is configured (local-only repos).
   // The push step already degrades gracefully for local repos; fetch must too.
