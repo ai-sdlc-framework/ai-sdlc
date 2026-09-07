@@ -39,7 +39,7 @@
     "test:install-runtime-deps-gate": "node --test ai-sdlc-plugin/scripts/install-runtime-deps.test.mjs",
     "test:check-stale-runtime-deps-gate": "node --test ai-sdlc-plugin/scripts/check-stale-runtime-deps.test.mjs",
     "test:execute-parallel-spawn-gate": "node --test ai-sdlc-plugin/scripts/execute-parallel-spawn.test.mjs",
-    "test:governance-resolver-gate": "node --test ai-sdlc-plugin/hooks/lib/governance-resolver.test.mjs ai-sdlc-plugin/hooks/session-start.test.mjs ai-sdlc-plugin/hooks/subagent-start.test.mjs",
+    "test:governance-resolver-gate": "node --test ai-sdlc-plugin/hooks/lib/governance-resolver.test.mjs ai-sdlc-plugin/hooks/session-start.test.mjs ai-sdlc-plugin/hooks/subagent-start.test.mjs ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs ai-sdlc-plugin/scripts/render-governance-hard-rules.test.mjs",
     "test:verify-attestation-gate": "node --test scripts/verify-attestation.test.mjs",
     "test:verify-attestation-plugin-gate": "node --test ai-sdlc-plugin/scripts/verify-attestation.test.mjs",
     "test:orchestrator-state-gate": "node --test scripts/check-orchestrator-state.test.mjs",

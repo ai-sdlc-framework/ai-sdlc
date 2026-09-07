@@ -2,7 +2,7 @@
 id: AISDLC-602
 title: >-
   Governance hard-rules: render resolved policy into execute/execute-parallel hard-rules + reconcile enforce-blocked-actions (fix gh-pr-merge drift)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
@@ -66,17 +66,17 @@ resolved policy and fixes the narration/enforcement drift.
   `--auto` stays allowed under strict.
 
 ## Acceptance Criteria
-- [ ] execute.md + execute-parallel.md hard-rule blocks render from the resolved
+- [x] execute.md + execute-parallel.md hard-rule blocks render from the resolved
   governance policy; no governance section ⇒ current strict text unchanged.
-- [ ] `enforce-blocked-actions.js` enforces the merge rule consistently with the
+- [x] `enforce-blocked-actions.js` enforces the merge rule consistently with the
   narration — blocks `gh pr merge` under strict (closing the `git merge*` gap),
   allows it under an opted-in merge-on-green policy, and still allows arming
   `--auto`.
-- [ ] Merge-on-green is gated on "all required checks green AND CLEAN" (the repo's
+- [x] Merge-on-green is gated on "all required checks green AND CLEAN" (the repo's
   real gates), documented and un-skippable.
-- [ ] Defaults strict end-to-end across SessionStart banner (601), SubagentStart
+- [x] Defaults strict end-to-end across SessionStart banner (601), SubagentStart
   banner (601), execute hard-rules (this task), and the PreToolUse hook (this task).
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Notes

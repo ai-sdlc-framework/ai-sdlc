@@ -750,6 +750,203 @@ blockedActions: []
   });
 });
 
+// ── AISDLC-602 merge governance (reconciles gh-pr-merge drift) ──────────
+//
+// These fixtures deliberately omit any 'gh pr merge*' blockedActions
+// pattern — the point of AISDLC-602 is that merge governance is now a
+// DEDICATED check (enforceMergeGovernance) independent of the generic
+// blockedActions glob list, so it must hold even with blockedActions: [].
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-602 merge governance, strict default)', () => {
+  let strictDir;
+
+  before(() => {
+    strictDir = join(tmpdir(), `enforce-blocked-merge-strict-${Date.now()}`);
+    mkdirSync(join(strictDir, '.ai-sdlc'), { recursive: true });
+    // No governance: section at all — resolves to STRICT_DEFAULTS.
+    writeFileSync(
+      join(strictDir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedActions: []
+`,
+    );
+  });
+
+  after(() => {
+    rmSync(strictDir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: strictDir });
+  }
+
+  it('blocks a raw "gh pr merge" (no --auto) under strict, even with no blockedActions configured', () => {
+    const result = run('gh pr merge 42');
+    assert.ok(isDenied(result), 'raw gh pr merge must be blocked under strict');
+  });
+
+  it('blocks "gh pr merge 42 --squash" (no --auto) under strict', () => {
+    const result = run('gh pr merge 42 --squash');
+    assert.ok(isDenied(result), 'raw gh pr merge with --squash (no --auto) is still a real merge');
+  });
+
+  it('allows arming "gh pr merge --auto" under strict', () => {
+    const result = run('gh pr merge 42 --auto');
+    assert.ok(!isDenied(result), 'arming --auto is NOT merging and must stay allowed under strict');
+  });
+
+  it('allows arming "gh pr merge --auto --squash" under strict (flag order/combination)', () => {
+    const result = run('gh pr merge 42 --auto --squash');
+    assert.ok(!isDenied(result), '--auto combined with --squash is still an arm, not a merge');
+  });
+
+  it('allows the cli-merge-if-eligible helper invocation under strict', () => {
+    const result = run('node pipeline-cli/bin/cli-merge-if-eligible.mjs --pr 42');
+    assert.ok(!isDenied(result), 'the merge-if-eligible helper is the sanctioned merge path');
+  });
+
+  it('deny reason cites the resolved policy and the sanctioned helper path', () => {
+    const result = run('gh pr merge 42');
+    const parsed = JSON.parse(result.output);
+    const reason = parsed.hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /allowMerge="never"/);
+    assert.match(reason, /cli-merge-if-eligible/);
+  });
+
+  // ── AISDLC-602 security-review regression: raw-merge bypasses ──────────
+  // Each of these executes (or would execute) an IMMEDIATE merge and must be
+  // blocked; the pre-fix `/--auto\b/` whole-string check let them through.
+
+  it('blocks "gh pr merge --auto=false 42" (=false disables auto → immediate merge)', () => {
+    const result = run('gh pr merge --auto=false 42');
+    assert.ok(isDenied(result), '--auto=false is a real merge, not an arm');
+  });
+
+  it('blocks "gh pr merge --auto=0 42" (=0 disables auto → immediate merge)', () => {
+    const result = run('gh pr merge --auto=0 42');
+    assert.ok(isDenied(result), '--auto=0 is a real merge, not an arm');
+  });
+
+  it('blocks a raw merge chained before a stray --auto ("gh pr merge 42 && echo --auto")', () => {
+    const result = run('gh pr merge 42 && echo --auto');
+    assert.ok(
+      isDenied(result),
+      'a stray --auto in a chained command must not unblock the raw merge',
+    );
+  });
+
+  it('blocks a raw merge with --auto only in a trailing comment ("gh pr merge 42 # --auto")', () => {
+    const result = run('gh pr merge 42 # --auto');
+    assert.ok(
+      isDenied(result),
+      'a --auto inside a shell comment never reaches gh → still a raw merge',
+    );
+  });
+
+  it('blocks when a raw merge is chained before a real arm ("gh pr merge 42 && gh pr merge 42 --auto")', () => {
+    const result = run('gh pr merge 42 && gh pr merge 42 --auto');
+    assert.ok(isDenied(result), 'the leading raw-merge segment must block the whole command');
+  });
+
+  it('blocks the reverse order too: an arm chained BEFORE a raw merge ("gh pr merge 42 --auto && gh pr merge 42")', () => {
+    // Segments are evaluated independently, so a clean arm in an earlier
+    // segment must not launder a raw-merge segment that follows it.
+    const result = run('gh pr merge 42 --auto && gh pr merge 42');
+    assert.ok(
+      isDenied(result),
+      'a trailing raw-merge segment must block regardless of a preceding arm',
+    );
+  });
+
+  it('blocks "gh pr merge 42 --body \\"--auto\\"" (--auto is a quoted arg value, not the flag)', () => {
+    const result = run('gh pr merge 42 --body "--auto"');
+    assert.ok(isDenied(result), 'a quoted --auto value must not be mistaken for the arming flag');
+  });
+
+  it('blocks quote-obfuscated "gh \\"pr\\" merge 42"', () => {
+    const result = run('gh "pr" merge 42');
+    assert.ok(isDenied(result), 'quote-obfuscated gh pr merge must still be detected and blocked');
+  });
+
+  it('allows a clean arm with an explicit repo flag ("gh pr merge 42 --auto -R owner/repo")', () => {
+    const result = run('gh pr merge 42 --auto -R owner/repo');
+    assert.ok(!isDenied(result), '-R <repo> alongside a bare --auto is still a clean arm');
+  });
+
+  it('fails CLOSED: raw "gh pr merge" is blocked even when agent-role.yaml is entirely missing', () => {
+    const noConfigDir = join(tmpdir(), `enforce-blocked-merge-noconfig-${Date.now()}`);
+    mkdirSync(noConfigDir, { recursive: true });
+    try {
+      const input = JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'gh pr merge 42' },
+      });
+      const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: noConfigDir });
+      assert.ok(
+        isDenied(result),
+        'with no resolvable policy the hook must default to strict and block the raw merge',
+      );
+    } finally {
+      rmSync(noConfigDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-602 merge governance, onGreenClean policy)', () => {
+  let greenDir;
+
+  before(() => {
+    greenDir = join(tmpdir(), `enforce-blocked-merge-green-${Date.now()}`);
+    mkdirSync(join(greenDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(greenDir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+governance:
+  allowMerge: onGreenClean
+blockedActions: []
+`,
+    );
+  });
+
+  after(() => {
+    rmSync(greenDir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: greenDir });
+  }
+
+  it('still blocks a raw "gh pr merge" even when policy permits merge-on-green — must route through the helper', () => {
+    const result = run('gh pr merge 42 --squash');
+    assert.ok(
+      isDenied(result),
+      'raw gh pr merge stays blocked under onGreenClean too — only the helper is sanctioned',
+    );
+  });
+
+  it('still allows arming "gh pr merge --auto" under onGreenClean', () => {
+    const result = run('gh pr merge 42 --auto');
+    assert.ok(!isDenied(result), 'arming remains allowed regardless of policy');
+  });
+
+  it('allows the cli-merge-if-eligible helper invocation under onGreenClean', () => {
+    const result = run(
+      'node pipeline-cli/bin/cli-merge-if-eligible.mjs --pr 42 --source-kind backlog',
+    );
+    assert.ok(!isDenied(result), 'the helper is the sanctioned merge path under onGreenClean');
+  });
+
+  it('deny reason cites the resolved onGreenClean policy', () => {
+    const result = run('gh pr merge 42');
+    const parsed = JSON.parse(result.output);
+    assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /allowMerge="onGreenClean"/);
+  });
+});
+
 // ── AISDLC-567 stale-base guard ──────────────────────────────────────────
 
 describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-567 stale-base guard)', () => {
