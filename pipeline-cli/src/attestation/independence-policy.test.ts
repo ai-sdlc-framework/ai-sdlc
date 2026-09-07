@@ -205,7 +205,7 @@ describe('evaluateIndependencePolicy — requiredTier: isolated, isAvailable() =
       () => false,
     );
     expect(outcome.status).toBe('unsatisfiable');
-    expect(outcome.message).toMatch(/RFC-0047|AISDLC-597/);
+    expect(outcome.message).toMatch(/not available|isolatedTierAvailable/);
   });
 
   it('reports unsatisfiable when overallIndependenceTier is none', () => {

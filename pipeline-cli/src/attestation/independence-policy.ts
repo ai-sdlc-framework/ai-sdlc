@@ -206,9 +206,9 @@ export function evaluateIndependencePolicy(
       requiredTier,
       overallIndependenceTier,
       message:
-        "requiredTier: 'isolated' is not yet available — the isolated-tier producer capability " +
-        'is not yet wired into policy enforcement (see RFC-0047 / AISDLC-597). ' +
-        "Set requiredTier to 'none' or 'attested' until AISDLC-597 ships.",
+        "requiredTier: 'isolated' is not available — the isolated-tier producer capability " +
+        'is not present in this build (isolatedTierAvailable() returned false). ' +
+        "Set requiredTier to 'none' or 'attested' until the isolated tier is available in your install.",
     };
   }
 
