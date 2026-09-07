@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.23.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.22.0...orchestrator-v0.23.0) (2026-09-07)
+
+
+### Features
+
+* rfc-0047 phase 1 — ci-only trust marker + verifier key partitioning (AISDLC-593) ([#1026](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1026)) ([cac3387](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cac33878f6fede0d55d20a2547ba7f61b5a64d51))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.23.0
+
 ## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.21.0...orchestrator-v0.22.0) (2026-09-06)
 
 
