@@ -55,7 +55,8 @@
     "cli-rfc": "bin/cli-rfc.mjs",
     "cli-embedding-gc": "bin/cli-embedding-gc.mjs",
     "cli-embedding-bump": "bin/cli-embedding-bump.mjs",
-    "cli-cost-report": "bin/cli-cost-report.mjs"
+    "cli-cost-report": "bin/cli-cost-report.mjs",
+    "cli-merge-if-eligible": "bin/cli-merge-if-eligible.mjs"
   },
   "exports": {
     ".": {
