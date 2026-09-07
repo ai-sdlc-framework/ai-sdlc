@@ -2,7 +2,7 @@
 id: AISDLC-603
 title: >-
   Governance: deterministic merge-if-eligible CLI helper (green + CLEAN + trusted sourceKind gate)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
@@ -49,15 +49,15 @@ helper; AISDLC-602 makes it the ONLY merge route (its reconciled hook blocks raw
 - Never write CI-skip tokens; never edit `.ai-sdlc/**` config.
 
 ## Acceptance Criteria
-- [ ] `merge-if-eligible` refuses (non-zero, no merge) under strict `allowMerge: never`.
-- [ ] Under `allowMerge: onGreenClean` + trusted `sourceKind`: merges only when all
+- [x] `merge-if-eligible` refuses (non-zero, no merge) under strict `allowMerge: never`.
+- [x] Under `allowMerge: onGreenClean` + trusted `sourceKind`: merges only when all
   required checks are green AND `mergeStateStatus == CLEAN`; refuses otherwise with an
   auditable reason.
-- [ ] External `sourceKind` (gh-issue / contributor PR) is NEVER merged, even green+CLEAN.
-- [ ] Required-checks set is the repo's real set (not a hardcoded subset).
-- [ ] Hermetic tests for: strict-refuse; green+CLEAN+trusted → merge; not-green → refuse;
+- [x] External `sourceKind` (gh-issue / contributor PR) is NEVER merged, even green+CLEAN.
+- [x] Required-checks set is the repo's real set (not a hardcoded subset).
+- [x] Hermetic tests for: strict-refuse; green+CLEAN+trusted → merge; not-green → refuse;
   not-CLEAN → refuse; untrusted-source → refuse.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Notes
