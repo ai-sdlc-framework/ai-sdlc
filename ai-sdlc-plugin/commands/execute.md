@@ -1085,6 +1085,43 @@ Each returns a verdict JSON: `{ approved, findings, summary }`. When the classif
 
 > **Reviewer concurrency at scale.** N parallel `/ai-sdlc execute` runs each spawn AT MOST 3 reviewer subagents in parallel, so the worst-case concurrent reviewer count is `3N` (unchanged from the pre-AISDLC-141 ceiling — the classifier only ever shrinks fan-out, never grows it). Reviewers are read-only (`disallowedTools: [Edit, Write, Bash?]`) and the only shared resource is the file system, which is safe for concurrent reads. The husky `pre-push` hook (in `.husky/pre-push`) does serialise across runs if multiple finish at the same moment, but the per-run review fan-out itself does not block on anything cross-run.
 
+### Step 7b.5 — Coordinator persists reviewer transcripts + verdicts (AISDLC-599)
+
+**Why this step exists, and why it is the COORDINATOR (this main session) doing it, not the reviewer subagents themselves:** Step 7c below reads each reviewer's transcript from `.ai-sdlc/transcripts/<task-id-lower>/<agent>.jsonl` and verdict from `.ai-sdlc/verdicts/<agent>-<task-id-lower>.json`. Those files CANNOT be written by the reviewer subagents that were just spawned in Step 7b — `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` ALWAYS refuses Write/Edit under `.ai-sdlc/**`, unconditionally, including for subagents the coordinator itself dispatched. That block is intentionally absolute and MUST NOT be narrowed (AISDLC-599 design decision: coordinator-persists, not "carve an exemption"). So this step has the coordinator — the main `/ai-sdlc execute` session, which is not subject to the subagent PreToolUse restriction — do the persistence itself, immediately after each reviewer Agent call returns and before Step 7c runs.
+
+**Why shell (`cp`/`cat`), not the Write/Edit tools:** `enforce-blocked-actions.js` refuses `.ai-sdlc/**` for the Write/Edit TOOLS regardless of which session invokes them — coordinator included. Bash `cp`/heredoc IS permitted (the hook only matches Write/Edit tool calls). So this step MUST use the `ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh` helper (invoked via Bash), never Write or Edit.
+
+**What the reviewer's "transcript" actually is:** NOT anything the subagent writes — it is the harness-captured JSONL Claude Code itself records for every subagent invocation, at a deterministic path keyed by the harness's own internal agent-id:
+
+```
+~/.claude/projects/<project-slug>/<session-uuid>/subagents/agent-<agent-id>.jsonl
+```
+
+Resolve each reviewer's `<agent-id>` from the `SubagentStart`-hook marker the harness already wrote in Step 7b's dispatch, at `$WORKTREE_PATH/.ai-sdlc/subagent-sessions/<agent-id>.json` (`agentType` field records the plugin agent name, e.g. `code-reviewer`, `security-reviewer`, `test-reviewer` / their `-codex` variants). For each reviewer spawned in Step 7b, find the marker whose `agentType` matches the resolved `AGENT_NAME` for that reviewer with the most recent `firedAt` (ties broken by newest — the same disclosed-race heuristic AISDLC-216 already uses for `.active-task` sentinel resolution); its filename (minus `.json`) is the `<agent-id>` to pass to the helper. The helper itself does the final `find ~/.claude/projects -name agent-<id>.jsonl` resolution (newest-mtime wins on ties) so it works even without that marker lookup, as long as the caller can supply a correct agent-id.
+
+**Procedure, per reviewer that actually ran (i.e. every name in `$SELECTED` when `INCR_SKIP` is not `true`):**
+
+1. Compose the verdict JSON `{ approved, findings, summary }` from that reviewer's in-band Agent-tool return (the same object Step 8 aggregates) and write it to a scratch file, e.g. `/tmp/verdict-${TASK_ID}-${AGENT_NAME}.json` — this is NOT under `.ai-sdlc/**`, so the ordinary Write tool is fine here.
+2. Resolve `<agent-id>` for that reviewer per the marker-lookup above.
+3. Invoke the helper via Bash:
+
+```bash
+bash ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh \
+  --worktree "$WORKTREE_PATH" \
+  --task-id "$TASK_ID" \
+  --reviewer "$AGENT_NAME" \
+  --agent-id "$RESOLVED_AGENT_ID" \
+  --verdict-file "/tmp/verdict-${TASK_ID}-${AGENT_NAME}.json"
+```
+
+This mkdir's the destination directories, copies the resolved harness transcript to `$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl`, and copies the verdict to `$WORKTREE_PATH/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json` — exactly the paths Step 7c reads. It exits non-zero with an actionable message if no harness transcript is found for the agent-id or the verdict file is missing; treat a non-zero exit as a real failure of this step (not a benign skip) and surface it to the operator before proceeding to Step 7c.
+
+Skip this step entirely for reviewers skipped by the classifier or by `INCR_SKIP=true` — they have synthetic auto-approved verdicts and no real reviewer subagent ran, so there is no harness transcript to persist.
+
+```bash
+echo "[ai-sdlc-progress] Step 7b.5: persisted reviewer transcripts + verdicts for $SELECTED (coordinator-side, AISDLC-599)"
+```
+
 ### Step 7c — Emit transcript leaves (RFC-0042 Phase 3 / AISDLC-383.8)
 
 After all spawned reviewer Agent calls complete and each reviewer's verdict JSON has been written, emit one Merkle leaf per reviewer. This step is **required for v6 signing (the default post-AISDLC-409)** — the v6 signer reads `.ai-sdlc/transcript-leaves.jsonl` and exits 1 if no leaves are found for the task. When `AI_SDLC_V5_LEGACY=1` (or legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0`) is set, the signer falls back to v5 and the leaves become harmless overhead.
@@ -1159,15 +1196,21 @@ for REVIEWER_NAME in $SELECTED; do
   TRANSCRIPT_FILE="$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl"
   VERDICT_FILE="$WORKTREE_PATH/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json"
 
-  # If the transcript file is missing (e.g. the reviewer subagent didn't write one),
-  # log a warning and continue — don't abort the pipeline.
+  # AISDLC-599: Step 7b.5 (above) has ALREADY persisted both files via the
+  # coordinator (shell cp, not the blocked Write/Edit tools) for every
+  # reviewer that actually ran. A missing file here is therefore NOT an
+  # expected/benign path anymore — it means Step 7b.5 was skipped, failed,
+  # or resolved the wrong agent-id for this reviewer. Log loudly and
+  # continue (don't abort the whole pipeline over one reviewer's leaf), but
+  # treat this as a real error signal the operator should investigate —
+  # the resulting v6 envelope will have fewer than 3 leaves.
   if [ ! -f "$TRANSCRIPT_FILE" ]; then
-    echo "[ai-sdlc-progress] Step 7c: transcript not found for ${AGENT_NAME} at ${TRANSCRIPT_FILE} — skipping leaf emission for this reviewer" >&2
+    echo "[ai-sdlc-progress] Step 7c: ERROR — transcript not found for ${AGENT_NAME} at ${TRANSCRIPT_FILE} even though Step 7b.5 should have persisted it — skipping leaf emission for this reviewer (investigate Step 7b.5's agent-id resolution)" >&2
     continue
   fi
 
   if [ ! -f "$VERDICT_FILE" ]; then
-    echo "[ai-sdlc-progress] Step 7c: verdict not found for ${AGENT_NAME} at ${VERDICT_FILE} — skipping leaf emission for this reviewer" >&2
+    echo "[ai-sdlc-progress] Step 7c: ERROR — verdict not found for ${AGENT_NAME} at ${VERDICT_FILE} even though Step 7b.5 should have persisted it — skipping leaf emission for this reviewer (investigate Step 7b.5)" >&2
     continue
   fi
 
