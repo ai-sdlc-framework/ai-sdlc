@@ -97,6 +97,25 @@ try {
   // resolvedGovernance stays at STRICT_DEFAULTS (fail-closed).
 }
 
+// ── Merge-governance token allowlists (AISDLC-602) ───────────────────
+// Declared BEFORE the top-level dispatch below so they are initialized before
+// enforceBash() → enforceMergeGovernance() runs at module load — a `const` in
+// the temporal dead zone here would crash the hook (fail-OPEN). Do not move
+// these below the dispatch.
+
+// Value-less flags that are safe to accompany an auto-arm.
+const SAFE_ARM_FLAGS = new Set([
+  '--auto',
+  '--squash',
+  '--merge',
+  '--rebase',
+  '--delete-branch',
+  '-d',
+  '--admin',
+]);
+// Flags that consume the NEXT token as their value (safe to skip both).
+const VALUE_FLAGS = new Set(['-R', '--repo']);
+
 // ── Dispatch by tool ─────────────────────────────────────────────────
 
 if (toolName === 'Bash' || (!toolName && toolInput.command)) {
@@ -139,48 +158,152 @@ function enforceBash(command) {
  * `gh pr merge` at all.
  *
  * Rules (apply regardless of the resolved `allowMerge` value):
- *   - `gh pr merge --auto` (arming auto-merge, in any flag order/combination
- *     e.g. `--auto --squash`) is NOT merging and is ALWAYS allowed.
- *   - A raw (non-`--auto`) `gh pr merge` invocation is ALWAYS blocked here.
- *     The only sanctioned merge path when policy permits merge is the
- *     AISDLC-603 `cli-merge-if-eligible` helper (`node
- *     pipeline-cli/bin/cli-merge-if-eligible.mjs`), which owns the real
- *     green+CLEAN+trusted-sourceKind evaluation — never reimplemented here.
- *     Under strict policy the helper self-refuses anyway (fail-closed on
- *     its own governance-resolver read), so blocking the raw command here
- *     is sufficient defense-in-depth for both policies.
+ *   - Arming auto-merge (`gh pr merge --auto`, in any flag order/combination
+ *     e.g. `--auto --squash`) is NOT merging and is ALLOWED.
+ *   - Any OTHER `gh pr merge` invocation is BLOCKED. The only sanctioned merge
+ *     path when policy permits merge is the AISDLC-603 `cli-merge-if-eligible`
+ *     helper (`node pipeline-cli/bin/cli-merge-if-eligible.mjs`), which owns the
+ *     real green+CLEAN+trusted-sourceKind evaluation — never reimplemented here.
+ *     Under strict policy the helper self-refuses anyway (fail-closed on its own
+ *     governance-resolver read), so blocking the raw command here is sufficient
+ *     defense-in-depth for both policies.
  *
- * Commands that don't invoke `gh pr merge` at all are untouched by this
- * function — they still flow through the generic `blockedActions` pattern
- * matching in `enforceBash()`.
+ * ── Fail-closed matching (AISDLC-602 security review) ──────────────────
+ * This runs against a raw shell command STRING, not a parsed argv, so the
+ * match is best-effort defense-in-depth — NOT an impenetrable sandbox. A
+ * determined agent with Bash access can always obfuscate (command
+ * substitution `$(...)`, backticks, base64|sh, aliases). Those are out of
+ * scope for a string matcher; the real backstop is branch protection +
+ * humans-merge. What this DOES close, fail-closed, are the realistic
+ * bypasses a reviewer found:
+ *   1. The `--auto` decision is scoped to the SPECIFIC `gh pr merge`
+ *      invocation's own tokens, not the whole command string — so a stray
+ *      `--auto` in a chained command / comment / quoted arg cannot unblock
+ *      an embedded raw merge (`gh pr merge 5 && echo --auto`).
+ *   2. Only a BARE `--auto` token counts as arming; `--auto=false`/`--auto=0`
+ *      (which are IMMEDIATE merges) do not, and are blocked.
+ *   3. The command is split on shell control operators (`&&`, `||`, `;`,
+ *      `|`, `&`, newline) and each segment evaluated independently; any one
+ *      raw-merge segment blocks the whole command.
+ *   4. Quotes are tolerated when detecting the `gh pr merge` token span
+ *      (`gh "pr" merge`), and an ALLOWLIST of known-safe arming tokens is
+ *      required — any unrecognized token (unknown flag, value-bearing flag
+ *      like `--body`, `--auto=…`) makes the segment NOT a clean arm, so it
+ *      is blocked. Over-blocking an exotic-but-legit arm is the safe bias.
+ *
+ * Commands that don't invoke `gh pr merge` at all are untouched — they still
+ * flow through the generic `blockedActions` pattern matching in enforceBash().
  */
 function enforceMergeGovernance(trimmed) {
-  if (!isGhPrMergeCommand(trimmed)) return;
-  if (isAutoArmCommand(trimmed)) return; // arming is not merging — always allowed
-
-  deny(
-    `raw 'gh pr merge' is not a permitted merge path (resolved governance allowMerge=` +
-      `"${resolvedGovernance.allowMerge}"). Merges must go through ` +
-      `'node pipeline-cli/bin/cli-merge-if-eligible.mjs' (AISDLC-603), which enforces the ` +
-      `real green+CLEAN+trusted-sourceKind gate — never a raw 'gh pr merge' call. Arming ` +
-      `auto-merge ('gh pr merge --auto') remains allowed.`,
-  );
-}
-
-/** Matches any command that invokes `gh pr merge` (case-insensitive). */
-function isGhPrMergeCommand(command) {
-  return /\bgh\s+pr\s+merge\b/i.test(command);
+  for (const segment of splitShellSegments(trimmed)) {
+    if (!segmentInvokesGhPrMerge(segment)) continue;
+    if (isCleanAutoArmSegment(segment)) continue; // arming is not merging — allowed
+    deny(
+      `raw 'gh pr merge' is not a permitted merge path (resolved governance allowMerge=` +
+        `"${resolvedGovernance.allowMerge}"). Merges must go through ` +
+        `'node pipeline-cli/bin/cli-merge-if-eligible.mjs' (AISDLC-603), which enforces the ` +
+        `real green+CLEAN+trusted-sourceKind gate — never a raw 'gh pr merge' call. Arming ` +
+        `auto-merge ('gh pr merge --auto') remains allowed.`,
+    );
+  }
 }
 
 /**
- * Matches a `gh pr merge` command that ALSO carries `--auto` — arming
- * auto-merge rather than merging immediately. GitHub CLI accepts `--auto`
- * anywhere after the subcommand and in any combination with other flags
- * (e.g. `--auto --squash`), so this checks the whole command string rather
- * than a fixed argument position.
+ * Splits a command into segments on shell control operators so a `gh pr merge`
+ * embedded in a chain (`x && gh pr merge 5`) is evaluated on its own. `&&` and
+ * `||` are matched before the single-char `&`/`|` forms.
  */
-function isAutoArmCommand(command) {
-  return /--auto\b/.test(command);
+function splitShellSegments(command) {
+  return command
+    .split(/(?:&&|\|\||;|\||&|\n)/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Removes an unquoted trailing shell comment and all quote characters. */
+function stripCommentAndQuotes(segment) {
+  // Cut at the first '#' (conservative: a '#' inside a quoted arg would only
+  // cause us to DROP later args, which can never turn a raw merge into a clean
+  // arm — fail-closed).
+  const noComment = segment.replace(/#.*$/, '');
+  return noComment.replace(/['"]/g, '');
+}
+
+/**
+ * True when a segment invokes `gh pr merge` (quote-tolerant, case-insensitive).
+ * Strips quotes first so `gh "pr" merge` / `gh 'pr' merge` are detected.
+ */
+function segmentInvokesGhPrMerge(segment) {
+  return /\bgh\s+pr\s+merge\b/i.test(stripCommentAndQuotes(segment));
+}
+
+/**
+ * Minimal shell-ish tokenizer: splits on unquoted whitespace, honoring single
+ * and double quotes so a quoted value (`--body "--auto"`) stays one token and
+ * its inner `--auto` is NOT mistaken for the arming flag. Backslash-escapes are
+ * not interpreted (rare in this surface; erring toward more tokens = more
+ * likely to hit the unknown-token deny path = fail-closed).
+ */
+function tokenizeShellish(segment) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(segment)) !== null) {
+    tokens.push(m[1] ?? m[2] ?? m[3]);
+  }
+  return tokens;
+}
+
+/**
+ * True ONLY for a recognized clean auto-arm: `gh pr merge [<pr>] --auto [safe
+ * flags...]`. A bare `--auto` token must be present, and every token must be in
+ * the allowlist (or a single PR-ref positional, or a `-R/--repo <value>` pair).
+ * Anything else — `--auto=false`, an unknown/value-bearing flag, extra
+ * positionals — returns false so the caller blocks (fail-closed).
+ */
+function isCleanAutoArmSegment(segment) {
+  const tokens = tokenizeShellish(stripComment(segment));
+  let i = 0;
+  // Skip a leading run of `VAR=value` env assignments.
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (tokens[i] !== 'gh' || tokens[i + 1] !== 'pr' || tokens[i + 2] !== 'merge') {
+    // Quote-obfuscated `gh "pr" merge` reaches here as a non-clean arm →
+    // caller blocks (segmentInvokesGhPrMerge already matched it).
+    return false;
+  }
+  i += 3;
+  let sawAuto = false;
+  let sawPositional = false;
+  for (; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok === '--auto') {
+      sawAuto = true;
+      continue;
+    }
+    if (SAFE_ARM_FLAGS.has(tok)) continue;
+    if (VALUE_FLAGS.has(tok)) {
+      i++; // consume the flag's value token
+      continue;
+    }
+    // A single PR-ref positional (number, owner/repo#n, or a PR URL) is allowed.
+    if (
+      !sawPositional &&
+      !tok.startsWith('-') &&
+      /^(\d+|[^/]+\/[^/]+#\d+|https?:\/\/\S+)$/.test(tok)
+    ) {
+      sawPositional = true;
+      continue;
+    }
+    // Anything else (unknown flag, `--auto=false`, `--body`, extra positional,
+    // a stray token) → not a clean arm.
+    return false;
+  }
+  return sawAuto;
+}
+
+/** Removes only a trailing unquoted shell comment (quotes preserved). */
+function stripComment(segment) {
+  return segment.replace(/#.*$/, '');
 }
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────
