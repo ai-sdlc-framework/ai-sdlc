@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.24.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.23.0...reference-v0.24.0) (2026-09-07)
+
+
+### Features
+
+* per-repo configurable governance — source of truth + hook render (AISDLC-601) ([#1043](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1043)) ([f9e407e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f9e407eee452837863b52fd5aa05822ea82e0e2d))
+
 ## [0.23.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.22.0...reference-v0.23.0) (2026-09-07)
 
 

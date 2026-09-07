@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.23.0...pipeline-cli-v0.24.0) (2026-09-07)
+
+
+### Features
+
+* deterministic merge-if-eligible CLI helper (AISDLC-603) ([#1046](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1046)) ([1edf1ec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1edf1ecf07993db5aaf4c98d0d21cf07f4f1cb6b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.24.0
+
 ## [0.23.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.22.0...pipeline-cli-v0.23.0) (2026-09-07)
 
 
