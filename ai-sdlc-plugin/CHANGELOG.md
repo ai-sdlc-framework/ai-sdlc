@@ -5,6 +5,14 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.20.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.19.0...ai-sdlc-plugin-v0.20.0) (2026-09-07)
+
+
+### Features
+
+* per-repo configurable governance — source of truth + hook render (AISDLC-601) ([#1043](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1043)) ([f9e407e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f9e407eee452837863b52fd5aa05822ea82e0e2d))
+* render governance policy into execute hard-rules + fix gh-pr-merge drift (AISDLC-602) ([#1047](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1047)) ([9f6fc75](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9f6fc756fb50e4b68bd0fb4140c3ca2b4ab0e531))
+
 ## [0.19.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.18.0...ai-sdlc-plugin-v0.19.0) (2026-09-07)
 
 
