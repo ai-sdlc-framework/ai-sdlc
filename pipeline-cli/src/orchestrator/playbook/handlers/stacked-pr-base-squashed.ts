@@ -16,7 +16,20 @@
  * Budget: 1.
  */
 
+import path from 'node:path';
+import { resolveTargetBranch } from '../../../steps/02-compute-branch.js';
 import type { Handler, RemediationOutcome, WorkerContext, HandlerDeps } from '../types.js';
+
+/**
+ * AISDLC-606 — `WorkerContext` doesn't carry `workDir` directly, but every
+ * worktree is created at `<workDir>/.worktrees/<taskIdLower>` (see
+ * `pipeline-cli/src/orchestrator/loop.ts`'s `worktreePath` construction), so
+ * walking up two segments reliably reconstructs it without threading a new
+ * field through the whole playbook-runner call chain.
+ */
+function workDirFromWorktreePath(worktreePath: string): string {
+  return path.resolve(worktreePath, '..', '..');
+}
 
 export const stackedPrBaseSquashedHandler: Handler = {
   mode: 'StackedPRBaseSquashed',
@@ -29,10 +42,14 @@ export const stackedPrBaseSquashedHandler: Handler = {
   },
   async remediate(ctx: WorkerContext, deps: HandlerDeps): Promise<RemediationOutcome> {
     // Budget enforced by playbook-runner — handler is per-attempt only.
+    // AISDLC-606 — rebase onto the resolved integration branch instead of a
+    // hardcoded `main`. Defaults to `'main'` when `spec.branching.targetBranch`
+    // is unset (byte-identical to pre-AISDLC-606 behavior).
+    const targetBranch = resolveTargetBranch(workDirFromWorktreePath(ctx.worktreePath));
     deps.logger.warn(
-      `[playbook/stacked-pr] rebasing ${ctx.branch} onto origin/main (base PR merged at ${ctx.failure.basePrMergedAt})`,
+      `[playbook/stacked-pr] rebasing ${ctx.branch} onto origin/${targetBranch} (base PR merged at ${ctx.failure.basePrMergedAt})`,
     );
-    const fetch = await deps.runner('git', ['fetch', 'origin', 'main'], {
+    const fetch = await deps.runner('git', ['fetch', 'origin', targetBranch], {
       cwd: ctx.worktreePath,
       allowFailure: true,
     });
@@ -42,10 +59,14 @@ export const stackedPrBaseSquashedHandler: Handler = {
         note: `git fetch failed: ${fetch.stderr.slice(0, 200)}`,
       };
     }
-    const rebase = await deps.runner('git', ['rebase', '--reapply-cherry-picks', 'origin/main'], {
-      cwd: ctx.worktreePath,
-      allowFailure: true,
-    });
+    const rebase = await deps.runner(
+      'git',
+      ['rebase', '--reapply-cherry-picks', `origin/${targetBranch}`],
+      {
+        cwd: ctx.worktreePath,
+        allowFailure: true,
+      },
+    );
     if (rebase.code !== 0) {
       // Rebase conflict — escalate per §5.1 ("Manual review on rebase
       // conflicts. Alt: open a fresh PR from rebased branch with base=main").
@@ -62,7 +83,7 @@ export const stackedPrBaseSquashedHandler: Handler = {
       return {
         status: 'recovered',
         nextState: 'FINALIZING',
-        note: 'rebased onto main + force-pushed; squashed parent commits dropped',
+        note: `rebased onto ${targetBranch} + force-pushed; squashed parent commits dropped`,
       };
     }
     return {

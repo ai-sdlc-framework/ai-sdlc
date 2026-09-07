@@ -1,6 +1,7 @@
 /**
- * Late-rebase helper for Step 11 — rebase the worktree onto origin/main
- * right before the push, not at launch time.
+ * Late-rebase helper for Step 11 — rebase the worktree onto the resolved
+ * integration branch (`origin/main` by default, or `spec.branching.targetBranch`
+ * when configured, AISDLC-606) right before the push, not at launch time.
  *
  * ## Why late-rebase (AISDLC-232)
  *
@@ -116,6 +117,12 @@ export interface LateRebaseOptions {
    * Mirrors the rebase-resolver's 3-attempt cap (rebase.md Step 3).
    */
   maxAttempts?: number;
+  /**
+   * AISDLC-606 — the resolved integration branch to fetch + rebase onto
+   * (e.g. `main`, `develop`). Defaults to `'main'` so callers that don't
+   * pass this explicitly are byte-identical to pre-AISDLC-606 behavior.
+   */
+  targetBranch?: string;
 }
 
 export interface LateRebaseResult {
@@ -324,9 +331,14 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
   const runner = opts.runner ?? defaultRunner;
   const maxAttempts = opts.maxAttempts ?? 3;
   const cwd = opts.worktreePath;
+  // AISDLC-606 — rebase onto the resolved integration branch instead of a
+  // hardcoded `main`. Defaults to `'main'` so callers that don't pass this
+  // explicitly are byte-identical to pre-AISDLC-606 behavior.
+  const targetBranch = opts.targetBranch ?? 'main';
+  const remoteRef = `origin/${targetBranch}`;
 
-  // Step 1 — fetch origin main
-  const fetchResult = await runner('git', ['fetch', 'origin', 'main'], {
+  // Step 1 — fetch origin <targetBranch>
+  const fetchResult = await runner('git', ['fetch', 'origin', targetBranch], {
     cwd,
     allowFailure: true,
     timeout: 30_000,
@@ -335,18 +347,17 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
     return {
       ok: false,
       conflictingFiles: [],
-      reason: `git fetch origin main failed: ${fetchResult.stderr.trim() || fetchResult.stdout.trim()}`,
+      reason: `git fetch origin ${targetBranch} failed: ${fetchResult.stderr.trim() || fetchResult.stdout.trim()}`,
       rebaseAttempts: 0,
       resolvedFiles: [],
     };
   }
 
   // Step 2 — check if already up-to-date
-  const ancestorCheck = await runner(
-    'git',
-    ['merge-base', '--is-ancestor', 'origin/main', 'HEAD'],
-    { cwd, allowFailure: true },
-  );
+  const ancestorCheck = await runner('git', ['merge-base', '--is-ancestor', remoteRef, 'HEAD'], {
+    cwd,
+    allowFailure: true,
+  });
   if (ancestorCheck.code === 0) {
     // origin/main is already an ancestor of HEAD — no rebase needed
     return { ok: true, conflictingFiles: [], rebaseAttempts: 0, resolvedFiles: [] };
@@ -359,7 +370,7 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
 
   for (attempts = 1; attempts <= maxAttempts; attempts++) {
     // Step 3 — attempt the rebase
-    const rebaseResult = await runner('git', ['rebase', 'origin/main'], {
+    const rebaseResult = await runner('git', ['rebase', remoteRef], {
       cwd,
       allowFailure: true,
     });

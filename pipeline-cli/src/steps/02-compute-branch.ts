@@ -171,6 +171,91 @@ function walkKeyPath<T>(root: Record<string, unknown>, keyPath: readonly string[
   return cur as T | undefined;
 }
 
+/**
+ * AISDLC-606 — single source of truth for the resolved integration/base
+ * branch that every downstream step (reviewer diff, late-rebase, reconcile,
+ * playbook handlers) must rebase/diff against instead of a hardcoded
+ * `origin/main`.
+ *
+ * Reads `spec.branching.targetBranch` from the canonical location:
+ *   1. `.ai-sdlc/pipeline.yaml` → `spec.branching.targetBranch` (or the
+ *      top-level `branching.targetBranch` shape, mirroring the dual-shape
+ *      tolerance `parsePipelineBacklogKey` already applies to `backlog`)
+ *   2. `.ai-sdlc/pipeline-backlog.yaml` → `branching.targetBranch`
+ *      (deprecated shim, logs a warning on first use)
+ *
+ * Mirrors the pattern the orchestrator already uses for
+ * `createBranch`/`createPR` (`config.pipeline?.spec.branching?.targetBranch
+ * ?? 'main'`, shipped in #1049 for issue #1037) — this is the pipeline-cli
+ * equivalent so the two layers agree on the same default.
+ *
+ * **Default is `'main'`** — when `targetBranch` is unset, every caller must
+ * behave byte-identically to the pre-AISDLC-606 hardcoded `origin/main`
+ * behavior. This is a non-negotiable regression bar (dogfood repo is
+ * main-based).
+ */
+export function resolveTargetBranch(workDir: string, logger?: PipelineLogger): string {
+  // --- 1. Canonical path: pipeline.yaml spec.branching.targetBranch ---
+  const pipelineYamlPath = join(workDir, '.ai-sdlc', 'pipeline.yaml');
+  if (existsSync(pipelineYamlPath)) {
+    const targetBranch = parsePipelineBranchingKey<string>(pipelineYamlPath, ['targetBranch']);
+    if (typeof targetBranch === 'string' && targetBranch.length > 0) return targetBranch;
+  }
+
+  // --- 2. Deprecated shim: pipeline-backlog.yaml branching.targetBranch ---
+  const legacyPath = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
+  if (existsSync(legacyPath)) {
+    const targetBranch = parseLegacyKey<string>(legacyPath, ['branching', 'targetBranch']);
+    if (typeof targetBranch === 'string' && targetBranch.length > 0) {
+      const log = logger ?? DEFAULT_LOGGER;
+      log.warn(
+        '[ai-sdlc] DEPRECATION: reading branching.targetBranch from .ai-sdlc/pipeline-backlog.yaml. ' +
+          'Migrate this setting to .ai-sdlc/pipeline.yaml under spec.branching.targetBranch. ' +
+          'pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).',
+      );
+      return targetBranch;
+    }
+  }
+
+  return 'main';
+}
+
+/**
+ * Read `<keyPath>` from `pipeline.yaml`'s branching section, accepting BOTH
+ * shapes the schema permits:
+ *   - top-level `branching:` block
+ *   - nested `spec.branching:` block (canonical Pipeline kind document,
+ *     `#/$defs/BranchingConfig`)
+ *
+ * Section-scoped — a missing key inside `branching` does NOT fall through
+ * to a sibling `spec.<key>` block, mirroring `parsePipelineBacklogKey`.
+ */
+export function parsePipelineBranchingKey<T>(
+  pipelineYamlPath: string,
+  keyPath: readonly string[],
+): T | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(pipelineYamlPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = yamlLoad(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  const root = parsed as Record<string, unknown>;
+  const branching = (root.branching ??
+    (root.spec as Record<string, unknown> | undefined)?.branching) as
+    | Record<string, unknown>
+    | undefined;
+  if (!branching || typeof branching !== 'object') return undefined;
+  return walkKeyPath<T>(branching, keyPath);
+}
+
 export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
   const taskIdLower = opts.taskId.toLowerCase();
   const pattern = readBranchPattern(

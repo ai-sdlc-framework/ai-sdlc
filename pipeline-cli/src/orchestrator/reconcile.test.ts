@@ -345,6 +345,30 @@ describe('runReconcile — orchestration', () => {
     expect(mergeCall?.args).toEqual(expect.arrayContaining(['--auto', '--squash', '4321']));
   });
 
+  // AISDLC-606 — reconcile's fetch+rebase must honor spec.branching.targetBranch
+  // instead of a hardcoded 'main'.
+  it('fetches + rebases onto the resolved target branch (develop-based repo)', () => {
+    mkdirSync(path.join(workDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      path.join(workDir, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+    );
+    writeDevVerdict(boardDir);
+    const { spawn, calls } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+    });
+    expect(result.outcome).toBe('success');
+    const fetchCall = calls.find((c) => c.file === 'git' && c.args[0] === 'fetch');
+    expect(fetchCall?.args).toEqual(['fetch', 'origin', 'develop']);
+    const rebaseCall = calls.find((c) => c.file === 'git' && c.args[0] === 'rebase');
+    expect(rebaseCall?.args).toEqual(['rebase', 'origin/develop']);
+  });
+
   it('outcome=partial when sign-attestation fails', () => {
     writeDevVerdict(boardDir);
     const { spawn } = makeSpawnRecorder({

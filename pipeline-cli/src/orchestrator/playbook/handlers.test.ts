@@ -14,7 +14,11 @@
  * `loop.playbook.test.ts` (the 10-task fixture queue per AC #8).
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { Runner, ExecResult, ExecOptions } from '../../runtime/exec.js';
 import type { PipelineLogger, PipelineResult } from '../../types.js';
@@ -595,5 +599,48 @@ describe('handlers/StackedPRBaseSquashed', () => {
     );
     expect(o.status).toBe('budget-exhausted');
     expect(o.note).toContain('rebase failed');
+  });
+
+  // AISDLC-606 — fetch + rebase must honor spec.branching.targetBranch
+  // instead of a hardcoded 'main'. WorkerContext doesn't carry workDir
+  // directly; the handler reconstructs it from the conventional
+  // `<workDir>/.worktrees/<taskIdLower>` worktreePath shape.
+  describe('AISDLC-606 — target branch resolution', () => {
+    let workDir: string;
+    let worktreePath: string;
+
+    afterEach(() => {
+      if (workDir) rmSync(workDir, { recursive: true, force: true });
+    });
+
+    it('rebases onto origin/<targetBranch> when spec.branching.targetBranch is configured', async () => {
+      workDir = mkdtempSync(path.join(tmpdir(), 'stacked-pr-wd-'));
+      worktreePath = path.join(workDir, '.worktrees', 'aisdlc-t');
+      mkdirSync(worktreePath, { recursive: true });
+      mkdirSync(path.join(workDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        path.join(workDir, '.ai-sdlc', 'pipeline.yaml'),
+        ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+      );
+
+      const { runner, calls } = recordingRunner([{ code: 0 }, { code: 0 }, { code: 0 }]);
+      const o = await stackedPrBaseSquashedHandler.remediate(
+        ctx({
+          worktreePath,
+          prUrl: 'https://example.com/pr/1',
+          failure: {
+            stderr: '',
+            exitCode: null,
+            mergeStateStatus: 'DIRTY',
+            basePrMergedAt: '2026-05-02T01:00:00Z',
+          },
+        }),
+        deps({ runner }),
+      );
+      expect(o.status).toBe('recovered');
+      expect(calls[0]!.args).toEqual(['fetch', 'origin', 'develop']);
+      expect(calls[1]!.args).toContain('origin/develop');
+      expect(calls[1]!.args).not.toContain('origin/main');
+    });
   });
 });

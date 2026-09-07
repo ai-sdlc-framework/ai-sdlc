@@ -36,7 +36,11 @@ import {
   type PushAndPrOptions,
   type PushAndPrResult,
 } from '../types.js';
-import { parseLegacyKey, parsePipelineBacklogKey } from './02-compute-branch.js';
+import {
+  parseLegacyKey,
+  parsePipelineBacklogKey,
+  resolveTargetBranch,
+} from './02-compute-branch.js';
 import { lateRebase } from './11-late-rebase.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
 
@@ -183,7 +187,8 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   //    take 20-40 min; origin/main may have moved). Mechanical conflicts are
   //    auto-resolved in-place; semantic conflicts abort + return the conflict
   //    files so the orchestrator can record `rebase-conflict` and continue.
-  const rebase = await lateRebase({ worktreePath: opts.worktreePath, runner });
+  const targetBranch = resolveTargetBranch(opts.workDir, opts.logger);
+  const rebase = await lateRebase({ worktreePath: opts.worktreePath, runner, targetBranch });
   if (!rebase.ok) {
     return {
       pushed: false,
@@ -288,7 +293,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       '--body',
       body,
       '--base',
-      'main',
+      targetBranch,
       '--head',
       opts.branch,
     ],

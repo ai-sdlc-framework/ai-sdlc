@@ -6,6 +6,7 @@ import {
   FALLBACK_SLUG,
   computeBranchName,
   readBranchPattern,
+  resolveTargetBranch,
   slugify,
 } from './02-compute-branch.js';
 import { parseTaskFile } from './01-validate.js';
@@ -520,5 +521,85 @@ describe('Step 2 — migration equivalence (AISDLC-245.5)', () => {
       cleanupTmpProject(legacyDir);
       cleanupTmpProject(canonicalDir);
     }
+  });
+});
+
+// AISDLC-606 — single source of truth for the resolved integration branch.
+describe('resolveTargetBranch (AISDLC-606)', () => {
+  it('defaults to "main" when no pipeline.yaml is present (no regression)', () => {
+    expect(resolveTargetBranch(tmp)).toBe('main');
+  });
+
+  it('defaults to "main" when pipeline.yaml has no spec.branching.targetBranch', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', "    pattern: 'ai-sdlc/{issueIdLower}-{slug}'"].join('\n') + '\n',
+    );
+    expect(resolveTargetBranch(tmp)).toBe('main');
+  });
+
+  it('reads pipeline.yaml spec.branching.targetBranch (canonical, develop-based repo)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      [
+        'apiVersion: ai-sdlc.io/v1alpha1',
+        'kind: Pipeline',
+        'metadata:',
+        '  name: test',
+        'spec:',
+        '  triggers: []',
+        '  providers: {}',
+        '  stages: []',
+        '  branching:',
+        "    pattern: 'ai-sdlc/{issueIdLower}-{slug}'",
+        '    targetBranch: develop',
+      ].join('\n') + '\n',
+    );
+    expect(resolveTargetBranch(tmp)).toBe('develop');
+  });
+
+  it('also accepts a top-level branching.targetBranch shape', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['branching:', '  targetBranch: develop'].join('\n') + '\n',
+    );
+    expect(resolveTargetBranch(tmp)).toBe('develop');
+  });
+
+  it('does NOT fall through to a sibling spec.backlog.branching.targetBranch', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  backlog:', '    branching:', '      targetBranch: develop'].join('\n') + '\n',
+    );
+    expect(resolveTargetBranch(tmp)).toBe('main');
+  });
+
+  it('falls back to pipeline-backlog.yaml branching.targetBranch (deprecated shim, warns)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
+      `branching:\n  targetBranch: develop\n`,
+    );
+    const logger = makeRecordingLogger();
+    expect(resolveTargetBranch(tmp, logger)).toBe('develop');
+    expect(logger.warnings).toHaveLength(1);
+    expect(logger.warnings[0]).toMatch(/DEPRECATION/);
+  });
+
+  it('prefers pipeline.yaml over pipeline-backlog.yaml (canonical wins)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+    );
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
+      `branching:\n  targetBranch: staging\n`,
+    );
+    expect(resolveTargetBranch(tmp)).toBe('develop');
   });
 });

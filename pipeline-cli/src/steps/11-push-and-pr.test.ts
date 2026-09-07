@@ -348,6 +348,59 @@ describe('Step 11 — pushAndPr', () => {
     ).toBe(true);
   });
 
+  // AISDLC-606 — `gh pr create --base` must default to 'main' (no
+  // regression) when spec.branching.targetBranch is unset.
+  it('opens the PR with --base main when targetBranch is unset (AISDLC-606 no-regression)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    const ghPrCreateCall = fake.calls.find(
+      (c) => c.command === 'gh' && c.args[0] === 'pr' && c.args[1] === 'create',
+    );
+    const baseIdx = ghPrCreateCall!.args.indexOf('--base');
+    expect(ghPrCreateCall!.args[baseIdx + 1]).toBe('main');
+  });
+
+  // AISDLC-606 — `gh pr create --base` must honor spec.branching.targetBranch
+  // when configured (develop-based repo).
+  it('opens the PR with --base develop when spec.branching.targetBranch=develop', async () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+    );
+    const fake = new FakeRunner()
+      .on(/^git fetch origin develop/, ok())
+      .on(/^git merge-base --is-ancestor origin\/develop HEAD/, ok())
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    const ghPrCreateCall = fake.calls.find(
+      (c) => c.command === 'gh' && c.args[0] === 'pr' && c.args[1] === 'create',
+    );
+    const baseIdx = ghPrCreateCall!.args.indexOf('--base');
+    expect(ghPrCreateCall!.args[baseIdx + 1]).toBe('develop');
+  });
+
   it('returns pushed=false with reason on non-fast-forward', async () => {
     const fake = new FakeRunner().on(
       /^git push -u origin/,
