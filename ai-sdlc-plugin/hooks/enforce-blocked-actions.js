@@ -23,11 +23,25 @@
  * Returns a deny decision when a tool call matches a guarded pattern.
  * Fail-safe: allows everything on any error — never block a session because
  * the policy file couldn't be parsed.
+ *
+ * 4. **Merge governance (AISDLC-602)** — reconciles the `blockedActions`
+ *    mechanism (Bash-command glob matching against `git merge*` etc.) with
+ *    the resolved `spec.governance` policy (AISDLC-601's resolver). A raw
+ *    `gh pr merge` (i.e. WITHOUT `--auto`) is always blocked here regardless
+ *    of the resolved `allowMerge` policy — the only sanctioned merge path is
+ *    the AISDLC-603 `node pipeline-cli/bin/cli-merge-if-eligible.mjs` helper,
+ *    which owns the real green+CLEAN+trusted-sourceKind evaluation (never
+ *    reimplemented in this hook). Arming auto-merge (`gh pr merge --auto`)
+ *    is NOT merging and stays allowed under every policy. This closes the
+ *    pre-AISDLC-602 gap where `blockedActions: git merge*` never matched
+ *    `gh pr merge` at all, so the loudest governance rule ("never merge")
+ *    wasn't actually enforced by this hook.
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
 const { join, resolve, isAbsolute, relative, sep, dirname } = require('path');
 const { execSync } = require('child_process');
+const { resolveGovernanceFromYaml, STRICT_DEFAULTS } = require('./lib/governance-resolver');
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
@@ -64,15 +78,23 @@ const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 
 let blockedActions = [];
 let blockedPaths = [];
+// AISDLC-602: resolved governance policy, used by the merge-governance check
+// below. Fails closed to STRICT_DEFAULTS (allowMerge: 'never') on any parse
+// error or absent agent-role.yaml — mirrors the trust-boundary contract
+// documented in governance-resolver.js (resolved from the trusted on-disk
+// project root, never PR-tree content).
+let resolvedGovernance = { ...STRICT_DEFAULTS };
 try {
   const yaml = readFileSync(agentRolePath, 'utf-8');
   blockedActions = parseListField(yaml, 'blockedActions');
   blockedPaths = parseListField(yaml, 'blockedPaths');
+  resolvedGovernance = resolveGovernanceFromYaml(yaml);
 } catch {
   // No agent-role.yaml (or unreadable) — fall through with empty config.
   // `.ai-sdlc/**` and the outside-worktree/permittedExternalPaths rules are
   // hardcoded floors enforced regardless of config (AISDLC-567), so we must
   // NOT exit early here the way the Bash-only enforcement used to.
+  // resolvedGovernance stays at STRICT_DEFAULTS (fail-closed).
 }
 
 // ── Dispatch by tool ─────────────────────────────────────────────────
@@ -89,9 +111,16 @@ process.exit(0);
 
 function enforceBash(command) {
   if (!command || typeof command !== 'string' || !command.trim()) return;
-  if (blockedActions.length === 0) return;
 
   const trimmed = command.trim();
+
+  // AISDLC-602: merge governance is enforced unconditionally — independent
+  // of whatever blockedActions patterns the project has (or hasn't)
+  // configured. See enforceMergeGovernance() for the exact rules.
+  enforceMergeGovernance(trimmed);
+
+  if (blockedActions.length === 0) return;
+
   for (const pattern of blockedActions) {
     const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
     const regexStr = escaped.replace(/\*/g, '.*');
@@ -100,6 +129,58 @@ function enforceBash(command) {
       deny(`command matches blockedAction pattern '${pattern}'`);
     }
   }
+}
+
+// ── Merge governance (AISDLC-602) ────────────────────────────────────
+
+/**
+ * Enforces the merge rule from the resolved governance policy, closing the
+ * pre-existing gap where `blockedActions: git merge*` never matched
+ * `gh pr merge` at all.
+ *
+ * Rules (apply regardless of the resolved `allowMerge` value):
+ *   - `gh pr merge --auto` (arming auto-merge, in any flag order/combination
+ *     e.g. `--auto --squash`) is NOT merging and is ALWAYS allowed.
+ *   - A raw (non-`--auto`) `gh pr merge` invocation is ALWAYS blocked here.
+ *     The only sanctioned merge path when policy permits merge is the
+ *     AISDLC-603 `cli-merge-if-eligible` helper (`node
+ *     pipeline-cli/bin/cli-merge-if-eligible.mjs`), which owns the real
+ *     green+CLEAN+trusted-sourceKind evaluation — never reimplemented here.
+ *     Under strict policy the helper self-refuses anyway (fail-closed on
+ *     its own governance-resolver read), so blocking the raw command here
+ *     is sufficient defense-in-depth for both policies.
+ *
+ * Commands that don't invoke `gh pr merge` at all are untouched by this
+ * function — they still flow through the generic `blockedActions` pattern
+ * matching in `enforceBash()`.
+ */
+function enforceMergeGovernance(trimmed) {
+  if (!isGhPrMergeCommand(trimmed)) return;
+  if (isAutoArmCommand(trimmed)) return; // arming is not merging — always allowed
+
+  deny(
+    `raw 'gh pr merge' is not a permitted merge path (resolved governance allowMerge=` +
+      `"${resolvedGovernance.allowMerge}"). Merges must go through ` +
+      `'node pipeline-cli/bin/cli-merge-if-eligible.mjs' (AISDLC-603), which enforces the ` +
+      `real green+CLEAN+trusted-sourceKind gate — never a raw 'gh pr merge' call. Arming ` +
+      `auto-merge ('gh pr merge --auto') remains allowed.`,
+  );
+}
+
+/** Matches any command that invokes `gh pr merge` (case-insensitive). */
+function isGhPrMergeCommand(command) {
+  return /\bgh\s+pr\s+merge\b/i.test(command);
+}
+
+/**
+ * Matches a `gh pr merge` command that ALSO carries `--auto` — arming
+ * auto-merge rather than merging immediately. GitHub CLI accepts `--auto`
+ * anywhere after the subcommand and in any combination with other flags
+ * (e.g. `--auto --squash`), so this checks the whole command string rather
+ * than a fixed argument position.
+ */
+function isAutoArmCommand(command) {
+  return /--auto\b/.test(command);
 }
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────

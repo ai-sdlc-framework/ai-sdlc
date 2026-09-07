@@ -750,6 +750,125 @@ blockedActions: []
   });
 });
 
+// ── AISDLC-602 merge governance (reconciles gh-pr-merge drift) ──────────
+//
+// These fixtures deliberately omit any 'gh pr merge*' blockedActions
+// pattern — the point of AISDLC-602 is that merge governance is now a
+// DEDICATED check (enforceMergeGovernance) independent of the generic
+// blockedActions glob list, so it must hold even with blockedActions: [].
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-602 merge governance, strict default)', () => {
+  let strictDir;
+
+  before(() => {
+    strictDir = join(tmpdir(), `enforce-blocked-merge-strict-${Date.now()}`);
+    mkdirSync(join(strictDir, '.ai-sdlc'), { recursive: true });
+    // No governance: section at all — resolves to STRICT_DEFAULTS.
+    writeFileSync(
+      join(strictDir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedActions: []
+`,
+    );
+  });
+
+  after(() => {
+    rmSync(strictDir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: strictDir });
+  }
+
+  it('blocks a raw "gh pr merge" (no --auto) under strict, even with no blockedActions configured', () => {
+    const result = run('gh pr merge 42');
+    assert.ok(isDenied(result), 'raw gh pr merge must be blocked under strict');
+  });
+
+  it('blocks "gh pr merge 42 --squash" (no --auto) under strict', () => {
+    const result = run('gh pr merge 42 --squash');
+    assert.ok(isDenied(result), 'raw gh pr merge with --squash (no --auto) is still a real merge');
+  });
+
+  it('allows arming "gh pr merge --auto" under strict', () => {
+    const result = run('gh pr merge 42 --auto');
+    assert.ok(!isDenied(result), 'arming --auto is NOT merging and must stay allowed under strict');
+  });
+
+  it('allows arming "gh pr merge --auto --squash" under strict (flag order/combination)', () => {
+    const result = run('gh pr merge 42 --auto --squash');
+    assert.ok(!isDenied(result), '--auto combined with --squash is still an arm, not a merge');
+  });
+
+  it('allows the cli-merge-if-eligible helper invocation under strict', () => {
+    const result = run('node pipeline-cli/bin/cli-merge-if-eligible.mjs --pr 42');
+    assert.ok(!isDenied(result), 'the merge-if-eligible helper is the sanctioned merge path');
+  });
+
+  it('deny reason cites the resolved policy and the sanctioned helper path', () => {
+    const result = run('gh pr merge 42');
+    const parsed = JSON.parse(result.output);
+    const reason = parsed.hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /allowMerge="never"/);
+    assert.match(reason, /cli-merge-if-eligible/);
+  });
+});
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-602 merge governance, onGreenClean policy)', () => {
+  let greenDir;
+
+  before(() => {
+    greenDir = join(tmpdir(), `enforce-blocked-merge-green-${Date.now()}`);
+    mkdirSync(join(greenDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(greenDir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+governance:
+  allowMerge: onGreenClean
+blockedActions: []
+`,
+    );
+  });
+
+  after(() => {
+    rmSync(greenDir, { recursive: true, force: true });
+  });
+
+  function run(command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: greenDir });
+  }
+
+  it('still blocks a raw "gh pr merge" even when policy permits merge-on-green — must route through the helper', () => {
+    const result = run('gh pr merge 42 --squash');
+    assert.ok(
+      isDenied(result),
+      'raw gh pr merge stays blocked under onGreenClean too — only the helper is sanctioned',
+    );
+  });
+
+  it('still allows arming "gh pr merge --auto" under onGreenClean', () => {
+    const result = run('gh pr merge 42 --auto');
+    assert.ok(!isDenied(result), 'arming remains allowed regardless of policy');
+  });
+
+  it('allows the cli-merge-if-eligible helper invocation under onGreenClean', () => {
+    const result = run(
+      'node pipeline-cli/bin/cli-merge-if-eligible.mjs --pr 42 --source-kind backlog',
+    );
+    assert.ok(!isDenied(result), 'the helper is the sanctioned merge path under onGreenClean');
+  });
+
+  it('deny reason cites the resolved onGreenClean policy', () => {
+    const result = run('gh pr merge 42');
+    const parsed = JSON.parse(result.output);
+    assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /allowMerge="onGreenClean"/);
+  });
+});
+
 // ── AISDLC-567 stale-base guard ──────────────────────────────────────────
 
 describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-567 stale-base guard)', () => {

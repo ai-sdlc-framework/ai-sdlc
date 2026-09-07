@@ -21,7 +21,7 @@ Spawn N concurrent `/ai-sdlc execute` sessions in tmux panes (AISDLC-462).
 2. **Resource gate**: refuses if available memory < 4GB OR 1-min load avg >= ncpu.
 3. **Mutual-awareness**: refuses to spawn a task already in `sessions/` with status != done|failed.
 4. **Operator confirmation**: always AskUserQuestion before spawning.
-5. **Never merge PRs.** Never force-push to main/master.
+5. **Merge / force-push rules are governance-configurable per repo** (`.ai-sdlc/agent-role.yaml` `spec.governance` — RFC-0048 / AISDLC-601, AISDLC-602). Run `node "${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}/scripts/render-governance-hard-rules.mjs"` and treat its first two lines as authoritative for this coordinator session — with no `governance:` section (the common case) they read **Never merge PRs** and **Never force-push**, matching each spawned `/ai-sdlc execute` session's own hard rules (see `execute.md`'s "Hard rules" section for the full rationale and the sanctioned merge-if-eligible helper path).
 
 ## Path resolution
 
