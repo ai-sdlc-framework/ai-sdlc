@@ -2,7 +2,7 @@
 id: RFC-0048
 title: Per-Repo Configurable Governance Hard-Rules
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: 'Dominique Legault'
 created: 2026-09-07
 updated: 2026-09-07
@@ -18,17 +18,24 @@ requiresDocs: []
 > five Open Questions gate promotion; they are resolved via an operator rubric
 > walkthrough before sign-off.
 
-**Status:** Draft (2026-09-07) — **5 Open Questions pending operator walkthrough.**
-The plugin injects a fixed set of governance hard-rules ("NEVER merge PRs", "NEVER
-force push", "NEVER close…") into every session, subagent, and `execute` command,
-verbatim, regardless of the consumer repo's policy — while the *enforcement*
-substrate (`agent-role.yaml` `blockedActions`/`blockedPaths`) is already per-repo.
-The narration and the enforcement have drifted (the prose asserts "never merge PRs"
-but `blockedActions: git merge*` doesn't even match `gh pr merge`). This RFC makes
-the hard-rules a single per-repo policy source of truth in `agent-role.yaml`,
-rendered into every governance surface, **defaults strict**, with a **trust boundary**
-so the governed party cannot relax its own guardrails. Trigger: local-trades adopter
-(plugin 0.19.0); tasks AISDLC-601/602 filed against this RFC.
+**Status:** Ready for Review (2026-09-07) — **all 5 Open Questions resolved via
+operator rubric walkthrough.** The plugin hard-codes governance hard-rules ("NEVER
+merge PRs", "NEVER force push", "NEVER close…") into every session, subagent, and
+`execute` command, while the *enforcement* substrate (`agent-role.yaml`
+`blockedActions`) is already per-repo — the two have drifted (`git merge*` doesn't
+match `gh pr merge`). This RFC makes the hard-rules a single per-repo policy source of
+truth in a `spec.governance` block (OQ-1), rendered into every governance surface,
+**defaults strict**. Resolutions: **(OQ-1)** dedicated `governance` block with per-rule
+keys; **(OQ-2)** merge-relaxation gates on work-item `sourceKind` provenance
+(internal-backlog = trusted → auto-merge-on-green-CLEAN eligible; external-GitHub =
+untrusted → never), with the policy *declaration* read only from trusted base-branch
+config; **(OQ-3)** operational rules (merge/force-push/close/branch-delete/reset-hard)
+configurable, integrity rules (CI-skip tokens, `.ai-sdlc/attestations|verdicts` edits,
+and relaxing governance from a PR tree) permanently fixed; **(OQ-4)** a deterministic
+`merge-if-eligible` CLI helper owns the green+CLEAN+tier gate, with the hook blocking
+raw `gh pr merge` so the helper is the only route; **(OQ-5)** ship the granular block
+**plus** a named `operator-trusted` preset now (`strict` = defaults). Trigger:
+local-trades adopter (plugin 0.19.0); tasks AISDLC-601/602/603.
 
 ## Summary
 
@@ -137,20 +144,40 @@ required; existing adopters unchanged.
 
 ## Implementation Plan
 
-Phase tasks are reconciled with the already-filed AISDLC-601/602 after OQ resolution:
+Three phase tasks (reconciled with the OQ resolutions):
 
-- **Phase 1 (AISDLC-601):** schema + resolver + strict defaults; render into
-  `session-start.js` + `subagent-start.js`; trust boundary.
-- **Phase 2 (AISDLC-602):** render into `execute`/`execute-parallel` hard-rules +
-  reconcile `enforce-blocked-actions.js` (`gh pr merge`); green+CLEAN enforcement.
-- Additional phases (presets, permanently-fixed-rule set) added per OQ-3/OQ-5
-  resolutions.
+- **Phase 1 (AISDLC-601):** `spec.governance` block (OQ-1) + `operator-trusted`/`strict`
+  presets (OQ-5) + resolver (strict defaults, fail-closed, preset expansion pinned to
+  the OQ-3 fixed set) + render into `session-start.js` + `subagent-start.js`; policy
+  read base-branch-only (OQ-2). Permanently-fixed integrity rules (OQ-3) never
+  relaxable.
+- **Phase 2 (AISDLC-602):** render the resolved policy into `execute`/`execute-parallel`
+  hard-rules + reconcile `enforce-blocked-actions.js` to block raw `gh pr merge`
+  (closing the `git merge*` gap) and route merges only through the Phase-3 helper.
+  Depends on 601 + 603.
+- **Phase 3 (AISDLC-603):** the deterministic `merge-if-eligible` CLI helper (OQ-4) —
+  green + CLEAN + trusted `sourceKind` gate (OQ-2), exits non-zero otherwise, then
+  merges. Depends on 601. This is where the green+CLEAN check lives.
 
 ## Open Questions
 
 **OQ-1 — Configuration surface / schema shape.** How does a repo express the policy:
 extend the existing `blockedActions` list, add a dedicated `spec.governance` block
 with per-rule keys, or a named-preset selector — or a combination?
+
+**Resolution (2026-09-07, full rubric): dedicated `spec.governance` block with
+per-rule keys.** Industry research: structured per-rule policy with defaults is the
+universal governance-as-config pattern (K8s OPA/Gatekeeper CRDs, GitHub branch
+protection, ESLint `rules: { name: severity|[severity,opts] }`, Terraform Sentinel) —
+flat allow/deny string lists only work when every entry has identical semantics.
+**Refinement:** rules carry rule-specific value types (e.g. `allowMerge:
+never | onGreenClean`, `allowForcePush: bool`) that `blockedActions` (a bash-command
+glob list) cannot represent. **Counter-argument:** "reuse `blockedActions` — it already
+gates merges." Rebuttal: it gates *bash patterns* (`git merge*`) and cannot express
+`gh pr merge` or `onGreenClean`; overloading it forces two grammars into one field and
+re-creates the very narration/enforcement split this RFC closes. **Selected over
+`blockedActions`-extension and preset-only** because governance needs per-rule value
+types and one structured source rendered to every surface.
 
 **OQ-2 — Trust boundary / authorization.** *Established lean (operator, 2026-09-07):*
 merge-relaxation gates on work-item trust tier — internal backlog tasks (higher trust)
@@ -161,18 +188,81 @@ contributor trust tier), and that the policy *declaration* is read only from tru
 base-branch/operator config (not PR-modified). See [[project_dual_workflow_architecture]],
 RFC-0043.
 
+**Resolution (2026-09-07, full rubric): the tier signal is work-item `sourceKind`
+provenance; the policy declaration is read base-branch-only.** Industry research:
+provenance-gated trust is standard (GitHub Actions restricts the fork-PR token by
+source via `pull_request_target`, not by content; RFC-0043 contributor trust tiers).
+The `sourceKind` (`backlog-task` vs `gh-issue-N`) is *already threaded through
+`executePipeline`* and maps one-to-one onto the operator's internal-vs-external
+architecture, and — critically — it is set by the dispatch, not by the party being
+governed, so it cannot be spoofed from a PR. **Refinement over the bare lean:** the
+merge-decision surface reads `sourceKind` (trusted ⇒ auto-merge-on-green-CLEAN
+eligible; untrusted ⇒ never), AND the `governance` declaration is resolved only from
+the trusted base-branch `.ai-sdlc/agent-role.yaml` / operator filesystem — never the
+PR tree (a PR cannot relax the rule it is governed by). **Counter-argument:** "PR
+author-association is GitHub's native trust primitive." Rebuttal: association answers
+"who opened the PR," not the work-item provenance the architecture keys on; it can be a
+*secondary* tightening on the external path but not the primary signal. **Selected over
+author-association-only** because `sourceKind` is already threaded, matches the
+internal-vs-external split exactly, and is unforgeable by the governed party.
+
 **OQ-3 — Configurable vs. permanently-fixed rules.** Which hard-rules become
 configurable (merge / force-push / close / branch-delete / reset-hard) and which stay
 permanently fixed regardless of config (CI-skip tokens; `.ai-sdlc/attestations|verdicts`
 edits)?
 
+**Resolution (2026-09-07, full rubric): operational rules configurable, integrity
+rules permanently fixed.** Configurable = `merge`, `force-push`, `close PR/issue`,
+`branch-delete`, `git reset --hard`. Permanently fixed regardless of config = never
+write CI-skip magic tokens; never edit `.ai-sdlc/attestations|verdicts`; governance
+cannot be relaxed from a PR tree (the OQ-2 base-branch-only invariant). Industry
+research: every serious policy system separates negotiable config from non-negotiable
+invariants (K8s always-on admission controllers; AWS SCP / permission-boundary
+ceilings; OPA pinned base bundles). **Counter-argument:** "a fully trusted operator
+repo should be able to do anything, including skip CI or edit attestations." Rebuttal:
+those are not preferences — they are the mechanisms the framework's guarantees rest on;
+a repo that can write `[skip ci]` or edit `.ai-sdlc/attestations` silently disables the
+verification everything else assumes, and once governance is config-driven the config
+that disables governance must itself be un-relaxable from the governed surface.
+**Selected over everything-configurable and merge-only** because it draws the line
+exactly where the trust chain breaks — keeping "configurable" from becoming
+"unguarded."
+
 **OQ-4 — green+CLEAN enforcement point.** Where does the merge-on-green gate live so
 it cannot be skipped: an LLM command-body precondition, a deterministic CLI helper the
 command must call, or a hook?
 
+**Resolution (2026-09-07, full rubric): a deterministic `merge-if-eligible` CLI helper
+owns the gate; the PreToolUse hook blocks raw `gh pr merge` so the helper is the only
+route.** The helper queries required-checks + `mergeStateStatus` + `sourceKind` and
+exits non-zero unless green + CLEAN + trusted-tier, then merges. Industry research: the
+framework's own governing principle is "anything mechanical → hook/workflow, never LLM"
+(attestation signing was moved from the command body to the pre-push hook for exactly
+this reason); deterministic gates beat LLM-honored prose. **Refinement:** two simple
+layers — the hook enforces "only via the helper" (blocks raw `gh pr merge`), the helper
+enforces "only when eligible" — which keeps the live-CI query out of the PreToolUse hot
+path while remaining un-skippable. **Counter-argument:** "let the command body check
+green+CLEAN — less machinery." Rebuttal: that is the soft enforcement the framework
+abandoned for signing; an LLM precondition is skippable under context pressure, a helper
+that exits non-zero is testable and auditable. **Selected over the inline-hook and
+LLM-precondition** because it is deterministic AND keeps network calls out of the hook.
+
 **OQ-5 — Preset layer.** Ship named presets (`strict` default, `operator-trusted`
 permitting merge-on-green-CLEAN) as a one-line opt-in on top of the granular rules, or
 granular-only for now?
+
+**Resolution (2026-09-07, operator decision): ship the granular block PLUS a named
+`operator-trusted` preset now** (`strict` = the defaults, no config). The operator
+selected the preset layer over the rubric's granular-only recommendation: an
+`operator-trusted` one-word opt-in for the merge-on-green-CLEAN bundle is worth shipping
+immediately for the known common case. **Preset semantics (load-bearing):** a preset is
+sugar that expands to the same resolved `governance` object — it MUST NOT be able to set
+anything the granular block couldn't (so OQ-3's permanently-fixed integrity rules stay
+fixed under any preset), and `operator-trusted` still only enables auto-merge for the
+trusted `sourceKind` per OQ-2 (it does not blanket-permit merging external work).
+Explicit granular keys override the preset. **Selected over granular-only** per operator
+call; the rubric's premature-bundling caution is mitigated by pinning the preset's
+expansion to the granular schema + the OQ-3 fixed set.
 
 ## References
 
@@ -196,3 +286,4 @@ granular-only for now?
 | Date | Change |
 | --- | --- |
 | 2026-09-07 | Initial Draft. Problem, Option-1 proposal, 5 Open Questions. Trigger: local-trades adopter (plugin 0.19.0); tasks AISDLC-601/602 filed. |
+| 2026-09-07 | **Draft → Ready for Review.** All 5 OQs resolved via operator rubric walkthrough: (1) dedicated `governance` block; (2) `sourceKind`-provenance tier gating + base-branch-only declaration; (3) operational-configurable / integrity-fixed; (4) deterministic `merge-if-eligible` helper + hook blocks raw `gh pr merge`; (5) granular **+** `operator-trusted` preset (operator override of the granular-only recommendation). Reconciled phase plan to AISDLC-601/602 + new AISDLC-603 (helper). |

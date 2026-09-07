@@ -13,6 +13,7 @@ labels:
   - hooks
 dependencies: []
 references:
+  - spec/rfcs/RFC-0048-per-repo-configurable-governance.md
   - ai-sdlc-plugin/hooks/session-start.js
   - ai-sdlc-plugin/hooks/subagent-start.js
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
@@ -54,6 +55,13 @@ owns the execute-command render surfaces + reconciling `enforce-blocked-actions.
   unchanged, byte-for-byte where practical).
 - Add a small resolver (shared, testable) that merges the repo's declared governance
   with the strict defaults into a resolved policy object.
+- **Named presets (OQ-5):** ship `strict` (= the defaults, no config needed) AND a
+  named `operator-trusted` preset that expands to the merge-on-green-CLEAN bundle. A
+  preset is SUGAR that expands to the same resolved `governance` object — it MUST NOT
+  set anything the granular block couldn't (the permanently-fixed integrity rules stay
+  fixed under any preset), and `operator-trusted` still only enables auto-merge for the
+  trusted `sourceKind` (it does not blanket-permit merging external work). Explicit
+  granular keys override the preset.
 - Render the injected hard-rule text in BOTH `session-start.js` and
   `subagent-start.js` FROM the resolved policy, not string constants. A repo that
   sets e.g. `governance.allowMerge: onGreenClean` (or removes the merge rule) sees
