@@ -369,6 +369,9 @@ export const agentRoleSchema = {
             'Soul DID URIs the agent is bound to when `scope: soul` (RFC-0009 §8.1). Each entry is a Soul DID URI (e.g., `did:platform-x:soul:soul-a`). Empty array or omission with `scope: soul` is treated as platform-wide (no soul-specific binding declared).',
           items: { type: 'string' },
         },
+        governance: {
+          $ref: '#/$defs/Governance',
+        },
       },
       additionalProperties: false,
     },
@@ -403,6 +406,43 @@ export const agentRoleSchema = {
   },
   additionalProperties: false,
   $defs: {
+    Governance: {
+      type: 'object',
+      description:
+        'Per-repo governance hard-rule policy (RFC-0048). All keys optional; an absent `governance` block resolves to strict defaults (never-merge / never-force-push / never-close / never-branch-delete / never-reset-hard). Malformed/unknown values fail closed to strict in the resolver (ai-sdlc-plugin/hooks/lib/governance-resolver.js). Permanently-fixed integrity rules (CI-skip tokens, editing `.ai-sdlc/attestations|verdicts`, relaxing governance from a PR tree) are intentionally NOT representable here.',
+      properties: {
+        preset: {
+          type: 'string',
+          enum: ['strict', 'operator-trusted'],
+          description:
+            "Sugar layer that expands to a resolved governance object. `strict` = the defaults (no-op). `operator-trusted` expands to `allowMerge: onGreenClean` (still trusted-tier only). A preset can never set anything the granular keys couldn't; explicit granular keys override the preset.",
+        },
+        allowMerge: {
+          type: 'string',
+          enum: ['never', 'onGreenClean'],
+          description:
+            'Whether agents may merge PRs. `never` (default) = only humans merge. `onGreenClean` = merge allowed once all required checks are green AND mergeStateStatus == CLEAN, for trusted-tier (internal backlog) work only.',
+        },
+        allowForcePush: {
+          type: 'boolean',
+          description: 'Whether agents may force-push (still `--force-with-lease`). Default false.',
+        },
+        allowClosePrIssue: {
+          type: 'boolean',
+          description: 'Whether agents may close PRs or issues. Default false.',
+        },
+        allowBranchDelete: {
+          type: 'boolean',
+          description: 'Whether agents may delete branches (`git branch -D`/`-d`). Default false.',
+        },
+        allowResetHard: {
+          type: 'boolean',
+          description:
+            'Whether agents may run destructive git (`git reset --hard`, `git checkout -- .`, `git restore .`). Default false.',
+        },
+      },
+      additionalProperties: false,
+    },
     ModelRule: {
       type: 'object',
       description: 'A rule mapping complexity ranges to model identifiers.',

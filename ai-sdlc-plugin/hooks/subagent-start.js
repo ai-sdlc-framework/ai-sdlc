@@ -42,6 +42,7 @@ const { readFileSync, readSync, existsSync, mkdirSync, writeFileSync } = require
 const { join } = require('path');
 const { execSync } = require('child_process');
 const { randomUUID } = require('crypto');
+const { resolveGovernanceFromYaml, renderSubagentHardRules } = require('./lib/governance-resolver');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ try {
 
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
+const resolvedGovernance = resolveGovernanceFromYaml(yaml);
 
 // ── Build subagent governance context ────────────────────────────────
 //
@@ -102,11 +104,7 @@ You are running as a Claude Code subagent. The orchestrating command will
 gate your output (reviews, PR creation). Stay focused on your assigned task.
 
 ### Hard rules — NEVER violate
-- **Never merge PRs** (\`gh pr merge\`)
-- **Never force-push** (\`git push --force\`/\`-f\`)
-- **Never close PRs or issues** (\`gh pr close\`, \`gh issue close\`)
-- **Never delete branches** (\`git branch -D\`/\`-d\`)
-- **Never run destructive git** (\`git reset --hard\`, \`git checkout -- .\`, \`git restore .\`)`;
+${renderSubagentHardRules(resolvedGovernance)}`;
 
 if (blockedPaths.length > 0) {
   context += `\n\n### Blocked paths (PreToolUse hook enforces — no edits)
