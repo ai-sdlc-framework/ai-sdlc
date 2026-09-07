@@ -326,6 +326,15 @@ describe('runReconcile — orchestration', () => {
     expect(stepNames).toContain('git-fetch');
     expect(stepNames).toContain('git-rebase');
     expect(stepNames).toContain('git-push');
+    // AISDLC-606 — with targetBranch unset the fetch/rebase resolve to the
+    // byte-identical pre-606 'main' default; assert on the literal args so a
+    // future refactor of the `origin/${targetBranch}` interpolation can't
+    // silently regress the default path (this is the one threaded surface
+    // whose default-fallback was previously only covered by step-name checks).
+    const fetchCall = calls.find((c) => c.file === 'git' && c.args[0] === 'fetch');
+    expect(fetchCall?.args).toEqual(['fetch', 'origin', 'main']);
+    const rebaseCall = calls.find((c) => c.file === 'git' && c.args[0] === 'rebase');
+    expect(rebaseCall?.args).toEqual(['rebase', 'origin/main']);
     expect(stepNames).toContain('gh-pr-ready');
     expect(stepNames).toContain('gh-pr-merge-auto');
     expect(stepNames).toContain('remove-verdict');

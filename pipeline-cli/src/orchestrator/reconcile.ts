@@ -653,7 +653,7 @@ function runReconcileInner(
     // instead of a hardcoded `main`. Defaults to `'main'` when
     // `spec.branching.targetBranch` is unset (byte-identical to
     // pre-AISDLC-606 behavior).
-    const targetBranch = resolveTargetBranch(options.workDir);
+    const targetBranch = resolveTargetBranch(workDir);
     const fetch = spawn('git', ['fetch', 'origin', targetBranch], { cwd: worktreePath });
     steps.push({
       name: 'git-fetch',
