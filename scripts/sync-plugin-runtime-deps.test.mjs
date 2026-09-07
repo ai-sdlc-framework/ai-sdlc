@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readWorkspaceVersion,
   computeDesiredPins,
+  nextMajorUpperBound,
   applyPinsToManifest,
   SYNCED_PACKAGES,
   MANIFEST_PATHS,
@@ -141,6 +142,46 @@ describe('computeDesiredPins', () => {
       '@ai-sdlc/pipeline-cli': '^0.14.0',
     });
     assert.deepEqual(desired, { '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0' });
+  });
+});
+
+describe('nextMajorUpperBound (AISDLC-600 code-review MAJOR)', () => {
+  it('returns <1.0.0 for 0.x versions (float across all 0.x minors)', () => {
+    assert.equal(nextMajorUpperBound('0.23.0'), '<1.0.0');
+    assert.equal(nextMajorUpperBound('0.0.1'), '<1.0.0');
+  });
+
+  it('derives the next major for 1.x+ so the range never becomes empty at 1.0.0', () => {
+    // The regression: a hardcoded `<1.0.0` would make computeDesiredPins emit
+    // `>=1.0.0 <1.0.0` (empty/unsatisfiable) the moment a synced package hits
+    // 1.0.0, breaking the self-heal `npm install`. Deriving the bound fixes it.
+    assert.equal(nextMajorUpperBound('1.0.0'), '<2.0.0');
+    assert.equal(nextMajorUpperBound('1.4.2'), '<2.0.0');
+    assert.equal(nextMajorUpperBound('2.9.9'), '<3.0.0');
+  });
+
+  it('produces a satisfiable range at the 1.0.0 boundary via computeDesiredPins', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '1.0.0',
+      pipelineCliVersion: '1.0.0',
+      pins: { orchestrator: '>=0.23.0 <1.0.0', pipelineCli: '>=0.23.0 <1.0.0' },
+    });
+    try {
+      const desired = computeDesiredPins(root, {
+        '@ai-sdlc/orchestrator': '>=0.23.0 <1.0.0',
+        '@ai-sdlc/pipeline-cli': '>=0.23.0 <1.0.0',
+      });
+      assert.deepEqual(desired, {
+        '@ai-sdlc/orchestrator': '>=1.0.0 <2.0.0',
+        '@ai-sdlc/pipeline-cli': '>=1.0.0 <2.0.0',
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on a malformed version rather than emitting a garbage pin', () => {
+    assert.throws(() => nextMajorUpperBound('not-a-version'));
   });
 });
 

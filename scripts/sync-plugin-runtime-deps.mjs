@@ -78,15 +78,34 @@ export function readWorkspaceVersion(repoRoot, pkgDir) {
 }
 
 /**
+ * Compute the exclusive upper bound for a forward-floating range: the next
+ * major after the given version. Derived from the version's major component
+ * (NOT a hardcoded `<1.0.0`) so the range stays valid across a future 1.0.0+
+ * bump — a hardcoded `<1.0.0` would produce the empty/unsatisfiable range
+ * `>=1.0.0 <1.0.0` the moment a synced package reaches 1.0.0 (AISDLC-600
+ * code-review MAJOR). For 0.x this returns `<1.0.0` (float across all 0.x
+ * minors); for 1.x, `<2.0.0`; etc.
+ */
+export function nextMajorUpperBound(version) {
+  const major = Number.parseInt(String(version).split('.')[0], 10);
+  if (!Number.isFinite(major) || major < 0) {
+    throw new Error(`cannot derive upper bound from version "${version}"`);
+  }
+  return `<${major + 1}.0.0`;
+}
+
+/**
  * Compute the desired runtimeDependencies patch: { pkgName: newPin } for every
  * synced package whose workspace version has moved past the manifest's
- * current pin floor. Returns {} when everything already agrees.
+ * current pin floor. Returns {} when everything already agrees. The pin is a
+ * forward-floating range `>=<version> <nextMajor>.0.0` so the plugin runtime
+ * self-heals across 0.x minors (never the AISDLC-574 caret-0.x trap).
  */
 export function computeDesiredPins(repoRoot, currentRuntimeDeps) {
   const desired = {};
   for (const { pkgDir, pkgName } of SYNCED_PACKAGES) {
     const workspaceVersion = readWorkspaceVersion(repoRoot, pkgDir);
-    const newPin = `>=${workspaceVersion} <1.0.0`;
+    const newPin = `>=${workspaceVersion} ${nextMajorUpperBound(workspaceVersion)}`;
     const currentPin = currentRuntimeDeps?.[pkgName];
     if (currentPin !== newPin) {
       desired[pkgName] = newPin;
