@@ -2,7 +2,7 @@
 id: AISDLC-598
 title: >-
   /ai-sdlc execute — sign the v6 envelope in-process on consumer repos (don't rely on the monorepo pre-push hook)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
@@ -38,12 +38,12 @@ Net adopter impact: `execute` runs dev + reviewer fan-out fine, but cannot produ
 - Ensure the signed envelope is committed on the branch before push (mirror the monorepo chore-commit, `--no-verify` as the hook does), respecting the CI-skip-token and `.ai-sdlc/attestations/**` write rules.
 
 ## Acceptance Criteria
-- [ ] Running `/ai-sdlc execute <task>` in a consumer repo (no monorepo pre-push signer) produces a committed v6 DSSE envelope that `verify-attestation` accepts, with zero manual coordinator steps.
-- [ ] In the monorepo, behaviour is unchanged: the pre-push hook still signs; `execute` does NOT double-sign (detection correctly identifies the monorepo push path).
-- [ ] `execute` runs `verify-attestation` on its own produce and aborts with an actionable message if red (no unverifiable push).
-- [ ] Detection is push-path-probe based, not a hardcoded monorepo check or a new operator env flag.
-- [ ] Hermetic/integration coverage for both topologies (monorepo delegates; consumer self-signs) including the negative "verify red → abort" case.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] Running `/ai-sdlc execute <task>` in a consumer repo (no monorepo pre-push signer) produces a committed v6 DSSE envelope that `verify-attestation` accepts, with zero manual coordinator steps.
+- [x] In the monorepo, behaviour is unchanged: the pre-push hook still signs; `execute` does NOT double-sign (detection correctly identifies the monorepo push path).
+- [x] `execute` runs `verify-attestation` on its own produce and aborts with an actionable message if red (no unverifiable push).
+- [x] Detection is push-path-probe based, not a hardcoded monorepo check or a new operator env flag.
+- [x] Hermetic/integration coverage for both topologies (monorepo delegates; consumer self-signs) including the negative "verify red → abort" case.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Notes

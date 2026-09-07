@@ -1474,6 +1474,37 @@ If reviews approved cleanly:
 
 When the PR merges, the file is already in `backlog/completed/` on `main` — no race with the post-merge workflow. The attestation file (added by the pre-push hook on a separate commit in Step 11) stays in the repo as audit trail (~1-2KB per PR; not a secret — the private key never left the contributor's machine).
 
+## Step 10.6 — Sign the v6 envelope in-process on consumer repos (AISDLC-598)
+
+**Purpose.** Step 10's comment above ("the pre-push hook owns signing") is only true INSIDE this monorepo, where `.husky/pre-push` chains to `scripts/check-attestation-sign.sh`. On a consumer/adopter repo, `.husky/pre-push` is the ADOPTER's own hook — it has never heard of ai-sdlc attestation signing — so relying on it silently produces a push with NO envelope, and `verify-attestation` stays red forever with no code path that ever fixes it.
+
+Run this BEFORE the push loop in Step 11a:
+
+```bash
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+bash "$PLUGIN_SCRIPTS_DIR/sign-attestation-if-consumer.sh"
+SIGN_IF_CONSUMER_RC=$?
+```
+
+`scripts/sign-attestation-if-consumer.sh` decides what to do via a **push-path probe** — not a hardcoded "is this the ai-sdlc monorepo" check and not a new operator env flag:
+
+1. It greps THIS repo's own `.husky/pre-push` for a reference to `check-attestation-sign.sh`, either directly or transitively via `scripts/pre-push-fixups.sh`. If found, the monorepo's own hook already owns signing for this repo — the script is a strict no-op and exits 0 immediately (never double-signs the same commit).
+2. If NOT found (the common consumer/adopter case, or no `.husky/pre-push` at all), it signs the DSSE envelope in-process right now using the exact same signer + verdict-file conventions the hook uses (`.active-task` sentinel, `.ai-sdlc/verdicts/<task-id-lower>.json`), stages + commits the envelope as a `chore: sign attestation for <task-id> (AISDLC-598)` commit, then **self-verifies** with the plugin's consumer-runnable verifier (`ai-sdlc-plugin/scripts/verify-attestation.mjs`, AISDLC-566) before returning.
+
+Exit codes:
+
+- **0** — either a no-op (monorepo push path owns it, or nothing to sign yet), or the consumer path signed + committed + self-verified successfully. Proceed to Step 11.
+- **non-zero** — the consumer path signed something that FAILED self-verification, or the signer itself failed. **Do NOT proceed to Step 11 — do not push.** The chore commit (if any) already landed locally so it's inspectable; surface the script's stderr output (it names the likely root cause: missing trusted-reviewer pubkeys, verdict-schema mismatch, or a stale/untrusted runtime resolution) and stop with `outcome: aborted`, populating `notes` for the operator.
+
+```bash
+if [ "$SIGN_IF_CONSUMER_RC" -ne 0 ]; then
+  echo "ERROR: Step 10.6 in-process attestation signing failed self-verification or the"
+  echo "       signer invocation itself failed. Aborting before push — see the"
+  echo "       [sign-attestation-if-consumer] output above for the actionable diagnosis."
+  exit 1
+fi
+```
+
 ## Step 11 — Push branch + open as DRAFT PR (AISDLC-218: 1 CI run per PR)
 
 > **Why DRAFT? (AISDLC-218)** Opening the PR immediately as a regular PR triggers CI run #1 before reviewers have completed and before the attestation envelope is signed. Then the envelope chore commit (auto-produced by the pre-push hook) triggers CI run #2 — identical work done twice. The fix: open as draft first, run reviewers + sign while still draft, then flip draft→ready_for_review as the LAST step (Step 13). CI fires exactly once on the fully-signed state. Observed in 12+ PRs during the 2026-05-06 autopilot session; ~50% CI-minute savings per PR.
