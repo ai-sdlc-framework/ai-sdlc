@@ -1102,8 +1102,29 @@ Resolve each reviewer's `<agent-id>` from the `SubagentStart`-hook marker the ha
 **Procedure, per reviewer that actually ran (i.e. every name in `$SELECTED` when `INCR_SKIP` is not `true`):**
 
 1. Compose the verdict JSON `{ approved, findings, summary }` from that reviewer's in-band Agent-tool return (the same object Step 8 aggregates) and write it to a scratch file, e.g. `/tmp/verdict-${TASK_ID}-${AGENT_NAME}.json` — this is NOT under `.ai-sdlc/**`, so the ordinary Write tool is fine here.
-2. Resolve `<agent-id>` for that reviewer per the marker-lookup above.
-3. Invoke the helper via Bash:
+2. Resolve `<agent-id>` for that reviewer. You captured each reviewer's harness `agentId` directly from its Agent-tool spawn result in Step 7b (the harness returns it as `agentId: <hex>`); if you recorded it, use it verbatim. If you did NOT retain it, recover it from the `SubagentStart` markers the harness wrote under `$WORKTREE_PATH/.ai-sdlc/subagent-sessions/<agent-id>.json` (each records `agentId`, `agentType`, `firedAt`) by selecting the newest-`firedAt` marker whose `agentType` equals this reviewer's `$AGENT_NAME`:
+
+   ```bash
+   # Prefer the agentId you captured from the Step 7b spawn result. Fallback:
+   # newest-firedAt SubagentStart marker matching this reviewer's agentType.
+   RESOLVED_AGENT_ID=$(node -e '
+     const { readdirSync, readFileSync } = require("fs");
+     const { join } = require("path");
+     const dir = join(process.argv[1], ".ai-sdlc", "subagent-sessions");
+     const want = process.argv[2];
+     let best = null;
+     for (const f of (() => { try { return readdirSync(dir); } catch { return []; } })()) {
+       if (!f.endsWith(".json")) continue;
+       let m; try { m = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
+       if (m.agentType !== want || !m.agentId) continue;
+       if (!best || String(m.firedAt) > String(best.firedAt)) best = m;
+     }
+     if (!best) { process.stderr.write("no SubagentStart marker for agentType=" + want + "\n"); process.exit(1); }
+     process.stdout.write(best.agentId);
+   ' "$WORKTREE_PATH" "$AGENT_NAME")
+   ```
+
+3. Invoke the helper via Bash (the helper does the final `find ~/.claude/projects -name "agent-<id>.jsonl"` resolution, newest-mtime wins on ties):
 
 ```bash
 bash ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh \

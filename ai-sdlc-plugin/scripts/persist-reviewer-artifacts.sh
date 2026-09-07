@@ -89,6 +89,31 @@ if [ ! -f "$VERDICT_FILE" ]; then
   exit 3
 fi
 
+# Defense-in-depth (AISDLC-599 review): REVIEWER and TASK_ID are interpolated
+# into destination paths under .ai-sdlc/; a '/' or '..' would let cp escape the
+# transcripts/verdicts subtrees. Callers pass a fixed vocabulary (plugin agent
+# names + AISDLC-NNN ids), so this only enforces an invariant that is already
+# true — but enforce it rather than assume it. AGENT_ID is interpolated into a
+# `find -name` glob, so reject glob metacharacters that would broaden the match.
+case "$REVIEWER" in
+  */* | *..*)
+    echo "persist-reviewer-artifacts.sh: invalid --reviewer '${REVIEWER}' (must not contain '/' or '..')" >&2
+    exit 1
+    ;;
+esac
+case "$TASK_ID" in
+  */* | *..*)
+    echo "persist-reviewer-artifacts.sh: invalid --task-id '${TASK_ID}' (must not contain '/' or '..')" >&2
+    exit 1
+    ;;
+esac
+case "$AGENT_ID" in
+  *[!A-Za-z0-9._-]*)
+    echo "persist-reviewer-artifacts.sh: invalid --agent-id '${AGENT_ID}' (allowed: A-Za-z0-9._-)" >&2
+    exit 1
+    ;;
+esac
+
 TASK_ID_LOWER=$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')
 
 # Resolve the harness-captured transcript by agent-id. Multiple matches can

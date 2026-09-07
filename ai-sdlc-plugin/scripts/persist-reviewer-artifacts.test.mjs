@@ -287,4 +287,85 @@ describe('persist-reviewer-artifacts.sh', () => {
     assert.notEqual(r.code, 0);
     assert.match(r.stderr, /usage:/i);
   });
+
+  it('rejects a --reviewer containing path-traversal characters', () => {
+    const { root, claudeProjectsDir, worktree } = makeHarness();
+    try {
+      writeTranscript(claudeProjectsDir, 'p', 's', 'agent-abc', '{}\n');
+      const verdictFile = writeVerdict(root, { approved: true, findings: [], summary: 'ok' });
+      const r = run(
+        [
+          '--worktree',
+          worktree,
+          '--task-id',
+          'AISDLC-599',
+          '--reviewer',
+          '../evil',
+          '--agent-id',
+          'abc',
+          '--verdict-file',
+          verdictFile,
+        ],
+        { HOME: root, CLAUDE_PROJECTS_DIR: claudeProjectsDir },
+      );
+      assert.notEqual(r.code, 0);
+      assert.match(r.stderr, /invalid --reviewer/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a --task-id containing a slash', () => {
+    const { root, claudeProjectsDir, worktree } = makeHarness();
+    try {
+      writeTranscript(claudeProjectsDir, 'p', 's', 'agent-abc', '{}\n');
+      const verdictFile = writeVerdict(root, { approved: true, findings: [], summary: 'ok' });
+      const r = run(
+        [
+          '--worktree',
+          worktree,
+          '--task-id',
+          'AISDLC/599',
+          '--reviewer',
+          'code-reviewer',
+          '--agent-id',
+          'abc',
+          '--verdict-file',
+          verdictFile,
+        ],
+        { HOME: root, CLAUDE_PROJECTS_DIR: claudeProjectsDir },
+      );
+      assert.notEqual(r.code, 0);
+      assert.match(r.stderr, /invalid --task-id/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a --agent-id containing glob metacharacters', () => {
+    const { root, claudeProjectsDir, worktree } = makeHarness();
+    try {
+      writeTranscript(claudeProjectsDir, 'p', 's', 'agent-abc', '{}\n');
+      const verdictFile = writeVerdict(root, { approved: true, findings: [], summary: 'ok' });
+      const r = run(
+        [
+          '--worktree',
+          worktree,
+          '--task-id',
+          'AISDLC-599',
+          '--reviewer',
+          'code-reviewer',
+          '--agent-id',
+          '*',
+          '--verdict-file',
+          verdictFile,
+        ],
+        { HOME: root, CLAUDE_PROJECTS_DIR: claudeProjectsDir },
+      );
+      assert.notEqual(r.code, 0);
+      assert.match(r.stderr, /invalid --agent-id/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
