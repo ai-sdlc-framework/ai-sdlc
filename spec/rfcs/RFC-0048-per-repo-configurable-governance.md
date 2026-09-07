@@ -2,7 +2,7 @@
 id: RFC-0048
 title: Per-Repo Configurable Governance Hard-Rules
 status: Draft
-lifecycle: Signed Off
+lifecycle: Implemented
 author: 'Dominique Legault'
 created: 2026-09-07
 updated: 2026-09-07
@@ -14,11 +14,15 @@ requiresDocs: []
 
 # RFC-0048: Per-Repo Configurable Governance Hard-Rules
 
-> This RFC lands on main with `lifecycle: Draft` for stakeholder reference. The
-> five Open Questions gate promotion; they are resolved via an operator rubric
-> walkthrough before sign-off.
+> **Implemented 2026-09-07.** This RFC landed as `Draft` for stakeholder reference,
+> had its five Open Questions resolved via an operator rubric walkthrough, was Signed
+> Off, and shipped across three phases (AISDLC-601/602/603). Kept for the design record.
 
-**Status:** Signed Off (2026-09-07, Engineering + Operator) — **all 5 Open Questions resolved via
+**Status:** Implemented (2026-09-07) — **all three phases shipped: AISDLC-601 (#1043,
+source-of-truth schema + resolver + SessionStart/SubagentStart render), AISDLC-603
+(#1046, deterministic `merge-if-eligible` CLI helper), AISDLC-602 (#1047, execute
+hard-rules render + `enforce-blocked-actions` merge-governance reconcile). Signed Off
+2026-09-07 (Engineering + Operator) — **all 5 Open Questions resolved via
 operator rubric walkthrough.** The plugin hard-codes governance hard-rules ("NEVER
 merge PRs", "NEVER force push", "NEVER close…") into every session, subagent, and
 `execute` command, while the *enforcement* substrate (`agent-role.yaml`
