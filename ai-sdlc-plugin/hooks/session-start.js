@@ -8,7 +8,7 @@
  * Fail-safe: exits silently on any error.
  */
 
-const { readFileSync, existsSync } = require('fs');
+const { readFileSync, readSync, existsSync } = require('fs');
 const { join } = require('path');
 const { execSync, spawnSync } = require('child_process');
 const {
@@ -25,9 +25,19 @@ const {
  */
 let runtimeDepsError = null;
 
+// AISDLC-601 CI follow-up: read stdin via `readStdinSync()` (a bounded
+// `fs.readSync(0, ...)` retry loop), NOT `readFileSync('/dev/stdin')`. Node's
+// synchronous read of a piped (non-TTY) fd 0 can throw `EAGAIN` on Linux when
+// the pipe hasn't fully buffered the writer's output yet — a well-known
+// Node/libuv difference from macOS. A single `readFileSync('/dev/stdin')` call
+// treats that transient `EAGAIN` as a hard failure; the fail-safe `catch` then
+// exited the whole hook, silently skipping governance injection on every
+// Linux-hosted `SessionStart` that raced the same way (reproduced
+// deterministically in GitHub Actions). This mirrors the AISDLC-571 fix already
+// applied to subagent-start.js / enforce-blocked-actions.js.
 let input;
 try {
-  const raw = readFileSync('/dev/stdin', 'utf-8');
+  const raw = readStdinSync();
   input = JSON.parse(raw);
 } catch {
   process.exit(0);
@@ -466,4 +476,52 @@ function parseListField(yaml, field) {
   }
 
   return items;
+}
+
+// ── stdin helpers (AISDLC-601 CI follow-up) ──────────────────────────
+//
+// Bounded `fs.readSync(0, ...)` retry loop that tolerates the transient
+// `EAGAIN` a piped fd 0 can raise on Linux before the writer's output is
+// buffered. Ported from subagent-start.js (AISDLC-571). A genuinely closed
+// or absent stdin still fails after MAX_EAGAIN_RETRIES so the caller's
+// fail-safe `catch` continues to short-circuit correctly.
+function readStdinSync() {
+  const chunks = [];
+  const buf = Buffer.alloc(65536);
+  const MAX_EAGAIN_RETRIES = 200;
+  let eagainRetries = 0;
+
+  for (;;) {
+    let bytesRead;
+    try {
+      bytesRead = readSync(0, buf, 0, buf.length, null);
+    } catch (err) {
+      if (err && err.code === 'EAGAIN') {
+        eagainRetries += 1;
+        if (eagainRetries > MAX_EAGAIN_RETRIES) {
+          throw err;
+        }
+        sleepSync(10);
+        continue;
+      }
+      // EOF is thrown as an error on some platforms when the fd is
+      // already exhausted; treat it the same as a 0-byte read.
+      if (err && err.code === 'EOF') {
+        break;
+      }
+      throw err;
+    }
+    if (bytesRead === 0) {
+      break;
+    }
+    chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
+  }
+
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+function sleepSync(ms) {
+  const sharedBuffer = new SharedArrayBuffer(4);
+  const view = new Int32Array(sharedBuffer);
+  Atomics.wait(view, 0, 0, ms);
 }
