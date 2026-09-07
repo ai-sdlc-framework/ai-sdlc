@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.23.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.22.0...reference-v0.23.0) (2026-09-07)
+
+
+### Features
+
+* add anchorEvidence audit-only leaf field (AISDLC-594) ([#1025](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1025)) ([d722f0e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d722f0e15f734d55498837b0359906ca839d43d7))
+
 ## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.21.0...reference-v0.22.0) (2026-09-06)
 
 

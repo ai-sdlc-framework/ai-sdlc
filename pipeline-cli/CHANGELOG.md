@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.23.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.22.0...pipeline-cli-v0.23.0) (2026-09-07)
+
+
+### Features
+
+* add anchorEvidence audit-only leaf field (AISDLC-594) ([#1025](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1025)) ([d722f0e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d722f0e15f734d55498837b0359906ca839d43d7))
+* rfc-0046 phase 4 — requiredTier policy + gate-agnostic enforcement (AISDLC-591) ([#1030](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1030)) ([5517164](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5517164bdacc406d0758801702a79b9e41a21e29))
+* rfc-0047 phase 1 — ci-only trust marker + verifier key partitioning (AISDLC-593) ([#1026](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1026)) ([cac3387](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cac33878f6fede0d55d20a2547ba7f61b5a64d51))
+* rfc-0047 phase 3 — verifier isolated re-derivation (AISDLC-595) ([#1028](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1028)) ([1c9ef0c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1c9ef0c78ee3c623032625ffe95221821fec757f))
+* rfc-0047 phase 4 — isolated producer + ci-only clean-room signer (AISDLC-596) ([#1029](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1029)) ([677a2cc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/677a2cca9fd8f0ee59fba26b337710d3d865a8a7))
+* rfc-0047 phase 5 — flip isolated capability gate into requiredTier policy (AISDLC-597) ([#1031](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1031)) ([3a409a7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3a409a7205b7e8d1be7ae788d7746e797a5b07f1))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.23.0
+
 ## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.21.0...pipeline-cli-v0.22.0) (2026-09-06)
 
 
