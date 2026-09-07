@@ -2415,3 +2415,170 @@ describe('cli-attestation verify — exit-code mapping from the core verifier', 
     ).rejects.toThrow('unexpected boom');
   });
 });
+
+// ── CLI: independence-policy (RFC-0046 Phase 4/AISDLC-591, RFC-0047 Phase 5/AISDLC-597) ──
+//
+// Mirrors the `verify` subcommand's CLI-level test pattern above (same
+// `loadAttestationRuntime` / `loadVerifyCore` mocks): isolates the CLI's
+// OWN wiring — the `status==='valid' && policyOutcome==='pass'` exit-code
+// AND-logic, and the fail-closed behavior on a malformed on-disk policy
+// config — from the actual verifier/runtime-resolution machinery (each
+// covered by its own hermetic suite).
+
+describe('cli-attestation independence-policy — exit-code AND-logic', () => {
+  let savedExitCode: number | string | null | undefined;
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.mocked(loadAttestationRuntime).mockReset();
+    vi.mocked(loadVerifyCore).mockReset();
+  });
+
+  afterEach(() => {
+    process.exitCode = savedExitCode;
+  });
+
+  it('status=valid + policyOutcome=pass (default requiredTier: none, no policy file) → exit 0', async () => {
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi.fn().mockReturnValue({
+      status: 'valid',
+      reason: 'ok',
+      overallIndependenceTier: 'attested',
+    });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    await expect(
+      buildAttestationCli([
+        'independence-policy',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(0);
+    const out = flushStdout();
+    expect(out).toMatch(/status=valid/);
+    expect(out).toMatch(/overallIndependenceTier=attested/);
+    expect(out).toMatch(/requiredTier=none/);
+    expect(out).toMatch(/policyOutcome=pass/);
+  });
+
+  it('status=valid but policyOutcome=shortfall (requiredTier: isolated, envelope only attested) → exit 1', async () => {
+    const policyDir = join(tmpRoot, '.ai-sdlc');
+    mkdirSync(policyDir, { recursive: true });
+    writeFileSync(join(policyDir, 'independence-policy.yaml'), 'requiredTier: isolated\n');
+
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi.fn().mockReturnValue({
+      status: 'valid',
+      reason: 'ok',
+      overallIndependenceTier: 'attested',
+    });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    await expect(
+      buildAttestationCli([
+        'independence-policy',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(1);
+    const out = flushStdout();
+    expect(out).toMatch(/requiredTier=isolated/);
+    expect(out).toMatch(/policyOutcome=shortfall/);
+  });
+
+  it('status=valid + policyOutcome=pass (requiredTier: isolated, envelope claims isolated — AISDLC-597 satisfiable) → exit 0', async () => {
+    const policyDir = join(tmpRoot, '.ai-sdlc');
+    mkdirSync(policyDir, { recursive: true });
+    writeFileSync(join(policyDir, 'independence-policy.yaml'), 'requiredTier: isolated\n');
+
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi.fn().mockReturnValue({
+      status: 'valid',
+      reason: 'ok',
+      overallIndependenceTier: 'isolated',
+    });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    await expect(
+      buildAttestationCli([
+        'independence-policy',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(0);
+    const out = flushStdout();
+    expect(out).toMatch(/requiredTier=isolated/);
+    expect(out).toMatch(/policyOutcome=pass/);
+  });
+
+  it('status=invalid (regardless of policyOutcome) → exit 1', async () => {
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi.fn().mockReturnValue({
+      status: 'invalid',
+      reason: 'tampered',
+      overallIndependenceTier: 'isolated',
+    });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    await expect(
+      buildAttestationCli([
+        'independence-policy',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(1);
+    const out = flushStdout();
+    expect(out).toMatch(/status=invalid/);
+  });
+
+  it('a malformed .ai-sdlc/independence-policy.yaml fails CLOSED end-to-end (non-zero exit, no crash)', async () => {
+    const policyDir = join(tmpRoot, '.ai-sdlc');
+    mkdirSync(policyDir, { recursive: true });
+    writeFileSync(join(policyDir, 'independence-policy.yaml'), 'requiredTier: bogus-tier\n');
+
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    const runVerifier = vi.fn().mockReturnValue({
+      status: 'valid',
+      reason: 'ok',
+      overallIndependenceTier: 'attested',
+    });
+    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
+
+    // The CLI handler catches the parse error itself (fail-closed contract)
+    // rather than letting it propagate as an unhandled rejection — asserted
+    // end-to-end here, not just at the pure `parseIndependencePolicyYaml`
+    // unit level (that coverage lives in independence-policy.test.ts).
+    await expect(
+      buildAttestationCli([
+        'independence-policy',
+        '--head',
+        VALID_HEAD_SHA,
+        '--base',
+        VALID_BASE_SHA,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(process.exitCode).toBe(1);
+    expect(stderrChunks.join('')).toMatch(/invalid requiredTier/);
+    // A malformed policy must never be credited as an accidental `pass` —
+    // no policyOutcome line should have been printed at all.
+    expect(flushStdout()).not.toMatch(/policyOutcome=/);
+  });
+});

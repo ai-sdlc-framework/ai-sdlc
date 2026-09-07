@@ -12,16 +12,17 @@
  * fed by the SAME `loadIndependencePolicy()` reader. One comparison, two
  * enforcement surfaces — see RFC-0046 §Rollout (OQ-5) + Phase 4.
  *
- * `isolated` is currently UNSATISFIABLE: RFC-0046 Phase 3 (AISDLC-590,
- * self-asserted `provenance.deployment: 'ci'`) was found CRITICAL-forgeable
- * and deferred to RFC-0047, whose re-derivable anchor (verifier-side
- * re-derivation via a CI-only key, AISDLC-593/595/596) is the producer half
- * of the capability. RFC-0047 OQ-5 splits the "producer exists" concern
- * (AISDLC-593/595/596, already merged) from the "policy may REQUIRE it"
- * concern (this module) — {@link isolatedTierAvailable} is the single
- * capability switch AISDLC-597 flips once the verifier is wired to credit
- * `requiredTier: isolated` as satisfiable. Until then, a policy requiring
- * `isolated` always reports `unsatisfiable`, never a false `pass`.
+ * `isolated` is now SATISFIABLE (AISDLC-597, RFC-0047 Phase 5): RFC-0046
+ * Phase 3 (AISDLC-590, self-asserted `provenance.deployment: 'ci'`) was
+ * found CRITICAL-forgeable and deferred to RFC-0047, whose re-derivable
+ * anchor (verifier-side re-derivation via a CI-only key, AISDLC-593/595/596)
+ * is the producer half of the capability. RFC-0047 OQ-5 split the "producer
+ * exists" concern (AISDLC-593/595/596, merged) from the "policy may REQUIRE
+ * it" concern (this module) — {@link isolatedTierAvailable} is the single
+ * capability switch, now flipped `true`: `requiredTier: isolated` is
+ * evaluated by the SAME tier comparison as `none`/`attested`, crediting a
+ * real, non-forgeable `isolated` claim from the verifier rather than always
+ * reporting `unsatisfiable`.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -44,16 +45,17 @@ function isIndependenceTier(value: unknown): value is IndependenceTier {
 /**
  * Capability switch for the `isolated` tier's PRODUCER (RFC-0047).
  *
- * Returns `false` today — `requiredTier: isolated` is unsatisfiable no
- * matter what the envelope claims. AISDLC-597 is the ONLY task authorized
- * to flip this to `true`, once the verifier re-derives the RFC-0047
- * CI-only anchor and can credit `isolated` as a real, non-forgeable claim.
- * Single source of truth: every enforcement surface (CI gate, ship-skill,
- * CLI) calls THIS function rather than re-deriving the answer locally, so
- * flipping it in one place flips it everywhere.
+ * Returns `true` (AISDLC-597 flip) — the isolated producer (AISDLC-596) and
+ * the ci-only verifier re-derivation path (AISDLC-595) are both merged, so
+ * `requiredTier: isolated` is now a real, satisfiable policy: the verifier
+ * can credit `isolated` as a non-forgeable claim rather than the tier being
+ * unconditionally `unsatisfiable`. Single source of truth: every
+ * enforcement surface (CI gate, ship-skill, CLI) calls THIS function rather
+ * than re-deriving the answer locally, so flipping it in one place flipped
+ * it everywhere. Do not scatter this check (AISDLC-421-class drift risk).
  */
 export function isolatedTierAvailable(): boolean {
-  return false;
+  return true;
 }
 
 /** Per-repo independence policy (`.ai-sdlc/independence-policy.yaml`). */
@@ -159,15 +161,24 @@ export interface EvaluateIndependencePolicyParams {
  *
  * - `requiredTier: 'none'` always `pass`es — informational only, matching
  *   the AC-1/AC-3 "no behavior change by default, but still surfaced" contract.
- * - `requiredTier: 'isolated'` is `unsatisfiable` while
- *   {@link isolatedTierAvailable} returns `false`, REGARDLESS of what the
+ * - `requiredTier: 'isolated'` is `unsatisfiable` while the isolated-tier
+ *   capability check (`isAvailable`, defaulting to
+ *   {@link isolatedTierAvailable} — the single source of truth every
+ *   production caller relies on) returns `false`, REGARDLESS of what the
  *   envelope claims — a forged/legacy `isolated` claim must never be
- *   credited as satisfying an unsatisfiable policy.
+ *   credited as satisfying an unsatisfiable policy. AISDLC-597 flipped
+ *   {@link isolatedTierAvailable} to `true`, so `isolated` is now
+ *   evaluated by the same order comparison below in production. The
+ *   `isAvailable` parameter exists ONLY so the hermetic test suite can
+ *   exercise the (now dormant) `unsatisfiable` branch without a second
+ *   capability switch scattered elsewhere — no production call site
+ *   passes it.
  * - Otherwise, `overallIndependenceTier` must be `>=` `requiredTier` on the
  *   {@link INDEPENDENCE_TIER_ORDER} total order, else `shortfall`.
  */
 export function evaluateIndependencePolicy(
   params: EvaluateIndependencePolicyParams,
+  isAvailable: () => boolean = isolatedTierAvailable,
 ): IndependencePolicyOutcome {
   const { requiredTier, overallIndependenceTier } = params;
 
@@ -189,15 +200,15 @@ export function evaluateIndependencePolicy(
     };
   }
 
-  if (requiredTier === 'isolated' && !isolatedTierAvailable()) {
+  if (requiredTier === 'isolated' && !isAvailable()) {
     return {
       status: 'unsatisfiable',
       requiredTier,
       overallIndependenceTier,
       message:
-        "requiredTier: 'isolated' is not yet available — the isolated-tier producer capability " +
-        'is not yet wired into policy enforcement (see RFC-0047 / AISDLC-597). ' +
-        "Set requiredTier to 'none' or 'attested' until AISDLC-597 ships.",
+        "requiredTier: 'isolated' is not available — the isolated-tier producer capability " +
+        'is not present in this build (isolatedTierAvailable() returned false). ' +
+        "Set requiredTier to 'none' or 'attested' until the isolated tier is available in your install.",
     };
   }
 
