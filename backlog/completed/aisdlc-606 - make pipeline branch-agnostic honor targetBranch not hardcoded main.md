@@ -2,7 +2,7 @@
 id: AISDLC-606
 title: >-
   Make the pipeline branch-agnostic: honor spec.branching.targetBranch in diff / rebase / attestation-base steps (not hardcoded origin/main)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
