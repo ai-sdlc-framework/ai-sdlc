@@ -325,10 +325,19 @@ describe('ai-sdlc-plugin session-start hook', () => {
   // Round-5 review measured sanitizeForContext as quadratic (2k/11ms,
   // 8k/178ms, 16k/703ms) on input it treats as attacker-influenceable, before
   // any truncation. A few-hundred-KB value hung session start for minutes.
+  //
+  // AISDLC-601 CI follow-up: the hostile value is injected via an env var, and
+  // Linux caps a SINGLE env-var string at MAX_ARG_STRLEN (128 KiB); a 400 KB
+  // value made execFileSync fail to spawn at all with E2BIG on Linux (exitCode
+  // null, ~immediate) while passing on macOS (no per-string cap) — the test
+  // never even exercised the redaction. Use 100 KB: comfortably under the
+  // 128 KiB cap so it spawns on Linux, yet ~6x the largest measured point
+  // above, so unbounded quadratic redaction would still be tens of seconds and
+  // blow the 5s bound (teeth preserved).
   it('AISDLC-557: stays fast on a huge hostile value instead of hanging', () => {
     const started = Date.now();
     const result = runHook(tempDirEmpty, {
-      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `exit 1: ${'a'.repeat(400_000)}`,
+      __AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR: `exit 1: ${'a'.repeat(100_000)}`,
     });
     const elapsed = Date.now() - started;
     assert.equal(result.exitCode, 0);
