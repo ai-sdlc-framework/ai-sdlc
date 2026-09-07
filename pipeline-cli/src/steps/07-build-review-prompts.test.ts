@@ -49,6 +49,30 @@ describe('Step 7 — buildReviewPrompts', () => {
     expect(r.diff).toContain('diff content');
   });
 
+  // AISDLC-606 — diff against the resolved target branch, not a hardcoded
+  // origin/main.
+  it('diffs against the resolved target branch when spec.branching.targetBranch is configured', async () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+    );
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/develop\.\.\.HEAD$/, ok('--- develop diff ---\n'))
+      .on(/^git diff --name-only origin\/develop\.\.\.HEAD$/, ok('a.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.diff).toContain('develop diff');
+    expect(r.changedFiles).toEqual(['a.ts']);
+  });
+
   it('emits an INDEPENDENCE warning when codex is not available', async () => {
     const fake = new FakeRunner();
     const r = await buildReviewPrompts({

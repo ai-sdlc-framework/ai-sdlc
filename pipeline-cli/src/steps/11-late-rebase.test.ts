@@ -7,7 +7,7 @@
  *   (c) hard conflict → abort cleanly + outcome envelope well-formed
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
@@ -337,6 +337,45 @@ describe('lateRebase', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/iteration cap/);
   });
+
+  // AISDLC-606 — targetBranch option: fetch + ancestor-check + rebase must
+  // all use the passed branch instead of a hardcoded `main`.
+  it('fetches + rebases onto origin/<targetBranch> when configured (develop-based repo)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git fetch origin develop/, ok())
+      .on(/^git merge-base --is-ancestor origin\/develop HEAD/, ok());
+
+    const result = await lateRebase({
+      worktreePath: tmp,
+      runner: fake.toRunner(),
+      targetBranch: 'develop',
+    });
+
+    expect(result.ok).toBe(true);
+    const fetchCalls = fake.calls.filter((c) => c.command === 'git' && c.args[0] === 'fetch');
+    expect(fetchCalls.map((c) => c.args)).toEqual([['fetch', 'origin', 'develop']]);
+    // Confirm it never touched origin/main
+    const mainCalls = fake.calls.filter((c) => c.args.includes('origin/main'));
+    expect(mainCalls).toEqual([]);
+  });
+
+  it('actually rebases onto origin/<targetBranch> (not origin/main) when conflicts are present', async () => {
+    const fake = new FakeRunner()
+      .on(/^git fetch origin develop/, ok())
+      .on(/^git merge-base --is-ancestor origin\/develop HEAD/, fail('', 1))
+      .on(/^git rebase origin\/develop$/, ok());
+
+    const result = await lateRebase({
+      worktreePath: tmp,
+      runner: fake.toRunner(),
+      targetBranch: 'develop',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.rebaseAttempts).toBe(1);
+    const rebaseCalls = fake.calls.filter((c) => c.command === 'git' && c.args[0] === 'rebase');
+    expect(rebaseCalls.map((c) => c.args)).toEqual([['rebase', 'origin/develop']]);
+  });
 });
 
 // ── Integration: pushAndPr with late-rebase ─────────────────────────────────
@@ -406,6 +445,42 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
     expect(r.pushed).toBe(true);
     expect(r.prUrl).toBe('https://github.com/x/y/pull/42');
     expect(r.rebaseConflict).toBeUndefined();
+  });
+
+  // AISDLC-606 — pushAndPr must read spec.branching.targetBranch from
+  // workDir's pipeline.yaml and thread it into lateRebase.
+  it('late-rebases onto the resolved target branch (develop-based repo)', async () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
+    );
+    const { pushAndPr } = await import('./11-push-and-pr.js');
+
+    const fake = new FakeRunner()
+      .on(/^git fetch origin develop/, ok())
+      .on(/^git merge-base --is-ancestor origin\/develop HEAD/, ok())
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/42\n'));
+
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task: integrationTask,
+      developerReturn: integrationDev,
+      verdict: integrationApproved,
+      runner: fake.toRunner(),
+    });
+
+    expect(r.pushed).toBe(true);
+    expect(r.prUrl).toBe('https://github.com/x/y/pull/42');
+    // Confirm it never touched origin/main
+    const mainCalls = fake.calls.filter(
+      (c) => c.args.includes('origin/main') || c.args.includes('main'),
+    );
+    expect(mainCalls).toEqual([]);
   });
 
   it('returns rebaseConflict when late-rebase fails with semantic conflict', async () => {

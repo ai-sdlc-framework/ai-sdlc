@@ -68,6 +68,7 @@ import {
   removeVerdict,
 } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
+import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { writeEvent, type WriteEventOpts } from './events.js';
 
 /** A reviewer the reconcile sub-tick emits + signs for. */
@@ -648,7 +649,12 @@ function runReconcileInner(
   // Step 3: force-push the chore commit on top of the dev's branch.
   // -------------------------------------------------------------------------
   if (!options.skipPush) {
-    const fetch = spawn('git', ['fetch', 'origin', 'main'], { cwd: worktreePath });
+    // AISDLC-606 — fetch + rebase onto the resolved integration branch
+    // instead of a hardcoded `main`. Defaults to `'main'` when
+    // `spec.branching.targetBranch` is unset (byte-identical to
+    // pre-AISDLC-606 behavior).
+    const targetBranch = resolveTargetBranch(workDir);
+    const fetch = spawn('git', ['fetch', 'origin', targetBranch], { cwd: worktreePath });
     steps.push({
       name: 'git-fetch',
       status: fetch.status === 0 ? 'success' : 'failed',
@@ -661,7 +667,7 @@ function runReconcileInner(
         signedAt,
       });
     }
-    const rebase = spawn('git', ['rebase', 'origin/main'], { cwd: worktreePath });
+    const rebase = spawn('git', ['rebase', `origin/${targetBranch}`], { cwd: worktreePath });
     steps.push({
       name: 'git-rebase',
       status: rebase.status === 0 ? 'success' : 'failed',

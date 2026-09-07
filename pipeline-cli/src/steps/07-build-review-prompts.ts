@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
+import { resolveTargetBranch } from './02-compute-branch.js';
 
 export interface BuildReviewPromptsOptions {
   taskId: string;
@@ -36,13 +37,19 @@ export async function buildReviewPrompts(
 ): Promise<BuildReviewPromptsResult> {
   const runner = opts.runner ?? defaultRunner;
 
-  const diffResult = await runner('git', ['diff', 'origin/main...HEAD'], {
+  // AISDLC-606 — diff against the resolved integration branch (defaults to
+  // `origin/main` when `spec.branching.targetBranch` is unset, so main-based
+  // repos are byte-identical to pre-AISDLC-606 behavior).
+  const targetBranch = resolveTargetBranch(opts.workDir);
+  const baseRef = `origin/${targetBranch}`;
+
+  const diffResult = await runner('git', ['diff', `${baseRef}...HEAD`], {
     cwd: opts.worktreePath,
     allowFailure: true,
   });
   const diff = diffResult.code === 0 ? diffResult.stdout : '';
 
-  const filesResult = await runner('git', ['diff', '--name-only', 'origin/main...HEAD'], {
+  const filesResult = await runner('git', ['diff', '--name-only', `${baseRef}...HEAD`], {
     cwd: opts.worktreePath,
     allowFailure: true,
   });
