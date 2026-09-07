@@ -43,6 +43,7 @@
     "test:verify-attestation-gate": "node --test scripts/verify-attestation.test.mjs",
     "test:verify-attestation-plugin-gate": "node --test ai-sdlc-plugin/scripts/verify-attestation.test.mjs",
     "test:orchestrator-state-gate": "node --test scripts/check-orchestrator-state.test.mjs",
+    "test:prepush-dash-safe": "node --test scripts/check-prepush-dash-safe.test.mjs",
     "test:gate-workflow": "node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs",
     "test:review-workflow": "node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs",
     "test:fork-pr-safety": "node --test .github/workflows/__tests__/fork-pr-safety.test.mjs",

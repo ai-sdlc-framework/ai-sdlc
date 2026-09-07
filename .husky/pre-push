@@ -59,7 +59,17 @@
 # these gates exist because the things they guard have failed silently in
 # the past).
 
-set -euo pipefail
+set -eu
+# `pipefail` is a bash/ksh/zsh option; POSIX sh (dash, Ubuntu's /bin/sh) LACKS
+# it and hard-errors on `set -o pipefail` ("Illegal option -o pipefail"). Husky
+# v9 SOURCES this hook under `sh` — ignoring the `#!/usr/bin/env bash` shebang —
+# so on Linux CI the shell is dash and a bare `set -euo pipefail` aborts the hook
+# before any gate runs, failing the push. macOS /bin/sh is bash so it only ever
+# broke on Linux (the CI-based gh-issue pipeline). Enable pipefail only when the
+# running shell actually supports it. (GitHub issue #1037.)
+if (set -o pipefail) 2>/dev/null; then
+  set -o pipefail
+fi
 
 # Read git's pre-push stdin once so multiple gates can consume the range info.
 # (AISDLC-370: DoR gate uses the push range to walk touched task files.)
