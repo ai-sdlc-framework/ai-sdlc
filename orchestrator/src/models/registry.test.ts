@@ -17,7 +17,7 @@ describe('ModelRegistry', () => {
         .list()
         .map((e) => e.alias)
         .sort(),
-    ).toEqual(['haiku', 'opus', 'opus[1m]', 'sonnet'].sort());
+    ).toEqual(['gemma', 'haiku', 'opus', 'opus[1m]', 'sonnet'].sort());
   });
 
   describe('resolve', () => {
