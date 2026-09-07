@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   readWorkspaceVersion,
   computeDesiredPins,
+  nextMajorUpperBound,
   applyPinsToManifest,
   SYNCED_PACKAGES,
   MANIFEST_PATHS,
@@ -111,25 +112,76 @@ describe('computeDesiredPins', () => {
       '@ai-sdlc/pipeline-cli': '^0.14.0',
     });
     assert.deepEqual(desired, {
-      '@ai-sdlc/orchestrator': '^0.19.0',
-      '@ai-sdlc/pipeline-cli': '^0.19.0',
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
     });
   });
 
-  it('returns {} when pins already match the workspace version', () => {
+  it('returns {} when pins already match the workspace version (forward-floating format)', () => {
     const desired = computeDesiredPins(root, {
-      '@ai-sdlc/orchestrator': '^0.19.0',
-      '@ai-sdlc/pipeline-cli': '^0.19.0',
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
     });
     assert.deepEqual(desired, {});
   });
 
-  it('flags only the package that drifted', () => {
+  it('flags a package still pinned in the legacy caret format even when the floor matches (AISDLC-600)', () => {
+    // The caret string itself is the caret-0.x trap this task closes — even
+    // when its floor equals the workspace version, it must be rewritten to
+    // the forward-floating range so future 0.x minors self-heal.
     const desired = computeDesiredPins(root, {
       '@ai-sdlc/orchestrator': '^0.19.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
+    });
+    assert.deepEqual(desired, { '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0' });
+  });
+
+  it('flags only the package that drifted', () => {
+    const desired = computeDesiredPins(root, {
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
       '@ai-sdlc/pipeline-cli': '^0.14.0',
     });
-    assert.deepEqual(desired, { '@ai-sdlc/pipeline-cli': '^0.19.0' });
+    assert.deepEqual(desired, { '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0' });
+  });
+});
+
+describe('nextMajorUpperBound (AISDLC-600 code-review MAJOR)', () => {
+  it('returns <1.0.0 for 0.x versions (float across all 0.x minors)', () => {
+    assert.equal(nextMajorUpperBound('0.23.0'), '<1.0.0');
+    assert.equal(nextMajorUpperBound('0.0.1'), '<1.0.0');
+  });
+
+  it('derives the next major for 1.x+ so the range never becomes empty at 1.0.0', () => {
+    // The regression: a hardcoded `<1.0.0` would make computeDesiredPins emit
+    // `>=1.0.0 <1.0.0` (empty/unsatisfiable) the moment a synced package hits
+    // 1.0.0, breaking the self-heal `npm install`. Deriving the bound fixes it.
+    assert.equal(nextMajorUpperBound('1.0.0'), '<2.0.0');
+    assert.equal(nextMajorUpperBound('1.4.2'), '<2.0.0');
+    assert.equal(nextMajorUpperBound('2.9.9'), '<3.0.0');
+  });
+
+  it('produces a satisfiable range at the 1.0.0 boundary via computeDesiredPins', () => {
+    const root = buildFixtureRepo({
+      orchestratorVersion: '1.0.0',
+      pipelineCliVersion: '1.0.0',
+      pins: { orchestrator: '>=0.23.0 <1.0.0', pipelineCli: '>=0.23.0 <1.0.0' },
+    });
+    try {
+      const desired = computeDesiredPins(root, {
+        '@ai-sdlc/orchestrator': '>=0.23.0 <1.0.0',
+        '@ai-sdlc/pipeline-cli': '>=0.23.0 <1.0.0',
+      });
+      assert.deepEqual(desired, {
+        '@ai-sdlc/orchestrator': '>=1.0.0 <2.0.0',
+        '@ai-sdlc/pipeline-cli': '>=1.0.0 <2.0.0',
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on a malformed version rather than emitting a garbage pin', () => {
+    assert.throws(() => nextMajorUpperBound('not-a-version'));
   });
 });
 
@@ -147,13 +199,13 @@ describe('applyPinsToManifest', () => {
   it('rewrites the pin and preserves other fields', () => {
     const manifestPath = join(root, 'ai-sdlc-plugin', 'plugin.json');
     const changed = applyPinsToManifest(manifestPath, {
-      '@ai-sdlc/orchestrator': '^0.19.0',
-      '@ai-sdlc/pipeline-cli': '^0.19.0',
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
     });
     assert.equal(changed, true);
     const rewritten = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '^0.19.0');
-    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '^0.19.0');
+    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.19.0 <1.0.0');
+    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.19.0 <1.0.0');
     assert.equal(rewritten.runtimeDependencies['@ai-sdlc/plugin-mcp-server'], '0.9.2');
     assert.equal(rewritten.name, 'ai-sdlc');
   });
@@ -209,14 +261,14 @@ describe('CLI end-to-end (--check and write modes)', () => {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       const desired = computeDesiredPins(root, manifest.runtimeDependencies);
       assert.deepEqual(desired, {
-        '@ai-sdlc/orchestrator': '^0.20.5',
-        '@ai-sdlc/pipeline-cli': '^0.20.5',
+        '@ai-sdlc/orchestrator': '>=0.20.5 <1.0.0',
+        '@ai-sdlc/pipeline-cli': '>=0.20.5 <1.0.0',
       });
       const changed = applyPinsToManifest(manifestPath, desired);
       assert.equal(changed, true);
       const rewritten = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '^0.20.5');
-      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '^0.20.5');
+      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.20.5 <1.0.0');
+      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.20.5 <1.0.0');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

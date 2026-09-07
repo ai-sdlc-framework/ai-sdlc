@@ -14,12 +14,26 @@
  * it reads the CURRENT workspace package.json versions for
  * @ai-sdlc/orchestrator and @ai-sdlc/pipeline-cli (source of truth — the
  * same files release-please bumps directly) and rewrites the
- * `runtimeDependencies` pin for each to `^<version>` in both plugin
+ * `runtimeDependencies` pin for each to `>=<version> <1.0.0` in both plugin
  * manifests, in place, only when the pin's floor differs from the
  * workspace version. Run it after `release-please-action` creates a
  * release (i.e. once orchestrator/pipeline-cli versions have already been
  * bumped by release-please itself) — see the `sync-plugin-runtime-deps`
  * job in .github/workflows/release.yml.
+ *
+ * AISDLC-600: the pin is a forward-floating range (`>=X <1.0.0`), NOT a
+ * caret (`^X`). A caret on a 0.x version resolves to `>=X.Y.0 <X.(Y+1).0` —
+ * it CANNOT float across a minor bump. That "caret-0.x trap" meant a
+ * plugin install could never self-heal forward to a newer 0.x minor release
+ * without this script re-running and rewriting the manifests, so an
+ * adopter running an older plugin snapshot was permanently stuck on an
+ * older runtime — unable to produce newer verdict/attestation tiers
+ * (e.g. RFC-0047's `independent` tier, shipped in 0.23.0) even after the
+ * runtime itself published a fix. The forward-floating range lets
+ * `install-runtime-deps.sh` / `check-stale-runtime-deps.mjs` self-heal to
+ * any published 0.x version without waiting on a manifest rewrite, while
+ * still refusing an eventual 1.0.0+ major (which may carry breaking
+ * changes this pin was never vetted against).
  *
  * Usage:
  *   node scripts/sync-plugin-runtime-deps.mjs           # write mode (default)
@@ -64,15 +78,34 @@ export function readWorkspaceVersion(repoRoot, pkgDir) {
 }
 
 /**
+ * Compute the exclusive upper bound for a forward-floating range: the next
+ * major after the given version. Derived from the version's major component
+ * (NOT a hardcoded `<1.0.0`) so the range stays valid across a future 1.0.0+
+ * bump — a hardcoded `<1.0.0` would produce the empty/unsatisfiable range
+ * `>=1.0.0 <1.0.0` the moment a synced package reaches 1.0.0 (AISDLC-600
+ * code-review MAJOR). For 0.x this returns `<1.0.0` (float across all 0.x
+ * minors); for 1.x, `<2.0.0`; etc.
+ */
+export function nextMajorUpperBound(version) {
+  const major = Number.parseInt(String(version).split('.')[0], 10);
+  if (!Number.isFinite(major) || major < 0) {
+    throw new Error(`cannot derive upper bound from version "${version}"`);
+  }
+  return `<${major + 1}.0.0`;
+}
+
+/**
  * Compute the desired runtimeDependencies patch: { pkgName: newPin } for every
  * synced package whose workspace version has moved past the manifest's
- * current pin floor. Returns {} when everything already agrees.
+ * current pin floor. Returns {} when everything already agrees. The pin is a
+ * forward-floating range `>=<version> <nextMajor>.0.0` so the plugin runtime
+ * self-heals across 0.x minors (never the AISDLC-574 caret-0.x trap).
  */
 export function computeDesiredPins(repoRoot, currentRuntimeDeps) {
   const desired = {};
   for (const { pkgDir, pkgName } of SYNCED_PACKAGES) {
     const workspaceVersion = readWorkspaceVersion(repoRoot, pkgDir);
-    const newPin = `^${workspaceVersion}`;
+    const newPin = `>=${workspaceVersion} ${nextMajorUpperBound(workspaceVersion)}`;
     const currentPin = currentRuntimeDeps?.[pkgName];
     if (currentPin !== newPin) {
       desired[pkgName] = newPin;

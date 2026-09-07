@@ -56,8 +56,14 @@ fi
 # would surprise adopters whose container images don't ship it.
 #
 # Output format: one "name@version" pair per line, e.g.
-#   @ai-sdlc/pipeline-cli@^0.10.0
+#   @ai-sdlc/pipeline-cli@>=0.23.0 <1.0.0
 #   @ai-sdlc/plugin-mcp-server@0.9.2
+#
+# AISDLC-600: the pipeline-cli/orchestrator pins are forward-floating ranges
+# (">=X <1.0.0"), not carets — a caret on a 0.x version cannot resolve past
+# its own minor (the "caret-0.x trap"), so it could never self-heal forward
+# across a 0.x minor bump. See sync-plugin-runtime-deps.mjs's header comment
+# for the full rationale.
 #
 # Exits 1 with an actionable message when `runtimeDependencies` is missing or
 # empty — pre-AISDLC-441 this was the silent-no-op failure mode.
