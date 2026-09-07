@@ -123,6 +123,81 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
       'subagent should not get the lifecycle checklist',
     );
   });
+
+  // RFC-0048 Phase 1 / AISDLC-601: hard rules render from resolved governance.
+  describe('RFC-0048 governance rendering', () => {
+    let tempDirGovOnGreenClean;
+    let tempDirGovPreset;
+    let tempDirGovMalformed;
+
+    before(() => {
+      tempDirGovOnGreenClean = join(tmpdir(), `subagent-start-gov-ogc-${Date.now()}`);
+      mkdirSync(join(tempDirGovOnGreenClean, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tempDirGovOnGreenClean, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  governance:\n    allowMerge: onGreenClean\n`,
+      );
+
+      tempDirGovPreset = join(tmpdir(), `subagent-start-gov-preset-${Date.now()}`);
+      mkdirSync(join(tempDirGovPreset, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tempDirGovPreset, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  governance:\n    preset: operator-trusted\n    allowMerge: never\n`,
+      );
+
+      tempDirGovMalformed = join(tmpdir(), `subagent-start-gov-malformed-${Date.now()}`);
+      mkdirSync(join(tempDirGovMalformed, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tempDirGovMalformed, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  governance:\n    allowMerge: always\n    preset: yolo-mode\n`,
+      );
+    });
+
+    after(() => {
+      rmSync(tempDirGovOnGreenClean, { recursive: true, force: true });
+      rmSync(tempDirGovPreset, { recursive: true, force: true });
+      rmSync(tempDirGovMalformed, { recursive: true, force: true });
+    });
+
+    it('strict-by-default (no governance section) matches historical exact bullet text', () => {
+      const result = runHook(tempDirWithConfig);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('**Never merge PRs** (`gh pr merge`)'));
+      assert.ok(ctx.includes('**Never force-push** (`git push --force`/`-f`)'));
+      assert.ok(ctx.includes('**Never close PRs or issues** (`gh pr close`, `gh issue close`)'));
+      assert.ok(ctx.includes('**Never delete branches** (`git branch -D`/`-d`)'));
+      assert.ok(
+        ctx.includes(
+          '**Never run destructive git** (`git reset --hard`, `git checkout -- .`, `git restore .`)',
+        ),
+      );
+    });
+
+    it('softens only the merge bullet via allowMerge: onGreenClean, leaves the other 4 strict', () => {
+      const result = runHook(tempDirGovOnGreenClean);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('mergeStateStatus == CLEAN'));
+      assert.ok(!ctx.includes('Never merge PRs'));
+      assert.ok(ctx.includes('Never force-push'));
+      assert.ok(ctx.includes('Never close PRs or issues'));
+      assert.ok(ctx.includes('Never delete branches'));
+      assert.ok(ctx.includes('Never run destructive git'));
+    });
+
+    it('explicit granular allowMerge: never overrides the operator-trusted preset', () => {
+      const result = runHook(tempDirGovPreset);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('Never merge PRs'));
+      assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
+    });
+
+    it('fails closed to strict on malformed allowMerge value and unknown preset name', () => {
+      const result = runHook(tempDirGovMalformed);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('Never merge PRs'));
+      assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
+    });
+  });
 });
 
 describe('ai-sdlc-plugin subagent-start hook — AISDLC-568 marker writing', () => {

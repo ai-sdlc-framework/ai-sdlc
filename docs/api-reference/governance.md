@@ -45,6 +45,52 @@ spec:
     maxFilesPerChange: 15
 ```
 
+## Per-repo governance hard-rules (RFC-0048 Phase 1)
+
+`spec.governance` (sibling to `spec.constraints`) is the single per-repo source
+of truth for the injected governance hard-rule TEXT — "NEVER merge PRs", "NEVER
+force push", etc. — that Claude Code sessions and subagents see in their
+SessionStart/SubagentStart banners. All keys are optional; an ABSENT
+`governance` section resolves to strict defaults, reproducing the historical
+injected text byte-for-byte:
+
+```yaml
+spec:
+  governance:
+    preset: strict            # or: operator-trusted (sugar, see below)
+    allowMerge: never          # never | onGreenClean
+    allowForcePush: false
+    allowClosePrIssue: false
+    allowBranchDelete: false
+    allowResetHard: false
+```
+
+- **`preset: operator-trusted`** is sugar for `{ allowMerge: onGreenClean }`
+  (the rest stay strict) — a one-line opt-in for the common "let the agent
+  merge once CI is fully green" case. Explicit granular keys override the
+  preset.
+- **`allowMerge: onGreenClean`** only softens the *narration*; it does not by
+  itself grant merge capability — merge eligibility is additionally gated on
+  the work item's trust tier (internal backlog tasks vs. external
+  GitHub-sourced work) and the deterministic `merge-if-eligible` gate
+  (AISDLC-602/603, not yet implemented as of Phase 1).
+- **Fail-closed:** any unknown key, unknown preset name, or malformed value
+  (wrong type / not in the enumerated set) is ignored — the resolved value
+  falls back to whatever the preset/default already produced. Malformed
+  config can never accidentally relax a rule.
+- **Permanently fixed, not configurable through this schema:** never write
+  CI-skip magic tokens; never edit `.ai-sdlc/attestations|verdicts`; the
+  `governance` declaration itself is honored only from the repo's trusted
+  base-branch `.ai-sdlc/agent-role.yaml` — never from PR-modified content (the
+  governed party cannot relax its own rules).
+
+The resolver lives at `ai-sdlc-plugin/hooks/lib/governance-resolver.js`
+(`resolveGovernanceFromYaml`, `renderSessionStartHardRules`,
+`renderSubagentHardRules`) and is consumed by both `session-start.js` and
+`subagent-start.js` so narration never drifts between the two surfaces. See
+[RFC-0048](../../spec/rfcs/RFC-0048-per-repo-configurable-governance.md) for
+the full design and resolved Open Questions.
+
 ## Enforcement Layers
 
 ### Layer 1: Orchestrator Runtime

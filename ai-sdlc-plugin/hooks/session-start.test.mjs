@@ -124,6 +124,75 @@ describe('ai-sdlc-plugin session-start hook', () => {
     assert.equal(result.exitCode, 0, 'should exit with code 0');
   });
 
+  // RFC-0048 Phase 1 / AISDLC-601: the injected hard-rule text now RENDERS
+  // from the resolved `spec.governance` policy rather than string constants.
+  describe('RFC-0048 governance rendering', () => {
+    let tempDirGovOnGreenClean;
+    let tempDirGovPreset;
+    let tempDirGovMalformed;
+
+    before(() => {
+      tempDirGovOnGreenClean = join(tmpdir(), `session-start-gov-ogc-${Date.now()}`);
+      mkdirSync(join(tempDirGovOnGreenClean, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tempDirGovOnGreenClean, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  goal: Fix bugs\n  governance:\n    allowMerge: onGreenClean\n`,
+      );
+
+      tempDirGovPreset = join(tmpdir(), `session-start-gov-preset-${Date.now()}`);
+      mkdirSync(join(tempDirGovPreset, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tempDirGovPreset, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  goal: Fix bugs\n  governance:\n    preset: operator-trusted\n    allowMerge: never\n`,
+      );
+
+      tempDirGovMalformed = join(tmpdir(), `session-start-gov-malformed-${Date.now()}`);
+      mkdirSync(join(tempDirGovMalformed, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tempDirGovMalformed, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  goal: Fix bugs\n  governance:\n    allowMerge: always\n    preset: yolo-mode\n`,
+      );
+    });
+
+    after(() => {
+      rmSync(tempDirGovOnGreenClean, { recursive: true, force: true });
+      rmSync(tempDirGovPreset, { recursive: true, force: true });
+      rmSync(tempDirGovMalformed, { recursive: true, force: true });
+    });
+
+    it('strict-by-default (no governance section) matches the historical exact banner text', () => {
+      const result = runHook(tempDirWithConfig);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('**NEVER merge PRs. Only humans merge.**'));
+      assert.ok(ctx.includes('**NEVER close issues or PRs.**'));
+      assert.ok(ctx.includes('**NEVER force push.**'));
+    });
+
+    it('softens the merge banner via the granular allowMerge: onGreenClean key', () => {
+      const result = runHook(tempDirGovOnGreenClean);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('mergeStateStatus == CLEAN'), 'softened merge text present');
+      assert.ok(!ctx.includes('NEVER merge PRs'), 'strict merge text must not also appear');
+      // Other two rules remain strict.
+      assert.ok(ctx.includes('**NEVER close issues or PRs.**'));
+      assert.ok(ctx.includes('**NEVER force push.**'));
+    });
+
+    it('explicit granular allowMerge: never overrides the operator-trusted preset', () => {
+      const result = runHook(tempDirGovPreset);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('**NEVER merge PRs. Only humans merge.**'));
+      assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
+    });
+
+    it('fails closed to strict on malformed allowMerge value and unknown preset name', () => {
+      const result = runHook(tempDirGovMalformed);
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('**NEVER merge PRs. Only humans merge.**'));
+      assert.ok(!ctx.includes('mergeStateStatus == CLEAN'));
+    });
+  });
+
   // AISDLC-557: root-cause regression test. Pre-fix, this scenario
   // (no agent-role.yaml + a captured self-heal failure) produced ZERO
   // output — the runtime-deps warning was built into `warnings` but the

@@ -11,6 +11,10 @@
 const { readFileSync, existsSync } = require('fs');
 const { join } = require('path');
 const { execSync, spawnSync } = require('child_process');
+const {
+  resolveGovernanceFromYaml,
+  renderSessionStartHardRules,
+} = require('./lib/governance-resolver');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -208,6 +212,7 @@ const maxFiles = extractField(yaml, 'maxFilesPerChange') || '15';
 const requireTests = extractField(yaml, 'requireTests') || 'true';
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
+const resolvedGovernance = resolveGovernanceFromYaml(yaml);
 
 // ── Detect missing dev tools ─────────────────────────────────────────
 
@@ -314,9 +319,7 @@ Before EVERY commit, run these and fix any failures:
 
 AI-SDLC: \`.husky/pre-push\` runs \`pnpm -r test:coverage\` (80% threshold) as the canonical verification gate. Run the four commands above before \`git push\` to fail fast.
 
-**NEVER merge PRs. Only humans merge.**
-**NEVER close issues or PRs.**
-**NEVER force push.**${reviewPolicySummary}`;
+${renderSessionStartHardRules(resolvedGovernance)}${reviewPolicySummary}`;
 
 if (warnings.length > 0) {
   context += `\n\n### Setup Warnings\n${warnings.join('\n')}`;
