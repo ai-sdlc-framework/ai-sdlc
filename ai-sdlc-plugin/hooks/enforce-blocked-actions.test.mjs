@@ -850,6 +850,16 @@ blockedActions: []
     assert.ok(isDenied(result), 'the leading raw-merge segment must block the whole command');
   });
 
+  it('blocks the reverse order too: an arm chained BEFORE a raw merge ("gh pr merge 42 --auto && gh pr merge 42")', () => {
+    // Segments are evaluated independently, so a clean arm in an earlier
+    // segment must not launder a raw-merge segment that follows it.
+    const result = run('gh pr merge 42 --auto && gh pr merge 42');
+    assert.ok(
+      isDenied(result),
+      'a trailing raw-merge segment must block regardless of a preceding arm',
+    );
+  });
+
   it('blocks "gh pr merge 42 --body \\"--auto\\"" (--auto is a quoted arg value, not the flag)', () => {
     const result = run('gh pr merge 42 --body "--auto"');
     assert.ok(isDenied(result), 'a quoted --auto value must not be mistaken for the arming flag');

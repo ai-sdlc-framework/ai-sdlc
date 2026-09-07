@@ -212,6 +212,11 @@ function enforceMergeGovernance(trimmed) {
  * Splits a command into segments on shell control operators so a `gh pr merge`
  * embedded in a chain (`x && gh pr merge 5`) is evaluated on its own. `&&` and
  * `||` are matched before the single-char `&`/`|` forms.
+ *
+ * Note: the split runs on the RAW command, BEFORE comment stripping — so a `#`
+ * comment that itself contains `&&`/`;`/`|` splits into extra pseudo-segments.
+ * This can only ever OVER-block (an inert comment fragment is treated as its
+ * own segment), never under-block, which is the safe bias for this boundary.
  */
 function splitShellSegments(command) {
   return command
@@ -282,6 +287,11 @@ function isCleanAutoArmSegment(segment) {
     }
     if (SAFE_ARM_FLAGS.has(tok)) continue;
     if (VALUE_FLAGS.has(tok)) {
+      // Skip the next token as this flag's value WITHOUT validating it — this
+      // intentionally matches gh's own parser (it consumes the token after
+      // `-R`/`--repo` positionally as the repo value), so there is no
+      // divergence a raw merge could exploit. Segments were already split on
+      // control operators, so this can never swallow `&&`/`;`/`|`.
       i++; // consume the flag's value token
       continue;
     }
