@@ -352,10 +352,86 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
 
+  # ── Independence policy gate (RFC-0046 Phase 4, AISDLC-591) ─────────────
+  # Enforces the repo's per-repo `.ai-sdlc/independence-policy.yaml`
+  # `requiredTier` (default `none` — no behavior change) against the
+  # envelope's `overallIndependenceTier` (AISDLC-588). This is the
+  # BRANCH-PROTECTION half of the gate-topology-agnostic enforcement
+  # contract; the SAME comparison (`pipeline-cli/src/attestation/
+  # independence-policy.ts:evaluateIndependencePolicy`) is invoked by a
+  # ship-skill for procedural-gate adopters with no branch protection.
+  #
+  # Cost-conscious by construction: the FIRST step reads only the flat
+  # `requiredTier:` scalar via a grep — cheap, no pnpm install. The default
+  # `none` policy (the overwhelming majority of repos, including this one
+  # today) short-circuits immediately with zero build cost. Only an
+  # adopter who has opted INTO `attested`/`isolated` enforcement pays for
+  # the orchestrator build + verifier run below.
+  independence-policy-gate:
+    name: Independence policy gate
+    needs: detect
+    if: >-
+      needs.detect.outputs.docs_only != 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # AISDLC-591 review MAJOR (code + security): the cheap pre-check must NOT
+      # re-parse the policy YAML's tier — a bash grep/sed reader diverges from the
+      # canonical `parseIndependencePolicyYaml` (trim + last-match-wins), which can
+      # under-enforce (fail open) on a crafted/malformed-but-parseable trusted
+      # policy file. The ONLY cheap decision made here is UNAMBIGUOUS file presence;
+      # when the file exists, the single canonical CLI parser
+      # (`cli-attestation independence-policy`) decides none-vs-attested-vs-isolated
+      # and its exit code. One parser, one source of truth.
+      - name: Detect independence policy presence (cheap, no install)
+        id: policy
+        run: |
+          set -euo pipefail
+          if [ -f ".ai-sdlc/independence-policy.yaml" ]; then
+            echo "[independence-policy-gate] policy file present — deferring to canonical CLI evaluator"
+            echo "has-policy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "[independence-policy-gate] no .ai-sdlc/independence-policy.yaml — default requiredTier=none, informational only"
+            echo "has-policy=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        if: steps.policy.outputs.has-policy == 'true'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.policy.outputs.has-policy == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install + build (only when a policy file is present)
+        if: steps.policy.outputs.has-policy == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter "@ai-sdlc/orchestrator..." build
+      - name: Enforce independence policy (canonical evaluator decides requiredTier)
+        if: steps.policy.outputs.has-policy == 'true'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          node pipeline-cli/bin/cli-attestation.mjs independence-policy \
+            --head "$HEAD_SHA" \
+            --base "$BASE_SHA"
+
   pr-ready:
     name: ai-sdlc/pr-ready
     needs:
-      [detect, lint, build-test, coverage, integration, attestation-gate, dependency-review-gate]
+      [
+        detect,
+        lint,
+        build-test,
+        coverage,
+        integration,
+        attestation-gate,
+        independence-policy-gate,
+        dependency-review-gate,
+      ]
     # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
     # (per their own draft guards), `re-actors/alls-green` treats all-skipped
     # as failure → posts `ai-sdlc/pr-ready: failure` on every draft sync.
@@ -385,6 +461,7 @@ jobs:
           # in allowed-skips so that the aggregator doesn't fail on their skip:
           #   - build-test / coverage / integration: skip on docs-only PRs
           #   - attestation-gate: skips on docs-only PRs (paths-ignore)
+          #   - independence-policy-gate: skips on docs-only PRs (AISDLC-591)
           #   - dependency-review-gate: skips on non-dep PRs (deps==false)
           #
           # The skipped-job deadlock bug (discovered 2026-05-31): alls-green
@@ -397,4 +474,5 @@ jobs:
             coverage,
             integration,
             attestation-gate,
+            independence-policy-gate,
             dependency-review-gate

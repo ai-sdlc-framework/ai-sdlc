@@ -92,6 +92,7 @@ const ALLOWED_SKIPS = new Set([
   'coverage',
   'integration',
   'attestation-gate',
+  'independence-policy-gate',
   'dependency-review-gate',
 ]);
 
@@ -164,6 +165,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'coverage',
       'integration',
       'attestation-gate',
+      'independence-policy-gate',
       'dependency-review-gate',
       'pr-ready',
     ];
@@ -201,6 +203,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'coverage',
       'integration',
       'attestation-gate',
+      'independence-policy-gate',
       'dependency-review-gate',
     ]) {
       assert.ok(needs.includes(required), `pr-ready needs: ${required}`);
@@ -232,6 +235,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'coverage',
       'integration',
       'attestation-gate',
+      'independence-policy-gate',
       'dependency-review-gate',
     ]) {
       assert.ok(
@@ -259,6 +263,32 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       gate.if,
       /github\.event\.pull_request\.user\.login\s*!=\s*'dependabot\[bot\]'/,
       'attestation-gate must skip dependabot[bot] PRs (issue #791)',
+    );
+  });
+
+  it('independence-policy-gate skips on docs-only PRs (AISDLC-591)', () => {
+    const gate = workflow.jobs['independence-policy-gate'];
+    assert.ok(gate, 'independence-policy-gate job must exist');
+    assert.ok(gate.if, 'independence-policy-gate must have an if: gating expression');
+    assert.match(
+      gate.if,
+      /needs\.detect\.outputs\.docs_only\s*!=\s*'true'/,
+      'independence-policy-gate must skip docs-only PRs',
+    );
+    const needs = Array.isArray(gate.needs) ? gate.needs : [gate.needs];
+    assert.ok(
+      needs.includes('detect'),
+      'independence-policy-gate must declare needs: [detect, ...]',
+    );
+    // The enforcement step must invoke the SAME CLI surface a ship-skill
+    // would invoke for procedural-gate adopters — one comparison, two
+    // callers (RFC-0046 §Rollout / OQ-5).
+    const enforceStep = gate.steps.find((s) =>
+      String(s.run ?? '').includes('cli-attestation.mjs independence-policy'),
+    );
+    assert.ok(
+      enforceStep,
+      'independence-policy-gate must run `cli-attestation independence-policy`',
     );
   });
 
@@ -412,6 +442,7 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       coverage: { result: 'skipped' },
       integration: { result: 'skipped' },
       'attestation-gate': { result: 'skipped' },
+      'independence-policy-gate': { result: 'skipped' },
       'dependency-review-gate': { result: 'skipped' },
     };
     const decision = allsGreenDecision(needs);
@@ -420,6 +451,42 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       true,
       `expected pass on all-green-docs-only; got: ${decision.reason}`,
     );
+  });
+
+  it('AISDLC-591: independence-policy-gate failure (requiredTier shortfall) → pr-ready FAILS', () => {
+    // Mirrors a code PR where the adopter opted into `requiredTier: attested`
+    // (or stronger) and the envelope's overallIndependenceTier fell short.
+    // independence-policy-gate is NOT skipped here (it ran and failed), so
+    // alls-green must treat this as a hard failure regardless of every
+    // other job passing — the branch-protection half of the gate-topology-
+    // agnostic enforcement contract (RFC-0046 §Rollout).
+    const needs = {
+      detect: { result: 'success' },
+      lint: { result: 'success' },
+      'build-test': { result: 'success' },
+      coverage: { result: 'success' },
+      integration: { result: 'success' },
+      'attestation-gate': { result: 'success' },
+      'independence-policy-gate': { result: 'failure' },
+      'dependency-review-gate': { result: 'skipped' },
+    };
+    const decision = allsGreenDecision(needs);
+    assert.equal(decision.passed, false, 'independence-policy-gate failure must block pr-ready');
+  });
+
+  it('AISDLC-591: independence-policy-gate success (requiredTier satisfied or none) → pr-ready PASSES', () => {
+    const needs = {
+      detect: { result: 'success' },
+      lint: { result: 'success' },
+      'build-test': { result: 'success' },
+      coverage: { result: 'success' },
+      integration: { result: 'success' },
+      'attestation-gate': { result: 'success' },
+      'independence-policy-gate': { result: 'success' },
+      'dependency-review-gate': { result: 'skipped' },
+    };
+    const decision = allsGreenDecision(needs);
+    assert.equal(decision.passed, true, `expected pass; got: ${decision.reason}`);
   });
 
   it('non-dep code PR (dependency-review-gate skipped) → pr-ready PASSES', () => {
