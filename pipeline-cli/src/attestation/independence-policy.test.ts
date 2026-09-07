@@ -185,6 +185,26 @@ describe('evaluateIndependencePolicy — requiredTier: isolated (currently unsat
   });
 });
 
+describe('evaluateIndependencePolicy — unrecognized tier fails CLOSED (AISDLC-591 security review)', () => {
+  it('an unknown overallIndependenceTier does NOT silently pass (fail-open guard)', () => {
+    const outcome = evaluateIndependencePolicy({
+      requiredTier: 'attested',
+      // simulate a less-validated caller (e.g. future ship-skill) passing garbage
+      overallIndependenceTier: 'bogus' as unknown as 'none',
+    });
+    expect(outcome.status).toBe('shortfall');
+    expect(outcome.status).not.toBe('pass');
+  });
+
+  it('an unknown requiredTier fails closed to shortfall', () => {
+    const outcome = evaluateIndependencePolicy({
+      requiredTier: 'super-isolated' as unknown as 'attested',
+      overallIndependenceTier: 'isolated',
+    });
+    expect(outcome.status).toBe('shortfall');
+  });
+});
+
 describe('gate-topology-agnostic enforcement — same comparison, two call sites', () => {
   // Simulates the `ai-sdlc/pr-ready` rollup job (branch-protection repos):
   // reads the policy, evaluates, and would fail the CI job on non-pass.

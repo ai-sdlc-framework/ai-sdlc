@@ -171,6 +171,24 @@ export function evaluateIndependencePolicy(
 ): IndependencePolicyOutcome {
   const { requiredTier, overallIndependenceTier } = params;
 
+  // AISDLC-591 security review (defense-in-depth): FAIL CLOSED on any unrecognized
+  // tier value. `INDEPENDENCE_TIER_ORDER[unknown]` is `undefined` and `undefined <
+  // n` is `false`, which would otherwise silently fall through to `pass` (fail
+  // open). Not reachable via the verifier (which enum-validates
+  // overallIndependenceTier), but this function is the single source of truth the
+  // future ship-skill also calls with less-validated input — validate both inputs.
+  if (
+    INDEPENDENCE_TIER_ORDER[requiredTier] === undefined ||
+    INDEPENDENCE_TIER_ORDER[overallIndependenceTier] === undefined
+  ) {
+    return {
+      status: 'shortfall',
+      requiredTier,
+      overallIndependenceTier,
+      message: `independence policy: unrecognized tier value (requiredTier='${requiredTier}', overallIndependenceTier='${overallIndependenceTier}') — failing closed`,
+    };
+  }
+
   if (requiredTier === 'isolated' && !isolatedTierAvailable()) {
     return {
       status: 'unsatisfiable',

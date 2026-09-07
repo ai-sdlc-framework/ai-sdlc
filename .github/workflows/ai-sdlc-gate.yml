@@ -378,37 +378,39 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Read required tier (cheap, no install)
+      # AISDLC-591 review MAJOR (code + security): the cheap pre-check must NOT
+      # re-parse the policy YAML's tier — a bash grep/sed reader diverges from the
+      # canonical `parseIndependencePolicyYaml` (trim + last-match-wins), which can
+      # under-enforce (fail open) on a crafted/malformed-but-parseable trusted
+      # policy file. The ONLY cheap decision made here is UNAMBIGUOUS file presence;
+      # when the file exists, the single canonical CLI parser
+      # (`cli-attestation independence-policy`) decides none-vs-attested-vs-isolated
+      # and its exit code. One parser, one source of truth.
+      - name: Detect independence policy presence (cheap, no install)
         id: policy
         run: |
           set -euo pipefail
-          POLICY_FILE=".ai-sdlc/independence-policy.yaml"
-          REQUIRED_TIER="none"
-          if [ -f "$POLICY_FILE" ]; then
-            LINE=$(grep -m1 '^requiredTier:' "$POLICY_FILE" || true)
-            if [ -n "$LINE" ]; then
-              REQUIRED_TIER=$(echo "$LINE" | sed -E "s/^requiredTier:[[:space:]]*//; s/[\"']//g" | xargs)
-            fi
+          if [ -f ".ai-sdlc/independence-policy.yaml" ]; then
+            echo "[independence-policy-gate] policy file present — deferring to canonical CLI evaluator"
+            echo "has-policy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "[independence-policy-gate] no .ai-sdlc/independence-policy.yaml — default requiredTier=none, informational only"
+            echo "has-policy=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "[independence-policy-gate] requiredTier=${REQUIRED_TIER:-none}"
-          echo "required-tier=${REQUIRED_TIER:-none}" >> "$GITHUB_OUTPUT"
-      - name: 'Pass immediately (requiredTier: none — informational only)'
-        if: steps.policy.outputs.required-tier == 'none' || steps.policy.outputs.required-tier == ''
-        run: echo "[independence-policy-gate] requiredTier=none — informational only, no enforcement"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        if: steps.policy.outputs.required-tier != 'none' && steps.policy.outputs.required-tier != ''
+        if: steps.policy.outputs.has-policy == 'true'
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: steps.policy.outputs.required-tier != 'none' && steps.policy.outputs.required-tier != ''
+        if: steps.policy.outputs.has-policy == 'true'
         with:
           node-version: 22
           cache: pnpm
-      - name: Install + build (only when policy requires enforcement)
-        if: steps.policy.outputs.required-tier != 'none' && steps.policy.outputs.required-tier != ''
+      - name: Install + build (only when a policy file is present)
+        if: steps.policy.outputs.has-policy == 'true'
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter "@ai-sdlc/orchestrator..." build
-      - name: Enforce independence policy
-        if: steps.policy.outputs.required-tier != 'none' && steps.policy.outputs.required-tier != ''
+      - name: Enforce independence policy (canonical evaluator decides requiredTier)
+        if: steps.policy.outputs.has-policy == 'true'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
