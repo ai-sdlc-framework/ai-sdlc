@@ -119,6 +119,29 @@ function installConsumerPushPath(root) {
   writeFileSync(join(root, '.husky', 'pre-push'), '#!/usr/bin/env bash\nnpx lint-staged\n');
 }
 
+/**
+ * Install a `.husky/pre-push` that ONLY mentions check-attestation-sign.sh in
+ * a comment (or a dead/disabled `#`-prefixed line) — never actually invokes
+ * it. MAJOR #2 round-2 review fix: a literal substring grep without comment
+ * stripping would false-positive this as "monorepo owns signing", causing
+ * BOTH this script AND the (non-existent) hook to skip signing — the exact
+ * silent-no-envelope failure this script exists to prevent.
+ */
+function installCommentOnlyMentionPushPath(root) {
+  mkdirSync(join(root, '.husky'), { recursive: true });
+  writeFileSync(
+    join(root, '.husky', 'pre-push'),
+    [
+      '#!/usr/bin/env bash',
+      '# This repo used to run scripts/check-attestation-sign.sh here, but we',
+      '# disabled it — see the incident writeup.',
+      '# ./scripts/check-attestation-sign.sh',
+      'npx lint-staged',
+      '',
+    ].join('\n'),
+  );
+}
+
 function installFakeSigner(root, { fail = false, valid = true } = {}) {
   const binDir = join(root, 'bin');
   mkdirSync(binDir, { recursive: true });
@@ -274,6 +297,29 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
       );
       assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore, 'no commit must land');
     });
+
+    it('MAJOR #2: a comment-only mention of check-attestation-sign.sh is treated as CONSUMER, not monorepo', () => {
+      installCommentOnlyMentionPushPath(root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(root, 'AISDLC-598');
+
+      const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+      const { cmd: verifyCmd } = installFakeVerifier(root, { valid: true });
+
+      const r = runScript(root, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+
+      assert.equal(r.status, 0, `expected 0 (signed as consumer), got ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /consumer-style push path/i);
+      assert.equal(
+        existsSync(signLog),
+        true,
+        'signer MUST run — a comment-only mention must not be treated as a live signer reference',
+      );
+    });
   });
 
   describe('consumer push path — signs in-process', () => {
@@ -344,7 +390,7 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
       assert.match(r.stderr, /no attestation needed yet/i);
     });
 
-    it('is idempotent — exits 0 without re-signing when the envelope already exists at HEAD', () => {
+    it('is idempotent — exits 0 without re-signing when the existing envelope re-verifies valid', () => {
       installConsumerPushPath(root);
       writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
       writeVerdictFile(root, 'AISDLC-598');
@@ -354,13 +400,60 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
       writeFileSync(join(attDir, `${head}.v6.dsse.json`), '{"existing":true}\n');
 
       const { cmd, logPath } = installFakeSigner(root, { fail: true });
+      const { cmd: verifyCmd } = installFakeVerifier(root, { valid: true });
       const r = runScript(root, {
         AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
         AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
       });
 
       assert.equal(r.status, 0, `expected 0 (idempotent), got ${r.status}: ${r.stderr}`);
-      assert.equal(existsSync(logPath), false, 'signer must NOT run when already signed');
+      assert.equal(existsSync(logPath), false, 'signer must NOT run when already signed and valid');
+    });
+
+    it('MINOR #3: a retry after a previously-failed self-verify does NOT silently pass', () => {
+      // Simulate the failure mode from the round-2 review: run 1 signed an
+      // envelope, self-verify failed (exit 1), the bad envelope + chore
+      // commit are already on disk. Run 2 must NOT see "envelope exists" and
+      // short-circuit to success without re-verifying.
+      installConsumerPushPath(root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(root, 'AISDLC-598');
+      const head = git(['rev-parse', 'HEAD'], root).trim();
+      const attDir = join(root, '.ai-sdlc', 'attestations');
+      mkdirSync(attDir, { recursive: true });
+      const badEnvelopePath = join(attDir, `${head}.v6.dsse.json`);
+      writeFileSync(badEnvelopePath, '{"existing":true,"bad":true}\n');
+
+      // The signer would succeed if re-invoked (fail:false); the verifier
+      // reports invalid, matching the "run 1 failed self-verify" scenario.
+      const { cmd: signCmd, logPath: signLog } = installFakeSigner(root, { fail: false });
+      const { cmd: verifyCmd, logPath: verifyLog } = installFakeVerifier(root, { valid: false });
+
+      const r = runScript(root, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+
+      assert.notEqual(
+        r.status,
+        0,
+        'must NOT silently pass when the existing envelope fails re-verify',
+      );
+      assert.equal(
+        existsSync(verifyLog),
+        true,
+        'verifier must have run against the pre-existing envelope',
+      );
+      assert.match(r.stderr, /FAILED re-verification|FAILED self-verification/i);
+      // The bad envelope must have been removed and a fresh sign attempted
+      // (proving this is a real retry, not a rubber-stamp).
+      assert.equal(
+        existsSync(signLog),
+        true,
+        'signer must have been re-invoked after the bad envelope was removed',
+      );
     });
 
     it('AC #3: aborts non-zero with an actionable message when self-verify is red', () => {
@@ -454,6 +547,98 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
       assert.match(r.stderr, /AI_SDLC_ALLOW_SIGNER_OVERRIDE/);
       assert.equal(existsSync(logPath), false, 'the substitute signer must NOT have run');
       assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore);
+    });
+  });
+
+  describe('security: verifier override gate (MAJOR #1, round-2 review)', () => {
+    it('(a) REFUSES to run a substitute verifier when the allow-flag is absent', () => {
+      // Isolate the verifier gate by hitting it via the idempotency
+      // short-circuit path (existing envelope), which calls run_self_verify
+      // WITHOUT ever needing the signer override at all.
+      installConsumerPushPath(root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(root, 'AISDLC-598');
+      const head = git(['rev-parse', 'HEAD'], root).trim();
+      const attDir = join(root, '.ai-sdlc', 'attestations');
+      mkdirSync(attDir, { recursive: true });
+      writeFileSync(join(attDir, `${head}.v6.dsse.json`), '{"existing":true}\n');
+
+      const { cmd: verifyCmd, logPath: verifyLog } = installFakeVerifier(root, { valid: true });
+
+      // No AI_SDLC_ALLOW_SIGNER_OVERRIDE set at all.
+      const r = runScript(root, {
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+
+      assert.equal(r.status, 2, `expected refusal exit 2, got ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /AI_SDLC_VERIFY_ATTESTATION_CMD/);
+      assert.match(r.stderr, /AI_SDLC_ALLOW_SIGNER_OVERRIDE/);
+      assert.equal(existsSync(verifyLog), false, 'the substitute verifier must NOT have run');
+    });
+
+    it('(b) honors the substitute verifier when AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 is set', () => {
+      installConsumerPushPath(root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(root, 'AISDLC-598');
+      const head = git(['rev-parse', 'HEAD'], root).trim();
+      const attDir = join(root, '.ai-sdlc', 'attestations');
+      mkdirSync(attDir, { recursive: true });
+      writeFileSync(join(attDir, `${head}.v6.dsse.json`), '{"existing":true}\n');
+
+      const { cmd: verifyCmd, logPath: verifyLog } = installFakeVerifier(root, { valid: true });
+
+      const r = runScript(root, {
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+
+      assert.equal(r.status, 0, `expected 0 (idempotent + verified), got ${r.status}: ${r.stderr}`);
+      assert.equal(existsSync(verifyLog), true, 'the substitute verifier MUST have run');
+    });
+  });
+
+  describe('suggestion #4: default branch auto-detection', () => {
+    it('resolves the base ref via refs/remotes/origin/HEAD when set (not hardcoded origin/main)', () => {
+      // Set up a repo whose default branch is `trunk`, not `main`, and point
+      // refs/remotes/origin/HEAD at it the way a real `git clone` would.
+      const trunkRoot = mkdtempSync(join(tmpdir(), 'ai-sdlc-sign-if-consumer-trunk-'));
+      git(['init', '-q', '-b', 'trunk'], trunkRoot);
+      git(['config', 'user.email', 'test@test.com'], trunkRoot);
+      git(['config', 'user.name', 'test'], trunkRoot);
+      git(['config', 'commit.gpgsign', 'false'], trunkRoot);
+      writeFileSync(join(trunkRoot, 'README.md'), 'baseline\n');
+      git(['add', '.'], trunkRoot);
+      git(['commit', '-q', '-m', 'baseline'], trunkRoot);
+      git(['update-ref', 'refs/remotes/origin/trunk', 'HEAD'], trunkRoot);
+      git(['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], trunkRoot);
+
+      installConsumerPushPath(trunkRoot);
+      writeFileSync(join(trunkRoot, '.active-task'), 'AISDLC-598\n');
+      writeVerdictFile(trunkRoot, 'AISDLC-598');
+
+      const { cmd: signCmd, logPath: signLog } = installFakeSigner(trunkRoot);
+      const { cmd: verifyCmd } = installFakeVerifier(trunkRoot, { valid: true });
+
+      const r = runScript(trunkRoot, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+
+      try {
+        assert.equal(
+          r.status,
+          0,
+          `expected 0 on a trunk-default repo, got ${r.status}: ${r.stderr}`,
+        );
+        assert.equal(
+          existsSync(signLog),
+          true,
+          'signer must have run against the trunk-based repo',
+        );
+      } finally {
+        rmSync(trunkRoot, { recursive: true, force: true });
+      }
     });
   });
 });
