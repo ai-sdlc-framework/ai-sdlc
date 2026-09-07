@@ -5,6 +5,19 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.19.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.18.0...ai-sdlc-plugin-v0.19.0) (2026-09-07)
+
+
+### Features
+
+* /ai-sdlc execute — sign v6 attestation in-process on consumer repos (AISDLC-598) ([#1034](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1034)) ([0779808](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0779808614efbd6b3da5dbe38d78d36f42d0db36))
+* coordinator persists reviewer transcripts/verdicts under .ai-sdlc/ (AISDLC-599) ([#1038](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1038)) ([66638dd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/66638dd993fdf871633263a224d34404b21dce73))
+
+
+### Bug Fixes
+
+* float plugin runtime-dep pins forward past caret-0.x trap (AISDLC-600) ([#1033](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1033)) ([a2ffbe6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a2ffbe657f55081d230c248a21e0d56ac7440887))
+
 ## [0.18.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.17.0...ai-sdlc-plugin-v0.18.0) (2026-09-06)
 
 
