@@ -56,6 +56,12 @@ test('pre-push enables pipefail only behind a capability guard', () => {
  * the `fi` that closes the pipefail guard) and execute it under the given shell,
  * asserting it exits 0 with no "Illegal option" error. This is the runtime proof
  * that the preamble is safe under a pipefail-less POSIX shell.
+ *
+ * NOTE: extraction is coupled to the guard's exact multi-line shape
+ * (`set -eu` … `if (set -o pipefail) …; then` … standalone `fi`). If the guard
+ * is reformatted (collapsed to one line / reindented) the `assert.ok` checks
+ * below THROW rather than false-pass — so this is fail-closed, but a maintainer
+ * changing the guard's formatting must update this extractor too.
  */
 function runPreambleUnder(shell) {
   const start = lines.findIndex((l) => /^set -eu\b/.test(l));
