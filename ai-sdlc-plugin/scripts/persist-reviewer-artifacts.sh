@@ -125,10 +125,22 @@ if [ ! -d "$CLAUDE_PROJECTS_DIR" ]; then
   exit 2
 fi
 
-# mtime accessor differs between BSD stat (macOS) and GNU stat (Linux) —
-# detect once and use whichever flavor works.
+# mtime accessor differs between GNU stat (Linux: -c '%Y') and BSD stat
+# (macOS: -f '%m'). We can't rely on `stat -f '%m' || stat -c '%Y'` because on
+# Linux `stat -f` means --file-system and exits 0 with NON-mtime output (so the
+# `||` fallback never fires and the value isn't a clean epoch integer, breaking
+# the `-gt` comparison with "integer expression expected"). Instead: try GNU
+# first, validate the result is all-digits, else try BSD, validate again, else 0.
 _mtime_of() {
-  stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
+  local m
+  m=$(stat -c '%Y' "$1" 2>/dev/null)
+  case "$m" in
+    '' | *[!0-9]*) m=$(stat -f '%m' "$1" 2>/dev/null) ;;
+  esac
+  case "$m" in
+    '' | *[!0-9]*) m=0 ;;
+  esac
+  printf '%s' "$m"
 }
 
 TRANSCRIPT_SRC=""
