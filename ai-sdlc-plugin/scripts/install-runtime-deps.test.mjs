@@ -244,7 +244,7 @@ describe('plugin manifests — runtimeDependencies must not drift (AISDLC-554)',
   });
 });
 
-describe('plugin manifests — runtimeDependencies pins must not lag the workspace (AISDLC-574)', () => {
+describe('plugin manifests — runtimeDependencies pins must not lag the workspace (AISDLC-574 / AISDLC-600)', () => {
   // AISDLC-574 root cause: runtimeDependencies pinned @ai-sdlc/orchestrator and
   // @ai-sdlc/pipeline-cli at ^0.14.0 — a caret-on-0.x range that resolves ONLY
   // to 0.14.x — while the workspace packages moved to 0.19.0. 0.14.0 has no
@@ -252,6 +252,12 @@ describe('plugin manifests — runtimeDependencies pins must not lag the workspa
   // adopter's signed leaves silently read self-authored. This test fails
   // whenever the pin's minimum resolvable version falls behind the workspace
   // package's own version, catching the drift class before it ships again.
+  //
+  // AISDLC-600: the pin format itself changed from a caret (`^X`, which
+  // cannot float across a 0.x minor bump — the "caret-0.x trap") to a
+  // forward-floating compound range (`>=X <1.0.0`). This test now also
+  // asserts the pin is NOT a caret, so a future regression back to `^X`
+  // fails loudly even if the floor version still happens to match.
   const repoRoot = join(__dirname, '..', '..');
   const pluginRoot = join(repoRoot, 'ai-sdlc-plugin');
   const topLevel = JSON.parse(readFileSync(join(pluginRoot, 'plugin.json'), 'utf-8'));
@@ -269,22 +275,15 @@ describe('plugin manifests — runtimeDependencies pins must not lag the workspa
     return parts;
   }
 
-  /** Strip a leading ^ or >= from a simple single-range pin to its floor version. */
+  /**
+   * Extract the floor version from a pin. Handles a compound range
+   * (">=X <Y", take the first whitespace-delimited token) as well as a
+   * legacy single-token pin (`^X`, `~X`, `>=X`, or bare `X`).
+   */
   function pinFloor(pin) {
-    const stripped = String(pin)
-      .replace(/^[\^~]/, '')
-      .replace(/^>=\s*/, '');
+    const firstToken = String(pin).trim().split(/\s+/)[0];
+    const stripped = firstToken.replace(/^[\^~]/, '').replace(/^>=\s*/, '');
     return parseVersion(stripped);
-  }
-
-  /** Does `version` satisfy caret-on-0.x semantics (>=floor, <next-minor)? */
-  function satisfiesCaretZero(version, floor) {
-    if (floor[0] !== 0) {
-      // Not the 0.x caret case this repo relies on — compare >= only.
-      return compareVersions(version, floor) >= 0;
-    }
-    if (version[0] !== 0 || version[1] !== floor[1]) return false;
-    return version[2] >= floor[2];
   }
 
   function compareVersions(a, b) {
@@ -310,10 +309,26 @@ describe('plugin manifests — runtimeDependencies pins must not lag the workspa
         assert.ok(pin, `${label} must declare ${pkgName} in runtimeDependencies`);
         const floor = pinFloor(pin);
         assert.ok(
-          satisfiesCaretZero(workspaceVersion, floor),
+          compareVersions(workspaceVersion, floor) >= 0,
           `${label} pins ${pkgName} at "${pin}" (floor ${floor.join('.')}), which does not ` +
             `resolve to the current workspace version ${workspaceVersion.join('.')} — the pin ` +
             `has drifted behind the released runtime (AISDLC-574)`,
+        );
+      }
+    });
+
+    it(`${pkgName} runtimeDependencies pin is a forward-floating range, not a caret (AISDLC-600)`, () => {
+      for (const [label, manifest] of [
+        ['plugin.json', topLevel],
+        ['.claude-plugin/plugin.json', marketplace],
+      ]) {
+        const pin = manifest.runtimeDependencies?.[pkgName];
+        assert.ok(pin, `${label} must declare ${pkgName} in runtimeDependencies`);
+        assert.ok(
+          !pin.startsWith('^'),
+          `${label} pins ${pkgName} at "${pin}" using a caret — carets on a 0.x version ` +
+            `cannot float across a minor bump (the AISDLC-600 caret-0.x trap). Use a ` +
+            `forward-floating range like ">=X.Y.0 <1.0.0" instead.`,
         );
       }
     });
@@ -921,6 +936,49 @@ describe('install-runtime-deps.sh — version convergence on stale installs (AIS
     assert.equal(exitCode, 0, `must fail open, not fail closed; stderr=${stderr}`);
     assert.match(stderr, /already installed/);
     assert.doesNotMatch(stderr, /upgrading/);
+  });
+
+  it('upgrades correctly when the pin is a compound range containing a space (AISDLC-600)', () => {
+    // Reproduces the forward-floating pin format (">=X <1.0.0") end-to-end
+    // through the real script — proves the space embedded in the pin does
+    // not get misparsed anywhere in the tab-delimited stale-check handoff
+    // or in the final `npm install name@pin` invocation.
+    const pluginDir = join(workDir, 'compound-range-pin-upgrade');
+    const compoundPin = '>=0.23.0 <1.0.0';
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': compoundPin,
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.23.0');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({
+      writeEntryPoints: true,
+      viewVersions: {
+        [`@ai-sdlc/pipeline-cli@${compoundPin}`]: '0.24.0',
+        '@ai-sdlc/plugin-mcp-server@0.9.2': '0.9.2',
+        '@ai-sdlc/orchestrator@^0.14.0': '0.14.0',
+      },
+    });
+    const { exitCode, stderr, invocations } = runScript({ pluginDir, npmBinDir: binDir, logFile });
+
+    assert.equal(exitCode, 0, `must converge and exit 0; stderr=${stderr}`);
+    assert.match(
+      stderr,
+      /upgrading @ai-sdlc\/pipeline-cli 0\.23\.0 -> 0\.24\.0 to satisfy pin >=0\.23\.0 <1\.0\.0/,
+      'must print the full compound-range pin intact, not truncated at the space',
+    );
+    assert.ok(
+      invocations.some((inv) => inv.args.includes(`@ai-sdlc/pipeline-cli@${compoundPin}`)),
+      'must re-invoke npm install with the exact compound-range spec as a single arg',
+    );
   });
 
   it('a pre-existing .ai-sdlc-installed sentinel file has no bearing on the version-convergence check', () => {

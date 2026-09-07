@@ -111,25 +111,36 @@ describe('computeDesiredPins', () => {
       '@ai-sdlc/pipeline-cli': '^0.14.0',
     });
     assert.deepEqual(desired, {
-      '@ai-sdlc/orchestrator': '^0.19.0',
-      '@ai-sdlc/pipeline-cli': '^0.19.0',
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
     });
   });
 
-  it('returns {} when pins already match the workspace version', () => {
+  it('returns {} when pins already match the workspace version (forward-floating format)', () => {
     const desired = computeDesiredPins(root, {
-      '@ai-sdlc/orchestrator': '^0.19.0',
-      '@ai-sdlc/pipeline-cli': '^0.19.0',
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
     });
     assert.deepEqual(desired, {});
   });
 
-  it('flags only the package that drifted', () => {
+  it('flags a package still pinned in the legacy caret format even when the floor matches (AISDLC-600)', () => {
+    // The caret string itself is the caret-0.x trap this task closes — even
+    // when its floor equals the workspace version, it must be rewritten to
+    // the forward-floating range so future 0.x minors self-heal.
     const desired = computeDesiredPins(root, {
       '@ai-sdlc/orchestrator': '^0.19.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
+    });
+    assert.deepEqual(desired, { '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0' });
+  });
+
+  it('flags only the package that drifted', () => {
+    const desired = computeDesiredPins(root, {
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
       '@ai-sdlc/pipeline-cli': '^0.14.0',
     });
-    assert.deepEqual(desired, { '@ai-sdlc/pipeline-cli': '^0.19.0' });
+    assert.deepEqual(desired, { '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0' });
   });
 });
 
@@ -147,13 +158,13 @@ describe('applyPinsToManifest', () => {
   it('rewrites the pin and preserves other fields', () => {
     const manifestPath = join(root, 'ai-sdlc-plugin', 'plugin.json');
     const changed = applyPinsToManifest(manifestPath, {
-      '@ai-sdlc/orchestrator': '^0.19.0',
-      '@ai-sdlc/pipeline-cli': '^0.19.0',
+      '@ai-sdlc/orchestrator': '>=0.19.0 <1.0.0',
+      '@ai-sdlc/pipeline-cli': '>=0.19.0 <1.0.0',
     });
     assert.equal(changed, true);
     const rewritten = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '^0.19.0');
-    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '^0.19.0');
+    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.19.0 <1.0.0');
+    assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.19.0 <1.0.0');
     assert.equal(rewritten.runtimeDependencies['@ai-sdlc/plugin-mcp-server'], '0.9.2');
     assert.equal(rewritten.name, 'ai-sdlc');
   });
@@ -209,14 +220,14 @@ describe('CLI end-to-end (--check and write modes)', () => {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       const desired = computeDesiredPins(root, manifest.runtimeDependencies);
       assert.deepEqual(desired, {
-        '@ai-sdlc/orchestrator': '^0.20.5',
-        '@ai-sdlc/pipeline-cli': '^0.20.5',
+        '@ai-sdlc/orchestrator': '>=0.20.5 <1.0.0',
+        '@ai-sdlc/pipeline-cli': '>=0.20.5 <1.0.0',
       });
       const changed = applyPinsToManifest(manifestPath, desired);
       assert.equal(changed, true);
       const rewritten = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '^0.20.5');
-      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '^0.20.5');
+      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/orchestrator'], '>=0.20.5 <1.0.0');
+      assert.equal(rewritten.runtimeDependencies['@ai-sdlc/pipeline-cli'], '>=0.20.5 <1.0.0');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -14,12 +14,26 @@
  * it reads the CURRENT workspace package.json versions for
  * @ai-sdlc/orchestrator and @ai-sdlc/pipeline-cli (source of truth — the
  * same files release-please bumps directly) and rewrites the
- * `runtimeDependencies` pin for each to `^<version>` in both plugin
+ * `runtimeDependencies` pin for each to `>=<version> <1.0.0` in both plugin
  * manifests, in place, only when the pin's floor differs from the
  * workspace version. Run it after `release-please-action` creates a
  * release (i.e. once orchestrator/pipeline-cli versions have already been
  * bumped by release-please itself) — see the `sync-plugin-runtime-deps`
  * job in .github/workflows/release.yml.
+ *
+ * AISDLC-600: the pin is a forward-floating range (`>=X <1.0.0`), NOT a
+ * caret (`^X`). A caret on a 0.x version resolves to `>=X.Y.0 <X.(Y+1).0` —
+ * it CANNOT float across a minor bump. That "caret-0.x trap" meant a
+ * plugin install could never self-heal forward to a newer 0.x minor release
+ * without this script re-running and rewriting the manifests, so an
+ * adopter running an older plugin snapshot was permanently stuck on an
+ * older runtime — unable to produce newer verdict/attestation tiers
+ * (e.g. RFC-0047's `independent` tier, shipped in 0.23.0) even after the
+ * runtime itself published a fix. The forward-floating range lets
+ * `install-runtime-deps.sh` / `check-stale-runtime-deps.mjs` self-heal to
+ * any published 0.x version without waiting on a manifest rewrite, while
+ * still refusing an eventual 1.0.0+ major (which may carry breaking
+ * changes this pin was never vetted against).
  *
  * Usage:
  *   node scripts/sync-plugin-runtime-deps.mjs           # write mode (default)
@@ -72,7 +86,7 @@ export function computeDesiredPins(repoRoot, currentRuntimeDeps) {
   const desired = {};
   for (const { pkgDir, pkgName } of SYNCED_PACKAGES) {
     const workspaceVersion = readWorkspaceVersion(repoRoot, pkgDir);
-    const newPin = `^${workspaceVersion}`;
+    const newPin = `>=${workspaceVersion} <1.0.0`;
     const currentPin = currentRuntimeDeps?.[pkgName];
     if (currentPin !== newPin) {
       desired[pkgName] = newPin;
