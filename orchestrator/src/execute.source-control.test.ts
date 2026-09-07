@@ -479,6 +479,94 @@ describe('options.sourceControl injection wins over AdapterBinding (AISDLC-530 A
   });
 });
 
+// ── AISDLC issue #1037: createBranch must fork from spec.branching.targetBranch ──
+//
+// Regression coverage for https://github.com/ai-sdlc-framework/ai-sdlc/issues/1037:
+// createBranch was always forking the issue branch from `main`, ignoring
+// spec.branching.targetBranch (used correctly by createPR as the PR base). This
+// broke gitflow/`develop`-based repos.
+
+describe('createBranch forks from spec.branching.targetBranch (issue #1037)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.GITHUB_TOKEN = 'dummy-test-token';
+    process.env.GITLAB_TOKEN = 'dummy-gitlab-token';
+  });
+
+  afterEach(async () => {
+    await Promise.resolve();
+  });
+
+  it('passes `from` equal to spec.branching.targetBranch when it is set (AC #1, #2)', async () => {
+    const { loadConfigAsync } = await import('./config.js');
+    const baseConfig = await loadConfigAsync(CONFIG_DIR);
+    if (!baseConfig.pipeline) {
+      throw new Error('test fixture missing base pipeline.yaml');
+    }
+    const pipelineOverride = structuredClone(baseConfig.pipeline);
+    pipelineOverride.spec.branching = {
+      ...pipelineOverride.spec.branching,
+      pattern: pipelineOverride.spec.branching?.pattern ?? 'ai-sdlc/issue-{issueNumber}',
+      targetBranch: 'develop',
+    };
+
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = createLocalSourceControl();
+    const createBranchSpy = vi.spyOn(sc, 'createBranch');
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const log = makeSilentLogger();
+
+    await executePipeline('530', {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/local-1037-develop-test',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      logger: log,
+      pipelineOverride,
+    });
+
+    expect(createBranchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: 'develop' }));
+  });
+
+  it('defaults `from` to "main" when spec.branching.targetBranch is unset (AC #4 — no regression)', async () => {
+    const { loadConfigAsync } = await import('./config.js');
+    const baseConfig = await loadConfigAsync(CONFIG_DIR);
+    if (!baseConfig.pipeline) {
+      throw new Error('test fixture missing base pipeline.yaml');
+    }
+    const pipelineOverride = structuredClone(baseConfig.pipeline);
+    pipelineOverride.spec.branching = {
+      pattern: pipelineOverride.spec.branching?.pattern ?? 'ai-sdlc/issue-{issueNumber}',
+      // targetBranch intentionally omitted
+    };
+
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = createLocalSourceControl();
+    const createBranchSpy = vi.spyOn(sc, 'createBranch');
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const log = makeSilentLogger();
+
+    await executePipeline('530', {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/local-1037-default-test',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      logger: log,
+      pipelineOverride,
+    });
+
+    expect(createBranchSpy).toHaveBeenCalledWith(expect.objectContaining({ from: 'main' }));
+  });
+});
+
 // Note: The real-git-repo integration test (git checkout -b fix) lives in a
 // separate file — execute.local-branch.test.ts — because this file uses a
 // module-level vi.mock('node:child_process') that cannot be undone per-describe.
