@@ -105,6 +105,23 @@ describe('evaluateMergeEligibility', () => {
     expect(result.reason).toMatch(/Backlog Drift=FAILURE/);
   });
 
+  it('refuses when a required check is still PENDING/queued (not yet SUCCESS)', () => {
+    // A merge-authorization gate must treat an unfinished check as not-green
+    // (fail-closed) — a queued check that later fails would otherwise slip a
+    // premature merge through. Only an exact SUCCESS is green.
+    const result = evaluateMergeEligibility({
+      policy: GREEN_CLEAN_POLICY,
+      sourceKind: 'backlog',
+      mergeStateStatus: 'CLEAN',
+      requiredChecks: [
+        { name: 'ci', state: 'SUCCESS' },
+        { name: 'ai-sdlc/pr-ready', state: 'PENDING' },
+      ],
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toMatch(/ai-sdlc\/pr-ready=PENDING/);
+  });
+
   it('refuses when mergeStateStatus is not CLEAN', () => {
     const result = evaluateMergeEligibility({
       policy: GREEN_CLEAN_POLICY,
