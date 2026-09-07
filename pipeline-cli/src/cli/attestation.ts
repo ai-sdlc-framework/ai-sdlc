@@ -968,7 +968,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           process.exitCode = out.status === 'valid' ? 0 : 1;
         },
       )
-      // ── independence-policy (RFC-0046 Phase 4, AISDLC-591) ─────────────────────
+      // ── independence-policy (RFC-0046 Phase 4/AISDLC-591, RFC-0047 Phase 5/AISDLC-597) ──
       .command(
         'independence-policy',
         "Run the same verifier as `verify`, then compare the envelope's " +
@@ -977,11 +977,13 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           'behavior change). Gate-topology-agnostic (RFC-0046 §Rollout / OQ-5): this is ' +
           'the SAME comparison invoked both by the `ai-sdlc/pr-ready` rollup ' +
           '(branch-protection repos) and by a ship-skill (procedural-gate repos, e.g. ' +
-          'local-trades, before shipping). `requiredTier: isolated` is currently ' +
-          'unsatisfiable regardless of the claimed tier (RFC-0047 / AISDLC-597 flips the ' +
-          'capability). Prints `overallIndependenceTier=`, `requiredTier=`, ' +
+          'local-trades, before shipping). `requiredTier: isolated` is now satisfiable ' +
+          '(RFC-0047 / AISDLC-597 flipped the capability once the isolated producer + ' +
+          'ci-only verifier path landed) — it is compared via the same tier order as ' +
+          '`none`/`attested`. Prints `overallIndependenceTier=`, `requiredTier=`, ' +
           '`policyOutcome=pass|shortfall|unsatisfiable`, `policyMessage=`. Exits non-zero ' +
-          'when the envelope itself is invalid OR the policy outcome is not `pass`.',
+          'when the envelope itself is invalid, the policy config is malformed, OR the ' +
+          'policy outcome is not `pass`.',
         (y: Argv) =>
           y
             .option('head', {
@@ -1036,7 +1038,22 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // a higher tier than the verifier actually reported.
           const overallIndependenceTier = (out.overallIndependenceTier ??
             'none') as IndependenceTier;
-          const policy = loadIndependencePolicy({ repoRoot });
+
+          let policy: ReturnType<typeof loadIndependencePolicy>;
+          try {
+            policy = loadIndependencePolicy({ repoRoot });
+          } catch (err) {
+            // A malformed `.ai-sdlc/independence-policy.yaml` must fail
+            // CLOSED (non-zero exit), never silently downgrade to
+            // `requiredTier: none` — matches `loadIndependencePolicy`'s own
+            // "fail loud" contract for an unrecognized tier value.
+            process.stderr.write(
+              `ERROR: independence-policy: failed to load policy config: ` +
+                `${err instanceof Error ? err.message : String(err)}\n`,
+            );
+            process.exitCode = 1;
+            return;
+          }
           const outcome = evaluateIndependencePolicy({
             requiredTier: policy.requiredTier,
             overallIndependenceTier,

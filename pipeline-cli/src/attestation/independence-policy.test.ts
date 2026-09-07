@@ -6,8 +6,10 @@
  *   - tier ordering + shortfall detection
  *   - `requiredTier: none` (default) — no behavior change (regression guard)
  *   - `requiredTier: attested` — blocks on `none`, passes on `attested`/`isolated`
- *   - `requiredTier: isolated` — unsatisfiable while `isolatedTierAvailable()`
- *     is `false` (current state; AISDLC-597 will add the satisfiable case)
+ *   - `requiredTier: isolated` — satisfiable now that `isolatedTierAvailable()`
+ *     is `true` (AISDLC-597); the `isAvailable` injection param on
+ *     `evaluateIndependencePolicy` still lets this suite exercise the
+ *     `unsatisfiable` branch hermetically, without a second scattered switch
  *   - policy file loader (missing file, flat YAML parse, malformed value)
  *   - the SAME `evaluateIndependencePolicy()` call exercised from two call
  *     sites, simulating the branch-protection (`ai-sdlc/pr-ready`) and
@@ -36,9 +38,9 @@ describe('INDEPENDENCE_TIER_ORDER — tier ordering', () => {
   });
 });
 
-describe('isolatedTierAvailable — capability switch (AISDLC-591 stub, AISDLC-597 flips)', () => {
-  it('returns false — isolated tier producer not yet wired into policy enforcement', () => {
-    expect(isolatedTierAvailable()).toBe(false);
+describe('isolatedTierAvailable — capability switch (AISDLC-597 flip)', () => {
+  it('returns true — isolated tier producer (AISDLC-596) + ci-only verifier (AISDLC-595) are wired', () => {
+    expect(isolatedTierAvailable()).toBe(true);
   });
 });
 
@@ -162,25 +164,55 @@ describe('evaluateIndependencePolicy — requiredTier: attested', () => {
   });
 });
 
-describe('evaluateIndependencePolicy — requiredTier: isolated (currently unsatisfiable)', () => {
-  it('reports unsatisfiable even when overallIndependenceTier already claims isolated', () => {
-    // AISDLC-597 will add the satisfiable case once isolatedTierAvailable()
-    // flips true; until then, even a claimed 'isolated' envelope must NOT
-    // be credited — a forged or stale claim must never satisfy an
-    // unsatisfiable policy.
+describe('evaluateIndependencePolicy — requiredTier: isolated (satisfiable, AISDLC-597)', () => {
+  it('passes when overallIndependenceTier is isolated', () => {
     const outcome = evaluateIndependencePolicy({
       requiredTier: 'isolated',
       overallIndependenceTier: 'isolated',
     });
+    expect(outcome.status).toBe('pass');
+  });
+
+  it('reports shortfall (blocks) when overallIndependenceTier is attested', () => {
+    const outcome = evaluateIndependencePolicy({
+      requiredTier: 'isolated',
+      overallIndependenceTier: 'attested',
+    });
+    expect(outcome.status).toBe('shortfall');
+    expect(outcome.message).toMatch(/shortfall/);
+  });
+
+  it('reports shortfall (blocks) when overallIndependenceTier is none', () => {
+    const outcome = evaluateIndependencePolicy({
+      requiredTier: 'isolated',
+      overallIndependenceTier: 'none',
+    });
+    expect(outcome.status).toBe('shortfall');
+  });
+});
+
+describe('evaluateIndependencePolicy — requiredTier: isolated, isAvailable() === false (hermetic unsatisfiable-branch coverage)', () => {
+  // Production code never passes the second `isAvailable` argument — every
+  // real call site relies on the default (`isolatedTierAvailable`, now
+  // `true`). This suite exercises the `unsatisfiable` branch that the
+  // pre-AISDLC-597 world always hit, proving `evaluateIndependencePolicy`
+  // still warns/rejects correctly when the capability is unavailable —
+  // i.e. asserting BOTH states of the single capability switch, per the
+  // AISDLC-597 acceptance criterion.
+  it('reports unsatisfiable even when overallIndependenceTier already claims isolated', () => {
+    const outcome = evaluateIndependencePolicy(
+      { requiredTier: 'isolated', overallIndependenceTier: 'isolated' },
+      () => false,
+    );
     expect(outcome.status).toBe('unsatisfiable');
     expect(outcome.message).toMatch(/RFC-0047|AISDLC-597/);
   });
 
   it('reports unsatisfiable when overallIndependenceTier is none', () => {
-    const outcome = evaluateIndependencePolicy({
-      requiredTier: 'isolated',
-      overallIndependenceTier: 'none',
-    });
+    const outcome = evaluateIndependencePolicy(
+      { requiredTier: 'isolated', overallIndependenceTier: 'none' },
+      () => false,
+    );
     expect(outcome.status).toBe('unsatisfiable');
   });
 });
@@ -250,12 +282,23 @@ describe('gate-topology-agnostic enforcement — same comparison, two call sites
     expect(ship.refuseShip).toBe(false);
   });
 
-  it('both surfaces agree: requiredTier=isolated → always blocked/refused today', () => {
+  it('both surfaces agree: requiredTier=isolated + overall=isolated → allowed (AISDLC-597 satisfiable)', () => {
     const ci = branchProtectionSurface('isolated', 'isolated');
     const ship = shipSkillSurface('isolated', 'isolated');
+    expect(ci.blocked).toBe(false);
+    expect(ship.refuseShip).toBe(false);
+    expect(ci.outcome.status).toBe('pass');
+    expect(ship.outcome.status).toBe('pass');
+    expect(ci.outcome).toEqual(ship.outcome);
+  });
+
+  it('both surfaces agree: requiredTier=isolated + overall=attested → blocked/refused (shortfall)', () => {
+    const ci = branchProtectionSurface('isolated', 'attested');
+    const ship = shipSkillSurface('isolated', 'attested');
     expect(ci.blocked).toBe(true);
     expect(ship.refuseShip).toBe(true);
-    expect(ci.outcome.status).toBe('unsatisfiable');
-    expect(ship.outcome.status).toBe('unsatisfiable');
+    expect(ci.outcome.status).toBe('shortfall');
+    expect(ship.outcome.status).toBe('shortfall');
+    expect(ci.outcome).toEqual(ship.outcome);
   });
 });

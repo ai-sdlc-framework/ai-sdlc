@@ -15,9 +15,9 @@ GitHub branch protection or a procedural (no-branch-protection) ship flow.
 |---|---|---|
 | `none` | No independence claim (self-authored / absent). | n/a |
 | `attested` | Lower-tier heuristic signal (AISDLC-568's `agentType`/marker check). | Yes — informational only, never load-bearing. |
-| `isolated` | Load-bearing claim: the review ran inside an RFC-0043 sandboxed boundary, signed by a clean-room signer distinct from the coordinator's key. | No, by construction — **but see "Current limitation" below.** |
+| `isolated` | Load-bearing claim: the review ran inside an RFC-0043 sandboxed boundary, signed by a clean-room signer distinct from the coordinator's key. | No, by construction. |
 
-## Current limitation — `requiredTier: isolated` is unsatisfiable today
+## `requiredTier: isolated` is now satisfiable (AISDLC-597, RFC-0047 Phase 5)
 
 RFC-0046 Phase 3's first `isolated` implementation attempt (AISDLC-590)
 anchored the claim on a self-asserted `provenance.deployment: 'ci'` string
@@ -25,22 +25,33 @@ signed with the *operator's own key* — a 3-reviewer reconcile found this
 CRITICAL-forgeable by exactly the threat model RFC-0046 OQ-1 defends against
 (a determined same-machine coordinator). That anchor design was deferred to
 [RFC-0047](../../spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md), which
-owns the re-derivable anchor (verifier-side re-derivation via a CI-only
-signing key distinct from the operator's — AISDLC-593/595/596, already
-shipped as the **producer** half of the capability).
+owns the re-derivable anchor: verifier-side re-derivation via a CI-only
+signing key distinct from the operator's (AISDLC-593/595/596, the
+**producer** half of the capability).
 
-Per RFC-0047 OQ-5, wiring that producer into **policy enforcement** is a
-separate, deliberately scoped follow-up task (AISDLC-597). Until AISDLC-597
-ships:
+RFC-0047 OQ-5 split wiring that producer into **policy enforcement** into a
+separate, deliberately scoped follow-up (AISDLC-597), which has now shipped:
 
-- Setting `requiredTier: isolated` in your policy file makes it
-  **unsatisfiable** — every PR/ship is blocked, *even one whose envelope
-  already claims `independenceTier: isolated`* (a stale or forged claim must
-  never be credited against a policy that can't yet verify it honestly).
-- The enforcement output explicitly says so: `policyOutcome=unsatisfiable`
-  with a message pointing here and at AISDLC-597.
-- **Do not set `requiredTier: isolated` in a live policy file until AISDLC-597
-  lands** — you will simply block every PR/ship with no path to green.
+- Setting `requiredTier: isolated` in your policy file is now a real,
+  enforced requirement — a repo can require the strongest tier and it is
+  compared against `overallIndependenceTier` exactly like `none`/`attested`.
+- **Infra prerequisites.** Before setting `requiredTier: isolated` in a live
+  policy file, your repo needs: (1) a registered ci-only signing key
+  (AISDLC-593's key partitioning — distinct from the operator's own key used
+  for the `attested` tier) and (2) the isolated-review workflow that
+  produces re-derivable evidence for the verifier to check (AISDLC-596's
+  isolated producer). Without both, every PR/ship legitimately falls short
+  (`policyOutcome=shortfall`) rather than passing — this is the honest
+  outcome, not a bug: an adopter with no isolated-review infra simply cannot
+  produce an `isolated` envelope.
+- **Downgrade-with-reason when the anchor is missing.** If the CI-only
+  signing key or the isolated-review workflow output is absent/invalid at
+  verification time, the verifier (AISDLC-595) does not silently credit
+  `isolated` — it downgrades the envelope's `overallIndependenceTier` to the
+  honest floor it CAN verify (`attested` or `none`) and records the reason
+  in the verifier's output. A `requiredTier: isolated` policy then correctly
+  reports `policyOutcome=shortfall` against the downgraded tier, rather than
+  a false `pass` against an unverifiable claim.
 
 ## Configuring the policy
 
@@ -48,7 +59,7 @@ Create `.ai-sdlc/independence-policy.yaml` at your repo root:
 
 ```yaml
 # .ai-sdlc/independence-policy.yaml
-requiredTier: attested   # none | attested | isolated (isolated: see limitation above)
+requiredTier: attested   # none | attested | isolated
 ```
 
 - **No file present → `requiredTier: none`.** Zero behavior change for
@@ -129,6 +140,11 @@ requiredTier=none
 policyOutcome=pass
 policyMessage=independence tier 'attested' (informational — requiredTier: none)
 ```
+
+A malformed `.ai-sdlc/independence-policy.yaml` (e.g. an unrecognized
+`requiredTier` value) fails **closed**: the CLI prints an `ERROR:` line to
+stderr, exits non-zero, and never prints a `policyOutcome=` line at all — a
+broken config must never be silently treated as `requiredTier: none`.
 
 ## Degrading correctly for procedural adopters
 
