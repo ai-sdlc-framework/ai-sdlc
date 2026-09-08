@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.20.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.1...ai-sdlc-plugin-v0.20.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* close runtime-dep pin-bump convergence gaps for adopters (AISDLC-608) ([#1058](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1058)) ([a739cec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a739ceceb3d68522404816bb21372cbb32da43b4))
+
 ## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.0...ai-sdlc-plugin-v0.20.1) (2026-09-08)
 
 
