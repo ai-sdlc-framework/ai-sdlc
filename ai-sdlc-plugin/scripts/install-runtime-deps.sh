@@ -20,15 +20,44 @@
 # Usage:
 #   bash scripts/install-runtime-deps.sh            # from within CLAUDE_PLUGIN_ROOT
 #   bash scripts/install-runtime-deps.sh /path/to/plugin-dir
+#   bash scripts/install-runtime-deps.sh /path/to/plugin-dir --force
+#   bash scripts/install-runtime-deps.sh --force    # CLAUDE_PLUGIN_ROOT from env
+#
+# AISDLC-608: `--force` (alias `--reinstall`) is an explicit operator escape
+# hatch that unconditionally `rm -rf`s every managed `@ai-sdlc/*` runtime-dep
+# directory and reinstalls against the CURRENT pins in plugin.json —
+# bypassing BOTH the file-existence idempotence gate AND the AISDLC-580
+# version-convergence check entirely. Before this flag, the only way to force
+# a clean re-resolve was to manually `rm -rf node_modules/@ai-sdlc/<pkg>`
+# yourself (exactly what the local-trades adopter had to do in the AISDLC-608
+# incident this flag exists to close). Useful when:
+#   - the registry stale-check timed out / was offline and you want to force
+#     a re-resolve without waiting for the next lucky session-start
+#   - you bumped the plugin (e.g. via `/plugin update`) and want the new pin
+#     to take effect immediately, in-session, without restarting
 #
 # Environment:
-#   CLAUDE_PLUGIN_ROOT — set by Claude Code; used when no explicit arg given.
+#   CLAUDE_PLUGIN_ROOT — set by Claude Code; used when no explicit path arg given.
 #
 # Exits 0 on success, 1 on failure. Prints a one-line status to stderr.
 
 set -euo pipefail
 
-PLUGIN_DIR="${1:-${CLAUDE_PLUGIN_ROOT:-}}"
+FORCE=0
+PLUGIN_DIR=""
+for arg in "$@"; do
+  case "$arg" in
+    --force|--reinstall)
+      FORCE=1
+      ;;
+    *)
+      if [ -z "$PLUGIN_DIR" ]; then
+        PLUGIN_DIR="$arg"
+      fi
+      ;;
+  esac
+done
+PLUGIN_DIR="${PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-}}"
 
 if [ -z "$PLUGIN_DIR" ]; then
   echo "install-runtime-deps.sh: CLAUDE_PLUGIN_ROOT is unset and no argument given — cannot determine plugin directory" >&2
@@ -203,7 +232,23 @@ fi
 # and the very next invocation retries the same rm+install), not silent.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STALE_CHECK_SCRIPT="$SCRIPT_DIR/check-stale-runtime-deps.mjs"
-if [ -f "$STALE_CHECK_SCRIPT" ]; then
+
+if [ "$FORCE" = "1" ]; then
+  # AISDLC-608: --force bypasses BOTH the file-existence idempotence gate
+  # and the version-convergence stale-check entirely — unconditionally
+  # remove every managed @ai-sdlc/* dir so the subsequent npm install below
+  # always runs against a clean slate, regardless of what's currently
+  # present or whether it happens to already satisfy the pin.
+  echo "install-runtime-deps.sh: --force given — unconditionally reinstalling all runtimeDependencies" >&2
+  for spec in "${RUNTIME_SPECS[@]}"; do
+    force_name="${spec%@*}"
+    echo "install-runtime-deps.sh: removing $PLUGIN_DIR/node_modules/$force_name for forced reinstall" >&2
+    rm -rf "$PLUGIN_DIR/node_modules/$force_name"
+  done
+  PIPELINE_CLI_OK=0
+  MCP_SERVER_OK=0
+  ORCHESTRATOR_OK=0
+elif [ -f "$STALE_CHECK_SCRIPT" ]; then
   STALE_OUTPUT=$(node "$STALE_CHECK_SCRIPT" "$PLUGIN_DIR" 2>/dev/null) || STALE_OUTPUT=""
   # Tab-delimited (not space) — a semver range pin can legally contain a
   # space (e.g. a compound range like ">=1.0.0 <2.0.0"), which would
@@ -221,7 +266,7 @@ if [ -f "$STALE_CHECK_SCRIPT" ]; then
   done <<< "$STALE_OUTPUT"
 fi
 
-if [ "$PIPELINE_CLI_OK" = "1" ] && [ "$MCP_SERVER_OK" = "1" ] && [ "$ORCHESTRATOR_OK" = "1" ]; then
+if [ "$FORCE" != "1" ] && [ "$PIPELINE_CLI_OK" = "1" ] && [ "$MCP_SERVER_OK" = "1" ] && [ "$ORCHESTRATOR_OK" = "1" ]; then
   echo "install-runtime-deps.sh: all runtimeDependencies already installed in $PLUGIN_DIR" >&2
   exit 0
 fi

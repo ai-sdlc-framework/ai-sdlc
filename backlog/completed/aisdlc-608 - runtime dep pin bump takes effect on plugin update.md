@@ -1,13 +1,13 @@
 ---
 id: AISDLC-608
 title: Runtime-dep pin bump must reliably take effect for adopters (not silently stay stale)
-status: To Do
+status: Done
 priority: high
 labels:
   - adopter-facing
   - plugin
   - runtime-deps
-references:
+dependencies:
   - AISDLC-580
   - AISDLC-607
 created: 2026-09-08
@@ -70,25 +70,25 @@ convergence from actually running for adopters.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: The session-start staleness check no longer silently fails-open on a
+- [x] AC-1: The session-start staleness check no longer silently fails-open on a
       routine (>2s) `npm view`; the timeout is raised/retried to a realistic
       budget AND a genuine timeout emits a governance-context warning rather than
       reading as "up to date." Hermetic test covers the timeout-vs-converged
       distinction.
-- [ ] AC-2: `install-runtime-deps.sh --force` (name TBD) unconditionally removes
+- [x] AC-2: `install-runtime-deps.sh --force` (name TBD) unconditionally removes
       + reinstalls the managed `@ai-sdlc/*` runtime deps against current pins,
       independent of the presence/convergence gates. Hermetic test asserts the
       forced path reinstalls even when a satisfying version is already present.
-- [ ] AC-3: When the installed runtime version does not match the pin's resolved
+- [x] AC-3: When the installed runtime version does not match the pin's resolved
       target, the operator gets an actionable message (what to run / that a
       reload is needed) — not silence. Test covers the stale-detected warning.
-- [ ] AC-4: Plugin README troubleshooting documents the "pin bumped but runtime
+- [x] AC-4: Plugin README troubleshooting documents the "pin bumped but runtime
       still stale after `/plugin update`" case and the `--force` recovery.
-- [ ] AC-5: Existing behavior preserved — offline / already-converged runs stay
+- [x] AC-5: Existing behavior preserved — offline / already-converged runs stay
       fast and side-effect-free (no reinstall when genuinely converged); the
       fail-open-on-offline property is retained (only the *silent-on-slow* and
       *masks-staleness* aspects change).
-- [ ] AC-6: `pnpm build && test && lint` clean; affected-package coverage >=80%.
+- [x] AC-6: `pnpm build && test && lint` clean; affected-package coverage >=80%.
 
 ## Non-goals
 
