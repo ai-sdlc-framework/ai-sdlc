@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.24.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.24.0...orchestrator-v0.24.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **orchestrator:** createBranch forks from spec.branching.targetBranch (closes [#1037](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1037)) ([#1049](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1049)) ([cd63853](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd63853aab77940cfb00bdb402645e37bd2bd1f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.24.1
+
 ## [0.24.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.23.0...orchestrator-v0.24.0) (2026-09-07)
 
 

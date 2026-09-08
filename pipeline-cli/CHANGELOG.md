@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.24.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.24.0...pipeline-cli-v0.24.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* cli-merge-if-eligible unusable in consumer / no-branch-protection repos (AISDLC-607) ([#1054](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1054)) ([528f9f9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/528f9f9893aa32594b7bb47cd079c374b122b111))
+* honor spec.branching.targetBranch, not hardcoded main (AISDLC-606) ([#1053](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1053)) ([50547c0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/50547c08ea9aa2e88ccc1c671f5b7695a106edd7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.24.1
+
 ## [0.24.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.23.0...pipeline-cli-v0.24.0) (2026-09-07)
 
 
