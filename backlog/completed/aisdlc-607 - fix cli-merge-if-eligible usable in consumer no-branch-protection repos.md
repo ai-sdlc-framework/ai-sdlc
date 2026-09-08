@@ -8,12 +8,14 @@ labels:
   - governance
   - merge-if-eligible
   - consumer-parity
-references:
-  - RFC-0048
+dependencies:
   - AISDLC-583
   - AISDLC-601
   - AISDLC-602
   - AISDLC-603
+references:
+  - spec/rfcs/RFC-0048-per-repo-configurable-governance.md
+  - pipeline-cli/src/governance/merge-if-eligible.ts
 created: 2026-09-07
 ---
 
