@@ -51,6 +51,20 @@
  * never blocks for longer than `3 * timeoutMs` in the worst case (all three
  * known packages present + registry unreachable) before degrading to the
  * old file-existence-only behavior.
+ *
+ * AISDLC-608: a genuine `npm view` TIMEOUT (registry reachable but slow) is
+ * indistinguishable from "confirmed converged" on stdout alone — both
+ * produce zero lines of stdout, which is exactly the masking bug this task
+ * exists to close. To let callers surface a warning instead of silently
+ * reading "no stdout" as "up to date", a timeout (as opposed to an ordinary
+ * failure like offline/no-npm/registry-miss) additionally emits one line per
+ * timed-out package to STDERR:
+ *   TIMEOUT\t<name>\t<pin>\t<timeoutMs>
+ * stdout semantics are UNCHANGED (still empty on timeout — this is still a
+ * fail-open path, not fail-closed) so existing stdout-only consumers keep
+ * working exactly as before; only a caller that additionally inspects
+ * stderr for the `TIMEOUT\t` prefix gains the ability to tell "confirmed
+ * converged" apart from "could not confirm — registry check timed out".
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -101,7 +115,15 @@ function main() {
     }
     if (!installed) continue;
 
-    const target = resolveRegistryVersion(name, pin, timeoutMs);
+    const { target, timedOut } = resolveRegistryVersion(name, pin, timeoutMs);
+    if (timedOut) {
+      // AISDLC-608: distinct from an ordinary failure — surface it on
+      // stderr so a caller that cares can tell "unknown due to timeout"
+      // apart from "confirmed converged". stdout stays empty either way
+      // (still fail-open, never fail-closed).
+      process.stderr.write(`TIMEOUT\t${name}\t${pin}\t${timeoutMs}\n`);
+      continue;
+    }
     if (!target) continue; // fail open — offline / registry unreachable / npm missing
 
     if (target !== installed) {
@@ -112,9 +134,13 @@ function main() {
 
 /**
  * Resolve the version npm would actually install for `name@pin` via
- * `npm view name@pin version`. Returns `''` on any failure (missing npm,
- * non-zero exit, timeout, empty output) — callers treat that as "cannot
- * determine, fail open".
+ * `npm view name@pin version`. Returns `{ target: '' }` on any failure
+ * (missing npm, non-zero exit, empty output) — callers treat an empty
+ * `target` as "cannot determine, fail open". Returns `{ target: '', timedOut:
+ * true }` specifically when the `spawnSync` timeout budget was exceeded, so
+ * callers CAN distinguish "npm view genuinely timed out" from "npm view ran
+ * to completion and failed/returned nothing" (AISDLC-608) — the two were
+ * previously conflated into the same empty-string result.
  */
 function resolveRegistryVersion(name, pin, timeoutMs) {
   try {
@@ -122,14 +148,22 @@ function resolveRegistryVersion(name, pin, timeoutMs) {
       encoding: 'utf-8',
       timeout: timeoutMs,
     });
-    if (result.error || result.status !== 0) return '';
+    // Node's spawnSync sets `result.error.code === 'ETIMEDOUT'` (and kills
+    // the child via `result.signal`) when the process exceeds the `timeout`
+    // option. That is the ONLY case treated as a timeout here — every other
+    // failure shape (non-zero exit, no npm on PATH, empty stdout) keeps the
+    // pre-existing silent fail-open behavior.
+    if (result.error && result.error.code === 'ETIMEDOUT') {
+      return { target: '', timedOut: true };
+    }
+    if (result.error || result.status !== 0) return { target: '' };
     const lines = (result.stdout || '')
       .trim()
       .split('\n')
       .filter((l) => l.length > 0);
-    return lines.length > 0 ? lines[lines.length - 1].trim() : '';
+    return { target: lines.length > 0 ? lines[lines.length - 1].trim() : '' };
   } catch {
-    return '';
+    return { target: '' };
   }
 }
 

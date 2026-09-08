@@ -713,6 +713,131 @@ describe('install-runtime-deps.sh — idempotence', () => {
   });
 });
 
+describe('install-runtime-deps.sh — --force / --reinstall (AISDLC-608)', () => {
+  /** Materialise an already-"installed" package with a real package.json. */
+  function writeInstalledPackage(pluginDir, name, entryRel, version) {
+    const pkgDir = join(pluginDir, 'node_modules', name);
+    mkdirSync(join(pkgDir, dirname(entryRel)), { recursive: true });
+    writeFileSync(join(pkgDir, entryRel), '');
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version }, null, 2));
+  }
+
+  it('--force unconditionally reinstalls even when a satisfying version is already present', () => {
+    // installed 0.20.1 satisfies pin ^0.20.0 AND matches what the registry
+    // would resolve to — the plain (non-forced) path would report "already
+    // installed" and invoke npm zero times (see the "already-converged" test
+    // above). --force must bypass both gates and reinstall anyway.
+    const pluginDir = join(workDir, 'force-reinstall-despite-converged');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.1');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({
+      writeEntryPoints: true,
+      viewVersions: {
+        '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1',
+        '@ai-sdlc/plugin-mcp-server@0.9.2': '0.9.2',
+        '@ai-sdlc/orchestrator@^0.14.0': '0.14.0',
+      },
+    });
+    const env = {
+      PATH: `${binDir}:${process.env.PATH}`,
+      HOME: process.env.HOME,
+      LOG_FILE: logFile,
+    };
+    const result = spawnSync('bash', [SCRIPT, pluginDir, '--force'], {
+      env,
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    const invocations = existsSync(logFile)
+      ? readFileSync(logFile, 'utf-8')
+          .trim()
+          .split('\n')
+          .filter((l) => l.length > 0)
+          .map((l) => JSON.parse(l))
+      : [];
+
+    assert.equal(result.status, 0, `must exit 0; stderr=${result.stderr}`);
+    assert.doesNotMatch(
+      result.stderr,
+      /already installed/,
+      'must NOT take the idempotence early-exit under --force',
+    );
+    assert.match(result.stderr, /--force given/);
+    // Exactly one npm invocation: the forced `npm install` (no `npm view`
+    // stale-check calls at all — the version-convergence check is bypassed
+    // entirely by --force).
+    assert.equal(invocations.length, 1, 'must invoke npm install exactly once, no npm view calls');
+    assert.equal(invocations[0].args[0], 'install');
+    assert.ok(
+      invocations[0].args.includes('@ai-sdlc/pipeline-cli@^0.20.0'),
+      'must reinstall pipeline-cli against the current pin',
+    );
+  });
+
+  it('--reinstall is accepted as an alias for --force', () => {
+    const pluginDir = join(workDir, 'reinstall-alias');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', 'bin/cli-deps.mjs', '0.20.1');
+    writeInstalledPackage(pluginDir, '@ai-sdlc/plugin-mcp-server', 'dist/bin.js', '0.9.2');
+    writeInstalledPackage(
+      pluginDir,
+      '@ai-sdlc/orchestrator',
+      'dist/runtime/attestations.js',
+      '0.14.0',
+    );
+
+    const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
+    const result = spawnSync('bash', [SCRIPT, pluginDir, '--reinstall'], {
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME, LOG_FILE: logFile },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 0, `must exit 0; stderr=${result.stderr}`);
+    assert.match(result.stderr, /--force given/);
+  });
+
+  it('--force works with CLAUDE_PLUGIN_ROOT env fallback instead of a positional plugin dir arg', () => {
+    const pluginDir = join(workDir, 'force-env-fallback');
+    writePluginJson(pluginDir, {
+      '@ai-sdlc/orchestrator': '^0.14.0',
+      '@ai-sdlc/pipeline-cli': '^0.20.0',
+      '@ai-sdlc/plugin-mcp-server': '0.9.2',
+    });
+    const { binDir, logFile } = buildFakeNpm({ writeEntryPoints: true });
+    const result = spawnSync('bash', [SCRIPT, '--force'], {
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        HOME: process.env.HOME,
+        LOG_FILE: logFile,
+        CLAUDE_PLUGIN_ROOT: pluginDir,
+      },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 0, `must exit 0; stderr=${result.stderr}`);
+    assert.ok(
+      existsSync(join(pluginDir, 'node_modules/@ai-sdlc/pipeline-cli/bin/cli-deps.mjs')),
+      'must install into CLAUDE_PLUGIN_ROOT when no positional plugin dir is given',
+    );
+  });
+});
+
 describe('install-runtime-deps.sh — fresh-install simulation (AISDLC-441 happy path)', () => {
   it('simulates Claude Code copying plugin cache without npm install + heals successfully', () => {
     // Reproduce the exact failure scenario described in GH issue 713:

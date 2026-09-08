@@ -206,6 +206,86 @@ describe('check-stale-runtime-deps.mjs — fails open', () => {
     assert.equal(stdout.trim(), '');
   });
 
+  it('AISDLC-608: reports nothing on stdout when npm view genuinely times out (still fail-open)', () => {
+    // A slow-but-reachable `npm view` (registry round-trip exceeds the
+    // budget) must NOT read as "confirmed up to date" on stdout — but the
+    // fail-open CONTRACT (never block, never emit a stale line you can't
+    // trust) is preserved: stdout stays empty either way.
+    const pluginDir = join(workDir, 'genuine-timeout');
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': '^0.20.0' });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.0');
+
+    const dir = mkdtempSync(join(tmpdir(), 'aisdlc-608-slow-npm-'));
+    const binDir = join(dir, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const npmPath = join(binDir, 'npm');
+    // Sleeps far longer than the timeoutMs we pass below, forcing spawnSync
+    // to hit its own `timeout` option and kill the child with ETIMEDOUT.
+    writeFileSync(npmPath, '#!/usr/bin/env bash\nsleep 5\necho "0.20.1"\n');
+    chmodSync(npmPath, 0o755);
+
+    const result = spawnSync('node', [SCRIPT, pluginDir, '200'], {
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 0, 'must always exit 0 — advisory check, never a hard failure');
+    assert.equal(result.stdout.trim(), '', 'stdout must stay empty — fail-open, not fail-closed');
+  });
+
+  it('AISDLC-608: distinguishes a genuine timeout from confirmed convergence via stderr', () => {
+    // This is the load-bearing distinction: a caller inspecting ONLY stdout
+    // cannot tell "npm view timed out" apart from "already converged" (both
+    // produce empty stdout). The stderr TIMEOUT marker is what lets a caller
+    // (session-start.js) surface a warning instead of silently masking
+    // staleness as convergence.
+    const pluginDir = join(workDir, 'genuine-timeout-stderr-marker');
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': '^0.20.0' });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.0');
+
+    const dir = mkdtempSync(join(tmpdir(), 'aisdlc-608-slow-npm-marker-'));
+    const binDir = join(dir, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const npmPath = join(binDir, 'npm');
+    writeFileSync(npmPath, '#!/usr/bin/env bash\nsleep 5\necho "0.20.1"\n');
+    chmodSync(npmPath, 0o755);
+
+    const result = spawnSync('node', [SCRIPT, pluginDir, '200'], {
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    assert.match(
+      result.stderr,
+      /TIMEOUT\t@ai-sdlc\/pipeline-cli\t\^0\.20\.0\t200/,
+      'must emit a TIMEOUT marker to stderr distinct from an ordinary offline/no-npm failure',
+    );
+  });
+
+  it('AISDLC-608: an ordinary (non-timeout) failure does NOT emit the TIMEOUT stderr marker', () => {
+    // Regression guard: the ordinary "registry unreachable" / "npm view
+    // exits 1" path must stay exactly as silent as before — only a REAL
+    // timeout gets the stderr marker, per the fail-open contract for every
+    // other failure shape.
+    const pluginDir = join(workDir, 'ordinary-failure-no-marker');
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': '^0.20.0' });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.0');
+    const npmBinDir = buildFakeNpm({}); // npm view always exits 1
+
+    const result = spawnSync('node', [SCRIPT, pluginDir], {
+      env: { PATH: `${npmBinDir}:${process.env.PATH}`, HOME: process.env.HOME },
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), '');
+    assert.doesNotMatch(
+      result.stderr,
+      /TIMEOUT\t/,
+      'an ordinary npm-view failure must not be reported as a timeout',
+    );
+  });
+
   it('reports nothing when npm is missing from PATH entirely', () => {
     const pluginDir = join(workDir, 'no-npm-on-path');
     writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': '^0.20.0' });

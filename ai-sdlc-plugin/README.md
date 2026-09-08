@@ -153,6 +153,48 @@ export PIPELINE_CLI_BIN=/path/to/ai-sdlc/pipeline-cli/bin
 
 **Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code injects `CLAUDE_PLUGIN_ROOT` at session start and it is always available in the main session context.
 
+### Troubleshooting: pin bumped but runtime still stale after `/plugin update` (AISDLC-608)
+
+**Symptom:** you (or an adopter) bump the plugin version — raising a `runtimeDependencies` pin
+in `plugin.json`, e.g. `@ai-sdlc/pipeline-cli` from `>=0.24.0` to `>=0.24.1` — run
+`/plugin update`, but the installed `node_modules/@ai-sdlc/pipeline-cli` stays on the
+already-installed 0.24.0. Tools keep behaving as if the fix that motivated the bump never
+shipped.
+
+**Why this happens:** `/plugin update` swaps the plugin's files (including the new pin in
+`plugin.json`) but Claude Code does **not** invoke `npm install` as part of that swap, and it
+cannot be hooked directly (not exposed to plugins). The only lever the plugin has is its own
+`SessionStart` hook (`hooks/session-start.js`), which runs a version-convergence check
+(`scripts/check-stale-runtime-deps.mjs`, AISDLC-580) and self-heals automatically — but only
+the next time a session actually starts. Two things can additionally mask this:
+
+- **A slow-but-reachable registry check.** The stale-check's `npm view` round-trip is
+  bounded by a timeout; a genuine timeout must not be mistaken for "confirmed up to date" —
+  if you see a session-start banner reading `⚠ ai-sdlc could not confirm runtime deps are up
+  to date (registry check timed out)`, that's exactly this case (AISDLC-608 AC-1). It is
+  advisory, not a hard failure — use the recovery command below to force a definitive answer.
+- **A mid-session `/plugin update`.** Since only `SessionStart` can trigger the self-heal, a
+  pin bump applied while a session is already running won't take effect until you reload or
+  start a new session.
+
+**Recovery — force a clean re-resolve on demand:**
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT" --force
+```
+
+`--force` (alias `--reinstall`) unconditionally removes every managed `@ai-sdlc/*`
+runtime-dep directory and reinstalls against the pins currently declared in `plugin.json` —
+bypassing both the file-existence idempotence gate and the version-convergence check
+entirely, so it always converges regardless of what's currently installed. Reload or restart
+your Claude Code session afterward so the already-running MCP server / pipeline-cli process
+picks up the freshly installed version.
+
+If you see a session-start banner reading `⚠ ai-sdlc runtime deps were stale — auto-upgrading
+now (...)`, no action is needed — the self-heal already ran; the banner is informational
+(AISDLC-608 AC-3). Run the `--force` command above only if a tool still behaves unexpectedly
+after that session starts.
+
 **Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` and `orchestrator-tick.test.mjs` both contain assertions (AISDLC-245.4 + AISDLC-272 suites) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. `ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs` tests each topology in isolation. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
 
 ## Attestation pre-push hook — shipping + install (AISDLC-555)

@@ -523,4 +523,87 @@ describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AI
       rmSync(pluginDir, { recursive: true, force: true });
     }
   });
+
+  // AISDLC-608: AC-1 (timeout must not read as "up to date") and AC-3
+  // (stale-detected must surface an actionable message, not silence).
+  describe('AISDLC-608: stale-check outcomes are no longer silent', () => {
+    it('AC-3: surfaces an actionable warning when drift is detected and auto-upgrade runs', () => {
+      const pluginDir = buildStaleButPresentPlugin({
+        // Real script output is TAB-delimited; the warning summariser parses
+        // tabs specifically so a compound-range pin's embedded space never
+        // corrupts the field split.
+        staleCheckOutput: '@ai-sdlc/pipeline-cli\t0.24.0\t0.24.1\t>=0.24.1 <1.0.0\n',
+      });
+      try {
+        const result = runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+        const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+        assert.ok(
+          ctx.includes('runtime deps were stale'),
+          'must surface a visible warning instead of silently auto-upgrading',
+        );
+        assert.ok(
+          ctx.includes('@ai-sdlc/pipeline-cli 0.24.0 -> 0.24.1'),
+          'must name the specific package and version transition',
+        );
+        assert.ok(
+          ctx.includes('install-runtime-deps.sh') && ctx.includes('--force'),
+          'must give the operator an actionable --force recovery command',
+        );
+      } finally {
+        rmSync(pluginDir, { recursive: true, force: true });
+      }
+    });
+
+    it('AC-1: surfaces a distinct warning when the registry check times out (not "up to date")', () => {
+      const pluginDir = buildStaleButPresentPlugin({ staleCheckOutput: '' });
+      // Replace the fake stale-check script with one that emits the real
+      // script's TIMEOUT stderr marker and empty stdout — exactly what
+      // check-stale-runtime-deps.mjs itself does on a genuine npm-view
+      // timeout (see check-stale-runtime-deps.test.mjs for that contract).
+      writeFileSync(
+        join(pluginDir, 'scripts', 'check-stale-runtime-deps.mjs'),
+        '#!/usr/bin/env node\n' +
+          'process.stderr.write("TIMEOUT\\t@ai-sdlc/pipeline-cli\\t^0.24.0\\t8000\\n");\n',
+        'utf-8',
+      );
+      try {
+        const result = runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+        const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+        assert.ok(
+          ctx.includes('could not confirm runtime deps are up to date'),
+          'a genuine timeout must surface its own distinct warning, not read as converged',
+        );
+        assert.ok(
+          !ctx.includes('runtime deps were stale'),
+          'must not ALSO claim drift was positively detected — this was a timeout, not a ' +
+            'confirmed mismatch',
+        );
+        assert.ok(
+          ctx.includes('--force'),
+          'must point the operator at the --force recovery command',
+        );
+        assert.ok(
+          !existsSync(join(pluginDir, '.install-invoked')),
+          'a timeout alone (no stdout drift reported) must not force an install — AC-5 ' +
+            'preserves fail-open / side-effect-free behavior',
+        );
+      } finally {
+        rmSync(pluginDir, { recursive: true, force: true });
+      }
+    });
+
+    it('a genuinely converged run (no drift, no timeout) stays completely silent (AC-5 regression guard)', () => {
+      const pluginDir = buildStaleButPresentPlugin({ staleCheckOutput: '' });
+      try {
+        const result = runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir });
+        assert.equal(
+          result.output,
+          '',
+          'a converged install with no agent-role.yaml must produce zero output, exactly as before',
+        );
+      } finally {
+        rmSync(pluginDir, { recursive: true, force: true });
+      }
+    });
+  });
 });

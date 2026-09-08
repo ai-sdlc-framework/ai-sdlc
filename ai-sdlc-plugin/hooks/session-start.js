@@ -25,6 +25,19 @@ const {
  */
 let runtimeDepsError = null;
 
+// AISDLC-608: captured outcomes of the version-convergence stale-check so
+// buildRuntimeDepsWarning() can surface actionable, non-silent messages for
+// both "stale detected + auto-upgrading" (AC-3) and "could not confirm —
+// registry check timed out" (AC-1), instead of the pre-fix behavior where
+// both outcomes produced zero operator-visible signal.
+let staleUpgradeSummary = null;
+let staleCheckTimedOut = false;
+
+// Number of packages check-stale-runtime-deps.mjs's own KNOWN_PACKAGES probes
+// (kept in sync manually; a mismatch only affects the outer spawnSync timeout
+// budget, never correctness).
+const KNOWN_RUNTIME_PACKAGE_COUNT = 3;
+
 // AISDLC-601 CI follow-up: read stdin via `readStdinSync()` (a bounded
 // `fs.readSync(0, ...)` retry loop), NOT `readFileSync('/dev/stdin')`. Node's
 // synchronous read of a piped (non-TTY) fd 0 can throw `EAGAIN` on Linux when
@@ -107,14 +120,56 @@ try {
       try {
         const staleCheckScript = join(pluginRoot, 'scripts', 'check-stale-runtime-deps.mjs');
         if (existsSync(staleCheckScript)) {
-          const staleResult = spawnSync(process.execPath, [staleCheckScript, pluginRoot, '2000'], {
-            encoding: 'utf-8',
-            // 3 known packages * ~2s npm-view budget each, plus slack for
-            // node startup — still far below the 120s install budget below.
-            timeout: 8_000,
-          });
-          if (staleResult.status === 0 && (staleResult.stdout || '').trim().length > 0) {
+          // AISDLC-608: the original 2000ms per-package budget was too
+          // aggressive for a correctness-gating registry round-trip — a
+          // routine `npm view` on a slow/cold-DNS network commonly exceeds
+          // 2s, and check-stale-runtime-deps.mjs fails OPEN on timeout by
+          // design (never blocks offline). That combination meant a normal,
+          // reachable-but-slow network silently skipped staleness detection
+          // with zero signal: no reinstall, no warning, adopter stuck on a
+          // stale version (the local-trades AISDLC-607 report).
+          //
+          // AISDLC-608 balance (code-review follow-up): the OLD 2s masked
+          // staleness silently; a naive 8s made every session-start on a
+          // slow-but-reachable network (VPN / throttled / slow private
+          // registry) block up to ~24-30s. We instead pair a MODERATE 4s
+          // default with the new timeout-surfaces-a-warning behavior: a
+          // timeout no longer masks staleness (it emits the `TIMEOUT` marker
+          // -> session warns "could not confirm; run --force"), so a shorter
+          // budget is safe. Worst-case blocking is now ~4s x 3 packages
+          // (~12s), and an offline registry still fails fast via DNS/ENOTFOUND
+          // (not the timeout). Operators on genuinely slow registries can
+          // raise it via AI_SDLC_RUNTIME_DEPS_STALE_TIMEOUT_MS (clamped to
+          // 1000-20000ms).
+          const DEFAULT_STALE_TIMEOUT_MS = 4_000;
+          const rawTimeoutOverride = Number.parseInt(
+            process.env.AI_SDLC_RUNTIME_DEPS_STALE_TIMEOUT_MS || '',
+            10,
+          );
+          const perPackageTimeoutMs = Number.isFinite(rawTimeoutOverride)
+            ? Math.min(Math.max(rawTimeoutOverride, 1_000), 20_000)
+            : DEFAULT_STALE_TIMEOUT_MS;
+          const staleResult = spawnSync(
+            process.execPath,
+            [staleCheckScript, pluginRoot, String(perPackageTimeoutMs)],
+            {
+              encoding: 'utf-8',
+              timeout: perPackageTimeoutMs * KNOWN_RUNTIME_PACKAGE_COUNT + 6_000,
+            },
+          );
+          const staleStdout = (staleResult.stdout || '').trim();
+          if (staleResult.status === 0 && staleStdout.length > 0) {
             staleUpgradeNeeded = true;
+            staleUpgradeSummary = summarizeStaleUpgrades(staleStdout);
+          }
+          // AISDLC-608: a genuine timeout must NOT read as "confirmed
+          // up-to-date" — check-stale-runtime-deps.mjs emits `TIMEOUT\t...`
+          // lines to stderr specifically for this case (distinct from an
+          // ordinary offline/no-npm failure, which stays silent by design).
+          // Surface it as a governance-context warning rather than masking
+          // it as convergence.
+          if (!staleUpgradeNeeded && /(^|\n)TIMEOUT\t/.test(staleResult.stderr || '')) {
+            staleCheckTimedOut = true;
           }
         }
       } catch {
@@ -440,12 +495,60 @@ function buildRuntimeDepsWarning() {
   // Prefer the module-local capture; the env var remains a read-only input for
   // tests and cross-process callers. Both are treated as UNTRUSTED data.
   const raw = runtimeDepsError ?? process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;
-  if (!raw) return null;
-  return (
-    `⚠ Plugin runtime-dependency install failed — [untrusted tool output] ${sanitizeForContext(raw)}. ` +
-    'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
-    'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"'
-  );
+  if (raw) {
+    return (
+      `⚠ Plugin runtime-dependency install failed — [untrusted tool output] ${sanitizeForContext(raw)}. ` +
+      'MCP tools + /ai-sdlc commands may not work. Manual recovery: ' +
+      'bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"'
+    );
+  }
+
+  // AISDLC-608 AC-3: a stale runtime dep (installed version doesn't match
+  // the pin's resolved target) was detected and this session-start is
+  // auto-upgrading it now. Pre-fix this was completely silent even though
+  // it has a real, visible side effect (an rm -rf + npm install runs).
+  if (staleUpgradeSummary) {
+    return (
+      `⚠ ai-sdlc runtime deps were stale — auto-upgrading now (${sanitizeForContext(staleUpgradeSummary)}). ` +
+      'If a tool still behaves unexpectedly after this session starts, force a clean ' +
+      're-resolve: bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT" --force'
+    );
+  }
+
+  // AISDLC-608 AC-1: the registry freshness check could not complete within
+  // its budget. Pre-fix, a timeout produced identical output to "confirmed
+  // up to date" (empty stdout either way) — the adopter got zero signal that
+  // staleness could not actually be ruled out. Distinguish it explicitly.
+  if (staleCheckTimedOut) {
+    return (
+      '⚠ ai-sdlc could not confirm runtime deps are up to date (registry check timed out). ' +
+      'If you recently bumped the plugin (e.g. via `/plugin update`), the change may not have ' +
+      'taken effect yet. Force a clean re-resolve: bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" ' +
+      '"$CLAUDE_PLUGIN_ROOT" --force, then reload/restart this session.'
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Render a short human-readable summary of the tab-delimited
+ * check-stale-runtime-deps.mjs stdout (`<name>\t<installed>\t<target>\t<pin>`
+ * per line) for the AC-3 auto-upgrade warning, e.g.
+ * "@ai-sdlc/pipeline-cli 0.24.0 -> 0.24.1". Multiple stale packages are
+ * joined with "; ". Malformed lines are skipped defensively rather than
+ * throwing — this only feeds an advisory banner, never gates behavior.
+ */
+function summarizeStaleUpgrades(stdout) {
+  const parts = [];
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue;
+    const fields = line.split('\t');
+    if (fields.length < 3) continue;
+    const [name, installed, target] = fields;
+    parts.push(`${name} ${installed} -> ${target}`);
+  }
+  return parts.length > 0 ? parts.join('; ') : null;
 }
 
 function extractField(yaml, field) {

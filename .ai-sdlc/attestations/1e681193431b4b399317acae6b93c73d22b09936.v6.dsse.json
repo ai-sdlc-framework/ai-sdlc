@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "8304d925d61b65e35005675d456419c548d62a36"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "951b6e5fc83539326d4ee3e83ad36a889542e5f2e4fe70d17aa21cb681f1fc54",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "aabb0b458c3f796c2b6c5489bf8b0843dec6cea6ce1f4806d66474d656f00b82",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "f768558961d703dee7924ebe1f89719b91eb883d691816f2b1e9dd5e2068caaa",
+      "verdictClass": "self-authored",
+      "harnessTranscriptHash": null
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "2815285b1b54a082468a0f0ad39d281f149a74d4f24aaeb81c685fe1c57da73e",
+        "31f14692ea46ae1bda9292ad73211c1c61fccfcd3d4e2b8443bf179ed66c7b1c"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "5a8ff5f1927187770f83d317d716bf096f143440a4e8069e7e718e71a8701810",
+        "31f14692ea46ae1bda9292ad73211c1c61fccfcd3d4e2b8443bf179ed66c7b1c"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "a211d613282c0e72ccfd5abd26ba10cb69751ab0956f0c14be9d551885d2f3d7",
+        "11b1bd49b19b49a88cac6e37f671d0bd73d6aac300ef9321dbc2f49760fedba0"
+      ]
+    }
+  ],
+  "rootHash": "41b22d5b06d2758554a546799778a1cd1b614ca97ee2b603bb24b964613806ea",
+  "rootSignature": "IEdYXu5IpI6T4kx6mIF+G55hXkqvreqBi4e603MjVDGiN7f5mh/XQTitQp/V97pMPc0v8CKu27bQ/XgYE/ZXBw==",
+  "nonce": "cbcc98dcd1efcbffb2e0ac561fd312584914c0235c91d1720b6af39e2109f4a5",
+  "leafCount": 3,
+  "signedAt": "2026-09-08T15:03:33.014Z",
+  "signerIdentity": "dominique@local:doms-macbook"
+}
