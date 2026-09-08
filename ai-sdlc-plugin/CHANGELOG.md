@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.0...ai-sdlc-plugin-v0.20.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **ai-sdlc-plugin:** republish to deliver pipeline-cli &gt;=0.24.1 consumer-repo merge fix (AISDLC-607) ([#1055](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1055)) ([fad5765](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fad57659f31f313ccca91b67a3824b6501c9af09))
+
 ## [0.20.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.19.0...ai-sdlc-plugin-v0.20.0) (2026-09-07)
 
 
