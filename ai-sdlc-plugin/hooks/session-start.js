@@ -127,11 +127,28 @@ try {
           // design (never blocks offline). That combination meant a normal,
           // reachable-but-slow network silently skipped staleness detection
           // with zero signal: no reinstall, no warning, adopter stuck on a
-          // stale version (the local-trades AISDLC-607 report). Raised to a
-          // realistic 8s-per-package budget; the outer spawnSync timeout
-          // covers 3 known packages worst-case plus slack for node startup,
-          // still well below the 120s install budget below.
-          const perPackageTimeoutMs = 8_000;
+          // stale version (the local-trades AISDLC-607 report).
+          //
+          // AISDLC-608 balance (code-review follow-up): the OLD 2s masked
+          // staleness silently; a naive 8s made every session-start on a
+          // slow-but-reachable network (VPN / throttled / slow private
+          // registry) block up to ~24-30s. We instead pair a MODERATE 4s
+          // default with the new timeout-surfaces-a-warning behavior: a
+          // timeout no longer masks staleness (it emits the `TIMEOUT` marker
+          // -> session warns "could not confirm; run --force"), so a shorter
+          // budget is safe. Worst-case blocking is now ~4s x 3 packages
+          // (~12s), and an offline registry still fails fast via DNS/ENOTFOUND
+          // (not the timeout). Operators on genuinely slow registries can
+          // raise it via AI_SDLC_RUNTIME_DEPS_STALE_TIMEOUT_MS (clamped to
+          // 1000-20000ms).
+          const DEFAULT_STALE_TIMEOUT_MS = 4_000;
+          const rawTimeoutOverride = Number.parseInt(
+            process.env.AI_SDLC_RUNTIME_DEPS_STALE_TIMEOUT_MS || '',
+            10,
+          );
+          const perPackageTimeoutMs = Number.isFinite(rawTimeoutOverride)
+            ? Math.min(Math.max(rawTimeoutOverride, 1_000), 20_000)
+            : DEFAULT_STALE_TIMEOUT_MS;
           const staleResult = spawnSync(
             process.execPath,
             [staleCheckScript, pluginRoot, String(perPackageTimeoutMs)],
