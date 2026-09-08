@@ -9,17 +9,20 @@
  * `resolveRepoGovernancePolicy`).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   evaluateMergeEligibility,
+  fetchAllCheckRuns,
   fetchMergeStateStatus,
   fetchRequiredChecks,
+  highestVersionCacheGovernanceResolverPath,
   isTrustedSourceKind,
   loadGovernanceResolverModule,
   mergePr,
+  resolveInstalledPluginGovernanceResolverPath,
   resolveRepoGovernancePolicy,
   resolveRepoSlug,
   runMergeIfEligible,
@@ -27,6 +30,13 @@ import {
   type GovernancePolicy,
 } from './merge-if-eligible.js';
 import type { ExecResult, Runner } from '../runtime/exec.js';
+
+const ORIGINAL_ENV = { ...process.env };
+
+function resetPluginEnv(): void {
+  delete process.env['CLAUDE_PLUGIN_DIR'];
+  delete process.env['CLAUDE_PLUGIN_ROOT'];
+}
 
 // ── FakeRunner ────────────────────────────────────────────────────────
 
@@ -180,14 +190,48 @@ describe('isTrustedSourceKind', () => {
 describe('resolveRepoGovernancePolicy', () => {
   let dir: string;
 
+  beforeEach(resetPluginEnv);
+
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
+    process.env = { ...ORIGINAL_ENV };
   });
 
   it('fails closed to STRICT_DEFAULTS when the resolver module cannot be located', () => {
     dir = mkdtempSync(join(tmpdir(), 'aisdlc-603-'));
     const policy = resolveRepoGovernancePolicy(dir, join(dir, 'nonexistent-pkg-root'));
     expect(policy).toEqual(STRICT_DEFAULTS);
+  });
+
+  it('AC-1 — simulated marketplace/consumer layout: loads the REAL resolver via CLAUDE_PLUGIN_ROOT (not the monorepo sibling) and returns onGreenClean', () => {
+    dir = mkdtempSync(join(tmpdir(), 'aisdlc-607-e2e-'));
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'agent-role.yaml'),
+      'spec:\n  governance:\n    preset: operator-trusted\n',
+      'utf-8',
+    );
+
+    const pluginRoot = join(dir, 'installed-plugin');
+    const hooksLibDir = join(pluginRoot, 'hooks', 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+    const realResolverPath = join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      'ai-sdlc-plugin',
+      'hooks',
+      'lib',
+      'governance-resolver.js',
+    );
+    cpSync(realResolverPath, join(hooksLibDir, 'governance-resolver.js'));
+    process.env['CLAUDE_PLUGIN_ROOT'] = pluginRoot;
+
+    // pkgRoot points at a nonexistent monorepo sibling — the ONLY way this
+    // resolves is via the installed-plugin (env-var) path.
+    const policy = resolveRepoGovernancePolicy(dir, join(dir, 'nonexistent-pipeline-cli-pkg-root'));
+    expect(policy.allowMerge).toBe('onGreenClean');
   });
 
   it('fails closed to STRICT_DEFAULTS when agent-role.yaml is absent', () => {
@@ -229,7 +273,12 @@ describe('resolveRepoGovernancePolicy', () => {
 });
 
 describe('loadGovernanceResolverModule', () => {
-  it('resolves the real AISDLC-601 resolver from this monorepo checkout', () => {
+  beforeEach(resetPluginEnv);
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('resolves the real AISDLC-601 resolver from this monorepo checkout (dogfood fallback)', () => {
     // pipeline-cli/src/governance/merge-if-eligible.test.ts → pkgRoot is
     // pipeline-cli/ itself (two levels up from this file at runtime via
     // import.meta.url in the SUT — here we pass it explicitly).
@@ -239,9 +288,111 @@ describe('loadGovernanceResolverModule', () => {
     expect(typeof mod?.resolveGovernanceFromYaml).toBe('function');
   });
 
-  it('returns null for a pkgRoot with no sibling ai-sdlc-plugin', () => {
-    const mod = loadGovernanceResolverModule('/tmp/definitely-not-a-real-monorepo-root');
+  it('AC-2 — returns null when the resolver cannot be found anywhere (fail-closed preserved)', () => {
+    const mod = loadGovernanceResolverModule(
+      '/tmp/definitely-not-a-real-monorepo-root',
+      '/tmp/definitely-not-a-real-cache-root',
+    );
     expect(mod).toBeNull();
+  });
+
+  it('AC-1 — resolves the resolver from $CLAUDE_PLUGIN_ROOT (installed-plugin layout), NOT the monorepo sibling', () => {
+    // Simulate a marketplace/consumer install: the plugin's governance
+    // resolver lives under an installed-plugin path, NOT as a
+    // pipeline-cli sibling. loadGovernanceResolverModule must find it via
+    // the CLAUDE_PLUGIN_ROOT env var, never touching the (nonexistent)
+    // monorepo-sibling fallback.
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-607-installed-plugin-'));
+    try {
+      const hooksLibDir = join(base, 'hooks', 'lib');
+      mkdirSync(hooksLibDir, { recursive: true });
+      const realResolverPath = join(
+        __dirname,
+        '..',
+        '..',
+        '..',
+        'ai-sdlc-plugin',
+        'hooks',
+        'lib',
+        'governance-resolver.js',
+      );
+      cpSync(realResolverPath, join(hooksLibDir, 'governance-resolver.js'));
+      process.env['CLAUDE_PLUGIN_ROOT'] = base;
+
+      const mod = loadGovernanceResolverModule('/tmp/definitely-not-a-real-monorepo-root');
+      expect(mod).not.toBeNull();
+      expect(typeof mod?.resolveGovernanceFromYaml).toBe('function');
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveInstalledPluginGovernanceResolverPath + highestVersionCacheGovernanceResolverPath (AISDLC-607 Defect 1)', () => {
+  let cacheRoot: string;
+
+  beforeEach(() => {
+    resetPluginEnv();
+    cacheRoot = mkdtempSync(join(tmpdir(), 'aisdlc-607-cache-'));
+  });
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    rmSync(cacheRoot, { recursive: true, force: true });
+  });
+
+  function seed(marketplace: string, version: string): string {
+    const dir = join(cacheRoot, marketplace, 'ai-sdlc', version, 'hooks', 'lib');
+    mkdirSync(dir, { recursive: true });
+    const p = join(dir, 'governance-resolver.js');
+    writeFileSync(p, 'module.exports = { resolveGovernanceFromYaml: () => ({}) };\n');
+    return p;
+  }
+
+  it('returns null when the cache root does not exist and no env vars are set', () => {
+    expect(resolveInstalledPluginGovernanceResolverPath(join(cacheRoot, 'missing'))).toBeNull();
+  });
+
+  it('resolves from $CLAUDE_PLUGIN_ROOT/hooks/lib/governance-resolver.js when present', () => {
+    const pluginDir = join(cacheRoot, 'plugin-root');
+    const hooksLibDir = join(pluginDir, 'hooks', 'lib');
+    mkdirSync(hooksLibDir, { recursive: true });
+    const p = join(hooksLibDir, 'governance-resolver.js');
+    writeFileSync(p, 'module.exports = {};\n');
+    process.env['CLAUDE_PLUGIN_ROOT'] = pluginDir;
+
+    expect(resolveInstalledPluginGovernanceResolverPath()).toBe(p);
+  });
+
+  it('prefers $CLAUDE_PLUGIN_ROOT over $CLAUDE_PLUGIN_DIR when both resolve', () => {
+    const rootFile = join(cacheRoot, 'root', 'hooks', 'lib', 'governance-resolver.js');
+    mkdirSync(join(cacheRoot, 'root', 'hooks', 'lib'), { recursive: true });
+    writeFileSync(rootFile, 'module.exports = {};\n');
+    process.env['CLAUDE_PLUGIN_ROOT'] = join(cacheRoot, 'root');
+
+    const dirFile = join(cacheRoot, 'dir', 'hooks', 'lib', 'governance-resolver.js');
+    mkdirSync(join(cacheRoot, 'dir', 'hooks', 'lib'), { recursive: true });
+    writeFileSync(dirFile, 'module.exports = {};\n');
+    process.env['CLAUDE_PLUGIN_DIR'] = join(cacheRoot, 'dir');
+
+    expect(resolveInstalledPluginGovernanceResolverPath()).toBe(rootFile);
+  });
+
+  it('picks the highest version across multiple versions (numeric, not lexical)', () => {
+    seed('acme-marketplace', '0.9.0');
+    const newest = seed('acme-marketplace', '0.20.1'); // 0.20.1 > 0.9.0 numerically
+    expect(highestVersionCacheGovernanceResolverPath(cacheRoot)).toBe(newest);
+    expect(resolveInstalledPluginGovernanceResolverPath(cacheRoot)).toBe(newest);
+  });
+
+  it('skips a version dir without hooks/lib/governance-resolver.js', () => {
+    mkdirSync(join(cacheRoot, 'mp', 'ai-sdlc', '0.22.0'), { recursive: true }); // no hooks/lib file
+    const withFile = seed('mp', '0.20.0');
+    expect(highestVersionCacheGovernanceResolverPath(cacheRoot)).toBe(withFile);
+  });
+
+  it('never throws when env vars point at nonexistent paths', () => {
+    process.env['CLAUDE_PLUGIN_ROOT'] = join(cacheRoot, 'does-not-exist');
+    expect(() => resolveInstalledPluginGovernanceResolverPath(cacheRoot)).not.toThrow();
   });
 });
 
@@ -258,28 +409,78 @@ describe('fetchRequiredChecks', () => {
         ]),
       },
     });
-    const checks = await fetchRequiredChecks(42, 'org/repo', runner);
-    expect(checks).toEqual([
-      { name: 'ci', state: 'SUCCESS' },
-      { name: 'verify-attestation', state: 'SUCCESS' },
-      { name: 'migration-mutation-gate', state: 'PENDING' },
-    ]);
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({
+      fetchFailed: false,
+      checks: [
+        { name: 'ci', state: 'SUCCESS' },
+        { name: 'verify-attestation', state: 'SUCCESS' },
+        { name: 'migration-mutation-gate', state: 'PENDING' },
+      ],
+    });
   });
 
-  it('returns [] on gh failure (fail-closed downstream)', async () => {
+  it('AC-3/AC-5 — a repo with no required contexts returns an empty-but-SUCCESSFUL result, not a failure', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --required': { stdout: '[]' },
+    });
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: false, checks: [] });
+  });
+
+  it('AC-5 — fetchFailed=true on gh failure (fail-closed downstream, never conflated with "no required contexts")', async () => {
     const { runner } = makeFakeRunner({
       'gh pr checks 42 --required': { code: 1, stderr: 'not found' },
     });
-    const checks = await fetchRequiredChecks(42, 'org/repo', runner);
-    expect(checks).toEqual([]);
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: true, checks: [] });
   });
 
-  it('returns [] on unparseable JSON', async () => {
+  it('AC-5 — fetchFailed=true on unparseable JSON', async () => {
     const { runner } = makeFakeRunner({
       'gh pr checks 42 --required': { stdout: 'not json' },
     });
-    const checks = await fetchRequiredChecks(42, 'org/repo', runner);
-    expect(checks).toEqual([]);
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: true, checks: [] });
+  });
+});
+
+describe('fetchAllCheckRuns (AISDLC-607 Defect 2 fallback)', () => {
+  it('parses the PR real check-runs from `gh pr checks` (unfiltered, no --required)', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr checks 42 --json': {
+        stdout: JSON.stringify([
+          { name: 'ci', state: 'SUCCESS' },
+          { name: 'lint', state: 'NEUTRAL' },
+        ]),
+      },
+    });
+    const result = await fetchAllCheckRuns(42, 'org/repo', runner);
+    expect(result).toEqual({
+      fetchFailed: false,
+      checks: [
+        { name: 'ci', state: 'SUCCESS' },
+        { name: 'lint', state: 'NEUTRAL' },
+      ],
+    });
+    // Never passes --required — this is the unfiltered fallback fetch.
+    expect(calls[0]?.args).not.toContain('--required');
+  });
+
+  it('fetchFailed=true on gh failure', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --json': { code: 1, stderr: 'boom' },
+    });
+    const result = await fetchAllCheckRuns(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: true, checks: [] });
+  });
+
+  it('fetchFailed=true on unparseable JSON', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --json': { stdout: 'not json' },
+    });
+    const result = await fetchAllCheckRuns(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: true, checks: [] });
   });
 });
 
@@ -461,5 +662,161 @@ describe('runMergeIfEligible', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // ── AISDLC-607 Defect 2: check-run fallback when no required contexts ──
+
+  it('AC-3 — no required contexts, all real check-runs SUCCESS/NEUTRAL/none-pending → ELIGIBLE', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': { stdout: '[]' }, // branch protection: no required contexts
+      'gh pr checks 42 --json': {
+        stdout: JSON.stringify([
+          { name: 'ci', state: 'SUCCESS' },
+          { name: 'lint', state: 'NEUTRAL' },
+          { name: 'legacy-skipped-job', state: 'SKIPPED' },
+        ]),
+      },
+      'gh pr merge 42': {},
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(true);
+    expect(result.eligibility.reason).toMatch(/check-run fallback/);
+    expect(result.merged).toBe(true);
+    expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
+  });
+
+  it('AC-4 — no required contexts, a check-run FAILURE → REFUSES with an auditable reason', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': { stdout: '[]' },
+      'gh pr checks 42 --json': {
+        stdout: JSON.stringify([
+          { name: 'ci', state: 'SUCCESS' },
+          { name: 'security-scan', state: 'FAILURE' },
+        ]),
+      },
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(false);
+    expect(result.eligibility.reason).toMatch(/security-scan=FAILURE/);
+    expect(result.merged).toBe(false);
+    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
+  });
+
+  it('AC-4 — no required contexts, a check-run PENDING → REFUSES with an auditable reason', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': { stdout: '[]' },
+      'gh pr checks 42 --json': {
+        stdout: JSON.stringify([
+          { name: 'ci', state: 'SUCCESS' },
+          { name: 'slow-integration-test', state: 'PENDING' },
+        ]),
+      },
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(false);
+    expect(result.eligibility.reason).toMatch(/slow-integration-test=PENDING/);
+    expect(result.merged).toBe(false);
+    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
+  });
+
+  it('AC-5 — the check-run fetch itself errors → REFUSES (fail-closed), NOT treated as vacuously green', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': { stdout: '[]' },
+      'gh pr checks 42 --json': { code: 1, stderr: 'gh: unexpected error' },
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(false);
+    expect(result.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+    expect(result.merged).toBe(false);
+    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
+  });
+
+  it('AC-5 — the REQUIRED-checks fetch itself errors (not merely empty) → REFUSES without falling back to check-runs', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': { code: 1, stderr: '403 branch protection unavailable' },
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(false);
+    expect(result.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+    // MUST NOT have fallen through to the unfiltered check-runs fetch —
+    // an errored required-checks fetch is never conflated with "no branch
+    // protection configured".
+    expect(calls.some((c) => c.args.includes('checks') && !c.args.includes('--required'))).toBe(
+      false,
+    );
+    expect(result.merged).toBe(false);
+  });
+
+  it('AC-6 — required contexts present: behavior is byte-identical to the pre-AISDLC-607 path (no fallback fetch at all)', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': {
+        stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]),
+      },
+      'gh pr merge 42': {},
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(true);
+    expect(result.eligibility.reason).toMatch(/all 1 required check\(s\) green/);
+    expect(result.eligibility.reason).not.toMatch(/check-run fallback/);
+    expect(result.merged).toBe(true);
+    // The unfiltered `gh pr checks 42 --json ...` (no --required) fallback
+    // fetch must NOT have been invoked — required contexts were found.
+    expect(calls.some((c) => c.args.includes('checks') && !c.args.includes('--required'))).toBe(
+      false,
+    );
   });
 });

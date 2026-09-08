@@ -1,7 +1,7 @@
 ---
 id: AISDLC-607
 title: Fix cli-merge-if-eligible — unusable in consumer / no-branch-protection repos
-status: To Do
+status: Done
 priority: high
 labels:
   - rfc-0048
@@ -91,24 +91,24 @@ that it has no required checks available and enforcement is procedural.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: In a simulated marketplace/consumer layout (plugin under a cache
+- [x] AC-1: In a simulated marketplace/consumer layout (plugin under a cache
       path, NOT a pipeline-cli sibling), `resolveRepoGovernancePolicy` loads the
       real resolver and returns `onGreenClean` for an `.ai-sdlc/agent-role.yaml`
       that resolves to it — no longer falling back to STRICT_DEFAULTS.
-- [ ] AC-2: When the resolver cannot be found in ANY location, STRICT_DEFAULTS
+- [x] AC-2: When the resolver cannot be found in ANY location, STRICT_DEFAULTS
       (`allowMerge:'never'`) still applies (fail-closed preserved).
-- [ ] AC-3: With `allowMerge=onGreenClean`, `sourceKind='backlog'`,
+- [x] AC-3: With `allowMerge=onGreenClean`, `sourceKind='backlog'`,
       `mergeStateStatus=CLEAN`, no branch-protection required contexts, and all
       real check-runs SUCCESS/NEUTRAL/none-pending → helper reports ELIGIBLE.
-- [ ] AC-4: Same as AC-3 but with any check-run FAILURE or PENDING → helper
+- [x] AC-4: Same as AC-3 but with any check-run FAILURE or PENDING → helper
       REFUSES with an auditable reason.
-- [ ] AC-5: When the check-runs fetch itself errors (non-zero gh exit / malformed
+- [x] AC-5: When the check-runs fetch itself errors (non-zero gh exit / malformed
       output) → helper REFUSES (fail-closed), NOT treated as vacuously green.
-- [ ] AC-6: When branch protection DOES expose required contexts, behavior is
+- [x] AC-6: When branch protection DOES expose required contexts, behavior is
       byte-identical to today (required-contexts path still used; no regression).
-- [ ] AC-7: Hermetic unit tests for all branches via the injectable `Runner`
+- [x] AC-7: Hermetic unit tests for all branches via the injectable `Runner`
       seam — no live `gh`/network/filesystem shell-outs.
-- [ ] AC-8: `pnpm --filter @ai-sdlc/pipeline-cli build && test && lint` clean;
+- [x] AC-8: `pnpm --filter @ai-sdlc/pipeline-cli build && test && lint` clean;
       package coverage stays >=80%.
 
 ## Non-goals / follow-ups
