@@ -56,8 +56,14 @@ fi
 # would surprise adopters whose container images don't ship it.
 #
 # Output format: one "name@version" pair per line, e.g.
-#   @ai-sdlc/pipeline-cli@>=0.23.0 <1.0.0
+#   @ai-sdlc/pipeline-cli@>=0.24.1 <1.0.0
 #   @ai-sdlc/plugin-mcp-server@0.9.2
+#
+# AISDLC-607: the pipeline-cli floor shown above must reflect the real pinned
+# range in plugin.json (kept in sync by sync-plugin-runtime-deps.mjs). pipeline-cli
+# >=0.24.1 carries the cli-merge-if-eligible fix that lets governed merges work in
+# consumer / no-branch-protection repos; this plugin release republishes so adopters
+# are prompted to update and pull it.
 #
 # AISDLC-600: the pipeline-cli/orchestrator pins are forward-floating ranges
 # (">=X <1.0.0"), not carets — a caret on a 0.x version cannot resolve past
