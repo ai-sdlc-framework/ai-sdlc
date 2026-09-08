@@ -107,7 +107,12 @@ export function highestVersionCacheGovernanceResolverPath(
 
   let marketplaces: string[];
   try {
-    marketplaces = readdirSync(cacheRoot);
+    // Filter to directories: a stray file at the marketplace level would be
+    // skipped by the downstream existsSync guards anyway, but the explicit
+    // filter makes the walk's intent clear.
+    marketplaces = readdirSync(cacheRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
   } catch {
     return null;
   }
@@ -118,7 +123,9 @@ export function highestVersionCacheGovernanceResolverPath(
     if (!existsSync(versionsDir)) continue;
     let versions: string[];
     try {
-      versions = readdirSync(versionsDir);
+      versions = readdirSync(versionsDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
     } catch {
       continue;
     }
