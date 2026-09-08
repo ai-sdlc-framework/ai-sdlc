@@ -15,7 +15,20 @@ on:
   # The release-please action below detects the absence of the
   # `release-please--branches--main` branch and creates a new one in the
   # same job; no extra inputs needed.
-  workflow_dispatch: {}
+  #
+  # `force_publish` (default false) is a RECOVERY path: when a release was
+  # created (tags + GitHub release) but the `publish-npm` job failed — e.g. a
+  # bad/expired NPM_TOKEN — a plain re-run does NOT republish, because
+  # release-please now reports `releases_created=false` (the release already
+  # exists) and the publish job is skipped. Dispatching with force_publish=true
+  # runs `pnpm -r publish` against main, which publishes every workspace version
+  # not yet on the registry, without having to cut a throwaway version bump.
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Run the npm publish job even when release-please created no new release (recovery for a failed publish).'
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -172,7 +185,12 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: release-please
-    if: needs.release-please.outputs.releases_created == 'true'
+    # Normal path: release-please created a new release. Recovery path: an
+    # operator-triggered workflow_dispatch with force_publish=true (used when a
+    # prior publish failed — e.g. bad NPM_TOKEN — and a re-run would otherwise
+    # skip because the release already exists). `inputs` is operator-controlled
+    # (a typed boolean input), so this is safe to use in the job condition.
+    if: needs.release-please.outputs.releases_created == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_publish == true)
     runs-on: ubuntu-latest
     permissions:
       contents: write # need write to commit the signed DSSE envelope back
