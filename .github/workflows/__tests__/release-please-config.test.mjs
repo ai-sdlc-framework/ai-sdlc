@@ -109,6 +109,28 @@ describe('release-please-config.json — AISDLC-401', () => {
       );
     });
 
+    it('exposes a force_publish recovery gate (AISDLC-607)', () => {
+      if (!existsSync(RELEASE_WORKFLOW_PATH)) return;
+      const on = workflow.on || workflow.true;
+      const dispatch = on && on.workflow_dispatch;
+      assert.ok(
+        dispatch && dispatch.inputs && dispatch.inputs.force_publish,
+        'release.yml workflow_dispatch must declare a force_publish input so a failed npm ' +
+          'publish can be recovered without cutting a throwaway version bump',
+      );
+      assert.equal(
+        dispatch.inputs.force_publish.type,
+        'boolean',
+        'force_publish must be a typed boolean so it is safe to compare in an if: expression',
+      );
+      const publishIf = workflow.jobs['publish-npm'].if;
+      assert.match(
+        publishIf,
+        /force_publish/,
+        "publish-npm's if: must honor the force_publish recovery gate",
+      );
+    });
+
     it('uses googleapis/release-please-action@v4', () => {
       if (!existsSync(RELEASE_WORKFLOW_PATH)) return;
       const workflowText = readFileSync(RELEASE_WORKFLOW_PATH, 'utf-8');
