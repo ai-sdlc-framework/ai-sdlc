@@ -53,6 +53,16 @@ import { execFileSync, spawnSync } from 'node:child_process';
  *   and the `.jsonl` file, the signer and verifier compute different
  *   patch-ids and the envelope lookup misses. Three-entry set is now
  *   canonical for both sides.
+ * - `backlog/tasks/` and `backlog/completed/` — excluded per AISDLC-610.
+ *   The task-Done move (`tasks/ → completed/`) is lifecycle bookkeeping, not
+ *   reviewed source content — it must not shift the attested content
+ *   identity. Without this exclusion, `emit-leaf` (run BEFORE the Done move)
+ *   and `sign-v6` (run AFTER, or vice-versa) compute DIFFERENT patch-ids for
+ *   the exact same reviewed diff, so `sign-v6`'s per-patch-id leaf lookup
+ *   misses the leaves `emit-leaf` just wrote (local-trades LT-595 HIGH-2 /
+ *   MED-5). This exclusion, `PATCH_ID_EXCLUSIONS`, `ATTESTATION_PATH_EXCLUSIONS`
+ *   in `pipeline-cli/attestation-core/verify-core.mjs`, and the `emit-leaf` /
+ *   `sign-v6` callers MUST stay in lockstep — see `patch-id-exclusion-lockstep.test.ts`.
  *
  * Kept as a tuple so callers spread it into git invocations and adding
  * another exclusion is a one-element append rather than a re-architecture.
@@ -65,6 +75,8 @@ export const PATCH_ID_EXCLUSIONS = [
   ':!.ai-sdlc/attestations/',
   ':!.ai-sdlc/transcript-leaves/',
   ':!.ai-sdlc/transcript-leaves.jsonl',
+  ':!backlog/tasks/',
+  ':!backlog/completed/',
 ] as const;
 
 /**

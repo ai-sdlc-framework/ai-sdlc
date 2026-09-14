@@ -38,6 +38,17 @@ before(() => {
   } catch (err) {
     throw new Error(`failed to build orchestrator: ${err.stderr?.toString() ?? err.message}`);
   }
+  // AISDLC-610: the helper also resolves pipeline-cli's compiled patch-id
+  // module (best-effort — see `tryLoadPipelineCliPatchId`) — make sure it's
+  // built so the `setupRepo` stub (which re-exports from the real dist) resolves.
+  try {
+    execFileSync('pnpm', ['--filter', '@ai-sdlc/pipeline-cli', 'build'], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    throw new Error(`failed to build pipeline-cli: ${err.stderr?.toString() ?? err.message}`);
+  }
 });
 
 function cleanEnv(extra = {}) {
@@ -93,6 +104,19 @@ function setupRepo(tmpHome, rootOverride) {
     '---\nname: security-reviewer\n---\nbody\n',
   );
   writeFileSync(join(root, 'ai-sdlc-plugin', 'plugin.json'), JSON.stringify({ version: '0.7.0' }));
+  // AISDLC-610: stub pipeline-cli's compiled patch-id module the same way,
+  // for the same reason — `sign-attestation.mjs` now resolves the SAME
+  // `computePatchId` module `emit-leaf` / `sign-v6` use (no re-implemented
+  // copy). This is best-effort/optional (see `tryLoadPipelineCliPatchId`),
+  // so its absence would silently degrade tests to the legacy per-SHA
+  // filename rather than fail loud — stub it so the content-addressed
+  // (patch-id) filename tests below exercise the real path.
+  mkdirSync(join(root, 'pipeline-cli', 'dist', 'attestation'), { recursive: true });
+  const patchIdDist = join(repoRoot, 'pipeline-cli', 'dist', 'attestation', 'patch-id.js');
+  writeFileSync(
+    join(root, 'pipeline-cli', 'dist', 'attestation', 'patch-id.js'),
+    `export * from '${patchIdDist.replace(/\\/g, '\\\\')}';\n`,
+  );
   // Symlink/copy the orchestrator dist (the helper does an absolute path
   // import from `process.cwd()`, so we need the dist available there).
   mkdirSync(join(root, 'orchestrator', 'dist', 'runtime'), { recursive: true });
