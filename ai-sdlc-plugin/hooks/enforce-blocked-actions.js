@@ -357,21 +357,24 @@ function stripComment(segment) {
  * Heredoc bodies are stripped BEFORE segment-splitting so a heredoc that
  * merely CONTAINS the text `git stash pop` (e.g. documentation piped via
  * `cat <<EOF`) is not mistaken for an actual invocation (AC-3 no-over-block).
- * Shell "wrapper" punctuation — subshells `( ... )`, brace groups `{ ... }`,
- * command substitution `$( ... )`, and backtick substitution `` ` ... ` `` —
- * is stripped next (see `stripShellWrappers`) because all of those STILL
- * EXECUTE their contents, so `(git stash pop)` / `$(git stash pop)` are
- * exactly as dangerous as a bare `git stash pop` (security-review finding:
- * these forms bypassed detection entirely before the wrapper strip). Segments
- * are then evaluated with the same shell-control-operator splitting used by
- * enforceMergeGovernance() above, so chained commands (`x && git stash pop`)
- * and wrapper-exposed commands (`{ git stash pop; }` → `git stash pop` after
- * unwrapping + `;`-splitting) are caught per-segment.
+ * The remaining text is then aggressively NORMALIZED (see
+ * `normalizeStashObfuscation`) to collapse the many shell-level ways of
+ * spelling the same invocation — quotes, backslashes, subshell/brace/
+ * command-substitution wrappers, and `$VAR`/`${VAR}` word-splitting tricks —
+ * down to their plain-text equivalent BEFORE segment-splitting and
+ * detection. This is deliberately NOT an enumerate-every-obfuscation
+ * strategy (security review found that approach keeps producing new
+ * bypasses — `/usr/bin/git`, `git st''ash`, `git${IFS}stash`, `git st\ash`,
+ * `\git stash`, `(git stash pop)`, etc. were each patched individually and
+ * each left a sibling bypass). Instead: normalize the obfuscation-capable
+ * characters away FIRST, then run ONE fail-closed subcommand-position
+ * detector (`evaluateStashSegment`) over the clean text — see that
+ * function's docstring for the fail-closed contract.
  */
 function enforceStashGovernance(command) {
   const withoutHeredocs = stripHeredocBodies(command);
-  const withoutWrappers = stripShellWrappers(withoutHeredocs);
-  for (const segment of splitShellSegments(withoutWrappers)) {
+  const normalized = normalizeStashObfuscation(withoutHeredocs);
+  for (const segment of splitShellSegments(normalized)) {
     const verdict = evaluateStashSegment(segment);
     if (verdict && verdict.blocked) {
       deny(verdict.reason);
@@ -380,24 +383,48 @@ function enforceStashGovernance(command) {
 }
 
 /**
- * Removes shell "wrapper" punctuation — `(`, `)`, `{`, `}`, `$`, and backtick
- * — that can be used to hide a real invocation inside a subshell `( ... )`,
- * brace group `{ ... }`, command substitution `$( ... )`, or backtick
- * substitution `` `...` ``. All of these EXECUTE their contents, so
- * `(git stash pop)` is exactly as dangerous as a bare `git stash pop`
- * (security-review finding on AISDLC-611: these forms were not detected at
- * all before this strip).
+ * Aggressively normalizes a command string for stash-governance DETECTION
+ * (never used to alter what the shell/Bash tool actually executes — only
+ * this local copy is transformed). Collapses the shell mechanisms that can
+ * be used to obfuscate a `git stash` invocation down to their plain-text
+ * equivalent, in order:
  *
- * This is a coarse CHARACTER-LEVEL strip, not balanced parsing — replacing
- * these characters with spaces can only ever ADD false-positive detections
- * (e.g. turning an unrelated `foo(bar)` into two harmless tokens) or expose a
- * hidden invocation for correct detection; it can never HIDE a real one. That
- * is the safe bias for this boundary. Used only for stash-governance
- * DETECTION — the original command string is untouched and is what the
- * shell/Bash tool actually executes.
+ * 1. `stripCommentAndQuotes` — drops a trailing `#` comment and EVERY quote
+ *    character, so a real shell's word-concatenation behavior is mirrored:
+ *    `git st''ash pop` / `git sta"sh" pop` both collapse to the literal
+ *    text `git stash pop` (closes the mid-token quote-splice bypass).
+ * 2. `${...}` / `$VAR` → a single space. Bash's default `$IFS` is
+ *    whitespace, so `git${IFS}stash${IFS}pop` really does word-split into
+ *    `git stash pop` at execution time — detection must mirror that
+ *    (closes the `$IFS`-splice bypass) rather than leave a stray `IFS`
+ *    token that corrupts subcommand-position detection.
+ * 3. Backslashes removed entirely (not replaced with a space) — a real
+ *    shell drops an unescaped `\` and joins what's on either side of it,
+ *    so `git st\ash pop` → `git stash pop` and `\git stash pop` →
+ *    `git stash pop` (closes the backslash-splice bypass).
+ * 4. Subshell / brace-group / backtick / remaining `$` wrapper punctuation
+ *    (`(`, `)`, `{`, `}`, `` ` ``, `$`) replaced with a space — all of
+ *    these EXECUTE their contents, so `(git stash pop)` /
+ *    `{ git stash pop; }` / `` `git stash pop` `` / `$(git stash pop)`
+ *    are exactly as dangerous as a bare invocation (closes the shell-
+ *    wrapper bypass). The bare `$` catches command substitution's opening
+ *    `$(` after step 4 already removed the parens — without it, a stray
+ *    `$` token survives and corrupts subcommand-position detection by
+ *    displacing the `git` token from index 0.
+ *
+ * This is a coarse CHARACTER-LEVEL transform, not balanced shell parsing —
+ * it can only ever ADD false-positive detections (e.g. turning an unrelated
+ * `foo(bar)` into two harmless tokens) or expose a hidden invocation for
+ * correct detection; it can never HIDE a real one. That is the deliberate
+ * safe bias for this boundary.
  */
-function stripShellWrappers(text) {
-  return text.replace(/[(){}`$]/g, ' ');
+function normalizeStashObfuscation(text) {
+  let out = stripCommentAndQuotes(text);
+  out = out.replace(/\$\{[^}]*\}/g, ' '); // ${VAR} / ${IFS} → space (word-split)
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ' '); // $VAR → space (word-split)
+  out = out.replace(/\\/g, ''); // drop backslashes; join adjoining text
+  out = out.replace(/[(){}`$]/g, ' '); // unwrap subshell/brace/backtick/`$(` execution forms
+  return out;
 }
 
 /** True when `tok` is `git` or a path ending in `/git` (e.g. `/usr/bin/git`, `./git`). */
@@ -497,22 +524,36 @@ function hasPositionalArg(tokens, fromIdx) {
  * invoke `git stash` at all (not a stash command → no opinion, caller
  * moves on).
  *
- * Tokenization here deliberately DIFFERS from `tokenizeShellish()` (used by
- * the merge governance above): it runs `stripCommentAndQuotes()` (strips a
- * trailing `#` comment AND every quote character) over the whole segment
- * BEFORE splitting on whitespace. This closes a security-review-found
- * bypass where quote characters landing mid-token (`git st''ash pop`,
- * `git sta"sh" pop`) produced a single literal token like `st''ash` that
- * never equaled `'stash'` — a real shell concatenates the quoted/unquoted
- * runs into one word (`stash`) before dispatch, and detection must mirror
- * that. The `git` token itself is matched by BASENAME (`isGitToken`, e.g.
- * `/usr/bin/git`) for the same reason — a path-qualified invocation is
- * exactly as real as a bare `git`.
+ * The caller (`enforceStashGovernance`) already ran `normalizeStashObfuscation`
+ * over the WHOLE command before segment-splitting, so by the time a segment
+ * reaches this function, quotes/backslashes/`$VAR`/wrapper punctuation are
+ * already gone. `stripCommentAndQuotes()` runs again here (idempotent — no
+ * quotes remain, so this is a defensive no-op) before splitting on
+ * whitespace, and the `git` token itself is matched by BASENAME
+ * (`isGitToken`, e.g. `/usr/bin/git`) rather than exact string equality, so a
+ * path-qualified invocation is treated exactly like a bare `git`.
  *
- * Fail-closed: any stash subcommand this function does not explicitly
- * recognize as safe (list/show/apply, tagged push/save, ref'd drop) is
- * blocked — including bare `git stash`, `git stash pop`, `git stash clear`,
- * and anything unrecognized.
+ * DETECTION IS BY SUBCOMMAND POSITION, not "the word stash appears
+ * anywhere": `findGitStashIndex` walks forward from the `git` token, skips
+ * recognized GLOBAL git flags (`-C <dir>`, `-c <k=v>`, etc.), and returns
+ * the index of the very next non-flag token. Only when THAT token is
+ * literally `stash` do we treat this as a stash invocation at all — so
+ * `git commit -m stash`, `git branch stash-experiment`, and
+ * `git log --grep stash` (where `stash` is an ARGUMENT, not the subcommand)
+ * correctly return `null` (not a stash invocation, no opinion) rather than
+ * being blocked.
+ *
+ * FAIL-CLOSED ONCE THE SUBCOMMAND *IS* STASH: any form this function does
+ * not explicitly recognize as safe (list/show/apply, tagged push/save,
+ * ref'd drop) is blocked — including bare `git stash`, `git stash pop`,
+ * `git stash clear`, and anything unrecognized. This is the load-bearing
+ * design change from the pre-review implementation: previously an
+ * unrecognized/unparseable form at the SUBCOMMAND-DETECTION step (obfuscated
+ * `git` token, obfuscated `stash` token) fell through to `return null`
+ * (ALLOW, wrong) instead of reaching this fail-closed dispatch. Normalizing
+ * the obfuscation away BEFORE detection (see `normalizeStashObfuscation`)
+ * means the only way to reach `return null` now is a command that is
+ * genuinely, unambiguously not a `git stash` invocation.
  */
 function evaluateStashSegment(segment) {
   const tokens = stripCommentAndQuotes(segment).trim().split(/\s+/).filter(Boolean);
@@ -522,7 +563,7 @@ function evaluateStashSegment(segment) {
   if (!isGitToken(tokens[i])) return null; // not a git invocation at all (basename-tolerant)
 
   const stashIdx = findGitStashIndex(tokens, i);
-  if (stashIdx === -1) return null; // `git <something-else>` — not stash
+  if (stashIdx === -1) return null; // `git <something-else>` — stash isn't the subcommand
 
   const subIdx = stashIdx + 1;
   const sub = tokens[subIdx];

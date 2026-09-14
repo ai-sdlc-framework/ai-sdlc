@@ -145,3 +145,38 @@ splitting — closing all three bypasses while keeping every existing
 allow/no-over-block case green (verified: `git commit -m stash`, tagged
 push/save, apply/list/show, ref'd drop, echo/heredoc/path substrings, and
 unrelated pnpm script names all remain ALLOWED).
+
+**Second security re-review — architecture change (fail-closed-on-ambiguity):**
+a third bypass class surfaced (`git${IFS}stash${IFS}pop` via `$IFS`
+word-splitting; `git st\ash pop` / `\git stash pop` via unstripped
+backslashes) — confirming that enumerating individual obfuscations one at a
+time was whack-a-mole. Replaced the per-fix patching with a two-stage
+fail-closed-by-construction design:
+
+1. **`normalizeStashObfuscation()`** aggressively normalizes the WHOLE
+   command before segment-splitting: strips quotes/comments
+   (`stripCommentAndQuotes`), collapses `${VAR}`/`$VAR` to a single space
+   (mirrors bash's real `$IFS` word-splitting semantics), strips backslashes
+   entirely (mirrors a real shell dropping an unescaped `\` and joining
+   adjoining text), and blanks subshell/brace/backtick/`$` wrapper
+   punctuation. This turns every obfuscated spelling of `git stash pop`
+   into the same plain text before detection ever runs.
+2. **Subcommand-position detection, fail-closed once matched**:
+   `findGitStashIndex` only treats `stash` as the stash subcommand when it
+   is the very NEXT non-flag token after `git` (skipping recognized global
+   flags) — so `git commit -m stash`, `git branch stash-experiment`, and
+   `git log --grep stash` correctly stay ALLOWED (`stash` is an argument,
+   not the subcommand). Once `stash` IS the subcommand, the existing
+   fail-closed dispatch (only list/show/apply/tagged-push/tagged-save/
+   ref'd-drop are safe; everything else blocks) takes over unchanged. This
+   eliminates the enumerate-every-obfuscation problem: anything that
+   normalizes to a `git`+stash-subcommand invocation that isn't provably
+   safe is blocked, by construction, rather than by an ever-growing
+   allowlist of detected obfuscations.
+
+7 more hermetic tests added (44 total in the no-bare-stash suite section →
+113 tests file-wide) covering `$IFS` (braced and bare forms), backslash
+mid-token splice, leading-backslash git-token splice, plus explicit
+subcommand-position no-over-block re-confirmation (`git commit -m stash`,
+`git branch stash-experiment`, `git log --grep stash`). All 113 tests
+pass; lint + format clean.

@@ -1214,6 +1214,51 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'global git flags before stash must not evade the guard');
   });
 
+  // ── $IFS / backslash-splice / leading-backslash bypass (2nd security re-review) ──
+
+  it('blocks git${IFS}stash${IFS}pop ($IFS word-splitting)', () => {
+    const result = runHook('git${IFS}stash${IFS}pop');
+    assert.ok(
+      isDenied(result),
+      "bash's default $IFS is whitespace — this really does execute git stash pop",
+    );
+  });
+
+  it('blocks git${IFS}stash${IFS}pop with braces omitted ($IFS bare form)', () => {
+    const result = runHook('git $IFS stash $IFS pop');
+    assert.ok(isDenied(result), 'bare $VAR form must also be collapsed to whitespace');
+  });
+
+  it('blocks git st\\ash pop (backslash mid-token splice)', () => {
+    const result = runHook('git st\\ash pop');
+    assert.ok(
+      isDenied(result),
+      'a real shell drops the unescaped backslash and joins st+ash into stash',
+    );
+  });
+
+  it('blocks \\git stash pop (leading backslash on the git token)', () => {
+    const result = runHook('\\git stash pop');
+    assert.ok(isDenied(result), 'a leading backslash must not hide the git token');
+  });
+
+  // ── Fail-closed subcommand-position redesign: no-over-block guard ────
+
+  it('does not block git commit -m stash (stash is an argument, not the subcommand)', () => {
+    const result = runHook('git commit -m stash');
+    assert.ok(!isDenied(result), 'stash must be the SUBCOMMAND position to trigger detection');
+  });
+
+  it('does not block git branch stash-experiment (stash is a branch-name argument)', () => {
+    const result = runHook('git branch stash-experiment');
+    assert.ok(!isDenied(result), 'branch is the subcommand here, not stash');
+  });
+
+  it('does not block git log --grep stash (stash is a grep pattern argument)', () => {
+    const result = runHook('git log --grep stash');
+    assert.ok(!isDenied(result), 'log is the subcommand here, not stash');
+  });
+
   it('does not let a trailing --auto-like decoy defeat the untagged-push block', () => {
     const result = runHook('git stash push -u && echo --message=fake');
     assert.ok(isDenied(result), 'the -m must belong to the actual git stash push segment');
