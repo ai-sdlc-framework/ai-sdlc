@@ -1271,8 +1271,9 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
 
   // ── Empty-variable intra-token splice (4th security re-review) ───────
   // An UNSET/empty var concatenates its neighbors in a real shell, so a splice
-  // INSIDE the git or stash token hides it under the space-only interpretation.
-  // The dual-interpretation normalizer (var→space AND var→empty) catches these.
+  // INSIDE the git or stash token would hide it under a space-only collapse.
+  // The single shell-accurate normalizer (other vars→empty) concatenates and
+  // catches these.
 
   it('blocks g${x}it stash pop (empty var spliced inside the git token)', () => {
     const result = runHook('g${x}it stash pop');
