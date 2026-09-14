@@ -307,13 +307,26 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
 
   // 3. Non-backlog untracked files → operator attention required
   if (otherFiles.length > 0) {
+    // AISDLC-609: name the ACTUAL resolved pattern/prefix in the message, not
+    // a generic placeholder. Before this fix, a repo whose configured prefix
+    // wasn't recognized would have its real task files land in `otherFiles`
+    // and the refusal would misleadingly call them "non-backlog" without any
+    // indication of what pattern was expected — leaving the operator unable
+    // to tell whether their files were truly foreign or a prefix-resolution
+    // bug. Surfacing the resolved prefix source makes that failure mode
+    // self-diagnosing instead of silent/misleading.
+    const configuredPrefix = readConfiguredTaskPrefix(workDir);
+    const patternDesc = configuredPrefix
+      ? `backlog/{tasks,completed}/${configuredPrefix}-N*.md (prefix "${configuredPrefix}" read from backlog/config.yml's task_prefix)`
+      : `backlog/{tasks,completed}/<prefix>-N*.md (no task_prefix configured in backlog/config.yml — using the prefix-agnostic fallback shape: any lowercase-alphanumeric prefix followed by "-" and digits)`;
     return {
       ok: false,
       reason:
         `Step 0.5: non-backlog untracked files detected in parent — manual cleanup required ` +
         `before dispatch can proceed.\n\nFiles:\n${otherFiles.map((f) => `  ${f}`).join('\n')}\n\n` +
-        `These are not backlog task files (pattern: backlog/{tasks,completed}/<prefix>-N*.md). ` +
-        `Clean them up manually (e.g. git clean -f <file>) and re-run.`,
+        `These do not match the recognized backlog task file pattern: ${patternDesc}. ` +
+        `If these ARE your project's task files, check backlog/config.yml's task_prefix — otherwise ` +
+        `clean them up manually (e.g. git clean -f <file>) and re-run.`,
       syncedFiles: [],
     };
   }

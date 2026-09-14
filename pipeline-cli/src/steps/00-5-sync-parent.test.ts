@@ -132,6 +132,23 @@ describe('Step 0.5 — syncParentUntrackedFiles', () => {
     expect(result.reason).toMatch(/non-backlog untracked files/);
     expect(result.reason).toContain('dist/index.js');
     expect(result.syncedFiles).toEqual([]);
+    // AISDLC-609: no backlog/config.yml in workDir → refusal names the
+    // prefix-agnostic fallback shape explicitly (self-diagnosing, not just
+    // "non-backlog" with no indication of what pattern was expected).
+    expect(result.reason).toContain('no task_prefix configured in backlog/config.yml');
+  });
+
+  it('(b2) AISDLC-609: refusal message names the configured prefix when backlog/config.yml sets one', async () => {
+    writeFileSync(
+      join(workDir, 'backlog/config.yml'),
+      "project_name: 'local-trades'\ntask_prefix: 'LT'\n",
+      'utf8',
+    );
+    const fake = new FakeRunner().on(/^git ls-files/, ok('dist/index.js\n'));
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('prefix "lt" read from backlog/config.yml');
+    expect(result.reason).toContain('dist/index.js');
   });
 
   it('(e) backlog + non-backlog untracked files → refuses with error listing non-backlog', async () => {
