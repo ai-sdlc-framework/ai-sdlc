@@ -3,7 +3,7 @@
  *
  * Mirrors `ai-sdlc-plugin/commands/execute.md` Step 0.5. Scans the parent
  * (orchestrator) repo's working tree for untracked files matching
- * `backlog/{tasks,completed}/aisdlc-N*.md`. For each genuinely-new file
+ * `backlog/{tasks,completed}/<prefix>-N*.md`. For each genuinely-new file
  * (not already on `origin/main`), creates a sync worktree on a generated
  * branch, copies the files there, commits, pushes, and opens a docs-only
  * PR. DOES NOT BLOCK — logs the sync PR URL and returns so main dispatch
@@ -30,7 +30,7 @@
  * ## Prune stale parent debris (AISDLC-446)
  *
  * `pruneStaleParentDebris()` is a complementary step that runs AFTER
- * `syncParentUntrackedFiles`. It scans for untracked `backlog/tasks/aisdlc-N*.md`
+ * `syncParentUntrackedFiles`. It scans for untracked `backlog/tasks/<prefix>-N*.md`
  * files whose same-ID counterpart already exists in `origin/main:backlog/completed/`.
  * When the content matches (no diff), the stale tasks/ file is deleted silently
  * except for one log line. When content differs (operator has local edits), a
@@ -598,21 +598,26 @@ export interface PruneStaleParentDebrisResult {
 }
 
 /**
- * Extract the task ID prefix from a backlog filename.
+ * Extract the task ID from a backlog filename.
  *
  * Given `backlog/tasks/aisdlc-446 - some-slug.md`, returns `aisdlc-446`
- * (lowercased). Returns `null` when the filename doesn't match the expected
- * `backlog/tasks/aisdlc-N` pattern.
+ * (lowercased); given `backlog/tasks/lt-592 - x.md`, returns `lt-592`. Returns
+ * `null` when the filename doesn't match the `backlog/{tasks,completed}/<prefix>-N`
+ * shape. AISDLC-609: intentionally PREFIX-AGNOSTIC (any `<prefix>-<digit>`), not
+ * tied to the configured task_prefix — pairing a tasks/ file to its completed/
+ * counterpart compares IDs extracted the SAME way on both sides, so it is
+ * correct for any prefix, and the prune delete is additionally content-guarded.
  */
 export function extractTaskId(relativePath: string): string | null {
-  // Match backlog/tasks/ or backlog/completed/ prefix + aisdlc-N id
+  // Match backlog/tasks/ or backlog/completed/ prefix + a <prefix>-N task id
+  // (prefix-agnostic; see JSDoc above for why this need not consult config).
   const match = relativePath.match(/^backlog\/(?:tasks|completed)\/([a-z0-9][a-z0-9._]*-\d+)\b/i);
   if (!match) return null;
   return match[1].toLowerCase();
 }
 
 /**
- * Find an untracked `backlog/tasks/aisdlc-N*.md` file's counterpart in
+ * Find an untracked `backlog/tasks/<prefix>-N*.md` file's counterpart in
  * `origin/main:backlog/completed/` by task ID (not by exact filename, since
  * the slug might differ). Returns the completed/ path on origin/main when
  * found, or null when not found.
@@ -667,7 +672,7 @@ export async function readOriginMainFile(
 /**
  * AISDLC-446 — Prune stale parent debris.
  *
- * Scans the parent's working tree for untracked `backlog/tasks/aisdlc-N*.md`
+ * Scans the parent's working tree for untracked `backlog/tasks/<prefix>-N*.md`
  * files. For each:
  *
  * 1. If a same-ID file exists in `origin/main:backlog/completed/` AND content
