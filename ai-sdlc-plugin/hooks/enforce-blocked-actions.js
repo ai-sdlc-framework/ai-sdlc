@@ -419,11 +419,28 @@ function enforceStashGovernance(command) {
  * safe bias for this boundary.
  */
 function normalizeStashObfuscation(text) {
-  let out = stripCommentAndQuotes(text);
+  // ORDER MATTERS (3rd security round finding): `${VAR}`/`$VAR` collapse
+  // MUST run BEFORE quote-stripping. In a real shell, an unescaped quote
+  // TERMINATES a `$VAR` name — `$IFS'stash'` expands `$IFS` then emits the
+  // literal `stash`. If quotes were stripped FIRST, `$IFS'stash'` would
+  // already read as `$IFSstash`, and the greedy `/\$[A-Za-z_][A-Za-z0-9_]*/`
+  // variable-name regex would swallow the whole thing as ONE (bogus)
+  // variable reference — silently deleting the `stash` token itself rather
+  // than collapsing `$IFS` to whitespace and leaving `stash` intact. That
+  // was the exact bypass in `git$IFS'stash'${IFS}pop`.
+  let out = text;
   out = out.replace(/\$\{[^}]*\}/g, ' '); // ${VAR} / ${IFS} → space (word-split)
   out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ' '); // $VAR → space (word-split)
+  out = stripCommentAndQuotes(out); // NOW strip comment + quotes, after $VAR is already gone
   out = out.replace(/\\/g, ''); // drop backslashes; join adjoining text
-  out = out.replace(/[(){}`$]/g, ' '); // unwrap subshell/brace/backtick/`$(` execution forms
+  // Unwrap subshell/brace/backtick/`$(` execution forms. Note: this also
+  // strips the `{`/`}` in a stash ref like `stash@{0}` (→ `stash@0` after
+  // the surrounding space collapse), which is harmless for OUR purposes —
+  // every safety check below only asks "is there a non-flag token present"
+  // (`hasPositionalArg`), never inspects the ref's exact contents — but a
+  // future editor adding ref-content validation here would need to reverse
+  // this stripping first.
+  out = out.replace(/[(){}`$]/g, ' ');
   return out;
 }
 

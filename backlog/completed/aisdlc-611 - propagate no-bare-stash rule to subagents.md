@@ -180,3 +180,27 @@ mid-token splice, leading-backslash git-token splice, plus explicit
 subcommand-position no-over-block re-confirmation (`git commit -m stash`,
 `git branch stash-experiment`, `git log --grep stash`). All 113 tests
 pass; lint + format clean.
+
+**Third security re-review — ordering bug in `normalizeStashObfuscation`:**
+`git$IFS'stash'${IFS}pop` (and `git $IFS'stash' pop`, `git$IFS''stash pop`)
+executed a real bare `git stash pop` but was ALLOWED. Root cause: quotes were
+stripped BEFORE `$VAR` collapse. In a real shell, an unescaped quote
+TERMINATES a `$VAR` name — `$IFS'stash'` expands `$IFS` then emits the
+literal `stash`. Stripping the quote first turned `$IFS'stash'` into
+`$IFSstash`, and the greedy `/\$[A-Za-z_][A-Za-z0-9_]*/` variable-name regex
+then swallowed the whole thing as one bogus variable reference — silently
+deleting the `stash` token itself instead of collapsing only `$IFS` to
+whitespace. Fixed by reordering `normalizeStashObfuscation`: `${VAR}`/`$VAR`
+collapse now runs FIRST, quote/comment stripping SECOND. Re-verified the
+pre-existing mid-token-quote case (`git st''ash pop`, no `$` involved) still
+normalizes correctly after the reorder. Added a comment noting that the
+wrapper-punctuation strip also incidentally splits ref tokens like
+`stash@{0}` into `stash@` + `0` — harmless, since every safety check only
+asks "is a non-flag token present," never inspects ref contents, but flagged
+so a future editor adding ref-content validation doesn't assume the ref
+survives intact.
+
+3 new hermetic tests added (47 total in the no-bare-stash suite section → 116
+tests file-wide) covering the exact bypass forms. All 116 tests pass; lint +
+format clean. This closes the third and (per operator) final security
+review round.

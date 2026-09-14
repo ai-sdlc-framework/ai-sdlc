@@ -1242,6 +1242,27 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'a leading backslash must not hide the git token');
   });
 
+  // ── $VAR-then-quote ordering bypass (3rd security re-review) ─────────
+
+  it("blocks git$IFS'stash'${IFS}pop (quote terminates $VAR name)", () => {
+    const result = runHook("git$IFS'stash'${IFS}pop");
+    assert.ok(
+      isDenied(result),
+      '$VAR collapse must run BEFORE quote-stripping so the quote correctly ' +
+        'terminates the $IFS variable name, leaving the stash token intact',
+    );
+  });
+
+  it("blocks git $IFS'stash' pop (bare $VAR immediately followed by a quote)", () => {
+    const result = runHook("git $IFS'stash' pop");
+    assert.ok(isDenied(result), 'bare $VAR form must also respect quote-termination ordering');
+  });
+
+  it("blocks git$IFS''stash pop (empty-quote immediately after $VAR)", () => {
+    const result = runHook("git$IFS''stash pop");
+    assert.ok(isDenied(result), 'an empty quote right after $VAR must not swallow the stash token');
+  });
+
   // ── Fail-closed subcommand-position redesign: no-over-block guard ────
 
   it('does not block git commit -m stash (stash is an argument, not the subcommand)', () => {
