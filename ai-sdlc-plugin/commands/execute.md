@@ -262,14 +262,16 @@ For ad-hoc / manual cleanup of a specific task without waiting for the next `/ai
 
 ## Step 0.5 — Auto-sync untracked parent task files (AISDLC-217)
 
-After Step 0's sweep, scan the parent's working tree for untracked files matching `backlog/{tasks,completed}/aisdlc-N*.md`. These accumulate in the parent when MCP tool writes bypass Pattern C routing (AISDLC-216), or when an operator pastes files directly into the parent's backlog directory.
+After Step 0's sweep, scan the parent's working tree for untracked files matching `backlog/{tasks,completed}/<prefix>-N*.md`, where `<prefix>` is this repo's task-id prefix (AISDLC-609). These accumulate in the parent when MCP tool writes bypass Pattern C routing (AISDLC-216), or when an operator pastes files directly into the parent's backlog directory.
+
+> **Task-id prefix resolution (AISDLC-609).** `<prefix>` is derived from `backlog/config.yml`'s `task_prefix:` field when present (e.g. this repo's `AISDLC`, lowercased to `aisdlc-`), falling back to a prefix-agnostic `<anything>-<digits>` shape when no explicit prefix is configured — so an adopter repo using e.g. `LT-` is recognized without any config. Both the sync-parent pass (below) and the prune-stale-debris pass (Step 0.5b) use the SAME resolution, implemented once in `pipeline-cli/src/steps/00-5-sync-parent.ts` (`backlogTaskRegex` / `readConfiguredTaskPrefix`) — no divergence between the two passes.
 
 This step is a **safety net** (backstop). AISDLC-216 is the upstream fix; Step 0.5 catches the residual cases.
 
 **What it does:**
 
 1. `git ls-files --others --exclude-standard` — lists all untracked files in the parent.
-2. Partitions: backlog task files (`backlog/{tasks,completed}/aisdlc-N*.md`) vs. everything else.
+2. Partitions: backlog task files (`backlog/{tasks,completed}/<prefix>-N*.md`) vs. everything else.
 3. If non-backlog untracked files exist → **refuses** with an operator-attention message. The operator must manually clean them up (`git clean -f <file>`) before dispatch can proceed.
 4. For each backlog file, verifies it is not already on `origin/main` (`git ls-tree origin/main <path>`).
 5. Genuinely-new files → creates a temporary sync worktree on a generated branch (`chore/sync-tasks-<sha>`), copies the files, commits, pushes, opens a docs-only PR titled `chore: sync N untracked task files`.
@@ -290,15 +292,15 @@ echo "[Step 0.5] $SYNC_RESULT"
 
 > **Implementation note.** The `sync-parent` subcommand is backed by `pipeline-cli/src/steps/00-5-sync-parent.ts` (`syncParentUntrackedFiles`). It follows the same `Runner` injection pattern as all other steps so it is fully hermetic under test. Invoke via `node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs"` (never `pnpm exec` — see CLAUDE.md "CI behavior" / AISDLC-156).
 
-> **Non-blocking contract.** Even when the sync PR opens, Step 0.5 returns immediately and Step 1 proceeds. The parent's untracked files remain until the operator runs `git clean -f backlog/tasks/aisdlc-N*.md` (or until the next Step 0 self-heal after the sync PR merges — at that point the files are on `origin/main`, `git reset --hard origin/main` is safe, and the parent is fully clean again).
+> **Non-blocking contract.** Even when the sync PR opens, Step 0.5 returns immediately and Step 1 proceeds. The parent's untracked files remain until the operator runs `git clean -f backlog/tasks/<prefix>-N*.md` (or until the next Step 0 self-heal after the sync PR merges — at that point the files are on `origin/main`, `git reset --hard origin/main` is safe, and the parent is fully clean again).
 
 ## Step 0.5b — Prune stale parent debris (AISDLC-446)
 
-After the sync-to-main step above, run a complementary prune pass over untracked `backlog/tasks/aisdlc-N*.md` files. This catches the class of debris documented in AISDLC-446: the operator filed a task → dev moved it to `completed/` in a PR → PR merged → `origin/main` now has the file under `completed/`, but the parent's untracked `tasks/` copy persists indefinitely (Pattern C's `git reset --hard origin/main` preserves untracked files by design).
+After the sync-to-main step above, run a complementary prune pass over untracked `backlog/tasks/<prefix>-N*.md` files (same prefix resolution as Step 0.5 above — AISDLC-609). This catches the class of debris documented in AISDLC-446: the operator filed a task → dev moved it to `completed/` in a PR → PR merged → `origin/main` now has the file under `completed/`, but the parent's untracked `tasks/` copy persists indefinitely (Pattern C's `git reset --hard origin/main` preserves untracked files by design).
 
 **What it does (per AC):**
 
-1. For each untracked `backlog/tasks/aisdlc-N*.md`, looks for a same-ID file in `origin/main:backlog/completed/` via `git ls-tree`.
+1. For each untracked `backlog/tasks/<prefix>-N*.md`, looks for a same-ID file in `origin/main:backlog/completed/` via `git ls-tree`.
 2. If found AND content matches (`git show origin/main:<path>` == local file) → **delete** the stale local file. One log line per deletion.
 3. If found BUT content differs → **log a warning and skip** (operator may have unsaved local edits).
 4. If NOT found → leave alone (genuine new task; the sync-to-main step above handles it).

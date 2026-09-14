@@ -62,9 +62,67 @@ import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 
-// Pattern matching backlog task files: backlog/tasks/aisdlc-N*.md
-// or backlog/completed/aisdlc-N*.md
-const BACKLOG_TASK_RE = /^backlog\/(tasks|completed)\/aisdlc-\d/i;
+// ── AISDLC-609: task-id-prefix-agnostic resolution ──────────────────────────
+//
+// Historically this module hardcoded the `aisdlc-` task-id prefix used by
+// THIS repo. A consumer repo configured with a different prefix (e.g. `LT-`)
+// had its untracked stub task files silently ignored or mishandled by Step
+// 0.5's sync + prune passes.
+//
+// Resolution order:
+//   1. `backlog/config.yml`'s `task_prefix:` field (the same source Backlog.md
+//      itself uses to mint task ids) — escaped and used verbatim.
+//   2. A prefix-agnostic fallback shape (`<anything>-<digits>`) when no
+//      explicit prefix is configured, so ANY adopter prefix is handled
+//      without requiring config.
+//
+// `aisdlc-` behavior for this repo is preserved byte-for-byte: this repo's
+// `backlog/config.yml` sets `task_prefix: 'AISDLC'`, so the derived pattern
+// is `aisdlc-\d` — identical to the previous hardcoded regex.
+
+/** Escapes a string for safe interpolation into a RegExp source. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Reads the configured task-id prefix from `backlog/config.yml`'s
+ * `task_prefix:` field. Returns the lowercased prefix, or `null` when the
+ * config file is absent or the field is not set — callers fall back to a
+ * prefix-agnostic pattern in that case.
+ */
+export function readConfiguredTaskPrefix(workDir: string): string | null {
+  try {
+    const configPath = join(workDir, 'backlog', 'config.yml');
+    if (!existsSync(configPath)) return null;
+    const content = readFileSync(configPath, 'utf8');
+    const match = content.match(/^\s*task_prefix\s*:\s*['"]?([A-Za-z0-9_-]+)['"]?\s*$/m);
+    if (!match) return null;
+    return match[1].toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the task-id-shape pattern source (no anchors, no capture group
+ * around the id itself) to interpolate into the backlog-file regexes below:
+ * either the escaped configured prefix, or a prefix-agnostic
+ * `[a-z0-9][a-z0-9._]*` shape that matches any adopter prefix.
+ */
+function resolveTaskIdPrefixSource(workDir: string): string {
+  const prefix = readConfiguredTaskPrefix(workDir);
+  return prefix ? escapeRegExp(prefix) : '[a-z0-9][a-z0-9._]*';
+}
+
+/**
+ * Pattern matching backlog task files: `backlog/tasks/<prefix>-N*.md` or
+ * `backlog/completed/<prefix>-N*.md`, where `<prefix>` is derived per-repo
+ * via `resolveTaskIdPrefixSource` (AISDLC-609).
+ */
+function backlogTaskRegex(workDir: string): RegExp {
+  return new RegExp(`^backlog/(tasks|completed)/${resolveTaskIdPrefixSource(workDir)}-\\d`, 'i');
+}
 
 export interface SyncParentOptions {
   /**
@@ -242,9 +300,10 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
     return { ok: true, syncedFiles: [] };
   }
 
-  // 2. Partition
-  const backlogFiles = untracked.filter((f) => BACKLOG_TASK_RE.test(f));
-  const otherFiles = untracked.filter((f) => !BACKLOG_TASK_RE.test(f));
+  // 2. Partition (AISDLC-609: prefix derived per-repo, not hardcoded aisdlc-)
+  const backlogTaskRe = backlogTaskRegex(workDir);
+  const backlogFiles = untracked.filter((f) => backlogTaskRe.test(f));
+  const otherFiles = untracked.filter((f) => !backlogTaskRe.test(f));
 
   // 3. Non-backlog untracked files → operator attention required
   if (otherFiles.length > 0) {
@@ -253,7 +312,7 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
       reason:
         `Step 0.5: non-backlog untracked files detected in parent — manual cleanup required ` +
         `before dispatch can proceed.\n\nFiles:\n${otherFiles.map((f) => `  ${f}`).join('\n')}\n\n` +
-        `These are not backlog task files (pattern: backlog/{tasks,completed}/aisdlc-N*.md). ` +
+        `These are not backlog task files (pattern: backlog/{tasks,completed}/<prefix>-N*.md). ` +
         `Clean them up manually (e.g. git clean -f <file>) and re-run.`,
       syncedFiles: [],
     };
@@ -534,7 +593,7 @@ export interface PruneStaleParentDebrisResult {
  */
 export function extractTaskId(relativePath: string): string | null {
   // Match backlog/tasks/ or backlog/completed/ prefix + aisdlc-N id
-  const match = relativePath.match(/^backlog\/(?:tasks|completed)\/(aisdlc-\d+)\b/i);
+  const match = relativePath.match(/^backlog\/(?:tasks|completed)\/([a-z0-9][a-z0-9._]*-\d+)\b/i);
   if (!match) return null;
   return match[1].toLowerCase();
 }
@@ -621,7 +680,9 @@ export async function pruneStaleParentDebris(
   const untracked = await listUntrackedFiles(workDir, runner);
 
   // Keep only backlog/tasks/ files matching the aisdlc-N pattern
-  const taskFiles = untracked.filter((f) => /^backlog\/tasks\/aisdlc-\d/i.test(f));
+  const taskFiles = untracked.filter(
+    (f) => backlogTaskRegex(workDir).test(f) && f.startsWith('backlog/tasks/'),
+  );
 
   const pruned: string[] = [];
   const skippedContentDiffers: string[] = [];

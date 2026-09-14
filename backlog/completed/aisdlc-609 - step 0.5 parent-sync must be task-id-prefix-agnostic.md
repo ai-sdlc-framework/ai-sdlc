@@ -1,7 +1,7 @@
 ---
 id: AISDLC-609
 title: Step 0.5 parent-sync/prune must be task-id-prefix-agnostic (not hardcoded aisdlc-)
-status: To Do
+status: Done
 priority: high
 labels:
   - adopter-facing
@@ -49,17 +49,54 @@ prefix for its tmux window regex. Step 0.5 was simply not brought along.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: In a repo with a non-`aisdlc-` task-id prefix (e.g. `LT-`), Step 0.5
+- [x] AC-1: In a repo with a non-`aisdlc-` task-id prefix (e.g. `LT-`), Step 0.5
       correctly identifies untracked `backlog/{tasks,completed}/<PREFIX>-N*.md`
       files as backlog task files (syncs/prunes them), instead of ignoring them
       or treating them as non-backlog "refuse" debris.
-- [ ] AC-2: For an `aisdlc-` repo, behavior is unchanged (regression-safe).
-- [ ] AC-3: Both `execute.md` Step 0.5 and `orchestrator-tick.md` Passes 1-2 use
+- [x] AC-2: For an `aisdlc-` repo, behavior is unchanged (regression-safe).
+- [x] AC-3: Both `execute.md` Step 0.5 and `orchestrator-tick.md` Passes 1-2 use
       the same prefix-agnostic resolution (no divergence).
-- [ ] AC-4: The prefix is derived from backlog config where available, with a
+- [x] AC-4: The prefix is derived from backlog config where available, with a
       prefix-agnostic glob fallback; documented in the command body.
-- [ ] AC-5: Any new/changed helper has hermetic tests covering a non-`aisdlc-`
+- [x] AC-5: Any new/changed helper has hermetic tests covering a non-`aisdlc-`
       prefix and the `aisdlc-` default; `pnpm build && test && lint` clean.
+
+## Final Summary
+
+Both `execute.md` Step 0.5/0.5b and `orchestrator-tick.md` Passes 1-2 already
+delegated to a single runtime helper, `pipeline-cli/src/steps/00-5-sync-parent.ts`
+(`syncParentUntrackedFiles` + `pruneStaleParentDebris`), so there was no
+divergence risk between the two command bodies once the helper itself was
+fixed — both commands invoke the same `sync-parent` / `prune-stale-parent-debris`
+CLI subcommands.
+
+Added `readConfiguredTaskPrefix()` (reads `backlog/config.yml`'s `task_prefix:`
+field, lowercased) and `backlogTaskRegex()` (interpolates the resolved prefix,
+or a prefix-agnostic `[a-z0-9][a-z0-9._]*-\d` fallback shape when no config is
+present, into the existing `backlog/(tasks|completed)/...` pattern). Replaced
+all hardcoded `aisdlc-` regexes in `syncParentUntrackedFiles`,
+`pruneStaleParentDebris`, and `extractTaskId` with the resolved pattern.
+`extractTaskId` itself needed no config lookup — its generic
+`[a-z0-9][a-z0-9._]*-\d+` shape already matches any adopter prefix.
+
+This repo's `backlog/config.yml` sets `task_prefix: 'AISDLC'`, so the derived
+pattern is byte-for-byte `aisdlc-\d` — AC-2 regression safety confirmed by the
+full existing test suite passing unchanged (59 tests, up from 47 pre-change).
+
+Added 12 new hermetic tests covering: `readConfiguredTaskPrefix` (present /
+absent config, missing field), sync of `LT-N` files both with an explicit
+`task_prefix: LT` config and with no config at all (fallback path), the
+non-backlog-debris refuse path still working correctly for an `LT-`-prefixed
+repo, `extractTaskId` on non-`aisdlc-` prefixes, and `pruneStaleParentDebris`
+pruning an `LT-N` file. Updated command-body prose in both `execute.md` and
+`orchestrator-tick.md` to document the resolution order (AC-4).
+
+`pnpm --filter @ai-sdlc/pipeline-cli build` — clean. `npx vitest run` on
+`00-5-sync-parent.test.ts` — 59/59 passed. Full `pipeline-cli` suite — 320/323
+files pass; the 3 pre-existing TUI (`app.test.tsx`,
+`use-terminal-dimensions.test.tsx`) timeouts are unrelated flaky tests
+(reproduced identically on the pre-change tree via `git stash`). `eslint` and
+`prettier --check` clean on all touched files.
 
 ## Non-goals
 
