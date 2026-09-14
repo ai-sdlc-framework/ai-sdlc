@@ -357,18 +357,52 @@ function stripComment(segment) {
  * Heredoc bodies are stripped BEFORE segment-splitting so a heredoc that
  * merely CONTAINS the text `git stash pop` (e.g. documentation piped via
  * `cat <<EOF`) is not mistaken for an actual invocation (AC-3 no-over-block).
- * Segments are then evaluated with the same shell-control-operator splitting
- * used by enforceMergeGovernance() above, so chained commands
- * (`x && git stash pop`) are caught per-segment.
+ * Shell "wrapper" punctuation — subshells `( ... )`, brace groups `{ ... }`,
+ * command substitution `$( ... )`, and backtick substitution `` ` ... ` `` —
+ * is stripped next (see `stripShellWrappers`) because all of those STILL
+ * EXECUTE their contents, so `(git stash pop)` / `$(git stash pop)` are
+ * exactly as dangerous as a bare `git stash pop` (security-review finding:
+ * these forms bypassed detection entirely before the wrapper strip). Segments
+ * are then evaluated with the same shell-control-operator splitting used by
+ * enforceMergeGovernance() above, so chained commands (`x && git stash pop`)
+ * and wrapper-exposed commands (`{ git stash pop; }` → `git stash pop` after
+ * unwrapping + `;`-splitting) are caught per-segment.
  */
 function enforceStashGovernance(command) {
   const withoutHeredocs = stripHeredocBodies(command);
-  for (const segment of splitShellSegments(withoutHeredocs)) {
+  const withoutWrappers = stripShellWrappers(withoutHeredocs);
+  for (const segment of splitShellSegments(withoutWrappers)) {
     const verdict = evaluateStashSegment(segment);
     if (verdict && verdict.blocked) {
       deny(verdict.reason);
     }
   }
+}
+
+/**
+ * Removes shell "wrapper" punctuation — `(`, `)`, `{`, `}`, `$`, and backtick
+ * — that can be used to hide a real invocation inside a subshell `( ... )`,
+ * brace group `{ ... }`, command substitution `$( ... )`, or backtick
+ * substitution `` `...` ``. All of these EXECUTE their contents, so
+ * `(git stash pop)` is exactly as dangerous as a bare `git stash pop`
+ * (security-review finding on AISDLC-611: these forms were not detected at
+ * all before this strip).
+ *
+ * This is a coarse CHARACTER-LEVEL strip, not balanced parsing — replacing
+ * these characters with spaces can only ever ADD false-positive detections
+ * (e.g. turning an unrelated `foo(bar)` into two harmless tokens) or expose a
+ * hidden invocation for correct detection; it can never HIDE a real one. That
+ * is the safe bias for this boundary. Used only for stash-governance
+ * DETECTION — the original command string is untouched and is what the
+ * shell/Bash tool actually executes.
+ */
+function stripShellWrappers(text) {
+  return text.replace(/[(){}`$]/g, ' ');
+}
+
+/** True when `tok` is `git` or a path ending in `/git` (e.g. `/usr/bin/git`, `./git`). */
+function isGitToken(tok) {
+  return typeof tok === 'string' && /(^|\/)git$/.test(tok);
 }
 
 /**
@@ -463,17 +497,29 @@ function hasPositionalArg(tokens, fromIdx) {
  * invoke `git stash` at all (not a stash command → no opinion, caller
  * moves on).
  *
+ * Tokenization here deliberately DIFFERS from `tokenizeShellish()` (used by
+ * the merge governance above): it runs `stripCommentAndQuotes()` (strips a
+ * trailing `#` comment AND every quote character) over the whole segment
+ * BEFORE splitting on whitespace. This closes a security-review-found
+ * bypass where quote characters landing mid-token (`git st''ash pop`,
+ * `git sta"sh" pop`) produced a single literal token like `st''ash` that
+ * never equaled `'stash'` — a real shell concatenates the quoted/unquoted
+ * runs into one word (`stash`) before dispatch, and detection must mirror
+ * that. The `git` token itself is matched by BASENAME (`isGitToken`, e.g.
+ * `/usr/bin/git`) for the same reason — a path-qualified invocation is
+ * exactly as real as a bare `git`.
+ *
  * Fail-closed: any stash subcommand this function does not explicitly
  * recognize as safe (list/show/apply, tagged push/save, ref'd drop) is
  * blocked — including bare `git stash`, `git stash pop`, `git stash clear`,
  * and anything unrecognized.
  */
 function evaluateStashSegment(segment) {
-  const tokens = tokenizeShellish(stripComment(segment));
+  const tokens = stripCommentAndQuotes(segment).trim().split(/\s+/).filter(Boolean);
   let i = 0;
   // Skip a leading run of `VAR=value` env assignments.
   while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-  if (tokens[i] !== 'git') return null; // not a git invocation at all
+  if (!isGitToken(tokens[i])) return null; // not a git invocation at all (basename-tolerant)
 
   const stashIdx = findGitStashIndex(tokens, i);
   if (stashIdx === -1) return null; // `git <something-else>` — not stash

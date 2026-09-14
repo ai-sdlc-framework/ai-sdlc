@@ -1149,6 +1149,66 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'quote-splitting the stash token must not evade the guard');
   });
 
+  // ── Path-qualified / quote-obfuscated / shell-wrapped bypass (security review) ──
+
+  it('blocks a path-qualified /usr/bin/git stash pop', () => {
+    const result = runHook('/usr/bin/git stash pop');
+    assert.ok(isDenied(result), 'basename-tolerant git matching must catch a full-path git binary');
+  });
+
+  it('blocks a path-qualified bare /usr/bin/git stash', () => {
+    const result = runHook('/usr/bin/git stash');
+    assert.ok(isDenied(result), 'basename-tolerant git matching must catch bare stash too');
+  });
+
+  it("blocks git st''ash pop (mid-token empty single-quote splice)", () => {
+    const result = runHook("git st''ash pop");
+    assert.ok(
+      isDenied(result),
+      'a real shell concatenates st + \'\' + ash into "stash" — detection must too',
+    );
+  });
+
+  it('blocks git sta"sh" pop (mid-token double-quote splice)', () => {
+    const result = runHook('git sta"sh" pop');
+    assert.ok(
+      isDenied(result),
+      'a real shell concatenates sta + "sh" into "stash" — detection must too',
+    );
+  });
+
+  it('blocks (git stash pop) wrapped in a subshell', () => {
+    const result = runHook('(git stash pop)');
+    assert.ok(
+      isDenied(result),
+      'a subshell still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks { git stash pop; } wrapped in a brace group', () => {
+    const result = runHook('{ git stash pop; }');
+    assert.ok(
+      isDenied(result),
+      'a brace group still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks $(git stash pop) command substitution', () => {
+    const result = runHook('$(git stash pop)');
+    assert.ok(
+      isDenied(result),
+      'command substitution still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks `git stash pop` backtick substitution', () => {
+    const result = runHook('`git stash pop`');
+    assert.ok(
+      isDenied(result),
+      'backtick substitution still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
   it('blocks git stash pop with global -C flag inserted', () => {
     const result = runHook('git -C /tmp/some-worktree stash pop');
     assert.ok(isDenied(result), 'global git flags before stash must not evade the guard');
