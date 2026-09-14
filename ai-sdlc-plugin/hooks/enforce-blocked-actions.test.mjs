@@ -1161,7 +1161,10 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
 
   it('blocks a path-qualified /usr/bin/git stash clear', () => {
     const result = runHook('/usr/bin/git stash clear');
-    assert.ok(isDenied(result), 'basename-tolerant git matching must catch clear on a full-path git');
+    assert.ok(
+      isDenied(result),
+      'basename-tolerant git matching must catch clear on a full-path git',
+    );
   });
 
   it("blocks git st''ash pop (mid-token empty single-quote splice)", () => {
@@ -1292,6 +1295,29 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
   it('blocks g${x}it stash clear (empty-var splice + destructive clear)', () => {
     const result = runHook('g${x}it stash clear');
     assert.ok(isDenied(result), 'empty-var splice must not hide a destructive clear');
+  });
+
+  // ── MIXED expansion: empty user var + $IFS in the SAME command (5th security re-review) ──
+  // A real shell resolves each var independently — an unset var concatenates
+  // while $IFS word-splits. The single shell-accurate normalize pass ($IFS→space,
+  // other vars→empty) models this; a two-uniform-corner sweep could not.
+
+  it('blocks g${x}it${IFS}stash pop (empty user var joins git, $IFS splits stash/pop)', () => {
+    const result = runHook('g${x}it${IFS}stash pop');
+    assert.ok(
+      isDenied(result),
+      'mixed empty-var + $IFS expansion must still resolve to a blocked pop',
+    );
+  });
+
+  it('blocks git${IFS}st${x}ash pop (empty splice inside stash + $IFS separator)', () => {
+    const result = runHook('git${IFS}st${x}ash pop');
+    assert.ok(isDenied(result), 'mixed expansion inside the stash token must still block pop');
+  });
+
+  it('blocks g${x}it${IFS}stash clear (mixed expansion + destructive clear)', () => {
+    const result = runHook('g${x}it${IFS}stash clear');
+    assert.ok(isDenied(result), 'mixed expansion must not hide a destructive clear');
   });
 
   // ── Fail-closed subcommand-position redesign: no-over-block guard ────

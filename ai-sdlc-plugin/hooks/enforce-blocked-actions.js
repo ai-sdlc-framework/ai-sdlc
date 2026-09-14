@@ -375,23 +375,20 @@ function stripComment(segment) {
  */
 function enforceStashGovernance(command) {
   const withoutHeredocs = stripHeredocBodies(command);
-  // AISDLC-611 (round 5): DUAL-INTERPRETATION of `$VAR`/`${VAR}` splices. An
-  // unknown variable can expand to EITHER whitespace (e.g. the default `$IFS`
-  // → word-split) OR the empty string (an unset/empty var → adjacent chars
-  // CONCATENATE). Both are real shell behaviors, so a splice INSIDE a token —
-  // `g${x}it stash pop` (empty → `git`) or `git${IFS}stash pop` (space →
-  // `git stash`) — must be caught under whichever interpretation reveals a
-  // destructive invocation. We normalize the command TWICE (var→space and
-  // var→empty) and block if EITHER interpretation resolves to a destructive
-  // `git stash` op. (Security round-4 finding: single space-only collapse let
-  // `g${x}it stash pop` through.)
-  for (const varReplacement of [' ', '']) {
-    const normalized = normalizeStashObfuscation(withoutHeredocs, varReplacement);
-    for (const segment of splitShellSegments(normalized)) {
-      const verdict = evaluateStashSegment(segment);
-      if (verdict && verdict.blocked) {
-        deny(verdict.reason);
-      }
+  // AISDLC-611: normalize the command with a SINGLE shell-accurate pass (see
+  // `normalizeStashObfuscation`) — `$IFS` → whitespace (word-split), every
+  // other `$VAR`/`${VAR}` → empty (an unset var concatenates its neighbors).
+  // This models what a real default shell actually does to EACH variable
+  // INDEPENDENTLY, so a mixed splice like `g${x}it${IFS}stash pop` (empty $x
+  // joins `git`, $IFS splits `stash`/`pop`) collapses to `git stash pop` and
+  // is caught. (An earlier two-uniform-corner approach — all-space OR
+  // all-empty — could not represent mixed expansions and let that form
+  // through; security round-5 finding.)
+  const normalized = normalizeStashObfuscation(withoutHeredocs);
+  for (const segment of splitShellSegments(normalized)) {
+    const verdict = evaluateStashSegment(segment);
+    if (verdict && verdict.blocked) {
+      deny(verdict.reason);
     }
   }
 }
@@ -432,7 +429,7 @@ function enforceStashGovernance(command) {
  * correct detection; it can never HIDE a real one. That is the deliberate
  * safe bias for this boundary.
  */
-function normalizeStashObfuscation(text, varReplacement = ' ') {
+function normalizeStashObfuscation(text) {
   // ORDER MATTERS (3rd security round finding): `${VAR}`/`$VAR` collapse
   // MUST run BEFORE quote-stripping. In a real shell, an unescaped quote
   // TERMINATES a `$VAR` name — `$IFS'stash'` expands `$IFS` then emits the
@@ -443,15 +440,22 @@ function normalizeStashObfuscation(text, varReplacement = ' ') {
   // than collapsing `$IFS` to whitespace and leaving `stash` intact. That
   // was the exact bypass in `git$IFS'stash'${IFS}pop`.
   //
-  // `varReplacement` (round-5 dual-interpretation): a `$VAR`/`${VAR}` splice
-  // can expand to whitespace (`$IFS` → word-split, replacement `' '`) OR to
-  // the empty string (unset var → adjacent chars concatenate, replacement
-  // `''`). The caller runs BOTH interpretations and blocks if either reveals a
-  // destructive op — so an intra-token splice like `g${x}it stash pop` (needs
-  // the empty interpretation to reveal `git`) is no longer a bypass.
+  // SHELL-ACCURATE per-variable resolution (round-5): each variable is
+  // resolved INDEPENDENTLY, mirroring a real default shell —
+  //   • `$IFS` / `${IFS}` → a single space (its default value is whitespace,
+  //     so it word-splits its neighbors);
+  //   • every OTHER `$VAR` / `${VAR}` → the empty string (an unset variable
+  //     expands to nothing, so its neighbors CONCATENATE).
+  // A two-uniform-corner sweep (all-space OR all-empty) could not represent a
+  // MIXED command like `g${x}it${IFS}stash pop` (unset `$x` joins → `git`,
+  // `$IFS` splits → `stash`/`pop`); this single pass does, because it applies
+  // the correct rule to each variable at once. IFS is handled BEFORE the
+  // generic `$VAR` rules so it isn't swallowed by the empty-collapse.
   let out = text;
-  out = out.replace(/\$\{[^}]*\}/g, varReplacement); // ${VAR} / ${IFS}
-  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, varReplacement); // $VAR
+  out = out.replace(/\$\{IFS\}/g, ' '); // ${IFS} → space (whitespace word-split)
+  out = out.replace(/\$IFS\b/g, ' '); // $IFS → space (\b so $IFStash is NOT matched here)
+  out = out.replace(/\$\{[^}]*\}/g, ''); // any other ${VAR} → empty (concatenate)
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ''); // any other $VAR → empty (concatenate)
   out = stripCommentAndQuotes(out); // NOW strip comment + quotes, after $VAR is already gone
   out = out.replace(/\\/g, ''); // drop backslashes; join adjoining text
   // Unwrap subshell/brace/backtick/`$(` execution forms. Note: this also
