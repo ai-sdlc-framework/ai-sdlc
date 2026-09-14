@@ -226,9 +226,11 @@ esac
 
 Every orchestrator tick runs the same two-pass cleanup that `/ai-sdlc execute` Step 0.5 / Step 0.5b runs. This keeps the parent's working tree tidy on every tick rather than only when `execute` fires.
 
-**Pass 1 — sync-parent (AISDLC-217):** syncs genuinely-new untracked `backlog/{tasks,completed}/aisdlc-N*.md` files to `origin/main` via a docs-only PR. Non-fatal when the sync PR fails (logs and continues).
+**Pass 1 — sync-parent (AISDLC-217):** syncs genuinely-new untracked `backlog/{tasks,completed}/<prefix>-N*.md` files to `origin/main` via a docs-only PR. Non-fatal when the sync PR fails (logs and continues).
 
-**Pass 2 — prune-stale-parent-debris (AISDLC-446):** deletes untracked `backlog/tasks/aisdlc-N*.md` files whose same-ID counterpart already exists in `origin/main:backlog/completed/` with identical content. Skips files with local edits. Silent when nothing to prune.
+**Pass 2 — prune-stale-parent-debris (AISDLC-446):** deletes untracked `backlog/tasks/<prefix>-N*.md` files whose same-ID counterpart already exists in `origin/main:backlog/completed/` with identical content. Skips files with local edits. Silent when nothing to prune.
+
+> **Task-id prefix resolution (AISDLC-609).** `<prefix>` is NOT hardcoded to `aisdlc-`. Both passes shell out to `pipeline-cli/src/steps/00-5-sync-parent.ts`, which derives the prefix from `backlog/config.yml`'s `task_prefix:` field (falling back to a prefix-agnostic `<anything>-<digits>` shape when unconfigured) — the identical resolution `execute.md` Step 0.5 uses, so a consumer repo with e.g. `task_prefix: LT` is handled correctly with no divergence between `execute.md` and this command.
 
 ```bash
 # Pass 1: sync untracked parent task files

@@ -32,6 +32,7 @@ import {
   extractTaskId,
   findCompletedCounterpartOnOrigin,
   readOriginMainFile,
+  readConfiguredTaskPrefix,
 } from './00-5-sync-parent.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
 
@@ -131,6 +132,23 @@ describe('Step 0.5 — syncParentUntrackedFiles', () => {
     expect(result.reason).toMatch(/non-backlog untracked files/);
     expect(result.reason).toContain('dist/index.js');
     expect(result.syncedFiles).toEqual([]);
+    // AISDLC-609: no backlog/config.yml in workDir → refusal names the
+    // prefix-agnostic fallback shape explicitly (self-diagnosing, not just
+    // "non-backlog" with no indication of what pattern was expected).
+    expect(result.reason).toContain('no task_prefix configured in backlog/config.yml');
+  });
+
+  it('(b2) AISDLC-609: refusal message names the configured prefix when backlog/config.yml sets one', async () => {
+    writeFileSync(
+      join(workDir, 'backlog/config.yml'),
+      "project_name: 'local-trades'\ntask_prefix: 'LT'\n",
+      'utf8',
+    );
+    const fake = new FakeRunner().on(/^git ls-files/, ok('dist/index.js\n'));
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('prefix "lt" read from backlog/config.yml');
+    expect(result.reason).toContain('dist/index.js');
   });
 
   it('(e) backlog + non-backlog untracked files → refuses with error listing non-backlog', async () => {
@@ -990,5 +1008,142 @@ describe('pruneStaleParentDebris — AISDLC-446', () => {
       (l) => l.includes('[prune-stale-debris]') && l.includes('could not read local file'),
     );
     expect(warnLog).toBeDefined();
+  });
+});
+
+// ── AISDLC-609: task-id-prefix-agnostic resolution ─────────────────────────
+
+describe('readConfiguredTaskPrefix', () => {
+  it('returns null when backlog/config.yml does not exist', () => {
+    expect(readConfiguredTaskPrefix(workDir)).toBeNull();
+  });
+
+  it('reads and lowercases the task_prefix field from backlog/config.yml', () => {
+    writeFileSync(
+      join(workDir, 'backlog/config.yml'),
+      "project_name: 'demo'\ntask_prefix: 'LT'\ndefault_status: 'To Do'\n",
+      'utf8',
+    );
+    expect(readConfiguredTaskPrefix(workDir)).toBe('lt');
+  });
+
+  it('returns null when task_prefix field is absent from config.yml', () => {
+    writeFileSync(join(workDir, 'backlog/config.yml'), "project_name: 'demo'\n", 'utf8');
+    expect(readConfiguredTaskPrefix(workDir)).toBeNull();
+  });
+});
+
+describe('Step 0.5 sync — non-aisdlc-prefix repo (AC-1, AC-4)', () => {
+  it('syncs untracked LT-N task files when backlog/config.yml sets task_prefix: LT', async () => {
+    writeFileSync(
+      join(workDir, 'backlog/config.yml'),
+      "project_name: 'local-trades'\ntask_prefix: 'LT'\n",
+      'utf8',
+    );
+    writeFileSync(join(workDir, 'backlog/tasks/LT-42 - some-feature.md'), '# LT-42\n', 'utf8');
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/LT-42 - some-feature.md\n'))
+      .on(/^git ls-tree origin\/main .+LT-42/, ok(''))
+      .on(/^git rev-parse --short=8 HEAD/, ok('deadbee0'))
+      .on(/^git worktree add/, ok(''))
+      .on(/^git add/, ok(''))
+      .on(/^git commit/, ok(''))
+      .on(/^git push/, ok(''))
+      .on(/^gh pr create/, ok('https://github.com/acme/local-trades/pull/1'))
+      .on(/^git worktree remove/, ok(''));
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(result.syncedFiles).toEqual(['backlog/tasks/LT-42 - some-feature.md']);
+    expect(result.prUrl).toBe('https://github.com/acme/local-trades/pull/1');
+  });
+
+  it('syncs untracked LT-N task files with NO config.yml present (prefix-agnostic fallback)', async () => {
+    // No backlog/config.yml at all — falls back to the generic <prefix>-<digits> shape.
+    writeFileSync(join(workDir, 'backlog/tasks/LT-7 - fallback.md'), '# LT-7\n', 'utf8');
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/LT-7 - fallback.md\n'))
+      .on(/^git ls-tree origin\/main .+LT-7/, ok(''))
+      .on(/^git rev-parse --short=8 HEAD/, ok('deadbee1'))
+      .on(/^git worktree add/, ok(''))
+      .on(/^git add/, ok(''))
+      .on(/^git commit/, ok(''))
+      .on(/^git push/, ok(''))
+      .on(/^gh pr create/, ok('https://github.com/acme/local-trades/pull/2'))
+      .on(/^git worktree remove/, ok(''));
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(result.syncedFiles).toEqual(['backlog/tasks/LT-7 - fallback.md']);
+  });
+
+  it('recognizes the repo-configured LT-N files as backlog files (no false "refuse")', async () => {
+    // Regression guard: a repo with task_prefix LT should not treat its OWN
+    // LT-N files as "other" debris.
+    writeFileSync(
+      join(workDir, 'backlog/config.yml'),
+      "project_name: 'local-trades'\ntask_prefix: 'LT'\n",
+      'utf8',
+    );
+    writeFileSync(join(workDir, 'backlog/tasks/LT-9 - feature.md'), '# LT-9\n', 'utf8');
+    // A genuinely non-backlog untracked file should still trigger the refuse path.
+    writeFileSync(join(workDir, 'random-debris.txt'), 'oops', 'utf8');
+
+    const fake = new FakeRunner().on(
+      /^git ls-files/,
+      ok('backlog/tasks/LT-9 - feature.md\nrandom-debris.txt\n'),
+    );
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('random-debris.txt');
+    expect(result.reason).not.toContain('LT-9');
+  });
+});
+
+describe('extractTaskId — prefix-agnostic (AC-1)', () => {
+  it('extracts a non-aisdlc prefix task ID (LT-42)', () => {
+    expect(extractTaskId('backlog/tasks/LT-42 - some-feature.md')).toBe('lt-42');
+  });
+
+  it('extracts a non-aisdlc prefix task ID from completed/', () => {
+    expect(extractTaskId('backlog/completed/LT-7 - fallback.md')).toBe('lt-7');
+  });
+
+  it('still extracts aisdlc-N task IDs (AC-2 regression)', () => {
+    expect(extractTaskId('backlog/tasks/aisdlc-446 - some-slug.md')).toBe('aisdlc-446');
+  });
+});
+
+describe('pruneStaleParentDebris — non-aisdlc-prefix repo (AC-1)', () => {
+  const CONTENT_MATCH = '---\nid: LT-42\nstatus: Done\n---\n\n## Body\n\nDone.\n';
+
+  it('prunes an untracked LT-N task file whose completed/ counterpart matches on origin/main', async () => {
+    writeFileSync(
+      join(workDir, 'backlog/config.yml'),
+      "project_name: 'local-trades'\ntask_prefix: 'LT'\n",
+      'utf8',
+    );
+    const staleFile = join(workDir, 'backlog/tasks/LT-42 - some-feature.md');
+    writeFileSync(staleFile, CONTENT_MATCH, 'utf8');
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/LT-42 - some-feature.md\n'))
+      .on(
+        /^git ls-tree origin\/main .+backlog\/completed\//,
+        ok('backlog/completed/LT-42 - some-feature.md\n'),
+      )
+      .on(/^git show origin\/main:/, ok(CONTENT_MATCH));
+
+    const result = await pruneStaleParentDebris({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(result.pruned).toEqual(['backlog/tasks/LT-42 - some-feature.md']);
+    expect(existsSync(staleFile)).toBe(false);
   });
 });
