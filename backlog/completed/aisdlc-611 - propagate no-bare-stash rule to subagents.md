@@ -1,7 +1,7 @@
 ---
 id: AISDLC-611
 title: Propagate the no-bare-stash rule to developer/reviewer subagents (data-loss guard)
-status: To Do
+status: Done
 priority: high
 labels:
   - safety
@@ -62,3 +62,48 @@ Propagate the no-bare-stash rule to subagents via BOTH belt and suspenders:
 Adopter report local-trades LT-595 (HIGH-3). Operator environment rule: prefer a
 temp WIP commit; `git stash push -u -m "<unique-tag>"` + `git stash apply <sha>`
 + tagged drop; NEVER bare `git stash` / `git stash pop` on the shared stack.
+
+## Final summary
+
+Implemented both belt-and-suspenders layers.
+
+**PreToolUse guard** — `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` gained
+`enforceStashGovernance()`, wired unconditionally into `enforceBash()` (same
+unconditional-enforcement pattern as the AISDLC-602 merge governance). It:
+
+- Strips heredoc bodies before segment-splitting (`stripHeredocBodies`) so
+  documentation/example text quoting `git stash pop` inside a `cat <<EOF`
+  block is never mistaken for a real invocation.
+- Splits on shell control operators (reusing `splitShellSegments`) so chained
+  commands (`x && git stash pop`) are caught per-segment.
+- Requires the segment's first non-env-assignment token to be `git` (not just
+  a substring match), so `echo "git stash pop"` / a path containing "stash" /
+  `git commit -m stash` are never flagged.
+- Scans past global git flags (`-C <dir>`, `-c <k=v>`, etc.) to find the
+  `stash` subcommand token, then dispatches on subcommand: `pop` always
+  blocks; bare `stash`/untagged `push`/`save` (no `-m`/`--message`/positional
+  tag) block; bare `drop` (no explicit ref) blocks; any unrecognized
+  subcommand (`clear`, `branch`, `create`, `store`, ...) blocks fail-closed;
+  `apply`, `list`, `show`, and ref'd `drop` are allowed.
+- Denial messages point at the safe pattern: prefer a temp WIP commit, else
+  `git stash push -u -m "<tag>"` + `git stash apply <ref>` + `git stash drop
+  <ref>`.
+
+29 new hermetic `node --test` cases in
+`ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs` cover every block/allow
+case plus evasion shapes (chained `&&`/`;`/`||`, quote-splitting the `stash`
+token, global `-C` flag insertion, a decoy `--message=` in a different chained
+segment) and no-over-block cases (paths, echo/heredoc text, `git commit -m
+stash`, unrelated pnpm scripts).
+
+**Agent definitions** — `ai-sdlc-plugin/agents/developer.md` gained Hard rule
+#10 stating the no-bare-stash constraint and safe pattern, referencing the
+LT-595 incident and the PreToolUse hook as the authoritative backstop.
+`code-reviewer.md` and `test-reviewer.md` (both have Bash tool access) each
+gained a short "Git safety" section with the same rule, scoped to their
+actual usage (they don't modify the working tree, but may shell out to `git`
+while inspecting a diff).
+
+Verification: `pnpm build && pnpm test && pnpm lint && pnpm format:check`
+clean; `node --test ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs`
+— 98 tests total in the file (29 new stash-governance tests), 0 failures.

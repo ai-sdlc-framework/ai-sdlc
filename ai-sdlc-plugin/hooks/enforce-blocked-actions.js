@@ -36,6 +36,19 @@
  *    pre-AISDLC-602 gap where `blockedActions: git merge*` never matched
  *    `gh pr merge` at all, so the loudest governance rule ("never merge")
  *    wasn't actually enforced by this hook.
+ *
+ * 5. **No-bare-stash governance (AISDLC-611)** — the git stash stack is
+ *    shared across the main checkout, all worktrees, and concurrent
+ *    sessions. A bare `git stash` / `git stash pop` can silently apply-and-
+ *    drop a PRE-EXISTING stash belonging to the operator or a sibling
+ *    session (real data-loss incident: local-trades LT-595, HIGH-3). This
+ *    hook BLOCKS bare `git stash` / `git stash save` (no `-m`/`--message`
+ *    tag), `git stash pop` (always — it cannot be made safe by tagging,
+ *    since it both applies AND drops), a bare `git stash drop` (no explicit
+ *    ref), and any other stash subcommand it doesn't recognize as safe
+ *    (fail-closed). It ALLOWS `git stash push -u -m "<tag>"` /
+ *    `git stash save "<tag>"`, `git stash apply <ref>`, `git stash list`,
+ *    `git stash show`, and `git stash drop <ref>` (explicit ref given).
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
@@ -116,6 +129,16 @@ const SAFE_ARM_FLAGS = new Set([
 // Flags that consume the NEXT token as their value (safe to skip both).
 const VALUE_FLAGS = new Set(['-R', '--repo']);
 
+// AISDLC-611: same temporal-dead-zone constraint applies to the stash
+// governance constants — must be initialized before enforceBash() →
+// enforceStashGovernance() runs at module load.
+const GIT_GLOBAL_VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
+const SAFE_STASH_PATTERN =
+  'prefer a temporary WIP commit to set work aside; if you must stash, tag it uniquely ' +
+  `('git stash push -u -m "<unique-tag>"'), restore it by exact ref/SHA ` +
+  `('git stash apply <ref>'), and only then drop it by that same tag/ref ` +
+  `('git stash drop <ref>')`;
+
 // ── Dispatch by tool ─────────────────────────────────────────────────
 
 if (toolName === 'Bash' || (!toolName && toolInput.command)) {
@@ -137,6 +160,10 @@ function enforceBash(command) {
   // of whatever blockedActions patterns the project has (or hasn't)
   // configured. See enforceMergeGovernance() for the exact rules.
   enforceMergeGovernance(trimmed);
+
+  // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
+  // independent of whatever blockedActions patterns the project configured.
+  enforceStashGovernance(trimmed);
 
   if (blockedActions.length === 0) return;
 
@@ -314,6 +341,213 @@ function isCleanAutoArmSegment(segment) {
 /** Removes only a trailing unquoted shell comment (quotes preserved). */
 function stripComment(segment) {
   return segment.replace(/#.*$/, '');
+}
+
+// ── No-bare-stash governance (AISDLC-611) ────────────────────────────
+
+/**
+ * Enforces the no-bare-stash rule. The git stash stack is a single shared
+ * resource across the main checkout, every `.worktrees/<id>/` isolate, and
+ * any concurrent session — a bare `git stash` followed by `git stash pop`
+ * can silently apply-and-drop a stash that belongs to someone else (the
+ * motivating incident: a dev subagent's own stash captured nothing, so its
+ * `pop` applied+dropped a pre-existing operator stash — local-trades LT-595,
+ * HIGH-3, a REAL data-loss incident).
+ *
+ * Heredoc bodies are stripped BEFORE segment-splitting so a heredoc that
+ * merely CONTAINS the text `git stash pop` (e.g. documentation piped via
+ * `cat <<EOF`) is not mistaken for an actual invocation (AC-3 no-over-block).
+ * Segments are then evaluated with the same shell-control-operator splitting
+ * used by enforceMergeGovernance() above, so chained commands
+ * (`x && git stash pop`) are caught per-segment.
+ */
+function enforceStashGovernance(command) {
+  const withoutHeredocs = stripHeredocBodies(command);
+  for (const segment of splitShellSegments(withoutHeredocs)) {
+    const verdict = evaluateStashSegment(segment);
+    if (verdict && verdict.blocked) {
+      deny(verdict.reason);
+    }
+  }
+}
+
+/**
+ * Removes heredoc BODY lines (the content between a `<<[-~]MARKER` opener and
+ * its closing `MARKER` line) from a multi-line command, replacing them with
+ * nothing. The opener line itself (which contains the real shell redirect,
+ * e.g. `cat <<EOF`) is preserved — only the inert body text is dropped. This
+ * prevents a heredoc that quotes `git stash pop` as documentation/example
+ * text from being mistaken for a real invocation once the command is split
+ * on newlines by splitShellSegments().
+ *
+ * Handles the common forms: `<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF` (tab-
+ * stripped closing delimiter). Best-effort — an unterminated heredoc simply
+ * consumes the remainder of the command, which can only ever cause
+ * under-inspection of trailing content, never a false BLOCK.
+ */
+function stripHeredocBodies(command) {
+  const lines = command.split('\n');
+  const kept = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const match = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (!match) {
+      kept.push(line);
+      i++;
+      continue;
+    }
+    const marker = match[2];
+    const dashed = /<<-/.test(line);
+    kept.push(line);
+    i++;
+    while (i < lines.length) {
+      const bodyLine = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
+      i++;
+      if (bodyLine === marker) break;
+    }
+  }
+  return kept.join('\n');
+}
+
+/**
+ * Locates the index of the `stash` token in a git invocation's token list,
+ * starting the scan just after the `git` token at `gitIdx`, tolerating
+ * global flags (`-C <dir>`, `-c <key=val>`, etc.) in between. Returns -1 when
+ * the invocation is `git <something-else>` (not stash) — e.g. `git commit`.
+ */
+function findGitStashIndex(tokens, gitIdx) {
+  let j = gitIdx + 1;
+  while (j < tokens.length) {
+    const tok = tokens[j];
+    if (tok === 'stash') return j;
+    if (GIT_GLOBAL_VALUE_FLAGS.has(tok)) {
+      j += 2;
+      continue;
+    }
+    if (tok.startsWith('-')) {
+      j += 1;
+      continue;
+    }
+    return -1; // some other git subcommand — not stash
+  }
+  return -1;
+}
+
+/** True when a `-m`/`--message`/`--message=<val>` flag with a non-empty value appears from `fromIdx` onward. */
+function hasMessageFlag(tokens, fromIdx) {
+  for (let i = fromIdx; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok === '-m' || tok === '--message') {
+      const val = tokens[i + 1];
+      return typeof val === 'string' && val.trim().length > 0;
+    }
+    if (tok.startsWith('--message=')) {
+      return tok.slice('--message='.length).trim().length > 0;
+    }
+  }
+  return false;
+}
+
+/** True when a non-flag (positional) token appears from `fromIdx` onward. */
+function hasPositionalArg(tokens, fromIdx) {
+  for (let i = fromIdx; i < tokens.length; i++) {
+    if (!tokens[i].startsWith('-')) return true;
+  }
+  return false;
+}
+
+/**
+ * Evaluates a single shell segment for a `git stash` invocation and decides
+ * whether it should be blocked. Returns `null` when the segment does not
+ * invoke `git stash` at all (not a stash command → no opinion, caller
+ * moves on).
+ *
+ * Fail-closed: any stash subcommand this function does not explicitly
+ * recognize as safe (list/show/apply, tagged push/save, ref'd drop) is
+ * blocked — including bare `git stash`, `git stash pop`, `git stash clear`,
+ * and anything unrecognized.
+ */
+function evaluateStashSegment(segment) {
+  const tokens = tokenizeShellish(stripComment(segment));
+  let i = 0;
+  // Skip a leading run of `VAR=value` env assignments.
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (tokens[i] !== 'git') return null; // not a git invocation at all
+
+  const stashIdx = findGitStashIndex(tokens, i);
+  if (stashIdx === -1) return null; // `git <something-else>` — not stash
+
+  const subIdx = stashIdx + 1;
+  const sub = tokens[subIdx];
+
+  // Bare `git stash` (no subcommand, or the next token is itself a flag like
+  // `-u`) behaves like an untagged `push` — block it, same as untagged push.
+  if (!sub || sub.startsWith('-')) {
+    return {
+      blocked: true,
+      reason:
+        `bare 'git stash' captures a snapshot with no identifying tag, making a later ` +
+        `'git stash pop'/'apply' ambiguous about which stash it targets on the SHARED stash ` +
+        `stack (main checkout + all worktrees + concurrent sessions). Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  if (sub === 'pop') {
+    return {
+      blocked: true,
+      reason:
+        `'git stash pop' applies AND drops in one step on the SHARED stash stack (main ` +
+        `checkout + all worktrees + concurrent sessions) — if your own stash captured nothing ` +
+        `(e.g. nothing was staged/dirty), the pop can silently apply-and-drop a PRE-EXISTING ` +
+        `stash belonging to the operator or a sibling session, permanently losing their work ` +
+        `(real incident: local-trades LT-595, HIGH-3). Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  if (sub === 'push') {
+    if (hasMessageFlag(tokens, subIdx + 1)) return { blocked: false };
+    return {
+      blocked: true,
+      reason:
+        `'git stash push' without a '-m'/'--message' tag is indistinguishable from other ` +
+        `stashes on the SHARED stash stack. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  if (sub === 'save') {
+    if (hasMessageFlag(tokens, subIdx + 1) || hasPositionalArg(tokens, subIdx + 1)) {
+      return { blocked: false };
+    }
+    return {
+      blocked: true,
+      reason:
+        `'git stash save' without a message tag is indistinguishable from other stashes on ` +
+        `the SHARED stash stack. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  if (sub === 'apply' || sub === 'list' || sub === 'show') {
+    return { blocked: false }; // never drops anything from the stack
+  }
+
+  if (sub === 'drop') {
+    if (hasPositionalArg(tokens, subIdx + 1)) return { blocked: false };
+    return {
+      blocked: true,
+      reason:
+        `bare 'git stash drop' (no explicit ref) drops whatever is CURRENTLY on top of the ` +
+        `SHARED stash stack, which may not be yours. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  // Any other subcommand (clear, branch, create, store, export, ...) is not
+  // recognized as safe — fail closed rather than risk missing a destructive
+  // variant.
+  return {
+    blocked: true,
+    reason: `'git stash ${sub}' is not a recognized safe stash operation. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+  };
 }
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────

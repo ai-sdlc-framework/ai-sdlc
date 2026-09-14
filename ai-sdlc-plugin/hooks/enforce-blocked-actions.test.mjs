@@ -1035,3 +1035,159 @@ blockedActions: []
     assert.doesNotMatch(result.stderr, /behind origin\/main/i, 'no warning once rebased');
   });
 });
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governance (AISDLC-611)', () => {
+  // ── Block cases (AC-1) ──────────────────────────────────────────────
+
+  it('blocks bare git stash', () => {
+    const result = runHook('git stash');
+    assert.ok(isDenied(result), 'should deny bare git stash');
+  });
+
+  it('blocks git stash save with no tag', () => {
+    const result = runHook('git stash save');
+    assert.ok(isDenied(result), 'should deny untagged git stash save');
+  });
+
+  it('blocks git stash push with no -m/--message tag', () => {
+    const result = runHook('git stash push -u');
+    assert.ok(isDenied(result), 'should deny untagged git stash push');
+  });
+
+  it('blocks git stash pop unconditionally', () => {
+    const result = runHook('git stash pop');
+    assert.ok(isDenied(result), 'should deny git stash pop');
+  });
+
+  it('blocks git stash pop even with a stash ref argument', () => {
+    const result = runHook('git stash pop stash@{0}');
+    assert.ok(isDenied(result), 'pop is never safe, even with an explicit ref');
+  });
+
+  it('blocks bare git stash drop (no explicit ref)', () => {
+    const result = runHook('git stash drop');
+    assert.ok(isDenied(result), 'should deny bare git stash drop');
+  });
+
+  it('blocks git stash clear (unrecognized/destructive subcommand, fail-closed)', () => {
+    const result = runHook('git stash clear');
+    assert.ok(isDenied(result), 'should deny git stash clear');
+  });
+
+  it('block message points at the safe pattern', () => {
+    const result = runHook('git stash pop');
+    assert.match(result.output, /git stash push -u -m/, 'reason should mention the safe pattern');
+    assert.match(result.output, /git stash apply/, 'reason should mention apply-by-ref');
+  });
+
+  // ── Allow cases (AC-1 + AC-3) ───────────────────────────────────────
+
+  it('allows tagged git stash push -u -m', () => {
+    const result = runHook('git stash push -u -m "wip-aisdlc-611"');
+    assert.ok(!isDenied(result), 'should allow tagged push');
+  });
+
+  it('allows git stash push --message=<tag>', () => {
+    const result = runHook('git stash push --message=wip-tag');
+    assert.ok(!isDenied(result), 'should allow --message= form');
+  });
+
+  it('allows git stash save "<tag>" (positional message)', () => {
+    const result = runHook('git stash save "wip work"');
+    assert.ok(!isDenied(result), 'should allow tagged save');
+  });
+
+  it('allows git stash apply <ref>', () => {
+    const result = runHook('git stash apply stash@{0}');
+    assert.ok(!isDenied(result), 'should allow apply by ref');
+  });
+
+  it('allows git stash apply with no ref (never drops anything)', () => {
+    const result = runHook('git stash apply');
+    assert.ok(!isDenied(result), 'apply never drops from the stack, safe even bare');
+  });
+
+  it('allows git stash list', () => {
+    const result = runHook('git stash list');
+    assert.ok(!isDenied(result), 'should allow list');
+  });
+
+  it('allows git stash show', () => {
+    const result = runHook('git stash show stash@{0}');
+    assert.ok(!isDenied(result), 'should allow show');
+  });
+
+  it('allows git stash drop <ref> (tagged/explicit drop)', () => {
+    const result = runHook('git stash drop stash@{0}');
+    assert.ok(!isDenied(result), 'should allow drop with an explicit ref');
+  });
+
+  it('allows a normal git push unrelated to stash', () => {
+    const result = runHook('git push origin feature');
+    assert.ok(!isDenied(result), 'unrelated git commands are untouched');
+  });
+
+  // ── Evasion shapes (AC-1): chained &&, quoting, control operators ───
+
+  it('blocks git stash pop chained after an unrelated command with &&', () => {
+    const result = runHook('pnpm test && git stash pop');
+    assert.ok(isDenied(result), 'chained && must not evade the guard');
+  });
+
+  it('blocks bare git stash chained with ;', () => {
+    const result = runHook('echo hi; git stash');
+    assert.ok(isDenied(result), 'chained ; must not evade the guard');
+  });
+
+  it('blocks git stash pop after ||', () => {
+    const result = runHook('false || git stash pop');
+    assert.ok(isDenied(result), 'chained || must not evade the guard');
+  });
+
+  it('blocks quote-obfuscated git "stash" pop', () => {
+    const result = runHook('git "stash" pop');
+    assert.ok(isDenied(result), 'quote-splitting the stash token must not evade the guard');
+  });
+
+  it('blocks git stash pop with global -C flag inserted', () => {
+    const result = runHook('git -C /tmp/some-worktree stash pop');
+    assert.ok(isDenied(result), 'global git flags before stash must not evade the guard');
+  });
+
+  it('does not let a trailing --auto-like decoy defeat the untagged-push block', () => {
+    const result = runHook('git stash push -u && echo --message=fake');
+    assert.ok(isDenied(result), 'the -m must belong to the actual git stash push segment');
+  });
+
+  // ── No-over-block cases (AC-3) ───────────────────────────────────────
+
+  it('does not block git stash list even though it is a stash subcommand', () => {
+    const result = runHook('git stash list');
+    assert.equal(result.output, '', 'should produce no output (fully allowed)');
+  });
+
+  it('does not block an echo that merely mentions "git stash pop" as text', () => {
+    const result = runHook('echo "remember: never run git stash pop"');
+    assert.ok(!isDenied(result), 'echo text is data, not an invocation');
+  });
+
+  it('does not block a path containing the word "stash"', () => {
+    const result = runHook('ls -la ./stash-archive/');
+    assert.ok(!isDenied(result), 'a path substring must not trigger the guard');
+  });
+
+  it('does not block a heredoc body that contains "git stash pop" as example text', () => {
+    const result = runHook('cat <<EOF\nDoc: never run git stash pop manually.\nEOF');
+    assert.ok(!isDenied(result), 'heredoc body content is inert data, not an invocation');
+  });
+
+  it('does not block git commit -m "stash" (message value happens to be the word stash)', () => {
+    const result = runHook('git commit -m stash');
+    assert.ok(!isDenied(result), 'git commit is not git stash');
+  });
+
+  it('does not block an unrelated npm/pnpm script whose name contains stash', () => {
+    const result = runHook('pnpm run unstash-fixtures');
+    assert.ok(!isDenied(result), 'script name containing "stash" must not trigger the guard');
+  });
+});
