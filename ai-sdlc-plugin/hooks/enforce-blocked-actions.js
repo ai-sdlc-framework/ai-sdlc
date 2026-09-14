@@ -373,11 +373,23 @@ function stripComment(segment) {
  */
 function enforceStashGovernance(command) {
   const withoutHeredocs = stripHeredocBodies(command);
-  const normalized = normalizeStashObfuscation(withoutHeredocs);
-  for (const segment of splitShellSegments(normalized)) {
-    const verdict = evaluateStashSegment(segment);
-    if (verdict && verdict.blocked) {
-      deny(verdict.reason);
+  // AISDLC-611 (round 5): DUAL-INTERPRETATION of `$VAR`/`${VAR}` splices. An
+  // unknown variable can expand to EITHER whitespace (e.g. the default `$IFS`
+  // → word-split) OR the empty string (an unset/empty var → adjacent chars
+  // CONCATENATE). Both are real shell behaviors, so a splice INSIDE a token —
+  // `g${x}it stash pop` (empty → `git`) or `git${IFS}stash pop` (space →
+  // `git stash`) — must be caught under whichever interpretation reveals a
+  // destructive invocation. We normalize the command TWICE (var→space and
+  // var→empty) and block if EITHER interpretation resolves to a destructive
+  // `git stash` op. (Security round-4 finding: single space-only collapse let
+  // `g${x}it stash pop` through.)
+  for (const varReplacement of [' ', '']) {
+    const normalized = normalizeStashObfuscation(withoutHeredocs, varReplacement);
+    for (const segment of splitShellSegments(normalized)) {
+      const verdict = evaluateStashSegment(segment);
+      if (verdict && verdict.blocked) {
+        deny(verdict.reason);
+      }
     }
   }
 }
@@ -418,7 +430,7 @@ function enforceStashGovernance(command) {
  * correct detection; it can never HIDE a real one. That is the deliberate
  * safe bias for this boundary.
  */
-function normalizeStashObfuscation(text) {
+function normalizeStashObfuscation(text, varReplacement = ' ') {
   // ORDER MATTERS (3rd security round finding): `${VAR}`/`$VAR` collapse
   // MUST run BEFORE quote-stripping. In a real shell, an unescaped quote
   // TERMINATES a `$VAR` name — `$IFS'stash'` expands `$IFS` then emits the
@@ -428,9 +440,16 @@ function normalizeStashObfuscation(text) {
   // variable reference — silently deleting the `stash` token itself rather
   // than collapsing `$IFS` to whitespace and leaving `stash` intact. That
   // was the exact bypass in `git$IFS'stash'${IFS}pop`.
+  //
+  // `varReplacement` (round-5 dual-interpretation): a `$VAR`/`${VAR}` splice
+  // can expand to whitespace (`$IFS` → word-split, replacement `' '`) OR to
+  // the empty string (unset var → adjacent chars concatenate, replacement
+  // `''`). The caller runs BOTH interpretations and blocks if either reveals a
+  // destructive op — so an intra-token splice like `g${x}it stash pop` (needs
+  // the empty interpretation to reveal `git`) is no longer a bypass.
   let out = text;
-  out = out.replace(/\$\{[^}]*\}/g, ' '); // ${VAR} / ${IFS} → space (word-split)
-  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ' '); // $VAR → space (word-split)
+  out = out.replace(/\$\{[^}]*\}/g, varReplacement); // ${VAR} / ${IFS}
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, varReplacement); // $VAR
   out = stripCommentAndQuotes(out); // NOW strip comment + quotes, after $VAR is already gone
   out = out.replace(/\\/g, ''); // drop backslashes; join adjoining text
   // Unwrap subshell/brace/backtick/`$(` execution forms. Note: this also
@@ -512,21 +531,6 @@ function findGitStashIndex(tokens, gitIdx) {
   return -1;
 }
 
-/** True when a `-m`/`--message`/`--message=<val>` flag with a non-empty value appears from `fromIdx` onward. */
-function hasMessageFlag(tokens, fromIdx) {
-  for (let i = fromIdx; i < tokens.length; i++) {
-    const tok = tokens[i];
-    if (tok === '-m' || tok === '--message') {
-      const val = tokens[i + 1];
-      return typeof val === 'string' && val.trim().length > 0;
-    }
-    if (tok.startsWith('--message=')) {
-      return tok.slice('--message='.length).trim().length > 0;
-    }
-  }
-  return false;
-}
-
 /** True when a non-flag (positional) token appears from `fromIdx` onward. */
 function hasPositionalArg(tokens, fromIdx) {
   for (let i = fromIdx; i < tokens.length; i++) {
@@ -560,17 +564,15 @@ function hasPositionalArg(tokens, fromIdx) {
  * correctly return `null` (not a stash invocation, no opinion) rather than
  * being blocked.
  *
- * FAIL-CLOSED ONCE THE SUBCOMMAND *IS* STASH: any form this function does
- * not explicitly recognize as safe (list/show/apply, tagged push/save,
- * ref'd drop) is blocked — including bare `git stash`, `git stash pop`,
- * `git stash clear`, and anything unrecognized. This is the load-bearing
- * design change from the pre-review implementation: previously an
- * unrecognized/unparseable form at the SUBCOMMAND-DETECTION step (obfuscated
- * `git` token, obfuscated `stash` token) fell through to `return null`
- * (ALLOW, wrong) instead of reaching this fail-closed dispatch. Normalizing
- * the obfuscation away BEFORE detection (see `normalizeStashObfuscation`)
- * means the only way to reach `return null` now is a command that is
- * genuinely, unambiguously not a `git stash` invocation.
+ * SCOPE (round 5, operator decision): once the subcommand IS `stash`, block
+ * ONLY the genuinely destructive stack ops — `pop`, `clear`, and bare `drop`
+ * (no ref). All other stash forms (bare `git stash`, `push`/`save` tagged or
+ * untagged, `apply`/`list`/`show`, `drop <ref>`) are non-destructive to other
+ * sessions' stashes and are allowed. Obfuscation is handled UPSTREAM by the
+ * caller running `normalizeStashObfuscation` under BOTH the space- and
+ * empty-string `$VAR` interpretations (see `enforceStashGovernance`), so a
+ * splice inside the `git`/`stash` token surfaces the destructive op under one
+ * of the two interpretations and is caught.
  */
 function evaluateStashSegment(segment) {
   const tokens = stripCommentAndQuotes(segment).trim().split(/\s+/).filter(Boolean);
@@ -585,16 +587,20 @@ function evaluateStashSegment(segment) {
   const subIdx = stashIdx + 1;
   const sub = tokens[subIdx];
 
-  // Bare `git stash` (no subcommand, or the next token is itself a flag like
-  // `-u`) behaves like an untagged `push` — block it, same as untagged push.
+  // AISDLC-611 (round 5, operator scope decision): block ONLY the genuinely
+  // DESTRUCTIVE stash-stack ops — `pop`, `clear`, and bare `drop` (no ref).
+  // Everything else, including bare `git stash` and untagged `push`/`save`, is
+  // ALLOWED: once `pop`/`clear`/bare-`drop` are blocked, an untagged stash can
+  // never be accidentally destroyed, so the old "push/save must be -m tagged"
+  // requirement was redundant defense-in-depth. Dropping it also removes the
+  // tag-VALUE parsing that a `$VAR`-valued tag (`-m "$TAG"`) turned into a
+  // false-block regression. Tagging remains RECOMMENDED (SAFE_STASH_PATTERN),
+  // just not enforced.
+
+  // Bare `git stash` (no subcommand / next token is a flag like `-u`) is a
+  // push — not destructive to anyone else's stash. Allow.
   if (!sub || sub.startsWith('-')) {
-    return {
-      blocked: true,
-      reason:
-        `bare 'git stash' captures a snapshot with no identifying tag, making a later ` +
-        `'git stash pop'/'apply' ambiguous about which stash it targets on the SHARED stash ` +
-        `stack (main checkout + all worktrees + concurrent sessions). Safe pattern: ${SAFE_STASH_PATTERN}.`,
-    };
+    return { blocked: false };
   }
 
   if (sub === 'pop') {
@@ -609,34 +615,18 @@ function evaluateStashSegment(segment) {
     };
   }
 
-  if (sub === 'push') {
-    if (hasMessageFlag(tokens, subIdx + 1)) return { blocked: false };
+  if (sub === 'clear') {
     return {
       blocked: true,
       reason:
-        `'git stash push' without a '-m'/'--message' tag is indistinguishable from other ` +
-        `stashes on the SHARED stash stack. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+        `'git stash clear' DELETES every entry on the SHARED stash stack (main checkout + all ` +
+        `worktrees + concurrent sessions), destroying stashes that may belong to the operator ` +
+        `or a sibling session. Safe pattern: ${SAFE_STASH_PATTERN}.`,
     };
-  }
-
-  if (sub === 'save') {
-    if (hasMessageFlag(tokens, subIdx + 1) || hasPositionalArg(tokens, subIdx + 1)) {
-      return { blocked: false };
-    }
-    return {
-      blocked: true,
-      reason:
-        `'git stash save' without a message tag is indistinguishable from other stashes on ` +
-        `the SHARED stash stack. Safe pattern: ${SAFE_STASH_PATTERN}.`,
-    };
-  }
-
-  if (sub === 'apply' || sub === 'list' || sub === 'show') {
-    return { blocked: false }; // never drops anything from the stack
   }
 
   if (sub === 'drop') {
-    if (hasPositionalArg(tokens, subIdx + 1)) return { blocked: false };
+    if (hasPositionalArg(tokens, subIdx + 1)) return { blocked: false }; // explicit ref → allowed
     return {
       blocked: true,
       reason:
@@ -645,13 +635,10 @@ function evaluateStashSegment(segment) {
     };
   }
 
-  // Any other subcommand (clear, branch, create, store, export, ...) is not
-  // recognized as safe — fail closed rather than risk missing a destructive
-  // variant.
-  return {
-    blocked: true,
-    reason: `'git stash ${sub}' is not a recognized safe stash operation. Safe pattern: ${SAFE_STASH_PATTERN}.`,
-  };
+  // Every other subcommand (push/save tagged OR untagged, apply, list, show,
+  // branch, create, store, export, drop <ref>, ...) is non-destructive to
+  // other sessions' stashes — allow. (Operator scope: destructive-ops-only.)
+  return { blocked: false };
 }
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────

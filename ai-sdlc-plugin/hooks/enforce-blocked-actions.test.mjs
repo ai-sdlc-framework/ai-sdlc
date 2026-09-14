@@ -1039,19 +1039,22 @@ blockedActions: []
 describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governance (AISDLC-611)', () => {
   // ── Block cases (AC-1) ──────────────────────────────────────────────
 
-  it('blocks bare git stash', () => {
+  // Round-5 scope (operator decision): destructive-ops-only. Bare `git stash`
+  // and untagged push/save are NON-destructive (they only ADD to the stack),
+  // so they are ALLOWED; only pop/clear/bare-drop are blocked.
+  it('allows bare git stash (a non-destructive push)', () => {
     const result = runHook('git stash');
-    assert.ok(isDenied(result), 'should deny bare git stash');
+    assert.ok(!isDenied(result), 'bare git stash only adds to the stack — allowed');
   });
 
-  it('blocks git stash save with no tag', () => {
+  it('allows git stash save with no tag (non-destructive)', () => {
     const result = runHook('git stash save');
-    assert.ok(isDenied(result), 'should deny untagged git stash save');
+    assert.ok(!isDenied(result), 'untagged save only adds to the stack — allowed');
   });
 
-  it('blocks git stash push with no -m/--message tag', () => {
+  it('allows git stash push with no -m/--message tag (non-destructive)', () => {
     const result = runHook('git stash push -u');
-    assert.ok(isDenied(result), 'should deny untagged git stash push');
+    assert.ok(!isDenied(result), 'untagged push only adds to the stack — allowed');
   });
 
   it('blocks git stash pop unconditionally', () => {
@@ -1069,7 +1072,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'should deny bare git stash drop');
   });
 
-  it('blocks git stash clear (unrecognized/destructive subcommand, fail-closed)', () => {
+  it('blocks git stash clear (destructive: wipes the whole shared stack)', () => {
     const result = runHook('git stash clear');
     assert.ok(isDenied(result), 'should deny git stash clear');
   });
@@ -1134,8 +1137,8 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'chained && must not evade the guard');
   });
 
-  it('blocks bare git stash chained with ;', () => {
-    const result = runHook('echo hi; git stash');
+  it('blocks git stash pop chained with ;', () => {
+    const result = runHook('echo hi; git stash pop');
     assert.ok(isDenied(result), 'chained ; must not evade the guard');
   });
 
@@ -1156,9 +1159,9 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'basename-tolerant git matching must catch a full-path git binary');
   });
 
-  it('blocks a path-qualified bare /usr/bin/git stash', () => {
-    const result = runHook('/usr/bin/git stash');
-    assert.ok(isDenied(result), 'basename-tolerant git matching must catch bare stash too');
+  it('blocks a path-qualified /usr/bin/git stash clear', () => {
+    const result = runHook('/usr/bin/git stash clear');
+    assert.ok(isDenied(result), 'basename-tolerant git matching must catch clear on a full-path git');
   });
 
   it("blocks git st''ash pop (mid-token empty single-quote splice)", () => {
@@ -1263,6 +1266,34 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'an empty quote right after $VAR must not swallow the stash token');
   });
 
+  // ── Empty-variable intra-token splice (4th security re-review) ───────
+  // An UNSET/empty var concatenates its neighbors in a real shell, so a splice
+  // INSIDE the git or stash token hides it under the space-only interpretation.
+  // The dual-interpretation normalizer (var→space AND var→empty) catches these.
+
+  it('blocks g${x}it stash pop (empty var spliced inside the git token)', () => {
+    const result = runHook('g${x}it stash pop');
+    assert.ok(
+      isDenied(result),
+      'an unset var concatenates to `git` — the empty interpretation must reveal it',
+    );
+  });
+
+  it('blocks git st${x}ash pop (empty var spliced inside the stash token)', () => {
+    const result = runHook('git st${x}ash pop');
+    assert.ok(isDenied(result), 'an unset var concatenates to `stash` — must still block pop');
+  });
+
+  it('blocks gi${x}t stash pop (empty var spliced inside the git token, variant)', () => {
+    const result = runHook('gi${x}t stash pop');
+    assert.ok(isDenied(result), 'empty-var splice on the git token must not evade detection');
+  });
+
+  it('blocks g${x}it stash clear (empty-var splice + destructive clear)', () => {
+    const result = runHook('g${x}it stash clear');
+    assert.ok(isDenied(result), 'empty-var splice must not hide a destructive clear');
+  });
+
   // ── Fail-closed subcommand-position redesign: no-over-block guard ────
 
   it('does not block git commit -m stash (stash is an argument, not the subcommand)', () => {
@@ -1280,9 +1311,13 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(!isDenied(result), 'log is the subcommand here, not stash');
   });
 
-  it('does not let a trailing --auto-like decoy defeat the untagged-push block', () => {
-    const result = runHook('git stash push -u && echo --message=fake');
-    assert.ok(isDenied(result), 'the -m must belong to the actual git stash push segment');
+  it('allows git stash push -u -m "$TAG" (variable-valued tag — over-block regression guard)', () => {
+    const result = runHook('git stash push -u -m "$TAG"');
+    assert.ok(
+      !isDenied(result),
+      'a $VAR-valued tag must not be falsely blocked: push is non-destructive and allowed ' +
+        'regardless of tag (the round-4 reorder + tag-parsing combo had falsely denied this)',
+    );
   });
 
   // ── No-over-block cases (AC-3) ───────────────────────────────────────
