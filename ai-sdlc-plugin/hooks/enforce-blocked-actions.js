@@ -37,18 +37,20 @@
  *    `gh pr merge` at all, so the loudest governance rule ("never merge")
  *    wasn't actually enforced by this hook.
  *
- * 5. **No-bare-stash governance (AISDLC-611)** — the git stash stack is
+ * 5. **Destructive-stash governance (AISDLC-611)** — the git stash stack is
  *    shared across the main checkout, all worktrees, and concurrent
- *    sessions. A bare `git stash` / `git stash pop` can silently apply-and-
- *    drop a PRE-EXISTING stash belonging to the operator or a sibling
- *    session (real data-loss incident: local-trades LT-595, HIGH-3). This
- *    hook BLOCKS bare `git stash` / `git stash save` (no `-m`/`--message`
- *    tag), `git stash pop` (always — it cannot be made safe by tagging,
- *    since it both applies AND drops), a bare `git stash drop` (no explicit
- *    ref), and any other stash subcommand it doesn't recognize as safe
- *    (fail-closed). It ALLOWS `git stash push -u -m "<tag>"` /
- *    `git stash save "<tag>"`, `git stash apply <ref>`, `git stash list`,
- *    `git stash show`, and `git stash drop <ref>` (explicit ref given).
+ *    sessions. A `git stash pop` can silently apply-and-drop a PRE-EXISTING
+ *    stash belonging to the operator or a sibling session (real data-loss
+ *    incident: local-trades LT-595, HIGH-3). Round-5 scope (operator
+ *    decision): this hook BLOCKS ONLY the genuinely destructive shared-stack
+ *    ops — `git stash pop`, `git stash clear`, and a bare `git stash drop`
+ *    (no explicit ref). It ALLOWS everything else: bare `git stash`, tagged
+ *    OR untagged `push`/`save`, `apply`, `list`, `show`, and
+ *    `git stash drop <ref>` (explicit ref). Tagging (`-m`) is still strongly
+ *    recommended but no longer enforced. Obfuscated invocations are caught by
+ *    normalizing the command under BOTH the `$VAR`→whitespace and
+ *    `$VAR`→empty-string interpretations and blocking if EITHER resolves to a
+ *    destructive op (see `enforceStashGovernance`/`normalizeStashObfuscation`).
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
