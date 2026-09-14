@@ -149,7 +149,7 @@
     "@vitest/coverage-v8": "^4.1.9",
     "ajv": "^8.20.0",
     "ink-testing-library": "^4.0.0",
-    "string-width": "^8.2.1",
+    "string-width": "^8.2.2",
     "typescript": "^6.0.3",
     "vite": "^6.0.0",
     "vitest": "^4.1.9"
