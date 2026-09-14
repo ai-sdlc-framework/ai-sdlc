@@ -1320,6 +1320,23 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
     assert.ok(isDenied(result), 'mixed expansion must not hide a destructive clear');
   });
 
+  it('blocks git${IFS:0:1}stash${IFS:0:1}pop (IFS parameter-expansion → space)', () => {
+    const result = runHook('git${IFS:0:1}stash${IFS:0:1}pop');
+    assert.ok(
+      isDenied(result),
+      '${IFS:0:1} evaluates to a space in-shell — must be treated as a separator, not deleted',
+    );
+  });
+
+  it('does not misclassify ${IFSX} (a distinct unset var) as the IFS separator', () => {
+    // ${IFSX} is a DIFFERENT variable → empty → `gitstash pop` is not a git
+    // token, so this is allowed (it does not execute a real git stash in-shell
+    // either — `$IFSX` is unset). Guards the IFS-param-expansion regex against
+    // over-matching a same-prefixed distinct variable name.
+    const result = runHook('git${IFSX}stash pop');
+    assert.ok(!isDenied(result), '${IFSX} is a distinct unset var (empty), not the IFS separator');
+  });
+
   // ── Fail-closed subcommand-position redesign: no-over-block guard ────
 
   it('does not block git commit -m stash (stash is an argument, not the subcommand)', () => {

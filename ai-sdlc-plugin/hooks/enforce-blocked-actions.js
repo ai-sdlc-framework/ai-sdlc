@@ -48,9 +48,23 @@
  *    OR untagged `push`/`save`, `apply`, `list`, `show`, and
  *    `git stash drop <ref>` (explicit ref). Tagging (`-m`) is still strongly
  *    recommended but no longer enforced. Obfuscated invocations are caught by
- *    normalizing the command under BOTH the `$VAR`→whitespace and
- *    `$VAR`→empty-string interpretations and blocking if EITHER resolves to a
- *    destructive op (see `enforceStashGovernance`/`normalizeStashObfuscation`).
+ *    normalizing the command with a single shell-accurate pass — `$IFS`
+ *    (including `${IFS:0:1}`-style parameter expansions) → whitespace
+ *    (word-split), every other `$VAR`/`${VAR}` → empty (unset var
+ *    concatenates) — plus quote/backslash/wrapper stripping, then blocking if
+ *    the result is a destructive op (see
+ *    `enforceStashGovernance`/`normalizeStashObfuscation`).
+ *
+ *    SCOPE (operator decision, AISDLC-611 / LT-595): this guard prevents a
+ *    cooperative agent from ACCIDENTALLY running a destructive stash op (the
+ *    actual incident it exists for). It is NOT — and a static PreToolUse regex
+ *    matcher fundamentally CANNOT be — proof against a DELIBERATELY-obfuscating
+ *    agent: inline shell-variable state (`X=pop; git stash $X`), `eval`,
+ *    `base64 | sh`, and a leading `sudo`/`env` prefix all execute a real op
+ *    that no static normalizer can resolve. Those are a different threat model
+ *    (a hostile agent, not an accidental one) and are accepted as out of scope
+ *    here; defense against a hostile agent belongs at the sandbox/permission
+ *    layer, not this hook.
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
@@ -453,6 +467,13 @@ function normalizeStashObfuscation(text) {
   // generic `$VAR` rules so it isn't swallowed by the empty-collapse.
   let out = text;
   out = out.replace(/\$\{IFS\}/g, ' '); // ${IFS} → space (whitespace word-split)
+  // ${IFS:0:1} / ${IFS#x} / ${IFS/a/b} / ${IFS:-x} … — any PARAMETER EXPANSION
+  // of the IFS var (IFS followed by an operator char, not a name char) yields
+  // whitespace in a real shell, so → space. Must run BEFORE the generic
+  // `${...}`→empty rule (which would otherwise delete it). `${IFSX}` (name
+  // char after IFS = a DISTINCT var) is intentionally NOT matched and falls to
+  // the empty rule below. (Security round-6 finding: `git${IFS:0:1}stash pop`.)
+  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
   out = out.replace(/\$IFS\b/g, ' '); // $IFS → space (\b so $IFStash is NOT matched here)
   out = out.replace(/\$\{[^}]*\}/g, ''); // any other ${VAR} → empty (concatenate)
   out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ''); // any other $VAR → empty (concatenate)
@@ -575,10 +596,10 @@ function hasPositionalArg(tokens, fromIdx) {
  * (no ref). All other stash forms (bare `git stash`, `push`/`save` tagged or
  * untagged, `apply`/`list`/`show`, `drop <ref>`) are non-destructive to other
  * sessions' stashes and are allowed. Obfuscation is handled UPSTREAM by the
- * caller running `normalizeStashObfuscation` under BOTH the space- and
- * empty-string `$VAR` interpretations (see `enforceStashGovernance`), so a
- * splice inside the `git`/`stash` token surfaces the destructive op under one
- * of the two interpretations and is caught.
+ * caller running `normalizeStashObfuscation`, whose single shell-accurate pass
+ * (`$IFS` → space, every other `$VAR` → empty) collapses splices inside the
+ * `git`/`stash`/subcommand tokens to their real executed form before this
+ * function sees them, so a mixed `g${x}it${IFS}stash pop` is caught.
  */
 function evaluateStashSegment(segment) {
   const tokens = stripCommentAndQuotes(segment).trim().split(/\s+/).filter(Boolean);
