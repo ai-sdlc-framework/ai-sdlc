@@ -36,6 +36,35 @@
  *    pre-AISDLC-602 gap where `blockedActions: git merge*` never matched
  *    `gh pr merge` at all, so the loudest governance rule ("never merge")
  *    wasn't actually enforced by this hook.
+ *
+ * 5. **Destructive-stash governance (AISDLC-611)** — the git stash stack is
+ *    shared across the main checkout, all worktrees, and concurrent
+ *    sessions. A `git stash pop` can silently apply-and-drop a PRE-EXISTING
+ *    stash belonging to the operator or a sibling session (real data-loss
+ *    incident: local-trades LT-595, HIGH-3). Round-5 scope (operator
+ *    decision): this hook BLOCKS ONLY the genuinely destructive shared-stack
+ *    ops — `git stash pop`, `git stash clear`, and a bare `git stash drop`
+ *    (no explicit ref). It ALLOWS everything else: bare `git stash`, tagged
+ *    OR untagged `push`/`save`, `apply`, `list`, `show`, and
+ *    `git stash drop <ref>` (explicit ref). Tagging (`-m`) is still strongly
+ *    recommended but no longer enforced. Obfuscated invocations are caught by
+ *    normalizing the command with a single shell-accurate pass — `$IFS`
+ *    (including `${IFS:0:1}`-style parameter expansions) → whitespace
+ *    (word-split), every other `$VAR`/`${VAR}` → empty (unset var
+ *    concatenates) — plus quote/backslash/wrapper stripping, then blocking if
+ *    the result is a destructive op (see
+ *    `enforceStashGovernance`/`normalizeStashObfuscation`).
+ *
+ *    SCOPE (operator decision, AISDLC-611 / LT-595): this guard prevents a
+ *    cooperative agent from ACCIDENTALLY running a destructive stash op (the
+ *    actual incident it exists for). It is NOT — and a static PreToolUse regex
+ *    matcher fundamentally CANNOT be — proof against a DELIBERATELY-obfuscating
+ *    agent: inline shell-variable state (`X=pop; git stash $X`), `eval`,
+ *    `base64 | sh`, and a leading `sudo`/`env` prefix all execute a real op
+ *    that no static normalizer can resolve. Those are a different threat model
+ *    (a hostile agent, not an accidental one) and are accepted as out of scope
+ *    here; defense against a hostile agent belongs at the sandbox/permission
+ *    layer, not this hook.
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
@@ -116,6 +145,16 @@ const SAFE_ARM_FLAGS = new Set([
 // Flags that consume the NEXT token as their value (safe to skip both).
 const VALUE_FLAGS = new Set(['-R', '--repo']);
 
+// AISDLC-611: same temporal-dead-zone constraint applies to the stash
+// governance constants — must be initialized before enforceBash() →
+// enforceStashGovernance() runs at module load.
+const GIT_GLOBAL_VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
+const SAFE_STASH_PATTERN =
+  'prefer a temporary WIP commit to set work aside; if you must stash, tag it uniquely ' +
+  `('git stash push -u -m "<unique-tag>"'), restore it by exact ref/SHA ` +
+  `('git stash apply <ref>'), and only then drop it by that same tag/ref ` +
+  `('git stash drop <ref>')`;
+
 // ── Dispatch by tool ─────────────────────────────────────────────────
 
 if (toolName === 'Bash' || (!toolName && toolInput.command)) {
@@ -137,6 +176,10 @@ function enforceBash(command) {
   // of whatever blockedActions patterns the project has (or hasn't)
   // configured. See enforceMergeGovernance() for the exact rules.
   enforceMergeGovernance(trimmed);
+
+  // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
+  // independent of whatever blockedActions patterns the project configured.
+  enforceStashGovernance(trimmed);
 
   if (blockedActions.length === 0) return;
 
@@ -314,6 +357,315 @@ function isCleanAutoArmSegment(segment) {
 /** Removes only a trailing unquoted shell comment (quotes preserved). */
 function stripComment(segment) {
   return segment.replace(/#.*$/, '');
+}
+
+// ── No-bare-stash governance (AISDLC-611) ────────────────────────────
+
+/**
+ * Enforces the no-bare-stash rule. The git stash stack is a single shared
+ * resource across the main checkout, every `.worktrees/<id>/` isolate, and
+ * any concurrent session — a bare `git stash` followed by `git stash pop`
+ * can silently apply-and-drop a stash that belongs to someone else (the
+ * motivating incident: a dev subagent's own stash captured nothing, so its
+ * `pop` applied+dropped a pre-existing operator stash — local-trades LT-595,
+ * HIGH-3, a REAL data-loss incident).
+ *
+ * Heredoc bodies are stripped BEFORE segment-splitting so a heredoc that
+ * merely CONTAINS the text `git stash pop` (e.g. documentation piped via
+ * `cat <<EOF`) is not mistaken for an actual invocation (AC-3 no-over-block).
+ * The remaining text is then aggressively NORMALIZED (see
+ * `normalizeStashObfuscation`) to collapse the many shell-level ways of
+ * spelling the same invocation — quotes, backslashes, subshell/brace/
+ * command-substitution wrappers, and `$VAR`/`${VAR}` word-splitting tricks —
+ * down to their plain-text equivalent BEFORE segment-splitting and
+ * detection. This is deliberately NOT an enumerate-every-obfuscation
+ * strategy (security review found that approach keeps producing new
+ * bypasses — `/usr/bin/git`, `git st''ash`, `git${IFS}stash`, `git st\ash`,
+ * `\git stash`, `(git stash pop)`, etc. were each patched individually and
+ * each left a sibling bypass). Instead: normalize the obfuscation-capable
+ * characters away FIRST, then run ONE fail-closed subcommand-position
+ * detector (`evaluateStashSegment`) over the clean text — see that
+ * function's docstring for the fail-closed contract.
+ */
+function enforceStashGovernance(command) {
+  const withoutHeredocs = stripHeredocBodies(command);
+  // AISDLC-611: normalize the command with a SINGLE shell-accurate pass (see
+  // `normalizeStashObfuscation`) — `$IFS` → whitespace (word-split), every
+  // other `$VAR`/`${VAR}` → empty (an unset var concatenates its neighbors).
+  // This models what a real default shell actually does to EACH variable
+  // INDEPENDENTLY, so a mixed splice like `g${x}it${IFS}stash pop` (empty $x
+  // joins `git`, $IFS splits `stash`/`pop`) collapses to `git stash pop` and
+  // is caught. (An earlier two-uniform-corner approach — all-space OR
+  // all-empty — could not represent mixed expansions and let that form
+  // through; security round-5 finding.)
+  const normalized = normalizeStashObfuscation(withoutHeredocs);
+  for (const segment of splitShellSegments(normalized)) {
+    const verdict = evaluateStashSegment(segment);
+    if (verdict && verdict.blocked) {
+      deny(verdict.reason);
+    }
+  }
+}
+
+/**
+ * Aggressively normalizes a command string for stash-governance DETECTION
+ * (never used to alter what the shell/Bash tool actually executes — only
+ * this local copy is transformed). Collapses the shell mechanisms that can
+ * be used to obfuscate a `git stash` invocation down to their plain-text
+ * equivalent, in order:
+ *
+ * 1. `stripCommentAndQuotes` — drops a trailing `#` comment and EVERY quote
+ *    character, so a real shell's word-concatenation behavior is mirrored:
+ *    `git st''ash pop` / `git sta"sh" pop` both collapse to the literal
+ *    text `git stash pop` (closes the mid-token quote-splice bypass).
+ * 2. `${...}` / `$VAR` → a single space. Bash's default `$IFS` is
+ *    whitespace, so `git${IFS}stash${IFS}pop` really does word-split into
+ *    `git stash pop` at execution time — detection must mirror that
+ *    (closes the `$IFS`-splice bypass) rather than leave a stray `IFS`
+ *    token that corrupts subcommand-position detection.
+ * 3. Backslashes removed entirely (not replaced with a space) — a real
+ *    shell drops an unescaped `\` and joins what's on either side of it,
+ *    so `git st\ash pop` → `git stash pop` and `\git stash pop` →
+ *    `git stash pop` (closes the backslash-splice bypass).
+ * 4. Subshell / brace-group / backtick / remaining `$` wrapper punctuation
+ *    (`(`, `)`, `{`, `}`, `` ` ``, `$`) replaced with a space — all of
+ *    these EXECUTE their contents, so `(git stash pop)` /
+ *    `{ git stash pop; }` / `` `git stash pop` `` / `$(git stash pop)`
+ *    are exactly as dangerous as a bare invocation (closes the shell-
+ *    wrapper bypass). The bare `$` catches command substitution's opening
+ *    `$(` after step 4 already removed the parens — without it, a stray
+ *    `$` token survives and corrupts subcommand-position detection by
+ *    displacing the `git` token from index 0.
+ *
+ * This is a coarse CHARACTER-LEVEL transform, not balanced shell parsing —
+ * it can only ever ADD false-positive detections (e.g. turning an unrelated
+ * `foo(bar)` into two harmless tokens) or expose a hidden invocation for
+ * correct detection; it can never HIDE a real one. That is the deliberate
+ * safe bias for this boundary.
+ */
+function normalizeStashObfuscation(text) {
+  // ORDER MATTERS (3rd security round finding): `${VAR}`/`$VAR` collapse
+  // MUST run BEFORE quote-stripping. In a real shell, an unescaped quote
+  // TERMINATES a `$VAR` name — `$IFS'stash'` expands `$IFS` then emits the
+  // literal `stash`. If quotes were stripped FIRST, `$IFS'stash'` would
+  // already read as `$IFSstash`, and the greedy `/\$[A-Za-z_][A-Za-z0-9_]*/`
+  // variable-name regex would swallow the whole thing as ONE (bogus)
+  // variable reference — silently deleting the `stash` token itself rather
+  // than collapsing `$IFS` to whitespace and leaving `stash` intact. That
+  // was the exact bypass in `git$IFS'stash'${IFS}pop`.
+  //
+  // SHELL-ACCURATE per-variable resolution (round-5): each variable is
+  // resolved INDEPENDENTLY, mirroring a real default shell —
+  //   • `$IFS` / `${IFS}` → a single space (its default value is whitespace,
+  //     so it word-splits its neighbors);
+  //   • every OTHER `$VAR` / `${VAR}` → the empty string (an unset variable
+  //     expands to nothing, so its neighbors CONCATENATE).
+  // A two-uniform-corner sweep (all-space OR all-empty) could not represent a
+  // MIXED command like `g${x}it${IFS}stash pop` (unset `$x` joins → `git`,
+  // `$IFS` splits → `stash`/`pop`); this single pass does, because it applies
+  // the correct rule to each variable at once. IFS is handled BEFORE the
+  // generic `$VAR` rules so it isn't swallowed by the empty-collapse.
+  let out = text;
+  out = out.replace(/\$\{IFS\}/g, ' '); // ${IFS} → space (whitespace word-split)
+  // ${IFS:0:1} / ${IFS#x} / ${IFS/a/b} / ${IFS:-x} … — any PARAMETER EXPANSION
+  // of the IFS var (IFS followed by an operator char, not a name char) yields
+  // whitespace in a real shell, so → space. Must run BEFORE the generic
+  // `${...}`→empty rule (which would otherwise delete it). `${IFSX}` (name
+  // char after IFS = a DISTINCT var) is intentionally NOT matched and falls to
+  // the empty rule below. (Security round-6 finding: `git${IFS:0:1}stash pop`.)
+  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
+  out = out.replace(/\$IFS\b/g, ' '); // $IFS → space (\b so $IFStash is NOT matched here)
+  out = out.replace(/\$\{[^}]*\}/g, ''); // any other ${VAR} → empty (concatenate)
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, ''); // any other $VAR → empty (concatenate)
+  out = stripCommentAndQuotes(out); // NOW strip comment + quotes, after $VAR is already gone
+  out = out.replace(/\\/g, ''); // drop backslashes; join adjoining text
+  // Unwrap subshell/brace/backtick/`$(` execution forms. Note: this also
+  // strips the `{`/`}` in a stash ref like `stash@{0}` (→ `stash@0` after
+  // the surrounding space collapse), which is harmless for OUR purposes —
+  // every safety check below only asks "is there a non-flag token present"
+  // (`hasPositionalArg`), never inspects the ref's exact contents — but a
+  // future editor adding ref-content validation here would need to reverse
+  // this stripping first.
+  out = out.replace(/[(){}`$]/g, ' ');
+  return out;
+}
+
+/** True when `tok` is `git` or a path ending in `/git` (e.g. `/usr/bin/git`, `./git`). */
+function isGitToken(tok) {
+  return typeof tok === 'string' && /(^|\/)git$/.test(tok);
+}
+
+/**
+ * Removes heredoc BODY lines (the content between a `<<[-~]MARKER` opener and
+ * its closing `MARKER` line) from a multi-line command, replacing them with
+ * nothing. The opener line itself (which contains the real shell redirect,
+ * e.g. `cat <<EOF`) is preserved — only the inert body text is dropped. This
+ * prevents a heredoc that quotes `git stash pop` as documentation/example
+ * text from being mistaken for a real invocation once the command is split
+ * on newlines by splitShellSegments().
+ *
+ * Handles the common forms: `<<EOF`, `<<'EOF'`, `<<"EOF"`, `<<-EOF` (tab-
+ * stripped closing delimiter). Best-effort — an unterminated heredoc simply
+ * consumes the remainder of the command, which can only ever cause
+ * under-inspection of trailing content, never a false BLOCK.
+ */
+function stripHeredocBodies(command) {
+  const lines = command.split('\n');
+  const kept = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const match = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (!match) {
+      kept.push(line);
+      i++;
+      continue;
+    }
+    const marker = match[2];
+    const dashed = /<<-/.test(line);
+    kept.push(line);
+    i++;
+    while (i < lines.length) {
+      const bodyLine = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
+      i++;
+      if (bodyLine === marker) break;
+    }
+  }
+  return kept.join('\n');
+}
+
+/**
+ * Locates the index of the `stash` token in a git invocation's token list,
+ * starting the scan just after the `git` token at `gitIdx`, tolerating
+ * global flags (`-C <dir>`, `-c <key=val>`, etc.) in between. Returns -1 when
+ * the invocation is `git <something-else>` (not stash) — e.g. `git commit`.
+ */
+function findGitStashIndex(tokens, gitIdx) {
+  let j = gitIdx + 1;
+  while (j < tokens.length) {
+    const tok = tokens[j];
+    if (tok === 'stash') return j;
+    if (GIT_GLOBAL_VALUE_FLAGS.has(tok)) {
+      j += 2;
+      continue;
+    }
+    if (tok.startsWith('-')) {
+      j += 1;
+      continue;
+    }
+    return -1; // some other git subcommand — not stash
+  }
+  return -1;
+}
+
+/** True when a non-flag (positional) token appears from `fromIdx` onward. */
+function hasPositionalArg(tokens, fromIdx) {
+  for (let i = fromIdx; i < tokens.length; i++) {
+    if (!tokens[i].startsWith('-')) return true;
+  }
+  return false;
+}
+
+/**
+ * Evaluates a single shell segment for a `git stash` invocation and decides
+ * whether it should be blocked. Returns `null` when the segment does not
+ * invoke `git stash` at all (not a stash command → no opinion, caller
+ * moves on).
+ *
+ * The caller (`enforceStashGovernance`) already ran `normalizeStashObfuscation`
+ * over the WHOLE command before segment-splitting, so by the time a segment
+ * reaches this function, quotes/backslashes/`$VAR`/wrapper punctuation are
+ * already gone. `stripCommentAndQuotes()` runs again here (idempotent — no
+ * quotes remain, so this is a defensive no-op) before splitting on
+ * whitespace, and the `git` token itself is matched by BASENAME
+ * (`isGitToken`, e.g. `/usr/bin/git`) rather than exact string equality, so a
+ * path-qualified invocation is treated exactly like a bare `git`.
+ *
+ * DETECTION IS BY SUBCOMMAND POSITION, not "the word stash appears
+ * anywhere": `findGitStashIndex` walks forward from the `git` token, skips
+ * recognized GLOBAL git flags (`-C <dir>`, `-c <k=v>`, etc.), and returns
+ * the index of the very next non-flag token. Only when THAT token is
+ * literally `stash` do we treat this as a stash invocation at all — so
+ * `git commit -m stash`, `git branch stash-experiment`, and
+ * `git log --grep stash` (where `stash` is an ARGUMENT, not the subcommand)
+ * correctly return `null` (not a stash invocation, no opinion) rather than
+ * being blocked.
+ *
+ * SCOPE (round 5, operator decision): once the subcommand IS `stash`, block
+ * ONLY the genuinely destructive stack ops — `pop`, `clear`, and bare `drop`
+ * (no ref). All other stash forms (bare `git stash`, `push`/`save` tagged or
+ * untagged, `apply`/`list`/`show`, `drop <ref>`) are non-destructive to other
+ * sessions' stashes and are allowed. Obfuscation is handled UPSTREAM by the
+ * caller running `normalizeStashObfuscation`, whose single shell-accurate pass
+ * (`$IFS` → space, every other `$VAR` → empty) collapses splices inside the
+ * `git`/`stash`/subcommand tokens to their real executed form before this
+ * function sees them, so a mixed `g${x}it${IFS}stash pop` is caught.
+ */
+function evaluateStashSegment(segment) {
+  const tokens = stripCommentAndQuotes(segment).trim().split(/\s+/).filter(Boolean);
+  let i = 0;
+  // Skip a leading run of `VAR=value` env assignments.
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (!isGitToken(tokens[i])) return null; // not a git invocation at all (basename-tolerant)
+
+  const stashIdx = findGitStashIndex(tokens, i);
+  if (stashIdx === -1) return null; // `git <something-else>` — stash isn't the subcommand
+
+  const subIdx = stashIdx + 1;
+  const sub = tokens[subIdx];
+
+  // AISDLC-611 (round 5, operator scope decision): block ONLY the genuinely
+  // DESTRUCTIVE stash-stack ops — `pop`, `clear`, and bare `drop` (no ref).
+  // Everything else, including bare `git stash` and untagged `push`/`save`, is
+  // ALLOWED: once `pop`/`clear`/bare-`drop` are blocked, an untagged stash can
+  // never be accidentally destroyed, so the old "push/save must be -m tagged"
+  // requirement was redundant defense-in-depth. Dropping it also removes the
+  // tag-VALUE parsing that a `$VAR`-valued tag (`-m "$TAG"`) turned into a
+  // false-block regression. Tagging remains RECOMMENDED (SAFE_STASH_PATTERN),
+  // just not enforced.
+
+  // Bare `git stash` (no subcommand / next token is a flag like `-u`) is a
+  // push — not destructive to anyone else's stash. Allow.
+  if (!sub || sub.startsWith('-')) {
+    return { blocked: false };
+  }
+
+  if (sub === 'pop') {
+    return {
+      blocked: true,
+      reason:
+        `'git stash pop' applies AND drops in one step on the SHARED stash stack (main ` +
+        `checkout + all worktrees + concurrent sessions) — if your own stash captured nothing ` +
+        `(e.g. nothing was staged/dirty), the pop can silently apply-and-drop a PRE-EXISTING ` +
+        `stash belonging to the operator or a sibling session, permanently losing their work ` +
+        `(real incident: local-trades LT-595, HIGH-3). Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  if (sub === 'clear') {
+    return {
+      blocked: true,
+      reason:
+        `'git stash clear' DELETES every entry on the SHARED stash stack (main checkout + all ` +
+        `worktrees + concurrent sessions), destroying stashes that may belong to the operator ` +
+        `or a sibling session. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  if (sub === 'drop') {
+    if (hasPositionalArg(tokens, subIdx + 1)) return { blocked: false }; // explicit ref → allowed
+    return {
+      blocked: true,
+      reason:
+        `bare 'git stash drop' (no explicit ref) drops whatever is CURRENTLY on top of the ` +
+        `SHARED stash stack, which may not be yours. Safe pattern: ${SAFE_STASH_PATTERN}.`,
+    };
+  }
+
+  // Every other subcommand (push/save tagged OR untagged, apply, list, show,
+  // branch, create, store, export, drop <ref>, ...) is non-destructive to
+  // other sessions' stashes — allow. (Operator scope: destructive-ops-only.)
+  return { blocked: false };
 }
 
 // ── Write/Edit enforcement (new behavior) ────────────────────────────

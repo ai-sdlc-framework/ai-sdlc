@@ -1035,3 +1035,364 @@ blockedActions: []
     assert.doesNotMatch(result.stderr, /behind origin\/main/i, 'no warning once rebased');
   });
 });
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governance (AISDLC-611)', () => {
+  // ── Block cases (AC-1) ──────────────────────────────────────────────
+
+  // Round-5 scope (operator decision): destructive-ops-only. Bare `git stash`
+  // and untagged push/save are NON-destructive (they only ADD to the stack),
+  // so they are ALLOWED; only pop/clear/bare-drop are blocked.
+  it('allows bare git stash (a non-destructive push)', () => {
+    const result = runHook('git stash');
+    assert.ok(!isDenied(result), 'bare git stash only adds to the stack — allowed');
+  });
+
+  it('allows git stash save with no tag (non-destructive)', () => {
+    const result = runHook('git stash save');
+    assert.ok(!isDenied(result), 'untagged save only adds to the stack — allowed');
+  });
+
+  it('allows git stash push with no -m/--message tag (non-destructive)', () => {
+    const result = runHook('git stash push -u');
+    assert.ok(!isDenied(result), 'untagged push only adds to the stack — allowed');
+  });
+
+  it('blocks git stash pop unconditionally', () => {
+    const result = runHook('git stash pop');
+    assert.ok(isDenied(result), 'should deny git stash pop');
+  });
+
+  it('blocks git stash pop even with a stash ref argument', () => {
+    const result = runHook('git stash pop stash@{0}');
+    assert.ok(isDenied(result), 'pop is never safe, even with an explicit ref');
+  });
+
+  it('blocks bare git stash drop (no explicit ref)', () => {
+    const result = runHook('git stash drop');
+    assert.ok(isDenied(result), 'should deny bare git stash drop');
+  });
+
+  it('blocks git stash clear (destructive: wipes the whole shared stack)', () => {
+    const result = runHook('git stash clear');
+    assert.ok(isDenied(result), 'should deny git stash clear');
+  });
+
+  it('block message points at the safe pattern', () => {
+    const result = runHook('git stash pop');
+    assert.match(result.output, /git stash push -u -m/, 'reason should mention the safe pattern');
+    assert.match(result.output, /git stash apply/, 'reason should mention apply-by-ref');
+  });
+
+  // ── Allow cases (AC-1 + AC-3) ───────────────────────────────────────
+
+  it('allows tagged git stash push -u -m', () => {
+    const result = runHook('git stash push -u -m "wip-aisdlc-611"');
+    assert.ok(!isDenied(result), 'should allow tagged push');
+  });
+
+  it('allows git stash push --message=<tag>', () => {
+    const result = runHook('git stash push --message=wip-tag');
+    assert.ok(!isDenied(result), 'should allow --message= form');
+  });
+
+  it('allows git stash save "<tag>" (positional message)', () => {
+    const result = runHook('git stash save "wip work"');
+    assert.ok(!isDenied(result), 'should allow tagged save');
+  });
+
+  it('allows git stash apply <ref>', () => {
+    const result = runHook('git stash apply stash@{0}');
+    assert.ok(!isDenied(result), 'should allow apply by ref');
+  });
+
+  it('allows git stash apply with no ref (never drops anything)', () => {
+    const result = runHook('git stash apply');
+    assert.ok(!isDenied(result), 'apply never drops from the stack, safe even bare');
+  });
+
+  it('allows git stash list', () => {
+    const result = runHook('git stash list');
+    assert.ok(!isDenied(result), 'should allow list');
+  });
+
+  it('allows git stash show', () => {
+    const result = runHook('git stash show stash@{0}');
+    assert.ok(!isDenied(result), 'should allow show');
+  });
+
+  it('allows git stash drop <ref> (tagged/explicit drop)', () => {
+    const result = runHook('git stash drop stash@{0}');
+    assert.ok(!isDenied(result), 'should allow drop with an explicit ref');
+  });
+
+  it('allows a normal git push unrelated to stash', () => {
+    const result = runHook('git push origin feature');
+    assert.ok(!isDenied(result), 'unrelated git commands are untouched');
+  });
+
+  // ── Evasion shapes (AC-1): chained &&, quoting, control operators ───
+
+  it('blocks git stash pop chained after an unrelated command with &&', () => {
+    const result = runHook('pnpm test && git stash pop');
+    assert.ok(isDenied(result), 'chained && must not evade the guard');
+  });
+
+  it('blocks git stash pop chained with ;', () => {
+    const result = runHook('echo hi; git stash pop');
+    assert.ok(isDenied(result), 'chained ; must not evade the guard');
+  });
+
+  it('blocks git stash pop after ||', () => {
+    const result = runHook('false || git stash pop');
+    assert.ok(isDenied(result), 'chained || must not evade the guard');
+  });
+
+  it('blocks quote-obfuscated git "stash" pop', () => {
+    const result = runHook('git "stash" pop');
+    assert.ok(isDenied(result), 'quote-splitting the stash token must not evade the guard');
+  });
+
+  // ── Path-qualified / quote-obfuscated / shell-wrapped bypass (security review) ──
+
+  it('blocks a path-qualified /usr/bin/git stash pop', () => {
+    const result = runHook('/usr/bin/git stash pop');
+    assert.ok(isDenied(result), 'basename-tolerant git matching must catch a full-path git binary');
+  });
+
+  it('blocks a path-qualified /usr/bin/git stash clear', () => {
+    const result = runHook('/usr/bin/git stash clear');
+    assert.ok(
+      isDenied(result),
+      'basename-tolerant git matching must catch clear on a full-path git',
+    );
+  });
+
+  it("blocks git st''ash pop (mid-token empty single-quote splice)", () => {
+    const result = runHook("git st''ash pop");
+    assert.ok(
+      isDenied(result),
+      'a real shell concatenates st + \'\' + ash into "stash" — detection must too',
+    );
+  });
+
+  it('blocks git sta"sh" pop (mid-token double-quote splice)', () => {
+    const result = runHook('git sta"sh" pop');
+    assert.ok(
+      isDenied(result),
+      'a real shell concatenates sta + "sh" into "stash" — detection must too',
+    );
+  });
+
+  it('blocks (git stash pop) wrapped in a subshell', () => {
+    const result = runHook('(git stash pop)');
+    assert.ok(
+      isDenied(result),
+      'a subshell still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks { git stash pop; } wrapped in a brace group', () => {
+    const result = runHook('{ git stash pop; }');
+    assert.ok(
+      isDenied(result),
+      'a brace group still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks $(git stash pop) command substitution', () => {
+    const result = runHook('$(git stash pop)');
+    assert.ok(
+      isDenied(result),
+      'command substitution still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks `git stash pop` backtick substitution', () => {
+    const result = runHook('`git stash pop`');
+    assert.ok(
+      isDenied(result),
+      'backtick substitution still EXECUTES its contents — must not evade the guard',
+    );
+  });
+
+  it('blocks git stash pop with global -C flag inserted', () => {
+    const result = runHook('git -C /tmp/some-worktree stash pop');
+    assert.ok(isDenied(result), 'global git flags before stash must not evade the guard');
+  });
+
+  // ── $IFS / backslash-splice / leading-backslash bypass (2nd security re-review) ──
+
+  it('blocks git${IFS}stash${IFS}pop ($IFS word-splitting)', () => {
+    const result = runHook('git${IFS}stash${IFS}pop');
+    assert.ok(
+      isDenied(result),
+      "bash's default $IFS is whitespace — this really does execute git stash pop",
+    );
+  });
+
+  it('blocks git${IFS}stash${IFS}pop with braces omitted ($IFS bare form)', () => {
+    const result = runHook('git $IFS stash $IFS pop');
+    assert.ok(isDenied(result), 'bare $VAR form must also be collapsed to whitespace');
+  });
+
+  it('blocks git st\\ash pop (backslash mid-token splice)', () => {
+    const result = runHook('git st\\ash pop');
+    assert.ok(
+      isDenied(result),
+      'a real shell drops the unescaped backslash and joins st+ash into stash',
+    );
+  });
+
+  it('blocks \\git stash pop (leading backslash on the git token)', () => {
+    const result = runHook('\\git stash pop');
+    assert.ok(isDenied(result), 'a leading backslash must not hide the git token');
+  });
+
+  // ── $VAR-then-quote ordering bypass (3rd security re-review) ─────────
+
+  it("blocks git$IFS'stash'${IFS}pop (quote terminates $VAR name)", () => {
+    const result = runHook("git$IFS'stash'${IFS}pop");
+    assert.ok(
+      isDenied(result),
+      '$VAR collapse must run BEFORE quote-stripping so the quote correctly ' +
+        'terminates the $IFS variable name, leaving the stash token intact',
+    );
+  });
+
+  it("blocks git $IFS'stash' pop (bare $VAR immediately followed by a quote)", () => {
+    const result = runHook("git $IFS'stash' pop");
+    assert.ok(isDenied(result), 'bare $VAR form must also respect quote-termination ordering');
+  });
+
+  it("blocks git$IFS''stash pop (empty-quote immediately after $VAR)", () => {
+    const result = runHook("git$IFS''stash pop");
+    assert.ok(isDenied(result), 'an empty quote right after $VAR must not swallow the stash token');
+  });
+
+  // ── Empty-variable intra-token splice (4th security re-review) ───────
+  // An UNSET/empty var concatenates its neighbors in a real shell, so a splice
+  // INSIDE the git or stash token would hide it under a space-only collapse.
+  // The single shell-accurate normalizer (other vars→empty) concatenates and
+  // catches these.
+
+  it('blocks g${x}it stash pop (empty var spliced inside the git token)', () => {
+    const result = runHook('g${x}it stash pop');
+    assert.ok(
+      isDenied(result),
+      'an unset var concatenates to `git` — the empty interpretation must reveal it',
+    );
+  });
+
+  it('blocks git st${x}ash pop (empty var spliced inside the stash token)', () => {
+    const result = runHook('git st${x}ash pop');
+    assert.ok(isDenied(result), 'an unset var concatenates to `stash` — must still block pop');
+  });
+
+  it('blocks gi${x}t stash pop (empty var spliced inside the git token, variant)', () => {
+    const result = runHook('gi${x}t stash pop');
+    assert.ok(isDenied(result), 'empty-var splice on the git token must not evade detection');
+  });
+
+  it('blocks g${x}it stash clear (empty-var splice + destructive clear)', () => {
+    const result = runHook('g${x}it stash clear');
+    assert.ok(isDenied(result), 'empty-var splice must not hide a destructive clear');
+  });
+
+  // ── MIXED expansion: empty user var + $IFS in the SAME command (5th security re-review) ──
+  // A real shell resolves each var independently — an unset var concatenates
+  // while $IFS word-splits. The single shell-accurate normalize pass ($IFS→space,
+  // other vars→empty) models this; a two-uniform-corner sweep could not.
+
+  it('blocks g${x}it${IFS}stash pop (empty user var joins git, $IFS splits stash/pop)', () => {
+    const result = runHook('g${x}it${IFS}stash pop');
+    assert.ok(
+      isDenied(result),
+      'mixed empty-var + $IFS expansion must still resolve to a blocked pop',
+    );
+  });
+
+  it('blocks git${IFS}st${x}ash pop (empty splice inside stash + $IFS separator)', () => {
+    const result = runHook('git${IFS}st${x}ash pop');
+    assert.ok(isDenied(result), 'mixed expansion inside the stash token must still block pop');
+  });
+
+  it('blocks g${x}it${IFS}stash clear (mixed expansion + destructive clear)', () => {
+    const result = runHook('g${x}it${IFS}stash clear');
+    assert.ok(isDenied(result), 'mixed expansion must not hide a destructive clear');
+  });
+
+  it('blocks git${IFS:0:1}stash${IFS:0:1}pop (IFS parameter-expansion → space)', () => {
+    const result = runHook('git${IFS:0:1}stash${IFS:0:1}pop');
+    assert.ok(
+      isDenied(result),
+      '${IFS:0:1} evaluates to a space in-shell — must be treated as a separator, not deleted',
+    );
+  });
+
+  it('does not misclassify ${IFSX} (a distinct unset var) as the IFS separator', () => {
+    // ${IFSX} is a DIFFERENT variable → empty → `gitstash pop` is not a git
+    // token, so this is allowed (it does not execute a real git stash in-shell
+    // either — `$IFSX` is unset). Guards the IFS-param-expansion regex against
+    // over-matching a same-prefixed distinct variable name.
+    const result = runHook('git${IFSX}stash pop');
+    assert.ok(!isDenied(result), '${IFSX} is a distinct unset var (empty), not the IFS separator');
+  });
+
+  // ── Fail-closed subcommand-position redesign: no-over-block guard ────
+
+  it('does not block git commit -m stash (stash is an argument, not the subcommand)', () => {
+    const result = runHook('git commit -m stash');
+    assert.ok(!isDenied(result), 'stash must be the SUBCOMMAND position to trigger detection');
+  });
+
+  it('does not block git branch stash-experiment (stash is a branch-name argument)', () => {
+    const result = runHook('git branch stash-experiment');
+    assert.ok(!isDenied(result), 'branch is the subcommand here, not stash');
+  });
+
+  it('does not block git log --grep stash (stash is a grep pattern argument)', () => {
+    const result = runHook('git log --grep stash');
+    assert.ok(!isDenied(result), 'log is the subcommand here, not stash');
+  });
+
+  it('allows git stash push -u -m "$TAG" (variable-valued tag — over-block regression guard)', () => {
+    const result = runHook('git stash push -u -m "$TAG"');
+    assert.ok(
+      !isDenied(result),
+      'a $VAR-valued tag must not be falsely blocked: push is non-destructive and allowed ' +
+        'regardless of tag (the round-4 reorder + tag-parsing combo had falsely denied this)',
+    );
+  });
+
+  // ── No-over-block cases (AC-3) ───────────────────────────────────────
+
+  it('does not block git stash list even though it is a stash subcommand', () => {
+    const result = runHook('git stash list');
+    assert.equal(result.output, '', 'should produce no output (fully allowed)');
+  });
+
+  it('does not block an echo that merely mentions "git stash pop" as text', () => {
+    const result = runHook('echo "remember: never run git stash pop"');
+    assert.ok(!isDenied(result), 'echo text is data, not an invocation');
+  });
+
+  it('does not block a path containing the word "stash"', () => {
+    const result = runHook('ls -la ./stash-archive/');
+    assert.ok(!isDenied(result), 'a path substring must not trigger the guard');
+  });
+
+  it('does not block a heredoc body that contains "git stash pop" as example text', () => {
+    const result = runHook('cat <<EOF\nDoc: never run git stash pop manually.\nEOF');
+    assert.ok(!isDenied(result), 'heredoc body content is inert data, not an invocation');
+  });
+
+  it('does not block git commit -m "stash" (message value happens to be the word stash)', () => {
+    const result = runHook('git commit -m stash');
+    assert.ok(!isDenied(result), 'git commit is not git stash');
+  });
+
+  it('does not block an unrelated npm/pnpm script whose name contains stash', () => {
+    const result = runHook('pnpm run unstash-fixtures');
+    assert.ok(!isDenied(result), 'script name containing "stash" must not trigger the guard');
+  });
+});
