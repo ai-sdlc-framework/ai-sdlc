@@ -1,7 +1,7 @@
 ---
 id: AISDLC-610
 title: Attestation patch-id must be identical across emit-leaf/sign-v6/verifier (exclude backlog/**)
-status: To Do
+status: Done
 priority: high
 labels:
   - adopter-facing
@@ -74,19 +74,19 @@ four in the SAME PR, with a test that proves they agree.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `computePatchId` excludes `backlog/{tasks,completed}/` on the signer,
+- [x] AC-1: `computePatchId` excludes `backlog/{tasks,completed}/` on the signer,
       and the SAME exclusion is applied on the verifier, `emit-leaf`, and
       `sign-v6` — verified by a test that computes the patch-id before and after a
       simulated `tasks/ → completed/` move and asserts it is UNCHANGED.
-- [ ] AC-2: A test reproduces the HIGH-2 flow end-to-end: `emit-leaf` writes
+- [x] AC-2: A test reproduces the HIGH-2 flow end-to-end: `emit-leaf` writes
       leaves, a backlog Done-move happens, `sign-v6` runs and FINDS the leaves via
       the per-patch-id file (no shared-fallback needed) and writes a valid
       envelope that `verify-attestation` accepts.
-- [ ] AC-3: `sign-v6` accepts an explicit `--patch-id` and uses it verbatim when
+- [x] AC-3: `sign-v6` accepts an explicit `--patch-id` and uses it verbatim when
       provided; when omitted it computes the identical key `emit-leaf` uses.
-- [ ] AC-4: Signer/verifier/emit-leaf/sign-v6 exclusion lists are proven
+- [x] AC-4: Signer/verifier/emit-leaf/sign-v6 exclusion lists are proven
       identical by a test (guard against future asymmetric drift — AISDLC-421).
-- [ ] AC-5: No base-ref change; existing `aisdlc-`/this-repo attestations still
+- [x] AC-5: No base-ref change; existing `aisdlc-`/this-repo attestations still
       verify (regression-safe). `pnpm build && test && lint` clean; coverage >=80%.
 
 ## References

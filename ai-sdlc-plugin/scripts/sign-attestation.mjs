@@ -43,6 +43,16 @@
  *   --task-id          (v6 only) task ID for filtering transcript leaves
  *                     (e.g. AISDLC-383.3). Falls back to the task ID parsed
  *                     from the active-task sentinel at .active-task.
+ *   --patch-id         (AISDLC-610) 40-char hex patch-id to use VERBATIM
+ *                     instead of recomputing it. Belt-and-suspenders against
+ *                     recomputation drift: a caller that already invoked
+ *                     `cli-attestation emit-leaf` (and therefore already
+ *                     knows the exact key its leaves were written under) can
+ *                     pass that same value here so sign-time key resolution
+ *                     can never diverge from emit-leaf's key. When omitted,
+ *                     computed via the same `computePatchId` implementation
+ *                     `emit-leaf` / `sign-v6` use (v6 path only; the v5 path
+ *                     always computes it).
  *   --review-verdicts  path to JSON: [{ agentId, harness, approved, findings }]
  *   --iteration-count  integer (1 = single dev pass; 2 = one iteration ran)
  *   --harness-note     string (empty = independence enforced; non-empty = warning text)
@@ -74,65 +84,10 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join, resolve, dirname, parse as parsePath } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-
-/**
- * AISDLC-398: Compute git patch-id for content-addressed envelope filenames.
- *
- * Uses `git diff-tree --no-color -p <base>..<head> -- ':!.ai-sdlc/attestations/'`
- * piped to `git patch-id --stable`.
- *
- * Returns the 40-char hex patch-id, or null on failure (caller falls back to
- * per-SHA filename for legacy compatibility).
- */
-function computePatchIdForFilename(base, head, repoRoot) {
-  if (!/^[0-9a-f]{40}$/i.test(base) || !/^[0-9a-f]{40}$/i.test(head)) {
-    return null;
-  }
-  let diffOutput;
-  try {
-    diffOutput = execFileSync(
-      'git',
-      [
-        'diff-tree',
-        '--no-color',
-        '-p',
-        `${base}..${head}`,
-        '--',
-        // AISDLC-422: keep this exclusion list IDENTICAL to
-        // `PATCH_ID_EXCLUSIONS` in pipeline-cli/src/attestation/patch-id.ts.
-        // Asymmetric exclusion = signer/verifier compute different patch-ids;
-        // envelope lookup fails. Drift = bug.
-        ':!.ai-sdlc/attestations/',
-        ':!.ai-sdlc/transcript-leaves/',
-      ],
-      {
-        cwd: repoRoot,
-        encoding: 'utf-8',
-        maxBuffer: 128 * 1024 * 1024,
-      },
-    );
-  } catch {
-    return null;
-  }
-  if (!diffOutput || diffOutput.trim().length === 0) {
-    return null;
-  }
-  const result = spawnSync('git', ['patch-id', '--stable'], {
-    input: diffOutput,
-    cwd: repoRoot,
-    encoding: 'utf-8',
-    maxBuffer: 128 * 1024 * 1024,
-  });
-  if (result.status !== 0 || !result.stdout) {
-    return null;
-  }
-  const match = result.stdout.trim().match(/^([0-9a-f]{40})/i);
-  return match ? match[1].toLowerCase() : null;
-}
 
 function fail(msg, code = 1) {
   process.stderr.write(`ERROR: ${msg}\n`);
@@ -239,6 +194,21 @@ function pipelineCliSignV6Candidates(repoRoot) {
     'dist',
     'attestation',
     'sign-v6.js',
+  ]);
+}
+
+// AISDLC-610: the signer's patch-id MUST be computed via the SAME
+// `computePatchId` implementation `cli-attestation emit-leaf` and `sign-v6`
+// use (pipeline-cli/src/attestation/patch-id.ts) — not a re-implemented
+// copy. A separate copy previously lived here and drifted from the
+// canonical exclusion set (missing the `.ai-sdlc/transcript-leaves.jsonl`
+// and, pre-AISDLC-610, `backlog/{tasks,completed}/` entries), which is
+// exactly the asymmetric-exclusion bug class AISDLC-421 exists to prevent.
+function pipelineCliPatchIdCandidates(repoRoot) {
+  return runtimeModuleCandidates(repoRoot, 'pipeline-cli', '@ai-sdlc/pipeline-cli', [
+    'dist',
+    'attestation',
+    'patch-id.js',
   ]);
 }
 
@@ -363,6 +333,7 @@ async function loadRuntimeModule(repoRoot, label, pkg, candidates, distSubpath, 
 
 const ORCHESTRATOR_DIST = ['dist', 'runtime', 'attestations.js'];
 const PIPELINE_CLI_DIST = ['dist', 'attestation', 'sign-v6.js'];
+const PIPELINE_CLI_PATCH_ID_DIST = ['dist', 'attestation', 'patch-id.js'];
 
 async function loadAttestationRuntime(repoRoot) {
   return loadRuntimeModule(
@@ -384,6 +355,32 @@ async function loadPipelineCliSignV6(repoRoot) {
     PIPELINE_CLI_DIST,
     join(repoRoot, 'pipeline-cli', ...PIPELINE_CLI_DIST),
   );
+}
+
+// AISDLC-610: resolves the SAME `computePatchId` module `emit-leaf` and
+// `sign-v6` use, so this signer's patch-id computation is guaranteed to
+// agree with theirs — no re-implementation, no drift risk.
+//
+// Unlike `loadRuntimeModule` (used for the v6 envelope BUILDER, which is
+// security-critical and must fail loudly rather than silently substitute a
+// re-implementation — AISDLC-554), patch-id resolution here is BEST-EFFORT
+// by design and always has been: pre-AISDLC-610 callers already tolerated
+// `computePatchIdForFilename` returning `null` (unreachable merge-base,
+// git unavailable, shallow clone, etc.) and transparently fell back to the
+// legacy per-SHA envelope filename. A missing/unbuilt pipeline-cli copy
+// (e.g. a fresh worktree, a hermetic test fixture that stubs only the
+// orchestrator runtime, or a consumer repo mid-install) must degrade the
+// SAME way — NOT hard-fail the entire sign step over an optimization.
+// Returns `null` when no candidate exists or import fails; never exits.
+async function tryLoadPipelineCliPatchId(repoRoot) {
+  const candidates = pipelineCliPatchIdCandidates(repoRoot);
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) return null;
+  try {
+    return await import(pathToFileURL(found).href);
+  } catch {
+    return null;
+  }
 }
 
 function parseArgs(argv) {
@@ -529,17 +526,34 @@ async function main() {
       process.env['GIT_AUTHOR_EMAIL'] || process.env['EMAIL'] || `${userInfo().username}@local`;
     const machine = hostname();
 
-    // AISDLC-398: compute content-addressed patch-id for primary filename.
-    let v6MergeBase = null;
-    try {
-      v6MergeBase = git(['merge-base', 'origin/main', 'HEAD'], repoRoot).trim();
-      if (!/^[0-9a-f]{40}$/i.test(v6MergeBase)) v6MergeBase = null;
-    } catch {
-      v6MergeBase = null;
+    // AISDLC-610: --patch-id (explicit, belt-and-suspenders) > auto-compute.
+    // When a caller (e.g. the slash command body, which already invoked
+    // `cli-attestation emit-leaf` and knows the exact patch-id it wrote
+    // leaves under) passes --patch-id explicitly, use it VERBATIM — no
+    // recomputation, so there is zero drift risk between the leaf-write key
+    // and the sign-time key even if git state changed in between (e.g. a
+    // concurrent fetch advanced a ref used by merge-base resolution).
+    let v6PatchId = typeof args['patch-id'] === 'string' ? args['patch-id'].trim() : null;
+    if (v6PatchId && !/^[0-9a-f]{40}$/i.test(v6PatchId)) {
+      fail(`--patch-id must be 40 lowercase hex characters, got: ${JSON.stringify(v6PatchId)}`);
     }
-    const v6PatchId = v6MergeBase
-      ? computePatchIdForFilename(v6MergeBase, headSha, repoRoot)
-      : null;
+    if (v6PatchId) v6PatchId = v6PatchId.toLowerCase();
+
+    if (!v6PatchId) {
+      // AISDLC-398 / AISDLC-610: compute content-addressed patch-id for the
+      // primary filename via the SAME `computePatchId` implementation
+      // `cli-attestation emit-leaf` and `sign-v6` use — not a
+      // re-implementation (see `tryLoadPipelineCliPatchId` above). Best
+      // effort: a missing/unbuilt copy degrades to the legacy per-SHA
+      // filename, exactly like the pre-AISDLC-610 behaviour.
+      const patchIdModule = await tryLoadPipelineCliPatchId(repoRoot);
+      if (patchIdModule) {
+        const v6MergeBase = patchIdModule.computeMergeBase('origin/main', 'HEAD', repoRoot);
+        v6PatchId = v6MergeBase
+          ? patchIdModule.computePatchId(v6MergeBase, headSha, repoRoot)
+          : null;
+      }
+    }
 
     let outPath;
     try {
@@ -813,9 +827,17 @@ async function main() {
     }
   }
 
-  const patchId = patchIdMergeBase
-    ? computePatchIdForFilename(patchIdMergeBase, headSha, repoRoot)
-    : null;
+  // AISDLC-610: use the SAME `computePatchId` implementation as the v6 path
+  // (and as `cli-attestation emit-leaf` / `sign-v6`) — not a re-implemented
+  // copy. See `tryLoadPipelineCliPatchId` above (best-effort: degrades to
+  // the legacy per-SHA filename when the module can't be resolved).
+  let patchId = null;
+  if (patchIdMergeBase) {
+    const patchIdModule = await tryLoadPipelineCliPatchId(repoRoot);
+    if (patchIdModule) {
+      patchId = patchIdModule.computePatchId(patchIdMergeBase, headSha, repoRoot);
+    }
+  }
 
   const envelopeJson = JSON.stringify(envelope, null, 2) + '\n';
 

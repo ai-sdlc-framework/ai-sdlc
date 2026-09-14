@@ -119,8 +119,34 @@ import {
 } from './merkle-core.mjs';
 
 /**
+ * Path-exclusion args for `git diff` / `git diff-tree` that omit the
+ * attestation envelope dir + per-patch-id transcript-leaves dir + shared
+ * transcript-leaves file + backlog lifecycle-bookkeeping dirs. Used by BOTH
+ * the linear-ancestor relaxation (`isAttestationOnlyDescendant`), the orphan
+ * tree-equivalence relaxation (`isTreeEquivalentModuloAttestation`), AND the
+ * verifier's own patch-id computation (`computePatchIdForVerifier` below).
+ *
+ * AISDLC-448: extracted into a shared constant so the relaxation paths stay
+ * byte-for-byte identical. Drift between them would re-open the same
+ * BOTH-mismatch class of false negatives this task was filed to close.
+ *
+ * AISDLC-610: `backlog/tasks/` + `backlog/completed/` added. MUST stay
+ * IDENTICAL to `PATCH_ID_EXCLUSIONS` in `pipeline-cli/src/attestation/patch-id.ts`
+ * (the signer side) — asymmetric exclusion lists reproduce the AISDLC-421 bug
+ * class where the signer and verifier compute different patch-ids for the
+ * same reviewed diff. See `patch-id-exclusion-lockstep.test.ts`.
+ */
+export const ATTESTATION_PATH_EXCLUSIONS = [
+  ':!.ai-sdlc/attestations/',
+  ':!.ai-sdlc/transcript-leaves.jsonl',
+  ':!.ai-sdlc/transcript-leaves/',
+  ':!backlog/tasks/',
+  ':!backlog/completed/',
+];
+
+/**
  * AISDLC-398: Compute the git patch-id for `base..head` with
- * `.ai-sdlc/attestations/**` excluded. Returns 40-char hex or null.
+ * `ATTESTATION_PATH_EXCLUSIONS` excluded. Returns 40-char hex or null.
  *
  * Used by the verifier to resolve the content-addressed envelope filename
  * before falling back to the legacy per-SHA filename.
@@ -139,16 +165,13 @@ function computePatchIdForVerifier(base, head, repoRoot) {
         '-p',
         `${base}..${head}`,
         '--',
-        // AISDLC-422 / AISDLC-475 (AC#6): keep this exclusion list IDENTICAL
-        // to `PATCH_ID_EXCLUSIONS` in pipeline-cli/src/attestation/patch-id.ts
-        // AND to `ATTESTATION_PATH_EXCLUSIONS` below. Three-entry canonical set:
-        // (attestations/, transcript-leaves/, transcript-leaves.jsonl).
-        // Asymmetric exclusion = verifier computes a different patch-id than the
-        // signer, so the envelope lookup misses and verification fails (same bug
-        // class as the AISDLC-421 verifier-shared-fallback hotfix).
-        ':!.ai-sdlc/attestations/',
-        ':!.ai-sdlc/transcript-leaves/',
-        ':!.ai-sdlc/transcript-leaves.jsonl',
+        // AISDLC-422 / AISDLC-475 (AC#6) / AISDLC-610: keep this exclusion
+        // list IDENTICAL to `PATCH_ID_EXCLUSIONS` in
+        // pipeline-cli/src/attestation/patch-id.ts. Asymmetric exclusion =
+        // verifier computes a different patch-id than the signer, so the
+        // envelope lookup misses and verification fails (same bug class as
+        // the AISDLC-421 verifier-shared-fallback hotfix).
+        ...ATTESTATION_PATH_EXCLUSIONS,
       ],
       {
         cwd: repoRoot,
@@ -176,23 +199,6 @@ function computePatchIdForVerifier(base, head, repoRoot) {
   const match = result.stdout.trim().match(/^([0-9a-f]{40})/i);
   return match ? match[1].toLowerCase() : null;
 }
-
-/**
- * Path-exclusion args for `git diff` / `git diff-tree` that omit the
- * attestation envelope dir + per-patch-id transcript-leaves dir + shared
- * transcript-leaves file. Used by BOTH the linear-ancestor relaxation
- * (`isAttestationOnlyDescendant`) and the orphan tree-equivalence relaxation
- * (`isTreeEquivalentModuloAttestation`).
- *
- * AISDLC-448: extracted into a shared constant so the two relaxation paths
- * stay byte-for-byte identical. Drift between them would re-open the same
- * BOTH-mismatch class of false negatives this task was filed to close.
- */
-const ATTESTATION_PATH_EXCLUSIONS = [
-  ':!.ai-sdlc/attestations/',
-  ':!.ai-sdlc/transcript-leaves.jsonl',
-  ':!.ai-sdlc/transcript-leaves/',
-];
 
 /**
  * AISDLC-419: detect "attestation-only descendant" relationship.

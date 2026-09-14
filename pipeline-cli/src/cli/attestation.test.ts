@@ -16,7 +16,12 @@ import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSyn
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendLeaf, loadLeavesForPatchId, type TranscriptLeaf } from '../attestation/merkle.js';
+import {
+  appendLeaf,
+  appendLeafForPatchId,
+  loadLeavesForPatchId,
+  type TranscriptLeaf,
+} from '../attestation/merkle.js';
 import { subagentSessionsDir } from '../attestation/verdict-class.js';
 import {
   claudeProjectSlug,
@@ -87,6 +92,10 @@ let savedEnvRepoRoot: string | undefined;
 
 function flushStdout(): string {
   return stdoutChunks.join('');
+}
+
+function flushStderr(): string {
+  return stderrChunks.join('');
 }
 
 beforeEach(() => {
@@ -454,6 +463,58 @@ describe('sign-v6', () => {
 
     const out = flushStdout();
     expect(out).toContain('.v6.dsse.json');
+  });
+
+  it('AISDLC-610 AC-3: honors an explicit --patch-id verbatim (per-patch-id file, no shared fallback)', async () => {
+    const explicitPatchId = '9'.repeat(40);
+    appendLeafForPatchId(
+      makeLeaf({ leafIndex: 0, taskId: 'AISDLC-610' }),
+      explicitPatchId,
+      tmpRoot,
+    );
+    appendLeafForPatchId(
+      makeLeaf({ leafIndex: 1, taskId: 'AISDLC-610', reviewerName: 'test-reviewer' }),
+      explicitPatchId,
+      tmpRoot,
+    );
+
+    await expect(
+      buildAttestationCli([
+        'sign-v6',
+        '--task-id',
+        'AISDLC-610',
+        '--head-sha',
+        'a'.repeat(40),
+        '--key-path',
+        keyPath,
+        '--patch-id',
+        explicitPatchId,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const out = flushStdout();
+    expect(out).toContain(`${explicitPatchId}.v6.dsse.json`);
+  });
+
+  it('AISDLC-610 AC-3: rejects a malformed --patch-id', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'sign-v6',
+        '--task-id',
+        'AISDLC-610',
+        '--head-sha',
+        'a'.repeat(40),
+        '--key-path',
+        keyPath,
+        '--patch-id',
+        'not-a-valid-patch-id',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(flushStderr()).toMatch(/--patch-id must be 40 lowercase hex characters/);
   });
 
   it('exits 1 when no leaves match task-id', async () => {

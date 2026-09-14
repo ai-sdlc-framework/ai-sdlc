@@ -307,11 +307,17 @@ describe('patch-id helpers (AISDLC-398 AC-4)', () => {
       // The transcript-leaves.jsonl shared file must be excluded so the signer
       // and verifier compute the same patch-id. Asymmetric exclusion reproduces
       // the AISDLC-421 bug class.
+      //
+      // AISDLC-610: `backlog/tasks/` + `backlog/completed/` were added as a
+      // 4th/5th entry — see `patch-id-exclusion-lockstep.test.ts` for the
+      // full cross-module lockstep guard.
       const mod = await import('./patch-id.js');
       expect(mod.PATCH_ID_EXCLUSIONS).toEqual([
         ':!.ai-sdlc/attestations/',
         ':!.ai-sdlc/transcript-leaves/',
         ':!.ai-sdlc/transcript-leaves.jsonl',
+        ':!backlog/tasks/',
+        ':!backlog/completed/',
       ]);
     });
 

@@ -326,6 +326,22 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               describe:
                 'Path to the operator ed25519 private key PEM. ' +
                 'Defaults to AISDLC_SIGNING_KEY_PATH env or ~/.ai-sdlc/signing-key.pem.',
+            })
+            .option('patch-id', {
+              type: 'string',
+              describe:
+                'AISDLC-610: 40-char hex patch-id to use VERBATIM instead of ' +
+                'recomputing it. Belt-and-suspenders against recomputation drift — ' +
+                'pass the SAME value already used for `emit-leaf --patch-id` so the ' +
+                'leaf lookup key can never diverge. When omitted, computed via the ' +
+                'same computePatchId(origin/main merge-base, head-sha) emit-leaf uses.',
+            })
+            .option('base-ref', {
+              type: 'string',
+              default: 'origin/main',
+              describe:
+                'AISDLC-610: base ref for the auto-computed patch-id (default: origin/main). ' +
+                'Only consulted when --patch-id is omitted.',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -356,6 +372,31 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const machine = hostname();
           const signerIdentity = `${identity}:${machine}`;
 
+          // AISDLC-610: resolve patch-id (explicit flag > auto-compute from
+          // git). Explicit --patch-id is used VERBATIM — no recomputation —
+          // so a caller that already ran `emit-leaf --patch-id <x>` gets a
+          // guaranteed-matching lookup key here. When omitted, this computes
+          // the identical key `emit-leaf`'s auto-compute path uses: same
+          // `computeMergeBase` + `computePatchId` functions, same default
+          // base ref (origin/main).
+          let patchId = args['patch-id'] as string | undefined;
+          if (patchId) {
+            if (!/^[0-9a-f]{40}$/i.test(patchId)) {
+              process.stderr.write(
+                `[cli-attestation] sign-v6: --patch-id must be 40 lowercase hex characters ` +
+                  `(got ${patchId.length}-char value: ${JSON.stringify(patchId.slice(0, 80))})\n`,
+              );
+              process.exit(1);
+            }
+            patchId = patchId.toLowerCase();
+          } else {
+            const baseRef = (args['base-ref'] as string | undefined) ?? 'origin/main';
+            const mergeBase = computeMergeBase(baseRef, 'HEAD', repoRoot);
+            if (mergeBase) {
+              patchId = computePatchId(mergeBase, headSha, repoRoot) ?? undefined;
+            }
+          }
+
           let outPath: string;
           try {
             outPath = signAndWriteV6Envelope({
@@ -364,6 +405,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               taskId,
               privateKeyPem,
               signerIdentity,
+              patchId,
             });
           } catch (err) {
             process.stderr.write(`[cli-attestation] sign-v6: ${(err as Error).message}\n`);
