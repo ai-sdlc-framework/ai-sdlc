@@ -42,7 +42,7 @@ reviewers did?). Ship behind a config flag so it can be A/B'd, not hard-swapped.
 
 ## Scope
 
-- Add a **combined correctness reviewer** (name TBD, e.g. `correctness-reviewer`)
+- Add a **combined correctness reviewer** named `correctness-reviewer`
   whose prompt merges the code-reviewer and test-reviewer remits (bugs/logic +
   test coverage/quality), on Sonnet. Preserve the same JSON verdict envelope
   shape so aggregation (`step_8_aggregate_verdicts`) and the AISDLC-616 ledger are
