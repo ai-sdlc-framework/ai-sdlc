@@ -8,9 +8,9 @@ labels:
   - attestation
   - security
 references:
-  - AISDLC-421
-  - AISDLC-606
-  - AISDLC-607
+  - backlog/completed/aisdlc-421 - fixattestation-RFC-0042-amendment-—-per-task-transcript-leaves-files-to-eliminate-cross-PR-rebase-conflicts.md
+  - backlog/completed/aisdlc-606 - make pipeline branch-agnostic honor targetBranch not hardcoded main.md
+  - backlog/completed/aisdlc-607 - fix cli-merge-if-eligible usable in consumer no-branch-protection repos.md
 created: 2026-09-14
 ---
 
