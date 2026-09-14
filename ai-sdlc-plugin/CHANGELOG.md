@@ -5,6 +5,16 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.20.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.1...ai-sdlc-plugin-v0.20.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* block bare git stash/pop in dev subagents (AISDLC-611) ([#1062](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1062)) ([0e365e2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0e365e28e866d0dfe59e9585867d64719febfe03))
+* close runtime-dep pin-bump convergence gaps for adopters (AISDLC-608) ([#1058](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1058)) ([a739cec](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a739ceceb3d68522404816bb21372cbb32da43b4))
+* lockstep attestation patch-id exclusions across emit-leaf/sign-v6/verifier (AISDLC-610) ([#1063](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1063)) ([5bd2a60](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5bd2a60ca02c562a01cde7b2b9978390817e769a))
+* make Step 0.5 parent-sync/prune task-id-prefix-agnostic (AISDLC-609) ([#1061](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1061)) ([7bef389](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7bef389c7dd54d3f2555d03465c4a533f002553d))
+
 ## [0.20.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.0...ai-sdlc-plugin-v0.20.1) (2026-09-08)
 
 

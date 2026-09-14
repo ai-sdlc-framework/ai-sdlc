@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.24.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.24.1...pipeline-cli-v0.24.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* lockstep attestation patch-id exclusions across emit-leaf/sign-v6/verifier (AISDLC-610) ([#1063](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1063)) ([5bd2a60](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5bd2a60ca02c562a01cde7b2b9978390817e769a))
+* make Step 0.5 parent-sync/prune task-id-prefix-agnostic (AISDLC-609) ([#1061](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1061)) ([7bef389](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7bef389c7dd54d3f2555d03465c4a533f002553d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.24.2
+
 ## [0.24.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.24.0...pipeline-cli-v0.24.1) (2026-09-08)
 
 
