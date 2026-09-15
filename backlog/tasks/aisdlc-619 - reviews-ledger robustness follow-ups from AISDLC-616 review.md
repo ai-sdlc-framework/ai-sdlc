@@ -7,8 +7,6 @@ labels:
   - observability
   - reviewers
   - tech-debt
-references:
-  - AISDLC-616
 created: 2026-09-14
 ---
 

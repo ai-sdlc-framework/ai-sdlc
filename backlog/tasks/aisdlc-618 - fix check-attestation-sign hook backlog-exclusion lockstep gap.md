@@ -7,8 +7,6 @@ labels:
   - attestation
   - hooks
   - bug
-references:
-  - AISDLC-610
 created: 2026-09-14
 ---
 
