@@ -439,11 +439,23 @@ echo "[orchestrator-tick] done/+failed/ verdicts: $VERDICTS_JSON"
 (the three-reviewer set); the merged 2-reviewer set is opt-in only, for A/B
 testing against the AISDLC-616 findings ledger.
 
+**Trust boundary (security review fix, round 2):** read `.ai-sdlc/review-config.yaml`
+from `origin/main` via `git show`, never from a working-tree checkout —
+consistent with `/ai-sdlc execute` Step 7a-pre and `resolveReviewerSetMode()`
+in `pipeline-cli/src/steps/reviewer-set.ts`. `$WORK_DIR` here is the
+Conductor's parent repo (pinned to `main` by the AISDLC-358 hard guard), so
+this is defense-in-depth rather than closing an active hole in this
+particular call site — but a single resolution rule everywhere is easier to
+reason about than "trusted here, PR-controlled there."
+
 ```bash
 REVIEWER_SET_MODE="${AI_SDLC_REVIEWER_SET:-}"
-if [ -z "$REVIEWER_SET_MODE" ] && [ -f "$WORK_DIR/.ai-sdlc/review-config.yaml" ]; then
-  REVIEWER_SET_MODE=$(grep -E '^\s*reviewerSet:' "$WORK_DIR/.ai-sdlc/review-config.yaml" 2>/dev/null \
-    | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
+if [ -z "$REVIEWER_SET_MODE" ]; then
+  BASE_REVIEW_CONFIG=$(cd "$WORK_DIR" && git show origin/main:.ai-sdlc/review-config.yaml 2>/dev/null || true)
+  if [ -n "$BASE_REVIEW_CONFIG" ]; then
+    REVIEWER_SET_MODE=$(printf '%s\n' "$BASE_REVIEW_CONFIG" | grep -E '^\s*reviewerSet:' \
+      | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
+  fi
 fi
 if [ "$REVIEWER_SET_MODE" != "code-test-merged" ]; then
   REVIEWER_SET_MODE="three"

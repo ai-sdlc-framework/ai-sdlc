@@ -98,6 +98,30 @@ export const RECONCILE_REVIEWERS_MERGED: readonly ReviewerName[] = [
   'security-reviewer',
 ] as const;
 
+/**
+ * Parse the CLI's `--reviewers` comma-separated string into a `ReviewerName[]`.
+ * Extracted as a pure, directly-unit-testable helper (AISDLC-617 round-2
+ * review) rather than inlined at the `cli/index.ts` argv-parsing call site.
+ *
+ * - Trims whitespace around each entry.
+ * - Drops empty entries (handles trailing commas / accidental double commas).
+ * - Returns `undefined` for an empty/whitespace-only input so callers can
+ *   `opts.reviewers = parseReviewersArg(raw) ?? opts.reviewers` without
+ *   accidentally overwriting a caller-supplied default with `[]`.
+ *
+ * Does NOT validate individual names against the `ReviewerName` union at
+ * runtime — an unrecognized name simply won't match any reviewer's
+ * transcript/verdict path downstream and reconcile's per-reviewer loop logs
+ * a `salvage-transcript:<name>` skip for it, rather than throwing here.
+ */
+export function parseReviewersArg(raw: string): ReviewerName[] | undefined {
+  const parsed = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean) as ReviewerName[];
+  return parsed.length > 0 ? parsed : undefined;
+}
+
 /** Per-step outcome inside a reconcile run. */
 export interface ReconcileStep {
   name: string;

@@ -28,6 +28,7 @@ import {
   defaultHomeDir,
   encodeWorktreePathForClaudeTmp,
   extractPrNumberFromUrl,
+  parseReviewersArg,
   readVerdictJson,
   RECONCILE_REVIEWERS,
   RECONCILE_REVIEWERS_MERGED,
@@ -114,6 +115,50 @@ function setupReviewerArtifacts(worktreePath: string, taskIdLower: string): void
 }
 
 describe('reconcile — pure helpers', () => {
+  // AISDLC-617 round-2 review — direct unit test for the `--reviewers`
+  // comma-split arg parsing (extracted from `cli/index.ts` into this pure
+  // helper for testability).
+  describe('parseReviewersArg', () => {
+    it('splits a comma-separated list into a ReviewerName[]', () => {
+      expect(parseReviewersArg('correctness-reviewer,security-reviewer')).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('splits the default three-reviewer list', () => {
+      expect(parseReviewersArg('code-reviewer,test-reviewer,security-reviewer')).toEqual([
+        'code-reviewer',
+        'test-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('trims whitespace around each entry', () => {
+      expect(parseReviewersArg(' correctness-reviewer , security-reviewer ')).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('drops empty entries from trailing/double commas', () => {
+      expect(parseReviewersArg('correctness-reviewer,,security-reviewer,')).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('returns undefined for an empty or whitespace-only string', () => {
+      expect(parseReviewersArg('')).toBeUndefined();
+      expect(parseReviewersArg('   ')).toBeUndefined();
+      expect(parseReviewersArg(',,,')).toBeUndefined();
+    });
+
+    it('parses a single-reviewer string', () => {
+      expect(parseReviewersArg('security-reviewer')).toEqual(['security-reviewer']);
+    });
+  });
+
   describe('extractPrNumberFromUrl', () => {
     it('returns the PR number from a github.com URL', () => {
       expect(extractPrNumberFromUrl('https://github.com/org/repo/pull/4321')).toBe('4321');

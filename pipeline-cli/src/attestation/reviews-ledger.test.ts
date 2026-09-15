@@ -153,6 +153,12 @@ describe('normalizeReviewerRole', () => {
   it('returns null for unrecognized names', () => {
     expect(normalizeReviewerRole('bogus')).toBeNull();
   });
+
+  // AISDLC-617 — opt-in merged code+test reviewer.
+  it('maps the AISDLC-617 correctness-reviewer name to the correctness role', () => {
+    expect(normalizeReviewerRole('correctness-reviewer')).toBe('correctness');
+    expect(normalizeReviewerRole('correctness')).toBe('correctness');
+  });
 });
 
 describe('normalizeFindings — itemized array shape', () => {

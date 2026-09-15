@@ -49,24 +49,34 @@ describe('Step 7 — buildReviewPrompts', () => {
     expect(r.diff).toContain('diff content');
   });
 
-  // AISDLC-617 — opt-in merged reviewer set: exactly 2 reviewers.
-  it('returns exactly 2 reviewer prompts (correctness + security) when reviewerSet=code-test-merged', async () => {
-    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
-    writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: code-test-merged\n');
-    const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
-    const r = await buildReviewPrompts({
-      taskId: 'AISDLC-1',
-      task,
-      branch: 'b',
-      worktreePath: tmp,
-      workDir: tmp,
-      runner: fake.toRunner(),
-      codexAvailable: false,
-    });
-    expect(r.prompts).toHaveLength(2);
-    expect(r.prompts.map((p) => p.reviewer)).toEqual(['correctness-reviewer', 'security-reviewer']);
+  // AISDLC-617 — opt-in merged reviewer set: exactly 2 reviewers. Opted in
+  // via the operator/CI-controlled env var (the only trusted A/B lever from
+  // inside a PR-controlled worktree — see the security test below).
+  it('returns exactly 2 reviewer prompts (correctness + security) when AI_SDLC_REVIEWER_SET=code-test-merged', async () => {
+    const prevEnv = process.env.AI_SDLC_REVIEWER_SET;
+    process.env.AI_SDLC_REVIEWER_SET = 'code-test-merged';
+    try {
+      const fake = new FakeRunner()
+        .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+        .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
+      const r = await buildReviewPrompts({
+        taskId: 'AISDLC-1',
+        task,
+        branch: 'b',
+        worktreePath: tmp,
+        workDir: tmp,
+        runner: fake.toRunner(),
+        codexAvailable: false,
+      });
+      expect(r.prompts).toHaveLength(2);
+      expect(r.prompts.map((p) => p.reviewer)).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    } finally {
+      if (prevEnv === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
+      else process.env.AI_SDLC_REVIEWER_SET = prevEnv;
+    }
   });
 
   // AISDLC-617 AC-4 — default reviewerSet is unchanged (three) even with an
@@ -85,6 +95,36 @@ describe('Step 7 — buildReviewPrompts', () => {
       codexAvailable: false,
     });
     expect(r.prompts).toHaveLength(3);
+  });
+
+  // AISDLC-617 round-2 SECURITY fix — a `.ai-sdlc/review-config.yaml`
+  // committed inside the PR-controlled worktree (opts.workDir) MUST NOT opt
+  // the PR into the shallower 2-reviewer set. Only origin/main's committed
+  // config (or the env var) can opt in. `tmp` here is a plain fixture dir,
+  // not a git repo, so the trusted `git show origin/main:...` read
+  // necessarily fails closed to the default three-reviewer set — exactly
+  // the fail-safe behavior required even when origin/main is unreachable.
+  it('SECURITY: a worktree-local review-config.yaml does NOT opt the PR into the merged set', async () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: code-test-merged\n');
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.prompts).toHaveLength(3);
+    expect(r.prompts.map((p) => p.reviewer)).toEqual([
+      'code-reviewer',
+      'test-reviewer',
+      'security-reviewer',
+    ]);
   });
 
   // AISDLC-606 — diff against the resolved target branch, not a hardcoded

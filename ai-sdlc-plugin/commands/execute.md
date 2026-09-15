@@ -841,16 +841,24 @@ cd -
 
 Before classifying, resolve which reviewer SET this run uses. **Default is unchanged** — the classic three-reviewer set (code-reviewer, test-reviewer, security-reviewer) — unless the operator explicitly opts into the merged 2-reviewer set for A/B testing against the AISDLC-616 findings ledger.
 
+**Trust boundary (security review fix, round 2):** `.ai-sdlc/review-config.yaml` is read from **`origin/main` via `git show`**, never from `$WORKTREE_PATH`'s own working-tree checkout. Reading the PR's own worktree copy would let an untrusted PR author commit `reviewerSet: code-test-merged` in their OWN branch to opt their own diff into the shallower single-pass review — a self-selection hole. Resolving from `origin/main` means changing review depth requires a merged, already-reviewed change to main first. This mirrors `resolveReviewerSetMode()` in `pipeline-cli/src/steps/reviewer-set.ts` — same precedence, same fail-safe-to-`three` semantics.
+
 ```bash
 REVIEWER_SET_MODE="${AI_SDLC_REVIEWER_SET:-}"
-if [ -z "$REVIEWER_SET_MODE" ] && [ -f "$WORKTREE_PATH/.ai-sdlc/review-config.yaml" ]; then
-  REVIEWER_SET_MODE=$(grep -E '^\s*reviewerSet:' "$WORKTREE_PATH/.ai-sdlc/review-config.yaml" 2>/dev/null \
-    | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
+if [ -z "$REVIEWER_SET_MODE" ]; then
+  # AISDLC-617 round 2: read from origin/main, NOT $WORKTREE_PATH's working
+  # tree. `git show` failing (file absent on origin/main, ref unreachable,
+  # etc.) is the expected/safe path and must fall through to the default.
+  BASE_REVIEW_CONFIG=$(cd "$WORKTREE_PATH" && git show origin/main:.ai-sdlc/review-config.yaml 2>/dev/null || true)
+  if [ -n "$BASE_REVIEW_CONFIG" ]; then
+    REVIEWER_SET_MODE=$(printf '%s\n' "$BASE_REVIEW_CONFIG" | grep -E '^\s*reviewerSet:' \
+      | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
+  fi
 fi
 if [ "$REVIEWER_SET_MODE" != "code-test-merged" ]; then
   REVIEWER_SET_MODE="three"
 fi
-echo "[ai-sdlc-progress] Step 7a-pre: reviewerSet mode = $REVIEWER_SET_MODE (AISDLC-617; default 'three' — opt in via AI_SDLC_REVIEWER_SET=code-test-merged or .ai-sdlc/review-config.yaml)"
+echo "[ai-sdlc-progress] Step 7a-pre: reviewerSet mode = $REVIEWER_SET_MODE (AISDLC-617; default 'three' — opt in via AI_SDLC_REVIEWER_SET=code-test-merged, or a MERGED .ai-sdlc/review-config.yaml on origin/main — the PR's own worktree copy is never trusted)"
 ```
 
 ### Step 7a — Classify the PR (AISDLC-141)
