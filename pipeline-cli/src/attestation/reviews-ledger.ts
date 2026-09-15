@@ -37,14 +37,7 @@
  * @module attestation/reviews-ledger
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /**
@@ -218,25 +211,24 @@ export function loadReviewLedger(taskId: string, repoRoot?: string): ReviewLedge
 }
 
 /**
- * Atomically APPEND a single record to the task's ledger. Never overwrites
- * existing content — every call, including the first pass and every
- * subsequent review iteration, is a pure append. Atomicity via write-to-tmp
- * + `renameSync` (POSIX rename is atomic within the same filesystem),
- * mirroring `appendLeafToFile` in `merkle.ts`.
+ * APPEND a single record to the task's ledger. Never overwrites existing
+ * content — every call, including the first pass and every subsequent
+ * review iteration, is a pure append. Uses `appendFileSync` (POSIX
+ * `O_APPEND`, single `write(2)` syscall) rather than read-modify-write:
+ * `O_APPEND` guarantees each write lands atomically at the current end of
+ * file, so concurrent same-task appends (e.g. two reviewer roles finishing
+ * at nearly the same instant) can never race and clobber each other's
+ * record the way a read-then-rewrite-then-rename cycle could (both readers
+ * see the same base content, and whichever rename runs last silently drops
+ * the other's line). It is also O(1) per append instead of O(N) (no longer
+ * re-reads and re-writes the whole file on every call), so ledger growth
+ * over a corpus's lifetime does not degrade write latency.
  */
 export function appendReviewLedgerRecord(record: ReviewLedgerRecord, repoRoot?: string): void {
   const filePath = reviewsLedgerPath(record.taskId, repoRoot);
   const dir = dirname(filePath);
   mkdirSync(dir, { recursive: true });
-
-  const existing = existsSync(filePath) ? readFileSync(filePath, 'utf8') : '';
-  const newLine = JSON.stringify(record) + '\n';
-  const newContent =
-    existing === '' || existing.endsWith('\n') ? existing + newLine : existing + '\n' + newLine;
-
-  const tmpPath = filePath + '.tmp';
-  writeFileSync(tmpPath, newContent, { encoding: 'utf8' });
-  renameSync(tmpPath, filePath);
+  appendFileSync(filePath, JSON.stringify(record) + '\n', { encoding: 'utf8' });
 }
 
 /**

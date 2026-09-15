@@ -109,6 +109,14 @@ function safeDiv(numerator: number, denominator: number): number {
  * append-only so a caller bug could theoretically double-append), the LAST
  * record for that role in file order wins, matching "most recent write" for
  * an append-only log.
+ *
+ * Each per-cycle map is a null-prototype `Object.create(null)` object rather
+ * than a plain `{}`. `record.role` is parsed from a COMMITTED (but
+ * untrusted-by-construction) JSONL ledger file — `ALL_ROLES` filtering means
+ * no exploitable prototype-pollution vector exists today (a `__proto__`-role
+ * record is never read back by any consumer), but indexing a plain object
+ * literal by an attacker-influenced string key is a footgun this hardens
+ * against defensively, independent of the current callers' filtering.
  */
 function groupIntoCycles(
   records: ReviewLedgerRecord[],
@@ -116,7 +124,9 @@ function groupIntoCycles(
   const cycles = new Map<string, Partial<Record<ReviewLedgerRole, ReviewLedgerRecord>>>();
   for (const record of records) {
     const key = cycleKey(record);
-    const cycle = cycles.get(key) ?? {};
+    const cycle =
+      cycles.get(key) ??
+      (Object.create(null) as Partial<Record<ReviewLedgerRole, ReviewLedgerRecord>>);
     cycle[record.role] = record;
     cycles.set(key, cycle);
   }
