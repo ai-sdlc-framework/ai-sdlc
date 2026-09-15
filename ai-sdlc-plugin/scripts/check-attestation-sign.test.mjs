@@ -25,11 +25,12 @@ import {
   existsSync,
   chmodSync,
   cpSync,
+  readFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'check-attestation-sign.sh');
@@ -364,5 +365,57 @@ process.stdout.write('signed via self-location resolution\\n');
       assert.equal(r.status, 2, `expected 2 (signer failure), got ${r.status}: ${r.stderr}`);
       assert.match(r.stderr, /sign-attestation\.mjs/);
     });
+  });
+});
+
+// ── AISDLC-618: plugin-shipped hook exclusion list bound to the real source ──
+//
+// Round-3 review audit: this plugin-shipped (AISDLC-555) copy of the hook is
+// a further hardcoded copy of the patch-id exclusion list, distinct from the
+// monorepo copy at scripts/check-attestation-sign.sh (which was fixed to
+// consume `cli-attestation print-patch-id-exclusions`). Because this copy
+// ships standalone into adopter repos with no pipeline-cli/ source tree, it
+// MUST stay a hardcoded literal — bound here against the REAL
+// PATCH_ID_EXCLUSIONS (imported from the built pipeline-cli dist — skipped,
+// not failed, when dist isn't built yet) so a future addition that isn't
+// mirrored here fails this test once dist is rebuilt.
+describe('AISDLC-618: plugin-shipped check-attestation-sign.sh exclusion list stays in lockstep with PATCH_ID_EXCLUSIONS', () => {
+  it("this script's hardcoded diff-tree exclusion list matches the REAL PATCH_ID_EXCLUSIONS from built dist", async (t) => {
+    const distPath = join(
+      __dirname,
+      '..',
+      '..',
+      'pipeline-cli',
+      'dist',
+      'attestation',
+      'patch-id.js',
+    );
+    if (!existsSync(distPath)) {
+      t.skip(
+        `pipeline-cli/dist/attestation/patch-id.js not built — run ` +
+          `\`pnpm --filter @ai-sdlc/pipeline-cli build\` to exercise this binding test`,
+      );
+      return;
+    }
+    const { PATCH_ID_EXCLUSIONS: realExclusions } = await import(pathToFileURL(distPath).href);
+
+    const scriptSource = readFileSync(SCRIPT, 'utf-8');
+    const match = scriptSource.match(
+      /DIFF_OUTPUT=\$\(git diff-tree --no-color -p "\$\{MERGE_BASE\}\.\.HEAD" -- ([^\n]+?) 2>\/dev\/null/,
+    );
+    assert.ok(
+      match,
+      'expected to find the DIFF_OUTPUT=$(git diff-tree ...) line in ' +
+        'check-attestation-sign.sh — if the computation was refactored, update this test too',
+    );
+    const scriptExclusions = [...match[1].matchAll(/':!([^']*)'/g)].map((m) => `:!${m[1]}`);
+    assert.deepEqual(
+      scriptExclusions,
+      realExclusions,
+      'AISDLC-618: ai-sdlc-plugin/scripts/check-attestation-sign.sh has a hardcoded ' +
+        'exclusion list that has drifted from the REAL PATCH_ID_EXCLUSIONS in ' +
+        'pipeline-cli/src/attestation/patch-id.ts. Update the hardcoded list in that ' +
+        'script whenever the real array changes.',
+    );
   });
 });

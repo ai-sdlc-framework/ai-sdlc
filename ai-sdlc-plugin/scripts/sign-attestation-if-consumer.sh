@@ -273,10 +273,16 @@ if [ -z "$HEAD_SHA" ]; then
   exit 0
 fi
 
+# AISDLC-618: exclusion list MUST stay IDENTICAL to PATCH_ID_EXCLUSIONS in
+# pipeline-cli/src/attestation/patch-id.ts (six-entry canonical set,
+# AISDLC-610 + AISDLC-616). This is a plugin-shipped standalone script with
+# no pipeline-cli/ source tree in adopter repos, so the list is a hardcoded
+# literal — kept in lockstep by
+# ai-sdlc-plugin/scripts/sign-attestation-if-consumer.test.mjs's binding test.
 MERGE_BASE=$(git merge-base "$BASE_REF" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "$MERGE_BASE" ] && [ ${#MERGE_BASE} -eq 40 ]; then
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' ':!backlog/tasks/' ':!backlog/completed/' ':!.ai-sdlc/reviews/' 2>/dev/null || echo '')
   if [ -n "$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     PATCH_ID=$(printf '%s' "$PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
