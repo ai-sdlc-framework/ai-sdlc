@@ -53,7 +53,11 @@ import {
   type CacheFileEntry,
   type ReviewerName as CacheReviewerName,
 } from '../orchestrator/reviewer-cache.js';
-import { runReconcile, type RunReconcileOptions } from '../orchestrator/reconcile.js';
+import {
+  parseReviewersArg,
+  runReconcile,
+  type RunReconcileOptions,
+} from '../orchestrator/reconcile.js';
 import { readFileSync } from 'node:fs';
 import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
@@ -165,6 +169,16 @@ export function buildCli(): Argv {
                 '`cli-attestation generate-nonce`) and embedded in each reviewer prompt ' +
                 'BEFORE spawning them. Passed through verbatim to every `emit-leaf --nonce` ' +
                 'call so harnessTranscriptHash can find it in the reviewer transcripts.',
+            })
+            .option('reviewers', {
+              type: 'string',
+              describe:
+                'AISDLC-617: comma-separated reviewer set override, e.g. ' +
+                '"correctness-reviewer,security-reviewer" for the opt-in ' +
+                'reviewerSet: code-test-merged flag. Defaults to the three-reviewer ' +
+                'set (code-reviewer,test-reviewer,security-reviewer) — this flag does ' +
+                'NOT change that default; the caller (slash command body) resolves ' +
+                'the flag and passes the set explicitly.',
             }),
         async (argv) => {
           const opts: RunReconcileOptions = {
@@ -182,6 +196,10 @@ export function buildCli(): Argv {
           if (argv['reviewer-model']) opts.reviewerModel = argv['reviewer-model'] as string;
           if (argv['harness']) opts.harness = argv['harness'] as string;
           if (argv['reviewer-nonce']) opts.reviewerNonce = argv['reviewer-nonce'] as string;
+          if (argv['reviewers']) {
+            const parsed = parseReviewersArg(argv['reviewers'] as string);
+            if (parsed) opts.reviewers = parsed;
+          }
           if (argv['reviewer-agent-ids']) {
             opts.reviewerAgentIds = parseJsonOption(
               argv['reviewer-agent-ids'],
@@ -222,7 +240,14 @@ export function buildCli(): Argv {
             .option('reviewer', {
               type: 'string',
               demandOption: true,
-              choices: ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const,
+              // AISDLC-617 — 'correctness-reviewer' is the opt-in merged
+              // code+test reviewer (reviewerSet: code-test-merged).
+              choices: [
+                'code-reviewer',
+                'test-reviewer',
+                'security-reviewer',
+                'correctness-reviewer',
+              ] as const,
             })
             .option('files', {
               type: 'string',

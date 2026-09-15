@@ -47,8 +47,16 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-/** Reviewer role recorded in a ledger entry. */
-export type ReviewLedgerRole = 'code' | 'test' | 'security';
+/**
+ * Reviewer role recorded in a ledger entry.
+ *
+ * AISDLC-617 — `'correctness'` is the opt-in merged code+test reviewer role
+ * (`correctness-reviewer` agent, `reviewerSet: code-test-merged`). It is
+ * additive: existing `'code'` / `'test'` / `'security'` records are
+ * unaffected, and ledger consumers that only know about the original three
+ * roles simply never see `'correctness'` records unless the flag is enabled.
+ */
+export type ReviewLedgerRole = 'code' | 'test' | 'security' | 'correctness';
 
 /** Severity of an individual finding. */
 export type ReviewLedgerSeverity = 'critical' | 'major' | 'minor' | 'suggestion';
@@ -106,6 +114,8 @@ export function normalizeReviewerRole(reviewerName: string): ReviewLedgerRole | 
   if (n.startsWith('code-reviewer') || n === 'code') return 'code';
   if (n.startsWith('test-reviewer') || n === 'test' || n === 'testing') return 'test';
   if (n.startsWith('security-reviewer') || n === 'security' || n === 'critic') return 'security';
+  // AISDLC-617 — opt-in merged code+test reviewer.
+  if (n.startsWith('correctness-reviewer') || n === 'correctness') return 'correctness';
   return null;
 }
 

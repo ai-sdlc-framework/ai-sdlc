@@ -28,8 +28,10 @@ import {
   defaultHomeDir,
   encodeWorktreePathForClaudeTmp,
   extractPrNumberFromUrl,
+  parseReviewersArg,
   readVerdictJson,
   RECONCILE_REVIEWERS,
+  RECONCILE_REVIEWERS_MERGED,
   runReconcile,
   safeExistsFile,
   salvageReviewerTranscript,
@@ -113,6 +115,50 @@ function setupReviewerArtifacts(worktreePath: string, taskIdLower: string): void
 }
 
 describe('reconcile — pure helpers', () => {
+  // AISDLC-617 round-2 review — direct unit test for the `--reviewers`
+  // comma-split arg parsing (extracted from `cli/index.ts` into this pure
+  // helper for testability).
+  describe('parseReviewersArg', () => {
+    it('splits a comma-separated list into a ReviewerName[]', () => {
+      expect(parseReviewersArg('correctness-reviewer,security-reviewer')).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('splits the default three-reviewer list', () => {
+      expect(parseReviewersArg('code-reviewer,test-reviewer,security-reviewer')).toEqual([
+        'code-reviewer',
+        'test-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('trims whitespace around each entry', () => {
+      expect(parseReviewersArg(' correctness-reviewer , security-reviewer ')).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('drops empty entries from trailing/double commas', () => {
+      expect(parseReviewersArg('correctness-reviewer,,security-reviewer,')).toEqual([
+        'correctness-reviewer',
+        'security-reviewer',
+      ]);
+    });
+
+    it('returns undefined for an empty or whitespace-only string', () => {
+      expect(parseReviewersArg('')).toBeUndefined();
+      expect(parseReviewersArg('   ')).toBeUndefined();
+      expect(parseReviewersArg(',,,')).toBeUndefined();
+    });
+
+    it('parses a single-reviewer string', () => {
+      expect(parseReviewersArg('security-reviewer')).toEqual(['security-reviewer']);
+    });
+  });
+
   describe('extractPrNumberFromUrl', () => {
     it('returns the PR number from a github.com URL', () => {
       expect(extractPrNumberFromUrl('https://github.com/org/repo/pull/4321')).toBe('4321');
@@ -352,6 +398,55 @@ describe('runReconcile — orchestration', () => {
       (c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'merge',
     );
     expect(mergeCall?.args).toEqual(expect.arrayContaining(['--auto', '--squash', '4321']));
+  });
+
+  // AISDLC-617 — reconcile's per-reviewer loop must honor an explicit
+  // `reviewers` override (the opt-in merged 2-reviewer set) rather than
+  // hardcoding RECONCILE_REVIEWERS (3).
+  it('reconciles exactly 2 reviewers when reviewers: RECONCILE_REVIEWERS_MERGED is passed', () => {
+    // Overwrite the artifact fixtures for the merged set (correctness + security)
+    // instead of the default three.
+    rmSync(path.join(worktreePath, '.ai-sdlc', 'transcripts', taskIdLower), {
+      recursive: true,
+      force: true,
+    });
+    rmSync(path.join(worktreePath, '.ai-sdlc', 'verdicts'), { recursive: true, force: true });
+    const transcriptsDir = path.join(worktreePath, '.ai-sdlc', 'transcripts', taskIdLower);
+    const verdictsDir = path.join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(transcriptsDir, { recursive: true });
+    mkdirSync(verdictsDir, { recursive: true });
+    for (const r of RECONCILE_REVIEWERS_MERGED) {
+      writeFileSync(path.join(transcriptsDir, `${r}.jsonl`), `{"reviewer":"${r}"}\n`, 'utf8');
+      writeFileSync(
+        path.join(verdictsDir, `${r}-${taskIdLower}.json`),
+        JSON.stringify({ approved: true, findings: { critical: 0, major: 0 } }),
+        'utf8',
+      );
+    }
+    writeFileSync(
+      path.join(verdictsDir, `${taskIdLower}.json`),
+      JSON.stringify({ verdicts: [], approved: true }),
+      'utf8',
+    );
+
+    writeDevVerdict(boardDir);
+    const { spawn } = makeSpawnRecorder();
+    const result = runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      spawn,
+      reviewers: RECONCILE_REVIEWERS_MERGED,
+    });
+    expect(result.outcome).toBe('success');
+    const stepNames = result.steps.map((s) => s.name);
+    expect(stepNames).toContain('emit-leaf:correctness-reviewer');
+    expect(stepNames).toContain('emit-leaf:security-reviewer');
+    expect(stepNames).not.toContain('emit-leaf:code-reviewer');
+    expect(stepNames).not.toContain('emit-leaf:test-reviewer');
+    // Exactly 2 emit-leaf steps, not 3 — the reviewer count is not hardcoded.
+    expect(stepNames.filter((n) => n.startsWith('emit-leaf:'))).toHaveLength(2);
   });
 
   // AISDLC-606 — reconcile's fetch+rebase must honor spec.branching.targetBranch

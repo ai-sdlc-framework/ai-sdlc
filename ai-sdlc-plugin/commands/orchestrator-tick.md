@@ -435,6 +435,39 @@ VERDICTS_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" collect-verdicts --boa
 echo "[orchestrator-tick] done/+failed/ verdicts: $VERDICTS_JSON"
 ```
 
+**AISDLC-617 — resolve the reviewer set once per tick.** Default is UNCHANGED
+(the three-reviewer set); the merged 2-reviewer set is opt-in only, for A/B
+testing against the AISDLC-616 findings ledger.
+
+**Trust boundary (security review fix, round 2):** read `.ai-sdlc/review-config.yaml`
+from `origin/main` via `git show`, never from a working-tree checkout —
+consistent with `/ai-sdlc execute` Step 7a-pre and `resolveReviewerSetMode()`
+in `pipeline-cli/src/steps/reviewer-set.ts`. `$WORK_DIR` here is the
+Conductor's parent repo (pinned to `main` by the AISDLC-358 hard guard), so
+this is defense-in-depth rather than closing an active hole in this
+particular call site — but a single resolution rule everywhere is easier to
+reason about than "trusted here, PR-controlled there."
+
+```bash
+REVIEWER_SET_MODE="${AI_SDLC_REVIEWER_SET:-}"
+if [ -z "$REVIEWER_SET_MODE" ]; then
+  BASE_REVIEW_CONFIG=$(cd "$WORK_DIR" && git show origin/main:.ai-sdlc/review-config.yaml 2>/dev/null || true)
+  if [ -n "$BASE_REVIEW_CONFIG" ]; then
+    REVIEWER_SET_MODE=$(printf '%s\n' "$BASE_REVIEW_CONFIG" | grep -E '^\s*reviewerSet:' \
+      | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
+  fi
+fi
+if [ "$REVIEWER_SET_MODE" != "code-test-merged" ]; then
+  REVIEWER_SET_MODE="three"
+fi
+if [ "$REVIEWER_SET_MODE" = "code-test-merged" ]; then
+  REVIEWER_LIST="correctness-reviewer security-reviewer"
+else
+  REVIEWER_LIST="code-reviewer test-reviewer security-reviewer"
+fi
+echo "[orchestrator-tick] reviewerSet mode = $REVIEWER_SET_MODE → [$REVIEWER_LIST] (AISDLC-617)"
+```
+
 The `--include-failed` flag is required so failed-side verdicts surface in
 `$VERDICTS_JSON`. Without it the CLI's `includeFailed` default is `false`
 (see `pipeline-cli/src/cli/dispatch.ts`), and Step 4's `outcome ∈ {failed,
@@ -466,7 +499,10 @@ For each verdict in the array with `outcome === 'success'`:
    # 2. The cache is bound to the dev HEAD SHA (iter-2 CRITICAL #1 trust
    #    anchor). Resolve it once.
    DEV_HEAD_SHA=$(git rev-parse HEAD)
-   for REVIEWER in code-reviewer test-reviewer security-reviewer; do
+   # AISDLC-617: iterate the resolved $REVIEWER_LIST (3 by default, 2 —
+   # correctness-reviewer + security-reviewer — when reviewerSet:
+   # code-test-merged is active), not a hardcoded triple.
+   for REVIEWER in $REVIEWER_LIST; do
      CHECK_JSON=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reviewer-cache check "<task-id>" \
        --reviewer "$REVIEWER" \
        --files "$FILES_JSON" \
@@ -532,20 +568,31 @@ For each verdict in the array with `outcome === 'success'`:
        security-reviewer)
          echo "security-reviewer"
          ;;
+       correctness-reviewer)
+         # AISDLC-617 — opt-in merged code+test reviewer. No codex variant.
+         echo "correctness-reviewer"
+         ;;
        *)
          echo "$role"
          ;;
      esac
    }
-   CODE_AGENT=$(_resolve_reviewer_agent code-reviewer)
-   TEST_AGENT=$(_resolve_reviewer_agent test-reviewer)
-   SEC_AGENT=$(_resolve_reviewer_agent security-reviewer)
+   # AISDLC-617: resolve an agent name for every role in $REVIEWER_LIST
+   # (3 by default, 2 when reviewerSet=code-test-merged) rather than three
+   # fixed variables — the fan-out below iterates $RESOLVED_AGENTS.
+   RESOLVED_AGENTS=""
+   for ROLE in $REVIEWER_LIST; do
+     RESOLVED_AGENTS="$RESOLVED_AGENTS $(_resolve_reviewer_agent "$ROLE")"
+   done
+   RESOLVED_AGENTS=$(echo "$RESOLVED_AGENTS" | xargs)
    ```
 
-   Roles:
-   - `$CODE_AGENT` (default: `code-reviewer-codex`) — reviews the diff
-   - `$TEST_AGENT` (default: `test-reviewer-codex`) — focuses on test coverage + ACs
-   - `$SEC_AGENT` (always: `security-reviewer`) — security audit
+   Roles (default three-reviewer set; exactly two — correctness + security —
+   when `reviewerSet: code-test-merged` is active, AISDLC-617):
+   - `code-reviewer` (default resolved agent: `code-reviewer-codex`) — reviews the diff
+   - `test-reviewer` (default resolved agent: `test-reviewer-codex`) — focuses on test coverage + ACs
+   - `security-reviewer` (always: `security-reviewer`) — security audit
+   - `correctness-reviewer` (opt-in, merged code+test remit; always claude-native, no codex variant)
 
    Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
    Foreground `Agent` calls are well-suited regardless of duration.
@@ -579,7 +626,7 @@ For each verdict in the array with `outcome === 'success'`:
    iteration's cache probe finds anything:
 
    ```bash
-   for REVIEWER in code-reviewer test-reviewer security-reviewer; do
+   for REVIEWER in $REVIEWER_LIST; do
      # Extract approved from the reviewer's verdict file.
      APPROVED=$(node -e "
        const r=require('<worktree>/.ai-sdlc/verdicts/${REVIEWER}-<task-id-lower>.json');
@@ -612,14 +659,25 @@ For each verdict in the array with `outcome === 'success'`:
    # tool returns an agentId per call; capture them into a JSON map.
    # AISDLC-483: use resolved agent names in the ID map so reconcile can
    # find transcripts under the correct agent name (e.g. code-reviewer-codex).
-   AGENT_IDS_JSON="{\"${CODE_AGENT}\":\"<id>\",\"${TEST_AGENT}\":\"<id>\",\"${SEC_AGENT}\":\"<id>\"}"
+   # AISDLC-617: build the map from $RESOLVED_AGENTS (2 or 3 entries) rather
+   # than three fixed variables, so the JSON map always matches $REVIEWER_LIST.
+   AGENT_IDS_JSON=$(node -e '
+     const agents = process.argv[1].trim().split(/\s+/).filter(Boolean);
+     const map = {};
+     for (const a of agents) map[a] = "<id>"; // caller replaces <id> per agent
+     process.stdout.write(JSON.stringify(map));
+   ' "$RESOLVED_AGENTS")
    # AISDLC-573: pass the SAME nonce embedded in each reviewer's prompt above
    # so reconcile's internal emit-leaf calls bind harnessTranscriptHash to
    # this pass's transcripts. Omit --reviewer-nonce entirely on an
    # all-cache-HIT pass (no reviewer ran — nothing to bind).
+   # AISDLC-617: --reviewers threads $REVIEWER_LIST through so reconcile's
+   # per-reviewer emit-leaf loop matches the resolved set (2 or 3), not a
+   # hardcoded three.
    node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" reconcile "<task-id>" \
      --reviewer-agent-ids "$AGENT_IDS_JSON" \
      --reviewer-nonce "$PR_NONCE" \
+     --reviewers "$(echo "$REVIEWER_LIST" | tr ' ' ',')" \
      | tee /tmp/reconcile-<task-id>.json
    ```
 

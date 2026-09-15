@@ -1,13 +1,21 @@
 /**
- * Step 7 — Build review prompts (3 reviewers — code, test, security).
+ * Step 7 — Build review prompts (default: 3 reviewers — code, test, security).
  *
  * Mirrors `execute-orchestrator.md` Step 7. Captures the PR diff + changed
  * file list, detects whether `codex` is installed (independence harness),
- * and produces three reviewer-specific prompt strings that can be fed to
- * three parallel `SubagentSpawner.spawn()` calls (Tier 2) or three parallel
- * Agent tool invocations (Tier 1).
+ * and produces reviewer-specific prompt strings that can be fed to parallel
+ * `SubagentSpawner.spawn()` calls (Tier 2) or parallel Agent tool
+ * invocations (Tier 1).
  *
- * The three reviewer subagents themselves run via the LLM dispatch boundary
+ * AISDLC-617 — the reviewer SET is flag-driven via
+ * `resolveReviewerSet()` (`steps/reviewer-set.ts`): the DEFAULT remains the
+ * three reviewers above; `reviewerSet: code-test-merged` (opt-in, via
+ * `AI_SDLC_REVIEWER_SET` or `.ai-sdlc/review-config.yaml`) swaps in exactly
+ * two — `correctness-reviewer` (merged code+test remit) + `security-reviewer`
+ * (unchanged, separate). Do not hardcode a reviewer count anywhere downstream
+ * of this step — always read `prompts.length`.
+ *
+ * The reviewer subagents themselves run via the LLM dispatch boundary
  * (Step 7b) which is NOT part of this step.
  *
  * @module steps/07-build-review-prompts
@@ -18,6 +26,7 @@ import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
+import { resolveReviewerSet } from './reviewer-set.js';
 
 export interface BuildReviewPromptsOptions {
   taskId: string;
@@ -28,9 +37,9 @@ export interface BuildReviewPromptsOptions {
   runner?: Runner;
   /** Override the codex-availability detection (test injection). */
   codexAvailable?: boolean;
+  /** Override the resolved reviewer set (test injection / explicit caller choice). AISDLC-617. */
+  reviewers?: ReviewerType[];
 }
-
-const REVIEWERS: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
 
 export async function buildReviewPrompts(
   opts: BuildReviewPromptsOptions,
@@ -81,7 +90,9 @@ export async function buildReviewPrompts(
 
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
 
-  const prompts: ReviewPrompt[] = REVIEWERS.map((reviewer) => ({
+  const reviewers = opts.reviewers ?? resolveReviewerSet({ workDir: opts.workDir });
+
+  const prompts: ReviewPrompt[] = reviewers.map((reviewer) => ({
     reviewer,
     prompt: buildPrompt(reviewer, {
       taskId: opts.taskId,

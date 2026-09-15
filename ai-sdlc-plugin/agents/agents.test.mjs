@@ -91,6 +91,7 @@ const agentFiles = [
   'code-reviewer-codex.md',
   'test-reviewer-codex.md',
   'ci-conflict-resolver.md',
+  'correctness-reviewer.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const codexReviewerFiles = ['code-reviewer-codex.md', 'test-reviewer-codex.md'];
@@ -184,7 +185,12 @@ describe('agent definition tool restrictions', () => {
     // incident (2026-05-30). Security stays on Opus (reasoning-heavy); all
     // other cost-sensitive roles use Sonnet. Utility agents (rebase, cleanup,
     // conflict resolution) inherit from the spawning session.
-    const sonnetRoles = ['developer.md', 'code-reviewer.md', 'test-reviewer.md'];
+    const sonnetRoles = [
+      'developer.md',
+      'code-reviewer.md',
+      'test-reviewer.md',
+      'correctness-reviewer.md',
+    ];
     for (const file of sonnetRoles) {
       assert.equal(
         agents[file].model,
@@ -547,5 +553,58 @@ describe('AISDLC-308: agentic scope-creep prevention reviewer gate', () => {
       body.includes('AISDLC-308'),
       'refinement-reviewer hard rule must reference AISDLC-308',
     );
+  });
+});
+
+describe('AISDLC-617: correctness-reviewer (opt-in merged code+test reviewer)', () => {
+  it('correctness-reviewer.md exists', () => {
+    assert.ok(
+      existsSync(join(__dirname, 'correctness-reviewer.md')),
+      'correctness-reviewer.md must exist',
+    );
+  });
+
+  it('correctness-reviewer.md pins model to sonnet (not opus — security stays separate)', () => {
+    assert.equal(agents['correctness-reviewer.md'].model, 'sonnet');
+  });
+
+  it('correctness-reviewer.md has Edit in disallowedTools and AgentTool disallowed', () => {
+    assert.ok(agents['correctness-reviewer.md'].disallowedTools.includes('Edit'));
+    assert.ok(agents['correctness-reviewer.md'].disallowedTools.includes('AgentTool'));
+  });
+
+  it('correctness-reviewer.md body covers BOTH bug/logic AND test coverage/quality remits (AC-2)', () => {
+    const body = readFileSync(join(__dirname, 'correctness-reviewer.md'), 'utf-8');
+    // Part A — bug/logic remit (from code-reviewer.md)
+    assert.ok(body.includes('logic error') || body.includes('Logic error'));
+    // Part B — test coverage/quality remit (from test-reviewer.md)
+    assert.ok(body.includes('test existence') || body.toLowerCase().includes('test quality'));
+    assert.ok(body.toLowerCase().includes('coverage'));
+  });
+
+  it('correctness-reviewer.md documents the SAME verdict envelope shape as the other reviewers', () => {
+    const body = readFileSync(join(__dirname, 'correctness-reviewer.md'), 'utf-8');
+    assert.ok(body.includes('"approved"'));
+    assert.ok(body.includes('"findings"'));
+    assert.ok(body.includes('"summary"'));
+  });
+
+  it('correctness-reviewer.md instructs flagging Resolution markers as critical (AISDLC-298 parity)', () => {
+    const body = readFileSync(join(__dirname, 'correctness-reviewer.md'), 'utf-8');
+    assert.ok(body.includes('Resolution'));
+    assert.ok(body.includes('critical'));
+  });
+
+  it('correctness-reviewer.md instructs scope-creep detection (AISDLC-308 parity)', () => {
+    const body = readFileSync(join(__dirname, 'correctness-reviewer.md'), 'utf-8');
+    assert.ok(body.includes('scope-creep'));
+    assert.ok(body.includes('backlog/tasks'));
+  });
+
+  it('correctness-reviewer.md documents it is opt-in and gated on the AISDLC-616 ledger', () => {
+    const body = readFileSync(join(__dirname, 'correctness-reviewer.md'), 'utf-8');
+    assert.ok(body.includes('AISDLC-617'));
+    assert.ok(body.includes('AISDLC-616'));
+    assert.ok(body.toLowerCase().includes('opt-in'));
   });
 });

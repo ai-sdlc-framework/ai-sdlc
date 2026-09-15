@@ -837,6 +837,30 @@ git diff --name-only origin/main...HEAD > "/tmp/pr-files-${TASK_ID}.txt"
 cd -
 ```
 
+### Step 7a-pre — Resolve the reviewer set (AISDLC-617)
+
+Before classifying, resolve which reviewer SET this run uses. **Default is unchanged** — the classic three-reviewer set (code-reviewer, test-reviewer, security-reviewer) — unless the operator explicitly opts into the merged 2-reviewer set for A/B testing against the AISDLC-616 findings ledger.
+
+**Trust boundary (security review fix, round 2):** `.ai-sdlc/review-config.yaml` is read from **`origin/main` via `git show`**, never from `$WORKTREE_PATH`'s own working-tree checkout. Reading the PR's own worktree copy would let an untrusted PR author commit `reviewerSet: code-test-merged` in their OWN branch to opt their own diff into the shallower single-pass review — a self-selection hole. Resolving from `origin/main` means changing review depth requires a merged, already-reviewed change to main first. This mirrors `resolveReviewerSetMode()` in `pipeline-cli/src/steps/reviewer-set.ts` — same precedence, same fail-safe-to-`three` semantics.
+
+```bash
+REVIEWER_SET_MODE="${AI_SDLC_REVIEWER_SET:-}"
+if [ -z "$REVIEWER_SET_MODE" ]; then
+  # AISDLC-617 round 2: read from origin/main, NOT $WORKTREE_PATH's working
+  # tree. `git show` failing (file absent on origin/main, ref unreachable,
+  # etc.) is the expected/safe path and must fall through to the default.
+  BASE_REVIEW_CONFIG=$(cd "$WORKTREE_PATH" && git show origin/main:.ai-sdlc/review-config.yaml 2>/dev/null || true)
+  if [ -n "$BASE_REVIEW_CONFIG" ]; then
+    REVIEWER_SET_MODE=$(printf '%s\n' "$BASE_REVIEW_CONFIG" | grep -E '^\s*reviewerSet:' \
+      | head -1 | sed -E 's/^[^:]*:\s*//' | tr -d '"'"'"' \r')
+  fi
+fi
+if [ "$REVIEWER_SET_MODE" != "code-test-merged" ]; then
+  REVIEWER_SET_MODE="three"
+fi
+echo "[ai-sdlc-progress] Step 7a-pre: reviewerSet mode = $REVIEWER_SET_MODE (AISDLC-617; default 'three' — opt in via AI_SDLC_REVIEWER_SET=code-test-merged, or a MERGED .ai-sdlc/review-config.yaml on origin/main — the PR's own worktree copy is never trusted)"
+```
+
 ### Step 7a — Classify the PR (AISDLC-141)
 
 Pre-AISDLC-141 every push fan-outs to all 3 reviewers (testing/critic/security) regardless of PR contents. Now we run the deterministic classifier (RFC-0010 §12) first and only spawn the subset it returns. The classifier is **fail-open**: if the binary is missing, the input is unreadable, or confidence is below 0.7 it returns ALL_REVIEWERS so we never silently skip a review we should have done.
@@ -874,6 +898,28 @@ The classifier reviewer names map to the reviewer subagents like this (the agent
 | `testing`       | `test-reviewer`      |
 | `critic`        | `code-reviewer`      |
 | `security`      | `security-reviewer`  |
+
+### Step 7a-post — Collapse selection for the merged reviewer set (AISDLC-617)
+
+When `$REVIEWER_SET_MODE` (resolved in Step 7a-pre) is `code-test-merged`, collapse the classifier's `testing`/`critic` names into a single `correctness` entry — the classifier itself still only knows about the three original names, so this is a post-processing step, not a classifier rewrite.
+
+```bash
+if [ "$REVIEWER_SET_MODE" = "code-test-merged" ]; then
+  HAS_CORRECTNESS=false
+  HAS_SECURITY=false
+  for name in $SELECTED; do
+    case "$name" in
+      testing|critic) HAS_CORRECTNESS=true ;;
+      security) HAS_SECURITY=true ;;
+    esac
+  done
+  MERGED_SELECTED=""
+  [ "$HAS_CORRECTNESS" = "true" ] && MERGED_SELECTED="correctness"
+  [ "$HAS_SECURITY" = "true" ] && MERGED_SELECTED="$(echo "$MERGED_SELECTED security" | xargs)"
+  SELECTED="$MERGED_SELECTED"
+  echo "[ai-sdlc-progress] Step 7a-post: reviewerSet=code-test-merged — collapsed classifier selection to: [$SELECTED]"
+fi
+```
 
 ### Step 7a-bis — Incremental review gate (AISDLC-142)
 
@@ -1041,6 +1087,11 @@ _resolve_reviewer_agent() {
       # Always claude-native — Codex does not handle security review reliably.
       echo "security-reviewer"
       ;;
+    correctness)
+      # AISDLC-617 — opt-in merged code+test reviewer. No codex variant;
+      # always the claude-native correctness-reviewer agent.
+      echo "correctness-reviewer"
+      ;;
     *)
       # Unknown classifier name — pass through unchanged.
       echo "$classifier_name"
@@ -1205,6 +1256,13 @@ for REVIEWER_NAME in $SELECTED; do
     security)
       REVIEWER_HARNESS="claude-code"
       ;;
+    correctness)
+      # AISDLC-617 — always claude-native (no codex variant for the merged reviewer).
+      REVIEWER_HARNESS="claude-code"
+      ;;
+    correctness-reviewer)
+      REVIEWER_HARNESS="claude-code"
+      ;;
     code-reviewer-codex|test-reviewer-codex)
       # Explicit codex-variant names (e.g. when REVIEWER_NAME itself is already
       # resolved to a codex agent). AGENT_NAME was already set above.
@@ -1288,12 +1346,12 @@ check_cancel_signal "$TASK_ID_LOWER" 2>/dev/null || true
 
 ## Step 8 — Aggregate verdicts
 
-Combine the three verdicts:
+Combine the verdicts from every reviewer that actually ran (3 by default; exactly 2 — correctness + security — when `reviewerSet: code-test-merged` is active, AISDLC-617). Aggregation never hardcodes a reviewer count — it counts findings and requires every PARTICIPATING reviewer's approval, whatever the size of `$SELECTED`:
 
 - Count findings by severity across all reviewers (`critical`, `major`, `minor`, `suggestion`).
 - If `HARNESS_NOTE` is non-empty, prepend it to the aggregated summary so the operator sees the independence warning every time it applies.
 - Compute the gate decision:
-  - **APPROVED**: all three reviewers approved AND no `critical`/`major` findings → proceed to Step 10. (The incremental-review marker upsert that USED to live here as Step 8.5 has moved to Step 11c — it now runs AFTER the draft PR is created, since AISDLC-218 made the PR open in Step 11b instead of by the developer subagent.)
+  - **APPROVED**: every reviewer that ran approved AND no `critical`/`major` findings → proceed to Step 10. (The incremental-review marker upsert that USED to live here as Step 8.5 has moved to Step 11c — it now runs AFTER the draft PR is created, since AISDLC-218 made the PR open in Step 11b instead of by the developer subagent.)
   - **CHANGES REQUESTED**: any `critical` or `major` findings → enter the iteration loop (Step 9). Do NOT update the marker on this branch — the marker only ever binds to APPROVED states.
 
 Print the aggregation summary to the user before proceeding.
@@ -1398,11 +1456,13 @@ else
       update_session_state "$TASK_ID_LOWER" "10-signing" 2>/dev/null || true
       # Fall through to Step 10 unchanged
     else
-      echo "[ai-sdlc-progress] Step 10.5: rebased; contentHash changed ($PRE_HASH → $POST_HASH); re-spawning 3 reviewers (1 round)"
-      # Re-spawn the three reviewers in parallel, single round only. Build a
-      # fresh review context from the post-rebase diff. Re-use Step 7's prompt
-      # template but include a "## Post-rebase context" preamble noting that
-      # main moved during review and the diff now reflects the rebased state.
+      echo "[ai-sdlc-progress] Step 10.5: rebased; contentHash changed ($PRE_HASH → $POST_HASH); re-spawning [$SELECTED] reviewers (1 round)"
+      # Re-spawn the SAME $SELECTED reviewer set from Step 7 (3 by default, 2
+      # when reviewerSet=code-test-merged — AISDLC-617) in parallel, single
+      # round only. Build a fresh review context from the post-rebase diff.
+      # Re-use Step 7's prompt template but include a "## Post-rebase context"
+      # preamble noting that main moved during review and the diff now
+      # reflects the rebased state.
       cd "$WORKTREE_PATH"
       git diff origin/main...HEAD > "/tmp/pr-diff-${TASK_ID}.txt"
       git diff --name-only origin/main...HEAD > "/tmp/pr-files-${TASK_ID}.txt"
@@ -1416,15 +1476,15 @@ else
       PR_NONCE=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" generate-nonce --head-sha "$HEAD_SHA_FOR_NONCE")
       PR_NONCE_MARKER=$(node "$PIPELINE_CLI_BIN/cli-attestation.mjs" nonce-marker --nonce "$PR_NONCE")
 
-      # Spawn 3 reviewers in parallel (single message, three Agent tool calls)
-      # exactly as Step 7 did — code-reviewer, test-reviewer, security-reviewer.
-      # Each prompt MUST include $PR_NONCE_MARKER verbatim (AISDLC-573), same
-      # as Step 7b, so the re-review's emit-leaf call (also re-run with
-      # --nonce "$PR_NONCE") can bind harnessTranscriptHash to this round's
-      # transcripts.
-      # If all three approve: proceed to Step 10. If any request changes: this
-      # round counts toward Step 9's iteration cap (max 2 dev iterations total).
-      # If the cap is already at 2, ship as `[needs-human-attention]` per Step 9.
+      # Spawn the reviewers in $SELECTED in parallel (single message, N Agent
+      # tool calls) exactly as Step 7 did. Each prompt MUST include
+      # $PR_NONCE_MARKER verbatim (AISDLC-573), same as Step 7b, so the
+      # re-review's emit-leaf call (also re-run with --nonce "$PR_NONCE") can
+      # bind harnessTranscriptHash to this round's transcripts.
+      # If every spawned reviewer approves: proceed to Step 10. If any request
+      # changes: this round counts toward Step 9's iteration cap (max 2 dev
+      # iterations total). If the cap is already at 2, ship as
+      # `[needs-human-attention]` per Step 9.
     fi
   fi
 fi

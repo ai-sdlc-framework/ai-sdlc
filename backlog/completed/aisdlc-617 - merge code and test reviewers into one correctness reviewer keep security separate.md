@@ -1,7 +1,7 @@
 ---
 id: AISDLC-617
 title: Merge code + test reviewers into one correctness reviewer; keep security separate (3→2)
-status: To Do
+status: Done
 priority: medium
 labels:
   - reviewers
@@ -60,19 +60,19 @@ reviewers did?). Ship behind a config flag so it can be A/B'd, not hard-swapped.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: With `reviewerSet=code-test-merged`, a code PR runs exactly two
+- [x] AC-1: With `reviewerSet=code-test-merged`, a code PR runs exactly two
       reviewers (combined correctness + security); with the default it still runs
       three. Both produce valid aggregated verdicts + attestation leaves.
-- [ ] AC-2: The combined reviewer's prompt covers both bug/logic AND test
+- [x] AC-2: The combined reviewer's prompt covers both bug/logic AND test
       coverage/quality; a fixture PR with a test-coverage gap AND a logic bug has
       both surfaced by the single combined reviewer.
-- [ ] AC-3: Security reviewer path is byte-for-byte unchanged (still separate,
+- [x] AC-3: Security reviewer path is byte-for-byte unchanged (still separate,
       still Opus).
-- [ ] AC-4: Default reviewerSet is unchanged (three) — this task adds the option,
+- [x] AC-4: Default reviewerSet is unchanged (three) — this task adds the option,
       it does not flip the default.
-- [ ] AC-5: Aggregation + leaf-emit handle a 2-reviewer set (no hardcoded count);
+- [x] AC-5: Aggregation + leaf-emit handle a 2-reviewer set (no hardcoded count);
       hermetic tests for both sets.
-- [ ] AC-6: `pnpm build && test && lint` clean; docs note the ledger-gated
+- [x] AC-6: `pnpm build && test && lint` clean; docs note the ledger-gated
       default-change plan.
 
 ## References
@@ -81,3 +81,21 @@ Operator reviewer-cost investigation (2026-09-14). Depends on **AISDLC-616**
 (findings ledger) for validation before any default change. Per-role model split
 PR #327. Reviewer fan-out lives in `/ai-sdlc execute` + orchestrator-tick skill
 bodies; aggregation in `pipeline_step_8_aggregate_verdicts`.
+
+## Final Summary
+
+Shipped the opt-in merged reviewer set behind `AI_SDLC_REVIEWER_SET=code-test-merged`
+/ `.ai-sdlc/review-config.yaml`'s `reviewerSet: code-test-merged`, default UNCHANGED
+(`three`). New `correctness-reviewer` agent merges code+test remits, same JSON
+verdict envelope. `pipeline-cli/src/steps/reviewer-set.ts` resolves the flag;
+`07-build-review-prompts.ts`, `reconcile.ts` (`RunReconcileOptions.reviewers`),
+`reviews-ledger.ts` (`correctness` role), `reviews-analysis.ts`, and the CLI
+(`cli-attestation emit-leaf`, `cli-orchestrator reconcile --reviewers`,
+`reviewer-cache`) all accept the 2-reviewer set with no hardcoded count.
+`/ai-sdlc execute` (Steps 7a-pre/7a-post/7b/7c/8/10.5) and `/ai-sdlc
+orchestrator-tick` (Step 3) are flag-driven. Docs at
+`docs/operations/reviewer-set-flag.md` explain the rationale and the
+AISDLC-616-ledger-gated default-change plan. Hermetic tests added for the
+resolver, the 2-reviewer prompt build, the reconcile reviewer-count override,
+and the merged agent's dual-remit prompt content (bugs/logic AND test
+coverage in the same file).

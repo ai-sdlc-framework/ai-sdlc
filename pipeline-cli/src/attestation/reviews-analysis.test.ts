@@ -220,3 +220,39 @@ describe('analyzeReviewLedger — a role that never participates gets zeroed sta
     expect(Number.isNaN(security.blockRate)).toBe(false);
   });
 });
+
+// AISDLC-617 — a review cycle run under reviewerSet: code-test-merged
+// (correctness + security, no separate code/test records) must NOT be
+// silently dropped from the analysis.
+describe('analyzeReviewLedger — AISDLC-617 code-test-merged cycles are counted, not dropped', () => {
+  it('counts a correctness+security cycle in totalCycles and in the correctness role row', () => {
+    const records: ReviewLedgerRecord[] = [
+      rec({
+        commitSha: 'e'.repeat(40),
+        role: 'correctness',
+        verdict: 'rejected',
+        findings: [{ severity: 'major', summary: 'bug', title: 'bug' }],
+      }),
+      rec({ commitSha: 'e'.repeat(40), role: 'security', verdict: 'approved' }),
+    ];
+    const result = analyzeReviewLedger(records);
+    expect(result.totalCycles).toBe(1);
+    const correctness = result.perRole.find((r) => r.role === 'correctness')!;
+    expect(correctness).toBeDefined();
+    expect(correctness.participatedCycles).toBe(1);
+    expect(correctness.blockedCycles).toBe(1);
+    expect(correctness.blockRate).toBe(1);
+    // No other role blocked in this cycle → correctness is the sole blocker.
+    expect(correctness.soleBlockerCycles).toBe(1);
+  });
+
+  it('formatReviewAnalysis renders the correctness role row without throwing', () => {
+    const records: ReviewLedgerRecord[] = [
+      rec({ commitSha: 'f'.repeat(40), role: 'correctness', verdict: 'approved' }),
+      rec({ commitSha: 'f'.repeat(40), role: 'security', verdict: 'approved' }),
+    ];
+    const result = analyzeReviewLedger(records);
+    const text = formatReviewAnalysis(result);
+    expect(text).toContain('correctness');
+  });
+});

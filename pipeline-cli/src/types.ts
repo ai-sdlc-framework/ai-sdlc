@@ -372,7 +372,14 @@ export interface ParseDeveloperReturnResult {
 
 // ── Step 7 — Build review prompts ────────────────────────────────────
 
-export type ReviewerType = 'code-reviewer' | 'test-reviewer' | 'security-reviewer';
+// AISDLC-617 — 'correctness-reviewer' is the opt-in merged code+test
+// reviewer (reviewerSet: code-test-merged). Default reviewer set is
+// unchanged (three: code-reviewer, test-reviewer, security-reviewer).
+export type ReviewerType =
+  | 'code-reviewer'
+  | 'test-reviewer'
+  | 'security-reviewer'
+  | 'correctness-reviewer';
 
 export interface ReviewPrompt {
   reviewer: ReviewerType;
@@ -583,7 +590,9 @@ export type SubagentType =
   | 'code-reviewer'
   | 'test-reviewer'
   | 'security-reviewer'
-  | 'refinement-reviewer';
+  | 'refinement-reviewer'
+  // AISDLC-617 — opt-in merged code+test reviewer (reviewerSet: code-test-merged).
+  | 'correctness-reviewer';
 
 export interface SpawnOpts {
   type: SubagentType;
