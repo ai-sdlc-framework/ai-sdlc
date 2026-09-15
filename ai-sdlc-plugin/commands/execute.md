@@ -1253,6 +1253,13 @@ for REVIEWER_NAME in $SELECTED; do
   # back to the most-recently-modified session directory under the resolved
   # project slug, the same disclosed-race heuristic AISDLC-216 already uses
   # for `.active-task` sentinel resolution.
+  # AISDLC-616: --iteration records which review pass this is on the
+  # append-only reviews ledger (.ai-sdlc/reviews/<task-id>.jsonl) — the
+  # first pass is 1, and each Step 9 re-review loop iteration increments
+  # $iteration_count before re-invoking this block. Defaults to 1 when
+  # $iteration_count is unset (first pass, before Step 9 ever runs).
+  # --pr-number is omitted here (the PR does not exist yet at Step 7c) —
+  # the ledger record's prNumber stays null for pre-PR review passes.
   node "$PIPELINE_CLI_BIN/cli-attestation.mjs" emit-leaf \
     --repo-root "$WORKTREE_PATH" \
     --task-id "$TASK_ID" \
@@ -1263,6 +1270,7 @@ for REVIEWER_NAME in $SELECTED; do
     --harness "$REVIEWER_HARNESS" \
     --model "$EMIT_MODEL" \
     --nonce "$PR_NONCE" \
+    --iteration "${iteration_count:-1}" \
     || echo "[ai-sdlc-progress] Step 7c: emit-leaf for ${AGENT_NAME} exited non-zero — non-fatal here, but the v6-default sign step will block (use AI_SDLC_V5_LEGACY=1 to fall back to v5)"
 done
 
@@ -1275,6 +1283,8 @@ check_cancel_signal "$TASK_ID_LOWER" 2>/dev/null || true
 > **Concurrency note (AISDLC-383.8).** Leaves are emitted sequentially (one per reviewer in the `for` loop) after all reviewer Agent calls complete. This is the safest ordering: leafIndex is determined by the number of lines in `transcript-leaves.jsonl` at emission time, and sequential writes ensure no TOCTOU race. Parallel emission (emitting all three simultaneously via background jobs) would require an advisory lock on the JSONL file — tracked as a follow-up if throughput becomes a bottleneck.
 
 > **Failure handling.** Post-AISDLC-409, v6 is the default — the v6 signer will fail if leaves are missing, so an `emit-leaf` failure here means the subsequent sign step will block. The operator should investigate the Step 7c warning before retrying. When `AI_SDLC_V5_LEGACY=1` (or legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0`) is set, the signer falls back to v5 and a failed `emit-leaf` is logged but does not abort the pipeline.
+
+> **Reviews ledger (AISDLC-616).** Each `emit-leaf` call above ALSO appends one record to the durable, append-only reviews ledger at `$WORKTREE_PATH/.ai-sdlc/reviews/<task-id-lower>.jsonl` — committed (not gitignored, unlike `.ai-sdlc/verdicts/`), so first-pass findings survive even after a later Step-9 iteration flips the same reviewer to APPROVED. See `docs/operations/transcript-management.md#reviews-ledger--measuring-reviewer-marginal-value-aisdlc-616` for the record schema and how to run `cli-reviews analyze` over it.
 
 ## Step 8 — Aggregate verdicts
 

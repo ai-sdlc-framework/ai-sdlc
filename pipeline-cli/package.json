@@ -50,6 +50,7 @@
     "cli-dispatch": "bin/cli-dispatch.mjs",
     "cli-dispatch-supervisor": "bin/cli-dispatch-supervisor.mjs",
     "cli-attestation": "bin/cli-attestation.mjs",
+    "cli-reviews": "bin/cli-reviews.mjs",
     "cli-compliance-audit": "bin/cli-compliance-audit.mjs",
     "cli-import-spec": "bin/cli-import-spec.mjs",
     "cli-rfc": "bin/cli-rfc.mjs",

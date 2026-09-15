@@ -123,7 +123,7 @@ describe('AISDLC-610 AC-4: signer/verifier exclusion-list lockstep', () => {
     expect(ATTESTATION_PATH_EXCLUSIONS).toContain(':!backlog/completed/');
   });
 
-  it('neither list has grown beyond the five canonical entries (regression guard)', () => {
+  it('neither list has grown beyond the six canonical entries (regression guard)', () => {
     // Pins the exact canonical set so a future one-sided addition (the
     // AISDLC-421 bug class) fails loudly here rather than silently breaking
     // attestation lookups in production.
@@ -133,9 +133,15 @@ describe('AISDLC-610 AC-4: signer/verifier exclusion-list lockstep', () => {
       ':!.ai-sdlc/transcript-leaves.jsonl',
       ':!backlog/tasks/',
       ':!backlog/completed/',
+      ':!.ai-sdlc/reviews/',
     ].sort();
     expect([...PATCH_ID_EXCLUSIONS].sort()).toEqual(canonical);
     expect([...ATTESTATION_PATH_EXCLUSIONS].sort()).toEqual(canonical);
+  });
+
+  it('both lists include .ai-sdlc/reviews/ (AISDLC-616)', () => {
+    expect(PATCH_ID_EXCLUSIONS).toContain(':!.ai-sdlc/reviews/');
+    expect(ATTESTATION_PATH_EXCLUSIONS).toContain(':!.ai-sdlc/reviews/');
   });
 });
 
@@ -200,6 +206,52 @@ describe('AISDLC-610 AC-1: backlog Done-move does not shift patch-id', () => {
     expect(pid1).not.toBeNull();
     expect(pid2).not.toBeNull();
     expect(pid1).not.toBe(pid2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AISDLC-616 AC-4: appending to the reviews ledger does not shift patch-id
+// ---------------------------------------------------------------------------
+
+describe('AISDLC-616 AC-4: reviews-ledger append does not shift patch-id', () => {
+  it('appending a record to .ai-sdlc/reviews/<task>.jsonl leaves the patch-id UNCHANGED', () => {
+    sh('git checkout -b feat-616-ledger', repoDir);
+
+    writeFileSync(join(repoDir, 'src-616.ts'), 'export const v = 616;\n');
+    sh('git add src-616.ts', repoDir);
+    sh('git commit -m "feat: source change (AISDLC-616)"', repoDir);
+
+    const base = sh('git merge-base main HEAD', repoDir);
+    const headBefore = sh('git rev-parse HEAD', repoDir);
+    const pidBefore = computePatchId(base, headBefore, repoDir);
+    expect(pidBefore).not.toBeNull();
+
+    // Simulate emit-leaf's ledger append + commit (mirrors how
+    // transcript-leaves/<patch-id>.jsonl gets committed in the same pass).
+    mkdirSync(join(repoDir, '.ai-sdlc', 'reviews'), { recursive: true });
+    writeFileSync(
+      join(repoDir, '.ai-sdlc', 'reviews', 'aisdlc-616.jsonl'),
+      JSON.stringify({
+        taskId: 'AISDLC-616',
+        prNumber: null,
+        commitSha: headBefore,
+        iteration: 1,
+        role: 'code',
+        harness: 'claude-code',
+        timestamp: '2026-09-14T00:00:00.000Z',
+        verdict: 'approved',
+        findings: [],
+      }) + '\n',
+    );
+    sh('git add .ai-sdlc/reviews/aisdlc-616.jsonl', repoDir);
+    sh('git commit -m "chore: append review ledger record (AISDLC-616)"', repoDir);
+
+    const headAfter = sh('git rev-parse HEAD', repoDir);
+    const pidAfter = computePatchId(base, headAfter, repoDir);
+
+    expect(headAfter).not.toBe(headBefore);
+    expect(pidAfter).not.toBeNull();
+    expect(pidAfter).toBe(pidBefore);
   });
 });
 

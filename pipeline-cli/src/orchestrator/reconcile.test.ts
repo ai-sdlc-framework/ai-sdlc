@@ -766,6 +766,51 @@ describe('runReconcile — orchestration', () => {
     }
   });
 
+  it('AISDLC-616: threads --iteration and --pr-number (derived from devVerdict.prUrl) into every emit-leaf call', () => {
+    writeDevVerdict(boardDir); // prUrl: .../pull/4321
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      reviewIteration: 2,
+      spawn: customSpawn,
+    });
+    expect(emitCalls.length).toBe(3);
+    for (const call of emitCalls) {
+      expect(call).toEqual(expect.arrayContaining(['--iteration', '2']));
+      expect(call).toEqual(expect.arrayContaining(['--pr-number', '4321']));
+    }
+  });
+
+  it('AISDLC-616: --iteration defaults to 1 when reviewIteration is not provided', () => {
+    writeDevVerdict(boardDir);
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    runReconcile({ workDir, taskId, boardDir, worktreePath, spawn: customSpawn });
+    for (const call of emitCalls) {
+      expect(call).toEqual(expect.arrayContaining(['--iteration', '1']));
+    }
+  });
+
   it('caller-supplied transcript + verdict overrides reach the emit-leaf args', () => {
     writeDevVerdict(boardDir);
     const explicitTranscript = path.join(workDir, 'tx', 'override.jsonl');

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-616
 title: Persist first-pass reviewer findings to an append-only ledger (measure reviewer marginal value)
-status: To Do
+status: Done
 priority: high
 labels:
   - observability

@@ -45,6 +45,11 @@ import {
   type AttestationEnvelopeV6,
 } from '../attestation/sign-v6.js';
 import { resolveInstalledPluginAgentDir } from '../attestation/agent-dir-resolver.js';
+import {
+  appendReviewLedgerRecord,
+  normalizeFindings,
+  normalizeReviewerRole,
+} from '../attestation/reviews-ledger.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { determineVerdictClass } from '../attestation/verdict-class.js';
 import { loadVerifyCore } from '../attestation/verify-core-loader.js';
@@ -572,6 +577,22 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               describe:
                 'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY identifier of the ci-only signing ' +
                 'key to bind into the leaf as anchorEvidence.signerKeyId. See --anchor-run-id.',
+            })
+            .option('iteration', {
+              type: 'number',
+              default: 1,
+              describe:
+                'AISDLC-616: 1-based review-iteration number (first pass = 1). Recorded on the ' +
+                'append-only reviews ledger (.ai-sdlc/reviews/<task-id>.jsonl) alongside the ' +
+                'Merkle leaf so the marginal-value analysis can distinguish first-pass findings ' +
+                'from later-iteration re-reviews.',
+            })
+            .option('pr-number', {
+              type: 'number',
+              describe:
+                'AISDLC-616: GitHub PR number, when already known at emit-leaf time. Recorded ' +
+                'on the reviews ledger record as `prNumber` (nullable — omit when the PR has not ' +
+                'been opened yet).',
             }),
         (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -676,11 +697,18 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const transcriptContent = readFileSync(transcriptPath);
           const transcriptHash = createHash('sha256').update(transcriptContent).digest('hex');
 
-          // Parse verdict JSON.
+          // Parse verdict JSON. `findings` may be EITHER the aggregated
+          // counts-object shape historically consumed here, OR the itemized
+          // array shape reviewer subagents actually return
+          // (`ai-sdlc-plugin/agents/*-reviewer.md`) — AISDLC-616 accepts both
+          // so the reviews ledger can capture itemized findings when
+          // available, without breaking existing counts-only callers.
           let verdict: {
             approved?: boolean;
             verdictApproved?: boolean;
-            findings?: { critical?: number; major?: number; minor?: number; suggestion?: number };
+            findings?:
+              | { critical?: number; major?: number; minor?: number; suggestion?: number }
+              | Array<{ severity?: string; file?: string; line?: number; message?: string }>;
           };
           try {
             verdict = JSON.parse(readFileSync(verdictPath, 'utf8')) as typeof verdict;
@@ -695,12 +723,23 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // compatibility with the slash-command-body verdicts format which uses `approved`).
           const verdictApproved = Boolean(verdict.verdictApproved ?? verdict.approved ?? false);
 
-          const findings = {
-            critical: verdict.findings?.critical ?? 0,
-            major: verdict.findings?.major ?? 0,
-            minor: verdict.findings?.minor ?? 0,
-            suggestion: verdict.findings?.suggestion ?? 0,
-          };
+          // AISDLC-616: normalize itemized findings for the reviews ledger,
+          // then derive the legacy counts object (Merkle leaf shape) from
+          // whichever verdict shape was given.
+          const normalizedFindings = normalizeFindings(verdict.findings);
+          const findings = Array.isArray(verdict.findings)
+            ? {
+                critical: normalizedFindings.filter((f) => f.severity === 'critical').length,
+                major: normalizedFindings.filter((f) => f.severity === 'major').length,
+                minor: normalizedFindings.filter((f) => f.severity === 'minor').length,
+                suggestion: normalizedFindings.filter((f) => f.severity === 'suggestion').length,
+              }
+            : {
+                critical: verdict.findings?.critical ?? 0,
+                major: verdict.findings?.major ?? 0,
+                minor: verdict.findings?.minor ?? 0,
+                suggestion: verdict.findings?.suggestion ?? 0,
+              };
 
           // AISDLC-421: resolve patch-id (explicit flag > auto-compute from git).
           //
@@ -866,6 +905,40 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // case of a true race, the last writer wins and the index-mismatch warning
           // in loadLeavesFromFile() will surface it on the next run.
           appendLeafForPatchId(leaf, patchId, repoRoot);
+
+          // AISDLC-616: append the SAME reviewer verdict to the durable,
+          // append-only reviews ledger (.ai-sdlc/reviews/<task-id>.jsonl).
+          // This is written EVERY call — including re-review iterations —
+          // so first-pass findings survive even once a later iteration
+          // flips the same reviewer to APPROVED, unlike the gitignored,
+          // overwritten `.ai-sdlc/verdicts/*.json`. A reviewer name that
+          // doesn't map to a canonical role (`normalizeReviewerRole`
+          // returns null) is logged and skipped rather than silently
+          // mis-tagging a record with a guessed role.
+          const role = normalizeReviewerRole(reviewerName);
+          if (role) {
+            const iteration = (args['iteration'] as number | undefined) ?? 1;
+            const prNumberArg = args['pr-number'] as number | undefined;
+            appendReviewLedgerRecord(
+              {
+                taskId,
+                prNumber: prNumberArg ?? null,
+                commitSha: headSha,
+                iteration,
+                role,
+                harness,
+                timestamp: signedAt,
+                verdict: verdictApproved ? 'approved' : 'rejected',
+                findings: normalizedFindings,
+              },
+              repoRoot,
+            );
+          } else {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: reviewer '${reviewerName}' does not map to a ` +
+                `canonical reviews-ledger role (code/test/security) — skipping ledger append\n`,
+            );
+          }
 
           const filePath = leavesFilePathForPatchId(patchId, repoRoot);
           emitText(

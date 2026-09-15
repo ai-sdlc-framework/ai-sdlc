@@ -63,6 +63,14 @@ import { execFileSync, spawnSync } from 'node:child_process';
  *   MED-5). This exclusion, `PATCH_ID_EXCLUSIONS`, `ATTESTATION_PATH_EXCLUSIONS`
  *   in `pipeline-cli/attestation-core/verify-core.mjs`, and the `emit-leaf` /
  *   `sign-v6` callers MUST stay in lockstep — see `patch-id-exclusion-lockstep.test.ts`.
+ * - `.ai-sdlc/reviews/` — excluded per AISDLC-616. The append-only reviewer
+ *   findings ledger (one JSONL record per reviewer per iteration, written by
+ *   `emit-leaf`) is lifecycle-observability data, not reviewed source
+ *   content, and — like `.ai-sdlc/transcript-leaves/` above — is appended to
+ *   BEFORE `sign-v6` runs in the same pipeline pass. Without this exclusion,
+ *   appending a ledger record would shift the patch-id between `emit-leaf`
+ *   and `sign-v6`, reproducing the exact AISDLC-421/610 bug class this
+ *   module exists to prevent.
  *
  * Kept as a tuple so callers spread it into git invocations and adding
  * another exclusion is a one-element append rather than a re-architecture.
@@ -77,6 +85,7 @@ export const PATCH_ID_EXCLUSIONS = [
   ':!.ai-sdlc/transcript-leaves.jsonl',
   ':!backlog/tasks/',
   ':!backlog/completed/',
+  ':!.ai-sdlc/reviews/',
 ] as const;
 
 /**
