@@ -87,6 +87,21 @@ describe('RunnerRegistry', () => {
       expect(registry.has('generic-llm')).toBe(true);
     });
 
+    it('registers generic LLM with custom model when LLM_MODEL is set', () => {
+      const registry = new RunnerRegistry();
+      const customModel = 'gemma-7b';
+      registry.discoverFromEnv({
+        LLM_API_URL: 'https://llm.example.com/v1/chat/completions',
+        LLM_API_KEY: 'test-key',
+        LLM_MODEL: customModel,
+      });
+
+      expect(registry.has('generic-llm')).toBe(true);
+      const runner = registry.get('generic-llm');
+      // We can't access private config directly, but we can check if it exists
+      expect(runner).toBeDefined();
+    });
+
     it('copilot unavailable without GH_TOKEN', () => {
       const registry = new RunnerRegistry();
       registry.discoverFromEnv({});

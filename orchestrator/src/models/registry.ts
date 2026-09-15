@@ -98,6 +98,14 @@ export const DEFAULT_REGISTRY: readonly ModelEntry[] = [
     replacementAlias: null,
     use: 'Implementation against a large codebase context (>200K tokens)',
   },
+  {
+    alias: 'gemma',
+    modelId: 'gemma4:31b',
+    deprecatedAt: null,
+    removedAt: null,
+    replacementAlias: null,
+    use: 'General purpose high-reasoning, local execution',
+  },
 ];
 
 export class ModelRegistry {

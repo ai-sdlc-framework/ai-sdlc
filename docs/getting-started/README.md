@@ -107,6 +107,9 @@ export CURSOR_API_KEY=cur_...
 # Codex — set CODEX_API_KEY
 export CODEX_API_KEY=cdx_...
 
+# Ollama (Local) — set LLM_API_KEY to 'ollama'
+export LLM_API_KEY=ollama
+
 # Any OpenAI-compatible API — set OPENAI_API_KEY or LLM_API_KEY + LLM_API_URL
 export OPENAI_API_KEY=sk-...
 ```
