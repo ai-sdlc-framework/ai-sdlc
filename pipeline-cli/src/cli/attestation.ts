@@ -488,7 +488,8 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               demandOption: true,
               describe:
                 'Reviewer name: code-reviewer | test-reviewer | security-reviewer | ' +
-                'code-reviewer-codex | test-reviewer-codex.',
+                'code-reviewer-codex | test-reviewer-codex | correctness-reviewer ' +
+                '(AISDLC-617 opt-in merged code+test reviewer).',
             })
             .option('transcript-path', {
               type: 'string',

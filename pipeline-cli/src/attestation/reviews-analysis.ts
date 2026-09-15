@@ -82,7 +82,13 @@ export interface ReviewAnalysisResult {
   pairOverlaps: PairOverlap[];
 }
 
-const ALL_ROLES: ReviewLedgerRole[] = ['code', 'test', 'security'];
+// AISDLC-617 — 'correctness' (the opt-in merged code+test reviewer role) is
+// included so cycles run under `reviewerSet: code-test-merged` are not
+// silently dropped from the analysis. A cycle only ever has EITHER
+// {code, test} OR {correctness}, never both, so per-role stats and pair
+// overlaps degrade gracefully (0 participation) for whichever set a given
+// repo/period didn't use.
+const ALL_ROLES: ReviewLedgerRole[] = ['code', 'test', 'security', 'correctness'];
 
 function cycleKey(record: ReviewLedgerRecord): string {
   return `${record.taskId}::${record.commitSha}::${record.iteration}`;

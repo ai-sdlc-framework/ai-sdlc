@@ -165,6 +165,16 @@ export function buildCli(): Argv {
                 '`cli-attestation generate-nonce`) and embedded in each reviewer prompt ' +
                 'BEFORE spawning them. Passed through verbatim to every `emit-leaf --nonce` ' +
                 'call so harnessTranscriptHash can find it in the reviewer transcripts.',
+            })
+            .option('reviewers', {
+              type: 'string',
+              describe:
+                'AISDLC-617: comma-separated reviewer set override, e.g. ' +
+                '"correctness-reviewer,security-reviewer" for the opt-in ' +
+                'reviewerSet: code-test-merged flag. Defaults to the three-reviewer ' +
+                'set (code-reviewer,test-reviewer,security-reviewer) — this flag does ' +
+                'NOT change that default; the caller (slash command body) resolves ' +
+                'the flag and passes the set explicitly.',
             }),
         async (argv) => {
           const opts: RunReconcileOptions = {
@@ -182,6 +192,12 @@ export function buildCli(): Argv {
           if (argv['reviewer-model']) opts.reviewerModel = argv['reviewer-model'] as string;
           if (argv['harness']) opts.harness = argv['harness'] as string;
           if (argv['reviewer-nonce']) opts.reviewerNonce = argv['reviewer-nonce'] as string;
+          if (argv['reviewers']) {
+            opts.reviewers = (argv['reviewers'] as string)
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean) as RunReconcileOptions['reviewers'];
+          }
           if (argv['reviewer-agent-ids']) {
             opts.reviewerAgentIds = parseJsonOption(
               argv['reviewer-agent-ids'],
@@ -222,7 +238,14 @@ export function buildCli(): Argv {
             .option('reviewer', {
               type: 'string',
               demandOption: true,
-              choices: ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const,
+              // AISDLC-617 — 'correctness-reviewer' is the opt-in merged
+              // code+test reviewer (reviewerSet: code-test-merged).
+              choices: [
+                'code-reviewer',
+                'test-reviewer',
+                'security-reviewer',
+                'correctness-reviewer',
+              ] as const,
             })
             .option('files', {
               type: 'string',

@@ -476,9 +476,11 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     assert.match(cmdBody, /reviewers' approval reused/);
   });
 
-  it('Step 10.5: re-spawns 3 reviewers in parallel when contentHash changed', () => {
-    assert.match(cmdBody, /re-spawning 3 reviewers/);
-    assert.match(cmdBody, /Spawn 3 reviewers in parallel/i);
+  it('Step 10.5: re-spawns the selected reviewers in parallel when contentHash changed', () => {
+    // AISDLC-617: wording is flag-driven ($SELECTED, 3 by default / 2 when
+    // reviewerSet=code-test-merged) rather than a hardcoded "3 reviewers".
+    assert.match(cmdBody, /re-spawning \[\$SELECTED\] reviewers/);
+    assert.match(cmdBody, /Spawn the reviewers in \$SELECTED in parallel/i);
   });
 
   it('Step 10.5: shares Step 9 iteration cap for re-review', () => {

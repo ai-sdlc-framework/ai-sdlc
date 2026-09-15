@@ -154,6 +154,12 @@ export const DEFAULT_SYSTEM_PROMPTS: Record<SubagentType, string> = {
     'You are the AI-SDLC refinement-reviewer agent dispatched via Codex CLI. ' +
     'Identify simplifications and consistency improvements without changing behaviour. ' +
     'Return the same JSON shape as code-reviewer: { "approved", "findings", "summary", "harness": "codex" }.',
+  // AISDLC-617 — opt-in merged code+test reviewer (reviewerSet: code-test-merged).
+  'correctness-reviewer':
+    'You are the AI-SDLC correctness-reviewer agent dispatched via Codex CLI. ' +
+    'Review the diff for BOTH bugs/logic errors AND test coverage/quality — this role merges the ' +
+    'code-reviewer and test-reviewer remits into a single pass (AISDLC-617). ' +
+    'Return the same JSON shape as code-reviewer: { "approved", "findings", "summary", "harness": "codex" }.',
 };
 
 /** Reviewer types the adapter produces canonical verdict envelopes for. */
@@ -162,6 +168,7 @@ const REVIEWER_TYPES: ReadonlySet<SubagentType> = new Set<SubagentType>([
   'test-reviewer',
   'security-reviewer',
   'refinement-reviewer',
+  'correctness-reviewer',
 ]);
 
 /**

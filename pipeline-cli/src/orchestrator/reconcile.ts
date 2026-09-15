@@ -71,13 +71,30 @@ import type { DispatchVerdict } from '../dispatch/types.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { writeEvent, type WriteEventOpts } from './events.js';
 
-/** A reviewer the reconcile sub-tick emits + signs for. */
-export type ReviewerName = 'code-reviewer' | 'test-reviewer' | 'security-reviewer';
+/**
+ * A reviewer the reconcile sub-tick emits + signs for.
+ *
+ * AISDLC-617 — `'correctness-reviewer'` is the opt-in merged code+test
+ * reviewer (`reviewerSet: code-test-merged`). Default reconcile behavior
+ * (`RECONCILE_REVIEWERS`) is UNCHANGED — callers opt into the 2-reviewer
+ * set via `RunReconcileOptions.reviewers`.
+ */
+export type ReviewerName =
+  | 'code-reviewer'
+  | 'test-reviewer'
+  | 'security-reviewer'
+  | 'correctness-reviewer';
 
-/** All reviewers the reconcile flow expects, in fixed order (matches Step 3 fan-out). */
+/** Default reviewers the reconcile flow expects, in fixed order (matches Step 3 fan-out). */
 export const RECONCILE_REVIEWERS: readonly ReviewerName[] = [
   'code-reviewer',
   'test-reviewer',
+  'security-reviewer',
+] as const;
+
+/** AISDLC-617 opt-in merged reviewer set — correctness-reviewer + security-reviewer. */
+export const RECONCILE_REVIEWERS_MERGED: readonly ReviewerName[] = [
+  'correctness-reviewer',
   'security-reviewer',
 ] as const;
 
@@ -150,6 +167,16 @@ export interface RunReconcileOptions {
    * dir before emitting a leaf.
    */
   reviewerAgentIds?: Partial<Record<ReviewerName | string, string>>;
+  /**
+   * AISDLC-617 — override the reviewer set reconcile iterates over. Defaults
+   * to `RECONCILE_REVIEWERS` (the three-reviewer set). Pass
+   * `RECONCILE_REVIEWERS_MERGED` (or an explicit array containing
+   * `correctness-reviewer`) when the caller resolved
+   * `reviewerSet: code-test-merged`. Aggregation and leaf-emit have no
+   * hardcoded reviewer count — this option is the single place reconcile's
+   * per-reviewer loop reads the set from.
+   */
+  reviewers?: readonly ReviewerName[];
   /**
    * Skip the `git fetch && rebase && push` step. Useful when the caller has
    * already pushed (e.g. operator manual rerun after fixing a conflict) and
@@ -528,7 +555,9 @@ function runReconcileInner(
   // AISDLC-493 — capture reviewer fan-out start/end timestamps for verdict patching.
   const reviewerStartedAt = now().toISOString();
 
-  for (const reviewer of RECONCILE_REVIEWERS) {
+  const reviewersToReconcile = options.reviewers ?? RECONCILE_REVIEWERS;
+
+  for (const reviewer of reviewersToReconcile) {
     const transcriptPath =
       options.reviewerTranscripts?.[reviewer] ??
       path.join(worktreePath, '.ai-sdlc', 'transcripts', taskIdLower, `${reviewer}.jsonl`);

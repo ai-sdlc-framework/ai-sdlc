@@ -13,6 +13,7 @@ export * from './04-flip-status.js';
 export * from './05-build-dev-prompt.js';
 export * from './06-parse-dev-return.js';
 export * from './07-build-review-prompts.js';
+export * from './reviewer-set.js';
 export * from './08-aggregate-verdicts.js';
 export * from './09-iterate.js';
 export * from './10-finalize.js';

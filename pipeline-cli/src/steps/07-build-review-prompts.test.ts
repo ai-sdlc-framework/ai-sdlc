@@ -49,6 +49,44 @@ describe('Step 7 — buildReviewPrompts', () => {
     expect(r.diff).toContain('diff content');
   });
 
+  // AISDLC-617 — opt-in merged reviewer set: exactly 2 reviewers.
+  it('returns exactly 2 reviewer prompts (correctness + security) when reviewerSet=code-test-merged', async () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: code-test-merged\n');
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.prompts).toHaveLength(2);
+    expect(r.prompts.map((p) => p.reviewer)).toEqual(['correctness-reviewer', 'security-reviewer']);
+  });
+
+  // AISDLC-617 AC-4 — default reviewerSet is unchanged (three) even with an
+  // unrelated config file present.
+  it('still returns 3 reviewers by default when no reviewerSet flag is set', async () => {
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok(''));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.prompts).toHaveLength(3);
+  });
+
   // AISDLC-606 — diff against the resolved target branch, not a hardcoded
   // origin/main.
   it('diffs against the resolved target branch when spec.branching.targetBranch is configured', async () => {
