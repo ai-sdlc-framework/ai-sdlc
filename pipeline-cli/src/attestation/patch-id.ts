@@ -63,6 +63,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
  *   MED-5). This exclusion, `PATCH_ID_EXCLUSIONS`, `ATTESTATION_PATH_EXCLUSIONS`
  *   in `pipeline-cli/attestation-core/verify-core.mjs`, and the `emit-leaf` /
  *   `sign-v6` callers MUST stay in lockstep — see `patch-id-exclusion-lockstep.test.ts`.
+ *   AISDLC-618: `scripts/check-attestation-sign.sh` (the bash pre-push hook) is a
+ *   THIRD synchronized surface — its own `git diff-tree` idempotency check must
+ *   exclude the same pathspecs, either via `cli-attestation print-patch-id-exclusions`
+ *   (this array, surfaced as a CLI subcommand) or its hardcoded fallback array,
+ *   asserted equal to this array by `check-attestation-sign.test.mjs`.
  * - `.ai-sdlc/reviews/` — excluded per AISDLC-616. The append-only reviewer
  *   findings ledger (one JSONL record per reviewer per iteration, written by
  *   `emit-leaf`) is lifecycle-observability data, not reviewed source
