@@ -5,6 +5,19 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.2...ai-sdlc-plugin-v0.21.0) (2026-09-15)
+
+
+### Features
+
+* add opt-in merged correctness reviewer, keep security separate (AISDLC-617) ([#1069](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1069)) ([7d3522a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7d3522adb203baf0b4fff8d68d75d7b2f68470ce))
+* persist reviewer findings to an append-only ledger (AISDLC-616) ([#1066](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1066)) ([ad809b7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ad809b7042bcb3072d6960f1d341ed1fee7513e9))
+
+
+### Bug Fixes
+
+* bring check-attestation-sign.sh patch-id exclusions into lockstep (AISDLC-618) ([#1073](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1073)) ([0735fbd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0735fbd9f70e7a28554fb62bbf85f445faafdd19))
+
 ## [0.20.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.1...ai-sdlc-plugin-v0.20.2) (2026-09-14)
 
 
