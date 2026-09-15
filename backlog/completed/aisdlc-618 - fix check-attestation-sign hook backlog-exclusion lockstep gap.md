@@ -1,7 +1,7 @@
 ---
 id: AISDLC-618
 title: Fix check-attestation-sign.sh patch-id backlog-exclusion lockstep gap (breaks task-move PRs)
-status: To Do
+status: Done
 priority: high
 labels:
   - attestation
@@ -70,17 +70,36 @@ push. High priority — it removes the auto-sign guarantee for the common path.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: On a PR whose diff moves a `backlog/tasks/*.md` to
+- [x] AC-1: On a PR whose diff moves a `backlog/tasks/*.md` to
       `backlog/completed/`, the hook's computed patch-id equals the signer's, and
       the auto-sign + idempotency check succeeds without `AI_SDLC_SKIP_*`.
-- [ ] AC-2: The hook's exclusion set is either derived from the pipeline-cli
+- [x] AC-2: The hook's exclusion set is either derived from the pipeline-cli
       single source of truth OR guarded by a test asserting equality with
       `PATCH_ID_EXCLUSIONS`; a future addition to one list cannot silently skip
       the other.
-- [ ] AC-3: Hermetic test reproduces the task-move-PR case and asserts hook ==
+- [x] AC-3: Hermetic test reproduces the task-move-PR case and asserts hook ==
       signer patch-id + successful idempotent no-op on re-push.
-- [ ] AC-4: `pnpm build && test && lint` clean; the AISDLC-610 exclusion-lockstep
+- [x] AC-4: `pnpm build && test && lint` clean; the AISDLC-610 exclusion-lockstep
       story is updated to include the bash hook as a third synchronized surface.
+
+## Final Summary
+
+Added `cli-attestation print-patch-id-exclusions` (single source of truth,
+`pipeline-cli/src/cli/attestation.ts`) which prints `PATCH_ID_EXCLUSIONS`
+(`pipeline-cli/src/attestation/patch-id.ts`) one per line or as JSON.
+`scripts/check-attestation-sign.sh`'s patch-id idempotency check now resolves
+its `git diff-tree` exclusion pathspecs from that CLI subcommand when
+`pipeline-cli/bin/cli-attestation.mjs` is present, falling back to a hardcoded
+`PATCH_ID_EXCLUSIONS_FALLBACK` array (kept byte-identical to
+`PATCH_ID_EXCLUSIONS` by a new lockstep test) for fresh worktrees / hermetic
+test repos where `pipeline-cli/dist` hasn't been built yet. A new
+`AI_SDLC_PATCH_ID_EXCLUSIONS_CMD` test-override env var mirrors the existing
+`AI_SDLC_SIGN_ATTESTATION_CMD` pattern. `scripts/check-attestation-sign.test.mjs`
+gained three new describe blocks: the lockstep-array assertion, a repro of the
+exact task-move-PR diff shape (asserts hook patch-id == signer patch-id +
+idempotent no-op), and a coverage test for the override path. CLAUDE.md and
+`patch-id.ts`'s docstring now document the bash hook as a third synchronized
+surface alongside the TS signer and `verify-core.mjs`.
 
 ## References
 

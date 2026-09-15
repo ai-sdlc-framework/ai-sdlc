@@ -33,14 +33,37 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  chmodSync,
+  readFileSync,
+} from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'sign-attestation-if-consumer.sh');
+
+/**
+ * AISDLC-618: exclusion pathspecs the fake signer (below) passes to
+ * `git diff-tree`. MUST stay in lockstep with `PATCH_ID_EXCLUSIONS` in
+ * pipeline-cli/src/attestation/patch-id.ts — see the binding test at the
+ * bottom of this file.
+ */
+const FAKE_SIGNER_EXCLUSIONS = [
+  ':!.ai-sdlc/attestations/',
+  ':!.ai-sdlc/transcript-leaves/',
+  ':!.ai-sdlc/transcript-leaves.jsonl',
+  ':!backlog/tasks/',
+  ':!backlog/completed/',
+  ':!.ai-sdlc/reviews/',
+];
 
 function cleanEnv(extra = {}) {
   const env = { ...process.env, ...extra };
@@ -166,7 +189,7 @@ fi
 FAKE_MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
 FAKE_PATCH_ID=""
 if [ -n "$FAKE_MERGE_BASE" ] && [ \${#FAKE_MERGE_BASE} -eq 40 ]; then
-  FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+  FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ${FAKE_SIGNER_EXCLUSIONS.map((e) => `'${e}'`).join(' ')} 2>/dev/null || echo '')
   if [ -n "$FAKE_DIFF" ]; then
     FAKE_PATCH_ID_LINE=$(printf '%s' "$FAKE_DIFF" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     FAKE_PATCH_ID=$(printf '%s' "$FAKE_PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
@@ -640,5 +663,62 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
         rmSync(trunkRoot, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// ── AISDLC-618: exclusion lists bound to the real source of truth ───────────
+//
+// Round-3 review audit: this plugin-shipped script (and its fake-signer test
+// stub) is a further hardcoded copy of the patch-id exclusion list that the
+// AISDLC-618 round-1/round-2 fixes did not cover. Both `FAKE_SIGNER_EXCLUSIONS`
+// (this file) and the production `sign-attestation-if-consumer.sh`'s own
+// hardcoded `git diff-tree` pathspecs are bound here against the REAL
+// `PATCH_ID_EXCLUSIONS` (imported from the built pipeline-cli dist — skipped,
+// not failed, when dist isn't built yet).
+describe('AISDLC-618: sign-attestation-if-consumer exclusion lists stay in lockstep with PATCH_ID_EXCLUSIONS', () => {
+  it('FAKE_SIGNER_EXCLUSIONS and the production script hardcoded list both match the REAL PATCH_ID_EXCLUSIONS from built dist', async (t) => {
+    const distPath = join(
+      __dirname,
+      '..',
+      '..',
+      'pipeline-cli',
+      'dist',
+      'attestation',
+      'patch-id.js',
+    );
+    if (!existsSync(distPath)) {
+      t.skip(
+        `pipeline-cli/dist/attestation/patch-id.js not built — run ` +
+          `\`pnpm --filter @ai-sdlc/pipeline-cli build\` to exercise this binding test`,
+      );
+      return;
+    }
+    const { PATCH_ID_EXCLUSIONS: realExclusions } = await import(pathToFileURL(distPath).href);
+
+    assert.deepEqual(
+      FAKE_SIGNER_EXCLUSIONS,
+      realExclusions,
+      'AISDLC-618: FAKE_SIGNER_EXCLUSIONS (this test file) has drifted from the REAL ' +
+        'PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. Update this ' +
+        'constant whenever the real array changes.',
+    );
+
+    const scriptSource = readFileSync(SCRIPT, 'utf-8');
+    const match = scriptSource.match(
+      /DIFF_OUTPUT=\$\(git diff-tree --no-color -p "\$\{MERGE_BASE\}\.\.HEAD" -- ([^\n]+?) 2>\/dev\/null/,
+    );
+    assert.ok(
+      match,
+      'expected to find the DIFF_OUTPUT=$(git diff-tree ...) line in ' +
+        'sign-attestation-if-consumer.sh — if the computation was refactored, update this test too',
+    );
+    const scriptExclusions = [...match[1].matchAll(/':!([^']*)'/g)].map((m) => `:!${m[1]}`);
+    assert.deepEqual(
+      scriptExclusions,
+      realExclusions,
+      'AISDLC-618: sign-attestation-if-consumer.sh has a hardcoded exclusion list that has ' +
+        'drifted from the REAL PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. ' +
+        'Update the hardcoded list in that script whenever the real array changes.',
+    );
   });
 });

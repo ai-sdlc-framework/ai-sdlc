@@ -13,6 +13,7 @@
  *   merkle-root                   — print current Merkle root + leaf count
  *   merkle-proof <index>          — print inclusion proof for a leaf by index
  *   emit-leaf                     — append a transcript leaf for one reviewer run
+ *   print-patch-id-exclusions     — print the canonical patch-id exclusion pathspecs
  *
  * Output is plain text by default; pass `--json` for machine-readable JSON
  * on the merkle-* subcommands; transcripts list accepts `--json` for the same.
@@ -37,7 +38,7 @@ import {
   type TranscriptLeaf,
   verifyInclusion,
 } from '../attestation/merkle.js';
-import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
+import { computeMergeBase, computePatchId, PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
 import {
   formatV6Envelope,
   resolveSigningKeyPath,
@@ -304,6 +305,30 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             if (verified !== undefined) {
               emitText(`verified:   ${verified ? 'OK' : 'FAIL'}`);
             }
+          }
+        },
+      )
+      // ── print-patch-id-exclusions (AISDLC-618) ────────────────────────────────
+      .command(
+        'print-patch-id-exclusions',
+        'Print the canonical patch-id exclusion pathspecs (PATCH_ID_EXCLUSIONS from ' +
+          'attestation/patch-id.ts), one per line. AISDLC-618: single source of truth ' +
+          'consumed by scripts/check-attestation-sign.sh (the bash pre-push hook) so the ' +
+          "hook's `git diff-tree` invocation can never drift from the TypeScript signer's " +
+          'exclusion list — the failure mode that broke every task-move PR after AISDLC-610 ' +
+          'added backlog/ exclusions to the signer/verifier but not the hook. Pass --json for ' +
+          'a JSON array instead of newline-separated plain text.',
+        (y: Argv) =>
+          y.option('json', {
+            type: 'boolean',
+            default: false,
+            describe: 'Emit a JSON array instead of newline-separated plain text.',
+          }),
+        (args) => {
+          if (args['json']) {
+            emitJson([...PATCH_ID_EXCLUSIONS]);
+          } else {
+            emitText(PATCH_ID_EXCLUSIONS.join('\n'));
           }
         },
       )
@@ -1189,7 +1214,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions)',
       )
       .help()
       .alias('h', 'help')

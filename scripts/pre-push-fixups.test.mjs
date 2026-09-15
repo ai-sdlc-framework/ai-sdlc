@@ -35,11 +35,30 @@ import {
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORCHESTRATOR_SCRIPT = join(__dirname, 'pre-push-fixups.sh');
 const PROJECT_ROOT = join(__dirname, '..');
+
+/**
+ * AISDLC-618: the exclusion pathspecs the fake signer (below) passes to
+ * `git diff-tree` MUST stay in lockstep with `PATCH_ID_EXCLUSIONS` in
+ * pipeline-cli/src/attestation/patch-id.ts — this is the SAME list
+ * `scripts/check-attestation-sign.sh` (the real hook this test exercises)
+ * resolves at push time. A stale/short list here reproduces the exact bug
+ * this task fixes: the fake signer computes a DIFFERENT patch-id than the
+ * (now-fixed) real hook for a diff that includes a backlog task-move, so the
+ * hook can't find the envelope the fake signer wrote and hard-aborts.
+ */
+const PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS = [
+  ':!.ai-sdlc/attestations/',
+  ':!.ai-sdlc/transcript-leaves/',
+  ':!.ai-sdlc/transcript-leaves.jsonl',
+  ':!backlog/tasks/',
+  ':!backlog/completed/',
+  ':!.ai-sdlc/reviews/',
+];
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -166,12 +185,16 @@ done
 WT_ROOT=$(git rev-parse --show-toplevel)
 HEAD_SHA=$(git rev-parse HEAD)
 
-# AISDLC-475: compute patch-id using the same exclusion list as the hook so
-# the signer writes to the patch-id-addressed filename that the hook checks.
+# AISDLC-475 / AISDLC-618: compute patch-id using the same exclusion list as
+# the hook (PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts)
+# so the signer writes to the patch-id-addressed filename the hook checks.
+# The exclusion pathspecs are DERIVED from PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS
+# (not a hand-typed literal here) — see the binding test at the bottom of this
+# file that pins that constant to the real PATCH_ID_EXCLUSIONS.
 MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "\$MERGE_BASE" ] && [ \${#MERGE_BASE} -eq 40 ]; then
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "\${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "\${MERGE_BASE}..HEAD" -- ${PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS.map((e) => `'${e}'`).join(' ')} 2>/dev/null || echo '')
   if [ -n "\$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "\$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     PATCH_ID=$(printf '%s' "\$PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
@@ -583,6 +606,44 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.ok(
       fixupsIdx < attestationIdx,
       `pre-push-fixups.sh (line ${fixupsIdx + 1}) must appear BEFORE check-attestation-sign.sh (line ${attestationIdx + 1})`,
+    );
+  });
+});
+
+// ── AISDLC-618: fake-signer exclusion list bound to the real source of truth ──
+//
+// Round-3 review: the fake signer's exclusion list (a 4th hand-copy, missed by
+// the round-1/round-2 AISDLC-618 fixes) computed a DIFFERENT patch-id than the
+// real hook for any push that includes a backlog task-move, because it was
+// still pinned at the pre-AISDLC-610 3-entry list. `combo 01/11/6/7` reproduced
+// this concretely: those combos exercise the real check-task-moved.sh moving a
+// task file in the SAME push range attestation-sign runs against.
+//
+// This test closes the gap by binding PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS
+// to the REAL `PATCH_ID_EXCLUSIONS` (imported from the built pipeline-cli
+// dist — skipped, not failed, when dist isn't built yet), so a future addition
+// to PATCH_ID_EXCLUSIONS that isn't mirrored here fails this test once dist is
+// rebuilt, instead of silently reproducing this exact bug class a fifth time.
+describe('AISDLC-618: pre-push-fixups fake signer stays in lockstep with PATCH_ID_EXCLUSIONS', () => {
+  it('PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS matches the REAL PATCH_ID_EXCLUSIONS from built dist', async (t) => {
+    const distPath = join(PROJECT_ROOT, 'pipeline-cli', 'dist', 'attestation', 'patch-id.js');
+    if (!existsSync(distPath)) {
+      t.skip(
+        `pipeline-cli/dist/attestation/patch-id.js not built — run ` +
+          `\`pnpm --filter @ai-sdlc/pipeline-cli build\` to exercise this binding test`,
+      );
+      return;
+    }
+    const { PATCH_ID_EXCLUSIONS: realExclusions } = await import(pathToFileURL(distPath).href);
+
+    assert.deepEqual(
+      PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS,
+      realExclusions,
+      'AISDLC-618 round 3: PRE_PUSH_FIXUPS_FAKE_SIGNER_EXCLUSIONS (scripts/pre-push-fixups.test.mjs) ' +
+        'has drifted from the REAL PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. ' +
+        'Update this constant whenever the real array changes — this is the exact failure mode ' +
+        'AISDLC-618 fixes: a stale fake-signer exclusion list computing a different patch-id than ' +
+        'the real hook for a diff that includes a backlog task-move.',
     );
   });
 });

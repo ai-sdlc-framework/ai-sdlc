@@ -25,14 +25,86 @@ import {
   existsSync,
   chmodSync,
   readdirSync,
+  readFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'check-attestation-sign.sh');
+
+/**
+ * Canonical patch-id exclusion pathspecs (AISDLC-618). MUST stay identical to
+ * `PATCH_ID_EXCLUSIONS` in `pipeline-cli/src/attestation/patch-id.ts` — this
+ * constant drives both the fake-signer's patch-id computation (below) and the
+ * task-move-PR repro test, so both sides of the "does the hook compute the
+ * SAME patch-id as the signer" assertion are anchored to one array in this
+ * file. The lockstep test further down parses the hook's own hardcoded
+ * fallback array out of check-attestation-sign.sh and asserts it equals this
+ * list, so a future addition to the signer's array that isn't mirrored here
+ * OR in the hook's fallback fails a test rather than silently drifting.
+ */
+const CANONICAL_PATCH_ID_EXCLUSIONS = [
+  ':!.ai-sdlc/attestations/',
+  ':!.ai-sdlc/transcript-leaves/',
+  ':!.ai-sdlc/transcript-leaves.jsonl',
+  ':!backlog/tasks/',
+  ':!backlog/completed/',
+  ':!.ai-sdlc/reviews/',
+];
+
+/**
+ * Render `CANONICAL_PATCH_ID_EXCLUSIONS` as single-quoted shell arguments,
+ * e.g. `':!.ai-sdlc/attestations/' ':!backlog/tasks/'`. Used to derive the
+ * fake signer's `git diff-tree` pathspec args from the SAME array driving
+ * the JS-side `computeCanonicalPatchId()` — so the fake signer can never
+ * become a fourth hand-copy of this exclusion list.
+ */
+function canonicalExclusionsShellArgs() {
+  return CANONICAL_PATCH_ID_EXCLUSIONS.map((e) => `'${e}'`).join(' ');
+}
+
+/**
+ * Parse the `PATCH_ID_EXCLUSIONS_FALLBACK=(...)` array literal out of
+ * `check-attestation-sign.sh`'s source text. Shared by the lockstep test
+ * (compares against `CANONICAL_PATCH_ID_EXCLUSIONS`) and the binding test
+ * (compares against the REAL `PATCH_ID_EXCLUSIONS` built dist export).
+ */
+function parseHookFallbackExclusions() {
+  const hookSource = readFileSync(SCRIPT, 'utf-8');
+  const match = hookSource.match(/PATCH_ID_EXCLUSIONS_FALLBACK=\(\s*([\s\S]*?)\n\)/);
+  assert.ok(
+    match,
+    'expected to find a PATCH_ID_EXCLUSIONS_FALLBACK=(...) array literal in ' +
+      'check-attestation-sign.sh — if the variable was renamed, update this test too',
+  );
+  return match[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const m = line.match(/^'([^']*)'$/);
+      assert.ok(m, `expected a single-quoted pathspec literal, got: ${JSON.stringify(line)}`);
+      return m[1];
+    });
+}
+
+/** Compute the git patch-id for `base..head` using the canonical exclusions. */
+function computeCanonicalPatchId(root, base, head = 'HEAD') {
+  const diffOut = spawnSync(
+    'git',
+    ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ...CANONICAL_PATCH_ID_EXCLUSIONS],
+    { cwd: root, encoding: 'utf-8' },
+  );
+  const patchIdResult = spawnSync('git', ['patch-id', '--stable'], {
+    input: diffOut.stdout,
+    cwd: root,
+    encoding: 'utf-8',
+  });
+  return patchIdResult.stdout.trim().slice(0, 40);
+}
 
 function cleanEnv(extra = {}) {
   const env = { ...process.env, ...extra };
@@ -43,6 +115,7 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_BYPASS_ALL_GATES;
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
+  delete env.AI_SDLC_PATCH_ID_EXCLUSIONS_CMD;
   // Round-5 security review: strip the sentinel too. Otherwise an operator
   // or CI runner with AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 exported would have the
   // gate's own negative test inherit it and never exercise the gate. It fails
@@ -127,6 +200,11 @@ function installFakeSigner(root, { fail = false, silent = false, withLeaves = fa
   // AISDLC-475: the real signer now writes ONLY the patch-id file (no SHA bridge).
   // The fake signer must mirror this so the hook's confirmation check passes.
   // We compute the patch-id using the same exclusion list as the hook and signer.
+  //
+  // AISDLC-618: the exclusion pathspecs are DERIVED from CANONICAL_PATCH_ID_EXCLUSIONS
+  // (not a fourth hand-copy) via canonicalExclusionsShellArgs() below, so this fake
+  // signer can never drift from the same constant the lockstep test binds to the
+  // real PATCH_ID_EXCLUSIONS.
   const writeBlock = silent
     ? '# silent mode: do not write the file'
     : `mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
@@ -142,12 +220,12 @@ if echo "$*" | grep -q -- "--schema-version v5"; then
 fi
 if [ "$SCHEMA_VERSION_ARG" = "v6" ]; then
   EXT=".v6.dsse.json"
-  # AISDLC-475 Fix B: compute patch-id using canonical 3-entry exclusion list.
+  # AISDLC-618: compute patch-id using canonical 6-entry exclusion list.
   # Write to <patch-id>.v6.dsse.json (primary), same as the real signer.
   FAKE_MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
   FAKE_PATCH_ID=""
   if [ -n "$FAKE_MERGE_BASE" ] && [ \${#FAKE_MERGE_BASE} -eq 40 ]; then
-    FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+    FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ${canonicalExclusionsShellArgs()} 2>/dev/null || echo '')
     if [ -n "$FAKE_DIFF" ]; then
       FAKE_PATCH_ID_LINE=$(printf '%s' "$FAKE_DIFF" | git patch-id --stable 2>/dev/null | head -1 || echo '')
       FAKE_PATCH_ID=$(printf '%s' "$FAKE_PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
@@ -1209,5 +1287,246 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       newDevHead,
       'a new chore commit must be added after genuine source change',
     );
+  });
+});
+
+// ── AISDLC-618: patch-id backlog-exclusion lockstep ──────────────────────────
+//
+// Root cause: AISDLC-610 added `backlog/tasks/` + `backlog/completed/` to the
+// signer's PATCH_ID_EXCLUSIONS and the verifier's ATTESTATION_PATH_EXCLUSIONS,
+// but NOT to this bash hook's hardcoded `git diff-tree` exclusion pathspecs.
+// AISDLC-616 additionally added `.ai-sdlc/reviews/`. Every `/ai-sdlc execute`
+// PR moves a backlog task file from tasks/ to completed/ in the same diff the
+// signer signs, so the hook computed a DIFFERENT patch-id than the signer,
+// found no envelope at that (wrong) key, and hard-aborted the push.
+//
+// The fix (see check-attestation-sign.sh): resolve the exclusion pathspecs
+// from `cli-attestation print-patch-id-exclusions` (single source of truth,
+// pipeline-cli/src/attestation/patch-id.ts:PATCH_ID_EXCLUSIONS) when the
+// compiled CLI is available, falling back to a hardcoded 6-entry mirror
+// (PATCH_ID_EXCLUSIONS_FALLBACK in the hook) otherwise. The two tests below
+// cover both halves of AC-2: (a) the fallback array can never silently drift
+// from the TypeScript source of truth, and (b) the hook and the signer
+// compute the SAME patch-id for the exact bug-reproducing diff shape (a
+// commit that moves backlog/tasks/*.md to backlog/completed/).
+
+describe('AISDLC-618: bash hook fallback exclusions stay in lockstep with PATCH_ID_EXCLUSIONS', () => {
+  it("the hook file's PATCH_ID_EXCLUSIONS_FALLBACK array matches CANONICAL_PATCH_ID_EXCLUSIONS", () => {
+    const entries = parseHookFallbackExclusions();
+
+    assert.deepEqual(
+      entries,
+      CANONICAL_PATCH_ID_EXCLUSIONS,
+      'AISDLC-618: check-attestation-sign.sh PATCH_ID_EXCLUSIONS_FALLBACK has drifted from ' +
+        'pipeline-cli/src/attestation/patch-id.ts PATCH_ID_EXCLUSIONS (mirrored here as ' +
+        'CANONICAL_PATCH_ID_EXCLUSIONS). Update BOTH the hook fallback array and this test ' +
+        'constant whenever the signer array changes — the whole point of this test is that ' +
+        'a future addition to one list without the other now fails CI instead of silently ' +
+        'reproducing the AISDLC-618 bug class.',
+    );
+  });
+
+  // Round-2 review (MAJOR): the test above only pins CANONICAL_PATCH_ID_EXCLUSIONS
+  // (a hand-copy in THIS file) against PATCH_ID_EXCLUSIONS_FALLBACK (a hand-copy in
+  // the bash hook) — two copies checked against each other, neither bound to the
+  // REAL source of truth. A 7th entry could be added to PATCH_ID_EXCLUSIONS in
+  // patch-id.ts (with its own TS-side tests updated to match) while BOTH hand-copies
+  // here stay at 6 and the test above still passes — reproducing the exact
+  // AISDLC-618/610 bug class from the fallback path (fresh/unbuilt worktree pushes).
+  //
+  // This test closes that gap by importing the REAL `PATCH_ID_EXCLUSIONS` from the
+  // built dist (the actual runtime value `cli-attestation print-patch-id-exclusions`
+  // serves) and asserting it against BOTH hand-copies. Skips (does not fail) when
+  // dist hasn't been built yet — hermetic-repo CI that runs this file before
+  // `pnpm --filter @ai-sdlc/pipeline-cli build` must not false-fail; the lockstep
+  // test above still enforces the two hand-copies agree with each other in that case.
+  it('CANONICAL_PATCH_ID_EXCLUSIONS and the hook fallback both match the REAL PATCH_ID_EXCLUSIONS from built dist', async (t) => {
+    const distPath = join(__dirname, '..', 'pipeline-cli', 'dist', 'attestation', 'patch-id.js');
+    if (!existsSync(distPath)) {
+      t.skip(
+        `pipeline-cli/dist/attestation/patch-id.js not built — run ` +
+          `\`pnpm --filter @ai-sdlc/pipeline-cli build\` to exercise this binding test`,
+      );
+      return;
+    }
+    const { PATCH_ID_EXCLUSIONS: realExclusions } = await import(pathToFileURL(distPath).href);
+
+    assert.deepEqual(
+      CANONICAL_PATCH_ID_EXCLUSIONS,
+      realExclusions,
+      'AISDLC-618 round 2: CANONICAL_PATCH_ID_EXCLUSIONS (this test file) has drifted from ' +
+        'the REAL PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. Update ' +
+        'this constant whenever the real array changes.',
+    );
+    assert.deepEqual(
+      parseHookFallbackExclusions(),
+      realExclusions,
+      'AISDLC-618 round 2: check-attestation-sign.sh PATCH_ID_EXCLUSIONS_FALLBACK has ' +
+        'drifted from the REAL PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. ' +
+        'Update the hook fallback array whenever the real array changes — this is the exact ' +
+        'failure mode AISDLC-618 fixes: an unbuilt-worktree push (fallback path) computing a ' +
+        'different patch-id than the signer.',
+    );
+  });
+});
+
+describe('AISDLC-618: task-move PR reproduces the same patch-id as the signer', () => {
+  let root;
+
+  beforeEach(() => {
+    root = setupRepo();
+    chmodSync(SCRIPT, 0o755);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('hook computes the SAME patch-id as the signer for a commit that moves backlog/tasks/*.md to backlog/completed/, and idempotency finds the envelope (no false abort)', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-618\n');
+    writeVerdictFile(root, 'AISDLC-618');
+
+    // Step 1: simulate the /ai-sdlc execute diff shape — a source-file change
+    // PLUS the task-move from backlog/tasks/ to backlog/completed/, all in one
+    // commit (mirrors how the dev subagent lands the move in its own PR diff).
+    mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(root, 'backlog', 'completed'), { recursive: true });
+    const taskPath = join(root, 'backlog', 'tasks', 'aisdlc-618 - fix hook lockstep.md');
+    writeFileSync(taskPath, '# AISDLC-618\n\nFix the hook lockstep gap.\n');
+    writeFileSync(join(root, 'source-618.ts'), 'export const z = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: fix hook lockstep (AISDLC-618)'], root);
+
+    // Step 2: the task-move — same commit range the real /ai-sdlc execute
+    // pipeline produces (task file moves in the SAME PR as the code change).
+    git(['rm', '-q', taskPath], root);
+    const completedPath = join(root, 'backlog', 'completed', 'aisdlc-618 - fix hook lockstep.md');
+    writeFileSync(completedPath, '# AISDLC-618\n\nFix the hook lockstep gap.\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: move AISDLC-618 to completed (AISDLC-220)'], root);
+    const devHead = git(['rev-parse', 'HEAD'], root).trim();
+
+    // Step 3: compute the patch-id the REAL signer would compute — using the
+    // canonical 6-entry exclusion list (what pipeline-cli's computePatchId
+    // does under the hood).
+    const mergeBase = execFileSync('git', ['merge-base', 'origin/main', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+    const signerPatchId = computeCanonicalPatchId(root, mergeBase);
+    assert.ok(
+      /^[0-9a-f]{40}$/.test(signerPatchId),
+      `signer-side computed patch-id must be 40-hex, got: "${signerPatchId}"`,
+    );
+
+    // Step 4: write the envelope at the signer's patch-id key (simulating a
+    // completed sign-v6 run for this exact commit).
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    writeFileSync(
+      join(attDir, `${signerPatchId}.v6.dsse.json`),
+      '{"_test":"signer-envelope","schemaVersion":"v6"}\n',
+    );
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: sign attestation for AISDLC-618 (AISDLC-133)'], root);
+    const signedHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(signedHead, devHead, 'the sign commit must advance HEAD');
+
+    // Step 5: run the REAL hook (no pipeline-cli present in this hermetic tmp
+    // repo, so it exercises the PATCH_ID_EXCLUSIONS_FALLBACK path — this is
+    // deliberate: it's exactly the fallback the lockstep test above pins).
+    // Before the AISDLC-618 fix, the hook's 3-entry exclusion list would
+    // compute a DIFFERENT patch-id here (because it would NOT exclude the
+    // backlog/ move), fail to find `${signerPatchId}.v6.dsse.json`, invoke
+    // the signer again, and the fake "fail" signer would abort the push.
+    const { cmd, logPath } = installFakeSigner(root, { fail: true });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
+
+    assert.equal(
+      r.status,
+      0,
+      `AISDLC-618: hook must exit 0 (idempotent — finds the signer's envelope) for a ` +
+        `task-move PR, got ${r.status}: ${r.stderr}`,
+    );
+    assert.equal(
+      existsSync(logPath),
+      false,
+      'AISDLC-618: signer must NOT be invoked — the hook must have found the envelope ' +
+        'at the SAME patch-id the signer used',
+    );
+    const finalHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(finalHead, signedHead, 'HEAD must not change on idempotent skip');
+  });
+
+  it('AI_SDLC_PATCH_ID_EXCLUSIONS_CMD override lets the hook consume the single source of truth directly', () => {
+    // Simulates the real repo layout where pipeline-cli/bin/cli-attestation.mjs
+    // exists and is built: stub AI_SDLC_PATCH_ID_EXCLUSIONS_CMD to emulate
+    // `cli-attestation print-patch-id-exclusions` and assert the hook produces
+    // the identical idempotent-skip behavior as the fallback path above.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-618\n');
+    writeVerdictFile(root, 'AISDLC-618');
+
+    mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(root, 'backlog', 'completed'), { recursive: true });
+    const taskPath = join(root, 'backlog', 'tasks', 'aisdlc-618b - repro.md');
+    writeFileSync(taskPath, '# AISDLC-618b\n');
+    writeFileSync(join(root, 'source-618b.ts'), 'export const w = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: repro b (AISDLC-618)'], root);
+    git(['rm', '-q', taskPath], root);
+    writeFileSync(join(root, 'backlog', 'completed', 'aisdlc-618b - repro.md'), '# AISDLC-618b\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: move AISDLC-618b to completed (AISDLC-220)'], root);
+
+    const mergeBase = execFileSync('git', ['merge-base', 'origin/main', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+    const signerPatchId = computeCanonicalPatchId(root, mergeBase);
+
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    writeFileSync(
+      join(attDir, `${signerPatchId}.v6.dsse.json`),
+      '{"_test":"signer-envelope","schemaVersion":"v6"}\n',
+    );
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: sign attestation for AISDLC-618b (AISDLC-133)'], root);
+    const signedHead = git(['rev-parse', 'HEAD'], root).trim();
+
+    // Stub command prints the same 6-entry canonical list, one per line —
+    // exactly the contract `cli-attestation print-patch-id-exclusions` fulfils.
+    const exclusionsScriptPath = join(root, 'bin', 'fake-exclusions.sh');
+    mkdirSync(join(root, 'bin'), { recursive: true });
+    writeFileSync(
+      exclusionsScriptPath,
+      `#!/usr/bin/env bash\n${CANONICAL_PATCH_ID_EXCLUSIONS.map((e) => `echo '${e}'`).join('\n')}\n`,
+    );
+    chmodSync(exclusionsScriptPath, 0o755);
+
+    const { cmd, logPath } = installFakeSigner(root, { fail: true });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+      AI_SDLC_PATCH_ID_EXCLUSIONS_CMD: `bash ${exclusionsScriptPath}`,
+    });
+
+    assert.equal(
+      r.status,
+      0,
+      `AISDLC-618: hook must exit 0 via the single-source-of-truth override path, ` +
+        `got ${r.status}: ${r.stderr}`,
+    );
+    assert.equal(
+      existsSync(logPath),
+      false,
+      'AISDLC-618: signer must NOT be invoked when the override CLI produces the ' +
+        'canonical exclusions and the envelope already exists at that patch-id',
+    );
+    const finalHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(finalHead, signedHead, 'HEAD must not change on idempotent skip');
   });
 });

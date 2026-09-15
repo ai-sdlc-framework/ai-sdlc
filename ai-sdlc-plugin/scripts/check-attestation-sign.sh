@@ -190,15 +190,23 @@ MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "$MERGE_BASE" ] && [ ${#MERGE_BASE} -eq 40 ]; then
   # Compute patch-id: pipe diff-tree output through git patch-id --stable.
-  # AISDLC-422 / AISDLC-475 (AC#6): keep the exclusion list IDENTICAL to
-  # PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts AND to
-  # ATTESTATION_PATH_EXCLUSIONS in scripts/verify-attestation.mjs.
-  # Three-entry canonical set (attestations/, transcript-leaves/, transcript-leaves.jsonl).
-  # Asymmetric exclusion makes this bash hook compute a different patch-id than
-  # the TypeScript signer, which is the failure mode AISDLC-422 fixes. The
-  # transcript-leaves.jsonl entry was added in AISDLC-475 (AC#6) to close the
-  # pre-existing asymmetry with the verifier's ATTESTATION_PATH_EXCLUSIONS.
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+  # AISDLC-422 / AISDLC-475 (AC#6) / AISDLC-610 / AISDLC-616 / AISDLC-618: keep
+  # the exclusion list IDENTICAL to PATCH_ID_EXCLUSIONS in
+  # pipeline-cli/src/attestation/patch-id.ts AND to ATTESTATION_PATH_EXCLUSIONS
+  # in pipeline-cli/attestation-core/verify-core.mjs. Six-entry canonical set
+  # (attestations/, transcript-leaves/, transcript-leaves.jsonl, backlog/tasks/,
+  # backlog/completed/, .ai-sdlc/reviews/). Asymmetric exclusion makes this
+  # bash hook compute a different patch-id than the TypeScript signer, which is
+  # the failure mode AISDLC-422/618 fixes.
+  #
+  # AISDLC-618: unlike the monorepo copy at scripts/check-attestation-sign.sh
+  # (which can shell out to `cli-attestation print-patch-id-exclusions` because
+  # pipeline-cli/ is always present in THIS repo), this is the PLUGIN-SHIPPED
+  # copy (AISDLC-555) that ships standalone into adopter repos with no
+  # pipeline-cli/ source tree at all — so the exclusion list here MUST stay a
+  # hardcoded literal, kept in lockstep by
+  # `ai-sdlc-plugin/scripts/check-attestation-sign.test.mjs`'s binding test.
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' ':!backlog/tasks/' ':!backlog/completed/' ':!.ai-sdlc/reviews/' 2>/dev/null || echo '')
   if [ -n "$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     # Output format: "<patch-id> <commit-sha>"

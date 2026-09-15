@@ -53,6 +53,10 @@
 #   so tests can stub it without needing the orchestrator built. The override
 #   is invoked with the same args the real signer accepts and is responsible
 #   for writing `.ai-sdlc/attestations/<head-sha>.dsse.json`.
+#   AI_SDLC_PATCH_ID_EXCLUSIONS_CMD="<command>" — overrides the
+#   `print-patch-id-exclusions` invocation (AISDLC-618) so tests can stub the
+#   exclusion-pathspec source without needing the orchestrator built. The
+#   override must print one pathspec per line to stdout.
 #
 # Exit codes:
 #   0 — nothing to sign (no sentinel, no verdict, or already attested), or
@@ -163,19 +167,65 @@ fi
 # The primary envelope filename is now <patch-id>.dsse.json (or .v6.dsse.json)
 # so we check that file first. If patch-id computation fails we fall back to
 # the per-SHA filename (pre-AISDLC-398 behaviour).
+#
+# AISDLC-618: exclusion pathspecs are resolved from the SAME single source of
+# truth the TypeScript signer/verifier use — `PATCH_ID_EXCLUSIONS` in
+# pipeline-cli/src/attestation/patch-id.ts, surfaced via
+# `cli-attestation print-patch-id-exclusions`. AISDLC-610 added
+# `backlog/tasks/` + `backlog/completed/` to that array (and AISDLC-616 added
+# `.ai-sdlc/reviews/`) but this hook's hardcoded three-entry list was never
+# updated in lockstep, so every task-move PR (i.e. every `/ai-sdlc execute`
+# PR) computed a DIFFERENT patch-id here than the signer did — the signer
+# would write envelope B, this hook would look for envelope A, not find it,
+# and hard-abort the push. Shelling out to the compiled CLI when it's
+# available eliminates the possibility of the two lists drifting again;
+# PATCH_ID_EXCLUSIONS_FALLBACK below is ONLY used when the CLI can't be
+# invoked (fresh worktree with no `pnpm build` yet, hermetic test repo with
+# no pipeline-cli/ present at all) and is asserted to match
+# PATCH_ID_EXCLUSIONS by `check-attestation-sign.test.mjs`'s lockstep test —
+# so even the fallback path cannot silently drift.
+PATCH_ID_EXCLUSIONS_FALLBACK=(
+  ':!.ai-sdlc/attestations/'
+  ':!.ai-sdlc/transcript-leaves/'
+  ':!.ai-sdlc/transcript-leaves.jsonl'
+  ':!backlog/tasks/'
+  ':!backlog/completed/'
+  ':!.ai-sdlc/reviews/'
+)
+
+PATCH_ID_EXCLUSIONS=()
+CLI_ATTESTATION_BIN="$WT_ROOT/pipeline-cli/bin/cli-attestation.mjs"
+if [ -n "${AI_SDLC_PATCH_ID_EXCLUSIONS_CMD:-}" ]; then
+  # TEST-ONLY override (never set by any production caller): lets
+  # check-attestation-sign.test.mjs stub the exclusions source without
+  # requiring the orchestrator to be built or pipeline-cli/ to be present at
+  # all. Env-gated (empty/unset is the default, no-op path) so there is no
+  # security regression — the `eval` below only ever runs a value this same
+  # process's own environment explicitly set.
+  CLI_CMD="$AI_SDLC_PATCH_ID_EXCLUSIONS_CMD"
+  while IFS= read -r line; do
+    [ -n "$line" ] && PATCH_ID_EXCLUSIONS+=("$line")
+  done < <(eval "$CLI_CMD" 2>/dev/null || true)
+elif [ -f "$CLI_ATTESTATION_BIN" ]; then
+  while IFS= read -r line; do
+    [ -n "$line" ] && PATCH_ID_EXCLUSIONS+=("$line")
+  done < <(node "$CLI_ATTESTATION_BIN" print-patch-id-exclusions --repo-root "$WT_ROOT" 2>/dev/null || true)
+fi
+if [ ${#PATCH_ID_EXCLUSIONS[@]} -eq 0 ]; then
+  PATCH_ID_EXCLUSIONS=("${PATCH_ID_EXCLUSIONS_FALLBACK[@]}")
+fi
+
 MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
 PATCH_ID=""
 if [ -n "$MERGE_BASE" ] && [ ${#MERGE_BASE} -eq 40 ]; then
   # Compute patch-id: pipe diff-tree output through git patch-id --stable.
-  # AISDLC-422 / AISDLC-475 (AC#6): keep the exclusion list IDENTICAL to
-  # PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts AND to
-  # ATTESTATION_PATH_EXCLUSIONS in scripts/verify-attestation.mjs.
-  # Three-entry canonical set (attestations/, transcript-leaves/, transcript-leaves.jsonl).
-  # Asymmetric exclusion makes this bash hook compute a different patch-id than
-  # the TypeScript signer, which is the failure mode AISDLC-422 fixes. The
-  # transcript-leaves.jsonl entry was added in AISDLC-475 (AC#6) to close the
-  # pre-existing asymmetry with the verifier's ATTESTATION_PATH_EXCLUSIONS.
-  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || echo '')
+  # AISDLC-422 / AISDLC-475 (AC#6) / AISDLC-610 / AISDLC-616 / AISDLC-618:
+  # keep the exclusion list IDENTICAL to PATCH_ID_EXCLUSIONS in
+  # pipeline-cli/src/attestation/patch-id.ts AND to
+  # ATTESTATION_PATH_EXCLUSIONS in scripts/verify-attestation.mjs. Asymmetric
+  # exclusion makes this bash hook compute a different patch-id than the
+  # TypeScript signer, which is the failure mode AISDLC-422/618 fix.
+  DIFF_OUTPUT=$(git diff-tree --no-color -p "${MERGE_BASE}..HEAD" -- "${PATCH_ID_EXCLUSIONS[@]}" 2>/dev/null || echo '')
   if [ -n "$DIFF_OUTPUT" ]; then
     PATCH_ID_LINE=$(printf '%s' "$DIFF_OUTPUT" | git patch-id --stable 2>/dev/null | head -1 || echo '')
     # Output format: "<patch-id> <commit-sha>"

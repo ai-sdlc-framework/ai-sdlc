@@ -29,6 +29,7 @@ import {
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
 import { buildAttestationCli } from './attestation.js';
+import { PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
 import {
   loadAttestationRuntime,
   TrustedRuntimeResolutionError,
@@ -355,6 +356,23 @@ describe('merkle-root — with leaves', () => {
     const parsed = JSON.parse(flushStdout()) as { root: string; leafCount: number };
     expect(parsed.leafCount).toBe(1);
     expect(parsed.root).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+// ── CLI: print-patch-id-exclusions (AISDLC-618) ────────────────────────────────
+
+describe('print-patch-id-exclusions', () => {
+  it('prints one pathspec per line in text mode, matching PATCH_ID_EXCLUSIONS', async () => {
+    await buildAttestationCli(['print-patch-id-exclusions']).parseAsync();
+    const out = flushStdout();
+    const lines = out.split('\n').filter((l) => l.length > 0);
+    expect(lines).toEqual([...PATCH_ID_EXCLUSIONS]);
+  });
+
+  it('emits a JSON array matching PATCH_ID_EXCLUSIONS with --json', async () => {
+    await buildAttestationCli(['print-patch-id-exclusions', '--json']).parseAsync();
+    const parsed = JSON.parse(flushStdout()) as string[];
+    expect(parsed).toEqual([...PATCH_ID_EXCLUSIONS]);
   });
 });
 
