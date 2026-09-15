@@ -185,6 +185,90 @@ Exit 0. The cryptographic claim (Merkle root signed by operator key) remains val
 | `.ai-sdlc/transcripts/<task-id>/` | Per-task directory |
 | `.ai-sdlc/transcripts/<task-id>/<reviewer>.jsonl` | Per-reviewer JSONL transcript |
 | `.ai-sdlc/transcript-leaves.jsonl` | Merkle leaf index (committed, never GC'd — Phase 2) |
+| `.ai-sdlc/reviews/<task-id>.jsonl` | Append-only reviewer findings ledger (committed, never GC'd — AISDLC-616, see below) |
+
+## Reviews ledger — measuring reviewer marginal value (AISDLC-616)
+
+Transcripts and verdict files above answer "did a real review process run?".
+They cannot answer a separate, cost-driven question: **does running 3
+reviewers (code + test + security) catch materially more blocking defects
+than 1 reviewer would?** That signal is destroyed by design elsewhere in the
+pipeline:
+
+- `.ai-sdlc/verdicts/*.json` are gitignored and OVERWRITTEN on every review
+  iteration — first-pass findings are gone once a reviewer flips to APPROVED.
+- Transcripts retain only the reviewer's own turns, not a structured,
+  cross-run-comparable record of what was found and when.
+
+The **reviews ledger** at `.ai-sdlc/reviews/<task-id-lower>.jsonl` closes this
+gap: `cli-attestation emit-leaf` appends ONE record per reviewer per review
+iteration (including the first pass), and the file is committed — never
+gitignored, never overwritten, only appended to.
+
+### Record schema
+
+```json
+{
+  "taskId": "AISDLC-616",
+  "prNumber": 4321,
+  "commitSha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4",
+  "iteration": 1,
+  "role": "code",
+  "harness": "claude-code",
+  "timestamp": "2026-09-14T10:00:00.000Z",
+  "verdict": "rejected",
+  "findings": [
+    { "severity": "critical", "summary": "SQL injection", "title": "src/foo.ts: sql injection", "area": "src/foo.ts" }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `taskId` | string | AISDLC task identifier |
+| `prNumber` | number \| null | GitHub PR number, when known at emit time |
+| `commitSha` | string | 40-char hex head SHA the review ran against |
+| `iteration` | number | 1-based review-iteration number (first pass = 1) |
+| `role` | `"code" \| "test" \| "security"` | Canonical reviewer role (normalized from `code-reviewer`, `code-reviewer-codex`, etc.) |
+| `harness` | string | `claude-code` \| `codex` |
+| `verdict` | `"approved" \| "rejected"` | This reviewer's own verdict for this iteration |
+| `findings` | array | Itemized, severity-tagged findings with a normalized `title`/`area` for cross-reviewer dedupe |
+
+**Durability + patch-id safety.** The ledger is committed (like
+`.ai-sdlc/transcript-leaves/`) rather than gitignored, so first-pass findings
+survive indefinitely. Because it is written in the SAME pipeline pass as
+`emit-leaf`/`sign-v6`, its path (`.ai-sdlc/reviews/`) is excluded from the
+attestation patch-id / Merkle-root computation in lockstep across
+`PATCH_ID_EXCLUSIONS` (`pipeline-cli/src/attestation/patch-id.ts`) and
+`ATTESTATION_PATH_EXCLUSIONS` (`pipeline-cli/attestation-core/verify-core.mjs`)
+— see `patch-id-exclusion-lockstep.test.ts`. Appending a ledger record never
+perturbs the signed content identity.
+
+### Running the analysis
+
+`cli-reviews analyze` reads the ledger and reports per-role metrics:
+
+```bash
+node pipeline-cli/bin/cli-reviews.mjs analyze --repo-root . --json
+```
+
+- **Block rate** — fraction of review cycles a role rejected.
+- **Sole-blocker rate** — fraction of cycles a role blocked and NO other role
+  in the same cycle also blocked (this role caught something unique).
+- **Cross-reviewer finding overlap** — per role pair, fraction of the union
+  of normalized finding titles that were raised by BOTH roles.
+- **Discordant-pair count (McNemar-style)** — per role, how many cycles the
+  PANEL (any role blocking) disagreed with what that role acting ALONE would
+  have decided. A role with 0 discordant cycles across a large corpus never
+  contributed a finding the other reviewers didn't already catch — the
+  direct evidence needed to decide whether to retire that reviewer.
+
+Pass `--repo-root` multiple times to aggregate a ledger corpus across
+multiple checkouts (e.g. this repo plus a sibling dogfood repo):
+
+```bash
+node pipeline-cli/bin/cli-reviews.mjs analyze --repo-root . --repo-root ../sibling-repo
+```
 
 ## Related runbooks
 

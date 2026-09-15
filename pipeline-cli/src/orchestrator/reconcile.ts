@@ -189,6 +189,13 @@ export interface RunReconcileOptions {
    */
   reviewerNonce?: string;
   /**
+   * AISDLC-616 — 1-based review-iteration number for this reconcile pass,
+   * threaded through to every `emit-leaf --iteration` call so the reviews
+   * ledger (`.ai-sdlc/reviews/<task-id>.jsonl`) can distinguish first-pass
+   * findings from later re-review iterations. Defaults to 1 (first pass).
+   */
+  reviewIteration?: number;
+  /**
    * Override sign-attestation script path. Defaults to
    * `ai-sdlc-plugin/scripts/sign-attestation.mjs` relative to workDir.
    */
@@ -592,6 +599,14 @@ function runReconcileInner(
     // (orchestrator-tick.md Step 3) generated + embedded one.
     if (options.reviewerNonce) {
       emitLeafArgs.push('--nonce', options.reviewerNonce);
+    }
+    // AISDLC-616: record the review-iteration number + PR number (when
+    // already known from devVerdict.prUrl) on the reviews ledger record
+    // `emit-leaf` appends alongside the Merkle leaf.
+    emitLeafArgs.push('--iteration', String(options.reviewIteration ?? 1));
+    const prNumberForLedger = extractPrNumberFromUrl(devVerdict.prUrl);
+    if (prNumberForLedger) {
+      emitLeafArgs.push('--pr-number', prNumberForLedger);
     }
     const emit = spawn('node', emitLeafArgs, { cwd: worktreePath });
     steps.push({

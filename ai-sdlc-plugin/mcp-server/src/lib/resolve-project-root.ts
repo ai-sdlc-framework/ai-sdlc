@@ -32,7 +32,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 export interface ResolveProjectRootOptions {
   /** Env mapping; defaults to `process.env`. Injectable for tests. */
@@ -105,16 +105,31 @@ export function isPatternCParent(root: string): boolean {
 }
 
 /**
- * Given a Pattern C parent `root` and an optional env mapping, determine
- * the active task ID (lower-cased) to use for worktree routing.
+ * Given a Pattern C parent `root`, an optional env mapping, and an optional
+ * `cwd`, determine the active task ID (lower-cased) to use for worktree
+ * routing.
  *
  * Lookup order:
  * 1. `AI_SDLC_ACTIVE_TASK_ID` env var
- * 2. Per-worktree `.active-task` sentinel — scans `<root>/.worktrees/<id>/.active-task`
+ * 2. **AISDLC-616 — dispatching worktree's OWN sentinel.** When `cwd` is
+ *    already inside one of `<root>/.worktrees/<id>/`, read THAT worktree's
+ *    own `.active-task` sentinel directly rather than scanning every
+ *    worktree for the most-recently-modified one. This closes the
+ *    transcript-routing scatter bug: with N concurrent `/ai-sdlc execute`
+ *    worktrees active, a process running inside worktree A must resolve to
+ *    task A even if worktree B happened to touch its sentinel more
+ *    recently — otherwise reviewer transcripts/verdicts/reviews-ledger
+ *    records for A can be misrouted into B's `.ai-sdlc/` tree (or vice
+ *    versa), clobbering same-named files across worktrees.
+ * 3. Per-worktree `.active-task` sentinel — scans `<root>/.worktrees/<id>/.active-task`
  *    (matches `pipeline-cli/src/steps/04-flip-status.ts` write location and the
  *    `findWorktreeSentinel` pattern used by enforce-blocked-actions.js +
  *    pipeline-cli/src/orchestrator/in-flight.ts). If multiple sentinels exist
- *    (multi-task parallel runs), returns the most-recently-modified one.
+ *    (multi-task parallel runs), returns the most-recently-modified one. This
+ *    global scan is now only the fallback used when `cwd` is NOT identifiably
+ *    inside a specific worktree (e.g. cwd is the parent root itself) — the
+ *    same disclosed-race heuristic AISDLC-216 already used, narrowed to the
+ *    cases where no better signal exists.
  *
  * Returns the lower-cased task ID on success, or `undefined` when no signal
  * is present.
@@ -122,6 +137,7 @@ export function isPatternCParent(root: string): boolean {
 export function resolveActiveTaskId(
   root: string,
   env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
 ): string | undefined {
   // 1. Env var takes precedence.
   const envTaskId = env.AI_SDLC_ACTIVE_TASK_ID;
@@ -129,8 +145,32 @@ export function resolveActiveTaskId(
     return envTaskId.trim().toLowerCase();
   }
 
-  // 2. Per-worktree .active-task sentinels.
   const worktreesDir = resolve(root, '.worktrees');
+
+  // 2. AISDLC-616: prefer the DISPATCHING worktree's own sentinel when cwd is
+  // identifiably inside one of the worktrees. This must win over the global
+  // newest-mtime scan below — that scan is precisely the scatter bug.
+  const resolvedCwd = resolve(cwd);
+  const relToWorktrees = relative(worktreesDir, resolvedCwd);
+  const isInsideAWorktree =
+    relToWorktrees !== '' && !relToWorktrees.startsWith('..') && !isAbsolute(relToWorktrees);
+  if (isInsideAWorktree) {
+    const ownWorktreeName = relToWorktrees.split(sep)[0];
+    if (ownWorktreeName) {
+      const ownSentinel = resolve(worktreesDir, ownWorktreeName, '.active-task');
+      try {
+        const contents = readFileSync(ownSentinel, 'utf-8').trim();
+        if (contents) return contents.toLowerCase();
+      } catch {
+        // No sentinel in THIS worktree yet — fall through to the global
+        // scan below rather than returning undefined outright, preserving
+        // pre-AISDLC-616 behavior for a worktree whose sentinel hasn't been
+        // written yet.
+      }
+    }
+  }
+
+  // 3. Global per-worktree .active-task sentinel scan (fallback).
   let entries: import('node:fs').Dirent[];
   try {
     entries = readdirSync(worktreesDir, { withFileTypes: true });
@@ -181,16 +221,16 @@ export function resolveProjectRoot(opts: ResolveProjectRootOptions = {}): string
 
   const envProjectRoot = env.AI_SDLC_PROJECT_ROOT;
   if (envProjectRoot && hasBacklogDir(envProjectRoot)) {
-    return applyPatternCIfNeeded(resolve(envProjectRoot), env);
+    return applyPatternCIfNeeded(resolve(envProjectRoot), env, cwd);
   }
 
   const claudeProjectDir = env.CLAUDE_PROJECT_DIR;
   if (claudeProjectDir && hasBacklogDir(claudeProjectDir)) {
-    return applyPatternCIfNeeded(resolve(claudeProjectDir), env);
+    return applyPatternCIfNeeded(resolve(claudeProjectDir), env, cwd);
   }
 
   const fromCwd = walkUpForBacklog(cwd);
-  if (fromCwd) return applyPatternCIfNeeded(fromCwd, env);
+  if (fromCwd) return applyPatternCIfNeeded(fromCwd, env, cwd);
 
   throw new Error(ERROR_MESSAGE);
 }
@@ -207,10 +247,14 @@ export function resolveProjectRoot(opts: ResolveProjectRootOptions = {}): string
  *
  * This is exported so tests can drive it directly.
  */
-export function applyPatternCIfNeeded(root: string, env: NodeJS.ProcessEnv = process.env): string {
+export function applyPatternCIfNeeded(
+  root: string,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
   if (!isPatternCParent(root)) return root;
 
-  const taskId = resolveActiveTaskId(root, env);
+  const taskId = resolveActiveTaskId(root, env, cwd);
   if (!taskId) {
     throw new Error(PATTERN_C_ERROR_MESSAGE);
   }

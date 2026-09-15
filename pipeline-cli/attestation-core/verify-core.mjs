@@ -135,6 +135,11 @@ import {
  * (the signer side) — asymmetric exclusion lists reproduce the AISDLC-421 bug
  * class where the signer and verifier compute different patch-ids for the
  * same reviewed diff. See `patch-id-exclusion-lockstep.test.ts`.
+ *
+ * AISDLC-616: `.ai-sdlc/reviews/` added — the append-only reviewer findings
+ * ledger is lifecycle-observability data written in the same pipeline pass
+ * as `emit-leaf`/`sign-v6`, so it must be excluded here in lockstep with
+ * `PATCH_ID_EXCLUSIONS` for the same reason `transcript-leaves/` is.
  */
 export const ATTESTATION_PATH_EXCLUSIONS = [
   ':!.ai-sdlc/attestations/',
@@ -142,6 +147,7 @@ export const ATTESTATION_PATH_EXCLUSIONS = [
   ':!.ai-sdlc/transcript-leaves/',
   ':!backlog/tasks/',
   ':!backlog/completed/',
+  ':!.ai-sdlc/reviews/',
 ];
 
 /**

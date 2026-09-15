@@ -731,6 +731,226 @@ describe('emit-leaf — happy path', () => {
   });
 });
 
+// ── CLI: emit-leaf reviews-ledger integration (AISDLC-616) ────────────────────
+
+describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
+  it('appends a ledger record alongside the Merkle leaf, with role/verdict/commitSha/iteration', async () => {
+    makeTranscript('aisdlc-616', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-616',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-code.json', {
+      approved: false,
+      findings: [
+        { severity: 'critical', file: 'src/foo.ts', line: 10, message: 'SQL injection' },
+        { severity: 'minor', message: 'nit' },
+      ],
+    });
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-616',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'e'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'claude-sonnet-4-6',
+      '--patch-id',
+      TEST_PATCH_ID,
+      '--iteration',
+      '1',
+      '--pr-number',
+      '4242',
+    ]).parseAsync();
+
+    const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
+    const records = loadReviewLedger('AISDLC-616', tmpRoot);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      taskId: 'AISDLC-616',
+      prNumber: 4242,
+      commitSha: 'e'.repeat(40),
+      iteration: 1,
+      role: 'code',
+      harness: 'claude-code',
+      verdict: 'rejected',
+    });
+    expect(records[0].findings).toHaveLength(2);
+    expect(records[0].findings[0]).toMatchObject({ severity: 'critical', area: 'src/foo.ts' });
+  });
+
+  it('defaults iteration to 1 and prNumber to null when omitted', async () => {
+    makeTranscript('aisdlc-616', 'test-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-616',
+      'test-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-test.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-616',
+      '--reviewer',
+      'test-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'f'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
+    const records = loadReviewLedger('AISDLC-616', tmpRoot);
+    expect(records).toHaveLength(1);
+    expect(records[0].iteration).toBe(1);
+    expect(records[0].prNumber).toBeNull();
+    expect(records[0].verdict).toBe('approved');
+  });
+
+  it('a second review iteration APPENDS a new record — the first-pass record is never overwritten', async () => {
+    makeTranscript('aisdlc-616', 'security-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-616',
+      'security-reviewer.jsonl',
+    );
+
+    const verdictPath1 = writeVerdict('verdict-security-1.json', {
+      approved: false,
+      findings: [{ severity: 'critical', message: 'hardcoded secret' }],
+    });
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-616',
+      '--reviewer',
+      'security-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath1,
+      '--head-sha',
+      'a'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'opus',
+      '--patch-id',
+      TEST_PATCH_ID,
+      '--iteration',
+      '1',
+    ]).parseAsync();
+
+    // Second iteration: transcript content changes (different hash → not an
+    // idempotent skip), reviewer now approves.
+    writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant', iteration: 2 }) + '\n');
+    const verdictPath2 = writeVerdict('verdict-security-2.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-616',
+      '--reviewer',
+      'security-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath2,
+      '--head-sha',
+      'a'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'opus',
+      '--patch-id',
+      TEST_PATCH_ID,
+      '--iteration',
+      '2',
+    ]).parseAsync();
+
+    const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
+    const records = loadReviewLedger('AISDLC-616', tmpRoot);
+    expect(records).toHaveLength(2);
+    expect(records[0].iteration).toBe(1);
+    expect(records[0].verdict).toBe('rejected');
+    expect(records[0].findings[0].severity).toBe('critical');
+    expect(records[1].iteration).toBe(2);
+    expect(records[1].verdict).toBe('approved');
+  });
+
+  it('skips the ledger append (with a stderr warning) for an unrecognized reviewer name', async () => {
+    makeTranscript('aisdlc-616', 'some-custom-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-616',
+      'some-custom-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-custom.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-616',
+      '--reviewer',
+      'some-custom-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'a'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
+    expect(loadReviewLedger('AISDLC-616', tmpRoot)).toEqual([]);
+    expect(flushStderr()).toContain('does not map to a canonical reviews-ledger role');
+    // The Merkle leaf itself must still be written — reviews-ledger skipping
+    // must not regress the pre-existing v6 signing path.
+    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
+  });
+});
+
 // ── CLI: emit-leaf anchorEvidence (RFC-0047 Phase 2, AISDLC-594) ──────────────
 
 describe('emit-leaf — anchorEvidence (RFC-0047 Phase 2, AISDLC-594)', () => {

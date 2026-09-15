@@ -256,6 +256,109 @@ describe('resolveActiveTaskId (AISDLC-216)', () => {
   });
 });
 
+describe('resolveActiveTaskId — transcript-routing scatter fix (AISDLC-616)', () => {
+  let scratch: string;
+
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'aisdlc-616-scatter-'));
+  });
+
+  afterEach(() => {
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  /**
+   * Simulates two concurrent `/ai-sdlc execute` worktrees: AISDLC-100 and
+   * AISDLC-200, each with its own `.active-task` sentinel. AISDLC-200's
+   * sentinel is made definitively NEWER (the exact condition that used to
+   * cause cross-routing pre-AISDLC-616 — see `resolveActiveTaskId`'s old
+   * "most-recently-modified wins globally" behavior).
+   *
+   * A process running with cwd INSIDE the AISDLC-100 worktree must resolve
+   * to 'aisdlc-100' — its OWN task — regardless of AISDLC-200's newer
+   * sentinel. This is the load-bearing assertion: without the AISDLC-616
+   * fix, this test fails (resolves 'aisdlc-200' instead), reproducing the
+   * exact scatter bug where worktree A's reviewer transcripts/verdicts get
+   * routed into worktree B's `.ai-sdlc/` tree.
+   */
+  it('a process inside worktree A resolves to A, never to a concurrently-active worktree B with a newer sentinel', () => {
+    const worktreeA = join(scratch, '.worktrees', 'aisdlc-100');
+    const worktreeB = join(scratch, '.worktrees', 'aisdlc-200');
+    mkdirSync(worktreeA, { recursive: true });
+    mkdirSync(worktreeB, { recursive: true });
+
+    writeFileSync(join(worktreeA, '.active-task'), 'AISDLC-100\n', 'utf-8');
+    writeFileSync(join(worktreeB, '.active-task'), 'AISDLC-200\n', 'utf-8');
+
+    // Make B's sentinel definitively newer — this is what caused scatter
+    // pre-fix under the global "most-recently-modified wins" scan.
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(worktreeB, '.active-task'), future, future);
+
+    // cwd inside worktree A (e.g. a subdirectory, mirroring a real dispatch
+    // running from deep inside the worktree).
+    const cwdInsideA = join(worktreeA, 'pipeline-cli');
+    mkdirSync(cwdInsideA, { recursive: true });
+
+    expect(resolveActiveTaskId(scratch, {}, cwdInsideA)).toBe('aisdlc-100');
+
+    // And symmetrically: a process inside worktree B resolves to B, not A —
+    // no cross-routing in either direction.
+    const cwdInsideB = join(worktreeB, 'pipeline-cli');
+    mkdirSync(cwdInsideB, { recursive: true });
+    expect(resolveActiveTaskId(scratch, {}, cwdInsideB)).toBe('aisdlc-200');
+  });
+
+  it('cwd exactly AT the worktree root (not a subdirectory) still resolves to its own sentinel', () => {
+    const worktreeA = join(scratch, '.worktrees', 'aisdlc-100');
+    const worktreeB = join(scratch, '.worktrees', 'aisdlc-200');
+    mkdirSync(worktreeA, { recursive: true });
+    mkdirSync(worktreeB, { recursive: true });
+    writeFileSync(join(worktreeA, '.active-task'), 'AISDLC-100\n', 'utf-8');
+    writeFileSync(join(worktreeB, '.active-task'), 'AISDLC-200\n', 'utf-8');
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(worktreeB, '.active-task'), future, future);
+
+    expect(resolveActiveTaskId(scratch, {}, worktreeA)).toBe('aisdlc-100');
+  });
+
+  it('falls back to the global newest-mtime scan when cwd is NOT inside any worktree', () => {
+    // Legacy behavior preserved for the ambiguous case (e.g. cwd is the
+    // parent root itself, or an operator-launched session with no worktree
+    // context at all).
+    const worktreeA = join(scratch, '.worktrees', 'aisdlc-100');
+    const worktreeB = join(scratch, '.worktrees', 'aisdlc-200');
+    mkdirSync(worktreeA, { recursive: true });
+    mkdirSync(worktreeB, { recursive: true });
+    writeFileSync(join(worktreeA, '.active-task'), 'AISDLC-100\n', 'utf-8');
+    writeFileSync(join(worktreeB, '.active-task'), 'AISDLC-200\n', 'utf-8');
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(worktreeB, '.active-task'), future, future);
+
+    expect(resolveActiveTaskId(scratch, {}, scratch)).toBe('aisdlc-200');
+  });
+
+  it('AI_SDLC_ACTIVE_TASK_ID env var still wins over the own-worktree sentinel', () => {
+    const worktreeA = join(scratch, '.worktrees', 'aisdlc-100');
+    mkdirSync(worktreeA, { recursive: true });
+    writeFileSync(join(worktreeA, '.active-task'), 'AISDLC-100\n', 'utf-8');
+
+    expect(resolveActiveTaskId(scratch, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-999' }, worktreeA)).toBe(
+      'aisdlc-999',
+    );
+  });
+
+  it('falls back to the global scan when cwd is inside a worktree that has no sentinel yet', () => {
+    const worktreeA = join(scratch, '.worktrees', 'aisdlc-100'); // no sentinel written
+    const worktreeB = join(scratch, '.worktrees', 'aisdlc-200');
+    mkdirSync(worktreeA, { recursive: true });
+    mkdirSync(worktreeB, { recursive: true });
+    writeFileSync(join(worktreeB, '.active-task'), 'AISDLC-200\n', 'utf-8');
+
+    expect(resolveActiveTaskId(scratch, {}, worktreeA)).toBe('aisdlc-200');
+  });
+});
+
 describe('applyPatternCIfNeeded (AISDLC-216)', () => {
   let scratch: string;
   let parentRoot: string;
