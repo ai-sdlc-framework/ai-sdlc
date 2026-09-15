@@ -456,6 +456,19 @@ export interface ChecksFetchResult {
 }
 
 /**
+ * Matches `gh pr checks --required`'s stderr when a repo has NO required
+ * contexts configured at all (e.g. no branch protection — private/free-plan
+ * repos, or a public repo that simply never set one up). Confirmed observed
+ * text (AISDLC-620): `no required checks reported on the '<branch>' branch`.
+ * This is a SECONDARY heuristic — a human-readable `gh` message, not a
+ * structured signal — so it is intentionally permissive (case-insensitive,
+ * substring) and is only ever used to WIDEN the fallback path, never to
+ * narrow the fail-closed path. A genuine error (auth/network/unparseable
+ * JSON) that happens not to match this pattern still fails closed below.
+ */
+const NO_REQUIRED_CHECKS_SENTINEL = /no required checks reported/i;
+
+/**
  * Fetch the repo's REAL required-checks set for `prNumber` via
  * `gh pr checks --required`, which GitHub CLI resolves from actual branch
  * protection / the `ai-sdlc/pr-ready` rollup — never a hardcoded subset, so
@@ -465,6 +478,16 @@ export interface ChecksFetchResult {
  * protection) — the caller falls back to `fetchAllCheckRuns`. `fetchFailed:
  * true` means the fetch itself errored — the caller MUST fail closed rather
  * than falling back (AC-5).
+ *
+ * AISDLC-620: on a repo with NO branch protection at all, `gh pr checks
+ * --required` does not exit 0 with an empty array (the AISDLC-607 case) —
+ * it exits **1** with stderr `no required checks reported on the '<branch>'
+ * branch`. Without this check, that exit-1 was indistinguishable from a
+ * genuine fetch error, so `fetchFailed:true` was returned and the AISDLC-607
+ * check-run fallback was never reached, permanently refusing eligibility on
+ * exactly the topology the fallback was built for. Any OTHER non-zero exit
+ * (auth failure, network error, unparseable JSON) still returns
+ * `fetchFailed: true`, preserving the fail-closed guarantee.
  */
 export async function fetchRequiredChecks(
   prNumber: number,
@@ -477,7 +500,15 @@ export async function fetchRequiredChecks(
     ['pr', 'checks', String(prNumber), '--required', '--json', 'name,state', '--repo', repoSlug],
     { cwd, allowFailure: true },
   );
-  if (out.code !== 0) return { checks: [], fetchFailed: true };
+  if (out.code !== 0) {
+    if (NO_REQUIRED_CHECKS_SENTINEL.test(out.stderr)) {
+      // Successful-but-empty: no required contexts configured at all. The
+      // caller falls through to `fetchAllCheckRuns` exactly as it does for
+      // the exit-0 + `[]` shape.
+      return { checks: [], fetchFailed: false };
+    }
+    return { checks: [], fetchFailed: true };
+  }
   try {
     const parsed = JSON.parse(out.stdout) as Array<{ name: string; state: string }>;
     return { checks: parsed.map((p) => ({ name: p.name, state: p.state })), fetchFailed: false };

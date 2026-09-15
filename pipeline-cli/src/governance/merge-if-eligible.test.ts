@@ -443,6 +443,50 @@ describe('fetchRequiredChecks', () => {
     const result = await fetchRequiredChecks(42, 'org/repo', runner);
     expect(result).toEqual({ fetchFailed: true, checks: [] });
   });
+
+  it('AISDLC-620 AC-1/AC-2 — the "no required checks reported" sentinel on exit-1 is treated as a SUCCESSFUL empty fetch, not a failure', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: "no required checks reported on the 'main' branch",
+      },
+    });
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: false, checks: [] });
+  });
+
+  it('AISDLC-620 AC-1/AC-2 — the sentinel match is case-insensitive and stderr-only (never matched against stdout content)', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: "NO REQUIRED CHECKS REPORTED on the 'release/1.x' branch",
+      },
+    });
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: false, checks: [] });
+  });
+
+  it('AISDLC-620 AC-2 — a GENUINE exit-1 error that does NOT match the sentinel still fails closed', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: 'gh: authentication required. run `gh auth login`',
+      },
+    });
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: true, checks: [] });
+  });
+
+  it('AISDLC-620 AC-2 — a genuine network-failure exit-1 still fails closed', async () => {
+    const { runner } = makeFakeRunner({
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: 'error connecting to api.github.com: dial tcp: lookup api.github.com: no such host',
+      },
+    });
+    const result = await fetchRequiredChecks(42, 'org/repo', runner);
+    expect(result).toEqual({ fetchFailed: true, checks: [] });
+  });
 });
 
 describe('fetchAllCheckRuns (AISDLC-607 Defect 2 fallback)', () => {
@@ -692,6 +736,64 @@ describe('runMergeIfEligible', () => {
     expect(result.eligibility.reason).toMatch(/check-run fallback/);
     expect(result.merged).toBe(true);
     expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
+  });
+
+  it('AISDLC-620 AC-1 — real no-branch-protection repo (gh --required exits 1 with "no required checks reported"), green + CLEAN → ELIGIBLE via check-run fallback', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: "no required checks reported on the 'main' branch",
+      },
+      'gh pr checks 42 --json': {
+        stdout: JSON.stringify([
+          { name: 'ci', state: 'SUCCESS' },
+          { name: 'lint', state: 'NEUTRAL' },
+        ]),
+      },
+      'gh pr merge 42': {},
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(true);
+    expect(result.eligibility.reason).toMatch(/check-run fallback/);
+    expect(result.merged).toBe(true);
+    expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
+  });
+
+  it('AISDLC-620 AC-2 — a genuine required-checks fetch error (NOT the sentinel) on a no-protection-looking exit-1 still REFUSES fail-closed', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: JSON.stringify({ mergeStateStatus: 'CLEAN' }) },
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: 'gh: authentication required. run `gh auth login`',
+      },
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      pkgRoot: '/unused',
+      runner,
+      loadPolicy: () => GREEN_CLEAN_POLICY,
+    });
+    expect(result.eligibility.eligible).toBe(false);
+    expect(result.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+    // MUST NOT have fallen through to the unfiltered check-runs fetch —
+    // a genuine auth/network error is never conflated with "no required
+    // checks configured".
+    expect(calls.some((c) => c.args.includes('checks') && !c.args.includes('--required'))).toBe(
+      false,
+    );
+    expect(result.merged).toBe(false);
   });
 
   it('AC-4 — no required contexts, a check-run FAILURE → REFUSES with an auditable reason', async () => {
