@@ -196,8 +196,12 @@ PATCH_ID_EXCLUSIONS_FALLBACK=(
 PATCH_ID_EXCLUSIONS=()
 CLI_ATTESTATION_BIN="$WT_ROOT/pipeline-cli/bin/cli-attestation.mjs"
 if [ -n "${AI_SDLC_PATCH_ID_EXCLUSIONS_CMD:-}" ]; then
-  # Test override: lets tests stub the exclusions source without requiring
-  # the orchestrator to be built or pipeline-cli/ to be present at all.
+  # TEST-ONLY override (never set by any production caller): lets
+  # check-attestation-sign.test.mjs stub the exclusions source without
+  # requiring the orchestrator to be built or pipeline-cli/ to be present at
+  # all. Env-gated (empty/unset is the default, no-op path) so there is no
+  # security regression — the `eval` below only ever runs a value this same
+  # process's own environment explicitly set.
   CLI_CMD="$AI_SDLC_PATCH_ID_EXCLUSIONS_CMD"
   while IFS= read -r line; do
     [ -n "$line" ] && PATCH_ID_EXCLUSIONS+=("$line")

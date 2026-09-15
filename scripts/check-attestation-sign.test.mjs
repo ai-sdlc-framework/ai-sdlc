@@ -30,7 +30,7 @@ import {
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'check-attestation-sign.sh');
@@ -54,6 +54,42 @@ const CANONICAL_PATCH_ID_EXCLUSIONS = [
   ':!backlog/completed/',
   ':!.ai-sdlc/reviews/',
 ];
+
+/**
+ * Render `CANONICAL_PATCH_ID_EXCLUSIONS` as single-quoted shell arguments,
+ * e.g. `':!.ai-sdlc/attestations/' ':!backlog/tasks/'`. Used to derive the
+ * fake signer's `git diff-tree` pathspec args from the SAME array driving
+ * the JS-side `computeCanonicalPatchId()` — so the fake signer can never
+ * become a fourth hand-copy of this exclusion list.
+ */
+function canonicalExclusionsShellArgs() {
+  return CANONICAL_PATCH_ID_EXCLUSIONS.map((e) => `'${e}'`).join(' ');
+}
+
+/**
+ * Parse the `PATCH_ID_EXCLUSIONS_FALLBACK=(...)` array literal out of
+ * `check-attestation-sign.sh`'s source text. Shared by the lockstep test
+ * (compares against `CANONICAL_PATCH_ID_EXCLUSIONS`) and the binding test
+ * (compares against the REAL `PATCH_ID_EXCLUSIONS` built dist export).
+ */
+function parseHookFallbackExclusions() {
+  const hookSource = readFileSync(SCRIPT, 'utf-8');
+  const match = hookSource.match(/PATCH_ID_EXCLUSIONS_FALLBACK=\(\s*([\s\S]*?)\n\)/);
+  assert.ok(
+    match,
+    'expected to find a PATCH_ID_EXCLUSIONS_FALLBACK=(...) array literal in ' +
+      'check-attestation-sign.sh — if the variable was renamed, update this test too',
+  );
+  return match[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const m = line.match(/^'([^']*)'$/);
+      assert.ok(m, `expected a single-quoted pathspec literal, got: ${JSON.stringify(line)}`);
+      return m[1];
+    });
+}
 
 /** Compute the git patch-id for `base..head` using the canonical exclusions. */
 function computeCanonicalPatchId(root, base, head = 'HEAD') {
@@ -165,8 +201,10 @@ function installFakeSigner(root, { fail = false, silent = false, withLeaves = fa
   // The fake signer must mirror this so the hook's confirmation check passes.
   // We compute the patch-id using the same exclusion list as the hook and signer.
   //
-  // AISDLC-618: the exclusion list below MUST match CANONICAL_PATCH_ID_EXCLUSIONS
-  // (6 entries, matches pipeline-cli's PATCH_ID_EXCLUSIONS post-AISDLC-610/616).
+  // AISDLC-618: the exclusion pathspecs are DERIVED from CANONICAL_PATCH_ID_EXCLUSIONS
+  // (not a fourth hand-copy) via canonicalExclusionsShellArgs() below, so this fake
+  // signer can never drift from the same constant the lockstep test binds to the
+  // real PATCH_ID_EXCLUSIONS.
   const writeBlock = silent
     ? '# silent mode: do not write the file'
     : `mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
@@ -187,7 +225,7 @@ if [ "$SCHEMA_VERSION_ARG" = "v6" ]; then
   FAKE_MERGE_BASE=$(git merge-base "origin/main" HEAD 2>/dev/null || echo '')
   FAKE_PATCH_ID=""
   if [ -n "$FAKE_MERGE_BASE" ] && [ \${#FAKE_MERGE_BASE} -eq 40 ]; then
-    FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ':!.ai-sdlc/attestations/' ':!.ai-sdlc/transcript-leaves/' ':!.ai-sdlc/transcript-leaves.jsonl' ':!backlog/tasks/' ':!backlog/completed/' ':!.ai-sdlc/reviews/' 2>/dev/null || echo '')
+    FAKE_DIFF=$(git diff-tree --no-color -p "\${FAKE_MERGE_BASE}..HEAD" -- ${canonicalExclusionsShellArgs()} 2>/dev/null || echo '')
     if [ -n "$FAKE_DIFF" ]; then
       FAKE_PATCH_ID_LINE=$(printf '%s' "$FAKE_DIFF" | git patch-id --stable 2>/dev/null | head -1 || echo '')
       FAKE_PATCH_ID=$(printf '%s' "$FAKE_PATCH_ID_LINE" | cut -c1-40 2>/dev/null || echo '')
@@ -1274,22 +1312,7 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
 
 describe('AISDLC-618: bash hook fallback exclusions stay in lockstep with PATCH_ID_EXCLUSIONS', () => {
   it("the hook file's PATCH_ID_EXCLUSIONS_FALLBACK array matches CANONICAL_PATCH_ID_EXCLUSIONS", () => {
-    const hookSource = readFileSync(SCRIPT, 'utf-8');
-    const match = hookSource.match(/PATCH_ID_EXCLUSIONS_FALLBACK=\(\s*([\s\S]*?)\n\)/);
-    assert.ok(
-      match,
-      'expected to find a PATCH_ID_EXCLUSIONS_FALLBACK=(...) array literal in ' +
-        'check-attestation-sign.sh — if the variable was renamed, update this test too',
-    );
-    const entries = match[1]
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => {
-        const m = line.match(/^'([^']*)'$/);
-        assert.ok(m, `expected a single-quoted pathspec literal, got: ${JSON.stringify(line)}`);
-        return m[1];
-      });
+    const entries = parseHookFallbackExclusions();
 
     assert.deepEqual(
       entries,
@@ -1300,6 +1323,49 @@ describe('AISDLC-618: bash hook fallback exclusions stay in lockstep with PATCH_
         'constant whenever the signer array changes — the whole point of this test is that ' +
         'a future addition to one list without the other now fails CI instead of silently ' +
         'reproducing the AISDLC-618 bug class.',
+    );
+  });
+
+  // Round-2 review (MAJOR): the test above only pins CANONICAL_PATCH_ID_EXCLUSIONS
+  // (a hand-copy in THIS file) against PATCH_ID_EXCLUSIONS_FALLBACK (a hand-copy in
+  // the bash hook) — two copies checked against each other, neither bound to the
+  // REAL source of truth. A 7th entry could be added to PATCH_ID_EXCLUSIONS in
+  // patch-id.ts (with its own TS-side tests updated to match) while BOTH hand-copies
+  // here stay at 6 and the test above still passes — reproducing the exact
+  // AISDLC-618/610 bug class from the fallback path (fresh/unbuilt worktree pushes).
+  //
+  // This test closes that gap by importing the REAL `PATCH_ID_EXCLUSIONS` from the
+  // built dist (the actual runtime value `cli-attestation print-patch-id-exclusions`
+  // serves) and asserting it against BOTH hand-copies. Skips (does not fail) when
+  // dist hasn't been built yet — hermetic-repo CI that runs this file before
+  // `pnpm --filter @ai-sdlc/pipeline-cli build` must not false-fail; the lockstep
+  // test above still enforces the two hand-copies agree with each other in that case.
+  it('CANONICAL_PATCH_ID_EXCLUSIONS and the hook fallback both match the REAL PATCH_ID_EXCLUSIONS from built dist', async (t) => {
+    const distPath = join(__dirname, '..', 'pipeline-cli', 'dist', 'attestation', 'patch-id.js');
+    if (!existsSync(distPath)) {
+      t.skip(
+        `pipeline-cli/dist/attestation/patch-id.js not built — run ` +
+          `\`pnpm --filter @ai-sdlc/pipeline-cli build\` to exercise this binding test`,
+      );
+      return;
+    }
+    const { PATCH_ID_EXCLUSIONS: realExclusions } = await import(pathToFileURL(distPath).href);
+
+    assert.deepEqual(
+      CANONICAL_PATCH_ID_EXCLUSIONS,
+      realExclusions,
+      'AISDLC-618 round 2: CANONICAL_PATCH_ID_EXCLUSIONS (this test file) has drifted from ' +
+        'the REAL PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. Update ' +
+        'this constant whenever the real array changes.',
+    );
+    assert.deepEqual(
+      parseHookFallbackExclusions(),
+      realExclusions,
+      'AISDLC-618 round 2: check-attestation-sign.sh PATCH_ID_EXCLUSIONS_FALLBACK has ' +
+        'drifted from the REAL PATCH_ID_EXCLUSIONS in pipeline-cli/src/attestation/patch-id.ts. ' +
+        'Update the hook fallback array whenever the real array changes — this is the exact ' +
+        'failure mode AISDLC-618 fixes: an unbuilt-worktree push (fallback path) computing a ' +
+        'different patch-id than the signer.',
     );
   });
 });
