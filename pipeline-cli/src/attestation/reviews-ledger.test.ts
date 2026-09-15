@@ -6,6 +6,7 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
+  readdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -108,6 +109,40 @@ describe('AC-1: append-only — every call appends, never overwrites', () => {
   it('returns an empty array when no ledger exists yet', () => {
     expect(loadReviewLedger('AISDLC-999', repoRoot)).toEqual([]);
     expect(existsSync(reviewsLedgerPath('AISDLC-999', repoRoot))).toBe(false);
+  });
+});
+
+describe('AISDLC-619: appendFileSync semantics (no full-file rewrite)', () => {
+  it('many sequential appends never lose a record (append-mode IO, not read-modify-write)', () => {
+    const n = 25;
+    for (let i = 1; i <= n; i++) {
+      appendReviewLedgerRecord(makeRecord({ iteration: i, role: 'code' }), repoRoot);
+    }
+    const records = loadReviewLedger('AISDLC-616', repoRoot);
+    expect(records).toHaveLength(n);
+    expect(records.map((r) => r.iteration)).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+  });
+
+  it('each append is a complete JSONL line ending in \\n (readers see well-formed lines)', () => {
+    appendReviewLedgerRecord(makeRecord({ iteration: 1 }), repoRoot);
+    appendReviewLedgerRecord(makeRecord({ iteration: 2 }), repoRoot);
+    appendReviewLedgerRecord(makeRecord({ iteration: 3 }), repoRoot);
+
+    const raw = readFileSync(reviewsLedgerPath('AISDLC-616', repoRoot), 'utf8');
+    expect(raw.endsWith('\n')).toBe(true);
+    const lines = raw.split('\n').filter((l) => l.length > 0);
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  it('does not create a .tmp file (no write-tmp + rename step)', () => {
+    appendReviewLedgerRecord(makeRecord(), repoRoot);
+    const dir = join(repoRoot, '.ai-sdlc', 'reviews');
+    const entries = readdirSync(dir);
+    expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
+    expect(entries).toEqual(['aisdlc-616.jsonl']);
   });
 });
 
@@ -236,5 +271,27 @@ describe('loadReviewLedgerFromFile — malformed line resilience', () => {
 
     const records = loadReviewLedger('AISDLC-616', repoRoot);
     expect(records).toHaveLength(2);
+  });
+
+  it('writes a WARNING to stderr naming the file and the 1-based line number of the malformed line', () => {
+    appendReviewLedgerRecord(makeRecord(), repoRoot);
+    const p = reviewsLedgerPath('AISDLC-616', repoRoot);
+    appendFileSync(p, 'not json\n');
+
+    const chunks: string[] = [];
+    const savedWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      loadReviewLedger('AISDLC-616', repoRoot);
+    } finally {
+      process.stderr.write = savedWrite;
+    }
+
+    const combined = chunks.join('');
+    expect(combined).toContain('[reviews-ledger] WARNING: skipping malformed JSONL line 2 in');
+    expect(combined).toContain(p);
   });
 });

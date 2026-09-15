@@ -6,7 +6,7 @@ import {
   appendReviewLedgerRecord,
   type ReviewLedgerRecord,
 } from '../attestation/reviews-ledger.js';
-import { buildReviewsCli, loadCorpus } from './reviews.js';
+import { buildReviewsCli, loadCorpus, runReviewsCli } from './reviews.js';
 
 let tmpRoot: string;
 let stdoutChunks: string[];
@@ -126,5 +126,40 @@ describe('cli-reviews analyze', () => {
     const out = stdoutChunks.join('');
     const parsed = JSON.parse(out) as { totalCycles: number };
     expect(parsed.totalCycles).toBe(0);
+  });
+});
+
+// AISDLC-619 — the `runReviewsCli()` bin-shim entry point was previously
+// untested; only `buildReviewsCli()` (the yargs-builder it delegates to) had
+// coverage. This exercises the real `process.argv` -> `hideBin` -> parseAsync
+// wiring the actual `pipeline-cli/bin/cli-reviews.mjs` shim invokes.
+describe('runReviewsCli — bin-shim entry point', () => {
+  let savedArgv: string[];
+
+  beforeEach(() => {
+    savedArgv = process.argv;
+  });
+
+  afterEach(() => {
+    process.argv = savedArgv;
+  });
+
+  it('parses process.argv via hideBin and prints a JSON report', async () => {
+    appendReviewLedgerRecord(rec({ role: 'code' }), tmpRoot);
+
+    process.argv = [
+      '/usr/bin/node',
+      '/path/to/cli-reviews.mjs',
+      'analyze',
+      '--repo-root',
+      tmpRoot,
+      '--json',
+    ];
+
+    await runReviewsCli();
+
+    const out = stdoutChunks.join('');
+    const parsed = JSON.parse(out) as { totalCycles: number };
+    expect(parsed.totalCycles).toBe(1);
   });
 });

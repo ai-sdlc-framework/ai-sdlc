@@ -1,7 +1,7 @@
 ---
 id: AISDLC-619
 title: reviews-ledger robustness follow-ups from AISDLC-616 review
-status: To Do
+status: Done
 priority: low
 labels:
   - observability
@@ -39,16 +39,36 @@ None were blocking; consolidated here so they are not lost.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `appendReviewLedgerRecord` uses append-mode IO (no full-file rewrite);
+- [x] AC-1: `appendReviewLedgerRecord` uses append-mode IO (no full-file rewrite);
       a test proves concurrent-ish sequential appends never lose a record and the
       docstring matches the implementation.
-- [ ] AC-2: `groupIntoCycles` (and any sibling role-keyed maps in
+- [x] AC-2: `groupIntoCycles` (and any sibling role-keyed maps in
       reviews-analysis) use a null-prototype map / Map; a test with a
       `__proto__`-role record proves no pollution and correct exclusion.
-- [ ] AC-3: Added tests for the CLI wrapper, the stderr-warning text, and the
+- [x] AC-3: Added tests for the CLI wrapper, the stderr-warning text, and the
       counts-only overlap-collision case.
-- [ ] AC-4: `pnpm build && test && lint` clean; patch coverage >= 80%.
+- [x] AC-4: `pnpm build && test && lint` clean; patch coverage >= 80%.
 
 ## References
 
 AISDLC-616 (PR #1066) reviewer suggestions (code + test + security).
+
+## Final Summary
+
+Implemented all three suggestion-level follow-ups from the AISDLC-616 review:
+
+1. `appendReviewLedgerRecord` (`pipeline-cli/src/attestation/reviews-ledger.ts`)
+   now uses `appendFileSync` (O_APPEND) instead of readFileSync + write-tmp +
+   rename — atomic per-write, O(1) per append, and the docstring now accurately
+   describes append-mode IO instead of overselling "Atomically APPEND".
+2. `groupIntoCycles` (`pipeline-cli/src/attestation/reviews-analysis.ts`) now
+   builds each per-cycle map via `Object.create(null)` instead of a plain `{}`,
+   hardening against prototype pollution from a corrupted/adversarial committed
+   ledger.
+3. Added tests: `runReviewsCli()` bin-shim entry point, the malformed-line
+   stderr warning text, a `__proto__`-role prototype-pollution regression test,
+   and a counts-only (degraded `normalizeFindings`) overlap-collision fixture
+   documenting the known title-collision limitation.
+
+`pnpm build && pnpm test && pnpm lint && pnpm format:check` all clean; patch
+coverage on the three touched source files is 98-100% lines.

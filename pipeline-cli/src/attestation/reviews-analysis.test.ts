@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { analyzeReviewLedger, formatReviewAnalysis } from './reviews-analysis.js';
-import type { ReviewLedgerRecord } from './reviews-ledger.js';
+import { normalizeFindings, type ReviewLedgerRecord } from './reviews-ledger.js';
 
 function rec(overrides: Partial<ReviewLedgerRecord>): ReviewLedgerRecord {
   return {
@@ -202,6 +202,97 @@ describe('analyzeReviewLedger — hand-computed fixture proving the math (AISDLC
     expect(text).toContain('code');
     expect(text).toContain('test');
     expect(text).toContain('security');
+  });
+});
+
+// AISDLC-619 — hardening against a corrupted/adversarial committed ledger:
+// groupIntoCycles indexes its per-cycle map by `record.role`, parsed from
+// untrusted committed JSON. A record carrying a non-canonical `__proto__`
+// role must not pollute Object.prototype and must be excluded from every
+// per-role stat (only ALL_ROLES entries are ever read back).
+describe('analyzeReviewLedger — AISDLC-619 prototype-pollution hardening', () => {
+  it('a record with role "__proto__" does not pollute Object.prototype and is excluded from stats', () => {
+    const pollutionAttempt: ReviewLedgerRecord = rec({
+      commitSha: 'g'.repeat(40),
+      role: '__proto__' as unknown as ReviewLedgerRecord['role'],
+      verdict: 'rejected',
+      findings: [{ severity: 'critical', summary: 'polluted', title: 'polluted' }],
+    });
+    const legit = rec({ commitSha: 'g'.repeat(40), role: 'code', verdict: 'approved' });
+
+    const result = analyzeReviewLedger([pollutionAttempt, legit]);
+
+    // No prototype pollution: a freshly created plain object must not
+    // suddenly have inherited a `toString`/own-enumerable `__proto__` value,
+    // nor should `{}.polluted` exist anywhere on Object.prototype.
+    expect(Object.prototype.hasOwnProperty.call({}, 'polluted')).toBe(false);
+    expect(({} as Record<string, unknown>)['__proto__']).toBe(Object.prototype);
+
+    // The one legit cycle is still counted correctly; the __proto__-role
+    // record contributes to no known role's stats (ALL_ROLES filter).
+    expect(result.totalCycles).toBe(1);
+    const code = result.perRole.find((r) => r.role === 'code')!;
+    expect(code.participatedCycles).toBe(1);
+    expect(code.blockedCycles).toBe(0);
+    for (const roleStats of result.perRole) {
+      // The __proto__ record's 'rejected' verdict must never leak into any
+      // canonical role's block/discordant counts via prototype lookup.
+      expect(roleStats.blockedCycles).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
+// AISDLC-619 — test-gap: counts-only (degraded) `normalizeFindings` output
+// synthesizes a generic, non-itemized title per severity bucket (e.g.
+// "critical finding #1 (itemized detail unavailable — counts-only
+// verdict)"). When TWO DIFFERENT roles both raised exactly one critical
+// finding in the same cycle, their synthesized titles are byte-identical —
+// a title COLLISION, not a real cross-reviewer match on the same defect.
+// The overlap math (`analyzeReviewLedger`'s pairOverlaps) has no way to
+// distinguish this from a genuine dedupe hit; this test documents the
+// known degraded-mode limitation so a future itemized-title fix has a
+// regression fixture to work against.
+describe('analyzeReviewLedger — AISDLC-619 counts-only overlap collision (degraded normalizeFindings)', () => {
+  it('two roles with the same counts-only severity bucket collide into a false overlap match', () => {
+    // Both roles raised exactly 1 critical finding, but from DIFFERENT
+    // underlying defects — the counts-only shape cannot tell them apart.
+    const codeFindings = normalizeFindings({ critical: 1, major: 0, minor: 0, suggestion: 0 });
+    const testFindings = normalizeFindings({ critical: 1, major: 0, minor: 0, suggestion: 0 });
+
+    // Sanity: the synthesized titles really are identical strings.
+    expect(codeFindings).toHaveLength(1);
+    expect(testFindings).toHaveLength(1);
+    expect(codeFindings[0]?.title).toBe(testFindings[0]?.title);
+
+    const records: ReviewLedgerRecord[] = [
+      rec({
+        commitSha: 'h'.repeat(40),
+        role: 'code',
+        verdict: 'rejected',
+        findings: codeFindings,
+      }),
+      rec({
+        commitSha: 'h'.repeat(40),
+        role: 'test',
+        verdict: 'rejected',
+        findings: testFindings,
+      }),
+    ];
+
+    const result = analyzeReviewLedger(records);
+    const pair = result.pairOverlaps.find(
+      (p) =>
+        (p.roleA === 'code' && p.roleB === 'test') || (p.roleA === 'test' && p.roleB === 'code'),
+    )!;
+
+    // Documents the known degraded-mode limitation: the union collapses to
+    // 1 distinct title and BOTH roles' findings map onto it, so the overlap
+    // math reports a 100% match even though these are two unrelated
+    // critical findings from different roles.
+    expect(pair.cyclesBothParticipated).toBe(1);
+    expect(pair.unionFindingCount).toBe(1);
+    expect(pair.overlapFindingCount).toBe(1);
+    expect(pair.overlapRatio).toBe(1);
   });
 });
 
