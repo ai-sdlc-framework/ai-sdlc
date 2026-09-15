@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.25.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.24.2...pipeline-cli-v0.25.0) (2026-09-15)
+
+
+### Features
+
+* add opt-in merged correctness reviewer, keep security separate (AISDLC-617) ([#1069](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1069)) ([7d3522a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7d3522adb203baf0b4fff8d68d75d7b2f68470ce))
+* persist reviewer findings to an append-only ledger (AISDLC-616) ([#1066](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1066)) ([ad809b7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ad809b7042bcb3072d6960f1d341ed1fee7513e9))
+
+
+### Bug Fixes
+
+* bring check-attestation-sign.sh patch-id exclusions into lockstep (AISDLC-618) ([#1073](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1073)) ([0735fbd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0735fbd9f70e7a28554fb62bbf85f445faafdd19))
+* harden reviews-ledger append IO + prototype pollution, add test coverage (AISDLC-619) ([#1072](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1072)) ([80c5e7c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/80c5e7c5995d51073c55cc41163fd5115f3d562f))
+* route no-required-checks exit-1 to check-run fallback (AISDLC-620) ([#1071](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1071)) ([d51eec1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d51eec1bbb2218eefcfa9ccc7af7236957e8747f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.25.0
+
 ## [0.24.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.24.1...pipeline-cli-v0.24.2) (2026-09-14)
 
 
