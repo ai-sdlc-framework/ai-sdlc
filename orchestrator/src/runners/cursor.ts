@@ -27,6 +27,20 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
 }
 
 /**
+ * Build the cursor-agent CLI argv. Cursor CLI accepts only the long
+ * `--model` flag (GH-1070); the short `-m` flag causes it to exit 1 with
+ * `unknown option '-m'`. When `model` is undefined/empty, neither `-m` nor
+ * `--model` is emitted so cursor-agent falls back to its own CLI default.
+ */
+export function buildCursorArgs(prompt: string, model: string | undefined): string[] {
+  const args = ['--print', prompt, '--force', '--output-format=stream-json'];
+  if (model) {
+    args.push('--model', model);
+  }
+  return args;
+}
+
+/**
  * Parse NDJSON stream output from cursor-agent --output-format=stream-json.
  * Extracts the final assistant message content for use as a summary.
  */
@@ -83,10 +97,7 @@ export class CursorRunner implements AgentRunner {
     const model = DEFAULT_CURSOR_MODEL ?? 'cursor-default';
 
     try {
-      const cursorArgs = ['--print', prompt, '--force', '--output-format=stream-json'];
-      if (DEFAULT_CURSOR_MODEL) {
-        cursorArgs.push('-m', DEFAULT_CURSOR_MODEL);
-      }
+      const cursorArgs = buildCursorArgs(prompt, DEFAULT_CURSOR_MODEL);
 
       // When running inside an OpenShell sandbox, prefix with sandbox connect
       let cmd: string;
