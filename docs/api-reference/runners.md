@@ -54,7 +54,7 @@ Invokes [Cursor](https://www.cursor.com/) CLI agent with NDJSON stream output.
 
 | Property | Value |
 |---|---|
-| CLI command | `cursor-agent --print <prompt> --force --output-format=stream-json [-m <model>]` |
+| CLI command | `cursor-agent --print <prompt> --force --output-format=stream-json [--model <model>]` |
 | stdin | None (prompt is a CLI argument) |
 | Auth | `CURSOR_API_KEY` |
 | Model override | `AI_SDLC_CURSOR_MODEL` env var |

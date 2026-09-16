@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { parseStreamJson, parseTokenUsage, CursorRunner } from './cursor.js';
+import { parseStreamJson, parseTokenUsage, CursorRunner, buildCursorArgs } from './cursor.js';
 import type { AgentContext } from './types.js';
 
 /* ------------------------------------------------------------------ */
@@ -402,6 +402,50 @@ describe('CursorRunner', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('out message');
+    });
+  });
+
+  // GH-1070: cursor-agent only accepts `--model`, not the short `-m` flag.
+  // Passing `-m` causes cursor-agent to exit 1 with `unknown option '-m'`.
+  describe('buildCursorArgs (GH-1070)', () => {
+    it('AC1: includes --model and the value, never -m, when a model is set', () => {
+      const args = buildCursorArgs('do the thing', 'cursor-fast');
+
+      expect(args).toContain('--model');
+      expect(args).toContain('cursor-fast');
+      expect(args).not.toContain('-m');
+    });
+
+    it('AC2: includes neither -m nor --model when model is undefined', () => {
+      const args = buildCursorArgs('do the thing', undefined);
+
+      expect(args).not.toContain('-m');
+      expect(args).not.toContain('--model');
+    });
+
+    it('AC2: includes neither -m nor --model when model is an empty string', () => {
+      const args = buildCursorArgs('do the thing', '');
+
+      expect(args).not.toContain('-m');
+      expect(args).not.toContain('--model');
+    });
+
+    it('AC3: end-to-end CursorRunner.run() spawns argv without -m when model unset', async () => {
+      // Regression guard for the reported failure mode: `unknown option '-m'`.
+      // The top-level suite runs with AI_SDLC_CURSOR_MODEL unset (DEFAULT_CURSOR_MODEL
+      // is read once at module import time in defaults.ts).
+      expect(process.env.AI_SDLC_CURSOR_MODEL).toBeUndefined();
+
+      setupSpawn({ stdout: '{"role":"assistant","content":"done"}', stderr: '' });
+      setupGitExec(['f.ts']);
+
+      const runner = new CursorRunner();
+      await runner.run(makeCtx());
+
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      const [, args] = spawnMock.mock.calls[0];
+      expect(args).not.toContain('-m');
+      expect(args).not.toContain('--model');
     });
   });
 });
