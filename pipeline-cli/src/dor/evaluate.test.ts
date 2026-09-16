@@ -121,6 +121,68 @@ describe('evaluateIssue (Stage A only)', () => {
     expect(v.overallVerdict).toBe('admit');
   });
 
+  // AISDLC-621 — hermetic mode must SKIP network-touching references
+  // (url / github-issue), not FAIL them with "no resolver registered".
+  describe('AISDLC-621 — hermetic gate 3 url/github-issue skip', () => {
+    it('AC-1: a doc URL in the body does not false-fail gate 3 in hermetic mode', async () => {
+      const v = await evaluateIssue(
+        input(
+          '## Description\nSee https://ai-sdlc.io/docs/api-reference/runners for the shape.\n' +
+            '## Acceptance Criteria\n- [ ] #1 Fix the runner shape',
+          'fix runner shape',
+        ),
+        { hermetic: true },
+      );
+      const gate3 = v.gates.find((g) => g.gateId === 3);
+      expect(gate3?.verdict).toBe('pass');
+      expect(gate3?.finding).toBeUndefined();
+    });
+
+    it('AC-2: a `closes #N` github-issue ref does not false-fail gate 3 in hermetic mode', async () => {
+      const v = await evaluateIssue(
+        input(
+          '## Description\nWraps up the work.\ncloses #1070\n' +
+            '## Acceptance Criteria\n- [ ] #1 Do the thing',
+          'wrap up',
+        ),
+        { hermetic: true },
+      );
+      const gate3 = v.gates.find((g) => g.gateId === 3);
+      expect(gate3?.verdict).toBe('pass');
+      expect(gate3?.finding).toBeUndefined();
+    });
+
+    it('AC-3: NON-hermetic mode still fails gate 3 on a dead (404) URL', async () => {
+      const fetchImpl = (async () =>
+        new Response(null, { status: 404 })) as unknown as typeof fetch;
+      const v = await evaluateIssue(
+        input(
+          '## Description\nSee https://ai-sdlc.io/docs/does-not-exist for the shape.\n' +
+            '## Acceptance Criteria\n- [ ] #1 Fix the runner shape',
+          'fix runner shape',
+        ),
+        { gate3: { fetchImpl } },
+      );
+      const gate3 = v.gates.find((g) => g.gateId === 3);
+      expect(gate3?.verdict).toBe('fail');
+    });
+
+    it('AC-4: hermetic mode still fails gate 3 on a missing local file-existence reference', async () => {
+      const v = await evaluateIssue(
+        input(
+          '## Description\nSee the referenced file.\n' +
+            '## Acceptance Criteria\n- [ ] #1 Fix the runner shape',
+          'fix runner shape',
+          { references: ['path/to/does-not-exist.ts'] },
+        ),
+        { hermetic: true },
+      );
+      const gate3 = v.gates.find((g) => g.gateId === 3);
+      expect(gate3?.verdict).toBe('fail');
+      expect(gate3?.finding).toMatch(/does-not-exist\.ts/);
+    });
+  });
+
   it('aggregates confidence: medium when at least one pass is medium', async () => {
     const v = await evaluateIssue(input('## Description\nfoo `pipeline-cli/x.ts`\n- [ ] #1 do x'), {
       hermetic: true,

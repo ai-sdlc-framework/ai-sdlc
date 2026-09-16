@@ -135,16 +135,28 @@ async function evaluateGate3Hermetic(
   opts: EvaluateOpts,
 ): Promise<GateEvaluation> {
   if (opts.hermetic) {
-    // Treat gate 3 as a vacuous pass — Stage A's network-touching half
-    // is excluded; the local-only resolvers (file-existence) still run.
+    // Network-touching references (kind 'url' / 'github-issue') cannot be
+    // verified offline — they must SKIP, not FAIL. AISDLC-621: the previous
+    // implementation dropped `urlHeadResolver` / `githubIssueResolver` from
+    // the registry without replacement, so those refs matched no
+    // resolver's `supports()` and gate 3 false-failed with "no resolver
+    // registered for reference shape." The hermetic skip resolvers below
+    // stand in for the real network resolvers (unconditional
+    // `resolved: true`), while `fileExistenceResolver` still performs a
+    // real offline check.
     const gate3opts: Gate3Opts = {
       ...opts.gate3,
-      // Keep file-existence resolver, but kill remote calls.
       resolvers: opts.gate3?.resolvers,
     };
     if (!gate3opts.resolvers) {
       const { fileExistenceResolver } = await import('./resolvers/file-existence.js');
-      gate3opts.resolvers = [fileExistenceResolver];
+      const { hermeticUrlSkipResolver, hermeticGithubIssueSkipResolver } =
+        await import('./resolvers/hermetic-skip.js');
+      gate3opts.resolvers = [
+        fileExistenceResolver,
+        hermeticUrlSkipResolver,
+        hermeticGithubIssueSkipResolver,
+      ];
     }
     return evaluateGate3(input, gate3opts);
   }
