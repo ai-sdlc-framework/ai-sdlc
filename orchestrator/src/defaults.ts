@@ -102,6 +102,8 @@ export const DEFAULT_OPENAI_MODEL = 'gpt-4';
 export const DEFAULT_ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
 export const DEFAULT_GENERIC_LLM_MODEL = 'default';
+export const DEFAULT_OLLAMA_API_URL = 'http://localhost:11434/v1/chat/completions';
+export const DEFAULT_OLLAMA_API_KEY = 'ollama';
 
 // ── CLI runner model overrides ────────────────────────────────────────
 export const DEFAULT_COPILOT_MODEL: string | undefined = process.env.AI_SDLC_COPILOT_MODEL;

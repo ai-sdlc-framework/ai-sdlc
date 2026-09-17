@@ -4,6 +4,7 @@ import { ClaudeCodeRunner } from './claude-code.js';
 import { CopilotRunner } from './copilot.js';
 import { CursorRunner } from './cursor.js';
 import { CodexRunner } from './codex.js';
+import { GenericLLMRunner } from './generic-llm.js';
 import type { AgentRunner, AgentContext, AgentResult } from './types.js';
 
 class MockRunner implements AgentRunner {
@@ -85,6 +86,50 @@ describe('RunnerRegistry', () => {
       });
 
       expect(registry.has('generic-llm')).toBe(true);
+    });
+
+    it('registers ollama when OLLAMA_MODEL is set, defaulting to the localhost endpoint', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ OLLAMA_MODEL: 'gemma4:31b' });
+
+      expect(registry.has('ollama')).toBe(true);
+      const runner = registry.get('ollama') as GenericLLMRunner;
+      expect(runner).toBeInstanceOf(GenericLLMRunner);
+      expect(runner.getConfig()).toMatchObject({
+        apiUrl: 'http://localhost:11434/v1/chat/completions',
+        apiKey: 'ollama',
+        model: 'gemma4:31b',
+      });
+    });
+
+    it('ollama unavailable without OLLAMA_MODEL', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({});
+
+      expect(registry.has('ollama')).toBe(false);
+      expect(registry.get('ollama')).toBeUndefined();
+    });
+
+    it('ollama honors OLLAMA_API_URL override', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({
+        OLLAMA_MODEL: 'gemma4:31b',
+        OLLAMA_API_URL: 'http://remote-ollama:11434/v1/chat/completions',
+      });
+
+      const runner = registry.get('ollama') as GenericLLMRunner;
+      expect(runner.getConfig().apiUrl).toBe('http://remote-ollama:11434/v1/chat/completions');
+    });
+
+    it('ollama derives apiUrl from OLLAMA_HOST when OLLAMA_API_URL is not set', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({
+        OLLAMA_MODEL: 'gemma4:31b',
+        OLLAMA_HOST: '127.0.0.1:11500',
+      });
+
+      const runner = registry.get('ollama') as GenericLLMRunner;
+      expect(runner.getConfig().apiUrl).toBe('http://127.0.0.1:11500/v1/chat/completions');
     });
 
     it('copilot unavailable without GH_TOKEN', () => {

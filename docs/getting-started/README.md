@@ -109,6 +109,11 @@ export CODEX_API_KEY=cdx_...
 
 # Any OpenAI-compatible API — set OPENAI_API_KEY or LLM_API_KEY + LLM_API_URL
 export OPENAI_API_KEY=sk-...
+
+# Ollama (local models, incl. Gemma) — set OLLAMA_MODEL; runs via the
+# OpenAI-compatible GenericLLMRunner path, no dedicated runner needed.
+# See "Ollama (local models)" in the Runners Reference for the full recipe.
+export OLLAMA_MODEL=gemma4:31b
 ```
 
 ### For SDK users

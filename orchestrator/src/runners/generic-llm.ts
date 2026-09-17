@@ -53,6 +53,11 @@ export class GenericLLMRunner implements AgentRunner {
     this.config = config;
   }
 
+  /** Read-only accessor for the resolved config (used by env-preset tests). */
+  getConfig(): Readonly<GenericLLMConfig> {
+    return this.config;
+  }
+
   async run(ctx: AgentContext): Promise<AgentResult> {
     const messages = this.buildMessages(ctx);
 
