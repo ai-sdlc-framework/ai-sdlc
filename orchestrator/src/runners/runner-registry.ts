@@ -17,7 +17,28 @@ import {
   DEFAULT_ANTHROPIC_API_URL,
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_GENERIC_LLM_MODEL,
+  DEFAULT_OLLAMA_API_URL,
+  DEFAULT_OLLAMA_API_KEY,
 } from '../defaults.js';
+
+/**
+ * Resolve the Ollama OpenAI-compatible chat-completions URL.
+ *
+ * Precedence: explicit `OLLAMA_API_URL` > derived from `OLLAMA_HOST` >
+ * hard-coded localhost default. `OLLAMA_HOST` (the var Ollama itself reads,
+ * e.g. `127.0.0.1:11434` or `http://myhost:11434`) is normalized to include
+ * a scheme and the `/v1/chat/completions` suffix.
+ */
+function resolveOllamaApiUrl(env: Record<string, string | undefined>): string {
+  if (env.OLLAMA_API_URL) return env.OLLAMA_API_URL;
+  if (env.OLLAMA_HOST) {
+    const host = /^https?:\/\//.test(env.OLLAMA_HOST)
+      ? env.OLLAMA_HOST
+      : `http://${env.OLLAMA_HOST}`;
+    return `${host.replace(/\/+$/, '')}/v1/chat/completions`;
+  }
+  return DEFAULT_OLLAMA_API_URL;
+}
 
 export interface RegisteredRunner {
   name: string;
@@ -179,6 +200,23 @@ export class RunnerRegistry {
           apiUrl: env.ANTHROPIC_API_URL ?? DEFAULT_ANTHROPIC_API_URL,
           apiKey: anthropicKey,
           model: env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
+        }),
+        available: true,
+        source: 'env',
+      });
+    }
+
+    // Ollama runner from env — Ollama exposes an OpenAI-compatible endpoint,
+    // so this is a named preset over the same GenericLLMRunner (no new runner
+    // class). Selecting var is OLLAMA_MODEL.
+    const ollamaModel = env.OLLAMA_MODEL;
+    if (ollamaModel && !this.runners.has('ollama')) {
+      this.runners.set('ollama', {
+        name: 'ollama',
+        runner: new GenericLLMRunner({
+          apiUrl: resolveOllamaApiUrl(env),
+          apiKey: DEFAULT_OLLAMA_API_KEY,
+          model: ollamaModel,
         }),
         available: true,
         source: 'env',

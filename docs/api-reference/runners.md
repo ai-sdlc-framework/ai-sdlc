@@ -98,6 +98,39 @@ Invokes any OpenAI-compatible chat completions API over HTTP.
 import { GenericLLMRunner } from '@ai-sdlc/orchestrator';
 ```
 
+### Ollama (local models)
+
+There is **no dedicated Ollama runner class** — Ollama exposes an
+[OpenAI-compatible chat-completions endpoint](https://github.com/ollama/ollama/blob/main/docs/openai.md)
+that `GenericLLMRunner` already speaks. This is also how Gemma (and any other
+model you `ollama pull`) runs — via the OpenAI-compatible HTTP path, **not**
+via a Claude-Code model alias.
+
+**Generic form** (works today with any three env vars):
+
+```bash
+export LLM_API_URL=http://localhost:11434/v1/chat/completions
+export LLM_API_KEY=ollama          # any non-empty value; Ollama ignores it
+export LLM_MODEL=gemma4:31b
+ai-sdlc run --issue 42 --runner generic-llm
+```
+
+**`ollama` preset form** (first-class, named preset — mirrors `openai`/`anthropic`):
+
+```bash
+export OLLAMA_MODEL=gemma4:31b      # defaults apiUrl to http://localhost:11434/v1/chat/completions
+ai-sdlc run --issue 42 --runner ollama
+```
+
+Override the endpoint with `OLLAMA_API_URL` (exact URL, takes precedence) or
+`OLLAMA_HOST` (host[:port], normalized into the `/v1/chat/completions` URL —
+matches the env var Ollama itself reads):
+
+```bash
+export OLLAMA_MODEL=gemma4:31b
+export OLLAMA_HOST=127.0.0.1:11500  # -> http://127.0.0.1:11500/v1/chat/completions
+```
+
 ## Selecting a Runner
 
 ### `--runner <name>` flag
@@ -191,6 +224,7 @@ const defaultRunner = registry.getDefault();
 | `openai` | `OPENAI_API_KEY` | `env` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `env` |
 | `generic-llm` | `LLM_API_URL` + `LLM_API_KEY` | `env` |
+| `ollama` | `OLLAMA_MODEL` (overridable via `OLLAMA_API_URL`/`OLLAMA_HOST`) | `env` |
 
 ### Manual Registration
 
@@ -252,3 +286,6 @@ All CLI-based runners (Claude Code, Copilot, Cursor, Codex) follow the same subp
 | `AI_SDLC_FORMAT_COMMAND` | _(none)_ | Format command injected into agent prompts |
 | `AI_SDLC_COMMIT_MESSAGE_TEMPLATE` | `fix: resolve issue #{issueNumber}\n\n{issueTitle}` | Commit message template |
 | `AI_SDLC_COMMIT_CO_AUTHOR` | `Claude <noreply@anthropic.com>` | Co-author for commits |
+| `OLLAMA_MODEL` | _(none)_ | Selects the `ollama` runner preset; model name (e.g. `gemma4:31b`) |
+| `OLLAMA_API_URL` | `http://localhost:11434/v1/chat/completions` | Exact chat-completions URL override for the `ollama` preset |
+| `OLLAMA_HOST` | _(none)_ | Host[:port] override for the `ollama` preset (normalized to the `/v1/chat/completions` URL); ignored if `OLLAMA_API_URL` is set |

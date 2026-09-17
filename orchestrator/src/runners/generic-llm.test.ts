@@ -168,3 +168,37 @@ describe('GenericLLMRunner', () => {
     expect(body.messages[0].content).toBe('Custom system prompt');
   });
 });
+
+// Integration test against a REAL Ollama server (or any OpenAI-compatible
+// endpoint configured via LLM_API_URL). Skipped in CI/hermetic runs — only
+// exercised when a developer has Ollama running locally and sets
+// OLLAMA_MODEL (or the generic LLM_API_URL/LLM_API_KEY/LLM_MODEL trio).
+//
+//   export OLLAMA_MODEL=gemma4:31b   # or LLM_API_URL + LLM_API_KEY + LLM_MODEL
+//   pnpm --filter @ai-sdlc/orchestrator test -- generic-llm
+describe.skipIf(!process.env.LLM_API_URL && !process.env.OLLAMA_MODEL)(
+  'GenericLLMRunner — Ollama integration (real endpoint)',
+  () => {
+    it('completes a real chat request against the configured Ollama/OpenAI-compatible endpoint', async () => {
+      const apiUrl =
+        process.env.LLM_API_URL ??
+        (process.env.OLLAMA_HOST
+          ? `http://${process.env.OLLAMA_HOST.replace(/^https?:\/\//, '')}/v1/chat/completions`
+          : 'http://localhost:11434/v1/chat/completions');
+      const model = process.env.OLLAMA_MODEL ?? process.env.LLM_MODEL ?? 'gemma4:31b';
+      const apiKey = process.env.LLM_API_KEY ?? 'ollama';
+
+      const runner = new GenericLLMRunner({ apiUrl, apiKey, model });
+
+      const result = await runner.run(
+        makeContext({
+          issueTitle: 'Say hello',
+          issueBody: 'Reply with a short one-sentence greeting. No code changes needed.',
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(typeof result.summary).toBe('string');
+    }, 30_000);
+  },
+);
