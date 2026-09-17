@@ -22,7 +22,7 @@ per-PR error.
 
 ## Scope
 
-- Add a single `cli-attestation finalize` (name TBD) subcommand that, given a
+- Add a single `cli-attestation finalize` (name settled) subcommand that, given a
   task id + the three reviewer transcript sources (or auto-discovers them) +
   head SHA, runs: persist → emit-leaf (×3) → sign-v6 → verify, and reports the
   patch-id + status. Idempotent and safe to re-run.
@@ -42,6 +42,6 @@ per-PR error.
 
 ## References
 
-Adopter report local-trades LT-595 (LOW-7). Depends on AISDLC-610 patch-id
+Adopter report local-trades LT-595 (LOW-7). Builds on the AISDLC-610 patch-id (merged)
 lockstep (merged). Related: the multi-worktree transcript-routing scatter noted
 during the AISDLC-609/610/611 reconciles.
