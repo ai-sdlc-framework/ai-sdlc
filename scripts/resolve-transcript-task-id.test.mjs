@@ -98,6 +98,82 @@ describe('resolve-transcript-task-id.sh — attribution sources', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('trims whitespace from AI_SDLC_ACTIVE_TASK_ID before resolving', () => {
+    const dir = scratchDir();
+    try {
+      const result = run(dir, ['code-reviewer'], {
+        AI_SDLC_ACTIVE_TASK_ID: '  AISDLC-999  \n',
+      });
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout.trim(), 'AISDLC-999');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a whitespace-only AI_SDLC_ACTIVE_TASK_ID is treated as unattributable, not as an empty task id', () => {
+    const dir = scratchDir();
+    try {
+      const result = run(dir, ['code-reviewer'], { AI_SDLC_ACTIVE_TASK_ID: '   \n\t  ' });
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolve-transcript-task-id.sh — path-safety shape validation (security)', () => {
+  it('refuses a task id containing ".." (path traversal)', () => {
+    const dir = scratchDir();
+    try {
+      writeFileSync(join(dir, '.active-task'), '../../etc/passwd');
+      const result = run(dir, ['code-reviewer']);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /unsafe shape/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a task id containing a "/" (directory component)', () => {
+    const dir = scratchDir();
+    try {
+      writeFileSync(join(dir, '.active-task'), 'AISDLC-562/extra');
+      const result = run(dir, ['code-reviewer']);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /unsafe shape/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a task id from AI_SDLC_ACTIVE_TASK_ID that fails the shape check', () => {
+    const dir = scratchDir();
+    try {
+      const result = run(dir, ['code-reviewer'], { AI_SDLC_ACTIVE_TASK_ID: '..' });
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /unsafe shape/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a task id with dots/dashes/underscores in valid positions', () => {
+    const dir = scratchDir();
+    try {
+      writeFileSync(join(dir, '.active-task'), 'AISDLC-100.5_beta');
+      const result = run(dir, ['code-reviewer']);
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout.trim(), 'AISDLC-100.5_beta');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('resolve-transcript-task-id.sh — no-sentinel case (AC #1, #3)', () => {

@@ -54,4 +54,29 @@ EOF
   exit 1
 fi
 
+# Defense-in-depth: the resolved task id becomes a filesystem path component
+# (`.ai-sdlc/transcripts/<task-id>/`). A malformed id ('..', a '/'-containing
+# value, or anything else that isn't a plain path-safe token) could either
+# escape the transcripts directory (path traversal) or alias two distinct
+# runs onto the same directory via unexpected normalization — both are the
+# same evidence-destruction class this script exists to prevent. Refuse
+# rather than sanitize: sanitizing silently could still alias two different
+# malformed ids to the same safe string.
+if ! printf '%s' "$TASK_ID" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
+  cat >&2 <<EOF
+[resolve-transcript-task-id] refusing to write a transcript for reviewer '$REVIEWER': resolved task id has an unsafe shape.
+
+Resolved task id: '$TASK_ID'
+
+Task ids used as transcript directory names must match ^[A-Za-z0-9][A-Za-z0-9._-]*\$
+(no '/', no '..', no leading dot/dash, no whitespace). A malformed id could
+escape the transcripts directory (path traversal) or alias two distinct runs
+onto the same directory — the exact evidence-destruction class AISDLC-562
+exists to prevent.
+
+Fix: correct the value in <worktree>/.active-task or AI_SDLC_ACTIVE_TASK_ID.
+EOF
+  exit 1
+fi
+
 printf '%s\n' "$TASK_ID"
