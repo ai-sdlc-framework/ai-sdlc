@@ -5,6 +5,25 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.25.0...orchestrator-v0.26.0) (2026-09-17)
+
+
+### Features
+
+* add ollama env preset for GenericLLMRunner (AISDLC-622, closes [#966](https://github.com/ai-sdlc-framework/ai-sdlc/issues/966)) ([#1077](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1077)) ([3018cb9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3018cb9f9ec38673ad1a33334486027419309338))
+
+
+### Bug Fixes
+
+* **orchestrator:** use --model instead of -m for cursor-agent ([#1074](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1074)) ([cd5e98d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd5e98d53d83cfe37d2b8c35c706f061f4e30029))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.26.0
+
 ## [0.25.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.24.2...orchestrator-v0.25.0) (2026-09-15)
 
 

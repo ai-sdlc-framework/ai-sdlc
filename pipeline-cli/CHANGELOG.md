@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.25.0...pipeline-cli-v0.26.0) (2026-09-17)
+
+
+### Bug Fixes
+
+* hermetic DoR gate 3 skips url/github refs instead of failing them (AISDLC-621) ([#1075](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1075)) ([8b80e51](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b80e517a6a16d053184e527c1953c4fcc522f26))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.26.0
+
 ## [0.25.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.24.2...pipeline-cli-v0.25.0) (2026-09-15)
 
 
