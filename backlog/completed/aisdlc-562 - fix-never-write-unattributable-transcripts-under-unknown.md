@@ -3,7 +3,7 @@ id: AISDLC-562
 title: >-
   fix(attestation): never write an unattributable transcript under UNKNOWN —
   fail loudly or refuse
-status: To Do
+status: Done
 assignee: []
 labels:
   - adoption
@@ -58,14 +58,14 @@ naming inconvenience, it is evidence destruction.
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] #1 A reviewer run with no resolvable task id fails with a named,
+- [x] #1 A reviewer run with no resolvable task id fails with a named,
       actionable error instead of writing to `UNKNOWN/`
-- [ ] #2 No code path can write two different runs to the same transcript path
-- [ ] #3 The failure names both the sentinel and the env-var remedy
-- [ ] #4 Existing `.ai-sdlc/transcripts/UNKNOWN/` content in this repo is
+- [x] #2 No code path can write two different runs to the same transcript path
+- [x] #3 The failure names both the sentinel and the env-var remedy
+- [x] #4 Existing `.ai-sdlc/transcripts/UNKNOWN/` content in this repo is
       audited for inclusion in any signed envelope, with the finding stated
       explicitly in the PR body
-- [ ] #5 Hermetic tests cover the no-sentinel and the collision cases
+- [x] #5 Hermetic tests cover the no-sentinel and the collision cases
 <!-- SECTION:ACCEPTANCE:END -->
 
 ## Implementation Notes
@@ -79,4 +79,28 @@ the same three filenames.
 Fits the same pattern as AISDLC-556 and AISDLC-560: the framework degrades
 silently in the direction that looks like success. The correct default for a
 provenance mechanism is to refuse.
+
+### Resolution
+
+Extracted TASK_ID resolution into `scripts/resolve-transcript-task-id.sh`
+(precedence: `TASK_ID` env → `.active-task` sentinel → `AI_SDLC_ACTIVE_TASK_ID`
+env; refuses with a named, actionable error and writes nothing when none
+resolve). `code-reviewer.md`, `test-reviewer.md`, `code-reviewer-codex.md`,
+and `test-reviewer-codex.md` now call the script and, on failure, return a
+refusal verdict without performing any review. `security-reviewer.md` has no
+Bash tool, so it resolves `TASK_ID` via the Read tool on `.active-task` only
+and refuses (no Write call at all) when that file is missing/empty — its
+refusal message explains it cannot check `AI_SDLC_ACTIVE_TASK_ID` directly.
+
+Hermetic tests: `scripts/resolve-transcript-task-id.test.mjs` (16 cases,
+mkdtemp-isolated) covering resolution precedence, the no-sentinel refusal
+case, and the collision case (two concurrent unattributed runs in separate
+worktrees both refuse and neither prints/writes anything to collide on).
+
+Audit (AC #4): searched the full git history of `.ai-sdlc/attestations/*`
+and `.ai-sdlc/transcript-leaves*` (the only transcript-derived artifacts ever
+committed — raw `.ai-sdlc/transcripts/` is gitignored, local-disk-only) for
+any `UNKNOWN` task id. Zero matches, in the current tree and across all
+history (`git log --all -p` pickaxe + full-tree grep). No `UNKNOWN`-attributed
+transcript was ever hashed into a signed envelope in this repo.
 <!-- SECTION:NOTES:END -->

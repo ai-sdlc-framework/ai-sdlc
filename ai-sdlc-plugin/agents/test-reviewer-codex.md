@@ -31,10 +31,15 @@ The operator's cross-harness review convention: "Claude Code develops, Codex rev
 
 ## Step 0 — Initialize transcript (RFC-0042 Phase 1 — MANDATORY)
 
-Before invoking Codex, initialize the transcript file for proof-of-execution attestation:
+Before invoking Codex, initialize the transcript file for proof-of-execution attestation.
+
+**A transcript that cannot be attributed to a task MUST NOT be written (AISDLC-562).** Do not fall back to a literal `UNKNOWN` directory — two unrelated runs writing that same shared path silently overwrite each other's evidence, and an attestation that cannot be attributed to a task is indistinguishable from one that can.
 
 ```bash
-TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+TASK_ID="$(bash scripts/resolve-transcript-task-id.sh test-reviewer-codex)" || {
+  echo "Refusing to review: cannot attribute this run to a task (see error above)." >&2
+  exit 1
+}
 TRANSCRIPT_DIR=".ai-sdlc/transcripts/${TASK_ID}"
 TRANSCRIPT_FILE="${TRANSCRIPT_DIR}/test-reviewer-codex.jsonl"
 mkdir -p "$TRANSCRIPT_DIR"
@@ -43,10 +48,27 @@ printf '{"role":"user","content":"[transcript-init] test-reviewer-codex prompt r
 echo "Transcript initialized at: $TRANSCRIPT_FILE"
 ```
 
-After forming your verdict (Step 5), before cleanup (Step 6), append your response event. Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely:
+**If this Bash call exits non-zero, STOP IMMEDIATELY.** Do not invoke Codex, do not perform any review. Return the refusal envelope below as your ONLY output and do not proceed to Step 1:
+
+```json
+{
+  "approved": false,
+  "findings": [
+    {
+      "severity": "critical",
+      "file": null,
+      "line": null,
+      "message": "review refused: cannot attribute this run to a task — no .active-task sentinel and no AI_SDLC_ACTIVE_TASK_ID env var found in this worktree. See AISDLC-562."
+    }
+  ],
+  "summary": "Review refused — cannot attribute this run to a task (see finding for remediation)."
+}
+```
+
+After forming your verdict (Step 5), before cleanup (Step 6), append your response event (only reached if Step 0 succeeded). Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely:
 
 ```bash
-TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+TASK_ID="$(bash scripts/resolve-transcript-task-id.sh test-reviewer-codex)" || exit 1
 TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/test-reviewer-codex.jsonl"
 VERDICT_SUMMARY="$(cat <<'EOF'
 <paste your summary field here>
