@@ -7,8 +7,6 @@ labels:
   - docs
   - adopter-facing
   - attestation
-references:
-  - RFC-0047
 created: 2026-09-14
 ---
 

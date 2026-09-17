@@ -6,8 +6,6 @@ priority: low
 labels:
   - attestation
   - dx
-references:
-  - AISDLC-610
 created: 2026-09-14
 ---
 
