@@ -5,6 +5,15 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.21.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.21.0...ai-sdlc-plugin-v0.21.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* doctor runtime-deps-stale false positive on range pins (npm view --json) (AISDLC-624) ([#1079](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1079)) ([014b95d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/014b95dbe05bfca6c1cfafbd73d4f65ee6283402))
+* refuse unattributable reviewer transcripts (AISDLC-562) ([#970](https://github.com/ai-sdlc-framework/ai-sdlc/issues/970)) ([137ea02](https://github.com/ai-sdlc-framework/ai-sdlc/commit/137ea02bc7a897f60f3f70d844ce94c2e4b0dbd5))
+* reviewer attribution fails soft (unique UNKNOWN dir) instead of refusing (AISDLC-623) ([#1080](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1080)) ([8ac80d9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8ac80d9eddd8f14ab176ba30d8bcadb20e9dcd14))
+
 ## [0.21.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.20.2...ai-sdlc-plugin-v0.21.0) (2026-09-15)
 
 
