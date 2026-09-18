@@ -189,7 +189,7 @@ describe('resolve-transcript-task-id.sh — no-sentinel case (fail-soft-unique, 
     try {
       const result = run(dir, ['code-reviewer']);
       assert.equal(result.status, 0);
-      assert.match(result.stdout.trim(), /^UNKNOWN-code-reviewer-[0-9TZ]+-[0-9a-f]+$/);
+      assert.match(result.stdout.trim(), /^UNKNOWN-code-reviewer-[0-9TZ]+-[0-9a-f]+-[0-9]+$/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -232,6 +232,43 @@ describe('resolve-transcript-task-id.sh — no-sentinel case (fail-soft-unique, 
       const result = run(dir, ['security-reviewer-example']);
       assert.match(result.stderr, /security-reviewer-example/);
       assert.match(result.stdout.trim(), /^UNKNOWN-security-reviewer-example-/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('sanitizes an unsafe reviewer name in the synthesized id so it stays path-safe (defense-in-depth, AISDLC-623 review)', () => {
+    // The fail-soft branch exits 0 before the PRESENT-id shape guard, so the
+    // reviewer-name component ($1) must be sanitized by construction. A caller
+    // passing an unsafe name ('../evil', a slash) must NOT be able to produce
+    // an id that escapes .ai-sdlc/transcripts/.
+    const dir = scratchDir();
+    try {
+      for (const unsafe of ['../evil', 'a/b/c', 'has space', 'weird$name']) {
+        const result = run(dir, [unsafe]);
+        assert.equal(result.status, 0, `unsafe name "${unsafe}" must still fail soft`);
+        const id = result.stdout.trim();
+        // The whole synthesized id must satisfy the same path-shape guard the
+        // PRESENT-id path enforces — no '/', '..', whitespace, or '$'.
+        assert.match(id, /^UNKNOWN-[A-Za-z0-9._-]+-[0-9TZ]+-[0-9a-f]+-[0-9]+$/);
+        assert.ok(!id.includes('/'), `id must not contain '/' for "${unsafe}"`);
+        assert.ok(!id.includes('..'), `id must not contain '..' for "${unsafe}"`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('two same-reviewer runs in different processes get distinct ids via the PID component (macOS %N fallback hardening)', () => {
+    // On BSD/macOS `date +%N` yields no sub-second precision, so uniqueness
+    // leans on $RANDOM + the PID ($$). Two separate invocations are two
+    // separate processes, so the PID component differs (or, same PID reused
+    // across time, the timestamp/random differs) — ids must not collide.
+    const dir = scratchDir();
+    try {
+      const a = run(dir, ['code-reviewer']).stdout.trim();
+      const b = run(dir, ['code-reviewer']).stdout.trim();
+      assert.notEqual(a, b, 'two unattributed runs must produce distinct ids');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

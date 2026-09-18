@@ -80,9 +80,28 @@ if [ -z "$TASK_ID" ]; then
   esac
   # Portable random suffix: prefer bash's $RANDOM (always available in this
   # bash-shebang'd script); do NOT depend on `openssl` or `/dev/urandom`
-  # being present (BusyBox / minimal containers may lack both).
+  # being present (BusyBox / minimal containers may lack both). The process
+  # id ($$) is appended so that on platforms where `date +%N` is unsupported
+  # (BSD/macOS collapse MILLIS to '000') two same-second concurrent runs in
+  # DIFFERENT processes still get distinct ids — hardening the AISDLC-562
+  # no-collision property beyond the 16-bit $RANDOM alone.
   RANDOM_SUFFIX="$(printf '%04x' "$((RANDOM % 65536))" 2>/dev/null || echo "0000")"
-  TASK_ID="UNKNOWN-${REVIEWER}-${UTC_TIMESTAMP}${MILLIS}Z-${RANDOM_SUFFIX}"
+  # Defense-in-depth (AISDLC-623 review): the fail-soft branch exits 0 before
+  # reaching the PRESENT-id shape guard below, so the $REVIEWER component
+  # ($1) would otherwise be interpolated into a filesystem path component
+  # unvalidated. Every in-tree caller passes a trusted literal, but a future
+  # or ad-hoc caller passing an unsafe name ('..' / a '/'-containing value)
+  # must not be able to escape .ai-sdlc/transcripts/. Sanitize (not refuse —
+  # this branch must always proceed) any char outside the path-safe class to
+  # '_', guaranteeing the synthesized id satisfies the same
+  # ^[A-Za-z0-9][A-Za-z0-9._-]*$ contract the PRESENT-id path enforces.
+  # '.' is deliberately EXCLUDED from the allowed set (unlike the shape
+  # guard) so that a name like '../evil' collapses to '___evil' with no '..'
+  # substring at all — the rest of the id (timestamp/hex/pid) never contains
+  # a dot, so the synthesized id is guaranteed dot-free and cannot form a
+  # '..' segment. Real reviewer names only use alphanumerics and hyphens.
+  SAFE_REVIEWER="$(printf '%s' "$REVIEWER" | tr -c 'A-Za-z0-9_-' '_')"
+  TASK_ID="UNKNOWN-${SAFE_REVIEWER}-${UTC_TIMESTAMP}${MILLIS}Z-${RANDOM_SUFFIX}-$$"
 
   cat >&2 <<EOF
 [resolve-transcript-task-id] WARNING: proceeding with an UNATTRIBUTED transcript for reviewer '$REVIEWER'.
