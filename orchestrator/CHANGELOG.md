@@ -5,6 +5,20 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.26.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.26.0...orchestrator-v0.26.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* reviewer attribution fails soft (unique UNKNOWN dir) instead of refusing (AISDLC-623) ([#1080](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1080)) ([8ac80d9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8ac80d9eddd8f14ab176ba30d8bcadb20e9dcd14))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.26.1
+
 ## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.25.0...orchestrator-v0.26.0) (2026-09-17)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.26.0...pipeline-cli-v0.26.1) (2026-09-18)
+
+
+### Miscellaneous
+
+* **pipeline-cli:** Synchronize node-packages versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.26.1
+
 ## [0.26.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.25.0...pipeline-cli-v0.26.0) (2026-09-17)
 
 
