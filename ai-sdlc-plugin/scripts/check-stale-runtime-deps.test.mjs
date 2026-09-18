@@ -47,13 +47,25 @@ function writeInstalledPackage(pluginDir, name, version) {
   writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version }, null, 2));
 }
 
-/** Build a fake `npm` that responds to `npm view <spec> version`. */
+/**
+ * Build a fake `npm` that responds to `npm view <spec> version --json`.
+ *
+ * `viewVersions` maps a spec to either:
+ *   - a single version string ("0.20.1") -> stubs the SINGLE-match `--json`
+ *     response, a bare JSON string: `"0.20.1"`.
+ *   - an array of version strings (["0.25.0", "0.26.0"]) -> stubs the
+ *     MULTI-match `--json` response, a JSON array (AISDLC-624: this is what
+ *     a RANGE pin matching more than one published version returns).
+ */
 function buildFakeNpm(viewVersions) {
   const dir = mkdtempSync(join(tmpdir(), 'aisdlc-580-npm-stub-'));
   const binDir = join(dir, 'bin');
   mkdirSync(binDir, { recursive: true });
   const cases = Object.entries(viewVersions)
-    .map(([spec, version]) => `    "${spec}") echo "${version}"; exit 0 ;;`)
+    .map(([spec, version]) => {
+      const json = JSON.stringify(version).replace(/"/g, '\\"');
+      return `    "${spec}") echo "${json}"; exit 0 ;;`;
+    })
     .join('\n');
   const stub = `#!/usr/bin/env bash
 if [ "$1" = "view" ]; then
@@ -180,6 +192,93 @@ describe('check-stale-runtime-deps.mjs — detects drift', () => {
     assert.equal(exitCode, 0);
     const fields = stdout.trim().split('\t');
     assert.deepEqual(fields, ['@ai-sdlc/pipeline-cli', '0.20.0', '0.20.1', compoundPin]);
+  });
+});
+
+describe('check-stale-runtime-deps.mjs — AISDLC-624 range-pin multi-match resolution', () => {
+  it('resolves a range pin whose npm view --json returns a multi-element array to the semver-MAX bare version, and reports NOTHING when installed already equals that max', () => {
+    // This is the exact false-positive from the bug report: pin
+    // ">=0.25.0 <1.0.0" matches both 0.25.0 and 0.26.0. Installed is
+    // 0.26.0 (the real max) — this must NOT be reported as stale.
+    const pluginDir = join(workDir, 'range-pin-multi-match-converged');
+    const pin = '>=0.25.0 <1.0.0';
+    writePluginJson(pluginDir, { '@ai-sdlc/orchestrator': pin });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/orchestrator', '0.26.0');
+    const npmBinDir = buildFakeNpm({
+      [`@ai-sdlc/orchestrator@${pin}`]: ['0.25.0', '0.26.0'],
+    });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    assert.equal(
+      stdout.trim(),
+      '',
+      'installed == semver-max of the range must NOT be reported stale',
+    );
+  });
+
+  it('reports stale when a range pin resolves (via multi-match array) to a version ahead of what is installed', () => {
+    const pluginDir = join(workDir, 'range-pin-multi-match-stale');
+    const pin = '>=0.25.0 <1.0.0';
+    writePluginJson(pluginDir, { '@ai-sdlc/orchestrator': pin });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/orchestrator', '0.25.0');
+    const npmBinDir = buildFakeNpm({
+      [`@ai-sdlc/orchestrator@${pin}`]: ['0.25.0', '0.26.0'],
+    });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    assert.equal(
+      stdout.trim(),
+      `@ai-sdlc/orchestrator\t0.25.0\t0.26.0\t${pin}`,
+      'bare semver-max target must be reported, not the decorated npm-view string',
+    );
+  });
+
+  it('a single-match pin whose npm view --json returns a bare JSON string passes through unchanged', () => {
+    const pluginDir = join(workDir, 'single-match-json-string');
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': '^0.20.0' });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.20.0');
+    const npmBinDir = buildFakeNpm({ '@ai-sdlc/pipeline-cli@^0.20.0': '0.20.1' });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    assert.equal(stdout.trim(), '@ai-sdlc/pipeline-cli\t0.20.0\t0.20.1\t^0.20.0');
+  });
+
+  it('picks the correct semver-MAX from an array containing 0.9.0 and 0.10.0 (not a lexical sort)', () => {
+    // Lexical string comparison would (wrongly) rank "0.9.0" > "0.10.0"
+    // because "9" > "1" as characters. A correct numeric semver compare
+    // must pick 0.10.0.
+    const pluginDir = join(workDir, 'semver-max-numeric-not-lexical');
+    const pin = '>=0.9.0 <1.0.0';
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': pin });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.10.0');
+    const npmBinDir = buildFakeNpm({
+      [`@ai-sdlc/pipeline-cli@${pin}`]: ['0.9.0', '0.10.0'],
+    });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    assert.equal(
+      stdout.trim(),
+      '',
+      'installed 0.10.0 must equal the numeric semver-max of [0.9.0, 0.10.0] -> not stale',
+    );
+  });
+
+  it('picks the correct semver-MAX from an array in descending order too (order-independent)', () => {
+    const pluginDir = join(workDir, 'semver-max-order-independent');
+    const pin = '>=0.9.0 <1.0.0';
+    writePluginJson(pluginDir, { '@ai-sdlc/pipeline-cli': pin });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/pipeline-cli', '0.9.0');
+    const npmBinDir = buildFakeNpm({
+      [`@ai-sdlc/pipeline-cli@${pin}`]: ['0.10.0', '0.9.0'],
+    });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    assert.equal(stdout.trim(), `@ai-sdlc/pipeline-cli\t0.9.0\t0.10.0\t${pin}`);
   });
 });
 
