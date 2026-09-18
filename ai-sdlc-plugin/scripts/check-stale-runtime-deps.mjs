@@ -133,18 +133,63 @@ function main() {
 }
 
 /**
+ * Compare two bare semver strings (`major.minor.patch[-prerelease]`).
+ * Returns a positive number if `a` > `b`, negative if `a` < `b`, 0 if equal.
+ * Dependency-free (no `semver` package is reachable from this script) —
+ * intentionally small: numeric major/minor/patch compare, with any
+ * pre-release/build-metadata suffix compared lexically as a tiebreaker only
+ * after the numeric core is equal. This is sufficient for choosing the
+ * highest of a small set of published, mostly-non-prerelease versions; it is
+ * not a full semver-precedence implementation.
+ */
+function compareSemver(a, b) {
+  const parse = (v) => {
+    const [core, ...rest] = String(v).split('-');
+    const prerelease = rest.join('-');
+    const parts = core.split('.').map((n) => Number.parseInt(n, 10) || 0);
+    return { parts, prerelease };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa.parts[i] || 0) - (pb.parts[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  // Numeric core is equal — a version with NO pre-release suffix outranks
+  // one that has one (per semver precedence rules), then fall back to a
+  // lexical compare of the suffixes as a tiebreaker.
+  if (!pa.prerelease && pb.prerelease) return 1;
+  if (pa.prerelease && !pb.prerelease) return -1;
+  if (pa.prerelease < pb.prerelease) return -1;
+  if (pa.prerelease > pb.prerelease) return 1;
+  return 0;
+}
+
+/**
  * Resolve the version npm would actually install for `name@pin` via
- * `npm view name@pin version`. Returns `{ target: '' }` on any failure
- * (missing npm, non-zero exit, empty output) — callers treat an empty
- * `target` as "cannot determine, fail open". Returns `{ target: '', timedOut:
- * true }` specifically when the `spawnSync` timeout budget was exceeded, so
- * callers CAN distinguish "npm view genuinely timed out" from "npm view ran
- * to completion and failed/returned nothing" (AISDLC-608) — the two were
- * previously conflated into the same empty-string result.
+ * `npm view name@pin version --json`. Returns `{ target: '' }` on any
+ * failure (missing npm, non-zero exit, empty/unparseable output) — callers
+ * treat an empty `target` as "cannot determine, fail open". Returns
+ * `{ target: '', timedOut: true }` specifically when the `spawnSync` timeout
+ * budget was exceeded, so callers CAN distinguish "npm view genuinely timed
+ * out" from "npm view ran to completion and failed/returned nothing"
+ * (AISDLC-608) — the two were previously conflated into the same
+ * empty-string result.
+ *
+ * AISDLC-624: `npm view <spec> version` WITHOUT `--json` prints a DECORATED
+ * multi-line form (`@scope/name@x.y.z 'x.y.z'`, one line per match) whenever
+ * a RANGE pin (e.g. `>=0.25.0 <1.0.0`) resolves to more than one published
+ * version. Taking the last line as a bare version string was wrong — it's
+ * the whole decorated line, not a version — causing a permanent false-
+ * positive stale warning for every multi-match range pin. `--json` always
+ * returns machine-parseable output: a JSON string for a single match, or a
+ * JSON array of bare version strings for multiple matches, so the target can
+ * be resolved unambiguously (semver-max of the array = what npm would
+ * actually install for that range).
  */
 function resolveRegistryVersion(name, pin, timeoutMs) {
   try {
-    const result = spawnSync('npm', ['view', `${name}@${pin}`, 'version'], {
+    const result = spawnSync('npm', ['view', `${name}@${pin}`, 'version', '--json'], {
       encoding: 'utf-8',
       timeout: timeoutMs,
     });
@@ -157,11 +202,26 @@ function resolveRegistryVersion(name, pin, timeoutMs) {
       return { target: '', timedOut: true };
     }
     if (result.error || result.status !== 0) return { target: '' };
-    const lines = (result.stdout || '')
-      .trim()
-      .split('\n')
-      .filter((l) => l.length > 0);
-    return { target: lines.length > 0 ? lines[lines.length - 1].trim() : '' };
+    const raw = (result.stdout || '').trim();
+    if (!raw) return { target: '' };
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { target: '' };
+    }
+
+    if (typeof parsed === 'string') {
+      return { target: parsed };
+    }
+    if (Array.isArray(parsed)) {
+      const versions = parsed.filter((v) => typeof v === 'string' && v.length > 0);
+      if (versions.length === 0) return { target: '' };
+      const max = versions.reduce((best, v) => (compareSemver(v, best) > 0 ? v : best));
+      return { target: max };
+    }
+    return { target: '' };
   } catch {
     return { target: '' };
   }
