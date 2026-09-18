@@ -135,7 +135,13 @@ describe('AISDLC-625 — adopter-environment reviewer attribution smoke test', (
     }
   });
 
-  it('two separate no-attribution consumer-repo runs never resolve to the same transcript id (the AISDLC-562 no-collision property, preserved under fail-soft)', () => {
+  it('two separate no-attribution runs of the SAME reviewer never resolve to the same transcript id (the AISDLC-562 no-collision property, preserved under fail-soft)', () => {
+    // Use the SAME reviewer name for BOTH runs: the reviewer name is embedded
+    // in the synthesized id, so passing different names would make the ids
+    // differ trivially without exercising the timestamp/random/pid uniqueness
+    // logic at all. Same name means the ids can ONLY differ via that
+    // uniqueness suffix — which is exactly the AISDLC-562 no-collision property
+    // (two concurrent unattributed runs of the same reviewer type).
     const dirA = consumerRepoDir();
     const dirB = consumerRepoDir();
     try {
@@ -145,7 +151,7 @@ describe('AISDLC-625 — adopter-environment reviewer attribution smoke test', (
         env,
         encoding: 'utf-8',
       });
-      const b = spawnSync('bash', [PLUGIN_RESOLVER, 'test-reviewer'], {
+      const b = spawnSync('bash', [PLUGIN_RESOLVER, 'code-reviewer'], {
         cwd: dirB,
         env,
         encoding: 'utf-8',
