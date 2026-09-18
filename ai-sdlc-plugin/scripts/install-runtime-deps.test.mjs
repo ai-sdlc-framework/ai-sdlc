@@ -68,10 +68,14 @@ function buildFakeNpm({ writeEntryPoints, exitCode = 0, viewVersions = {} }) {
   const binDir = join(dir, 'bin');
   mkdirSync(binDir, { recursive: true });
 
-  // AISDLC-580: `npm view <name>@<pin> version` responses for the
-  // version-convergence check. Keyed by the exact "name@pin" spec string;
-  // an unmatched spec exits 1 (simulating a registry miss / offline), which
-  // the script must fail open on rather than blocking the install.
+  // AISDLC-580 / AISDLC-624: `npm view <name>@<pin> version --json` responses
+  // for the version-convergence check (delegated to check-stale-runtime-deps.mjs,
+  // which switched to `--json` in AISDLC-624). Keyed by the exact "name@pin"
+  // spec string; an unmatched spec exits 1 (simulating a registry miss /
+  // offline), which the script must fail open on rather than blocking the
+  // install. The response is JSON-encoded to match real `npm view --json`
+  // output: a single-match pin yields a bare JSON string ("0.20.1"); a range
+  // pin matching multiple versions yields a JSON array (["0.25.0","0.26.0"]).
   const viewHandlerBash =
     Object.keys(viewVersions).length > 0
       ? `
@@ -79,7 +83,10 @@ if [ "$1" = "view" ]; then
   spec="$2"
   case "$spec" in
 ${Object.entries(viewVersions)
-  .map(([spec, version]) => `    "${spec}") echo "${version}"; exit 0 ;;`)
+  .map(
+    ([spec, version]) =>
+      `    "${spec}") echo "${JSON.stringify(version).replace(/"/g, '\\"')}"; exit 0 ;;`,
+  )
   .join('\n')}
     *) exit 1 ;;
   esac
