@@ -280,6 +280,44 @@ describe('check-stale-runtime-deps.mjs — AISDLC-624 range-pin multi-match reso
     assert.equal(exitCode, 0);
     assert.equal(stdout.trim(), `@ai-sdlc/pipeline-cli\t0.9.0\t0.10.0\t${pin}`);
   });
+
+  it('fails open (reports nothing) when npm view --json returns an empty array', () => {
+    // A range pin that resolves to zero published versions yields `[]`.
+    // After filtering there is no candidate, so target is '' and the
+    // package is silently skipped — never reported stale on absent data.
+    const pluginDir = join(workDir, 'range-pin-empty-array');
+    const pin = '>=99.0.0 <100.0.0';
+    writePluginJson(pluginDir, { '@ai-sdlc/orchestrator': pin });
+    writeInstalledPackage(pluginDir, '@ai-sdlc/orchestrator', '0.26.0');
+    const npmBinDir = buildFakeNpm({ [`@ai-sdlc/orchestrator@${pin}`]: [] });
+
+    const { exitCode, stdout } = run(pluginDir, npmBinDir);
+    assert.equal(exitCode, 0);
+    assert.equal(stdout.trim(), '', 'empty --json array must fail open, not report stale');
+  });
+
+  it('fails open when npm view --json returns a non-string/non-array shape (null or object)', () => {
+    // Defensive: any unexpected JSON shape (null, object) must be treated
+    // as "cannot determine" and fail open, never coerced into a target.
+    for (const [label, shape] of [
+      ['null', null],
+      ['object', { latest: '0.26.0' }],
+    ]) {
+      const pluginDir = join(workDir, `range-pin-shape-${label}`);
+      const pin = '>=0.25.0 <1.0.0';
+      writePluginJson(pluginDir, { '@ai-sdlc/orchestrator': pin });
+      writeInstalledPackage(pluginDir, '@ai-sdlc/orchestrator', '0.26.0');
+      const npmBinDir = buildFakeNpm({ [`@ai-sdlc/orchestrator@${pin}`]: shape });
+
+      const { exitCode, stdout } = run(pluginDir, npmBinDir);
+      assert.equal(exitCode, 0);
+      assert.equal(
+        stdout.trim(),
+        '',
+        `${label} --json shape must fail open, not report stale`,
+      );
+    }
+  });
 });
 
 describe('check-stale-runtime-deps.mjs — fails open', () => {
