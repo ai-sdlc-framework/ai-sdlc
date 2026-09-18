@@ -311,11 +311,7 @@ describe('check-stale-runtime-deps.mjs — AISDLC-624 range-pin multi-match reso
 
       const { exitCode, stdout } = run(pluginDir, npmBinDir);
       assert.equal(exitCode, 0);
-      assert.equal(
-        stdout.trim(),
-        '',
-        `${label} --json shape must fail open, not report stale`,
-      );
+      assert.equal(stdout.trim(), '', `${label} --json shape must fail open, not report stale`);
     }
   });
 });
