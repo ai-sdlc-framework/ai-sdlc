@@ -250,6 +250,51 @@ rm -rf "$MY_VAR/$subdirectory"
 scans `ai-sdlc-plugin/` and `scripts/` for unguarded variable `rm` patterns. Adding a new
 `rm -rf "$VAR/..."` without a guard within 5 lines will fail the test and block the PR.
 
+## Changing a Shared Surface — Test the Boundary, Not Just the Unit
+
+Some code is used across a boundary you don't exercise in normal development: a
+script the **plugin bundle** ships to adopters, a helper **multiple packages**
+import, a **contract** (attribution, attestation, config shape) that consumers
+depend on. The most damaging regressions this project has shipped were not wrong
+logic — the unit tests passed. They were **a shared surface that changed while a
+consumer or environment we don't run locally was left behind.**
+
+> **Reference incident:** the 0.21.0 adopter-brick
+> ([`docs/audits/2026-09-18-0.21.0-adopter-brick.md`](docs/audits/2026-09-18-0.21.0-adopter-brick.md)).
+> A reviewer-attribution change shipped with 327 lines of passing tests — all of
+> which tested the script's logic *in the monorepo*, where attribution always
+> resolves. The script was never bundled into the plugin, and the reviewer
+> prompt hardcoded a repo-root path, so in an **adopter** repo every review
+> hard-refused and the whole pipeline bricked. Our CI stayed green because it
+> cannot reproduce the adopter environment by construction.
+
+Before merging a change to a shared surface, work this checklist:
+
+1. **Enumerate the consumers.** Who reads this script / helper / contract? Grep
+   for callers — including `ai-sdlc-plugin/agents/*.md` prompt bodies, sibling
+   package tests, and any `.sh` invoked from more than one place. List them in
+   the PR body.
+2. **Cover the degraded / absent environment, not only the happy path.** If the
+   change assumes a file exists, a sentinel is present, or an env var is set,
+   add a test for when it **isn't** — that is the adopter/consumer condition the
+   monorepo never hits. A test that only exercises the in-repo state is testing
+   the one environment that can't break.
+3. **If it ships to adopters, prove the bundle contains it.** A script a reviewer
+   prompt references MUST exist in `ai-sdlc-plugin/scripts/` and resolve via a
+   portable path (`CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DIR`, then repo-root) —
+   never a hardcoded repo-root path. This is enforced by a bundle-parity gate
+   (AISDLC-626) and an adopter-environment reviewer smoke test (AISDLC-625),
+   both wired into `pnpm test`.
+4. **Update every stub in lockstep.** When you change what a shared script
+   emits/consumes, every test with its own fake for that surface (e.g. a fake
+   `npm view`) must be updated in the same PR — a sibling stub left on the old
+   contract will fail only in full-suite CI, or worse, not at all.
+5. **Put trust gates at the boundary that owns the trust, not in the adopter's
+   critical path.** See
+   [`docs/operations/fail-soft-at-the-adopter-boundary.md`](docs/operations/fail-soft-at-the-adopter-boundary.md):
+   a gate that protects an artifact (e.g. attestation integrity) belongs at the
+   signer, never as a step that can hard-block an adopter's core loop.
+
 ## Commit Messages
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) enforced by [commitlint](https://commitlint.js.org/). Every commit message must follow this format:
