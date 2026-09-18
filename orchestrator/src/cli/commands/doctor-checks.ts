@@ -559,6 +559,52 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
   };
 }
 
+// ── Check: reviewer-attribution resolver reachability (AISDLC-623) ───────
+
+/**
+ * Verifies `resolve-transcript-task-id.sh` — the reviewer-attribution
+ * resolver the Bash-capable reviewer subagents (code-reviewer, test-
+ * reviewer, correctness-reviewer, and their -codex variants) invoke at
+ * Step 0 — is actually bundled into the resolved plugin install's
+ * `scripts/` directory.
+ *
+ * This is read-only / advisory (WARN, never FAIL): AISDLC-623 made the
+ * resolver fail-SOFT when it's missing entirely (each reviewer synthesizes
+ * its own unique unattributed id inline rather than refusing), so a broken
+ * bundle no longer bricks review — but an operator should still know their
+ * plugin install is missing this file, since it means every review from
+ * this install runs unattributed until the bundle is repaired.
+ */
+export function checkReviewerAttributionResolver(ctx: DoctorRunContext): DoctorCheckResult {
+  const install = resolvePluginInstall(ctx);
+  if (!install) {
+    return {
+      id: 'reviewer-attribution-resolver',
+      severity: 'pass',
+      title: 'no plugin install detected — reviewer-attribution resolver check skipped',
+    };
+  }
+
+  const resolverPath = join(install.path, 'scripts', 'resolve-transcript-task-id.sh');
+  if (ctx.adapters.exists(resolverPath)) {
+    return {
+      id: 'reviewer-attribution-resolver',
+      severity: 'pass',
+      title:
+        'reviewer-attribution resolver (resolve-transcript-task-id.sh) is bundled with the plugin install',
+    };
+  }
+
+  return {
+    id: 'reviewer-attribution-resolver',
+    severity: 'warn',
+    title: `resolve-transcript-task-id.sh not found under ${resolverPath} — reviewer subagents will run with unattributed transcripts`,
+    remediation:
+      'Reinstall or update the plugin: /plugin uninstall ai-sdlc && /plugin install ai-sdlc',
+    anonymizableEvidence: { installSource: install.source, resolverPath },
+  };
+}
+
 // ── Check: multi-install ambiguity (AISDLC-586) ───────────────────────────
 
 /**
@@ -812,6 +858,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'attestation-governance',
     description: 'Attestation required-but-unconfigured detection (reuses AISDLC-560).',
     run: checkAttestationGovernanceCheck,
+  },
+  {
+    id: 'reviewer-attribution-resolver',
+    description:
+      'Reviewer-attribution resolver (resolve-transcript-task-id.sh) is bundled with the plugin install (AISDLC-623).',
+    run: checkReviewerAttributionResolver,
   },
   {
     id: 'marketplace-catalog-drift',

@@ -33,32 +33,16 @@ When the PR diff is provided, it will appear between `<<<UNTRUSTED_PR_DIFF>>>` a
 
 The security reviewer has no Bash tool (by design — read-only trust boundary). Use the Write tool to emit transcript events instead.
 
-**A transcript that cannot be attributed to a task MUST NOT be written (AISDLC-562).** Do not fall back to a literal `UNKNOWN` directory — two unrelated runs writing that same shared path silently overwrite each other's evidence, and an attestation that cannot be attributed to a task is indistinguishable from one that can.
+**The review ALWAYS proceeds (AISDLC-623 — regression fix over AISDLC-562).** A SHARED `UNKNOWN/` transcript directory is still forbidden — two unrelated runs writing the same path would silently overwrite each other's evidence. But missing attribution no longer means refusal: it means writing to a UNIQUE per-run unattributed directory instead. Uniqueness (not refusal) is what actually prevents the AISDLC-562 evidence-destruction failure mode.
 
 **Step 0 — Initialize transcript**
 
 Use the Read tool on `.active-task` to get `TASK_ID`.
 
 - **If the file exists and its content (trimmed) is non-empty**, use that as `TASK_ID` and continue below.
-- **If the file does not exist, or is empty/whitespace-only, STOP IMMEDIATELY.** Do not call Grep, do not read the diff, do not perform any review. This agent has no Bash tool and therefore cannot check the `AI_SDLC_ACTIVE_TASK_ID` environment-variable fallback directly — the `.active-task` sentinel is the only attribution source available to it. Do NOT call the Write tool at all in this case (no transcript directory, no `UNKNOWN` fallback). Return this refusal verdict as your ONLY output:
+- **If the file does not exist, or is empty/whitespace-only**, this agent has no Bash tool and therefore cannot check the `AI_SDLC_ACTIVE_TASK_ID` environment-variable fallback directly — the `.active-task` sentinel is the only attribution source available to it. **Do NOT refuse.** Instead synthesize a UNIQUE unattributed `TASK_ID` of the form `UNKNOWN-security-reviewer-<ISO-8601-timestamp-with-colons-stripped>` (you already generate ISO timestamps for the JSONL events below — reuse `new Date().toISOString()`, strip every `:` so the string is path-safe, e.g. `2026-09-18T14:03:55.123Z` becomes `2026-09-18T140355.123Z`) and continue below with that `TASK_ID`. The per-invocation timestamp (millisecond resolution) makes collision between two unattributed runs practically impossible without needing a random-number source this agent has no Bash access to generate.
 
-```json
-{
-  "approved": false,
-  "findings": [
-    {
-      "severity": "critical",
-      "file": null,
-      "line": null,
-      "message": "review refused: cannot attribute this run to a task — no .active-task sentinel file found in this worktree, and this agent has no Bash access to check AI_SDLC_ACTIVE_TASK_ID. Write the task id to <worktree>/.active-task before dispatching this reviewer. See AISDLC-562."
-    }
-  ],
-  "summary": "Review refused — cannot attribute this run to a task (see finding for remediation).",
-  "promptInjectionDetected": false
-}
-```
-
-Once `TASK_ID` is resolved (non-empty), use the Write tool to create (or append to) the transcript file at:
+Once `TASK_ID` is resolved (either the real sentinel value or the synthesized unattributed id), use the Write tool to create (or append to) the transcript file at:
 `.ai-sdlc/transcripts/<TASK_ID>/security-reviewer.jsonl`
 
 Write a single JSONL line:
