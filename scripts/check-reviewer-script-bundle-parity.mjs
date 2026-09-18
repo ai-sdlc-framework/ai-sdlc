@@ -48,13 +48,25 @@ const __dirname_ = fileURLToPath(new URL('.', import.meta.url));
 const DEFAULT_REPO_ROOT = join(__dirname_, '..');
 
 /**
- * Matches `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh` and
- * `${CLAUDE_PLUGIN_DIR}/scripts/<name>.sh` (with or without a `:-...}`
- * bash-default-value suffix inside the braces, e.g.
- * `${CLAUDE_PLUGIN_ROOT:-}/scripts/foo.sh`).
+ * Matches a reviewer `.md`'s reference to a bundled script resolved through the
+ * plugin root, in either bash form:
+ *   - braced:    `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.sh` /
+ *                `${CLAUDE_PLUGIN_DIR}/scripts/<name>.sh` (with or without a
+ *                `:-...` bash-default suffix inside the braces, e.g.
+ *                `${CLAUDE_PLUGIN_ROOT:-}/scripts/foo.sh`)
+ *   - braceless: `$CLAUDE_PLUGIN_ROOT/scripts/<name>.sh` /
+ *                `$CLAUDE_PLUGIN_DIR/scripts/<name>.sh`
+ *
+ * KNOWN LIMITATION (AISDLC-626 review): this is a single-idiom allowlist, not a
+ * general bash invocation detector. A reference routed through an intermediate
+ * variable (e.g. `PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_ROOT}/scripts"; bash
+ * "$PLUGIN_SCRIPTS_DIR/foo.sh"`) would evade this scan — the exact false-
+ * negative shape behind AISDLC-562/#970. Robustly catching that needs bash
+ * variable tracking; until then, keep reviewer `.md` files on the direct idiom
+ * above so this gate stays authoritative.
  */
 const PLUGIN_ROOT_SCRIPT_REF =
-  /\$\{CLAUDE_PLUGIN_(?:ROOT|DIR)(?::-[^}]*)?\}\/scripts\/([A-Za-z0-9_-]+\.sh)/g;
+  /\$(?:\{CLAUDE_PLUGIN_(?:ROOT|DIR)(?::-[^}]*)?\}|CLAUDE_PLUGIN_(?:ROOT|DIR))\/scripts\/([A-Za-z0-9_-]+\.sh)/g;
 
 /** List every `*.md` file directly under `ai-sdlc-plugin/agents/`. */
 export function listAgentMarkdownFiles(repoRoot) {

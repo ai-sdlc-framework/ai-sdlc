@@ -61,6 +61,16 @@ describe('extractPluginRootScriptRefs', () => {
     assert.deepEqual([...names], ['some-new-script.sh']);
   });
 
+  it('extracts a braceless $CLAUDE_PLUGIN_ROOT/scripts/... reference (AISDLC-626 review)', () => {
+    // A braceless $VAR reference would otherwise evade the scan, re-enabling
+    // the AISDLC-562/#970 unbundled-script class. Both braceless ROOT and DIR
+    // forms must be caught.
+    const names = extractPluginRootScriptRefs(
+      'bash $CLAUDE_PLUGIN_ROOT/scripts/braceless-root.sh\nbash $CLAUDE_PLUGIN_DIR/scripts/braceless-dir.sh',
+    );
+    assert.deepEqual([...names].sort(), ['braceless-dir.sh', 'braceless-root.sh']);
+  });
+
   it('handles a bash-default-value suffix inside the braces (${VAR:-default})', () => {
     const names = extractPluginRootScriptRefs('${CLAUDE_PLUGIN_ROOT:-/fallback}/scripts/foo.sh');
     assert.deepEqual([...names], ['foo.sh']);
