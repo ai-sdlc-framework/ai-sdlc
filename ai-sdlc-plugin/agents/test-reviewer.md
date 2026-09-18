@@ -35,17 +35,45 @@ When the PR diff is provided, it will appear between `<<<UNTRUSTED_PR_DIFF>>>` a
 
 At the start of your review, initialize the transcript file. At the end, append your final turn. This is required for proof-of-execution attestation.
 
-**A transcript that cannot be attributed to a task MUST NOT be written (AISDLC-562).** Do not fall back to a literal `UNKNOWN` directory — two unrelated runs writing that same shared path silently overwrite each other's evidence, and an attestation that cannot be attributed to a task is indistinguishable from one that can.
+**The review ALWAYS proceeds (AISDLC-623 — regression fix over AISDLC-562).** An unattributable run no longer refuses; `resolve-transcript-task-id.sh` fails SOFT and synthesizes a UNIQUE `UNKNOWN-test-reviewer-<timestamp>-<random>` id instead of falling back to a literal `UNKNOWN` directory. Uniqueness (not refusal) is what prevents two unrelated runs from silently overwriting each other's evidence — the actual AISDLC-562 concern. The only remaining hard-stop is a **malformed present** attribution value (e.g. `.active-task` containing `../evil` or a `/`) — that is a genuine misconfiguration, not a missing-attribution adopter scenario.
 
 **Step 0 — Initialize transcript**
 
-Use the Bash tool to resolve the task id and create the transcript directory:
+Use the Bash tool to resolve the task id (resolving the resolver script portably across plugin install topologies) and create the transcript directory:
 
 ```bash
-TASK_ID="$(bash scripts/resolve-transcript-task-id.sh test-reviewer)" || {
-  echo "Refusing to review: cannot attribute this run to a task (see error above)." >&2
-  exit 1
-}
+CANDIDATES=()
+[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && CANDIDATES+=("${CLAUDE_PLUGIN_ROOT}/scripts/resolve-transcript-task-id.sh")
+[ -n "${CLAUDE_PLUGIN_DIR:-}" ] && CANDIDATES+=("${CLAUDE_PLUGIN_DIR}/scripts/resolve-transcript-task-id.sh")
+CANDIDATES+=("scripts/resolve-transcript-task-id.sh")
+RESOLVE_SCRIPT=""
+for candidate in "${CANDIDATES[@]}"; do
+  if [ -f "$candidate" ]; then
+    RESOLVE_SCRIPT="$candidate"
+    break
+  fi
+done
+
+if [ -n "$RESOLVE_SCRIPT" ]; then
+  TASK_ID="$(bash "$RESOLVE_SCRIPT" test-reviewer)" || {
+    echo "Refusing to review: resolved attribution id has an unsafe shape (see error above)." >&2
+    exit 1
+  }
+else
+  # No resolver script reachable at all (broken/partial plugin install) —
+  # still proceed with review rather than refusing (AISDLC-623): synthesize
+  # a unique unattributed id inline so this run never collides with any
+  # other unattributed run.
+  TASK_ID="UNKNOWN-test-reviewer-$(date -u +%Y%m%dT%H%M%S)-$RANDOM"
+  echo "[transcript-init] WARNING: resolve-transcript-task-id.sh not found under plugin scripts/ or repo scripts/ — proceeding with unattributed transcript id $TASK_ID. To attribute, set .active-task or AI_SDLC_ACTIVE_TASK_ID." >&2
+fi
+
+# Persist the resolved id so Step END reuses the SAME id (re-invoking the
+# resolver would synthesize a DIFFERENT random unattributed id and split
+# this run's transcript across two directories).
+mkdir -p .ai-sdlc/transcripts
+printf '%s' "$TASK_ID" > .ai-sdlc/transcripts/.last-task-id.test-reviewer
+
 TRANSCRIPT_DIR=".ai-sdlc/transcripts/${TASK_ID}"
 TRANSCRIPT_FILE="${TRANSCRIPT_DIR}/test-reviewer.jsonl"
 mkdir -p "$TRANSCRIPT_DIR"
@@ -54,7 +82,7 @@ printf '{"role":"user","content":"[transcript-init] test-reviewer prompt receive
 echo "Transcript initialized at: $TRANSCRIPT_FILE"
 ```
 
-**If this Bash call exits non-zero, STOP IMMEDIATELY.** Do not read the diff, do not perform any review analysis. Return the refusal verdict below as your ONLY output and do not proceed further:
+**If this Bash call exits non-zero** (the resolver script IS present but returned a malformed-present-id error — see the fail-soft note above), STOP IMMEDIATELY. Do not read the diff, do not perform any review analysis. Return the refusal verdict below as your ONLY output and do not proceed further:
 
 ```json
 {
@@ -64,10 +92,10 @@ echo "Transcript initialized at: $TRANSCRIPT_FILE"
       "severity": "critical",
       "file": null,
       "line": null,
-      "message": "review refused: cannot attribute this run to a task — no .active-task sentinel and no AI_SDLC_ACTIVE_TASK_ID env var found in this worktree. See AISDLC-562."
+      "message": "review refused: the resolved task-attribution id has an unsafe shape (path traversal / invalid characters). Fix the value in <worktree>/.active-task or AI_SDLC_ACTIVE_TASK_ID. See AISDLC-562 / AISDLC-623."
     }
   ],
-  "summary": "Review refused — cannot attribute this run to a task (see finding for remediation).",
+  "summary": "Review refused — resolved task-attribution id is malformed (see finding for remediation).",
   "promptInjectionDetected": false
 }
 ```
@@ -77,7 +105,8 @@ echo "Transcript initialized at: $TRANSCRIPT_FILE"
 After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event (only reached if Step 0 succeeded). Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely (printf with `%s` would produce malformed JSONL for any summary containing a `"`):
 
 ```bash
-TASK_ID="$(bash scripts/resolve-transcript-task-id.sh test-reviewer)" || exit 1
+TASK_ID="$(cat .ai-sdlc/transcripts/.last-task-id.test-reviewer 2>/dev/null)"
+[ -z "$TASK_ID" ] && TASK_ID="UNKNOWN-test-reviewer-$(date -u +%Y%m%dT%H%M%S)-$RANDOM"
 TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/test-reviewer.jsonl"
 VERDICT_SUMMARY="$(cat <<'EOF'
 <paste your summary field here>

@@ -24,6 +24,7 @@ import {
   checkManifestsAgree,
   fixManifestsAgree,
   checkPluginInstallAmbiguity,
+  checkReviewerAttributionResolver,
   checkAttestationGovernanceCheck,
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
@@ -309,6 +310,69 @@ describe('checkPluginInstallAmbiguity', () => {
       repoLocalVersion: '0.9.2',
       marketplaceVersion: '0.18.0',
     });
+  });
+});
+
+// ── checkReviewerAttributionResolver (AISDLC-623) ─────────────────────
+
+describe('checkReviewerAttributionResolver', () => {
+  it('passes (skip) when no plugin install is detected at all', () => {
+    const result = checkReviewerAttributionResolver(makeCtx(makeAdapters()));
+    expect(result.severity).toBe('pass');
+    expect(result.title).toMatch(/no plugin install detected/);
+  });
+
+  it('passes when resolve-transcript-task-id.sh is bundled under the resolved plugin install scripts/', () => {
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir);
+    writeFileSync(
+      join(repoLocalDir, 'scripts', 'resolve-transcript-task-id.sh'),
+      '#!/usr/bin/env bash\n',
+    );
+
+    const result = checkReviewerAttributionResolver(makeCtx(makeAdapters()));
+    expect(result.severity).toBe('pass');
+    expect(result.title).toMatch(/bundled with the plugin install/);
+  });
+
+  it('WARNs (not fails) when the resolver script is missing from an otherwise-installed plugin', () => {
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir);
+    // writePluginManifests creates scripts/ but not resolve-transcript-task-id.sh — simulates a stale/partial bundle.
+
+    const result = checkReviewerAttributionResolver(makeCtx(makeAdapters()));
+    expect(result.severity).toBe('warn');
+    expect(result.title).toMatch(/resolve-transcript-task-id\.sh not found/);
+    expect(result.remediation).toMatch(/plugin uninstall ai-sdlc/);
+    expect(result.anonymizableEvidence).toMatchObject({ installSource: 'repo-local' });
+  });
+
+  it('resolves against the marketplace install (not a stale repo-local checkout) when both exist', () => {
+    const homeDir = join(tmpDir, 'home');
+    const cacheRoot = join(homeDir, '.claude', 'plugins', 'cache');
+    const marketplaceDir = join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc', '0.18.0');
+    writePluginManifests(marketplaceDir, { rootVersion: '0.18.0' });
+    writeFileSync(
+      join(marketplaceDir, 'scripts', 'resolve-transcript-task-id.sh'),
+      '#!/usr/bin/env bash\n',
+    );
+    const repoLocalDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(repoLocalDir, { rootVersion: '0.9.2' });
+    // repo-local intentionally has NO resolver script — proves the check audits marketplace, not repo-local.
+
+    const result = checkReviewerAttributionResolver(
+      makeCtx(
+        makeAdapters({
+          homeDir: () => homeDir,
+          listDir: (p) => {
+            if (p === cacheRoot) return ['ai-sdlc-local'];
+            if (p === join(cacheRoot, 'ai-sdlc-local', 'ai-sdlc')) return ['0.18.0'];
+            return [];
+          },
+        }),
+      ),
+    );
+    expect(result.severity).toBe('pass');
   });
 });
 
