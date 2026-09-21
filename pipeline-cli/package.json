@@ -151,7 +151,7 @@
     "ajv": "^8.20.0",
     "ink-testing-library": "^4.0.0",
     "string-width": "^8.2.1",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vite": "^6.0.0",
     "vitest": "^4.1.9"
   }
