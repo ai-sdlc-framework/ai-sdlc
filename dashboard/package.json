@@ -14,7 +14,7 @@
     "@ai-sdlc/orchestrator": "workspace:*",
     "@ai-sdlc/pipeline-cli": "workspace:*",
     "better-sqlite3": "^12.11.1",
-    "next": "^15.5.19",
+    "next": "^16.3.5",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
