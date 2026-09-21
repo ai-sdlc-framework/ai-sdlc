@@ -31,7 +31,7 @@
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
     "@ai-sdlc/orchestrator": "workspace:*",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",

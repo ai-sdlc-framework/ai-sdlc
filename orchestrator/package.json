@@ -55,11 +55,11 @@
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
-    "@inquirer/prompts": "^8.5.2",
+    "@inquirer/prompts": "^8.7.2",
     "better-sqlite3": "^12.11.1",
     "commander": "^15.0.0",
     "franc": "^6.2.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
