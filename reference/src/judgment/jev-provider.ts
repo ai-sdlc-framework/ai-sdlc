@@ -64,8 +64,12 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
   const model = opts.model ?? JEV_DEFAULT_MODEL;
 
   const getKey = (): string | undefined => opts.apiKey || process.env[API_KEY_ENV] || undefined;
-  const getBaseUrl = (): string =>
-    (opts.baseUrl || process.env[BASE_URL_ENV] || JEV_DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const getBaseUrl = (): string => {
+    // Strip trailing slashes with a linear scan (a `/\/+$/` regex is quadratic on long runs).
+    let url = opts.baseUrl || process.env[BASE_URL_ENV] || JEV_DEFAULT_BASE_URL;
+    while (url.endsWith('/')) url = url.slice(0, -1);
+    return url;
+  };
 
   /** Strip the key from any text that may end up in an error. */
   const redact = (text: string, key: string): string =>

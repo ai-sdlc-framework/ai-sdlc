@@ -150,6 +150,33 @@ describe('configuration', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer env-key');
   });
 
+  it.each([
+    ['https://example.test', 'https://example.test/v1/systemone'],
+    ['https://example.test/', 'https://example.test/v1/systemone'],
+    ['https://example.test///', 'https://example.test/v1/systemone'],
+    ['https://example.test/base//', 'https://example.test/base/v1/systemone'],
+  ])('normalises trailing slashes on baseUrl %s', async (baseUrl, expected) => {
+    const f = vi.fn(async (..._a: unknown[]) => jsonRes(fixture('noul.response')));
+    const provider = createJevProvider({
+      apiKey: KEY,
+      baseUrl,
+      fetchImpl: f as unknown as typeof fetch,
+    });
+    await provider.evaluate(noulReq);
+    expect((f.mock.calls[0] as [string])[0]).toBe(expected);
+  });
+
+  it('handles a very long run of trailing slashes without stalling', async () => {
+    const f = vi.fn(async (..._a: unknown[]) => jsonRes(fixture('noul.response')));
+    const provider = createJevProvider({
+      apiKey: KEY,
+      baseUrl: `https://example.test${'/'.repeat(100000)}x`,
+      fetchImpl: f as unknown as typeof fetch,
+    });
+    await provider.evaluate(noulReq);
+    expect((f.mock.calls[0] as [string])[0]).toContain('x/v1/systemone');
+  });
+
   it('exposes identity and capabilities', () => {
     const p = createJevProvider({ apiKey: KEY });
     expect(p.name).toBe('jev');
