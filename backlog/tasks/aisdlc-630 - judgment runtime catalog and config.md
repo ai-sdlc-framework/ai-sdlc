@@ -50,7 +50,8 @@ are the specification. The central property: `evaluateJudgment` never throws, an
    `version`, `egressClass` (`work-item-text`, `code-diff`, `agent-output`),
    `direction` (`tighten-only`, `bidirectional`), `riskClass` (`seam`, `tighten`,
    `relax`), `buildState`, `questions`, `compose(answers, input, thresholds, ctx)` where
-   `ctx` carries `permissiveAllowed`, and optional `agrees(decision, label)`.
+   `ctx` carries `permissiveAllowed`, optional `agrees(decision, label)`, and optional
+   `capabilityId` naming the capability the judgment serves (RFC-0049 section 9.1).
    `JudgmentOutcome<D>` is `act`, `escalate` (to `llm` or `operator`) or `abstain`.
 2. **Catalog registry:** `registerJudgmentDefinition`, `getJudgmentDefinition(id)`,
    `listJudgmentDefinitions`; duplicate ids are rejected.
@@ -75,6 +76,11 @@ are the specification. The central property: `evaluateJudgment` never throws, an
      `permissiveAllowed = definition.direction === 'bidirectional' && sourceKind === 'backlog'`.
    - A thrown `compose`, `buildState` or `questions` is caught and becomes abstain
      `definition-error`.
+   - When the definition has a `capabilityId` and `ctx` supplies an optional
+     `onCapabilityOutcome` callback, call it once per evaluation with `live` (effective
+     mode `enforce` and outcome `act` or `escalate`), `shadow` (provider answered in
+     `shadow`) or `degraded` plus the abstain reason. The callback defaults to a no-op
+     and a throw from it is swallowed.
 5. **Enforce downgrade** (RFC-0049 section 4): a judgment configured `enforce` runs as
    `shadow`, with the reason on the record, when the model is an alias (`*-latest`,
    `*-preview`) and not an exact version; when the provider declares
@@ -116,6 +122,7 @@ are the specification. The central property: `evaluateJudgment` never throws, an
 - [ ] `enforce` with an alias model, with a provider declaring `calibratedProbabilities: false`, with no thresholds for the active key, or with no satisfying promotion record runs as `shadow` and records the reason; one test per condition.
 - [ ] A `relax` definition with a `path: override` promotion record, or a corpus record below `n` 50 or precision 0.95, is not enforced; a `seam` definition with a non-empty override `evidence` is.
 - [ ] `permissiveAllowed` is true only for a `bidirectional` definition with `sourceKind` `backlog`; false for `gh-issue`, for an absent `sourceKind`, and for any `tighten-only` definition.
+- [ ] With an `onCapabilityOutcome` callback supplied, one evaluation calls it exactly once with `live`, `shadow` or `degraded` as specified, and a throwing callback does not change the evaluation result.
 - [ ] `questionSetHash` is stable across runs and changes when a question's text, an option, or the definition `version` changes.
 - [ ] The config schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
 - [ ] The loader reads only from the base ref or the explicit env path; a test proves a working-tree copy of the file is ignored.

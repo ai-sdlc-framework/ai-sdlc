@@ -69,6 +69,10 @@ All five definitions: `egressClass` `work-item-text`, `riskClass` `seam`,
    frontmatter, then judgment (`act` only), then the existing regex, then default.
    `AssignClassResult.source` gains the value `judgment`.
 
+6. **Capability ids:** `decision.stage-b-signals` sets `capabilityId`
+   `decisions.stage-b-signals` and `estimate.class` sets `estimation.class-assignment`
+   (RFC-0049 section 9.1). The other three definitions set none.
+
 ## Acceptance Criteria
 - [ ] With the layer disabled, the outputs of reversibility, pillar tagging, duplicate detection, Stage B scoring and class assignment are unchanged on their existing test fixtures.
 - [ ] `decision.reversibility` in `enforce` overrides a keyword miss, and a keyword `one-way` hit survives a judgment answer of `reversible`.

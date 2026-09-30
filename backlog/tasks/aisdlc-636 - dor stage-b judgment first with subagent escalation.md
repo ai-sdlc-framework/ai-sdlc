@@ -69,9 +69,11 @@ Stage-B-owned gates. RFC-0049 section 5, Group B.
      as today.
    - On `abstain`, the existing path runs unchanged.
    - A deterministic Stage A block is never overridden by the judgment.
-5. **Calibration log:** records whether Stage B verdicts came from the judgment or the
+5. **Capability id:** the definition sets `capabilityId` `dor.stage-b`
+   (RFC-0049 section 9.1).
+6. **Calibration log:** records whether Stage B verdicts came from the judgment or the
    subagent.
-6. **`agrees`** compares the judgment's per-gate result with the expected verdicts in
+7. **`agrees`** compares the judgment's per-gate result with the expected verdicts in
    the `spec/dor-corpus/` fixtures; provide the converter from that corpus to `eval`
    JSONL.
 

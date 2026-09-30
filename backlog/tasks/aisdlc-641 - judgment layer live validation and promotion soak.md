@@ -20,6 +20,9 @@ dependencies:
   - AISDLC-637
   - AISDLC-638
   - AISDLC-639
+  - AISDLC-643
+  - AISDLC-644
+  - AISDLC-647
 references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - docs/operations/dor-promotion.md
@@ -56,7 +59,10 @@ live API differ.
    50 findings-ledger rows, then evaluate it.
 6. Promote judgments one at a time by PR, each citing its report and carrying its
    promotion record, following the bars in RFC-0049 section 8.
-7. Write a short results note answering the RFC's four value hypotheses with measured
+7. As each capability is proven, confirm `/ai-sdlc doctor` shows it `live` in the
+   `capability-liveness` table, then change its `runtimeEvidence` entry to `live` in
+   the RFC that specifies it, citing the judgment-log or state-file record.
+8. Write a short results note answering the RFC's four value hypotheses with measured
    numbers: tasks stopped before a developer run, developer returns flagged before
    reviewer fan-out, findings flagged as ungrounded, and operator queue items resolved
    without a manual step.
@@ -67,5 +73,6 @@ live API differ.
 - [ ] An evaluation report exists under `.ai-sdlc/judgment-evals/` for each judgment that has a corpus.
 - [ ] Measured p50 and p95 latency and cost per evaluation are recorded against the documented figures.
 - [ ] Every judgment moved to `enforce` has a promotion record meeting its `riskClass` bar, and `review.reviewer-set` is not promoted on fewer than 50 ledger rows or below 0.95 act-band precision.
+- [ ] Each promoted capability shows `live` in the doctor table and its `runtimeEvidence` entry cites the record that proves it; capabilities still degraded keep a `degraded` entry with an owner or an explicit no-owner statement.
 - [ ] A results note records a measured answer, or an explicit no-data statement, for each of the four value hypotheses.
 <!-- SECTION:DESCRIPTION:END -->

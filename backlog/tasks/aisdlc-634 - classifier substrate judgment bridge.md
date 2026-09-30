@@ -77,7 +77,11 @@ RFC-0049 section 5, Group A.
    model's self-reported confidence and is not reused. Judgment thresholds come only
    from the judgment config; with none configured the runtime keeps the judgment in
    `shadow`.
-5. **`agrees`** on each definition compares the decision with a corpus label, so
+5. **Capability ids:** each definition sets `capabilityId` to the matching id from
+   the RFC-0049 section 9.1 table (`classifier.capture-triage`,
+   `classifier.capture-severity`, `classifier.pr-comment-is-capture`,
+   `classifier.dor-answer-is-new-concern`, `decisions.stage-c-recommendation`).
+6. **`agrees`** on each definition compares the decision with a corpus label, so
    `cli-judgment eval` can run against `.ai-sdlc/classifier-corpus/<task-type>.yaml`
    entries that carry an operator override. Provide a small converter from that corpus
    format to the `eval` JSONL format.
