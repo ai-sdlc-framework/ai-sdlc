@@ -3,7 +3,7 @@ id: AISDLC-660
 title: >-
   opencode v2: repo governance port, in-tree dispatch runner, harness
   adapter, ops runbook, contrib runner
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30 10:57'
 labels:
