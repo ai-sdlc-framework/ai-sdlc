@@ -10,6 +10,7 @@ export default tseslint.config(
       'docs/',
       'community/',
       'contrib/',
+      '.opencode/', // plain-JS opencode plugin; not part of any tsconfig project
       'sdk-go/',
       'sdk-python/',
       '**/dist/',

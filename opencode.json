@@ -28,8 +28,28 @@
       "gh pr merge*": "deny",
       "git merge*": "deny",
       "git push --force*": "deny",
-      "git push --force-with-lease*": "allow",
       "git push -f*": "deny",
+      "git push --force-with-lease*": "allow",
+      // Bypass shapes of the lease carve-out, re-denied AFTER the allow
+      // (last-match-wins): a second force flag, a short-flag force, a
+      // `+`-prefixed refspec, and main/master targets. Glob patterns cannot
+      // express the full strict-lease grammar (and cannot see flags hidden
+      // behind quoting/`env`/`git -C`), so the plugin's isStrictLeasePush() is
+      // the AUTHORITATIVE check; these denies are defence in depth only.
+      "git push*--force": "deny",
+      "git push*--force *": "deny",
+      "git push*--force=*": "deny",
+      "git push* -f": "deny",
+      "git push* -f*": "deny",
+      "git push* +*": "deny",
+      "git push*:+*": "deny",
+      "git push* main": "deny",
+      "git push* main *": "deny",
+      "git push* master": "deny",
+      "git push* master *": "deny",
+      "git push*:main*": "deny",
+      "git push*:master*": "deny",
+      "git push*--mirror*": "deny",
       "gh pr close*": "deny",
       "gh issue close*": "deny",
       "git branch -D*": "deny",
@@ -45,7 +65,16 @@
       ".ai-sdlc/**": "deny",
       "**/.ai-sdlc/**": "deny",
       ".github/workflows/**": "deny",
-      "scripts/verify-attestation.mjs": "deny"
+      "scripts/verify-attestation.mjs": "deny",
+      // Harness config: the agent must not rewrite the policy that governs it.
+      // (Mirrored by the plugin's hardcoded floor. NOT yet in
+      // .ai-sdlc/agent-role.yaml blockedPaths — operator decision pending.)
+      "opencode.json": "deny",
+      "opencode.jsonc": "deny",
+      "**/opencode.json": "deny",
+      "**/opencode.jsonc": "deny",
+      ".opencode/**": "deny",
+      "**/.opencode/**": "deny"
     }
   },
   // AI-SDLC MCP server (backlog, decisions, governance introspection).

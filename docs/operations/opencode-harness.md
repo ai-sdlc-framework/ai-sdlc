@@ -102,13 +102,31 @@ rules, MCP server). That dogfood parity is intended, not an accident.
    task, stash/branch hygiene floors, and telemetry. Keep the declarative
    layer and `agent-role.yaml` in sync when editing either.
 
-**force-with-lease divergence (known, intentional):** the config denies
+**force-with-lease carve-out (known, intentional, strict):** the config denies
 `git push --force*` and then re-allows `git push --force-with-lease*` (the
-Definition of Done requires a lease push after the mandatory rebase); the
-plugin port matches — it denies `git push --force*`/`-f*` but skips
-`--force-with-lease*`. The **old Claude Code hook denies even
-`--force-with-lease`** — an existing spec conflict in the Claude layer,
-deliberately not "fixed" in the port (flagged for the governance RFC).
+Definition of Done requires a lease push after the mandatory rebase). A bare
+prefix glob is NOT safe: `git push --force-with-lease --force origin main`
+also matches it. So the plugin (authoritative) allows ONLY a strict lease:
+`--force-with-lease[=<ref>[:<sha>]]` with no other force flag (`--force`,
+`-f`/`-fu`, `--mirror`, `--delete`), no `+`-prefixed refspec, and no
+`main`/`master` target. The declarative layer re-denies those bypass shapes
+after the allow (last-match-wins) as defence in depth; globs cannot express
+the full grammar, so the plugin decides. A bare lease with no refspec pushes
+the current branch, which cannot be resolved statically (known limitation).
+The **old Claude Code hook denies even `--force-with-lease`** — an existing
+spec conflict in the Claude layer, deliberately not "fixed" in the port
+(flagged for the governance RFC).
+
+**Harness config floor:** `opencode.json`, `opencode.jsonc` and `.opencode/**`
+are denied for edits (declaratively and by the plugin) so an agent cannot
+rewrite the policy that governs it. Adding them to `agent-role.yaml`
+blockedPaths is an operator follow-up.
+
+**Per-stage tool policy:** dispatched runs get a `permission` block in the
+per-dispatch config: web tools and `external_directory` are denied by default.
+A stage with an explicit `allowedTools` list that contains no edit-capable
+tool (reviewer/classifier-type) runs WITHOUT `--auto`, with only its mapped
+tools allowed.
 
 **Snapshots:** v2 snapshots every step by default (the interactive undo
 feature). The repo config keeps that for interactive use; dispatched runs get
@@ -120,7 +138,7 @@ feature). The repo config keeps that for interactive use; dispatched runs get
 so behavior is consistent across runners:
 
 1. baseline worktree snapshot (pre-existing untracked noise excluded)
-2. `opencode run --standalone --auto --format json --model <ref> [--agent <name>] <prompt>`
+2. `opencode run --standalone [--auto] --format json --model <ref> [--agent <name>] -- <prompt>`
    spawned in the worktree; 30 s heartbeats; line-buffered NDJSON parse
    (`step_start` / `text` / `tool_use` / `step_finish` / `error`)
 3. exit 0 with a stream-level error and no final text → failure; otherwise

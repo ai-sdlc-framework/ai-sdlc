@@ -102,6 +102,37 @@ describe('RunnerRegistry', () => {
       });
     });
 
+    it('registers opencode with source env when OPENCODE_MODEL is set', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ OPENCODE_MODEL: 'lmstudio/qwen/qwen3.8-27b' });
+
+      expect(registry.has('opencode')).toBe(true);
+      expect(registry.list().find((r) => r.name === 'opencode')?.source).toBe('env');
+    });
+
+    it('registers opencode with source env when only AI_SDLC_MODEL is set', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ AI_SDLC_MODEL: 'lmstudio/qwen/qwen3.8-27b' });
+
+      expect(registry.list().find((r) => r.name === 'opencode')?.source).toBe('env');
+    });
+
+    it('opencode is absent when neither OPENCODE_MODEL nor AI_SDLC_MODEL is set', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({});
+
+      expect(registry.has('opencode')).toBe(false);
+      expect(registry.get('opencode')).toBeUndefined();
+    });
+
+    it('AISDLC-529: opencode never becomes the default while claude-code is available', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ OPENCODE_MODEL: 'lmstudio/qwen/qwen3.8-27b' });
+
+      expect(registry.getDefault()).toBe(registry.get('claude-code'));
+      expect(registry.getDefault()).not.toBe(registry.get('opencode'));
+    });
+
     it('ollama unavailable without OLLAMA_MODEL', () => {
       const registry = new RunnerRegistry();
       registry.discoverFromEnv({});

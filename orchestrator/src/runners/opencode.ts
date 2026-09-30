@@ -9,6 +9,8 @@
  *  - `--auto` auto-approves permissions that are not explicitly denied.
  *    Deny rules (declarative opencode.json permission + the ai-sdlc
  *    governance plugin) remain in force and short-circuit `--auto`.
+ *    `--auto` is NOT passed for read-only stages (an allowedTools list with
+ *    no edit tool — reviewer/classifier-type stages); see buildToolPermission.
  *  - `--format json` emits NDJSON on stdout: step_start / text / tool_use /
  *    step_finish / error events, each with a top-level `sessionID`.
  *  - There is NO final "result" event. Authoritative token usage is read via
@@ -32,7 +34,7 @@
  */
 
 import { spawn, execFile, execFileSync, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -172,7 +174,11 @@ export function parseOpenCodeLine(
     const cost = num(part.cost);
     if (cost > 0) {
       state.costUsd += cost;
-      onProgress?.({ type: 'cost', costUsd: state.costUsd, message: `Total cost: $${state.costUsd.toFixed(4)}` });
+      onProgress?.({
+        type: 'cost',
+        costUsd: state.costUsd,
+        message: `Total cost: $${state.costUsd.toFixed(4)}`,
+      });
     }
   } else if (type === 'error') {
     const message = (parsed.error as Record<string, unknown> | undefined)?.message;
@@ -195,6 +201,8 @@ export interface RunOpenCodeOptions {
   extraEnv?: Record<string, string | undefined>;
   /** Injectable spawn for tests. */
   spawnFn?: typeof spawn;
+  /** Pass `--auto` (default true). Read-only stages set this false. */
+  auto?: boolean;
 }
 
 export interface RunOpenCodeResult {
@@ -218,16 +226,21 @@ export interface RunOpenCodeResult {
  */
 export function runOpenCode(opts: RunOpenCodeOptions): Promise<RunOpenCodeResult> {
   const bin = opts.bin ?? resolveOpenCodeBin();
-  const args = ['run', '--standalone', '--auto', '--format', 'json', '--model', opts.model];
+  const args = ['run', '--standalone'];
+  if (opts.auto !== false) args.push('--auto');
+  args.push('--format', 'json', '--model', opts.model);
   if (opts.agent) {
     args.push('--agent', opts.agent);
   }
-  args.push(opts.prompt);
+  // `--` ends option parsing so a prompt starting with `-` is never read as a flag.
+  args.push('--', opts.prompt);
 
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
     const logPrefix = '[ai-sdlc:opencode]';
-    process.stderr.write(`${logPrefix} spawning: ${bin} ${args.filter((a) => a !== opts.prompt).join(' ')} (prompt ${opts.prompt.length} chars)\n`);
+    process.stderr.write(
+      `${logPrefix} spawning: ${bin} ${args.filter((a) => a !== opts.prompt).join(' ')} (prompt ${opts.prompt.length} chars)\n`,
+    );
     process.stderr.write(`${logPrefix} workDir: ${opts.workDir}\n`);
 
     let child: ChildProcess;
@@ -239,11 +252,18 @@ export function runOpenCode(opts: RunOpenCodeOptions): Promise<RunOpenCodeResult
         timeout: opts.timeoutMs,
       });
     } catch (err) {
-      reject(new Error(`failed to spawn opencode: ${err instanceof Error ? err.message : String(err)}`));
+      reject(
+        new Error(`failed to spawn opencode: ${err instanceof Error ? err.message : String(err)}`),
+      );
       return;
     }
 
-    const state: OpenCodeStreamState = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0 };
+    const state: OpenCodeStreamState = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      costUsd: 0,
+    };
     let lastActivity = Date.now();
     let lineBuf = '';
     const errBuf: Buffer[] = [];
@@ -276,7 +296,9 @@ export function runOpenCode(opts: RunOpenCodeOptions): Promise<RunOpenCodeResult
       clearInterval(heartbeat);
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const stderr = Buffer.concat(errBuf).toString('utf-8');
-      process.stderr.write(`${logPrefix} exited: code=${code} signal=${signal ?? '-'} elapsed=${elapsed}s\n`);
+      process.stderr.write(
+        `${logPrefix} exited: code=${code} signal=${signal ?? '-'} elapsed=${elapsed}s\n`,
+      );
       if (lineBuf.trim()) parseOpenCodeLine(lineBuf.trim(), state, opts.onProgress);
       if (code === 0) {
         resolve({
@@ -328,11 +350,11 @@ export async function fetchSessionTokens(
   bin: string = resolveOpenCodeBin(),
 ): Promise<TokenUsage | undefined> {
   try {
-    const { stdout } = await execFileAsync(
-      bin,
-      ['session', 'export', '--standalone', sessionID],
-      { cwd: workDir, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 },
-    );
+    const { stdout } = await execFileAsync(bin, ['session', 'export', '--standalone', sessionID], {
+      cwd: workDir,
+      timeout: 30_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
     const info = (JSON.parse(stdout) as { info?: { tokens?: Record<string, unknown> } })?.info;
     const t = info?.tokens;
     if (!t || typeof t !== 'object') return undefined;
@@ -412,21 +434,51 @@ function readProjectConfigText(workDir: string): string | undefined {
 }
 
 /**
- * Re-anchor relative `command` paths in the project's local MCP server
- * entries at the main clone's root.
+ * Re-anchor local MCP server script paths at the main clone's root.
  *
  * Dispatched runs execute from `.worktrees/<id>/` checkouts, but local MCP
  * servers are usually built artifacts (git-ignored) and their relative
- * `command` paths in the project's opencode.json do not resolve there.
- * Re-rooted at the main clone they do. Entries whose re-anchored script does
- * not exist in the main clone either are dropped — they are broken from a
- * worktree anyway, and a dead entry just adds a failed spawn to every run.
- * `remote` entries, executable names (command[0]) and flag-like args
- * (`-y`, `--filter`) are never re-anchored.
+ * script path in the project's opencode.json does not resolve there.
+ * Re-rooted at the main clone it does.
+ *
+ * Only an arg that is a relative path resolving to an EXISTING file under
+ * the main clone is re-anchored; everything else (`npx`/`uvx`/`docker run`
+ * invocations, `@scope/pkg`, URLs, `owner/repo`, `--flag=a/b`, plain words)
+ * is left byte-for-byte untouched. The only entry ever dropped is one whose
+ * script-position arg (the first non-flag arg after an interpreter such as
+ * `node`) looks like a relative script file path (has a script extension)
+ * but exists in neither the worktree nor the main clone: it is a dead
+ * entry, and it would only add a failed spawn to every run.
  */
+const SCRIPT_EXT_RE = /\.(?:[cm]?js|ts|py|sh|rb)$/i;
+const INTERPRETERS = new Set([
+  'node',
+  'bun',
+  'deno',
+  'python',
+  'python3',
+  'tsx',
+  'ruby',
+  'bash',
+  'sh',
+]);
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isRelativePathArg(part: string): boolean {
+  return !part.startsWith('-') && !isAbsolute(part) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(part);
+}
+
 export function remapMcpTable(
   table: Record<string, McpServerEntry>,
   mainRoot: string,
+  workDir?: string,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [name, entry] of Object.entries(table)) {
@@ -439,22 +491,22 @@ export function remapMcpTable(
       continue;
     }
     const original = entry.command as unknown[];
+    const exe = typeof original[0] === 'string' ? (original[0].split(/[\\/]/).pop() ?? '') : '';
     const script = original[1];
     if (
+      INTERPRETERS.has(exe) &&
       typeof script === 'string' &&
-      !script.startsWith('-') &&
-      !isAbsolute(script) &&
-      !existsSync(resolve(mainRoot, script))
+      isRelativePathArg(script) &&
+      SCRIPT_EXT_RE.test(script) &&
+      !existsSync(resolve(mainRoot, script)) &&
+      !(workDir && existsSync(resolve(workDir, script)))
     ) {
-      continue;
+      continue; // unbuilt everywhere — drop rather than dangle
     }
     const command = original.map((part, idx) => {
-      if (typeof part !== 'string' || isAbsolute(part) || part.startsWith('-')) return part;
-      if (idx === 0) return part; // executable name — resolved via the child's PATH
-      if (idx === 1 || part.includes('/') || part.includes('\\')) {
-        return resolve(mainRoot, part);
-      }
-      return part;
+      if (idx === 0 || typeof part !== 'string' || !isRelativePathArg(part)) return part;
+      const anchored = resolve(mainRoot, part);
+      return isFile(anchored) ? anchored : part;
     });
     out[name] = { ...entry, command };
   }
@@ -478,13 +530,117 @@ export async function resolveMainCloneRoot(workDir: string): Promise<string | un
   }
 }
 
+export interface OpenCodeToolPermission {
+  /** `permission` block to merge into the dispatch config. */
+  permission: Record<string, unknown>;
+  /**
+   * True when the stage may not modify the worktree (an explicit allowedTools
+   * list with no edit-capable tool). Read-only stages run WITHOUT `--auto`.
+   */
+  readOnly: boolean;
+}
+
+const EDIT_TOOLS = new Set(['edit', 'write', 'multiedit', 'notebookedit', 'patch']);
+
+/** Claude-style tool name → opencode permission key (undefined = unmapped). */
+function toolPermissionKey(tool: string): string | undefined {
+  const name = tool.split('(')[0].trim().toLowerCase();
+  if (EDIT_TOOLS.has(name)) return 'edit';
+  switch (name) {
+    case 'read':
+      return 'read';
+    case 'grep':
+      return 'grep';
+    case 'glob':
+      return 'glob';
+    case 'bash':
+    case 'shell':
+      return 'bash';
+    case 'webfetch':
+      return 'webfetch';
+    case 'websearch':
+      return 'websearch';
+    case 'task':
+    case 'agent':
+      return 'task';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Map a stage's tool policy onto the per-dispatch opencode `permission` block.
+ *
+ *  - `allowedTools` undefined (developer stage): web + external_directory are
+ *    denied; everything else keeps the project's rules and `--auto` behavior.
+ *  - `allowedTools` given: edit / bash / task / web* / external_directory are
+ *    denied unless an allowed tool maps onto them; allowed read-class tools
+ *    are explicitly allowed (no `--auto` to lean on); scoped `Bash(pat)`
+ *    entries become `bash` pattern allows. A bare `Bash` leaves the project's
+ *    bash rules untouched. `readOnly` = no edit-capable tool allowed.
+ *
+ * `baseline` is the project's parsed `permission` block: the result is
+ * merged on top of it so project deny rules survive regardless of whether
+ * opencode deep- or shallow-merges the env config document.
+ */
+export function buildToolPermission(
+  allowedTools: string[] | undefined,
+  baseline: Record<string, unknown> = {},
+): OpenCodeToolPermission {
+  const permission: Record<string, unknown> = { ...baseline };
+  if (!allowedTools) {
+    permission.webfetch = 'deny';
+    permission.websearch = 'deny';
+    permission.external_directory = 'deny';
+    return { permission, readOnly: false };
+  }
+
+  const allowed = new Set<string>();
+  const bashPatterns: string[] = [];
+  let bareBash = false;
+  for (const tool of allowedTools) {
+    const key = toolPermissionKey(tool);
+    if (!key) continue;
+    allowed.add(key);
+    if (key === 'bash') {
+      const scoped = tool.match(/^[^(]+\((.*)\)$/s);
+      if (scoped) bashPatterns.push(scoped[1].trim());
+      else bareBash = true;
+    }
+  }
+
+  for (const key of ['read', 'grep', 'glob']) {
+    if (allowed.has(key)) permission[key] = 'allow';
+  }
+  for (const key of ['edit', 'task', 'webfetch', 'websearch']) {
+    if (!allowed.has(key)) permission[key] = 'deny';
+  }
+  permission.external_directory = 'deny';
+
+  if (!allowed.has('bash')) {
+    permission.bash = 'deny';
+  } else if (!bareBash) {
+    const projectBash =
+      baseline.bash && typeof baseline.bash === 'object' && !Array.isArray(baseline.bash)
+        ? (baseline.bash as Record<string, unknown>)
+        : {};
+    const allows: Record<string, string> = {};
+    for (const pat of bashPatterns) allows[pat] = 'allow';
+    // Last match wins: default-deny, then the scoped allows, then the
+    // project's own rules (its denies must still beat a scoped allow).
+    permission.bash = { '*': 'deny', ...allows, ...projectBash };
+  }
+
+  return { permission, readOnly: !allowed.has('edit') };
+}
+
 /**
  * Build the per-dispatch `OPENCODE_CONFIG_CONTENT` value.
  *
  * opencode v2 reads this env var as a virtual config document that merges
  * LAST, per key (verified empirically against the installed 2.0.18 binary —
- * keys we omit here, such as `permission` and `agent`, survive from the
- * project's opencode.json). We use it to fix what breaks when the dispatched
+ * keys we omit here, such as `agent`, survive from the project's
+ * opencode.json). We use it to fix what breaks when the dispatched
  * run's cwd is a worktree checkout:
  *   - `mcp` — relative local-server paths re-anchored at the main clone
  *   - `snapshot` — v2 step snapshots default ON (interactive undo); a
@@ -492,22 +648,40 @@ export async function resolveMainCloneRoot(workDir: string): Promise<string | un
  *     The project's opencode.json keeps the default for interactive sessions.
  *   - `autoupdate: false` — the binary must not self-update between the run
  *     and the `session export` that follows it.
+ *   - `permission` — the per-stage tool policy (see buildToolPermission),
+ *     layered over the project's own permission block.
  */
-export function buildDispatchConfig(workDir: string, mainRoot: string | undefined): string {
+export function buildDispatchConfig(
+  workDir: string,
+  mainRoot: string | undefined,
+  allowedTools?: string[],
+): string {
   const config: Record<string, unknown> = { autoupdate: false, snapshot: false };
-  if (mainRoot) {
-    const raw = readProjectConfigText(workDir);
-    if (raw) {
-      try {
-        const parsed = parseJsonc(raw) as { mcp?: Record<string, McpServerEntry> };
-        if (parsed && typeof parsed === 'object' && parsed.mcp && typeof parsed.mcp === 'object') {
-          config.mcp = remapMcpTable(parsed.mcp, mainRoot);
+  let baseline: Record<string, unknown> = {};
+  const raw = readProjectConfigText(workDir);
+  if (raw) {
+    try {
+      const parsed = parseJsonc(raw) as {
+        mcp?: Record<string, McpServerEntry>;
+        permission?: unknown;
+      };
+      if (parsed && typeof parsed === 'object') {
+        if (
+          parsed.permission &&
+          typeof parsed.permission === 'object' &&
+          !Array.isArray(parsed.permission)
+        ) {
+          baseline = parsed.permission as Record<string, unknown>;
         }
-      } catch {
-        // Malformed project config — dispatch without MCP remapping.
+        if (mainRoot && parsed.mcp && typeof parsed.mcp === 'object') {
+          config.mcp = remapMcpTable(parsed.mcp, mainRoot, workDir);
+        }
       }
+    } catch {
+      // Malformed project config — dispatch without MCP remapping.
     }
   }
+  config.permission = buildToolPermission(allowedTools, baseline).permission;
   return JSON.stringify(config);
 }
 
@@ -554,7 +728,9 @@ export class OpenCodeRunner implements AgentRunner {
       extraEnv.OPENCODE_CONFIG_CONTENT = buildDispatchConfig(
         ctx.workDir,
         await resolveMainCloneRoot(ctx.workDir),
+        ctx.allowedTools,
       );
+      const { readOnly } = buildToolPermission(ctx.allowedTools);
 
       const result = await runOpenCode({
         workDir: ctx.workDir,
@@ -563,6 +739,7 @@ export class OpenCodeRunner implements AgentRunner {
         agent: process.env.OPENCODE_AGENT,
         timeoutMs,
         extraEnv,
+        auto: !readOnly,
         onProgress: ctx.onProgress,
       });
 
@@ -585,7 +762,10 @@ export class OpenCodeRunner implements AgentRunner {
           ? await fetchSessionTokens(result.sessionID, ctx.workDir, result.model)
           : undefined) ?? result.tokenUsage;
 
-      const { filesChanged, agentAlreadyCommitted } = await detectChangedFiles(ctx.workDir, baseline);
+      const { filesChanged, agentAlreadyCommitted } = await detectChangedFiles(
+        ctx.workDir,
+        baseline,
+      );
 
       if (filesChanged.length === 0) {
         return {

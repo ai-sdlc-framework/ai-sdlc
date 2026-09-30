@@ -13,6 +13,7 @@ import {
   parseJsonc,
   remapMcpTable,
   buildDispatchConfig,
+  buildToolPermission,
   resolveMainCloneRoot,
   type OpenCodeStreamState,
 } from './opencode.js';
@@ -74,7 +75,7 @@ function makeFakeChild(opts: { stdout?: string; stderr?: string; code?: number; 
   // and the events would be lost — the child would never settle the promise.
   let started = false;
   child.on('newListener', (event: string | symbol) => {
-    if (event !== 'close' && event !== 'error' || started) return;
+    if ((event !== 'close' && event !== 'error') || started) return;
     started = true;
     queueMicrotask(() => {
       if (opts.stdout) child.stdout.emit('data', Buffer.from(opts.stdout));
@@ -123,7 +124,9 @@ afterEach(() => {
 
 describe('resolveOpenCodeBin', () => {
   it('honors an explicit OPENCODE_BIN', () => {
-    expect(resolveOpenCodeBin({ OPENCODE_BIN: '/x/opencode' } as NodeJS.ProcessEnv)).toBe('/x/opencode');
+    expect(resolveOpenCodeBin({ OPENCODE_BIN: '/x/opencode' } as NodeJS.ProcessEnv)).toBe(
+      '/x/opencode',
+    );
   });
 
   it('falls back to opencode on PATH', () => {
@@ -223,8 +226,7 @@ describe('parseOpenCodeLine', () => {
         },
       }),
       state,
-      (e) =>
-        progress.push({ type: e.type, tool: e.tool, file: e.file }),
+      (e) => progress.push({ type: e.type, tool: e.tool, file: e.file }),
     );
     expect(progress).toEqual([{ type: 'tool_start', tool: 'shell', file: 'pnpm build' }]);
   });
@@ -341,14 +343,57 @@ describe('fetchSessionTokens', () => {
 /* ------------------------------------------------------------------ */
 
 /** A realistic two-step v2 stream: text + tool + finish, then final text. */
-const STREAM_OK = [
-  JSON.stringify({ type: 'step_start', sessionID: 'ses_test1', part: { id: 'prt_1', type: 'step-start' } }),
-  JSON.stringify({ type: 'text', sessionID: 'ses_test1', part: { id: 'prt_2', type: 'text', text: 'Let me check.' } }),
-  JSON.stringify({ type: 'tool_use', sessionID: 'ses_test1', part: { partID: 'prt_3', type: 'tool', id: 'c1', tool: 'shell', state: { status: 'completed', input: { command: 'pnpm build' } } } }),
-  JSON.stringify({ type: 'step_finish', sessionID: 'ses_test1', part: { id: 'prt_4', type: 'step-finish', reason: 'tool-calls', cost: 0, tokens: { input: 1000, output: 50, reasoning: 10, cache: { read: 0, write: 0 } } } }),
-  JSON.stringify({ type: 'text', sessionID: 'ses_test1', part: { id: 'prt_5', type: 'text', text: 'Done: implemented search' } }),
-  JSON.stringify({ type: 'step_finish', sessionID: 'ses_test1', part: { id: 'prt_6', type: 'step-finish', reason: 'stop', cost: 1.25, tokens: { input: 2000, output: 80, reasoning: 20, cache: { read: 500, write: 0 } } } }),
-].join('\n') + '\n';
+const STREAM_OK =
+  [
+    JSON.stringify({
+      type: 'step_start',
+      sessionID: 'ses_test1',
+      part: { id: 'prt_1', type: 'step-start' },
+    }),
+    JSON.stringify({
+      type: 'text',
+      sessionID: 'ses_test1',
+      part: { id: 'prt_2', type: 'text', text: 'Let me check.' },
+    }),
+    JSON.stringify({
+      type: 'tool_use',
+      sessionID: 'ses_test1',
+      part: {
+        partID: 'prt_3',
+        type: 'tool',
+        id: 'c1',
+        tool: 'shell',
+        state: { status: 'completed', input: { command: 'pnpm build' } },
+      },
+    }),
+    JSON.stringify({
+      type: 'step_finish',
+      sessionID: 'ses_test1',
+      part: {
+        id: 'prt_4',
+        type: 'step-finish',
+        reason: 'tool-calls',
+        cost: 0,
+        tokens: { input: 1000, output: 50, reasoning: 10, cache: { read: 0, write: 0 } },
+      },
+    }),
+    JSON.stringify({
+      type: 'text',
+      sessionID: 'ses_test1',
+      part: { id: 'prt_5', type: 'text', text: 'Done: implemented search' },
+    }),
+    JSON.stringify({
+      type: 'step_finish',
+      sessionID: 'ses_test1',
+      part: {
+        id: 'prt_6',
+        type: 'step-finish',
+        reason: 'stop',
+        cost: 1.25,
+        tokens: { input: 2000, output: 80, reasoning: 20, cache: { read: 500, write: 0 } },
+      },
+    }),
+  ].join('\n') + '\n';
 
 describe('runOpenCode', () => {
   const baseOpts = {
@@ -373,11 +418,30 @@ describe('runOpenCode', () => {
       'json',
       '--model',
       'lmstudio/qwen/qwen3.8-27b',
+      '--',
       'do the thing',
     ]);
     expect(opts.cwd).toBe('/tmp/opencode-repo');
     expect(opts.timeout).toBe(5_000);
     expect(opts.env.AI_SDLC_PROJECT_ROOT).toBe('/tmp/opencode-repo');
+  });
+
+  it('omits --auto when auto is false (read-only stages)', async () => {
+    setupSpawn({ stdout: STREAM_OK, code: 0 });
+    await runOpenCode({ ...baseOpts, auto: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const args = (spawnMock.mock.calls[0] as any)[1] as string[];
+    expect(args).not.toContain('--auto');
+    expect(args.slice(-2)).toEqual(['--', 'do the thing']);
+  });
+
+  it('guards a dash-leading prompt with --', async () => {
+    setupSpawn({ stdout: STREAM_OK, code: 0 });
+    await runOpenCode({ ...baseOpts, prompt: '--not-a-flag' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const args = (spawnMock.mock.calls[0] as any)[1] as string[];
+    expect(args.indexOf('--')).toBe(args.length - 2);
+    expect(args[args.length - 1]).toBe('--not-a-flag');
   });
 
   it('adds --agent when provided', async () => {
@@ -565,6 +629,117 @@ describe('remapMcpTable', () => {
   });
 });
 
+describe('remapMcpTable — non-script local servers (AISDLC-660 review)', () => {
+  it('keeps npx/uvx/docker entries byte-for-byte, including args containing slashes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aisdlc-remap-'));
+    try {
+      const table = {
+        npx: { type: 'local', command: ['npx', 'some-pkg'] },
+        scoped: { type: 'local', command: ['npx', '-y', '@scope/pkg', '--flag=a/b'] },
+        uvx: { type: 'local', command: ['uvx', 'server'] },
+        docker: {
+          type: 'local',
+          command: ['docker', 'run', '-i', '--rm', 'ghcr.io/owner/image:latest', 'owner/repo'],
+        },
+        url: { type: 'local', command: ['npx', 'mcp-remote', 'https://example.com/mcp'] },
+      };
+      const out = remapMcpTable(structuredClone(table), dir);
+      expect(out).toEqual(table);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('re-anchors only args that resolve to existing files; leaves lookalike paths alone', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aisdlc-remap-'));
+    try {
+      await mkdir(join(dir, 'tools'), { recursive: true });
+      await writeFile(join(dir, 'tools', 'srv.js'), '');
+      const out = remapMcpTable(
+        { s: { type: 'local', command: ['node', 'tools/srv.js', '--cfg', 'owner/repo'] } },
+        dir,
+      );
+      expect(out.s).toEqual({
+        type: 'local',
+        command: ['node', join(dir, 'tools/srv.js'), '--cfg', 'owner/repo'],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps an interpreter script that exists in the worktree but not the main clone', async () => {
+    const main = await mkdtemp(join(tmpdir(), 'aisdlc-remap-main-'));
+    const wt = await mkdtemp(join(tmpdir(), 'aisdlc-remap-wt-'));
+    try {
+      await writeFile(join(wt, 'local.js'), '');
+      const out = remapMcpTable({ s: { type: 'local', command: ['node', 'local.js'] } }, main, wt);
+      expect(out.s).toEqual({ type: 'local', command: ['node', 'local.js'] });
+    } finally {
+      await rm(main, { recursive: true, force: true });
+      await rm(wt, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('buildToolPermission', () => {
+  it('developer default (no allowedTools): denies web + external_directory, keeps --auto', () => {
+    const { permission, readOnly } = buildToolPermission(undefined, {
+      bash: { 'git merge*': 'deny' },
+    });
+    expect(permission).toEqual({
+      bash: { 'git merge*': 'deny' },
+      webfetch: 'deny',
+      websearch: 'deny',
+      external_directory: 'deny',
+    });
+    expect(readOnly).toBe(false);
+  });
+
+  it('read-only stage: allows only mapped read tools, denies edit/bash/web/task, readOnly=true', () => {
+    const { permission, readOnly } = buildToolPermission(['Read', 'Grep', 'Glob']);
+    expect(permission).toMatchObject({
+      read: 'allow',
+      grep: 'allow',
+      glob: 'allow',
+      edit: 'deny',
+      bash: 'deny',
+      task: 'deny',
+      webfetch: 'deny',
+      websearch: 'deny',
+      external_directory: 'deny',
+    });
+    expect(readOnly).toBe(true);
+  });
+
+  it('scoped Bash(pattern) becomes a default-deny bash map with the project rules last', () => {
+    const { permission, readOnly } = buildToolPermission(['Read', 'Bash(pnpm lint*)'], {
+      bash: { 'git merge*': 'deny' },
+    });
+    expect(permission.bash).toEqual({
+      '*': 'deny',
+      'pnpm lint*': 'allow',
+      'git merge*': 'deny',
+    });
+    expect(Object.keys(permission.bash as object)).toEqual(['*', 'pnpm lint*', 'git merge*']);
+    expect(readOnly).toBe(true);
+  });
+
+  it('an edit-capable tool list is not read-only and leaves edit rules untouched', () => {
+    const { permission, readOnly } = buildToolPermission(['Read', 'Edit', 'Write', 'Bash']);
+    expect(readOnly).toBe(false);
+    expect(permission).not.toHaveProperty('edit');
+    expect(permission).not.toHaveProperty('bash');
+    expect(permission.webfetch).toBe('deny');
+  });
+
+  it('web tools are allowed through only when explicitly listed', () => {
+    const { permission } = buildToolPermission(['Read', 'WebFetch']);
+    expect(permission).not.toHaveProperty('webfetch');
+    expect(permission.websearch).toBe('deny');
+  });
+});
+
 describe('resolveMainCloneRoot', () => {
   it('maps an absolute --git-common-dir to its parent', async () => {
     setupRunnerExecFile({ commonDir: '/main/.git' });
@@ -587,6 +762,7 @@ describe('buildDispatchConfig', () => {
     expect(JSON.parse(buildDispatchConfig('/tmp/no-such-dir', undefined))).toEqual({
       autoupdate: false,
       snapshot: false,
+      permission: { webfetch: 'deny', websearch: 'deny', external_directory: 'deny' },
     });
   });
 
@@ -661,9 +837,9 @@ describe('OpenCodeRunner', () => {
 
     // The commit flow.
     const all = execFileArgLists();
-    expect(all.some((a) => a[0] === 'git' && a.includes('add') && a.includes('src/search.ts'))).toBe(
-      true,
-    );
+    expect(
+      all.some((a) => a[0] === 'git' && a.includes('add') && a.includes('src/search.ts')),
+    ).toBe(true);
     expect(
       all.some((a) =>
         a.some((x) => x.includes('Co-Authored-By:') && x.includes('Add search feature')),
@@ -682,7 +858,9 @@ describe('OpenCodeRunner', () => {
     await writeFile(
       join(workDir, 'opencode.json'),
       JSON.stringify({
-        mcp: { 'ai-sdlc': { type: 'local', command: ['node', 'ai-sdlc-plugin/mcp-server/dist/bin.js'] } },
+        mcp: {
+          'ai-sdlc': { type: 'local', command: ['node', 'ai-sdlc-plugin/mcp-server/dist/bin.js'] },
+        },
       }),
     );
 
@@ -701,6 +879,7 @@ describe('OpenCodeRunner', () => {
     expect(JSON.parse(opts.env.OPENCODE_CONFIG_CONTENT)).toEqual({
       autoupdate: false,
       snapshot: false,
+      permission: { webfetch: 'deny', websearch: 'deny', external_directory: 'deny' },
       mcp: {
         'ai-sdlc': {
           type: 'local',
@@ -709,6 +888,31 @@ describe('OpenCodeRunner', () => {
       },
     });
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('read-only stage (allowedTools without edit): no --auto, permission block injected', async () => {
+    setupSpawn({ stdout: STREAM_OK, code: 0 });
+    setupRunnerExecFile({ diff: ['src/search.ts'], session: { json: exportJson() } });
+    await new OpenCodeRunner().run(makeCtx({ allowedTools: ['Read', 'Grep', 'Glob'] }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [, args, opts] = spawnMock.mock.calls[0] as any;
+    expect(args).not.toContain('--auto');
+    const cfg = JSON.parse(opts.env.OPENCODE_CONFIG_CONTENT);
+    expect(cfg.permission).toMatchObject({
+      edit: 'deny',
+      bash: 'deny',
+      webfetch: 'deny',
+      read: 'allow',
+    });
+  });
+
+  it('developer stage (no allowedTools): still passes --auto', async () => {
+    setupSpawn({ stdout: STREAM_OK, code: 0 });
+    setupRunnerExecFile({ diff: ['src/search.ts'], session: { json: exportJson() } });
+    await new OpenCodeRunner().run(makeCtx());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const args = (spawnMock.mock.calls[0] as any)[1] as string[];
+    expect(args).toContain('--auto');
   });
 
   it('fails loudly when no model is resolvable', async () => {
@@ -737,7 +941,11 @@ describe('OpenCodeRunner', () => {
     setupSpawn({
       code: 0,
       stdout:
-        JSON.stringify({ type: 'step_start', sessionID: 'ses_test1', part: { type: 'step-start' } }) +
+        JSON.stringify({
+          type: 'step_start',
+          sessionID: 'ses_test1',
+          part: { type: 'step-start' },
+        }) +
         '\n' +
         JSON.stringify({
           type: 'error',

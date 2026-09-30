@@ -33,9 +33,11 @@ describe('HarnessRegistry', () => {
 });
 
 describe('createDefaultHarnessRegistry', () => {
-  it('ships with claude-code and codex adapters', () => {
+  it('ships with claude-code, codex and opencode adapters', () => {
     const reg = createDefaultHarnessRegistry();
     expect(reg.has('claude-code')).toBe(true);
     expect(reg.has('codex')).toBe(true);
+    expect(reg.has('opencode')).toBe(true);
+    expect(reg.get('opencode')?.name).toBe('opencode');
   });
 });

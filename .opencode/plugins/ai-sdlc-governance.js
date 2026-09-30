@@ -27,13 +27,13 @@
  * → repo root), else the session's own directory.
  */
 
-import { readFileSync, existsSync, appendFileSync, mkdirSync, readdirSync } from "node:fs";
-import { join, resolve, isAbsolute, relative, sep, dirname, extname } from "node:path";
-import { homedir } from "node:os";
-import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { readFileSync, existsSync, appendFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { join, resolve, isAbsolute, relative, sep, dirname, extname } from 'node:path';
+import { homedir } from 'node:os';
+import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const BANNER_MARKER = "AI-SDLC GOVERNANCE";
+const BANNER_MARKER = 'AI-SDLC GOVERNANCE';
 
 // ── Roots ─────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ function deriveProjectRoot() {
 // ── agent-role.yaml list parsing (port of parseListField) ─────────────
 
 function parseListField(yaml, field) {
-  const lines = yaml.split("\n");
+  const lines = yaml.split('\n');
   const items = [];
   let inSection = false;
   for (const line of lines) {
@@ -77,19 +77,24 @@ function parseListField(yaml, field) {
 // adopters without one are unchanged.
 
 const STRICT_DEFAULTS = Object.freeze({
-  allowMerge: "never",
+  allowMerge: 'never',
   allowForcePush: false,
   allowClosePrIssue: false,
   allowBranchDelete: false,
   allowResetHard: false,
 });
 
-const KNOWN_PRESETS = new Set(["strict", "operator-trusted"]);
-const GOV_BOOLEAN_KEYS = ["allowForcePush", "allowClosePrIssue", "allowBranchDelete", "allowResetHard"];
+const KNOWN_PRESETS = new Set(['strict', 'operator-trusted']);
+const GOV_BOOLEAN_KEYS = [
+  'allowForcePush',
+  'allowClosePrIssue',
+  'allowBranchDelete',
+  'allowResetHard',
+];
 
 function parseGovernanceBlock(yamlText) {
-  if (typeof yamlText !== "string") return null;
-  const lines = yamlText.split("\n");
+  if (typeof yamlText !== 'string') return null;
+  const lines = yamlText.split('\n');
   let govIndent = null;
   const raw = {};
   let found = false;
@@ -109,11 +114,11 @@ function parseGovernanceBlock(yamlText) {
     const kv = line.match(/^\s*([A-Za-z0-9_]+):\s*(.*)$/);
     if (!kv) continue;
     const key = kv[1];
-    let value = kv[2].replace(/\s+#.*$/, "").trim();
-    if (value === "") continue;
-    value = value.replace(/^['"]/, "").replace(/['"]$/, "");
-    if (value === "true") raw[key] = true;
-    else if (value === "false") raw[key] = false;
+    let value = kv[2].replace(/\s+#.*$/, '').trim();
+    if (value === '') continue;
+    value = value.replace(/^['"]/, '').replace(/['"]$/, '');
+    if (value === 'true') raw[key] = true;
+    else if (value === 'false') raw[key] = false;
     else raw[key] = value;
   }
   return found ? raw : null;
@@ -121,16 +126,16 @@ function parseGovernanceBlock(yamlText) {
 
 function resolveGovernance(rawGovernance) {
   const resolved = { ...STRICT_DEFAULTS };
-  if (!rawGovernance || typeof rawGovernance !== "object") return resolved;
-  if (typeof rawGovernance.preset === "string" && KNOWN_PRESETS.has(rawGovernance.preset)) {
-    if (rawGovernance.preset === "operator-trusted") resolved.allowMerge = "onGreenClean";
+  if (!rawGovernance || typeof rawGovernance !== 'object') return resolved;
+  if (typeof rawGovernance.preset === 'string' && KNOWN_PRESETS.has(rawGovernance.preset)) {
+    if (rawGovernance.preset === 'operator-trusted') resolved.allowMerge = 'onGreenClean';
   }
-  if (typeof rawGovernance.allowMerge === "string") {
+  if (typeof rawGovernance.allowMerge === 'string') {
     const v = rawGovernance.allowMerge;
-    if (v === "never" || v === "onGreenClean") resolved.allowMerge = v;
+    if (v === 'never' || v === 'onGreenClean') resolved.allowMerge = v;
   }
   for (const key of GOV_BOOLEAN_KEYS) {
-    if (typeof rawGovernance[key] === "boolean") resolved[key] = rawGovernance[key];
+    if (typeof rawGovernance[key] === 'boolean') resolved[key] = rawGovernance[key];
   }
   return resolved;
 }
@@ -147,13 +152,13 @@ function loadPolicy(projectRoot) {
   if (!root) return empty;
   let yaml;
   try {
-    yaml = readFileSync(join(root, ".ai-sdlc", "agent-role.yaml"), "utf-8");
+    yaml = readFileSync(join(root, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
   } catch {
     return empty;
   }
   return {
-    blockedActions: parseListField(yaml, "blockedActions"),
-    blockedPaths: parseListField(yaml, "blockedPaths"),
+    blockedActions: parseListField(yaml, 'blockedActions'),
+    blockedPaths: parseListField(yaml, 'blockedPaths'),
     governance: resolveGovernance(parseGovernanceBlock(yaml)),
   };
 }
@@ -163,8 +168,8 @@ function loadPolicy(projectRoot) {
 /** Command-pattern match — port of the Claude hook's blockedActions test
  *  (escape metachars, `*` → `.*`, full-anchored, case-insensitive). */
 function cmdMatch(pattern, command) {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-  return new RegExp(`^${escaped}$`, "i").test(command);
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`, 'i').test(command);
 }
 
 /** Path-glob match — port of the hook's matchGlob (`**` crosses `/`,
@@ -172,23 +177,31 @@ function cmdMatch(pattern, command) {
  *  bypass a floor by casing alone). */
 function matchGlob(glob, path) {
   const regexStr = glob
-    .split("")
+    .split('')
     .map((char, i, arr) => {
-      if (char === "*" && arr[i + 1] === "*") return "__DOUBLESTAR__";
-      if (char === "*" && arr[i - 1] === "*") return "";
-      if (char === "*") return "[^/]*";
-      if (/[.+?^${}()|[\]\\]/.test(char)) return "\\" + char;
+      if (char === '*' && arr[i + 1] === '*') return '__DOUBLESTAR__';
+      if (char === '*' && arr[i - 1] === '*') return '';
+      if (char === '*') return '[^/]*';
+      if (/[.+?^${}()|[\]\\]/.test(char)) return '\\' + char;
       return char;
     })
-    .join("")
-    .replace(/__DOUBLESTAR__/g, ".*");
-  return new RegExp(`^${regexStr}$`, "i").test(path);
+    .join('')
+    .replace(/__DOUBLESTAR__/g, '.*');
+  return new RegExp(`^${regexStr}$`, 'i').test(path);
 }
 
 // ── Shell governance (port of enforce-blocked-actions.js) ─────────────
 
-const SAFE_ARM_FLAGS = new Set(["--auto", "--squash", "--merge", "--rebase", "--delete-branch", "-d", "--admin"]);
-const VALUE_FLAGS = new Set(["-R", "--repo"]);
+const SAFE_ARM_FLAGS = new Set([
+  '--auto',
+  '--squash',
+  '--merge',
+  '--rebase',
+  '--delete-branch',
+  '-d',
+  '--admin',
+]);
+const VALUE_FLAGS = new Set(['-R', '--repo']);
 
 function splitShellSegments(command) {
   return command
@@ -199,12 +212,12 @@ function splitShellSegments(command) {
 
 /** Removes an unquoted trailing shell comment and all quote characters. */
 function stripCommentAndQuotes(segment) {
-  return segment.replace(/#.*$/, "").replace(/['"]/g, "");
+  return segment.replace(/#.*$/, '').replace(/['"]/g, '');
 }
 
 /** Removes only a trailing unquoted shell comment (quotes preserved). */
 function stripComment(segment) {
-  return segment.replace(/#.*$/, "");
+  return segment.replace(/#.*$/, '');
 }
 
 /**
@@ -236,13 +249,13 @@ function isCleanAutoArmSegment(segment) {
   const tokens = tokenizeShellish(stripComment(segment));
   let i = 0;
   while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-  if (tokens[i] !== "gh" || tokens[i + 1] !== "pr" || tokens[i + 2] !== "merge") return false;
+  if (tokens[i] !== 'gh' || tokens[i + 1] !== 'pr' || tokens[i + 2] !== 'merge') return false;
   i += 3;
   let sawAuto = false;
   let sawPositional = false;
   for (; i < tokens.length; i++) {
     const tok = tokens[i];
-    if (tok === "--auto") {
+    if (tok === '--auto') {
       sawAuto = true;
       continue;
     }
@@ -253,7 +266,7 @@ function isCleanAutoArmSegment(segment) {
     }
     if (
       !sawPositional &&
-      !tok.startsWith("-") &&
+      !tok.startsWith('-') &&
       /^(\d+|[^/]+\/[^/]+#\d+|https?:\/\/\S+)$/.test(tok)
     ) {
       sawPositional = true;
@@ -285,7 +298,7 @@ function checkMergeGovernance(segment, governance) {
 
 // ── No-bare-stash governance (AISDLC-611) ────────────────────────────
 
-const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+const GIT_GLOBAL_VALUE_FLAGS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace']);
 const SAFE_STASH_PATTERN =
   'prefer a temporary WIP commit to set work aside; if you must stash, tag it uniquely ' +
   `('git stash push -u -m "<unique-tag>"'), restore it by exact ref/SHA ` +
@@ -300,7 +313,7 @@ const SAFE_STASH_PATTERN =
  * (under-inspection only — never a false BLOCK).
  */
 function stripHeredocBodies(command) {
-  const lines = command.split("\n");
+  const lines = command.split('\n');
   const kept = [];
   let i = 0;
   while (i < lines.length) {
@@ -316,12 +329,12 @@ function stripHeredocBodies(command) {
     kept.push(line);
     i++;
     while (i < lines.length) {
-      const bodyLine = dashed ? lines[i].replace(/^\t+/, "") : lines[i];
+      const bodyLine = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
       i++;
       if (bodyLine === marker) break;
     }
   }
-  return kept.join("\n");
+  return kept.join('\n');
 }
 
 /**
@@ -342,20 +355,20 @@ function stripHeredocBodies(command) {
  */
 function normalizeStashObfuscation(text) {
   let out = text;
-  out = out.replace(/\$\{IFS\}/g, " ");
-  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, " ");
-  out = out.replace(/\$IFS\b/g, " ");
-  out = out.replace(/\$\{[^}]*\}/g, "");
-  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, "");
+  out = out.replace(/\$\{IFS\}/g, ' ');
+  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
+  out = out.replace(/\$IFS\b/g, ' ');
+  out = out.replace(/\$\{[^}]*\}/g, '');
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, '');
   out = stripCommentAndQuotes(out);
-  out = out.replace(/\\/g, "");
-  out = out.replace(/[(){}`$]/g, " ");
+  out = out.replace(/\\/g, '');
+  out = out.replace(/[(){}`$]/g, ' ');
   return out;
 }
 
 /** True when `tok` is `git` or a path ending in `/git` (e.g. `/usr/bin/git`). */
 function isGitToken(tok) {
-  return typeof tok === "string" && /(^|\/)git$/.test(tok);
+  return typeof tok === 'string' && /(^|\/)git$/.test(tok);
 }
 
 /**
@@ -368,12 +381,12 @@ function findGitStashIndex(tokens, gitIdx) {
   let j = gitIdx + 1;
   while (j < tokens.length) {
     const tok = tokens[j];
-    if (tok === "stash") return j;
+    if (tok === 'stash') return j;
     if (GIT_GLOBAL_VALUE_FLAGS.has(tok)) {
       j += 2;
       continue;
     }
-    if (tok.startsWith("-")) {
+    if (tok.startsWith('-')) {
       j += 1;
       continue;
     }
@@ -385,7 +398,7 @@ function findGitStashIndex(tokens, gitIdx) {
 /** True when a non-flag (positional) token appears from `fromIdx` onward. */
 function hasPositionalArg(tokens, fromIdx) {
   for (let i = fromIdx; i < tokens.length; i++) {
-    if (!tokens[i].startsWith("-")) return true;
+    if (!tokens[i].startsWith('-')) return true;
   }
   return false;
 }
@@ -407,9 +420,9 @@ function evaluateStashSegment(segment) {
   const sub = tokens[stashIdx + 1];
 
   // Bare `git stash` (no subcommand / next token is a flag) is a push — allow.
-  if (!sub || sub.startsWith("-")) return { blocked: false };
+  if (!sub || sub.startsWith('-')) return { blocked: false };
 
-  if (sub === "pop") {
+  if (sub === 'pop') {
     return {
       blocked: true,
       reason:
@@ -421,7 +434,7 @@ function evaluateStashSegment(segment) {
     };
   }
 
-  if (sub === "clear") {
+  if (sub === 'clear') {
     return {
       blocked: true,
       reason:
@@ -431,7 +444,7 @@ function evaluateStashSegment(segment) {
     };
   }
 
-  if (sub === "drop") {
+  if (sub === 'drop') {
     if (hasPositionalArg(tokens, stashIdx + 2)) return { blocked: false };
     return {
       blocked: true,
@@ -461,28 +474,108 @@ function checkStashGovernance(command) {
  * denies `--force-with-lease` too — a pre-existing spec conflict, flagged
  * upstream; the opencode port resolves it in favor of the DoD by carving
  * the lease-protected form out of the force-push denies.
+ *
+ * The carve-out is STRICT (AISDLC-660 review): a prefix glob such as
+ * `git push --force-with-lease*` also matches
+ * `git push --force-with-lease --force origin main`, which is a plain
+ * force-push. So the carve-out applies only when `isStrictLeasePush` holds.
  */
-const FORCE_WITH_LEASE_PATTERN = "git push --force-with-lease*";
+const FORCE_PUSH_PATTERN_RE = /^git push (--force|-f)/;
+const PROTECTED_PUSH_TARGETS = new Set(['main', 'master']);
 
 function isForcePushPattern(pattern) {
-  return /^git push (--force|-f)/.test(pattern);
+  return FORCE_PUSH_PATTERN_RE.test(pattern);
+}
+
+/** Tokenize a segment and locate the `push` subcommand of a `git` invocation. */
+function parseGitPush(segment) {
+  const tokens = tokenizeShellish(stripComment(segment));
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (!isGitToken(tokens[i])) return null;
+  i++;
+  while (i < tokens.length && tokens[i].startsWith('-')) {
+    i += GIT_GLOBAL_VALUE_FLAGS.has(tokens[i]) ? 2 : 1;
+  }
+  if (tokens[i] !== 'push') return null;
+  return tokens.slice(i + 1);
+}
+
+const LEASE_FLAG_RE = /^--force-with-lease(=.*)?$/;
+
+/** True when a `git push` arg list carries any force-ish flag or `+refspec`. */
+function hasForceIndicator(args) {
+  return args.some(
+    (t) =>
+      t === '--force' ||
+      t.startsWith('--force=') ||
+      LEASE_FLAG_RE.test(t) ||
+      t === '--force-if-includes' ||
+      t === '--mirror' ||
+      (/^-[A-Za-z]+$/.test(t) && t.includes('f')) ||
+      (!t.startsWith('-') && (t.startsWith('+') || t.includes(':+'))),
+  );
+}
+
+/**
+ * Strict lease form: EXACTLY `--force-with-lease[=<ref>[:<sha>]]` with no
+ * other force flag (`--force`, `-f`/`-fu`-style clusters, `--mirror`,
+ * `--force-if-includes` is tolerated — it only makes the lease stricter),
+ * no `+`-prefixed refspec, no `--delete`, and no main/master push target.
+ * A bare lease with no refspec pushes the current branch; that case cannot
+ * be resolved statically and is allowed (documented limitation).
+ */
+function isStrictLeasePush(segment) {
+  const args = parseGitPush(segment);
+  if (!args) return false;
+  if (!args.some((t) => LEASE_FLAG_RE.test(t))) return false;
+
+  const positionals = [];
+  for (const t of args) {
+    if (t === '--force' || t.startsWith('--force=') || t === '--mirror') return false;
+    if (t === '--delete' || t === '-d') return false;
+    if (/^-[A-Za-z]+$/.test(t) && (t.includes('f') || t.includes('d'))) return false;
+    if (!t.startsWith('-')) positionals.push(t);
+  }
+  // positionals[0] is the remote; the rest are refspecs.
+  for (const spec of positionals.slice(1)) {
+    if (spec.startsWith('+') || spec.includes(':+')) return false;
+    const dest = spec.includes(':') ? spec.slice(spec.lastIndexOf(':') + 1) : spec;
+    const branch = dest.replace(/^refs\/heads\//, '');
+    if (PROTECTED_PUSH_TARGETS.has(branch.toLowerCase())) return false;
+  }
+  return true;
 }
 
 /**
  * blockedActions matching, SEGMENT-AWARE (splits on shell control operators
  * first, so a chained `cd x && git push --force origin` is still caught —
- * a strict superset of the Claude hook's whole-command match). When a
- * force-push pattern matches, the force-with-lease carve-out above skips it;
- * the force-with-lease form is the only force-push that survives.
+ * a strict superset of the Claude hook's whole-command match). Force-push
+ * patterns are additionally enforced by token analysis so a force flag AFTER
+ * the remote (`git push origin main --force`) cannot dodge the prefix glob.
+ * Only a strict lease push (see isStrictLeasePush) survives.
  */
 function checkBlockedActions(command, patterns) {
+  const hasForceRule = patterns.some(isForcePushPattern);
   for (const segment of splitShellSegments(command)) {
     for (const pattern of patterns) {
       if (!cmdMatch(pattern, segment)) continue;
-      if (isForcePushPattern(pattern) && cmdMatch(FORCE_WITH_LEASE_PATTERN, segment)) {
+      if (isForcePushPattern(pattern) && isStrictLeasePush(segment)) {
         continue; // carve-out: the DoD-required lease-protected form
       }
       return { blocked: true, reason: `command matches blockedAction pattern '${pattern}'` };
+    }
+    if (hasForceRule) {
+      const args = parseGitPush(segment);
+      if (args && hasForceIndicator(args) && !isStrictLeasePush(segment)) {
+        return {
+          blocked: true,
+          reason:
+            'force-push is blocked; the only permitted form is a strict ' +
+            "'git push --force-with-lease[=<ref>[:<sha>]] <remote> <branch>' with no other force " +
+            "flag, no '+' refspec, and a non-main/master target",
+        };
+      }
     }
   }
   return null;
@@ -494,7 +587,7 @@ function checkBlockedActions(command, patterns) {
  * config-driven. Returns the first blocking verdict or null.
  */
 function checkShellCommand(command, policy) {
-  if (!command || typeof command !== "string" || !command.trim()) return null;
+  if (!command || typeof command !== 'string' || !command.trim()) return null;
   const trimmed = command.trim();
 
   for (const segment of splitShellSegments(trimmed)) {
@@ -522,7 +615,7 @@ function findWorktreeSentinel(projectAbs, startFrom) {
   if (!startFrom) return null;
   const start = isAbsolute(startFrom) ? resolve(startFrom) : resolve(projectAbs, startFrom);
 
-  const worktreesRoot = join(projectAbs, ".worktrees");
+  const worktreesRoot = join(projectAbs, '.worktrees');
   if (start !== worktreesRoot && !start.startsWith(worktreesRoot + sep)) {
     return null;
   }
@@ -530,11 +623,11 @@ function findWorktreeSentinel(projectAbs, startFrom) {
   let current = start;
   for (;;) {
     if (dirname(current) === worktreesRoot) {
-      return join(current, ".active-task");
+      return join(current, '.active-task');
     }
     const parent = dirname(current);
     if (parent === current) return null; // hit fs root
-    if (parent === worktreesRoot) return join(current, ".active-task");
+    if (parent === worktreesRoot) return join(current, '.active-task');
     if (!parent.startsWith(worktreesRoot + sep) && parent !== worktreesRoot) {
       return null;
     }
@@ -561,17 +654,17 @@ function readActiveTaskId(projectAbs, searchFrom) {
   const perWorktree = findWorktreeSentinel(projectAbs, searchFrom);
   if (perWorktree) {
     try {
-      const id = readFileSync(perWorktree, "utf-8").trim();
+      const id = readFileSync(perWorktree, 'utf-8').trim();
       if (id) return id;
     } catch {
       // fall through
     }
   }
 
-  const projectSentinel = join(projectAbs, ".worktrees", ".active-task");
+  const projectSentinel = join(projectAbs, '.worktrees', '.active-task');
   if (existsSync(projectSentinel)) {
     try {
-      const id = readFileSync(projectSentinel, "utf-8").trim();
+      const id = readFileSync(projectSentinel, 'utf-8').trim();
       if (id) return id;
     } catch {
       // fall through
@@ -590,7 +683,7 @@ function loadPermittedExternalPaths(projectAbs, searchFrom) {
   const taskId = readActiveTaskId(projectAbs, searchFrom);
   if (!taskId) return [];
 
-  const tasksDir = join(projectAbs, "backlog", "tasks");
+  const tasksDir = join(projectAbs, 'backlog', 'tasks');
   if (!existsSync(tasksDir)) return [];
 
   let entries;
@@ -601,12 +694,12 @@ function loadPermittedExternalPaths(projectAbs, searchFrom) {
   }
 
   const idLower = taskId.toLowerCase();
-  const taskFile = entries.find((f) => f.toLowerCase().startsWith(idLower + " "));
+  const taskFile = entries.find((f) => f.toLowerCase().startsWith(idLower + ' '));
   if (!taskFile) return [];
 
   let content;
   try {
-    content = readFileSync(join(tasksDir, taskFile), "utf-8");
+    content = readFileSync(join(tasksDir, taskFile), 'utf-8');
   } catch {
     return [];
   }
@@ -614,7 +707,7 @@ function loadPermittedExternalPaths(projectAbs, searchFrom) {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
   if (!fmMatch) return [];
 
-  return parseListField(fmMatch[1], "permittedExternalPaths");
+  return parseListField(fmMatch[1], 'permittedExternalPaths');
 }
 
 /**
@@ -625,10 +718,10 @@ function loadPermittedExternalPaths(projectAbs, searchFrom) {
 function warnIfStaleBase(dir) {
   if (!dir) return;
   try {
-    const output = execSync("git rev-list --count HEAD..origin/main", {
+    const output = execSync('git rev-list --count HEAD..origin/main', {
       cwd: dir,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"],
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     const behindCount = parseInt(output, 10);
     if (Number.isFinite(behindCount) && behindCount > 0) {
@@ -642,6 +735,8 @@ function warnIfStaleBase(dir) {
     // best-effort only — never block
   }
 }
+
+const HARNESS_CONFIG_FLOOR = ['opencode.json', 'opencode.jsonc', '.opencode/**'];
 
 /**
  * Full path governance (port of enforceWriteEdit). `home` is the active
@@ -658,7 +753,7 @@ function warnIfStaleBase(dir) {
  * root and was only correct when the tool cwd WAS the root.
  */
 function checkPath(filePath, policy, projectAbs, searchFrom) {
-  if (!filePath || typeof filePath !== "string") return null;
+  if (!filePath || typeof filePath !== 'string') return null;
 
   const base = searchFrom || projectAbs;
   const absPath = isAbsolute(filePath) ? resolve(filePath) : resolve(base, filePath);
@@ -670,17 +765,30 @@ function checkPath(filePath, policy, projectAbs, searchFrom) {
   warnIfStaleBase(homeAbs);
 
   if (insideHome) {
-    const relPath = relative(homeAbs, absPath).split(sep).join("/");
+    const relPath = relative(homeAbs, absPath).split(sep).join('/');
 
     // `.ai-sdlc/**` is ALWAYS refused, regardless of agent-role.yaml
     // content (or its absence) — hardcoded floor (AISDLC-567 Part A).
-    if (matchGlob(".ai-sdlc/**", relPath) || relPath === ".ai-sdlc") {
+    if (matchGlob('.ai-sdlc/**', relPath) || relPath === '.ai-sdlc') {
       return {
         blocked: true,
         reason:
           `path '${relPath}' is under .ai-sdlc/, which is never editable — pipeline ` +
           `configuration is out of scope for agent edits regardless of project config.`,
       };
+    }
+
+    // Harness-config floor (AISDLC-660 review): an agent must not rewrite the
+    // very permission policy / plugin that governs it.
+    for (const glob of HARNESS_CONFIG_FLOOR) {
+      if (matchGlob(glob, relPath)) {
+        return {
+          blocked: true,
+          reason:
+            `path '${relPath}' is opencode harness configuration (governance policy/plugin) — ` +
+            `never editable by the agent it governs.`,
+        };
+      }
     }
 
     for (const glob of policy.blockedPaths) {
@@ -712,7 +820,7 @@ function checkPath(filePath, policy, projectAbs, searchFrom) {
           `cross-repo writes for this task, add 'permittedExternalPaths' to the task frontmatter ` +
           `and set AI_SDLC_ACTIVE_TASK_ID before invoking the agent.`
         : `path '${absPath}' is outside the agent's active worktree/project root and not under ` +
-          `the active task's permittedExternalPaths (${allowed.join(", ")}).`,
+          `the active task's permittedExternalPaths (${allowed.join(', ')}).`,
   };
 }
 
@@ -724,32 +832,32 @@ function checkPath(filePath, policy, projectAbs, searchFrom) {
  * input field for read/edit/write is `path`).
  */
 function canonicalizeAction(tool, input) {
-  const inp = input && typeof input === "object" ? input : {};
+  const inp = input && typeof input === 'object' ? input : {};
   switch (tool) {
-    case "shell":
-    case "Bash": {
-      const cmd = String(inp.command || "").trim();
-      const lastCmd = cmd.includes("&&") ? cmd.split("&&").pop().trim() : cmd;
+    case 'shell':
+    case 'Bash': {
+      const cmd = String(inp.command || '').trim();
+      const lastCmd = cmd.includes('&&') ? cmd.split('&&').pop().trim() : cmd;
       const tokens = lastCmd.split(/\s+/).slice(0, 3);
-      return tokens.join(" ").slice(0, 60) || "shell";
+      return tokens.join(' ').slice(0, 60) || 'shell';
     }
-    case "read":
-      return `read:${extname(String(inp.path || "")) || "file"}`;
-    case "edit":
-      return `edit:${extname(String(inp.path || "")) || "file"}`;
-    case "write":
-      return `write:${extname(String(inp.path || "")) || "file"}`;
-    case "grep":
-      return `grep:${String(inp.pattern || "").slice(0, 30)}`;
-    case "glob":
-      return `glob:${String(inp.pattern || "").slice(0, 30)}`;
-    case "subagent":
-    case "Agent":
-      return `agent:${String(inp.description || "").slice(0, 30)}`;
-    case "webfetch":
-      return `webfetch:${String(inp.url || "").slice(0, 40)}`;
-    case "websearch":
-      return `websearch:${String(inp.query || "").slice(0, 40)}`;
+    case 'read':
+      return `read:${extname(String(inp.path || '')) || 'file'}`;
+    case 'edit':
+      return `edit:${extname(String(inp.path || '')) || 'file'}`;
+    case 'write':
+      return `write:${extname(String(inp.path || '')) || 'file'}`;
+    case 'grep':
+      return `grep:${String(inp.pattern || '').slice(0, 30)}`;
+    case 'glob':
+      return `glob:${String(inp.pattern || '').slice(0, 30)}`;
+    case 'subagent':
+    case 'Agent':
+      return `agent:${String(inp.description || '').slice(0, 30)}`;
+    case 'webfetch':
+      return `webfetch:${String(inp.url || '').slice(0, 40)}`;
+    case 'websearch':
+      return `websearch:${String(inp.query || '').slice(0, 40)}`;
     default:
       return String(tool).toLowerCase();
   }
@@ -767,13 +875,15 @@ function appendTelemetry(sessionID, tool, input, projectAbs) {
     const entry = {
       ts: new Date().toISOString(),
       sid: sessionID,
-      tool: String(tool || "unknown"),
-      action: canonicalizeAction(String(tool || ""), input),
+      tool: String(tool || 'unknown'),
+      action: canonicalizeAction(String(tool || ''), input),
       project: projectAbs || process.cwd(),
     };
-    const dir = process.env.AI_SDLC_TELEMETRY_DIR || join(homedir(), ".local", "share", "opencode", "usage-data");
+    const dir =
+      process.env.AI_SDLC_TELEMETRY_DIR ||
+      join(homedir(), '.local', 'share', 'opencode', 'usage-data');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, "tool-sequences.jsonl"), JSON.stringify(entry) + "\n", "utf-8");
+    appendFileSync(join(dir, 'tool-sequences.jsonl'), JSON.stringify(entry) + '\n', 'utf-8');
   } catch {
     // Never fail — telemetry is best-effort
   }
@@ -802,7 +912,7 @@ function renderGovernanceBanner(policy) {
     `- **Never write under \`.ai-sdlc/\`** or any path the project lists in \`.ai-sdlc/agent-role.yaml\` blockedPaths.`,
     `- **Never write outside the active worktree** unless the active task's frontmatter permittedExternalPaths allows it.`,
   ];
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────
@@ -815,13 +925,13 @@ async function sessionDir(ctx, sessionID) {
   try {
     const s = await ctx.session.get(sessionID);
     const d = s?.location?.directory ?? s?.directory;
-    if (typeof d === "string" && d) return resolve(d);
+    if (typeof d === 'string' && d) return resolve(d);
   } catch {
     // fall through
   }
   try {
     const d = ctx.location?.directory;
-    if (typeof d === "string" && d) return resolve(d);
+    if (typeof d === 'string' && d) return resolve(d);
   } catch {
     // fall through
   }
@@ -829,7 +939,7 @@ async function sessionDir(ctx, sessionID) {
 }
 
 export default {
-  id: "ai-sdlc.governance",
+  id: 'ai-sdlc.governance',
   setup: async (ctx) => {
     const registrations = [];
     const register = async (fn) => {
@@ -847,26 +957,34 @@ export default {
     //    effect + message. Effective policy = union of both layers, so
     //    governance is immune to config merge ordering.
     await register(() =>
-      ctx.permission.hook("evaluate", async (input) => {
+      ctx.permission.hook('evaluate', async (input) => {
         try {
-          const action = String(input.action ?? "");
+          const action = String(input.action ?? '');
           const resources = Array.isArray(input.resources) ? input.resources : [input.resources];
-          const resource = resources[0];
           const root = deriveProjectRoot();
           let verdict = null;
 
-          if (action === "shell" || action === "bash") {
-            verdict = checkShellCommand(typeof resource === "string" ? resource : "", loadPolicy(root));
-          } else if (action === "edit" || action === "write" || action === "patch") {
+          // Check EVERY resource: a multi-resource call (e.g. a patch touching
+          // several files) is denied if ANY one is blocked.
+          if (action === 'shell' || action === 'bash') {
+            const policy = loadPolicy(root);
+            for (const resource of resources) {
+              verdict = checkShellCommand(typeof resource === 'string' ? resource : '', policy);
+              if (verdict) break;
+            }
+          } else if (action === 'edit' || action === 'write' || action === 'patch') {
             const dir = await sessionDir(ctx, input.sessionID);
-            if (typeof resource === "string" && resource) {
-              verdict = checkPath(resource, loadPolicy(root), root, dir);
+            const policy = loadPolicy(root);
+            for (const resource of resources) {
+              if (typeof resource !== 'string' || !resource) continue;
+              verdict = checkPath(resource, policy, root, dir);
+              if (verdict) break;
             }
           }
           // MCP tools (ai-sdlc_*) and everything else: no opinion.
 
           if (verdict && verdict.blocked) {
-            input.effect = "deny";
+            input.effect = 'deny';
             input.message = `Blocked by AI-SDLC governance policy: ${verdict.reason}`;
           }
         } catch {
@@ -877,7 +995,7 @@ export default {
 
     // 2) tool.execute.after — telemetry JSONL (port of collect-tool-sequence).
     await register(() =>
-      ctx.tool.hook("execute.after", async (e) => {
+      ctx.tool.hook('execute.after', async (e) => {
         try {
           appendTelemetry(e?.sessionID, e?.tool, e?.input, deriveProjectRoot());
         } catch {
@@ -892,12 +1010,16 @@ export default {
     //    model calls we re-see a marker-free system and re-push; if it does,
     //    the guard skips).
     await register(() =>
-      ctx.session.hook("context", async (req) => {
+      ctx.session.hook('context', async (req) => {
         try {
           const system = req?.system;
           if (!Array.isArray(system)) return;
-          if (system.some((p) => typeof p?.text === "string" && p.text.includes(BANNER_MARKER))) return;
-          system.push({ type: "text", text: renderGovernanceBanner(loadPolicy(deriveProjectRoot())) });
+          if (system.some((p) => typeof p?.text === 'string' && p.text.includes(BANNER_MARKER)))
+            return;
+          system.push({
+            type: 'text',
+            text: renderGovernanceBanner(loadPolicy(deriveProjectRoot())),
+          });
         } catch {
           // fail-open
         }

@@ -34,8 +34,8 @@ node contrib/runners/opencode/runner.mjs \
 | `--body <text>` | issue description | empty |
 | `--model <ref>` | `provider/model[#variant]`; bare ids get an `anthropic/` prefix | `OPENCODE_MODEL` → `AI_SDLC_MODEL` |
 | `--agent <name>` | `--agent` for the run | `OPENCODE_AGENT` |
-| `--max-files <n>` | max files constraint in the prompt | 10 |
-| `--blocked-paths a/**,b/**` | blocked-path constraints | none |
+| `--max-files <n>` | max files constraint (prompted AND enforced before commit) | 10 |
+| `--blocked-paths a/**,b/**` | blocked-path globs (prompted AND enforced before commit) | none |
 | `--timeout <dur>` | `15m`/`30m`/`1h`/ms | `AI_SDLC_RUNNER_TIMEOUT` or 15m |
 | `--retries <n>` | contract retries after a transport failure | 0 |
 
@@ -82,6 +82,15 @@ and `error` carries the reason; `tokenUsage` is best-effort (the
   captured session with `--session <id>` when one was captured, else
   starting fresh. Baseline file snapshots are taken once, before attempt 1,
   so partial writes from a dead attempt are still in the final diff.
+- `--max-files` / `--blocked-paths` are ENFORCED, not advisory: after the
+  run and before anything is staged, the changed-file list is checked; a
+  violation yields `success: false` with `error` naming the cause, no
+  commit, and the offending changes left in the worktree.
+- Only args resolving to existing files under the main clone are
+  re-anchored in MCP commands (`npx`/`uvx`/`docker` args, `@scope/pkg`,
+  URLs, `owner/repo`, `--flag=a/b` are never touched).
+- The prompt is passed after `--` so a dash-leading prompt is never parsed
+  as a flag.
 - The runner commits locally (template + `Co-Authored-By`) and NEVER
   pushes; pushing is the orchestrator/promotion layer's job.
 - Tokens come from `opencode session export --standalone <id>` (authoritative

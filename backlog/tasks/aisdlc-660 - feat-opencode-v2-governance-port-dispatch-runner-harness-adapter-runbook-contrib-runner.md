@@ -48,8 +48,11 @@ config area drifts between the two.
    proven empirically: the env doc merges last, per-key; omitted keys
    survive from the project config), MCP table re-anchored at the
    main-clone root for linked worktrees (entries whose re-anchored
-   script is missing are dropped, fail-soft), retry + `--session`
-   resume, `--standalone` on every programmatic invocation.
+   script is missing are dropped, fail-soft), a per-stage tool policy
+   mapped into the dispatch `permission` block (`--auto` omitted for
+   read-only stages), `--standalone` on every programmatic invocation.
+   The in-tree runner has NO auto-retry; retry + `--session` resume live
+   only in the contrib runner (deliverable 5).
 3. **Harness adapter** — `orchestrator/src/harness/adapters/opencode.ts`
    (Path C): delegates `invoke` to the runner; ISO-8601 timeout (5 min
    default); exit0+streamError+empty-stdout treated as failure.
@@ -58,7 +61,9 @@ config area drifts between the two.
    §13.2/§13.3.
 5. **Contrib runner** — `contrib/runners/opencode/` (`runner.mjs` +
    README + metadata.yaml), mirroring the `contrib/adapters/`
-   convention.
+   convention. Owns the contract retry that resumes the same session via
+   `--session <id>`, and enforces `--max-files` / `--blocked-paths`
+   before commit.
 
 ## Validation
 

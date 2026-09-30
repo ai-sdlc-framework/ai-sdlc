@@ -51,9 +51,9 @@ describe('OpenCodeAdapter', () => {
       expect(
         await new OpenCodeAdapter({ env: { ANTHROPIC_API_KEY: 'sk-ant' } }).getAccountId(),
       ).toMatch(/^[0-9a-f]{16}$/);
-      expect(await new OpenCodeAdapter({ env: { OPENAI_API_KEY: 'sk-oai' } }).getAccountId()).toMatch(
-        /^[0-9a-f]{16}$/,
-      );
+      expect(
+        await new OpenCodeAdapter({ env: { OPENAI_API_KEY: 'sk-oai' } }).getAccountId(),
+      ).toMatch(/^[0-9a-f]{16}$/);
     });
 
     it('returns null for local inference (no account to pool)', async () => {
@@ -61,8 +61,9 @@ describe('OpenCodeAdapter', () => {
     });
 
     it('is harness-namespaced: same key differs from codex', async () => {
-      const opencodeId = await new OpenCodeAdapter({ env: { OPENAI_API_KEY: 'shared-key' } })
-        .getAccountId();
+      const opencodeId = await new OpenCodeAdapter({
+        env: { OPENAI_API_KEY: 'shared-key' },
+      }).getAccountId();
       const codexId = await new (await import('./codex.js')).CodexAdapter({
         env: { OPENAI_API_KEY: 'shared-key' },
       }).getAccountId();
@@ -93,7 +94,9 @@ describe('OpenCodeAdapter', () => {
         }).availableModels(),
       ).toEqual(['lmstudio/qwen/qwen3.8-27b']);
       expect(
-        await new OpenCodeAdapter({ env: { AI_SDLC_MODEL: 'anthropic/claude-x' } }).availableModels(),
+        await new OpenCodeAdapter({
+          env: { AI_SDLC_MODEL: 'anthropic/claude-x' },
+        }).availableModels(),
       ).toEqual(['anthropic/claude-x']);
     });
 
@@ -121,10 +124,8 @@ describe('OpenCodeAdapter', () => {
     });
 
     it('default: maps a successful run to HarnessResult', async () => {
-       
       const calls: RunOpenCodeOptions[] = [];
       const a = new OpenCodeAdapter({
-         
         runFn: async (opts: RunOpenCodeOptions) => {
           calls.push(opts);
           return okResult();
@@ -152,11 +153,75 @@ describe('OpenCodeAdapter', () => {
       expect((events[1] as { status: string }).status).toBe('success');
     });
 
+    it('default: timeout is 5 minutes when HarnessInput.timeout is unset', async () => {
+      const calls: RunOpenCodeOptions[] = [];
+      const a = new OpenCodeAdapter({
+        runFn: async (opts: RunOpenCodeOptions) => {
+          calls.push(opts);
+          return okResult();
+        },
+      });
+      await a.invoke(baseInput);
+      expect(calls[0].timeoutMs).toBe(300_000);
+    });
+
+    it.each([
+      ['PT30S', 30_000],
+      ['PT1H30M', 5_400_000],
+      ['P1DT1S', 86_401_000],
+    ])('default: ISO 8601 duration %s parses to %d ms', async (iso, ms) => {
+      const calls: RunOpenCodeOptions[] = [];
+      const a = new OpenCodeAdapter({
+        runFn: async (opts: RunOpenCodeOptions) => {
+          calls.push(opts);
+          return okResult();
+        },
+      });
+      await a.invoke({ ...baseInput, timeout: iso });
+      expect(calls[0].timeoutMs).toBe(ms);
+    });
+
+    it('default: an unparseable timeout falls back to the 5 minute default', async () => {
+      const calls: RunOpenCodeOptions[] = [];
+      const a = new OpenCodeAdapter({
+        runFn: async (opts: RunOpenCodeOptions) => {
+          calls.push(opts);
+          return okResult();
+        },
+      });
+      await a.invoke({ ...baseInput, timeout: 'ten minutes' });
+      expect(calls[0].timeoutMs).toBe(300_000);
+    });
+
+    it('default: read-only allowedTools drops --auto and injects a deny permission block', async () => {
+      const calls: RunOpenCodeOptions[] = [];
+      const a = new OpenCodeAdapter({
+        runFn: async (opts: RunOpenCodeOptions) => {
+          calls.push(opts);
+          return okResult();
+        },
+      });
+      await a.invoke({ ...baseInput, allowedTools: ['Read', 'Grep', 'Glob'] });
+      expect(calls[0].auto).toBe(false);
+      const cfg = JSON.parse(calls[0].extraEnv?.OPENCODE_CONFIG_CONTENT ?? '{}');
+      expect(cfg.permission).toMatchObject({ edit: 'deny', bash: 'deny', webfetch: 'deny' });
+    });
+
+    it('default: no allowedTools keeps --auto (developer-stage behavior)', async () => {
+      const calls: RunOpenCodeOptions[] = [];
+      const a = new OpenCodeAdapter({
+        runFn: async (opts: RunOpenCodeOptions) => {
+          calls.push(opts);
+          return okResult();
+        },
+      });
+      await a.invoke(baseInput);
+      expect(calls[0].auto).toBe(true);
+    });
+
     it('default: prefixes bare model ids with anthropic/', async () => {
-       
       let model: string | undefined;
       const a = new OpenCodeAdapter({
-         
         runFn: async (opts: RunOpenCodeOptions) => {
           model = opts.model;
           return okResult();
@@ -168,8 +233,7 @@ describe('OpenCodeAdapter', () => {
 
     it('default: stream error with no final text is a failure', async () => {
       const a = new OpenCodeAdapter({
-        runFn: async () =>
-          okResult({ stdout: '', streamError: 'socket closed unexpectedly' }),
+        runFn: async () => okResult({ stdout: '', streamError: 'socket closed unexpectedly' }),
       });
       const r = await a.invoke(baseInput);
       expect(r.status).toBe('failure');
@@ -179,9 +243,7 @@ describe('OpenCodeAdapter', () => {
     it('default: a timeout-killed run maps to status timeout', async () => {
       const a = new OpenCodeAdapter({
         runFn: async () => {
-          throw new Error(
-            'opencode exited with code 143 (signal SIGTERM): ' + 'x'.repeat(800),
-          );
+          throw new Error('opencode exited with code 143 (signal SIGTERM): ' + 'x'.repeat(800));
         },
       });
       const r = await a.invoke(baseInput);

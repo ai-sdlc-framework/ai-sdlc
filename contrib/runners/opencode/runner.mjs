@@ -25,6 +25,9 @@
  *      AI_SDLC_TYPECHECK_COMMAND, AI_SDLC_COMMIT_TEMPLATE, AI_SDLC_CO_AUTHOR,
  *      AI_SDLC_TELEMETRY_DIR (all optional)
  *
+ * --max-files / --blocked-paths are ENFORCED against the changed-file list
+ * BEFORE anything is staged or committed (violation => success:false, no commit).
+ *
  * Exit: 0 = dispatch succeeded, 1 = failed. Diagnostics on stderr.
  * Result JSON on stdout:
  *   { success, sessionID, filesChanged, summary, error?, commitSha?,
@@ -32,7 +35,7 @@
  */
 
 import { spawn, execFile, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -58,7 +61,9 @@ function parseArgs(argv) {
 }
 
 function parseDuration(s) {
-  const m = String(s ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/);
+  const m = String(s ?? '')
+    .trim()
+    .match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/);
   if (!m) return null;
   return Math.round(parseFloat(m[1]) * { ms: 1, s: 1e3, m: 6e4, h: 36e5 }[m[2] || 'ms']);
 }
@@ -81,7 +86,10 @@ const ISSUE_BODY = typeof args.body === 'string' ? args.body : '';
 const MAX_FILES = Number(args['max-files']) > 0 ? Number(args['max-files']) : 10;
 const BLOCKED =
   typeof args['blocked-paths'] === 'string'
-    ? args['blocked-paths'].split(',').map((s) => s.trim()).filter(Boolean)
+    ? args['blocked-paths']
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
     : [];
 const RETRIES = Math.max(0, Number(args.retries) || 0);
 const TIMEOUT_MS =
@@ -97,9 +105,15 @@ function onPath(name) {
   }
 }
 
-const BIN = env.OPENCODE_BIN || onPath('opencode') || join(homedir(), '.opencode', 'bin', 'opencode');
-const MODEL = (typeof args.model === 'string' && args.model) || env.OPENCODE_MODEL || env.AI_SDLC_MODEL || undefined;
-const AGENT = (typeof args.agent === 'string' ? args.agent : undefined) || env.OPENCODE_AGENT || undefined;
+const BIN =
+  env.OPENCODE_BIN || onPath('opencode') || join(homedir(), '.opencode', 'bin', 'opencode');
+const MODEL =
+  (typeof args.model === 'string' && args.model) ||
+  env.OPENCODE_MODEL ||
+  env.AI_SDLC_MODEL ||
+  undefined;
+const AGENT =
+  (typeof args.agent === 'string' ? args.agent : undefined) || env.OPENCODE_AGENT || undefined;
 
 const model = MODEL ? (MODEL.includes('/') ? MODEL : `anthropic/${MODEL}`) : undefined;
 
@@ -122,9 +136,11 @@ function buildPrompt() {
     '3. Write or update tests to cover your changes.',
   ];
   let step = 3;
-  if (fmtCmd) lines.push(`${++step}. Run \`${fmtCmd}\` and fix any formatting problems it reports.`);
+  if (fmtCmd)
+    lines.push(`${++step}. Run \`${fmtCmd}\` and fix any formatting problems it reports.`);
   if (lintCmd) lines.push(`${++step}. Run \`${lintCmd}\` and fix any lint problems it reports.`);
-  if (typecheckCmd) lines.push(`${++step}. Run \`${typecheckCmd}\` and fix any type errors it reports.`);
+  if (typecheckCmd)
+    lines.push(`${++step}. Run \`${typecheckCmd}\` and fix any type errors it reports.`);
   lines.push(
     `${++step}. NEVER modify files matching the blocked paths below — violations are detected and rejected.`,
     `${++step}. Keep your changes to at most ${MAX_FILES} files.`,
@@ -149,11 +165,10 @@ function resumePrompt(err) {
 /* ── git helpers (self-contained mirror of orchestrator git-utils) ── */
 
 async function gitExec(dir, gitArgs) {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['-c', 'core.quotePath=false', ...gitArgs],
-    { cwd: dir, env: cleanGitEnv() },
-  );
+  const { stdout } = await execFileAsync('git', ['-c', 'core.quotePath=false', ...gitArgs], {
+    cwd: dir,
+    env: cleanGitEnv(),
+  });
   return stdout.trim();
 }
 
@@ -185,7 +200,9 @@ async function detectChangedFiles(dir, baseline) {
     gitExec(dir, ['ls-files', '--others', '--exclude-standard']),
   ]);
   const allUntracked = untrackedOut.split('\n').filter(Boolean);
-  const agentUntracked = baseline ? allUntracked.filter((f) => !baseline.untracked.has(f)) : allUntracked;
+  const agentUntracked = baseline
+    ? allUntracked.filter((f) => !baseline.untracked.has(f))
+    : allUntracked;
   const uncommitted = [...new Set([...diffOut, ...stagedOut, ...agentUntracked].filter(Boolean))];
 
   let committedFiles = [];
@@ -256,6 +273,31 @@ function parseJsonc(text) {
   return JSON.parse(out);
 }
 
+const SCRIPT_EXT_RE = /\.(?:[cm]?js|ts|py|sh|rb)$/i;
+const INTERPRETERS = new Set([
+  'node',
+  'bun',
+  'deno',
+  'python',
+  'python3',
+  'tsx',
+  'ruby',
+  'bash',
+  'sh',
+]);
+
+function isFile(p) {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isRelativePathArg(part) {
+  return !part.startsWith('-') && !isAbsolute(part) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(part);
+}
+
 function buildDispatchConfig(workDir, mainRoot) {
   // opencode v2 merges this env-var document LAST (per-key): permission and
   // agent entries from the project's opencode.json survive; we override
@@ -278,26 +320,38 @@ function buildDispatchConfig(workDir, mainRoot) {
         if (parsed && typeof parsed === 'object' && parsed.mcp && typeof parsed.mcp === 'object') {
           const mcp = {};
           for (const [name, entry] of Object.entries(parsed.mcp)) {
-            if (!entry || typeof entry !== 'object' || Array.isArray(entry) || entry.type === 'remote' || !Array.isArray(entry.command)) {
+            if (
+              !entry ||
+              typeof entry !== 'object' ||
+              Array.isArray(entry) ||
+              entry.type === 'remote' ||
+              !Array.isArray(entry.command)
+            ) {
               mcp[name] = entry;
               continue;
             }
+            const exe =
+              typeof entry.command[0] === 'string' ? entry.command[0].split(/[\\/]/).pop() : '';
             const script = entry.command[1];
             if (
+              INTERPRETERS.has(exe) &&
               typeof script === 'string' &&
-              !script.startsWith('-') &&
-              !isAbsolute(script) &&
-              !existsSync(resolve(mainRoot, script))
+              isRelativePathArg(script) &&
+              SCRIPT_EXT_RE.test(script) &&
+              !isFile(resolve(mainRoot, script)) &&
+              !isFile(resolve(workDir, script))
             ) {
-              continue; // unbuilt in the main clone — drop rather than dangle
+              continue; // unbuilt everywhere — drop rather than dangle
             }
+            // Re-anchor ONLY args that resolve to an existing file under the
+            // main clone; everything else (npx/uvx/docker args, @scope/pkg,
+            // URLs, owner/repo, --flag=a/b) is left untouched.
             mcp[name] = {
               ...entry,
               command: entry.command.map((part, idx) => {
-                if (typeof part !== 'string' || isAbsolute(part) || part.startsWith('-')) return part;
-                if (idx === 0) return part; // executable name — resolved via PATH
-                if (idx === 1 || part.includes('/') || part.includes('\\')) return resolve(mainRoot, part);
-                return part;
+                if (idx === 0 || typeof part !== 'string' || !isRelativePathArg(part)) return part;
+                const anchored = resolve(mainRoot, part);
+                return isFile(anchored) ? anchored : part;
               }),
             };
           }
@@ -325,11 +379,14 @@ function runOpenCode({ prompt, sessionID, mainRoot }) {
   const list = ['run', '--standalone', '--auto', '--format', 'json', '--model', model];
   if (sessionID) list.push('--session', sessionID);
   if (AGENT) list.push('--agent', AGENT);
-  list.push(prompt);
+  // `--` ends option parsing so a prompt starting with `-` is never read as a flag.
+  list.push('--', prompt);
 
   return new Promise((resolveP, rejectP) => {
     const startedAt = Date.now();
-    log(`spawning: ${BIN} ${list.filter((a) => a !== prompt).join(' ')} (prompt ${prompt.length} chars)`);
+    log(
+      `spawning: ${BIN} ${list.filter((a) => a !== prompt).join(' ')} (prompt ${prompt.length} chars)`,
+    );
     log(`workDir: ${WORKDIR}`);
 
     const child = spawn(BIN, list, {
@@ -396,12 +453,15 @@ function runOpenCode({ prompt, sessionID, mainRoot }) {
       if (code === 0) {
         resolveP({ ...state, stderr });
       } else {
-        rejectP(
-          new Error(
-            `opencode exited with code ${code}${signal ? ` (signal ${signal})` : ''}: ` +
-              `${stderr.slice(-800) || state.streamError || state.summaryText || ''}`,
-          ),
+        const failure = new Error(
+          `opencode exited with code ${code}${signal ? ` (signal ${signal})` : ''}: ` +
+            `${stderr.slice(-800) || state.streamError || state.summaryText || ''}`,
         );
+        // Carry the captured session + partial stream state on the error so the
+        // retry loop can resume the SAME session (--session) after a dead run.
+        failure.sessionID = state.sessionID;
+        failure.streamState = state;
+        rejectP(failure);
       }
     });
     child.on('error', (err) => {
@@ -415,11 +475,11 @@ function runOpenCode({ prompt, sessionID, mainRoot }) {
 async function fetchSessionTokens(sessionID) {
   if (!sessionID) return undefined;
   try {
-    const { stdout } = await execFileAsync(
-      BIN,
-      ['session', 'export', '--standalone', sessionID],
-      { cwd: WORKDIR, timeout: 30_000, maxBuffer: 64 * 1024 * 1024 },
-    );
+    const { stdout } = await execFileAsync(BIN, ['session', 'export', '--standalone', sessionID], {
+      cwd: WORKDIR,
+      timeout: 30_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
     const t = JSON.parse(stdout)?.info?.tokens;
     if (!t || typeof t !== 'object') return undefined;
     return {
@@ -439,6 +499,34 @@ function streamTokens(run) {
     outputTokens: run.outputTokens,
     cacheReadTokens: run.cacheReadTokens || undefined,
   };
+}
+
+/* ── Constraint enforcement (--max-files / --blocked-paths) ───────── */
+
+function globToRegExp(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*' && glob[i + 1] === '*') {
+      re += '.*';
+      i++;
+    } else if (c === '*') re += '[^/]*';
+    else if (/[.+?^${}()|[\]\\]/.test(c)) re += '\\' + c;
+    else re += c;
+  }
+  return new RegExp(`^${re}$`, 'i');
+}
+
+/** Returns a violation message, or undefined when filesChanged is within bounds. */
+function constraintViolation(files) {
+  const blocked = files.filter((f) => BLOCKED.some((g) => globToRegExp(g).test(f)));
+  if (blocked.length > 0) {
+    return `blocked paths modified (rejected before commit): ${blocked.slice(0, 10).join(', ')}`;
+  }
+  if (files.length > MAX_FILES) {
+    return `${files.length} files changed, exceeding --max-files ${MAX_FILES} (rejected before commit)`;
+  }
+  return undefined;
 }
 
 /* ── Main: dispatch (with one contract retry), commit, report ─────── */
@@ -489,7 +577,9 @@ const main = (async () => {
   for (let attempt = 1; attempt <= 1 + RETRIES; attempt++) {
     attempts = attempt;
     const promptForAttempt = attempt === 1 ? buildPrompt() : resumePrompt(String(lastError));
-    log(`attempt ${attempt}/${1 + RETRIES}${sessionID ? ` (resuming session ${sessionID})` : ' (fresh session)'}`);
+    log(
+      `attempt ${attempt}/${1 + RETRIES}${sessionID ? ` (resuming session ${sessionID})` : ' (fresh session)'}`,
+    );
     try {
       lastRun = await runOpenCode({ prompt: promptForAttempt, sessionID, mainRoot });
       sessionID = lastRun.sessionID ?? sessionID;
@@ -502,6 +592,8 @@ const main = (async () => {
       break;
     } catch (err) {
       lastError = err;
+      sessionID = err?.sessionID ?? sessionID;
+      lastRun = err?.streamState ?? lastRun;
       log(`attempt ${attempt} failed: ${String(err.message ?? err).slice(0, 200)}`);
       if (attempt <= RETRIES) continue;
       emit(
@@ -530,6 +622,24 @@ const main = (async () => {
         filesChanged: [],
         summary: 'Agent made no changes',
         error: 'No files were modified',
+        tokenUsage,
+        attempts,
+      },
+      false,
+    );
+  }
+
+  // Enforced BEFORE anything is staged or committed; the offending changes
+  // are left in the worktree for the operator (never auto-reverted).
+  const violation = constraintViolation(filesChanged);
+  if (violation) {
+    emit(
+      {
+        success: false,
+        sessionID,
+        filesChanged,
+        summary: 'Agent violated dispatch constraints',
+        error: violation,
         tokenUsage,
         attempts,
       },
@@ -593,4 +703,3 @@ main.catch((err) => {
     false,
   );
 });
-

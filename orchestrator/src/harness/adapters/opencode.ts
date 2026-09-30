@@ -19,6 +19,8 @@ import { createHash } from 'node:crypto';
 import { probeVersion } from '../version-probe.js';
 import {
   runOpenCode,
+  buildDispatchConfig,
+  buildToolPermission,
   type RunOpenCodeOptions,
   type RunOpenCodeResult,
 } from '../../runners/opencode.js';
@@ -39,10 +41,7 @@ export interface OpenCodeAdapterDeps {
   /** Env for credential/model introspection (defaults to process.env). */
   env?: NodeJS.ProcessEnv;
   /** Override the actual invocation path; tests inject a stub. */
-  invoke?: (
-    input: HarnessInput,
-    onEvent?: (e: HarnessEvent) => void,
-  ) => Promise<HarnessResult>;
+  invoke?: (input: HarnessInput, onEvent?: (e: HarnessEvent) => void) => Promise<HarnessResult>;
   /** Override the version probe for tests. */
   probe?: () => Promise<HarnessAvailability>;
   /** Override the runOpenCode primitive (tests inject a fake). */
@@ -144,6 +143,12 @@ export class OpenCodeAdapter implements HarnessAdapter {
         prompt: input.prompt,
         model,
         timeoutMs,
+        // Per-stage tool policy: read-only stages run without --auto, and the
+        // permission block is injected via the per-dispatch config document.
+        auto: !buildToolPermission(input.allowedTools).readOnly,
+        extraEnv: {
+          OPENCODE_CONFIG_CONTENT: buildDispatchConfig(input.cwd, undefined, input.allowedTools),
+        },
         onProgress: (e) => {
           // Forward the runner's 30s heartbeat; finer-grained progress events
           // (text / tool_start) are richer than the harness contract needs.
