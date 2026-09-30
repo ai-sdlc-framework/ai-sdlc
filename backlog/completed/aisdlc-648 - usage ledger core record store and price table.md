@@ -79,15 +79,42 @@ to: one normalized record per model call. RFC-0050 sections A1 and A5 (price tab
    `unpriced` marker that callers and reports can see.
 
 ## Acceptance Criteria
-- [ ] `ModelCallRecord`, the store, the reader, `recordModelCall` and the price table exist under `reference/src/usage/` and are re-exported from `reference/src/index.ts`.
-- [ ] The record schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
-- [ ] Appending the same record twice writes it once; the second call reports one skipped.
-- [ ] Records land in the month file of their own timestamp, including a batch that spans a month boundary.
-- [ ] Deleting the index file and appending an already-present record still skips it.
-- [ ] Ten concurrent processes appending distinct records leave a ledger in which every line parses and no record is lost.
-- [ ] `recordModelCall` returns normally when the usage directory is unwritable.
-- [ ] `priceCall` returns `unpriced` for an unknown model and prices each token class separately for a known one, choosing the row in effect at the call's timestamp, preferring a `manual` row and ignoring a `held` one.
-- [ ] `CostTracker.computeCost` no longer prices an unknown model as Sonnet, and its existing tests for known models pass unchanged.
-- [ ] No test reads or writes under the real home directory.
+- [x] `ModelCallRecord`, the store, the reader, `recordModelCall` and the price table exist under `reference/src/usage/` and are re-exported from `reference/src/index.ts`.
+- [x] The record schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
+- [x] Appending the same record twice writes it once; the second call reports one skipped.
+- [x] Records land in the month file of their own timestamp, including a batch that spans a month boundary.
+- [x] Deleting the index file and appending an already-present record still skips it.
+- [x] Ten concurrent processes appending distinct records leave a ledger in which every line parses and no record is lost.
+- [x] `recordModelCall` returns normally when the usage directory is unwritable.
+- [x] `priceCall` returns `unpriced` for an unknown model and prices each token class separately for a known one, choosing the row in effect at the call's timestamp, preferring a `manual` row and ignoring a `held` one.
+- [x] `CostTracker.computeCost` no longer prices an unknown model as Sonnet, and its existing tests for known models pass unchanged.
+- [x] No test reads or writes under the real home directory.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+Added the RFC-0050 usage ledger core: the `ModelCallRecord` schema (registered with AJV, `generated-schemas.ts` regenerated), a monthly JSONL store with a cross-process claim-file lock and a rebuildable dedup index, cursors, a never-throwing direct reporter, a streaming reader, and a price history with seed rows and `priceCall`. `CostTracker.computeCost` no longer prices unknown models as Sonnet.
+
+## Changes
+- `reference/src/usage/*` (new): types, paths, fs-lock, store, reader, reporter, prices, prices-seed, barrel, tests
+- `spec/schemas/model-call-record.v1.schema.json` (new), `reference/src/core/{validation,index,generated-schemas}.ts` (modified)
+- `reference/src/index.ts` (modified): re-exports
+- `orchestrator/src/cost-tracker.ts` (+test), `orchestrator/src/execute.ts` (modified): explicit unpriced marker
+
+## Design decisions
+- **Lock**: directory lock whose removal only happens under an O_EXCL claim file; no rename-back (third review round).
+- **Prices**: fetched vs manual entry points split; all five prices must be finite and > 0.
+- **Seed rows** apply from the epoch; later `prices.jsonl` rows supersede from their `effectiveFrom`.
+
+## Verification
+- `pnpm build` — clean
+- reference suite 1486 passed; orchestrator suite 4794 passed
+- `pnpm lint`, `format:check`, `validate-schemas`, `dark-code:check` — clean
+- AC 11 (root `pnpm test`): not fully confirmed locally; 4 pipeline-cli `bin-invocation` tests also fail on clean origin/main and 3 `verify-runtime` tests fail only inside `.worktrees/`; CI to confirm
+- 3 parallel reviews approved after 3 rounds
+
+## Follow-up
+- `DEFAULT_MODEL_COSTS` disagrees with the published list for opus-4-6, haiku-4-5, claude-3-5-haiku
+- `CostTracker` does not price cache-write tokens
