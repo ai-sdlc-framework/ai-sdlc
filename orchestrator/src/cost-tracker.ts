@@ -137,7 +137,10 @@ export class CostTracker {
     const unpriced = new Set<string>();
 
     for (const entry of entries) {
-      if (entry.model && !CostTracker.isPriced(entry.model)) unpriced.add(entry.model);
+      // Unpriced means no known price AND no caller-supplied cost.
+      if (entry.model && !CostTracker.isPriced(entry.model) && !entry.costUsd) {
+        unpriced.add(entry.model);
+      }
       costByAgent[entry.agentName] = (costByAgent[entry.agentName] ?? 0) + (entry.costUsd ?? 0);
       if (entry.model) {
         costByModel[entry.model] = (costByModel[entry.model] ?? 0) + (entry.costUsd ?? 0);

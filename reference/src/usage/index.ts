@@ -18,7 +18,8 @@ export { appendModelCalls, readCursor, writeCursor } from './store.js';
 export { readModelCalls } from './reader.js';
 export { recordModelCall, type DirectCallInput, type RecordModelCallResult } from './reporter.js';
 export {
-  appendPriceRows,
+  appendFetchedPriceRows,
+  appendManualPriceRows,
   readPriceHistory,
   selectPriceRow,
   priceCall,

@@ -6,21 +6,27 @@
 
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   statSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { validateModelCallRecord } from '../core/validation.js';
-import { withUsageLock, writeFileAtomic } from './fs-lock.js';
+import { DIR_MODE, FILE_MODE, withUsageLock, writeFileAtomic } from './fs-lock.js';
 import { isLedgerFile, ledgerFileForTs, resolveUsageDir } from './paths.js';
 import type { AppendResult, ModelCallRecord, UsageStoreOptions } from './types.js';
 
 const INDEX_IDS_FILE = 'dedup-ids.txt';
 const INDEX_META_FILE = 'dedup-meta.json';
 const CURSORS_FILE = 'cursors.json';
+/** A callId with control characters (a newline above all) would corrupt the line-based index. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the purpose
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
 interface IndexMeta {
   version: 1;
@@ -61,14 +67,15 @@ function writeMeta(dir: string): void {
 }
 
 /** Rebuild the dedup index from the ledger files. Caller holds the lock. */
-function rebuildIndex(dir: string): Set<string> {
+function rebuildIndex(dir: string, touch: () => void): Set<string> {
   const ids = new Set<string>();
   for (const f of listLedgerFiles(dir)) {
+    touch();
     for (const line of readFileSync(join(dir, f), 'utf-8').split('\n')) {
       if (!line.trim()) continue;
       try {
         const id = (JSON.parse(line) as { callId?: unknown }).callId;
-        if (typeof id === 'string' && id) ids.add(id);
+        if (typeof id === 'string' && id && !CONTROL_CHARS.test(id)) ids.add(id);
       } catch {
         // skip a corrupt line; it cannot be deduplicated against
       }
@@ -80,17 +87,32 @@ function rebuildIndex(dir: string): Set<string> {
 }
 
 /** Load the known-id set, rebuilding when the index is missing or out of step. Caller holds the lock. */
-function loadKnownIds(dir: string): Set<string> {
+function loadKnownIds(dir: string, touch: () => void): Set<string> {
   const meta = readMeta(dir);
   const idsPath = join(dir, INDEX_IDS_FILE);
   if (!meta || !existsSync(idsPath) || !sameSizes(meta.sizes, currentSizes(dir))) {
-    return rebuildIndex(dir);
+    return rebuildIndex(dir, touch);
   }
   return new Set(
     readFileSync(idsPath, 'utf-8')
       .split('\n')
       .filter((l) => l.length > 0),
   );
+}
+
+/** True when the file exists, is non-empty and its last byte is not a newline. */
+function endsWithoutNewline(path: string): boolean {
+  if (!existsSync(path)) return false;
+  const size = statSync(path).size;
+  if (size === 0) return false;
+  const fd = openSync(path, 'r');
+  try {
+    const buf = Buffer.alloc(1);
+    readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] !== 0x0a;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** Drop fields that must never be written for scope 'other'. */
@@ -112,13 +134,17 @@ export function appendModelCalls(
   const result: AppendResult = { written: 0, skipped: 0, invalid: 0 };
   if (records.length === 0) return result;
 
-  return withUsageLock(dir, () => {
-    const known = loadKnownIds(dir);
+  return withUsageLock(dir, (touch) => {
+    const known = loadKnownIds(dir, touch);
     const byFile = new Map<string, string[]>();
     const newIds: string[] = [];
 
     for (const raw of records) {
-      if (!validateModelCallRecord(raw).valid) {
+      if (
+        typeof raw?.callId !== 'string' ||
+        CONTROL_CHARS.test(raw.callId) ||
+        !validateModelCallRecord(raw).valid
+      ) {
         result.invalid++;
         continue;
       }
@@ -137,11 +163,19 @@ export function appendModelCalls(
 
     if (result.written === 0) return result;
 
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     for (const [file, lines] of byFile) {
-      appendFileSync(join(dir, file), `${lines.join('\n')}\n`, 'utf-8');
+      touch();
+      const path = join(dir, file);
+      // A crash can leave a partial last line; start on a fresh line so the new
+      // record is not concatenated onto it.
+      const lead = endsWithoutNewline(path) ? '\n' : '';
+      appendFileSync(path, `${lead}${lines.join('\n')}\n`, { encoding: 'utf-8', mode: FILE_MODE });
     }
-    appendFileSync(join(dir, INDEX_IDS_FILE), newIds.map((i) => `${i}\n`).join(''), 'utf-8');
+    appendFileSync(join(dir, INDEX_IDS_FILE), newIds.map((i) => `${i}\n`).join(''), {
+      encoding: 'utf-8',
+      mode: FILE_MODE,
+    });
     writeMeta(dir);
     return result;
   });

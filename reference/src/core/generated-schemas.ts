@@ -5146,7 +5146,8 @@ export const modelCallRecordV1Schema = {
     callId: {
       type: 'string',
       minLength: 1,
-      description: 'Provider message id; the deduplication key.',
+      pattern: '^[^\\u0000-\\u001f\\u007f]+$',
+      description: 'Provider message id; the deduplication key. Control characters are rejected.',
     },
     requestId: { type: 'string', description: 'Provider request id, when reported.' },
     ts: { type: 'string', format: 'date-time', description: 'ISO timestamp of the call.' },

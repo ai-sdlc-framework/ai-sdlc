@@ -9,7 +9,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { withUsageLock } from './fs-lock.js';
+import { DIR_MODE, FILE_MODE, withUsageLock } from './fs-lock.js';
 import { resolveUsageDir } from './paths.js';
 import { SEED_PRICES } from './prices-seed.js';
 import {
@@ -41,26 +41,57 @@ function isPriceRow(v: unknown): v is PriceRow {
     if (typeof r[k] !== 'string') return false;
   }
   if (Number.isNaN(Date.parse(r.effectiveFrom as string))) return false;
-  return PRICE_FIELDS.every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]) && r[k] >= 0);
+  if (Number.isNaN(Date.parse(r.fetchedAt as string))) return false;
+  // Every class must carry a real price: a zero, negative or non-numeric price
+  // is rejected rather than stored.
+  return PRICE_FIELDS.every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]) && r[k] > 0);
 }
 
-/** Append observed price rows to `prices.jsonl`. Invalid rows are skipped; returns the count written. */
-export function appendPriceRows(
-  rows: ReadonlyArray<PriceRow>,
-  opts: UsageStoreOptions = {},
-): number {
+function appendRows(rows: ReadonlyArray<PriceRow>, opts: UsageStoreOptions): number {
   const valid = rows.filter(isPriceRow);
   if (valid.length === 0) return 0;
   const dir = resolveUsageDir(opts);
   return withUsageLock(dir, () => {
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(
-      join(dir, PRICES_FILE),
-      valid.map((r) => `${JSON.stringify(r)}\n`).join(''),
-      'utf-8',
-    );
+    mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    appendFileSync(join(dir, PRICES_FILE), valid.map((r) => `${JSON.stringify(r)}\n`).join(''), {
+      encoding: 'utf-8',
+      mode: FILE_MODE,
+    });
     return valid.length;
   });
+}
+
+/**
+ * Append prices observed from an external source. The status is forced to
+ * `active`, or `held` when the caller marked the row held; a fetched row can
+ * never become `manual`. Invalid rows (zero, negative or non-numeric prices,
+ * unparsable dates) are skipped; returns the count written.
+ */
+export function appendFetchedPriceRows(
+  rows: ReadonlyArray<PriceRow>,
+  opts: UsageStoreOptions = {},
+): number {
+  return appendRows(
+    rows.map((r) => ({
+      ...r,
+      status: r.status === 'held' ? ('held' as const) : ('active' as const),
+    })),
+    opts,
+  );
+}
+
+/**
+ * Append operator-entered prices. Status is forced to `manual`, which wins over
+ * fetched rows. Operator use only; fetch code must use `appendFetchedPriceRows`.
+ */
+export function appendManualPriceRows(
+  rows: ReadonlyArray<PriceRow>,
+  opts: UsageStoreOptions = {},
+): number {
+  return appendRows(
+    rows.map((r) => ({ ...r, status: 'manual' as const })),
+    opts,
+  );
 }
 
 /** Seed rows followed by every valid row in `prices.jsonl`, in file order. */

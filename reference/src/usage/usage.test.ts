@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import {
   chmodSync,
+  statSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -14,7 +15,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   appendModelCalls,
-  appendPriceRows,
+  appendFetchedPriceRows,
+  appendManualPriceRows,
   priceCall,
   priceCallBreakdown,
   readCursor,
@@ -77,6 +79,23 @@ async function collect(
   const out: ModelCallRecord[] = [];
   for await (const r of readModelCalls(filter, { dir: d })) out.push(r);
   return out;
+}
+
+function priceRow(over: Partial<PriceRow>): PriceRow {
+  return {
+    model: 'test-model',
+    inputPer1M: 1,
+    outputPer1M: 5,
+    cacheReadPer1M: 0.1,
+    cacheWrite5mPer1M: 1.25,
+    cacheWrite1hPer1M: 2,
+    source: 'test',
+    url: 'https://example.invalid/prices',
+    fetchedAt: '2026-01-01T00:00:00.000Z',
+    effectiveFrom: '2026-01-01',
+    status: 'active',
+    ...over,
+  };
 }
 
 describe('resolveUsageDir', () => {
@@ -214,6 +233,46 @@ describe('appendModelCalls', () => {
     expect(new Set(ids).size).toBe(200);
     expect(appendModelCalls([rec('p0-0')], { dir }).skipped).toBe(1);
   }, 120_000);
+});
+
+describe('crash-safety, control characters and permissions', () => {
+  it('starts a new line when the ledger ends with a partial line', async () => {
+    appendModelCalls([rec('a')], { dir });
+    const file = join(dir, 'ledger-2026-09.jsonl');
+    writeFileSync(file, `${readFileSync(file, 'utf-8')}{"callId":"partial`);
+    expect(appendModelCalls([rec('b')], { dir }).written).toBe(1);
+    const got = (await collect({})).map((r) => r.callId);
+    expect(got).toEqual(['a', 'b']);
+    expect(appendModelCalls([rec('b')], { dir }).skipped).toBe(1);
+  });
+
+  it('rejects a callId containing control characters without touching the index', () => {
+    const res = appendModelCalls([rec('bad\nid'), rec('bad\u0000id'), rec('tab\tid'), rec('ok')], {
+      dir,
+    });
+    expect(res).toEqual({ written: 1, skipped: 0, invalid: 3 });
+    expect(readFileSync(join(dir, 'dedup-ids.txt'), 'utf-8')).toBe('ok\n');
+  });
+
+  it('skips control-character ids found in the ledger when rebuilding the index', () => {
+    writeFileSync(
+      join(dir, 'ledger-2026-09.jsonl'),
+      `${JSON.stringify({ callId: 'x\ny' })}\n${JSON.stringify(rec('fine'))}\n`,
+    );
+    expect(appendModelCalls([rec('fine')], { dir }).skipped).toBe(1);
+    expect(readFileSync(join(dir, 'dedup-ids.txt'), 'utf-8')).toBe('fine\n');
+  });
+
+  it.skipIf(process.platform === 'win32')('creates the directory 0700 and files 0600', () => {
+    const sub = join(dir, 'fresh');
+    appendModelCalls([rec('a')], { dir: sub });
+    writeCursor('f.jsonl', 1, { dir: sub });
+    appendManualPriceRows([priceRow({})], { dir: sub });
+    expect(statSync(sub).mode & 0o777).toBe(0o700);
+    for (const f of readdirSync(sub).filter((n) => !n.startsWith('.'))) {
+      expect(statSync(join(sub, f)).mode & 0o777).toBe(0o600);
+    }
+  });
 });
 
 describe('cursors', () => {
@@ -363,20 +422,7 @@ describe('price table', () => {
     cacheRead: 1_000_000,
     output: 1_000_000,
   };
-  const row = (over: Partial<PriceRow>): PriceRow => ({
-    model: 'test-model',
-    inputPer1M: 1,
-    outputPer1M: 5,
-    cacheReadPer1M: 0.1,
-    cacheWrite5mPer1M: 1.25,
-    cacheWrite1hPer1M: 2,
-    source: 'test',
-    url: 'https://example.invalid/prices',
-    fetchedAt: '2026-01-01T00:00:00.000Z',
-    effectiveFrom: '2026-01-01',
-    status: 'active',
-    ...over,
-  });
+  const row = priceRow;
 
   it('returns unpriced for an unknown model and never substitutes another', () => {
     expect(priceCall({ model: 'no-such-model', ts: '2026-09-15T00:00:00Z', tokens: T })).toBe(
@@ -446,7 +492,7 @@ describe('price table', () => {
   });
 
   it('appends rows to prices.jsonl and merges them with the seed rows', () => {
-    const written = appendPriceRows(
+    const written = appendFetchedPriceRows(
       [
         row({ model: 'claude-sonnet-5', inputPer1M: 99, effectiveFrom: '2026-10-01' }),
         row({ inputPer1M: -1 }),
@@ -454,7 +500,7 @@ describe('price table', () => {
       { dir },
     );
     expect(written).toBe(1);
-    expect(appendPriceRows([], { dir })).toBe(0);
+    expect(appendFetchedPriceRows([], { dir })).toBe(0);
     const history = readPriceHistory({ dir });
     expect(history.length).toBe(SEED_PRICES.length + 1);
     const before = priceCall(
@@ -467,6 +513,47 @@ describe('price table', () => {
     );
     expect(before).toBeCloseTo(2 + 2.5 + 4 + 0.2 + 10);
     expect(after).toBeCloseTo(99 + 1.25 + 2 + 0.1 + 5);
+  });
+
+  it('rejects zero, negative, non-numeric prices and unparsable dates', () => {
+    const bad = [
+      row({ inputPer1M: 0 }),
+      row({ cacheWrite1hPer1M: 0 }),
+      row({ outputPer1M: -2 }),
+      row({ cacheReadPer1M: Number.NaN }),
+      row({ inputPer1M: '1' as unknown as number }),
+      row({ fetchedAt: 'yesterday' }),
+      row({ effectiveFrom: 'soon' }),
+    ];
+    expect(appendFetchedPriceRows(bad, { dir })).toBe(0);
+    expect(appendManualPriceRows(bad, { dir })).toBe(0);
+  });
+
+  it('never lets the fetched entry point produce a manual row', () => {
+    appendFetchedPriceRows(
+      [
+        row({ status: 'manual', model: 'm1' }),
+        row({ status: 'held', model: 'm2' }),
+        row({ model: 'm3' }),
+      ],
+      { dir },
+    );
+    const byModel = Object.fromEntries(
+      readPriceHistory({ dir })
+        .filter((r) => ['m1', 'm2', 'm3'].includes(r.model))
+        .map((r) => [r.model, r.status]),
+    );
+    expect(byModel).toEqual({ m1: 'active', m2: 'held', m3: 'active' });
+  });
+
+  it('forces status manual for the operator entry point and it wins', () => {
+    appendFetchedPriceRows([row({ inputPer1M: 1 })], { dir });
+    appendManualPriceRows([row({ inputPer1M: 6, status: 'active' })], { dir });
+    const rows = readPriceHistory({ dir });
+    expect(selectPriceRow(rows, 'test-model', '2026-09-01T00:00:00Z')).toMatchObject({
+      inputPer1M: 6,
+      status: 'manual',
+    });
   });
 
   it('skips corrupt and structurally invalid lines in prices.jsonl', () => {
