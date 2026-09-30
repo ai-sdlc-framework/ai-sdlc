@@ -54,7 +54,8 @@
 # (AI_SDLC_SKIP_SUBSTRATE_GATE=1, AI_SDLC_SKIP_COVERAGE_GATE=1,
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_DOR_GATE=1,
-# AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1, AI_SDLC_SKIP_FOLLOWUP_GATE=1,
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -84,6 +85,10 @@ fi
 # release-please owns CHANGELOG.md; manual edits cause rebase conflicts.
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-changelog-edit.sh
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
+# Follow-up gate: completed task files added/modified in the push range must
+# track, decline, or say "(none)" for every follow-up. Runs after DoR and
+# before the fixup orchestrator. Skip: AI_SDLC_SKIP_FOLLOWUP_GATE=1
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-followups-on-push.sh
 # AISDLC-486: backlog-drift pre-push gate — catches error-severity drift
 # introduced by renames/moves/deletes before CI discovers it. Specifically
 # checks (a) inbound backlog references to renamed/deleted files and (b)

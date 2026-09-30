@@ -1,10 +1,21 @@
 import { z } from 'zod';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { checkFollowups, formatFollowupViolations } from '@ai-sdlc/pipeline-cli';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from '../types.js';
 import { applyTaskEdit } from '../lib/backlog-frontmatter.js';
 import { locateTaskFile, pickProjectRoot } from './task-edit.js';
+
+/** Project task-id prefix from `backlog/config.yml` (undefined → rule default). */
+function readTaskPrefix(projectDir: string): string | undefined {
+  try {
+    const cfg = readFileSync(join(projectDir, 'backlog', 'config.yml'), 'utf-8');
+    return /^task_prefix:\s*['"]?([A-Za-z][A-Za-z0-9]*)['"]?\s*$/m.exec(cfg)?.[1];
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * MCP tool: `task_complete` — drop-in replacement for
@@ -50,6 +61,25 @@ export function registerTaskComplete(server: McpServer, deps: ToolDeps): void {
             ],
             isError: true,
           };
+        }
+
+        // Follow-up rule: reject BEFORE any write or move so a rejected
+        // call leaves the task file untouched. Same rule + message as the
+        // pre-push gate (shared implementation in pipeline-cli).
+        if (finalSummary !== undefined) {
+          const taskPrefix = readTaskPrefix(projectDir);
+          const check = checkFollowups(finalSummary, { taskPrefix });
+          if (!check.ok) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: formatFollowupViolations(check.violations, { taskPrefix }),
+                },
+              ],
+              isError: true,
+            };
+          }
         }
 
         // Idempotent: if it's already in completed/, just touch the
