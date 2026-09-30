@@ -177,6 +177,17 @@ describe('configuration', () => {
     expect((f.mock.calls[0] as [string])[0]).toContain('x/v1/systemone');
   });
 
+  it('strips a very long run of genuinely trailing slashes', async () => {
+    const f = vi.fn(async (..._a: unknown[]) => jsonRes(fixture('noul.response')));
+    const provider = createJevProvider({
+      apiKey: KEY,
+      baseUrl: `https://example.test${'/'.repeat(100000)}`,
+      fetchImpl: f as unknown as typeof fetch,
+    });
+    await provider.evaluate(noulReq);
+    expect((f.mock.calls[0] as [string])[0]).toBe('https://example.test/v1/systemone');
+  });
+
   it('exposes identity and capabilities', () => {
     const p = createJevProvider({ apiKey: KEY });
     expect(p.name).toBe('jev');
