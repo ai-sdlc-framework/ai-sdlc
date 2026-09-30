@@ -1,8 +1,6 @@
 import {
-  closeSync,
   existsSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -47,21 +45,33 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+const ID_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
+const MAX_REASON = 200;
+const RESERVED_IDS = new Set(['constructor', 'prototype']);
+
+function validId(id: unknown): id is string {
+  return typeof id === 'string' && ID_PATTERN.test(id) && !RESERVED_IDS.has(id);
+}
+
+function token(): string {
+  return `${process.pid}.${Math.random().toString(36).slice(2)}`;
+}
+
 /** Acquire an O_EXCL lockfile with bounded wait. Returns false if not acquired. */
-function acquireLock(lockPath: string): boolean {
+function acquireLock(lockPath: string, tok: string): boolean {
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     try {
-      closeSync(openSync(lockPath, 'wx'));
+      writeFileSync(lockPath, tok, { flag: 'wx', mode: 0o600 });
       return true;
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return false;
       try {
         if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
           rmSync(lockPath, { force: true });
-          continue;
         }
       } catch {
-        continue; // lock vanished between attempts
+        // lock vanished or cannot be inspected; fall through to the deadline check
       }
       if (Date.now() >= deadline) return false;
       sleepSync(2 + Math.floor(Math.random() * 8));
@@ -69,14 +79,32 @@ function acquireLock(lockPath: string): boolean {
   }
 }
 
+function releaseLock(lockPath: string, tok: string): void {
+  try {
+    if (readFileSync(lockPath, 'utf-8') === tok) rmSync(lockPath, { force: true });
+  } catch {
+    // already gone
+  }
+}
+
+function sanitizeReason(reason: string): string {
+  // eslint-disable-next-line no-control-regex
+  return reason.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, MAX_REASON);
+}
+
 function readState(file: string): CapabilityStateFile {
+  const caps: Record<string, CapabilityRecord> = Object.create(null);
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as CapabilityStateFile;
-    if (parsed && typeof parsed === 'object' && parsed.capabilities) return parsed;
+    if (parsed && typeof parsed === 'object' && parsed.capabilities) {
+      for (const [k, v] of Object.entries(parsed.capabilities)) {
+        if (validId(k) && v && typeof v === 'object') caps[k] = v;
+      }
+    }
   } catch {
     // missing or corrupt: start fresh
   }
-  return { version: 1, capabilities: {} };
+  return { version: 1, capabilities: caps };
 }
 
 /**
@@ -89,15 +117,20 @@ export function reportCapabilityOutcome(
   opts: ReportCapabilityOptions = {},
 ): void {
   try {
+    if (!validId(id)) return;
     const dir = stateDir(opts.artifactsDir);
     mkdirSync(dir, { recursive: true });
     const file = join(dir, 'state.json');
     const lock = join(dir, 'state.lock');
-    if (!acquireLock(lock)) return;
+    const tok = token();
+    if (!acquireLock(lock, tok)) return;
+    let tmp: string | undefined;
     try {
       const state = readState(file);
       const now = (opts.now?.() ?? new Date()).toISOString();
-      const rec: CapabilityRecord = state.capabilities[id] ?? { counts: emptyCounts() };
+      const rec: CapabilityRecord = (Object.hasOwn(state.capabilities, id)
+        ? state.capabilities[id]
+        : undefined) ?? { counts: emptyCounts() };
       rec.counts = { ...emptyCounts(), ...rec.counts };
       rec.counts[outcome] += 1;
       rec.lastOutcome = outcome;
@@ -108,15 +141,17 @@ export function reportCapabilityOutcome(
         rec.lastShadowAt = now;
       } else {
         rec.lastDegradedAt = now;
-        if (opts.reason !== undefined) rec.lastDegradedReason = opts.reason;
+        if (opts.reason !== undefined) rec.lastDegradedReason = sanitizeReason(String(opts.reason));
       }
       if (!getCapability(id)) rec.unregistered = true;
       state.capabilities[id] = rec;
-      const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-      writeFileSync(tmp, JSON.stringify(state, null, 2));
+      tmp = `${file}.${token()}.tmp`;
+      writeFileSync(tmp, JSON.stringify(state, null, 2), { flag: 'wx', mode: 0o600 });
       renameSync(tmp, file);
+      tmp = undefined;
     } finally {
-      rmSync(lock, { force: true });
+      if (tmp) rmSync(tmp, { force: true });
+      releaseLock(lock, tok);
     }
   } catch {
     // reporting must never affect the caller
@@ -133,7 +168,7 @@ export function readCapabilityState(artifactsDir?: string): CapabilityStateRow[]
   const file = join(stateDir(artifactsDir), 'state.json');
   const state = existsSync(file) ? readState(file) : { version: 1 as const, capabilities: {} };
   const toRow = (id: string, title?: string): CapabilityStateRow => {
-    const rec = state.capabilities[id];
+    const rec = Object.hasOwn(state.capabilities, id) ? state.capabilities[id] : undefined;
     return {
       id,
       title,

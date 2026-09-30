@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  existsSync,
+  chmodSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -104,6 +112,9 @@ describe('reporting', () => {
     reportCapabilityOutcome('dor.stage-b', 'degraded', { artifactsDir: dir, reason: 'disabled' });
     const raw = readFileSync(join(dir, '_capabilities', 'state.json'), 'utf-8');
     expect(Object.keys(JSON.parse(raw))).toEqual(['version', 'capabilities']);
+    const SENTINEL = 'SECRET-INPUT-TEXT';
+    void SENTINEL;
+    expect(raw).not.toContain(SENTINEL);
   });
 
   it('twenty concurrent processes sum to twenty', async () => {
@@ -121,11 +132,68 @@ describe('reporting', () => {
         (_, i) =>
           new Promise<void>((resolve, reject) => {
             const p = spawn(tsx, [script, dir, String(i % 2)], { stdio: 'ignore' });
+            p.on('error', reject);
             p.on('exit', (c) => (c === 0 ? resolve() : reject(new Error(`exit ${c}`))));
           }),
       ),
     );
     const row = readCapabilityState(dir).find((r) => r.id === 'dor.stage-b')!;
-    expect(row.counts.live + row.counts.degraded + row.counts.shadow).toBe(20);
+    expect(row.counts.live).toBe(10);
+    expect(row.counts.degraded).toBe(10);
+    expect(row.counts.shadow).toBe(0);
   }, 60000);
+
+  it('unwritable dir writes no state', () => {
+    const blocker = join(dir, 'file');
+    writeFileSync(blocker, 'x');
+    reportCapabilityOutcome('dor.stage-b', 'live', { artifactsDir: join(blocker, 'sub') });
+    expect(existsSync(join(blocker, 'sub'))).toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('read-only capabilities dir returns promptly', () => {
+    const cap = join(dir, '_capabilities');
+    mkdirSync(cap, { recursive: true });
+    chmodSync(cap, 0o555);
+    try {
+      const start = Date.now();
+      expect(() =>
+        reportCapabilityOutcome('dor.stage-b', 'live', { artifactsDir: dir }),
+      ).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(1500);
+      expect(existsSync(join(cap, 'state.json'))).toBe(false);
+    } finally {
+      chmodSync(cap, 0o755);
+    }
+  });
+
+  it('ignores prototype-polluting and malformed ids', () => {
+    for (const id of ['__proto__', 'constructor', 'prototype', 'Bad Id', '']) {
+      expect(() => reportCapabilityOutcome(id, 'live', { artifactsDir: dir })).not.toThrow();
+    }
+    expect(({} as Record<string, unknown>).live).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'counts')).toBe(false);
+    expect(readCapabilityState(dir).every((r) => r.status === 'never-observed')).toBe(true);
+  });
+
+  it('drops polluting keys from a hostile state file', () => {
+    mkdirSync(join(dir, '_capabilities'), { recursive: true });
+    writeFileSync(
+      join(dir, '_capabilities', 'state.json'),
+      '{"version":1,"capabilities":{"__proto__":{"counts":{"live":9}},"constructor":{"counts":{"live":9}}}}',
+    );
+    reportCapabilityOutcome('dor.stage-b', 'live', { artifactsDir: dir });
+    const raw = JSON.parse(readFileSync(join(dir, '_capabilities', 'state.json'), 'utf-8'));
+    expect(Object.keys(raw.capabilities)).toEqual(['dor.stage-b']);
+  });
+
+  it('caps and sanitizes the reason', () => {
+    reportCapabilityOutcome('dor.stage-b', 'degraded', {
+      artifactsDir: dir,
+      reason: 'a\nb\u0000' + 'x'.repeat(500),
+    });
+    const r = readCapabilityState(dir).find((x) => x.id === 'dor.stage-b')!.lastDegradedReason!;
+    expect(r.length).toBe(200);
+    // eslint-disable-next-line no-control-regex
+    expect(r).not.toMatch(/[\u0000-\u001f]/);
+  });
 });
