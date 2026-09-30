@@ -102,6 +102,32 @@ rules, MCP server). That dogfood parity is intended, not an accident.
    task, stash/branch hygiene floors, and telemetry. Keep the declarative
    layer and `agent-role.yaml` in sync when editing either.
 
+**Security posture: best-effort, NOT a security boundary.** The plugin's (and
+the declarative layer's) shell-command matching is a best-effort
+defence-in-depth layer. Statically parsing shell text cannot be complete, and
+this is deliberately not a shell parser. The authoritative controls are
+server-side: **GitHub rulesets** (no force-push and no deletion on
+`main`/`master`) and a **pre-push hook that sees the real ref pairs** git is
+about to update. Do not rely on the plugin to stop a determined or compromised
+agent. Known bypass classes that are NOT handled (non-exhaustive):
+
+- config- or environment-driven push targets set by means the analysis does not
+  see (an earlier command in a different tool call, git config files, includes,
+  `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM`, `url.*.insteadOf`);
+- symbolic-ref / alias resolution (a symref or remote-tracking alias that points
+  at `main`, `git remote set-url`, packed/loose ref tricks);
+- exotic quoting and comment forms, here-strings, process substitution,
+  `IFS`/brace-expansion tricks beyond the simple normalisation;
+- other wrapper commands not in the recognised list (`nohup`, `env`, `sudo`,
+  `timeout`, `stdbuf`, `caffeinate`, `xcrun`, `nice`, `time`, `command`, `exec`
+  are), and scripts written to disk and then executed;
+- a script or program (`make`, `npm run`, a git hook, a build tool) that itself
+  runs `git push`;
+- a `cd` or `GIT_*` change made by a previous, separate command.
+
+What IS attempted (and may change): the strict lease-push grammar, the wrapper /
+alias / continuation normalisation, and the fail-closed rules below.
+
 **force-with-lease carve-out (known, intentional, strict):** the config denies
 `git push --force*` and then re-allows `git push --force-with-lease*` (the
 Definition of Done requires a lease push after the mandatory rebase). A bare
@@ -116,6 +142,11 @@ lease: `--force-with-lease[=<ref>[:<sha>]]` with
   no `+` refspec, no glob (`*`), no `:dst` delete, no tags/notes refs, and never
   `main`/`master` (after stripping `refs/`/`heads/`, and including a final path
   component of `main`/`master`);
+- a lease push is additionally denied (fail closed) when its command text contains any
+  `$` expansion, backtick, `GIT_DIR`/`GIT_WORK_TREE`/`GIT_CONFIG_*` assignment,
+  `--git-dir`/`--work-tree`, more than one `-C` or a `-C` outside the session dir,
+  `-c push.default`/`branch.*.merge`/`remote.*.push`, or a preceding `cd`/`pushd`
+  in the same compound command;
 - `HEAD`, `@`, or no refspec at all resolved to the current branch of the
   session directory (`git -C <dir>` honoured) and denied when that branch is
   `main`/`master`, detached, or cannot be resolved (fail closed).

@@ -638,18 +638,34 @@ export function buildToolPermission(
   }
   permission.external_directory = 'deny';
 
+  // The project's own bash `allow` keys (e.g. the DoD lease-push allow) are
+  // dropped above; additionally emit an explicit DENY for each so that an
+  // opencode deep-merge of the project config cannot resurrect them.
+  const projectAllowKeys =
+    baseline.bash && typeof baseline.bash === 'object' && !Array.isArray(baseline.bash)
+      ? Object.entries(baseline.bash as Record<string, unknown>)
+          .filter(([, v]) => v === 'allow')
+          .map(([k]) => k)
+      : [];
+  const explicitDenies: Record<string, string> = {};
+  for (const key of projectAllowKeys) {
+    if (!bashPatterns.includes(key)) explicitDenies[key] = 'deny';
+  }
+  const projectBash =
+    inherited.bash && typeof inherited.bash === 'object' && !Array.isArray(inherited.bash)
+      ? (inherited.bash as Record<string, unknown>)
+      : {};
+
   if (!allowed.has('bash')) {
     permission.bash = 'deny';
   } else if (!bareBash) {
-    const projectBash =
-      inherited.bash && typeof inherited.bash === 'object' && !Array.isArray(inherited.bash)
-        ? (inherited.bash as Record<string, unknown>)
-        : {};
     const allows: Record<string, string> = {};
     for (const pat of bashPatterns) allows[pat] = 'allow';
     // Last match wins: default-deny, then the scoped allows, then the
-    // project's deny/ask rules (they must still beat a scoped allow).
-    permission.bash = { '*': 'deny', ...allows, ...projectBash };
+    // project's deny/ask rules and explicit denies of its allows.
+    permission.bash = { '*': 'deny', ...allows, ...projectBash, ...explicitDenies };
+  } else if (Object.keys(explicitDenies).length > 0) {
+    permission.bash = { ...projectBash, ...explicitDenies };
   }
 
   return { permission, readOnly: !allowed.has('edit') };

@@ -178,18 +178,29 @@ function cleanGitEnv() {
   return e;
 }
 
+const lines = (out) =>
+  out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
 async function snapshotWorktree(dir) {
+  // Record HEAD BEFORE the run: committed work is diffed against this SHA,
+  // not against origin/main (a ref the agent could move or delete).
+  let head;
+  try {
+    head = await gitExec(dir, ['rev-parse', 'HEAD']);
+  } catch {
+    head = undefined;
+  }
   try {
     const [untracked, modified] = await Promise.all([
       gitExec(dir, ['ls-files', '--others', '--exclude-standard']),
       gitExec(dir, ['diff', '--name-only']),
     ]);
-    return {
-      untracked: new Set(untracked.split('\n').filter(Boolean)),
-      modified: new Set(modified.split('\n').filter(Boolean)),
-    };
+    return { head, untracked: new Set(lines(untracked)), modified: new Set(lines(modified)) };
   } catch {
-    return { untracked: new Set(), modified: new Set() };
+    return { head, untracked: new Set(), modified: new Set() };
   }
 }
 
@@ -199,28 +210,28 @@ async function detectChangedFiles(dir, baseline) {
     gitExec(dir, ['diff', '--name-only', '--cached']),
     gitExec(dir, ['ls-files', '--others', '--exclude-standard']),
   ]);
-  const allUntracked = untrackedOut.split('\n').filter(Boolean);
+  const allUntracked = lines(untrackedOut);
   const agentUntracked = baseline
     ? allUntracked.filter((f) => !baseline.untracked.has(f))
     : allUntracked;
-  const uncommitted = [...new Set([...diffOut, ...stagedOut, ...agentUntracked].filter(Boolean))];
+  // NOTE: the git outputs are newline-delimited STRINGS — split them before
+  // spreading (spreading a string yields single characters).
+  const uncommitted = [...new Set([...lines(diffOut), ...lines(stagedOut), ...agentUntracked])];
 
   let committedFiles = [];
   let agentAlreadyCommitted = false;
   try {
-    const mergeBase = await gitExec(dir, ['merge-base', 'HEAD', 'origin/main']);
-    if (mergeBase) {
-      committedFiles = (await gitExec(dir, ['diff', '--name-only', `${mergeBase}..HEAD`]))
-        .split('\n')
-        .filter(Boolean);
+    const base = baseline?.head || (await gitExec(dir, ['merge-base', 'HEAD', 'origin/main']));
+    if (base) {
+      committedFiles = lines(await gitExec(dir, ['diff', '--name-only', `${base}..HEAD`]));
       agentAlreadyCommitted = committedFiles.length > 0 && uncommitted.length === 0;
     }
   } catch {
-    /* no origin/main — treat everything uncommitted as the diff */
+    /* no usable base — treat everything uncommitted as the diff */
   }
   return {
     filesChanged: agentAlreadyCommitted ? committedFiles : uncommitted,
-    // UNION of committed (merge-base..HEAD) and uncommitted files: constraint
+    // UNION of committed (baselineHead..HEAD) and uncommitted files: constraint
     // enforcement must see a blocked file the agent already committed even
     // when other changes are still uncommitted.
     allChanged: [...new Set([...committedFiles, ...uncommitted])],

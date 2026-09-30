@@ -735,8 +735,8 @@ describe('buildToolPermission', () => {
     };
     const { permission } = buildToolPermission(['Read', 'Bash(pnpm test*)'], baseline);
     const bash = permission.bash as Record<string, string>;
-    expect(bash['git push --force-with-lease*']).toBeUndefined();
-    expect(Object.values(bash)).not.toContain('git push --force-with-lease*');
+    // never 'allow' — and explicitly denied so a deep-merge cannot resurrect it
+    expect(bash['git push --force-with-lease*']).toBe('deny');
     expect(bash['git push --force*']).toBe('deny');
     expect(bash['pnpm test*']).toBe('allow');
     expect(bash['*']).toBe('deny');
@@ -750,8 +750,32 @@ describe('buildToolPermission', () => {
       bash: { 'git push --force-with-lease*': 'allow', 'git merge*': 'deny' },
       edit: { '.ai-sdlc/**': 'deny' },
     });
-    expect(permission.bash).toEqual({ 'git merge*': 'deny' });
+    expect(permission.bash).toEqual({
+      'git merge*': 'deny',
+      'git push --force-with-lease*': 'deny',
+    });
     expect(permission.edit).toEqual({ '.ai-sdlc/**': 'deny' });
+  });
+
+  it('bare Bash (non-developer) emits an explicit deny for every project bash allow key', () => {
+    const { permission } = buildToolPermission(['Read', 'Bash'], {
+      bash: {
+        'git push --force-with-lease*': 'allow',
+        'gh pr view*': 'allow',
+        'git merge*': 'deny',
+      },
+    });
+    const bash = permission.bash as Record<string, string>;
+    expect(bash['git push --force-with-lease*']).toBe('deny');
+    expect(bash['gh pr view*']).toBe('deny');
+    expect(bash['git merge*']).toBe('deny');
+    expect(Object.values(bash)).not.toContain('allow');
+    // no project allow => no synthetic bash block at all
+    expect(
+      buildToolPermission(['Read', 'Bash'], { bash: { 'git merge*': 'deny' } }).permission.bash,
+    ).toEqual({
+      'git merge*': 'deny',
+    });
   });
 
   it('allowing Read/Grep/Glob never replaces the project deny patterns for that key', () => {
@@ -779,6 +803,7 @@ describe('buildToolPermission', () => {
         '*': 'deny',
         'pnpm test*': 'allow',
         'git merge*': 'deny',
+        'git push --force-with-lease*': 'deny',
       });
     } finally {
       await rm(dir, { recursive: true, force: true });

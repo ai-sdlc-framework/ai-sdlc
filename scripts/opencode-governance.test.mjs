@@ -385,6 +385,95 @@ describe('lease push: current-branch resolution (fail closed)', () => {
   });
 });
 
+describe('round-3 hardening (best effort; see runbook for what is NOT handled)', () => {
+  const denied = [
+    // --signed takes no separate value token
+    'git push --force-with-lease --signed origin main',
+    'git push --force-with-lease --signed origin HEAD:main',
+    // shell expansion in any refspec fails closed
+    'BR=main; git push --force-with-lease origin $BR',
+    'BR=main; git push --force-with-lease origin ${BR}',
+    "git push --force-with-lease origin $'\\x6dain'",
+    'git push --force-with-lease origin "$(git rev-parse --abbrev-ref HEAD)"',
+    // repository / environment redirection
+    'GIT_DIR=/tmp/x git push --force-with-lease origin feat/x',
+    'GIT_WORK_TREE=/tmp/x git push --force-with-lease origin feat/x',
+    'git --git-dir=/tmp/x push --force-with-lease origin feat/x',
+    'git --git-dir /tmp/x push --force-with-lease origin feat/x',
+    'git --work-tree=/tmp/x push --force-with-lease origin feat/x',
+    'git push --force-with-lease --git-dir=/tmp/x origin feat/x',
+    'git -C a -C b push --force-with-lease origin feat/x',
+    'git -C /etc push --force-with-lease origin feat/x',
+    'git -C ../.. push --force-with-lease origin feat/x',
+    'git -c push.default=matching push --force-with-lease origin feat/x',
+    'git -c branch.feat/x.merge=refs/heads/main push --force-with-lease origin',
+    'GIT_CONFIG_COUNT=1 git push --force-with-lease origin feat/x',
+    'GIT_CONFIG_KEY_0=push.default git push --force-with-lease origin feat/x',
+    'GIT_CONFIG_PARAMETERS="\'push.default=x\'" git push --force-with-lease origin feat/x',
+    // a preceding cd / GIT_* export in the same compound command
+    'cd /tmp/other && git push --force-with-lease origin feat/x',
+    'pushd /tmp/other; git push --force-with-lease origin feat/x',
+    'export GIT_DIR=/tmp/x && git push --force-with-lease origin feat/x',
+    // push / ref mutation commands
+    'git config remote.origin.push refs/heads/feat:refs/heads/main',
+    'git config push.default matching',
+    'git config alias.p push',
+    'git symbolic-ref HEAD refs/heads/main',
+    'git branch -f main HEAD',
+    'git branch -M main',
+    'git checkout -B main',
+    'git switch -C master',
+    // wrapper prefixes
+    'timeout 30 git push --force-with-lease --all origin',
+    'timeout -s KILL 30 git push --force-with-lease --force origin feat/x',
+    '/usr/bin/env git push --force-with-lease --all origin',
+    'env -u FOO git push --force-with-lease --all origin',
+    'env -i git push --force-with-lease --all origin',
+    'env A=1 B=2 git push --force-with-lease --all origin',
+    'stdbuf -oL git push --force-with-lease --all origin',
+    'caffeinate -i git push --force-with-lease --all origin',
+    'xcrun git push --force-with-lease --all origin',
+    'sudo -u bob git push --force-with-lease --all origin',
+    // wrapped / dynamic invocations
+    "bash -lc 'git push --force origin feat/x'",
+    'sh -e -c "git push --force-with-lease origin feat/x"',
+    "zsh -c 'git push --force origin feat/x'",
+    "ksh -c 'git push --force origin feat/x'",
+    "dash -c 'git push --force origin feat/x'",
+    'echo "git push --force origin main" | bash',
+    'echo "git push --force origin main" | /bin/sh',
+    "python3 -c \"import subprocess; subprocess.run(['git','push','--force','origin','main'])\"",
+    "node -e \"require('child_process').execSync('git push --force origin main')\"",
+  ];
+  const allowed = [
+    'git push --force-with-lease --signed origin feat/x',
+    'timeout 30 git push --force-with-lease origin feat/x',
+    '/usr/bin/env git push --force-with-lease origin feat/x',
+    'env -u FOO git push --force-with-lease origin feat/x',
+    'sudo -u bob git push --force-with-lease origin feat/x',
+    'stdbuf -oL git push --force-with-lease origin feat/x',
+    'git -C ./sub push --force-with-lease origin feat/x',
+    'git config --get remote.origin.url',
+    'git config user.name someone',
+    'git symbolic-ref --short HEAD',
+    'git branch -f feat/x HEAD',
+    "bash -c 'echo hello'",
+    'echo push | bash',
+  ];
+  for (const cmd of denied) {
+    it(`denies: ${cmd}`, async () => {
+      const { ctx } = await loadHooks();
+      assert.equal((await evaluate(ctx.hooks, 'shell', cmd)).denied, true);
+    });
+  }
+  for (const cmd of allowed) {
+    it(`allows: ${cmd}`, async () => {
+      const { ctx } = await loadHooks();
+      assert.equal((await evaluate(ctx.hooks, 'shell', cmd)).denied, false);
+    });
+  }
+});
+
 describe('multi-resource evaluation', () => {
   it('denies when ANY shell resource is blocked (not just the first)', async () => {
     const { ctx } = await loadHooks();

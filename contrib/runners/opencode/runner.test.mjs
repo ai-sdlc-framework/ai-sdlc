@@ -62,7 +62,19 @@ if (mode === 'commit-blocked') {
   const cp = require('child_process');
   cp.execFileSync('git', ['add', '.github/workflows/x.yml'], { cwd: process.cwd() });
   cp.execFileSync('git', ['commit', '-q', '-m', 'agent commit'], { cwd: process.cwd() });
+  // The agent also deletes the origin/main ref the old merge-base logic relied on.
+  try { cp.execFileSync('git', ['update-ref', '-d', 'refs/remotes/origin/main'], { cwd: process.cwd() }); } catch {}
   write('src/b.txt');
+  finish('done');
+  process.exit(0);
+}
+if (mode === 'modify-tracked') {
+  fs.appendFileSync(path.join(process.cwd(), '.github/workflows/ci.yml'), 'malicious: true\\n');
+  finish('done');
+  process.exit(0);
+}
+if (mode === 'modify-many') {
+  for (const f of ['a.txt', 'b.txt', 'c.txt']) fs.appendFileSync(path.join(process.cwd(), f), 'more\\n');
   finish('done');
   process.exit(0);
 }
@@ -100,6 +112,10 @@ function makeRepo(name, projectConfig) {
   const git = (...a) => execFileSync('git', a, { cwd: repo, env: { ...process.env, ...GIT_ENV } });
   git('init', '-q');
   writeFileSync(join(repo, 'README.md'), 'hi\n');
+  // Pre-existing TRACKED files the agent can modify in place.
+  mkdirSync(join(repo, '.github', 'workflows'), { recursive: true });
+  writeFileSync(join(repo, '.github', 'workflows', 'ci.yml'), 'name: ci\n');
+  for (const f of ['a.txt', 'b.txt', 'c.txt']) writeFileSync(join(repo, f), `${f}\n`);
   if (projectConfig) writeFileSync(join(repo, 'opencode.json'), JSON.stringify(projectConfig));
   git('add', '-A');
   git('commit', '-q', '-m', 'init');
@@ -303,6 +319,8 @@ test('--blocked-paths also sees files the agent already COMMITTED (union with un
   // the runner must NOT have added its own commit on top
   assert.equal(ctx.git('log', '--format=%s', '-n', '1').toString().trim(), 'agent commit');
   assert.ok(existsSync(join(ctx.repo, 'src/b.txt')), 'uncommitted change left in place');
+  // ...even though the agent deleted refs/remotes/origin/main (baseline HEAD, not that ref, is the base)
+  assert.equal(ctx.git('for-each-ref', 'refs/remotes/origin/main').toString().trim(), '');
 });
 
 test('--max-files counts committed + uncommitted files together', async () => {
@@ -312,6 +330,34 @@ test('--max-files counts committed + uncommitted files together', async () => {
   });
   assert.equal(code, 1);
   assert.match(result.error, /2 files changed, exceeding --max-files 1/);
+});
+
+test('modifying an EXISTING tracked blocked file is caught (real file names, not characters)', async () => {
+  const ctx = makeRepo('tracked-blocked');
+  const before = ctx.git('rev-parse', 'HEAD').toString().trim();
+  const { code, result } = await runRunner(
+    ctx,
+    [...MODEL, '--blocked-paths', '.github/workflows/**'],
+    {
+      FAKE_MODE: 'modify-tracked',
+    },
+  );
+  assert.equal(code, 1);
+  assert.match(result.error, /blocked paths modified[^:]*: \.github\/workflows\/ci\.yml$/);
+  assert.deepEqual(result.filesChanged, ['.github/workflows/ci.yml']);
+  assert.equal(ctx.git('rev-parse', 'HEAD').toString().trim(), before);
+});
+
+test('--max-files counts REAL modified tracked files, and a success reports real names', async () => {
+  const over = makeRepo('tracked-many');
+  const r1 = await runRunner(over, [...MODEL, '--max-files', '2'], { FAKE_MODE: 'modify-many' });
+  assert.equal(r1.code, 1);
+  assert.match(r1.result.error, /3 files changed, exceeding --max-files 2/);
+
+  const ok = makeRepo('tracked-many-ok');
+  const r2 = await runRunner(ok, [...MODEL, '--max-files', '3'], { FAKE_MODE: 'modify-many' });
+  assert.equal(r2.code, 0);
+  assert.deepEqual(r2.result.filesChanged.sort(), ['a.txt', 'b.txt', 'c.txt']);
 });
 
 test('--max-files is ENFORCED before commit', async () => {

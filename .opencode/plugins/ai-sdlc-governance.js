@@ -495,26 +495,64 @@ function isForcePushPattern(pattern) {
 }
 
 /** Command prefixes that merely wrap the real command (`env git push …`). */
-const WRAPPER_PREFIXES = new Set(['env', 'command', 'exec', 'nice', 'time', 'nohup', 'sudo']);
+const WRAPPER_PREFIXES = new Set([
+  'env',
+  'command',
+  'exec',
+  'nice',
+  'time',
+  'nohup',
+  'sudo',
+  'timeout',
+  'stdbuf',
+  'caffeinate',
+  'xcrun',
+]);
+// Wrapper flags that take a SEPARATE value token.
+const WRAPPER_VALUE_FLAGS = {
+  env: new Set(['-u', '-C', '-S', '--unset', '--chdir']),
+  sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U']),
+  timeout: new Set(['-s', '-k', '--signal', '--kill-after']),
+};
 
 /**
  * Tokenize a segment for git analysis. Reuses normalizeStashObfuscation (quote
  * stripping, `$VAR`/`${IFS}` collapsing, backslash removal) so obfuscated
  * spellings normalize to what a real shell would execute, then drops leading
- * env assignments and wrapper prefixes (env/command/exec/nice/time + their
- * flags). Returns null when the command is not a git invocation.
+ * env assignments and wrapper prefixes (env, /usr/bin/env, command, exec,
+ * nice, time, timeout <dur>, stdbuf, caffeinate, xcrun, sudo -u <user> and
+ * their flags). Returns null when the command is not a git invocation.
+ * Best effort only — see the runbook: this is NOT a shell parser.
  */
 function parseGit(segment) {
   const tokens = normalizeStashObfuscation(segment).trim().split(/\s+/).filter(Boolean);
   let i = 0;
+  const envAssigns = [];
   for (;;) {
     if (i >= tokens.length) return null;
     const t = tokens[i];
+    const base = t.split('/').pop();
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+      envAssigns.push(t);
       i++;
-    } else if (WRAPPER_PREFIXES.has(t)) {
+    } else if (WRAPPER_PREFIXES.has(base)) {
       i++;
-      while (i < tokens.length && (tokens[i].startsWith('-') || /^\d+$/.test(tokens[i]))) i++;
+      const valueFlags = WRAPPER_VALUE_FLAGS[base];
+      let needDuration = base === 'timeout';
+      while (i < tokens.length) {
+        const w = tokens[i];
+        if (w.startsWith('-')) {
+          i += valueFlags && valueFlags.has(w) ? 2 : 1;
+        } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+          envAssigns.push(w); // `env VAR=x git …`
+          i++;
+        } else if (/^\d/.test(w) && (needDuration || /^\d+$/.test(w))) {
+          needDuration = false;
+          i++;
+        } else {
+          break;
+        }
+      }
     } else {
       break;
     }
@@ -522,23 +560,33 @@ function parseGit(segment) {
   if (!isGitToken(tokens[i])) return null;
   i++;
   const configs = [];
-  let cwdArg = null;
+  const cwdArgs = [];
+  const globalOpts = [];
   while (i < tokens.length && tokens[i].startsWith('-')) {
     const t = tokens[i];
     if (t === '-c' && tokens[i + 1] !== undefined) {
       configs.push(tokens[i + 1]);
       i += 2;
     } else if (t === '-C' && tokens[i + 1] !== undefined) {
-      cwdArg = tokens[i + 1];
+      cwdArgs.push(tokens[i + 1]);
       i += 2;
-    } else if (t.startsWith('-c') && t.length > 2) {
+    } else if (t.startsWith('-c') && t.length > 2 && !t.startsWith('--')) {
       configs.push(t.slice(2));
       i += 1;
     } else {
+      globalOpts.push(t);
       i += GIT_GLOBAL_VALUE_FLAGS.has(t) ? 2 : 1;
     }
   }
-  return { subcommand: tokens[i], args: tokens.slice(i + 1), configs, cwdArg };
+  return {
+    subcommand: tokens[i],
+    args: tokens.slice(i + 1),
+    configs,
+    cwdArgs,
+    cwdArg: cwdArgs.length === 1 ? cwdArgs[0] : null,
+    globalOpts,
+    envAssigns,
+  };
 }
 
 /** `-c alias.*` (hides the real subcommand) and push-rewriting configs. */
@@ -546,7 +594,10 @@ function hasDangerousGitConfig(parsed) {
   return parsed.configs.some(
     (c) =>
       /^alias\./i.test(c) ||
-      (parsed.subcommand === 'push' && /^remote\.[^=]*\.(push|mirror|pushurl)=?/i.test(c)),
+      (parsed.subcommand === 'push' &&
+        /^(remote\.[^=]*\.(push|mirror|pushurl)|push\.default|branch\.[^=]*\.(merge|remote|pushremote))=?/i.test(
+          c,
+        )),
   );
 }
 
@@ -566,7 +617,8 @@ const DANGEROUS_PUSH_LONG = [
   'exec',
 ];
 const FORCEISH_PUSH_LONG = ['force', 'force-with-lease', 'force-if-includes', 'mirror'];
-const PUSH_LONG_VALUE_OPTS = ['repo', 'push-option', 'receive-pack', 'exec', 'signed'];
+// `--signed` only takes `--signed=<v>` (never a separate value token).
+const PUSH_LONG_VALUE_OPTS = ['repo', 'push-option', 'receive-pack', 'exec'];
 
 function longOptMatches(tok, candidates) {
   if (!tok.startsWith('--') || tok.length < 3) return [];
@@ -652,11 +704,29 @@ function isSafeBranchDestination(dst) {
  *   - `HEAD`, `@`, or NO refspec resolve to the current branch of `cwd`
  *     (`git rev-parse --abbrev-ref HEAD`); unresolvable => denied (fail closed).
  */
-function isStrictLeasePush(segment, cwd) {
+function isStrictLeasePush(segment, cwd, tainted = false) {
+  // Fail closed on any shell expansion: `$BR`, `${BR}`, `$'\\x6dain'`, `$(…)`, backticks.
+  if (/[$`]/.test(segment)) return false;
+  // A preceding cd / GIT_* export / ref-mutating segment changes what the push means.
+  if (tainted) return false;
   const parsed = parseGit(segment);
   if (!parsed || parsed.subcommand !== 'push') return false;
   if (hasDangerousGitConfig(parsed)) return false;
+  if (
+    parsed.envAssigns.some((e) => /^GIT_(DIR|WORK_TREE|CONFIG_\w+|CONFIG_PARAMETERS)=/i.test(e)) ||
+    parsed.globalOpts.some((o) => /^--(git-dir|work-tree|namespace)\b/.test(o))
+  ) {
+    return false;
+  }
+  // At most ONE -C, and it must be a plain path under the session dir.
+  if (parsed.cwdArgs.length > 1) return false;
+  if (parsed.cwdArgs.length === 1) {
+    const target = resolve(cwd || process.cwd(), parsed.cwdArgs[0]);
+    const base = resolve(cwd || process.cwd());
+    if (target !== base && !target.startsWith(base + sep)) return false;
+  }
   const args = parsed.args;
+  if (args.some((t) => /^--(git-dir|work-tree)\b/.test(t))) return false;
   if (!args.some(isLeaseFlag)) return false;
 
   const positionals = [];
@@ -710,12 +780,70 @@ function isStrictLeasePush(segment, cwd) {
  * runbook; write the push as a plain top-level command instead).
  */
 function wrappedForcePushSuspicion(command) {
-  if (!/(\b(?:ba|z|da)?sh\s+-\w*c\b|\beval\b|\bxargs\b|\$\(|`)/.test(command)) return false;
+  const wrapped =
+    // any shell (sh/bash/zsh/ksh/dash) with ANY flags before -c
+    /\b(?:ba|z|k|da)?sh\b[^|;&\n]*\s-[A-Za-z]*c[A-Za-z]*(\s|$)/.test(command) ||
+    // piping text into a shell
+    /\|\s*(?:\S*\/)?(?:ba|z|k|da)?sh\b/.test(command) ||
+    // interpreters running inline code
+    /\b(?:python[\d.]*|node|perl|ruby)\b[^|;&\n]*\s-[ecEC]\b/.test(command) ||
+    /(\beval\b|\bxargs\b|\$\(|`)/.test(command);
+  if (!wrapped) return false;
   const flat = normalizeStashObfuscation(command);
-  if (!/\bgit\b/.test(flat) || !/\bpush\b/.test(flat)) return false;
-  return /(^|\s)(--force\S*|--mirr\S*|--all|--branches|--tags|-[A-Za-z]*f[A-Za-z]*|\+\S+)(\s|$)/.test(
+  if (!/\bpush\b/.test(flat)) return false;
+  return /(^|[\s,[(])(--force\S*|--mirr\S*|--all|--branches|--tags|-[A-Za-z]*f[A-Za-z]*|\+\S+)(?=[\s,\])]|$)/.test(
     flat,
   );
+}
+
+/**
+ * Commands that re-point what a later push means or rewrite push config:
+ * `git config` setting remote.*.push / push.default / alias.*, `git
+ * symbolic-ref <name> <target>`, `git branch -f|-M main|master`, `git
+ * checkout -B|switch -C main|master`. Returns a reason string or null.
+ * Best effort: only the trivially recognisable spellings.
+ */
+function refMutationReason(parsed) {
+  if (!parsed) return null;
+  const args = parsed.args;
+  const positional = args.filter((a) => !a.startsWith('-'));
+  if (parsed.subcommand === 'config') {
+    const readOnly = args.some((a) =>
+      /^--(get|get-all|get-regexp|list|unset|unset-all)$|^-l$/.test(a),
+    );
+    if (
+      !readOnly &&
+      positional.some((k) =>
+        /^(remote\.[^.]*\.(push|mirror|pushurl)|push\.default|alias\..*)$/i.test(k),
+      )
+    ) {
+      return 'git config must not set remote.*.push/mirror, push.default or alias.*';
+    }
+  }
+  if (parsed.subcommand === 'symbolic-ref' && positional.length >= 2) {
+    return 'git symbolic-ref must not re-point a ref';
+  }
+  const forceBranch = args.some((a) => /^(-f|--force|-M|-B|-C)$/.test(a));
+  const protectedArg = positional.some((a) => PROTECTED_PUSH_TARGETS.has(a.toLowerCase()));
+  if (
+    (parsed.subcommand === 'branch' ||
+      parsed.subcommand === 'checkout' ||
+      parsed.subcommand === 'switch') &&
+    forceBranch &&
+    protectedArg
+  ) {
+    return 'forcing/resetting a local main/master branch is not permitted';
+  }
+  return null;
+}
+
+/** True for a segment that changes directory or GIT_* environment for what follows. */
+function isTaintingSegment(segment) {
+  const flat = normalizeStashObfuscation(segment).trim();
+  if (/^(cd|pushd|popd)\b/.test(flat)) return true;
+  if (/^(export\s+|declare\s+-x\s+)?GIT_(DIR|WORK_TREE|CONFIG_\w+|CONFIG_PARAMETERS)=/i.test(flat))
+    return true;
+  return false;
 }
 
 /**
@@ -728,10 +856,13 @@ function wrappedForcePushSuspicion(command) {
  */
 function checkBlockedActions(command, patterns, cwd) {
   const hasForceRule = patterns.some(isForcePushPattern);
+  let tainted = false;
   for (const segment of splitShellSegments(command)) {
+    const wasTainted = tainted;
+    if (isTaintingSegment(segment)) tainted = true;
     for (const pattern of patterns) {
       if (!cmdMatch(pattern, segment)) continue;
-      if (isForcePushPattern(pattern) && isStrictLeasePush(segment, cwd)) {
+      if (isForcePushPattern(pattern) && isStrictLeasePush(segment, cwd, wasTainted)) {
         continue; // carve-out: the DoD-required lease-protected form
       }
       return { blocked: true, reason: `command matches blockedAction pattern '${pattern}'` };
@@ -782,6 +913,8 @@ function checkShellCommand(command, policy, cwd) {
     const verdict = checkMergeGovernance(segment, policy.governance);
     if (verdict) return verdict;
     const parsed = parseGit(segment);
+    const mutation = refMutationReason(parsed);
+    if (mutation) return { blocked: true, reason: mutation };
     if (parsed && hasDangerousGitConfig(parsed)) {
       return {
         blocked: true,
