@@ -169,12 +169,16 @@ async function gitExec(dir, gitArgs) {
     cwd: dir,
     env: cleanGitEnv(),
   });
-  return stdout.trim();
+  // NUL-delimited (-z) output must not be trimmed: a leading/trailing space in a
+  // file name would otherwise be eaten.
+  return gitArgs.includes('-z') ? stdout : stdout.trim();
 }
 
 function cleanGitEnv() {
   const e = { ...process.env };
   for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete e[k];
+  // File names from the agent are literal paths, never pathspec patterns (`:(glob)`, `*`).
+  e.GIT_LITERAL_PATHSPECS = '1';
   return e;
 }
 

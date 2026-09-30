@@ -147,9 +147,21 @@ Known bypass classes that are NOT handled (non-exhaustive):
   directory change makes the branch/target unverifiable): write
   `git -C sub push ...` instead.
 
-Known FALSE-POSITIVE denials (over-blocking, fail closed): redirection tokens
-glued to arguments in unusual ways, and heredoc bodies or commit-message text
-that happen to contain a force-ish push spelling. Contrib runner: changed paths
+Redirections are detected on the RAW text and only when unquoted and unescaped
+(`<`/`>` are legal inside quoted or escaped ref names). A quoted/escaped `<`/`>`,
+or a redirection target containing `:`, makes a lease push fail closed, as does any
+`$`/backtick in a push. When a segment contains an expansion next to a push and a
+force-ish token anywhere in the command, it is denied even if the expansion hides the
+subcommand (`P=push; git $P --force ...`). A generic fallback also denies any segment
+with `git` ... `push` ... a force-ish token that could not be evaluated as a push
+(unrecognised wrapper flags such as `env -S`, `exec -a`, `stdbuf -o L`; a quoted `#`).
+
+Known FALSE-POSITIVE denials (over-blocking, fail closed): text that merely MENTIONS a
+force push (`echo "git push --force" > notes.txt`, heredoc bodies or commit-message
+text containing a force-ish push spelling), any `$` expansion in a segment that also
+mentions `push`, and a legitimate lease push preceded by `cd`/`GIT_*` in the same command.
+Remaining gaps are the classes listed above; the list is not exhaustive and the plugin
+stays a best-effort layer behind the required server-side rulesets. Contrib runner: changed paths
 are read with `git ... -z` so quotes/newlines are not C-quoted; other tooling
 that parses `git diff --name-only` without `-z` will still see C-quoted paths.
 

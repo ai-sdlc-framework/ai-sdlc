@@ -511,7 +511,7 @@ const WRAPPER_PREFIXES = new Set([
 // Wrapper flags that take a SEPARATE value token.
 const WRAPPER_VALUE_FLAGS = {
   env: new Set(['-u', '-C', '-S', '--unset', '--chdir']),
-  sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U']),
+  sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U', '--chdir']),
   timeout: new Set(['-s', '-k', '--signal', '--kill-after']),
 };
 
@@ -524,17 +524,88 @@ const WRAPPER_VALUE_FLAGS = {
  * their flags). Returns null when the command is not a git invocation.
  * Best effort only — see the runbook: this is NOT a shell parser.
  */
-function parseGit(segment) {
-  const rawTokens = normalizeStashObfuscation(segment).trim().split(/\s+/).filter(Boolean);
-  // Drop redirections: `2>&1`, `>out`, and a bare operator plus its target (`> file`).
-  const tokens = [];
-  for (let k = 0; k < rawTokens.length; k++) {
-    const t = rawTokens[k];
-    if (/^\d*[<>]+$/.test(t)) k++;
-    else if (!/^\d*[<>]+\S*$/.test(t)) tokens.push(t);
+/**
+ * Remove REAL shell redirections from a raw segment: only UNQUOTED, UNESCAPED
+ * `<`/`>` (with an optional leading fd number and trailing target word) count.
+ * A quoted/escaped `<`/`>` is legal inside a git ref name (`'>x:ma''in'`,
+ * `\\>x:main`), so it is never treated as a redirection; it is reported via
+ * `angleQuoted` and makes the lease carve-out fail closed. A redirection target
+ * containing `:` is also reported (`redirectColon`) — it may really be a refspec.
+ */
+function stripRedirections(raw) {
+  let out = '';
+  let i = 0;
+  let quote = null;
+  let angleQuoted = false;
+  let redirectColon = false;
+  while (i < raw.length) {
+    const c = raw[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === '<' || c === '>') angleQuoted = true;
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === '\\') {
+      const n = raw[i + 1];
+      if (n === '<' || n === '>') angleQuoted = true;
+      out += c + (n ?? '');
+      i += 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === '<' || c === '>') {
+      out = out.replace(/(^|\s)\d+$/, '$1'); // standalone fd number: `2>`
+      while (raw[i] === '<' || raw[i] === '>') i++;
+      if (raw[i] === '&') {
+        i++;
+        while (/[\d-]/.test(raw[i] ?? '')) i++;
+      }
+      while (raw[i] === ' ' || raw[i] === '\t') i++;
+      let target = '';
+      let q = null;
+      while (i < raw.length) {
+        const d = raw[i];
+        if (q) {
+          if (d === q) q = null;
+          target += d;
+          i++;
+        } else if (d === "'" || d === '"') {
+          q = d;
+          target += d;
+          i++;
+        } else if (d === '\\') {
+          target += d + (raw[i + 1] ?? '');
+          i += 2;
+        } else if (/\s/.test(d) || d === '<' || d === '>') {
+          break;
+        } else {
+          target += d;
+          i++;
+        }
+      }
+      if (target.includes(':')) redirectColon = true;
+      out += ' ';
+      continue;
+    }
+    out += c;
+    i++;
   }
+  return { text: out, angleQuoted, redirectColon };
+}
+
+function parseGit(segment) {
+  const stripped = stripRedirections(segment);
+  const tokens = normalizeStashObfuscation(stripped.text).trim().split(/\s+/).filter(Boolean);
   let i = 0;
   const envAssigns = [];
+  const wrapperChdirs = [];
   for (;;) {
     if (i >= tokens.length) return null;
     const t = tokens[i];
@@ -549,7 +620,20 @@ function parseGit(segment) {
       while (i < tokens.length) {
         const w = tokens[i];
         if (w.startsWith('-')) {
-          i += valueFlags && valueFlags.has(w) ? 2 : 1;
+          // `env -C dir` / `env --chdir=dir` / `sudo -D dir` change the working
+          // directory exactly like `git -C`: record them so they are validated.
+          if (
+            (base === 'env' && (w === '-C' || w === '--chdir')) ||
+            (base === 'sudo' && (w === '-D' || w === '--chdir'))
+          ) {
+            if (tokens[i + 1] !== undefined) wrapperChdirs.push(tokens[i + 1]);
+            i += 2;
+          } else if (/^--chdir=/.test(w)) {
+            wrapperChdirs.push(w.slice('--chdir='.length));
+            i += 1;
+          } else {
+            i += valueFlags && valueFlags.has(w) ? 2 : 1;
+          }
         } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
           envAssigns.push(w); // `env VAR=x git …`
           i++;
@@ -567,7 +651,7 @@ function parseGit(segment) {
   if (!isGitToken(tokens[i])) return null;
   i++;
   const configs = [];
-  const cwdArgs = [];
+  const cwdArgs = [...wrapperChdirs];
   const globalOpts = [];
   while (i < tokens.length && tokens[i].startsWith('-')) {
     const t = tokens[i];
@@ -593,6 +677,8 @@ function parseGit(segment) {
     cwdArg: cwdArgs.length === 1 ? cwdArgs[0] : null,
     globalOpts,
     envAssigns,
+    angleQuoted: stripped.angleQuoted,
+    redirectColon: stripped.redirectColon,
   };
 }
 
@@ -719,6 +805,9 @@ function isStrictLeasePush(segment, cwd, tainted = false) {
   const parsed = parseGit(segment);
   if (!parsed || parsed.subcommand !== 'push') return false;
   if (hasDangerousGitConfig(parsed)) return false;
+  // A quoted/escaped `<`/`>` (legal in ref names) or a `:`-bearing redirection
+  // target could be a hidden refspec: never carve out.
+  if (parsed.angleQuoted || parsed.redirectColon) return false;
   if (
     parsed.envAssigns.some((e) => /^GIT_(DIR|WORK_TREE|CONFIG_\w+|CONFIG_PARAMETERS)=/i.test(e)) ||
     parsed.globalOpts.some((o) => /^--(git-dir|work-tree|namespace)\b/.test(o))
@@ -849,10 +938,57 @@ function isTaintingSegment(segment) {
   const flat = normalizeStashObfuscation(segment).trim();
   if (/^(?:(?:command|builtin)\s+)?(?:cd|pushd|popd)\b/.test(flat)) return true;
   // `GIT_DIR=x`, `export GIT_DIR=x`, `export FOO=1 GIT_DIR=x`, `declare|typeset -x GIT_DIR=x`
-  return /^(?:(?:export|declare\s+-x|typeset\s+-x)\s+)?(?:[A-Za-z_]\w*=\S*\s+)*GIT_(?:DIR|WORK_TREE|CONFIG_\w+)=/i.test(
+  return /^(?:(?:export|declare|typeset|local|readonly)(?:\s+-[-\w]*)*\s+)?(?:[A-Za-z_]\w*=\S*\s+)*GIT_(?:DIR|WORK_TREE|CONFIG_\w+)=/i.test(
     flat,
   );
 }
+
+/** Strip surrounding quote characters from a whitespace-split token. */
+const unquoteTok = (t) => t.replace(/^['"`(]+|['"`)]+$/g, '');
+
+const FORCEISH_TOKEN_RE = /^(--force\S*|--mirr\S*|--delete\S*|-[A-Za-z]*f[A-Za-z]*|\+\S+)$/;
+
+/**
+ * Generic fail-closed scan of free text: a `git` token, later a `push` token,
+ * later a force-ish token (`--force`, `-f`, `+refspec`, any
+ * `--force-with-lease` spelling, `--mirror`, `--delete`). Used when parseGit
+ * did NOT return an evaluated push (unrecognised wrapper flags such as
+ * `env -S`, `exec -a`, `stdbuf -o L`, a quoted `#` that hid the rest of the
+ * text, ...). Checked on BOTH the raw and the normalised text.
+ */
+function looksLikeForcePush(text) {
+  const toks = text.split(/\s+/).map(unquoteTok).filter(Boolean);
+  const gi = toks.findIndex((t) => t.split('/').pop() === 'git');
+  if (gi === -1) return false;
+  const pi = toks.findIndex((t, idx) => idx > gi && t === 'push');
+  if (pi === -1) return false;
+  return toks.slice(pi + 1).some((t) => FORCEISH_TOKEN_RE.test(t));
+}
+
+// git subcommands that can never push: a `$` inside them is not suspicious.
+const NON_PUSH_GIT_SUBCOMMANDS = new Set([
+  'commit',
+  'log',
+  'add',
+  'status',
+  'diff',
+  'show',
+  'fetch',
+  'rev-parse',
+  'checkout',
+  'switch',
+  'restore',
+  'branch',
+  'tag',
+  'stash',
+  'rebase',
+  'merge-base',
+  'remote',
+  'config',
+  'ls-files',
+  'grep',
+  'blame',
+]);
 
 /**
  * blockedActions matching, SEGMENT-AWARE (splits on shell control operators
@@ -877,15 +1013,50 @@ function checkBlockedActions(command, patterns, cwd) {
     }
     if (hasForceRule) {
       const parsed = parseGit(segment);
+      const isPush = !!parsed && parsed.subcommand === 'push';
+      const hasExpansion = /[$`]/.test(segment);
       // Any push whose RAW text contains an expansion is unanalysable
       // (normalisation deletes `$VAR`/`${…}`): `git push ${F:---force} origin ${M:-main}`,
       // `F=--force; git push $F origin`. Deny the push outright.
-      if (parsed && parsed.subcommand === 'push' && /[$`]/.test(segment)) {
+      if (isPush && hasExpansion) {
         return {
           blocked: true,
           reason:
             'a git push containing a shell expansion ($VAR, ${…}, $(…), backticks) cannot be ' +
             'verified — write the refspec and flags literally',
+        };
+      }
+      // Expansion that may HIDE the subcommand or flags: `P=push; git $P --force origin main`,
+      // `G=git; $G push --force origin main`. parseGit did not see a push here.
+      if (!isPush && hasExpansion) {
+        const commandHasPush = /\bpush\b/.test(command);
+        const commandHasForce =
+          /(^|[\s=,'"])(--force\S*|--mirr\S*|-[A-Za-z]*f[A-Za-z]*|\+\S+)/.test(command);
+        const gitish = /\bgit\b/.test(segment) || /^\s*[$`]/.test(segment);
+        const harmless = !!parsed && NON_PUSH_GIT_SUBCOMMANDS.has(parsed.subcommand);
+        if (
+          /\bpush\b/.test(segment) ||
+          (commandHasPush && commandHasForce && gitish && !harmless)
+        ) {
+          return {
+            blocked: true,
+            reason:
+              'a command using shell expansion next to a git push cannot be verified (the ' +
+              'expansion may supply the subcommand or a force flag) — write it literally',
+          };
+        }
+      }
+      // Generic fail-closed fallback: git ... push ... <force-ish> that parseGit did not
+      // evaluate as a push (unrecognised wrapper flags, quoted '#', ...).
+      if (
+        !isPush &&
+        (looksLikeForcePush(segment) || looksLikeForcePush(normalizeStashObfuscation(segment)))
+      ) {
+        return {
+          blocked: true,
+          reason:
+            'this segment looks like a force-ish git push that could not be analysed ' +
+            '(unrecognised wrapper/option form) — run it as a plain top-level git push',
         };
       }
       if (

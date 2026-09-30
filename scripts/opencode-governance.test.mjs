@@ -490,6 +490,77 @@ describe('round-3 hardening (best effort; see runbook for what is NOT handled)',
   }
 });
 
+describe('round-4 hardening (redirection spelling, expansion, generic fallback)', () => {
+  const denied = [
+    // MAJOR X: quoted/escaped angle brackets are legal ref-name characters, not redirections
+    "git branch '>x' && git push --force-with-lease origin '>x:ma''in'",
+    'git push --force-with-lease origin \\>x:main',
+    "git push --force-with-lease origin '>x:main'",
+    'git push --force-with-lease origin "<x:main"',
+    // a redirection whose target looks like a refspec
+    'git push --force-with-lease origin >x:main',
+    // MAJOR Y: expansion hiding the subcommand / flags
+    'P=push; git $P --force origin main',
+    'G=git; $G push --force origin main',
+    'P=push F=--force; git $P $F origin main',
+    'git `echo push` --force origin main',
+    // generic fail-closed fallback: forms parseGit cannot evaluate as a push
+    "env -S 'git push --force origin main'",
+    'env -S "git push --force-with-lease origin feat/x"',
+    'exec -a name git push --force origin main',
+    'env -P /usr/bin git push --force origin main',
+    'stdbuf -o L git push --force origin main',
+    "git -c 'a.b= #' push --force origin main",
+    "git -c 'a.b= #' push --force-with-lease --all origin",
+    // env/sudo chdir behave like git -C
+    'env -C /etc git push --force-with-lease origin feat/x',
+    'env --chdir=/etc git push --force-with-lease origin feat/x',
+    'sudo -D /etc git push --force-with-lease origin feat/x',
+    'env -C a git -C b push --force-with-lease origin feat/x',
+    // looser export/declare/local spellings taint the following push
+    'export -- GIT_DIR=/tmp/x && git push --force-with-lease origin feat/x',
+    'declare -gx GIT_DIR=/tmp/x; git push --force-with-lease origin feat/x',
+    'local -x GIT_DIR=/tmp/x; git push --force-with-lease origin feat/x',
+  ];
+  const allowed = [
+    // glued / spaced REAL redirections on a legit lease push
+    'git push --force-with-lease origin feat/x 2>&1',
+    'git push --force-with-lease origin feat/x > /tmp/out.txt',
+    'git push --force-with-lease origin feat/x >out',
+    'git push --force-with-lease origin feat/x 2>/dev/null',
+    'git push --force-with-lease origin feat/x >>/tmp/log 2>&1',
+    'git push --force-with-lease origin feat/x </dev/null',
+    // controls
+    'echo $HOME',
+    'git commit -m "cost $5" && git push origin feature-x',
+    'git log --oneline',
+    'git push origin feature-x',
+    'env -C ./sub git push --force-with-lease origin feat/x',
+  ];
+  for (const cmd of denied) {
+    it(`denies: ${cmd}`, async () => {
+      const { ctx } = await loadHooks();
+      assert.equal((await evaluate(ctx.hooks, 'shell', cmd)).denied, true);
+    });
+  }
+  for (const cmd of allowed) {
+    it(`allows: ${cmd}`, async () => {
+      const { ctx } = await loadHooks();
+      assert.equal((await evaluate(ctx.hooks, 'shell', cmd)).denied, false);
+    });
+  }
+
+  // Judgement call, documented in the runbook: text that merely MENTIONS a force push is
+  // denied too (fail closed) — we do not try to tell prose from commands.
+  it('denies (documented false positive): echo "git push --force" > notes.txt', async () => {
+    const { ctx } = await loadHooks();
+    assert.equal(
+      (await evaluate(ctx.hooks, 'shell', 'echo "git push --force" > notes.txt')).denied,
+      true,
+    );
+  });
+});
+
 describe('multi-resource evaluation', () => {
   it('denies when ANY shell resource is blocked (not just the first)', async () => {
     const { ctx } = await loadHooks();
