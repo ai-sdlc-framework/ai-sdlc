@@ -19,6 +19,7 @@ import {
   reportCapabilityOutcome,
   readCapabilityState,
   deriveCapabilityStatus,
+  CAPABILITY_OUTCOMES,
 } from './index.js';
 
 const EXPECTED = [
@@ -195,5 +196,18 @@ describe('reporting', () => {
     expect(r.length).toBe(200);
     // eslint-disable-next-line no-control-regex
     expect(r).not.toMatch(/[\u0000-\u001f]/);
+  });
+});
+
+describe('outcomes', () => {
+  it('lists exactly the three outcomes', () => {
+    expect([...CAPABILITY_OUTCOMES]).toEqual(['live', 'shadow', 'degraded']);
+  });
+
+  it('keys the counts of a new record by every outcome, starting at zero', () => {
+    reportCapabilityOutcome('dor.stage-b', 'shadow', { artifactsDir: dir });
+    const row = readCapabilityState(dir).find((r) => r.id === 'dor.stage-b');
+    expect(Object.keys(row!.counts).sort()).toEqual([...CAPABILITY_OUTCOMES].sort());
+    expect(row!.counts).toEqual({ live: 0, shadow: 1, degraded: 0 });
   });
 });

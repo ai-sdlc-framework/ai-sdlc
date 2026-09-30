@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { getCapability, listCapabilities } from './registry.js';
+import { CAPABILITY_OUTCOMES } from './types.js';
 import type {
   CapabilityOutcome,
   CapabilityRecord,
@@ -38,7 +39,10 @@ function stateDir(artifactsDir?: string): string {
 }
 
 function emptyCounts(): Record<CapabilityOutcome, number> {
-  return { live: 0, shadow: 0, degraded: 0 };
+  return Object.fromEntries(CAPABILITY_OUTCOMES.map((o) => [o, 0])) as Record<
+    CapabilityOutcome,
+    number
+  >;
 }
 
 function sleepSync(ms: number): void {

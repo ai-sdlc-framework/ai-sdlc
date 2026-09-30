@@ -1,3 +1,4 @@
+export { CAPABILITY_OUTCOMES } from './types.js';
 export type {
   CapabilityDefinition,
   CapabilityOutcome,

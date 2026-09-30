@@ -1,5 +1,8 @@
+/** Every outcome a capability can report; the single source for the type below. */
+export const CAPABILITY_OUTCOMES = ['live', 'shadow', 'degraded'] as const;
+
 /** How a capability ran on a given invocation. */
-export type CapabilityOutcome = 'live' | 'shadow' | 'degraded';
+export type CapabilityOutcome = (typeof CAPABILITY_OUTCOMES)[number];
 
 /** Current status of a capability: its latest outcome, or `never-observed`. */
 export type CapabilityStatus = CapabilityOutcome | 'never-observed';
