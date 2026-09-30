@@ -17,7 +17,7 @@ deferredDocsDeadline: '2026-11-30'
 
 # RFC-0049: System One Judgment Layer (Typed-Question Provider Adapter, Jev First)
 
-**Status:** Signed Off (2026-09-30, Engineering + Operator) — **all 5 Open Questions
+**Status:** Signed Off (2026-09-30, Engineering + Operator) — **all 7 Open Questions
 resolved via operator rubric walkthrough.** Resolutions: **(OQ-1)** judgments may relax review on
 trusted-`sourceKind` work only, limited in v1 to selecting the merged two-reviewer set
 (AISDLC-617) per PR, with `security-reviewer` always run and the path regex as a veto;
@@ -28,7 +28,11 @@ plus a thin `fetch` Jev adapter in `reference/src/judgment/`, no vendor SDK depe
 corpus or documented operator override, relax-class judgments are corpus-only (n ≥ 50
 from the AISDLC-616 ledger, act-band precision ≥ 95%); **(OQ-5)** v1 also ships a
 generic OpenAI-compatible adapter, shadow-only (operator selected this over the
-Jev-only recommendation). Phase tasks AISDLC-629 to AISDLC-641.
+Jev-only recommendation). **Amended 2026-09-30 (capability liveness, section 9):**
+**(OQ-6)** the four `Implemented` RFCs whose model-backed parts never ran keep their
+lifecycle and gain a machine-checked `runtimeEvidence` block per capability;
+**(OQ-7)** a required capability that reports degraded fails doctor and files a
+Decision, and blocks nothing. Phase tasks AISDLC-629 to AISDLC-647.
 
 > No live Jev call has been made yet (the API key is pending), so every performance
 > and accuracy figure quoted from the vendor documentation is a hypothesis to be
@@ -53,6 +57,12 @@ keyword and regex heuristics that currently stand in for semantic judgment. Code
 the control flow, generative agents keep generation, reviewers keep the attested
 verdict, and the operator keeps decisions. Every judgment ships in `shadow` mode and is
 promoted to `enforce` one at a time on measured evidence.
+
+The RFC also closes the process gap that let those seams sit unwired for months without
+anyone noticing (section 9, **capability liveness**): every optional capability reports
+whether it ran live, in shadow or degraded; doctor and the RFC lifecycle gate read that
+record; task follow-ups must be filed, not written as prose; and stub implementations
+reachable from production code are flagged.
 
 ## Motivation
 
@@ -185,6 +195,9 @@ Those four are the RFC's value hypothesis. The live evaluation (AISDLC-641) meas
    agreement with labelled outcomes, never on vendor claims.
 7. Keep the framework fully functional with no provider configured. The layer is
    opt-in for adopters.
+8. Make silent degradation impossible to miss: an optional capability that falls back
+   is counted and reported, and an RFC cannot be marked `Implemented` while one of its
+   capabilities has never run live.
 
 ## Non-Goals
 
@@ -575,21 +588,132 @@ the thresholds, and the runtime refuses `enforce` without one (section 4). A cha
 the pinned model version returns every `enforce` judgment to `shadow` until it is
 re-evaluated against the new version.
 
+### 9. Capability liveness
+
+The failure this section prevents is recorded in Motivation: capabilities were built,
+tested, reviewed and marked `Implemented`, and then ran their fallback path on every
+invocation for months. The fail-open design was right (AISDLC-628: degrade, do not
+block an adopter's core loop). What was missing is the other half of that principle:
+**fail soft, never silently, and never count a fallback as done.**
+
+**9.1 Capability registry.** A capability is an optional, usually model-backed,
+function of the framework that has a defined fallback. Each one is declared once in
+code (`reference/src/capabilities/`) with an `id`, a title, the RFC that specified it,
+what its fallback does, and how to enable it. The initial registry covers the seams
+verified in Motivation:
+
+| Capability id | Specified by | Fallback today | Wired by |
+| --- | --- | --- | --- |
+| `classifier.capture-triage` | RFC-0024 | `pending` sentinel | AISDLC-634 |
+| `classifier.capture-severity` | RFC-0024 | `pending` sentinel | AISDLC-634 |
+| `classifier.pr-comment-is-capture` | RFC-0024 | `pending` sentinel | AISDLC-634 |
+| `classifier.dor-answer-is-new-concern` | RFC-0024 | `pending` sentinel | AISDLC-634 |
+| `decisions.stage-c-recommendation` | RFC-0035 | `pending` sentinel | AISDLC-634 |
+| `decisions.stage-b-signals` | RFC-0035 | constants at 0.5 | AISDLC-635 |
+| `dor.stage-b` | RFC-0011 | gates 4 and 6 `skip` | AISDLC-636 |
+| `estimation.class-assignment` | RFC-0016 | title-prefix regex | AISDLC-635 |
+| `estimation.stage-b` | RFC-0016 | Stage A verdict | none in this RFC |
+| `sa.layer3` | RFC-0008 | no production client | none in this RFC |
+| `review.meta-review` | `orchestrator/src/review-meta.ts` | hook not wired | none in this RFC |
+| `policy.llm-evaluator` | reference policy | stub evaluator | none in this RFC |
+
+The last four stay degraded after this RFC ships. Listing them is the point: they
+become visible and owned instead of assumed. Every Judgment Catalog definition names
+the capability it serves (`capabilityId`), so wiring a judgment is what moves a
+capability out of `degraded`.
+
+**9.2 Outcome reporting.** Each time a capability runs it reports one of three
+outcomes:
+
+- `live`: it produced its real result and the caller used it.
+- `shadow`: it produced its real result and the caller did not use it.
+- `degraded`: it took the fallback path. The reason is recorded (no backend
+  configured, provider error, disabled by config, and so on).
+
+Reports are counted in `$ARTIFACTS_DIR/_capabilities/state.json`: per capability, the
+count of each outcome, first and last `live` timestamps, and the last `degraded`
+timestamp and reason. A failed write is swallowed; reporting never changes the result
+of the call it describes. A capability with no record at all is reported as
+`never-observed`, which is treated as `degraded`.
+
+**9.3 Repo declaration and enforcement (OQ-7).** A repo lists the capabilities it
+expects to be live in `.ai-sdlc/capabilities.yaml` (`spec.required`), read from the
+base branch only. The default is an empty list, so adopters see no change.
+
+- `/ai-sdlc doctor` gains a `capability-liveness` check: a table of every registered
+  capability with its last outcome and counts; `fail` for a required capability that
+  is `degraded` or `never-observed`, `warn` for a required capability in `shadow`.
+- The orchestrator tick files one Decision (RFC-0035) per required capability that is
+  degraded, at most once per capability per day, never duplicating an open one, and
+  emits a `CapabilityDegraded` event for the TUI.
+- Nothing is blocked. No tick refuses to dispatch and no PR check fails because a
+  capability is degraded (RFC-0035 G0; AISDLC-628).
+
+**9.4 Lifecycle evidence (OQ-6).** RFC frontmatter gains `runtimeEvidence`, a list with
+one entry per capability the RFC specifies:
+
+```yaml
+runtimeEvidence:
+  - capability: dor.stage-b
+    status: degraded            # live | shadow | degraded | not-applicable
+    evidence: artifacts/_dor/calibration.jsonl (158 evaluations, all stage A)
+    date: '2026-09-30'
+    owner: AISDLC-636
+```
+
+- The lifecycle gate (`scripts/check-rfc-lifecycle-transitions.mjs`) refuses
+  `Signed Off → Implemented` unless `runtimeEvidence` is present and every entry is
+  `live` or `not-applicable`. An RFC with no optional capability declares an empty
+  list. The existing audited operator override applies to this rule as to the others.
+- The RFC linter prints a warning for every `Implemented` RFC that carries a
+  `degraded` or `shadow` entry.
+- The four RFCs already marked `Implemented` (RFC-0011, RFC-0016, RFC-0024, RFC-0035)
+  keep their lifecycle and gain `runtimeEvidence` blocks recording their degraded
+  capabilities and owning tasks. They are corrected to `live` by the live validation
+  task as each capability is proven.
+
+**9.5 Follow-ups are filed, not written.** The escape that caused this was a sentence
+in a task's Final Summary ("the orchestrator should inject the adapter") that never
+became a task. In a completed task's `### Follow-up` section, every item must cite a
+tracked-work id, or the section must read `(none)`, or the item must start with
+`declined:` and give a reason. The check runs in the pre-push chain on completed task
+files in the push range and in the plugin's `task_complete` tool. It blocks, with the
+`declined:` form as the explicit way to say no. Tasks completed before the gate lands
+are not re-checked.
+
+**9.6 Stub-in-production rule.** The dark-code gate (AISDLC-552) finds modules nobody
+imports. It cannot see a module that is imported and receives a stub. A second rule in
+the same script flags non-test source that imports a test double (a module or export
+named as a fake, stub or mock) and requires an allowlist entry naming the capability
+and the reason. Existing hits enter a baseline that may only shrink, as with dark
+modules. This is a heuristic with a known blind spot: an interface with no
+implementation at all (the classifier substrate's invoker) has nothing to import, so
+it is caught by the registry and outcome reporting in 9.1 and 9.2, not by this rule.
+
 ## Design Details
 
 ### Schema Changes
 
 - New: `spec/schemas/judgment-config.v1.schema.json` (`JudgmentConfig`), registered in
   the AJV loader and regenerated into `reference/src/core/generated-schemas.ts`.
-- `spec/schemas/orchestrator-events.v1.schema.json`: two additive event types.
+- `spec/schemas/orchestrator-events.v1.schema.json`: three additive event types
+  (the third is `CapabilityDegraded`).
+- New: `spec/schemas/capabilities-config.v1.schema.json` (`CapabilitiesConfig`).
+- `spec/schemas/rfc.schema.json`: optional `runtimeEvidence` list.
 - No change to `pipeline.schema.json`, the verdict schema, the attestation envelope or
   any transcript leaf.
 
 ### Behavioral Changes
 
-With no provider configured, none. With a provider configured and every judgment in
-`shadow`, the only changes are outbound calls for permitted egress classes and new log
-records. Behaviour changes only for a judgment an operator promotes to `enforce`.
+With no provider configured, no judgment behaviour changes. With a provider configured
+and every judgment in `shadow`, the only changes are outbound calls for permitted
+egress classes and new log records. Behaviour changes only for a judgment an operator
+promotes to `enforce`.
+
+Capability liveness (section 9) adds a state file, a doctor check and, for repos that
+declare required capabilities, Decisions. It adds two gates that block: the follow-up
+check on newly completed tasks, and the evidence requirement on promoting an RFC to
+`Implemented`. Neither affects an adopter's pipeline run.
 
 ### Data Egress
 
@@ -666,7 +790,7 @@ provider being up or stable.
 
 ## Implementation Plan
 
-Thirteen phase tasks. AISDLC-629 to AISDLC-640 are fully testable with recorded
+Nineteen phase tasks. AISDLC-629 to AISDLC-640 are fully testable with recorded
 fixtures and need no API key (AISDLC-632 ships a live contract test that is skipped
 without one). AISDLC-641 is the first step that must run against the live API.
 
@@ -703,6 +827,25 @@ without one). AISDLC-641 is the first step that must run against the live API.
 - **AISDLC-641 — live validation and promotion soak.** Operator-only,
   non-dispatchable: run the contract test and evaluations with the live key, set
   thresholds, promote judgments one at a time. Depends on 632 to 639.
+
+Capability liveness (section 9), added by the 2026-09-30 amendment. AISDLC-642,
+AISDLC-645 and AISDLC-646 have no dependency on the judgment layer and can start
+immediately.
+
+- **AISDLC-642 — capability registry and outcome reporting.** Registry, the three
+  outcomes, the state file. No dependencies.
+- **AISDLC-643 — instrument the seams.** Report outcomes from every registered
+  capability's call site and from the judgment runtime. Depends on 631 and 642.
+- **AISDLC-644 — doctor check, repo declaration and Decisions.** `capability-liveness`
+  doctor check, `.ai-sdlc/capabilities.yaml`, Decision filing, runbook (OQ-7).
+  Depends on 643.
+- **AISDLC-645 — follow-up gate.** Pre-push check and `task_complete` validation.
+  No dependencies.
+- **AISDLC-646 — stub-in-production rule.** Second rule in the dark-code gate with a
+  shrink-only baseline. No dependencies.
+- **AISDLC-647 — lifecycle evidence.** `runtimeEvidence` in the RFC schema, the
+  `Signed Off → Implemented` rule, the linter warning, and the retroactive blocks on
+  RFC-0011, RFC-0016, RFC-0024 and RFC-0035 (OQ-6). Depends on 642.
 
 ## Open Questions
 
@@ -834,6 +977,60 @@ Mitigation: shadow-only means it adds log volume, not behaviour, and it shares e
 definition, fixture and harness with the Jev path. **Selected over Jev-only** per
 operator call.
 
+**OQ-6 — Correcting the record for RFCs already marked `Implemented`.** RFC-0011,
+RFC-0016, RFC-0024 and RFC-0035 are `lifecycle: Implemented`, and each specifies a
+model-backed capability that has never run in this repository. Section 9.4 requires
+evidence for future promotions. How should these four be corrected: annotate, roll
+back, leave alone, or add a lifecycle state?
+
+**Resolution (2026-09-30, full rubric): keep the lifecycle and annotate per
+capability.** Each of the four gains a machine-checked `runtimeEvidence` block marking
+every capability `live`, `shadow`, `degraded` or `not-applicable`, with the evidence
+and the owning wiring task. Industry research: Kubernetes enhancement proposals
+separate merged code from graduation and attach written graduation criteria that
+include evidence of real use; this repo has rollback precedent (RFC-0024 was returned
+to `Ready for Review` once); the DoR upstream gate accepts both `Signed Off` and
+`Implemented`, so a rollback would block nothing. **Substrate surveyed:** in each of
+the four the deterministic half is live and enforced (DoR Stage A alone stopped 68 of
+158 logged evaluations); the lifecycle gate checks ladder order and has an audited
+override, and asks for no runtime evidence; `rfc.schema.json` is
+`additionalProperties: false`, so the new field needs a schema change before any RFC
+can carry it. **Refinement:** the linter prints every `Implemented` RFC with a
+non-live entry, doctor reports the same capabilities, and the live validation task
+flips entries to `live` as each is proven. **Counter-argument:** "An annotation nobody
+reads is how this happened; the lifecycle field is what people and tools look at, so
+that is the field that must not lie." Rebuttal: this annotation is read by code on
+every lint and every doctor run, and a rollback would label DoR as not implemented
+when its deterministic half is the most-used gate in the pipeline. **Selected over
+rollback** because per-capability status is more accurate than one flag, **over
+forward-only** because a known-wrong record should be corrected, **and over a new
+lifecycle state** because that changes four tools to express what one frontmatter
+block can.
+
+**OQ-7 — Enforcement when a required capability is degraded.** A repo declares the
+capabilities it expects to be live. When one reports `degraded`, what happens: a
+warning, a Decision, a hard block, or holding only the dependent step?
+
+**Resolution (2026-09-30, full rubric): doctor reports `fail` and the orchestrator
+tick files a Decision; nothing is blocked.** One Decision per degraded required
+capability, at most daily, never duplicating an open one, plus a `CapabilityDegraded`
+event. Industry research: RFC-0035 G0 forbids pipeline-halting events and routes
+everything through Decisions with a timebox and a default on silence; the 0.21.0
+adopter-brick post-mortem (AISDLC-628) recorded that a gate protecting an artifact
+must not block the core loop; Kubernetes separates readiness from liveness, reporting
+a not-ready component without killing it; CI cannot prove liveness because that needs
+the provider key and a real call. **Refinement:** the hard stop lives where it is
+cheap, in section 9.4: an RFC cannot be promoted to `Implemented` with a degraded
+capability. `spec.required` defaults to empty, so adopters are unaffected.
+**Counter-argument:** "A Decision that can be ignored recreates the silence; only a
+block guarantees someone looks." Rebuttal: the Decision is filed automatically,
+carries a timebox and sits beside a failing doctor check, so ignoring it is a visible
+act; a block would make this repo's throughput depend on a third party's uptime,
+which is the adopter-brick failure in a new place. **Selected over fail-closed per
+step** because with DoR in the path that halts admission on every provider outage,
+**over a hard block** for the same reason at larger scale, **and over a warning
+only** because that is today's behaviour.
+
 ## References
 
 - Provider documentation, read 2026-09-30: <https://docs.typesafe.ai/introduction>,
@@ -857,6 +1054,12 @@ operator call.
   [[RFC-0042]], [[RFC-0046]], [[RFC-0047]] (attestation, unchanged);
   [[RFC-0043]] (untrusted input, verdict contract); [[RFC-0048]] (`sourceKind`,
   base-branch-only config); [[RFC-0004]] (cost attribution).
+- Capability liveness: `scripts/check-dark-code.mjs` (AISDLC-552),
+  `scripts/check-rfc-lifecycle-transitions.mjs`,
+  `docs/operations/fail-soft-at-the-adopter-boundary.md` (AISDLC-628),
+  `orchestrator/src/cli/commands/doctor-checks.ts`,
+  `ai-sdlc-plugin/mcp-server/src/tools/task-complete.ts`; [[RFC-0025]] (framework
+  quality monitoring); AISDLC-289 (the follow-up that was never filed).
 
 ## Sign-Off
 
@@ -874,3 +1077,4 @@ operator call.
 | 2026-09-30 | Initial Draft. Problem decomposition, provider interface, Judgment Catalog, runtime contract, integration surfaces, 5 Open Questions. Trigger: typesafe.ai platform access; API key pending. |
 | 2026-09-30 | **Draft → Ready for Review.** All 5 OQs resolved via operator rubric walkthrough: (1) relaxation on trusted work, bounded to per-PR selection of the AISDLC-617 merged reviewer set with security always run (operator override of the tighten-only recommendation); (2) `work-item-text` egress by default, other classes explicit; (3) thin `fetch` adapter in `reference`, no vendor SDK; (4) promotion tiered by `riskClass`, relax-class corpus-only against the AISDLC-616 ledger; (5) generic OpenAI-compatible adapter added, shadow-only (operator override of the Jev-only recommendation). Added `riskClass`, `calibratedProbabilities`, `(provider, model)`-keyed thresholds, the `review.reviewer-set` judgment; `complexity.factors` narrowed to tighten-only. Phase plan reconciled to AISDLC-629 to AISDLC-641. |
 | 2026-09-30 | **Ready for Review → Signed Off** (Engineering + Operator). Added runtime evidence that the classifier substrate, DoR Stage B and Decision Catalog Stage C have never produced a model-backed answer in this repository, with the documented cause (AISDLC-321/275 dependency constraint; AISDLC-289 follow-up never filed); `dor.stage-b` specified for the no-spawner path. Phase tasks AISDLC-629 to AISDLC-641 dispatchable (641 operator-only). |
+| 2026-09-30 | **Amendment (lifecycle unchanged, sign-off confirmed by operator for the extension).** Added section 9, capability liveness: registry and `live` / `shadow` / `degraded` outcome reporting, doctor check and Decisions for required capabilities, `runtimeEvidence` and the `Signed Off → Implemented` evidence rule, the follow-up gate, and the stub-in-production rule. OQ-6 (annotate the four `Implemented` RFCs per capability) and OQ-7 (doctor fail plus Decision, nothing blocked) resolved via operator rubric. Phase tasks AISDLC-642 to AISDLC-647 added; RFC-0049 had merged as #1094 before this amendment. |
