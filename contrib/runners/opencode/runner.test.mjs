@@ -78,6 +78,11 @@ if (mode === 'modify-many') {
   finish('done');
   process.exit(0);
 }
+if (mode === 'odd-name') {
+  fs.writeFileSync(path.join(process.cwd(), 'we"ird name.txt'), 'x\\n');
+  finish('done');
+  process.exit(0);
+}
 if (mode === 'noop') { finish('nothing to do'); process.exit(0); }
 process.exit(2);
 `;
@@ -358,6 +363,13 @@ test('--max-files counts REAL modified tracked files, and a success reports real
   const r2 = await runRunner(ok, [...MODEL, '--max-files', '3'], { FAKE_MODE: 'modify-many' });
   assert.equal(r2.code, 0);
   assert.deepEqual(r2.result.filesChanged.sort(), ['a.txt', 'b.txt', 'c.txt']);
+});
+
+test('paths with quotes/spaces are reported verbatim (git -z, no C-quoting)', async () => {
+  const ctx = makeRepo('oddname');
+  const { code, result } = await runRunner(ctx, MODEL, { FAKE_MODE: 'odd-name' });
+  assert.equal(code, 0);
+  assert.deepEqual(result.filesChanged, ['we"ird name.txt']);
 });
 
 test('--max-files is ENFORCED before commit', async () => {

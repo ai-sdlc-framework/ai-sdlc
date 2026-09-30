@@ -219,12 +219,12 @@ function splitShellSegments(command) {
 
 /** Removes an unquoted trailing shell comment and all quote characters. */
 function stripCommentAndQuotes(segment) {
-  return segment.replace(/#.*$/, '').replace(/['"]/g, '');
+  return segment.replace(/(^|\s)#.*$/, '$1').replace(/['"]/g, '');
 }
 
 /** Removes only a trailing unquoted shell comment (quotes preserved). */
 function stripComment(segment) {
-  return segment.replace(/#.*$/, '');
+  return segment.replace(/(^|\s)#.*$/, '$1');
 }
 
 /**
@@ -525,7 +525,14 @@ const WRAPPER_VALUE_FLAGS = {
  * Best effort only — see the runbook: this is NOT a shell parser.
  */
 function parseGit(segment) {
-  const tokens = normalizeStashObfuscation(segment).trim().split(/\s+/).filter(Boolean);
+  const rawTokens = normalizeStashObfuscation(segment).trim().split(/\s+/).filter(Boolean);
+  // Drop redirections: `2>&1`, `>out`, and a bare operator plus its target (`> file`).
+  const tokens = [];
+  for (let k = 0; k < rawTokens.length; k++) {
+    const t = rawTokens[k];
+    if (/^\d*[<>]+$/.test(t)) k++;
+    else if (!/^\d*[<>]+\S*$/.test(t)) tokens.push(t);
+  }
   let i = 0;
   const envAssigns = [];
   for (;;) {
@@ -840,10 +847,11 @@ function refMutationReason(parsed) {
 /** True for a segment that changes directory or GIT_* environment for what follows. */
 function isTaintingSegment(segment) {
   const flat = normalizeStashObfuscation(segment).trim();
-  if (/^(cd|pushd|popd)\b/.test(flat)) return true;
-  if (/^(export\s+|declare\s+-x\s+)?GIT_(DIR|WORK_TREE|CONFIG_\w+|CONFIG_PARAMETERS)=/i.test(flat))
-    return true;
-  return false;
+  if (/^(?:(?:command|builtin)\s+)?(?:cd|pushd|popd)\b/.test(flat)) return true;
+  // `GIT_DIR=x`, `export GIT_DIR=x`, `export FOO=1 GIT_DIR=x`, `declare|typeset -x GIT_DIR=x`
+  return /^(?:(?:export|declare\s+-x|typeset\s+-x)\s+)?(?:[A-Za-z_]\w*=\S*\s+)*GIT_(?:DIR|WORK_TREE|CONFIG_\w+)=/i.test(
+    flat,
+  );
 }
 
 /**
@@ -869,11 +877,22 @@ function checkBlockedActions(command, patterns, cwd) {
     }
     if (hasForceRule) {
       const parsed = parseGit(segment);
+      // Any push whose RAW text contains an expansion is unanalysable
+      // (normalisation deletes `$VAR`/`${…}`): `git push ${F:---force} origin ${M:-main}`,
+      // `F=--force; git push $F origin`. Deny the push outright.
+      if (parsed && parsed.subcommand === 'push' && /[$`]/.test(segment)) {
+        return {
+          blocked: true,
+          reason:
+            'a git push containing a shell expansion ($VAR, ${…}, $(…), backticks) cannot be ' +
+            'verified — write the refspec and flags literally',
+        };
+      }
       if (
         parsed &&
         parsed.subcommand === 'push' &&
         hasForceIndicator(parsed.args) &&
-        !isStrictLeasePush(segment, cwd)
+        !isStrictLeasePush(segment, cwd, wasTainted)
       ) {
         return {
           blocked: true,

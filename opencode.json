@@ -17,10 +17,13 @@
   // `git push --force-with-lease*` re-allows the ONE sanctioned force-push
   // variant the Definition of Done requires after the mandatory rebase.
   //
-  // The authoritative runtime layer is the in-process governance plugin at
-  // .opencode/plugins/ai-sdlc-governance.js — it re-applies the full policy
-  // (segment-aware command analysis, worktree-relative path resolution,
-  // permittedExternalPaths) and is unaffected by config merge ordering.
+  // The in-process governance plugin at .opencode/plugins/ai-sdlc-governance.js
+  // is decisive for allow/deny within the harness (it re-applies the policy with
+  // segment-aware command analysis, worktree-relative path resolution and
+  // permittedExternalPaths, and is unaffected by config merge ordering), but all
+  // of this shell-text matching is BEST-EFFORT defence in depth, not a security
+  // boundary. Server-side GitHub rulesets are the required backstop; see
+  // docs/operations/opencode-harness.md.
   // Keep this section and .ai-sdlc/agent-role.yaml in sync when editing.
   // ─────────────────────────────────────────────────────────────────────
   "permission": {

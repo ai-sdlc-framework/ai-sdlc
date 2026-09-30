@@ -178,11 +178,8 @@ function cleanGitEnv() {
   return e;
 }
 
-const lines = (out) =>
-  out
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
+// NUL-delimited (`-z`) listings: paths with quotes/newlines are never C-quoted.
+const lines = (out) => out.split('\0').filter(Boolean);
 
 async function snapshotWorktree(dir) {
   // Record HEAD BEFORE the run: committed work is diffed against this SHA,
@@ -195,8 +192,8 @@ async function snapshotWorktree(dir) {
   }
   try {
     const [untracked, modified] = await Promise.all([
-      gitExec(dir, ['ls-files', '--others', '--exclude-standard']),
-      gitExec(dir, ['diff', '--name-only']),
+      gitExec(dir, ['ls-files', '-z', '--others', '--exclude-standard']),
+      gitExec(dir, ['diff', '-z', '--name-only']),
     ]);
     return { head, untracked: new Set(lines(untracked)), modified: new Set(lines(modified)) };
   } catch {
@@ -206,9 +203,9 @@ async function snapshotWorktree(dir) {
 
 async function detectChangedFiles(dir, baseline) {
   const [diffOut, stagedOut, untrackedOut] = await Promise.all([
-    gitExec(dir, ['diff', '--name-only']),
-    gitExec(dir, ['diff', '--name-only', '--cached']),
-    gitExec(dir, ['ls-files', '--others', '--exclude-standard']),
+    gitExec(dir, ['diff', '-z', '--name-only']),
+    gitExec(dir, ['diff', '-z', '--name-only', '--cached']),
+    gitExec(dir, ['ls-files', '-z', '--others', '--exclude-standard']),
   ]);
   const allUntracked = lines(untrackedOut);
   const agentUntracked = baseline
@@ -223,7 +220,7 @@ async function detectChangedFiles(dir, baseline) {
   try {
     const base = baseline?.head || (await gitExec(dir, ['merge-base', 'HEAD', 'origin/main']));
     if (base) {
-      committedFiles = lines(await gitExec(dir, ['diff', '--name-only', `${base}..HEAD`]));
+      committedFiles = lines(await gitExec(dir, ['diff', '-z', '--name-only', `${base}..HEAD`]));
       agentAlreadyCommitted = committedFiles.length > 0 && uncommitted.length === 0;
     }
   } catch {

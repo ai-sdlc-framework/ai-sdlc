@@ -95,7 +95,7 @@ rules, MCP server). That dogfood parity is intended, not an accident.
 2. **Agent frontmatter** — `.opencode/agents/developer.md` carries only
    `permission: { task: "deny" }` (dispatch agents do not spawn subagents)
    plus `mode: all` and description.
-3. **In-process plugin (authoritative)** — `.opencode/plugins/ai-sdlc-governance.js`
+3. **In-process plugin (decisive within the harness; best-effort defence in depth)** — `.opencode/plugins/ai-sdlc-governance.js`
    re-applies the full `agent-role.yaml` policy at runtime: segment-aware
    command analysis (`&&`/`||`/`;`-split, first match per segment),
    worktree-relative path resolution, `permittedExternalPaths` via the active
@@ -103,13 +103,25 @@ rules, MCP server). That dogfood parity is intended, not an accident.
    layer and `agent-role.yaml` in sync when editing either.
 
 **Security posture: best-effort, NOT a security boundary.** The plugin's (and
-the declarative layer's) shell-command matching is a best-effort
-defence-in-depth layer. Statically parsing shell text cannot be complete, and
-this is deliberately not a shell parser. The authoritative controls are
-server-side: **GitHub rulesets** (no force-push and no deletion on
-`main`/`master`) and a **pre-push hook that sees the real ref pairs** git is
-about to update. Do not rely on the plugin to stop a determined or compromised
-agent. Known bypass classes that are NOT handled (non-exhaustive):
+the declarative layer's) shell-command matching is decisive for allow/deny
+within the harness, but it is a best-effort defence-in-depth layer. Statically
+parsing shell text cannot be complete, and this is deliberately not a shell
+parser. Do not rely on it to stop a determined or compromised agent.
+
+**Required operator prerequisite:** configure **GitHub rulesets** that forbid
+force-push and deletion on `main`/`master`. This server-side control is the
+real backstop; verify it is in place with:
+
+```bash
+gh api repos/{owner}/{repo}/rulesets   # expect an active ruleset with non_fast_forward + deletion rules targeting the default branch
+```
+
+A **pre-push hook** that inspects the real ref pairs git is about to update is
+recommended as an additional layer, but it is client-side and bypassable
+(`--no-verify`, `core.hooksPath`, editing `.git/hooks`); it is NOT a boundary
+either, and no such ref-pair hook ships in this repo for the opencode harness.
+
+Known bypass classes that are NOT handled (non-exhaustive):
 
 - config- or environment-driven push targets set by means the analysis does not
   see (an earlier command in a different tool call, git config files, includes,
@@ -118,12 +130,28 @@ agent. Known bypass classes that are NOT handled (non-exhaustive):
   at `main`, `git remote set-url`, packed/loose ref tricks);
 - exotic quoting and comment forms, here-strings, process substitution,
   `IFS`/brace-expansion tricks beyond the simple normalisation;
-- other wrapper commands not in the recognised list (`nohup`, `env`, `sudo`,
-  `timeout`, `stdbuf`, `caffeinate`, `xcrun`, `nice`, `time`, `command`, `exec`
-  are), and scripts written to disk and then executed;
+- unrecognised git global options (e.g. `--attr-source`) that shift where the
+  subcommand token appears;
+- shell keywords and negation in front of the command (`! git push ...`,
+  `if ...; then git push ...`);
+- wrapper commands not in the recognised list (recognised: `env`, `command`,
+  `exec`, `nice`, `time`, `nohup`, `sudo`, `timeout`, `stdbuf`, `caffeinate`,
+  `xcrun`; NOT recognised: `arch`, `ionice`, `flock`, `doas`, ...), and scripts
+  written to disk and then executed;
 - a script or program (`make`, `npm run`, a git hook, a build tool) that itself
   runs `git push`;
-- a `cd` or `GIT_*` change made by a previous, separate command.
+- a trailing `--get` on `git config` (`git config remote.origin.push x --get`)
+  is not recognised as read-only ordering;
+- a `cd` or `GIT_*` change made by a previous, separate command. A preceding
+  `cd sub && git push ...` in the SAME command is denied for lease pushes (the
+  directory change makes the branch/target unverifiable): write
+  `git -C sub push ...` instead.
+
+Known FALSE-POSITIVE denials (over-blocking, fail closed): redirection tokens
+glued to arguments in unusual ways, and heredoc bodies or commit-message text
+that happen to contain a force-ish push spelling. Contrib runner: changed paths
+are read with `git ... -z` so quotes/newlines are not C-quoted; other tooling
+that parses `git diff --name-only` without `-z` will still see C-quoted paths.
 
 What IS attempted (and may change): the strict lease-push grammar, the wrapper /
 alias / continuation normalisation, and the fail-closed rules below.
@@ -131,7 +159,7 @@ alias / continuation normalisation, and the fail-closed rules below.
 **force-with-lease carve-out (known, intentional, strict):** the config denies
 `git push --force*` and then re-allows `git push --force-with-lease*` (the
 Definition of Done requires a lease push after the mandatory rebase). A bare
-prefix glob is NOT safe, so the plugin (authoritative) allows ONLY a strict
+prefix glob is NOT safe, so the plugin (decisive for allow/deny within the harness) allows ONLY a strict
 lease: `--force-with-lease[=<ref>[:<sha>]]` with
 
 - no other force flag (`--force`, `-f`/`-fu`) and no
