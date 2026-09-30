@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateModelCallRecord } from '../core/validation.js';
 import {
   appendModelCalls,
   appendFetchedPriceRows,
@@ -111,6 +112,14 @@ describe('resolveUsageDir', () => {
     process.env[USAGE_DIR_ENV] = dir;
     expect(appendModelCalls([rec('a')]).written).toBe(1);
     expect(existsSync(join(dir, 'ledger-2026-09.jsonl'))).toBe(true);
+  });
+});
+
+describe('validateModelCallRecord', () => {
+  it('accepts a valid record and rejects control characters in callId', () => {
+    expect(validateModelCallRecord(rec('ok')).valid).toBe(true);
+    expect(validateModelCallRecord(rec('bad\nid')).valid).toBe(false);
+    expect(validateModelCallRecord({ ...rec('x'), tokens: { input: -1 } }).valid).toBe(false);
   });
 });
 
@@ -222,7 +231,15 @@ describe('appendModelCalls', () => {
               stdio: 'ignore',
             },
           );
-          child.on('exit', done);
+          const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+          child.on('error', () => {
+            clearTimeout(timer);
+            done(null);
+          });
+          child.on('exit', (code) => {
+            clearTimeout(timer);
+            done(code);
+          });
         }),
     );
     const codes = await Promise.all(runs);

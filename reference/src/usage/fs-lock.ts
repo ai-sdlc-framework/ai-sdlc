@@ -34,38 +34,106 @@ function sleepSync(ms: number): void {
 }
 
 /**
- * Try to reclaim a stale lock by renaming it aside. Returns normally whether or
- * not this caller won; the caller simply retries acquisition.
+ * Invariant: every removal of the lock directory (reclaiming a stale lock, or
+ * a holder releasing) happens while holding a short-lived claim file created
+ * with O_EXCL. While a remover holds the claim, the lock path cannot become
+ * absent, so nobody can mkdir a fresh lock there. The object a reclaimer
+ * verified as stale is therefore exactly the object it removes, and a live
+ * lock is never moved. The lock is never renamed back. The claim is held for
+ * milliseconds; a claim older than CLAIM_STALE_MS belongs to a dead process.
  */
-function reclaimStale(lockPath: string, staleAfterMs: number): void {
-  let seen;
-  try {
-    seen = statSync(lockPath);
-  } catch {
-    return; // already gone
+const CLAIM_STALE_MS = 10_000;
+
+/** Test seams for `reclaimStale`; unused in production. */
+export interface ReclaimHooks {
+  /** Runs after the first staleness check, before the claim is taken. */
+  afterStat?: () => void;
+  /** Runs while the claim is held, after the lock was re-verified stale. */
+  underClaim?: () => void;
+}
+
+function acquireClaim(claimPath: string, token: string): boolean {
+  const started = Date.now();
+  let delay = 1;
+  for (;;) {
+    try {
+      writeFileSync(claimPath, token, { flag: 'wx', mode: FILE_MODE });
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return false;
+    }
+    try {
+      if (Date.now() - statSync(claimPath).mtimeMs > CLAIM_STALE_MS) {
+        rmSync(claimPath, { force: true });
+        continue;
+      }
+    } catch {
+      continue; // claim vanished; retry immediately
+    }
+    if (Date.now() - started > WAIT_LIMIT_MS) return false;
+    sleepSync(delay);
+    delay = Math.min(delay * 2, 25);
   }
-  if (Date.now() - seen.mtimeMs <= staleAfterMs) return;
+}
+
+function releaseClaim(claimPath: string, token: string): void {
+  try {
+    if (readFileSync(claimPath, 'utf-8') === token) rmSync(claimPath, { force: true });
+  } catch {
+    // claim already gone
+  }
+}
+
+/** Remove the lock directory atomically: rename aside, then delete the moved copy. */
+function removeLockDir(lockPath: string): void {
   const aside = `${lockPath}.stale-${process.pid}-${randomBytes(6).toString('hex')}`;
   try {
     renameSync(lockPath, aside);
   } catch {
-    return; // another reclaimer won, or the holder released
-  }
-  try {
-    // The path may have been re-acquired between our stat and our rename. If
-    // what we moved aside is not the lock we judged stale, put it back.
-    if (statSync(aside).ino !== seen.ino) {
-      try {
-        renameSync(aside, lockPath);
-        return;
-      } catch {
-        // someone already holds a new lock; fall through and discard
-      }
-    }
-  } catch {
     return;
   }
   rmSync(aside, { recursive: true, force: true });
+}
+
+function isStale(lockPath: string, staleAfterMs: number): boolean {
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs > staleAfterMs;
+  } catch {
+    return false; // absent: nothing to reclaim
+  }
+}
+
+/**
+ * Reclaim a stale lock. Staleness is re-verified under the claim immediately
+ * before removal, so a lock that became live after the first check survives.
+ * Exported for tests; not part of the package barrel.
+ */
+export function reclaimStale(
+  lockPath: string,
+  staleAfterMs: number,
+  hooks: ReclaimHooks = {},
+): boolean {
+  if (!isStale(lockPath, staleAfterMs)) return false;
+  hooks.afterStat?.();
+  const claimPath = `${lockPath}.claim`;
+  const token = `${process.pid}-${randomBytes(6).toString('hex')}`;
+  if (!acquireClaim(claimPath, token)) return false;
+  try {
+    if (!isStale(lockPath, staleAfterMs)) return false;
+    hooks.underClaim?.();
+    removeLockDir(lockPath);
+    return true;
+  } finally {
+    releaseClaim(claimPath, token);
+  }
+}
+
+function ownerOf(lockPath: string): string | undefined {
+  try {
+    return readFileSync(join(lockPath, OWNER_FILE), 'utf-8');
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -102,6 +170,7 @@ export function withUsageLock<T>(
     // the owner file is best effort; release then leaves an unowned lock to age out
   }
   const touch = (): void => {
+    if (ownerOf(lockPath) !== token) return; // never refresh another holder's lock
     try {
       const now = new Date();
       utimesSync(lockPath, now, now);
@@ -112,13 +181,17 @@ export function withUsageLock<T>(
   try {
     return fn(touch);
   } finally {
-    let owner: string | undefined;
-    try {
-      owner = readFileSync(join(lockPath, OWNER_FILE), 'utf-8');
-    } catch {
-      owner = undefined;
+    // Release under the claim so the owner check and removal cannot interleave
+    // with a reclaimer or a new holder; remove only a lock that is still ours.
+    const claimPath = `${lockPath}.claim`;
+    const claimToken = `${process.pid}-${randomBytes(6).toString('hex')}`;
+    if (acquireClaim(claimPath, claimToken)) {
+      try {
+        if (ownerOf(lockPath) === token) removeLockDir(lockPath);
+      } finally {
+        releaseClaim(claimPath, claimToken);
+      }
     }
-    if (owner === token) rmSync(lockPath, { recursive: true, force: true });
   }
 }
 

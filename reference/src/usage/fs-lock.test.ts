@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { withUsageLock, writeFileAtomic } from './fs-lock.js';
+import { reclaimStale, withUsageLock, writeFileAtomic } from './fs-lock.js';
 
 let dir: string;
 beforeEach(() => {
@@ -41,6 +41,74 @@ describe('withUsageLock', () => {
     const old = new Date(Date.now() - 120_000);
     utimesSync(lock, old, old);
     expect(withUsageLock(dir, () => 'ok')).toBe('ok');
+  });
+});
+
+describe('reclaimStale', () => {
+  const makeLock = (owner: string, ageMs: number) => {
+    const lock = join(dir, '.usage.lock');
+    mkdirSync(lock);
+    writeFileSync(join(lock, 'owner'), owner);
+    const t = new Date(Date.now() - ageMs);
+    utimesSync(lock, t, t);
+    return lock;
+  };
+
+  it('removes a stale lock', () => {
+    const lock = makeLock('old', 120_000);
+    expect(reclaimStale(lock, 30_000)).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.claim`)).toBe(false);
+  });
+
+  it('leaves a live lock alone', () => {
+    const lock = makeLock('live', 0);
+    expect(reclaimStale(lock, 30_000)).toBe(false);
+    expect(existsSync(lock)).toBe(true);
+  });
+
+  it('never moves a live lock that replaced the stale one after the first check', () => {
+    const lock = makeLock('old', 120_000);
+    let removed = 0;
+    const result = reclaimStale(lock, 30_000, {
+      afterStat: () => {
+        // another reclaimer removes the stale lock and a new holder takes a fresh one
+        rmSync(lock, { recursive: true, force: true });
+        mkdirSync(lock);
+        writeFileSync(join(lock, 'owner'), 'live-holder');
+      },
+      underClaim: () => {
+        removed++;
+      },
+    });
+    expect(result).toBe(false);
+    expect(removed).toBe(0);
+    expect(readFileSync(join(lock, 'owner'), 'utf-8')).toBe('live-holder');
+    expect(existsSync(`${lock}.claim`)).toBe(false);
+  });
+
+  it('serialises the release of a holder behind an active claim', () => {
+    // a holder that finishes while a reclaimer owns the claim must not remove
+    // the lock until the claim is gone; here the claim is stale, so release proceeds
+    const lock = join(dir, '.usage.lock');
+    writeFileSync(`${lock}.claim`, 'dead-process');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${lock}.claim`, old, old);
+    withUsageLock(dir, () => undefined);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.claim`)).toBe(false);
+  });
+
+  it('touch never refreshes a lock now owned by someone else', () => {
+    const lock = join(dir, '.usage.lock');
+    withUsageLock(dir, (touch) => {
+      writeFileSync(join(lock, 'owner'), 'someone-else');
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(lock, old, old);
+      touch();
+      expect(Date.now() - statSync(lock).mtimeMs).toBeGreaterThan(50_000);
+    });
+    expect(readFileSync(join(lock, 'owner'), 'utf-8')).toBe('someone-else');
   });
 });
 
@@ -103,7 +171,15 @@ describe('withUsageLock safety', () => {
                 stdio: 'ignore',
               },
             );
-            child.on('exit', done);
+            const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+            child.on('error', () => {
+              clearTimeout(timer);
+              done(null);
+            });
+            child.on('exit', (code) => {
+              clearTimeout(timer);
+              done(code);
+            });
           }),
       ),
     );
