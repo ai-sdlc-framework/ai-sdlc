@@ -115,8 +115,13 @@ const NON_INSTRUMENTED_PATTERNS = [
   // from coverage because they parse argv and call into libraries; the
   // libraries are unit-tested directly.
   /(^|\/)src\/cli-[^/]+\.ts$/,
-  // Index re-export shims — excluded by pipeline-cli's vitest config.
-  /(^|\/)src\/.*\/index\.ts$/,
+  // Barrel `index.ts` re-export shims at any depth under src/, including the
+  // top-level `src/index.ts` (AISDLC-660). Excluded by pipeline-cli's vitest
+  // config (`src/**/index.ts`); tests never load them, and the dark-code gate
+  // requires every new module to be re-exported from one, so demanding
+  // coverage data for them failed every new-module PR. Narrow: only files
+  // named exactly `index.ts` (not `indexer.ts`, `myindex.ts`, `index.tsx`).
+  /(^|\/)src\/(?:.*\/)?index\.ts$/,
   // Generated schemas — sanctioned exclusion per CLAUDE.md.
   /(^|\/)generated-schemas\.ts$/,
   // bin/*.mjs CLI entrypoint shims — these are thin argv-parse thunks that
