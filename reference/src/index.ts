@@ -30,3 +30,6 @@ export * from './compliance/index.js';
 
 // Resource builders
 export * from './builders/index.js';
+
+// Capability registry and outcome reporting
+export * from './capabilities/index.js';
