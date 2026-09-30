@@ -124,4 +124,96 @@ describe('checkFollowups', () => {
     expect(msg).toContain('#123 or owner/repo#123');
     expect(msg).toContain('not as URLs');
   });
+
+  describe('comment lines and section markers', () => {
+    it('treats a line with prose between comments as prose', () => {
+      const r = checkFollowups(wrap('<!-- --> visible prose <!-- -->'));
+      expect(r.ok).toBe(false);
+      expect(r.violations[0].item).toContain('visible prose');
+    });
+
+    it('skips a line that is only comments', () => {
+      expect(checkFollowups(wrap('(none)\n<!-- a --> <!---->')).ok).toBe(true);
+    });
+
+    it('only the final-summary END marker ends the section', () => {
+      const r = checkFollowups(wrap('(none)\n<!-- SECTION:X:END -->\n- untracked prose'));
+      expect(r.ok).toBe(false);
+      expect(r.violations[0].item).toBe('untracked prose');
+      const begin = checkFollowups(wrap('(none)\n<!-- SECTION:X:BEGIN -->\n- untracked prose'));
+      expect(begin.ok).toBe(false);
+    });
+  });
+
+  describe('code fences', () => {
+    it('only closes on a matching fence', () => {
+      // A ~~~ line does not close a ``` fence, so the heading inside stays fenced.
+      const md = '```\n~~~\n### Follow-up\n- prose\n```\n';
+      expect(checkFollowups(md).ok).toBe(true);
+      // A shorter fence does not close a longer one.
+      const longer = '````\n```\n### Follow-up\n- prose\n````\n';
+      expect(checkFollowups(longer).ok).toBe(true);
+      // After the real close, a heading is live again.
+      expect(checkFollowups('```\nx\n```\n### Follow-up\n- prose\n').ok).toBe(false);
+    });
+
+    it('does not close a section fence on a different fence token', () => {
+      const md = '### Follow-up\n```\n~~~\n- AISDLC-1\n```\n';
+      const r = checkFollowups(md);
+      // fenced content counts as section text; the ~~~ line is an uncited item
+      expect(r.ok).toBe(false);
+    });
+
+    it('documents: an unclosed fence before the heading hides the section', () => {
+      expect(checkFollowups('```\nnever closed\n### Follow-up\n- prose\n').ok).toBe(true);
+    });
+  });
+
+  it('says "(none)" must stand alone and rejects (none) with a reason', () => {
+    const r = checkFollowups(wrap('(none) - nothing to do'));
+    expect(r.ok).toBe(false);
+    expect(formatFollowupViolations(r.violations)).toContain('must stand alone');
+  });
+
+  describe('adversarial input stays fast', () => {
+    const BOUND_MS = 500;
+    const inputs: Record<string, string> = {
+      'comments then x (40)': `${'<!---->'.repeat(40)}x`,
+      'comments then x (200)': `${'<!---->'.repeat(200)}x`,
+      'comments with spaces then x': `${'<!-- a -->  '.repeat(200)}x`,
+      'whitespace run then x': `${' '.repeat(3000)}x`,
+      'word-char run': `${'a'.repeat(3000)}`,
+      'dotted-dash run': `${'a.-'.repeat(1000)}/`,
+      'emphasis run then x': `${'*'.repeat(3000)}x`,
+      'underscore run then x': `${'_'.repeat(3000)}x`,
+      'huge line': `${'<!---->'.repeat(5000)}x`,
+    };
+    for (const [name, line] of Object.entries(inputs)) {
+      it(`checkFollowups: ${name}`, () => {
+        const t = Date.now();
+        checkFollowups(wrap(line));
+        checkFollowups(wrap(`- ${line}`));
+        expect(Date.now() - t).toBeLessThan(BOUND_MS);
+      });
+    }
+
+    it('reports an over-long line as oversized (fail closed)', () => {
+      const r = checkFollowups(wrap(`${'<!---->'.repeat(5000)}x`));
+      expect(r.ok).toBe(false);
+      expect(r.violations[0].reason).toBe('item-too-large');
+    });
+
+    it('many adversarial lines in one section stay fast', () => {
+      const t = Date.now();
+      const r = checkFollowups(
+        wrap(
+          Array(500)
+            .fill(`${'<!---->'.repeat(100)}x`)
+            .join('\n'),
+        ),
+      );
+      expect(Date.now() - t).toBeLessThan(BOUND_MS);
+      expect(r.ok).toBe(false);
+    });
+  });
 });
