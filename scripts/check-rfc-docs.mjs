@@ -44,6 +44,7 @@ import {
   reportTransitionsAndExit,
   extractLifecycle,
   extractRuntimeEvidence,
+  describeEvidenceEntryProblem,
   RUNTIME_EVIDENCE_STATUSES,
 } from './check-rfc-lifecycle-transitions.mjs';
 
@@ -882,6 +883,10 @@ export function validateRuntimeEvidence(source, rfcId, { extraCapabilityIds = []
   const ev = extractRuntimeEvidence(source);
   if (!ev.present) return { failures, warnings };
   const fail = (reason) => failures.push({ rfc: rfcId, surface: null, reason });
+  if (ev.parseError) {
+    fail('the frontmatter could not be parsed unambiguously (for example a duplicate key)');
+    return { failures, warnings };
+  }
   if (!Array.isArray(ev.value)) {
     fail("'runtimeEvidence' must be a list of entries");
     return { failures, warnings };
@@ -906,6 +911,11 @@ export function validateRuntimeEvidence(source, rfcId, { extraCapabilityIds = []
       fail(
         `'runtimeEvidence' entry '${entry.capability}' has unknown status '${String(entry.status)}' (expected ${RUNTIME_EVIDENCE_STATUSES.join(', ')})`,
       );
+      continue;
+    }
+    const problem = describeEvidenceEntryProblem(entry);
+    if (problem) {
+      fail(`'runtimeEvidence' entry '${entry.capability}' is malformed (${problem})`);
       continue;
     }
     if (implemented && (entry.status === 'degraded' || entry.status === 'shadow')) {

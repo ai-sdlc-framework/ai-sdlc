@@ -431,7 +431,7 @@ const PROMOTABLE_EVIDENCE_STATUSES = new Set(['live', 'not-applicable']);
  * reports anything else as a non-array value so the caller fails closed.
  *
  * @param {string|null|undefined} source - Full RFC content.
- * @returns {{ present: boolean, value?: unknown }}
+ * @returns {{ present: boolean, value?: unknown, parseError?: boolean }}
  */
 export function extractRuntimeEvidence(source) {
   if (!source) return { present: false };
@@ -450,10 +450,14 @@ export function extractRuntimeEvidence(source) {
       }
       return { present: false };
     } catch {
-      // Fall through to the inline parser.
+      // The YAML parser is present but rejected the frontmatter (for example a
+      // duplicate key). Never fall back to the weaker parser here: it can read a
+      // different value than the real parser would. Fail closed.
+      return { present: true, parseError: true };
     }
   }
 
+  // js-yaml is genuinely not installed: use the dependency-free fallback.
   return parseRuntimeEvidenceFallback(block);
 }
 
@@ -495,6 +499,37 @@ export function parseRuntimeEvidenceFallback(block) {
 }
 
 /**
+ * Structural check of one `runtimeEvidence` entry, mirroring the schema's required
+ * fields. Returns a short description of the problem, or null when well-formed.
+ *
+ * @param {unknown} entry
+ * @returns {string|null}
+ */
+export function describeEvidenceEntryProblem(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return 'entry must be a mapping';
+  }
+  if (typeof entry.capability !== 'string' || entry.capability.trim() === '') {
+    return "missing 'capability'";
+  }
+  if (!RUNTIME_EVIDENCE_STATUSES.includes(entry.status)) {
+    return `status must be one of ${RUNTIME_EVIDENCE_STATUSES.join(', ')}`;
+  }
+  if (typeof entry.evidence !== 'string' || entry.evidence.trim() === '') {
+    return "missing 'evidence'";
+  }
+  if (
+    typeof entry.date !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
+    Number.isNaN(Date.parse(`${entry.date}T00:00:00Z`)) ||
+    new Date(`${entry.date}T00:00:00Z`).toISOString().slice(0, 10) !== entry.date
+  ) {
+    return "'date' must be a quoted ISO date (YYYY-MM-DD)";
+  }
+  return null;
+}
+
+/**
  * Evaluate the `Signed Off -> Implemented` promotion rule against the AFTER content.
  * Fails closed: absent, malformed, or any `degraded` / `shadow` entry is refused.
  * An empty list is accepted (the RFC specifies no optional capability).
@@ -511,23 +546,21 @@ export function evaluatePromotionEvidence(afterContent) {
         "'runtimeEvidence' is absent from the frontmatter (declare an empty list if the RFC specifies no optional capability)",
     };
   }
+  if (ev.parseError) {
+    return {
+      ok: false,
+      reason:
+        'the frontmatter could not be parsed unambiguously (for example a duplicate key), so runtimeEvidence cannot be trusted',
+    };
+  }
   if (!Array.isArray(ev.value)) {
     return { ok: false, reason: "'runtimeEvidence' is malformed (expected a list of entries)" };
   }
   const blocking = [];
   for (const [i, entry] of ev.value.entries()) {
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      Array.isArray(entry) ||
-      typeof entry.capability !== 'string' ||
-      entry.capability.trim() === '' ||
-      !RUNTIME_EVIDENCE_STATUSES.includes(entry.status)
-    ) {
-      return {
-        ok: false,
-        reason: `'runtimeEvidence' entry ${i + 1} is malformed (needs a capability and a status of ${RUNTIME_EVIDENCE_STATUSES.join(', ')})`,
-      };
+    const problem = describeEvidenceEntryProblem(entry);
+    if (problem) {
+      return { ok: false, reason: `'runtimeEvidence' entry ${i + 1} is malformed (${problem})` };
     }
     if (!PROMOTABLE_EVIDENCE_STATUSES.has(entry.status)) {
       blocking.push(`${entry.capability} (${entry.status})`);

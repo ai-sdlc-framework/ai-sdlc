@@ -1313,6 +1313,29 @@ describe('validateRuntimeEvidence', () => {
     );
   });
 
+  it('does not warn on a not-applicable entry', () => {
+    const r = validateRuntimeEvidence(
+      evidenceRfc('Implemented', evEntry('dor.stage-b', 'not-applicable')),
+      'RFC-9999',
+    );
+    assert.deepEqual(r, { failures: [], warnings: [] });
+  });
+
+  it('fails on missing/empty evidence, a bad date, and duplicate runtimeEvidence keys', () => {
+    const noEvidence = "  - capability: dor.stage-b\n    status: live\n    date: '2026-09-30'";
+    const badDate =
+      '  - capability: dor.stage-b\n    status: live\n    evidence: e\n    date: soon';
+    for (const entries of [noEvidence, badDate]) {
+      const r = validateRuntimeEvidence(evidenceRfc('Implemented', entries), 'RFC-9999');
+      assert.equal(r.failures.length, 1);
+      assert.match(r.failures[0].reason, /malformed/);
+    }
+    const dup = `---\nlifecycle: Implemented\nruntimeEvidence: []\nruntimeEvidence:\n${evEntry('dor.stage-b', 'live')}\n---\n`;
+    const d = validateRuntimeEvidence(dup, 'RFC-9999');
+    assert.equal(d.failures.length, 1);
+    assert.match(d.failures[0].reason, /could not be parsed/);
+  });
+
   it('fails on a non-list, non-mapping entry, missing capability, and unknown status', () => {
     assert.equal(
       validateRuntimeEvidence('---\nlifecycle: Implemented\nruntimeEvidence: nope\n---\n', 'R')

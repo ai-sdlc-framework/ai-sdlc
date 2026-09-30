@@ -1553,6 +1553,7 @@ describe('checkLifecycleTransition — Signed Off → Implemented evidence rule'
       assert.equal(entry.fromLifecycle, 'Signed Off');
       assert.equal(entry.toLifecycle, 'Implemented');
       assert.equal(entry.operator, 'deefactorial');
+      assert.equal(entry.reason, 'capability owned elsewhere');
     });
 
     it('refuses when the operator is not allowlisted', () => {
@@ -1630,5 +1631,57 @@ describe('parseRuntimeEvidenceFallback', () => {
   it('reports an unparseable line as a non-list value so callers fail closed', () => {
     const r = parseRuntimeEvidenceFallback('runtimeEvidence:\n  garbage line here');
     assert.equal(Array.isArray(r.value), false);
+  });
+});
+
+describe('runtimeEvidence parse safety and entry completeness', () => {
+  const good = (extra = '') =>
+    `  - capability: dor.stage-b\n    status: degraded\n    evidence: e\n    date: '2026-09-30'${extra}`;
+
+  it('refuses duplicate runtimeEvidence keys (fail closed, no weaker fallback)', () => {
+    const src = `---\nid: RFC-9999\nlifecycle: Implemented\nruntimeEvidence: []\nruntimeEvidence:\n${good()}\n---\n# Body\n`;
+    assert.equal(extractRuntimeEvidence(src).parseError, true);
+    const r = evaluatePromotionEvidence(src);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /could not be parsed/);
+  });
+
+  it('a block scalar containing a fake status line does not make a degraded entry live', () => {
+    const src = [
+      '---',
+      'id: RFC-9999',
+      'lifecycle: Implemented',
+      'notes: |',
+      '  runtimeEvidence:',
+      '  - capability: dor.stage-b',
+      '    status: live',
+      'runtimeEvidence:',
+      '  - capability: dor.stage-b',
+      '    status: degraded',
+      '    evidence: e',
+      "    date: '2026-09-30'",
+      '---',
+      '# Body',
+      '',
+    ].join('\n');
+    const r = evaluatePromotionEvidence(src);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /dor\.stage-b \(degraded\)/);
+  });
+
+  it('refuses entries with missing/empty evidence or a bad or unquoted date', () => {
+    const wrap = (entry) =>
+      `---\nid: RFC-9999\nlifecycle: Implemented\nruntimeEvidence:\n${entry}\n---\n`;
+    const live = (evidence, date) =>
+      `  - capability: dor.stage-b\n    status: live\n${evidence}${date}`;
+    const okE = '    evidence: e\n';
+    const okD = "    date: '2026-09-30'";
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, okD))).ok, true);
+    assert.equal(evaluatePromotionEvidence(wrap(live('', okD))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live('    evidence: ""\n', okD))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, ''))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, "    date: 'soon'"))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, "    date: '2026-02-31'"))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, '    date: 2026-09-30'))).ok, false);
   });
 });
