@@ -1,0 +1,103 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Keep the manually-managed installed binary stable — no background self-update.
+  "autoupdate": false,
+  "share": "disabled",
+  // ─────────────────────────────────────────────────────────────────────
+  // AI-SDLC governance (declarative layer).
+  //
+  // Mirrors the blockedActions / blockedPaths policy in .ai-sdlc/agent-role.yaml.
+  // These are DENY rules only — there is intentionally no `*` allow: everything
+  // not explicitly denied falls through to the normal permission flow (auto-
+  // approve under `--auto` for dispatched runs, prompt for approval in
+  // interactive sessions), which mirrors the Claude Code plugin's PreToolUse
+  // hook semantics exactly.
+  //
+  // Ordering matters (last-match-wins): `git push --force*` denies, then
+  // `git push --force-with-lease*` re-allows the ONE sanctioned force-push
+  // variant the Definition of Done requires after the mandatory rebase.
+  //
+  // The authoritative runtime layer is the in-process governance plugin at
+  // .opencode/plugins/ai-sdlc-governance.js — it re-applies the full policy
+  // (segment-aware command analysis, worktree-relative path resolution,
+  // permittedExternalPaths) and is unaffected by config merge ordering.
+  // Keep this section and .ai-sdlc/agent-role.yaml in sync when editing.
+  // ─────────────────────────────────────────────────────────────────────
+  "permission": {
+    "bash": {
+      "gh pr merge*": "deny",
+      "git merge*": "deny",
+      "git push --force*": "deny",
+      "git push -f*": "deny",
+      "git push --force-with-lease*": "allow",
+      // Bypass shapes of the lease carve-out, re-denied AFTER the allow
+      // (last-match-wins): a second force flag, a short-flag force, a
+      // `+`-prefixed refspec, and main/master targets. Glob patterns cannot
+      // express the full strict-lease grammar (and cannot see flags hidden
+      // behind quoting/`env`/`git -C`), so the plugin's isStrictLeasePush() is
+      // the AUTHORITATIVE check; these denies are defence in depth only.
+      "git push*--force": "deny",
+      "git push*--force *": "deny",
+      "git push*--force=*": "deny",
+      "git push* -f": "deny",
+      "git push* -f*": "deny",
+      "git push* +*": "deny",
+      "git push*:+*": "deny",
+      "git push* main": "deny",
+      "git push* main *": "deny",
+      "git push* master": "deny",
+      "git push* master *": "deny",
+      "git push*:main*": "deny",
+      "git push*:master*": "deny",
+      "git push*--mirror*": "deny",
+      "git push*--all*": "deny",
+      "git push*--branches*": "deny",
+      "git push*--tags*": "deny",
+      "git push*--prune*": "deny",
+      "git push*--delete*": "deny",
+      "git push*heads/main*": "deny",
+      "git push*heads/master*": "deny",
+      "git push*/main": "deny",
+      "git push*/main *": "deny",
+      "git push*/master": "deny",
+      "git push*/master *": "deny",
+      "gh pr close*": "deny",
+      "gh issue close*": "deny",
+      "git branch -D*": "deny",
+      "git branch -d*": "deny",
+      "git reset --hard*": "deny",
+      "git checkout -- .": "deny",
+      "git restore .": "deny",
+      "git stash pop*": "deny",
+      "git stash clear*": "deny",
+      "git stash drop": "deny"
+    },
+    "edit": {
+      ".ai-sdlc/**": "deny",
+      "**/.ai-sdlc/**": "deny",
+      ".github/workflows/**": "deny",
+      "scripts/verify-attestation.mjs": "deny",
+      // Harness config: the agent must not rewrite the policy that governs it.
+      // (Mirrored by the plugin's hardcoded floor. NOT yet in
+      // .ai-sdlc/agent-role.yaml blockedPaths — operator decision pending.)
+      "opencode.json": "deny",
+      "opencode.jsonc": "deny",
+      "**/opencode.json": "deny",
+      "**/opencode.jsonc": "deny",
+      ".opencode/**": "deny",
+      "**/.opencode/**": "deny"
+    }
+  },
+  // AI-SDLC MCP server (backlog, decisions, governance introspection).
+  // Relative command resolves against the project directory — works in the
+  // main clone (dist is built), fails soft in fresh worktree checkouts where
+  // mcp-server/dist is gitignored (AISDLC-385); dispatched runs get an
+  // absolute-path entry injected via OPENCODE_CONFIG_CONTENT instead.
+  "mcp": {
+    "ai-sdlc": {
+      "type": "local",
+      "command": ["node", "ai-sdlc-plugin/mcp-server/dist/bin.js"],
+      "timeout": 30000
+    }
+  }
+}

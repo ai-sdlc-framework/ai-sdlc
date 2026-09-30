@@ -31,6 +31,7 @@ Claude and Codex review each other's work. Bidirectional coverage with harness-t
 | [`cross-harness-review.md`](cross-harness-review.md) | Full bidirectional convention, Codex CLI prerequisites, security architecture, cost comparison, pilot procedure, and results log |
 | [`codex-execution-path.md`](codex-execution-path.md) | Wire protocol for `--spawner codex` programmatic dispatch via the `CodexHarnessAdapter` |
 | [`codex-completion.md`](codex-completion.md) | Codex completion path reference |
+| [`opencode-harness.md`](opencode-harness.md) | OpenCode v2 execution path — `--standalone` isolation, LM Studio local models, three-layer governance, per-dispatch `OPENCODE_CONFIG_CONTENT` injection, smoke test |
 
 **RFC:** [`spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md`](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) §13
 

@@ -1,0 +1,9 @@
+name: opencode
+displayName: 'OpenCode Agent Runner'
+description: 'Standalone issue-dispatch runner for the opencode v2 CLI (run --standalone)'
+kind: runner
+version: '0.1.0'
+stability: alpha
+interfaces: []
+owner: community
+specVersions: ['v1alpha1']

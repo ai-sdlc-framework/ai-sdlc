@@ -63,6 +63,13 @@ export interface HarnessInput {
   tools?: ToolDefinition[];
   /** Optional skill names to load. */
   skills?: string[];
+  /**
+   * Optional stage tool allowlist (Claude-style names: Read, Grep, Glob, Edit,
+   * Write, Bash, Bash(pattern)). Adapters that support per-stage tool policy
+   * (opencode) map it onto their permission model; a list with no edit tool
+   * marks the stage read-only. Undefined = the harness default policy.
+   */
+  allowedTools?: string[];
   /** ISO 8601 duration. */
   timeout?: string;
   /** Per-stage cost ceiling. */
