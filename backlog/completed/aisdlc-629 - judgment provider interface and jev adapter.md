@@ -2,7 +2,7 @@
 id: AISDLC-629
 title: >-
   RFC-0049 Phase 0: JudgmentProvider interface, registry, fake provider and thin-fetch Jev adapter
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
