@@ -1230,12 +1230,16 @@ async function executePipelineBody(
   let costReceipt: CostReceipt | undefined;
   if (result.tokenUsage) {
     const tu = result.tokenUsage;
-    const totalCostUsd = CostTracker.computeCost(
+    const priced = CostTracker.computeCostDetailed(
       tu.inputTokens,
       tu.outputTokens,
       tu.model,
       tu.cacheReadTokens,
     );
+    const totalCostUsd = priced.costUsd;
+    if (priced.unpriced) {
+      log.info(`No price known for model "${tu.model}"; cost receipt is recorded as unpriced (0).`);
+    }
     costReceipt = {
       totalCost: totalCostUsd,
       currency: 'USD',

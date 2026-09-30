@@ -25,6 +25,8 @@ export interface CostSummary {
   avgTokensPerRun: number;
   costByAgent: Record<string, number>;
   costByModel: Record<string, number>;
+  /** Models in the period with no known price; their cost is reported as zero, not estimated. */
+  unpricedModels?: string[];
   period?: string;
 }
 
@@ -48,7 +50,39 @@ export class CostTracker {
   constructor(private store: StateStore) {}
 
   /**
-   * Compute cost in USD from token counts and model name.
+   * Whether `model` has a known price. An unknown model is never priced as
+   * another model; it is reported as unpriced.
+   */
+  static isPriced(model: string): boolean {
+    return Object.prototype.hasOwnProperty.call(DEFAULT_MODEL_COSTS, model);
+  }
+
+  /**
+   * Compute cost in USD from token counts and model name, with an explicit
+   * `unpriced` marker. An unknown model yields zero cost and `unpriced: true`.
+   */
+  static computeCostDetailed(
+    inputTokens: number,
+    outputTokens: number,
+    model: string,
+    cacheReadTokens = 0,
+  ): { costUsd: number; unpriced: boolean; model: string } {
+    if (!CostTracker.isPriced(model)) {
+      return { costUsd: 0, unpriced: true, model };
+    }
+    const costs = DEFAULT_MODEL_COSTS[model];
+    const costUsd =
+      (inputTokens * costs.inputPer1M +
+        outputTokens * costs.outputPer1M +
+        cacheReadTokens * (costs.cacheReadPer1M ?? 0)) /
+      1_000_000;
+    return { costUsd, unpriced: false, model };
+  }
+
+  /**
+   * Compute cost in USD from token counts and model name. An unknown model
+   * costs zero and is not priced as another model; call
+   * `computeCostDetailed` (or `isPriced`) to see the `unpriced` marker.
    */
   static computeCost(
     inputTokens: number,
@@ -56,27 +90,8 @@ export class CostTracker {
     model: string,
     cacheReadTokens = 0,
   ): number {
-    const costs = DEFAULT_MODEL_COSTS[model];
-    if (!costs) {
-      // Fallback: use sonnet pricing
-      const fallback = DEFAULT_MODEL_COSTS['claude-sonnet-4-5-20250929'] ?? {
-        inputPer1M: 3,
-        outputPer1M: 15,
-        cacheReadPer1M: 0.3,
-      };
-      return (
-        (inputTokens * fallback.inputPer1M +
-          outputTokens * fallback.outputPer1M +
-          cacheReadTokens * (fallback.cacheReadPer1M ?? 0)) /
-        1_000_000
-      );
-    }
-    return (
-      (inputTokens * costs.inputPer1M +
-        outputTokens * costs.outputPer1M +
-        cacheReadTokens * (costs.cacheReadPer1M ?? 0)) /
-      1_000_000
-    );
+    return CostTracker.computeCostDetailed(inputTokens, outputTokens, model, cacheReadTokens)
+      .costUsd;
   }
 
   /**
@@ -86,12 +101,19 @@ export class CostTracker {
     // Auto-compute cost if not provided
     let costUsd = entry.costUsd ?? 0;
     if (costUsd === 0 && entry.model && (entry.inputTokens || entry.outputTokens)) {
-      costUsd = CostTracker.computeCost(
+      const computed = CostTracker.computeCostDetailed(
         entry.inputTokens ?? 0,
         entry.outputTokens ?? 0,
         entry.model,
         entry.cacheReadTokens ?? 0,
       );
+      costUsd = computed.costUsd;
+      if (computed.unpriced) {
+        process.emitWarning(
+          `No price known for model "${entry.model}"; its cost is recorded as zero (unpriced).`,
+          'UnpricedModelWarning',
+        );
+      }
     }
 
     return this.store.saveCostEntry({
@@ -112,8 +134,10 @@ export class CostTracker {
     const costByModel: Record<string, number> = {};
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    const unpriced = new Set<string>();
 
     for (const entry of entries) {
+      if (entry.model && !CostTracker.isPriced(entry.model)) unpriced.add(entry.model);
       costByAgent[entry.agentName] = (costByAgent[entry.agentName] ?? 0) + (entry.costUsd ?? 0);
       if (entry.model) {
         costByModel[entry.model] = (costByModel[entry.model] ?? 0) + (entry.costUsd ?? 0);
@@ -134,6 +158,7 @@ export class CostTracker {
       avgTokensPerRun: entryCount > 0 ? dbSummary.totalTokens / entryCount : 0,
       costByAgent,
       costByModel,
+      ...(unpriced.size > 0 ? { unpricedModels: [...unpriced].sort() } : {}),
       period: since,
     };
   }

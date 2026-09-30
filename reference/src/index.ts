@@ -33,3 +33,6 @@ export * from './builders/index.js';
 
 // Capability registry and outcome reporting
 export * from './capabilities/index.js';
+
+// Usage ledger (model-call records, store, price history)
+export * from './usage/index.js';
