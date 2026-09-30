@@ -26,6 +26,14 @@ import {
   diffAgainstBaseline,
   formatReport,
   writeBaseline,
+  STUB_PATTERNS,
+  isStubModuleSpecifier,
+  extractStubUsages,
+  findStubSites,
+  validateStubAllowlist,
+  diffStubsAgainstBaseline,
+  stubGrowth,
+  formatStubReport,
 } from './check-dark-code.mjs';
 
 /**
@@ -476,5 +484,128 @@ describe('formatReport', () => {
     const out = formatReport({ newlyDark: [], nowReachable: ['src/wired.ts'], totalDark: 3 });
     assert.match(out, /--update-baseline/);
     assert.match(out, /\+ src\/wired\.ts/);
+  });
+});
+
+describe('stub-in-production rule', () => {
+  const sites = (root, opts = {}) => findStubSites({ workDir: root, roots: ['src'], ...opts });
+
+  it('flags production import of a fake-* module but not the same import from a test', () => {
+    const root = fixture({
+      'src/fake-store.ts': 'export const s = 1;',
+      'src/a.ts': "import { s } from './fake-store.js';\nexport const x = s;",
+      'src/a.test.ts': "import { s } from './fake-store.js';\nexport const y = s;",
+    });
+    try {
+      const found = sites(root);
+      assert.deepEqual(
+        found.map((f) => [f.path, f.kind, f.name]),
+        [['src/a.ts', 'module', './fake-store.js']],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('flags calls to createStub*; ignores definitions and barrel re-exports', () => {
+    const root = fixture({
+      'src/def.ts':
+        'export function createStubThing() { return 1; }\nexport const z = createStubThing();',
+      'src/index.ts': "export { createStubThing } from './def.js';",
+      'src/use.ts':
+        "import { createStubThing } from './def.js';\nexport const v = createStubThing();",
+    });
+    try {
+      assert.deepEqual(
+        sites(root).map((f) => [f.path, f.name]),
+        [['src/use.ts', 'createStubThing']],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count imports or calls that appear only in comments', () => {
+    const code = "// import { x } from './fake-a.js'\n/* createStubX() */\nexport const q = 1;";
+    assert.deepEqual(extractStubUsages(code), []);
+  });
+
+  it('ignores type-only imports and Stubborn-style names', () => {
+    assert.deepEqual(extractStubUsages("import type { FakeThing } from './t.js';"), []);
+    assert.deepEqual(extractStubUsages('export const a = Stubborn(1);'), []);
+    assert.equal(extractStubUsages('const a = new MockSpawner();').length, 1);
+  });
+
+  it('matches module patterns', () => {
+    for (const s of [
+      './fake-x.js',
+      './x-fake',
+      './mock-x',
+      './x-mock.js',
+      './stub-x',
+      './x-stub',
+      './__mocks__/y.js',
+      '../__test-helpers__/z',
+    ]) {
+      assert.ok(isStubModuleSpecifier(s), s);
+    }
+    assert.ok(!isStubModuleSpecifier('./faker.js'));
+    assert.ok(!isStubModuleSpecifier('mock-fs'));
+    assert.ok(STUB_PATTERNS.identifier.length > 0);
+  });
+
+  it('allowlist entry suppresses; entry without reason is rejected', () => {
+    const root = fixture({ 'src/use.ts': 'export const v = createStubThing();' });
+    try {
+      const allow = [{ path: 'src/use.ts', capability: 'cap.x', reason: 'explicit option' }];
+      assert.deepEqual(sites(root, { stubAllowlist: allow }), []);
+      assert.equal(validateStubAllowlist(allow).length, 0);
+      assert.equal(validateStubAllowlist([{ path: 'a', capability: 'c', reason: ' ' }]).length, 1);
+      assert.equal(validateStubAllowlist([{ path: 'a', reason: 'r' }]).length, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('baseline diff: new fails, gone reported; growth vs base refused', () => {
+    const found = [{ path: 'a.ts', kind: 'identifier', name: 'createStubA' }];
+    const base = { stubSites: [{ path: 'b.ts', name: 'createStubB' }] };
+    const d = diffStubsAgainstBaseline(found, base);
+    assert.equal(d.newStubs.length, 1);
+    assert.deepEqual(d.goneStubs, ['b.ts::createStubB']);
+    assert.deepEqual(stubGrowth({ stubSites: [] }, { stubSites: found }), ['a.ts::createStubA']);
+    assert.deepEqual(stubGrowth({ stubSites: found }, { stubSites: [] }), []);
+    assert.deepEqual(stubGrowth({ stubSites: null }, { stubSites: found }), []);
+    assert.deepEqual(stubGrowth(null, { stubSites: found }), []);
+  });
+
+  it('failure text names site, both resolutions and the blind spot', () => {
+    const out = formatStubReport({
+      newStubs: [{ path: 'a.ts', kind: 'identifier', name: 'createStubA' }],
+      goneStubs: ['b.ts::x'],
+      grown: ['c.ts::y'],
+      errors: ['bad'],
+    });
+    assert.match(out, /a\.ts uses createStubA/);
+    assert.match(out, /wire a real/);
+    assert.match(out, /stubAllowlist/);
+    assert.match(out, /no implementation at all/);
+    assert.match(out, /capability outcome reporting/);
+    assert.doesNotMatch(out, /AISDLC-\d+/);
+    assert.match(formatStubReport({ total: 3 }), /OK/);
+  });
+
+  it('writeBaseline persists stub lists', () => {
+    const root = fixture({ 'x.txt': '' });
+    try {
+      const out = writeBaseline([], root, 'b.json', [], {
+        stubSites: [{ path: 'a', name: 'n', capability: 'c' }],
+        stubAllowlist: [],
+      });
+      assert.equal(out.stubSites.length, 1);
+      assert.equal(loadBaseline(root, 'b.json').stubSites.length, 1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

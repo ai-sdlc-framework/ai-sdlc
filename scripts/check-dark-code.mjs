@@ -36,6 +36,21 @@
  * modules, reports baselined modules that became reachable (ratchet down), and
  * refuses to let the baseline GROW relative to a base ref.
  *
+ * Second rule - stub in production: the rule above cannot see a module that is
+ * imported and then handed a test double (`return createStubX([])` in shipped
+ * code). A STUB SITE is a non-test source file that imports from a module whose
+ * name marks it as a fake/mock/stub, or imports or calls an exported identifier
+ * named like one (see STUB_PATTERNS, the single place the patterns live). A file
+ * that only DEFINES such an identifier, or a barrel that only re-exports it, is
+ * not a site. Sites must be fixed (wire a real implementation), listed in
+ * `stubAllowlist` ({ path, capability, reason }), or sit in the shrink-only
+ * `stubSites` baseline. Comment stripping, source roots and specifier handling
+ * are shared with the dark-module rule.
+ *
+ * KNOWN BLIND SPOT: an interface with no implementation at all has nothing to
+ * import, so this rule cannot see it. That case is covered by capability
+ * outcome reporting, not by this gate.
+ *
  * Usage:
  *   node scripts/check-dark-code.mjs                     # gate
  *   node scripts/check-dark-code.mjs --json              # machine-readable
@@ -290,6 +305,206 @@ export function findDarkModules({
   return dark.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+/**
+ * Test-double patterns - the ONE place to review what counts as a stub.
+ *
+ * `moduleBasename` is tested against a specifier's last segment without its
+ * extension; `moduleDirs` against every directory segment; `identifier` against
+ * imported or called names (a trailing lowercase letter is rejected so `Stubborn`
+ * is not `Stub*`).
+ */
+export const STUB_PATTERNS = {
+  moduleBasename: [/^fake-/, /-fake$/, /^mock-/, /-mock$/, /^stub-/, /-stub$/],
+  moduleDirs: ['__mocks__', '__test-helpers__', '__test-helpers'],
+  identifier: [
+    /^createStub/,
+    /^createFake/,
+    /^createMock/,
+    /^Fake(?![a-z])/,
+    /^Mock(?![a-z])/,
+    /^Stub(?![a-z])/,
+  ],
+};
+
+export const isStubIdentifier = (name) => STUB_PATTERNS.identifier.some((re) => re.test(name));
+
+/** True when `spec` (a relative specifier) addresses a test-double module. */
+export function isStubModuleSpecifier(spec) {
+  if (!spec.startsWith('.')) return false;
+  const segs = spec.split('/').filter((s) => s && s !== '.' && s !== '..');
+  if (segs.length === 0) return false;
+  if (segs.slice(0, -1).some((d) => STUB_PATTERNS.moduleDirs.includes(d))) return true;
+  const last = segs[segs.length - 1];
+  if (STUB_PATTERNS.moduleDirs.includes(last)) return true;
+  const base = last.replace(/\.[cm]?[jt]sx?$/, '');
+  return STUB_PATTERNS.moduleBasename.some((re) => re.test(base));
+}
+
+/** Names a file declares itself; using those is definition, not a stub site. */
+function declaredNames(code) {
+  const out = new Set();
+  const re = /\b(?:function\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g;
+  let m;
+  while ((m = re.exec(code)) !== null) out.add(m[1]);
+  return out;
+}
+
+/**
+ * Stub usages in one file's text: `[{ kind: 'module'|'identifier', name }]`.
+ * Comments are stripped first (same as the reachability scan).
+ */
+export function extractStubUsages(text) {
+  const code = stripComments(text);
+  const found = new Map();
+  const add = (kind, name) => found.set(`${kind}:${name}`, { kind, name });
+  const declared = declaredNames(code);
+
+  const importRe = /\bimport\s+(type\s+)?(?:([^'";]*?)\s*\bfrom\s*)?['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = importRe.exec(code)) !== null) {
+    if (isStubModuleSpecifier(m[3])) add('module', m[3]);
+    if (m[1] || !m[2]) continue; // `import type` / side-effect import: no runtime identifiers
+    const clause = m[2];
+    const braces = clause.match(/\{([^}]*)\}/);
+    const names = [];
+    if (braces) {
+      for (const part of braces[1].split(',')) {
+        const p = part.trim();
+        if (!p || /^type\s/.test(p)) continue;
+        names.push(p.split(/\s+as\s+/)[0].trim());
+      }
+    }
+    const outside = clause.replace(/\{[^}]*\}/, '').replace(/\*\s*as\s+/, '');
+    for (const n of outside.split(',')) if (n.trim()) names.push(n.trim());
+    for (const n of names) if (isStubIdentifier(n)) add('identifier', n);
+  }
+  const dynRe = /\bimport\s*\(\s*['"]([^'"]+)['"]/g;
+  while ((m = dynRe.exec(code)) !== null) {
+    if (isStubModuleSpecifier(m[1])) add('module', m[1]);
+  }
+  const callRe = /(?<![.\w$])(?:new\s+)?([A-Za-z_$][\w$]*)\s*\(/g;
+  while ((m = callRe.exec(code)) !== null) {
+    if (isStubIdentifier(m[1]) && !declared.has(m[1])) add('identifier', m[1]);
+  }
+  // Imported-and-declared collisions are not stubs: drop identifiers the file defines.
+  return [...found.values()].filter((u) => u.kind === 'module' || !declared.has(u.name));
+}
+
+export const stubKey = (e) => `${e.path}::${e.name}`;
+
+/**
+ * Validate stubAllowlist entries: { path, capability, reason } all non-empty.
+ * @returns {string[]}
+ */
+export function validateStubAllowlist(allowlist) {
+  const errors = [];
+  allowlist.forEach((entry, i) => {
+    if (!entry || typeof entry !== 'object') {
+      errors.push(`stubAllowlist[${i}] must be { path, capability, reason }`);
+      return;
+    }
+    for (const field of ['path', 'capability', 'reason']) {
+      if (typeof entry[field] !== 'string' || entry[field].trim().length === 0) {
+        errors.push(
+          `stubAllowlist[${i}] ('${entry.path ?? '?'}') is missing a non-empty '${field}'`,
+        );
+      }
+    }
+  });
+  return errors;
+}
+
+/**
+ * Find stub sites: non-test source files that import or call a test double.
+ * Test files, test-helper directories and test-double modules themselves are
+ * skipped. Allowlisted paths are suppressed.
+ *
+ * @returns {{path: string, kind: string, name: string}[]} sorted.
+ */
+export function findStubSites({
+  workDir = process.cwd(),
+  roots = DEFAULT_ROOTS,
+  stubAllowlist = [],
+} = {}) {
+  const allowed = new Set(stubAllowlist.map((e) => e?.path).filter(Boolean));
+  const out = [];
+  for (const file of roots.flatMap((r) => listFiles(join(workDir, r), isSourceFile))) {
+    const rel = relative(workDir, file);
+    if (isTestFile(rel) || allowed.has(rel)) continue;
+    const parts = rel.split(sep);
+    if (parts.some((p) => STUB_PATTERNS.moduleDirs.includes(p) || p === '__fixtures__')) continue;
+    if (isStubModuleSpecifier(`./${rel.replace(/\.[^.]+$/, '')}`)) continue;
+    for (const u of extractStubUsages(readFileSync(file, 'utf-8'))) {
+      out.push({ path: rel, kind: u.kind, name: u.name });
+    }
+  }
+  return out.sort((a, b) => stubKey(a).localeCompare(stubKey(b)));
+}
+
+/** `newSites` fail the gate; `gone` are baselined sites that no longer exist. */
+export function diffStubsAgainstBaseline(sites, baseline) {
+  const base = new Set((baseline.stubSites ?? []).map(stubKey));
+  const current = new Set(sites.map(stubKey));
+  return {
+    newStubs: sites.filter((s) => !base.has(stubKey(s))),
+    goneStubs: [...base].filter((k) => !current.has(k)).sort(),
+  };
+}
+
+/** Stub-site keys added relative to `previous`; null base stubSites = rule not yet on base. */
+export function stubGrowth(previous, current) {
+  if (!previous || !Array.isArray(previous.stubSites)) return [];
+  const before = new Set(previous.stubSites.map(stubKey));
+  return (current.stubSites ?? [])
+    .map(stubKey)
+    .filter((k) => !before.has(k))
+    .sort();
+}
+
+/** Report lines for the stub rule. Empty when nothing to say. */
+export function formatStubReport({
+  newStubs = [],
+  goneStubs = [],
+  grown = [],
+  errors = [],
+  total = 0,
+}) {
+  const lines = [];
+  if (newStubs.length > 0) {
+    lines.push(`[dark-code] FAIL: ${newStubs.length} new test double(s) used in production code:`);
+    for (const s of newStubs) {
+      lines.push(`  - ${s.path} uses ${s.kind === 'module' ? `module '${s.name}'` : s.name}`);
+    }
+    lines.push('');
+    lines.push('  Shipped code must not import or call a test double. Either wire a real');
+    lines.push('  implementation, or add a stubAllowlist entry { path, capability, reason } to');
+    lines.push('  .ai-sdlc/dark-code-baseline.json (for example a mock selectable by an explicit');
+    lines.push('  command-line option).');
+    lines.push('  Known blind spot: an interface with no implementation at all has nothing to');
+    lines.push('  import, so this check cannot see it; capability outcome reporting covers that.');
+  } else {
+    lines.push(`[dark-code] OK: no new test doubles in production code (${total} baselined).`);
+  }
+  if (grown.length > 0) {
+    lines.push('');
+    lines.push(`[dark-code] FAIL: stubSites baseline GREW by ${grown.length} entr(ies):`);
+    for (const k of grown) lines.push(`  ! ${k}`);
+    lines.push('  The stub baseline is a ratchet - it may shrink, never grow.');
+  }
+  if (errors.length > 0) {
+    lines.push('');
+    lines.push('[dark-code] FAIL: invalid stubAllowlist entries:');
+    for (const e of errors) lines.push(`  ! ${e}`);
+  }
+  if (goneStubs.length > 0) {
+    lines.push('');
+    lines.push(`[dark-code] ${goneStubs.length} baselined stub site(s) are gone - `);
+    lines.push('  run `node scripts/check-dark-code.mjs --update-baseline` to ratchet down:');
+    for (const k of goneStubs) lines.push(`  + ${k}`);
+  }
+  return lines.join('\n');
+}
+
 /** Read the baseline file. Missing file = empty baseline (first run). */
 export function loadBaseline(workDir = process.cwd(), baselinePath = BASELINE_PATH) {
   const full = join(workDir, baselinePath);
@@ -299,6 +514,8 @@ export function loadBaseline(workDir = process.cwd(), baselinePath = BASELINE_PA
     return {
       darkModules: Array.isArray(parsed.darkModules) ? parsed.darkModules : [],
       allowlist: Array.isArray(parsed.allowlist) ? parsed.allowlist : [],
+      stubSites: Array.isArray(parsed.stubSites) ? parsed.stubSites : [],
+      stubAllowlist: Array.isArray(parsed.stubAllowlist) ? parsed.stubAllowlist : [],
     };
   } catch (err) {
     throw new Error(`dark-code baseline at ${baselinePath} is not valid JSON: ${err.message}`);
@@ -348,6 +565,9 @@ export function loadBaselineAtRef(ref, workDir = process.cwd(), baselinePath = B
     return {
       darkModules: Array.isArray(parsed.darkModules) ? parsed.darkModules : [],
       allowlist: Array.isArray(parsed.allowlist) ? parsed.allowlist : [],
+      // null = the base ref predates the stub rule; growth cannot be judged.
+      stubSites: Array.isArray(parsed.stubSites) ? parsed.stubSites : null,
+      stubAllowlist: Array.isArray(parsed.stubAllowlist) ? parsed.stubAllowlist : [],
     };
   } catch {
     // No git, no such ref, or baseline not yet on that ref — skip the check
@@ -404,6 +624,7 @@ export function writeBaseline(
   workDir = process.cwd(),
   baselinePath = BASELINE_PATH,
   allowlist = [],
+  stubs = { stubSites: [], stubAllowlist: [] },
 ) {
   const payload = {
     $comment:
@@ -411,48 +632,72 @@ export function writeBaseline(
       're-export. The gate fails only on modules NOT listed here, so this file is a ratchet: ' +
       'shrink it as modules get wired, never grow it by hand — growth relative to the base ref ' +
       'fails the gate. Use `allowlist` entries of the form { path, reason } for entry points ' +
-      'that are legitimately never imported.',
+      'that are legitimately never imported. `stubSites` records non-test source that imports or ' +
+      'calls a test double; same ratchet. `stubAllowlist` entries are { path, capability, reason }.',
     generatedAt: new Date().toISOString().slice(0, 10),
     allowlist,
     darkModules: dark.map((d) => ({ path: d.path, rfc: d.rfc })),
+    stubAllowlist: stubs.stubAllowlist,
+    stubSites: stubs.stubSites,
   };
   writeFileSync(join(workDir, baselinePath), `${JSON.stringify(payload, null, 2)}\n`);
   return payload;
 }
 
-/* c8 ignore start — CLI wiring; behaviour is covered via the exports above. */
+/* c8 ignore start - CLI wiring; behaviour is covered via the exports above. */
 function main(argv) {
   const workDir = process.cwd();
   const baseRefIdx = argv.indexOf('--base-ref');
   const baseRef = baseRefIdx !== -1 ? argv[baseRefIdx + 1] : 'origin/main';
   const baseline = loadBaseline(workDir);
   const allowlistErrors = validateAllowlist(baseline.allowlist);
+  const stubErrors = validateStubAllowlist(baseline.stubAllowlist ?? []);
   const dark = findDarkModules({ workDir, allowlist: baseline.allowlist });
+  const stubs = findStubSites({ workDir, stubAllowlist: baseline.stubAllowlist ?? [] });
 
   if (argv.includes('--update-baseline')) {
-    if (allowlistErrors.length > 0) {
+    if (allowlistErrors.length > 0 || stubErrors.length > 0) {
       process.stdout.write(
-        `${formatReport({ newlyDark: [], nowReachable: [], totalDark: dark.length, allowlistErrors })}\n`,
+        `${formatReport({ newlyDark: [], nowReachable: [], totalDark: dark.length, allowlistErrors })}\n${formatStubReport({ errors: stubErrors })}\n`,
       );
       return 1;
     }
-    writeBaseline(dark, workDir, BASELINE_PATH, baseline.allowlist);
-    process.stdout.write(`[dark-code] baseline updated: ${dark.length} module(s)\n`);
+    // Stub baseline may only shrink: keep baselined entries that still exist.
+    const live = new Set(stubs.map(stubKey));
+    const kept = (baseline.stubSites ?? []).filter((e) => live.has(stubKey(e)));
+    writeBaseline(dark, workDir, BASELINE_PATH, baseline.allowlist, {
+      stubSites: kept,
+      stubAllowlist: baseline.stubAllowlist ?? [],
+    });
+    process.stdout.write(
+      `[dark-code] baseline updated: ${dark.length} module(s), ${kept.length} stub site(s)\n`,
+    );
     return 0;
   }
 
   const diff = diffAgainstBaseline(dark, baseline);
+  const stubDiff = diffStubsAgainstBaseline(stubs, baseline);
   const previous = loadBaselineAtRef(baseRef, workDir);
   const grown = previous ? baselineGrowth(previous, baseline) : [];
+  const stubGrown = stubGrowth(previous, baseline);
 
   if (argv.includes('--json')) {
-    process.stdout.write(`${JSON.stringify({ dark, ...diff, grown, allowlistErrors }, null, 2)}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ dark, ...diff, grown, allowlistErrors, stubSites: stubs, ...stubDiff, stubGrown, stubErrors }, null, 2)}\n`,
+    );
   } else {
     process.stdout.write(
-      `${formatReport({ ...diff, totalDark: dark.length, grown, allowlistErrors })}\n`,
+      `${formatReport({ ...diff, totalDark: dark.length, grown, allowlistErrors })}\n${formatStubReport({ ...stubDiff, grown: stubGrown, errors: stubErrors, total: (baseline.stubSites ?? []).length })}\n`,
     );
   }
-  return diff.newlyDark.length > 0 || grown.length > 0 || allowlistErrors.length > 0 ? 1 : 0;
+  const failed =
+    diff.newlyDark.length > 0 ||
+    grown.length > 0 ||
+    allowlistErrors.length > 0 ||
+    stubDiff.newStubs.length > 0 ||
+    stubGrown.length > 0 ||
+    stubErrors.length > 0;
+  return failed ? 1 : 0;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

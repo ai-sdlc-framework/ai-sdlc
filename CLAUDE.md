@@ -71,7 +71,7 @@ when the gate landed, so it fails only on NEWLY dark modules. It is a **ratchet*
 shrink it as modules get wired (`--update-baseline` after wiring), never grow it
 by hand. Entry points that are legitimately never imported go in its `allowlist`
 with a required reason. Do NOT silence a finding with a token import — that
-recreates exactly the condition being detected.
+recreates exactly the condition being detected. A second rule flags non-test source that imports or calls a test double (`fake-*`/`mock-*`/`stub-*` modules, `createStub*`/`Fake*`/`Mock*` exports); resolve by wiring a real implementation or adding a `stubAllowlist` entry `{ path, capability, reason }`, and the `stubSites` baseline is shrink-only. It cannot see an interface with no implementation at all (nothing to import); capability outcome reporting covers that.
 
 ## Feature flags
 
