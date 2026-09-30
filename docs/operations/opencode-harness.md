@@ -105,17 +105,47 @@ rules, MCP server). That dogfood parity is intended, not an accident.
 **force-with-lease carve-out (known, intentional, strict):** the config denies
 `git push --force*` and then re-allows `git push --force-with-lease*` (the
 Definition of Done requires a lease push after the mandatory rebase). A bare
-prefix glob is NOT safe: `git push --force-with-lease --force origin main`
-also matches it. So the plugin (authoritative) allows ONLY a strict lease:
-`--force-with-lease[=<ref>[:<sha>]]` with no other force flag (`--force`,
-`-f`/`-fu`, `--mirror`, `--delete`), no `+`-prefixed refspec, and no
-`main`/`master` target. The declarative layer re-denies those bypass shapes
-after the allow (last-match-wins) as defence in depth; globs cannot express
-the full grammar, so the plugin decides. A bare lease with no refspec pushes
-the current branch, which cannot be resolved statically (known limitation).
-The **old Claude Code hook denies even `--force-with-lease`** — an existing
-spec conflict in the Claude layer, deliberately not "fixed" in the port
-(flagged for the governance RFC).
+prefix glob is NOT safe, so the plugin (authoritative) allows ONLY a strict
+lease: `--force-with-lease[=<ref>[:<sha>]]` with
+
+- no other force flag (`--force`, `-f`/`-fu`) and no
+  `--all/--branches/--tags/--mirror/--prune/--delete` (long options are
+  matched by unambiguous-prefix, so `--mirr` counts as `--mirror`; an ambiguous
+  prefix fails closed);
+- every destination a plain branch name, `heads/<name>` or `refs/heads/<name>`:
+  no `+` refspec, no glob (`*`), no `:dst` delete, no tags/notes refs, and never
+  `main`/`master` (after stripping `refs/`/`heads/`, and including a final path
+  component of `main`/`master`);
+- `HEAD`, `@`, or no refspec at all resolved to the current branch of the
+  session directory (`git -C <dir>` honoured) and denied when that branch is
+  `main`/`master`, detached, or cannot be resolved (fail closed).
+
+Command text is normalised before analysis (quote/`$VAR`/`${IFS}` obfuscation,
+backslash-newline continuations, `env`/`command`/`exec`/`nice`/`time` prefixes).
+`git -c alias.*` and push-rewriting `-c remote.*.push|mirror` are denied. A
+force-ish push inside `bash -c`, `eval`, `xargs`, `$(...)` or backticks cannot
+be verified statically and is denied — run the push as a plain top-level
+command. The declarative layer re-denies the common bypass shapes after the
+allow (last-match-wins) as defence in depth; globs cannot express the grammar,
+so the plugin decides. The **old Claude Code hook denies even
+`--force-with-lease`** — an existing spec conflict in the Claude layer,
+deliberately not "fixed" in the port (flagged for the governance RFC).
+
+**Policy snapshot:** `agent-role.yaml` (blockedActions/blockedPaths) and the
+active task's `permittedExternalPaths` are read once when the plugin is set up,
+so a later shell write to those files (shell writes are not path-governed) cannot
+weaken enforcement. Limitation: a session that starts after such a write sees the
+written state; dispatched runs load the plugin before the agent acts. Path checks
+resolve symlinks (deepest existing ancestor) before comparing.
+
+**Dispatched-run caveats:**
+
+- `external_directory` is denied by default in dispatched runs, so a task's
+  `permittedExternalPaths` cross-repo writes do NOT work under the opencode
+  runner today (the declarative deny short-circuits the plugin's allowance).
+- The project's `.opencode/plugins/*` and local MCP `command`s execute with the
+  operator's privileges. Do not dispatch opencode against an UNTRUSTED PR
+  checkout: its plugin code and MCP commands run before any governance applies.
 
 **Harness config floor:** `opencode.json`, `opencode.jsonc` and `.opencode/**`
 are denied for edits (declaratively and by the plugin) so an agent cannot

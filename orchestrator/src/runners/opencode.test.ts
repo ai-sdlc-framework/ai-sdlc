@@ -725,6 +725,66 @@ describe('buildToolPermission', () => {
     expect(readOnly).toBe(true);
   });
 
+  it('a reviewer-style stage cannot inherit the project lease-push allow (re-review MAJOR B)', () => {
+    const baseline = {
+      bash: {
+        'git merge*': 'deny',
+        'git push --force*': 'deny',
+        'git push --force-with-lease*': 'allow',
+      },
+    };
+    const { permission } = buildToolPermission(['Read', 'Bash(pnpm test*)'], baseline);
+    const bash = permission.bash as Record<string, string>;
+    expect(bash['git push --force-with-lease*']).toBeUndefined();
+    expect(Object.values(bash)).not.toContain('git push --force-with-lease*');
+    expect(bash['git push --force*']).toBe('deny');
+    expect(bash['pnpm test*']).toBe('allow');
+    expect(bash['*']).toBe('deny');
+    // the developer default keeps the project's allows
+    const dev = buildToolPermission(undefined, baseline).permission.bash as Record<string, string>;
+    expect(dev['git push --force-with-lease*']).toBe('allow');
+  });
+
+  it('bare Bash (non-developer stage) also drops inherited project allows', () => {
+    const { permission } = buildToolPermission(['Read', 'Edit', 'Bash'], {
+      bash: { 'git push --force-with-lease*': 'allow', 'git merge*': 'deny' },
+      edit: { '.ai-sdlc/**': 'deny' },
+    });
+    expect(permission.bash).toEqual({ 'git merge*': 'deny' });
+    expect(permission.edit).toEqual({ '.ai-sdlc/**': 'deny' });
+  });
+
+  it('allowing Read/Grep/Glob never replaces the project deny patterns for that key', () => {
+    const { permission } = buildToolPermission(['Read', 'Grep', 'Glob'], {
+      read: { '*.env': 'deny' },
+      grep: 'deny',
+    });
+    expect(permission.read).toEqual({ '*': 'allow', '*.env': 'deny' });
+    expect(Object.keys(permission.read as object)).toEqual(['*', '*.env']);
+    expect(permission.grep).toBe('deny'); // a plain project deny is never weakened
+    expect(permission.glob).toBe('allow'); // no project rule -> plain allow
+  });
+
+  it('buildDispatchConfig: a real project config with a lease allow never reaches a scoped stage', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'aisdlc-permcfg-'));
+    try {
+      await writeFile(
+        join(dir, 'opencode.json'),
+        JSON.stringify({
+          permission: { bash: { 'git push --force-with-lease*': 'allow', 'git merge*': 'deny' } },
+        }),
+      );
+      const cfg = JSON.parse(buildDispatchConfig(dir, undefined, ['Read', 'Bash(pnpm test*)']));
+      expect(cfg.permission.bash).toEqual({
+        '*': 'deny',
+        'pnpm test*': 'allow',
+        'git merge*': 'deny',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('an edit-capable tool list is not read-only and leaves edit rules untouched', () => {
     const { permission, readOnly } = buildToolPermission(['Read', 'Edit', 'Write', 'Bash']);
     expect(readOnly).toBe(false);

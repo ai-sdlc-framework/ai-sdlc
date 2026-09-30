@@ -17,7 +17,15 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -60,6 +68,9 @@ before(() => {
     join(root, 'backlog', 'tasks', 'aisdlc-99 - test-task.md'),
     `---\nid: AISDLC-99\ntitle: t\npermittedExternalPaths:\n  - '${sibling}'\n---\n\nBody.\n`,
   );
+  // The session dir is a real git checkout on a feature branch: bare pushes
+  // and `HEAD`/`@` refspecs resolve the current branch from it.
+  execFileSync('git', ['init', '-q', '-b', 'feat/x'], { cwd: worktree });
   setEnv('AI_SDLC_PROJECT_ROOT', root);
   setEnv('AI_SDLC_TELEMETRY_DIR', telemetryDir);
 });
@@ -130,9 +141,20 @@ describe('plugin shape', () => {
     ctx.permission.hook = () => {
       throw new Error('registration boom');
     };
-    await plugin.setup(ctx);
+    const origWrite = process.stderr.write.bind(process.stderr);
+    let captured = '';
+    process.stderr.write = (chunk) => {
+      captured += String(chunk);
+      return true;
+    };
+    try {
+      await plugin.setup(ctx);
+    } finally {
+      process.stderr.write = origWrite;
+    }
     assert.ok(ctx.hooks['tool.execute.after']);
     assert.ok(ctx.hooks['session.context']);
+    assert.match(captured, /failed to register permission\.evaluate hook: registration boom/);
   });
 });
 
@@ -194,6 +216,17 @@ describe('force-with-lease carve-out (strict)', () => {
     'git push --force-with-lease --force-if-includes origin feat/x',
     'git push --force-with-lease origin HEAD:refs/heads/feat/x',
     'git push --force-with-lease origin feat/main-menu',
+    // bare / HEAD / @ resolve to the current branch (feat/x in the session dir)
+    'git push --force-with-lease origin',
+    'git push --force-with-lease',
+    'git push --force-with-lease origin HEAD',
+    'git push --force-with-lease origin @',
+    'git push --force-with-lease origin HEAD:feat/x',
+    'git push --force-with-lease origin HEAD:heads/feat/x',
+    'git push --force-with-lease origin feat/x:feat/x',
+    'git push --force-with-lease origin HEAD:refs/heads/feat/x',
+    'env GIT_TRACE=0 git push --force-with-lease origin feat/x',
+    'git push --force-w origin feat/x', // unambiguous abbreviation of the lease flag
   ];
   const denied = [
     // The reported bypass: the prefix glob let a second force flag ride along.
@@ -213,6 +246,43 @@ describe('force-with-lease carve-out (strict)', () => {
     'git push --force-with-lease --mirror origin',
     'git push --force-with-lease --delete origin feat/x',
     'git push --force-with-lease -d origin feat/x',
+    // Re-review MAJOR A: widening flags with a lease (no refspec => no target check)
+    'git push --force-with-lease --all origin',
+    'git push --force-with-lease --branches origin',
+    'git push --force-with-lease --tags origin',
+    'git push --force-with-lease --prune origin',
+    'git push --force-with-lease --mirr origin', // abbreviation of --mirror
+    'git push --force-with-lease --dele origin feat/x', // abbreviation of --delete
+    'git push --force-with-lease --al origin', // abbreviation of --all
+    'git push --force-with-lease --forc origin feat/x', // ambiguous abbreviation: fail closed
+    // glob destinations
+    "git push --force-with-lease origin 'refs/heads/*:refs/heads/*'",
+    'git push --force-with-lease origin refs/heads/*:refs/heads/*',
+    'git push --force-with-lease origin HEAD:refs/heads/feat/*',
+    // git expands heads/main -> refs/heads/main
+    'git push --force-with-lease origin HEAD:heads/main',
+    'git push --force-with-lease origin HEAD:heads/master',
+    'git push --force-with-lease origin HEAD:refs/heads/main',
+    'git push --force-with-lease origin HEAD:refs/heads//main',
+    'git push --force-with-lease origin HEAD:refs/heads/./main',
+    'git push --force-with-lease origin HEAD:refs/heads/release/main',
+    'git push --force-with-lease origin HEAD:MAIN',
+    // non-branch destinations / deletes
+    'git push --force-with-lease origin HEAD:refs/tags/v1',
+    'git push --force-with-lease origin :feat/x',
+    'git push --force-with-lease origin feat/x:',
+    // wrapper prefixes, continuations, alias/config tricks, obfuscation
+    'env git push --force-with-lease --force origin feat/x',
+    'command git push --force-with-lease --all origin',
+    'nice -n 5 git push --force-with-lease --force origin feat/x',
+    'git push --force-with-lease \\\n  --force origin feat/x',
+    'git -c alias.p=push p --force origin feat/x',
+    'git -c remote.origin.mirror=true push --force-with-lease origin feat/x',
+    "git 'push' --force-with-lease --force origin feat/x",
+    'git push --force-with-lease ${EMPTY}--force origin feat/x',
+    "bash -c 'git push --force-with-lease --force origin feat/x'",
+    'echo $(git push --force-with-lease --all origin)',
+    'true `git push --force origin feat/x`',
     // chained / global-flag forms
     'git status && git push --force-with-lease --force origin feat/x',
     'git -C /tmp/x push --force-with-lease --force origin feat/x',
@@ -230,6 +300,89 @@ describe('force-with-lease carve-out (strict)', () => {
       assert.equal((await evaluate(ctx.hooks, 'shell', cmd)).denied, true);
     });
   }
+});
+
+describe('lease push: current-branch resolution (fail closed)', () => {
+  const dirs = [];
+  function repoOn(branch, { commit = false } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-gov-br-'));
+    dirs.push(dir);
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 't',
+      GIT_AUTHOR_EMAIL: 't@example.invalid',
+      GIT_COMMITTER_NAME: 't',
+      GIT_COMMITTER_EMAIL: 't@example.invalid',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'commit.gpgsign',
+      GIT_CONFIG_VALUE_0: 'false',
+    };
+    execFileSync('git', ['init', '-q', '-b', branch], { cwd: dir, env });
+    if (commit) {
+      writeFileSync(join(dir, 'f'), 'x');
+      execFileSync('git', ['add', 'f'], { cwd: dir, env });
+      execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: dir, env });
+    }
+    return { dir, env };
+  }
+  after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+
+  for (const cmd of [
+    'git push --force-with-lease origin',
+    'git push --force-with-lease',
+    'git push --force-with-lease origin HEAD',
+    'git push --force-with-lease origin @',
+  ]) {
+    it(`denies on a main checkout: ${cmd}`, async () => {
+      const { dir } = repoOn('main');
+      const { ctx } = await loadHooks({ directory: dir });
+      assert.equal((await evaluate(ctx.hooks, 'shell', cmd)).denied, true);
+    });
+  }
+
+  it('denies on a master checkout (bare lease)', async () => {
+    const { dir } = repoOn('master');
+    const { ctx } = await loadHooks({ directory: dir });
+    assert.equal(
+      (await evaluate(ctx.hooks, 'shell', 'git push --force-with-lease origin')).denied,
+      true,
+    );
+  });
+
+  it('denies when the session dir is not a git repo (cannot resolve => fail closed)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-gov-norepo-'));
+    dirs.push(dir);
+    const { ctx } = await loadHooks({ directory: dir });
+    assert.equal(
+      (await evaluate(ctx.hooks, 'shell', 'git push --force-with-lease origin')).denied,
+      true,
+    );
+    // ...but an explicit, safe refspec needs no resolution
+    assert.equal(
+      (await evaluate(ctx.hooks, 'shell', 'git push --force-with-lease origin feat/x')).denied,
+      false,
+    );
+  });
+
+  it('denies on a detached HEAD (bare lease)', async () => {
+    const { dir, env } = repoOn('feat/y', { commit: true });
+    execFileSync('git', ['checkout', '-q', '--detach'], { cwd: dir, env });
+    const { ctx } = await loadHooks({ directory: dir });
+    assert.equal(
+      (await evaluate(ctx.hooks, 'shell', 'git push --force-with-lease origin HEAD')).denied,
+      true,
+    );
+  });
+
+  it('honors git -C <dir> when resolving the current branch', async () => {
+    const { dir: mainDir } = repoOn('main');
+    const { ctx } = await loadHooks(); // session dir = feat/x worktree
+    assert.equal(
+      (await evaluate(ctx.hooks, 'shell', `git -C ${mainDir} push --force-with-lease origin`))
+        .denied,
+      true,
+    );
+  });
 });
 
 describe('multi-resource evaluation', () => {
@@ -319,6 +472,74 @@ describe('path governance', () => {
     setEnv('AI_SDLC_ACTIVE_TASK_ID', 'AISDLC-99');
     const { ctx } = await loadHooks();
     assert.equal((await evaluate(ctx.hooks, 'edit', join(worktree, '.ai-sdlc/x'))).denied, true);
+  });
+
+  it('symlinks are resolved: a link out of the worktree cannot smuggle a write outside', async () => {
+    symlinkSync(sibling, join(worktree, 'link-out'));
+    const { ctx } = await loadHooks();
+    const r = await evaluate(ctx.hooks, 'edit', 'link-out/new-file.txt');
+    assert.equal(r.denied, true);
+    assert.match(r.message, /outside the agent's active worktree/);
+  });
+
+  it('symlinks are resolved: a link into .ai-sdlc is still under the floor', async () => {
+    mkdirSync(join(worktree, '.ai-sdlc'), { recursive: true });
+    symlinkSync(join(worktree, '.ai-sdlc'), join(worktree, 'innocent-docs'));
+    const { ctx } = await loadHooks();
+    assert.equal((await evaluate(ctx.hooks, 'edit', 'innocent-docs/agent-role.yaml')).denied, true);
+    // ...and a link to an ordinary in-worktree dir stays allowed
+    mkdirSync(join(worktree, 'real-src'), { recursive: true });
+    symlinkSync(join(worktree, 'real-src'), join(worktree, 'src-link'));
+    assert.equal((await evaluate(ctx.hooks, 'edit', 'src-link/a.ts')).denied, false);
+  });
+
+  it('a permitted external dir reached through a symlink to elsewhere is still denied', async () => {
+    setEnv('AI_SDLC_ACTIVE_TASK_ID', 'AISDLC-99');
+    const elsewhere = mkdtempSync(join(tmpdir(), 'oc-gov-else-'));
+    try {
+      const { ctx } = await loadHooks();
+      const viaLink = join(sibling, 'sneaky');
+      symlinkSync(elsewhere, viaLink);
+      assert.equal((await evaluate(ctx.hooks, 'edit', join(viaLink, 'f.txt'))).denied, true);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+      rmSync(join(sibling, 'sneaky'), { force: true });
+    }
+  });
+
+  it('policy is snapshotted at setup: a later rewrite of agent-role.yaml cannot weaken it', async () => {
+    const { ctx } = await loadHooks();
+    const yamlPath = join(root, '.ai-sdlc', 'agent-role.yaml');
+    writeFileSync(
+      yamlPath,
+      'blockedActions:\n  - "nothing-matches-this*"\nblockedPaths:\n  - "nothing/**"\n',
+    );
+    try {
+      assert.equal((await evaluate(ctx.hooks, 'shell', 'git merge x')).denied, true);
+      assert.equal(
+        (await evaluate(ctx.hooks, 'edit', join(worktree, '.github/workflows/ci.yml'))).denied,
+        true,
+      );
+    } finally {
+      writeFileSync(yamlPath, REAL_AGENT_ROLE);
+    }
+  });
+
+  it('permittedExternalPaths is snapshotted at setup: editing the task file or switching ids cannot widen it', async () => {
+    setEnv('AI_SDLC_ACTIVE_TASK_ID', 'AISDLC-99');
+    const { ctx } = await loadHooks();
+    const taskPath = join(root, 'backlog', 'tasks', 'aisdlc-99 - test-task.md');
+    const original = readFileSync(taskPath, 'utf-8');
+    const other = mkdtempSync(join(tmpdir(), 'oc-gov-widen-'));
+    try {
+      writeFileSync(taskPath, original.replace(sibling, other));
+      setEnv('AI_SDLC_ACTIVE_TASK_ID', 'AISDLC-1');
+      assert.equal((await evaluate(ctx.hooks, 'edit', join(other, 'f.txt'))).denied, true);
+      assert.equal((await evaluate(ctx.hooks, 'edit', join(sibling, 'f.txt'))).denied, false);
+    } finally {
+      writeFileSync(taskPath, original);
+      rmSync(other, { recursive: true, force: true });
+    }
   });
 
   it('non-shell, non-edit actions (read, mcp) get no opinion', async () => {

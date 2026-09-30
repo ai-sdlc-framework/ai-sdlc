@@ -576,8 +576,9 @@ function toolPermissionKey(tool: string): string | undefined {
  *  - `allowedTools` given: edit / bash / task / web* / external_directory are
  *    denied unless an allowed tool maps onto them; allowed read-class tools
  *    are explicitly allowed (no `--auto` to lean on); scoped `Bash(pat)`
- *    entries become `bash` pattern allows. A bare `Bash` leaves the project's
- *    bash rules untouched. `readOnly` = no edit-capable tool allowed.
+ *    entries become `bash` pattern allows. A bare `Bash` keeps only the
+ *    project's deny/ask bash rules. Project `allow` entries are NEVER
+ *    inherited by these stages. `readOnly` = no edit-capable tool allowed.
  *
  * `baseline` is the project's parsed `permission` block: the result is
  * merged on top of it so project deny rules survive regardless of whether
@@ -587,13 +588,25 @@ export function buildToolPermission(
   allowedTools: string[] | undefined,
   baseline: Record<string, unknown> = {},
 ): OpenCodeToolPermission {
-  const permission: Record<string, unknown> = { ...baseline };
   if (!allowedTools) {
-    permission.webfetch = 'deny';
-    permission.websearch = 'deny';
-    permission.external_directory = 'deny';
-    return { permission, readOnly: false };
+    // Developer default stage: the project's rules (including its allows,
+    // e.g. the DoD-required force-with-lease push) are kept as-is.
+    return {
+      permission: {
+        ...baseline,
+        webfetch: 'deny',
+        websearch: 'deny',
+        external_directory: 'deny',
+      },
+      readOnly: false,
+    };
   }
+
+  // Non-developer stages never inherit project `allow` entries: an allow in
+  // the project's map (last match wins) would otherwise re-grant, e.g., the
+  // lease-push allow to a review stage that only asked for `Bash(pnpm test*)`.
+  const inherited = denyOnly(baseline);
+  const permission: Record<string, unknown> = { ...inherited };
 
   const allowed = new Set<string>();
   const bashPatterns: string[] = [];
@@ -609,8 +622,16 @@ export function buildToolPermission(
     }
   }
 
+  // Allowing a read-class tool must not replace the project's own deny
+  // patterns for it (e.g. `*.env`): plain allow only when the project has no
+  // rule for the key, else `{'*':'allow', ...projectDenies}` (last match wins).
   for (const key of ['read', 'grep', 'glob']) {
-    if (allowed.has(key)) permission[key] = 'allow';
+    if (!allowed.has(key)) continue;
+    const existing = inherited[key];
+    if (existing === undefined) permission[key] = 'allow';
+    else if (existing && typeof existing === 'object')
+      permission[key] = { '*': 'allow', ...existing };
+    // else: a plain deny/ask string is kept — never weakened
   }
   for (const key of ['edit', 'task', 'webfetch', 'websearch']) {
     if (!allowed.has(key)) permission[key] = 'deny';
@@ -621,17 +642,34 @@ export function buildToolPermission(
     permission.bash = 'deny';
   } else if (!bareBash) {
     const projectBash =
-      baseline.bash && typeof baseline.bash === 'object' && !Array.isArray(baseline.bash)
-        ? (baseline.bash as Record<string, unknown>)
+      inherited.bash && typeof inherited.bash === 'object' && !Array.isArray(inherited.bash)
+        ? (inherited.bash as Record<string, unknown>)
         : {};
     const allows: Record<string, string> = {};
     for (const pat of bashPatterns) allows[pat] = 'allow';
     // Last match wins: default-deny, then the scoped allows, then the
-    // project's own rules (its denies must still beat a scoped allow).
+    // project's deny/ask rules (they must still beat a scoped allow).
     permission.bash = { '*': 'deny', ...allows, ...projectBash };
   }
 
   return { permission, readOnly: !allowed.has('edit') };
+}
+
+/** The deny/ask-only subset of a project permission block (drops every `allow`). */
+function denyOnly(baseline: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(baseline)) {
+    if (value === 'allow') continue;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const kept = Object.entries(value as Record<string, unknown>).filter(
+        ([, v]) => v !== 'allow',
+      );
+      out[key] = Object.fromEntries(kept);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
 }
 
 /**

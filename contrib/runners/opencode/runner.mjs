@@ -220,6 +220,10 @@ async function detectChangedFiles(dir, baseline) {
   }
   return {
     filesChanged: agentAlreadyCommitted ? committedFiles : uncommitted,
+    // UNION of committed (merge-base..HEAD) and uncommitted files: constraint
+    // enforcement must see a blocked file the agent already committed even
+    // when other changes are still uncommitted.
+    allChanged: [...new Set([...committedFiles, ...uncommitted])],
     agentAlreadyCommitted,
   };
 }
@@ -612,7 +616,10 @@ const main = (async () => {
   }
 
   const tokenUsage = (await fetchSessionTokens(sessionID)) ?? streamTokens(lastRun);
-  const { filesChanged, agentAlreadyCommitted } = await detectChangedFiles(WORKDIR, baseline);
+  const { filesChanged, allChanged, agentAlreadyCommitted } = await detectChangedFiles(
+    WORKDIR,
+    baseline,
+  );
 
   if (filesChanged.length === 0) {
     emit(
@@ -631,7 +638,7 @@ const main = (async () => {
 
   // Enforced BEFORE anything is staged or committed; the offending changes
   // are left in the worktree for the operator (never auto-reverted).
-  const violation = constraintViolation(filesChanged);
+  const violation = constraintViolation(allChanged);
   if (violation) {
     emit(
       {

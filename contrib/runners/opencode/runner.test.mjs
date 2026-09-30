@@ -56,6 +56,16 @@ if (mode === 'always-fail') { out({ type: 'step_start', sessionID: 'ses_1' }); p
 if (mode === 'stream-error') { out({ type: 'error', sessionID: 'ses_1', error: { message: 'LM Studio socket drop' } }); process.exit(0); }
 if (mode === 'blocked') { write('.github/workflows/x.yml'); finish('done'); process.exit(0); }
 if (mode === 'many') { write('a.txt'); write('b.txt'); write('c.txt'); finish('done'); process.exit(0); }
+if (mode === 'commit-blocked') {
+  // The agent COMMITS a blocked file itself and leaves another change uncommitted.
+  write('.github/workflows/x.yml');
+  const cp = require('child_process');
+  cp.execFileSync('git', ['add', '.github/workflows/x.yml'], { cwd: process.cwd() });
+  cp.execFileSync('git', ['commit', '-q', '-m', 'agent commit'], { cwd: process.cwd() });
+  write('src/b.txt');
+  finish('done');
+  process.exit(0);
+}
 if (mode === 'noop') { finish('nothing to do'); process.exit(0); }
 process.exit(2);
 `;
@@ -93,6 +103,8 @@ function makeRepo(name, projectConfig) {
   if (projectConfig) writeFileSync(join(repo, 'opencode.json'), JSON.stringify(projectConfig));
   git('add', '-A');
   git('commit', '-q', '-m', 'init');
+  // The runner diffs committed work against origin/main (merge-base).
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
   const state = join(root, `${name}-state`);
   mkdirSync(state, { recursive: true });
   return { repo, state, git };
@@ -273,6 +285,33 @@ test('--blocked-paths is ENFORCED before commit', async () => {
   assert.match(result.error, /\.github\/workflows\/x\.yml/);
   assert.equal(ctx.git('rev-parse', 'HEAD').toString().trim(), before, 'nothing committed');
   assert.ok(existsSync(join(ctx.repo, '.github/workflows/x.yml')), 'changes left for the operator');
+});
+
+test('--blocked-paths also sees files the agent already COMMITTED (union with uncommitted)', async () => {
+  const ctx = makeRepo('committed-blocked');
+  const { code, result } = await runRunner(
+    ctx,
+    [...MODEL, '--blocked-paths', '.github/workflows/**'],
+    {
+      FAKE_MODE: 'commit-blocked',
+    },
+  );
+  assert.equal(code, 1);
+  assert.equal(result.success, false);
+  assert.match(result.error, /blocked paths modified/);
+  assert.match(result.error, /\.github\/workflows\/x\.yml/);
+  // the runner must NOT have added its own commit on top
+  assert.equal(ctx.git('log', '--format=%s', '-n', '1').toString().trim(), 'agent commit');
+  assert.ok(existsSync(join(ctx.repo, 'src/b.txt')), 'uncommitted change left in place');
+});
+
+test('--max-files counts committed + uncommitted files together', async () => {
+  const ctx = makeRepo('committed-max');
+  const { code, result } = await runRunner(ctx, [...MODEL, '--max-files', '1'], {
+    FAKE_MODE: 'commit-blocked',
+  });
+  assert.equal(code, 1);
+  assert.match(result.error, /2 files changed, exceeding --max-files 1/);
 });
 
 test('--max-files is ENFORCED before commit', async () => {
