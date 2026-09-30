@@ -36,3 +36,6 @@ export * from './capabilities/index.js';
 
 // Usage ledger (model-call records, store, price history)
 export * from './usage/index.js';
+
+// Judgment layer (closed-set probabilistic questions)
+export * from './judgment/index.js';
