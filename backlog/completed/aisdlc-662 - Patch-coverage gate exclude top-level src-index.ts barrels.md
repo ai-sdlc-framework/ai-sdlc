@@ -1,5 +1,5 @@
 ---
-id: AISDLC-660
+id: AISDLC-662
 title: 'Patch-coverage gate: exclude top-level src/index.ts barrels'
 status: Done
 assignee: []

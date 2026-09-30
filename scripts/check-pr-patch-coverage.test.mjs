@@ -368,7 +368,7 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     'pipeline-cli/src/index.ts',
     'reference/src/usage/index.ts',
   ]) {
-    it(`exits 0 when only barrel ${barrel} changed (AISDLC-660)`, () => {
+    it(`exits 0 when only barrel ${barrel} changed (AISDLC-662)`, () => {
       const base = commitFile(repo, 'README.md', '# x\n', 'init');
       const head = commitFile(
         repo,
@@ -389,7 +389,7 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     'reference/src/foo/index.tsx',
     'reference/src/myindex.ts',
   ]) {
-    it(`keeps ${notBarrel} instrumented and fails without coverage (AISDLC-660)`, () => {
+    it(`keeps ${notBarrel} instrumented and fails without coverage (AISDLC-662)`, () => {
       const base = commitFile(repo, 'README.md', '# x\n', 'init');
       const head = commitFile(
         repo,
