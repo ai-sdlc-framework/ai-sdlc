@@ -2,7 +2,7 @@
 id: AISDLC-646
 title: >-
   RFC-0049 section 9.6: flag test doubles imported by production code, with a shrink-only baseline
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
