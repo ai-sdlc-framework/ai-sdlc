@@ -74,4 +74,54 @@ describe('checkFollowups', () => {
     expect(checkFollowups(wrap('- [ ] thing (AISDLC-3)')).ok).toBe(true);
     expect(checkFollowups(wrap('**(none)**')).ok).toBe(true);
   });
+
+  describe('Backlog.md final-summary markers', () => {
+    const real = (follow: string): string =>
+      `## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n## Summary\n\nDone.\n\n## Follow-up\n\n${follow}\n<!-- SECTION:FINAL_SUMMARY:END -->\n`;
+
+    it('passes (none) when the END marker follows the section', () => {
+      expect(checkFollowups(real('(none)')).ok).toBe(true);
+    });
+
+    it('passes a cited id list', () => {
+      expect(checkFollowups(real('- Wire it (AISDLC-70)\n- Also #12')).ok).toBe(true);
+    });
+
+    it('still fails a prose item and does not report the marker', () => {
+      const r = checkFollowups(real('- The orchestrator should inject the adapter'));
+      expect(r.ok).toBe(false);
+      expect(r.violations.map((v) => v.item)).toEqual([
+        'The orchestrator should inject the adapter',
+      ]);
+    });
+  });
+
+  it('checks every Follow-up section, not just the first', () => {
+    const md = '### Follow-up\n(none)\n\n## Notes\nx\n\n### Follow-ups\n- prose only\n';
+    const r = checkFollowups(md);
+    expect(r.ok).toBe(false);
+    expect(r.violations).toHaveLength(1);
+  });
+
+  it('attributes nested sub-bullets and continuations to the parent item', () => {
+    expect(checkFollowups(wrap('- Parent (AISDLC-5)\n  - child prose\n    more prose')).ok).toBe(
+      true,
+    );
+    const bad = checkFollowups(wrap('- Parent prose\n  - child cites AISDLC-5'));
+    expect(bad.ok).toBe(true);
+    expect(checkFollowups(wrap('- Parent prose\n  - child prose')).violations).toHaveLength(1);
+  });
+
+  it('treats an oversized item as a violation without crashing', () => {
+    const r = checkFollowups(wrap(`- AISDLC-1 ${'a '.repeat(5000)}`));
+    expect(r.ok).toBe(false);
+    expect(r.violations[0].reason).toBe('item-too-large');
+    expect(formatFollowupViolations(r.violations)).toContain('too long');
+  });
+
+  it('explains how to write issue references', () => {
+    const msg = formatFollowupViolations([{ item: 'x', reason: 'no-tracked-id' }]);
+    expect(msg).toContain('#123 or owner/repo#123');
+    expect(msg).toContain('not as URLs');
+  });
 });

@@ -15,7 +15,7 @@ export interface FollowupViolation {
   /** The offending item, trimmed and with list markers removed. */
   item: string;
   /** Why it was rejected. */
-  reason: 'no-tracked-id' | 'declined-without-reason';
+  reason: 'no-tracked-id' | 'declined-without-reason' | 'item-too-large';
 }
 
 export interface FollowupCheckOptions {
@@ -30,10 +30,17 @@ export interface FollowupCheckResult {
 
 const DEFAULT_TASK_PREFIX = 'AISDLC';
 const MIN_DECLINE_REASON_LENGTH = 10;
+/** Items longer than this are rejected before any regex runs (bounds backtracking). */
+const MAX_ITEM_LENGTH = 4096;
+const DISPLAY_LENGTH = 200;
 
 /** `### Follow-up` / `## Follow-ups` (with optional trailing qualifier). */
 const HEADING_RE = /^(#{2,4})\s+follow-?ups?\b.*$/i;
 const ANY_HEADING_RE = /^(#{1,6})\s+\S/;
+/** Backlog.md section markers, e.g. `<!-- SECTION:FINAL_SUMMARY:END -->`. */
+const SECTION_MARKER_RE = /^\s*<!--\s*SECTION:[A-Z_]+:(?:BEGIN|END)\s*-->\s*$/;
+/** A line holding nothing but HTML comments. */
+const COMMENT_ONLY_RE = /^\s*(?:<!--.*?-->\s*)+$/;
 const FENCE_RE = /^\s*(```|~~~)/;
 const LIST_MARKER_RE = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
 /** GitHub issue reference: `#123`, `owner/repo#123`. */
@@ -48,12 +55,11 @@ function taskIdRegExp(prefix: string): RegExp {
   return new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(prefix)}-\\d+(?:\\.\\d+)*(?![A-Za-z0-9])`, 'i');
 }
 
-/** Lines of the Follow-up section body, or null when there is no such section. */
-function extractSection(markdown: string): string[] | null {
+/** Bodies of every Follow-up section (a document may hold several). */
+function extractSections(markdown: string): string[][] {
   const lines = markdown.split(/\r?\n/);
+  const sections: string[][] = [];
   let inFence = false;
-  let start = -1;
-  let level = 0;
   for (let i = 0; i < lines.length; i++) {
     if (FENCE_RE.test(lines[i])) {
       inFence = !inFence;
@@ -61,24 +67,26 @@ function extractSection(markdown: string): string[] | null {
     }
     if (inFence) continue;
     const m = HEADING_RE.exec(lines[i]);
-    if (m) {
-      start = i + 1;
-      level = m[1].length;
-      break;
+    if (!m) continue;
+    const level = m[1].length;
+    const body: string[] = [];
+    let fence = false;
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      const line = lines[j];
+      if (FENCE_RE.test(line)) fence = !fence;
+      else if (!fence) {
+        if (SECTION_MARKER_RE.test(line)) break;
+        const h = ANY_HEADING_RE.exec(line);
+        if (h && h[1].length <= level) break;
+      }
+      if (!fence && COMMENT_ONLY_RE.test(line)) continue;
+      body.push(line);
     }
+    sections.push(body);
+    i = j - 1;
   }
-  if (start === -1) return null;
-  const body: string[] = [];
-  inFence = false;
-  for (let i = start; i < lines.length; i++) {
-    if (FENCE_RE.test(lines[i])) inFence = !inFence;
-    else if (!inFence) {
-      const h = ANY_HEADING_RE.exec(lines[i]);
-      if (h && h[1].length <= level) break;
-    }
-    body.push(lines[i]);
-  }
-  return body;
+  return sections;
 }
 
 /** Group section lines into items: one per list entry, one per paragraph. */
@@ -96,7 +104,11 @@ function toItems(body: string[]): string[] {
       flush();
       continue;
     }
-    if (LIST_MARKER_RE.test(line)) {
+    const isMarker = LIST_MARKER_RE.test(line);
+    if (isMarker && current && currentIsList && /^\s+/.test(line)) {
+      // Nested sub-bullet: belongs to its parent item (the parent must cite).
+      current.push(line.replace(LIST_MARKER_RE, '').trim());
+    } else if (isMarker) {
       flush();
       current = [line.replace(LIST_MARKER_RE, '')];
       currentIsList = true;
@@ -124,12 +136,15 @@ export function checkFollowups(
   markdown: string,
   options: FollowupCheckOptions = {},
 ): FollowupCheckResult {
-  const body = extractSection(markdown);
-  if (!body) return { ok: true, violations: [] };
-
+  const sections = extractSections(markdown);
   const idRe = taskIdRegExp(options.taskPrefix ?? DEFAULT_TASK_PREFIX);
   const violations: FollowupViolation[] = [];
-  for (const raw of toItems(body)) {
+  const raws = sections.flatMap((body) => toItems(body));
+  for (const raw of raws) {
+    if (raw.length > MAX_ITEM_LENGTH) {
+      violations.push({ item: `${raw.slice(0, DISPLAY_LENGTH)}...`, reason: 'item-too-large' });
+      continue;
+    }
     const item = stripEmphasis(raw);
     if (/^\(?none\)?\.?$/i.test(item)) continue;
     const declined = DECLINED_RE.exec(item);
@@ -161,13 +176,20 @@ export function formatFollowupViolations(
   );
   for (const v of violations) {
     out.push(
-      `  - "${v.item}"${v.reason === 'declined-without-reason' ? ' (declined: needs a reason of at least 10 characters)' : ''}`,
+      `  - "${v.item}"${
+        v.reason === 'declined-without-reason'
+          ? ' (declined: needs a reason of at least 10 characters)'
+          : v.reason === 'item-too-large'
+            ? ' (item is too long; split it into short items)'
+            : ''
+      }`,
     );
   }
   out.push('');
   out.push('A follow-up that is only prose is never acted on. Each item must be one of:');
+  out.push(`  1. Tracked work: cite a task id (e.g. ${prefix}-123) or an issue reference.`);
   out.push(
-    `  1. Tracked work: cite a task id (e.g. ${prefix}-123) or an issue reference (e.g. #123).`,
+    '     Write issue references as #123 or owner/repo#123 (not as URLs); a bare URL does not count.',
   );
   out.push('  2. None: make the whole section read "(none)".');
   out.push('  3. Declined: start the item with "declined:" followed by a reason (10+ characters).');

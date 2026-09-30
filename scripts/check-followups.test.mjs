@@ -86,6 +86,19 @@ describe('check-followups.mjs --task', () => {
     assert.match(r.stderr, /declined:/);
   });
 
+  it('handles the real marker-wrapped Final Summary layout', () => {
+    const real = (f) =>
+      `---\nid: AISDLC-1\nstatus: Done\n---\n\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n## Summary\n\nShipped.\n\n## Follow-up\n\n${f}\n<!-- SECTION:FINAL_SUMMARY:END -->\n`;
+    assert.equal(run(['--task', put('m-none.md', real('(none)'))], dir).status, 0);
+    assert.equal(
+      run(['--task', put('m-cited.md', real('- Do it (AISDLC-9)\n- Also #4'))], dir).status,
+      0,
+    );
+    const bad = run(['--task', put('m-prose.md', real('- Someone should fix this'))], dir);
+    assert.equal(bad.status, 1);
+    assert.doesNotMatch(bad.stderr, /SECTION:/);
+  });
+
   it('accepts declined: with a reason, rejects it without', () => {
     const ok = run(
       ['--task', put('d1.md', task('\n### Follow-up\n- declined: not worth the churn\n'))],
@@ -151,6 +164,18 @@ describe('range mode and pre-push hook', () => {
     assert.equal(r.status, 1);
     assert.match(r.stderr, /new\.md/);
     assert.doesNotMatch(r.stderr, /old\.md/);
+  });
+
+  it('range mode accepts a marker-wrapped (none) completed file', () => {
+    writeFileSync(
+      join(repo, 'backlog', 'completed', 'wrapped.md'),
+      '---\nid: AISDLC-2\n---\n\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\n## Follow-up\n\n(none)\n<!-- SECTION:FINAL_SUMMARY:END -->\n',
+    );
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'wrapped'], repo);
+    const t = git(['rev-parse', 'HEAD'], repo).trim();
+    const r = run(['--staged', '--push-range', `${tip}..${t}`], repo);
+    assert.equal(r.status, 0, r.stderr);
   });
 
   it('does not report a prose task outside the range', () => {
