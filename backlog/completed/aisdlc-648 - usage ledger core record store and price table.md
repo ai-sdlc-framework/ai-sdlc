@@ -116,5 +116,5 @@ Added the RFC-0050 usage ledger core: the `ModelCallRecord` schema (registered w
 - 3 parallel reviews approved after 3 rounds
 
 ## Follow-up
-- `DEFAULT_MODEL_COSTS` disagrees with the published list for opus-4-6, haiku-4-5, claude-3-5-haiku
-- `CostTracker` does not price cache-write tokens
+- Declined: not filed by this task; `DEFAULT_MODEL_COSTS` disagreeing with the published list for opus-4-6, haiku-4-5 and claude-3-5-haiku is pending an operator decision (existing tests pin those values)
+- Declined: not filed by this task; `CostTracker` not pricing cache-write tokens is pending an operator decision
