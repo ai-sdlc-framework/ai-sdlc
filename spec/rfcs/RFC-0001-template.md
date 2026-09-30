@@ -99,6 +99,19 @@ requiresDocs: []
 # approaches. (Deadline enforcement is informational in v1.)
 # deferredDocs: false
 # deferredDocsDeadline: YYYY-MM-DD
+
+# Runtime evidence for each optional (usually model-backed) capability this RFC
+# specifies. REQUIRED (an empty list is fine) before `lifecycle` moves from
+# `Signed Off` to `Implemented`, and every entry must then be `live` or
+# `not-applicable`. `capability` is an id from the capability registry;
+# `status` is one of live | shadow | degraded | not-applicable; `owner` is
+# optional. Declare `runtimeEvidence: []` if the RFC specifies no capability.
+# runtimeEvidence:
+#   - capability: dor.stage-b
+#     status: degraded
+#     evidence: where the status was observed
+#     date: YYYY-MM-DD
+#     owner: TASK-ID
 ---
 
 # RFC-NNNN: Title

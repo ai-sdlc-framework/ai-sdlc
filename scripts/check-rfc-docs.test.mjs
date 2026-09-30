@@ -11,7 +11,8 @@
 
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -35,6 +36,8 @@ import {
   TEMPLATE_FILENAME,
   ASSUMES_OK_LIFECYCLES,
   REQUIRES_OK_LIFECYCLES,
+  KNOWN_CAPABILITY_IDS,
+  validateRuntimeEvidence,
 } from './check-rfc-docs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1257,5 +1260,152 @@ describe('validateRfcDependencies', () => {
     );
     assert.deepEqual(failures, []);
     assert.deepEqual(warnings, []);
+  });
+});
+
+// ------------------------------------------------------ runtimeEvidence
+
+const evidenceRfc = (lifecycle, entries) =>
+  `---\nid: RFC-9999\nlifecycle: ${lifecycle}\nstatus: Implemented\nruntimeEvidence:\n${entries}\n---\n# Body\n`;
+const evEntry = (cap, status, owner) =>
+  `  - capability: ${cap}\n    status: ${status}\n    evidence: e\n    date: '2026-09-30'` +
+  (owner ? `\n    owner: ${owner}` : '');
+
+describe('validateRuntimeEvidence', () => {
+  it('returns nothing when the block is absent', () => {
+    const r = validateRuntimeEvidence('---\nid: RFC-9999\n---\n', 'RFC-9999');
+    assert.deepEqual(r, { failures: [], warnings: [] });
+  });
+
+  it('warns once per degraded or shadow entry on an Implemented RFC, naming RFC, capability, owner', () => {
+    const src = evidenceRfc(
+      'Implemented',
+      [
+        evEntry('dor.stage-b', 'degraded', 'OWN-1'),
+        evEntry('sa.layer3', 'shadow'),
+        evEntry('estimation.stage-b', 'live'),
+      ].join('\n'),
+    );
+    const r = validateRuntimeEvidence(src, 'RFC-9999');
+    assert.deepEqual(r.failures, []);
+    assert.equal(r.warnings.length, 2);
+    assert.equal(r.warnings[0].rfc, 'RFC-9999');
+    assert.match(r.warnings[0].reason, /dor\.stage-b.*degraded.*OWN-1/);
+    assert.match(r.warnings[1].reason, /sa\.layer3.*shadow.*owner: none/);
+  });
+
+  it('does not warn on a non-Implemented RFC', () => {
+    const r = validateRuntimeEvidence(
+      evidenceRfc('Signed Off', evEntry('dor.stage-b', 'degraded')),
+      'RFC-9999',
+    );
+    assert.deepEqual(r.warnings, []);
+  });
+
+  it('fails on an unknown capability id, but accepts one declared via extraCapabilityIds', () => {
+    const src = evidenceRfc('Implemented', evEntry('made.up', 'live'));
+    const bad = validateRuntimeEvidence(src, 'RFC-9999');
+    assert.equal(bad.failures.length, 1);
+    assert.match(bad.failures[0].reason, /unknown capability 'made\.up'/);
+    assert.deepEqual(
+      validateRuntimeEvidence(src, 'RFC-9999', { extraCapabilityIds: ['made.up'] }).failures,
+      [],
+    );
+  });
+
+  it('fails on a non-list, non-mapping entry, missing capability, and unknown status', () => {
+    assert.equal(
+      validateRuntimeEvidence('---\nlifecycle: Implemented\nruntimeEvidence: nope\n---\n', 'R')
+        .failures.length,
+      1,
+    );
+    assert.equal(
+      validateRuntimeEvidence(evidenceRfc('Implemented', '  - just-a-string'), 'R').failures.length,
+      1,
+    );
+    assert.equal(
+      validateRuntimeEvidence(evidenceRfc('Implemented', '  - status: live'), 'R').failures.length,
+      1,
+    );
+    const r = validateRuntimeEvidence(
+      evidenceRfc('Implemented', evEntry('dor.stage-b', 'bogus')),
+      'R',
+    );
+    assert.match(r.failures[0].reason, /unknown status 'bogus'/);
+  });
+});
+
+describe('checkAllRfcs — runtimeEvidence', () => {
+  it('fails the check for an unknown capability and exits zero for warnings only', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-evidence-'));
+    try {
+      const rfcs = join(dir, 'rfcs');
+      mkdirSync(rfcs);
+      const write = (name, body) => writeFileSync(join(rfcs, name), body);
+      const fm = (id, entries) =>
+        `---\nid: ${id}\ntitle: Test RFC\nstatus: Draft\nlifecycle: Implemented\nauthor: a\ncreated: 2026-01-01\nupdated: 2026-01-01\nrequiresDocs: []\nruntimeEvidence:\n${entries}\n---\n# ${id}\n`;
+      write('RFC-9001-warn.md', fm('RFC-9001', evEntry('dor.stage-b', 'degraded', 'OWN-1')));
+      let run = spawnSync(process.execPath, [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir], {
+        encoding: 'utf-8',
+      });
+      assert.equal(run.status, 0);
+      assert.match(run.stdout, /WARN RFC-9001: capability 'dor\.stage-b' is degraded/);
+      write('RFC-9002-bad.md', fm('RFC-9002', evEntry('nope.cap', 'live')));
+      run = spawnSync(process.execPath, [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir], {
+        encoding: 'utf-8',
+      });
+      assert.equal(run.status, 1);
+      assert.match(run.stderr, /unknown capability 'nope\.cap'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('KNOWN_CAPABILITY_IDS', () => {
+  it('matches the built-in capability registry exactly', () => {
+    const src = readFileSync(
+      join(__dirname, '..', 'reference', 'src', 'capabilities', 'registry.ts'),
+      'utf-8',
+    );
+    const start = src.indexOf('BUILT_IN_CAPABILITIES');
+    const ids = [...src.slice(start).matchAll(/(?:judgment\(\s*|id:\s*)'([a-z0-9.-]+)'/g)].map(
+      (m) => m[1],
+    );
+    assert.deepEqual([...KNOWN_CAPABILITY_IDS].sort(), [...new Set(ids)].sort());
+  });
+});
+
+describe('rfc.schema.json runtimeEvidence', () => {
+  const req = createRequire(join(__dirname, '..', 'reference', 'package.json'));
+  const Ajv2020 = req('ajv/dist/2020.js').default ?? req('ajv/dist/2020.js');
+  const addFormats = req('ajv-formats').default ?? req('ajv-formats');
+  const schema = JSON.parse(
+    readFileSync(join(__dirname, '..', 'spec', 'schemas', 'rfc.schema.json'), 'utf-8'),
+  );
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  addFormats(ajv);
+  const validate = ajv.compile(schema);
+  const base = {
+    id: 'RFC-9999',
+    title: 'Test RFC',
+    status: 'Draft',
+    author: 'a',
+    created: '2026-01-01',
+    updated: '2026-01-01',
+    requiresDocs: [],
+  };
+  const good = { capability: 'dor.stage-b', status: 'degraded', evidence: 'e', date: '2026-09-30' };
+
+  it('accepts a well-formed list, an empty list, and an owner', () => {
+    assert.ok(validate({ ...base, runtimeEvidence: [good, { ...good, owner: 'OWN-1' }] }));
+    assert.ok(validate({ ...base, runtimeEvidence: [] }));
+    assert.ok(validate(base));
+  });
+
+  it('rejects an unknown status and a missing capability', () => {
+    assert.equal(validate({ ...base, runtimeEvidence: [{ ...good, status: 'bogus' }] }), false);
+    const { capability: _c, ...noCap } = good;
+    assert.equal(validate({ ...base, runtimeEvidence: [noCap] }), false);
   });
 });

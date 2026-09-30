@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-08
-updated: 2026-05-27
+updated: 2026-09-30
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0023, RFC-0024, RFC-0025, RFC-0029]
 # Strategic / framework RFC. User-facing surfaces (operator runbook, API reference)
@@ -23,6 +23,17 @@ implementedBy:
   - AISDLC-293 (Phase 9 — Override-driven calibration loop)
   - AISDLC-294 (Phase 10 — Research subagent + visual graphs)
   - AISDLC-295 (Phase 11 — Promotion runbook)
+runtimeEvidence:
+  - capability: decisions.stage-c-recommendation
+    status: degraded
+    evidence: pending sentinel returned on every invocation; no model backend wired
+    date: '2026-09-30'
+    owner: AISDLC-634
+  - capability: decisions.stage-b-signals
+    status: degraded
+    evidence: stage B signals are constants at 0.5; no model-backed signal has run
+    date: '2026-09-30'
+    owner: AISDLC-635
 ---
 
 <!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All 14 OQs resolved in §15 (operator walkthrough 2026-05-15). All 11 implementation phases shipped (AISDLC-285..295 — see implementedBy frontmatter). Engineering + Operator sign-offs complete (signed today via PR #742). Product Authority box still pending but not gating per project_team_roles (operator owns Engineering + Operator authority). Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all phases shipped and merged, (b) Engineering + Operator authority concurs, (c) AISDLC-447 timebox enhancement is a documented follow-up not a gating gap. -->
@@ -596,3 +607,9 @@ These 8 patterns are normative for the v1 Decision Catalog implementation. RFC-0
 - [RFC-0031](RFC-0031-calibration-driven-did-revision-proposal.md) — Calibration-driven DID revision (calibration loop pattern)
 - [RFC-0033](RFC-0033-governance-reporting-layer.md) — Governance reporting layer (decision-metrics consumer)
 - [`docs/api-reference/review-calibration.md`](../../docs/api-reference/review-calibration.md) — Review-calibration system; deterministic preprocessing → confidence-tiered → meta-review pattern this RFC mirrors
+
+## Revision History
+
+| Version | Date | Author | Notes |
+|---|---|---|---|
+| v1 | 2026-09-30 | dominique | Added `runtimeEvidence` recording `decisions.stage-c-recommendation` (owner AISDLC-634) and `decisions.stage-b-signals` (owner AISDLC-635) as degraded. Lifecycle unchanged. |
