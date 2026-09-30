@@ -2,7 +2,7 @@
 id: AISDLC-648
 title: >-
   RFC-0050 Part A: usage ledger core (record schema, JSONL store, deduplication, direct reporter, price table)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
