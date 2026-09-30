@@ -415,6 +415,166 @@ export function checkRequiresShipped({ toContent, toLifecycle, rfcId, readUpstre
   return { ok: false, violations, diagnostic };
 }
 
+/** Statuses a `runtimeEvidence` entry may carry. */
+export const RUNTIME_EVIDENCE_STATUSES = ['live', 'shadow', 'degraded', 'not-applicable'];
+
+/** Statuses that satisfy the `Signed Off -> Implemented` promotion rule. */
+const PROMOTABLE_EVIDENCE_STATUSES = new Set(['live', 'not-applicable']);
+
+/**
+ * Read `runtimeEvidence` from an RFC's frontmatter.
+ *
+ * Returns `{ present: false }` when the key is absent or the frontmatter cannot be
+ * read, and `{ present: true, value }` otherwise (value is whatever was parsed,
+ * unvalidated). Uses js-yaml when available; the fallback handles only the
+ * `runtimeEvidence: []` form and block lists of flat `key: value` entries, and
+ * reports anything else as a non-array value so the caller fails closed.
+ *
+ * @param {string|null|undefined} source - Full RFC content.
+ * @returns {{ present: boolean, value?: unknown, parseError?: boolean }}
+ */
+export function extractRuntimeEvidence(source) {
+  if (!source) return { present: false };
+  const normalised = source.replace(/\r\n/g, '\n');
+  if (!normalised.startsWith('---\n')) return { present: false };
+  const fenceEnd = normalised.indexOf('\n---\n', 4);
+  if (fenceEnd === -1) return { present: false };
+  const block = normalised.slice(4, fenceEnd);
+
+  const yaml = getJsYaml();
+  if (yaml) {
+    try {
+      const parsed = yaml.load(block);
+      if (parsed && typeof parsed === 'object' && 'runtimeEvidence' in parsed) {
+        return { present: true, value: parsed['runtimeEvidence'] };
+      }
+      return { present: false };
+    } catch {
+      // The YAML parser is present but rejected the frontmatter (for example a
+      // duplicate key). Never fall back to the weaker parser here: it can read a
+      // different value than the real parser would. Fail closed.
+      return { present: true, parseError: true };
+    }
+  }
+
+  // js-yaml is genuinely not installed: use the dependency-free fallback.
+  return parseRuntimeEvidenceFallback(block);
+}
+
+/**
+ * Dependency-free fallback used when js-yaml is unavailable. Exported for tests.
+ *
+ * @param {string} block - Raw frontmatter block (between the fences).
+ * @returns {{ present: boolean, value?: unknown }}
+ */
+export function parseRuntimeEvidenceFallback(block) {
+  const lines = block.split('\n');
+  const idx = lines.findIndex((l) => /^runtimeEvidence\s*:/.test(l));
+  if (idx === -1) return { present: false };
+  const rest = lines[idx].replace(/^runtimeEvidence\s*:/, '').trim();
+  if (rest === '[]') return { present: true, value: [] };
+  if (rest !== '') return { present: true, value: rest };
+  const entries = [];
+  let current = null;
+  for (const line of lines.slice(idx + 1)) {
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    if (!/^\s/.test(line)) break;
+    const item = line.match(/^\s+-\s+([A-Za-z]+)\s*:\s*(.*)$/);
+    const cont = line.match(/^\s+([A-Za-z]+)\s*:\s*(.*)$/);
+    const strip = (v) =>
+      v
+        .replace(/\s+#.*$/, '')
+        .trim()
+        .replace(/^['"]|['"]$/g, '');
+    if (item) {
+      current = { [item[1]]: strip(item[2]) };
+      entries.push(current);
+    } else if (cont && current) {
+      current[cont[1]] = strip(cont[2]);
+    } else {
+      return { present: true, value: line.trim() };
+    }
+  }
+  return { present: true, value: entries };
+}
+
+/**
+ * Structural check of one `runtimeEvidence` entry, mirroring the schema's required
+ * fields. Returns a short description of the problem, or null when well-formed.
+ *
+ * @param {unknown} entry
+ * @returns {string|null}
+ */
+export function describeEvidenceEntryProblem(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return 'entry must be a mapping';
+  }
+  if (typeof entry.capability !== 'string' || entry.capability.trim() === '') {
+    return "missing 'capability'";
+  }
+  if (!RUNTIME_EVIDENCE_STATUSES.includes(entry.status)) {
+    return `status must be one of ${RUNTIME_EVIDENCE_STATUSES.join(', ')}`;
+  }
+  if (typeof entry.evidence !== 'string' || entry.evidence.trim() === '') {
+    return "missing 'evidence'";
+  }
+  if (
+    typeof entry.date !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
+    Number.isNaN(Date.parse(`${entry.date}T00:00:00Z`)) ||
+    new Date(`${entry.date}T00:00:00Z`).toISOString().slice(0, 10) !== entry.date
+  ) {
+    return "'date' must be a quoted ISO date (YYYY-MM-DD)";
+  }
+  return null;
+}
+
+/**
+ * Evaluate the `Signed Off -> Implemented` promotion rule against the AFTER content.
+ * Fails closed: absent, malformed, or any `degraded` / `shadow` entry is refused.
+ * An empty list is accepted (the RFC specifies no optional capability).
+ *
+ * @param {string|null|undefined} afterContent
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+export function evaluatePromotionEvidence(afterContent) {
+  const ev = extractRuntimeEvidence(afterContent);
+  if (!ev.present) {
+    return {
+      ok: false,
+      reason:
+        "'runtimeEvidence' is absent from the frontmatter (declare an empty list if the RFC specifies no optional capability)",
+    };
+  }
+  if (ev.parseError) {
+    return {
+      ok: false,
+      reason:
+        'the frontmatter could not be parsed unambiguously (for example a duplicate key), so runtimeEvidence cannot be trusted',
+    };
+  }
+  if (!Array.isArray(ev.value)) {
+    return { ok: false, reason: "'runtimeEvidence' is malformed (expected a list of entries)" };
+  }
+  const blocking = [];
+  for (const [i, entry] of ev.value.entries()) {
+    const problem = describeEvidenceEntryProblem(entry);
+    if (problem) {
+      return { ok: false, reason: `'runtimeEvidence' entry ${i + 1} is malformed (${problem})` };
+    }
+    if (!PROMOTABLE_EVIDENCE_STATUSES.has(entry.status)) {
+      blocking.push(`${entry.capability} (${entry.status})`);
+    }
+  }
+  if (blocking.length > 0) {
+    return {
+      ok: false,
+      reason: `capabilities not yet live: ${blocking.join(', ')}`,
+    };
+  }
+  return { ok: true };
+}
+
 /**
  * Check a single RFC lifecycle transition.
  *
@@ -496,11 +656,17 @@ export function checkLifecycleTransition({
   }
 
   const key = `${fromLifecycle}->${toLifecycle}`;
+  let promotionReason = null;
   if (!FORBIDDEN_TRANSITIONS.has(key)) {
-    return { ok: true };
+    // Promotion rule: Signed Off -> Implemented requires runtime evidence in the
+    // after-content. Every other permitted transition is unchanged.
+    if (key !== 'Signed Off->Implemented') return { ok: true };
+    const evidence = evaluatePromotionEvidence(rfcBody);
+    if (evidence.ok) return { ok: true };
+    promotionReason = evidence.reason;
   }
 
-  // Forbidden transition detected — check for override marker.
+  // Forbidden transition (or failed promotion rule) detected — check for override marker.
   // AISDLC-350: override requires the marker in BOTH PR body AND RFC body
   // (defense-in-depth — single-source override is a trust-all bypass).
   const prOverride = parseOverrideMarker(prBody);
@@ -536,6 +702,24 @@ export function checkLifecycleTransition({
     }
 
     return { ok: true, override: { operator, reason } };
+  }
+
+  if (promotionReason !== null) {
+    let missing = '';
+    if (prOverride && !rfcOverride) {
+      missing = ' Override marker found in PR body only — it must ALSO appear in the RFC body.';
+    } else if (!prOverride && rfcOverride) {
+      missing = ' Override marker found in RFC body only — it must ALSO appear in the PR body.';
+    }
+    const diagnostic =
+      `[rfc-lifecycle] FAIL ${rfcId}: cannot promote '${fromLifecycle}' → '${toLifecycle}': ` +
+      `${promotionReason}. Every capability the RFC specifies must be recorded in ` +
+      `'runtimeEvidence' as 'live' or 'not-applicable' before the RFC is marked Implemented. ` +
+      `To bypass (audit-trail preserving), add to BOTH the PR body AND the RFC body: ` +
+      `<!-- ai-sdlc:lifecycle-jump-approved-by:<operator> reason:<text> --> ` +
+      `where <operator> is listed in .ai-sdlc/lifecycle-approvers.yaml.` +
+      missing;
+    return { ok: false, violation: key, diagnostic };
   }
 
   // Compute the correct next step(s) for the diagnostic message.

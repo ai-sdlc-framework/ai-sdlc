@@ -7300,6 +7300,45 @@ export const rfcSchema = {
       description:
         'ISO 8601 date by which the deferred docs MUST be authored. REQUIRED when `deferredDocs: true`.',
     },
+    runtimeEvidence: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['capability', 'status', 'evidence', 'date'],
+        additionalProperties: false,
+        properties: {
+          capability: {
+            type: 'string',
+            minLength: 1,
+            description: 'Capability id from the capability registry (for example `dor.stage-b`).',
+          },
+          status: {
+            type: 'string',
+            enum: ['live', 'shadow', 'degraded', 'not-applicable'],
+            description:
+              'Observed runtime state of the capability. `live`: it produced its real result and the caller used it. `shadow`: it produced its real result and the caller did not use it. `degraded`: it took its fallback path. `not-applicable`: the RFC names the capability but this deployment does not need it.',
+          },
+          evidence: {
+            type: 'string',
+            minLength: 1,
+            description:
+              'Where the status was observed (an artifact path, a log, a command and its result).',
+          },
+          date: {
+            type: 'string',
+            format: 'date',
+            pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+            description: 'ISO 8601 date (YYYY-MM-DD) the evidence was recorded.',
+          },
+          owner: {
+            type: 'string',
+            description: 'Tracked-work id that will move the capability to `live`. Optional.',
+          },
+        },
+      },
+      description:
+        'Runtime evidence for each optional (usually model-backed) capability the RFC specifies. Promotion from `Signed Off` to `Implemented` requires the field to be present with every entry `live` or `not-applicable`; an empty list means the RFC specifies no optional capability. Entries that are `degraded` or `shadow` on an `Implemented` RFC produce a linter warning. Optional.',
+    },
   },
   allOf: [
     {

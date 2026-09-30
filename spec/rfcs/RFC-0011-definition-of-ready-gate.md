@@ -5,12 +5,18 @@ status: Implemented
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-04-30
-updated: 2026-05-13
+updated: 2026-09-30
 targetSpecVersion: v1alpha1
 # Conceptual / strategic + future-feature RFC. Phase 1 (AISDLC-115.1) ships
 # only the schemas + status enum. Per-surface tutorials/api docs land with
 # the agent rollout in later phases — see spec/rfcs/README.md operator notes.
 requiresDocs: []
+runtimeEvidence:
+  - capability: dor.stage-b
+    status: degraded
+    evidence: artifacts/_dor/calibration.jsonl (158 evaluations, all stage A)
+    date: '2026-09-30'
+    owner: AISDLC-636
 ---
 
 # RFC-0011: Definition-of-Ready Gate for Pipeline Admission
@@ -38,6 +44,7 @@ requiresDocs: []
 | v2 | 2026-04-30 | dominique | Deterministic-first evaluation order (Section 4.4), test corpus + 3-tier eval harness (Section 5.6), Phase 2 split into 2a/2b |
 | v3 | 2026-04-30 | dominique | All 10 open questions resolved (Section 13). Library-function-with-shims architecture (Section 5.0-5.2), pluggable resolver registry, dual-fanout notifications, two-stage staleness, three-tier confidence gating, grandfather-on-rubric-revision. Sign-off complete. |
 | v4 | 2026-05-03 | dominique | Promoted from warn-only to enforce in dogfood project on 2026-05-03 via operator-override path (per `docs/operations/dor-promotion.md`). Hybrid promotion model documented in AISDLC-161; corpus-rigorous path unblocks once data accumulates. AISDLC-115.9 ships the one-line `evaluationMode` flip in `.ai-sdlc/dor-config.yaml`. |
+| v5 | 2026-09-30 | dominique | Added `runtimeEvidence` recording `dor.stage-b` as degraded (owner AISDLC-636). Lifecycle unchanged. |
 
 ## Table of Contents
 

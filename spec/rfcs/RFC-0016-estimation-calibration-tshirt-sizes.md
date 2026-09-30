@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-01
-updated: 2026-05-27
+updated: 2026-09-30
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0011
@@ -18,6 +18,16 @@ implementedBy:
   - AISDLC-282 (Phase 4 — Stage B LLM tie-breaker ensemble)
   - AISDLC-283 (Phase 5 — Bias adjustment state + token PR comment)
   - AISDLC-284 (Phase 6 — Soak drift detection + class proposals)
+runtimeEvidence:
+  - capability: estimation.class-assignment
+    status: degraded
+    evidence: class taken from the title-prefix regex; no model-backed assignment has run
+    date: '2026-09-30'
+    owner: AISDLC-635
+  - capability: estimation.stage-b
+    status: degraded
+    evidence: Stage A verdict used unchanged; no stage B evaluation has run
+    date: '2026-09-30'
 ---
 
 <!-- ai-sdlc:lifecycle-jump-approved-by:deefactorial reason:All 6 implementation phases shipped (AISDLC-279..284 — see implementedBy frontmatter). Engineering + Operator sign-offs present (Dominique 2026-05-03). Product Authority box pending but not gating per project_team_roles (operator owns Engineering + Operator authority); Product re-review can land in a follow-up. Lifecycle ladder skip (Ready for Review → Implemented) authorized because: (a) all phases shipped and merged, (b) Engineering + Operator authority concurs, (c) the intermediate "Signed Off" step is procedurally redundant given operator owns both roles. -->
@@ -48,6 +58,7 @@ implementedBy:
 | v1 | 2026-05-01 | dominique | Initial draft. Captures the systematic-overestimate-bias problem observed during the 2026-05-01 session and proposes a t-shirt-size + 2x-deviation calibration loop, mirroring how human teams calibrate story points. |
 | v2 | 2026-05-01 | dominique | Restructured around the **deterministic-first / LLM-as-last-resort** pattern (mirrors RFC-0011 DoR Stage A/B). New §5 catalogues 8 Stage A deterministic signals (file scope, LOC delta, coverage threshold, historical actuals, dependency depth, blocked-paths-touched, file-type breakdown, reviewer-iteration history). New §6 reframes the LLM as a tie-breaker that runs ONLY when Stage A signals disagree or are missing, with the deterministic inputs as context. Renumbered §5-§9 → §7-§11; updated §1 + §2.2 to lead with the Stage A/B framing; added Q8 (which Stage A signals ship in Phase 1). |
 | v3 | 2026-05-03 | dominique | Operator walkthrough resolved 8 open questions (Q1-Q8); Q3 / Q5 / Q6 received substantive design upgrades beyond the original lean — see new §15 Resolutions section. Q3 collapses the 10-class taxonomy to a 3-class convergent core (`bug` / `feature` / `chore`) with full ontology structure (definition + exemplars + anti_patterns + synonyms) and confidence-gated LLM classification (auto / log-for-review / fall-back); Q5 replaces the single-shot EstimateRevised model with content-hash-keyed ensemble sampling (median bucket + variance signal); Q6 introduces a 3-state token enum (`uncalibrated` / `warming` / `calibrated`) with appendable variance qualifier shared across PR comment / CLI / dashboard / Slack surfaces. Q7 PR surfacing now ships as a bot comment with the AISDLC-142 idempotent-marker pattern; Q8 ships 6 cheap signals + a class-default fallback (= 7 signals) in Phase 1. Lifecycle flipped Draft → Ready for Review; Engineering + Operator signoffs added (Product owner Alex pending review). |
+| v4 | 2026-09-30 | dominique | Added `runtimeEvidence` recording `estimation.class-assignment` (owner AISDLC-635) and `estimation.stage-b` as degraded. Lifecycle unchanged. |
 
 ---
 

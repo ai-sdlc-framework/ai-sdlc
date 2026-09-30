@@ -42,6 +42,10 @@ import { execFileSync } from 'node:child_process';
 import {
   checkAllTransitions,
   reportTransitionsAndExit,
+  extractLifecycle,
+  extractRuntimeEvidence,
+  describeEvidenceEntryProblem,
+  RUNTIME_EVIDENCE_STATUSES,
 } from './check-rfc-lifecycle-transitions.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -822,6 +826,13 @@ export function checkAllRfcs({
     });
     failures.push(...depF);
     warnings.push(...depW);
+
+    // Capability-liveness evidence: unknown ids fail; degraded/shadow entries on
+    // an Implemented RFC warn (never fail).
+    const rfcIdForEvidence = parsed.frontmatter.id ?? basename(file);
+    const ev = validateRuntimeEvidence(readFileSync(file, 'utf-8'), rfcIdForEvidence);
+    failures.push(...ev.failures);
+    warnings.push(...ev.warnings);
   }
 
   return {
@@ -831,6 +842,90 @@ export function checkAllRfcs({
     enforcedCount,
     skippedCount,
   };
+}
+
+/**
+ * Capability ids an RFC's `runtimeEvidence` may name: the RFC-0049 section 9.1
+ * registry. This is the single literal list for the RFC tooling; a test binds it
+ * to `reference/src/capabilities/registry.ts` so the two cannot drift.
+ */
+export const KNOWN_CAPABILITY_IDS = [
+  'classifier.capture-triage',
+  'classifier.capture-severity',
+  'classifier.pr-comment-is-capture',
+  'classifier.dor-answer-is-new-concern',
+  'decisions.stage-c-recommendation',
+  'decisions.stage-b-signals',
+  'dor.stage-b',
+  'estimation.class-assignment',
+  'estimation.stage-b',
+  'sa.layer3',
+  'review.meta-review',
+  'policy.llm-evaluator',
+];
+
+/**
+ * Validate the `runtimeEvidence` block of one RFC.
+ *
+ * Failures: malformed block, unknown status, or a capability id that is neither in
+ * the registry list nor in `extraCapabilityIds` (ids declared by Judgment Catalog
+ * definitions). Warnings: one line per `degraded` / `shadow` entry on an RFC at
+ * lifecycle `Implemented`, naming the RFC, the capability and the owner.
+ *
+ * @param {string} source  Full RFC file content.
+ * @param {string} rfcId   RFC id for messages.
+ * @param {{ extraCapabilityIds?: Iterable<string> }} [opts]
+ * @returns {{ failures: Array<{rfc: string, surface: null, reason: string}>, warnings: Array<{rfc: string, reason: string}> }}
+ */
+export function validateRuntimeEvidence(source, rfcId, { extraCapabilityIds = [] } = {}) {
+  const failures = [];
+  const warnings = [];
+  const ev = extractRuntimeEvidence(source);
+  if (!ev.present) return { failures, warnings };
+  const fail = (reason) => failures.push({ rfc: rfcId, surface: null, reason });
+  if (ev.parseError) {
+    fail('the frontmatter could not be parsed unambiguously (for example a duplicate key)');
+    return { failures, warnings };
+  }
+  if (!Array.isArray(ev.value)) {
+    fail("'runtimeEvidence' must be a list of entries");
+    return { failures, warnings };
+  }
+  const known = new Set([...KNOWN_CAPABILITY_IDS, ...extraCapabilityIds]);
+  const implemented = extractLifecycle(source) === 'Implemented';
+  for (const [i, entry] of ev.value.entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      fail(`'runtimeEvidence' entry ${i + 1} must be a mapping`);
+      continue;
+    }
+    if (typeof entry.capability !== 'string' || entry.capability.trim() === '') {
+      fail(`'runtimeEvidence' entry ${i + 1} is missing 'capability'`);
+      continue;
+    }
+    if (!known.has(entry.capability)) {
+      fail(
+        `'runtimeEvidence' names unknown capability '${entry.capability}' (not in the capability registry)`,
+      );
+    }
+    if (!RUNTIME_EVIDENCE_STATUSES.includes(entry.status)) {
+      fail(
+        `'runtimeEvidence' entry '${entry.capability}' has unknown status '${String(entry.status)}' (expected ${RUNTIME_EVIDENCE_STATUSES.join(', ')})`,
+      );
+      continue;
+    }
+    const problem = describeEvidenceEntryProblem(entry);
+    if (problem) {
+      fail(`'runtimeEvidence' entry '${entry.capability}' is malformed (${problem})`);
+      continue;
+    }
+    if (implemented && (entry.status === 'degraded' || entry.status === 'shadow')) {
+      warnings.push({
+        rfc: rfcId,
+        reason: `capability '${entry.capability}' is ${entry.status} on an Implemented RFC (owner: ${entry.owner ? entry.owner : 'none'})`,
+      });
+    }
+  }
+  return { failures, warnings };
 }
 
 /**

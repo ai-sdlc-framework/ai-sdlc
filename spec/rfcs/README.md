@@ -73,6 +73,8 @@ Draft → Ready for Review → Signed Off → Implemented
 
 **Drafts MUST land on main early.** As soon as the author considers the RFC shareable (typically after the first internal pass), it should be merged to main with `lifecycle: Draft`. Stakeholders can then reference it at its canonical `spec/rfcs/RFC-NNNN-*.md` URL while iteration continues through normal PR review. **Sign-off no longer gates visibility** — these are orthogonal questions. Hiding drafts until sign-off destroys the feedback loop the RFC process is supposed to create.
 
+**Promotion to `Implemented` requires runtime evidence.** The `Signed Off → Implemented` transition is refused by the lifecycle gate (`scripts/check-rfc-lifecycle-transitions.mjs`) unless the RFC's frontmatter carries `runtimeEvidence` and every entry is `live` or `not-applicable`. An RFC that specifies no optional capability declares an empty list (`runtimeEvidence: []`). A missing field, a malformed entry, or any `degraded` or `shadow` entry fails the gate. The audited operator override (the approval marker in both the PR body and the RFC body, by an operator listed in `.ai-sdlc/lifecycle-approvers.yaml`) applies to this rule exactly as it does to ladder skips, and writes the same audit entry. Transitions other than `Signed Off → Implemented` are unaffected.
+
 The `lifecycle` field is separate from the per-owner sign-off checklist that lives in the RFC body (`## Sign-Off`). The checklist is the source of truth for which individual owners have signed; `lifecycle` is the aggregate state used by the index table and tooling.
 
 ### Legacy `status` field
@@ -182,6 +184,31 @@ The schema lives at [`spec/schemas/rfc.schema.json`](../schemas/rfc.schema.json)
 | `amends`               | array of RFC ID | RFCs this RFC amends (e.g. RFC-0010 amends RFC-0002).                                                                                                  |
 | `deferredDocs`         | boolean        | Escape hatch — see below.                                                                                                                              |
 | `deferredDocsDeadline` | ISO 8601 date   | Required when `deferredDocs: true`.                                                                                                                    |
+| `runtimeEvidence`      | array of objects | One entry per optional (usually model-backed) capability the RFC specifies — see [`runtimeEvidence`](#runtimeevidence--capability-liveness-evidence). Required (possibly empty) to promote `Signed Off → Implemented`. |
+
+### `runtimeEvidence` — capability liveness evidence
+
+A capability is an optional, usually model-backed, function of the framework that has a defined fallback. An RFC that specifies one records what has actually been observed at runtime, so a fallback path is never counted as done:
+
+```yaml
+runtimeEvidence:
+  - capability: dor.stage-b        # id from the capability registry (reference/src/capabilities/)
+    status: degraded               # live | shadow | degraded | not-applicable
+    evidence: artifacts/_dor/calibration.jsonl (158 evaluations, all stage A)
+    date: '2026-09-30'
+    owner: AISDLC-636              # optional: the tracked-work id that will make it live
+```
+
+| Status | Meaning |
+|---|---|
+| `live` | The capability produced its real result and the caller used it. |
+| `shadow` | It produced its real result and the caller did not use it. |
+| `degraded` | It took its fallback path. |
+| `not-applicable` | The RFC names the capability but this deployment does not need it. |
+
+- **Promotion rule:** see [RFC Lifecycle](#rfc-lifecycle-aisdlc-118). `Signed Off → Implemented` needs the field present with every entry `live` or `not-applicable`; an empty list means the RFC specifies no optional capability.
+- **Linter:** `pnpm rfc:check` prints one warning per `degraded` or `shadow` entry on an `Implemented` RFC, naming the RFC, the capability and the owner. Warnings do not fail the check. An entry whose `capability` is not a registered capability id fails it.
+- **Already-`Implemented` RFCs** keep their lifecycle; their degraded capabilities are annotated rather than rolled back, and corrected to `live` as each capability is proven.
 
 ### `requires:` vs `assumes:` — dependency-kind semantics (AISDLC-311)
 

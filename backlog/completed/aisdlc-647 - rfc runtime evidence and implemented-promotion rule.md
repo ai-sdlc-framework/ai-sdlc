@@ -2,7 +2,7 @@
 id: AISDLC-647
 title: >-
   RFC-0049 OQ-6: runtimeEvidence in the RFC schema, evidence required for Signed Off to Implemented, retroactive annotations
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:

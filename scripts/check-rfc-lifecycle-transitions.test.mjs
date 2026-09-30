@@ -30,6 +30,9 @@ import {
   appendAuditEntry,
   checkLifecycleTransition,
   checkRequiresShipped,
+  extractRuntimeEvidence,
+  parseRuntimeEvidenceFallback,
+  evaluatePromotionEvidence,
   checkAllTransitions,
   reportTransitionsAndExit,
   checkAllowlistMutationGuard,
@@ -43,6 +46,10 @@ const SCRIPT = join(__dirname, 'check-rfc-lifecycle-transitions.mjs');
 
 function rfcWithLifecycle(lifecycle) {
   return `---\nid: RFC-9999\nlifecycle: ${lifecycle}\nstatus: Draft\n---\n# Body\n`;
+}
+
+function rfcWithEvidence(lifecycle, evidenceYaml) {
+  return `---\nid: RFC-9999\nlifecycle: ${lifecycle}\nstatus: Draft\n${evidenceYaml}\n---\n# Body\n`;
 }
 
 function rfcWithoutLifecycle() {
@@ -402,6 +409,7 @@ describe('checkLifecycleTransition — allowed transitions', () => {
       fromLifecycle: 'Signed Off',
       toLifecycle: 'Implemented',
       rfcId: 'RFC-9999',
+      rfcBody: rfcWithEvidence('Implemented', 'runtimeEvidence: []'),
     });
     assert.ok(r.ok);
   });
@@ -604,7 +612,7 @@ describe('checkAllTransitions', () => {
       {
         rfcId: 'RFC-0003',
         fromContent: rfcWithLifecycle('Signed Off'),
-        toContent: rfcWithLifecycle('Implemented'),
+        toContent: rfcWithEvidence('Implemented', 'runtimeEvidence: []'),
       },
     ];
     const r = checkAllTransitions(transitions);
@@ -1331,7 +1339,7 @@ describe('checkAllTransitions — requires-shipped warnings (AISDLC-311)', () =>
       {
         rfcId: 'RFC-0042',
         fromContent: '---\nlifecycle: Signed Off\n---\n',
-        toContent: '---\nlifecycle: Implemented\nrequires: [RFC-0001]\n---\n',
+        toContent: '---\nlifecycle: Implemented\nruntimeEvidence: []\nrequires: [RFC-0001]\n---\n',
         readUpstreamRfcContent: () => '---\nlifecycle: Draft\n---\n',
       },
     ]);
@@ -1348,7 +1356,7 @@ describe('checkAllTransitions — requires-shipped warnings (AISDLC-311)', () =>
       {
         rfcId: 'RFC-0042',
         fromContent: '---\nlifecycle: Signed Off\n---\n',
-        toContent: '---\nlifecycle: Implemented\nrequires: [RFC-0001]\n---\n',
+        toContent: '---\nlifecycle: Implemented\nruntimeEvidence: []\nrequires: [RFC-0001]\n---\n',
         readUpstreamRfcContent: () => '---\nlifecycle: Implemented\n---\n',
       },
     ]);
@@ -1360,7 +1368,7 @@ describe('checkAllTransitions — requires-shipped warnings (AISDLC-311)', () =>
       {
         rfcId: 'RFC-0042',
         fromContent: '---\nlifecycle: Signed Off\n---\n',
-        toContent: '---\nlifecycle: Implemented\nrequires: [RFC-0001]\n---\n',
+        toContent: '---\nlifecycle: Implemented\nruntimeEvidence: []\nrequires: [RFC-0001]\n---\n',
       },
     ]);
     assert.deepEqual(report.warnings, []);
@@ -1388,5 +1396,292 @@ describe('reportTransitionsAndExit — warnings rendering', () => {
       console.log = origLog;
       console.error = origErr;
     }
+  });
+});
+
+// ------------------------------- Signed Off → Implemented promotion rule
+
+describe('extractRuntimeEvidence', () => {
+  it('reports absent for empty, unfenced, unterminated, or key-less content', () => {
+    assert.deepEqual(extractRuntimeEvidence(''), { present: false });
+    assert.deepEqual(extractRuntimeEvidence('no frontmatter'), { present: false });
+    assert.deepEqual(extractRuntimeEvidence('---\nid: x\nno close'), { present: false });
+    assert.deepEqual(extractRuntimeEvidence(rfcWithLifecycle('Implemented')), { present: false });
+  });
+
+  it('parses an empty list and a populated list', () => {
+    assert.deepEqual(
+      extractRuntimeEvidence(rfcWithEvidence('Implemented', 'runtimeEvidence: []')),
+      {
+        present: true,
+        value: [],
+      },
+    );
+    const r = extractRuntimeEvidence(
+      rfcWithEvidence(
+        'Implemented',
+        "runtimeEvidence:\n  - capability: dor.stage-b\n    status: live\n    evidence: e\n    date: '2026-09-30'",
+      ),
+    );
+    assert.equal(r.value[0].capability, 'dor.stage-b');
+    assert.equal(r.value[0].status, 'live');
+  });
+});
+
+describe('evaluatePromotionEvidence', () => {
+  const entry = (status, cap = 'dor.stage-b') =>
+    `  - capability: ${cap}\n    status: ${status}\n    evidence: e\n    date: '2026-09-30'`;
+  const doc = (yaml) => rfcWithEvidence('Implemented', yaml);
+
+  it('refuses when runtimeEvidence is absent', () => {
+    const r = evaluatePromotionEvidence(rfcWithLifecycle('Implemented'));
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /absent/);
+  });
+
+  it('refuses a non-list value', () => {
+    assert.equal(evaluatePromotionEvidence(doc('runtimeEvidence: nope')).ok, false);
+  });
+
+  it('refuses malformed entries (missing capability, unknown status, non-mapping)', () => {
+    assert.equal(
+      evaluatePromotionEvidence(doc('runtimeEvidence:\n  - status: live\n    evidence: e')).ok,
+      false,
+    );
+    assert.equal(evaluatePromotionEvidence(doc(`runtimeEvidence:\n${entry('bogus')}`)).ok, false);
+    assert.equal(evaluatePromotionEvidence(doc('runtimeEvidence:\n  - just-a-string')).ok, false);
+  });
+
+  it('refuses degraded and shadow entries, naming the capability', () => {
+    for (const status of ['degraded', 'shadow']) {
+      const r = evaluatePromotionEvidence(doc(`runtimeEvidence:\n${entry(status)}`));
+      assert.equal(r.ok, false);
+      assert.match(r.reason, /dor\.stage-b \(/);
+    }
+  });
+
+  it('refuses when one entry is live and another degraded', () => {
+    const r = evaluatePromotionEvidence(
+      doc(`runtimeEvidence:\n${entry('live', 'a.b')}\n${entry('degraded', 'c.d')}`),
+    );
+    assert.equal(r.ok, false);
+  });
+
+  it('accepts an empty list and all live / not-applicable entries', () => {
+    assert.equal(evaluatePromotionEvidence(doc('runtimeEvidence: []')).ok, true);
+    assert.equal(
+      evaluatePromotionEvidence(
+        doc(`runtimeEvidence:\n${entry('live', 'a.b')}\n${entry('not-applicable', 'c.d')}`),
+      ).ok,
+      true,
+    );
+  });
+});
+
+describe('checkLifecycleTransition — Signed Off → Implemented evidence rule', () => {
+  const base = { fromLifecycle: 'Signed Off', toLifecycle: 'Implemented', rfcId: 'RFC-9999' };
+  const degraded = (extra = '') =>
+    rfcWithEvidence(
+      'Implemented',
+      "runtimeEvidence:\n  - capability: dor.stage-b\n    status: degraded\n    evidence: e\n    date: '2026-09-30'",
+    ) + extra;
+
+  it('refuses with no rfcBody (fail closed) and with absent evidence', () => {
+    assert.equal(checkLifecycleTransition(base).ok, false);
+    const r = checkLifecycleTransition({ ...base, rfcBody: rfcWithLifecycle('Implemented') });
+    assert.equal(r.ok, false);
+    assert.equal(r.violation, 'Signed Off->Implemented');
+    assert.match(r.diagnostic, /runtimeEvidence/);
+  });
+
+  it('refuses a degraded entry', () => {
+    const r = checkLifecycleTransition({ ...base, rfcBody: degraded() });
+    assert.equal(r.ok, false);
+    assert.match(r.diagnostic, /dor\.stage-b/);
+  });
+
+  it('allows an empty list', () => {
+    const r = checkLifecycleTransition({
+      ...base,
+      rfcBody: rfcWithEvidence('Implemented', 'runtimeEvidence: []'),
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.override, undefined);
+  });
+
+  it('does not apply to other transitions', () => {
+    for (const [from, to] of [
+      ['Draft', 'Ready for Review'],
+      ['Ready for Review', 'Signed Off'],
+      ['Implemented', 'Draft'],
+      ['Implemented', 'Superseded'],
+    ]) {
+      assert.equal(
+        checkLifecycleTransition({ fromLifecycle: from, toLifecycle: to, rfcId: 'RFC-9999' }).ok,
+        true,
+      );
+    }
+  });
+
+  describe('operator override', () => {
+    let repoRoot;
+    before(() => {
+      repoRoot = mkdtempSync(join(tmpdir(), 'evidence-override-'));
+    });
+    after(() => {
+      rmSync(repoRoot, { recursive: true, force: true });
+    });
+
+    it('permits a degraded entry when both markers and an allowlisted operator are present, and audits', () => {
+      const marker = overrideMarker('deefactorial', 'capability owned elsewhere');
+      const r = checkLifecycleTransition({
+        ...base,
+        rfcBody: degraded(`\n${marker}\n`),
+        prBody: marker,
+        approvers: makeApprovers('deefactorial'),
+        repoRoot,
+        prNumber: '7',
+        commitSha: 'abc1234',
+      });
+      assert.equal(r.ok, true);
+      assert.equal(r.override.operator, 'deefactorial');
+      const audit = readFileSync(
+        join(repoRoot, '.ai-sdlc', '_audit', 'lifecycle-overrides.jsonl'),
+        'utf-8',
+      );
+      const entry = JSON.parse(audit.trim().split('\n').pop());
+      assert.equal(entry.fromLifecycle, 'Signed Off');
+      assert.equal(entry.toLifecycle, 'Implemented');
+      assert.equal(entry.operator, 'deefactorial');
+      assert.equal(entry.reason, 'capability owned elsewhere');
+    });
+
+    it('refuses when the operator is not allowlisted', () => {
+      const marker = overrideMarker('mallory', 'because');
+      const r = checkLifecycleTransition({
+        ...base,
+        rfcBody: degraded(`\n${marker}\n`),
+        prBody: marker,
+        approvers: makeApprovers('deefactorial'),
+        repoRoot,
+      });
+      assert.equal(r.ok, false);
+      assert.match(r.diagnostic, /NOT in/);
+    });
+
+    it('refuses when the marker is in only one location', () => {
+      const marker = overrideMarker('deefactorial', 'r');
+      const prOnly = checkLifecycleTransition({
+        ...base,
+        rfcBody: degraded(),
+        prBody: marker,
+        approvers: makeApprovers('deefactorial'),
+      });
+      assert.equal(prOnly.ok, false);
+      assert.match(prOnly.diagnostic, /PR body only/);
+      const rfcOnly = checkLifecycleTransition({
+        ...base,
+        rfcBody: degraded(`\n${marker}\n`),
+        approvers: makeApprovers('deefactorial'),
+      });
+      assert.equal(rfcOnly.ok, false);
+      assert.match(rfcOnly.diagnostic, /RFC body only/);
+    });
+  });
+
+  it('checkAllTransitions refuses a degraded promotion', () => {
+    const r = checkAllTransitions([
+      { rfcId: 'RFC-9999', fromContent: rfcWithLifecycle('Signed Off'), toContent: degraded() },
+    ]);
+    assert.equal(r.failures.length, 1);
+  });
+});
+
+describe('parseRuntimeEvidenceFallback', () => {
+  it('handles absent, empty, scalar, and block-list forms', () => {
+    assert.deepEqual(parseRuntimeEvidenceFallback('id: x'), { present: false });
+    assert.deepEqual(parseRuntimeEvidenceFallback('runtimeEvidence: []'), {
+      present: true,
+      value: [],
+    });
+    assert.deepEqual(parseRuntimeEvidenceFallback('runtimeEvidence: nope'), {
+      present: true,
+      value: 'nope',
+    });
+    const r = parseRuntimeEvidenceFallback(
+      [
+        'id: x',
+        'runtimeEvidence:',
+        '  # comment',
+        '  - capability: dor.stage-b',
+        '    status: degraded   # trailing',
+        "    date: '2026-09-30'",
+        '',
+        '  - capability: "estimation.stage-b"',
+        '    status: live',
+        'next: key',
+      ].join('\n'),
+    );
+    assert.equal(r.value.length, 2);
+    assert.equal(r.value[0].status, 'degraded');
+    assert.equal(r.value[0].date, '2026-09-30');
+    assert.equal(r.value[1].capability, 'estimation.stage-b');
+  });
+
+  it('reports an unparseable line as a non-list value so callers fail closed', () => {
+    const r = parseRuntimeEvidenceFallback('runtimeEvidence:\n  garbage line here');
+    assert.equal(Array.isArray(r.value), false);
+  });
+});
+
+describe('runtimeEvidence parse safety and entry completeness', () => {
+  const good = (extra = '') =>
+    `  - capability: dor.stage-b\n    status: degraded\n    evidence: e\n    date: '2026-09-30'${extra}`;
+
+  it('refuses duplicate runtimeEvidence keys (fail closed, no weaker fallback)', () => {
+    const src = `---\nid: RFC-9999\nlifecycle: Implemented\nruntimeEvidence: []\nruntimeEvidence:\n${good()}\n---\n# Body\n`;
+    assert.equal(extractRuntimeEvidence(src).parseError, true);
+    const r = evaluatePromotionEvidence(src);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /could not be parsed/);
+  });
+
+  it('a block scalar containing a fake status line does not make a degraded entry live', () => {
+    const src = [
+      '---',
+      'id: RFC-9999',
+      'lifecycle: Implemented',
+      'notes: |',
+      '  runtimeEvidence:',
+      '  - capability: dor.stage-b',
+      '    status: live',
+      'runtimeEvidence:',
+      '  - capability: dor.stage-b',
+      '    status: degraded',
+      '    evidence: e',
+      "    date: '2026-09-30'",
+      '---',
+      '# Body',
+      '',
+    ].join('\n');
+    const r = evaluatePromotionEvidence(src);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /dor\.stage-b \(degraded\)/);
+  });
+
+  it('refuses entries with missing/empty evidence or a bad or unquoted date', () => {
+    const wrap = (entry) =>
+      `---\nid: RFC-9999\nlifecycle: Implemented\nruntimeEvidence:\n${entry}\n---\n`;
+    const live = (evidence, date) =>
+      `  - capability: dor.stage-b\n    status: live\n${evidence}${date}`;
+    const okE = '    evidence: e\n';
+    const okD = "    date: '2026-09-30'";
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, okD))).ok, true);
+    assert.equal(evaluatePromotionEvidence(wrap(live('', okD))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live('    evidence: ""\n', okD))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, ''))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, "    date: 'soon'"))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, "    date: '2026-02-31'"))).ok, false);
+    assert.equal(evaluatePromotionEvidence(wrap(live(okE, '    date: 2026-09-30'))).ok, false);
   });
 });

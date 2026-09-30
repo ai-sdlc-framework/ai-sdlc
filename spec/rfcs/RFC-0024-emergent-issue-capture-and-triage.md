@@ -5,10 +5,31 @@ status: Draft
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-26
+updated: 2026-09-30
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0015]
 requiresDocs: []
+runtimeEvidence:
+  - capability: classifier.capture-triage
+    status: degraded
+    evidence: pending sentinel returned on every invocation; no model backend wired
+    date: '2026-09-30'
+    owner: AISDLC-634
+  - capability: classifier.capture-severity
+    status: degraded
+    evidence: pending sentinel returned on every invocation; no model backend wired
+    date: '2026-09-30'
+    owner: AISDLC-634
+  - capability: classifier.pr-comment-is-capture
+    status: degraded
+    evidence: pending sentinel returned on every invocation; no model backend wired
+    date: '2026-09-30'
+    owner: AISDLC-634
+  - capability: classifier.dor-answer-is-new-concern
+    status: degraded
+    evidence: pending sentinel returned on every invocation; no model backend wired
+    date: '2026-09-30'
+    owner: AISDLC-634
 ---
 
 # RFC-0024: Emergent Issue Capture + Triage Pattern
@@ -462,3 +483,4 @@ Position grounded in RFC-0029 Part II + Principle 5 (governance by composition).
 | v0.2 | 2026-05-04 | Dominique Legault | Abstraction pass: lifted ai-sdlc-internal terminology (backlog tasks, RFCs) to framework-level (Issue, Feature Issue, Bug Issue) routed through the configured issue-tracker adapter (RFC-0003). Triage values renamed: `new-task` → `new-issue`; `new-rfc` → `new-feature-issue`. Capture record schema fields renamed: `relatedTaskId/extensionTargetTaskId/blocksTaskId/createdTaskId/createdRfcId/rfcCarvePath` → `relatedIssueId/extensionTargetIssueId/blocksIssueId/createdIssueId/createdFeatureIssueId/featureIssueCarveRef`. Added §1.1 framework-vs-ai-sdlc-internal terminology table. Added two-step Feature Issue → execution Issue lifecycle clarification in §8. Added RFC-0003 reference. ai-sdlc-internal examples (AISDLC-NNN) preserved as illustrative only. |
 | v0.3 | 2026-05-13 | Dominique Legault | Implementation shipped (AISDLC-269). `spec/schemas/capture-record.v1.schema.json` formalizes §6 schema. `pipeline-cli/src/capture/` implements capture writer, reader, triage rubric, PR-comment parser, in-code marker linter. `cli-capture` CLI ships §5.1/§5.2/§5.3/§5.4 surfaces. `captures-pending.ts` filter implements §9.3 pre-dispatch guard. All 12 OQs resolved with normative answers in §15 (first-pass). Lifecycle flipped to Implemented. |
 | v0.4 | 2026-05-15 | Dominique Legault | Second OQ walkthrough revised OQ-1 (team-shared → Draft → Shared state machine) / OQ-2 (operator-confirms → threshold-gated dual axis) / OQ-3 (marker-only → bidirectional sync + LLM auto-classifier) / OQ-5 (leave-unknown → threshold-gated severity) / OQ-7 (redact-only → tiered deletion with draft `discard`) / OQ-9 (TUI-only → multi-surface 3d/7d/14d/21d ladder + auto-archive) / OQ-11 (manual → DoR-classifier integration) and added §15.1 Capture Lifecycle Defaults (4 timeboxes + per-org `capture-config.yaml`). Revealed gap between shipped behavior (AISDLC-269, against 2026-05-13 first-pass) and revised design. **Lifecycle rolled back from Implemented to Ready for Review.** Refit tasks AISDLC-320 / 321 + 275-278 file the gap closure; lifecycle flips back to Implemented after Refit Phase 6 (AISDLC-278) ships. |
+| v0.5 | 2026-09-30 | Dominique Legault | Added `runtimeEvidence` recording the four `classifier.*` capabilities as degraded (owner AISDLC-634). Lifecycle unchanged. |
