@@ -226,3 +226,13 @@ export {
   type VerificationStatus as DispatchVerificationStatus,
   type WorkerKind as DispatchWorkerKind,
 } from './dispatch/index.js';
+
+// Follow-up rule for completed backlog tasks — shared by the pre-push script
+// (`scripts/check-followups.mjs`) and the plugin's `task_complete` tool.
+export {
+  checkFollowups,
+  formatFollowupViolations,
+  type FollowupCheckOptions,
+  type FollowupCheckResult,
+  type FollowupViolation,
+} from './backlog/followup-rule.js';

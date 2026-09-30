@@ -133,4 +133,46 @@ describe('task_complete MCP tool', () => {
     expect(result.isError).toBeUndefined();
     expect(existsSync(join(projectDir, 'backlog', 'completed', filename))).toBe(true);
   });
+
+  describe('follow-up rule', () => {
+    const filename = 'aisdlc-9 - followups.md';
+    const write = (): string => {
+      const p = join(projectDir, 'backlog', 'tasks', filename);
+      writeFileSync(p, '---\nid: AISDLC-9\nstatus: In Progress\n---\n\n## Description\n\nBody.\n');
+      return p;
+    };
+
+    it('rejects a prose follow-up, leaves the file in place, then accepts a cited one', async () => {
+      const sourcePath = write();
+      const before = readFileSync(sourcePath, 'utf-8');
+      const bad = await handler({
+        id: 'AISDLC-9',
+        finalSummary: '### Follow-up\n- The orchestrator should inject the adapter\n',
+      });
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0].text).toContain('"The orchestrator should inject the adapter"');
+      expect(bad.content[0].text).toContain('declined:');
+      expect(existsSync(sourcePath)).toBe(true);
+      expect(readFileSync(sourcePath, 'utf-8')).toBe(before);
+      expect(existsSync(join(projectDir, 'backlog', 'completed', filename))).toBe(false);
+
+      const ok = await handler({
+        id: 'AISDLC-9',
+        finalSummary: '### Follow-up\n- The orchestrator should inject the adapter (AISDLC-700)\n',
+      });
+      expect(ok.isError).toBeUndefined();
+      expect(existsSync(sourcePath)).toBe(false);
+      expect(existsSync(join(projectDir, 'backlog', 'completed', filename))).toBe(true);
+    });
+
+    it('honours the project task prefix from backlog/config.yml', async () => {
+      writeFileSync(join(projectDir, 'backlog', 'config.yml'), "task_prefix: 'PROJ'\n");
+      write();
+      const res = await handler({
+        id: 'AISDLC-9',
+        finalSummary: '### Follow-up\n- do it (PROJ-4)\n',
+      });
+      expect(res.isError).toBeUndefined();
+    });
+  });
 });

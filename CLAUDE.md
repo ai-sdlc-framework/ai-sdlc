@@ -388,7 +388,7 @@ Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level d
 - `pnpm lint` — clean
 
 ## Follow-up
-<next steps or "(none)">
+<every item cites a task or issue id (e.g. AISDLC-123 or #123), or starts with "declined: <reason>"; or write "(none)">
 ```
 
 ### When NOT to create a backlog task
