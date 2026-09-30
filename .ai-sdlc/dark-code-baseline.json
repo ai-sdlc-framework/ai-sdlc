@@ -1,5 +1,5 @@
 {
-  "$comment": "Dark-code baseline (AISDLC-552). Modules with no non-test importer and no barrel re-export. The gate fails only on modules NOT listed here, so this file is a ratchet: shrink it as modules get wired, never grow it by hand — growth relative to the base ref fails the gate. Use `allowlist` entries of the form { path, reason } for entry points that are legitimately never imported.",
+  "$comment": "Dark-code baseline (AISDLC-552). Modules with no non-test importer and no barrel re-export. The gate fails only on modules NOT listed here, so this file is a ratchet: shrink it as modules get wired, never grow it by hand — growth relative to the base ref fails the gate. Use `allowlist` entries of the form { path, reason } for entry points that are legitimately never imported. stubSites (stub-in-production rule): non-test source importing or calling a test double; same ratchet. stubAllowlist entries are { path, capability, reason }. Capability \"unassigned\" means no capability id has been mapped yet.",
   "generatedAt": "2026-08-11",
   "allowlist": [],
   "darkModules": [
@@ -102,6 +102,109 @@
     {
       "path": "reference/src/policy/structural-preprocessor.ts",
       "rfc": "RFC-0006"
+    }
+  ],
+  "stubAllowlist": [],
+  "stubSites": [
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubBitbucket",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubCodeAnalysis",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubDeploymentTarget",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubGitAdapterFetcher",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubGitLabCI",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubGitLabSource",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubJira",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubMessenger",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubSandbox",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubSemgrep",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/adapters.ts",
+      "name": "createStubSonarQube",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/discovery.ts",
+      "name": "createStubAgentCardFetcher",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/policy-evaluators.ts",
+      "name": "createStubLLMEvaluator",
+      "capability": "policy.llm-evaluator"
+    },
+    {
+      "path": "orchestrator/src/security.ts",
+      "name": "createStubApprovalWorkflow",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/security.ts",
+      "name": "createStubJITCredentialIssuer",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/security.ts",
+      "name": "createStubKillSwitch",
+      "capability": "unassigned"
+    },
+    {
+      "path": "orchestrator/src/security.ts",
+      "name": "createStubSandbox",
+      "capability": "unassigned"
+    },
+    {
+      "path": "pipeline-cli/src/cli/execute.ts",
+      "name": "MockSpawner",
+      "capability": "unassigned"
+    },
+    {
+      "path": "pipeline-cli/src/cli/ucvg.ts",
+      "name": "FakeModelClient",
+      "capability": "unassigned"
+    },
+    {
+      "path": "pipeline-cli/src/execute-pipeline.ts",
+      "name": "MockSpawner",
+      "capability": "unassigned"
     }
   ]
 }
