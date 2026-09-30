@@ -11,7 +11,7 @@
 
 The HarnessAdapter framework decouples the orchestrator from any single coding-agent runtime. Each adapter declares static capabilities, a binary requirement with version range, and three runtime methods (`getAccountId`, `isAvailable`, `invoke`). Adapters are in-tree only — third-party plugins are NOT supported in v1 because adapters execute external CLIs with full credential scope.
 
-The two adapters shipped with v1 are `claude-code` and `codex`. Adding a new adapter follows a five-step recipe.
+The three adapters shipped to date are `claude-code` and `codex` (v1) and `opencode` (RFC-0010 v23 — see [opencode-harness.md](opencode-harness.md) for its v2-contract specifics, including the `>=2.0.0` floor and the `--standalone` isolation requirement). Adding a new adapter follows a five-step recipe.
 
 ## Recipe
 
@@ -158,3 +158,5 @@ Two pieces of the adapter contract are stubbed in Phase 2.7 and complete in late
 - **Schema-conformant artifact emission.** Per RFC §13.9, adapters MUST validate any JSON artifacts they produce against `spec/schemas/artifacts/<name>.schema.json`. The artifact schemas land in Phase 4.
 
 When implementing a new adapter today, you can ship the static capabilities + version probe + getAccountId + availableModels and leave `invoke` stubbed (matching Claude Code and Codex's pattern). Phase 3 will populate the dispatch path uniformly across all adapters.
+
+Note: `opencode` is the first adapter to ship a **live default `invoke`** — it delegates to the in-tree runner's `runOpenCode` spawn primitive (see [opencode-harness.md](opencode-harness.md)) instead of throwing the Phase 2.7 stub error. New adapters MAY do the same once their runner-side spawn path exists and is tested.

@@ -16,6 +16,17 @@ export {
 export { CopilotRunner } from './copilot.js';
 export { CursorRunner } from './cursor.js';
 export { CodexRunner } from './codex.js';
+export {
+  OpenCodeRunner,
+  resolveOpenCodeBin,
+  resolveOpenCodeModel,
+  runOpenCode,
+  parseOpenCodeLine,
+  fetchSessionTokens,
+  type RunOpenCodeOptions,
+  type RunOpenCodeResult,
+  type OpenCodeStreamState,
+} from './opencode.js';
 export { RunnerRegistry, createRunnerRegistry, type RegisteredRunner } from './runner-registry.js';
 export {
   SecurityTriageRunner,

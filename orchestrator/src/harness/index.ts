@@ -25,19 +25,22 @@ export {
 
 export { ClaudeCodeAdapter, type ClaudeCodeAdapterDeps } from './adapters/claude-code.js';
 export { CodexAdapter, type CodexAdapterDeps } from './adapters/codex.js';
+export { OpenCodeAdapter, type OpenCodeAdapterDeps } from './adapters/opencode.js';
 
 import { HarnessRegistry } from './registry.js';
 import { ClaudeCodeAdapter } from './adapters/claude-code.js';
 import { CodexAdapter } from './adapters/codex.js';
+import { OpenCodeAdapter } from './adapters/opencode.js';
 
 /**
- * Create a registry pre-populated with the v1 adapters (claude-code, codex).
- * Future adapters (gemini-cli, opencode, aider, generic-api) register themselves
- * the same way once their adapter implementations land.
+ * Create a registry pre-populated with the v1 adapters (claude-code, codex,
+ * opencode). Future adapters (gemini-cli, aider, generic-api) register
+ * themselves the same way once their implementations land.
  */
 export function createDefaultHarnessRegistry(): HarnessRegistry {
   const reg = new HarnessRegistry();
   reg.register(new ClaudeCodeAdapter());
   reg.register(new CodexAdapter());
+  reg.register(new OpenCodeAdapter());
   return reg;
 }

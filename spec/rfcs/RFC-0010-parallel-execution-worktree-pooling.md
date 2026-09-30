@@ -74,6 +74,7 @@ requiresDocs:
 | v20 | 2026-04-26 | Resolved Q15 (migration rollback on PR abort). Adds `DatabaseBranchPool.spec.allowBranchFromBranch: boolean (default false)` topology guard — eliminates the divergence problem at the source for ~95% of pipelines that branch from stable upstream. When opt-in is set, reclamation of a branch with active children emits `MigrationDiverged` event naming the divergence; operator triages. No auto-reclaim, no auto-rebase, no auto-block at merge gate — divergence is informational, operator decides. **All 16 open questions resolved** (Q1 from the original list, then Q1–Q15 carried through the v6 renumbering). |
 | v21 | 2026-04-30 | Phase 5 hardening shipped (AISDLC-70.8): operator runbook extended with five new failure-mode recovery playbooks (`WorktreeOwnershipMismatch`, `RebaseConflict`, stuck heartbeats, `IndependenceViolated`, `MigrationDiverged`, `BranchQuotaExceeded`), three-scenario chaos test plan, and the feature-flag promotion ritual. Flag remained `off` by default pending substantive readiness. |
 | v22 | 2026-05-01 | Feature flag promoted to default-on per maintainer directive 2026-05-01 — corpus-driven not calendar-driven. The original Phase 5 AC #4 ("after 1 week of dogfood pipeline running with `AI_SDLC_PARALLELISM=experimental`, promote to default-on") was a calendar gate; it is dropped in favor of the substantive readiness gate "no parallelism-related incidents in the trailing observation window." Pre-flight scan of `orchestrator/_events.jsonl` and trailing 7-day commit history showed zero `WorktreeOwnershipMismatch` / `RebaseConflict` / merge-gate failures. `AI_SDLC_PARALLELISM` now defaults to `'on'`; explicit `'experimental'` opt-in (pre-promotion mode) and explicit `'off'`/`'disabled'`/`'false'`/`'0'` opt-out paths are preserved (AISDLC-116). |
+| v23 | 2026-09-29 | Shipped the `opencode` adapter — first of the four deferred in v1. Built on the opencode **v2** CLI contract (`run --standalone --auto --format json` NDJSON stream, in-process plugins, markdown agents, v1/v2 config normalizer), verified end-to-end against the installed 2.0.18 binary; the `>=2.0.0` version floor is deliberate — v1 binaries lack the contract, so they are unusable for these stages, not merely older. Capability matrix `opencode` column promoted from "future" to normative (`skills` ✅ — discovery verified; `maxContextTokens` 1M declared, mirroring the claude-code precedent while actual window varies by model). `createDefaultHarnessRegistry` now ships three adapters. Companion runbook: `docs/operations/opencode-harness.md`. |
 
 ---
 
@@ -206,7 +207,7 @@ The fix is well-understood: each worktree gets its own database branch (Neon, Su
 - **Dependency install caching.** `pnpm` content-addressable store is sufficient for our workloads; no special mechanism is specified here.
 - **Speculative branching** (running multiple plan variants per issue and picking the winner). Out of scope.
 - **Adaptive model selection.** This RFC defines *declarative* per-stage routing (the operator picks the model in YAML). Learning-based selection (the orchestrator picks the model based on stage difficulty signals) is out of scope and would be a future RFC building on the per-stage-cost telemetry this RFC requires.
-- **Day-one parity across all harnesses.** This RFC defines the HarnessAdapter interface and the capability matrix. The reference implementation ships only `claude-code` (parity with today) and `codex` (highest-value second harness for cross-harness review). Adapters for `gemini-cli`, `opencode`, `aider`, and `generic-api` are deferred to follow-up work but the interface MUST be sufficient to implement them without further schema changes.
+- **Day-one parity across all harnesses.** This RFC defines the HarnessAdapter interface and the capability matrix. The reference implementation ships only `claude-code` (parity with today) and `codex` (highest-value second harness for cross-harness review). Adapters for `gemini-cli`, `aider`, and `generic-api` remain deferred to follow-up work (`opencode` landed in v23) but the interface MUST be sufficient to implement them without further schema changes.
 - **Cross-harness session migration.** A stage that starts on Claude Code cannot mid-flight transfer its conversation to Codex. Each stage runs end-to-end on one harness; switching happens at stage boundaries.
 - **Authoritative subscription quota introspection.** Anthropic does not currently expose Claude Code window state via API. The SubscriptionLedger is a *self-tracked best-effort estimate* based on observed token consumption against documented window caps, not a queried-from-vendor source of truth. The interface is forward-compatible with an authoritative API if/when one ships.
 - **Real-time spot-pricing arbitrage.** Continuously rerouting between providers on minute-by-minute price changes is out of scope. We optimize over hours-to-days windows, not seconds.
@@ -922,7 +923,8 @@ The orchestrator maintains a registry at `orchestrator/src/harness/registry.ts`:
 const HARNESSES = new Map<string, HarnessAdapter>([
   ['claude-code', new ClaudeCodeAdapter()],
   ['codex',       new CodexAdapter()],
-  // 'gemini-cli', 'opencode', 'aider', 'generic-api' — registered when adapters land
+  ['opencode',    new OpenCodeAdapter()],
+  // 'gemini-cli', 'aider', 'generic-api' — registered when adapters land
 ]);
 ```
 
@@ -930,17 +932,17 @@ Pipeline-load MUST fail with `UnknownHarness` if a stage names a harness not pre
 
 ### 13.3 Capability matrix (initial adapters)
 
-The reference implementation ships these two adapters at v1; the matrix below is the starting baseline and MUST be kept current as adapters evolve.
+The reference implementation ships three adapters: `claude-code` (v1), `codex` (v1), and `opencode` (v23); the matrix below is the starting baseline and MUST be kept current as adapters evolve.
 
-| Capability | `claude-code` | `codex` | `gemini-cli` (future) | `opencode` (future) | `aider` (future) | `generic-api` (future) |
+| Capability | `claude-code` | `codex` | `gemini-cli` (future) | `opencode` | `aider` (future) | `generic-api` (future) |
 |---|---|---|---|---|---|---|
 | freshContext | ✅ | ✅ | ✅ | ✅ | ⚠️ stateful | ✅ |
 | customTools (MCP) | ✅ | ⚠️ partial | ❌ | ✅ | ❌ | ❌ |
 | streaming | ✅ | ✅ | ✅ | ✅ | ✅ | depends |
 | worktreeAwareCwd | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| skills | ✅ | ❌ | ❌ | ⚠️ partial | ❌ | ❌ |
+| skills | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | artifactWrites | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ via tools only |
-| maxContextTokens | 1M (Opus) | 200K (GPT-5) | 2M (Gemini) | varies | varies | depends |
+| maxContextTokens | 1M (Opus) | 200K (GPT-5) | 2M (Gemini) | 1M declared (actual varies by model) | varies | depends |
 
 The matrix is normative: stage validation (§13.4) checks declared requirements against this table.
 

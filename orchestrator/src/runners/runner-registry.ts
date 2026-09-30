@@ -11,6 +11,7 @@ import { GenericLLMRunner } from './generic-llm.js';
 import { CopilotRunner } from './copilot.js';
 import { CursorRunner } from './cursor.js';
 import { CodexRunner } from './codex.js';
+import { OpenCodeRunner } from './opencode.js';
 import {
   DEFAULT_OPENAI_API_URL,
   DEFAULT_OPENAI_MODEL,
@@ -267,6 +268,22 @@ export class RunnerRegistry {
       this.runners.set('codex', {
         name: 'codex',
         runner: new CodexRunner(),
+        available: true,
+        source: 'env',
+      });
+    }
+
+    // OpenCode runner — registered (selectable via `--runner opencode`) when a
+    // model is configured for it: OPENCODE_MODEL or AI_SDLC_MODEL. Like all
+    // env-discovered runners (AISDLC-529) it NEVER auto-defaults — the mere
+    // presence of a model env var (commonly set for the operator's own
+    // opencode/LM Studio usage) must not silently switch the dispatch runner
+    // away from claude-code.
+    const opencodeModel = env.OPENCODE_MODEL ?? env.AI_SDLC_MODEL;
+    if (opencodeModel && !this.runners.has('opencode')) {
+      this.runners.set('opencode', {
+        name: 'opencode',
+        runner: new OpenCodeRunner(),
         available: true,
         source: 'env',
       });

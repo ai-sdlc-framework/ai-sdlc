@@ -1,6 +1,6 @@
-# Community Adapters
+# Community Extensions
 
-Community-contributed adapters for the AI-SDLC Framework.
+Community-contributed adapters and runners for the AI-SDLC Framework.
 
 ## Available Adapters
 
@@ -11,6 +11,15 @@ Community-contributed adapters for the AI-SDLC Framework.
 | [Bitbucket](adapters/bitbucket/) | SourceControl | Planned |
 | [SonarQube](adapters/sonarqube/) | CodeAnalysis | Planned |
 | [Semgrep](adapters/semgrep/) | CodeAnalysis | Planned |
+
+## Available Runners
+
+Standalone issue-dispatch scripts (no typed interface — see
+[`runners/`](runners/README.md) for the dispatch contract).
+
+| Runner | Runtime | Status |
+| --- | --- | --- |
+| [OpenCode](runners/opencode/) | opencode v2 CLI | Shipped (alpha) |
 
 ## Creating an Adapter
 
