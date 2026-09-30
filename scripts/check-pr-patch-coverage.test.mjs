@@ -363,6 +363,46 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     assert.deepEqual(parsed.changedCodeFiles, []);
   });
 
+  for (const barrel of [
+    'reference/src/index.ts',
+    'pipeline-cli/src/index.ts',
+    'reference/src/usage/index.ts',
+  ]) {
+    it(`exits 0 when only barrel ${barrel} changed (AISDLC-662)`, () => {
+      const base = commitFile(repo, 'README.md', '# x\n', 'init');
+      const head = commitFile(
+        repo,
+        barrel,
+        "export * from './thing.js';\nexport * from './other.js';\n",
+        'feat: re-export new module from barrel',
+      );
+      const r = runGate(repo, { base, head, json: true });
+      assert.equal(r.status, 0, `stdout: ${r.stdout}\nstderr: ${r.stderr}`);
+      const parsed = JSON.parse(r.stdout);
+      assert.equal(parsed.reason, 'no-instrumentable-changes');
+      assert.deepEqual(parsed.changedCodeFiles, []);
+    });
+  }
+
+  for (const notBarrel of [
+    'reference/src/indexer.ts',
+    'reference/src/foo/index.tsx',
+    'reference/src/myindex.ts',
+  ]) {
+    it(`keeps ${notBarrel} instrumented and fails without coverage (AISDLC-662)`, () => {
+      const base = commitFile(repo, 'README.md', '# x\n', 'init');
+      const head = commitFile(
+        repo,
+        notBarrel,
+        'export const a = 1;\nexport const b = 2;\n',
+        'feat: add non-barrel file',
+      );
+      const r = runGate(repo, { base, head, json: true });
+      assert.notEqual(r.status, 0, `expected failure\nstdout: ${r.stdout}`);
+      assert.match(r.stdout + r.stderr, new RegExp(notBarrel.replace(/\./g, '\\.')));
+    });
+  }
+
   it('exits 0 when only attestation-core/*.mjs changed (AISDLC-575)', () => {
     // attestation-core/verify-core.mjs is the single-sourced, dependency-free
     // DSSE verifier consumed by three drivers via subprocess / dynamic import
