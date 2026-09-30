@@ -2,7 +2,7 @@
 id: AISDLC-642
 title: >-
   RFC-0049 section 9: capability registry, live/shadow/degraded outcome reporting and state file
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
