@@ -2,7 +2,7 @@
 id: AISDLC-636
 title: >-
   RFC-0049 Group B: dor.stage-b judgment-first Definition-of-Ready Stage B with refinement-reviewer escalation
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
