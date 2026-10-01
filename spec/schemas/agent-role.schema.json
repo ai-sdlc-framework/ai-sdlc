@@ -290,6 +290,12 @@
           "uniqueItems": true,
           "description": "Additional branch names (exact, or a trailing `*` prefix match) that stay protected from force pushes, merged with the always-protected defaults: `main`, `master`, `release-please--branches--*`, `gh-pages`, `production`, `prod`, `release/*`, `releases/*`."
         },
+        "mergeAuthors": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$" },
+          "uniqueItems": true,
+          "description": "GitHub logins whose pull requests the deterministic merge gate (`cli-merge-if-eligible`) may merge when `allowMerge: onGreenClean`. Read only from the verified main checkout. Absent or empty means nobody: every merge is refused (fail closed)."
+        },
         "operational": {
           "type": "array",
           "items": {

@@ -15,7 +15,10 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
+  loadTrustedPolicyModule,
+  refusalResult,
   resolveRepoSlug,
+  resolveTrustedMainRoot,
   runMergeIfEligible,
   type RunMergeIfEligibleResult,
   type SourceKind,
@@ -105,8 +108,9 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
           .option('repo-root', {
             type: 'string',
             describe:
-              'Trusted base-branch checkout to read .ai-sdlc/agent-role.yaml from (default: cwd). ' +
-              'MUST NOT be a PR worktree/tree — the governed party must not relax its own rules.',
+              'TEST-ONLY. Honoured solely when AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1; otherwise ' +
+              'ignored. Production always reads .ai-sdlc/agent-role.yaml from the verified main ' +
+              'checkout of the repo containing this CLI, never from cwd or a worktree copy.',
           })
           .option('cwd', {
             type: 'string',
@@ -130,25 +134,61 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
           }),
       async (argv) => {
         const cwd = (argv.cwd as string | undefined) ?? process.cwd();
-        const repoRoot = (argv['repo-root'] as string | undefined) ?? process.cwd();
-        const repoSlug = (argv.repo as string | undefined) ?? (await resolveRepoSlug(runner, cwd));
         const prNumber = argv.pr as number;
         const sourceKind = argv['source-kind'] as SourceKind;
         const mergeMethod = argv['merge-method'] as 'squash' | 'merge' | 'rebase';
         const dryRun = Boolean(argv['dry-run']);
         const format = String(argv.format) as 'text' | 'json';
+        const pkgRoot = packageRoot();
 
-        const result = await runMergeIfEligible({
-          prNumber,
-          sourceKind,
-          repoSlug,
-          repoRoot,
-          pkgRoot: packageRoot(),
-          runner,
+        // H3: the policy root is the VERIFIED main checkout only; --repo-root is
+        // honoured solely under the explicit test-only env var.
+        const trusted = resolveTrustedMainRoot({
           cwd,
-          mergeMethod,
-          dryRun,
+          anchorDir: pkgRoot,
+          repoRootOverride: argv['repo-root'] as string | undefined,
+          trustedModule: loadTrustedPolicyModule(pkgRoot),
         });
+
+        if (argv['repo-root'] !== undefined && !trusted.testOverride) {
+          process.stderr.write(
+            '[merge-if-eligible] --repo-root is test-only and was ignored; policy is read from the ' +
+              'verified main checkout.\n',
+          );
+        }
+
+        let result: RunMergeIfEligibleResult;
+        let repoSlug = (argv.repo as string | undefined) ?? '';
+        let slugMismatch: string | null = null;
+        if (trusted.root !== null && !trusted.testOverride) {
+          // Derive the slug from the verified checkout; a conflicting --repo is refused.
+          const derived = await resolveRepoSlug(runner, trusted.root);
+          if (repoSlug && repoSlug.toLowerCase() !== derived.toLowerCase()) {
+            slugMismatch =
+              `--repo "${repoSlug}" does not match the verified checkout's repository ` +
+              `"${derived}" — refusing`;
+          }
+          repoSlug = derived;
+        } else if (trusted.root !== null && !repoSlug) {
+          repoSlug = await resolveRepoSlug(runner, cwd);
+        }
+
+        if (slugMismatch) {
+          result = refusalResult(prNumber, slugMismatch, dryRun);
+        } else {
+          result = await runMergeIfEligible({
+            prNumber,
+            sourceKind,
+            repoSlug,
+            repoRoot: trusted.root,
+            rootRefusal: trusted.reason,
+            pkgRoot,
+            runner,
+            cwd,
+            mergeMethod,
+            dryRun,
+          });
+        }
 
         if (format === 'json') {
           process.stdout.write(renderJsonResult(result));

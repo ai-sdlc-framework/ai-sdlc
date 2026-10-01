@@ -11,6 +11,8 @@ import {
   parseGovernanceBlock,
   resolveGovernance,
   resolveGovernanceFromYaml,
+  resolveMergeAuthors,
+  resolveMergeAuthorsFromYaml,
   renderSessionStartHardRules,
   renderSubagentHardRules,
 } from './governance-resolver.js';
@@ -199,5 +201,49 @@ describe('renderSubagentHardRules', () => {
     const text = renderSubagentHardRules({ ...STRICT_DEFAULTS, allowForcePush: true });
     assert.doesNotMatch(text, /Never force-push/);
     assert.match(text, /Force-push is allowed per repo policy/);
+  });
+});
+
+describe('resolveMergeAuthors (merge-if-eligible allow-list)', () => {
+  it('is empty when absent, null or not an array (fail closed)', () => {
+    assert.deepEqual(resolveMergeAuthors(null), []);
+    assert.deepEqual(resolveMergeAuthors({}), []);
+    assert.deepEqual(resolveMergeAuthors({ mergeAuthors: 'octocat' }), []);
+    assert.deepEqual(resolveMergeAuthorsFromYaml('spec:\n  role: x\n'), []);
+    assert.deepEqual(resolveMergeAuthorsFromYaml(undefined), []);
+  });
+
+  it('reads a block list and an inline list from the governance block', () => {
+    const block = 'spec:\n  governance:\n    mergeAuthors:\n      - octocat\n      - "Hub-Bot9"\n';
+    assert.deepEqual(resolveMergeAuthorsFromYaml(block), ['octocat', 'Hub-Bot9']);
+    const inline = 'spec:\n  governance:\n    mergeAuthors: [octocat, other-user]\n';
+    assert.deepEqual(resolveMergeAuthorsFromYaml(inline), ['octocat', 'other-user']);
+  });
+
+  it('drops malformed logins and case-insensitive duplicates', () => {
+    const list = resolveMergeAuthors({
+      mergeAuthors: [
+        'ok',
+        'OK',
+        '-bad',
+        'bad-',
+        'a--b',
+        'has space',
+        'x[bot]',
+        42,
+        '',
+        'a'.repeat(40),
+      ],
+    });
+    assert.deepEqual(list, ['ok']);
+  });
+
+  it('does not change the resolved governance shape', () => {
+    const yaml =
+      'spec:\n  governance:\n    allowMerge: onGreenClean\n    mergeAuthors: [octocat]\n';
+    assert.deepEqual(resolveGovernanceFromYaml(yaml), {
+      ...STRICT_DEFAULTS,
+      allowMerge: 'onGreenClean',
+    });
   });
 });

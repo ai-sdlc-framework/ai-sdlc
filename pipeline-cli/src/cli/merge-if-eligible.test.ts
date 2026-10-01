@@ -5,9 +5,18 @@
  * CLI-facing render/format layer that the yargs router calls.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildMergeIfEligibleCli, renderJsonResult, renderResult } from './merge-if-eligible.js';
-import { STRICT_DEFAULTS, type RunMergeIfEligibleResult } from '../governance/merge-if-eligible.js';
+import {
+  loadTrustedPolicyModule,
+  STRICT_DEFAULTS,
+  TEST_ONLY_POLICY_ROOT_ENV,
+  type RunMergeIfEligibleResult,
+} from '../governance/merge-if-eligible.js';
 import type { ExecResult, Runner } from '../runtime/exec.js';
 
 function baseResult(overrides: Partial<RunMergeIfEligibleResult> = {}): RunMergeIfEligibleResult {
@@ -104,8 +113,21 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
   let savedExit: typeof process.exit;
   let savedStdout: typeof process.stdout.write;
   let stdoutChunks: string[];
+  let stderrChunks: string[];
+  let savedStderr: typeof process.stderr.write;
+  let savedEnv: string | undefined;
 
   beforeEach(() => {
+    savedEnv = process.env[TEST_ONLY_POLICY_ROOT_ENV];
+    // These tests drive --repo-root at a nonexistent dir: that override is
+    // only honoured under the explicit test-only env var.
+    process.env[TEST_ONLY_POLICY_ROOT_ENV] = '1';
+    savedStderr = process.stderr.write.bind(process.stderr);
+    stderrChunks = [];
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
     savedArgv = process.argv;
     savedExit = process.exit;
     savedStdout = process.stdout.write.bind(process.stdout);
@@ -123,6 +145,9 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     process.argv = savedArgv;
     process.exit = savedExit;
     process.stdout.write = savedStdout;
+    process.stderr.write = savedStderr;
+    if (savedEnv === undefined) delete process.env[TEST_ONLY_POLICY_ROOT_ENV];
+    else process.env[TEST_ONLY_POLICY_ROOT_ENV] = savedEnv;
   });
 
   it('AC1 — refuses (process.exit(1)) under strict policy, no gh calls beyond repo-slug resolution', async () => {
@@ -180,29 +205,77 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     expect(parsed.ok).toBe(false);
   });
 
-  it('does not exit non-zero when eligible (dry-run, text format)', async () => {
-    process.argv = [
-      'node',
-      'merge-if-eligible',
-      '42',
-      '--source-kind',
-      'backlog',
-      '--repo',
-      'org/repo',
-      // repo-root omitted → resolves against process.cwd() of the test
-      // runner, which has no governance:onGreenClean → strict refusal is
-      // the realistic outcome here, so we assert on the refusal text
-      // format instead of forcing an eligible path through the real FS.
-    ];
-    const fake = makeFakeRunner({});
+  async function runCli(argv: string[], runner: Runner): Promise<string> {
+    process.argv = ['node', 'merge-if-eligible', ...argv];
     let thrown: unknown;
     try {
-      await buildMergeIfEligibleCli({ runner: fake.runner }).parseAsync();
+      await buildMergeIfEligibleCli({ runner }).parseAsync();
     } catch (e) {
       thrown = e;
     }
-    const msg = thrown instanceof Error ? thrown.message : String(thrown);
+    return thrown instanceof Error ? thrown.message : String(thrown);
+  }
+
+  it('test-only mode without --repo derives the slug from cwd via gh and refuses under strict', async () => {
+    const fake = makeFakeRunner({ 'gh repo view': { stdout: 'org/repo\n' } });
+    const msg = await runCli(
+      ['42', '--source-kind', 'backlog', '--repo-root', '/definitely/does/not/exist/aisdlc-663'],
+      fake.runner,
+    );
     expect(msg).toBe('process.exit(1)');
     expect(stdoutChunks.join('')).toContain('REFUSED');
+    expect(fake.calls).toHaveLength(1);
   });
+
+  it('production: --repo-root is ignored (with a notice) and an unverifiable cwd refuses with zero gh calls', async () => {
+    delete process.env[TEST_ONLY_POLICY_ROOT_ENV];
+    const plain = mkdtempSync(join(tmpdir(), 'aisdlc-663-5-cwd-'));
+    try {
+      const fake = makeFakeRunner({});
+      const msg = await runCli(
+        [
+          '42',
+          '--source-kind',
+          'backlog',
+          '--repo-root',
+          plain,
+          '--cwd',
+          plain,
+          '--format',
+          'json',
+        ],
+        fake.runner,
+      );
+      expect(msg).toBe('process.exit(1)');
+      const parsed = JSON.parse(stdoutChunks.join(''));
+      expect(parsed.ok).toBe(false);
+      expect(parsed.reason).toMatch(/verified main checkout/);
+      expect(stderrChunks.join('')).toMatch(/--repo-root is test-only and was ignored/);
+      expect(fake.calls).toEqual([]);
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const canVerify =
+    loadTrustedPolicyModule(pkgRoot, '/nonexistent-plugin-cache')?.verifiedMainRoot(pkgRoot) !==
+    null;
+
+  it.skipIf(!canVerify)(
+    'production: a --repo that disagrees with the verified checkout repository is refused',
+    async () => {
+      delete process.env[TEST_ONLY_POLICY_ROOT_ENV];
+      const fake = makeFakeRunner({ 'gh repo view': { stdout: 'org/real\n' } });
+      const msg = await runCli(
+        ['42', '--source-kind', 'backlog', '--repo', 'org/other', '--format', 'json'],
+        fake.runner,
+      );
+      expect(msg).toBe('process.exit(1)');
+      const parsed = JSON.parse(stdoutChunks.join(''));
+      expect(parsed.reason).toMatch(/does not match the verified checkout/);
+      // Only the slug derivation ran; the PR was never read.
+      expect(fake.calls.every((c) => c.args[0] === 'repo')).toBe(true);
+    },
+  );
 });

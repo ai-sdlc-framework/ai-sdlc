@@ -37,6 +37,11 @@
  *    `gh pr merge` at all, so the loudest governance rule ("never merge")
  *    wasn't actually enforced by this hook.
  *
+ * 4b. **API-merge governance** — merging through the GitHub API (the REST
+ *    `.../pulls/<n>/merge` endpoint via `gh api`, `curl` or `wget`, or the
+ *    GraphQL `mergePullRequest` mutation) is denied under every `allowMerge`
+ *    value (see `enforceApiMergeGovernance`); the sanctioned helper stays allowed.
+ *
  * 5. **Destructive-stash governance (AISDLC-611)** — the git stash stack is
  *    shared across the main checkout, all worktrees, and concurrent
  *    sessions. A `git stash pop` can silently apply-and-drop a PRE-EXISTING
@@ -250,6 +255,11 @@ function enforceBash(command) {
   // configured. See enforceMergeGovernance() for the exact rules.
   enforceMergeGovernance(trimmed);
 
+  // Merging through the REST/GraphQL API is the same act as a raw merge
+  // command and must not be a side door around the sanctioned helper (denied
+  // under every allowMerge value).
+  enforceApiMergeGovernance(trimmed);
+
   // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
   // independent of whatever blockedActions patterns the project configured.
   enforceStashGovernance(trimmed);
@@ -366,6 +376,76 @@ function enforceMergeGovernance(trimmed) {
         `auto-merge ('gh pr merge --auto') remains allowed.`,
     );
   }
+}
+
+// ── API-merge governance ─────────────────────────────────────────────
+
+/**
+ * Denies merging a PR through the GitHub API instead of the sanctioned
+ * `node pipeline-cli/bin/cli-merge-if-eligible.mjs` helper, under EVERY
+ * `allowMerge` value (the helper, not the hook, owns the real eligibility
+ * gate and performs the merge itself, so nothing legitimate needs the API
+ * route from a Bash tool call). Covered:
+ *   - the REST endpoint `.../pulls/<n>/merge`, any HTTP method (a GET only
+ *     reads, but the whole path is denied: simpler and safer), in the
+ *     `gh api repos/<o>/<r>/pulls/<n>/merge` and `gh api /repos/...` spellings,
+ *     flags in any order (`-X PUT`, `--method=PUT`, `-f merge_method=...`),
+ *     `curl`/`wget`/`http` to `https://api.github.com/repos/<o>/<r>/pulls/<n>/merge`,
+ *     and script-runner (`node -e`, `python -c`, ...) spellings;
+ *   - the GraphQL `mergePullRequest` mutation sent through `gh api graphql` /
+ *     `curl` (arming auto-merge via `enablePullRequestAutoMerge` is NOT matched).
+ * Arming auto-merge through the pr subcommand is untouched; see
+ * enforceMergeGovernance().
+ *
+ * Detection runs on a normalized copy of the command (variables collapsed like
+ * a default shell, quotes/backslashes/percent-escapes removed, heredoc bodies
+ * dropped) and is deliberately text-level: like every matcher here it cannot
+ * defeat `eval`, base64 pipelines or constructed strings; branch protection +
+ * required checks remain the backstop. It ONLY fires when the command also
+ * contains a network or interpreter tool word, so `grep`/`cat`/`git log` on
+ * text that merely mentions such a path stay allowed.
+ */
+function enforceApiMergeGovernance(command) {
+  const text = normalizeForApiMerge(stripHeredocBodies(command));
+  const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
+  const mergeMutation = /\bmergePullRequest\b/i;
+  if (!mergePath.test(text) && !mergeMutation.test(text)) return;
+  // Network/interpreter tool as a standalone word (also when path-qualified
+  // or wrapped by sh -c / xargs / env / sudo).
+  const tool =
+    /(^|[\s;&|(<>`=:/])(gh|curl|wget|http|https|xh|httpie|python[0-9.]*|node|nodejs|deno|bun|ruby|perl|php|bash|sh|zsh|eval|xargs|env|sudo|exec|nohup|time)(?=$|[\s;&|)<>`])/i;
+  if (!tool.test(text)) return;
+  deny(
+    `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
+      `mutation) is not a permitted merge path under any governance allowMerge value. ` +
+      `Merges must go through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs', which ` +
+      `enforces the real eligibility gate. Arming auto-merge remains allowed.`,
+  );
+}
+
+/**
+ * Normalizes a command for API-merge DETECTION only (never alters what runs).
+ * Mirrors a default shell for variables (`$IFS` splits, any other `$VAR` is
+ * empty so its neighbours concatenate), drops quotes and backslashes (so
+ * `pu''lls` / `pulls\/5` collapse), and decodes `%XX` escapes. Unlike the stash
+ * normalizer it KEEPS braces/parens so `{owner}` placeholders and URLs stay intact.
+ */
+function normalizeForApiMerge(text) {
+  let out = text;
+  out = out.replace(/\$\{IFS\}/g, ' ');
+  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
+  out = out.replace(/\$IFS\b/g, ' ');
+  out = out.replace(/\$\{[^}]*\}/g, '');
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, '');
+  out = out.replace(/['"]/g, '');
+  out = out.replace(/\\\n/g, '');
+  out = out.replace(/\\/g, '');
+  try {
+    out = decodeURIComponent(out);
+  } catch {
+    out = out.replace(/%([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+  return out;
 }
 
 /**

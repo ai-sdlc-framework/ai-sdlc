@@ -308,6 +308,21 @@ describe('AgentRole spec.governance (RFC-0048 / AISDLC-601)', () => {
     expect(validateResource(doc).valid).toBe(true);
   });
 
+  it('accepts a mergeAuthors allow-list and rejects malformed or duplicate logins', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = {
+      allowMerge: 'onGreenClean',
+      mergeAuthors: ['octocat', 'Hub-Bot9'],
+    };
+    expect(validateResource(doc).valid).toBe(true);
+    (doc.spec as Record<string, unknown>).governance = { mergeAuthors: [] };
+    expect(validateResource(doc).valid).toBe(true);
+    for (const bad of [['has space'], ['-lead'], ['x'.repeat(40)], [42], ['a', 'a'], 'octocat']) {
+      (doc.spec as Record<string, unknown>).governance = { mergeAuthors: bad };
+      expect(validateResource(doc).valid).toBe(false);
+    }
+  });
+
   it('rejects an unknown or duplicate operational entry', () => {
     const doc = baseAgentRole();
     (doc.spec as Record<string, unknown>).governance = { operational: ['merge-anything'] };

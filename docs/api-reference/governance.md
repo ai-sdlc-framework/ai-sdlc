@@ -63,6 +63,7 @@ spec:
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
+    mergeAuthors: []           # GitHub logins the merge gate may merge for; empty = nobody
 ```
 
 - **`preset: operator-trusted`** is sugar for `{ allowMerge: onGreenClean }`
@@ -70,10 +71,53 @@ spec:
   merge once CI is fully green" case. Explicit granular keys override the
   preset.
 - **`allowMerge: onGreenClean`** only softens the *narration*; it does not by
-  itself grant merge capability — merge eligibility is additionally gated on
-  the work item's trust tier (internal backlog tasks vs. external
-  GitHub-sourced work) and the deterministic `merge-if-eligible` gate
-  (AISDLC-602/603, not yet implemented as of Phase 1).
+  itself grant merge capability. The only sanctioned merge route is
+  `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog`,
+  which merges only when ALL of these hold (each fails closed):
+  - the policy is read from the **verified main checkout** only (see below);
+  - `allowMerge` resolves to `onGreenClean` there, and `--source-kind` is
+    `backlog` (`gh-issue` is always refused);
+  - facts read from the PR itself via one `gh pr view` call: it is **not from a
+    fork** (`isCrossRepository` is `false`), its **base branch is `main`**, its
+    **author login is on `governance.mergeAuthors`**, and a **backlog task**
+    matching the PR exists. The task id comes from the head branch
+    (`ai-sdlc/<id>-...`) and/or a trailing `(<ID>)` in the title (when both are
+    present they must agree), and a `backlog/tasks/<id> - *.md` or
+    `backlog/completed/<id> - *.md` file must exist on `origin/main` (checked
+    with `git ls-tree`, so run `git fetch origin main` first) **or** be added by
+    the PR's own diff (the repo creates and completes a task in the same PR);
+  - the required checks (or, with no branch-protection contexts, every
+    non-skipped check run) are green and `mergeStateStatus` is `CLEAN`;
+  - the PR head commit read in the first call is still the head just before the
+    merge, and the merge is issued with `--match-head-commit <sha>` so GitHub
+    rejects it if the head moved after the checks were evaluated (the CLI reports
+    the refusal and exits non-zero).
+- **`mergeAuthors`** is an optional list of GitHub logins (compared
+  case-insensitively) whose PRs the merge gate may merge, for example
+  `mergeAuthors: [octocat]`. Absent, empty or malformed means nobody, so every
+  merge is refused until the operator sets it. It is read only from the verified
+  main checkout's `.ai-sdlc/agent-role.yaml`, and needs a plugin version that
+  includes the key (an older installed plugin resolves it to empty).
+- **Verified main checkout (policy trust):** the merge CLI reads
+  `.ai-sdlc/agent-role.yaml` only from the main checkout of the repo that
+  contains the running CLI, verified like the lease policy (real `.git`
+  directory matching the git common dir) and required to be the same checkout
+  as the invocation's working directory. A worktree copy of the file, a
+  different repository's policy, or a `--repo-root` flag has no effect; if the
+  main checkout cannot be verified the CLI refuses. `--repo-root` is
+  **test-only**: it is honoured solely when
+  `AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1` is set in the environment (do not set
+  it in production). A `--repo` slug that differs from the verified checkout's
+  repository is refused.
+- **API merges are blocked:** the PreToolUse hook denies
+  `gh api .../pulls/<n>/merge` (any method, with or without a leading slash,
+  flags in any order), `curl`/`wget` to the same endpoint, and the GraphQL
+  `mergePullRequest` mutation, under every `allowMerge` value. Arming auto-merge
+  (`gh pr merge --auto`) and the sanctioned helper stay allowed. This is a
+  text-level matcher: it cannot see `eval`, base64 pipelines or constructed
+  strings, so branch protection remains the backstop. Residual: the CLI and
+  plugin code run from the agent's own checkout and are not protected from
+  edits by this change.
 - **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
   case: after rebasing a dispatched task's branch. The PreToolUse hook then
   permits a push only when ALL of these hold:

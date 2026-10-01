@@ -947,6 +947,107 @@ blockedActions: []
   });
 });
 
+// ── API-merge governance (denied under every allowMerge value) ───────────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', () => {
+  const dirs = {};
+
+  before(() => {
+    for (const [name, governance] of [
+      ['strict', ''],
+      ['green', 'governance:\n  allowMerge: onGreenClean\n'],
+    ]) {
+      const d = join(tmpdir(), `enforce-blocked-apimerge-${name}-${Date.now()}`);
+      mkdirSync(join(d, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(d, '.ai-sdlc', 'agent-role.yaml'),
+        `role: coding-agent\ngoal: Test agent\n${governance}blockedActions: []\n`,
+      );
+      dirs[name] = d;
+    }
+  });
+
+  after(() => {
+    for (const d of Object.values(dirs)) rmSync(d, { recursive: true, force: true });
+  });
+
+  function run(policy, command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dirs[policy] });
+  }
+
+  const DENIED = [
+    'gh api repos/acme/widgets/pulls/42/merge -X PUT',
+    'gh api -X PUT repos/acme/widgets/pulls/42/merge',
+    'gh api /repos/acme/widgets/pulls/42/merge --method PUT -f merge_method=squash',
+    'gh api --method=PUT repos/acme/widgets/pulls/42/merge',
+    'gh api repos/acme/widgets/pulls/42/merge',
+    'gh api -f merge_method=squash -F sha=abc123 repos/acme/widgets/pulls/42/merge -X PUT',
+    'gh api "repos/acme/widgets/pulls/42/merge" -X PUT',
+    "gh api 'repos/acme/widgets/pu''lls/42/merge' -X PUT",
+    'gh api repos/acme/widgets/pulls/42/merge/ -X PUT',
+    'gh api repos/{owner}/{repo}/pulls/42/merge -X PUT',
+    'gh api repos/$OWNER/$REPO/pulls/$PR/merge -X PUT',
+    'gh api repos/${OWNER}/${REPO}/pulls/${PR}/merge -X PUT',
+    'gh api repos/acme/widgets/pulls/42/%6Derge -X PUT',
+    'gh api repos/acme/widgets/pulls/42/merge -X PUT && echo done',
+    'echo start; gh api repos/acme/widgets/pulls/42/merge -X PUT',
+    'gh api graphql -f query=\'mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }\'',
+    'curl -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    'curl -sS -H "Authorization: Bearer $GH_TOKEN" -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge -d \'{"merge_method":"squash"}\'',
+    'curl --request PUT --url https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    '/usr/bin/curl -X PUT api.github.com/repos/acme/widgets/pulls/42/merge',
+    'wget --method=PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    'http PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    'bash -c "gh api repos/acme/widgets/pulls/42/merge -X PUT"',
+    'echo repos/acme/widgets/pulls/42/merge | xargs gh api -X PUT',
+    "node -e \"fetch('https://api.github.com/repos/acme/widgets/pulls/42/merge',{method:'PUT'})\"",
+    'python3 -c "import requests; requests.put(\'https://api.github.com/repos/acme/widgets/pulls/42/merge\')"',
+  ];
+
+  for (const policy of ['strict', 'green']) {
+    for (const cmd of DENIED) {
+      it(`denies under ${policy}: ${cmd}`, () => {
+        const result = run(policy, cmd);
+        assert.ok(isDenied(result), `expected deny: ${cmd}`);
+        const parsed = JSON.parse(result.output);
+        assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /GitHub API/);
+        assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /cli-merge-if-eligible/);
+      });
+    }
+  }
+
+  const ALLOWED = [
+    // arming is not merging
+    'gh pr merge 42 --auto',
+    'gh pr merge 42 --auto --squash',
+    // the sanctioned helper
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog',
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --dry-run',
+    // reads and unrelated API calls
+    'gh api repos/acme/widgets/pulls/42',
+    'gh api repos/acme/widgets/pulls/42/files',
+    'gh api repos/acme/widgets/pulls/42/comments -f body=hi',
+    'gh api repos/acme/widgets/pulls/42/merge-queue-entry',
+    'gh api graphql -f query=\'mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}) { clientMutationId } }\'',
+    'curl -s https://api.github.com/repos/acme/widgets/pulls/42',
+    // text that merely mentions the path, no network/interpreter tool
+    'grep -rn "pulls/42/merge" docs',
+    'cat docs/api-reference/governance.md',
+    // heredoc body quoting the path as documentation
+    "cat <<'EOF'\ngh api repos/acme/widgets/pulls/42/merge -X PUT\nEOF",
+  ];
+
+  for (const policy of ['strict', 'green']) {
+    for (const cmd of ALLOWED) {
+      it(`allows under ${policy}: ${cmd.split('\n')[0]}`, () => {
+        const result = run(policy, cmd);
+        assert.ok(!isDenied(result), `expected allow: ${cmd}`);
+      });
+    }
+  }
+});
+
 // ── AISDLC-567 stale-base guard ──────────────────────────────────────────
 
 describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-567 stale-base guard)', () => {

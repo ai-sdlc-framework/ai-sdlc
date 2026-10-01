@@ -15,6 +15,8 @@
  *                                         # (true = leaseOnOwnBranch, false = never)
  *     operational: [..closed set..]       # default: [] (dispatch-role grants)
  *     protectedBranches: [..names..]      # default: [] (adds to main/master)
+ *     mergeAuthors: [..github logins..]   # default: [] (empty = nobody; the
+ *                                         # merge-if-eligible gate then refuses)
  *     allowClosePrIssue: bool             # default: false
  *     allowBranchDelete: bool             # default: false
  *     allowResetHard: bool                # default: false
@@ -71,7 +73,7 @@ const OPERATIONAL_ACTIONS = Object.freeze([
 ]);
 
 const KNOWN_PRESETS = new Set(['strict', 'operator-trusted']);
-const LIST_KEYS = new Set(['operational', 'protectedBranches']);
+const LIST_KEYS = new Set(['operational', 'protectedBranches', 'mergeAuthors']);
 const BOOLEAN_KEYS = ['allowForcePush', 'allowClosePrIssue', 'allowBranchDelete', 'allowResetHard'];
 
 /**
@@ -253,6 +255,36 @@ function resolveProtectedBranches(rawGovernance) {
 }
 
 /**
+ * Resolves the `mergeAuthors` allow-list: GitHub logins whose PRs the
+ * `merge-if-eligible` gate may merge. Only well-formed logins are kept
+ * (alphanumerics and single hyphens, max 39 chars, as GitHub allows; a trailing
+ * `[bot]` is not accepted). Absent / non-array / malformed yields [] and an
+ * empty list trusts nobody, so malformed input can only refuse more.
+ * Read ONLY from the verified main checkout by the merge gate.
+ */
+function resolveMergeAuthors(rawGovernance) {
+  if (!rawGovernance || typeof rawGovernance !== 'object') return [];
+  const list = rawGovernance.mergeAuthors;
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const entry of list) {
+    if (
+      typeof entry === 'string' &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(entry) &&
+      !out.some((x) => x.toLowerCase() === entry.toLowerCase())
+    ) {
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/** Parse + resolve the `mergeAuthors` allow-list from raw agent-role.yaml text. */
+function resolveMergeAuthorsFromYaml(yamlText) {
+  return resolveMergeAuthors(parseGovernanceBlock(yamlText));
+}
+
+/**
  * Resolves the force-push mode, operational list and protected branches from
  * raw agent-role.yaml text. Kept separate from `resolveGovernance` so that
  * function's resolved shape (and its callers) stay unchanged.
@@ -377,6 +409,8 @@ module.exports = {
   resolveForcePushMode,
   resolveOperational,
   resolveProtectedBranches,
+  resolveMergeAuthors,
+  resolveMergeAuthorsFromYaml,
   resolveGovernanceExtrasFromYaml,
   renderOperationalRules,
   renderSessionStartHardRules,
