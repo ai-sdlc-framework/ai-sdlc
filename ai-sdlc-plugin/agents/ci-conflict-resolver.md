@@ -163,13 +163,27 @@ push), this agent IS the canonical caller — the watcher does not own a
 slash command body that can push, so this agent pushes itself.
 
 ```bash
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
+BRANCH=$(git branch --show-current)
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   echo "ERROR: refusing to force-push $BRANCH"
   exit 1
 fi
-git push --force-with-lease origin "$BRANCH"
+echo "$BRANCH"
 ```
+
+Then run the push as its own, standalone Bash command from the worktree, with
+the branch printed above written LITERALLY (no variables, quotes, `cd &&` or
+chaining) — the one spelling the `leaseOnOwnBranch` policy accepts:
+
+```bash
+git push --force-with-lease origin HEAD:refs/heads/<branch>
+```
+
+The policy only permits this from a dispatched worktree
+(`.worktrees/<task-id-lower>` with a matching `.active-task` and an
+`ai-sdlc/<task-id-lower>-` branch). If the PreToolUse hook denies the push,
+return `outcome: 'failed'` with `escalationReason: 'push-rejected'` and the
+hook's message in `notes`.
 
 If the push is rejected (someone pushed to the same branch under us
 since the watcher fetched), DO NOT escalate to plain `--force`. Return

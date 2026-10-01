@@ -20,8 +20,8 @@
 
 'use strict';
 
-const { readFileSync, realpathSync } = require('fs');
-const { join, resolve, dirname, basename } = require('path');
+const { readFileSync, realpathSync, lstatSync } = require('fs');
+const { join, resolve, dirname, basename, sep } = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const { resolveGovernanceExtrasFromYaml } = require('./governance-resolver');
 
@@ -89,6 +89,27 @@ function mainCheckoutRoot(dir, run = runGit) {
 }
 
 /**
+ * Like mainCheckoutRoot, but cross-checks the candidate against the filesystem
+ * because the common-dir chain (`.git` file -> gitdir -> commondir) is writable
+ * by the governed agent: `<root>/.git` must be a real DIRECTORY (not a file or
+ * symlink) whose realpath equals the reported common dir.
+ */
+function verifiedMainRoot(dir, run = runGit) {
+  const root = mainCheckoutRoot(dir, run);
+  if (!root) return null;
+  try {
+    const dotGit = join(root, '.git');
+    const st = lstatSync(dotGit);
+    if (!st.isDirectory() || st.isSymbolicLink()) return null;
+    const common = run(['rev-parse', '--git-common-dir'], dir);
+    if (!common || safeReal(dotGit) !== safeReal(resolve(dir, common))) return null;
+    return root;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reads the policy from the main checkout of the project dir's repo, after
  * checking the tool's cwd belongs to the same repo. Returns the extras
  * ({forcePushMode, operational, protectedBranches}) or null when the trusted
@@ -96,12 +117,52 @@ function mainCheckoutRoot(dir, run = runGit) {
  */
 function loadTrustedExtras(projectDir, cwd, run = runGit) {
   try {
-    const mainRoot = mainCheckoutRoot(projectDir, run);
+    const mainRoot = verifiedMainRoot(projectDir, run);
     if (!mainRoot) return null;
-    const cwdMain = mainCheckoutRoot(cwd, run);
+    const cwdMain = verifiedMainRoot(cwd, run);
     if (!cwdMain || safeReal(cwdMain) !== safeReal(mainRoot)) return null;
     const text = readFileSync(join(mainRoot, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
     return resolveGovernanceExtrasFromYaml(text);
+  } catch {
+    return null;
+  }
+}
+
+function isUnder(child, parent) {
+  return child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
+}
+
+/**
+ * Validates that the tool's cwd is a genuine dispatched worktree of the repo the
+ * policy was loaded for, and returns its real root. All of these must hold, else
+ * null (the caller fails closed):
+ *  - the worktree top (realpath, symlinks resolved) is under
+ *    realpath(<mainRoot>)/.worktrees/  (so an operator's main checkout, a forged
+ *    directory elsewhere such as /tmp/x/aisdlc-700, and a symlinked entry all fail);
+ *  - the project dir is the main checkout or sits under <mainRoot>/.worktrees/;
+ *  - the worktree's own git dir lives under <mainRoot>/.git/worktrees/ and its
+ *    `gitdir` back-pointer leads to <top>/.git (a hand-forged gitdir elsewhere
+ *    that merely points its `commondir` at the real repo fails).
+ */
+function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
+  try {
+    const mainRoot = verifiedMainRoot(projectDir, run);
+    if (!mainRoot) return null;
+    const realMain = safeReal(mainRoot);
+    const worktreesDir = join(realMain, '.worktrees');
+    const realProj = safeReal(projectDir);
+    if (realProj !== realMain && !isUnder(realProj, worktreesDir)) return null;
+    const topRaw = run(['rev-parse', '--show-toplevel'], cwd);
+    if (!topRaw) return null;
+    const top = safeReal(topRaw);
+    if (!isUnder(top, worktreesDir) || dirname(top) !== worktreesDir) return null;
+    const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
+    if (!gitDirRaw) return null;
+    const gitDir = safeReal(resolve(cwd, gitDirRaw));
+    if (!isUnder(gitDir, join(realMain, '.git', 'worktrees'))) return null;
+    const back = readFileSync(join(gitDir, 'gitdir'), 'utf-8').trim();
+    if (safeReal(back) !== join(top, '.git')) return null;
+    return { mainRoot, top };
   } catch {
     return null;
   }
@@ -134,7 +195,10 @@ function bannerGovernance(yamlText, resolved, projectDir, cwd, hierarchyRole, ru
 function readTaskId(worktreeRoot) {
   try {
     const first = readFileSync(join(worktreeRoot, '.active-task'), 'utf-8').split('\n')[0].trim();
-    return /^[A-Za-z][A-Za-z0-9]*-\d+(\.\d+)*$/.test(first) ? first.toLowerCase() : null;
+    // `AISDLC-663`, `AISDLC-100.5`, and the GH-issue form `gh-issue-123`.
+    return /^[A-Za-z][A-Za-z0-9]*(-[A-Za-z][A-Za-z0-9]*)*-\d+(\.\d+)*$/.test(first)
+      ? first.toLowerCase()
+      : null;
   } catch {
     return null;
   }
@@ -146,6 +210,8 @@ module.exports = {
   probeRef,
   safeReal,
   mainCheckoutRoot,
+  verifiedMainRoot,
+  resolveLeaseWorktree,
   loadTrustedExtras,
   bannerGovernance,
   readTaskId,

@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  symlinkSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -747,5 +748,108 @@ describe('an internal error while evaluating a push is a DENY, not an allow', ()
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('worktree authenticity (forged bindings)', () => {
+  let r;
+  before(() => {
+    r = makeRepo('forge', roleYaml(LEASE));
+  });
+  const push = (b) => `git push --force-with-lease origin ${b}`;
+
+  it('legit .worktrees/<id> worktree is allowed (baseline)', () => {
+    assert.ok(!denied(run(L(), { cwd: r.wt, projectDir: r.root })));
+  });
+
+  it('REPRODUCTION + regression: a forged worktree OUTSIDE .worktrees bound to another task is denied', () => {
+    const B = 'ai-sdlc/aisdlc-700-x';
+    const forged = join(base, 'forged-x', 'aisdlc-700');
+    git(r.root, 'worktree', 'add', '-q', '-b', B, forged);
+    writeFileSync(join(forged, '.active-task'), 'AISDLC-700\n');
+    const cwd = realpathSync(forged);
+    // Everything the three-way binding checks agrees (sentinel, dir name, branch)...
+    assert.equal(git(cwd, 'symbolic-ref', '-q', 'HEAD'), `refs/heads/${B}`);
+    // ...but the directory is not a dispatched worktree under <main>/.worktrees/.
+    assert.ok(denied(run(push(B), { cwd, projectDir: r.root })));
+    assert.ok(denied(run(push(B), { cwd, projectDir: cwd })));
+  });
+
+  it('a worktree whose .git file points at a hand-forged gitdir (commondir -> real repo) is denied', () => {
+    const B = 'ai-sdlc/aisdlc-701-x';
+    const dir = join(r.root, '.worktrees', 'aisdlc-701');
+    const fake = join(base, 'fake-gitdir');
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(fake, { recursive: true });
+    writeFileSync(join(fake, 'HEAD'), `ref: refs/heads/${B}\n`);
+    writeFileSync(join(fake, 'commondir'), `${join(r.root, '.git')}\n`);
+    writeFileSync(join(fake, 'gitdir'), `${join(dir, '.git')}\n`);
+    writeFileSync(join(dir, '.git'), `gitdir: ${fake}\n`);
+    writeFileSync(join(dir, '.active-task'), 'AISDLC-701\n');
+    const cwd = realpathSync(dir);
+    // Precondition: git really accepts the forgery as a checkout of that branch.
+    assert.equal(git(cwd, 'symbolic-ref', '-q', 'HEAD'), `refs/heads/${B}`);
+    assert.ok(denied(run(push(B), { cwd, projectDir: r.root })));
+  });
+
+  it('a symlinked .worktrees entry pointing at a real worktree elsewhere is denied', () => {
+    const B = 'ai-sdlc/aisdlc-5-x';
+    const real = join(base, 'elsewhere', 'aisdlc-5');
+    git(r.root, 'worktree', 'add', '-q', '-b', B, real);
+    writeFileSync(join(real, '.active-task'), 'AISDLC-5\n');
+    const link = join(r.root, '.worktrees', 'aisdlc-5');
+    symlinkSync(real, link);
+    assert.ok(denied(run(push(B), { cwd: link, projectDir: r.root })));
+    assert.ok(denied(run(push(B), { cwd: realpathSync(real), projectDir: r.root })));
+  });
+
+  it('project dir outside the main checkout / .worktrees is denied', () => {
+    const outside = join(base, 'forged-x', 'aisdlc-700');
+    assert.ok(denied(run(L(), { cwd: r.wt, projectDir: realpathSync(outside) })));
+  });
+
+  it('an operator main checkout (not under .worktrees) gets no lease push even on a task-named branch', () => {
+    const op = makeRepo('opmain', roleYaml(LEASE));
+    // Main checkout itself on a task-named branch with a sentinel and a matching directory name.
+    const mainDir = join(base, 'opmain');
+    const dirNamed = join(base, 'aisdlc-9');
+    git(base, 'init', '-q', '-b', 'main', dirNamed);
+    mkdirSync(join(dirNamed, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(dirNamed, '.ai-sdlc', 'agent-role.yaml'), roleYaml(LEASE));
+    git(dirNamed, ...['-c', 'user.name=t', '-c', 'user.email=t@example.invalid'], 'add', '-A');
+    git(
+      dirNamed,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@example.invalid',
+      'commit',
+      '-q',
+      '-m',
+      'i',
+    );
+    git(dirNamed, 'checkout', '-q', '-b', 'ai-sdlc/aisdlc-9-x');
+    git(dirNamed, 'remote', 'add', 'origin', join(base, 'opmain-origin.git'));
+    writeFileSync(join(dirNamed, '.active-task'), 'AISDLC-9\n');
+    const cwd = realpathSync(dirNamed);
+    assert.ok(denied(run(push('ai-sdlc/aisdlc-9-x'), { cwd, projectDir: cwd })));
+    void op;
+    void mainDir;
+  });
+});
+
+describe('gh-issue task ids', () => {
+  it('allows gh-issue-N with dir .worktrees/gh-issue-N and branch ai-sdlc/gh-issue-N-slug', () => {
+    const r = makeRepo('ghissue', roleYaml(LEASE));
+    const B = 'ai-sdlc/gh-issue-42-fix-thing';
+    const dir = join(r.root, '.worktrees', 'gh-issue-42');
+    git(r.root, 'worktree', 'add', '-q', '-b', B, dir);
+    writeFileSync(join(dir, '.active-task'), 'gh-issue-42\n');
+    const cwd = realpathSync(dir);
+    const cmd = `git push --force-with-lease origin HEAD:refs/heads/${B}`;
+    assert.ok(!denied(run(cmd, { cwd, projectDir: r.root })));
+    // mismatched id still denies
+    writeFileSync(join(dir, '.active-task'), 'gh-issue-43\n');
+    assert.ok(denied(run(cmd, { cwd, projectDir: r.root })));
   });
 });

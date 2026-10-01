@@ -15,6 +15,7 @@ const {
   probeRef,
   runGit,
   mainCheckoutRoot,
+  verifiedMainRoot,
   loadTrustedExtras,
   bannerGovernance,
   readTaskId,
@@ -113,6 +114,7 @@ describe('mainCheckoutRoot / loadTrustedExtras with an injected runner', () => {
   it('reads the policy from the main checkout of the same repo', () =>
     tmp((d) => {
       mkdirSync(join(d, '.ai-sdlc'));
+      mkdirSync(join(d, '.git'));
       writeFileSync(join(d, '.ai-sdlc', 'agent-role.yaml'), LEASE_YAML);
       const run = () => join(d, '.git');
       const e = loadTrustedExtras(d, d, run);
@@ -146,6 +148,7 @@ describe('bannerGovernance', () => {
   it('a lease copy confirmed by the trusted main checkout keeps the lease', () =>
     tmp((d) => {
       mkdirSync(join(d, '.ai-sdlc'));
+      mkdirSync(join(d, '.git'));
       writeFileSync(join(d, '.ai-sdlc', 'agent-role.yaml'), LEASE_YAML);
       const resolved = resolveGovernanceFromYaml(LEASE_YAML);
       const out = bannerGovernance(LEASE_YAML, resolved, d, d, 'operator-dispatch', () =>
@@ -163,6 +166,12 @@ describe('readTaskId', () => {
       for (const [content, want] of [
         ['AISDLC-663\n', 'aisdlc-663'],
         ['AISDLC-100.5', 'aisdlc-100.5'],
+        ['gh-issue-123\n', 'gh-issue-123'],
+        ['GH-ISSUE-9', 'gh-issue-9'],
+        ['gh-issue-', null],
+        ['gh-issue', null],
+        ['-1', null],
+        ['gh--issue-1', null],
         ['', null],
         ['\n', null],
         ['junk', null],
@@ -171,5 +180,29 @@ describe('readTaskId', () => {
         writeFileSync(join(d, '.active-task'), content);
         assert.equal(readTaskId(d), want, JSON.stringify(content));
       }
+    }));
+});
+
+describe('verifiedMainRoot cross-checks the agent-writable gitdir chain', () => {
+  it('rejects a .git FILE, a symlinked .git, or a .git that is not the reported common dir', () =>
+    tmp((d) => {
+      const root = join(d, 'main');
+      mkdirSync(root);
+      const run = () => join(root, '.git');
+      // missing .git
+      assert.equal(verifiedMainRoot(root, run), null);
+      // .git is a file
+      writeFileSync(join(root, '.git'), 'gitdir: /tmp/evil\n');
+      assert.equal(verifiedMainRoot(root, run), null);
+      rmSync(join(root, '.git'));
+      // real directory
+      mkdirSync(join(root, '.git'));
+      assert.equal(verifiedMainRoot(root, run), root);
+      // reported common dir points at a different .git
+      const other = join(d, 'evil', '.git');
+      mkdirSync(other, { recursive: true });
+      let n = 0;
+      const lying = () => (n++ === 0 ? join(root, '.git') : other);
+      assert.equal(verifiedMainRoot(root, lying), null);
     }));
 });

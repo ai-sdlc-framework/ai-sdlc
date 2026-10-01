@@ -171,12 +171,14 @@ identical to what the slash command enforces:
 
 ```bash
 # Reference shape — DO NOT run this from the subagent.
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
+BRANCH=$(git branch --show-current)
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   echo "ERROR: refusing to force-push $BRANCH"
   exit 1
 fi
-git push --force-with-lease origin "$BRANCH"
+# The push itself is a standalone command, branch written literally, from the
+# dispatched worktree (the only spelling `leaseOnOwnBranch` accepts):
+git push --force-with-lease origin HEAD:refs/heads/<branch>
 ```
 
 `--force-with-lease` refuses if the remote moved under us — which

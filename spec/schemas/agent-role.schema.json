@@ -282,7 +282,7 @@
             { "type": "boolean" },
             { "type": "string", "enum": ["never", "leaseOnOwnBranch"] }
           ],
-          "description": "Force-push policy. `never` (default; boolean `false`) = no force pushes. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, directory name and `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push."
+          "description": "Force-push policy. `never` (default; boolean `false`) = no force pushes. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, its directory name under `<repo>/.worktrees/` and the `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push."
         },
         "protectedBranches": {
           "type": "array",

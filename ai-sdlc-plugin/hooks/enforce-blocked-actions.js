@@ -76,7 +76,13 @@ const {
   STRICT_DEFAULTS,
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
-const { runGit: gitOut, probeRef, loadTrustedExtras, readTaskId } = require('./lib/trusted-policy');
+const {
+  runGit: gitOut,
+  probeRef,
+  loadTrustedExtras,
+  resolveLeaseWorktree,
+  readTaskId,
+} = require('./lib/trusted-policy');
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
@@ -153,7 +159,16 @@ function loadLeasePolicy() {
     const cwd = toolCwd || process.cwd();
     const trusted = loadTrustedExtras(projectDir, cwd);
     if (!trusted || trusted.forcePushMode !== 'leaseOnOwnBranch') return closed;
-    return { mode: 'leaseOnOwnBranch', protectedBranches: trusted.protectedBranches, cwd };
+    // The cwd must be a genuine dispatched worktree under <main>/.worktrees/
+    // (realpath), else no lease: operator main-checkout sessions get none.
+    const wt = resolveLeaseWorktree(projectDir, cwd);
+    if (!wt) return closed;
+    return {
+      mode: 'leaseOnOwnBranch',
+      protectedBranches: trusted.protectedBranches,
+      cwd,
+      top: wt.top,
+    };
   } catch {
     return closed;
   }
@@ -242,7 +257,7 @@ function enforceBash(command) {
   try {
     const lease = loadLeasePolicy();
     if (lease.mode === 'leaseOnOwnBranch') {
-      const top = gitOut(['rev-parse', '--show-toplevel'], lease.cwd);
+      const top = lease.top;
       const verdict = evaluateLeasePush(trimmed, {
         ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
         protectedBranches: lease.protectedBranches,

@@ -86,11 +86,31 @@ spec:
     destinations such as `HEAD:<branch>` are refused because git resolves them
     against the remote with every rule (tags and notes refs win over heads), and
     names such as `heads/x`, `tags/x`, `remotes/x`, `refs/x` are refused;
-  - `<branch>` is the task's own branch: the worktree has a valid `.active-task`,
-    the worktree directory is named `<task-id-lower>`, and the branch starts
-    with `ai-sdlc/<task-id-lower>-` (the `backlog.branching.pattern` default
-    `ai-sdlc/{issueIdLower}-{slug}`, hardcoded here). Anything missing or
-    disagreeing denies. **A session with no `.active-task` sentinel (an
+  - `<branch>` is the task's own branch: the worktree has a valid `.active-task`
+    (`AISDLC-123`, `AISDLC-100.5`, or the GitHub-issue form `gh-issue-42`), the
+    worktree directory is named `<task-id-lower>` (`.worktrees/aisdlc-123`,
+    `.worktrees/gh-issue-42`), and the branch starts with
+    `ai-sdlc/<task-id-lower>-` (the `backlog.branching.pattern` default
+    `ai-sdlc/{issueIdLower}-{slug}`, hardcoded here; the GitHub-issue path
+    produces `ai-sdlc/gh-issue-42-<slug>`). Anything missing or disagreeing
+    denies;
+  - the worktree is genuine: its real path (symlinks resolved) is directly
+    under `<main checkout>/.worktrees/`, the project directory is the main
+    checkout or under its `.worktrees/`, the main checkout's `.git` is a real
+    directory matching the git common dir, and the worktree's own git dir lives
+    under `<main>/.git/worktrees/` with a `gitdir` back-pointer to the worktree.
+    A forged directory elsewhere (for example `/tmp/x/aisdlc-700`), a symlinked
+    `.worktrees` entry, or a hand-built gitdir pointing at the real repo all
+    deny, and so does an operator's main checkout;
+  - **the accepted spelling**: run, as its own standalone command from the
+    worktree, `git push --force-with-lease origin HEAD:refs/heads/<branch>` with
+    the branch printed by `git branch --show-current` written literally (no
+    variables, quotes, `cd &&`, chaining; `-u` is allowed, bare `HEAD` and
+    `--set-upstream HEAD` are not). The no-colon form
+    `git push --force-with-lease origin <branch>` is also accepted. The
+    `/ai-sdlc rebase` command and the rebase/CI-conflict/developer agents use
+    this spelling, and a test parses their push lines and runs them through the
+    hook so they cannot drift; **A session with no `.active-task` sentinel (an
     operator's own session) therefore gets no lease push**; the supported paths
     are to run the rebase/push from the dispatched worktree (`/ai-sdlc rebase`)
     or for the operator to push manually. Residual: an agent can rewrite its own
@@ -134,7 +154,9 @@ spec:
   `gh pr create --body` containing a line that reads like a force push) can be
   denied under `leaseOnOwnBranch`. Payloads wrapped in `bash -c '...'` or
   `sh -c '...'` are not parsed by this hook (a pre-existing gap, unchanged);
-  `xargs git push` is recognised.
+  `xargs git push` is recognised. The matcher is not a boundary against a
+  deliberately hostile agent: `bash -c`, `GIT_CONFIG`/`-c` injected `+` refspecs,
+  and git aliases (under `never`) are pre-existing gaps, not closed here.
 - **`operational`** is a closed list granted to the dispatch role:
   `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`,
   `file-subid-followups`, `answer-operational-decisions`,
