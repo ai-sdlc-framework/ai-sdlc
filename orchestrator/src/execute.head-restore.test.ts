@@ -53,7 +53,7 @@ describe('captureCurrentBranch', () => {
   });
 
   afterEach(async () => {
-    await rm(repo, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it('returns the symbolic branch name when HEAD is on a branch', async () => {
@@ -77,7 +77,7 @@ describe('captureCurrentBranch', () => {
       const result = await captureCurrentBranch(tmp);
       expect(result).toBeNull();
     } finally {
-      await rm(tmp, { recursive: true, force: true });
+      await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 });
@@ -96,7 +96,7 @@ describe('restoreOriginalBranch', () => {
   });
 
   afterEach(async () => {
-    await rm(repo, { recursive: true, force: true });
+    await rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   function makeLog() {

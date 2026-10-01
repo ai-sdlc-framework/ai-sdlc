@@ -62,7 +62,7 @@ describe('WorktreePoolManager integration (real git)', () => {
   });
 
   afterEach(async () => {
-    if (tmpRoot) await rm(tmpRoot, { recursive: true, force: true });
+    if (tmpRoot) await rm(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   // Flaky test moved to worktree-pool.integration.flaky.test.ts (AISDLC-371).

@@ -117,7 +117,7 @@ function makeRunner(branchStates: Record<string, 'MERGED' | 'OPEN' | null>): {
         const targetPath = args[args.length - 1];
         if (targetPath) {
           try {
-            rmSync(targetPath, { recursive: true, force: true });
+            rmSync(targetPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
           } catch {
             // no-op — mirror the allow-failure behaviour of the real function
           }
@@ -166,7 +166,7 @@ const workDirs: string[] = [];
 afterEach(() => {
   for (const d of workDirs) {
     try {
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     } catch {
       /* ignore cleanup errors */
     }

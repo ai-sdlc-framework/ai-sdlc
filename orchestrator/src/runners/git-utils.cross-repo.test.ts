@@ -43,7 +43,7 @@ describe('detectCrossRepoWrites — real fs integration', () => {
   });
 
   afterEach(async () => {
-    await rm(parent, { recursive: true, force: true });
+    await rm(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it('detects dirty sibling repo and returns the modified file list', async () => {

@@ -54,6 +54,13 @@ export function makeGitEnv(): NodeJS.ProcessEnv {
     // user-config bleed from the operator's machine.
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
+    // AISDLC-655.5: no detached `git gc --auto` / maintenance process may still
+    // be writing into .git when a fixture dir is removed (ENOTEMPTY flake).
+    GIT_CONFIG_COUNT: '2',
+    GIT_CONFIG_KEY_0: 'gc.auto',
+    GIT_CONFIG_VALUE_0: '0',
+    GIT_CONFIG_KEY_1: 'maintenance.auto',
+    GIT_CONFIG_VALUE_1: 'false',
     // Disable husky so the calling project's pre-commit hooks don't fire.
     HUSKY: '0',
     // Suppress credential helpers / interactive prompts.
