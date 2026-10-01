@@ -258,6 +258,34 @@ describe('decision.stage-b-signals', () => {
     const out = d.compose({ novelty: score(3), exemplarSimilarity: score(2) }, input, {}, trusted);
     expect(out).toEqual({ kind: 'act', decision: { novelty: 0.5, exemplarSimilarity: 0.5 } });
   });
+  it.each([Number.NaN, -1, 4, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'falls back to the 0.5 baseline for a malformed level %s, never a NaN signal',
+    (bad) => {
+      const out = d.compose(
+        { novelty: score(bad), exemplarSimilarity: score(0) },
+        input,
+        {},
+        trusted,
+      );
+      expect(out).toEqual({ kind: 'act', decision: { novelty: 0.5, exemplarSimilarity: 0 } });
+      const both = d.compose(
+        { novelty: score(bad), exemplarSimilarity: score(bad) },
+        input,
+        {},
+        trusted,
+      );
+      expect(both).toEqual({ kind: 'act', decision: { novelty: 0.5, exemplarSimilarity: 0.5 } });
+    },
+  );
+  it('treats a non-finite confidence as below the minimum', () => {
+    const out = d.compose(
+      { novelty: score(0, Number.NaN), exemplarSimilarity: score(0) },
+      input,
+      {},
+      trusted,
+    );
+    expect(out).toEqual({ kind: 'act', decision: { novelty: 0.5, exemplarSimilarity: 0 } });
+  });
   it('leaves a low-confidence signal at the baseline', () => {
     const out = d.compose(
       { novelty: score(0, 0.3), exemplarSimilarity: score(0) },

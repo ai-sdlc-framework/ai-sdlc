@@ -100,3 +100,27 @@ describe('score-a with the judgment layer', () => {
     expect(provider.requests.length).toBeGreaterThan(0);
   });
 });
+
+describe('score-c with the judgment layer', () => {
+  it('gates on the baseline composite and shows the judged one for display only', async () => {
+    delete process.env.AI_SDLC_JUDGMENT_CONFIG_PATH;
+    process.env.AI_SDLC_JUDGMENT = 'off';
+    const plainId = await seed('Settle the matter');
+    const plain = await run('score-c', plainId, '--format', 'json');
+    expect(plain).not.toHaveProperty('judgedCompositeScore');
+
+    const provider = new FakeJudgmentProvider({ name: 'fake-dec-cli-c' })
+      .script('engineering', { type: 'noul', probability: 0.9 })
+      .script('product', { type: 'noul', probability: 0.9 })
+      .script('design', { type: 'noul', probability: 0.9 });
+    registerJudgmentProvider(provider);
+    configure('fake-dec-cli-c');
+    delete process.env.AI_SDLC_JUDGMENT;
+    const r = await run('score-c', plainId, '--format', 'json');
+    // The gating composite is the unjudged one, whatever the judgment layer answered.
+    expect(r.stageBCompositeScore).toBe(plain.stageBCompositeScore);
+    expect(r.fired).toBe(plain.fired);
+    expect(r.judgedCompositeScore).toBeLessThan(r.stageBCompositeScore as number);
+    expect(provider.requests.length).toBeGreaterThan(0);
+  });
+});

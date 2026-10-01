@@ -80,8 +80,9 @@ import {
   runCalibrationSweep,
   judgeStageA,
   judgeStageBSignals,
+  DECISION_JUDGMENT_SOURCE_KIND,
   runStageA,
-  runStageB,
+  runStageBWithJudgment,
   runStageC,
   setFatigue,
   shouldInvokeResearchSubagent,
@@ -1054,7 +1055,7 @@ export function buildDecisionsCli(): Argv {
 
         const runner = createJudgmentRunner({ workDir });
         const judged = await judgeStageA(decision, openDecisions, runner, {
-          sourceKind: 'backlog',
+          sourceKind: DECISION_JUDGMENT_SOURCE_KIND,
         });
         const stageA = runStageA({
           decision,
@@ -1222,21 +1223,29 @@ export function buildDecisionsCli(): Argv {
             warnToStderr('[score-c] dep-graph unavailable — blast-radius defaults to zeros');
           }
         }
+        // Decisions are internal work-item text (the catalog's sources are all internal
+        // origins; there is no external-issue source), so they are judged as trusted
+        // backlog items. Every judgment consulted here is nominal in the permissive
+        // direction anyway (see their reducesReview rationales).
         const runner = createJudgmentRunner({ workDir });
         const judged = await judgeStageA(decision, openDecisions, runner, {
-          sourceKind: 'backlog',
-        });
-        const stageA = runStageA({
-          decision,
-          openDecisions,
-          graph,
-          workDir,
-          ...(judged ? { judged } : {}),
+          sourceKind: DECISION_JUDGMENT_SOURCE_KIND,
         });
         const signals = await judgeStageBSignals(decision, workDir, runner, {
-          sourceKind: 'backlog',
+          sourceKind: DECISION_JUDGMENT_SOURCE_KIND,
         });
-        const stageB = runStageB({ decision, stageA, ...(signals ? { signals } : {}) });
+        // The Stage C band, auto-apply and the framework route read ONLY the baseline
+        // (`stageB`, no judged input). The judged composite is shown, never gated on.
+        const pair = runStageBWithJudgment({
+          decision,
+          stageAInput: { decision, openDecisions, graph, workDir },
+          ...(judged ? { judgedStageA: judged } : {}),
+          ...(signals ? { signals } : {}),
+        });
+        const stageB = pair.gating;
+        // Shown only when the layer contributed something, so the unconfigured output is unchanged.
+        const judgedCompositeScore =
+          pair.judged === pair.gating ? undefined : pair.judgedCompositeScore;
 
         // CLI requires no real invoker by design — the CLI is a dry-run
         // surface for operators inspecting "what would Stage C say?". The
@@ -1265,11 +1274,17 @@ export function buildDecisionsCli(): Argv {
               fired: false,
               skipReason: result.skipReason,
               stageBCompositeScore: stageB.compositeScore,
+              ...(judgedCompositeScore !== undefined ? { judgedCompositeScore } : {}),
             });
           } else {
             emitText(`Stage C did not fire for ${id}`);
             emitText(`  reason:                ${result.skipReason}`);
             emitText(`  stage-b composite:     ${stageB.compositeScore.toFixed(3)}`);
+            if (judgedCompositeScore !== undefined) {
+              emitText(
+                `  judged composite:      ${judgedCompositeScore.toFixed(3)} (display only)`,
+              );
+            }
             emitText(`  mid-band:              [0.4, 0.7) — pass --force to bypass for spot-check`);
           }
           return;
@@ -1307,12 +1322,16 @@ export function buildDecisionsCli(): Argv {
             stored: shouldStore,
             autoApplied: autoApplyEligible,
             stageBCompositeScore: stageB.compositeScore,
+            ...(judgedCompositeScore !== undefined ? { judgedCompositeScore } : {}),
           });
         } else {
           emitText(`Stage C result for ${id}`);
           emitText(
             `  fired:               yes (stage-b composite ${stageB.compositeScore.toFixed(3)})`,
           );
+          if (judgedCompositeScore !== undefined) {
+            emitText(`  judged composite:    ${judgedCompositeScore.toFixed(3)} (display only)`);
+          }
           emitText(`  recommendation:      ${stageC.recommendation.optionId}`);
           emitText(`  confidence:          ${stageC.recommendation.confidence.toFixed(3)}`);
           emitText(`  threshold:           ${stageC.effectiveThreshold.toFixed(3)}`);

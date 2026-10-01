@@ -42,6 +42,17 @@ export const DUPLICATE_SHORTLIST_MAX = 5;
 /** Most exemplars sent as context for the Stage B signals. */
 export const STAGE_B_EXEMPLAR_LIMIT = 8;
 
+/**
+ * The `sourceKind` the CLI judges decisions under. `Decision.metadata.source` records a
+ * decision's origin as one of `DECISION_SOURCES` (dor-clarification, rfc-open-question,
+ * emergent-finding, framework-calibration, subagent-escalation, ad-hoc). All are internal
+ * origins and none identifies untrusted external text such as a gh issue, so there is no
+ * field to derive a stricter kind from: decisions are treated as trusted work-item text.
+ * The judgments consulted here are also nominal in the permissive direction (their
+ * reducesReview rationales), so this does not widen what a model answer can do.
+ */
+export const DECISION_JUDGMENT_SOURCE_KIND = 'backlog';
+
 export interface JudgeOptions {
   /** Kind of the work item. Only `'backlog'` may decide in the permissive direction. */
   sourceKind?: string;

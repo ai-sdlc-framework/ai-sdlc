@@ -32,6 +32,7 @@ import type { DependencyGraph } from '../deps/dependency-graph.js';
 import { buildDependencyGraph, impact as graphImpact } from '../deps/dependency-graph.js';
 import { computeEffectivePriorities } from '../deps/effective-priority.js';
 
+import { brandBaseline, type BaselineStageAOutput } from './baseline-brand.js';
 import type {
   Decision,
   DecisionOption,
@@ -813,6 +814,15 @@ export function runStageA(input: StageAInput): StageAOutput {
     resolvedByStageA,
     routingActor,
   };
+}
+
+/**
+ * Stage A with NO judged input. This is the only way to obtain a `BaselineStageAOutput`,
+ * the type every gating read of Stage B accepts. The input type omits `judged`, so a
+ * judged answer cannot be passed in.
+ */
+export function runBaselineStageA(input: Omit<StageAInput, 'judged'>): BaselineStageAOutput {
+  return brandBaseline(runStageA(input));
 }
 
 // ── Coverage metric (AC#6) ────────────────────────────────────────────────────

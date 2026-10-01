@@ -38,6 +38,12 @@
  * @module decisions/stage-b
  */
 
+import {
+  brandBaseline,
+  type BaselineStageAOutput,
+  type BaselineStageBOutput,
+} from './baseline-brand.js';
+import { runBaselineStageA, runStageA, type StageAInput, type StageAJudgments } from './stage-a.js';
 import type {
   Decision,
   DecisionRouting,
@@ -574,6 +580,80 @@ export function runStageB(input: StageBInput): StageBOutput {
     compositeScore,
     resolvedByStageB,
   };
+}
+
+// ── Baseline / judged boundary ───────────────────────────────────────────────
+
+/** Input for `runBaselineStageB`: no judged signals, and a Stage A that is itself baseline. */
+export interface BaselineStageBInput {
+  decision: Decision;
+  stageA: BaselineStageAOutput;
+  pillarOwners?: PillarOwnerConfig;
+  now?: Date;
+}
+
+/**
+ * Stage B from a baseline Stage A and with both Stage B signals at 0.5. This is the only
+ * way to obtain a `BaselineStageBOutput`, which every gate (the Stage C band test, Stage C
+ * auto-apply, the framework route) requires. A judged Stage A or judged signals do not
+ * type-check here.
+ */
+export function runBaselineStageB(input: BaselineStageBInput): BaselineStageBOutput {
+  return brandBaseline(runStageB(input));
+}
+
+export interface StageBWithJudgmentInput {
+  decision: Decision;
+  /** Stage A inputs; the judged answers are passed separately so the baseline never sees them. */
+  stageAInput: Omit<StageAInput, 'judged'>;
+  judgedStageA?: StageAJudgments;
+  signals?: LlmConfidenceSignals;
+  pillarOwners?: PillarOwnerConfig;
+  now?: Date;
+}
+
+export interface StageBWithJudgmentResult {
+  /** Baseline Stage A. Gates read only this. */
+  gatingStageA: BaselineStageAOutput;
+  /** Baseline Stage B. The Stage C band, auto-apply and framework route read only this. */
+  gating: BaselineStageBOutput;
+  /**
+   * Composite computed with the judged answers. DISPLAY AND SCORING ONLY: never read by a
+   * gate. Equals `gating.compositeScore` when nothing was judged.
+   */
+  judgedCompositeScore: number;
+  /** The judged Stage B result, for display. Not accepted by any gate (no baseline brand). */
+  judged: StageBOutput;
+}
+
+/**
+ * Run the baseline Stage A/B that gates use, plus a judged run for display. The judged run
+ * is skipped (and `judgedCompositeScore` equals the baseline) when no judged input exists.
+ */
+export function runStageBWithJudgment(input: StageBWithJudgmentInput): StageBWithJudgmentResult {
+  const { decision, stageAInput, judgedStageA, signals, pillarOwners, now } = input;
+  const gatingStageA = runBaselineStageA(stageAInput);
+  const gating = runBaselineStageB({
+    decision,
+    stageA: gatingStageA,
+    ...(pillarOwners ? { pillarOwners } : {}),
+    ...(now ? { now } : {}),
+  });
+  if (!judgedStageA && !signals) {
+    return { gatingStageA, gating, judgedCompositeScore: gating.compositeScore, judged: gating };
+  }
+  const judgedA = runStageA({ ...stageAInput, ...(judgedStageA ? { judged: judgedStageA } : {}) });
+  const judgedRun = runStageB({
+    decision,
+    stageA: judgedA,
+    ...(signals ? { signals } : {}),
+    ...(pillarOwners ? { pillarOwners } : {}),
+    ...(now ? { now } : {}),
+  });
+  // The route can never be judged: the framework route and llmEligible come from the
+  // baseline run, so the displayed judged result carries the baseline routing.
+  const judged: StageBOutput = { ...judgedRun, routing: gating.routing };
+  return { gatingStageA, gating, judgedCompositeScore: judged.compositeScore, judged };
 }
 
 // ── Event factory ─────────────────────────────────────────────────────────────

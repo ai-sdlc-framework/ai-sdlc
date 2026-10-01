@@ -44,6 +44,15 @@ const LEVEL_DIVISOR = 3;
  * constants give. So a level above the baseline is held at 0.5 and only levels that lower
  * confidence take effect. Lifting this cap makes the judgment review-reducing, which
  * needs riskClass 'relax' and its promotion bar.
+ *
+ * The composite score is not monotonic in review: the Stage C band [0.4, 0.7) fires the
+ * model only in the middle, and a composite on either side means less model involvement
+ * (and Stage C may auto-apply). So moving a signal in either direction could reduce review
+ * through compositeScore, the Stage C band or the framework route. The consumer therefore
+ * never lets these signals reach a gate: every gating read (Stage C band, Stage C
+ * auto-apply inputs, framework route) uses the baseline composite computed with both
+ * signals at 0.5, and the judged composite is carried for display only
+ * (`judgedCompositeScore`).
  */
 export const decisionStageBSignalsDefinition: JudgmentDefinition<
   StageBSignalsInput,
@@ -99,7 +108,14 @@ export const decisionStageBSignalsDefinition: JudgmentDefinition<
     if (!novelty || !similarity) return { kind: 'abstain', reason: 'missing-answer' };
     const minConfidence = thresholdOf(thresholds, 'minConfidence', STAGE_B_DEFAULT_MIN_CONFIDENCE);
     const signal = (a: { score: number; confidence: number }): number => {
-      if (a.confidence < minConfidence) return STAGE_B_SIGNAL_BASELINE;
+      // A malformed level or confidence can never produce a NaN signal: fall back to the
+      // baseline rather than let NaN propagate into the composite.
+      if (!Number.isFinite(a.score) || a.score < 0 || a.score > LEVEL_DIVISOR) {
+        return STAGE_B_SIGNAL_BASELINE;
+      }
+      if (!Number.isFinite(a.confidence) || a.confidence < minConfidence) {
+        return STAGE_B_SIGNAL_BASELINE;
+      }
       const v = Math.min(Math.max(a.score / LEVEL_DIVISOR, 0), 1);
       return Math.min(v, STAGE_B_SIGNAL_BASELINE);
     };

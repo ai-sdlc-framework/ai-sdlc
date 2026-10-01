@@ -26,6 +26,12 @@ const PILLAR_QUESTIONS: Record<DecisionPillar, string> = {
  * keyword result and never removes one, so no outcome yields less review. No outcome is
  * permissive, so the direction is nominal. An empty set abstains and the keyword result
  * stands.
+ *
+ * The pillar set also feeds the Stage B actorFit score, hence compositeScore, the Stage C
+ * band and the framework route. Those are not monotonic in review (a composite on either
+ * side of [0.4, 0.7) means less model involvement), so a judged pillar must never reach
+ * them: every gating read uses the baseline Stage A/B run computed from the keyword pillars
+ * only, and the judged composite is carried for display only (`judgedCompositeScore`).
  */
 export const decisionPillarsDefinition: JudgmentDefinition<DecisionText, DecisionPillar[]> = {
   id: 'decision.pillars',

@@ -21,6 +21,13 @@ export const REVERSIBILITY_DEFAULT_THRESHOLD = 0.8;
  *   route a decision to the framework to auto-decide, which `unknown` does not. A phrase
  *   list `one-way` hit is also never overridden. So no outcome yields less review than
  *   the phrase list alone.
+ *
+ * Reversibility also feeds the Stage B loadBearing score, hence compositeScore, the Stage C
+ * band and the framework route. A judged `one-way` raises loadBearing, and the composite is
+ * not monotonic in review (a composite on either side of [0.4, 0.7) means less model
+ * involvement), so no judged reversibility reaches a gate: every gating read uses the
+ * baseline composite computed from the phrase list and explicit field alone, and the judged
+ * composite is carried for display only (`judgedCompositeScore`).
  */
 export const decisionReversibilityDefinition: JudgmentDefinition<DecisionText, Reversibility> = {
   id: 'decision.reversibility',
