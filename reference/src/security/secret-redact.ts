@@ -37,7 +37,8 @@
  *     key or an access key id (never a bare 40-char word)
  *   - URL userinfo credentials: `scheme://user:password@host`
  *   - `.env`-style assignments: `NAME=value` where NAME contains SECRET,
- *     TOKEN, PASSWORD, PASSWD, API_KEY, PRIVATE_KEY or CREDENTIAL
+ *     TOKEN, PASSWORD, PASSWD, API_KEY, PRIVATE_KEY, CREDENTIAL or a
+ *     standalone PASS / PWD word
  *   - PEM private-key blocks: `-----BEGIN ... PRIVATE KEY-----`
  *   - JWTs: three base64url segments separated by dots
  *   - Generic high-entropy: long alphanumeric runs (warn-level catch-all)
@@ -149,34 +150,40 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   { name: 'GITHUB_PAT', regex: /ghp_[A-Za-z0-9]{36,}/g },
   // AWS secret access keys are 40 chars of base64 alphabet with no documented
   // prefix, so a bare 40-char token is NEVER redacted (it would corrupt git
-  // SHAs, hashes and ids). Three anchored shapes only:
+  // SHAs, hashes and ids). Three anchored shapes only. In all of them the value
+  // is EXACTLY 40 chars of [A-Za-z0-9/+] (it must not be part of a longer base64
+  // run: lookbehind + lookahead) and a 40-char lowercase-hex token (a git SHA)
+  // is left alone.
   //
-  // (a) a key NAME containing `secret` (aws_secret_access_key = <40>,
-  //     "SecretAccessKey": "<40>", AWS_SECRET_ACCESS_KEY=<40>). The name tail
-  //     and whitespace runs are bounded ({0,64}/{0,20}) so a long run of
-  //     `secret` repeats stays linear. The value must be EXACTLY 40 chars
-  //     (not followed by another base64 char).
+  // (a) a key NAME containing `secret` (case-insensitive) followed by a bounded
+  //     name tail ([\w .[\]-]{0,64}, so `Secret Access Key`, `aws_secret_access_key`,
+  //     `fs.s3a.secret.key`, `AWS Secret Access Key [None]`), an optional closing
+  //     quote/backtick, and a separator: `:` `=` `:=` `=>` `>` (so `]:` works via
+  //     the tail), plain whitespace (`aws configure set aws_secret_access_key X`),
+  //     or an XML close+open tag pair (`</name><value>`). The value may be wrapped
+  //     in a quote or backtick. All quantifiers are bounded so a long run of
+  //     `secret` repeats, spaces, `[` or backticks stays linear.
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /(secret[A-Za-z0-9_-]{0,64}["']?[ \t]{0,20}[:=][ \t]{0,20}["']?)[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])/gi,
+      /(secret[\w .[\]-]{0,64}?(?:["'`]?[ \t]{0,20}(?::=|=>|[:=>])[ \t]{0,20}|["'`]?[ \t]{1,20}|<\/\w{1,32}>\s{0,20}<\w{1,32}>\s{0,20})["'`]?)(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
     replacement: '$1[REDACTED:AWS_SECRET_KEY]',
   },
   // (b) an access key id (AKIA/ASIA + 16) followed within a short separator
-  //     (whitespace , : ; | = quotes) by a 40-char token. The token must
-  //     contain a non-lowercase-hex char so a 40-hex git SHA next to an id is
-  //     left alone. The id is kept here; AWS_ACCESS_KEY redacts it next.
+  //     (whitespace , : ; | = quotes backticks) by a 40-char token. The id is
+  //     kept here; AWS_ACCESS_KEY redacts it next. `=` is a separator, so it is
+  //     NOT in the value-boundary lookbehind class.
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /((?:AKIA|ASIA)[0-9A-Z]{16}[\s,:;|="']{1,8})(?=[A-Za-z0-9/+=]{0,39}[^0-9a-f])(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])/g,
+      /((?:AKIA|ASIA)[0-9A-Z]{16}[\s,:;|="'`]{1,8})(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/g,
     replacement: '$1[REDACTED:AWS_SECRET_KEY]',
   },
   // (c) the mirror order: a 40-char token followed by an access key id.
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /(?<![A-Za-z0-9/+=])(?=[A-Za-z0-9/+=]{0,39}[^0-9a-f])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])(?=[\s,:;|="']{1,8}(?:AKIA|ASIA)[0-9A-Z]{16})/g,
+      /(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])(?=[\s,:;|="'`]{1,8}(?:AKIA|ASIA)[0-9A-Z]{16})/g,
   },
   // AWS access key IDs (`AKIA<16>`, plus `ASIA<16>` STS temporary ids).
   // Quantifier is `{16,}` so trailing alphanumerics get redacted along
@@ -223,6 +230,9 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   //  - A plain user without a password (`ssh://git@host`,
   //    `https://token@host`) is kept: it is a username, not a credential.
   //  - IPv6 hosts (`[::1]`) contain no `@` and are untouched.
+  //  - Residual gap: a raw `/`, `#` or `?` inside a password ends the match
+  //    (`scheme://user:pa/ss@host` keeps `ss`), and an `@` in the user part is
+  //    not handled; widening would over-match URLs with `@` in a path/query.
   // Quantifiers are bounded and every scan is anchored at a `://`, so long
   // inputs stay linear.
   {
@@ -238,20 +248,41 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   },
   // `.env`-style assignments: `NAME=value` where NAME CONTAINS (case-
   // insensitive substring, so `GITHUB_TOKEN`, `authToken`, `db_password`)
-  // SECRET, TOKEN, PASSWORD, PASSWD, API_KEY, PRIVATE_KEY or CREDENTIAL.
+  // SECRET, TOKEN, PASSWORD, PASSWD, API_KEY, PRIVATE_KEY or CREDENTIAL, or has
+  // a standalone PASS / PWD word (`DB_PASS`, `MYSQL_PWD`; not preceded by a
+  // letter and not followed by a letter/digit, so `PASSENGER`, `BYPASS`,
+  // `COMPASS` are untouched). The name tail allows `-` and `.`, so
+  // `secret-key=x` and `--secret-key=x` are redacted (value only).
   // Only the VALUE is redacted; the name, `export `, `=` and surrounding
   // spaces and quotes stay. Names without those substrings (`KEY`, `MONKEY`,
   // `PUBLIC_KEY`, `SSH_KEY`) are untouched. Substring semantics are
-  // deliberately aggressive: `MAX_TOKENS=4096` is redacted too (documented
-  // false positive; a leak costs more than a lost number).
+  // deliberately aggressive: `MAX_TOKENS=4096` and `PWD=/home/me` are redacted
+  // too (documented false positives; a leak costs more than a lost value).
   // Value forms: "double" / 'single' quoted (spaces and escapes allowed),
   // unquoted (up to whitespace, so a trailing ` # comment` survives), or an
   // unterminated quote (to end of line). Empty values, `==`, and values that
   // are already a `[REDACTED:` marker are left alone (idempotence).
+  //
+  // RESIDUAL GAPS (known, must be closed before any provider-enabling work
+  // relies on this redactor as its only defense):
+  //  - colon / header / flag forms: `POSTGRES_PASSWORD: hunter2`,
+  //    `"password":"x"`, `Authorization: Bearer ...`, `--password x`,
+  //    `curl -u user:pw`, `.netrc`;
+  //  - names `APIKEY=`, `api-key=`, `apiKey=` (only `API_KEY` is a keyword) and
+  //    camelCase `dbPass=`;
+  //  - URL passwords: a raw `/`, `#` or `?` inside the password ends the match
+  //    (widening would over-match URLs that merely contain `@` in a path or
+  //    query), and an `@` in the URL user part;
+  //  - unquoted multi-token values (`TOKEN=Bearer abc def` redacts only
+  //    `Bearer`);
+  //  - structured-state values under secret-named keys in the JSON walk
+  //    (`{"password":"hunter2"}` is not redacted except the exact-40-char AWS
+  //    case);
+  //  - known false positives: `MAX_TOKENS=4096`, `PWD=/home/me`.
   {
     name: 'ENV_ASSIGNMENT',
     regex:
-      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Za-z0-9_]{0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:)[^\s]+|["'](?!["'])(?!\[REDACTED:)[^\n]*)/gi,
+      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))[A-Za-z0-9_.-]{0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:)[^\s]+|["'](?!["'])(?!\[REDACTED:)[^\n]*)/gi,
     replacement: '$1$2[REDACTED:ENV_SECRET]$2',
   },
   // The `(?<![A-Za-z0-9_-])` run-start anchor does not change what matches (a

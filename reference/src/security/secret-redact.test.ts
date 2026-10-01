@@ -166,6 +166,135 @@ describe('.env-style assignments', () => {
   });
 });
 
+describe('AWS secret access keys: realistic layouts', () => {
+  const R = '[REDACTED:AWS_SECRET_KEY]';
+  const cases: Array<[string, string, string]> = [
+    [
+      'IAM console label',
+      `Secret Access Key: ${AWS_SECRET} (copy now)`,
+      `Secret Access Key: ${R} (copy now)`,
+    ],
+    [
+      'aws configure transcript',
+      `AWS Secret Access Key [None]: ${AWS_SECRET}\nDefault region`,
+      `AWS Secret Access Key [None]: ${R}\nDefault region`,
+    ],
+    [
+      'aws configure set (whitespace separator)',
+      `aws configure set aws_secret_access_key ${AWS_SECRET} --profile x`,
+      `aws configure set aws_secret_access_key ${R} --profile x`,
+    ],
+    [
+      'backtick-quoted value',
+      `secret_access_key: \`${AWS_SECRET}\` ok`,
+      `secret_access_key: \`${R}\` ok`,
+    ],
+    [
+      'STS XML',
+      `<SecretAccessKey>${AWS_SECRET}</SecretAccessKey><Expiration>x</Expiration>`,
+      `<SecretAccessKey>${R}</SecretAccessKey><Expiration>x</Expiration>`,
+    ],
+    [
+      'Hadoop name/value XML',
+      `<name>fs.s3a.secret.key</name><value>${AWS_SECRET}</value>`,
+      `<name>fs.s3a.secret.key</name><value>${R}</value>`,
+    ],
+    ['dotted fs.s3a.secret.key', `fs.s3a.secret.key=${AWS_SECRET}`, `fs.s3a.secret.key=${R}`],
+    ['dotted aws.secret.key', `aws.secret.key=${AWS_SECRET}`, `aws.secret.key=${R}`],
+    ['Go short declaration', `awsSecret := "${AWS_SECRET}"`, `awsSecret := "${R}"`],
+    ['PHP/Ruby hash rocket', `'secret' => '${AWS_SECRET}',`, `'secret' => '${R}',`],
+    [
+      'markdown table with backticks',
+      `| \`${ID}\` | \`${AWS_SECRET}\` |`,
+      `| \`[REDACTED:AWS_ACCESS_KEY]\` | \`${R}\` |`,
+    ],
+    ['id=value', `${ID}=${AWS_SECRET} tail`, `[REDACTED:AWS_ACCESS_KEY]=${R} tail`],
+    ['value=id', `${AWS_SECRET}=${ID}`, `${R}=[REDACTED:AWS_ACCESS_KEY]`],
+  ];
+  for (const [name, input, expected] of cases) {
+    it(`redacts: ${name}`, () => {
+      expect(redactSecrets(input)).toBe(expected);
+    });
+  }
+
+  it('still leaves a bare 40-char token and a SHA after a secret word unchanged', () => {
+    expect(redactSecrets(`token ${AWS_SECRET} here`)).toBe(`token ${AWS_SECRET} here`);
+    const sha = 'a'.repeat(20) + '1'.repeat(20);
+    expect(redactSecrets(`fix secret leak in commit ${sha}`)).toBe(
+      `fix secret leak in commit ${sha}`,
+    );
+    expect(redactSecrets(`name=${AWS_SECRET}`)).toBe(`name=${AWS_SECRET}`);
+  });
+
+  it('does not redact a 41-char or longer base64 run after a secret name', () => {
+    expect(redactSecrets(`Secret Access Key: ${AWS_SECRET}A`)).toBe(
+      `Secret Access Key: ${AWS_SECRET}A`,
+    );
+    expect(redactSecrets(`<SecretAccessKey>${AWS_SECRET}Z</SecretAccessKey>`)).toBe(
+      `<SecretAccessKey>${AWS_SECRET}Z</SecretAccessKey>`,
+    );
+  });
+});
+
+describe('.env-style assignments: PASS, PWD and dashed names', () => {
+  it('redacts PASS / PWD names (value only)', () => {
+    for (const name of ['DB_PASS', 'MAIL_PASS', 'MYSQL_PWD', 'PASS', 'pwd']) {
+      expect(redactSecrets(`${name}=hunter2`)).toBe(`${name}=[REDACTED:ENV_SECRET]`);
+    }
+  });
+
+  it('leaves PASSENGER / BYPASS / COMPASS style words unchanged', () => {
+    for (const t of [
+      'PASSENGER=3',
+      'PASSENGER_COUNT=3',
+      'BYPASS=1',
+      'COMPASS=north',
+      'PASSTHROUGH=1',
+      'PWDX=1',
+      'bypass_cache=1',
+    ]) {
+      expect(redactSecrets(t)).toBe(t);
+    }
+  });
+
+  it('redacts secret-key=x and --secret-key=x (value only)', () => {
+    expect(redactSecrets('secret-key=abc')).toBe('secret-key=[REDACTED:ENV_SECRET]');
+    expect(redactSecrets('run --secret-key=abc now')).toBe(
+      'run --secret-key=[REDACTED:ENV_SECRET] now',
+    );
+    expect(redactSecrets('app.secret.token=abc')).toBe('app.secret.token=[REDACTED:ENV_SECRET]');
+  });
+});
+
+describe('ReDoS: changed regexes stay linear on adversarial input', () => {
+  it('handles 200k-char secret/whitespace/bracket/backtick runs', () => {
+    const n = 200_000;
+    const inputs = [
+      'secret'.repeat(n / 6),
+      'secret '.repeat(n / 7),
+      'secret_' + ' '.repeat(n),
+      'secret' + '['.repeat(n),
+      'secret' + '`'.repeat(n),
+      'secret:' + '`'.repeat(n),
+      'secret</a>' + ' '.repeat(n),
+      'secret</a><b>'.repeat(n / 13),
+      'secret ' + 'A'.repeat(n),
+      AKIA_RUN(n),
+      'PASS'.repeat(n / 4),
+      'PASS_' + '-'.repeat(n),
+      'secret-'.repeat(n / 7),
+      '--secret-key='.repeat(n / 13),
+    ];
+    const start = Date.now();
+    for (const i of inputs) redactSecrets(i);
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
+
+function AKIA_RUN(n: number): string {
+  return ('AKIA' + 'A'.repeat(16) + '=').repeat(n / 21);
+}
+
 describe('registry hardening', () => {
   it('is idempotent for the new shapes', () => {
     const input = [
