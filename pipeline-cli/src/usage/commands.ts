@@ -202,9 +202,9 @@ export function renderAllotmentRows(rows: readonly AllotmentRow[], tolerance: nu
 }
 
 /** Manual snapshots plus the observations harnesses wrote to the limit-event log. */
-function allSnapshots(
-  deps: UsageViewDeps,
-  ctx: Context,
+export function allSnapshots(
+  deps: Pick<UsageViewDeps, 'usageDir'>,
+  ctx: Pick<Context, 'config' | 'weights'>,
   records: readonly ModelCallRecord[],
 ): Snapshot[] {
   const auto = snapshotsFromObservations(

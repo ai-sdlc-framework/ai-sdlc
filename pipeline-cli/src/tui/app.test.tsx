@@ -13,7 +13,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { render, cleanup } from 'ink-testing-library';
 import { App, handleAppKey } from './app.js';
 import { BLOCKERS_EMPTY_STATE } from './panes/blockers.js';
-import { FOOTER_KEYS } from './footer.js';
+import { FOOTER_KEYS, Footer } from './footer.js';
 import { TUI_TELEMETRY_FLAG } from './analytics/feature-flag.js';
 
 // AISDLC-178.6 — the App's ModeRouter now logs interactions on mount.
@@ -56,11 +56,11 @@ describe('App (Overview Mode layout)', () => {
     expect(frame).toContain('pipeline self-driving');
   });
 
-  it('footer renders all 10 keystroke bindings', () => {
+  it('footer renders all 11 keystroke bindings', () => {
     const { lastFrame } = render(<App />);
     const frame = lastFrame() ?? '';
 
-    const expectedKeys = ['b', 'p', 'd', 'c', 'a', 'n', '/', 'r', '?', 'q'];
+    const expectedKeys = ['b', 'p', 'd', 'c', 'a', 'n', 'u', '/', 'r', '?', 'q'];
     expect(FOOTER_KEYS.map(([k]) => k)).toEqual(expectedKeys);
 
     for (const key of expectedKeys) {
@@ -77,6 +77,14 @@ describe('App (Overview Mode layout)', () => {
     expect(frame).toContain('PRs');
     expect(frame).toContain('quit');
     expect(frame).toContain('analytics');
+    expect(frame).toContain('[u] usage');
+  });
+});
+
+describe('Footer', () => {
+  it('lists the usage pane key', () => {
+    const { lastFrame } = render(<Footer />);
+    expect(lastFrame() ?? '').toContain('[u] usage');
   });
 });
 

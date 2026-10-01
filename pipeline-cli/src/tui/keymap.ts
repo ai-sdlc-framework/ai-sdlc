@@ -14,6 +14,7 @@ export type ModeId =
   | 'config'
   | 'analytics'
   | 'decisions'
+  | 'usage'
   | 'help';
 
 export interface KeyBinding {
@@ -65,6 +66,12 @@ export const KEYMAP: ReadonlyArray<KeyBinding> = [
     description:
       'Open Decisions-Pending pane — RFC-0035 Decision catalog; resolve pending items from TUI',
     mode: 'decisions',
+  },
+  {
+    key: 'u',
+    footerLabel: 'usage',
+    description: 'Open Usage pane — usage windows, implied allotment, top consumers',
+    mode: 'usage',
   },
   {
     key: '/',
