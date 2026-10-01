@@ -3,7 +3,7 @@ import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildReviewPrompts } from './07-build-review-prompts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
-import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
+import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { TaskSpec } from '../types.js';
 import {
   FakeJudgmentProvider,
@@ -44,8 +44,14 @@ const task: TaskSpec = {
 describe('Step 7 — buildReviewPrompts', () => {
   it('returns 3 reviewer prompts in canonical order', async () => {
     const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
+      .on(
+        /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+        ok('--- diff content ---\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok('a.ts\0b.ts\0'),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -67,8 +73,11 @@ describe('Step 7 — buildReviewPrompts', () => {
 
   it('returns the resolved model per reviewer (security on opus, others on sonnet)', async () => {
     const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('d\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'));
+      .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok('d\n'))
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok('a.ts\0'),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -89,8 +98,14 @@ describe('Step 7 — buildReviewPrompts', () => {
   it('records the routing assignment by default and leaves no trace when recordRouting is false', async () => {
     const mk = () =>
       new FakeRunner()
-        .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-        .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'));
+        .on(
+          /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+          ok('--- diff content ---\n'),
+        )
+        .on(
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+          ok('a.ts\0'),
+        );
     const base = {
       taskId: 'AISDLC-1',
       task,
@@ -114,8 +129,14 @@ describe('Step 7 — buildReviewPrompts', () => {
     process.env.AI_SDLC_REVIEWER_SET = 'code-test-merged';
     try {
       const fake = new FakeRunner()
-        .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-        .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
+        .on(
+          /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+          ok('--- diff content ---\n'),
+        )
+        .on(
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+          ok('a.ts\0b.ts\0'),
+        );
       const r = await buildReviewPrompts({
         taskId: 'AISDLC-1',
         task,
@@ -140,8 +161,14 @@ describe('Step 7 — buildReviewPrompts', () => {
   // unrelated config file present.
   it('still returns 3 reviewers by default when no reviewerSet flag is set', async () => {
     const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok(''));
+      .on(
+        /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+        ok('--- diff content ---\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok(''),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -165,8 +192,14 @@ describe('Step 7 — buildReviewPrompts', () => {
     mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
     writeFileSync(join(tmp, '.ai-sdlc', 'review-config.yaml'), 'reviewerSet: code-test-merged\n');
     const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\nb.ts\n'));
+      .on(
+        /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+        ok('--- diff content ---\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok('a.ts\0b.ts\0'),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -193,8 +226,14 @@ describe('Step 7 — buildReviewPrompts', () => {
       ['spec:', '  branching:', '    targetBranch: develop'].join('\n') + '\n',
     );
     const fake = new FakeRunner()
-      .on(/^git diff origin\/develop\.\.\.HEAD$/, ok('--- develop diff ---\n'))
-      .on(/^git diff --name-only origin\/develop\.\.\.HEAD$/, ok('a.ts\n'));
+      .on(
+        /^git -c core\.quotePath=false diff origin\/develop\.\.\.HEAD$/,
+        ok('--- develop diff ---\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/develop\.\.\.HEAD$/,
+        ok('a.ts\0'),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -309,8 +348,14 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
     sourceKind: 'backlog' | 'gh-issue' | undefined,
   ) => {
     const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('diff --git a/src/a.ts b/src/a.ts\n+x\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('src/a.ts\n'));
+      .on(
+        /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+        ok('diff --git a/src/a.ts b/src/a.ts\n+x\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok('src/a.ts\0'),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -355,8 +400,11 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
   it('offline replay never reaches the judgment layer', async () => {
     const ctx = judgmentCtx('enforce');
     const fake = new FakeRunner()
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('d\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('src/a.ts\n'));
+      .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok('d\n'))
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok('src/a.ts\0'),
+      );
     const r = await buildReviewPrompts({
       taskId: 'AISDLC-1',
       task,
@@ -370,5 +418,95 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
       judgment: ctx,
     });
     expect(r.prompts).toHaveLength(3);
+  });
+
+  const DIFF_RE = /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/;
+  const FILES_RE =
+    /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/;
+  const GOOD_DIFF = 'diff --git a/src/a.ts b/src/a.ts\n+x\n';
+
+  const runner = (diff: ReturnType<typeof ok>, files: ReturnType<typeof ok>) =>
+    new FakeRunner().on(DIFF_RE, diff).on(FILES_RE, files);
+
+  const reviewersFor = async (fake: FakeRunner, judgment: EvaluateJudgmentContext) =>
+    (
+      await buildReviewPrompts({
+        taskId: 'AISDLC-1',
+        task,
+        branch: 'b',
+        worktreePath: tmp,
+        workDir: tmp,
+        runner: fake.toRunner(),
+        codexAvailable: false,
+        artifactsDir: join(tmp, 'arts'),
+        sourceKind: 'backlog',
+        judgment,
+      })
+    ).prompts.map((p) => p.reviewer);
+
+  it('reads paths NUL-separated, unquoted, with both sides of renames', async () => {
+    const fake = runner(ok(GOOD_DIFF), ok('src/a.ts\0src/é.ts\0'));
+    await reviewersFor(fake, judgmentCtx('enforce'));
+    const call = fake.calls.find((c) => c.args.includes('--name-only'));
+    expect(call?.args).toEqual([
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--name-only',
+      '-z',
+      '--no-renames',
+      'origin/main...HEAD',
+    ]);
+  });
+
+  it('a non-ASCII workflow path from git vetoes the merged set', async () => {
+    const fake = runner(ok(GOOD_DIFF), ok('.github/workflows/déploy.yml\0'));
+    expect(await reviewersFor(fake, judgmentCtx('enforce'))).toEqual(THREE);
+  });
+
+  it('a quoted path from git fails closed', async () => {
+    const fake = runner(ok(GOOD_DIFF), ok('".github/workflows/d\\303\\251ploy.yml"\0'));
+    expect(await reviewersFor(fake, judgmentCtx('enforce'))).toEqual(THREE);
+  });
+
+  it.each([
+    ['a failed diff', fail('boom', 1), ok('src/a.ts\0')],
+    ['a failed file list', ok(GOOD_DIFF), fail('boom', 1)],
+    ['an empty diff with changed files', ok(''), ok('src/a.ts\0')],
+  ])('%s never selects the merged set', async (_n, diff, files) => {
+    expect(await reviewersFor(runner(diff, files), judgmentCtx('enforce'))).toEqual(THREE);
+  });
+
+  it('the control case still selects the merged set', async () => {
+    expect(
+      await reviewersFor(runner(ok(GOOD_DIFF), ok('src/a.ts\0')), judgmentCtx('enforce')),
+    ).toEqual(['correctness-reviewer', 'security-reviewer']);
+  });
+
+  it('a backlog dispatch reaches the judgment as backlog; gh-issue never reaches it', async () => {
+    const seen: (string | undefined)[] = [];
+    const withSink = (): EvaluateJudgmentContext => ({
+      ...judgmentCtx('enforce'),
+      sinks: [{ record: (r) => void seen.push(`${r.judgmentId}:${r.sourceKind}`) }],
+    });
+    await reviewersFor(runner(ok(GOOD_DIFF), ok('src/a.ts\0')), withSink());
+    expect(seen).toContain('review.reviewer-set:backlog');
+
+    seen.length = 0;
+    const fake = runner(ok(GOOD_DIFF), ok('src/a.ts\0'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+      artifactsDir: join(tmp, 'arts'),
+      sourceKind: 'gh-issue',
+      judgment: withSink(),
+    });
+    expect(r.prompts.map((p) => p.reviewer)).toEqual(THREE);
+    expect(seen.some((x) => x?.startsWith('review.reviewer-set:'))).toBe(false);
   });
 });

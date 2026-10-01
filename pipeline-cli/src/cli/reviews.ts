@@ -25,6 +25,7 @@ import { loadAllReviewLedgers, type ReviewLedgerRecord } from '../attestation/re
 import {
   corpusToJsonl,
   gitDiffInputResolver,
+  isSafeRef,
   ledgerToReviewerSetCorpus,
 } from '../judgment/reviewer-set-corpus.js';
 import { analyzeReviewLedger, formatReviewAnalysis } from '../attestation/reviews-analysis.js';
@@ -109,10 +110,16 @@ export function buildReviewsCli(argv: string[]): ReturnType<typeof yargs> {
             describe: 'Write the JSONL here instead of stdout.',
           }),
       (args) => {
+        const baseRef = args['base-ref'] as string;
+        if (!isSafeRef(baseRef)) {
+          process.stderr.write(`invalid --base-ref '${baseRef}': must not start with '-'\n`);
+          process.exitCode = 2;
+          return;
+        }
         const root = resolve((args['repo-root'] as string | undefined) ?? process.cwd());
         const { items, skipped } = ledgerToReviewerSetCorpus(
           loadCorpus([root]),
-          gitDiffInputResolver(root, args['base-ref'] as string),
+          gitDiffInputResolver(root, baseRef),
         );
         const text = corpusToJsonl(items);
         const out = args['out'] as string | undefined;

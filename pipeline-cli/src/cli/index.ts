@@ -547,7 +547,12 @@ export function buildCli(): Argv {
         (y) =>
           y
             .positional('task-id', { type: 'string', demandOption: true })
-            .option('worktree-path', { type: 'string' }),
+            .option('worktree-path', { type: 'string' })
+            .option('source-kind', {
+              type: 'string',
+              choices: ['backlog', 'gh-issue'] as const,
+              describe: 'Kind of the work item. Absent means untrusted (never relaxes review).',
+            }),
         async (argv) => {
           const v = await validateTask({
             taskId: argv['task-id'] as string,
@@ -566,6 +571,9 @@ export function buildCli(): Argv {
             branch: branch.branch,
             worktreePath,
             workDir: argv['work-dir'] as string,
+            ...(argv['source-kind']
+              ? { sourceKind: argv['source-kind'] as 'backlog' | 'gh-issue' }
+              : {}),
           });
           emit(result);
         },

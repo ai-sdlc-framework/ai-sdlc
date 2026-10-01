@@ -19,26 +19,85 @@ export function judgmentLayerActive(ctx: EvaluateJudgmentContext | undefined): b
   return !!ctx && !!ctx.config.provider;
 }
 
+export interface ReviewPathScan {
+  paths: string[];
+  /** True when a path or diff header could not be read as a plain path (fail closed). */
+  unparseable: boolean;
+}
+
+/** Git prints paths with special characters as a double-quoted, escaped string. */
+const isQuoted = (p: string): boolean => p.startsWith('"');
+
 /**
- * Every path the diff touches, including the pre-image side of renames and the file
- * headers, so a file moved out of a sensitive location still counts as touching it.
+ * Every path the diff touches: the changed-file list plus the file headers and rename or
+ * copy lines of the diff, so a file moved out of a sensitive location still counts as
+ * touching it. Anything that cannot be read as a plain path (a quoted path or header)
+ * sets `unparseable`, which callers treat as a veto: the path rules cannot be trusted
+ * on a path they cannot match.
  */
-export function reviewPaths(changedFiles: readonly string[], diff: string): string[] {
-  const paths = new Set(changedFiles);
+export function scanReviewPaths(changedFiles: readonly string[], diff: string): ReviewPathScan {
+  const paths = new Set<string>();
+  let unparseable = false;
+  for (const p of changedFiles) {
+    if (p === '' || isQuoted(p)) unparseable = true;
+    else paths.add(p);
+  }
   for (const line of diff.split('\n')) {
-    if (!line.startsWith('diff --git ')) continue;
-    const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-    if (m) {
+    if (line.startsWith('diff --git ')) {
+      const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      if (
+        !m ||
+        isQuoted(m[1]) ||
+        isQuoted(m[2]) ||
+        line.includes(' "a/') ||
+        line.includes(' "b/')
+      ) {
+        unparseable = true;
+        continue;
+      }
       paths.add(m[1]);
       paths.add(m[2]);
+      continue;
+    }
+    const rc = /^(?:rename|copy) (?:from|to) (.*)$/.exec(line);
+    if (rc) {
+      if (rc[1] === '' || isQuoted(rc[1])) unparseable = true;
+      else paths.add(rc[1]);
     }
   }
-  return [...paths];
+  return { paths: [...paths], unparseable };
+}
+
+/** Every plain path the diff touches (see {@link scanReviewPaths}). */
+export function reviewPaths(changedFiles: readonly string[], diff: string): string[] {
+  return scanReviewPaths(changedFiles, diff).paths;
 }
 
 /** The path classifier's auth / lockfile / CI matches over every touched path. */
 export function reviewPathRisk(changedFiles: readonly string[], diff: string): PathRisk {
   return classifyPathRisk(reviewPaths(changedFiles, diff));
+}
+
+const GOVERNANCE_PATH_RES: readonly RegExp[] = [
+  /(?:^|\/)\.github\/actions\//i,
+  /^\.github\/dependabot\.ya?ml$/i,
+  /(?:^|\/)CODEOWNERS$/i,
+  /(?:^|\/)\.husky\//i,
+  /(?:^|\/)scripts\/(?:.*\/)?[^/]+\.sh$/i,
+  /(?:^|\/)scripts\/(?:.*\/)?(?:check|verify)-[^/]*$/i,
+  /(?:^|\/)pipeline-cli\/src\/attestation\//i,
+  /(?:^|\/)pipeline-cli\/attestation-core\//i,
+  /(?:^|\/)ai-sdlc-plugin\/hooks\//i,
+  /(?:^|\/)\.ai-sdlc\//i,
+];
+
+/**
+ * The first changed path under a governance surface (CI helpers, gates, hooks,
+ * attestation and review configuration), or undefined. A change there decides what
+ * gets reviewed, so it never relaxes review. Applied by the reviewer-set selection only.
+ */
+export function governancePathMatch(paths: readonly string[]): string | undefined {
+  return paths.find((p) => GOVERNANCE_PATH_RES.some((re) => re.test(p)));
 }
 
 /** Run `fn` with a sink that captures the last evaluation record. */

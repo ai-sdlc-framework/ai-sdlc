@@ -395,8 +395,13 @@ export async function evaluateJudgment<I, D>(
       return await abstain('state-too-large');
     }
 
+    // A definition that can reduce review never reads or writes the answer cache: the
+    // cache sits in a directory the code under review can write, so a planted entry
+    // would otherwise decide a relaxation with no model call.
+    const reducesReview = definition.riskClass === 'relax' || definition.reducesReview === true;
     const cacheable =
       !!ctx.cache &&
+      !reducesReview &&
       config.defaults.cache &&
       !ALIAS_RE.test(model) &&
       !ALIAS_RE.test(provider.modelId);

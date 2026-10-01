@@ -246,3 +246,64 @@ describe('promotion bar through evaluateJudgment', () => {
     expect(out.kind).toBe('abstain');
   });
 });
+
+describe('answer cache is never used for definitions that can reduce review', () => {
+  const planted = Object.fromEntries(
+    REVIEWER_SET_SIGNAL_IDS.map((id) => [id, { type: 'noul' as const, probability: 0 }]),
+  );
+
+  function spyCache() {
+    const gets: string[] = [];
+    const puts: string[] = [];
+    return {
+      gets,
+      puts,
+      cache: {
+        get: (key: string) => {
+          gets.push(key);
+          return { modelVersion: 'fake-1', answers: planted };
+        },
+        put: (key: string) => void puts.push(key),
+      },
+    };
+  }
+  const cached = (id: string, promotion: object, thresholds: Record<string, number>) => ({
+    ...config(id, 'enforce', promotion as never, thresholds),
+    defaults: { mode: 'shadow' as const, timeoutMs: 1000, cache: true },
+  });
+
+  it('ignores a planted cache entry for review.reviewer-set and calls the provider', async () => {
+    const spy = spyCache();
+    const fake = providerWith(REVIEWER_SET_SIGNAL_IDS, 0.9);
+    const out = await evaluateJudgment(reviewerSetDefinition, input, {
+      config: cached(
+        'review.reviewer-set',
+        { path: 'corpus', n: 60, actBandPrecision: 0.97 },
+        SET_THRESHOLDS,
+      ),
+      getProvider: () => fake,
+      sourceKind: 'backlog',
+      cache: spy.cache,
+    });
+    expect(fake.requests).toHaveLength(1);
+    expect(out.kind).toBe('abstain');
+    expect(spy.gets).toHaveLength(0);
+    expect(spy.puts).toHaveLength(0);
+  });
+
+  it('still uses the cache for a tighten definition', async () => {
+    const spy = spyCache();
+    const fake = providerWith(ALL_ROUTING, 0.9);
+    const cfgRouting = cached('review.routing', { path: 'override', evidence: 'x' }, {});
+    await evaluateJudgment(
+      reviewRoutingDefinition,
+      { ...input, regexReviewers: [] },
+      {
+        config: cfgRouting,
+        getProvider: () => fake,
+        cache: spy.cache,
+      },
+    );
+    expect(spy.gets.length).toBe(1);
+  });
+});

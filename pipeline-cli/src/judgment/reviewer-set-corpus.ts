@@ -39,15 +39,22 @@ export interface LedgerCorpusResult {
   skipped: { taskId: string; reason: string }[];
 }
 
-/** True when a first-pass code, test or correctness record holds a critical or major finding. */
+const isFirstPassCodeOrTest = (r: ReviewLedgerRecord): boolean =>
+  r.iteration === 1 && CODE_OR_TEST_ROLES.has(r.role);
+
+/** True when a first-pass code, test or correctness record blocked: not approved, or critical/major. */
 export function hasFirstPassBlockingFinding(records: readonly ReviewLedgerRecord[]): boolean {
   return records.some(
     (r) =>
-      r.iteration === 1 &&
-      CODE_OR_TEST_ROLES.has(r.role) &&
-      Array.isArray(r.findings) &&
-      r.findings.some((f) => BLOCKING.has(f.severity)),
+      isFirstPassCodeOrTest(r) &&
+      (r.verdict !== 'approved' ||
+        (Array.isArray(r.findings) && r.findings.some((f) => BLOCKING.has(f.severity)))),
   );
+}
+
+/** True when a first-pass code/test record has no readable findings list: it is never labelled. */
+function hasMalformedFirstPass(records: readonly ReviewLedgerRecord[]): boolean {
+  return records.some((r) => isFirstPassCodeOrTest(r) && !Array.isArray(r.findings));
 }
 
 /** Build the judgment input from a unified diff. */
@@ -72,7 +79,7 @@ export function ledgerToReviewerSetCorpus(
   const items: CorpusItem[] = [];
   const skipped: LedgerCorpusResult['skipped'] = [];
   for (const [taskId, group] of byTask) {
-    const first = group.filter((r) => r.iteration === 1 && CODE_OR_TEST_ROLES.has(r.role));
+    const first = group.filter(isFirstPassCodeOrTest);
     if (first.length === 0) {
       skipped.push({ taskId, reason: 'no first-pass code or test review recorded' });
       continue;
@@ -87,8 +94,14 @@ export function ledgerToReviewerSetCorpus(
       skipped.push({ taskId, reason: 'diff unavailable' });
       continue;
     }
+    const blocking = hasFirstPassBlockingFinding(group);
+    if (!blocking && hasMalformedFirstPass(group)) {
+      // An approved record with no readable findings cannot show the PR was clean.
+      skipped.push({ taskId, reason: 'first-pass record has no readable findings' });
+      continue;
+    }
     const label: ReviewerSetLabelDetail = {
-      separateReviewBlocking: hasFirstPassBlockingFinding(group),
+      separateReviewBlocking: blocking,
       taskId,
       prNumber: anchor.prNumber ?? null,
     };
@@ -102,20 +115,29 @@ export function corpusToJsonl(items: readonly CorpusItem[]): string {
   return items.map((i) => JSON.stringify({ input: i.input, label: i.label })).join('\n') + '\n';
 }
 
+/** A ref that cannot be read as an option: non-empty and not starting with `-`. */
+export function isSafeRef(ref: string): boolean {
+  return ref.length > 0 && !ref.startsWith('-');
+}
+
 /** Default resolver: `git diff <base>...<commit>` in the repo; undefined on any failure. */
 export function gitDiffInputResolver(
   repoRoot: string,
   baseRef = 'origin/main',
 ): (pr: ReviewedPr) => ReviewerSetInput | undefined {
   return (pr) => {
-    if (!/^[0-9a-f]{7,40}$/i.test(pr.commitSha)) return undefined;
+    if (!/^[0-9a-f]{7,40}$/i.test(pr.commitSha) || !isSafeRef(baseRef)) return undefined;
     try {
-      const diff = execFileSync('git', ['diff', `${baseRef}...${pr.commitSha}`], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
+      const diff = execFileSync(
+        'git',
+        ['diff', '--end-of-options', `${baseRef}...${pr.commitSha}`],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          maxBuffer: 64 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
       return diff.trim() === '' ? undefined : reviewerSetInputFromDiff(diff);
     } catch {
       return undefined;

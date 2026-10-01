@@ -47,13 +47,10 @@ import {
   type AggregatedVerdict,
   type DeveloperReturn,
   type PipelineLogger,
-  type ReviewerType,
   type ReviewerVerdict,
   type SubagentSpawner,
 } from '../types.js';
 import { writeVerdictFile } from './execute.js';
-
-const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
 
 /** Marker used to identify reviewer findings blocks in PR comments. */
 export const REVIEWER_FINDINGS_MARKER = '<!-- ai-sdlc:reviewer-findings -->';
@@ -327,7 +324,7 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
     })),
   );
   const initialVerdicts: ReviewerVerdict[] = reviewerResults.map((r, i) =>
-    coerceReviewerVerdict(REVIEWER_TYPES[i], r),
+    coerceReviewerVerdict(reviewBuild.prompts[i].reviewer, r),
   );
 
   const initialVerdict = await aggregateVerdicts({

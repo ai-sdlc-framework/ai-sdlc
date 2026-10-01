@@ -65,8 +65,11 @@ function makeHappyRunner(): FakeRunner {
     .on(/^git fetch/, ok())
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-    .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-    .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'))
+    .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+    .on(
+      /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+      ok('a.ts\0'),
+    )
     .on(/^git push -u origin/, ok())
     .on(/^gh pr create/, ok('https://github.com/owner/repo/pull/42\n'));
 }
@@ -280,8 +283,8 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       .on(/^git fetch/, ok())
       .on(/^git worktree add/, ok())
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok())
-      .on(/^git diff --name-only/, ok())
+      .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok())
+      .on(/^git -c core\.quotePath=false diff --name-only -z --no-renames/, ok())
       .on(/^git push -u origin/, fail('! [rejected] (non-fast-forward)\nerror: failed to push', 1));
 
     const result = await executePipeline({
@@ -437,7 +440,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       .on(/^git fetch/, ok())
       .on(/^git worktree add/, ok())
       .on(/^git -C .+ rev-parse HEAD$/, ok())
-      .on(/^git diff/, ok())
+      .on(/^git (-c core\.quotePath=false )?diff/, ok())
       .on(/^git push -u origin/, fail('non-fast-forward', 1));
 
     const result = await executePipeline({
@@ -797,8 +800,14 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         },
       )
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'))
+      .on(
+        /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+        ok('--- diff content ---\n'),
+      )
+      .on(
+        /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+        ok('a.ts\0'),
+      )
       .on(/^git push -u origin/, ok())
       .on(/^gh pr create/, ok('https://github.com/owner/repo/pull/42\n'));
 
@@ -1020,8 +1029,14 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         .on(/^git fetch/, ok())
         .on(/^git worktree add/, ok())
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-        .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
-        .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'))
+        .on(
+          /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+          ok('--- diff content ---\n'),
+        )
+        .on(
+          /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+          ok('a.ts\0'),
+        )
         .on(/^git push -u origin/, ok())
         .on(
           (cmd, args) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'create',

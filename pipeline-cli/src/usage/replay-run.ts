@@ -255,14 +255,19 @@ function loadTask(taskId: string, currentCheckout: string): TaskSpec {
 /** Runner that points the pipeline's `<base>...HEAD` diff at the recorded merge base. */
 function pinnedRunner(inner: Runner, mergeBase: string): Runner {
   return (command, args, opts) => {
-    if (command === 'git' && args[0] === 'diff') {
-      const next = args.map((a) => (a.endsWith('...HEAD') ? `${mergeBase}...HEAD` : a));
+    // Leading `-c key=value` pairs (e.g. core.quotePath) are kept in front of the subcommand.
+    let i = 0;
+    while (args[i] === '-c' && i + 1 < args.length) i += 2;
+    if (command === 'git' && args[i] === 'diff') {
+      const lead = args.slice(0, i);
+      const next = args.slice(i).map((a) => (a.endsWith('...HEAD') ? `${mergeBase}...HEAD` : a));
       // No external diff driver or textconv: nothing in the commit can pick a program to run.
       return inner(
         command,
         [
           '-c',
           'core.hooksPath=/dev/null',
+          ...lead,
           next[0] as string,
           '--no-ext-diff',
           '--no-textconv',

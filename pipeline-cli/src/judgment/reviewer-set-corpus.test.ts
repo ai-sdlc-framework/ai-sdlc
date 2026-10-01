@@ -15,6 +15,7 @@ import { runJudgmentCli } from '../cli/judgment.js';
 import {
   corpusToJsonl,
   gitDiffInputResolver,
+  isSafeRef,
   hasFirstPassBlockingFinding,
   ledgerToReviewerSetCorpus,
   reviewerSetInputFromDiff,
@@ -81,13 +82,27 @@ describe('ledger to corpus converter', () => {
     expect(noDiff.skipped).toEqual([{ taskId: 'T-1', reason: 'diff unavailable' }]);
   });
 
-  it('groups per task and tolerates a record without findings', () => {
+  it('groups per task and never labels a record without readable findings as clean', () => {
     const out = convert([
       rec({ taskId: 'A', findings: [finding('major')] }),
       rec({ taskId: 'B', prNumber: null, role: 'test', findings: undefined as never }),
     ]);
-    expect(out.items.map((i) => (i.label as { taskId: string }).taskId)).toEqual(['A', 'B']);
+    expect(out.items.map((i) => (i.label as { taskId: string }).taskId)).toEqual(['A']);
+    expect(out.skipped).toEqual([
+      { taskId: 'B', reason: 'first-pass record has no readable findings' },
+    ]);
     expect(hasFirstPassBlockingFinding([rec({ findings: undefined as never })])).toBe(false);
+  });
+
+  it('a rejected first-pass record is blocking even with no findings listed', () => {
+    for (const findings of [[], undefined as never]) {
+      const out = convert([rec({ verdict: 'rejected', findings })]);
+      expect(out.items[0].label).toMatchObject({ separateReviewBlocking: true });
+    }
+    expect(hasFirstPassBlockingFinding([rec({ verdict: 'rejected' })])).toBe(true);
+    expect(hasFirstPassBlockingFinding([rec({ verdict: 'rejected', role: 'security' })])).toBe(
+      false,
+    );
   });
 
   it('serialises to the JSONL eval reads', () => {
@@ -190,6 +205,35 @@ describe('gitDiffInputResolver and the reviewer-set-corpus command', () => {
     expect(resolve({ taskId: 'T', prNumber: 1, commitSha: 'f'.repeat(40) })).toBeUndefined();
     const same = git('rev-parse', 'main').trim();
     expect(resolve({ taskId: 'T', prNumber: 1, commitSha: same })).toBeUndefined();
+  });
+
+  it('rejects an option-like base ref', () => {
+    expect(isSafeRef('--output=/tmp/x')).toBe(false);
+    expect(isSafeRef('')).toBe(false);
+    expect(isSafeRef('origin/main')).toBe(true);
+    const sha = git('rev-parse', 'HEAD').trim();
+    expect(
+      gitDiffInputResolver(
+        repo,
+        '--output=/tmp/owned',
+      )({ taskId: 'T', prNumber: 1, commitSha: sha }),
+    ).toBeUndefined();
+  });
+
+  it('the command refuses an option-like --base-ref', async () => {
+    const outFile = join(repo, 'never.jsonl');
+    const saved = process.exitCode;
+    await buildReviewsCli([
+      'reviewer-set-corpus',
+      '--repo-root',
+      repo,
+      '--base-ref=--output=x',
+      '--out',
+      outFile,
+    ]).parseAsync();
+    expect(process.exitCode).toBe(2);
+    process.exitCode = saved;
+    expect(() => readFileSync(outFile, 'utf8')).toThrow();
   });
 
   it('the command writes the corpus from a ledger', async () => {

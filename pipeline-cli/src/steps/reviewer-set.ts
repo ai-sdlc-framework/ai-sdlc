@@ -51,9 +51,11 @@ import {
   type JudgmentMode,
 } from '@ai-sdlc/reference';
 import type { ReviewerType } from '../types.js';
+import { classifyPathRisk } from '../classifier/classifier.js';
 import {
+  governancePathMatch,
   judgmentLayerActive,
-  reviewPathRisk,
+  scanReviewPaths,
   selectionLogRecord,
   withCapturedRecord,
   writeSelectionRecord,
@@ -187,6 +189,12 @@ export interface SelectReviewerSetOpts extends ResolveReviewerSetOpts {
   changedFiles: readonly string[];
   /** Unified diff text. */
   diff: string;
+  /**
+   * True when the diff or the file list could not be read completely (a failed or
+   * truncated git call). The judgment then never relaxes review: it must not judge
+   * file names alone.
+   */
+  diffUnavailable?: boolean;
   /** Ready judgment context; omit (or leave the layer unconfigured) to keep today's behaviour. */
   judgment?: EvaluateJudgmentContext;
 }
@@ -242,6 +250,8 @@ export async function selectReviewerSet(
   if (!ctx || !judgmentLayerActive(ctx)) return base('config', 'config:layer-disabled');
 
   const pinned = explicitReviewerSetMode(opts);
+  // The selection record uses an id with no registered definition on purpose: it is an
+  // audit line, not an evaluation, so `cli-judgment replay` and `eval` skip it.
   const log = (
     sel: ReviewerSetSelection,
     inputs: Record<string, unknown>,
@@ -264,13 +274,16 @@ export async function selectReviewerSet(
       ),
     );
 
-  const risk = reviewPathRisk(opts.changedFiles, opts.diff);
+  const scan = scanReviewPaths(opts.changedFiles, opts.diff);
+  const risk = classifyPathRisk(scan.paths);
+  const governance = governancePathMatch(scan.paths);
   const inputs = {
     sourceKind: opts.sourceKind ?? null,
     changedFiles: opts.changedFiles.length,
     pathAuth: risk.touchesAuth,
     pathLockfile: risk.touchesLockfiles,
     pathCi: risk.touchesCi,
+    pathGovernance: governance !== undefined,
     pinned,
   };
   const vetoed = async (decidedBy: string): Promise<ReviewerSetSelection> => {
@@ -282,9 +295,14 @@ export async function selectReviewerSet(
   if (pinned !== null) return vetoed(`config:explicit-${pinned}`);
   if (opts.sourceKind !== 'backlog') return vetoed('veto:source-kind');
   if (opts.changedFiles.length === 0) return vetoed('veto:no-changed-files');
+  if (opts.diffUnavailable === true || opts.diff.trim() === '') {
+    return vetoed('veto:diff-unavailable');
+  }
+  if (scan.unparseable) return vetoed('veto:unparseable-path');
   if (risk.touchesAuth) return vetoed('veto:path-auth');
   if (risk.touchesLockfiles) return vetoed('veto:path-lockfile');
   if (risk.touchesCi) return vetoed('veto:path-ci');
+  if (governance !== undefined) return vetoed('veto:path-governance');
 
   const { value: outcome, record } = await withCapturedRecord(
     { ...ctx, sourceKind: 'backlog', ...(opts.taskId ? { taskId: opts.taskId } : {}) },

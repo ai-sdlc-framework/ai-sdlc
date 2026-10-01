@@ -29,8 +29,6 @@ import type {
   SubagentSpawner,
 } from '../types.js';
 
-const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
-
 const DEFAULT_MAX_ITERATIONS = 2;
 
 /**
@@ -137,7 +135,7 @@ export async function iterateReviewLoop(
     });
 
     const newVerdicts: ReviewerVerdict[] = await Promise.all(
-      prompts.map((p, i) =>
+      prompts.map((p) =>
         spawnReviewerWithRetry(
           opts.spawner!,
           {
@@ -146,7 +144,7 @@ export async function iterateReviewLoop(
             cwd: opts.worktreePath,
             ...(p.model ? { model: p.model } : {}),
           },
-          REVIEWER_TYPES[i],
+          p.reviewer,
         ),
       ),
     );

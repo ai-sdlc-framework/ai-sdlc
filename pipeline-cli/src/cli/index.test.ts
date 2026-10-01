@@ -114,6 +114,18 @@ describe('CLI router', () => {
     expect(stdoutJson()).toMatchObject({ model: 'claude-sonnet-4-6', arm: 'default' });
   });
 
+  it('build-review-prompts accepts --source-kind and rejects other values', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'cli demo', status: 'To Do' });
+    for (const kind of ['backlog', 'gh-issue']) {
+      stdoutChunks.length = 0;
+      setArgv('build-review-prompts', 'AISDLC-1', '--source-kind', kind, '--work-dir', tmp);
+      await buildCli().parseAsync();
+      expect((stdoutJson() as { prompts: unknown[] }).prompts).toHaveLength(3);
+    }
+    setArgv('build-review-prompts', 'AISDLC-1', '--source-kind', 'bogus', '--work-dir', tmp);
+    await expect(async () => buildCli().parseAsync()).rejects.toThrow(/process\.exit/);
+  });
+
   it('validate-task emits ok=true for a valid task', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-1', title: 'cli demo', status: 'To Do' });
     setArgv('validate-task', 'AISDLC-1', '--work-dir', tmp);

@@ -14,8 +14,9 @@
  * two — `correctness-reviewer` (merged code+test remit) + `security-reviewer`
  * (unchanged, separate). With a judgment provider configured, `selectReviewerSet()`
  * may pick the merged set per PR (trusted work only, never past a path veto) and
- * `routeReviewers()` may add reviewers afterwards; neither ever shrinks a set. Do not hardcode a reviewer count anywhere downstream
- * of this step — always read `prompts.length`.
+ * `routeReviewers()` may add reviewers afterwards; neither ever shrinks a set. Do not
+ * hardcode a reviewer count anywhere downstream of this step: always read
+ * `prompts.length`.
  *
  * The reviewer subagents themselves run via the LLM dispatch boundary
  * (Step 7b) which is NOT part of this step.
@@ -78,23 +79,37 @@ export async function buildReviewPrompts(
   const targetBranch = resolveTargetBranch(opts.workDir);
   const baseRef = `origin/${targetBranch}`;
 
-  const diffResult = await runner('git', ['diff', `${baseRef}...HEAD`], {
-    cwd: opts.worktreePath,
-    allowFailure: true,
-  });
+  // `core.quotePath=false` keeps non-ASCII bytes literal; `-z` separates paths with NUL
+  // and never quotes them; `--no-renames` lists both sides of a rename. The path rules
+  // that veto a relaxation match on these plain paths.
+  const diffResult = await runner(
+    'git',
+    ['-c', 'core.quotePath=false', 'diff', `${baseRef}...HEAD`],
+    { cwd: opts.worktreePath, allowFailure: true },
+  );
   const diff = diffResult.code === 0 ? diffResult.stdout : '';
 
-  const filesResult = await runner('git', ['diff', '--name-only', `${baseRef}...HEAD`], {
-    cwd: opts.worktreePath,
-    allowFailure: true,
-  });
+  const filesResult = await runner(
+    'git',
+    [
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--name-only',
+      '-z',
+      '--no-renames',
+      `${baseRef}...HEAD`,
+    ],
+    { cwd: opts.worktreePath, allowFailure: true },
+  );
   const changedFiles =
-    filesResult.code === 0
-      ? filesResult.stdout
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean)
-      : [];
+    filesResult.code === 0 ? filesResult.stdout.split('\0').filter((p) => p !== '') : [];
+  // A failed git call, or a diff that came back empty for a non-empty file list, means the
+  // judgment would see file names alone. It must not relax review in that case.
+  const diffUnavailable =
+    diffResult.code !== 0 ||
+    filesResult.code !== 0 ||
+    (changedFiles.length > 0 && diff.trim() === '');
 
   // Codex independence detection
   let codexAvailable = opts.codexAvailable;
@@ -136,6 +151,7 @@ export async function buildReviewPrompts(
         taskId: opts.taskId,
         changedFiles,
         diff,
+        diffUnavailable,
         ...(judgment ? { judgment } : {}),
       })
     ).reviewers;

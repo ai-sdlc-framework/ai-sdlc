@@ -207,6 +207,103 @@ describe('selectReviewerSet: the merged set requires every condition', () => {
   });
 });
 
+describe('selectReviewerSet: path quoting, missing diff and governance vetoes', () => {
+  const run = async (over: Partial<SelectReviewerSetOpts>) => {
+    const { ctx, fake } = ctxFor({ probability: 0 });
+    const sel = await selectReviewerSet(base({ judgment: ctx, ...over }));
+    return { sel, fake };
+  };
+
+  it.each([
+    ['non-ASCII workflow', ['.github/workflows/déploy.yml'], 'veto:path-ci'],
+    ['non-ASCII auth dir', ['src/auth/été.ts'], 'veto:path-auth'],
+    ['non-ASCII lockfile dir', ['paquet/pnpm-lock.yaml'], 'veto:path-lockfile'],
+    ['workflow with a literal quote', ['.github/workflows/a"b.yml'], 'veto:path-ci'],
+    ['workflow with a backslash', ['.github/workflows/a\\b.yml'], 'veto:path-ci'],
+    ['workflow with a newline', ['.github/workflows/a\nb.yml'], 'veto:path-ci'],
+  ])('plain %s paths still veto', async (_n, files, decidedBy) => {
+    const { sel, fake } = await run({ changedFiles: files });
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.decidedBy).toBe(decidedBy);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('a quoted path in the file list fails closed', async () => {
+    const { sel, fake } = await run({
+      changedFiles: ['".github/workflows/d\\303\\251ploy.yml"'],
+    });
+    expect(sel.decidedBy).toBe('veto:unparseable-path');
+    expect(sel.reviewers).toEqual(THREE);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('a quoted diff header fails closed even when the file list is plain', async () => {
+    const diff =
+      'diff --git ".github/workflows/d\\303\\251ploy.yml" "docs/d\\303\\251ploy.md"\nrename from x\n';
+    const { sel } = await run({ changedFiles: ['docs/deploy.md'], diff });
+    expect(sel.decidedBy).toBe('veto:unparseable-path');
+  });
+
+  it('a workflow renamed to a quoted destination is vetoed', async () => {
+    const diff = [
+      'diff --git a/.github/workflows/ci.yml "b/docs/caf\\303\\251.md"',
+      'similarity index 90%',
+      'rename from .github/workflows/ci.yml',
+      'rename to "docs/caf\\303\\251.md"',
+    ].join('\n');
+    const { sel } = await run({ changedFiles: ['docs/readme.md'], diff });
+    expect(sel.reviewers).toEqual(THREE);
+    expect(['veto:unparseable-path', 'veto:path-ci']).toContain(sel.decidedBy);
+  });
+
+  it('a plain rename out of a workflow is vetoed by the rename lines', async () => {
+    const diff = [
+      'diff --git a/.github/workflows/ci.yml b/docs/ci.md',
+      'rename from .github/workflows/ci.yml',
+      'rename to docs/ci.md',
+    ].join('\n');
+    const { sel } = await run({ changedFiles: ['docs/ci.md'], diff });
+    expect(sel.decidedBy).toBe('veto:path-ci');
+  });
+
+  it('a failed or truncated diff read vetoes', async () => {
+    expect((await run({ diffUnavailable: true })).sel.decidedBy).toBe('veto:diff-unavailable');
+  });
+
+  it('an empty diff with changed files vetoes', async () => {
+    const { sel, fake } = await run({ diff: '  \n' });
+    expect(sel.decidedBy).toBe('veto:diff-unavailable');
+    expect(sel.reviewers).toEqual(THREE);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it.each([
+    '.github/actions/setup/action.yml',
+    '.github/dependabot.yml',
+    'CODEOWNERS',
+    '.github/CODEOWNERS',
+    'docs/CODEOWNERS',
+    '.husky/pre-push',
+    'scripts/deploy.sh',
+    'scripts/check-coverage.mjs',
+    'scripts/verify-attestation.mjs',
+    'pipeline-cli/src/attestation/patch-id.ts',
+    'ai-sdlc-plugin/hooks/enforce.js',
+    '.ai-sdlc/judgment-config.yaml',
+    '.ai-sdlc/review-config.yaml',
+  ])('governance path %s vetoes the merged set', async (path) => {
+    const { sel, fake } = await run({ changedFiles: [path] });
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.decidedBy).toBe('veto:path-governance');
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('ordinary source and scripts data files do not veto', async () => {
+    const { sel } = await run({ changedFiles: ['scripts/data.json', 'pipeline-cli/src/a.ts'] });
+    expect(sel.reviewers).toEqual(MERGED);
+  });
+});
+
 describe('selectReviewerSet: explicit configuration', () => {
   it('an explicit code-test-merged from env still applies, judgment or not', async () => {
     const env = { AI_SDLC_REVIEWER_SET: 'code-test-merged' };
@@ -344,6 +441,17 @@ describe('routeReviewers', () => {
     expect(out.reviewers).toEqual([...MERGED, 'test-reviewer', 'code-reviewer']);
     expect(out.reviewers.length).toBeGreaterThanOrEqual(MERGED.length);
     for (const r of MERGED) expect(out.reviewers).toContain(r);
+  });
+
+  it('fires at exactly the threshold and not just below it', async () => {
+    const at = ctxFor({ routing: { 'input-handling': 0.5 } });
+    expect(
+      (await routeReviewers({ reviewers: ['code-reviewer'], ...ROUTE, judgment: at.ctx })).added,
+    ).toEqual(['test-reviewer', 'security-reviewer']);
+    const below = ctxFor({ routing: { 'input-handling': 0.4999 } });
+    expect(
+      (await routeReviewers({ reviewers: ['code-reviewer'], ...ROUTE, judgment: below.ctx })).added,
+    ).toEqual([]);
   });
 
   it('shadow mode and abstains leave the set unchanged', async () => {

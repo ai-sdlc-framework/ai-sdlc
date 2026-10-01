@@ -39,12 +39,9 @@ import {
   type PipelineOptions,
   type PipelineOutcome,
   type PipelineResult,
-  type ReviewerType,
   type ReviewerVerdict,
   type TaskSpec,
 } from './types.js';
-
-const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
 
 export async function executePipeline(opts: PipelineOptions): Promise<PipelineResult> {
   const logger = opts.logger ?? DEFAULT_LOGGER;
@@ -300,7 +297,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       runner: opts.runner,
-      sourceKind: opts.sourceKind,
+      sourceKind,
     });
 
     // Step 7b — spawn 3 reviewers in parallel
@@ -313,7 +310,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       })),
     );
     const initialVerdicts: ReviewerVerdict[] = reviewerResults.map((r, i) =>
-      coerceReviewerVerdict(REVIEWER_TYPES[i], r),
+      coerceReviewerVerdict(reviewBuild.prompts[i].reviewer, r),
     );
 
     // Step 8 — aggregate
@@ -336,7 +333,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       initialDeveloperReturn: initialDev,
       initialVerdict,
       maxIterations: opts.maxReviewIterations ?? 2,
-      sourceKind: opts.sourceKind,
+      sourceKind,
       spawner: opts.spawner,
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry
