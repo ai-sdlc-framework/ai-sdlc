@@ -4431,6 +4431,105 @@ export const embeddingAdapterV1Schema = {
   },
 } as const;
 
+export const hierarchyRosterV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/hierarchy-roster.v1.schema.json',
+  title: 'AI-SDLC HierarchyRoster v1',
+  description:
+    'Roster of the named Claude Code sessions started by cli-hierarchy up, written to .ai-sdlc/dispatch/hierarchy.json. One entry per session. Tiers resolve the dispatch session or an idle executor from this file instead of hard-coded names.',
+  type: 'object',
+  required: ['schemaVersion', 'sessions'],
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['v1'],
+      description:
+        'Roster schema version. Pinned so future readers can refuse rosters they do not understand.',
+    },
+    sessions: {
+      type: 'array',
+      description: 'One entry per started session.',
+      items: { $ref: '#/$defs/session' },
+    },
+  },
+  additionalProperties: false,
+  $defs: {
+    session: {
+      type: 'object',
+      required: [
+        'role',
+        'name',
+        'tmuxSession',
+        'tmuxWindow',
+        'paneId',
+        'pid',
+        'model',
+        'permissionMode',
+        'startedAt',
+        'status',
+      ],
+      properties: {
+        role: {
+          type: 'string',
+          enum: ['planner', 'operator-dispatch', 'executor'],
+          description: 'Tier the session belongs to.',
+        },
+        name: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Name the harness actually gave the session. Equals the requested name unless the harness added a collision suffix.',
+        },
+        tmuxSession: {
+          type: 'string',
+          const: 'ai-sdlc-hierarchy',
+          description:
+            "tmux session hosting the window. Always the dedicated hierarchy session 'ai-sdlc-hierarchy'; entries naming any other session are never acted on.",
+        },
+        tmuxWindow: {
+          type: 'string',
+          pattern: '^[a-z][a-z0-9-]{0,47}$',
+          description:
+            'tmux window name. Always the name that was requested, so a later up can recognise its own window.',
+        },
+        paneId: {
+          type: 'string',
+          pattern: '^(%[0-9]+)?$',
+          description: "tmux pane id (for example '%14'). Empty string when it could not be read.",
+        },
+        pid: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            'Process id of the session as reported by the harness registry, or of the tmux pane when the registry had not yet listed the session. 0 when unknown.',
+        },
+        model: {
+          type: 'string',
+          minLength: 1,
+          description: 'Model the session was started with.',
+        },
+        permissionMode: {
+          type: 'string',
+          minLength: 1,
+          description: 'Permission mode the session was started with.',
+        },
+        startedAt: {
+          type: 'string',
+          format: 'date-time',
+          description: 'ISO-8601 timestamp the window was created.',
+        },
+        status: {
+          type: 'string',
+          enum: ['starting', 'running'],
+          description:
+            "'starting' until the harness registry confirmed the session and its final name, then 'running'.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+} as const;
+
 export const journeyConfigV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/journey-config.v1.schema.json',
@@ -8794,6 +8893,7 @@ export const SCHEMAS: Record<string, object> = {
   'dispatch-verdict.v1.schema.json': dispatchVerdictV1Schema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
   'embedding-adapter.v1.schema.json': embeddingAdapterV1Schema,
+  'hierarchy-roster.v1.schema.json': hierarchyRosterV1Schema,
   'journey-config.v1.schema.json': journeyConfigV1Schema,
   'journey.v1.schema.json': journeyV1Schema,
   'metric-snapshot.v1.schema.json': metricSnapshotV1Schema,

@@ -54,6 +54,7 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
 const ARTIFACT_SCHEMA_FILES = {
   RefinementVerdict: 'refinement-verdict.v1.schema.json',
   ModelCallRecord: 'model-call-record.v1.schema.json',
+  HierarchyRoster: 'hierarchy-roster.v1.schema.json',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
@@ -231,6 +232,13 @@ export function validateRefinementVerdict<T = unknown>(data: unknown): Validatio
  */
 export function validateModelCallRecord<T = unknown>(data: unknown): ValidationResult<T> {
   return validateArtifact<T>('ModelCallRecord', data);
+}
+
+/**
+ * Convenience wrapper for the session-hierarchy roster shape.
+ */
+export function validateHierarchyRoster<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('HierarchyRoster', data);
 }
 
 /**

@@ -129,3 +129,7 @@ orchestrator/.gitignore
 
 # AISDLC-557: orchestrator gate-failure backoff state (runtime, per-machine)
 .ai-sdlc/dispatch/gate-failure-count
+
+# Session hierarchy roster (machine-local)
+.ai-sdlc/dispatch/hierarchy.json
+.ai-sdlc/dispatch/hierarchy.json.tmp*
