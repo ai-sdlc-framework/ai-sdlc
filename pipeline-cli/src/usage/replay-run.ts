@@ -253,7 +253,7 @@ function loadTask(taskId: string, currentCheckout: string): TaskSpec {
 }
 
 /** Runner that points the pipeline's `<base>...HEAD` diff at the recorded merge base. */
-function pinnedRunner(inner: Runner, mergeBase: string): Runner {
+export function pinnedRunner(inner: Runner, mergeBase: string): Runner {
   return (command, args, opts) => {
     // Leading `-c key=value` pairs (e.g. core.quotePath) are kept in front of the subcommand.
     let i = 0;

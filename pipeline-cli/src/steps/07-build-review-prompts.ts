@@ -79,12 +79,13 @@ export async function buildReviewPrompts(
   const targetBranch = resolveTargetBranch(opts.workDir);
   const baseRef = `origin/${targetBranch}`;
 
+  // `--text` stops a `-diff` attribute hiding content behind a binary stub.
   // `core.quotePath=false` keeps non-ASCII bytes literal; `-z` separates paths with NUL
   // and never quotes them; `--no-renames` lists both sides of a rename. The path rules
   // that veto a relaxation match on these plain paths.
   const diffResult = await runner(
     'git',
-    ['-c', 'core.quotePath=false', 'diff', `${baseRef}...HEAD`],
+    ['-c', 'core.quotePath=false', 'diff', '--text', `${baseRef}...HEAD`],
     { cwd: opts.worktreePath, allowFailure: true },
   );
   const diff = diffResult.code === 0 ? diffResult.stdout : '';
@@ -152,6 +153,7 @@ export async function buildReviewPrompts(
         changedFiles,
         diff,
         diffUnavailable,
+        ...(opts.iteration !== undefined ? { iteration: opts.iteration } : {}),
         ...(judgment ? { judgment } : {}),
       })
     ).reviewers;

@@ -64,6 +64,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   // consistently. Defaults to 'backlog' when not provided so legacy callers
   // (and the orchestrator path) keep their existing behaviour.
   const sourceKind: 'backlog' | 'gh-issue' = opts.sourceKind ?? 'backlog';
+  // Review depth may only be relaxed for work the caller says is trusted backlog work.
+  // An inline taskSpec with no sourceKind came from outside the backlog: untrusted.
+  const reviewSourceKind: 'backlog' | 'gh-issue' | undefined =
+    opts.taskSpec && opts.sourceKind === undefined ? undefined : sourceKind;
 
   // Step 1 — Validate task.
   //
@@ -297,7 +301,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       runner: opts.runner,
-      sourceKind,
+      sourceKind: reviewSourceKind,
     });
 
     // Step 7b — spawn 3 reviewers in parallel
@@ -333,7 +337,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       initialDeveloperReturn: initialDev,
       initialVerdict,
       maxIterations: opts.maxReviewIterations ?? 2,
-      sourceKind,
+      sourceKind: reviewSourceKind,
       spawner: opts.spawner,
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry

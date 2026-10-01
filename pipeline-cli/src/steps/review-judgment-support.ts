@@ -89,7 +89,25 @@ const GOVERNANCE_PATH_RES: readonly RegExp[] = [
   /(?:^|\/)pipeline-cli\/attestation-core\//i,
   /(?:^|\/)ai-sdlc-plugin\/hooks\//i,
   /(?:^|\/)\.ai-sdlc\//i,
+  // Settings that change how diffs or packages are read.
+  /(?:^|\/)\.gitattributes$/i,
+  /(?:^|\/)\.npmrc$/i,
+  // The selection and judgment code itself.
+  /(?:^|\/)pipeline-cli\/src\/steps\/reviewer-set(?:\.|-)[^/]*$/i,
+  /(?:^|\/)pipeline-cli\/src\/steps\/review-[^/]*$/i,
+  /(?:^|\/)pipeline-cli\/src\/steps\/07-build-review-prompts[^/]*$/i,
+  /(?:^|\/)reference\/src\/judgment\//i,
+  // Agents, commands and signing scripts that define what review means.
+  /(?:^|\/)ai-sdlc-plugin\/agents\//i,
+  /(?:^|\/)ai-sdlc-plugin\/commands\//i,
+  /(?:^|\/)ai-sdlc-plugin\/scripts\/sign-[^/]*$/i,
+  /(?:^|\/)scripts\/is-docs-only-changeset\.mjs$/i,
 ];
+
+/** True when the diff holds a binary or unreadable hunk the judgment could not read. */
+export function diffHasBinaryHunk(diff: string): boolean {
+  return /^(?:Binary files .* differ|GIT binary patch)$/m.test(diff);
+}
 
 /**
  * The first changed path under a governance surface (CI helpers, gates, hooks,

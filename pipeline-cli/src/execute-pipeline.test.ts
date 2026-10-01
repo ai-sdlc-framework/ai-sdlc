@@ -65,7 +65,10 @@ function makeHappyRunner(): FakeRunner {
     .on(/^git fetch/, ok())
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-    .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+    .on(
+      /^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/,
+      ok('--- diff content ---\n'),
+    )
     .on(
       /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
       ok('a.ts\0'),
@@ -283,7 +286,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       .on(/^git fetch/, ok())
       .on(/^git worktree add/, ok())
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-      .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok())
+      .on(/^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/, ok())
       .on(/^git -c core\.quotePath=false diff --name-only -z --no-renames/, ok())
       .on(/^git push -u origin/, fail('! [rejected] (non-fast-forward)\nerror: failed to push', 1));
 
@@ -801,7 +804,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       )
       .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
       .on(
-        /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+        /^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/,
         ok('--- diff content ---\n'),
       )
       .on(
@@ -1030,7 +1033,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         .on(/^git worktree add/, ok())
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
         .on(
-          /^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/,
+          /^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/,
           ok('--- diff content ---\n'),
         )
         .on(

@@ -253,7 +253,7 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     ].join('\n');
     const { sel } = await run({ changedFiles: ['docs/readme.md'], diff });
     expect(sel.reviewers).toEqual(THREE);
-    expect(['veto:unparseable-path', 'veto:path-ci']).toContain(sel.decidedBy);
+    expect(sel.decidedBy).toBe('veto:unparseable-path');
   });
 
   it('a plain rename out of a workflow is vetoed by the rename lines', async () => {
@@ -291,11 +291,79 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     'ai-sdlc-plugin/hooks/enforce.js',
     '.ai-sdlc/judgment-config.yaml',
     '.ai-sdlc/review-config.yaml',
+    'pipeline-cli/attestation-core/merkle.ts',
+    '.gitattributes',
+    'packages/web/.gitattributes',
+    '.npmrc',
+    'sub/.npmrc',
+    'pipeline-cli/src/steps/reviewer-set.ts',
+    'pipeline-cli/src/steps/reviewer-set-selection.test.ts',
+    'pipeline-cli/src/steps/review-routing.ts',
+    'pipeline-cli/src/steps/review-judgment-support.ts',
+    'pipeline-cli/src/steps/07-build-review-prompts.ts',
+    'reference/src/judgment/evaluate.ts',
+    'reference/src/judgment/catalog/review-routing.ts',
+    'ai-sdlc-plugin/agents/security-reviewer.md',
+    'ai-sdlc-plugin/commands/review-pr.md',
+    'ai-sdlc-plugin/scripts/sign-attestation.mjs',
+    'ai-sdlc-plugin/scripts/sign-other.mjs',
+    'scripts/is-docs-only-changeset.mjs',
   ])('governance path %s vetoes the merged set', async (path) => {
     const { sel, fake } = await run({ changedFiles: [path] });
     expect(sel.reviewers).toEqual(THREE);
     expect(sel.decidedBy).toBe('veto:path-governance');
     expect(fake.requests).toHaveLength(0);
+  });
+
+  it.each([
+    'pipeline-cli/src/steps/reviewer-settings.ts',
+    'pipeline-cli/src/steps/preview-build.ts',
+    'pipeline-cli/src/steps/reviews.ts',
+    'pipeline-cli/src/other/review-routing.ts',
+    'reference/src/judgments/x.ts',
+    'reference/src/judgment-x.ts',
+    'ai-sdlc-plugin/agent/x.md',
+    'ai-sdlc-plugin/scripts/other.mjs',
+    'ai-sdlc-plugin/scripts/design-x.mjs',
+    'scripts/is-docs-only-changeset.test.mjs',
+    'docs/gitattributes.md',
+    'docs/npmrc.md',
+    'pipeline-cli/attestation-corex/a.ts',
+    'src/not-scripts/run.sh.txt',
+  ])('lookalike path %s does not veto', async (path) => {
+    const { sel } = await run({ changedFiles: [path] });
+    expect(sel.reviewers).toEqual(MERGED);
+    expect(sel.decidedBy).toBe('judgment:all-signals-below-threshold');
+  });
+
+  it.each([
+    ['iteration 2', 2],
+    ['iteration 3', 3],
+  ])('%s never relaxes review', async (_n, iteration) => {
+    const { sel, fake } = await run({ iteration });
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.decidedBy).toBe('veto:iteration');
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('iteration 1 (or none) is allowed', async () => {
+    expect((await run({ iteration: 1 })).sel.reviewers).toEqual(MERGED);
+    expect((await run({})).sel.reviewers).toEqual(MERGED);
+  });
+
+  it.each([
+    'diff --git a/x.bin b/x.bin\nBinary files a/x.bin and b/x.bin differ\n',
+    'diff --git a/x.bin b/x.bin\nGIT binary patch\nliteral 3\n',
+  ])('a binary hunk vetoes: %#', async (diff) => {
+    const { sel, fake } = await run({ diff: diff.replace(/\\n/g, '\n') });
+    expect(sel.reviewers).toEqual(THREE);
+    expect(sel.decidedBy).toBe('veto:binary-diff');
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('text that merely mentions binary files in a hunk does not veto', async () => {
+    const diff = 'diff --git a/a.ts b/a.ts\n+// Binary files differ here\n';
+    expect((await run({ diff: diff.replace(/\\n/g, '\n') })).sel.reviewers).toEqual(MERGED);
   });
 
   it('ordinary source and scripts data files do not veto', async () => {
@@ -353,6 +421,15 @@ describe('floors', () => {
     ]);
     expect(applyReviewerSetFloors(['security-reviewer'])).toEqual(THREE);
     expect(applyReviewerSetFloors([])).toEqual(THREE);
+    expect(applyReviewerSetFloors(['security-reviewer', 'security-reviewer'])).toEqual(THREE);
+    expect(applyReviewerSetFloors(['code-reviewer', 'code-reviewer'])).toEqual([
+      'code-reviewer',
+      'security-reviewer',
+    ]);
+    expect(applyReviewerSetFloors(['correctness-reviewer'])).toEqual([
+      'correctness-reviewer',
+      'security-reviewer',
+    ]);
     expect(applyReviewerSetFloors(MERGED)).toEqual(MERGED);
   });
 });
@@ -452,6 +529,22 @@ describe('routeReviewers', () => {
     expect(
       (await routeReviewers({ reviewers: ['code-reviewer'], ...ROUTE, judgment: below.ctx })).added,
     ).toEqual([]);
+  });
+
+  it('logs the path-classifier incumbent and the signals that decided', async () => {
+    const records: { judgmentId: string; incumbent?: unknown; outcome: unknown }[] = [];
+    const { ctx } = ctxFor({ routing: { 'input-handling': 0.9 } });
+    await routeReviewers({
+      reviewers: ['code-reviewer'],
+      ...ROUTE,
+      judgment: { ...ctx, sinks: [{ record: (r) => void records.push(r) }] },
+    });
+    const rec = records.find((r) => r.judgmentId === 'review.routing');
+    expect(rec?.incumbent).toEqual({ reviewers: ['testing', 'critic', 'security'] });
+    expect(rec?.outcome).toMatchObject({
+      kind: 'act',
+      decision: { signals: ['input-handling'], called: ['testing', 'security'] },
+    });
   });
 
   it('shadow mode and abstains leave the set unchanged', async () => {

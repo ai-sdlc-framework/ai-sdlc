@@ -56,7 +56,18 @@ const approved = (
   durationMs: 0,
 });
 
-async function run(sourceKind?: 'backlog' | 'gh-issue') {
+const inlineSpec = {
+  id: 'AISDLC-300',
+  title: 'x',
+  status: 'To Do',
+  acceptanceCriteria: ['a'],
+  acceptanceCriteriaChecked: [false],
+  description: 'd',
+  rawBody: 'd',
+  filePath: '<inline>',
+};
+
+async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false) {
   writeTaskFile(tmp, { id: 'AISDLC-300', title: 'x', status: 'To Do', acceptanceCriteria: ['a'] });
   mkdirSync(join(tmp, '.worktrees', 'aisdlc-300'), { recursive: true });
   const spawner = new MockSpawner({
@@ -70,7 +81,7 @@ async function run(sourceKind?: 'backlog' | 'gh-issue') {
     .on(/^git fetch/, ok())
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-    .on(/^git -c core\.quotePath=false diff origin\/main\.\.\.HEAD$/, ok('diff\n'))
+    .on(/^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/, ok('diff\n'))
     .on(/^git -c core\.quotePath=false diff --name-only/, ok('a.ts\0'))
     .on(/^git push -u origin/, ok())
     .on(/^gh pr create/, ok('https://github.com/o/r/pull/1\n'));
@@ -82,12 +93,23 @@ async function run(sourceKind?: 'backlog' | 'gh-issue') {
     skipFinalizeCommit: true,
     maxReviewIterations: 1,
     ...(sourceKind ? { sourceKind } : {}),
+    ...(inline ? { taskSpec: inlineSpec } : {}),
   });
 }
 
 describe('executePipeline reviewer-set wiring', () => {
   it('a backlog dispatch with no explicit sourceKind reaches Step 7 as backlog', async () => {
     await run();
+    expect(seen[0].sourceKind).toBe('backlog');
+  });
+
+  it('an inline taskSpec with no sourceKind is untrusted at Step 7', async () => {
+    await run(undefined, true);
+    expect(seen[0].sourceKind).toBeUndefined();
+  });
+
+  it('an inline taskSpec with an explicit backlog sourceKind stays backlog', async () => {
+    await run('backlog', true);
     expect(seen[0].sourceKind).toBe('backlog');
   });
 

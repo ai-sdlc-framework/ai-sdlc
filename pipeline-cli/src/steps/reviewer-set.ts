@@ -53,6 +53,7 @@ import {
 import type { ReviewerType } from '../types.js';
 import { classifyPathRisk } from '../classifier/classifier.js';
 import {
+  diffHasBinaryHunk,
   governancePathMatch,
   judgmentLayerActive,
   scanReviewPaths,
@@ -195,6 +196,8 @@ export interface SelectReviewerSetOpts extends ResolveReviewerSetOpts {
    * file names alone.
    */
   diffUnavailable?: boolean;
+  /** Review iteration (1 = first pass). A re-run never relaxes review. */
+  iteration?: number;
   /** Ready judgment context; omit (or leave the layer unconfigured) to keep today's behaviour. */
   judgment?: EvaluateJudgmentContext;
 }
@@ -294,10 +297,12 @@ export async function selectReviewerSet(
 
   if (pinned !== null) return vetoed(`config:explicit-${pinned}`);
   if (opts.sourceKind !== 'backlog') return vetoed('veto:source-kind');
+  if ((opts.iteration ?? 1) > 1) return vetoed('veto:iteration');
   if (opts.changedFiles.length === 0) return vetoed('veto:no-changed-files');
   if (opts.diffUnavailable === true || opts.diff.trim() === '') {
     return vetoed('veto:diff-unavailable');
   }
+  if (diffHasBinaryHunk(opts.diff)) return vetoed('veto:binary-diff');
   if (scan.unparseable) return vetoed('veto:unparseable-path');
   if (risk.touchesAuth) return vetoed('veto:path-auth');
   if (risk.touchesLockfiles) return vetoed('veto:path-lockfile');
