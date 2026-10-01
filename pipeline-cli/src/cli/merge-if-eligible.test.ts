@@ -212,13 +212,10 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
       'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
       [`commits/${HEAD}/check-runs`]: {
-        stdout: JSON.stringify({
-          total: 1,
-          runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }],
-        }),
+        stdout: JSON.stringify({ name: 'ci', status: 'completed', conclusion: 'success' }),
       },
-      [`commits/${HEAD}/status`]: { stdout: JSON.stringify({ total: 0, statuses: [] }) },
-      'show origin/main:backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
+      [`commits/${HEAD}/status`]: { stdout: '' },
+      'contents/backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
     });
     const msg = await runCli(['42', '--source-kind', 'backlog', '--dry-run'], fake.runner, {
       root: '/main',
@@ -234,7 +231,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       ...repoView,
       'gh pr view 42': { stdout: GOOD_PR },
       [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
-      'show origin/main:backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
+      'contents/backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
       'gh pr merge 42': {},
     });
     const msg = await runCli(['42', '--source-kind', 'backlog', '--arm'], fake.runner, {
@@ -252,7 +249,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       ...repoView,
       'gh pr view 42': { stdout: GOOD_PR },
       [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
-      'show origin/main:backlog/config.yml': { stdout: 'x: 1\n' },
+      'contents/backlog/config.yml': { stdout: 'x: 1\n' },
       'gh pr merge 42': {},
     });
     expect(

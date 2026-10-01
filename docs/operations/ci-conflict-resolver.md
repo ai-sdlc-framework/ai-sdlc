@@ -154,9 +154,12 @@ ai-sdlc/ci-conflict-resolver: failure shape '<shape>' not auto-resolvable, opera
 
 The agent enforces these defensively at every step:
 
-1. Never merge a PR (`gh pr merge --merge/--squash/--rebase`).
-   `gh pr merge --auto` IS permitted — it only re-attaches the
-   auto-merge request, not the merge itself.
+1. Never merge a PR, and never run a raw `gh pr merge` in any form (the
+   PreToolUse hook denies it, `--auto` included). Re-attaching the
+   auto-merge request goes through
+   `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,
+   which applies the repo's merge policy and trust checks first; when it
+   refuses, the repository workflow re-arms on push.
 2. Force-push only with `--force-with-lease`. Plain `git push --force`
    / `-f` is forbidden.
 3. Never push to `main` / `master`. Refused at agent Stage 1 + Stage 7.

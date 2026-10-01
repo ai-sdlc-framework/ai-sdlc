@@ -11,7 +11,6 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  armPr,
   deriveTaskId,
   evaluateMergeEligibility,
   evaluatePrTrust,
@@ -21,9 +20,8 @@ import {
   fetchShaChecks,
   isBacklogTaskFileFor,
   isTrustedSourceKind,
-  mergePr,
   parseGovernanceBlock,
-  readFileFromOriginMain,
+  readFileFromMain,
   readTaskPrefix,
   resolveGovernanceFromYaml,
   resolveRepoSlug,
@@ -31,12 +29,13 @@ import {
   runMergeIfEligible,
   STRICT_DEFAULTS,
   stateForRequired,
+  taskFileOnMain,
   verifiedMainRoot,
   type GovernancePolicy,
   type PrSnapshot,
   type RunMergeIfEligibleOptions,
 } from './merge-if-eligible.js';
-import { defaultRunner, type ExecResult, type Runner } from '../runtime/exec.js';
+import { type ExecResult, type Runner } from '../runtime/exec.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -109,26 +108,60 @@ const SNAPSHOT: PrSnapshot = {
 
 type Run = [name: string, status: string, conclusion: string | null];
 
-/** Handlers for the head-commit check runs + statuses queries. */
+/** Handlers for the head-commit check runs + statuses queries (one JSON object per line). */
 function shaChecks(
   sha: string,
   runs: Run[],
   statuses: Array<[string, string]> = [],
-  extra: { runsTotal?: number; statusTotal?: number } = {},
 ): Record<string, Partial<ExecResult>> {
+  const lines = (xs: unknown[]) => xs.map((x) => JSON.stringify(x)).join('\n');
   return {
     [`commits/${sha}/check-runs`]: {
-      stdout: JSON.stringify({
-        total: extra.runsTotal ?? runs.length,
-        runs: runs.map(([name, status, conclusion]) => ({ name, status, conclusion })),
-      }),
+      stdout: lines(runs.map(([name, status, conclusion]) => ({ name, status, conclusion }))),
     },
     [`commits/${sha}/status`]: {
-      stdout: JSON.stringify({
-        total: extra.statusTotal ?? statuses.length,
-        statuses: statuses.map(([context, state]) => ({ context, state })),
-      }),
+      stdout: lines(statuses.map(([context, state]) => ({ context, state }))),
     },
+  };
+}
+
+const SHA_BACKLOG = '1'.repeat(40);
+const SHA_TASKS = '2'.repeat(40);
+const SHA_COMPLETED = '3'.repeat(40);
+
+/** Handlers for the git-trees walk main -> backlog -> tasks/completed (names are file names). */
+function treeHandlers(
+  names: { tasks?: string[]; completed?: string[] },
+  opts: { truncatedDir?: 'root' | 'backlog' | 'tasks' | 'completed' } = {},
+): Record<string, Partial<ExecResult>> {
+  const tree = (entries: Array<[string, string, string]>, dir: string) =>
+    JSON.stringify({
+      truncated: opts.truncatedDir === dir,
+      tree: entries.map(([path, type, sha]) => ({ path, type, sha })),
+    });
+  const blobs = (xs: string[] = []) =>
+    xs.map((n): [string, string, string] => [n, 'blob', '4'.repeat(40)]);
+  return {
+    'git/trees/main --jq': {
+      stdout: tree(
+        [
+          ['backlog', 'tree', SHA_BACKLOG],
+          ['README.md', 'blob', '5'.repeat(40)],
+        ],
+        'root',
+      ),
+    },
+    [`git/trees/${SHA_BACKLOG} --jq`]: {
+      stdout: tree(
+        [
+          ['tasks', 'tree', SHA_TASKS],
+          ['completed', 'tree', SHA_COMPLETED],
+        ],
+        'backlog',
+      ),
+    },
+    [`git/trees/${SHA_TASKS} --jq`]: { stdout: tree(blobs(names.tasks), 'tasks') },
+    [`git/trees/${SHA_COMPLETED} --jq`]: { stdout: tree(blobs(names.completed), 'completed') },
   };
 }
 
@@ -343,41 +376,6 @@ describe('fetchRequiredChecks', () => {
   });
 });
 
-describe('mergePr', () => {
-  it('invokes the merge with the configured method, pinned to the checked head commit', async () => {
-    const { runner, calls } = makeFakeRunner({ 'gh pr merge': {} });
-    const res = await mergePr(42, 'org/repo', 'squash', HEAD_A, runner);
-    expect(res).toEqual({ ok: true, error: '' });
-    expect(calls).toEqual([
-      {
-        command: 'gh',
-        args: [
-          'pr',
-          'merge',
-          '42',
-          '--squash',
-          '--match-head-commit',
-          HEAD_A,
-          '--repo',
-          'org/repo',
-        ],
-      },
-    ]);
-  });
-
-  it('reports (does not throw) a refusal such as a moved head', async () => {
-    const { runner } = makeFakeRunner({
-      'gh pr merge': {
-        code: 1,
-        stderr: 'Head branch was modified. Review and try the merge again.\n',
-      },
-    });
-    const res = await mergePr(42, 'org/repo', 'squash', HEAD_A, runner);
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/Head branch was modified/);
-  });
-});
-
 describe('fetchPrSnapshot', () => {
   it('reads head, merge state, provenance and files in ONE gh pr view call', async () => {
     const { runner, calls } = makeFakeRunner({ 'gh pr view 42': { stdout: prView() } });
@@ -442,7 +440,7 @@ describe('resolveRepoSlug', () => {
 });
 
 describe('fetchShaChecks (bound to the exact head commit)', () => {
-  it('maps check runs and statuses of THAT sha', async () => {
+  it('maps check runs and statuses of THAT sha, reading every page', async () => {
     const { runner, calls } = makeFakeRunner(
       shaChecks(
         HEAD_A,
@@ -470,9 +468,21 @@ describe('fetchShaChecks (bound to the exact head commit)', () => {
       `repos/org/repo/commits/${HEAD_A}/check-runs?per_page=100`,
       `repos/org/repo/commits/${HEAD_A}/status?per_page=100`,
     ]);
+    expect(calls.every((c) => c.args.includes('--paginate'))).toBe(true);
   });
 
-  it('fails closed on gh errors, bad output and truncated lists', async () => {
+  it('handles more than one page (150 check runs) without refusing', async () => {
+    const many = Array.from({ length: 150 }, (_, i): Run => [`job-${i}`, 'completed', 'success']);
+    const res = await fetchShaChecks(
+      HEAD_A,
+      'org/repo',
+      makeFakeRunner(shaChecks(HEAD_A, many)).runner,
+    );
+    expect(res.fetchFailed).toBe(false);
+    expect(res.checks).toHaveLength(150);
+  });
+
+  it('fails closed on gh errors and malformed output', async () => {
     const base = shaChecks(HEAD_A, [['ci', 'completed', 'success']]);
     const bad = (patch: Record<string, Partial<ExecResult>>) =>
       fetchShaChecks(HEAD_A, 'org/repo', makeFakeRunner({ ...base, ...patch }).runner);
@@ -481,14 +491,16 @@ describe('fetchShaChecks (bound to the exact head commit)', () => {
     expect((await bad({ [`commits/${HEAD_A}/check-runs`]: { stdout: 'nope' } })).fetchFailed).toBe(
       true,
     );
-    expect((await bad({ [`commits/${HEAD_A}/status`]: { stdout: '{}' } })).fetchFailed).toBe(true);
-    const trunc = await fetchShaChecks(
-      HEAD_A,
-      'org/repo',
-      makeFakeRunner(shaChecks(HEAD_A, [['ci', 'completed', 'success']], [], { runsTotal: 150 }))
-        .runner,
+    expect((await bad({ [`commits/${HEAD_A}/status`]: { stdout: '{"x":1}' } })).fetchFailed).toBe(
+      true,
     );
-    expect(trunc.fetchFailed).toBe(true);
+    expect(
+      (
+        await bad({
+          [`commits/${HEAD_A}/check-runs`]: { stdout: '{"name":"a","status":"x"}\nbroken' },
+        })
+      ).fetchFailed,
+    ).toBe(true);
   });
 });
 
@@ -561,49 +573,129 @@ describe('deriveTaskId + isBacklogTaskFileFor', () => {
   });
 });
 
-describe('readFileFromOriginMain + readTaskPrefix', () => {
-  it('reads committed text via `git --git-dir <root>/.git show origin/main:<path>`', async () => {
-    const { runner, calls } = makeFakeRunner({ 'show origin/main:': { stdout: 'text' } });
-    expect(await readFileFromOriginMain('/main', 'a/b.yaml', runner)).toBe('text');
-    expect(calls[0].args).toEqual(['--git-dir', '/main/.git', 'show', 'origin/main:a/b.yaml']);
+describe('readFileFromMain + readTaskPrefix + taskFileOnMain (GitHub is authoritative)', () => {
+  it('reads main through the contents API with the raw media type (no local git)', async () => {
+    const { runner, calls } = makeFakeRunner({ 'contents/a/b.yaml': { stdout: 'text' } });
+    expect(await readFileFromMain('org/repo', 'a/b.yaml', runner)).toBe('text');
+    expect(calls).toEqual([
+      {
+        command: 'gh',
+        args: [
+          'api',
+          '-H',
+          'Accept: application/vnd.github.raw',
+          'repos/org/repo/contents/a/b.yaml?ref=main',
+        ],
+      },
+    ]);
   });
 
-  it('returns null on failure (fail closed)', async () => {
-    const { runner } = makeFakeRunner({ 'show origin/main:': { code: 128 } });
-    expect(await readFileFromOriginMain('/main', 'a', runner)).toBeNull();
+  it('returns null on any gh failure or an empty body (fail closed)', async () => {
+    const f = makeFakeRunner({ 'contents/': { code: 1, stderr: 'HTTP 404' } });
+    expect(await readFileFromMain('org/repo', 'a', f.runner)).toBeNull();
+    const e = makeFakeRunner({ 'contents/': { stdout: '  \n' } });
+    expect(await readFileFromMain('org/repo', 'a', e.runner)).toBeNull();
   });
 
   it('reads task_prefix from backlog/config.yml and defaults to AISDLC', async () => {
     const ok = makeFakeRunner({ 'config.yml': { stdout: "x: 1\ntask_prefix: 'PROJ'\n" } });
-    expect(await readTaskPrefix('/main', ok.runner)).toBe('PROJ');
+    expect(await readTaskPrefix('org/repo', ok.runner)).toBe('PROJ');
     const none = makeFakeRunner({ 'config.yml': { stdout: 'x: 1\n' } });
-    expect(await readTaskPrefix('/main', none.runner)).toBe('AISDLC');
-    const missing = makeFakeRunner({ 'config.yml': { code: 128 } });
-    expect(await readTaskPrefix('/main', missing.runner)).toBe('AISDLC');
+    expect(await readTaskPrefix('org/repo', none.runner)).toBe('AISDLC');
+    const missing = makeFakeRunner({ 'config.yml': { code: 1 } });
+    expect(await readTaskPrefix('org/repo', missing.runner)).toBe('AISDLC');
+  });
+
+  it('finds a task file in backlog/tasks or backlog/completed via the trees API', async () => {
+    const h = treeHandlers({ tasks: ['aisdlc-10 - other.md'], completed: ['aisdlc-9 - done.md'] });
+    expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(h).runner)).toBe(true);
+    expect(await taskFileOnMain('aisdlc-10', 'org/repo', makeFakeRunner(h).runner)).toBe(true);
+    expect(await taskFileOnMain('aisdlc-11', 'org/repo', makeFakeRunner(h).runner)).toBe(false);
+    expect(await taskFileOnMain('aisdlc-1', 'org/repo', makeFakeRunner(h).runner)).toBe(false);
+  });
+
+  it('fails closed on any tree failure, truncation or missing backlog directory', async () => {
+    const names = { completed: ['aisdlc-9 - done.md'] };
+    for (const dir of ['root', 'backlog', 'tasks', 'completed'] as const) {
+      const h = treeHandlers(names, { truncatedDir: dir });
+      expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(h).runner)).toBe(false);
+    }
+    for (const key of [
+      'git/trees/main --jq',
+      `git/trees/${SHA_BACKLOG} --jq`,
+      `git/trees/${SHA_COMPLETED} --jq`,
+    ]) {
+      const h = { ...treeHandlers(names), [key]: { code: 1 } };
+      expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(h).runner)).toBe(false);
+    }
+    const garbage = { ...treeHandlers(names), 'git/trees/main --jq': { stdout: 'not json' } };
+    expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(garbage).runner)).toBe(
+      false,
+    );
+    const noTree = {
+      ...treeHandlers(names),
+      'git/trees/main --jq': { stdout: '{"truncated":false}' },
+    };
+    expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(noTree).runner)).toBe(false);
+    const noBacklog = {
+      ...treeHandlers(names),
+      'git/trees/main --jq': { stdout: '{"truncated":false,"tree":[]}' },
+    };
+    expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(noBacklog).runner)).toBe(
+      false,
+    );
+  });
+
+  it('a file (blob) named backlog is not a directory and refuses', async () => {
+    const h = {
+      ...treeHandlers({ completed: ['aisdlc-9 - done.md'] }),
+      'git/trees/main --jq': {
+        stdout: JSON.stringify({
+          truncated: false,
+          tree: [{ path: 'backlog', type: 'blob', sha: SHA_BACKLOG }],
+        }),
+      },
+    };
+    expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(h).runner)).toBe(false);
+  });
+
+  it('a backlog tree without a tasks directory still checks completed', async () => {
+    const h = {
+      ...treeHandlers({ completed: ['aisdlc-9 - done.md'] }),
+      [`git/trees/${SHA_BACKLOG} --jq`]: {
+        stdout: JSON.stringify({
+          truncated: false,
+          tree: [{ path: 'completed', type: 'tree', sha: SHA_COMPLETED }],
+        }),
+      },
+    };
+    expect(await taskFileOnMain('aisdlc-9', 'org/repo', makeFakeRunner(h).runner)).toBe(true);
   });
 });
 
 describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
-  const onMain =
-    'backlog/completed/aisdlc-9 - do the thing.md\nbacklog/tasks/aisdlc-10 - other.md\n';
-
   async function trust(
     overrides: Partial<PrSnapshot>,
     opts: {
       authors?: string[];
-      lsTree?: string;
-      lsTreeCode?: number;
+      tasks?: string[];
+      completed?: string[];
+      treesFail?: boolean;
       commit?: Partial<ExecResult>;
     } = {},
   ) {
     const { runner, calls } = makeFakeRunner({
-      'ls-tree': { stdout: opts.lsTree ?? onMain, code: opts.lsTreeCode ?? 0 },
+      ...(opts.treesFail
+        ? { 'git/trees/': { code: 1 } }
+        : treeHandlers({
+            tasks: opts.tasks ?? ['aisdlc-10 - other.md'],
+            completed: opts.completed ?? ['aisdlc-9 - do the thing.md'],
+          })),
       'commits/': opts.commit ?? { stdout: '{"author":"operator","committer":"operator"}' },
     });
     const reason = await evaluatePrTrust({
       snapshot: { ...SNAPSHOT, ...overrides },
       mergeAuthors: opts.authors ?? ['operator'],
-      repoRoot: '/main-checkout',
       repoSlug: 'org/repo',
       taskPrefix: 'AISDLC',
       runner,
@@ -611,20 +703,11 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
     return { reason, calls };
   }
 
-  it('passes for a same-repo, main-based, allow-listed PR whose task is on origin/main', async () => {
+  it('passes for a same-repo, main-based, allow-listed PR whose task is on main (per GitHub)', async () => {
     const { reason, calls } = await trust({});
     expect(reason).toBeNull();
-    expect(calls[0].args).toEqual([
-      '--git-dir',
-      '/main-checkout/.git',
-      'ls-tree',
-      '-r',
-      '--name-only',
-      'origin/main',
-      '--',
-      'backlog/tasks',
-      'backlog/completed',
-    ]);
+    expect(calls[0].args.slice(0, 2)).toEqual(['api', 'repos/org/repo/git/trees/main']);
+    expect(calls.every((c) => c.command === 'gh')).toBe(true);
   });
 
   it('refuses a fork PR (isCrossRepository !== false)', async () => {
@@ -636,7 +719,7 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
     expect((await trust({ authorLogin: 'OPERATOR' })).reason).toBeNull();
   });
 
-  it('refuses when the allow-list is empty (fail closed), without any git call', async () => {
+  it('refuses when the allow-list is empty (fail closed), without any call', async () => {
     const { reason, calls } = await trust({}, { authors: [] });
     expect(reason).toMatch(/empty list trusts nobody/);
     expect(calls).toEqual([]);
@@ -646,7 +729,7 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
     expect((await trust({ baseRefName: 'release/1.x' })).reason).toMatch(/base branch/);
   });
 
-  it('refuses when no backlog task exists on origin/main or in the PR diff', async () => {
+  it('refuses when no backlog task exists on main or in the PR diff', async () => {
     const { reason } = await trust({
       headRefName: 'ai-sdlc/aisdlc-77-nope',
       title: 'x (AISDLC-77)',
@@ -654,8 +737,8 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
     expect(reason).toMatch(/no backlog task file for "aisdlc-77"/);
   });
 
-  it('refuses when git ls-tree fails (cannot prove the task exists)', async () => {
-    expect((await trust({}, { lsTreeCode: 128 })).reason).toMatch(/no backlog task file/);
+  it('refuses when the trees API fails (cannot prove the task exists)', async () => {
+    expect((await trust({}, { treesFail: true })).reason).toMatch(/no backlog task file/);
   });
 
   it('refuses when the branch/title carry no task id, a gh-issue style id, or disagree', async () => {
@@ -668,17 +751,17 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
     expect((await trust({ title: 'x (AISDLC-10)' })).reason).toMatch(/ambiguous task id/);
   });
 
-  it('accepts a task file added by the PR own diff without a git ls-tree call', async () => {
+  it('accepts a task file added by the PR own diff without a trees call', async () => {
     const { reason, calls } = await trust(
       {
         headRefName: 'ai-sdlc/aisdlc-77-new',
         title: 'x (AISDLC-77)',
         files: [{ path: 'backlog/completed/aisdlc-77 - new.md', changeType: 'ADDED' }],
       },
-      { lsTree: '' },
+      { tasks: [], completed: [] },
     );
     expect(reason).toBeNull();
-    expect(calls.every((c) => c.command === 'gh')).toBe(true);
+    expect(calls.some((c) => String(c.args[1]).includes('git/trees'))).toBe(false);
   });
 
   it('does not count a task file the PR deletes, nor an unrelated PR file', async () => {
@@ -687,7 +770,7 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
       { path: 'backlog/tasks/aisdlc-77 - new.md', changeType: 'DELETED' },
       { path: 'src/aisdlc-77 - new.md', changeType: 'ADDED' },
     ]) {
-      expect((await trust({ ...base, files: [f] }, { lsTree: '' })).reason).toMatch(
+      expect((await trust({ ...base, files: [f] }, { tasks: [], completed: [] })).reason).toMatch(
         /no backlog task file/,
       );
     }
@@ -880,54 +963,115 @@ describe('verified main root + policy read from git', () => {
     expect(resolveTrustedMainRoot({ cwd: attacker, anchorDir }).root).toBeNull();
   });
 
-  it('a worktree copy and an UNCOMMITTED main-checkout edit saying onGreenClean are both ignored', async () => {
-    const granted = GREEN_YAML;
-    writeFileSync(join(worktree, '.ai-sdlc', 'agent-role.yaml'), granted);
-    writeFileSync(join(main, '.ai-sdlc', 'agent-role.yaml'), granted); // working tree, uncommitted
-    const committed = await readFileFromOriginMain(main, '.ai-sdlc/agent-role.yaml', defaultRunner);
-    expect(committed).toBe(NEVER_YAML);
-    const { runner, calls } = makeFakeRunner({});
+  it('git environment variables cannot redirect the root verification', () => {
+    const attacker = join(base, 'attacker');
+    initRepo(attacker, GREEN_YAML);
+    process.env['GIT_COMMON_DIR'] = join(attacker, '.git');
+    process.env['GIT_OBJECT_DIRECTORY'] = join(attacker, '.git', 'objects');
+    process.env['GIT_ALTERNATE_OBJECT_DIRECTORIES'] = join(attacker, '.git', 'objects');
+    process.env['GIT_REPLACE_REF_BASE'] = 'refs/forged/';
+    process.env['GIT_WORK_TREE'] = attacker;
+    expect(real(verifiedMainRoot(worktree))).toBe(realpathSync(main));
+    expect(real(verifiedMainRoot(main))).toBe(realpathSync(main));
+  });
+
+  // The policy is authoritative from GitHub: a forged local origin/main ref, a worktree
+  // copy and an uncommitted edit have no say, and nothing is ever read through local git.
+  const apiPolicy = (yaml: string | null) =>
+    yaml === null
+      ? { 'contents/.ai-sdlc/agent-role.yaml': { code: 1, stderr: 'HTTP 404' } }
+      : { 'contents/.ai-sdlc/agent-role.yaml': { stdout: yaml } };
+
+  it('API says never: refused even though a forged local origin/main and worktree copy say onGreenClean', async () => {
+    writeFileSync(join(main, '.ai-sdlc', 'agent-role.yaml'), GREEN_YAML);
+    git(['commit', '-qam', 'forged grant'], main);
+    git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], main);
+    writeFileSync(join(worktree, '.ai-sdlc', 'agent-role.yaml'), GREEN_YAML);
+    const { runner, calls } = makeFakeRunner(apiPolicy(NEVER_YAML));
     const result = await runMergeIfEligible({
       prNumber: 9,
       sourceKind: 'backlog',
       repoSlug: 'org/repo',
       repoRoot: main,
-      runner: (c, a, o) => (c === 'git' ? defaultRunner(c, a, o) : runner(c, a, o)),
+      runner,
     });
     expect(result.eligibility.eligible).toBe(false);
     expect(result.eligibility.reason).toMatch(/allowMerge="never"/);
-    expect(calls).toEqual([]); // no gh call spent
+    expect(calls).toHaveLength(1); // only the API policy read; no git, no PR read
+    expect(calls[0].command).toBe('gh');
   });
 
-  it('uses the committed grant even when the working tree says never (policy comes from git)', async () => {
-    const m2 = join(base, 'main2');
-    initRepo(m2, GREEN_YAML);
-    writeFileSync(join(m2, '.ai-sdlc', 'agent-role.yaml'), NEVER_YAML); // uncommitted tightening
-    const { runner, calls } = makeFakeRunner({ 'gh pr view': { code: 1, stderr: 'x' } });
-    const result = await runMergeIfEligible({
-      prNumber: 9,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: m2,
-      runner: (c, a, o) => (c === 'git' ? defaultRunner(c, a, o) : runner(c, a, o)),
-    });
-    // Reached the PR read, i.e. the committed onGreenClean grant was honoured.
-    expect(result.eligibility.reason).toMatch(/could not read the PR/);
-    expect(calls).toHaveLength(1);
-  });
-
-  it('refuses when origin/main or the policy file is unreadable', async () => {
-    git(['update-ref', '-d', 'refs/remotes/origin/main'], main);
-    const { runner, calls } = makeFakeRunner({});
+  it('API says onGreenClean: honoured even though local refs and files say never', async () => {
+    const { runner } = makeFakeRunner({ ...apiPolicy(GREEN_YAML), 'gh pr view': { code: 1 } });
     const result = await runMergeIfEligible({
       prNumber: 9,
       sourceKind: 'backlog',
       repoSlug: 'org/repo',
       repoRoot: main,
-      runner: (c, a, o) => (c === 'git' ? defaultRunner(c, a, o) : runner(c, a, o)),
+      runner,
     });
-    expect(result.eligibility.reason).toMatch(/as committed on origin\/main/);
-    expect(calls).toEqual([]);
+    expect(result.eligibility.reason).toMatch(/could not read the PR/);
+  });
+
+  it('an API failure (404, error, empty body) refuses and spends no PR call', async () => {
+    for (const handlers of [
+      apiPolicy(null),
+      { 'contents/.ai-sdlc/agent-role.yaml': { stdout: '' } },
+    ]) {
+      const { runner, calls } = makeFakeRunner(handlers);
+      const result = await runMergeIfEligible({
+        prNumber: 9,
+        sourceKind: 'backlog',
+        repoSlug: 'org/repo',
+        repoRoot: main,
+        runner,
+      });
+      expect(result.eligibility.reason).toMatch(
+        /could not read \.ai-sdlc\/agent-role\.yaml from main/,
+      );
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it('mergeAuthors come only from the API copy, never from a local file', async () => {
+    writeFileSync(
+      join(main, '.ai-sdlc', 'agent-role.yaml'),
+      'governance:\n  allowMerge: onGreenClean\n  mergeAuthors: [mallory]\n',
+    );
+    const { runner } = makeFakeRunner({
+      ...apiPolicy(GREEN_YAML), // allow-list: operator only
+      'gh pr view 42': { stdout: prView({ author: { login: 'mallory' } }) },
+    });
+    const result = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: main,
+      runner,
+      taskPrefix: 'AISDLC',
+    });
+    expect(result.eligibility.reason).toMatch(/"mallory" is not on the/);
+  });
+
+  it('a revocation on main applies on the very next run (no local fetch involved)', async () => {
+    let policy = GREEN_YAML;
+    const runner: Runner = async (_c, args) => {
+      if (String(args.join(' ')).includes('contents/.ai-sdlc/agent-role.yaml')) {
+        return { stdout: policy, stderr: '', code: 0 };
+      }
+      return { stdout: '', stderr: 'x', code: 1 }; // PR read fails -> proves the grant was honoured
+    };
+    const run = () =>
+      runMergeIfEligible({
+        prNumber: 9,
+        sourceKind: 'backlog',
+        repoSlug: 'org/repo',
+        repoRoot: main,
+        runner,
+      });
+    expect((await run()).eligibility.reason).toMatch(/could not read the PR/);
+    policy = NEVER_YAML;
+    expect((await run()).eligibility.reason).toMatch(/allowMerge="never"/);
   });
 });
 
@@ -977,24 +1121,33 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
     expect(noRoot.policy).toEqual(STRICT_DEFAULTS);
   });
 
-  it('reads the policy with git show origin/main in the verified checkout when not injected', async () => {
+  it('reads the policy from main via the GitHub contents API when not injected', async () => {
     const { promise, calls } = run(
-      { ...ALL_OK, 'show origin/main:.ai-sdlc/agent-role.yaml': { stdout: GREEN_YAML } },
+      { ...ALL_OK, 'contents/.ai-sdlc/agent-role.yaml': { stdout: GREEN_YAML } },
       { policyYaml: undefined },
     );
     expect((await promise).merged).toBe(true);
     expect(calls[0]).toEqual({
-      command: 'git',
-      args: ['--git-dir', '/unused/.git', 'show', 'origin/main:.ai-sdlc/agent-role.yaml'],
+      command: 'gh',
+      args: [
+        'api',
+        '-H',
+        'Accept: application/vnd.github.raw',
+        'repos/org/repo/contents/.ai-sdlc/agent-role.yaml?ref=main',
+      ],
     });
+    expect(calls.every((c) => c.command === 'gh')).toBe(true);
   });
 
-  it('reads the task prefix from origin/main when not injected', async () => {
-    const { promise } = run(
-      { ...ALL_OK, 'show origin/main:backlog/config.yml': { stdout: 'task_prefix: AISDLC\n' } },
+  it('reads the task prefix from main via GitHub when not injected', async () => {
+    const { promise, calls } = run(
+      { ...ALL_OK, 'contents/backlog/config.yml': { stdout: 'task_prefix: AISDLC\n' } },
       { taskPrefix: undefined },
     );
     expect((await promise).merged).toBe(true);
+    expect(calls.some((c) => String(c.args.at(-1)).includes('contents/backlog/config.yml'))).toBe(
+      true,
+    );
   });
 
   it('merges when green + CLEAN + trusted, pinned to the head commit, in the expected order', async () => {
@@ -1032,7 +1185,7 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
     ];
     for (const [pr, extra, re] of cases) {
       const { promise, calls } = run(
-        { ...ALL_OK, 'gh pr view 42': { stdout: prView(pr) }, 'ls-tree': { stdout: '' } },
+        { ...ALL_OK, 'gh pr view 42': { stdout: prView(pr) }, ...treeHandlers({}) },
         extra,
       );
       const r = await promise;
@@ -1042,11 +1195,11 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
     }
   });
 
-  it('merges when the task exists on origin/main (not in the PR diff)', async () => {
+  it('merges when the task exists on main per GitHub (not in the PR diff)', async () => {
     const { promise } = run({
       ...ALL_OK,
       'gh pr view 42': { stdout: prView({ files: [] }) },
-      'ls-tree': { stdout: 'backlog/completed/aisdlc-9 - do the thing.md\n' },
+      ...treeHandlers({ completed: ['aisdlc-9 - do the thing.md'] }),
     });
     expect((await promise).merged).toBe(true);
   });
@@ -1085,14 +1238,14 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
     expect((await promise).eligibility.reason).toMatch(/ci=MISSING/);
   });
 
-  it('refuses when the head-commit checks fetch fails or is truncated', async () => {
+  it('refuses when the head-commit checks fetch fails or returns malformed output', async () => {
     const failed = await run({ ...ALL_OK, [`commits/${HEAD_A}/status`]: { code: 1 } }).promise;
     expect(failed.eligibility.reason).toMatch(/fetch itself failed\/errored/);
-    const trunc = await run({
+    const garbage = await run({
       ...ALL_OK,
-      ...shaChecks(HEAD_A, [['ci', 'completed', 'success']], [], { runsTotal: 500 }),
+      [`commits/${HEAD_A}/check-runs`]: { stdout: 'not json' },
     }).promise;
-    expect(trunc.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+    expect(garbage.eligibility.reason).toMatch(/fetch itself failed\/errored/);
   });
 
   it('no required contexts: every check run and status of the head commit must be green (fallback)', async () => {
@@ -1299,7 +1452,7 @@ describe('runMergeIfEligible — arm mode (same gate, no green requirement)', ()
       [{ 'gh pr view 42': { stdout: prView({ author: { login: 'mallory' } }) } }, /"mallory"/],
       [{ 'gh pr view 42': { stdout: prView({ baseRefName: 'dev' }) } }, /base branch is "dev"/],
       [
-        { 'gh pr view 42': { stdout: prView({ files: [] }) }, 'ls-tree': { stdout: '' } },
+        { 'gh pr view 42': { stdout: prView({ files: [] }) }, ...treeHandlers({}) },
         /no backlog task file/,
       ],
       [
@@ -1394,13 +1547,5 @@ describe('runMergeIfEligible — arm mode (same gate, no green requirement)', ()
     expect(r.eligibility.eligible).toBe(true);
     expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(1);
     expect(armCalls(calls)).toEqual([]);
-  });
-
-  it('armPr reports a refusal instead of throwing', async () => {
-    const { runner } = makeFakeRunner({ 'gh pr merge': { code: 1, stderr: 'nope\n' } });
-    expect(await armPr(42, 'org/repo', 'squash', HEAD_A, runner)).toEqual({
-      ok: false,
-      error: 'nope',
-    });
   });
 });

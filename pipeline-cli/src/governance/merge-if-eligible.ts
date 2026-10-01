@@ -15,13 +15,16 @@
  *    base branch `main`, an author on the policy's `mergeAuthors` allow-list,
  *    a head commit authored by an allow-listed login, and a matching backlog
  *    task (see `evaluatePrTrust`).
- *  - **Policy comes from git, not a working tree.** The policy and allow-list
- *    are read with `git show origin/main:.ai-sdlc/agent-role.yaml` in the
- *    verified main checkout, so uncommitted edits (or a worktree copy) are
- *    ignored, and the resolver is implemented natively here: no plugin file
- *    chosen through an environment variable is ever loaded for this decision.
- *    There is no argv or environment override of the policy root; tests inject
- *    one programmatically through the exported builder.
+ *  - **Policy comes from GitHub, not from local state.** The policy, allow-list,
+ *    `task_prefix` and the task-file existence check are read from the
+ *    repository's `main` as GitHub serves it (`gh api .../contents/...?ref=main`
+ *    and the git trees API), against the same slug as the PR, so a forged local
+ *    ref, a worktree copy, an uncommitted edit or a git environment variable
+ *    has no effect, and a revocation on main applies immediately. The resolver
+ *    is implemented natively here: no plugin file chosen through an environment
+ *    variable is loaded. A verified main checkout is still required as an extra
+ *    anchor for the repository slug. There is no argv or environment override;
+ *    tests inject one programmatically through the exported builder.
  *  - **Checks are bound to the head commit.** The check runs and statuses are
  *    queried for the exact `headRefOid` read from the PR, the head is re-read
  *    before merging, and the merge itself carries `--match-head-commit`.
@@ -40,7 +43,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import type { Runner } from '../runtime/exec.js';
 
 // ── Governance policy types (mirrors ai-sdlc-plugin/hooks/lib/governance-resolver.js) ──
@@ -69,15 +72,32 @@ export const STRICT_DEFAULTS: GovernancePolicy = Object.freeze({
 /** Sync git runner used only to verify the main checkout; null on any failure. */
 export type GitSync = (args: string[], cwd: string) => string | null;
 
+/** Environment variables that can redirect or forge git's view of a repository. */
+const GIT_REDIRECT_ENV = [
+  'GIT_COMMON_DIR',
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_REPLACE_REF_BASE',
+];
+
+/** `process.env` without the git-redirecting variables (defense in depth). */
+function cleanGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of GIT_REDIRECT_ENV) delete env[key];
+  return env;
+}
+
 const defaultGitSync: GitSync = (args, cwd) => {
   try {
     return (
-      execFileSync('git', args, {
+      execFileSync('git', ['--no-replace-objects', ...args], {
         cwd,
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 5000,
-        env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined },
+        env: cleanGitEnv(),
       }).trim() || null
     );
   } catch {
@@ -150,30 +170,39 @@ export function resolveTrustedMainRoot(opts: {
   return { root: anchorMain, reason: '' };
 }
 
-/** `git` args pinned to the verified checkout's own git dir (ignores GIT_DIR in the environment). */
-function gitArgs(repoRoot: string, args: string[]): string[] {
-  return ['--git-dir', join(repoRoot, '.git'), ...args];
-}
-
 /**
- * Read a file as committed on `origin/main` (`git show`), never from the
- * working tree. `null` when git or the ref/path is unavailable (fail closed).
+ * Read a file from the repository's `main` branch as GitHub serves it
+ * (`gh api repos/<slug>/contents/<path>?ref=main`, raw media type). This is the
+ * AUTHORITATIVE source for the policy and config: it does not depend on any
+ * local ref, working tree or git environment. A gh failure, a non-200 answer,
+ * or an empty body returns `null` (callers refuse).
  */
-export async function readFileFromOriginMain(
-  repoRoot: string,
+export async function readFileFromMain(
+  repoSlug: string,
   path: string,
   runner: Runner,
+  cwd?: string,
 ): Promise<string | null> {
-  const out = await runner('git', gitArgs(repoRoot, ['show', `origin/main:${path}`]), {
-    cwd: repoRoot,
-    allowFailure: true,
-  });
-  return out.code === 0 ? out.stdout : null;
+  const out = await runner(
+    'gh',
+    [
+      'api',
+      '-H',
+      'Accept: application/vnd.github.raw',
+      `repos/${repoSlug}/contents/${path}?ref=main`,
+    ],
+    { cwd, allowFailure: true },
+  );
+  return out.code === 0 && out.stdout.trim() !== '' ? out.stdout : null;
 }
 
-/** Backlog task id prefix from `backlog/config.yml` `task_prefix` on origin/main; default `AISDLC`. */
-export async function readTaskPrefix(repoRoot: string, runner: Runner): Promise<string> {
-  const text = await readFileFromOriginMain(repoRoot, 'backlog/config.yml', runner);
+/** Backlog task id prefix from `backlog/config.yml` `task_prefix` on main; default `AISDLC`. */
+export async function readTaskPrefix(
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<string> {
+  const text = await readFileFromMain(repoSlug, 'backlog/config.yml', runner, cwd);
   const m = text ? /^task_prefix:\s*['"]?([A-Za-z][A-Za-z0-9]*)['"]?\s*$/m.exec(text) : null;
   return m?.[1] ?? 'AISDLC';
 }
@@ -413,27 +442,69 @@ export function isBacklogTaskFileFor(taskId: string, path: string): boolean {
   );
 }
 
-/** Does a matching task file exist on `origin/main`? (`git ls-tree`, no network.) */
-export async function taskFileOnOriginMain(
-  taskId: string,
-  repoRoot: string,
+interface TreeListing {
+  truncated: boolean;
+  entries: Array<{ path: string; type: string; sha: string }>;
+}
+
+/** One non-recursive tree listing from the git trees API; `null` on any failure. */
+async function fetchTree(
+  repoSlug: string,
+  treeish: string,
   runner: Runner,
-): Promise<boolean> {
+  cwd?: string,
+): Promise<TreeListing | null> {
   const out = await runner(
-    'git',
-    gitArgs(repoRoot, [
-      'ls-tree',
-      '-r',
-      '--name-only',
-      'origin/main',
-      '--',
-      'backlog/tasks',
-      'backlog/completed',
-    ]),
-    { cwd: repoRoot, allowFailure: true },
+    'gh',
+    [
+      'api',
+      `repos/${repoSlug}/git/trees/${treeish}`,
+      '--jq',
+      '{truncated: .truncated, tree: [.tree[] | {path, type, sha}]}',
+    ],
+    { cwd, allowFailure: true },
   );
-  if (out.code !== 0) return false;
-  return out.stdout.split('\n').some((line) => isBacklogTaskFileFor(taskId, line.trim()));
+  if (out.code !== 0) return null;
+  try {
+    const p = JSON.parse(out.stdout) as {
+      truncated?: unknown;
+      tree?: Array<{ path: string; type: string; sha: string }>;
+    };
+    if (!Array.isArray(p.tree)) return null;
+    return { truncated: p.truncated === true, entries: p.tree };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does a matching task file exist on the repository's `main` (per GitHub)?
+ * Walks `main` -> `backlog` -> `tasks` / `completed` with non-recursive tree
+ * listings, so no listing is anywhere near GitHub's truncation limit; any
+ * failure or a truncated listing returns false (fail closed).
+ */
+export async function taskFileOnMain(
+  taskId: string,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<boolean> {
+  const root = await fetchTree(repoSlug, 'main', runner, cwd);
+  if (!root || root.truncated) return false;
+  const backlog = root.entries.find((e) => e.path === 'backlog' && e.type === 'tree');
+  if (!backlog) return false;
+  const backlogTree = await fetchTree(repoSlug, backlog.sha, runner, cwd);
+  if (!backlogTree || backlogTree.truncated) return false;
+  for (const dir of ['tasks', 'completed']) {
+    const entry = backlogTree.entries.find((e) => e.path === dir && e.type === 'tree');
+    if (!entry) continue;
+    const listing = await fetchTree(repoSlug, entry.sha, runner, cwd);
+    if (!listing || listing.truncated) return false;
+    if (listing.entries.some((e) => isBacklogTaskFileFor(taskId, `backlog/${dir}/${e.path}`))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -479,7 +550,7 @@ export async function fetchCommitLogins(
  *   - base branch is exactly `main`;
  *   - PR author login is on the (non-empty) `mergeAuthors` allow-list;
  *   - a backlog task with the repo's id shape, derived from the branch/title,
- *     exists on `origin/main` OR is added by the PR's own diff. A PR that adds
+ *     exists on `main` (per GitHub) OR is added by the PR's own diff. A PR that adds
  *     its own task file is accepted because the repo creates and completes a
  *     task in one PR; that makes the task a provenance hint, NOT a trust
  *     signal. The author allow-list is the real signal;
@@ -487,12 +558,11 @@ export async function fetchCommitLogins(
  *     an unlinked/unknown author refuses.
  * Note: `files` from `gh pr view --json` is capped by GitHub (about 100
  * entries). A task file beyond the cap is missed in the PR diff, which can only
- * turn into a refusal (the origin/main check then decides).
+ * turn into a refusal (the check on main then decides).
  */
 export async function evaluatePrTrust(args: {
   snapshot: PrSnapshot;
   mergeAuthors: string[];
-  repoRoot: string;
   repoSlug: string;
   taskPrefix: string;
   runner: Runner;
@@ -508,7 +578,7 @@ export async function evaluatePrTrust(args: {
   if (mergeAuthors.length === 0) {
     return (
       'no spec.governance.mergeAuthors allow-list is configured in .ai-sdlc/agent-role.yaml on ' +
-      'origin/main — refusing (fail-closed; an empty list trusts nobody)'
+      'main — refusing (fail-closed; an empty list trusts nobody)'
     );
   }
   const allowed = (login: string) =>
@@ -528,11 +598,10 @@ export async function evaluatePrTrust(args: {
     (f) =>
       f.changeType?.toUpperCase() !== 'DELETED' && isBacklogTaskFileFor(derived.taskId!, f.path),
   );
-  if (!inPr && !(await taskFileOnOriginMain(derived.taskId, args.repoRoot, args.runner))) {
+  if (!inPr && !(await taskFileOnMain(derived.taskId, args.repoSlug, args.runner, args.cwd))) {
     return (
-      `no backlog task file for "${derived.taskId}" exists on origin/main or in this PR's own ` +
-      'diff (backlog/tasks or backlog/completed) — if it was merged recently, run ' +
-      '"git fetch origin main" in the main checkout first'
+      `no backlog task file for "${derived.taskId}" exists on main (per GitHub) or in this PR's own ` +
+      'diff (backlog/tasks or backlog/completed)'
     );
   }
   const logins = await fetchCommitLogins(pr.headRefOid, args.repoSlug, args.runner, args.cwd);
@@ -813,12 +882,21 @@ export async function fetchRequiredChecks(
   }
 }
 
+/** Parse newline-delimited JSON objects (one per `gh api --paginate --jq` element). */
+function parseNdjson<T>(text: string): T[] {
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
+    .map((l) => JSON.parse(l) as T);
+}
+
 /**
  * Check runs and commit statuses for the EXACT commit `sha` (not "the PR's
  * current head"), so the evaluation is bound to the head that will be merged.
- * Check runs: `status != completed` is PENDING, otherwise the upper-cased
- * conclusion. Statuses: the upper-cased state. `fetchFailed` on any gh error,
- * unparseable output, or a truncated list (more runs than one page).
+ * All pages are read (`gh api --paginate`). Check runs: `status != completed`
+ * is PENDING, otherwise the upper-cased conclusion. Statuses: the upper-cased
+ * state. `fetchFailed` on any gh error or unparseable output.
  */
 export async function fetchShaChecks(
   sha: string,
@@ -831,8 +909,9 @@ export async function fetchShaChecks(
     [
       'api',
       `repos/${repoSlug}/commits/${sha}/check-runs?per_page=100`,
+      '--paginate',
       '--jq',
-      '{total: .total_count, runs: [.check_runs[] | {name, status, conclusion}]}',
+      '.check_runs[] | {name, status, conclusion}',
     ],
     { cwd, allowFailure: true },
   );
@@ -841,31 +920,30 @@ export async function fetchShaChecks(
     [
       'api',
       `repos/${repoSlug}/commits/${sha}/status?per_page=100`,
+      '--paginate',
       '--jq',
-      '{total: .total_count, statuses: [.statuses[] | {context, state}]}',
+      '.statuses[] | {context, state}',
     ],
     { cwd, allowFailure: true },
   );
   if (runsOut.code !== 0 || statusOut.code !== 0) return { checks: [], fetchFailed: true };
   try {
-    const r = JSON.parse(runsOut.stdout) as {
-      total: number;
-      runs: Array<{ name: string; status: string; conclusion: string | null }>;
-    };
-    const s = JSON.parse(statusOut.stdout) as {
-      total: number;
-      statuses: Array<{ context: string; state: string }>;
-    };
-    if (!Array.isArray(r.runs) || !Array.isArray(s.statuses)) throw new Error('shape');
-    if (r.total > r.runs.length || s.total > s.statuses.length) {
+    const runs = parseNdjson<{ name: string; status: string; conclusion: string | null }>(
+      runsOut.stdout,
+    );
+    const statuses = parseNdjson<{ context: string; state: string }>(statusOut.stdout);
+    if (
+      runs.some((c) => typeof c.name !== 'string' || typeof c.status !== 'string') ||
+      statuses.some((c) => typeof c.context !== 'string' || typeof c.state !== 'string')
+    ) {
       return { checks: [], fetchFailed: true };
     }
     const checks: RequiredCheckStatus[] = [
-      ...r.runs.map((c) => ({
+      ...runs.map((c) => ({
         name: c.name,
         state: c.status !== 'completed' ? 'PENDING' : (c.conclusion ?? 'UNKNOWN').toUpperCase(),
       })),
-      ...s.statuses.map((c) => ({ name: c.context, state: c.state.toUpperCase() })),
+      ...statuses.map((c) => ({ name: c.context, state: c.state.toUpperCase() })),
     ];
     return { checks, fetchFailed: false };
   } catch {
@@ -880,7 +958,7 @@ export function stateForRequired(name: string, results: RequiredCheckStatus[]): 
   return matches.find((c) => c.state.toUpperCase() !== 'SUCCESS')?.state ?? 'SUCCESS';
 }
 
-export interface MergePrResult {
+interface MergePrResult {
   ok: boolean;
   /** gh stderr (trimmed) when the merge was refused/failed. */
   error: string;
@@ -893,7 +971,7 @@ export interface MergePrResult {
  * moved after the checks were evaluated cannot be merged. A refusal is
  * returned (not thrown) so the caller can report it and exit non-zero.
  */
-export async function mergePr(
+async function mergePr(
   prNumber: number,
   repoSlug: string,
   mergeMethod: 'squash' | 'merge' | 'rebase',
@@ -924,7 +1002,7 @@ export async function mergePr(
  * caller also re-reads the head just before, so a head that moved is refused
  * even if gh does not enforce the pin for arming. Refusals are returned, not thrown.
  */
-export async function armPr(
+async function armPr(
   prNumber: number,
   repoSlug: string,
   mergeMethod: 'squash' | 'merge' | 'rebase',
@@ -979,11 +1057,11 @@ export interface RunMergeIfEligibleOptions {
   dryRun?: boolean;
   /**
    * Programmatic injection (tests): committed `agent-role.yaml` text, or `null`
-   * for "unreadable". When omitted the text is read with `git show
-   * origin/main:.ai-sdlc/agent-role.yaml` in the verified checkout.
+   * for "unreadable". When omitted the text is read from main via
+   * the GitHub contents API.
    */
   policyYaml?: string | null;
-  /** Programmatic injection (tests): backlog id prefix (default: read from origin/main). */
+  /** Programmatic injection (tests): backlog id prefix (default: read from main via GitHub). */
   taskPrefix?: string;
   /**
    * `merge` (default): merge once green + CLEAN. `arm`: enable auto-merge
@@ -1025,7 +1103,7 @@ export function refusalResult(
  * Compose policy resolution + PR-state fetch + evaluation + (conditionally)
  * the merge call. Order, each step failing closed:
  *   1. verified main checkout (else refuse);
- *   2. committed policy on origin/main, `allowMerge` and caller `sourceKind`
+ *   2. policy on main (per GitHub), `allowMerge` and caller `sourceKind`
  *      (no `gh` calls spent on a refusal);
  *   3. ONE `gh pr view` read (head commit, merge state, fork/author/base/title/files)
  *      then the trust facts (`evaluatePrTrust`);
@@ -1048,17 +1126,16 @@ export async function runMergeIfEligible(
       opts.dryRun,
     );
   }
-  const repoRoot = opts.repoRoot;
 
   const yamlText =
     opts.policyYaml !== undefined
       ? opts.policyYaml
-      : await readFileFromOriginMain(repoRoot, '.ai-sdlc/agent-role.yaml', opts.runner);
+      : await readFileFromMain(opts.repoSlug, '.ai-sdlc/agent-role.yaml', opts.runner, opts.cwd);
   if (yamlText === null) {
     return refusalResult(
       opts.prNumber,
-      'could not read .ai-sdlc/agent-role.yaml as committed on origin/main (uncommitted and ' +
-        'worktree copies are never used) — refusing (fail-closed)',
+      'could not read .ai-sdlc/agent-role.yaml from main as GitHub serves it (local refs, ' +
+        'working trees and worktree copies are never used) — refusing (fail-closed)',
       opts.dryRun,
     );
   }
@@ -1095,9 +1172,8 @@ export async function runMergeIfEligible(
   const trustRefusal = await evaluatePrTrust({
     snapshot,
     mergeAuthors,
-    repoRoot,
     repoSlug: opts.repoSlug,
-    taskPrefix: opts.taskPrefix ?? (await readTaskPrefix(repoRoot, opts.runner)),
+    taskPrefix: opts.taskPrefix ?? (await readTaskPrefix(opts.repoSlug, opts.runner, opts.cwd)),
     runner: opts.runner,
     cwd: opts.cwd,
   });

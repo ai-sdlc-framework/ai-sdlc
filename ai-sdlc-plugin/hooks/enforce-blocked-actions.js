@@ -333,7 +333,7 @@ function enforceBash(command) {
  * through the generic `blockedActions` pattern matching in enforceBash().
  */
 function enforceMergeGovernance(trimmed) {
-  for (const segment of splitShellSegments(trimmed)) {
+  for (const segment of splitShellSegments(stripInertHeredocBodies(trimmed))) {
     if (!segmentInvokesGhPrMerge(segment)) continue;
     deny(
       `raw 'gh pr merge' (including 'gh pr merge --auto') is not a permitted merge path ` +
@@ -343,6 +343,23 @@ function enforceMergeGovernance(trimmed) {
         `real policy, fork, author, base, task and head-commit checks.`,
     );
   }
+}
+
+/**
+ * Removes heredoc bodies (see stripHeredocBodies) so documentation or a commit
+ * message quoted through `cat <<EOF` does not look like a command, BUT only when
+ * no opener line feeds the body to something that would EXECUTE it (a shell, an
+ * interpreter, eval, source, xargs): then the text is left intact so a real
+ * command hidden in a heredoc is still caught (fail closed).
+ */
+function stripInertHeredocBodies(command) {
+  const openers = command.split('\n').filter((line) => /<<-?\s*['"]?[A-Za-z_]/.test(line));
+  const executes = openers.some((line) =>
+    /(^|[\s;&|(`=/])(?:(?:ba|z|da|k|c|fi)?sh|python[0-9.]*|nodejs|node|deno|bun|ruby|perl|php|eval|source|xargs|env|sudo|exec)(?=$|[\s;&|)<>`])/i.test(
+      line,
+    ),
+  );
+  return executes ? command : stripHeredocBodies(command);
 }
 
 // ── API-merge governance ─────────────────────────────────────────────
@@ -385,7 +402,7 @@ function enforceApiMergeGovernance(command) {
     `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
       `mutation) is not a permitted merge path under any governance allowMerge value. ` +
       `Merges must go through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs', which ` +
-      `enforces the real eligibility gate. Arming auto-merge remains allowed.`,
+      `enforces the real eligibility gate, and arming auto-merge goes through the same helper with --arm.`,
   );
 }
 

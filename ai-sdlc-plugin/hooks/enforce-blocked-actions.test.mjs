@@ -1061,6 +1061,30 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
   }
 
   for (const policy of ['strict', 'green']) {
+    it(`ignores merge text quoted in an inert heredoc but still denies an executed one under ${policy}`, () => {
+      const quoted = "cat <<'EOF'\ngh pr merge 42 --auto\nEOF";
+      assert.ok(!isDenied(run(policy, quoted)), 'documentation in a heredoc is not a command');
+      const commit = 'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF';
+      assert.ok(!isDenied(run(policy, commit)));
+      for (const executed of [
+        'bash <<EOF\ngh pr merge 42 --auto\nEOF',
+        "sh <<'EOF'\ngh pr merge 42\nEOF",
+        'cat <<EOF | bash\ngh pr merge 42 --squash\nEOF',
+        'python3 - <<EOF\nimport os\nEOF\ngh pr merge 42',
+      ]) {
+        assert.ok(isDenied(run(policy, executed)), `expected deny: ${executed}`);
+      }
+      // The opener line itself is a real command and is always checked.
+      assert.ok(isDenied(run(policy, "gh pr merge 42 --auto <<'EOF'\nbody\nEOF")));
+    });
+
+    it(`API-merge deny message no longer claims arming stays allowed under ${policy}`, () => {
+      const result = run(policy, 'gh api repos/acme/widgets/pulls/42/merge -X PUT');
+      const reason = JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason;
+      assert.doesNotMatch(reason, /remains allowed/);
+      assert.match(reason, /--arm/);
+    });
+
     it(`denies arming with --admin (an admin merge bypass) under ${policy}`, () => {
       assert.ok(isDenied(run(policy, 'gh pr merge 42 --auto --admin')));
       assert.ok(isDenied(run(policy, 'gh pr merge 42 --admin --squash')));
