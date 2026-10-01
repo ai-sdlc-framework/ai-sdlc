@@ -11,8 +11,6 @@ requires: []
 assumes: [RFC-0004, RFC-0010, RFC-0016, RFC-0023, RFC-0035, RFC-0041, RFC-0049]
 requiresDocs:
   - operator-runbook
-deferredDocs: true
-deferredDocsDeadline: '2026-11-30'
 ---
 
 # RFC-0050: Usage Ledger and Evidence-Based Model Routing

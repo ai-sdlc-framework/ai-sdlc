@@ -116,6 +116,19 @@ Pluggable adapters fetch raw customer signals (support tickets, community thread
 
 ---
 
+### Usage and Model Routing
+
+Token usage per model call, plan allotment tracking, and evidence-based choice of models per agent role.
+
+| Runbook | Description |
+|---------|-------------|
+| [`usage-ledger.md`](usage-ledger.md) | The machine-level usage ledger: what is recorded, ingestion, `cli-usage` reports and views, weighted units, allotment snapshots, price feed, troubleshooting |
+| [`model-routing.md`](model-routing.md) | The routing table, resolver order, exploration, assignment log, scorecards, reviewer replay, and the planned weekly proposal rules |
+
+**RFC:** [`spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md`](../../spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md)
+
+---
+
 ### Design System (if applicable)
 
 | Runbook | Description |
