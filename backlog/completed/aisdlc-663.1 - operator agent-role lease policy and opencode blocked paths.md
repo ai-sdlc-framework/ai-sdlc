@@ -37,10 +37,10 @@ This PR makes two changes to `.ai-sdlc/agent-role.yaml`:
 ## Final Summary
 
 ## Summary
-`.ai-sdlc/agent-role.yaml` now carries the lease-on-own-branch force-push policy (`spec.governance.allowForcePush: leaseOnOwnBranch`) and the seven-entry `spec.governance.operational` list defined by the governance task, and `opencode.json`, `opencode.jsonc` and `.opencode/**` are added to `constraints.blockedPaths`. Authored by the operator as a separate PR because governance is never relaxed from the PR tree it governs.
+`.ai-sdlc/agent-role.yaml` now carries the lease-on-own-branch force-push policy (`spec.governance.allowForcePush: leaseOnOwnBranch`) and the seven-entry `spec.governance.operational` list defined by the governance task, and `opencode.json`, `opencode.jsonc` and `.opencode/**` (root and nested) are added to `constraints.blockedPaths`. Authored by the operator as a separate PR because governance is never relaxed from the PR tree it governs.
 
 ## Changes
-- `.ai-sdlc/agent-role.yaml`: `spec.governance` block and three OpenCode `blockedPaths` entries; the existing `blockedActions` and every other constraint are unchanged.
+- `.ai-sdlc/agent-role.yaml`: `spec.governance` block and six OpenCode `blockedPaths` entries (the three root forms plus the `**/` nested forms); the existing `blockedActions` and every other constraint are unchanged.
 - This task file.
 
 ## Design decisions
@@ -52,4 +52,8 @@ This PR makes two changes to `.ai-sdlc/agent-role.yaml`:
 - Three parallel reviews and a v6 attestation cover this PR (AC 4).
 
 ## Follow-up
-(none)
+- declined: block `.claude/settings*`, `.husky/**` and `ai-sdlc-plugin/hooks/**` in `blockedPaths`. Executors legitimately edit hooks and `.husky` (for example plugin-hook tasks), so this needs a separate operator decision.
+- declined: read the trusted policy from a git object on `main` instead of the main checkout's working-tree file. A Bash write to the parent could widen the grant until the parent next syncs; accepted residual risk, bounded because the protected-branch defaults cannot be removed.
+- declined: gate the `operational` ids (`answer-operational-decisions`, `clear-executor-context`) in code. They are a closed, validated set but render as banner text only; limiting the dispatch role to operational-scope decisions in the decision CLI is deferred.
+- declined: load `ai-sdlc-plugin/hooks/enforce-blocked-actions` from the main checkout or plugin root. A worktree-rooted session runs its own checkout's copy of the hook; loading it from the trusted location is a hardening for a separate change to the hook.
+- declined: bind the own-branch check to the session's project worktree instead of the tool's working directory (a session that changes into a sibling worktree could lease-push that branch; `main` and `master` stay unreachable).
