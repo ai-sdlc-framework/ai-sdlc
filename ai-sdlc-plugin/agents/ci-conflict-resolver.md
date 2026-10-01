@@ -47,10 +47,12 @@ agents per tick.
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** No `gh pr merge` for merge — `gh pr merge --auto`
-   is the re-arm path and is explicitly permitted (it does NOT merge; it
-   only re-attaches the auto-merge request the force-push cleared per
-   AISDLC-356).
+1. **Never merge a PR.** No raw `gh pr merge` in any form (the hook denies
+   it, `--auto` included). The re-arm path is
+   `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,
+   which applies the repo's merge policy and trust checks before re-attaching
+   the auto-merge request the force-push cleared (AISDLC-356); when it refuses,
+   the repository workflow re-arms on push.
 2. **Force-push uses `--force-with-lease` ONLY.** Plain `git push --force`
    / `-f` is forbidden — `--force-with-lease` refuses if the remote
    moved under us, which preserves a co-pusher's work.
@@ -194,7 +196,7 @@ After a successful push, re-arm auto-merge (GitHub clears the auto-merge
 request on every force-push per AISDLC-356):
 
 ```bash
-gh pr merge "$PR_NUMBER" --auto 2>/dev/null || true
+node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" --source-kind backlog --arm 2>/dev/null || true
 ```
 
 Swallow non-zero exits — auto-merge may not be enabled in the repo or

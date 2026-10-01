@@ -11,6 +11,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  armPr,
   deriveTaskId,
   evaluateMergeEligibility,
   evaluatePrTrust,
@@ -1227,5 +1228,179 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
     expect(r.merged).toBe(false);
     expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(1);
     expect(mergeCalls(calls)).toEqual([]);
+  });
+});
+
+describe('runMergeIfEligible — arm mode (same gate, no green requirement)', () => {
+  const ARM_OK: Record<string, Partial<ExecResult>> = {
+    'gh pr view 42': { stdout: prView() },
+    ...COMMIT_OPERATOR,
+    'gh pr merge 42': {},
+  };
+
+  function runArm(
+    handlers: Record<string, Partial<ExecResult> | Error>,
+    extra: Partial<RunMergeIfEligibleOptions> = {},
+  ) {
+    const fake = makeFakeRunner(handlers);
+    const promise = runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner: fake.runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      mode: 'arm',
+      ...extra,
+    });
+    return { promise, calls: fake.calls };
+  }
+  const armCalls = (calls: RecordedCall[]) => calls.filter((c) => c.args.includes('--auto'));
+
+  it('arms with --auto and --match-head-commit for the checked head, without any checks fetch', async () => {
+    const { promise, calls } = runArm(ARM_OK);
+    const r = await promise;
+    expect(r).toMatchObject({ armed: true, merged: false, dryRun: false });
+    expect(r.eligibility.eligible).toBe(true);
+    expect(armCalls(calls)[0].args).toEqual([
+      'pr',
+      'merge',
+      '42',
+      '--auto',
+      '--squash',
+      '--match-head-commit',
+      HEAD_A,
+      '--repo',
+      'org/repo',
+    ]);
+    expect(
+      calls.some((c) => c.args.includes('checks') || String(c.args[1]).includes('/check-runs')),
+    ).toBe(false);
+  });
+
+  it('refuses under strict policy / untrusted sourceKind / no root without spending a gh call', async () => {
+    for (const extra of [
+      { policyYaml: NEVER_YAML },
+      { sourceKind: 'gh-issue' as const },
+      { repoRoot: null },
+    ]) {
+      const { promise, calls } = runArm({}, extra);
+      const r = await promise;
+      expect(r.eligibility.eligible).toBe(false);
+      expect(r.armed).toBeFalsy();
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('applies the same trust checks as merge mode: fork, author, base, task, head commit author', async () => {
+    const cases: Array<[Record<string, Partial<ExecResult>>, RegExp]> = [
+      [{ 'gh pr view 42': { stdout: prView({ isCrossRepository: true }) } }, /fork/],
+      [{ 'gh pr view 42': { stdout: prView({ author: { login: 'mallory' } }) } }, /"mallory"/],
+      [{ 'gh pr view 42': { stdout: prView({ baseRefName: 'dev' }) } }, /base branch is "dev"/],
+      [
+        { 'gh pr view 42': { stdout: prView({ files: [] }) }, 'ls-tree': { stdout: '' } },
+        /no backlog task file/,
+      ],
+      [
+        { [`commits/${HEAD_A} --jq {author`]: { stdout: '{"author":"mallory","committer":null}' } },
+        /head commit author "mallory"/,
+      ],
+    ];
+    for (const [patch, re] of cases) {
+      const { promise, calls } = runArm({ ...ARM_OK, ...patch });
+      const r = await promise;
+      expect(r.eligibility.reason).toMatch(re);
+      expect(r.armed).toBeFalsy();
+      expect(armCalls(calls)).toEqual([]);
+    }
+    const noList = await runArm(ARM_OK, { policyYaml: 'governance:\n  allowMerge: onGreenClean\n' })
+      .promise;
+    expect(noList.eligibility.reason).toMatch(/empty list trusts nobody/);
+  });
+
+  it('head moved between the trust checks and the arm: refuses, never arms', async () => {
+    let views = 0;
+    const calls: RecordedCall[] = [];
+    const delegate = makeFakeRunner(ARM_OK).runner;
+    const runner: Runner = async (command, args, o) => {
+      calls.push({ command, args });
+      if (args[1] === 'view') {
+        views += 1;
+        return {
+          stdout: prView({ headRefOid: views === 1 ? HEAD_A : HEAD_B }),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return delegate(command, args, o);
+    };
+    const r = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      mode: 'arm',
+    });
+    expect(r.armed).toBeFalsy();
+    expect(r.eligibility.reason).toMatch(/head moved from a{40} to b{40}/);
+    expect(armCalls(calls)).toEqual([]);
+  });
+
+  it('refuses when the pre-arm re-read fails, or GitHub refuses the arm', async () => {
+    let views = 0;
+    const delegate = makeFakeRunner(ARM_OK).runner;
+    const runner: Runner = async (c, a, o) => {
+      if (a[1] === 'view') {
+        views += 1;
+        return views === 1
+          ? { stdout: prView(), stderr: '', code: 0 }
+          : { stdout: '', stderr: 'x', code: 1 };
+      }
+      return delegate(c, a, o);
+    };
+    const failedReread = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      mode: 'arm',
+    });
+    expect(failedReread.eligibility.reason).toMatch(
+      /could not re-read the PR immediately before arming/,
+    );
+    const refused = await runArm({
+      ...ARM_OK,
+      'gh pr merge 42': { code: 1, stderr: 'auto merge is not allowed for this repository' },
+    }).promise;
+    expect(refused.armed).toBeFalsy();
+    expect(refused.eligibility.eligible).toBe(false);
+    expect(refused.eligibility.reason).toMatch(
+      /arming auto-merge was refused by GitHub.*not allowed/,
+    );
+  });
+
+  it('dry-run evaluates the trust checks but never re-reads or arms', async () => {
+    const { promise, calls } = runArm(ARM_OK, { dryRun: true });
+    const r = await promise;
+    expect(r).toMatchObject({ dryRun: true, merged: false });
+    expect(r.armed).toBeFalsy();
+    expect(r.eligibility.eligible).toBe(true);
+    expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(1);
+    expect(armCalls(calls)).toEqual([]);
+  });
+
+  it('armPr reports a refusal instead of throwing', async () => {
+    const { runner } = makeFakeRunner({ 'gh pr merge': { code: 1, stderr: 'nope\n' } });
+    expect(await armPr(42, 'org/repo', 'squash', HEAD_A, runner)).toEqual({
+      ok: false,
+      error: 'nope',
+    });
   });
 });

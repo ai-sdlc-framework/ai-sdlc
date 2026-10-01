@@ -43,6 +43,8 @@ export function renderResult(result: RunMergeIfEligibleResult): string {
     );
   } else if (result.merged) {
     lines.push(`${prefix} | MERGED | ${result.eligibility.reason}`);
+  } else if (result.armed) {
+    lines.push(`${prefix} | ARMED | ${result.eligibility.reason}`);
   } else {
     lines.push(`${prefix} | REFUSED | ${result.eligibility.reason}`);
   }
@@ -56,6 +58,7 @@ export function renderJsonResult(result: RunMergeIfEligibleResult): string {
         ok: result.eligibility.eligible,
         prNumber: result.prNumber,
         merged: result.merged,
+        armed: Boolean(result.armed),
         dryRun: result.dryRun,
         policy: result.policy,
         reason: result.eligibility.reason,
@@ -86,6 +89,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
       'Usage: $0 <pr> --source-kind <backlog|gh-issue> [options]\n\n' +
         '  merge-if-eligible 176 --source-kind backlog          # merge iff green+CLEAN+trusted\n' +
         '  merge-if-eligible 176 --source-kind backlog --dry-run  # evaluate only, never merge\n' +
+        '  merge-if-eligible 176 --source-kind backlog --arm    # arm auto-merge iff trusted (same policy gate)\n' +
         '  merge-if-eligible 176 --source-kind gh-issue         # always refused (untrusted)',
     )
     .command(
@@ -116,6 +120,13 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
             default: 'squash' as const,
             describe: "The repo's configured merge method, used only when eligible.",
           })
+          .option('arm', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Arm auto-merge instead of merging now. Needs the same allowMerge grant and the same ' +
+              'fork/author/base/task/head checks; GitHub then merges once its own required checks pass.',
+          })
           .option('dry-run', {
             type: 'boolean',
             default: false,
@@ -132,6 +143,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
         const sourceKind = argv['source-kind'] as SourceKind;
         const mergeMethod = argv['merge-method'] as 'squash' | 'merge' | 'rebase';
         const dryRun = Boolean(argv['dry-run']);
+        const mode = argv.arm ? ('arm' as const) : ('merge' as const);
         const format = String(argv.format) as 'text' | 'json';
 
         // The policy root is the VERIFIED main checkout only. There is no flag
@@ -163,6 +175,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
                 cwd,
                 mergeMethod,
                 dryRun,
+                mode,
                 policyYaml: override?.policyYaml,
               });
 

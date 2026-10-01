@@ -229,6 +229,51 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     expect(out.join('')).toContain('eligible=true');
   });
 
+  it('--arm arms auto-merge for a trusted PR: prints ARMED, exits 0, argv pins the head', async () => {
+    const fake = makeFakeRunner({
+      ...repoView,
+      'gh pr view 42': { stdout: GOOD_PR },
+      [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
+      'show origin/main:backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
+      'gh pr merge 42': {},
+    });
+    const msg = await runCli(['42', '--source-kind', 'backlog', '--arm'], fake.runner, {
+      root: '/main',
+      policyYaml: GREEN_YAML,
+    });
+    expect(msg).toBe('ok');
+    expect(out.join('')).toMatch(/PR #42 \| ARMED \|/);
+    const arm = fake.calls.find((c) => c.args.includes('--auto'));
+    expect(arm?.args).toEqual(expect.arrayContaining(['--match-head-commit', HEAD, '--squash']));
+  });
+
+  it('--arm --format json reports armed, and exits 1 when refused (policy never)', async () => {
+    const ok = makeFakeRunner({
+      ...repoView,
+      'gh pr view 42': { stdout: GOOD_PR },
+      [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
+      'show origin/main:backlog/config.yml': { stdout: 'x: 1\n' },
+      'gh pr merge 42': {},
+    });
+    expect(
+      await runCli(['42', '--source-kind', 'backlog', '--arm', '--format', 'json'], ok.runner, {
+        root: '/main',
+        policyYaml: GREEN_YAML,
+      }),
+    ).toBe('ok');
+    expect(JSON.parse(out.join(''))).toMatchObject({ ok: true, armed: true, merged: false });
+    out = [];
+    const refused = makeFakeRunner(repoView);
+    expect(
+      await runCli(
+        ['42', '--source-kind', 'backlog', '--arm', '--format', 'json'],
+        refused.runner,
+        { root: '/main', policyYaml: NEVER_YAML },
+      ),
+    ).toBe('process.exit(1)');
+    expect(JSON.parse(out.join(''))).toMatchObject({ ok: false, armed: false });
+  });
+
   it('production path: an unverifiable cwd refuses with zero gh calls, whatever argv/env say', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'aisdlc-663-5-cwd-'));
     try {

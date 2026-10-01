@@ -130,21 +130,35 @@ spec:
   `buildMergeIfEligibleCli({ trustedRootOverride })`, which argv and the environment
   cannot reach, and the hook refuses any shell command that names the old override
   variable.
-- **API merges are blocked:** the PreToolUse hook denies
+- **Arming goes through the helper (`--arm`):**
+  `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`
+  arms auto-merge (`gh pr merge <n> --auto --squash --match-head-commit <sha>`,
+  matching the repository workflow's squash method) only when the same policy gate
+  and trust checks pass: `allowMerge: onGreenClean` on `origin/main`,
+  `--source-kind backlog`, not a fork, base `main`, author and head commit author on
+  `mergeAuthors`, a backlog task, and the head re-read unchanged just before arming.
+  It does NOT require the checks to be green or `mergeStateStatus` to be `CLEAN`,
+  because waiting for GitHub's checks is the point of arming, and it adds
+  `--dry-run`, `--format json` and the `REFUSED` / `ARMED` output and exit codes of
+  merge mode. An armed PR is a merge in waiting, so arming needs the same grant as
+  merging: under the default `allowMerge: never` it is refused. `--match-head-commit`
+  is passed on the arm, but the head re-read is what bounds a moved head if the
+  installed `gh` does not enforce the pin for auto-merge.
+- **Raw merge commands and API merges are blocked:** the PreToolUse hook denies
+  EVERY raw `gh pr merge` invocation, whatever the flags (`--auto`, `--squash`,
+  `--rebase`, `--admin`, `--delete-branch`, `--disable-auto`), and
   `gh api .../pulls/<n>/merge` (any method, with or without a leading slash,
   flags in any order), `curl`/`wget` to the same endpoint, and the GraphQL
-  `mergePullRequest` mutation, under every `allowMerge` value. The sanctioned
-  helper stays allowed. `--admin` is not an accepted companion flag of arming
-  (`gh pr merge --auto --admin` is denied). This is a text-level matcher: it cannot
-  see `eval`, base64 pipelines or constructed strings.
+  `mergePullRequest` and `enablePullRequestAutoMerge` mutations, under every
+  `allowMerge` value. The sanctioned helper (merge mode and `--arm`) stays allowed.
+  The repository workflow `auto-enable-auto-merge.yml` still arms same-repo PRs on
+  open; it is not an agent action and is unchanged. This is a text-level matcher:
+  it cannot see `eval`, base64 pipelines, variable-expanded URLs, `gh api graphql
+  --input <file>`, shell aliases or constructed strings.
 - **Known residuals (be explicit about them):**
-  - **Arming is still allowed (open operator decision).** The hook allows
-    `gh pr merge --auto`, and the repository workflow arms same-repo PRs itself, so
-    an agent can still arm auto-merge on ANY PR (fork PRs and non-allow-listed
-    authors included), which becomes a merge as soon as GitHub's own checks pass.
-    The helper's checks do not apply to arming; only GitHub-side protections
-    mitigate it until the operator chooses to deny agent-side arming or route it
-    through the helper.
+  - **The operator's token is not constrained here.** Everything above governs the
+    agent's shell; a GitHub token with merge rights used by anything else is outside
+    this change.
   - **An agent-editable local CLI is not a trust boundary against that agent.** The
     CLI, the plugin hooks and the repository checkout run from the agent's own
     worktree, so an agent that can edit them is not bound by them; the verified-root

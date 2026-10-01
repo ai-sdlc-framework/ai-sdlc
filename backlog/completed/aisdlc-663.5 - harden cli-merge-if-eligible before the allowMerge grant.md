@@ -47,7 +47,8 @@ under `.ai-sdlc/`.
 - [x] The CLI refuses unless, from the PR data it fetches itself, the PR is not from a fork, its base is `main`, its author and its head commit author are on a non-empty allow-list, and a backlog task with the repo's id shape, derived from the head branch/title, exists on `origin/main` or in the PR's own diff. `--source-kind gh-issue` stays refused.
 - [x] Head commit, merge state and provenance come from one `gh pr view` call; the check runs and statuses are read for that exact SHA; the head is re-read before merging and a moved head refuses; the merge is issued with `--match-head-commit <sha>` and a GitHub refusal is reported with a non-zero exit.
 - [x] The policy and allow-list are read as committed on `origin/main` in the verified main checkout (uncommitted and worktree copies ignored), resolved by code inside the CLI (no env-selected plugin file); the working directory must belong to the same checkout as the CLI; a missing or unverifiable root refuses; there is no argv or environment override of the policy root or repository (tests inject one programmatically).
-- [x] The hook denies `gh api` calls to `.../pulls/<n>/merge` (any method, leading slash or not, flags in any order), `curl`/`wget` to the REST merge endpoint and the GraphQL `mergePullRequest` mutation, under every `allowMerge` value; the sanctioned helper stays allowed; `--admin` is no longer an accepted arming flag.
+- [x] The hook denies every raw merge command in every flag form (arming included), `gh api` calls to `.../pulls/<n>/merge` (any method, leading slash or not, flags in any order), `curl`/`wget` to the REST merge endpoint and the GraphQL `mergePullRequest` / `enablePullRequestAutoMerge` mutations, under every `allowMerge` value; the sanctioned helper stays allowed in merge mode and in `--arm` mode.
+- [x] `cli-merge-if-eligible <pr> --arm` arms auto-merge pinned to the checked head only when the same policy gate (`onGreenClean`), fork, author, head commit author, base and task checks pass and the head is unchanged on a re-read; REFUSED/ARMED output, JSON format and exit codes mirror merge mode; the plugin command/agent text that told agents to arm with a raw command now calls the helper.
 - [x] `spec.governance.mergeAuthors` exists in the schema (and the Go SDK copy and generated schemas) with a login pattern matching the resolver, resolves to an empty list when absent or malformed, and existing policies without it still resolve.
 - [x] Tests cover each rule and the key rules were mutation-checked in a scratch copy.
 - [x] `docs/api-reference/governance.md` describes the hardened conditions and states the residuals plainly; nothing is claimed that the code does not do.
@@ -57,12 +58,14 @@ under `.ai-sdlc/`.
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 ## Summary
-`cli-merge-if-eligible` now derives trust from GitHub data and the committed policy on `origin/main` instead of the `--source-kind` flag alone, evaluates checks for the exact head commit, pins the merge to it, and the hook closes the API-merge side door. The `allowMerge: onGreenClean` grant can be applied without those holes open. Agent-side auto-merge arming is deliberately unchanged and remains an open residual (below).
+`cli-merge-if-eligible` now derives trust from GitHub data and the committed policy on `origin/main` instead of the `--source-kind` flag alone, evaluates checks for the exact head commit, pins the merge to it, and the hook closes the API-merge side door. The `allowMerge: onGreenClean` grant can be applied without those holes open. Arming auto-merge is no longer a raw agent action: the hook denies it and `--arm` routes it through the same gate.
 
 ## Changes
 - `pipeline-cli/src/governance/merge-if-eligible.ts` (rewritten core): native verified-main-root and governance resolution (no plugin file loaded), `git show origin/main` policy/task-prefix reads, one `gh pr view` snapshot, `evaluatePrTrust` (fork, base `main`, `mergeAuthors`, head commit author, task id with the repo's prefix on `origin/main` or in the PR diff), head-SHA check runs/statuses (`fetchShaChecks`), head re-read and `--match-head-commit` pin.
 - `pipeline-cli/src/cli/merge-if-eligible.ts` (modified): `--repo-root`/`--repo` removed; the repository slug comes only from `gh repo view` in the verified checkout and a failure prints a clean REFUSED line; tests inject a root through the builder option.
-- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` (modified): `enforceApiMergeGovernance`, `--admin` dropped from the arming allow-list, refusal of commands naming the removed override variable.
+- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` (modified): `enforceApiMergeGovernance`, every raw merge/arm form denied (the arming allow-list is gone), GraphQL arming mutation denied, refusal of commands naming the removed override variable.
+- `pipeline-cli/src/governance/merge-if-eligible.ts`, `pipeline-cli/src/cli/merge-if-eligible.ts` (modified): `--arm` mode (`armPr`, `armed` result, ARMED output).
+- `ai-sdlc-plugin/commands/{execute,rebase,resolve-conflicts,orchestrator-tick}.md`, `ai-sdlc-plugin/agents/ci-conflict-resolver.md` (modified): re-arm wording now calls the helper.
 - `ai-sdlc-plugin/hooks/lib/governance-resolver.js`, `spec/schemas/agent-role.schema.json`, `sdk-go/core/schemas/agent-role.schema.json`, `reference/src/core/generated-schemas.ts` (modified): `mergeAuthors` with an aligned login pattern.
 - Tests in the four test files plus `reference/src/core/validation.test.ts`; `docs/api-reference/governance.md` and `ai-sdlc-plugin/commands/execute.md` (modified).
 
@@ -77,8 +80,11 @@ under `.ai-sdlc/`.
 - Mutation check in a scratch copy: all key-rule mutations killed.
 
 ## Follow-up
-- declined: stop agents arming auto-merge (open operator decision). Until the operator chooses to deny agent-side `--auto` or route arming through the helper, an agent can arm auto-merge on any PR (fork PRs and non-allow-listed authors included), which merges on green; only GitHub-side protections mitigate it. Two candidate patches were prepared outside the PR
-- declined: protect the CLI and plugin code in the agent's own checkout from edits; an agent-editable local CLI is not a trust boundary against that agent, and GitHub-side protections (strict required checks, enforce_admins, CODEOWNERS plus required review, fork-PR workflow approval) are operator-only and essential
+- declined: local CLI is not a trust boundary against the governed agent. The CLI, the plugin hooks and the checkout run from the agent's own worktree, so an agent that can edit them is not bound by them; the verified-root anchor is the checkout containing the (possibly copied) CLI and the local `origin/main` ref is agent-writable. GitHub-side protections (strict required checks, enforce_admins, CODEOWNERS plus required review on governance paths, fork-PR workflow approval) are operator-only and essential
+- declined: text-level hook bypasses (variable-expanded URLs, `gh api graphql --input <file>`, shell aliases, `eval`/base64, constructed strings); a static matcher cannot close them, the real backstop is GitHub-side protection
+- declined: operator-token power; anything holding a merge-capable GitHub token outside the agent shell is outside this change
+- declined: the task bind accepts a PR that adds its own task file (the repo creates and completes a task in one PR), so the task is a provenance hint and the author allow-list is the real trust signal
+- declined: programmatic pipeline code (`execute-pipeline.ts`, `resume-from-draft.ts`) still arms with a child-process `gh` call because the hook only governs Bash tool calls; moving it onto the helper is a separate change
 - declined: block the branch-merge API (`POST /repos/<o>/<r>/merges`) in the hook; a different endpoint, out of this task's scope
-- declined: reconcile the CLAUDE.md "Never merge PRs" wording; that edit needs direct operator approval and is not made here
+- declined: reconcile the CLAUDE.md "Never merge PRs" and `--auto` wording; that edit needs direct operator approval and is not made here
 <!-- SECTION:FINAL_SUMMARY:END -->

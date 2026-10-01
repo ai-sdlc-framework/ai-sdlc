@@ -918,6 +918,38 @@ export async function mergePr(
   return { ok: out.code === 0, error: out.stderr.trim() };
 }
 
+/**
+ * Arm auto-merge (the repository workflow arms with `--auto --squash`, so the
+ * default method here matches). Pinned with `--match-head-commit <sha>`; the
+ * caller also re-reads the head just before, so a head that moved is refused
+ * even if gh does not enforce the pin for arming. Refusals are returned, not thrown.
+ */
+export async function armPr(
+  prNumber: number,
+  repoSlug: string,
+  mergeMethod: 'squash' | 'merge' | 'rebase',
+  headSha: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<MergePrResult> {
+  const out = await runner(
+    'gh',
+    [
+      'pr',
+      'merge',
+      String(prNumber),
+      '--auto',
+      `--${mergeMethod}`,
+      '--match-head-commit',
+      headSha,
+      '--repo',
+      repoSlug,
+    ],
+    { cwd, allowFailure: true },
+  );
+  return { ok: out.code === 0, error: out.stderr.trim() };
+}
+
 /** `owner/repo` of the checkout at `cwd` via `gh repo view`; `null` on failure or empty output. */
 export async function resolveRepoSlug(runner: Runner, cwd?: string): Promise<string | null> {
   const out = await runner(
@@ -953,6 +985,14 @@ export interface RunMergeIfEligibleOptions {
   policyYaml?: string | null;
   /** Programmatic injection (tests): backlog id prefix (default: read from origin/main). */
   taskPrefix?: string;
+  /**
+   * `merge` (default): merge once green + CLEAN. `arm`: enable auto-merge
+   * (GitHub then merges once ITS required checks pass). Arming is a merge in
+   * waiting, so it needs the same `onGreenClean` grant and the same trust
+   * checks; it only skips the green/CLEAN evaluation, because waiting for
+   * checks is the point of arming.
+   */
+  mode?: 'merge' | 'arm';
 }
 
 export interface RunMergeIfEligibleResult {
@@ -960,6 +1000,8 @@ export interface RunMergeIfEligibleResult {
   policy: GovernancePolicy;
   eligibility: MergeEligibilityResult;
   merged: boolean;
+  /** True when auto-merge was armed (`mode: 'arm'`). */
+  armed?: boolean;
   dryRun: boolean;
 }
 
@@ -1060,6 +1102,57 @@ export async function runMergeIfEligible(
     cwd: opts.cwd,
   });
   if (trustRefusal) return refuse(trustRefusal);
+
+  if (opts.mode === 'arm') {
+    const armEligibility: MergeEligibilityResult = {
+      eligible: true,
+      reason:
+        `policy allowMerge=onGreenClean, sourceKind=backlog, trust checks passed for head ` +
+        `${snapshot.headRefOid} — eligible to arm auto-merge (GitHub merges only once its own ` +
+        'required checks pass)',
+    };
+    if (opts.dryRun) {
+      return {
+        prNumber: opts.prNumber,
+        policy,
+        eligibility: armEligibility,
+        merged: false,
+        dryRun: true,
+      };
+    }
+    const reread = await fetchPrSnapshot(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+    if (!reread) {
+      return refuse('could not re-read the PR immediately before arming — refusing (fail-closed)');
+    }
+    if (reread.headRefOid.toLowerCase() !== snapshot.headRefOid.toLowerCase()) {
+      return refuse(
+        `the PR head moved from ${snapshot.headRefOid} to ${reread.headRefOid} after the trust ` +
+          'checks — refusing to arm; re-run for the new head',
+      );
+    }
+    const armResult = await armPr(
+      opts.prNumber,
+      opts.repoSlug,
+      opts.mergeMethod ?? 'squash',
+      snapshot.headRefOid,
+      opts.runner,
+      opts.cwd,
+    );
+    if (!armResult.ok) {
+      return refuse(
+        `arming auto-merge was refused by GitHub (head pinned to ${snapshot.headRefOid}): ` +
+          (armResult.error || '(no error text)'),
+      );
+    }
+    return {
+      prNumber: opts.prNumber,
+      policy,
+      eligibility: armEligibility,
+      merged: false,
+      armed: true,
+      dryRun: false,
+    };
+  }
 
   // Which contexts are REQUIRED comes from `gh pr checks --required` (names
   // only; it reports the PR's current head). Their STATE comes from the exact

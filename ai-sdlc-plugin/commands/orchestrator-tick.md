@@ -689,7 +689,7 @@ prNumber, steps:[{name,status,output}]}`. Render `steps` as one
 
    This replaces the previous 6-step Bash recipe (per-reviewer emit-leaf
    loops, sign-attestation, `git fetch && rebase && push`, `gh pr ready`,
-   `gh pr merge --auto`, `cli-dispatch remove-verdict`). The composite
+   auto-merge arming, `cli-dispatch remove-verdict`). The composite
    command is hermetic: spawn shim makes it unit-testable, and a partial
    failure stops at the failing step without orphaning leaves or
    skipping cleanup of a successful path.

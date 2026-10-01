@@ -792,14 +792,29 @@ blockedActions: []
     assert.ok(isDenied(result), 'raw gh pr merge with --squash (no --auto) is still a real merge');
   });
 
-  it('allows arming "gh pr merge --auto" under strict', () => {
+  it('blocks arming "gh pr merge --auto" under strict (arming is a merge in waiting)', () => {
     const result = run('gh pr merge 42 --auto');
-    assert.ok(!isDenied(result), 'arming --auto is NOT merging and must stay allowed under strict');
+    assert.ok(isDenied(result), 'raw arming must go through the helper --arm mode');
+    assert.match(
+      JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason,
+      /cli-merge-if-eligible\.mjs <pr> --arm/,
+    );
   });
 
-  it('allows arming "gh pr merge --auto --squash" under strict (flag order/combination)', () => {
-    const result = run('gh pr merge 42 --auto --squash');
-    assert.ok(!isDenied(result), '--auto combined with --squash is still an arm, not a merge');
+  it('blocks arming "gh pr merge --auto --squash" under strict (flag order/combination)', () => {
+    assert.ok(isDenied(run('gh pr merge 42 --auto --squash')));
+    assert.ok(isDenied(run('gh pr merge --squash --auto 42')));
+  });
+
+  it('allows the helper in merge mode and in --arm mode under strict', () => {
+    assert.ok(!isDenied(run('node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --arm')));
+    assert.ok(
+      !isDenied(
+        run(
+          'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --arm --format json',
+        ),
+      ),
+    );
   });
 
   it('allows the cli-merge-if-eligible helper invocation under strict', () => {
@@ -870,9 +885,32 @@ blockedActions: []
     assert.ok(isDenied(result), 'quote-obfuscated gh pr merge must still be detected and blocked');
   });
 
-  it('allows a clean arm with an explicit repo flag ("gh pr merge 42 --auto -R owner/repo")', () => {
+  it('blocks an arm with an explicit repo flag ("gh pr merge 42 --auto -R owner/repo")', () => {
     const result = run('gh pr merge 42 --auto -R owner/repo');
-    assert.ok(!isDenied(result), '-R <repo> alongside a bare --auto is still a clean arm');
+    assert.ok(isDenied(result), 'no raw arming form is allowed any more');
+  });
+
+  it('blocks every raw merge/arm flag combination and the disarm form', () => {
+    for (const cmd of [
+      'gh pr merge 42 --auto --squash --match-head-commit abc',
+      'gh pr merge 42 --auto --rebase --delete-branch',
+      'gh pr merge 42 -d --auto',
+      'gh pr merge 42 --merge',
+      'gh pr merge 42 --rebase',
+      'gh pr merge 42 --admin',
+      'gh pr merge --disable-auto 42',
+      'gh pr merge',
+      'gh pr merge https://github.com/o/r/pull/42 --auto',
+      'GH_TOKEN=x gh pr merge 42 --auto',
+      'cd repo && gh pr merge 42 --auto',
+      '(gh pr merge 42 --auto)',
+      'GH PR MERGE 42 --AUTO',
+      'gh \'pr\' "merge" 42 --auto',
+      'gh pr merge 42 --auto 2>&1',
+      'gh pr merge 42 --auto | cat',
+    ]) {
+      assert.ok(isDenied(run(cmd)), `expected deny: ${cmd}`);
+    }
   });
 
   it('fails CLOSED: raw "gh pr merge" is blocked even when agent-role.yaml is entirely missing', () => {
@@ -928,9 +966,13 @@ blockedActions: []
     );
   });
 
-  it('still allows arming "gh pr merge --auto" under onGreenClean', () => {
+  it('blocks arming "gh pr merge --auto" under onGreenClean too (helper --arm is the route)', () => {
     const result = run('gh pr merge 42 --auto');
-    assert.ok(!isDenied(result), 'arming remains allowed regardless of policy');
+    assert.ok(isDenied(result), 'raw arming is denied regardless of policy');
+  });
+
+  it('allows the helper --arm mode under onGreenClean', () => {
+    assert.ok(!isDenied(run('node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --arm')));
   });
 
   it('allows the cli-merge-if-eligible helper invocation under onGreenClean', () => {
@@ -993,6 +1035,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
     'gh api repos/acme/widgets/pulls/42/merge -X PUT && echo done',
     'echo start; gh api repos/acme/widgets/pulls/42/merge -X PUT',
     'gh api graphql -f query=\'mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }\'',
+    'gh api graphql -f query=\'mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}) { clientMutationId } }\'',
     'curl -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
     'curl -sS -H "Authorization: Bearer $GH_TOKEN" -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge -d \'{"merge_method":"squash"}\'',
     'curl --request PUT --url https://api.github.com/repos/acme/widgets/pulls/42/merge',
@@ -1037,10 +1080,9 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
   }
 
   const ALLOWED = [
-    // arming is not merging
-    'gh pr merge 42 --auto',
-    'gh pr merge 42 --auto --squash',
-    // the sanctioned helper
+    // the sanctioned helper (merge and arm modes)
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --arm',
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --arm --dry-run',
     'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog',
     'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --dry-run',
     // reads and unrelated API calls
@@ -1048,7 +1090,6 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
     'gh api repos/acme/widgets/pulls/42/files',
     'gh api repos/acme/widgets/pulls/42/comments -f body=hi',
     'gh api repos/acme/widgets/pulls/42/merge-queue-entry',
-    'gh api graphql -f query=\'mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}) { clientMutationId } }\'',
     'curl -s https://api.github.com/repos/acme/widgets/pulls/42',
     // text that merely mentions the path, no network/interpreter tool
     'grep -rn "pulls/42/merge" docs',
