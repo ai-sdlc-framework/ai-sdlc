@@ -19,6 +19,8 @@
  * @module classifier/substrate/types
  */
 
+import type { JudgmentProvider, ResolvedJudgmentConfig } from '@ai-sdlc/reference';
+
 // ── Task types ───────────────────────────────────────────────────────────────
 
 /**
@@ -132,6 +134,25 @@ export interface ClassifyOpts {
    * identifiers.
    */
   agentRole?: string;
+  /**
+   * Kind of the work item being classified. Only `'backlog'` is trusted for
+   * permissive judgment outcomes; any other value (e.g. `'gh-issue'`) or none
+   * turns a permissive outcome into the `pending` sentinel. Used only by the
+   * judgment bridge, which runs when no `invoker` is supplied.
+   */
+  sourceKind?: string;
+  /** Judgment-bridge overrides. Tests inject a config and provider; production leaves it unset. */
+  judgment?: ClassifierJudgmentOpts;
+}
+
+/** Overrides for the judgment bridge (see `judgment-bridge.ts`). */
+export interface ClassifierJudgmentOpts {
+  /** Resolved judgment config; defaults to the one loaded from the base ref. */
+  config?: ResolvedJudgmentConfig;
+  /** Provider lookup; defaults to the registered or built-in provider. */
+  getProvider?: (name: string, config: ResolvedJudgmentConfig) => JudgmentProvider | undefined;
+  /** Directory the judgment log is written under; defaults to the artifacts dir. */
+  artifactsDir?: string;
 }
 
 /**

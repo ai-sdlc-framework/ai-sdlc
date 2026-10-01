@@ -37,6 +37,23 @@ export {
   type SubstrateConfig,
 } from './config.js';
 export { buildPrompt, isAllowedClassification, ALLOWED_CLASSIFICATIONS } from './task-prompts.js';
+export {
+  PENDING_CLASSIFICATION,
+  SUBSTRATE_CAPABILITY_IDS,
+  SUBSTRATE_JUDGMENT_IDS,
+  registerSubstrateJudgments,
+  substrateJudgmentDefinition,
+  substrateJudgmentDefinitions,
+  type SubstrateJudgmentDecision,
+  type SubstrateJudgmentDefinition,
+} from './judgment-definitions.js';
+export { classifyViaJudgment, type JudgmentClassification } from './judgment-bridge.js';
+export {
+  convertCorpusToEvalJsonl,
+  corpusEntriesToEvalRows,
+  evalRowsToJsonl,
+  type EvalRow,
+} from './corpus-eval.js';
 export { FakeLlmInvoker, type FakeInvokerFixture } from './fake-invoker.js';
 export {
   ALL_TASK_TYPES,
@@ -44,6 +61,7 @@ export {
   type ClassifierDecision,
   type ClassifierInput,
   type ClassifierTaskType,
+  type ClassifierJudgmentOpts,
   type ClassifyOpts,
   type LlmInvocationRequest,
   type LlmInvocationResponse,

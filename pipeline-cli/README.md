@@ -66,7 +66,7 @@ cli-dor-corpus.mjs              # AISDLC-161 DoR calibration aggregator
 cli-dor-digest.mjs              # AISDLC-162 DoR Slack digest
 cli-dor-stats.mjs               # AISDLC-162 DoR analytics
 cli-incremental-decide.mjs      # AISDLC-142 incremental review gate
-cli-judgment.mjs                # judgment layer: doctor, list, ask, eval, replay
+cli-judgment.mjs                # judgment layer: doctor, list, ask, eval, export-corpus, replay
 cli-orchestrator.mjs            # RFC-0015 autonomous orchestrator
 cli-orchestrator-corpus.mjs     # AISDLC-178.7 orchestrator soak aggregator
 cli-pr-unstick.mjs              # PR queue rescue helper
@@ -323,6 +323,7 @@ Shared options: `--cwd <dir>` (working directory), `--config <file>` (use this j
 | `list` | Lists every registered judgment with id, version, `riskClass`, `direction`, `egressClass`, the configured mode and the effective mode (with the reason when the runtime would downgrade or disable it). |
 | `ask <judgment-id> --input <json-file>` | Runs one forced evaluation and prints the answers with probabilities, the outcome and the thresholds used, as JSON. Refuses, naming the config key (`spec.egress.allow`), when the judgment's egress class is not allowed. |
 | `eval <judgment-id> --corpus <jsonl>` | Runs the judgment over a corpus (one `{"input": ..., "label": ...}` object per line), with the answer cache on, composes at the configured thresholds and compares with the judgment's `agrees`. Prints and writes `n`, the share of items in the act, escalate and abstain bands, act-band precision, a confusion table of decision against label, latency p50 and p95, total input tokens and cost. |
+| `export-corpus <task-type> [--corpus-dir <dir>] [--out <file>]` | Turns a classifier calibration corpus (`.ai-sdlc/classifier-corpus/<task-type>.yaml`) into `eval` JSONL. Only entries carrying an operator override become rows; the override is the label. Task types: `capture-triage`, `capture-severity`, `pr-comment-is-capture`, `dor-answer-is-new-concern`, `decision-recommendation`. Prints to stdout unless `--out` is given, so `eval capture.triage --corpus <file>` can measure the classifier judgments (`capture.triage`, `capture.severity`, `capture.pr-comment`, `dor.answer-segment`, `decision.recommendation`). |
 | `replay --since <date> [--judgment <id>]` | Reads the judgment log and recomputes outcomes from the logged answers, with no provider calls. Without `--threshold` it uses the logged thresholds and reports how many logged outcomes it reproduced; it also reports agreement with the logged `incumbent` where present. The log keeps a hash of the input, not the input, so a judgment whose `compose` reads its input cannot be replayed. |
 
 `ask`, `eval` and `replay` accept `--threshold <name>=<number>` (repeatable) to override the configured thresholds, and `--source-kind <kind>` (default `backlog`; only `backlog` items may be decided permissively).
