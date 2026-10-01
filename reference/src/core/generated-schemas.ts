@@ -424,8 +424,34 @@ export const agentRoleSchema = {
             'Whether agents may merge PRs. `never` (default) = only humans merge. `onGreenClean` = merge allowed once all required checks are green AND mergeStateStatus == CLEAN, for trusted-tier (internal backlog) work only.',
         },
         allowForcePush: {
-          type: 'boolean',
-          description: 'Whether agents may force-push (still `--force-with-lease`). Default false.',
+          oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['never', 'leaseOnOwnBranch'] }],
+          description:
+            "Force-push policy. `never` (default; boolean `false`) = no force pushes. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, its directory name under `<repo>/.worktrees/` and the `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push.",
+        },
+        protectedBranches: {
+          type: 'array',
+          items: { type: 'string', pattern: '^[A-Za-z0-9._/-]+\\*?$' },
+          uniqueItems: true,
+          description:
+            'Additional branch names (exact, or a trailing `*` prefix match) that stay protected from force pushes, merged with the always-protected defaults: `main`, `master`, `release-please--branches--*`, `gh-pages`, `production`, `prod`, `release/*`, `releases/*`.',
+        },
+        operational: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: [
+              'rebase-own-branch',
+              'lease-push-own-branch',
+              'retrigger-ci',
+              'requeue',
+              'file-subid-followups',
+              'answer-operational-decisions',
+              'clear-executor-context',
+            ],
+          },
+          uniqueItems: true,
+          description:
+            "Operational actions granted to the dispatch role. Closed set; rendered into the dispatch session's rules. Does not relax any hook by itself.",
         },
         allowClosePrIssue: {
           type: 'boolean',

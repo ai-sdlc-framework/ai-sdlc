@@ -278,6 +278,44 @@ describe('AgentRole spec.governance (RFC-0048 / AISDLC-601)', () => {
     expect(validateResource(doc).valid).toBe(false);
   });
 
+  it.each([true, false, 'never', 'leaseOnOwnBranch'])('accepts allowForcePush=%s', (v) => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { allowForcePush: v };
+    expect(validateResource(doc).valid).toBe(true);
+  });
+
+  it.each(['always', 'lease', 'true', 1, null])('rejects allowForcePush=%s', (v) => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { allowForcePush: v };
+    expect(validateResource(doc).valid).toBe(false);
+  });
+
+  it('accepts the full operational list and protectedBranches', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = {
+      allowForcePush: 'leaseOnOwnBranch',
+      protectedBranches: ['release/*', 'prod'],
+      operational: [
+        'rebase-own-branch',
+        'lease-push-own-branch',
+        'retrigger-ci',
+        'requeue',
+        'file-subid-followups',
+        'answer-operational-decisions',
+        'clear-executor-context',
+      ],
+    };
+    expect(validateResource(doc).valid).toBe(true);
+  });
+
+  it('rejects an unknown or duplicate operational entry', () => {
+    const doc = baseAgentRole();
+    (doc.spec as Record<string, unknown>).governance = { operational: ['merge-anything'] };
+    expect(validateResource(doc).valid).toBe(false);
+    (doc.spec as Record<string, unknown>).governance = { operational: ['requeue', 'requeue'] };
+    expect(validateResource(doc).valid).toBe(false);
+  });
+
   it('rejects a non-boolean allow* value', () => {
     const doc = baseAgentRole();
     (doc.spec as Record<string, unknown>).governance = { allowForcePush: 'true' };

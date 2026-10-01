@@ -13,8 +13,10 @@ const { join } = require('path');
 const { execSync, spawnSync } = require('child_process');
 const {
   resolveGovernanceFromYaml,
+  renderOperationalRules,
   renderSessionStartHardRules,
 } = require('./lib/governance-resolver');
+const { bannerGovernance } = require('./lib/trusted-policy');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -277,7 +279,21 @@ const maxFiles = extractField(yaml, 'maxFilesPerChange') || '15';
 const requireTests = extractField(yaml, 'requireTests') || 'true';
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
-const resolvedGovernance = resolveGovernanceFromYaml(yaml);
+// Render the force-push rule / operational grants from the SAME trusted source
+// the PreToolUse hook enforces (a worktree copy of agent-role.yaml cannot make
+// the banner claim a grant the enforcer would refuse).
+const bannerGov = bannerGovernance(
+  yaml,
+  resolveGovernanceFromYaml(yaml),
+  projectDir,
+  (typeof input?.cwd === 'string' && input.cwd) || process.cwd(),
+  process.env.AI_SDLC_HIERARCHY_ROLE,
+);
+const resolvedGovernance = bannerGov.resolved;
+const operationalRules = renderOperationalRules(
+  bannerGov.operational,
+  process.env.AI_SDLC_HIERARCHY_ROLE,
+);
 
 // ── Detect missing dev tools ─────────────────────────────────────────
 
@@ -384,7 +400,7 @@ Before EVERY commit, run these and fix any failures:
 
 AI-SDLC: \`.husky/pre-push\` runs \`pnpm -r test:coverage\` (80% threshold) as the canonical verification gate. Run the four commands above before \`git push\` to fail fast.
 
-${renderSessionStartHardRules(resolvedGovernance)}${reviewPolicySummary}`;
+${renderSessionStartHardRules(resolvedGovernance)}${operationalRules ? `\n${operationalRules}` : ''}${reviewPolicySummary}`;
 
 if (warnings.length > 0) {
   context += `\n\n### Setup Warnings\n${warnings.join('\n')}`;

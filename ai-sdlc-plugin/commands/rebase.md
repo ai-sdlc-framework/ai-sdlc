@@ -72,7 +72,7 @@ fi
 # `+?` would stop at the first dash, mangling task IDs like `aisdlc-105`
 # down to `aisdlc`. Use an explicit `<letters>-<digits-and-dots>` shape
 # instead — captures `aisdlc-105`, `aisdlc-100.2`, etc.
-TASK_ID_LOWER=$(echo "$BRANCH" | sed -E 's|^ai-sdlc/([a-z]+-[0-9.]+).*|\1|')
+TASK_ID_LOWER=$(echo "$BRANCH" | sed -E 's|^ai-sdlc/([a-z]+(-[a-z]+)*-[0-9.]+).*|\1|')
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
 ```
 
@@ -86,8 +86,15 @@ remote head:
 if [ ! -d "$WORKTREE_PATH" ]; then
   git fetch origin "$BRANCH"
   mkdir -p .worktrees
-  git worktree add "$WORKTREE_PATH" "origin/$BRANCH"
+  # Create the worktree ON the branch (-B), not detached: the force-push in
+  # Step 6 is only permitted from a dispatched worktree that is checked out
+  # on its own task branch.
+  git worktree add "$WORKTREE_PATH" -B "$BRANCH" "origin/$BRANCH"
 fi
+
+# Task sentinel: the PreToolUse hook binds the lease push to the task named
+# here (it must match the worktree directory name and the branch prefix).
+[ -s "$WORKTREE_PATH/.active-task" ] || printf '%s\n' "$TASK_ID_LOWER" > "$WORKTREE_PATH/.active-task"
 ```
 
 If `git worktree add` fails because the branch is already checked out
@@ -279,15 +286,25 @@ verified the branch is not main/master, but defense-in-depth here:
 
 ```bash
 cd "$WORKTREE_PATH"
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
+BRANCH=$(git branch --show-current)
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   echo "ERROR: refusing to force-push $BRANCH"
   exit 1
 fi
-
-git push --force-with-lease origin "$BRANCH"
-cd -
+echo "$BRANCH"
 ```
+
+Then run the push as its **own, standalone Bash command** from `$WORKTREE_PATH`
+(the PreToolUse hook reads the tool call's cwd). Write the branch name printed
+above LITERALLY into the command: no variables, no quotes, no `cd &&`, no
+chaining, no `--set-upstream`/`-u` needed. This is the one spelling the
+`leaseOnOwnBranch` policy accepts:
+
+```bash
+git push --force-with-lease origin HEAD:refs/heads/<branch>
+```
+
+When you are done pushing, `cd` back to the original directory.
 
 If the push is rejected (someone pushed to the same branch under us),
 do NOT escalate to plain `--force`. Print the rejection and tell the

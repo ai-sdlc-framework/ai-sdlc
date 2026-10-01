@@ -213,7 +213,7 @@ describe('/ai-sdlc rebase body — re-attestation', () => {
 
 describe('/ai-sdlc rebase body — push step', () => {
   it('uses --force-with-lease (never plain --force)', () => {
-    assert.match(body, /git push --force-with-lease origin "\$BRANCH"/);
+    assert.match(body, /git push --force-with-lease origin HEAD:refs\/heads\/<branch>/);
   });
 
   it('refuses to push when branch is main/master (defense-in-depth at Step 6)', () => {
@@ -295,11 +295,16 @@ describe('/ai-sdlc rebase body — Step 1 task-id regex (BSD-portable)', () => {
     const m = branch.match(regexFromBody);
     return m ? m[1] : null;
   }
-  // The regex in body shape: 's|^ai-sdlc/([a-z]+-[0-9.]+).*|\1|'
-  const portable = /^ai-sdlc\/([a-z]+-[0-9.]+).*/;
+  // The regex in body shape: 's|^ai-sdlc/([a-z]+(-[a-z]+)*-[0-9.]+).*|\1|'
+  // (also captures the GH-issue form `gh-issue-42`).
+  const portable = /^ai-sdlc\/([a-z]+(-[a-z]+)*-[0-9.]+).*/;
 
-  it('regex literal in body uses BSD-portable [a-z]+-[0-9.]+ pattern', () => {
-    assert.match(body, /\[a-z\]\+-\[0-9\.\]\+/);
+  it('regex literal in body uses a BSD-portable ERE (no `+?`, no lookahead)', () => {
+    assert.match(body, /\[a-z\]\+\(-\[a-z\]\+\)\*-\[0-9\.\]\+/);
+  });
+
+  it('captures gh-issue-42 from ai-sdlc/gh-issue-42-fix-thing', () => {
+    assert.equal(deriveTaskIdFromBranch('ai-sdlc/gh-issue-42-fix-thing', portable), 'gh-issue-42');
   });
 
   it('regex does NOT use the BSD-incompatible `+?` non-greedy quantifier', () => {

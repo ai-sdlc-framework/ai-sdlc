@@ -68,9 +68,21 @@
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
-const { join, resolve, isAbsolute, relative, sep, dirname } = require('path');
+const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
 const { execSync } = require('child_process');
-const { resolveGovernanceFromYaml, STRICT_DEFAULTS } = require('./lib/governance-resolver');
+const {
+  resolveGovernanceFromYaml,
+  resolveGovernanceExtrasFromYaml,
+  STRICT_DEFAULTS,
+} = require('./lib/governance-resolver');
+const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
+const {
+  runGit: gitOut,
+  probeRef,
+  loadTrustedExtras,
+  resolveLeaseWorktree,
+  readTaskId,
+} = require('./lib/trusted-policy');
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
@@ -124,6 +136,62 @@ try {
   // hardcoded floors enforced regardless of config (AISDLC-567), so we must
   // NOT exit early here the way the Bash-only enforcement used to.
   // resolvedGovernance stays at STRICT_DEFAULTS (fail-closed).
+}
+
+// ── Own-branch lease policy (RFC-0051 §10) ───────────────────────────
+
+/**
+ * Resolves the lease policy (see lib/trusted-policy.js for the trust model).
+ *
+ * Step 1 reads the project-dir policy text with NO git subprocess; unless it
+ * says `leaseOnOwnBranch`, the mode is `never` and nothing else runs. Because
+ * that text may be a PR-tree copy, the grant is only honored when the trusted
+ * main-checkout policy ALSO says lease (so a worktree copy can only tighten).
+ * Any failure fails closed to `never`.
+ */
+function loadLeasePolicy() {
+  const closed = { mode: 'never', protectedBranches: [], cwd: undefined };
+  try {
+    const localText = readFileSync(join(projectDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+    if (resolveGovernanceExtrasFromYaml(localText).forcePushMode !== 'leaseOnOwnBranch') {
+      return closed;
+    }
+    const cwd = toolCwd || process.cwd();
+    const trusted = loadTrustedExtras(projectDir, cwd);
+    if (!trusted || trusted.forcePushMode !== 'leaseOnOwnBranch') return closed;
+    // The cwd must be a genuine dispatched worktree under <main>/.worktrees/
+    // (realpath), else no lease: operator main-checkout sessions get none.
+    const wt = resolveLeaseWorktree(projectDir, cwd);
+    if (!wt) return closed;
+    return {
+      mode: 'leaseOnOwnBranch',
+      protectedBranches: trusted.protectedBranches,
+      cwd,
+      top: wt.top,
+    };
+  } catch {
+    return closed;
+  }
+}
+
+/** Local refs (other than refs/heads/<name>) that git would resolve the short name to. */
+function refAliasState(name, cwd) {
+  const candidates = [
+    `refs/tags/${name}`,
+    `refs/${name}`,
+    `refs/remotes/${name}`,
+    `refs/remotes/${name}/HEAD`,
+  ];
+  for (const c of candidates) {
+    const st = probeRef(c, cwd);
+    if (st !== 'missing') return st === 'found' ? 'collides' : 'error';
+  }
+  return 'clear';
+}
+
+/** True when the command text mentions a git push (used to fail closed on errors). */
+function looksLikeGitPush(command) {
+  return /\bgit\b[\s\S]*\bpush\b/i.test(command.replace(/['"\\]/g, ''));
 }
 
 // ── Merge-governance token allowlists (AISDLC-602) ───────────────────
@@ -181,12 +249,56 @@ function enforceBash(command) {
   // independent of whatever blockedActions patterns the project configured.
   enforceStashGovernance(trimmed);
 
+  // RFC-0051 §10: own-branch force-with-lease. Only active when the TRUSTED
+  // policy resolved to `leaseOnOwnBranch`; under `never` (default, absent,
+  // malformed) this is a no-op and the blockedActions patterns below behave
+  // exactly as before.
+  let leasePushAllowed = false;
+  try {
+    const lease = loadLeasePolicy();
+    if (lease.mode === 'leaseOnOwnBranch') {
+      const top = lease.top;
+      const verdict = evaluateLeasePush(trimmed, {
+        ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
+        protectedBranches: lease.protectedBranches,
+        remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
+        aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
+        taskId: top ? readTaskId(top) : null,
+        worktreeName: top ? basename(top) : null,
+        refAliasState: (name) => refAliasState(name, lease.cwd),
+      });
+      if (verdict.decision === 'deny') deny(verdict.reason);
+      leasePushAllowed = verdict.decision === 'allow';
+    }
+    // Default policy (`never`/unset): also catch the common non-prefix shapes the
+    // anchored blockedActions globs miss (`git push origin --force main`,
+    // `git push origin -f HEAD:main`, `+refspec`). Runs no git subprocess.
+    if (lease.mode !== 'leaseOnOwnBranch' && hasForcePushOption(trimmed)) {
+      deny('force-push is not permitted by the resolved governance policy (allowForcePush: never)');
+    }
+  } catch {
+    // A thrown error (or timeout) must not become an allow: deny pushes, ignore the rest.
+    if (looksLikeGitPush(trimmed))
+      deny('could not evaluate the own-branch lease policy for this git push');
+  }
+
   if (blockedActions.length === 0) return;
+
+  const withoutLeaseFlags = trimmed
+    .replace(/\s--force-with-lease(=\S*)?/g, '')
+    .replace(/\s--force-if-includes/g, '');
 
   for (const pattern of blockedActions) {
     const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
     const regexStr = escaped.replace(/\*/g, '.*');
     const regex = new RegExp(`^${regexStr}$`, 'i');
+    // The one command shape the lease policy positively allowed is exempt only
+    // from `git push` patterns that match PURELY because of the lease flags
+    // (e.g. `git push --force*`). A pattern that still matches once those flags
+    // are removed (e.g. `git push *develop*`) keeps applying.
+    if (leasePushAllowed && /^git\s+push\b/i.test(pattern) && !regex.test(withoutLeaseFlags)) {
+      continue;
+    }
     if (regex.test(trimmed)) {
       deny(`command matches blockedAction pattern '${pattern}'`);
     }
