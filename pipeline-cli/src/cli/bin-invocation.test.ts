@@ -93,7 +93,7 @@ const ALL_GUARDED_BINS = [...CI_INVOKED_BINS, UMBRELLA_BIN] as const;
 // them locally or in workflow steps that use the correct direct-node pattern),
 // but we still assert their shims + dist targets exist so a rename/deletion
 // doesn't silently strand the atomic-completion contract.
-const AISDLC_203_BINS = ['cli-task-complete', 'cli-backlog-verify'] as const;
+const AISDLC_203_BINS = ['cli-task-complete', 'cli-backlog-verify', 'cli-hierarchy'] as const;
 
 describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbrella bin guard)', () => {
   // The bins import from `dist/cli/*.js` so the dist must exist before we
