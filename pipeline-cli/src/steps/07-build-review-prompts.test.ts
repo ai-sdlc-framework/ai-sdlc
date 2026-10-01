@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildReviewPrompts } from './07-build-review-prompts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
@@ -78,6 +78,26 @@ describe('Step 7 — buildReviewPrompts', () => {
       ['test-reviewer', 'claude-sonnet-4-6', 'default'],
       ['security-reviewer', 'claude-opus-4-6', 'default'],
     ]);
+  });
+
+  it('records the routing assignment by default and leaves no trace when recordRouting is false', async () => {
+    const mk = () =>
+      new FakeRunner()
+        .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+        .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'));
+    const base = {
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      codexAvailable: false,
+      artifactsDir: join(tmp, 'arts'),
+    };
+    await buildReviewPrompts({ ...base, runner: mk().toRunner(), recordRouting: false });
+    expect(existsSync(join(tmp, 'arts', '_routing', 'assignments.jsonl'))).toBe(false);
+    await buildReviewPrompts({ ...base, runner: mk().toRunner() });
+    expect(existsSync(join(tmp, 'arts', '_routing', 'assignments.jsonl'))).toBe(true);
   });
 
   // AISDLC-617 — opt-in merged reviewer set: exactly 2 reviewers. Opted in

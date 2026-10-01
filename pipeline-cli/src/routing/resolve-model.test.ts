@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DEFAULT_MODELS } from '../runtime/shell-claude-p-spawner.js';
 import { DEFAULT_ROLE_MODELS, builtInDefaultTable } from './default-table.js';
 import { assignmentLogPath } from './assignment-log.js';
@@ -268,7 +268,7 @@ describe('exploration', () => {
   });
 
   function forge(rec: Record<string, unknown>) {
-    mkdirSync(artifacts, { recursive: true });
+    mkdirSync(dirname(assignmentLogPath(artifacts)), { recursive: true });
     writeFileSync(
       assignmentLogPath(artifacts),
       JSON.stringify({ iteration: 1, taskId: 'SYN-F', ...rec }) + '\n',
@@ -457,7 +457,7 @@ describe('assignment log', () => {
     expect(bad).toEqual(good);
     // Nothing was created under the unwritable path, and the capability report was swallowed.
     expect(readFileSync(blocker, 'utf8')).toBe('x');
-    expect(existsSync(join(blocker, 'assignments.jsonl'))).toBe(false);
+    expect(existsSync(join(blocker, '_routing', 'assignments.jsonl'))).toBe(false);
     expect(existsSync(join(blocker, '_capabilities'))).toBe(false);
   });
 

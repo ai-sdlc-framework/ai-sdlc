@@ -48,6 +48,11 @@ export interface BuildReviewPromptsOptions {
   iteration?: number;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
+  /**
+   * Set false to resolve models without writing the assignment log or reporting
+   * the routing capability (offline replay must leave no trace).
+   */
+  recordRouting?: boolean;
 }
 
 export async function buildReviewPrompts(
@@ -111,7 +116,8 @@ export async function buildReviewPrompts(
       iteration: opts.iteration ?? 1,
       workDir: opts.workDir,
       artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
-      record: routingRecordable(opts.worktreePath, opts.artifactsDir),
+      record:
+        opts.recordRouting !== false && routingRecordable(opts.worktreePath, opts.artifactsDir),
     });
     return {
       reviewer,

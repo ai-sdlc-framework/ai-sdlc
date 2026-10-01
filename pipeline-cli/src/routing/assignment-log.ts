@@ -26,7 +26,7 @@ export interface AssignmentRecord {
 }
 
 export function assignmentLogPath(artifactsDir: string): string {
-  return join(artifactsDir, 'assignments.jsonl');
+  return join(artifactsDir, '_routing', 'assignments.jsonl');
 }
 
 /** Append one record. Swallows every error; returns whether the write happened. */

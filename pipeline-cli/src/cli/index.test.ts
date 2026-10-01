@@ -85,7 +85,7 @@ describe('CLI router', () => {
     );
     await buildCli().parseAsync();
     expect(stdoutJson()).toEqual({ model: 'claude-opus-4-6', arm: 'default', reason: 'default' });
-    expect(readFileSync(join(arts, 'assignments.jsonl'), 'utf8')).toContain('AISDLC-1');
+    expect(readFileSync(join(arts, '_routing', 'assignments.jsonl'), 'utf8')).toContain('AISDLC-1');
   });
 
   it('resolve-model --skip-log does not write and tolerates an unknown task', async () => {
@@ -105,7 +105,7 @@ describe('CLI router', () => {
     );
     await buildCli().parseAsync();
     expect(stdoutJson()).toEqual({ model: '', arm: 'default', reason: 'default' });
-    expect(existsSync(join(arts, 'assignments.jsonl'))).toBe(false);
+    expect(existsSync(join(arts, '_routing', 'assignments.jsonl'))).toBe(false);
   });
 
   it('resolve-model derives the class from the task file when none is given', async () => {
