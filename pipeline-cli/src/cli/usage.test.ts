@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildUsageCli, renderIngestResult } from './usage.js';
@@ -60,6 +69,63 @@ describe('cli-usage ingest', () => {
     vi.stubEnv('CLAUDE_CODE_ENV', 'ccr');
     await buildUsageCli(['ingest', '--projects-dir', fixture()]).parseAsync();
     expect(writes.join('')).toContain('remote sandbox');
+  });
+});
+
+describe('cli-usage ingest output carries no transcript text', () => {
+  const CANARY = 'SENTINEL-CANARY-CLI-TEXT';
+
+  it('prints and writes no canary on normal and error paths (json and text)', async () => {
+    const projects = fixture();
+    const file = join(projects, 'p1', 's1.jsonl');
+    appendFileSync(file, `{"type":"user","message":{"content":"${CANARY} tool output"}}\n`);
+    appendFileSync(
+      file,
+      `{"type":"assistant","unknown":"${CANARY}","message":{"id":"u","model":"m","content":"${CANARY}","usage":{"input_tokens":1,"output_tokens":1},"newField":1},"timestamp":"2026-09-02T10:00:00Z"}\n`,
+    );
+    appendFileSync(
+      file,
+      `${JSON.stringify({ type: 'user', pad: `${CANARY}${'x'.repeat(5 * 1024 * 1024)}` })}\n`,
+    );
+    appendFileSync(file, `{bad json ${CANARY}\n`);
+    mkdirSync(join(projects, 'p1', 's1', 'subagents'), { recursive: true });
+    writeFileSync(
+      join(projects, 'p1', 's1', 'subagents', 'agent-a1.jsonl'),
+      `{"type":"assistant","timestamp":"2026-09-02T10:00:00Z","message":{"id":"x1","model":"m","usage":{"output_tokens":1}}}\n{"type":"assistant","message":{"content":"${CANARY}`,
+    );
+    const errors: string[] = [];
+    const errSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((c: string | Uint8Array) => {
+        errors.push(String(c));
+        return true;
+      });
+    const consoleSpies = (['log', 'info', 'warn', 'error'] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation((...a: unknown[]) => {
+        errors.push(a.map(String).join(' '));
+      }),
+    );
+    try {
+      await buildUsageCli(['ingest', '--projects-dir', projects, '--json']).parseAsync();
+      await buildUsageCli(['ingest', '--projects-dir', projects, '--backfill']).parseAsync();
+      await buildUsageCli([
+        'ingest',
+        '--projects-dir',
+        join(root, 'missing'),
+        '--json',
+      ]).parseAsync();
+    } finally {
+      errSpy.mockRestore();
+      for (const sp of consoleSpies) sp.mockRestore();
+    }
+    const all = [...writes, ...errors].join('\n');
+    expect(all).toContain('callsWritten');
+    expect(all).not.toContain('SENTINEL');
+    for (const rel of readdirSync(join(root, 'usage'), { recursive: true }) as string[]) {
+      const full = join(root, 'usage', rel);
+      if (statSync(full).isFile())
+        expect(readFileSync(full, 'utf-8'), rel).not.toContain('SENTINEL');
+    }
   });
 });
 

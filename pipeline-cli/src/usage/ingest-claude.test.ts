@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  statSync,
   rmSync,
   symlinkSync,
   truncateSync,
@@ -166,13 +168,48 @@ describe('ingestClaudeTranscripts', () => {
     });
   });
 
-  it('never writes message text or sidecar description anywhere under the usage dir', async () => {
+  it('never writes, prints or logs message text, tool output or sidecar descriptions', async () => {
     const repo = mkRepo(join(root, 'work', 'myrepo'));
-    writeSession('p1', 'sess1', [assistant({ id: 'm1', cwd: repo })]);
+    const out: string[] = [];
+    const sinks = [
+      vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+        out.push(String(c));
+        return true;
+      }),
+      vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        out.push(String(c));
+        return true;
+      }),
+      ...(['log', 'info', 'warn', 'error', 'debug'] as const).map((m) =>
+        vi.spyOn(console, m).mockImplementation((...a: unknown[]) => {
+          out.push(a.map(String).join(' '));
+        }),
+      ),
+    ];
+    const toolOutput = JSON.stringify({
+      type: 'user',
+      cwd: repo,
+      message: { content: [{ type: 'tool_result', content: `${BODY} tool output` }] },
+    });
+    writeSession('p1', 'sess1', [
+      assistant({ id: 'm1', cwd: repo }),
+      toolOutput,
+      `{"type":"assistant","note":"${BODY} truncated-then-bad`,
+    ]);
+    // hostile oversized line carrying the canary
+    appendFileSync(
+      join(projects, 'p1', 'sess1.jsonl'),
+      `${JSON.stringify({ type: 'user', cwd: repo, pad: `${BODY}${'x'.repeat(5 * 1024 * 1024)}` })}\n`,
+    );
     writeSubagent('p1', 'sess1', 'aaa', [assistant({ id: 's1', cwd: repo, agentId: 'aaa' })], {
       agentType: 'ai-sdlc:developer',
       description: DESCRIPTION,
     });
+    // missing sidecar, truncated final line
+    const sub = writeSubagent('p1', 'sess1', 'bbb', [
+      assistant({ id: 's2', cwd: repo, agentId: 'bbb' }),
+    ]);
+    appendFileSync(sub, `{"type":"assistant","message":{"content":"${BODY}`);
     writeSession('p2', 'sess2', [
       JSON.stringify({
         type: 'assistant',
@@ -186,11 +223,20 @@ describe('ingestClaudeTranscripts', () => {
         },
       }),
     ]);
-    await ingest();
-    const { readdirSync } = await import('node:fs');
-    for (const name of readdirSync(usage)) {
-      const text = readFileSync(join(usage, name), 'utf-8');
-      expect(text, name).not.toContain('SENTINEL');
+    let res;
+    try {
+      res = await ingest();
+      await ingest({ backfill: true });
+    } finally {
+      for (const s of sinks) s.mockRestore();
+    }
+    expect(res.errors).toBeGreaterThan(0);
+    expect(JSON.stringify(res)).not.toContain('SENTINEL');
+    expect(out.join('\n')).not.toContain('SENTINEL');
+    for (const rel of readdirSync(usage, { recursive: true }) as string[]) {
+      const full = join(usage, rel);
+      if (!statSync(full).isFile()) continue;
+      expect(readFileSync(full, 'utf-8'), rel).not.toContain('SENTINEL');
     }
   });
 
@@ -332,6 +378,13 @@ describe('ingestClaudeTranscripts', () => {
     }
     const raw = readFileSync(join(usage, 'ledger-2026-09.jsonl'), 'utf-8');
     expect(raw).not.toContain('secret-project-dir');
+    // every file written under the usage dir, including limit events
+    for (const name of readdirSync(usage)) {
+      const text = readFileSync(join(usage, name), 'utf-8');
+      for (const literal of [other, 'secret-project-dir', 'feat/aisdlc-5-private', DESCRIPTION]) {
+        expect(text, `${name} leaks ${literal}`).not.toContain(literal);
+      }
+    }
     // cursors must not leak the transcript path either
     expect(readFileSync(join(usage, 'cursors.json'), 'utf-8')).not.toContain('p9');
   });
@@ -535,6 +588,28 @@ describe('ingestClaudeTranscripts', () => {
     const second = await ingest();
     expect(second.timedOut).toBe(false);
     expect((await ledger()).length).toBe(5);
+  });
+
+  it('falls back to the default time limit when max-seconds is not a usable number', async () => {
+    const repo = mkRepo(join(root, 'work', 'myrepo'));
+    writeSession('p1', 'sess1', [assistant({ id: 'm1', cwd: repo })]);
+    let t = 0;
+    // a NaN limit must not disable the limit: with a 1ms-per-read clock the default (30s) is not hit
+    const res = await ingest({ maxSeconds: Number.NaN, now: () => (t += 1) });
+    expect(res.timedOut).toBe(false);
+    expect(res.callsWritten).toBe(1);
+    // a limit of 0 or negative also falls back to the default instead of expiring at once
+    expect((await ingest({ maxSeconds: -5, backfill: true, now: () => (t += 1) })).timedOut).toBe(
+      false,
+    );
+    // and an enormous clock jump still stops a NaN-limited run at the default limit
+    let jump = 0;
+    const stopped = await ingest({
+      maxSeconds: Number.NaN,
+      backfill: true,
+      now: () => (jump += 60_000),
+    });
+    expect(stopped.timedOut).toBe(true);
   });
 
   it('handles an absent projects directory', async () => {

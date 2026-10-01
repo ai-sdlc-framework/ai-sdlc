@@ -321,7 +321,9 @@ node pipeline-cli/bin/cli-usage.mjs ingest [--backfill] [--projects-dir <path>] 
 | `--max-seconds`  | Stop starting new work after this many seconds (default 30). Progress is saved; the next run continues. |
 | `--json`         | Print the result as JSON.                                                               |
 
-The result reports files scanned, calls written, repeats skipped (the same message appears on several transcript lines and is counted once) and errors.
+The result reports files scanned, calls written, repeats skipped and errors.
+
+**Repeated lines for one message.** The same message id appears on several transcript lines. Within one batch (up to 2000 records, flushed at the end of each transcript) the line with the largest output count is kept; across batches and runs the first record written wins and later repeats are skipped. A message whose lines straddle a batch boundary or two runs can therefore keep a slightly lower output count than its final line reports. This is a known limitation.
 
 **What is stored.** Counts, ids, model, timestamp, harness, billing pool and attribution only. No prompt, response, file content, tool output or subagent description is ever read into a record, logged or printed. A usage or rate-limit notice found in a transcript becomes a line in `limit-events.jsonl` holding its timestamp, session id and a short fixed category, never the message text.
 

@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_MAX_SECONDS, isIngestSwitchedOff, isRemoteSandbox } from './ingest-claude.js';
@@ -38,7 +39,7 @@ export function launchUsageIngestDetached(opts: LaunchOptions = {}): boolean {
     const child = spawn(
       process.execPath,
       [bin, 'ingest', '--max-seconds', String(opts.maxSeconds ?? DEFAULT_MAX_SECONDS)],
-      { detached: true, stdio: 'ignore', env },
+      { detached: true, stdio: 'ignore', cwd: tmpdir(), env },
     );
     child.on('error', () => {});
     child.unref();

@@ -15,6 +15,7 @@ export type {
 export { UNPRICED } from './types.js';
 export { USAGE_DIR_ENV, resolveUsageDir, ledgerFileForTs } from './paths.js';
 export { appendModelCalls, readCursor, writeCursor } from './store.js';
+export { withUsageLock } from './fs-lock.js';
 export { readModelCalls } from './reader.js';
 export { recordModelCall, type DirectCallInput, type RecordModelCallResult } from './reporter.js';
 export {

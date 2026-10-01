@@ -15,6 +15,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  cpSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -232,4 +233,145 @@ await new Promise((r) => setTimeout(r, 4000));`,
       assert.equal(lines, 500);
     },
   );
+});
+
+const CANARY = 'SENTINEL-CANARY-BODY-TEXT';
+
+function plantTranscripts(dir, n) {
+  const projects = join(dir, 'claude', 'projects');
+  for (let i = 0; i < n; i++) {
+    const p = join(projects, `proj${i % 20}`);
+    mkdirSync(p, { recursive: true });
+    writeFileSync(
+      join(p, `sess${i}.jsonl`),
+      `${JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-09-02T10:00:00Z',
+        sessionId: `sess${i}`,
+        cwd: join(dir, 'elsewhere'),
+        message: {
+          id: `msg-${i}`,
+          model: 'claude-x',
+          content: [{ type: 'text', text: CANARY }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        },
+      })}\n`,
+    );
+  }
+}
+
+describe('hook time limit on 500 synthetic transcripts (stub ingester, always runs)', () => {
+  it('returns promptly without waiting for a slow ingester', async () => {
+    const { dir, env } = sandbox('stub-slow');
+    plantTranscripts(dir, 500);
+    const marker = join(dir, 'ran.txt');
+    const bin = fakeBin(
+      dir,
+      `import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(marker)}, 'x');
+await new Promise((r) => setTimeout(r, 6000));`,
+    );
+    const res = runHook(HOOK_JS, { ...env, PIPELINE_CLI_BIN: bin });
+    assert.equal(res.status, 0);
+    assert.ok(res.ms < hookTimeoutMs(), `hook took ${res.ms}ms, limit ${hookTimeoutMs()}ms`);
+    assert.ok(res.ms < 2500, `hook waited for the ingester: ${res.ms}ms`);
+    assert.equal(res.stdout + res.stderr, '');
+    assert.ok(await waitFor(marker), 'ingester was started');
+  });
+
+  it('exits 0 when the stub ingester fails, and when none is installed', () => {
+    const { dir, env } = sandbox('stub-failing');
+    plantTranscripts(dir, 500);
+    const bin = fakeBin(dir, `process.exit(3);`);
+    const failing = runHook(HOOK_JS, { ...env, PIPELINE_CLI_BIN: bin });
+    assert.equal(failing.status, 0);
+    assert.equal(failing.stdout + failing.stderr, '');
+    const missing = sandbox('stub-missing');
+    plantTranscripts(missing.dir, 500);
+    const none = runHook(HOOK_SH, { ...missing.env, PIPELINE_CLI_BIN: join(missing.dir, 'nope') });
+    assert.equal(none.status, 0);
+    assert.ok(none.ms < hookTimeoutMs());
+    assert.equal(none.stdout + none.stderr, '');
+  });
+});
+
+describe('hook never runs code from the project being worked on', () => {
+  /** A copy of the hook in a temp plugin dir with no trusted ingester beside it. */
+  function isolatedPlugin(dir) {
+    const hooks = join(dir, 'plugin', 'hooks');
+    mkdirSync(hooks, { recursive: true });
+    for (const f of ['usage-ingest.js', 'usage-ingest.sh']) cpSync(join(here, f), join(hooks, f));
+    return hooks;
+  }
+
+  function plantInProject(dir, marker) {
+    const project = join(dir, 'project');
+    mkdirSync(join(project, 'pipeline-cli', 'bin'), { recursive: true });
+    writeFileSync(
+      join(project, 'pipeline-cli', 'bin', 'cli-usage.mjs'),
+      `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, process.cwd());`,
+    );
+    return project;
+  }
+
+  for (const script of ['usage-ingest.js', 'usage-ingest.sh']) {
+    const runner = script.endsWith('.sh') ? 'bash' : process.execPath;
+
+    it(`never launches a cwd-planted cli-usage.mjs (${script}) when no trusted candidate exists`, async () => {
+      const { dir, env } = sandbox(`planted-${script}`);
+      const marker = join(dir, 'planted-ran.txt');
+      const project = plantInProject(dir, marker);
+      const hooks = isolatedPlugin(dir);
+      const res = spawnSync(runner, [join(hooks, script)], {
+        cwd: project,
+        env: { ...env, CLAUDE_PROJECT_DIR: project, CLAUDE_PLUGIN_ROOT: join(dir, 'plugin') },
+        input: '{}',
+        encoding: 'utf-8',
+        timeout: 15_000,
+      });
+      assert.equal(res.status, 0);
+      assert.equal(await waitFor(marker, 1200), false, 'planted ingester must never run');
+    });
+
+    it(`launches a trusted candidate (${script}) with a neutral working directory`, async () => {
+      const { dir, env } = sandbox(`trusted-${script}`);
+      const marker = join(dir, 'trusted-ran.txt');
+      const project = plantInProject(dir, join(dir, 'planted-ran.txt'));
+      const hooks = isolatedPlugin(dir);
+      const bin = fakeBin(
+        dir,
+        `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, process.cwd());`,
+      );
+      const res = spawnSync(runner, [join(hooks, script)], {
+        cwd: project,
+        env: { ...env, PIPELINE_CLI_BIN: bin },
+        input: '{}',
+        encoding: 'utf-8',
+        timeout: 15_000,
+      });
+      assert.equal(res.status, 0);
+      assert.ok(await waitFor(marker), 'trusted ingester launched');
+      assert.notEqual(readFileSync(marker, 'utf-8'), project);
+      assert.equal(existsSync(join(dir, 'planted-ran.txt')), false);
+    });
+  }
+
+  it('launches the plugin-local node_modules candidate', async () => {
+    const { dir, env } = sandbox('plugin-local');
+    const marker = join(dir, 'local-ran.txt');
+    const hooks = isolatedPlugin(dir);
+    const binDir = join(dir, 'plugin', 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin');
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(
+      join(binDir, 'cli-usage.mjs'),
+      `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'x');`,
+    );
+    const res = spawnSync(process.execPath, [join(hooks, 'usage-ingest.js')], {
+      env,
+      input: '{}',
+      encoding: 'utf-8',
+    });
+    assert.equal(res.status, 0);
+    assert.ok(await waitFor(marker));
+  });
 });

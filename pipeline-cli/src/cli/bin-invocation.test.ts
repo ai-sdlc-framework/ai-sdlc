@@ -53,7 +53,7 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -427,7 +427,10 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
         cwd: join(tmp, 'elsewhere'),
         message: { id, model: 'claude-x', usage: { input_tokens: 1, output_tokens: 1 } },
       });
-    writeFileSync(join(projects, 's1.jsonl'), `${call('m1')}\n${call('m1')}\n{broken\n`);
+    writeFileSync(
+      join(projects, 's1.jsonl'),
+      `${call('m1')}\n${call('m1')}\n{broken SENTINEL-CANARY-BIN\n`,
+    );
     const env: NodeJS.ProcessEnv = { ...process.env, AI_SDLC_USAGE_DIR: join(tmp, 'usage') };
     delete env['CLAUDE_CODE_ENV'];
     delete env['CLAUDE_REMOTE_EXECUTION'];
@@ -439,6 +442,7 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
     );
     const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
     expect(result.status, detail).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain('SENTINEL');
     expect(JSON.parse(result.stdout), detail).toMatchObject({
       filesScanned: 1,
       callsWritten: 1,
@@ -446,6 +450,42 @@ describe('cli-usage: bin shim guard and end-to-end ingest', () => {
       errors: 1,
     });
   });
+  it('two concurrent ingests never duplicate limit events', async () => {
+    const projects = join(tmp, 'projects', 'p1');
+    mkdirSync(projects, { recursive: true });
+    for (let i = 0; i < 60; i++) {
+      writeFileSync(
+        join(projects, `s${i}.jsonl`),
+        `${JSON.stringify({
+          type: 'assistant',
+          timestamp: `2026-09-02T10:00:${String(i % 60).padStart(2, '0')}Z`,
+          sessionId: `s${i}`,
+          cwd: join(tmp, 'elsewhere'),
+          message: { id: `syn-${i}`, model: '<synthetic>', content: 'Claude usage limit reached' },
+        })}\n`,
+      );
+    }
+    const env: NodeJS.ProcessEnv = { ...process.env, AI_SDLC_USAGE_DIR: join(tmp, 'usage') };
+    delete env['CLAUDE_CODE_ENV'];
+    delete env['CLAUDE_REMOTE_EXECUTION'];
+    delete env['AI_SDLC_USAGE_INGEST'];
+    const run = (): Promise<number | null> =>
+      new Promise((resolveRun) => {
+        const child = spawn(
+          process.execPath,
+          [binPath, 'ingest', '--backfill', '--json', '--projects-dir', join(tmp, 'projects')],
+          { env, stdio: 'ignore' },
+        );
+        child.on('close', (code) => resolveRun(code));
+      });
+    const codes = await Promise.all([run(), run(), run()]);
+    expect(codes).toEqual([0, 0, 0]);
+    const lines = readFileSync(join(tmp, 'usage', 'limit-events.jsonl'), 'utf-8')
+      .split('\n')
+      .filter(Boolean);
+    expect(lines).toHaveLength(60);
+    expect(new Set(lines).size).toBe(60);
+  }, 60_000);
 });
 
 // ── AISDLC-209: end-to-end bin shim integration tests (AC#6) ─────────

@@ -12,14 +12,16 @@
  *
  * Bin resolution is file-existence only (no install, no network, no scan of the
  * user-writable plugin cache): $PIPELINE_CLI_BIN, then the plugin's own
- * node_modules, then the monorepo checkout.
+ * node_modules, then the plugin-relative monorepo checkout.
+ * Nothing is ever derived from the working directory or the project being
+ * worked on: a repository must not be able to plant code this hook runs.
  */
 
 'use strict';
 
 const { spawn } = require('node:child_process');
 const { existsSync, mkdirSync, statSync, writeFileSync } = require('node:fs');
-const { homedir } = require('node:os');
+const { homedir, tmpdir } = require('node:os');
 const { join } = require('node:path');
 
 const BIN_NAME = 'cli-usage.mjs';
@@ -40,7 +42,7 @@ function isRemoteSandbox(env) {
 }
 
 /** Path of cli-usage.mjs, or undefined when none is installed. */
-function resolveBin(env, pluginDir, cwd) {
+function resolveBin(env, pluginDir) {
   const candidates = [];
   if (env.PIPELINE_CLI_BIN) candidates.push(join(env.PIPELINE_CLI_BIN, BIN_NAME));
   if (env.CLAUDE_PLUGIN_ROOT)
@@ -49,7 +51,6 @@ function resolveBin(env, pluginDir, cwd) {
     candidates.push(join(env.CLAUDE_PLUGIN_DIR, PIPELINE_CLI_REL, BIN_NAME));
   candidates.push(join(pluginDir, PIPELINE_CLI_REL, BIN_NAME));
   candidates.push(join(pluginDir, '..', 'pipeline-cli', 'bin', BIN_NAME));
-  candidates.push(join(cwd, 'pipeline-cli', 'bin', BIN_NAME));
   return candidates.find((c) => existsSync(c));
 }
 
@@ -79,15 +80,16 @@ function launchIngest(options = {}) {
   try {
     const env = options.env || process.env;
     const pluginDir = options.pluginDir || join(__dirname, '..');
-    const cwd = options.cwd || process.cwd();
     if (isRemoteSandbox(env)) return 'remote-sandbox';
     if (isOff(env)) return 'switched-off';
-    const bin = resolveBin(env, pluginDir, cwd);
+    const bin = resolveBin(env, pluginDir);
     if (!bin) return 'no-ingester';
     if (debounced(env, Date.now())) return 'debounced';
     const child = spawn(process.execPath, [bin, 'ingest', '--max-seconds', String(MAX_SECONDS)], {
       detached: true,
       stdio: 'ignore',
+      // neutral cwd: never resolve anything relative to the project being worked on
+      cwd: tmpdir(),
       env,
     });
     child.on('error', () => {});

@@ -19,7 +19,6 @@ import {
   appendFileSync,
   lstatSync,
   type Stats,
-  mkdirSync,
   openSync,
   closeSync,
   readFileSync,
@@ -203,15 +202,16 @@ interface LimitEvent {
 }
 
 class LimitEventLog {
-  private known?: Set<string>;
-  constructor(private readonly dir: string) {}
+  constructor(
+    private readonly dir: string,
+    private readonly withLock: <T>(dir: string, fn: () => T) => T,
+  ) {}
 
   private static key(e: LimitEvent): string {
     return `${e.ts}|${e.sessionId}|${e.category}`;
   }
 
   private load(): Set<string> {
-    if (this.known) return this.known;
     const known = new Set<string>();
     const path = join(this.dir, LIMIT_EVENTS_FILE);
     try {
@@ -233,29 +233,33 @@ class LimitEventLog {
     } catch {
       // no file yet
     }
-    this.known = known;
     return known;
   }
 
-  /** Append the events not already recorded; returns how many were new. */
+  /**
+   * Append the events not already recorded; returns how many were new. The
+   * read-check-append runs under the usage directory lock, so concurrent
+   * ingesters never duplicate an event.
+   */
   append(events: LimitEvent[]): number {
     if (events.length === 0) return 0;
-    const known = this.load();
-    const fresh: LimitEvent[] = [];
-    for (const e of events) {
-      const k = LimitEventLog.key(e);
-      if (known.has(k)) continue;
-      known.add(k);
-      fresh.push({ ts: e.ts, sessionId: e.sessionId, category: e.category });
-    }
-    if (fresh.length === 0) return 0;
-    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    appendFileSync(
-      join(this.dir, LIMIT_EVENTS_FILE),
-      fresh.map((e) => `${JSON.stringify(e)}\n`).join(''),
-      { encoding: 'utf-8', mode: 0o600 },
-    );
-    return fresh.length;
+    return this.withLock(this.dir, () => {
+      const known = this.load();
+      const fresh: LimitEvent[] = [];
+      for (const e of events) {
+        const k = LimitEventLog.key(e);
+        if (known.has(k)) continue;
+        known.add(k);
+        fresh.push({ ts: e.ts, sessionId: e.sessionId, category: e.category });
+      }
+      if (fresh.length === 0) return 0;
+      appendFileSync(
+        join(this.dir, LIMIT_EVENTS_FILE),
+        fresh.map((e) => `${JSON.stringify(e)}\n`).join(''),
+        { encoding: 'utf-8', mode: 0o600 },
+      );
+      return fresh.length;
+    });
   }
 }
 
@@ -300,11 +304,15 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
   if (isRemoteSandbox(env)) return { ...result, disabled: 'remote-sandbox' };
   if (isIngestSwitchedOff(env)) return { ...result, disabled: 'switched-off' };
 
-  const { appendModelCalls, readCursor, writeCursor, resolveUsageDir } =
+  const { appendModelCalls, readCursor, writeCursor, resolveUsageDir, withUsageLock } =
     await import('@ai-sdlc/reference');
 
   const now = opts.now ?? Date.now;
-  const deadline = now() + Math.max(1, opts.maxSeconds ?? DEFAULT_MAX_SECONDS) * 1000;
+  const seconds =
+    typeof opts.maxSeconds === 'number' && Number.isFinite(opts.maxSeconds) && opts.maxSeconds > 0
+      ? opts.maxSeconds
+      : DEFAULT_MAX_SECONDS;
+  const deadline = now() + seconds * 1000;
   const expired = (): boolean => now() >= deadline;
   const home = opts.homeDir ?? homedir();
   const storeOpts: UsageStoreOptions = opts.usageDir ? { dir: opts.usageDir } : {};
@@ -312,7 +320,7 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
   const projectsDir = opts.projectsDir ?? defaultProjectsDir(env, home);
   const frameworkOnly = (env['AI_SDLC_USAGE_SCOPE'] ?? '').toLowerCase() === 'framework-only';
   const resolver = new AttributionResolver({ homeDir: home });
-  const limitLog = new LimitEventLog(usageDir);
+  const limitLog = new LimitEventLog(usageDir, withUsageLock);
   const bytesPerFile = opts.backfill ? BACKFILL_BYTES_PER_FILE : NORMAL_RUN_BYTES_PER_FILE;
 
   for (const file of walkTranscripts(projectsDir)) {
