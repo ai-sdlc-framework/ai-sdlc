@@ -55,7 +55,8 @@ allowed to unblock, and reports upward. RFC-0051 sections 1, 6 and 9.
    - **Report:** send the planner a progress line at the configured cadence and a
      summary when a brief completes.
 2. **Context clear** (`cli-hierarchy clear <executor-name>`): looks up the executor's
-   pane in the roster, sends `/clear` followed by Enter, waits for the configured
+   pane in the roster (`{{schemaVersion: 'v1', sessions: [...]}}`; `paneId` matches
+   `^%[0-9]+$`, `tmuxSession` is `ai-sdlc-hierarchy`), sends `/clear` followed by Enter, waits for the configured
    settle time, then sends `/ai-sdlc executor` followed by Enter; records an
    `ExecutorContextCleared` event. Refuses when the executor has an inflight
    manifest. Implemented in TypeScript with the tmux calls behind the injectable
@@ -77,6 +78,12 @@ allowed to unblock, and reports upward. RFC-0051 sections 1, 6 and 9.
 5. **Events:** add `HierarchySessionStarted`, `ExecutorContextCleared`,
    `DecisionRouted` to `pipeline-cli/src/orchestrator/events.ts` and the events
    schema (the escalation events are completed in AISDLC-669).
+6. **Identity and capability:** every board write by this loop uses the dispatch
+   session's roster `name` as `workerId`. Register `hierarchy.clear` (AISDLC-642
+   registry): `live` when a clear's second keystroke was sent and the executor
+   reported back within the settle time, `degraded` with a reason otherwise. Any new capability id must also be
+   added to `KNOWN_CAPABILITY_IDS` in `scripts/check-rfc-docs.mjs`, or the RFC linter
+   fails on the `runtimeEvidence` entry that later names it.
 
 ## Acceptance Criteria
 - [ ] A brief dropped into `briefs/` is enqueued once; a second tick does not enqueue it again.
@@ -86,6 +93,7 @@ allowed to unblock, and reports upward. RFC-0051 sections 1, 6 and 9.
 - [ ] A failed manifest within the retry limit is requeued; one past it is left in `failed/` and escalated.
 - [ ] The playbook never issues a push to `main` or `master` (negative test), and every playbook action is recorded as an event.
 - [ ] The three new event types validate against the updated schema.
+- [ ] `hierarchy.clear` is listed in `KNOWN_CAPABILITY_IDS` and reported `live` after a successful clear and `degraded` when the executor does not resume within the settle time.
 - [ ] The skill body states the hard rules.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

@@ -57,8 +57,15 @@ than writes. RFC-0051 section 7.
    (`cli-dispatch enqueue --from-brief` reads that block) and prose sections the
    planner edits. The brief names the planner session and the dispatch session from
    the roster.
-6. **Hand-off:** `--notify` sends `operator-dispatch` a one-line message naming the
-   brief file.
+6. **Hand-off:** `--notify` sends the dispatch session (its roster `name`) a one-line
+   message naming the brief file.
+7. **Planner skill** `ai-sdlc-plugin/commands/planner.md`: the prompt the AISDLC-664
+   bootstrap gives the planner session (`/ai-sdlc planner`). It prints the roster, the
+   open briefs and their progress, and the pending design decisions routed to the
+   planner, then describes the hand-off flow (`cli-hierarchy brief`, edit, `--notify`)
+   and the hard rule that Open Questions are resolved only with the operator through
+   the decision rubric. It is a short orientation, not a loop: the planner is where
+   the operator works interactively.
 
 ## Acceptance Criteria
 - [ ] For a fixture set of six tasks with a dependency chain, the brief's waves match the chain and a dependency outside the set is listed as an external prerequisite.
@@ -67,5 +74,6 @@ than writes. RFC-0051 section 7.
 - [ ] A task referencing a hook or workflow path appears under trust-sensitive.
 - [ ] The YAML block round-trips through `cli-dispatch enqueue --from-brief` into manifests with the same `after`, `sequenceGroup` and `wave` values.
 - [ ] `--notify` sends exactly one message to the dispatch session named in the roster (asserted on an injected sender).
+- [ ] `ai-sdlc-plugin/commands/planner.md` exists, is the prompt the bootstrap issues for the planner role, and states the hard rule on Open Questions.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

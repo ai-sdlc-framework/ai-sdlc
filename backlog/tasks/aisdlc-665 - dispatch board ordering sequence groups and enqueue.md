@@ -60,6 +60,16 @@ as it is.
    fields). Refuses an id that is already on the board in any state.
 6. **`cli-dispatch board`**: prints every manifest by state with its eligibility and,
    for ineligible ones, the reason.
+7. **Worker identity:** a claim records `workerId`, and in a hierarchy that value MUST
+   equal the claiming session's roster `name` (the AISDLC-664 roster is
+   `{{schemaVersion: 'v1', sessions: [...]}}` and its status and down commands join
+   inflight manifests to sessions by that name only). `cli-dispatch claim --worker
+   <name>` is the only way the loops claim.
+8. **Capability:** register `hierarchy.board` (AISDLC-642 registry) and report `live`
+   on a successful claim or completion and `degraded` with a reason when the board
+   directory is unreadable or a rename fails. Any new capability id must also be
+   added to `KNOWN_CAPABILITY_IDS` in `scripts/check-rfc-docs.mjs`, or the RFC linter
+   fails on the `runtimeEvidence` entry that later names it.
 
 ## Acceptance Criteria
 - [ ] A manifest with an unmet `after` is not claimable; it becomes claimable once the named task's verdict is in `done/`.
@@ -70,5 +80,6 @@ as it is.
 - [ ] `enqueue --from-brief` creates one manifest per listed task with the brief's ordering fields, and refuses a task already on the board.
 - [ ] `cli-dispatch board` lists each manifest with its state and, for ineligible ones, which rule holds it.
 - [ ] Existing manifests without the new fields are claimed exactly as before (existing board tests pass unchanged).
+- [ ] A claim made with `--worker executor-beta` records `workerId` `executor-beta`, and `hierarchy.board` is listed in `KNOWN_CAPABILITY_IDS` and reported `live` after a claim.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

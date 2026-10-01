@@ -90,7 +90,9 @@ and is never an acceptance criterion the developer must satisfy.
    the existing inputs keep working.
 8. **Capability:** register `usage.ingest` in the capability registry from AISDLC-642
    and report `live` on a successful ingest and `degraded` with a reason otherwise.
-   Add a doctor line showing the time of the last successful ingest.
+   Add a doctor line showing the time of the last successful ingest. Any new capability id must also be
+   added to `KNOWN_CAPABILITY_IDS` in `scripts/check-rfc-docs.mjs`, or the RFC linter
+   fails on the `runtimeEvidence` entry that later names it.
 
 ## Acceptance Criteria
 - [ ] `cli-usage report --group-by model` over a synthetic ledger prints one row per model with each token class in its own column, and the JSON and CSV outputs carry the same numbers.
@@ -102,6 +104,6 @@ and is never an acceptance criterion the developer must satisfy.
 - [ ] Two snapshots whose implied allotments differ beyond the tolerance with a similar model mix emit `AllotmentChangeSuspected`; two within tolerance do not.
 - [ ] The config schema is registered, `generated-schemas.ts` is regenerated and committed, and running with no config file uses the documented defaults.
 - [ ] `cli-cost-report` produces a unified view from the usage ledger alone.
-- [ ] `usage.ingest` appears in the capability state as `live` after a successful ingest and `degraded` after a failed one.
+- [ ] `usage.ingest` appears in the capability state as `live` after a successful ingest and `degraded` after a failed one, and is listed in `KNOWN_CAPABILITY_IDS`.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
