@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/model-call-record.v1.schema.json",
+  "title": "AI-SDLC ModelCallRecord v1",
+  "description": "One record per model call in the machine-level usage ledger (RFC-0050 A1). Stores counts, identifiers and attribution only; never prompt, response, file content or tool output.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "callId",
+    "ts",
+    "harness",
+    "provider",
+    "model",
+    "tokens",
+    "billingPool",
+    "sessionId",
+    "agentRole",
+    "scope"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "const": "v1", "description": "Record schema version." },
+    "callId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+      "description": "Provider message id; the deduplication key. Control characters are rejected."
+    },
+    "requestId": { "type": "string", "description": "Provider request id, when reported." },
+    "ts": { "type": "string", "format": "date-time", "description": "ISO timestamp of the call." },
+    "harness": {
+      "type": "string",
+      "enum": ["claude-code", "codex", "opencode", "direct"],
+      "description": "Where the call was made."
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Provider name, for example 'anthropic' or 'openai'."
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact model id as reported by the call."
+    },
+    "tokens": {
+      "type": "object",
+      "required": ["input", "cacheWrite5m", "cacheWrite1h", "cacheRead", "output"],
+      "additionalProperties": false,
+      "description": "Token counts by class.",
+      "properties": {
+        "input": { "type": "integer", "minimum": 0 },
+        "cacheWrite5m": { "type": "integer", "minimum": 0 },
+        "cacheWrite1h": { "type": "integer", "minimum": 0 },
+        "cacheRead": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 },
+        "reasoning": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Subset of output tokens spent on reasoning, where reported."
+        }
+      }
+    },
+    "billingPool": {
+      "type": "string",
+      "enum": [
+        "subscription-interactive",
+        "agent-sdk-credit",
+        "api-key",
+        "codex-plan",
+        "pay-per-token",
+        "unknown"
+      ],
+      "description": "Which allowance the call draws from."
+    },
+    "sessionId": { "type": "string", "description": "Harness session id." },
+    "agentId": { "type": "string", "description": "Subagent id, when the call was a subagent's." },
+    "agentRole": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Role of the caller, for example 'main-session' or 'ai-sdlc:developer'."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["framework", "other"],
+      "description": "'framework' calls keep repository, task and source; 'other' calls do not."
+    },
+    "repo": { "type": "string", "description": "Repository name; framework scope only." },
+    "taskId": { "type": "string", "description": "Task id; framework scope only." },
+    "source": {
+      "type": "object",
+      "required": ["file", "offset"],
+      "additionalProperties": false,
+      "description": "Where the call was read from; omitted for scope 'other'.",
+      "properties": {
+        "file": { "type": "string" },
+        "offset": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

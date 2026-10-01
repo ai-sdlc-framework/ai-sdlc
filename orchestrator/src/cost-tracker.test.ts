@@ -20,9 +20,22 @@ describe('CostTracker', () => {
       expect(cost).toBeCloseTo(0.0105, 4);
     });
 
-    it('uses fallback pricing for unknown models', () => {
-      const cost = CostTracker.computeCost(1000, 500, 'unknown-model');
-      expect(cost).toBeGreaterThan(0);
+    it('does not price an unknown model as another model', () => {
+      expect(CostTracker.computeCost(1000, 500, 'unknown-model')).toBe(0);
+      expect(CostTracker.isPriced('unknown-model')).toBe(false);
+      expect(CostTracker.isPriced('toString')).toBe(false);
+      expect(CostTracker.isPriced('claude-opus-4-6')).toBe(true);
+    });
+
+    it('marks an unknown model as unpriced with zero cost', () => {
+      expect(CostTracker.computeCostDetailed(1000, 500, 'unknown-model', 10)).toEqual({
+        costUsd: 0,
+        unpriced: true,
+        model: 'unknown-model',
+      });
+      const known = CostTracker.computeCostDetailed(1000, 500, 'claude-sonnet-4-5-20250929');
+      expect(known.unpriced).toBe(false);
+      expect(known.costUsd).toBeCloseTo(0.0105, 4);
     });
 
     it('computes opus cost correctly', () => {
@@ -72,6 +85,60 @@ describe('CostTracker', () => {
 
       const entries = store.getCostEntries({ runId: 'run-1' });
       expect(entries[0].totalTokens).toBe(4000);
+    });
+  });
+
+  describe('unpriced models', () => {
+    it('records zero cost, emits a visible warning and lists the model in the summary', async () => {
+      const warnings: string[] = [];
+      const onWarning = (w: Error) => warnings.push(w.message);
+      process.on('warning', onWarning);
+      try {
+        tracker.recordCost({
+          runId: 'run-u',
+          agentName: 'code-agent',
+          pipelineType: 'execute',
+          model: 'mystery-model-1',
+          inputTokens: 1000,
+          outputTokens: 1000,
+        });
+        // Node emits process warnings asynchronously.
+        await new Promise((r) => setImmediate(r));
+      } finally {
+        process.off('warning', onWarning);
+      }
+      expect(warnings.some((w) => w.includes('mystery-model-1') && w.includes('unpriced'))).toBe(
+        true,
+      );
+      const entries = store.getCostEntries({ runId: 'run-u' });
+      expect(entries[0].costUsd).toBe(0);
+      const summary = tracker.getCostSummary();
+      expect(summary.unpricedModels).toEqual(['mystery-model-1']);
+    });
+
+    it('does not list an unknown model whose caller supplied a non-zero cost', () => {
+      tracker.recordCost({
+        runId: 'run-c',
+        agentName: 'code-agent',
+        pipelineType: 'execute',
+        model: 'mystery-model-2',
+        inputTokens: 1000,
+        outputTokens: 1000,
+        costUsd: 1.25,
+      });
+      expect(tracker.getCostSummary().unpricedModels).toBeUndefined();
+    });
+
+    it('omits unpricedModels when every model is priced', () => {
+      tracker.recordCost({
+        runId: 'run-p',
+        agentName: 'code-agent',
+        pipelineType: 'execute',
+        model: 'claude-sonnet-4-5-20250929',
+        inputTokens: 1000,
+        outputTokens: 1000,
+      });
+      expect(tracker.getCostSummary().unpricedModels).toBeUndefined();
     });
   });
 

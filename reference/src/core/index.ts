@@ -17,6 +17,7 @@ export {
 export {
   validate,
   validateResource,
+  validateModelCallRecord,
   formatValidationErrors,
   type ValidationResult,
   type ValidationError,

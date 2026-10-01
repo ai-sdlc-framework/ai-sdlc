@@ -53,6 +53,7 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
  */
 const ARTIFACT_SCHEMA_FILES = {
   RefinementVerdict: 'refinement-verdict.v1.schema.json',
+  ModelCallRecord: 'model-call-record.v1.schema.json',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
@@ -223,6 +224,13 @@ export function validateArtifact<T = unknown>(
  */
 export function validateRefinementVerdict<T = unknown>(data: unknown): ValidationResult<T> {
   return validateArtifact<T>('RefinementVerdict', data);
+}
+
+/**
+ * Convenience wrapper for the usage-ledger ModelCallRecord shape.
+ */
+export function validateModelCallRecord<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('ModelCallRecord', data);
 }
 
 /**
