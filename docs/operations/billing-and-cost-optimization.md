@@ -306,14 +306,23 @@ Tonight's interactive quota is finite. The SDK credit is a separate $200/mo pool
 ### Pattern 4 — Track your burn
 
 ```bash
+# Usage by model and role, from the machine-level usage ledger (RFC-0050):
+node pipeline-cli/bin/cli-usage.mjs ingest
+node pipeline-cli/bin/cli-usage.mjs report --group-by model --group-by role
+
+# Units used in the current session and weekly windows, and the projected time to the limit:
+node pipeline-cli/bin/cli-usage.mjs window
+
+# Tokens and units for one task, split by role:
+node pipeline-cli/bin/cli-usage.mjs task <task-id>
+
 # Watch the orchestrator's burn-down report:
 node pipeline-cli/bin/cli-orchestrator.mjs status
-
-# Cost-governance ledger (RFC-0004):
-ls -la .ai-sdlc/artifacts/_cost/
 ```
 
-The ledger records every dispatch's token consumption + estimated dollar cost. Wire it into your operator dashboard or check it weekly.
+The usage ledger records the token counts of every Claude Code and Codex session on the machine, with the billing pool each call drew from, and turns them into weighted units and an API-equivalent cost. Record what the provider shows with `cli-usage snapshot --window weekly --used-pct <n>` and `cli-usage allotment` shows your implied allotment over time. See [`usage-ledger.md`](usage-ledger.md) for every report and view. To pick cheaper models for roles where the evidence supports it, see [`model-routing.md`](model-routing.md).
+
+The cost-governance ledger (RFC-0004) is separate and still holds per-dispatch estimates: `ls -la .ai-sdlc/artifacts/_cost/`.
 
 ---
 
