@@ -727,3 +727,39 @@ describe('AISDLC-369: cli-verify-attestation-debug bin shim guard', () => {
 //     tests added to guard the full read-patch-rename pipeline through the shim.
 //   - AISDLC-369: cli-verify-attestation-debug — standalone .mjs debug tool.
 // Search for `node pipeline-cli/bin/` to enumerate them.
+
+describe('RFC-0050: cli-usage bin shim', () => {
+  beforeAll(() => {
+    if (!existsSync(join(PKG_ROOT, 'dist', 'cli', 'usage.js'))) {
+      const build = spawnSync('pnpm', ['build'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      if (build.status !== 0) {
+        throw new Error(
+          `pre-test build failed (exit ${build.status}):\n${build.stdout}\n${build.stderr}`,
+        );
+      }
+    }
+  }, 60_000);
+
+  const binPath = join(PKG_ROOT, 'bin', 'cli-usage.mjs');
+
+  it('bin shim file exists at the expected path', () => {
+    expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
+  });
+
+  it('is invokable via `node <pkg-root>/bin/cli-usage.mjs prices --help` and exits 0', () => {
+    const result = spawnSync(process.execPath, [binPath, 'prices', '--help'], {
+      cwd: PKG_ROOT,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+      env: process.env,
+    });
+    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
+    expect(result.status, `cli-usage prices --help did not exit 0:${detail}`).toBe(0);
+    expect(result.stdout + result.stderr).toMatch(/refresh/);
+  });
+});

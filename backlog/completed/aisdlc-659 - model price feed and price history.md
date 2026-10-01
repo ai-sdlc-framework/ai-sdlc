@@ -2,7 +2,7 @@
 id: AISDLC-659
 title: >-
   RFC-0050 Part A: model price feed (price sources, daily refresh, dated price history, validation)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -83,15 +83,15 @@ published sources into the price history from AISDLC-648. RFC-0050 section A6.
    an active price changes. Add it to the event type union and the events schema.
 
 ## Acceptance Criteria
-- [ ] Each adapter turns its recorded fixture into rows with all five token classes in per-million-token units, leaving an unpublished class undefined.
-- [ ] A refresh with unchanged prices appends nothing; a changed price appends one row with the fetch date as `effectiveFrom` and emits `ModelPriceChanged`.
-- [ ] A call made before a price change is priced with the old row and a call made after it with the new one.
-- [ ] A zero, negative or non-numeric price is rejected and does not reach the history.
-- [ ] Two sources disagreeing beyond the tolerance, and a price moving beyond the change factor, each produce a `held` row that `priceCall` ignores until `prices confirm` is run.
-- [ ] A `manual` row takes precedence over a fetched active row for the same model and date.
-- [ ] With every source failing, the last prices remain in force, the refresh exits without throwing, and prices older than the staleness limit are labelled stale in `prices list`.
-- [ ] No request made by any adapter contains a repository name, path, task id or token count (asserted on the recorded request in a test).
-- [ ] The module header records, per provider, whether a provider-native price endpoint was found.
-- [ ] `ModelPriceChanged` validates against the updated events schema.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] Each adapter turns its recorded fixture into rows with all five token classes in per-million-token units, leaving an unpublished class undefined.
+- [x] A refresh with unchanged prices appends nothing; a changed price appends one row with the fetch date as `effectiveFrom` and emits `ModelPriceChanged`.
+- [x] A call made before a price change is priced with the old row and a call made after it with the new one.
+- [x] A zero, negative or non-numeric price is rejected and does not reach the history.
+- [x] Two sources disagreeing beyond the tolerance, and a price moving beyond the change factor, each produce a `held` row that `priceCall` ignores until `prices confirm` is run.
+- [x] A `manual` row takes precedence over a fetched active row for the same model and date.
+- [x] With every source failing, the last prices remain in force, the refresh exits without throwing, and prices older than the staleness limit are labelled stale in `prices list`.
+- [x] No request made by any adapter contains a repository name, path, task id or token count (asserted on the recorded request in a test).
+- [x] The module header records, per provider, whether a provider-native price endpoint was found.
+- [x] `ModelPriceChanged` validates against the updated events schema.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

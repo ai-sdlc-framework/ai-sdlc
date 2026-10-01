@@ -5319,6 +5319,27 @@ export const orchestratorEventsV1Schema = {
       description:
         'Failure-mode tag (e.g. `SecretScanBlocked`, `RebaseConflict`, `UnknownFailureMode`) — present on `OrchestratorFailed` / `OrchestratorRecovered`.',
     },
+    model: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Exact model id whose price changed - present on `ModelPriceChanged` (RFC-0050).',
+    },
+    tokenClass: {
+      type: 'string',
+      enum: ['input', 'output', 'cacheRead', 'cacheWrite5m', 'cacheWrite1h'],
+      description: 'Token class whose price changed - present on `ModelPriceChanged`.',
+    },
+    oldPrice: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      description: 'Previous price in USD per million tokens - present on `ModelPriceChanged`.',
+    },
+    newPrice: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      description: 'New price in USD per million tokens - present on `ModelPriceChanged`.',
+    },
     context: {
       type: 'object',
       description:
@@ -5603,7 +5624,7 @@ export const orchestratorEventsV1Schema = {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -5631,6 +5652,7 @@ export const orchestratorEventsV1Schema = {
         'PrOpened',
         'ReconcileCompleted',
         'DispatchToMergeCompleted',
+        'ModelPriceChanged',
       ],
     },
   },

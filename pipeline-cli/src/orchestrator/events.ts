@@ -68,6 +68,13 @@ export type OrchestratorEventType =
    * counter, present when `phase === 'iteration'`, always >=2).
    */
   | 'DeveloperContractRetry'
+  /**
+   * RFC-0050 A6 - emitted when an active model price changes. Per-event
+   * fields: `model`, `tokenClass` (`input`, `output`, `cacheRead`,
+   * `cacheWrite5m`, `cacheWrite1h`), `oldPrice`, `newPrice` (USD per million
+   * tokens).
+   */
+  | 'ModelPriceChanged'
   | 'OrchestratorTaskAlreadyInFlight'
   | 'WorkerStateTransition'
   /**

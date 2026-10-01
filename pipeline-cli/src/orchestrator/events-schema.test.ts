@@ -397,6 +397,23 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       ciWaitMs: null,
     });
   });
+
+  it('accepts ModelPriceChanged with model, token class, old and new price', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'ModelPriceChanged',
+      model: 'claude-haiku-4-5',
+      tokenClass: 'input',
+      oldPrice: 0.8,
+      newPrice: 1,
+    });
+  });
+
+  it('rejects ModelPriceChanged with an unknown token class or a non-positive price', () => {
+    const base = { ts: baseTs, type: 'ModelPriceChanged', model: 'm', oldPrice: 1, newPrice: 2 };
+    expectInvalid({ ...base, tokenClass: 'bogus' });
+    expectInvalid({ ...base, tokenClass: 'input', newPrice: 0 });
+  });
 });
 
 describe('orchestrator-events.v1.schema.json — rejects malformed events', () => {
