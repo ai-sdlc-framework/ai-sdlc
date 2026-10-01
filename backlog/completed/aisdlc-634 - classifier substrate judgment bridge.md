@@ -2,7 +2,7 @@
 id: AISDLC-634
 title: >-
   RFC-0049 Group A: classifier-substrate bridge and the five substrate judgment definitions
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
