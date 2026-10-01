@@ -27,14 +27,17 @@ cli-usage snapshot --window weekly --used-pct 42   # calibrate against the provi
 
 One record per model call, appended to a monthly file. Each record has:
 
-- the provider message id (used to skip repeats), the timestamp, the harness, the provider and the exact model id;
-- five token counts: input, 5-minute cache write, 1-hour cache write, cache read and output;
+- the provider message id (used to skip repeats), the request id and the agent id where the harness reports them, the timestamp, the harness, the provider and the exact model id;
+- five token counts (plus a reasoning-token subset of output where reported): input, 5-minute cache write, 1-hour cache write, cache read and output;
 - the billing pool (`subscription-interactive`, `agent-sdk-credit`, `api-key`, `codex-plan`, `pay-per-token` or `unknown`; `unknown` is used when the transcript does not make the entry point clear, never a guess);
-- the session id, the agent role (`main-session` for the main session, or the subagent type such as `ai-sdlc:developer`) and the attribution scope.
+- the session id, the agent role (`main-session` for the main session, or the subagent type such as `ai-sdlc:developer`) and the attribution scope;
+- a `breakdownMissing` flag, set when the harness reported only a session total, so the whole total sits in the input count and the split between token classes is unknown.
 
 For calls in a framework repository the record also holds the repository name, the task id when one can be resolved, and the source file and byte offset.
 
-**Never recorded:** prompt text, response text, file content, tool output, the working directory, or anything from a project that has no `.ai-sdlc/` directory beyond the counts above. A usage-limit notice found in a transcript yields only a timestamp, a session id and a fixed category (`usage-limit` or `rate-limit`); the notice text is not kept.
+**Never recorded:** prompt text, response text, file content, tool output, the working directory, or anything from a project that is not a framework repository beyond the counts above. A usage-limit notice found in a transcript yields only a timestamp, a session id and a fixed category (`usage-limit` or `rate-limit`); the notice text is not kept.
+
+**One path caveat.** Framework-scope records keep the transcript source path. The harness names transcript directories after the working directory, so that path encodes the project location and your home directory name. The ledger stays on your machine and is never committed, but treat it as revealing where your projects live before you share a copy. Other-scope records omit the path.
 
 ## Where the ledger lives
 
@@ -57,12 +60,12 @@ Each call has one of two scopes, decided from the working directory the harness 
 
 | Scope | When | What is kept |
 | --- | --- | --- |
-| `framework` | The working directory is inside a repository that has an `.ai-sdlc/` directory | Repository, task id, source file and offset, plus the common fields |
-| `other` | Everything else | Tokens, model, timestamp, harness, session id and agent role only. Repository, task, working directory and source file are omitted |
+| `framework` | The working directory is inside a repository whose root has both an `.ai-sdlc/` directory and a `.git` entry | Repository, task id, source file and offset, plus the common fields |
+| `other` | Everything else, including a directory with `.ai-sdlc/` but no `.git` | Tokens, model, timestamp, harness, session id and agent role only. Repository, task, working directory and source file are omitted |
 
 Reports show both by default. Narrow them with `--scope framework`, `--scope other` or `--scope all`.
 
-To restrict ingestion to framework repositories, set `AI_SDLC_USAGE_SCOPE=framework-only` in the environment where ingestion runs. Calls from other projects are then skipped and counted in the `otherScopeSkipped` field of `cli-usage ingest --json`. The Codex ingester honours the same variable.
+To restrict ingestion to framework repositories, set `AI_SDLC_USAGE_SCOPE=framework-only` in the environment where ingestion runs. Transcripts from other projects are then skipped and counted in the `otherScopeSkipped` field of `cli-usage ingest --json`. That count is per transcript file, not per call: a transcript with five other-scope calls adds one. The Codex ingester honours the same variable, but compares it exactly against the lowercase value `framework-only`, so write it in lowercase (the Claude Code ingester also accepts other letter cases).
 
 ## Ingestion
 
@@ -226,7 +229,7 @@ sess-a   main-session  framework  45,300             12     678,000           ..
 sess-b   main-session  other      22,200             5      100,000           -
 ```
 
-(The path is shortened here. It is shown only for framework scope.)
+(The path is shortened here. It is shown only for framework scope.) For a subagent row the `agent` column shows the subagent id rather than the role, so a main session and its subagents appear as separate rows.
 
 ---
 
@@ -249,6 +252,16 @@ $ cli-usage snapshot --window weekly --used-pct 42
 Recorded weekly snapshot: 236,567 units at 42% implies an allotment of 563,254 units.
 ```
 
+When the new snapshot's implied allotment differs from the previous one by more than the tolerance, the command prints a second line. In a scratch ledger with a 20% snapshot followed by a 50% snapshot over the same units:
+
+```console
+$ cli-usage snapshot --window weekly --used-pct 20 --at 2026-09-29T12:00:00Z
+Recorded weekly snapshot: 68,000 units at 20% implies an allotment of 340,000 units.
+$ cli-usage snapshot --window weekly --used-pct 50
+Recorded weekly snapshot: 68,000 units at 50% implies an allotment of 136,000 units.
+Probable allotment change: -60.0% against the previous snapshot.
+```
+
 `--window` is the name of a window in your config (`session` and `weekly` by default). `--used-pct` is above 0 and at most 100. `--at <time>` records an earlier observation. The command divides the units consumed in that window by the percentage to get an implied allotment. A snapshot taken when the window held no calls cannot be calibrated and is not recorded.
 
 ### Reading the allotment series
@@ -268,17 +281,25 @@ The more snapshots you record, at varied points in the window, the more useful t
 
 ### Limit events
 
-Limit notices found in transcripts are written to `limit-events.jsonl` with a timestamp, a session id and a category (`usage-limit` or `rate-limit`). The ingest summary counts them in `Limit events`, and the operator TUI usage pane shows the most recent one. There is no separate `cli-usage` view for them; read the file with `jq`:
+Limit notices found in transcripts are written to `limit-events.jsonl` (created when the first event is recorded) with a timestamp, a session id and a category (`usage-limit` or `rate-limit`). The ingest summary counts them in `Limit events`, and the operator TUI usage pane shows the most recent one. There is no separate `cli-usage` view for them; read the file with `jq`:
 
 ```bash
-jq . "${AI_SDLC_USAGE_DIR:-$HOME/.ai-sdlc/usage}/limit-events.jsonl"
+f="${AI_SDLC_USAGE_DIR:-$HOME/.ai-sdlc/usage}/limit-events.jsonl"
+[ -f "$f" ] && jq . "$f"
 ```
+
+The file does not exist until the first event, so the guard keeps the command quiet on a machine that has seen none.
 
 ---
 
 ## Price feed
 
-Prices come from public sources rather than a hand-kept table.
+Prices come from public sources rather than a hand-kept table. `cli-usage prices refresh` contacts two third-party aggregators:
+
+- the OpenRouter public models endpoint, `https://openrouter.ai/api/v1/models`;
+- the LiteLLM price file, `https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`, read from the `main` branch of a GitHub repository (an unpinned branch, so its content can change at any time).
+
+Neither is a provider's own price list. Fetched prices are treated as untrusted input: they are validated, and they are held rather than used when sources disagree or a price jumps (see the rules below). They are still important, because the prices feed the weights behind units, scorecards and the allotment math.
 
 | Command | What it does |
 | --- | --- |
@@ -299,7 +320,7 @@ claude-sonnet-4-6  in=3 out=15 read=0.3 w5m=3.75 w1h=6  source=anthropic-publish
 ...
 ```
 
-Prices are per million tokens. `refresh` fetches only public URLs and sends nothing about your repository. The orchestrator also runs it at most once a day. `refresh` takes `--source <name>`, `--json`, `--tolerance` (default 0.05) and `--change-factor` (default 3).
+Prices are per million tokens. `refresh` is a plain GET of those two public URLs and sends nothing about your repository. The orchestrator also runs it at most once a day, at the start of a tick; there is no setting that turns that daily refresh off, so to avoid this network egress do not run the orchestrator loop, and do not run `prices refresh`. Without a refresh, the last known prices (or manual rows from `prices set`) stay in force, and `prices list` marks them `STALE` after 14 days. `refresh` takes `--source <name>`, `--json`, `--tolerance` (default 0.05) and `--change-factor` (default 3).
 
 A fetched row is rejected if a price is zero, negative or not a number. A row is held, and not used, when two sources disagree by more than the tolerance or a price moves by more than the change factor against the last row. A held row shows in `prices list` with the command to confirm it. If every source is unreachable, the last known prices stay in force, and `prices list` marks them `STALE` after 14 days (change with `--stale-days`).
 
@@ -364,8 +385,8 @@ The operator TUI (`AI_SDLC_TUI=experimental`) has a usage pane, opened with `u`,
 | `ingest` writes nothing in a remote sandbox | The ingester is a no-op there by design | Ingest from the machine that runs the harness |
 | Older sessions are missing | A run stopped at its time limit before reaching them | Run `cli-usage ingest --backfill` (or `ingest` again, which continues from the cursors) |
 | `Calls written: 0` on every run | Everything is already in the ledger | Nothing to do |
-| Calls from one project are missing | `AI_SDLC_USAGE_SCOPE=framework-only` is set and the project has no `.ai-sdlc/` | Unset it, or add the directory if the project should count as framework |
-| A call has no task id | The path, branch and `.active-task` file did not name one | Expected for main-session work outside a task worktree |
+| Calls from one project are missing | `AI_SDLC_USAGE_SCOPE=framework-only` is set and the project root has no `.ai-sdlc/` directory or no `.git` entry | Unset it, or add what is missing if the project should count as framework |
+| A call has no task id | The path, branch and `.active-task` file did not name one, or the call is `other` scope (a repository with `.ai-sdlc/` but no `.git` is `other`) | Expected for main-session work outside a task worktree; check the repository root has both |
 | `implied allotment: unknown` | No snapshot for that window | `cli-usage snapshot --window <name> --used-pct <n>` |
 | `No usage in the weekly window at that time, so it cannot be calibrated.` | The `--at` time is before any recorded call | Use a later time, or ingest older transcripts first |
 | `probable allotment change` | Implied allotment moved more than the tolerance with a similar model mix | Check whether your plan or the provider's accounting changed; raise `allotmentTolerance` if it is noise |

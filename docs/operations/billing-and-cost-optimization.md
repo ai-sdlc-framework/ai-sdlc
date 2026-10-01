@@ -314,7 +314,7 @@ node pipeline-cli/bin/cli-usage.mjs report --group-by model --group-by role
 node pipeline-cli/bin/cli-usage.mjs window
 
 # Tokens and units for one task, split by role:
-node pipeline-cli/bin/cli-usage.mjs task <task-id>
+node pipeline-cli/bin/cli-usage.mjs task DEMO-1
 
 # Watch the orchestrator's burn-down report:
 node pipeline-cli/bin/cli-orchestrator.mjs status

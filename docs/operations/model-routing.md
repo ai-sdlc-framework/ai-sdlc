@@ -144,7 +144,7 @@ Every resolution made with a task id is appended to `$ARTIFACTS_DIR/_routing/ass
 
 This log is what makes an outcome attributable to a model and separates an explored comparison from a pinned one. Writing it never changes the model that is returned, and a write failure is ignored.
 
-**Set `ARTIFACTS_DIR`.** The resolver's default when `ARTIFACTS_DIR` is unset is `<project>/.ai-sdlc/artifacts`, while `cli-usage scorecard` and `cli-usage replay-corpus build` default to `<project>/artifacts`. Setting `ARTIFACTS_DIR` once makes the assignment log, the scorecard and the replay corpus agree on one place.
+**Set `ARTIFACTS_DIR`.** The resolver's default when `ARTIFACTS_DIR` is unset is `<project>/.ai-sdlc/artifacts`, while `cli-usage scorecard` and `cli-usage replay-corpus build` default to `<project>/artifacts`. The defaults differ today, and setting `ARTIFACTS_DIR` once makes the assignment log, the scorecard and the replay corpus agree on one place.
 
 ## Overrides
 
@@ -276,7 +276,7 @@ Replay reviews are never written to the reviews ledger, the transcript leaves or
 
 Each replayed review runs `claude -p` with read-only tools only (Read, Grep, Glob), no MCP, user-level settings only, no slash commands, no session transcript and prompts denied. It never uses `bypassPermissions`. If the installed `claude` lacks any of these flags, the command refuses to run. The commit is checked out in a throwaway local clone with no remote, hooks off and user git config off. Every `.claude/`, `.mcp.json` and `CLAUDE.md` the commit carries is stripped, symlinks become plain files, and `CLAUDE_PROJECT_DIR`, `CLAUDECODE` and `AI_SDLC_*` are dropped from the environment. Only the diff comes from the replayed commit, and it is marked untrusted in the prompt.
 
-The residual risk is stated in `cli-usage replay --help`: the session is still a model reading untrusted code with read-only tools. A malicious diff could try to mislead the verdict or ask the model to echo file contents it can read inside the clone. Replay only commits from repositories you trust.
+The residual risk is stated in `cli-usage replay --help`: the session is still a model reading untrusted code with read-only tools. A malicious diff could try to mislead the verdict or ask the model to echo file contents it can read inside the clone. The isolation is the CLI's own permission layer plus a throwaway clone. It is not an operating-system sandbox. The session still loads your user-level Claude settings (`--setting-sources=user`), so any user-level Read allow rules or additional directories you have configured apply, and what the session can read may be wider than the clone. Replay only commits from repositories you trust.
 
 ---
 
