@@ -135,9 +135,16 @@ describe('evaluateJudgment', () => {
     (p as unknown as { baseUrl: string }).baseUrl = 'http://127.0.0.1:8080';
     const { outcome } = await run(makeDef({ egressClass: 'code-diff' }), cfg(), p);
     expect(outcome).toEqual({ kind: 'abstain', reason: 'shadow' });
+    // Config text can never exempt egress: only the provider's own baseUrl counts.
     const q = new FakeJudgmentProvider().script('q1', YES);
     const config = cfg({ providerOptions: { fake: { baseUrl: 'http://localhost:9' } } });
     expect((await run(makeDef({ egressClass: 'agent-output' }), config, q)).outcome).toEqual({
+      kind: 'abstain',
+      reason: 'egress-not-permitted',
+    });
+    const l = new FakeJudgmentProvider().script('q1', YES);
+    (l as unknown as { baseUrl: string }).baseUrl = 'http://localhost:9';
+    expect((await run(makeDef({ egressClass: 'agent-output' }), cfg(), l)).outcome).toEqual({
       kind: 'abstain',
       reason: 'shadow',
     });
@@ -401,5 +408,148 @@ describe('evaluateJudgment', () => {
   it('uses the registered-provider registry by default and never throws', async () => {
     const outcome = await evaluateJudgment(makeDef(), { text: 'x' }, { config: cfg() });
     expect(outcome).toEqual({ kind: 'abstain', reason: 'disabled' });
+  });
+});
+
+describe('evaluateJudgment hardening', () => {
+  it('redacts secrets in question text and keys, and counts questions toward the size budget', async () => {
+    const secret = 'sk-' + 'b'.repeat(30);
+    const def = makeDef({
+      questions: () => ({
+        q1: {
+          type: 'choice',
+          instructions: `see ${secret}`,
+          options: { a: `opt ${secret}`, b: 'x' },
+        },
+      }),
+    });
+    const p = new FakeJudgmentProvider().script('q1', {
+      type: 'choice',
+      choice: 'a',
+      probabilities: { a: 0.9, b: 0.1 },
+      confidence: 0.9,
+    });
+    await run(def, cfg(), p);
+    expect(JSON.stringify(p.requests[0].questions)).not.toContain(secret);
+    const big = makeDef({
+      questions: () => ({ q1: { type: 'noul', instructions: 'y'.repeat(400) } }),
+    });
+    const small = new FakeJudgmentProvider({ capabilities: { maxStateTokens: 50 } }).script(
+      'q1',
+      YES,
+    );
+    expect((await run(big, cfg(), small)).outcome).toEqual({
+      kind: 'abstain',
+      reason: 'state-too-large',
+    });
+  });
+
+  it('redacts secrets in state object keys', async () => {
+    const secret = 'sk-' + 'c'.repeat(30);
+    const p = new FakeJudgmentProvider().script('q1', YES);
+    await run(makeDef({ buildState: () => ({ [secret]: 'v' }) }), cfg(), p);
+    expect(JSON.stringify(p.requests[0].state)).not.toContain(secret);
+  });
+
+  it('downgrades enforce on a config/provider model mismatch', async () => {
+    const p = new FakeJudgmentProvider({ modelId: 'fake-2' }).script('q1', YES);
+    const { outcome, records } = await run(makeDef(), cfg(enforceSpec()), p);
+    expect(outcome).toEqual({ kind: 'abstain', reason: 'shadow' });
+    expect(records[0].downgradeReason).toBe('model-mismatch');
+    const noModel = new FakeJudgmentProvider().script('q1', YES);
+    const c = resolveJudgmentConfig({
+      spec: { provider: 'fake', judgments: enforceSpec().judgments, defaults: { mode: 'shadow' } },
+    });
+    expect((await run(makeDef(), c, noModel)).records[0].downgradeReason).toBe('model-mismatch');
+  });
+
+  it('downgrades enforce when the response modelVersion differs from the configured model', async () => {
+    const p = new FakeJudgmentProvider().script('q1', YES);
+    const orig = p.evaluate.bind(p);
+    p.evaluate = async (r) => ({ ...(await orig(r)), modelVersion: 'fake-9' });
+    const { outcome, records } = await run(makeDef(), cfg(enforceSpec()), p);
+    expect(outcome).toEqual({ kind: 'abstain', reason: 'shadow' });
+    expect(records[0].downgradeReason).toBe('model-mismatch');
+  });
+
+  it('detects alias models case-insensitively and in other forms', async () => {
+    for (const m of [
+      'Fake-LATEST',
+      'fake:latest',
+      'fake@latest',
+      'latest',
+      'x-beta',
+      'x-exp',
+      'x-nightly',
+    ]) {
+      const p = new FakeJudgmentProvider({ modelId: m }).script('q1', YES);
+      const { records } = await run(makeDef(), cfg(enforceSpec({}, m)), p);
+      expect(records[0].downgradeReason, m).toBe('model-alias');
+    }
+  });
+
+  it('denies enforce when the thresholds object is empty', async () => {
+    const p = new FakeJudgmentProvider().script('q1', YES);
+    const spec = enforceSpec({ thresholds: { 'fake@fake-1': {} } });
+    expect((await run(makeDef(), cfg(spec), p)).records[0].downgradeReason).toBe('no-thresholds');
+  });
+
+  describe('answer validation', () => {
+    const choiceDef = makeDef({
+      questions: () => ({
+        q1: { type: 'choice', instructions: 'i', options: { a: 'A', b: 'B' } },
+      }),
+    });
+    const scoreDef = makeDef({
+      questions: () => ({ q1: { type: 'score', instructions: 'i', levels: ['l0', 'l1'] } }),
+    });
+    const bad: Array<[string, typeof choiceDef, JudgmentAnswer]> = [
+      ['type mismatch', choiceDef, YES],
+      [
+        'unoffered choice',
+        choiceDef,
+        { type: 'choice', choice: 'z', probabilities: { a: 1 }, confidence: 1 },
+      ],
+      [
+        'probability out of range',
+        choiceDef,
+        { type: 'choice', choice: 'a', probabilities: { a: 1.5 }, confidence: 1 },
+      ],
+      ['NaN probability', makeDef(), { type: 'noul', probability: Number.NaN }],
+      [
+        'score out of range',
+        scoreDef,
+        { type: 'score', score: 5, probabilities: [0.5, 0.5], confidence: 1 },
+      ],
+      [
+        'bad confidence',
+        scoreDef,
+        { type: 'score', score: 1, probabilities: [0.5, 0.5], confidence: 2 },
+      ],
+    ];
+    for (const [name, def, answer] of bad) {
+      it(`abstains provider-error on ${name}`, async () => {
+        const p = new FakeJudgmentProvider().script('q1', answer);
+        const { outcome } = await run(def, cfg(enforceSpec()), p);
+        expect(outcome).toEqual({ kind: 'abstain', reason: 'provider-error' });
+      });
+    }
+
+    it('accepts well-formed choice and score answers', async () => {
+      const p = new FakeJudgmentProvider().script('q1', {
+        type: 'choice',
+        choice: 'a',
+        probabilities: { a: 0.7, b: 0.3 },
+        confidence: 0.7,
+      });
+      expect((await run(choiceDef, cfg(enforceSpec()), p)).outcome.kind).toBe('act');
+      const s = new FakeJudgmentProvider().script('q1', {
+        type: 'score',
+        score: 1,
+        probabilities: [0.2, 0.8],
+        confidence: 0.8,
+      });
+      expect((await run(scoreDef, cfg(enforceSpec()), s)).outcome.kind).toBe('act');
+    });
   });
 });

@@ -14,7 +14,13 @@ import {
 import { listJudgmentProviders, getJudgmentProvider } from './registry.js';
 import { canonicalJson, sha256Hex } from './question-hash.js';
 import { redactSecrets } from '../security/secret-redact.js';
-import type { JsonValue, JudgmentAnswer, JudgmentProvider, JudgmentResponse } from './types.js';
+import type {
+  JsonValue,
+  JudgmentAnswer,
+  JudgmentProvider,
+  JudgmentQuestion,
+  JudgmentResponse,
+} from './types.js';
 
 export type CapabilityReport = 'live' | 'shadow' | 'degraded';
 
@@ -72,7 +78,7 @@ export interface EvaluateJudgmentContext {
   now?: () => Date;
 }
 
-const ALIAS_RE = /-(latest|preview)$/;
+const ALIAS_RE = /(^|[-:@])(latest|preview|beta|exp|nightly)$/i;
 const CORPUS_MIN_N = 50;
 
 function defaultGetProvider(name: string): JudgmentProvider | undefined {
@@ -97,7 +103,7 @@ function redactValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(redactValue);
   if (value !== null && typeof value === 'object') {
     const out: { [key: string]: JsonValue } = {};
-    for (const [k, v] of Object.entries(value)) out[k] = redactValue(v);
+    for (const [k, v] of Object.entries(value)) out[redactSecrets(k)] = redactValue(v);
     return out;
   }
   return value;
@@ -132,12 +138,41 @@ function enforceDowngradeReason(
   key: string,
   model: string,
 ): string | undefined {
-  if (ALIAS_RE.test(model)) return 'model-alias';
+  if (ALIAS_RE.test(model) || ALIAS_RE.test(provider.modelId)) return 'model-alias';
+  if (config.model !== provider.modelId) return 'model-mismatch';
   if (provider.capabilities.calibratedProbabilities === false) return 'uncalibrated-provider';
   const settings = config.judgments[definition.id];
-  if (!settings?.thresholds[key]) return 'no-thresholds';
+  const thresholds = settings?.thresholds[key];
+  if (!thresholds || Object.keys(thresholds).length === 0) return 'no-thresholds';
   if (!promotionSatisfies(definition.riskClass, settings.promotion[key])) return 'no-promotion';
   return undefined;
+}
+
+const inUnit = (n: unknown): boolean =>
+  typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
+
+/** True when an answer is well-formed for its question (type, choice, probability ranges). */
+function answerMatches(q: JudgmentQuestion, a: JudgmentAnswer | undefined): boolean {
+  if (!a || a.type !== q.type) return false;
+  if (q.type === 'noul') return inUnit((a as { probability: number }).probability);
+  const ans = a as Exclude<JudgmentAnswer, { type: 'noul' }>;
+  if (!inUnit(ans.confidence)) return false;
+  if (q.type === 'choice') {
+    const c = ans as Extract<JudgmentAnswer, { type: 'choice' }>;
+    return (
+      Object.hasOwn(q.options, c.choice) &&
+      !!c.probabilities &&
+      Object.values(c.probabilities).every(inUnit)
+    );
+  }
+  const sc = ans as Extract<JudgmentAnswer, { type: 'score' }>;
+  return (
+    Number.isInteger(sc.score) &&
+    sc.score >= 0 &&
+    sc.score < q.levels.length &&
+    Array.isArray(sc.probabilities) &&
+    sc.probabilities.every(inUnit)
+  );
 }
 
 async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -237,9 +272,8 @@ export async function evaluateJudgment<I, D>(
     rec.providerModelKey = key;
 
     if (!config.egressAllow.includes(definition.egressClass as EgressClass)) {
-      const baseUrl =
-        provider.baseUrl ?? (config.providerOptions[provider.name]?.baseUrl as string | undefined);
-      if (!isLoopbackUrl(baseUrl)) return await abstain('egress-not-permitted');
+      // Only the provider's own endpoint can exempt egress; config text cannot.
+      if (!isLoopbackUrl(provider.baseUrl)) return await abstain('egress-not-permitted');
     }
 
     let mode = configuredMode;
@@ -257,14 +291,19 @@ export async function evaluateJudgment<I, D>(
     let questions: ReturnType<typeof definition.questions>;
     try {
       state = redactValue(definition.buildState(input));
-      questions = definition.questions(input);
+      questions = redactValue(
+        definition.questions(input) as unknown as JsonValue,
+      ) as unknown as typeof questions;
     } catch {
       return await abstain('definition-error');
     }
     rec.questionSetHash = sha256Hex(canonicalJson({ questions, version: definition.version }));
     const stateJson = canonicalJson(state);
     rec.stateHash = sha256Hex(stateJson);
-    if (stateJson.length / 4 > provider.capabilities.maxStateTokens) {
+    if (
+      (stateJson.length + canonicalJson(questions).length) / 4 >
+      provider.capabilities.maxStateTokens
+    ) {
       return await abstain('state-too-large');
     }
 
@@ -281,9 +320,15 @@ export async function evaluateJudgment<I, D>(
     if (
       !response ||
       !response.answers ||
-      Object.keys(questions).some((id) => !response.answers[id])
+      Object.keys(questions).some((id) => !answerMatches(questions[id], response.answers[id]))
     ) {
       return await abstain('provider-error');
+    }
+    if (mode === 'enforce' && response.modelVersion && response.modelVersion !== config.model) {
+      mode = 'shadow';
+      rec.mode = 'shadow';
+      rec.configuredMode = 'enforce';
+      rec.downgradeReason = 'model-mismatch';
     }
     rec.answers = response.answers;
     rec.modelVersion = response.modelVersion;

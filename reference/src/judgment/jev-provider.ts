@@ -89,6 +89,7 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body,
+        redirect: 'error',
         signal: controller.signal,
       });
       return {
