@@ -156,6 +156,11 @@ function loadLeasePolicy() {
     if (resolveGovernanceExtrasFromYaml(localText).forcePushMode !== 'leaseOnOwnBranch') {
       return closed;
     }
+    // The lease needs an EXPLICIT, absolute CLAUDE_PROJECT_DIR: the toplevel
+    // fallback used for blockedActions would make the own-session binding pass
+    // trivially (project dir == whatever the cwd is in).
+    const envDir = process.env.CLAUDE_PROJECT_DIR;
+    if (!envDir || !isAbsolute(envDir)) return closed;
     const cwd = toolCwd || process.cwd();
     const trusted = loadTrustedExtras(projectDir, cwd);
     if (!trusted || trusted.forcePushMode !== 'leaseOnOwnBranch') return closed;

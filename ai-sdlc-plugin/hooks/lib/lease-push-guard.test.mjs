@@ -322,6 +322,22 @@ describe('evaluateLeasePush - option abbreviations and parser agreement', () => 
   });
 });
 
+describe('evaluateLeasePush - deny reasons steer toward the accepted spelling', () => {
+  it('every generic deny names HEAD:refs/heads/<own> and never the bare no-colon spelling', () => {
+    for (const cmd of [
+      `git push --force-with-lease --receive-pack=x origin HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease origin HEAD:refs/heads/main`,
+      `git push --force-with-lease evil HEAD:refs/heads/${OWN}`,
+      `git push --force origin ${OWN}`,
+    ]) {
+      const r = evaluateLeasePush(cmd, ctx());
+      assert.equal(r.decision, 'deny', cmd);
+      assert.match(r.reason, /--force-with-lease HEAD:refs\/heads\/<own-branch>/, cmd);
+      assert.doesNotMatch(r.reason, /--force-with-lease <own-branch>/, cmd);
+    }
+  });
+});
+
 describe('evaluateLeasePush - short destination / alias hardening', () => {
   const dec = (cmd, over) => evaluateLeasePush(cmd, ctx(over)).decision;
 

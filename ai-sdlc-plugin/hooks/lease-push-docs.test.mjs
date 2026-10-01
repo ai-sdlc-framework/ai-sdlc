@@ -52,6 +52,17 @@ function bodies() {
     const p = join(pluginRoot, 'skills', d, 'SKILL.md');
     if (existsSync(p)) out.push(p);
   }
+  // Tracked repo-local copies under .claude/ (skills, commands) must not drift either.
+  const repoRoot = join(pluginRoot, '..');
+  let tracked = [];
+  try {
+    tracked = execFileSync('git', ['ls-files', '.claude'], { cwd: repoRoot, encoding: 'utf-8' })
+      .split('\n')
+      .filter((f) => f.endsWith('.md'));
+  } catch {
+    tracked = [];
+  }
+  for (const f of tracked) out.push(join(repoRoot, f));
   return out;
 }
 
@@ -129,6 +140,13 @@ describe('push spellings prescribed in command / agent / skill bodies', () => {
     ]) {
       assert.ok(names.has(expected), `${expected} no longer shows a force-with-lease push`);
     }
+  });
+
+  it('also scans the tracked .claude/skills copy of the governance skill', () => {
+    assert.ok(
+      found.some((x) => x.f.includes(`${'.claude'}/skills/ai-sdlc-governance/SKILL.md`)),
+      '.claude/skills/ai-sdlc-governance/SKILL.md must show the explicit spelling and be scanned',
+    );
   });
 
   for (const { f, line } of found) {

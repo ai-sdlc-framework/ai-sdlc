@@ -297,7 +297,7 @@ function evaluateLeasePush(command, ctx) {
     decision: 'deny',
     reason:
       `force-push under allowForcePush=leaseOnOwnBranch is limited to a single ` +
-      `'git push <remote> --force-with-lease <own-branch>' on this worktree's own non-protected ` +
+      `'git push <remote> --force-with-lease HEAD:refs/heads/<own-branch>' on this task's own non-protected ` +
       `branch (${why}).`,
   };
 }

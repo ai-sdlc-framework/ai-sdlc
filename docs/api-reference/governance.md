@@ -115,6 +115,11 @@ spec:
     A forged directory elsewhere (for example `/tmp/x/aisdlc-700`), a symlinked
     `.worktrees` entry, or a hand-built gitdir pointing at the real repo all
     deny, and so does an operator's main checkout;
+  - the hook knows the session's own project directory: `CLAUDE_PROJECT_DIR`
+    must be set, non-empty and absolute. If it is unset, empty or relative the
+    lease decision fails closed to `never` (the toplevel fallback is kept only
+    for the legacy `blockedActions` / `blockedPaths` reads, since it would make
+    the own-session binding below pass trivially);
   - **the accepted spelling**: run, as its own standalone command from the
     worktree, `git push --force-with-lease origin HEAD:refs/heads/<branch>` with
     the branch printed by `git branch --show-current` written literally (no

@@ -85,7 +85,7 @@ policy.
 ## Final Summary
 
 ## Summary
-The lease-push guard now accepts only `git push --force-with-lease[=<branch>:<sha>] [-u] origin HEAD:refs/heads/<own>` (sources `HEAD`, the own branch or `refs/heads/<own>`; destination exactly `refs/heads/<own>`). The no-colon form is refused in every spelling, with a deny message naming the accepted spelling. A session whose project directory is a task worktree may use the lease only from that very worktree.
+The lease-push guard now accepts only `git push --force-with-lease[=<branch>:<sha>] [-u] origin HEAD:refs/heads/<own>` (sources `HEAD`, the own branch or `refs/heads/<own>`; destination exactly `refs/heads/<own>`). The no-colon form is refused in every spelling, with a deny message naming the accepted spelling. A session whose project directory is a task worktree may use the lease only from that very worktree, and the lease decision fails closed when `CLAUDE_PROJECT_DIR` is unset, empty or relative.
 
 ## Changes
 - `ai-sdlc-plugin/hooks/lib/lease-push-guard.js` (modified): the no-colon branch now denies; the alias probe stays, fail-closed, because it still guards sources that name the own branch.
@@ -96,6 +96,7 @@ The lease-push guard now accepts only `git push --force-with-lease[=<branch>:<sh
 ## Design decisions
 - **Explicit destination only**: git maps a no-colon refspec through `remote.<name>.push` and, under `push.default=upstream|tracking`, `branch.<own>.merge`, which for a task branch created from origin/main is refs/heads/main. Both were reproduced against a bare origin: the unguarded command overwrote main for `push.default=upstream`, `push.default=tracking` and `remote.origin.push=<own>:refs/heads/main`.
 - **Own-session binding**: project dir equals the worktree top, or the project dir is the main checkout and the worktree is a genuine bound `.worktrees/<id>`.
+- **Explicit project dir**: the toplevel fallback stays for the legacy `blockedActions` reads only; using it for the lease would make the own-session binding pass trivially.
 - **Out of scope by design**: `remote.<name>.pushurl` / `pushInsteadOf` redirect the branch name to another repository, which is not this guard's trust boundary.
 
 ## Verification

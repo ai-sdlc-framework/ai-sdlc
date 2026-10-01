@@ -158,9 +158,18 @@ describe('leaseOnOwnBranch - allowed', () => {
     assert.ok(!denied(out), out);
   });
 
-  it('allows when CLAUDE_PROJECT_DIR is unset', () => {
-    const out = run(L(), { cwd: leaseRepo.wt, unsetProject: true });
-    assert.ok(!denied(out), out);
+  it('lease needs an explicit absolute CLAUDE_PROJECT_DIR: unset, empty or relative => denied', () => {
+    // The toplevel fallback (kept for blockedActions) would make the own-session binding pass trivially.
+    assert.ok(denied(run(L(), { cwd: leaseRepo.wt, unsetProject: true })), 'unset');
+    assert.ok(denied(run(L(), { cwd: leaseRepo.wt, projectDir: '' })), 'empty');
+    assert.ok(
+      denied(run(L(), { cwd: leaseRepo.wt, projectDir: '.worktrees/aisdlc-1' })),
+      'relative',
+    );
+    assert.ok(denied(run(L(), { cwd: leaseRepo.wt, projectDir: '.' })), 'dot');
+    // set and valid: unchanged
+    assert.ok(!denied(run(L(), { cwd: leaseRepo.wt, projectDir: leaseRepo.root })));
+    assert.ok(!denied(run(L(), { cwd: leaseRepo.wt, projectDir: leaseRepo.wt })));
   });
 
   it('allows the fully-qualified HEAD:refs/heads/<own> form', () => {
