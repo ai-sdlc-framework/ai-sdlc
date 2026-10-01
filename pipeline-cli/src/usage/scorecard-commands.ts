@@ -25,6 +25,8 @@ import {
   readAssignmentLog,
   writeEvidenceFiles,
 } from './scorecard-sources.js';
+import { REPLAY_TASK_ID } from './replay-run.js';
+import { readReplayResults, renderReplayRows, replayRows } from './replay-report.js';
 import { deriveUnitWeights, describeWeights } from './units.js';
 import { loadUsageConfig } from './usage-config.js';
 import type { UsageIo, UsageViewDeps } from './commands.js';
@@ -55,12 +57,27 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
           choices: ['text', 'json', 'csv'] as const,
           default: 'text',
         })
+        .option('replay-results', {
+          type: 'string',
+          array: true,
+          default: [] as string[],
+          description: 'Reviewer replay results file to add reviewer rows from (repeatable)',
+        })
         .option('write-evidence', {
           type: 'string',
           description: 'Write one JSON evidence file per cell into this directory',
         }),
     async (argv) => {
       const now = deps.now?.() ?? new Date();
+      const replayFiles = readReplayResults(
+        (argv['replay-results'] as string[]).map((p) => resolve(p)),
+      );
+      if (typeof replayFiles === 'string') {
+        io.err(`${replayFiles}\n`);
+        io.exit(1);
+        return;
+      }
+      const replay = replayRows(replayFiles);
       let from: Date | undefined;
       if (argv.since !== undefined) {
         from = new Date(argv.since);
@@ -91,7 +108,8 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
         { scope: 'framework', repo, ...(from ? { from } : {}) },
         { dir: deps.usageDir },
       )) {
-        if (r.taskId) records.push(r);
+        // Replay calls carry the `replay` task id and are not real task cost.
+        if (r.taskId && r.taskId !== REPLAY_TASK_ID) records.push(r);
       }
 
       const outcomes = deriveOutcomes(
@@ -118,11 +136,16 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
         unitsNote: describeWeights(weights),
       };
 
-      if (argv.format === 'json') io.out(renderScorecardJson(card));
-      else if (argv.format === 'csv') {
+      if (argv.format === 'json') {
+        const json = JSON.parse(renderScorecardJson(card)) as Record<string, unknown>;
+        io.out(`${JSON.stringify(replay.length ? { ...json, replay } : json, null, 2)}\n`);
+      } else if (argv.format === 'csv') {
         io.out(renderScorecardCsv(card));
         io.err(`${card.unitsNote}\n`);
-      } else io.out(renderScorecardText(card));
+      } else {
+        io.out(renderScorecardText(card));
+        io.out(renderReplayRows(replay));
+      }
 
       if (argv['write-evidence']) {
         const paths = writeEvidenceFiles(resolve(argv['write-evidence']), card, {
