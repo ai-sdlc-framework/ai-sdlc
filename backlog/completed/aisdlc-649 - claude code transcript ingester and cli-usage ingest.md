@@ -100,16 +100,47 @@ and A3, and the OQ-1 resolution.
 10. **README:** a `cli-usage ingest` section in `pipeline-cli/README.md`.
 
 ## Acceptance Criteria
-- [ ] A synthetic project with one session and two subagent transcripts ingests to the expected records, with agent roles taken from the sidecars and `main-session` for the session file.
-- [ ] A message that appears on three lines produces one record.
-- [ ] A second `ingest` run with no new lines writes nothing; appending lines to a transcript ingests only the new calls.
-- [ ] A truncated final line, an unknown field and a missing sidecar do not fail the run, and the affected transcript is retried on the next run.
-- [ ] A transcript whose `cwd` is inside a repository with `.ai-sdlc/` yields `framework` records with `repo`, and with `taskId` when the path contains a worktree segment.
-- [ ] A transcript whose `cwd` has no `.ai-sdlc/` ancestor yields `other` records containing none of `repo`, `taskId`, `source`, working directory, branch or description (asserted field by field).
-- [ ] `AI_SDLC_USAGE_SCOPE=framework-only` writes no `other` records.
-- [ ] Lines with model `<synthetic>` produce no model-call record, and one carrying a limit notice produces a limit event with no message text.
-- [ ] `node pipeline-cli/bin/cli-usage.mjs ingest --json` reports scanned, written, skipped and error counts, and the bin-invocation test covers the new shim.
-- [ ] The hook-triggered run returns control within the hook's time limit on a projects directory of 500 synthetic transcripts, and a failing ingester does not fail the hook.
-- [ ] No ledger record or log line contains any text from a message body.
+- [x] A synthetic project with one session and two subagent transcripts ingests to the expected records, with agent roles taken from the sidecars and `main-session` for the session file.
+- [x] A message that appears on three lines produces one record.
+- [x] A second `ingest` run with no new lines writes nothing; appending lines to a transcript ingests only the new calls.
+- [x] A truncated final line, an unknown field and a missing sidecar do not fail the run, and the affected transcript is retried on the next run.
+- [x] A transcript whose `cwd` is inside a repository with `.ai-sdlc/` yields `framework` records with `repo`, and with `taskId` when the path contains a worktree segment.
+- [x] A transcript whose `cwd` has no `.ai-sdlc/` ancestor yields `other` records containing none of `repo`, `taskId`, `source`, working directory, branch or description (asserted field by field).
+- [x] `AI_SDLC_USAGE_SCOPE=framework-only` writes no `other` records.
+- [x] Lines with model `<synthetic>` produce no model-call record, and one carrying a limit notice produces a limit event with no message text.
+- [x] `node pipeline-cli/bin/cli-usage.mjs ingest --json` reports scanned, written, skipped and error counts, and the bin-invocation test covers the new shim.
+- [x] The hook-triggered run returns control within the hook's time limit on a projects directory of 500 synthetic transcripts, and a failing ingester does not fail the hook.
+- [x] No ledger record or log line contains any text from a message body.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+Added the Claude Code transcript ingester (`pipeline-cli/src/usage/`), the `cli-usage ingest` command, and detached, time-limited triggers from the plugin Stop and SessionStart hooks and the orchestrator tick. Calls are attributed by agent role, scope (framework vs other, with other-scope records stripped), task and billing pool, deduplicated by message id, and written through the usage ledger store.
+
+## Changes
+- `pipeline-cli/src/usage/*` (new): transcript parsing, attribution, line reader, ingester, launcher, with tests
+- `pipeline-cli/src/cli/usage.ts`, `pipeline-cli/bin/cli-usage.mjs`, `pipeline-cli/package.json` (bin entry), `pipeline-cli/README.md`
+- `ai-sdlc-plugin/hooks/usage-ingest.{js,sh}` + test, both `plugin.json` manifests (Stop and SessionStart hooks)
+- `pipeline-cli/src/orchestrator/loop.ts`, `pipeline-cli/src/cli/orchestrator.ts`: tick trigger (production entry only)
+- `reference/src/usage/index.ts`: one-line re-export of `withUsageLock`
+
+## Design decisions
+- **Hook binary resolution** uses only trusted locations (env, plugin install, plugin-relative monorepo path); nothing derived from the current project; children run with a neutral working directory.
+- **Scope** needs both `.ai-sdlc/` and `.git` at a repository root and never treats the home directory as a root.
+- **Billing pool** is decided only by the transcript's stated entrypoint; otherwise unknown.
+- **Limit events** are appended under the ledger lock with only a timestamp, session id and fixed category.
+
+## Verification
+- `pnpm build` — clean
+- New tests pass (ingester, CLI, launcher, hook gate); about 98% line coverage on `pipeline-cli/src/usage/`
+- `pnpm lint`, `pnpm format:check`, `pnpm dark-code:check`, validate-schemas — clean
+- AC 12 (root `pnpm test`): not fully green locally; the bin-invocation `pnpm exec` probes and some TUI tests also fail on clean origin/main, and the verify-runtime and attestation suites fail only inside `.worktrees/`; CI to confirm
+- 3 parallel reviews approved after 2 rounds (round 1 found a critical in the hook binary resolution, fixed)
+
+## Follow-up
+- AISDLC-663 tracks unifying the limit-event writers of this ingester and the Codex ingester.
+- Declined: not filed by this task; requiring absolute paths for the env-provided binary locations in the usage hook (security review minor) is pending an operator decision.
+- Declined: not filed by this task; a batch cursor read in the reference store (cursors.json is re-parsed per call) is pending an operator decision.
+- Declined: not filed by this task; registering the `usage.ingest` capability in the doctor registry is pending an operator decision.
