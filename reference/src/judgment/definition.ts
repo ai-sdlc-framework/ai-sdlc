@@ -40,6 +40,23 @@ export interface JudgmentDefinition<I, D> {
   egressClass: EgressClass;
   direction: JudgmentDirection;
   riskClass: JudgmentRiskClass;
+  /**
+   * What the caller does when a seam judgment abstains or escalates: the pending
+   * sentinel. Required (exactly `'pending'`) for `riskClass: 'seam'`.
+   */
+  fallback?: 'pending';
+  /**
+   * True when ANY outcome can result in less review than the deterministic path would
+   * apply (fewer or cheaper reviewers, a skipped gate, an auto-approval, a lowered bar,
+   * a lower tier). Requires `riskClass: 'relax'`.
+   */
+  reducesReview?: boolean;
+  /**
+   * Names of the outcomes (the strings `compose` uses in its decisions) that reduce
+   * review. A non-empty list implies `reducesReview: true`. A seam definition that is
+   * `bidirectional` must declare this as an empty array.
+   */
+  reducingOutcomes?: readonly string[];
   /** Name of the capability this judgment serves. */
   capabilityId?: string;
   /** Pure: selects only the fields the questions need. Must not truncate. */

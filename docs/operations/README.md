@@ -61,6 +61,12 @@ Admission filter that ensures tasks are properly specified before agent dispatch
 
 **RFC:** [`spec/rfcs/RFC-0011-definition-of-ready-gate.md`](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md)
 
+### Judgment Layer
+
+| Runbook | Description |
+|---------|-------------|
+| [`judgment-definitions.md`](judgment-definitions.md) | Registration-time safety rules for judgment definitions (`fallback`, `reducesReview`, `reducingOutcomes`) |
+
 ---
 
 ### Signal Ingestion Pipeline
