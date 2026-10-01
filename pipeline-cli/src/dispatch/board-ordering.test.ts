@@ -272,16 +272,33 @@ describe('requeueStaleInflight', () => {
     expect(readInflightManifest(board, 'T-1')).toBeDefined();
   });
 
-  it('keeps the queue position and leaves no temporary file when requeueing', () => {
-    writeManifest(board, mk('T-1'));
+  it('puts a requeued task back at its enqueue position, not its claim time', () => {
+    const enqueued = Date.parse('2026-05-20T09:00:00.000Z');
+    writeManifest(board, mk('T-1', { dispatchedAt: new Date(enqueued).toISOString() }));
+    writeManifest(board, mk('T-2'));
+    const t1 = path.join(board, 'queue', 'T-1.dispatch.json');
+    _setMtimeForTest(t1, enqueued);
+    _setMtimeForTest(path.join(board, 'queue', 'T-2.dispatch.json'), enqueued + 60_000);
     const claim = claimNext(board, 'in-session-agent');
-    const old = 1_000_000_000;
-    _setMtimeForTest(claim.manifestPath ?? '', old);
+    expect(claim.manifest?.taskId).toBe('T-1');
+    _setMtimeForTest(claim.manifestPath ?? '', now().getTime() - 3_600_000);
     expect(requeueStaleInflight(board, { now, staleMs: 1000 }).requeued).toHaveLength(1);
     const queueFile = path.join(board, 'queue', 'T-1.dispatch.json');
-    expect(statSync(queueFile).mtimeMs).toBe(old);
-    expect(readdirSync(path.join(board, 'queue'))).toEqual(['T-1.dispatch.json']);
+    expect(statSync(queueFile).mtimeMs).toBe(enqueued);
+    expect(readdirSync(path.join(board, 'queue')).sort()).toEqual([
+      'T-1.dispatch.json',
+      'T-2.dispatch.json',
+    ]);
     expect(readdirSync(path.join(board, 'inflight'))).toEqual([]);
+    expect(claimNext(board, 'in-session-agent').manifest?.taskId).toBe('T-1');
+  });
+
+  it('stamps the claim time so an old queued task is not reaped at once', () => {
+    writeManifest(board, mk('T-1'));
+    const queued = path.join(board, 'queue', 'T-1.dispatch.json');
+    _setMtimeForTest(queued, Date.now() - 7 * 24 * 3_600_000);
+    const claim = claimNext(board, 'in-session-agent');
+    expect(Date.now() - statSync(claim.manifestPath ?? '').mtimeMs).toBeLessThan(60_000);
   });
 
   it('leaves a live manifest alone', () => {
@@ -595,8 +612,8 @@ describe('worker identity and hierarchy.board capability', () => {
 });
 
 describe('requeue and unblock keep FIFO position', () => {
-  it('requeueInflight preserves mtime, clears inflight files and refuses a queue clash', () => {
-    writeManifest(board, mk('T-1'));
+  it('requeueInflight restores the enqueue time, clears inflight files and refuses a queue clash', () => {
+    writeManifest(board, mk('T-1', { dispatchedAt: new Date(1_000_000).toISOString() }));
     claimNext(board, 'in-session-agent');
     const inflight = path.join(board, 'inflight', 'T-1.dispatch.json');
     _setMtimeForTest(inflight, 1_000_000);
