@@ -49,6 +49,27 @@ describe('Step 7 — buildReviewPrompts', () => {
     expect(r.diff).toContain('diff content');
   });
 
+  it('returns the resolved model per reviewer (security on opus, others on sonnet)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('d\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+      artifactsDir: join(tmp, 'arts'),
+    });
+    expect(r.prompts.map((p) => [p.reviewer, p.model, p.modelArm])).toEqual([
+      ['code-reviewer', 'claude-sonnet-4-6', 'default'],
+      ['test-reviewer', 'claude-sonnet-4-6', 'default'],
+      ['security-reviewer', 'claude-opus-4-6', 'default'],
+    ]);
+  });
+
   // AISDLC-617 — opt-in merged reviewer set: exactly 2 reviewers. Opted in
   // via the operator/CI-controlled env var (the only trusted A/B lever from
   // inside a PR-controlled worktree — see the security test below).

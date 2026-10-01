@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildCli } from './index.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
@@ -68,6 +68,52 @@ function stdoutJson(): unknown {
 }
 
 describe('CLI router', () => {
+  it('resolve-model emits the default model/arm and logs the assignment', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'cli demo', status: 'To Do' });
+    const arts = join(tmp, 'arts');
+    setArgv(
+      'resolve-model',
+      'security-reviewer',
+      '--task-id',
+      'AISDLC-1',
+      '--source-kind',
+      'backlog',
+      '--artifacts-dir',
+      arts,
+      '--work-dir',
+      tmp,
+    );
+    await buildCli().parseAsync();
+    expect(stdoutJson()).toEqual({ model: 'claude-opus-4-6', arm: 'default', reason: 'default' });
+    expect(readFileSync(join(arts, 'assignments.jsonl'), 'utf8')).toContain('AISDLC-1');
+  });
+
+  it('resolve-model --skip-log does not write and tolerates an unknown task', async () => {
+    const arts = join(tmp, 'arts2');
+    setArgv(
+      'resolve-model',
+      'correctness-reviewer',
+      '--task-id',
+      'NOPE-1',
+      '--skip-log',
+      '--task-class',
+      'bug',
+      '--artifacts-dir',
+      arts,
+      '--work-dir',
+      tmp,
+    );
+    await buildCli().parseAsync();
+    expect(stdoutJson()).toEqual({ model: '', arm: 'default', reason: 'default' });
+    expect(existsSync(join(arts, 'assignments.jsonl'))).toBe(false);
+  });
+
+  it('resolve-model derives the class from the task file when none is given', async () => {
+    setArgv('resolve-model', 'developer', '--task-id', 'GONE-9', '--skip-log', '--work-dir', tmp);
+    await buildCli().parseAsync();
+    expect(stdoutJson()).toMatchObject({ model: 'claude-sonnet-4-6', arm: 'default' });
+  });
+
   it('validate-task emits ok=true for a valid task', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-1', title: 'cli demo', status: 'To Do' });
     setArgv('validate-task', 'AISDLC-1', '--work-dir', tmp);

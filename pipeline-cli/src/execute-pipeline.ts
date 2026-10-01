@@ -228,12 +228,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
 
     // Step 5 — build developer prompt
     logger.progress('05-build-dev-prompt', `iteration 1`);
-    const { prompt: devPrompt } = await buildDeveloperPrompt({
+    const { prompt: devPrompt, model: devModel } = await buildDeveloperPrompt({
       taskId: opts.taskId,
       task,
       branch: branch.branch,
       worktreePath: branch.worktreePath,
       iteration: 1,
+      sourceKind: opts.sourceKind,
     });
 
     // Step 5b — spawn developer (LLM)
@@ -241,6 +242,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       type: 'developer',
       prompt: devPrompt,
       cwd: branch.worktreePath,
+      ...(devModel ? { model: devModel } : {}),
     });
 
     // Step 6 — parse developer return (AISDLC-176: retry once on JSON
@@ -298,6 +300,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       runner: opts.runner,
+      sourceKind: opts.sourceKind,
     });
 
     // Step 7b — spawn 3 reviewers in parallel
@@ -306,6 +309,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
         type: p.reviewer,
         prompt: p.prompt,
         cwd: branch.worktreePath,
+        ...(p.model ? { model: p.model } : {}),
       })),
     );
     const initialVerdicts: ReviewerVerdict[] = reviewerResults.map((r, i) =>
@@ -332,6 +336,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       initialDeveloperReturn: initialDev,
       initialVerdict,
       maxIterations: opts.maxReviewIterations ?? 2,
+      sourceKind: opts.sourceKind,
       spawner: opts.spawner,
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry

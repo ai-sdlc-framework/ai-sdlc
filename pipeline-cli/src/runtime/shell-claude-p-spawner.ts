@@ -75,6 +75,8 @@ import {
   type SubagentType,
   type SubprocessDiagnostics,
 } from '../types.js';
+import { DEFAULT_ROLE_MODELS } from '../routing/default-table.js';
+import { resolveModel } from '../routing/resolve-model.js';
 
 /**
  * Subset of `child_process.spawn` we depend on. Tests inject a fake to assert
@@ -114,11 +116,12 @@ export interface ShellClaudePSpawnerOptions {
    */
   permissionMode?: string;
   /**
-   * Per-role model override. Merges with `DEFAULT_MODELS` (the same per-role
-   * split `ClaudeCliInlineSpawner` uses: sonnet for dev/code/test, opus for
-   * security). When a model is resolved for `opts.type`, the spawner emits
-   * `--model <model>` so the subagent runs on the intended tier instead of
-   * inheriting the session default. AISDLC-349 inline code-review MAJOR fix.
+   * Explicit per-role model pin. Wins over the routing table. When no pin
+   * exists the model comes from `opts.model` (already resolved by Steps 5/7)
+   * or from the routing resolver, whose built-in default is sonnet for
+   * dev/code/test and opus for security. When a model is resolved for
+   * `opts.type`, the spawner emits `--model <model>` so the subagent runs on
+   * the intended tier instead of inheriting the session default.
    */
   models?: Partial<Record<SubagentType, string>>;
 }
@@ -130,12 +133,7 @@ export interface ShellClaudePSpawnerOptions {
  * `ClaudeCliInlineSpawner`'s mirror copy of these defaults; that spawner
  * was removed in RFC-0041 Phase 3.3.)
  */
-const DEFAULT_MODELS: Partial<Record<SubagentType, string>> = {
-  developer: 'claude-sonnet-4-6',
-  'code-reviewer': 'claude-sonnet-4-6',
-  'test-reviewer': 'claude-sonnet-4-6',
-  'security-reviewer': 'claude-opus-4-6',
-};
+export const DEFAULT_MODELS: Partial<Record<SubagentType, string>> = DEFAULT_ROLE_MODELS;
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 
@@ -145,7 +143,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   private readonly defaultTimeoutMs: number;
   private readonly extraArgs: readonly string[];
   private readonly permissionMode: string;
-  private readonly models: Partial<Record<SubagentType, string>>;
+  private readonly pinnedModels: Partial<Record<SubagentType, string>>;
 
   constructor(options: ShellClaudePSpawnerOptions = {}) {
     this.binary = options.binary ?? 'claude';
@@ -156,7 +154,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.extraArgs = options.extraArgs ?? [];
     this.permissionMode = options.permissionMode ?? 'bypassPermissions';
-    this.models = { ...DEFAULT_MODELS, ...(options.models ?? {}) };
+    this.pinnedModels = { ...(options.models ?? {}) };
   }
 
   async spawnParallel(opts: SpawnOpts[]): Promise<SubagentResult[]> {
@@ -168,11 +166,28 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   }
 
   /**
+   * Model for a spawn: explicit pin, then the model Steps 5/7 already
+   * resolved, then the routing resolver (table on the base ref, else the
+   * built-in per-role default). Resolution here is read-only: no task id is
+   * known, so nothing is logged and nothing is explored.
+   */
+  private modelFor(opts: SpawnOpts): string | undefined {
+    const pinned = this.pinnedModels[opts.type];
+    if (pinned) return pinned;
+    if (opts.model) return opts.model;
+    try {
+      return resolveModel({ role: opts.type, workDir: opts.cwd, record: false }).model;
+    } catch {
+      return DEFAULT_ROLE_MODELS[opts.type];
+    }
+  }
+
+  /**
    * Build the argv list for a given subagent invocation. Exposed (rather than
    * inlined) so tests can assert the exact CLI shape without invoking `spawn`.
    */
   buildArgv(opts: SpawnOpts): string[] {
-    const model = this.models[opts.type];
+    const model = this.modelFor(opts);
     const modelArgv = model ? ['--model', model] : [];
     return [
       '--print',

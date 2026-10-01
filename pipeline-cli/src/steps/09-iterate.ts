@@ -70,19 +70,21 @@ export async function iterateReviewLoop(
     iteration++;
 
     const feedback = formatFeedback(currentVerdict.verdicts);
-    const { prompt: devPrompt } = await buildDeveloperPrompt({
+    const { prompt: devPrompt, model: devModel } = await buildDeveloperPrompt({
       taskId: opts.taskId,
       task: opts.task,
       branch: opts.branch,
       worktreePath: opts.worktreePath,
       reviewerFeedback: feedback,
       iteration,
+      sourceKind: opts.sourceKind,
     });
 
     const devResult = await opts.spawner.spawn({
       type: 'developer',
       prompt: devPrompt,
       cwd: opts.worktreePath,
+      ...(devModel ? { model: devModel } : {}),
     });
     // AISDLC-176 — retry once on JSON envelope contract violation. The
     // iteration loop honors the same retry contract as the initial Step
@@ -130,13 +132,20 @@ export async function iterateReviewLoop(
       branch: opts.branch,
       worktreePath: opts.worktreePath,
       workDir: opts.worktreePath,
+      iteration,
+      sourceKind: opts.sourceKind,
     });
 
     const newVerdicts: ReviewerVerdict[] = await Promise.all(
       prompts.map((p, i) =>
         spawnReviewerWithRetry(
           opts.spawner!,
-          { type: p.reviewer, prompt: p.prompt, cwd: opts.worktreePath },
+          {
+            type: p.reviewer,
+            prompt: p.prompt,
+            cwd: opts.worktreePath,
+            ...(p.model ? { model: p.model } : {}),
+          },
           REVIEWER_TYPES[i],
         ),
       ),

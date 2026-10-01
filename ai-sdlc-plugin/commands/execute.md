@@ -777,10 +777,18 @@ Return the JSON shape documented in your agent definition.
 When invoking the Agent tool for the developer agent:
 
 - `subagent_type: developer`
+- `model`: the routed model from the block below, passed only when the resolved arm is not `default` (the `default` arm leaves the agent definition's own model in place, exactly as before)
 - The agent's cwd will be the worktree path
 - The PreToolUse hook walks up from the agent's cwd to find `<worktree>/.active-task` (written in Step 4) and resolves `permittedExternalPaths` from that task's frontmatter for cross-repo writes
 
 Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them to the user as they appear.
+
+```bash
+# Resolve the developer model from the routing table on origin/main (none present = default arm).
+ROUTE_SOURCE_KIND=backlog; [ "$ARG_FORM" = "gh-issue" ] && ROUTE_SOURCE_KIND=gh-issue
+DEV_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model developer --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration 1 --artifacts-dir "$WORKTREE_PATH/.ai-sdlc/artifacts" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
+echo "[ai-sdlc-progress] Step 5: developer model route: $DEV_ROUTE"
+```
 
 ```bash
 # AISDLC-481: Check cancel before developer invocation (step boundary).
@@ -1140,6 +1148,17 @@ Each spawned-reviewer prompt should contain:
 - The branch name + base (`main`)
 - **The diff-binding nonce marker (AISDLC-573):** append the literal value of `$PR_NONCE_MARKER` verbatim to the prompt (e.g. as its own line: `Diff-binding token (for attestation, do not omit from your response): $PR_NONCE_MARKER`). This is what allows `computeHarnessTranscriptHash` (AISDLC-570) to find the nonce in the reviewer's own harness-captured transcript at sign time — omitting it means `harnessTranscriptHash` silently stays `null` for that reviewer's leaf.
 
+For each reviewer, resolve its routed model and pass it as the Agent call's `model` only when the arm is not `default`:
+
+```bash
+ROUTE_SOURCE_KIND=backlog; [ "${ARG_FORM:-}" = "gh-issue" ] && ROUTE_SOURCE_KIND=gh-issue
+for name in $SELECTED; do
+  REVIEWER_AGENT=$(_resolve_reviewer_agent "$name")
+  REVIEWER_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$REVIEWER_AGENT" --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration "${iteration_count:-1}" --artifacts-dir "$WORKTREE_PATH/.ai-sdlc/artifacts" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
+  echo "[ai-sdlc-progress] Step 7b: $REVIEWER_AGENT model route: $REVIEWER_ROUTE"
+done
+```
+
 Each returns a verdict JSON: `{ approved, findings, summary }`. When the classifier fell open (`fellOpen: true`), spawn ALL 3 — the existing safety semantics are preserved (AC-4).
 
 > **Cost note (AC-8).** The classifier-decision line is also surfaced in the PR body (Step 11) as `Classifier decision: [<reviewers>] (confidence: <N.NN>)`. That gives the operator a per-PR view of how often we successfully scope down vs. fall open — feedback for the calibration log.
@@ -1219,9 +1238,9 @@ After all spawned reviewer Agent calls complete and each reviewer's verdict JSON
 # Harness is determined per-reviewer below (security-reviewer always runs under
 # claude-code; code-reviewer/test-reviewer use the codex variant when available).
 #
-# Model is informational; use the known subagent model if set, otherwise a
-# descriptive placeholder that the operator can update from reviewer metadata.
-EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-claude-sonnet-4-6}"
+# Model is the routed model for the reviewer (resolved without re-logging);
+# AISDLC_REVIEWER_MODEL still wins, and a role with no routed model keeps the
+# previous informational placeholder.
 CODEX_AVAILABLE="false"
 if which codex >/dev/null 2>&1; then
   CODEX_AVAILABLE="true"
@@ -1240,6 +1259,8 @@ for REVIEWER_NAME in $SELECTED; do
   # in Step 7b) so the harness metadata in the Merkle leaf stays consistent with
   # the agent that actually ran (AISDLC-383.8 code review MAJOR finding).
   AGENT_NAME=$(_resolve_reviewer_agent "$REVIEWER_NAME")
+  EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$AGENT_NAME" --task-id "$TASK_ID" --source-kind "${ROUTE_SOURCE_KIND:-backlog}" --iteration "${iteration_count:-1}" --artifacts-dir "$WORKTREE_PATH/.ai-sdlc/artifacts" --work-dir "$(pwd)" --skip-log 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).model||"")}catch{}})')}"
+  EMIT_MODEL="${EMIT_MODEL:-claude-sonnet-4-6}"
   case "$REVIEWER_NAME" in
     testing)
       REVIEWER_HARNESS="codex"

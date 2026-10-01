@@ -72,4 +72,15 @@ describe('Step 5 — buildDeveloperPrompt', () => {
     expect(r.prompt).toContain('## References\n(none)');
     expect(r.prompt).toContain('## Permitted external paths (cross-repo writes)\nnone');
   });
+
+  it('returns the resolved developer model (default arm without a repo table)', async () => {
+    const r = await buildDeveloperPrompt({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: '/tmp/wt',
+    });
+    expect(r.model).toBe('claude-sonnet-4-6');
+    expect(r.modelArm).toBe('default');
+  });
 });

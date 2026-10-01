@@ -5353,6 +5353,86 @@ export const modelCallRecordV1Schema = {
   },
 } as const;
 
+export const modelRoutingV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/model-routing.v1.schema.json',
+  title: 'AI-SDLC ModelRouting',
+  description:
+    'Per-repository model routing table (RFC-0050 B2). Lives at .ai-sdlc/model-routing.yaml and is read from the base branch only. Maps each agent role and task class to a model, with optional candidate models for deterministic exploration.',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'spec'],
+  properties: {
+    apiVersion: { $ref: 'common.schema.json#/$defs/apiVersion' },
+    kind: { type: 'string', const: 'ModelRouting' },
+    metadata: { $ref: 'common.schema.json#/$defs/metadata' },
+    spec: {
+      type: 'object',
+      required: ['strength', 'cells'],
+      additionalProperties: false,
+      properties: {
+        strength: {
+          type: 'array',
+          minItems: 1,
+          uniqueItems: true,
+          items: { type: 'string', minLength: 1 },
+          description:
+            "Models ordered weakest to strongest. Defines what 'stronger' means for overrides; every model named in the table must appear here.",
+        },
+        exploreShare: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0,
+          description: "Share of eligible tasks sent to a candidate instead of the cell's model.",
+        },
+        salt: {
+          type: 'string',
+          description: 'Salt mixed into the assignment hash so a new salt reshuffles assignments.',
+        },
+        cells: {
+          type: 'object',
+          description: "Role -> task class (or '*') -> cell.",
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: { $ref: '#/$defs/cell' },
+          },
+        },
+        evidence: {
+          type: 'object',
+          description: "Evidence behind a cell, keyed '<role>.<taskClass>'.",
+          additionalProperties: {
+            type: 'object',
+            properties: {
+              report: { type: 'string' },
+              n: { type: 'integer', minimum: 0 },
+              firstPassApproval: { type: 'number', minimum: 0, maximum: 1 },
+            },
+            additionalProperties: true,
+          },
+        },
+      },
+    },
+  },
+  $defs: {
+    cell: {
+      type: 'object',
+      required: ['model'],
+      additionalProperties: false,
+      properties: {
+        model: { type: 'string', minLength: 1 },
+        candidates: {
+          type: 'array',
+          minItems: 1,
+          uniqueItems: true,
+          items: { type: 'string', minLength: 1 },
+          description:
+            'Models eligible to receive the exploration share. Never allowed on the security reviewer role.',
+        },
+      },
+    },
+  },
+} as const;
+
 export const orchestratorEventsV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/orchestrator-events.v1.schema.json',
@@ -9084,6 +9164,7 @@ export const SCHEMAS: Record<string, object> = {
   'journey.v1.schema.json': journeyV1Schema,
   'metric-snapshot.v1.schema.json': metricSnapshotV1Schema,
   'model-call-record.v1.schema.json': modelCallRecordV1Schema,
+  'model-routing.v1.schema.json': modelRoutingV1Schema,
   'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,

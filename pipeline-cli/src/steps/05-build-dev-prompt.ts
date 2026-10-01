@@ -13,6 +13,9 @@
  * @module steps/05-build-dev-prompt
  */
 
+import { resolveModel } from '../routing/resolve-model.js';
+import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
+import { taskClassOf } from '../routing/task-class.js';
 import type { DeveloperPromptResult, TaskSpec } from '../types.js';
 
 export interface BuildDeveloperPromptOptions {
@@ -24,6 +27,10 @@ export interface BuildDeveloperPromptOptions {
   reviewerFeedback?: string;
   /** Iteration number — set to >1 to inject the feedback section (default 1). */
   iteration?: number;
+  /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
+  sourceKind?: 'backlog' | 'gh-issue';
+  /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
+  artifactsDir?: string;
 }
 
 export async function buildDeveloperPrompt(
@@ -65,5 +72,23 @@ export async function buildDeveloperPrompt(
     feedbackBlock +
     `\nReturn the JSON shape documented in your agent definition.\n`;
 
-  return { prompt, task: opts.task };
+  // Resolve the developer model. Recording is best-effort inside resolveModel
+  // and cannot change the prompt or the model returned here.
+  const routed = resolveModel({
+    role: 'developer',
+    taskClass: taskClassOf(opts.task.rawBody),
+    taskId: opts.taskId,
+    sourceKind: opts.sourceKind,
+    iteration,
+    workDir: opts.worktreePath,
+    artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+    record: routingRecordable(opts.worktreePath, opts.artifactsDir),
+  });
+
+  return {
+    prompt,
+    task: opts.task,
+    ...(routed.model !== undefined ? { model: routed.model } : {}),
+    modelArm: routed.arm,
+  };
 }

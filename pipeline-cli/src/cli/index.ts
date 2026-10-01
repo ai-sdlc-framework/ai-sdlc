@@ -62,6 +62,8 @@ import { readFileSync } from 'node:fs';
 import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
+import { resolveModel } from '../routing/resolve-model.js';
+import { taskClassOf } from '../routing/task-class.js';
 import { cleanupTask } from '../steps/13-cleanup.js';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { finalizeTask } from '../steps/10-finalize.js';
@@ -566,6 +568,52 @@ export function buildCli(): Argv {
             workDir: argv['work-dir'] as string,
           });
           emit(result);
+        },
+      )
+      // Model routing (RFC-0050 B2) - resolved model for one agent role
+      .command(
+        'resolve-model <role>',
+        'Resolve the model for an agent role from the routing table on the base ref',
+        (y) =>
+          y
+            .positional('role', { type: 'string', demandOption: true })
+            .option('task-id', { type: 'string', describe: 'Task id (needed for exploration)' })
+            .option('task-class', {
+              type: 'string',
+              describe: 'Estimation class (default: read from the task file, else uncategorized)',
+            })
+            .option('source-kind', { type: 'string', choices: ['backlog', 'gh-issue'] as const })
+            .option('iteration', { type: 'number', default: 1 })
+            .option('artifacts-dir', { type: 'string' })
+            .option('skip-log', {
+              type: 'boolean',
+              default: false,
+              describe: 'Resolve without appending to the assignment log',
+            }),
+        async (argv) => {
+          let taskClass = argv['task-class'] as string | undefined;
+          if (!taskClass && argv['task-id']) {
+            try {
+              const v = await validateTask({
+                taskId: argv['task-id'] as string,
+                workDir: argv['work-dir'] as string,
+              });
+              taskClass = taskClassOf(v.task?.rawBody);
+            } catch {
+              taskClass = undefined;
+            }
+          }
+          const result = resolveModel({
+            role: argv.role as string,
+            taskId: argv['task-id'] as string | undefined,
+            taskClass,
+            sourceKind: argv['source-kind'] as 'backlog' | 'gh-issue' | undefined,
+            iteration: argv.iteration as number,
+            workDir: argv['work-dir'] as string,
+            artifactsDir: argv['artifacts-dir'] as string | undefined,
+            record: !(argv['skip-log'] as boolean),
+          });
+          emit({ model: result.model ?? '', arm: result.arm, reason: result.reason });
         },
       )
       // Step 8

@@ -330,6 +330,10 @@ export interface DeveloperPromptResult {
   prompt: string;
   /** The task spec that was rendered (echo for caller convenience). */
   task: TaskSpec;
+  /** Model resolved for the developer role; undefined when none is pinned. */
+  model?: string;
+  /** Which routing arm chose the model. */
+  modelArm?: 'table' | 'explore' | 'override' | 'default';
 }
 
 // ── Step 6 — Parse developer return ──────────────────────────────────
@@ -384,6 +388,10 @@ export type ReviewerType =
 export interface ReviewPrompt {
   reviewer: ReviewerType;
   prompt: string;
+  /** Model resolved for this reviewer role; undefined when none is pinned. */
+  model?: string;
+  /** Which routing arm chose the model. */
+  modelArm?: 'table' | 'explore' | 'override' | 'default';
 }
 
 export interface BuildReviewPromptsResult {
@@ -427,6 +435,8 @@ export interface AggregatedVerdict {
 
 export interface IterateReviewLoopOptions {
   taskId: string;
+  /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
+  sourceKind?: 'backlog' | 'gh-issue';
   /**
    * Path to the per-task git worktree. Steps 5/7 inside the loop need to read
    * the diff against the worktree HEAD, so this is the worktree path, NOT the
@@ -600,6 +610,11 @@ export interface SpawnOpts {
   cwd: string;
   /** Per-spawn timeout in ms. Defaults to 30 minutes if the spawner respects it. */
   timeout?: number;
+  /**
+   * Model already resolved by the routing table for this role (Steps 5 and 7
+   * return it). When absent the spawner resolves the role itself.
+   */
+  model?: string;
 }
 
 /**

@@ -56,6 +56,7 @@ const ARTIFACT_SCHEMA_FILES = {
   ModelCallRecord: 'model-call-record.v1.schema.json',
   HierarchyRoster: 'hierarchy-roster.v1.schema.json',
   UsageConfig: 'usage-config.v1.schema.json',
+  ModelRouting: 'model-routing.v1.schema.json',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
@@ -247,6 +248,13 @@ export function validateHierarchyRoster<T = unknown>(data: unknown): ValidationR
  */
 export function validateUsageConfig<T = unknown>(data: unknown): ValidationResult<T> {
   return validateArtifact<T>('UsageConfig', data);
+}
+
+/**
+ * Convenience wrapper for the RFC-0050 ModelRouting table shape.
+ */
+export function validateModelRouting<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('ModelRouting', data);
 }
 
 /**

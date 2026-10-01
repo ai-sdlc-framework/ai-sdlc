@@ -329,7 +329,7 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
   // ── Step 5 — Build developer prompt ─────────────────────────────────
   server.tool(
     'pipeline_step_5_build_dev_prompt',
-    'RFC-0012 Step 5: render the developer subagent prompt from the TaskSpec. Pure function — no side effects.',
+    'RFC-0012 Step 5: render the developer subagent prompt from the TaskSpec. Also returns the routed `model` (and `modelArm`) to pass on the agent call; the assignment log is appended best-effort.',
     {
       taskId: z.string(),
       task: taskSpecSchema,
@@ -343,8 +343,12 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
         .number()
         .optional()
         .describe('Iteration number — set to >1 to inject the feedback section (default 1).'),
+      sourceKind: z
+        .enum(['backlog', 'gh-issue'])
+        .optional()
+        .describe('Work source; only backlog work is eligible for model exploration.'),
     },
-    async ({ taskId, task, branch, worktreePath, reviewerFeedback, iteration }) => {
+    async ({ taskId, task, branch, worktreePath, reviewerFeedback, iteration, sourceKind }) => {
       try {
         const result = await runners.buildDeveloperPrompt({
           taskId,
@@ -353,6 +357,7 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
           worktreePath,
           reviewerFeedback,
           iteration,
+          sourceKind,
         });
         return jsonResult(result);
       } catch (err) {
@@ -385,7 +390,7 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
   // ── Step 7 — Build review prompts ───────────────────────────────────
   server.tool(
     'pipeline_step_7_build_review_prompts',
-    'RFC-0012 Step 7: capture the PR diff + changed files and render 3 reviewer-specific prompts (code, test, security).',
+    'RFC-0012 Step 7: capture the PR diff + changed files and render 3 reviewer-specific prompts (code, test, security). Each prompt also carries the routed `model` (and `modelArm`) to pass on the agent call.',
     {
       taskId: z.string(),
       task: taskSpecSchema,
@@ -396,8 +401,22 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
         .boolean()
         .optional()
         .describe('Override the codex-availability detection (test injection).'),
+      sourceKind: z
+        .enum(['backlog', 'gh-issue'])
+        .optional()
+        .describe('Work source; only backlog work is eligible for model exploration.'),
+      iteration: z.number().optional().describe('Review iteration (default 1).'),
     },
-    async ({ taskId, task, branch, worktreePath, workDir, codexAvailable }) => {
+    async ({
+      taskId,
+      task,
+      branch,
+      worktreePath,
+      workDir,
+      codexAvailable,
+      sourceKind,
+      iteration,
+    }) => {
       try {
         const result = await runners.buildReviewPrompts({
           taskId,
@@ -406,6 +425,8 @@ export function registerPipelineTools(server: McpServer, deps: PipelineToolDeps 
           worktreePath,
           workDir,
           codexAvailable,
+          sourceKind,
+          iteration,
         });
         return jsonResult(result);
       } catch (err) {
