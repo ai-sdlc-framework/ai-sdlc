@@ -36,7 +36,7 @@ function call(n: number, over: Partial<ModelCallRecord> = {}): ModelCallRecord {
 const load = (extra = {}) =>
   loadUsagePaneData({ usageDir: dir, now: () => NOW, priceRows: [], ...extra });
 
-describe('loadUsagePaneData', () => {
+describe('loadUsagePaneData', { timeout: 15_000 }, () => {
   it('reports an empty ledger', async () => {
     const d = await load();
     expect(d.empty).toBe(true);
@@ -110,7 +110,7 @@ describe('loadUsagePaneData', () => {
   });
 });
 
-describe('bounded ledger read', () => {
+describe('bounded ledger read', { timeout: 15_000 }, () => {
   const HOUR = 3_600_000;
   const at = (
     hoursAgo: number,
@@ -155,7 +155,7 @@ describe('bounded ledger read', () => {
   });
 });
 
-describe('top consumers ordering and robustness', () => {
+describe('top consumers ordering and robustness', { timeout: 15_000 }, () => {
   const row = (role: string, units: number): ReportRow => ({
     keys: { role },
     calls: 1,

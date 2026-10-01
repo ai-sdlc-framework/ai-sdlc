@@ -15,6 +15,21 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) await new Promise<void>((r) => setImmediate(r));
 }
 
+/** Poll real timers until the frame satisfies the predicate (for tests that do real file I/O). */
+async function waitForFrame(
+  lastFrame: () => string | undefined,
+  predicate: (frame: string) => boolean,
+  { timeoutMs = 10_000, stepMs = 10 } = {},
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const f = lastFrame() ?? '';
+    if (predicate(f)) return f;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for frame; last frame:\n${f}`);
+    await new Promise<void>((r) => setTimeout(r, stepMs));
+  }
+}
+
 function row(key: 'role' | 'model', name: string, units: number): ReportRow {
   return {
     keys: { [key]: name },
@@ -168,12 +183,12 @@ describe('UsagePane', () => {
     const dir = mkdtempSync(join(tmpdir(), 'usage-pane-ui-'));
     try {
       const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
-      await flush();
-      expect(lastFrame() ?? '').toContain('No usage recorded');
+      const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
+      expect(f).toContain('No usage recorded');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('shows unknown when a suspected change has no previous allotment', async () => {
     const data: UsagePaneData = {
@@ -293,15 +308,14 @@ describe('UsagePane', () => {
       );
       appendFileSync(join(dir, ledgerFileForTs(ts)), 'null\n');
       const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
-      await flush();
-      const f = lastFrame() ?? '';
+      const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
       expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
       expect(f).not.toContain(dir);
       expect(f).not.toContain('TypeError');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'shows only the fixed error line for an unreadable usage directory',
@@ -315,8 +329,7 @@ describe('UsagePane', () => {
       chmodSync(dir, 0o000);
       try {
         const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
-        await flush();
-        const f = lastFrame() ?? '';
+        const f = await waitForFrame(lastFrame, (x) => !x.includes('Loading usage'));
         expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
         expect(f).not.toContain('EACCES');
         expect(f).not.toContain(base);
@@ -325,5 +338,6 @@ describe('UsagePane', () => {
         rmSync(base, { recursive: true, force: true });
       }
     },
+    15_000,
   );
 });
