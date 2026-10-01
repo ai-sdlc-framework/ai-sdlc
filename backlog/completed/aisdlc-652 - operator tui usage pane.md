@@ -76,6 +76,9 @@ Added a full-screen usage pane to the operator TUI, opened with `u` and listed i
 - Refresh uses a 15 second poll interval plus the router's refresh key; the interval is cleared on unmount.
 - A failed read renders one fixed error line; the underlying error text and paths are never shown.
 - Rows are single strings with end truncation, so a narrow terminal never wraps a row.
+- Every string from the ledger (model, role, window keys, limit-event fields) goes through one display sanitizer that replaces control characters, bidi overrides and lone surrogates and caps labels at 64 characters; the ledger is never modified.
+- A refresh is skipped while a load is in flight. The ledger read is bounded to the lookback the view needs, doubling until older history cannot change any window start, so numbers match a full read.
+- The pane does not filter malformed ledger records itself: a non-object line makes the shared reader throw and the pane shows its fixed error line, which keeps it consistent with `cli-usage report`.
 
 ## Verification
 - `pnpm build`, `pnpm lint`, `pnpm dark-code:check`, the rfc, docs, follow-up and adopter-string gates clean; `pnpm format:check` reports only the two dashboard files that are also flagged without this change
@@ -84,4 +87,6 @@ Added a full-screen usage pane to the operator TUI, opened with `u` and listed i
 
 ## Follow-up
 - (none)
+- declined: sanitizing control characters and length at the Codex ingester (model id and rate-limit window keys) and the Claude model id filter is a separate ingester change; the pane sanitizes at display
+- declined: making the shared ledger reader skip non-object lines is a reference package change that also affects `cli-usage report`
 - declined: showing the pane in the overview grid is left out because the overview layout has no free slot and the task scopes the pane to a mode

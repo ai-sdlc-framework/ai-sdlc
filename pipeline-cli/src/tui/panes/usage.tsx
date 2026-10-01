@@ -21,6 +21,7 @@ import {
   type UsagePaneData,
   type UsagePaneDeps,
 } from '../../usage/pane-data.js';
+import { sanitizeLabel } from '../../usage/sanitize-label.js';
 import type { ReportRow } from '../../usage/report.js';
 import type { WindowView } from '../../usage/windows.js';
 
@@ -52,7 +53,7 @@ function windowLines(v: WindowView): string[] {
       : 'allotment unknown';
   const limit =
     v.hoursToLimit !== undefined ? `limit in ${v.hoursToLimit.toFixed(1)}h` : 'limit n/a';
-  return [`${v.window} (${v.lengthHours}h)  ${used}`, `  ${allot}  ${limit}`];
+  return [`${sanitizeLabel(v.window)} (${v.lengthHours}h)  ${used}`, `  ${allot}  ${limit}`];
 }
 
 function consumerLine(label: string, r: ReportRow): string {
@@ -63,9 +64,11 @@ function consumerLine(label: string, r: ReportRow): string {
 }
 
 function Row({ children, ...rest }: { children: string } & React.ComponentProps<typeof Text>) {
+  // Defence in depth: whatever a caller built, no control character reaches the
+  // terminal and the row stays on one line.
   return (
-    <Text wrap="truncate-end" {...rest}>
-      {children}
+    <Text {...rest} wrap="truncate-end">
+      {sanitizeLabel(children, Infinity)}
     </Text>
   );
 }
@@ -86,7 +89,9 @@ function Consumers({
         <Row color="gray"> none in this window</Row>
       ) : (
         rows.map((r) => (
-          <Row key={r.keys[key1] ?? ''}>{consumerLine(`  ${r.keys[key1] ?? '(unknown)'}`, r)}</Row>
+          <Row key={r.keys[key1] ?? ''}>
+            {consumerLine(`  ${sanitizeLabel(r.keys[key1] ?? '(unknown)')}`, r)}
+          </Row>
         ))
       )}
     </Box>
@@ -100,27 +105,27 @@ function Body({ data }: { data: UsagePaneData }): React.ReactElement {
   return (
     <Box flexDirection="column">
       {data.windows.flatMap((v) =>
-        windowLines(v).map((l, i) => <Row key={`${v.window}${i}`}>{l}</Row>),
+        windowLines(v).map((l, i) => <Row key={`${v.window}-${i}`}>{l}</Row>),
       )}
       <Consumers
-        title={`TOP CONSUMERS BY ROLE (${data.consumerWindow ?? 'weekly'} window)`}
+        title={`TOP CONSUMERS BY ROLE (${sanitizeLabel(data.consumerWindow ?? 'weekly')} window)`}
         rows={data.topByRole}
         key1="role"
       />
       <Consumers
-        title={`TOP CONSUMERS BY MODEL (${data.consumerWindow ?? 'weekly'} window)`}
+        title={`TOP CONSUMERS BY MODEL (${sanitizeLabel(data.consumerWindow ?? 'weekly')} window)`}
         rows={data.topByModel}
         key1="model"
       />
       <Box flexDirection="column" marginTop={1}>
         <Row>
           {ev
-            ? `Last limit event: ${ev.window} ${ev.usedPercent.toFixed(1)}% at ${ev.ts}`
+            ? `Last limit event: ${sanitizeLabel(ev.window)} ${Number(ev.usedPercent).toFixed(1)}% at ${sanitizeLabel(ev.ts)}`
             : 'Last limit event: none recorded'}
         </Row>
         {ch ? (
           <Row color="yellow">
-            {`Probable allotment change: ${ch.window} ${INT(ch.previousAllotment ?? 0)} -> ${INT(ch.impliedAllotment)} at ${ch.ts}`}
+            {`Probable allotment change: ${sanitizeLabel(ch.window)} ${ch.previousAllotment !== undefined ? INT(ch.previousAllotment) : 'unknown'} -> ${INT(ch.impliedAllotment)} at ${sanitizeLabel(ch.ts)}`}
           </Row>
         ) : null}
       </Box>
@@ -136,6 +141,15 @@ export function UsagePane({ load, deps, intervalMs }: UsagePaneProps = {}): Reac
   loadRef.current = load;
   const depsRef = useRef(deps);
   depsRef.current = deps;
+  const inFlight = useRef(false);
+  const unmounted = useRef(false);
+
+  useEffect(() => {
+    unmounted.current = false;
+    return (): void => {
+      unmounted.current = true;
+    };
+  }, []);
 
   useEffect(() => {
     const handle = setInterval(() => setTick((n) => n + 1), intervalMs ?? USAGE_POLL_INTERVAL_MS);
@@ -143,19 +157,21 @@ export function UsagePane({ load, deps, intervalMs }: UsagePaneProps = {}): Reac
   }, [intervalMs]);
 
   useEffect(() => {
-    let cancelled = false;
+    // A refresh that arrives while a load is still running is skipped, so slow
+    // reads never stack.
+    if (inFlight.current) return;
+    inFlight.current = true;
     const run = async (): Promise<void> => {
       try {
         const data = await (loadRef.current ?? (() => loadUsagePaneData(depsRef.current)))();
-        if (!cancelled) setState({ kind: 'ready', data });
+        if (!unmounted.current) setState({ kind: 'ready', data });
       } catch {
-        if (!cancelled) setState({ kind: 'error' });
+        if (!unmounted.current) setState({ kind: 'error' });
+      } finally {
+        inFlight.current = false;
       }
     };
     void run();
-    return (): void => {
-      cancelled = true;
-    };
   }, [nonce, tick]);
 
   return (

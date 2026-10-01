@@ -174,4 +174,156 @@ describe('UsagePane', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('shows unknown when a suspected change has no previous allotment', async () => {
+    const data: UsagePaneData = {
+      ...DATA,
+      allotmentChange: { ...DATA.allotmentChange!, previousAllotment: undefined },
+    };
+    const { lastFrame } = render(<UsagePane load={async () => data} />);
+    await flush();
+    const f = lastFrame() ?? '';
+    expect(f).toContain('unknown -> 30,000');
+    expect(f).not.toContain('0 -> 30,000');
+  });
+
+  it('lists consumers in descending units order', async () => {
+    const data: UsagePaneData = {
+      ...DATA,
+      topByRole: [row('role', 'first-role', 900), row('role', 'second-role', 100)],
+    };
+    const { lastFrame } = render(<UsagePane load={async () => data} />);
+    await flush();
+    const f = lastFrame() ?? '';
+    expect(f.indexOf('first-role')).toBeGreaterThan(-1);
+    expect(f.indexOf('second-role')).toBeGreaterThan(f.indexOf('first-role'));
+  });
+
+  it('renders hostile labels without control characters and without extra rows', async () => {
+    const hostile = (n: string): string =>
+      `${n}\u001b]52;c;QUJD\u0007\u001b[2J\u001b]0;pwned\u0007\u009b\u202e\nfake-row`;
+    const data: UsagePaneData = {
+      ...DATA,
+      windows: [
+        { window: hostile('win'), lengthHours: 5, units: 1, calls: 1, start: 'a', end: 'b' },
+      ],
+      topByRole: [row('role', hostile('role'), 5)],
+      topByModel: [row('model', hostile('gpt-5'), 5)],
+      lastLimitEvent: { ts: hostile('ts'), window: hostile('lim'), usedPercent: 50 },
+      allotmentChange: { ...DATA.allotmentChange!, window: hostile('chg'), ts: hostile('cts') },
+    };
+    const clean: UsagePaneData = {
+      ...data,
+      windows: [{ window: 'win', lengthHours: 5, units: 1, calls: 1, start: 'a', end: 'b' }],
+      topByRole: [row('role', 'role', 5)],
+      topByModel: [row('model', 'gpt-5', 5)],
+      lastLimitEvent: { ts: 'ts', window: 'lim', usedPercent: 50 },
+      allotmentChange: { ...DATA.allotmentChange!, window: 'chg', ts: 'cts' },
+    };
+    const shot = async (d: UsagePaneData): Promise<string> => {
+      const { lastFrame, unmount } = render(
+        <Box width={40}>
+          <UsagePane load={async () => d} />
+        </Box>,
+      );
+      await flush();
+      const f = lastFrame() ?? '';
+      unmount();
+      return f;
+    };
+    const f = await shot(data);
+    for (const bad of ['\u001b', '\u0007', '\u009b', '\u202e']) {
+      expect(f).not.toContain(bad);
+    }
+    expect(f).not.toContain('fake-row');
+    expect(f.split('\n')).toHaveLength((await shot(clean)).split('\n').length);
+  });
+
+  it('skips a refresh while a load is still in flight', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let release: () => void = () => {};
+    const load = vi.fn(
+      () =>
+        new Promise<UsagePaneData>((resolve) => {
+          release = () => resolve(DATA);
+        }),
+    );
+    const { unmount, lastFrame } = render(<UsagePane load={load} intervalMs={1000} />);
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 3; i += 1) {
+      vi.advanceTimersByTime(1000);
+      await flush();
+    }
+    expect(load).toHaveBeenCalledTimes(1);
+    release();
+    await flush();
+    expect(lastFrame() ?? '').toContain('weekly (168h)');
+    vi.advanceTimersByTime(1000);
+    await flush();
+    expect(load).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it('shows only the fixed error line when the real reader meets a bad ledger line', async () => {
+    const { mkdtempSync, rmSync, appendFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { appendModelCalls, ledgerFileForTs } = await import('@ai-sdlc/reference');
+    const dir = mkdtempSync(join(tmpdir(), 'usage-pane-bad-'));
+    try {
+      const ts = '2026-09-10T11:00:00.000Z';
+      appendModelCalls(
+        [
+          {
+            schemaVersion: 'v1',
+            callId: 'c1',
+            ts,
+            harness: 'claude-code',
+            provider: 'anthropic',
+            model: 'm',
+            tokens: { input: 1, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 1 },
+            billingPool: 'unknown',
+            sessionId: 's',
+            agentRole: 'r',
+            scope: 'other',
+          },
+        ],
+        { dir },
+      );
+      appendFileSync(join(dir, ledgerFileForTs(ts)), 'null\n');
+      const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
+      await flush();
+      const f = lastFrame() ?? '';
+      expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
+      expect(f).not.toContain(dir);
+      expect(f).not.toContain('TypeError');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'shows only the fixed error line for an unreadable usage directory',
+    async () => {
+      const { mkdtempSync, rmSync, chmodSync, mkdirSync } = await import('node:fs');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const base = mkdtempSync(join(tmpdir(), 'usage-pane-perm-'));
+      const dir = join(base, 'usage');
+      mkdirSync(dir);
+      chmodSync(dir, 0o000);
+      try {
+        const { lastFrame } = render(<UsagePane deps={{ usageDir: dir, priceRows: [] }} />);
+        await flush();
+        const f = lastFrame() ?? '';
+        expect(f).toContain(USAGE_ERROR_TEXT.slice(0, 30));
+        expect(f).not.toContain('EACCES');
+        expect(f).not.toContain(base);
+      } finally {
+        chmodSync(dir, 0o700);
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
 });
