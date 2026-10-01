@@ -13,6 +13,7 @@ import {
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_LLM_TIMEOUT_MS,
 } from '../defaults.js';
+import { anthropicTokens, reportApiKeyCall, type AnthropicUsage } from '../usage/direct-usage.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -51,6 +52,8 @@ export interface ReviewAgentConfig {
   apiKey?: string;
   /** Model to use. Defaults to claude-sonnet-4-5. */
   model?: string;
+  /** Usage ledger directory override. Defaults to the machine-level ledger. */
+  usageDir?: string;
   /**
    * Model to escalate to when the input exceeds the large-context threshold.
    * Defaults to AI_SDLC_REVIEW_LARGE_MODEL env var, then claude-opus-4-7.
@@ -290,7 +293,7 @@ export class ReviewAgentRunner implements AgentRunner {
     ].join('\n');
 
     try {
-      const verdict = await this.callAPI(apiKey, userContent);
+      const verdict = await this.callAPI(apiKey, userContent, ctx.issueId);
 
       return {
         success: true,
@@ -311,6 +314,7 @@ export class ReviewAgentRunner implements AgentRunner {
   private async callAPI(
     apiKey: string,
     userContent: string,
+    taskId?: string,
   ): Promise<ReviewVerdict & { _tokenUsage?: TokenUsage }> {
     const apiUrl = this.config.apiUrl ?? DEFAULT_ANTHROPIC_API_URL;
     const baseModel = this.config.model ?? DEFAULT_ANTHROPIC_MODEL;
@@ -361,17 +365,31 @@ export class ReviewAgentRunner implements AgentRunner {
 
       const body = (await res.json()) as {
         content: Array<{ type: string; text: string }>;
-        usage?: { input_tokens: number; output_tokens: number };
+        usage?: AnthropicUsage;
         model?: string;
       };
 
       const text = body.content?.[0]?.text ?? '';
       const verdict = this.parseVerdict(text);
 
+      // Direct usage report. This runner calls the Messages API itself and
+      // writes no harness transcript, so the call cannot also be ingested from
+      // one: reporting it here does not double count.
+      if (body.usage) {
+        reportApiKeyCall({
+          provider: 'anthropic',
+          model: body.model ?? model,
+          tokens: anthropicTokens(body.usage),
+          agentRole: `review-${this.config.reviewType}`,
+          taskId,
+          usageDir: this.config.usageDir,
+        });
+      }
+
       const tokenUsage: TokenUsage | undefined = body.usage
         ? {
-            inputTokens: body.usage.input_tokens,
-            outputTokens: body.usage.output_tokens,
+            inputTokens: body.usage.input_tokens ?? 0,
+            outputTokens: body.usage.output_tokens ?? 0,
             model: body.model ?? model,
           }
         : undefined;

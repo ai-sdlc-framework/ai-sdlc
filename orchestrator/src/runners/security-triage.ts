@@ -16,6 +16,7 @@ import {
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_LLM_TIMEOUT_MS,
 } from '../defaults.js';
+import { anthropicTokens, reportApiKeyCall, type AnthropicUsage } from '../usage/direct-usage.js';
 import type { HarnessAdapter } from '../harness/types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -42,6 +43,8 @@ export interface SecurityTriageConfig {
   model?: string;
   /** Request timeout in ms. Defaults to 120_000. */
   timeoutMs?: number;
+  /** Usage ledger directory override. Defaults to the machine-level ledger. */
+  usageDir?: string;
   /** Risk score threshold at or above which issues are auto-rejected. Defaults to 6. */
   rejectThreshold?: number;
   /**
@@ -121,7 +124,7 @@ export class SecurityTriageRunner implements AgentRunner {
     try {
       const verdict = this.config.harness
         ? await this.callHarness(this.config.harness, userContent)
-        : await this.callApiPath(userContent);
+        : await this.callApiPath(userContent, ctx.issueId);
 
       return {
         success: true,
@@ -141,6 +144,7 @@ export class SecurityTriageRunner implements AgentRunner {
 
   private async callApiPath(
     userContent: string,
+    issueId?: string,
   ): Promise<TriageVerdict & { _tokenUsage?: TokenUsage }> {
     const apiKey = this.config.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -148,7 +152,7 @@ export class SecurityTriageRunner implements AgentRunner {
         'ANTHROPIC_API_KEY is not set and no harness is configured. Set the env var or pass `harness` in SecurityTriageConfig (recommended for the subscription-billed backlog workflow).',
       );
     }
-    return this.callAPI(apiKey, userContent);
+    return this.callAPI(apiKey, userContent, issueId);
   }
 
   private async callHarness(
@@ -182,6 +186,7 @@ export class SecurityTriageRunner implements AgentRunner {
   private async callAPI(
     apiKey: string,
     userContent: string,
+    issueId?: string,
   ): Promise<TriageVerdict & { _tokenUsage?: TokenUsage }> {
     const apiUrl = this.config.apiUrl ?? DEFAULT_ANTHROPIC_API_URL;
     const model = this.config.model ?? DEFAULT_ANTHROPIC_MODEL;
@@ -214,17 +219,32 @@ export class SecurityTriageRunner implements AgentRunner {
 
       const body = (await res.json()) as {
         content: Array<{ type: string; text: string }>;
-        usage?: { input_tokens: number; output_tokens: number };
+        usage?: AnthropicUsage;
         model?: string;
       };
 
       const text = body.content?.[0]?.text ?? '';
       const verdict = this.parseVerdict(text);
 
+      // Direct usage report, API path only. This path writes no harness
+      // transcript, so the call cannot also be ingested from one: reporting it
+      // here does not double count. The harness path is not reported here
+      // because the harness's own transcript is ingested instead.
+      if (body.usage) {
+        reportApiKeyCall({
+          provider: 'anthropic',
+          model: body.model ?? model,
+          tokens: anthropicTokens(body.usage),
+          agentRole: 'security-triage',
+          taskId: issueId,
+          usageDir: this.config.usageDir,
+        });
+      }
+
       const tokenUsage: TokenUsage | undefined = body.usage
         ? {
-            inputTokens: body.usage.input_tokens,
-            outputTokens: body.usage.output_tokens,
+            inputTokens: body.usage.input_tokens ?? 0,
+            outputTokens: body.usage.output_tokens ?? 0,
             model: body.model ?? model,
           }
         : undefined;
