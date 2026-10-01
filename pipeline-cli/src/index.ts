@@ -18,6 +18,9 @@ export * from './steps/index.js';
 export * from './deps/index.js';
 export { executePipeline } from './execute-pipeline.js';
 
+// RFC-0049 - judgment layer context builder (log, cache, events sinks).
+export * from './judgment/index.js';
+
 // RFC-0015 Phase 1 — autonomous-pipeline orchestrator (AISDLC-169.1).
 export {
   buildOrchestratorStatus,

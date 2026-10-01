@@ -218,6 +218,8 @@ export const DEFAULT_MODEL_COSTS: Record<
   'claude-haiku-4-5-20251001': { inputPer1M: 0.8, outputPer1M: 4.0, cacheReadPer1M: 0.08 },
   'claude-sonnet-4-20250514': { inputPer1M: 3.0, outputPer1M: 15.0, cacheReadPer1M: 0.3 },
   'claude-3-5-haiku-20241022': { inputPer1M: 1.0, outputPer1M: 5.0, cacheReadPer1M: 0.1 },
+  // Jev judgment provider: input-only pricing, no generated output, no cache discount.
+  'jev-1.13.0': { inputPer1M: 0.042, outputPer1M: 0, cacheReadPer1M: 0 },
 };
 
 /** Default monthly cost budget in USD. */

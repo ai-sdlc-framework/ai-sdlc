@@ -373,6 +373,33 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts JudgmentEscalated (RFC-0049)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'JudgmentEscalated',
+      judgmentId: 'dor.stage-b',
+      escalateTo: 'operator',
+      reason: 'low confidence',
+      taskId: 'AISDLC-1',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'JudgmentEscalated',
+      judgmentId: 'dor.stage-b',
+      escalateTo: 'nobody',
+    });
+  });
+
+  it('accepts JudgmentProviderUnavailable (RFC-0049)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'JudgmentProviderUnavailable',
+      judgmentId: 'dor.stage-b',
+      provider: 'jev',
+      reason: 'provider-unavailable',
+    });
+  });
+
   it('accepts DispatchToMergeCompleted (AISDLC-493) with ciWaitMs', () => {
     expectValid({
       ts: baseTs,

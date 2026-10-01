@@ -10,3 +10,7 @@ export * from './question-hash.js';
 export * from './config.js';
 export * from './config-loader.js';
 export * from './evaluate.js';
+export * from './redact-json.js';
+export * from './cache.js';
+export * from './log-sink.js';
+export * from './builtin-providers.js';

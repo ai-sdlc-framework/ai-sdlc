@@ -321,4 +321,37 @@ export class CostTracker {
 
     return this.store.saveCostEntry(entry);
   }
+
+  /**
+   * Record one uncached judgment-provider call. Same column-reuse convention as
+   * `recordEmbeddingCost`: pipelineType 'judgmentTokens', agentName = consumerLabel,
+   * model '<provider>@<modelVersion>'. `costUsd` defaults to the priced rate for
+   * `modelVersion`; callers normally pass the provider's declared-rate cost.
+   */
+  recordJudgmentCost(record: JudgmentCostRecord, runId = 'judgment'): number {
+    const costUsd =
+      record.costUsd ?? CostTracker.computeCost(record.inputTokens, 0, record.modelVersion);
+    const entry: Omit<CostLedgerEntry, 'id' | 'createdAt'> = {
+      runId,
+      agentName: record.consumerLabel,
+      pipelineType: 'judgmentTokens',
+      model: `${record.provider}@${record.modelVersion}`,
+      inputTokens: record.inputTokens,
+      outputTokens: 0,
+      totalTokens: record.inputTokens,
+      costUsd,
+      stageName: record.judgmentId,
+    };
+    return this.store.saveCostEntry(entry);
+  }
+}
+
+/** One uncached judgment call, as recorded in the cost ledger. */
+export interface JudgmentCostRecord {
+  provider: string;
+  modelVersion: string;
+  consumerLabel: string;
+  judgmentId: string;
+  inputTokens: number;
+  costUsd?: number;
 }

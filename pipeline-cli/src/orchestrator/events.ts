@@ -302,7 +302,20 @@ export type OrchestratorEventType =
    * event. Per-event fields: `taskId`, `dispatchedAt`, `mergedAt`,
    * `totalLifecycleMs`, optional `ciWaitMs` (best-effort, null-tolerant).
    */
-  | 'DispatchToMergeCompleted';
+  | 'DispatchToMergeCompleted'
+  /**
+   * RFC-0049 - emitted when an enforced judgment returns `escalate`. Per-event
+   * fields: `judgmentId`, `escalateTo` (`operator` or `llm`), `reason`, optional
+   * `taskId`.
+   */
+  | 'JudgmentEscalated'
+  /**
+   * RFC-0049 - emitted when a judgment provider is configured but cannot be
+   * used. At most once per process per `reason` (`provider-not-registered`,
+   * `provider-unavailable`, `availability-check-failed`). Per-event fields:
+   * `reason`, `judgmentId`, optional `provider`, optional `taskId`.
+   */
+  | 'JudgmentProviderUnavailable';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

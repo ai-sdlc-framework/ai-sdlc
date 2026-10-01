@@ -13,7 +13,8 @@ import {
 } from './config.js';
 import { resolveJudgmentProvider } from './registry.js';
 import { canonicalJson, sha256Hex } from './question-hash.js';
-import { redactSecrets } from '../security/secret-redact.js';
+import { judgmentCacheKey, type JudgmentCache } from './cache.js';
+import { redactJsonValue as redactValue } from './redact-json.js';
 import type {
   JsonValue,
   JudgmentAnswer,
@@ -51,6 +52,18 @@ export interface JudgmentEvaluationRecord {
   outputTokens: number | null;
   /** True when the provider was called. */
   called: boolean;
+  /** Input tokens times the provider's declared input rate; 0 on a cache hit; null when unknown. */
+  costUsd: number | null;
+  /** True when the answers came from the content-addressed cache. */
+  cacheHit: boolean;
+  /** What the existing (pre-judgment) path decided, supplied by the caller. */
+  incumbent?: unknown;
+  sourceKind?: string;
+  /** Set when a provider was configured but could not be used. */
+  providerUnavailableReason?:
+    | 'provider-not-registered'
+    | 'availability-check-failed'
+    | 'provider-unavailable';
   taskId?: string;
 }
 
@@ -65,6 +78,10 @@ export interface EvaluateJudgmentContext {
   /** Kind of the work item; only `'backlog'` is trusted for permissive decisions. */
   sourceKind?: string;
   taskId?: string;
+  /** What the existing path decided for this input; recorded so agreement can be computed. */
+  incumbent?: unknown;
+  /** Content-addressed answer cache; used only when `defaults.cache` is true and the model is exact. */
+  cache?: JudgmentCache;
   sinks?: JudgmentSink[];
   /** Cost-attribution tag sent with the request. Defaults to the judgment id. */
   consumerLabel?: string;
@@ -91,17 +108,6 @@ function isLoopbackUrl(url: string | undefined): boolean {
   } catch {
     return false;
   }
-}
-
-function redactValue(value: JsonValue): JsonValue {
-  if (typeof value === 'string') return redactSecrets(value);
-  if (Array.isArray(value)) return value.map(redactValue);
-  if (value !== null && typeof value === 'object') {
-    const out: { [key: string]: JsonValue } = {};
-    for (const [k, v] of Object.entries(value)) out[redactSecrets(k)] = redactValue(v);
-    return out;
-  }
-  return value;
 }
 
 /** Whether a promotion record satisfies the bar for a risk class (RFC section 8). */
@@ -143,11 +149,35 @@ function enforceDowngradeReason(
   return undefined;
 }
 
+/**
+ * Reason the runtime would run an `enforce` judgment as `shadow` for this config
+ * and provider, or undefined when it may enforce. Used by `ai-sdlc doctor`.
+ */
+export function judgmentEnforceDowngradeReason(
+  definition: JudgmentDefinition<unknown, unknown>,
+  config: ResolvedJudgmentConfig,
+  provider: JudgmentProvider,
+): string | undefined {
+  const model = config.model ?? provider.modelId;
+  return enforceDowngradeReason(
+    definition,
+    config,
+    provider,
+    providerModelKey(provider.name, model),
+    model,
+  );
+}
+
+/** True when a model id is a moving alias rather than an exact version. */
+export function isModelAlias(model: string): boolean {
+  return ALIAS_RE.test(model);
+}
+
 const inUnit = (n: unknown): boolean =>
   typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 
 /** True when an answer is well-formed for its question (type, choice, probability ranges). */
-function answerMatches(q: JudgmentQuestion, a: JudgmentAnswer | undefined): boolean {
+export function answerMatches(q: JudgmentQuestion, a: JudgmentAnswer | undefined): boolean {
   if (!a || a.type !== q.type) return false;
   if (q.type === 'noul') return inUnit((a as { probability: number }).probability);
   const ans = a as Exclude<JudgmentAnswer, { type: 'noul' }>;
@@ -168,6 +198,37 @@ function answerMatches(q: JudgmentQuestion, a: JudgmentAnswer | undefined): bool
     Array.isArray(sc.probabilities) &&
     sc.probabilities.every(inUnit)
   );
+}
+
+/**
+ * Rebuild an answer from the question set, keeping only known fields, so extra ids
+ * or fields in a cached entry never reach `compose` or the log.
+ */
+function normalizeAnswer(q: JudgmentQuestion, a: JudgmentAnswer): JudgmentAnswer {
+  if (q.type === 'noul') {
+    return { type: 'noul', probability: (a as { probability: number }).probability };
+  }
+  const ans = a as Exclude<JudgmentAnswer, { type: 'noul' }>;
+  if (q.type === 'choice') {
+    const c = ans as Extract<JudgmentAnswer, { type: 'choice' }>;
+    const probabilities: Record<string, number> = {};
+    for (const k of Object.keys(q.options)) {
+      if (Object.hasOwn(c.probabilities, k)) probabilities[k] = c.probabilities[k];
+    }
+    return { type: 'choice', choice: c.choice, probabilities, confidence: c.confidence };
+  }
+  const sc = ans as Extract<JudgmentAnswer, { type: 'score' }>;
+  return {
+    type: 'score',
+    score: sc.score,
+    probabilities: [...sc.probabilities],
+    confidence: sc.confidence,
+  };
+}
+
+/** A finite, non-negative token count, or null when the provider reported nothing usable. */
+function tokenCount(n: unknown): number | null {
+  return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, n) : null;
 }
 
 async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -211,6 +272,10 @@ export async function evaluateJudgment<I, D>(
     inputTokens: null,
     outputTokens: null,
     called: false,
+    costUsd: null,
+    cacheHit: false,
+    ...(ctx.incumbent !== undefined ? { incumbent: ctx.incumbent } : {}),
+    ...(ctx.sourceKind ? { sourceKind: ctx.sourceKind } : {}),
     ...(ctx.taskId ? { taskId: ctx.taskId } : {}),
   };
   let report: CapabilityReport = 'degraded';
@@ -254,14 +319,21 @@ export async function evaluateJudgment<I, D>(
     const provider = ctx.getProvider
       ? ctx.getProvider(config.provider)
       : resolveJudgmentProvider(config.provider, config.providerOptions, config.model);
-    if (!provider) return await abstain('disabled');
+    if (!provider) {
+      rec.providerUnavailableReason = 'provider-not-registered';
+      return await abstain('disabled');
+    }
     let availability: { available: boolean };
     try {
       availability = await provider.isAvailable();
     } catch {
+      rec.providerUnavailableReason = 'availability-check-failed';
       return await abstain('disabled');
     }
-    if (!availability.available) return await abstain('disabled');
+    if (!availability.available) {
+      rec.providerUnavailableReason = 'provider-unavailable';
+      return await abstain('disabled');
+    }
 
     const model = config.model ?? provider.modelId;
     const key = providerModelKey(provider.name, model);
@@ -304,22 +376,68 @@ export async function evaluateJudgment<I, D>(
       return await abstain('state-too-large');
     }
 
-    let response: JudgmentResponse;
-    try {
-      rec.called = true;
-      response = await withTimeout(
-        provider.evaluate({ state, questions, consumerLabel: rec.consumerLabel }),
-        config.defaults.timeoutMs,
+    const cacheable =
+      !!ctx.cache &&
+      config.defaults.cache &&
+      !ALIAS_RE.test(model) &&
+      !ALIAS_RE.test(provider.modelId);
+    const cacheKey = cacheable
+      ? judgmentCacheKey({
+          provider: provider.name,
+          model,
+          questionSetHash: rec.questionSetHash,
+          questions,
+          stateHash: rec.stateHash,
+        })
+      : undefined;
+
+    let response: JudgmentResponse | undefined;
+    if (ctx.cache && cacheKey) {
+      const hit = ctx.cache.get(cacheKey, (answers) =>
+        Object.keys(questions).every((id) => answerMatches(questions[id], answers[id])),
       );
-    } catch {
-      return await abstain('provider-error');
+      if (hit && hit.modelVersion === model) {
+        const answers: Record<string, JudgmentAnswer> = {};
+        for (const id of Object.keys(questions)) {
+          answers[id] = normalizeAnswer(questions[id], hit.answers[id]);
+        }
+        response = {
+          answers,
+          modelVersion: hit.modelVersion,
+          usage: { inputTokens: 0, outputTokens: 0 },
+          latencyMs: 0,
+        };
+        rec.cacheHit = true;
+      }
     }
-    if (
-      !response ||
-      !response.answers ||
-      Object.keys(questions).some((id) => !answerMatches(questions[id], response.answers[id]))
-    ) {
-      return await abstain('provider-error');
+    if (!response) {
+      try {
+        rec.called = true;
+        response = await withTimeout(
+          provider.evaluate({ state, questions, consumerLabel: rec.consumerLabel }),
+          config.defaults.timeoutMs,
+        );
+      } catch {
+        return await abstain('provider-error');
+      }
+      // A billed call is recorded even when its answers turn out unusable.
+      rec.inputTokens = tokenCount(response?.usage?.inputTokens);
+      rec.outputTokens = tokenCount(response?.usage?.outputTokens);
+      rec.costUsd =
+        rec.inputTokens === null
+          ? null
+          : (rec.inputTokens * provider.capabilities.inputCostPer1MTokens) / 1_000_000;
+      if (typeof response?.modelVersion === 'string') rec.modelVersion = response.modelVersion;
+      if (
+        !response ||
+        !response.answers ||
+        Object.keys(questions).some((id) => !answerMatches(questions[id], response?.answers[id]))
+      ) {
+        return await abstain('provider-error');
+      }
+      if (ctx.cache && cacheKey && response.modelVersion === model) {
+        ctx.cache.put(cacheKey, { modelVersion: response.modelVersion, answers: response.answers });
+      }
     }
     if (mode === 'enforce' && response.modelVersion && response.modelVersion !== config.model) {
       mode = 'shadow';
@@ -330,8 +448,12 @@ export async function evaluateJudgment<I, D>(
     rec.answers = response.answers;
     rec.modelVersion = response.modelVersion;
     rec.latencyMs = response.latencyMs;
-    rec.inputTokens = response.usage?.inputTokens ?? null;
-    rec.outputTokens = response.usage?.outputTokens ?? null;
+    rec.inputTokens = tokenCount(response.usage?.inputTokens);
+    rec.outputTokens = tokenCount(response.usage?.outputTokens);
+    rec.costUsd =
+      rec.inputTokens === null
+        ? null
+        : (rec.inputTokens * provider.capabilities.inputCostPer1MTokens) / 1_000_000;
 
     if (mode === 'shadow') {
       report = 'shadow';
