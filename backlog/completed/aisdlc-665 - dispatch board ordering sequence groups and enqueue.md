@@ -2,7 +2,7 @@
 id: AISDLC-665
 title: >-
   RFC-0051 OQ-1: manifest after/sequenceGroup/priority/wave/blockedBy, claim rules, reaper requeue, cli-dispatch enqueue
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
