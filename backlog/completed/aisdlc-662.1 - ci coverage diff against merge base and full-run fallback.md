@@ -1,7 +1,7 @@
 ---
 id: AISDLC-662.1
 title: 'CI coverage: diff against the merge-ref base and fall back to a full run'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
