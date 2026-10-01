@@ -243,4 +243,13 @@ describe('makeGitEnv() — AISDLC-257 orchestrator fixture-leak prevention', () 
       expect(readdirSync(fixtureDir).length).toBeGreaterThan(0);
     });
   });
+
+  it('disables git auto gc / maintenance (AISDLC-655.5)', () => {
+    const env = makeGitEnv();
+    expect(env['GIT_CONFIG_COUNT']).toBe('2');
+    expect(env['GIT_CONFIG_KEY_0']).toBe('gc.auto');
+    expect(env['GIT_CONFIG_VALUE_0']).toBe('0');
+    expect(env['GIT_CONFIG_KEY_1']).toBe('maintenance.auto');
+    expect(env['GIT_CONFIG_VALUE_1']).toBe('false');
+  });
 });

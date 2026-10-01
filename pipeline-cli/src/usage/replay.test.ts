@@ -73,7 +73,15 @@ const GIT_ENV = {
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_TERMINAL_PROMPT: '0',
+  // AISDLC-655.5: a detached `git gc --auto` / maintenance process can still be
+  // writing into .git when afterEach rmSync runs (ENOTEMPTY flake).
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'gc.auto',
+  GIT_CONFIG_VALUE_0: '0',
+  GIT_CONFIG_KEY_1: 'maintenance.auto',
+  GIT_CONFIG_VALUE_1: 'false',
 };
+const RM_OPTS = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, env: GIT_ENV, encoding: 'utf8' }).trim();
 }
@@ -128,6 +136,9 @@ beforeEach(() => {
   usageDir = mkdtempSync(join(tmpdir(), 'replay-usage-'));
   tmpRoot = mkdtempSync(join(tmpdir(), 'replay-tmp-'));
   git(repo, 'init', '-q', '-b', 'main');
+  // Repo-local so git processes spawned by production code are covered too.
+  git(repo, 'config', 'gc.auto', '0');
+  git(repo, 'config', 'maintenance.auto', 'false');
   git(repo, 'config', 'user.email', 'replay-test@example.invalid');
   git(repo, 'config', 'user.name', 'Replay Test');
   git(repo, 'config', 'commit.gpgsign', 'false');
@@ -165,7 +176,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const d of [repo, artifacts, usageDir, tmpRoot]) rmSync(d, { recursive: true, force: true });
+  for (const d of [repo, artifacts, usageDir, tmpRoot]) rmSync(d, RM_OPTS);
 });
 
 /** Hash every file under a directory, by relative path and bytes. */
@@ -1176,7 +1187,7 @@ describe('isUnderAiSdlc', () => {
       expect(isUnderAiSdlc(join(root, '.AI-SDLC', 'y.json'), root, 'darwin')).toBe(true);
       expect(isUnderAiSdlc(join(root, '.AI-SDLC', 'y.json'), root, 'linux')).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, RM_OPTS);
     }
   });
 });
@@ -1560,9 +1571,9 @@ describe('commit-supplied Claude Code config never reaches the session', () => {
       // The links were removed, never their targets.
       expect(readFileSync(join(outside, 'secret.md'), 'utf8')).toBe('do not delete');
       expect(lstatSync(join(dir, 'linked-claude')).isSymbolicLink()).toBe(true);
-      rmSync(outside, { recursive: true, force: true });
+      rmSync(outside, RM_OPTS);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, RM_OPTS);
     }
   });
 
@@ -1624,7 +1635,7 @@ describe('commit-supplied Claude Code config never reaches the session', () => {
         { tmpRoot },
       );
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      rmSync(outside, RM_OPTS);
     }
   });
 });
@@ -1637,7 +1648,7 @@ describe('commit-supplied config under case and compatibility variants', () => {
       writeFileSync(join(d, a), '');
       return !existsSync(join(d, b));
     } finally {
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, RM_OPTS);
     }
   }
 
@@ -1677,7 +1688,7 @@ describe('commit-supplied config under case and compatibility variants', () => {
       removeCommitClaudeConfig(dir);
       expect(listing(dir)).toEqual(['src', 'src/keep.ts', 'sub'].sort());
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, RM_OPTS);
     }
   });
 
@@ -1787,7 +1798,7 @@ describe('sandbox environment', () => {
       expect(env).not.toHaveProperty('B');
       expect(env.KEEP).toBe('ok');
     } finally {
-      rmSync(base, { recursive: true, force: true });
+      rmSync(base, RM_OPTS);
     }
   });
 

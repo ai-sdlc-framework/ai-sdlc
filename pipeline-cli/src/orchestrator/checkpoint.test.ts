@@ -106,7 +106,7 @@ function makeGitRepoWithOrigin(): { repoDir: string; originDir: string } {
 afterEach(() => {
   for (const d of tmpDirs) {
     try {
-      rmSync(d, { recursive: true, force: true });
+      rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     } catch {
       /* ignore cleanup errors */
     }

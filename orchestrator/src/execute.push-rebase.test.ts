@@ -116,7 +116,7 @@ describe('pushBranchWithRebase', () => {
   afterEach(async () => {
     if (active) {
       const root = active.origin.replace(/\/origin\.git$/, '');
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       active = null;
     }
   });
@@ -211,7 +211,7 @@ describe('pushBranchWithRebase', () => {
       expect(skipped).toBe(true);
       expect(log.info).toHaveBeenCalledWith(expect.stringContaining("no 'origin' remote"));
     } finally {
-      await rm(tmp, { recursive: true, force: true });
+      await rm(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 });
