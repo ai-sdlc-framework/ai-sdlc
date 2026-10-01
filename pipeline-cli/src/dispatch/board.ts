@@ -66,6 +66,16 @@ const DIAGNOSTIC_SUFFIX = '.diagnostic.json';
  * picks it up on the next poll without touching the manifest itself.
  */
 const RESUME_SIGNAL_SUFFIX = '.resume.json';
+/**
+ * Filename suffix for the completion marker left in `done/` when a success
+ * verdict is removed (the reconcile step clears verdicts once handled). The
+ * marker keeps a finished task recognised: tasks that run `after` it stay
+ * claimable and the id cannot be enqueued again.
+ */
+const COMPLETED_SUFFIX = '.completed.json';
+
+/** Shape of a task id the board accepts when building paths. */
+export const TASK_ID_RE = /^[A-Z][A-Z0-9-]*-[0-9]+(\.[0-9]+)*$/;
 
 /** Default heartbeat-stale threshold in milliseconds (RFC-0041 OQ-3 — 30 min). */
 export const DEFAULT_HEARTBEAT_STALE_MS = 30 * 60 * 1000;
@@ -83,6 +93,9 @@ export function ensureBoardDirs(boardDir: string): void {
 
 /** Build the absolute path for a manifest in a given subdir. */
 function manifestPathIn(boardDir: string, sub: string, taskId: string): string {
+  if (!TASK_ID_RE.test(taskId)) {
+    throw new Error(`dispatch: '${taskId}' is not a valid task id`);
+  }
   return path.join(boardDir, sub, `${taskId}${MANIFEST_SUFFIX}`);
 }
 
@@ -141,8 +154,12 @@ export type Eligibility = { eligible: true } | { eligible: false; reason: string
 
 /** Board facts the eligibility rules read. Build once per claim / listing. */
 export interface EligibilityContext {
-  /** Task ids with a success verdict in `done/`. */
+  /** Task ids that finished with success (a verdict or a completion marker in `done/`). */
   doneTaskIds: ReadonlySet<string>;
+  /** Task ids with a failure verdict or diagnostic in `failed/`. */
+  failedTaskIds: ReadonlySet<string>;
+  /** Task ids present on the board in any state. */
+  onBoardTaskIds: ReadonlySet<string>;
   /** Sequence groups that currently have an inflight manifest, with the holder. */
   busyGroups: ReadonlyMap<string, string>;
 }
@@ -150,12 +167,34 @@ export interface EligibilityContext {
 /** Read the board facts the eligibility rules need. */
 export function loadEligibilityContext(boardDir: string): EligibilityContext {
   const doneTaskIds = new Set<string>();
-  for (const entry of safeReaddir(path.join(boardDir, 'done'))) {
-    if (!entry.endsWith(VERDICT_SUFFIX)) continue;
-    const verdict = readVerdict(path.join(boardDir, 'done', entry));
-    if (verdict && verdict.outcome === 'success') {
-      doneTaskIds.add(entry.slice(0, -VERDICT_SUFFIX.length));
+  const failedTaskIds = new Set<string>();
+  const onBoardTaskIds = new Set<string>();
+  for (const sub of ['queue', 'inflight', 'blocked'] as const) {
+    for (const entry of safeReaddir(path.join(boardDir, sub))) {
+      if (entry.endsWith(MANIFEST_SUFFIX)) {
+        onBoardTaskIds.add(entry.slice(0, -MANIFEST_SUFFIX.length));
+      }
     }
+  }
+  for (const entry of safeReaddir(path.join(boardDir, 'done'))) {
+    if (entry.endsWith(COMPLETED_SUFFIX)) {
+      const id = entry.slice(0, -COMPLETED_SUFFIX.length);
+      doneTaskIds.add(id);
+      onBoardTaskIds.add(id);
+      continue;
+    }
+    if (!entry.endsWith(VERDICT_SUFFIX)) continue;
+    const id = entry.slice(0, -VERDICT_SUFFIX.length);
+    onBoardTaskIds.add(id);
+    const verdict = readVerdict(path.join(boardDir, 'done', entry));
+    if (verdict && verdict.outcome === 'success') doneTaskIds.add(id);
+  }
+  for (const entry of safeReaddir(path.join(boardDir, 'failed'))) {
+    const suffix = [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX].find((x) => entry.endsWith(x));
+    if (!suffix) continue;
+    const id = entry.slice(0, -suffix.length);
+    failedTaskIds.add(id);
+    onBoardTaskIds.add(id);
   }
   const busyGroups = new Map<string, string>();
   const inflightDir = path.join(boardDir, 'inflight');
@@ -166,7 +205,7 @@ export function loadEligibilityContext(boardDir: string): EligibilityContext {
       busyGroups.set(manifest.sequenceGroup, manifest.taskId);
     }
   }
-  return { doneTaskIds, busyGroups };
+  return { doneTaskIds, failedTaskIds, onBoardTaskIds, busyGroups };
 }
 
 /**
@@ -180,7 +219,14 @@ export function checkEligibility(manifest: DispatchManifest, ctx: EligibilityCon
   }
   const unmet = (manifest.after ?? []).filter((id) => !ctx.doneTaskIds.has(id));
   if (unmet.length > 0) {
-    return { eligible: false, reason: `waiting for ${unmet.join(', ')} to finish` };
+    const reasons = unmet.map((id) =>
+      ctx.failedTaskIds.has(id)
+        ? `task ${id} failed`
+        : !ctx.onBoardTaskIds.has(id)
+          ? `task ${id} is not on the board`
+          : `waiting for ${id} to finish`,
+    );
+    return { eligible: false, reason: reasons.join('; ') };
   }
   if (manifest.sequenceGroup) {
     const holder = ctx.busyGroups.get(manifest.sequenceGroup);
@@ -192,6 +238,11 @@ export function checkEligibility(manifest: DispatchManifest, ctx: EligibilityCon
     }
   }
   return { eligible: true };
+}
+
+/** Test seam for `claimNext`: runs between the eligibility check and the claim rename. */
+export interface ClaimHooks {
+  beforeClaimRename?: (manifest: DispatchManifest) => void;
 }
 
 /**
@@ -219,6 +270,7 @@ export function claimNext(
   boardDir: string,
   workerKind: WorkerKind,
   now: () => Date = () => new Date(),
+  hooks: ClaimHooks = {},
 ): ClaimResult {
   ensureBoardDirs(boardDir);
   const queueDir = path.join(boardDir, 'queue');
@@ -264,6 +316,7 @@ export function claimNext(
       claimedGroups.add(manifest.sequenceGroup);
     }
     const inflightPath = manifestPathIn(boardDir, 'inflight', manifest.taskId);
+    hooks.beforeClaimRename?.(manifest);
     try {
       renameSync(fullPath, inflightPath);
     } catch (err) {
@@ -273,10 +326,41 @@ export function claimNext(
       }
       throw err;
     }
+    // The group check above is check-then-act: another Worker may have claimed
+    // a different manifest of the same group in the meantime. Re-scan after
+    // our rename; when any other holder exists, hand ours back (the rename
+    // keeps its mtime and contents, so its queue position and retry count are
+    // unchanged). Every Worker re-scans after its own rename, so at least one
+    // of two racing claimants sees the other and the group never has two.
+    if (manifest.sequenceGroup && groupHasOtherHolder(boardDir, manifest)) {
+      try {
+        renameSync(inflightPath, fullPath);
+      } catch (err) {
+        if (!isFsErrorCode(err, 'ENOENT')) throw err;
+      }
+      continue;
+    }
     return { claimed: true, manifestPath: inflightPath, manifest };
   }
 
   return { claimed: false };
+}
+
+/** True when an inflight manifest other than `manifest` carries the same sequence group. */
+function groupHasOtherHolder(boardDir: string, manifest: DispatchManifest): boolean {
+  const inflightDir = path.join(boardDir, 'inflight');
+  for (const entry of safeReaddir(inflightDir)) {
+    if (!entry.endsWith(MANIFEST_SUFFIX)) continue;
+    const other = readManifest(path.join(inflightDir, entry));
+    if (
+      other &&
+      other.sequenceGroup === manifest.sequenceGroup &&
+      other.taskId !== manifest.taskId
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -332,31 +416,51 @@ export function unblockManifest(boardDir: string, taskId: string): boolean {
   if (existsSync(dst)) {
     throw new Error(`dispatch.unblock: queue/${taskId}${MANIFEST_SUFFIX} already exists`);
   }
-  const tmp = `${dst}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, dst);
+  writeIntoQueue(dst, manifest, statSync(src));
   rmSync(src);
   return true;
 }
 
+/** Atomic write into `queue/` that keeps the source file's mtime (its FIFO position). */
+function writeIntoQueue(
+  dst: string,
+  manifest: DispatchManifest,
+  keepTimes: { atime: Date; mtime: Date },
+  beforeRename?: () => void,
+): void {
+  const tmp = `${dst}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  utimesSync(tmp, keepTimes.atime, keepTimes.mtime);
+  beforeRename?.();
+  renameSync(tmp, dst);
+}
+
 /**
  * Return an inflight manifest to `queue/` with `retryCount` set to the given
- * value (the reaper's requeue path). Clears the inflight heartbeat and any
- * resume signal. Returns false when no inflight manifest exists.
+ * value (the reaper's requeue path). Clears the inflight manifest, heartbeat
+ * and any resume signal before the queue copy appears, so a Worker cannot
+ * claim the fresh copy and have the cleanup delete its claim. The original
+ * mtime is kept so the task holds its FIFO position. Returns false when no
+ * inflight manifest exists.
+ *
+ * @throws when `queue/<task-id>` already exists.
  */
 export function requeueInflight(boardDir: string, taskId: string, retryCount: number): boolean {
   ensureBoardDirs(boardDir);
   const src = manifestPathIn(boardDir, 'inflight', taskId);
   const manifest = existsSync(src) ? readManifest(src) : undefined;
   if (!manifest) return false;
-  manifest.retryCount = retryCount;
   const dst = manifestPathIn(boardDir, 'queue', taskId);
-  const tmp = `${dst}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, dst);
-  for (const suffix of [MANIFEST_SUFFIX, STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
-    rmSync(path.join(boardDir, 'inflight', `${taskId}${suffix}`), { force: true });
+  if (existsSync(dst)) {
+    throw new Error(`dispatch.requeue: queue/${taskId}${MANIFEST_SUFFIX} already exists`);
   }
+  manifest.retryCount = retryCount;
+  const times = statSync(src);
+  writeIntoQueue(dst, manifest, times, () => {
+    for (const suffix of [MANIFEST_SUFFIX, STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
+      rmSync(path.join(boardDir, 'inflight', `${taskId}${suffix}`), { force: true });
+    }
+  });
   return true;
 }
 
@@ -388,7 +492,7 @@ export function isOnBoard(boardDir: string, taskId: string): boolean {
     if (existsSync(manifestPathIn(boardDir, sub, taskId))) return true;
   }
   for (const sub of ['done', 'failed'] as const) {
-    for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX]) {
+    for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX, COMPLETED_SUFFIX]) {
       if (existsSync(path.join(boardDir, sub, `${taskId}${suffix}`))) return true;
     }
   }
@@ -845,6 +949,19 @@ export function removeVerdict(
   subdir: 'done' | 'failed' = 'done',
 ): void {
   ensureBoardDirs(boardDir);
+  if (subdir === 'done') {
+    // Leave a completion marker behind a success verdict so dependents stay
+    // claimable and the id stays taken once the verdict has been handled.
+    const verdictFile = path.join(boardDir, 'done', `${taskId}${VERDICT_SUFFIX}`);
+    const verdict = existsSync(verdictFile) ? readVerdict(verdictFile) : undefined;
+    if (verdict?.outcome === 'success') {
+      const marker = path.join(boardDir, 'done', `${taskId}${COMPLETED_SUFFIX}`);
+      const tmp = `${marker}.tmp-${process.pid}-${Date.now()}`;
+      const body = { schemaVersion: 'v1', taskId, completedAt: verdict.completedAt };
+      writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n', 'utf-8');
+      renameSync(tmp, marker);
+    }
+  }
   // Verdicts and diagnostics use different suffixes; check both.
   for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX]) {
     const target = path.join(boardDir, subdir, `${taskId}${suffix}`);

@@ -38,6 +38,7 @@ export {
   releaseInflight,
   removeResumeSignal,
   removeVerdict,
+  TASK_ID_RE,
   requeueInflight,
   sweepStaleHeartbeats,
   unblockManifest,

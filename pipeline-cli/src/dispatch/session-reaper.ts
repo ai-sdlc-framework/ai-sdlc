@@ -277,8 +277,9 @@ export interface RequeueOptions {
   /**
    * Live session names from the hierarchy roster. When given, an inflight
    * manifest whose claiming session (the heartbeat's worker id) is not in
-   * this set is requeued regardless of heartbeat age. Omit when no roster
-   * exists.
+   * this set is requeued regardless of heartbeat age. Applies only when a
+   * heartbeat with a worker id exists; a manifest without one is judged by
+   * age alone. Omit when no roster exists.
    */
   roster?: ReadonlySet<string>;
   now?: () => Date;
@@ -328,7 +329,11 @@ export function requeueStaleInflight(boardDir: string, opts: RequeueOptions = {}
     }
     if (!reason) continue;
 
-    const retryCount = (manifest.retryCount ?? 0) + 1;
+    const priorRetries =
+      Number.isInteger(manifest.retryCount) && (manifest.retryCount as number) > 0
+        ? (manifest.retryCount as number)
+        : 0;
+    const retryCount = priorRetries + 1;
     if (retryCount > retryLimit) {
       writeDiagnostic(boardDir, {
         schemaVersion: 'v1',
@@ -337,7 +342,7 @@ export function requeueStaleInflight(boardDir: string, opts: RequeueOptions = {}
         completedAt: wallNow.toISOString(),
         workerId: 'session-reaper',
         cause: 'retry-limit-exceeded',
-        notes: `${reason}; requeued ${manifest.retryCount ?? 0} time(s), limit ${retryLimit}`,
+        notes: `${reason}; requeued ${priorRetries} time(s), limit ${retryLimit}`,
       });
       result.failed.push({ taskId, retryCount, reason });
     } else if (requeueInflight(boardDir, taskId, retryCount)) {

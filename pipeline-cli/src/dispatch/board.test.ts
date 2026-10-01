@@ -379,7 +379,7 @@ describe('releaseInflight', () => {
 
   it('returns false when there is no inflight entry', () => {
     const boardDir = mkBoard();
-    expect(releaseInflight(boardDir, 'AISDLC-NOPE')).toBe(false);
+    expect(releaseInflight(boardDir, 'AISDLC-9992')).toBe(false);
   });
 
   it('clears any stale heartbeat state on release', () => {
@@ -565,9 +565,9 @@ describe('peekQueue', () => {
 
   it('reflects the full lifecycle correctly', () => {
     const boardDir = mkBoard();
-    writeManifest(boardDir, mkManifest('AISDLC-A'));
-    writeManifest(boardDir, mkManifest('AISDLC-B'));
-    writeManifest(boardDir, mkManifest('AISDLC-C'));
+    writeManifest(boardDir, mkManifest('AISDLC-9993'));
+    writeManifest(boardDir, mkManifest('AISDLC-9994'));
+    writeManifest(boardDir, mkManifest('AISDLC-9995'));
     expect(peekQueue(boardDir)).toEqual({
       queued: 3,
       inflight: 0,
@@ -579,7 +579,7 @@ describe('peekQueue', () => {
     expect(peekQueue(boardDir).queued).toBe(2);
     expect(peekQueue(boardDir).inflight).toBe(1);
 
-    writeVerdict(boardDir, mkVerdict('AISDLC-A', 'success'));
+    writeVerdict(boardDir, mkVerdict('AISDLC-9993', 'success'));
     expect(peekQueue(boardDir).done).toBe(1);
     expect(peekQueue(boardDir).inflight).toBe(0);
   });
@@ -619,7 +619,7 @@ describe('heartbeat read/write', () => {
   it('readHeartbeat returns undefined when state file is missing', () => {
     const boardDir = mkBoard();
     ensureBoardDirs(boardDir);
-    expect(readHeartbeat(boardDir, 'AISDLC-MISSING')).toBeUndefined();
+    expect(readHeartbeat(boardDir, 'AISDLC-9991')).toBeUndefined();
   });
 
   it('readHeartbeat returns undefined when state file is corrupt', () => {
@@ -774,7 +774,7 @@ describe('writeResumeSignal + readResumeSignal + removeResumeSignal', () => {
   it('readResumeSignal returns undefined when no signal exists', () => {
     const boardDir = mkBoard();
     ensureBoardDirs(boardDir);
-    expect(readResumeSignal(boardDir, 'AISDLC-NOPE')).toBeUndefined();
+    expect(readResumeSignal(boardDir, 'AISDLC-9992')).toBeUndefined();
   });
 
   it('readResumeSignal returns undefined on a corrupt signal file', () => {
@@ -786,7 +786,7 @@ describe('writeResumeSignal + readResumeSignal + removeResumeSignal', () => {
 
   it('removeResumeSignal is idempotent on missing files', () => {
     const boardDir = mkBoard();
-    expect(() => removeResumeSignal(boardDir, 'AISDLC-NOPE')).not.toThrow();
+    expect(() => removeResumeSignal(boardDir, 'AISDLC-9992')).not.toThrow();
   });
 
   it('removeResumeSignal deletes an existing signal', () => {
@@ -986,7 +986,7 @@ describe('probeIterationBudget', () => {
   it('returns defaults with no manifest when nothing is inflight', () => {
     const boardDir = mkBoard();
     ensureBoardDirs(boardDir);
-    const probe = probeIterationBudget(boardDir, 'AISDLC-MISSING');
+    const probe = probeIterationBudget(boardDir, 'AISDLC-9991');
     expect(probe.attempts).toBe(0);
     expect(probe.budget).toBe(DEFAULT_ITERATION_BUDGET);
     expect(probe.exhausted).toBe(false);
@@ -1255,9 +1255,14 @@ describe('Phase 1.5 hermetic end-to-end (AC #6, #7)', () => {
   it('writeVerdict clears inflight on terminal outcomes (success / failed / quota-exhausted / blocked)', () => {
     for (const outcome of ['success', 'failed', 'quota-exhausted', 'blocked'] as const) {
       const boardDir = mkBoard();
-      writeManifest(boardDir, mkManifest(`AISDLC-330${outcome[0]?.toUpperCase()}`));
+      writeManifest(
+        boardDir,
+        mkManifest(
+          `AISDLC-330${['success', 'failed', 'quota-exhausted', 'blocked'].indexOf(outcome)}`,
+        ),
+      );
       claimNext(boardDir, 'in-session-agent');
-      const taskId = `AISDLC-330${outcome[0]?.toUpperCase()}`;
+      const taskId = `AISDLC-330${['success', 'failed', 'quota-exhausted', 'blocked'].indexOf(outcome)}`;
       writeVerdict(boardDir, mkVerdict(taskId, outcome));
       expect(existsSync(path.join(boardDir, 'inflight', `${taskId}.dispatch.json`))).toBe(false);
     }

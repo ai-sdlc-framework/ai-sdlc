@@ -109,6 +109,7 @@ import {
   removeResumeSignal,
   requeueStaleInflight,
   removeVerdict,
+  TASK_ID_RE,
   sweepStaleHeartbeats,
   unblockManifest,
   writeHeartbeat,
@@ -144,6 +145,17 @@ import {
   updatePassiveTickState,
   writePassiveTickState,
 } from '../orchestrator/stale-cache-reverify.js';
+
+/** Parse an optional integer flag. Returns null (after writing an error) when malformed. */
+function intFlag(flags: Record<string, string>, name: string): number | undefined | null {
+  const raw = flags[name];
+  if (raw === undefined || raw === '') return undefined;
+  if (!/^-?\d+$/.test(raw.trim())) {
+    process.stderr.write(`cli-dispatch: --${name} must be an integer (got '${raw}')\n`);
+    return null;
+  }
+  return Number.parseInt(raw, 10);
+}
 
 /**
  * Minimal argv parser — yargs would be overkill for a JSON-out CLI.
@@ -391,7 +403,8 @@ export async function runDispatchCli(
     }
 
     case 'sweep': {
-      const staleMs = flags['stale-ms'] ? Number.parseInt(flags['stale-ms'], 10) : undefined;
+      const staleMs = intFlag(flags, 'stale-ms');
+      if (staleMs === null) return 2;
       const result = sweepStaleHeartbeats(boardDir, { staleMs });
       out(result);
       return 0;
@@ -624,8 +637,11 @@ export async function runDispatchCli(
               .map((x) => x.trim())
               .filter(Boolean);
           if (flags['group']) shared.sequenceGroup = flags['group'];
-          if (flags['priority']) shared.priority = Number.parseInt(flags['priority'], 10);
-          if (flags['wave']) shared.wave = Number.parseInt(flags['wave'], 10);
+          const priority = intFlag(flags, 'priority');
+          const wave = intFlag(flags, 'wave');
+          if (priority === null || wave === null) return 2;
+          if (priority !== undefined) shared.priority = priority;
+          if (wave !== undefined) shared.wave = wave;
           entries = ids.map((taskId) => ({ taskId, ...shared }));
         }
         const paths = enqueueTasks(boardDir, entries, {
@@ -655,6 +671,10 @@ export async function runDispatchCli(
 
     case 'unblock': {
       const taskId = requireFlag(flags, 'task-id');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch unblock: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
       if (!unblockManifest(boardDir, taskId)) {
         process.stderr.write(`cli-dispatch unblock: ${taskId} is not parked in blocked/\n`);
         return 1;
@@ -665,12 +685,26 @@ export async function runDispatchCli(
 
     case 'reap': {
       const opts: Parameters<typeof requeueStaleInflight>[1] = {};
-      if (flags['stale-ms']) opts.staleMs = Number.parseInt(flags['stale-ms'], 10);
-      if (flags['retry-limit']) opts.retryLimit = Number.parseInt(flags['retry-limit'], 10);
+      const staleMs = intFlag(flags, 'stale-ms');
+      const retryLimit = intFlag(flags, 'retry-limit');
+      if (staleMs === null || retryLimit === null) return 2;
+      if (staleMs !== undefined) opts.staleMs = staleMs;
+      if (retryLimit !== undefined) opts.retryLimit = retryLimit;
       if (flags['roster']) {
-        opts.roster = new Set(
-          JSON.parse(readFileSync(path.resolve(flags['roster']), 'utf-8')) as string[],
-        );
+        let names: unknown;
+        try {
+          names = JSON.parse(readFileSync(path.resolve(flags['roster']), 'utf-8'));
+        } catch (err) {
+          process.stderr.write(
+            `cli-dispatch: --roster must be a readable JSON file (${err instanceof Error ? err.message : String(err)})\n`,
+          );
+          return 2;
+        }
+        if (!Array.isArray(names) || !names.every((n) => typeof n === 'string')) {
+          process.stderr.write('cli-dispatch: --roster must be a JSON array of strings\n');
+          return 2;
+        }
+        opts.roster = new Set(names as string[]);
       }
       out(requeueStaleInflight(boardDir, opts));
       return 0;

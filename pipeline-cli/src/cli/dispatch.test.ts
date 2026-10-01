@@ -245,7 +245,7 @@ describe('runDispatchCli', () => {
 
   it('remove-verdict idempotent for missing files', async () => {
     const { exit } = await captureStdout(() =>
-      runDispatchCli(['remove-verdict', '--board-dir', boardDir, '--task-id', 'AISDLC-NOPE']),
+      runDispatchCli(['remove-verdict', '--board-dir', boardDir, '--task-id', 'AISDLC-9992']),
     );
     expect(exit).toBe(0);
   });
@@ -396,7 +396,7 @@ describe('runDispatchCli', () => {
           '--board-dir',
           boardDir,
           '--task-id',
-          'AISDLC-NOPE',
+          'AISDLC-9992',
           '--feedback',
           'fb',
         ]),
@@ -408,7 +408,7 @@ describe('runDispatchCli', () => {
 
     it('read-resume-signal returns {present:false} when no signal exists', async () => {
       const { captured } = await captureStdout(() =>
-        runDispatchCli(['read-resume-signal', '--board-dir', boardDir, '--task-id', 'AISDLC-NOPE']),
+        runDispatchCli(['read-resume-signal', '--board-dir', boardDir, '--task-id', 'AISDLC-9992']),
       );
       expect(readLastJson(captured)).toEqual({ present: false });
     });
@@ -449,7 +449,7 @@ describe('runDispatchCli', () => {
           '--board-dir',
           boardDir,
           '--task-id',
-          'AISDLC-NOPE',
+          'AISDLC-9992',
         ]),
       );
       expect(exit).toBe(0);
@@ -533,7 +533,7 @@ describe('runDispatchCli', () => {
           '--board-dir',
           boardDir,
           '--task-id',
-          'AISDLC-MISSING',
+          'AISDLC-9991',
         ]),
       );
       const result = readLastJson(captured) as { hasManifest: boolean };
@@ -1235,7 +1235,7 @@ describe('runDispatchCli ordering commands', () => {
       runDispatchCli(['board', '--board-dir', boardDir]),
     );
     expect(captured.raw).toContain('T-2  eligible');
-    expect(captured.raw).toContain('T-1  held: waiting for T-9 to finish');
+    expect(captured.raw).toContain('T-1  held: task T-9 is not on the board');
     const json = await captureStdout(() =>
       runDispatchCli(['board', '--json', '--board-dir', boardDir]),
     );
@@ -1286,5 +1286,27 @@ describe('runDispatchCli ordering commands', () => {
     );
     expect((readLastJson(captured) as { requeued: unknown[] }).requeued).toHaveLength(1);
     expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(true);
+  });
+
+  it('rejects non-integer numeric flags and a malformed roster', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const run = (args: string[]) => runDispatchCli([...args, '--board-dir', boardDir]);
+    expect(await run(['enqueue', '--task', 'T-1', '--priority', 'high', '--work-dir', root])).toBe(
+      2,
+    );
+    expect(await run(['enqueue', '--task', 'T-1', '--wave', '1.5', '--work-dir', root])).toBe(2);
+    expect(await run(['sweep', '--stale-ms', 'soon'])).toBe(2);
+    expect(await run(['reap', '--retry-limit', 'x'])).toBe(2);
+    expect(await run(['reap', '--stale-ms', '1e3'])).toBe(2);
+    const roster = path.join(root, 'bad-roster.json');
+    writeFileSync(roster, '{"a":1}');
+    expect(await run(['reap', '--roster', roster])).toBe(2);
+    writeFileSync(roster, '[1]');
+    expect(await run(['reap', '--roster', roster])).toBe(2);
+    writeFileSync(roster, 'not json');
+    expect(await run(['reap', '--roster', roster])).toBe(2);
+    expect(await run(['unblock', '--task-id', '../../x'])).toBe(2);
+    expect(err.mock.calls.join('')).toContain('--priority must be an integer');
+    err.mockRestore();
   });
 });

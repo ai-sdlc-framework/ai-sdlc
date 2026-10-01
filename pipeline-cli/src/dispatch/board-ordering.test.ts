@@ -2,7 +2,19 @@
  * Ordering rules, blocked/ parking, requeue reaper, enqueue and board listing.
  */
 
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  readFileSync,
+  statSync,
+  renameSync,
+  readdirSync,
+} from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Ajv2020 } from 'ajv/dist/2020.js';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -15,6 +27,9 @@ import {
   isOnBoard,
   listBoard,
   readInflightManifest,
+  releaseInflight,
+  removeVerdict,
+  requeueInflight,
   unblockManifest,
   writeHeartbeat,
   writeManifest,
@@ -115,7 +130,7 @@ describe('claim rules', () => {
       const p = writeManifest(board, mk(id, extra));
       _setMtimeForTest(p, 1_000_000 + t * 1000);
     }
-    const order: string[] = [];
+    const order: (string | undefined)[] = [];
     for (;;) {
       const r = claimNext(board, 'in-session-agent');
       if (!r.claimed) break;
@@ -164,7 +179,7 @@ describe('listBoard', () => {
     const by = Object.fromEntries(listBoard(board).map((e) => [e.taskId, e]));
     expect(by['T-1']?.state).toBe('inflight');
     expect(by['T-2']?.reason).toContain("sequence group 'g' is busy");
-    expect(by['T-3']?.reason).toContain('waiting for T-9');
+    expect(by['T-3']?.reason).toContain('task T-9 is not on the board');
     expect(by['T-4']?.reason).toContain('DEC-1');
     expect(by['T-5']?.reason).toContain('cool-down');
     expect(by['T-6']).toMatchObject({ state: 'queue', eligible: true });
@@ -297,5 +312,167 @@ describe('parseBrief', () => {
     expect(() => parseBrief('- {task: T-1, wave: x}')).toThrow(/integer/);
     expect(() => parseBrief('- {task: T-1, after: [1]}')).toThrow(/task ids/);
     expect(() => parseBrief('- {task: T-1, group: 3}')).toThrow(/text/);
+  });
+});
+
+describe('completion marker', () => {
+  it('keeps a finished task recognised after its verdict is removed', () => {
+    writeManifest(board, mk('T-1'));
+    claimNext(board, 'in-session-agent');
+    succeed(board, 'T-1');
+    writeManifest(board, mk('T-2', { after: ['T-1'] }));
+    removeVerdict(board, 'T-1', 'done');
+    expect(isOnBoard(board, 'T-1')).toBe(true);
+    const claim = claimNext(board, 'in-session-agent');
+    expect(claim.claimed && claim.manifest?.taskId).toBe('T-2');
+    expect(() =>
+      enqueueTasks(board, [{ taskId: 'T-1' }], {
+        baseSha: 'abc',
+        dispatchedBy: 't',
+        resolveTaskFile: () => 'x.md',
+      }),
+    ).toThrow(/already on the board/);
+  });
+
+  it('does not let a failed or iterate-needed task satisfy after', () => {
+    writeManifest(board, mk('T-1'));
+    claimNext(board, 'in-session-agent');
+    writeVerdict(board, {
+      schemaVersion: 'v1',
+      taskId: 'T-1',
+      outcome: 'iterate-needed',
+      completedAt: '2026-05-20T11:00:00.000Z',
+      workerId: 'w',
+    });
+    removeVerdict(board, 'T-1', 'done');
+    writeManifest(board, mk('T-2', { after: ['T-1'] }));
+    expect(claimNext(board, 'in-session-agent').claimed).toBe(false);
+
+    writeManifest(board, mk('T-3'));
+    writeManifest(board, mk('T-4', { after: ['T-3'] }));
+    writeVerdict(board, {
+      schemaVersion: 'v1',
+      taskId: 'T-3',
+      outcome: 'failed',
+      completedAt: '2026-05-20T11:00:00.000Z',
+      workerId: 'w',
+    });
+    removeVerdict(board, 'T-3', 'failed');
+    const held = listBoard(board).find((e) => e.taskId === 'T-4');
+    expect(held?.eligible).toBe(false);
+  });
+});
+
+describe('ineligibility reasons', () => {
+  it('tells failed, missing and pending dependencies apart', () => {
+    writeVerdictFile('failed', 'T-1');
+    writeManifest(board, mk('T-3'));
+    writeManifest(board, mk('T-4', { after: ['T-1'] }));
+    writeManifest(board, mk('T-5', { after: ['T-2'] }));
+    writeManifest(board, mk('T-6', { after: ['T-3'] }));
+    const reason = (id: string) => listBoard(board).find((e) => e.taskId === id)?.reason;
+    expect(reason('T-4')).toBe('task T-1 failed');
+    expect(reason('T-5')).toBe('task T-2 is not on the board');
+    expect(reason('T-6')).toBe('waiting for T-3 to finish');
+  });
+
+  function writeVerdictFile(sub: 'failed', id: string): void {
+    writeFileSync(
+      path.join(board, sub, `${id}.verdict.json`),
+      JSON.stringify({ schemaVersion: 'v1', taskId: id, outcome: 'failed', workerId: 'w' }),
+    );
+  }
+});
+
+describe('sequence group race', () => {
+  it('rolls a claim back when another manifest of the group was claimed in between', () => {
+    writeManifest(board, mk('T-1', { sequenceGroup: 'g' }));
+    writeManifest(board, mk('T-2', { sequenceGroup: 'g' }));
+    const queued = path.join(board, 'queue', 'T-1.dispatch.json');
+    const before = statSync(queued).mtimeMs;
+    const first = claimNext(board, 'in-session-agent', undefined, {
+      beforeClaimRename: (m) => {
+        // A rival Worker claims the other manifest of the group right now.
+        if (m.taskId === 'T-1') {
+          renameSync(
+            path.join(board, 'queue', 'T-2.dispatch.json'),
+            path.join(board, 'inflight', 'T-2.dispatch.json'),
+          );
+        }
+      },
+    });
+    expect(first.claimed).toBe(false);
+    expect(readdirSync(path.join(board, 'inflight'))).toEqual(['T-2.dispatch.json']);
+    expect(existsSync(queued)).toBe(true);
+    expect(statSync(queued).mtimeMs).toBe(before);
+  });
+});
+
+describe('requeue and unblock keep FIFO position', () => {
+  it('requeueInflight preserves mtime, clears inflight files and refuses a queue clash', () => {
+    writeManifest(board, mk('T-1'));
+    claimNext(board, 'in-session-agent');
+    const inflight = path.join(board, 'inflight', 'T-1.dispatch.json');
+    _setMtimeForTest(inflight, 1_000_000);
+    writeFileSync(path.join(board, 'inflight', 'T-1.state.json'), '{}');
+    writeFileSync(path.join(board, 'inflight', 'T-1.resume.json'), '{}');
+    expect(requeueInflight(board, 'T-1', 2)).toBe(true);
+    expect(readdirSync(path.join(board, 'inflight'))).toEqual([]);
+    const queued = path.join(board, 'queue', 'T-1.dispatch.json');
+    expect(statSync(queued).mtimeMs).toBe(1_000_000);
+    expect(JSON.parse(readFileSync(queued, 'utf-8')).retryCount).toBe(2);
+
+    writeManifest(board, mk('T-2'));
+    writeFileSync(path.join(board, 'inflight', 'T-2.dispatch.json'), JSON.stringify(mk('T-2')));
+    expect(() => requeueInflight(board, 'T-2', 1)).toThrow(/already exists/);
+    expect(releaseInflight(board, 'T-9')).toBe(false);
+  });
+
+  it('unblockManifest preserves the parked mtime', () => {
+    writeFileSync(
+      path.join(board, 'blocked', 'T-1.dispatch.json'),
+      JSON.stringify(mk('T-1', { blockedBy: 'D-1' })),
+    );
+    _setMtimeForTest(path.join(board, 'blocked', 'T-1.dispatch.json'), 2_000_000);
+    expect(unblockManifest(board, 'T-1')).toBe(true);
+    expect(statSync(path.join(board, 'queue', 'T-1.dispatch.json')).mtimeMs).toBe(2_000_000);
+  });
+});
+
+describe('task id validation', () => {
+  it('rejects path traversal in any path builder', () => {
+    expect(() => unblockManifest(board, '../../x')).toThrow(/not a valid task id/);
+    expect(() => releaseInflight(board, '../../x')).toThrow(/not a valid task id/);
+    expect(() => writeManifest(board, mk('../../x'))).toThrow(/not a valid task id/);
+  });
+});
+
+describe('legacy manifests', () => {
+  it('claim in FIFO order and validate against the schema', () => {
+    const schemaPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      '..',
+      'spec',
+      'schemas',
+      'dispatch-manifest.v1.schema.json',
+    );
+    const validate = new Ajv2020({ strict: false, allErrors: true }).compile(
+      JSON.parse(readFileSync(schemaPath, 'utf-8')),
+    );
+    for (const [i, id] of ['T-1', 'T-2', 'T-3'].entries()) {
+      const m = mk(id);
+      expect(validate(m)).toBe(true);
+      const file = writeManifest(board, m);
+      _setMtimeForTest(file, (3 - i) * 1_000_000);
+    }
+    const order: (string | undefined)[] = [];
+    for (;;) {
+      const r = claimNext(board, 'in-session-agent');
+      if (!r.claimed) break;
+      order.push(r.manifest?.taskId);
+    }
+    expect(order).toEqual(['T-3', 'T-2', 'T-1']);
   });
 });

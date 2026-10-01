@@ -9,7 +9,7 @@
 
 import { load as yamlLoad } from 'js-yaml';
 
-import { isOnBoard, writeManifest } from './board.js';
+import { isOnBoard, TASK_ID_RE, writeManifest } from './board.js';
 import type { DispatchManifest, ManifestWorkerKind } from './types.js';
 
 /** One task to enqueue and its ordering fields. */
@@ -39,8 +39,6 @@ export const DEFAULT_VERIFY_COMMANDS = [
   'pnpm lint',
   'pnpm format:check',
 ];
-
-const TASK_ID_RE = /^[A-Z][A-Z0-9-]*-[0-9]+(\.[0-9]+)*$/;
 
 /**
  * Write one manifest per entry into `queue/`. Returns the written paths.
