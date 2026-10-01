@@ -42,7 +42,7 @@ Do NOT commit if any of these fail. Fix the errors first, then commit.
 
 - **Always rebase** feature branches onto main. Never merge main into a feature branch.
 - When updating a feature branch with latest main: `git fetch origin && git rebase origin/main`
-- After rebase with conflicts resolved: `git push --force-with-lease origin <branch>`
+- After rebase with conflicts resolved: `git push --force-with-lease origin HEAD:refs/heads/<branch>` (a standalone command with the branch name written literally)
 - Never use `gh api pulls/N/update-branch` with merge method.
 - Keep commit history linear — no merge commits on feature branches.
 - Use conventional commits: `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `style:`

@@ -80,12 +80,22 @@ spec:
   - it is a single `git push <configured-remote> --force-with-lease[=<own>[:<sha>]] <refspec>...`
     command (no chaining, quoting, wrapper, env prefix, `git -C`/`--git-dir`, or
     extra flags; plain ASCII only);
-  - every refspec is either the bare no-colon form (`<branch>` or
-    `refs/heads/<branch>`) or a colon form whose destination is spelled exactly
-    `refs/heads/<branch>` (for example `HEAD:refs/heads/<branch>`). Short
-    destinations such as `HEAD:<branch>` are refused because git resolves them
-    against the remote with every rule (tags and notes refs win over heads), and
-    names such as `heads/x`, `tags/x`, `remotes/x`, `refs/x` are refused;
+  - every refspec is a colon form whose source is `HEAD` (or the own branch /
+    `refs/heads/<branch>`) and whose destination is spelled exactly
+    `refs/heads/<branch>`, i.e. `HEAD:refs/heads/<branch>`. **The no-colon form
+    (`git push --force-with-lease origin <branch>`) is refused in every case.**
+    Git does not send a no-colon refspec to `refs/heads/<branch>`: it maps it
+    through `remote.<name>.push` and, under `push.default=upstream|tracking`,
+    through `branch.<branch>.merge`. Task branches are created from
+    `origin/main`, so they track `refs/heads/main`, and the "sanctioned" command
+    would force-push the task branch onto main (by accident with
+    `push.default=upstream`, or on purpose with one
+    `git config remote.origin.push refs/heads/<branch>:refs/heads/main`); both are
+    reproduced against real git in the tests. An explicit refspec on the command
+    line ignores that configuration. Short destinations such as `HEAD:<branch>`
+    are refused too, because git resolves them against the remote with every rule
+    (tags and notes refs win over heads), as are names such as `heads/x`,
+    `tags/x`, `remotes/x`, `refs/x`;
   - `<branch>` is the task's own branch: the worktree has a valid `.active-task`
     (`AISDLC-123`, `AISDLC-100.5`, or the GitHub-issue form `gh-issue-42`), the
     worktree directory is named `<task-id-lower>` (`.worktrees/aisdlc-123`,
@@ -94,21 +104,29 @@ spec:
     `ai-sdlc/{issueIdLower}-{slug}`, hardcoded here; the GitHub-issue path
     produces `ai-sdlc/gh-issue-42-<slug>`). Anything missing or disagreeing
     denies;
-  - the worktree is genuine: its real path (symlinks resolved) is directly
-    under `<main checkout>/.worktrees/`, the project directory is the main
-    checkout or under its `.worktrees/`, the main checkout's `.git` is a real
+  - the worktree is genuine and it is the session's own: its real path (symlinks
+    resolved) is directly under `<main checkout>/.worktrees/`; the project
+    directory (`CLAUDE_PROJECT_DIR`) is either that worktree itself (a session
+    rooted in worktree A that changes into sibling worktree B gets no lease from
+    B) or the main checkout (then the worktree must still be a genuine bound
+    `.worktrees/<id>`); the main checkout's `.git` is a real
     directory matching the git common dir, and the worktree's own git dir lives
     under `<main>/.git/worktrees/` with a `gitdir` back-pointer to the worktree.
     A forged directory elsewhere (for example `/tmp/x/aisdlc-700`), a symlinked
     `.worktrees` entry, or a hand-built gitdir pointing at the real repo all
     deny, and so does an operator's main checkout;
+  - the hook knows the session's own project directory: `CLAUDE_PROJECT_DIR`
+    must be set, non-empty and absolute. If it is unset, empty or relative the
+    lease decision fails closed to `never` (the toplevel fallback is kept only
+    for the legacy `blockedActions` / `blockedPaths` reads, since it would make
+    the own-session binding below pass trivially);
   - **the accepted spelling**: run, as its own standalone command from the
     worktree, `git push --force-with-lease origin HEAD:refs/heads/<branch>` with
     the branch printed by `git branch --show-current` written literally (no
     variables, quotes, `cd &&`, chaining; `-u` is allowed, bare `HEAD` and
-    `--set-upstream HEAD` are not). The no-colon form
-    `git push --force-with-lease origin <branch>` is also accepted. The
-    `/ai-sdlc rebase` command and the rebase/CI-conflict/developer agents use
+    `--set-upstream HEAD` are not; a lease value, if given, is
+    `--force-with-lease=<branch>:<sha>`). The deny message for any other spelling
+    names this one. The `/ai-sdlc rebase` command and the rebase/CI-conflict/developer agents use
     this spelling, and a test parses their push lines and runs them through the
     hook so they cannot drift; **A session with no `.active-task` sentinel (an
     operator's own session) therefore gets no lease push**; the supported paths
@@ -125,7 +143,13 @@ spec:
   Everything else that looks like a force-push (plain `--force`/`-f`, `+refspec`,
   `--force-if-includes` alone, another branch, a raw URL remote, `--delete`,
   `--mirror`, `--all`, a push with no explicit refspec, abbreviations of those
-  options) is blocked. `--follow-tags` is not force-ish on its own but is not part
+  options) is blocked. Other push-affecting git config: with an explicit refspec,
+  `push.followTags` only adds tags missing on the remote, `push.pushOption`,
+  `push.negotiate` and `transfer.*` only tune the transport, and
+  `remote.<name>.mirror=true` makes git abort; none moves a different ref.
+  `remote.<name>.pushurl` / `url.<base>.pushInsteadOf` can send the task branch
+  name to a different repository, which is not this guard's trust boundary.
+  `--follow-tags` is not force-ish on its own but is not part
   of the allowed lease shape. The own branch is read from git state as the full
   ref, never from the command text.
 

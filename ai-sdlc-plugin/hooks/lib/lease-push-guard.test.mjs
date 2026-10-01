@@ -28,19 +28,19 @@ const verdict = (cmd, over) => evaluateLeasePush(cmd, ctx(over)).decision;
 
 describe('evaluateLeasePush — allowed shapes', () => {
   for (const cmd of [
-    `git push --force-with-lease origin ${OWN}`,
-    `git push origin --force-with-lease ${OWN}`,
-    `git push --force-with-lease=${OWN} origin ${OWN}`,
-    `git push --force-with-lease=${OWN}:0123abcd origin ${OWN}`,
-    `git push --force-with-lease=refs/heads/${OWN} origin ${OWN}`,
-    `git push --force-with-lease --force-if-includes origin ${OWN}`,
-    `git push -u --force-with-lease origin ${OWN}`,
+    `git push --force-with-lease origin HEAD:refs/heads/${OWN}`,
+    `git push origin --force-with-lease HEAD:refs/heads/${OWN}`,
+    `git push --force-with-lease=${OWN} origin HEAD:refs/heads/${OWN}`,
+    `git push --force-with-lease=${OWN}:0123abcd origin HEAD:refs/heads/${OWN}`,
+    `git push --force-with-lease=refs/heads/${OWN} origin HEAD:refs/heads/${OWN}`,
+    `git push --force-with-lease --force-if-includes origin HEAD:refs/heads/${OWN}`,
+    `git push -u --force-with-lease origin HEAD:refs/heads/${OWN}`,
     `git push --force-with-lease origin HEAD:refs/heads/${OWN}`,
     `git push --force-with-lease origin ${OWN}:refs/heads/${OWN}`,
     `git push --force-with-lease origin refs/heads/${OWN}:refs/heads/${OWN}`,
-    `git push --force-with-lease origin refs/heads/${OWN}`,
-    `git push --force-with-lease fork ${OWN}`,
-    `  git push --force-with-lease origin ${OWN}  `,
+    `git push --force-with-lease origin refs/heads/${OWN}:refs/heads/${OWN}`,
+    `git push --force-with-lease fork HEAD:refs/heads/${OWN}`,
+    `  git push --force-with-lease origin HEAD:refs/heads/${OWN}  `,
   ]) {
     it(`allows: ${cmd.trim()}`, () => assert.equal(verdict(cmd), 'allow'));
   }
@@ -59,27 +59,30 @@ describe('evaluateLeasePush — denied', () => {
     ['master', 'git push --force-with-lease origin master'],
     ['delete :main', 'git push --force-with-lease origin :main'],
     ['delete :own', `git push --force-with-lease origin :${OWN}`],
-    ['--delete', `git push --force-with-lease --delete origin ${OWN}`],
-    ['-d', `git push --force-with-lease -d origin ${OWN}`],
+    ['--delete', `git push --force-with-lease --delete origin HEAD:refs/heads/${OWN}`],
+    ['-d', `git push --force-with-lease -d origin HEAD:refs/heads/${OWN}`],
     ['--mirror', 'git push --force-with-lease --mirror origin'],
     ['--all', 'git push --force-with-lease --all origin'],
     ['--tags', 'git push --force-with-lease --tags origin'],
-    ['plain --force', `git push --force origin ${OWN}`],
-    ['-f', `git push -f origin ${OWN}`],
-    ['clustered -uf', `git push -uf origin ${OWN}`],
+    ['plain --force', `git push --force origin HEAD:refs/heads/${OWN}`],
+    ['-f', `git push -f origin HEAD:refs/heads/${OWN}`],
+    ['clustered -uf', `git push -uf origin HEAD:refs/heads/${OWN}`],
     ['+refspec', `git push origin +${OWN}`],
     ['+refspec w/ lease', `git push --force-with-lease origin +${OWN}`],
-    ['--force-if-includes alone', `git push --force-if-includes origin ${OWN}`],
-    ['abbreviated option', `git push --force-w origin ${OWN}`],
-    ['abbrev --forc', `git push --forc origin ${OWN}`],
+    ['--force-if-includes alone', `git push --force-if-includes origin HEAD:refs/heads/${OWN}`],
+    ['abbreviated option', `git push --force-w origin HEAD:refs/heads/${OWN}`],
+    ['abbrev --forc', `git push --forc origin HEAD:refs/heads/${OWN}`],
     ['no refspec', 'git push --force-with-lease origin'],
     ['no remote', 'git push --force-with-lease'],
     ['raw URL remote', `git push --force-with-lease https://evil.example/r.git ${OWN}`],
     ['unconfigured remote name', `git push --force-with-lease evil ${OWN}`],
-    ['lease value other ref', `git push --force-with-lease=main:0123abcd origin ${OWN}`],
-    ['lease value malformed', `git push --force-with-lease=a:b origin ${OWN}`],
-    ['--no-verify', `git push --no-verify --force-with-lease origin ${OWN}`],
-    ['unknown flag', `git push --force-with-lease --receive-pack=x origin ${OWN}`],
+    [
+      'lease value other ref',
+      `git push --force-with-lease=main:0123abcd origin HEAD:refs/heads/${OWN}`,
+    ],
+    ['lease value malformed', `git push --force-with-lease=a:b origin HEAD:refs/heads/${OWN}`],
+    ['--no-verify', `git push --no-verify --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['unknown flag', `git push --force-with-lease --receive-pack=x origin HEAD:refs/heads/${OWN}`],
     ['chained &&', `git push --force-with-lease origin ${OWN} && echo hi`],
     ['chained ;', `git push --force-with-lease origin ${OWN}; rm -rf x`],
     ['chained ||', `git push --force-with-lease origin ${OWN} || true`],
@@ -88,24 +91,24 @@ describe('evaluateLeasePush — denied', () => {
     ['subshell', `(git push --force-with-lease origin ${OWN})`],
     ['command subst', `echo $(git push --force-with-lease origin other)`],
     ['backticks', 'echo `git push --force-with-lease origin other`'],
-    ['cd then push', `cd /elsewhere && git push --force-with-lease origin ${OWN}`],
-    ['git -C', `git -C /elsewhere push --force-with-lease origin ${OWN}`],
-    ['--git-dir', `git --git-dir=/x/.git push --force-with-lease origin ${OWN}`],
-    ['GIT_DIR prefix', `GIT_DIR=/x/.git git push --force-with-lease origin ${OWN}`],
-    ['env wrapper', `env git push --force-with-lease origin ${OWN}`],
-    ['command wrapper', `command git push --force-with-lease origin ${OWN}`],
-    ['absolute git path', `/usr/bin/git push --force-with-lease origin ${OWN}`],
-    ['-c alias override', `git -c alias.p=push p --force-with-lease origin ${OWN}`],
+    ['cd then push', `cd /elsewhere && git push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['git -C', `git -C /elsewhere push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['--git-dir', `git --git-dir=/x/.git push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['GIT_DIR prefix', `GIT_DIR=/x/.git git push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['env wrapper', `env git push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['command wrapper', `command git push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['absolute git path', `/usr/bin/git push --force-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['-c alias override', `git -c alias.p=push p --force-with-lease origin HEAD:refs/heads/${OWN}`],
     ['configured alias', 'git fpush origin whatever'],
-    ['quoted flag', `git push '--force-with-lease' origin ${OWN}`],
+    ['quoted flag', `git push '--force-with-lease' origin HEAD:refs/heads/${OWN}`],
     ['quoted ref', `git push --force-with-lease origin "${OWN}"`],
-    ['escaped flag', `git push --force\\-with-lease origin ${OWN}`],
-    ['variable flag', `git push $FLAG origin ${OWN}`],
+    ['escaped flag', `git push --force\\-with-lease origin HEAD:refs/heads/${OWN}`],
+    ['variable flag', `git push $FLAG origin HEAD:refs/heads/${OWN}`],
     ['variable ref', `git push --force-with-lease origin $B`],
     ['glob', 'git push --force-with-lease origin *'],
     ['brace', 'git push --force-with-lease origin {a,b}'],
     ['redirect', `git push --force-with-lease origin ${OWN} > /dev/null`],
-    ['push option f', `git push -o x -f origin ${OWN}`],
+    ['push option f', `git push -o x -f origin HEAD:refs/heads/${OWN}`],
   ];
   for (const [name, cmd] of denied) {
     it(`denies: ${name}`, () => assert.equal(verdict(cmd), 'deny', cmd));
@@ -114,7 +117,9 @@ describe('evaluateLeasePush — denied', () => {
   it('denies when own branch is main/master/protected', () => {
     for (const b of ['main', 'master', 'release/1.0', 'prod']) {
       assert.equal(
-        verdict(`git push --force-with-lease origin ${b}`, { ownRef: `refs/heads/${b}` }),
+        verdict(`git push --force-with-lease origin HEAD:refs/heads/${b}`, {
+          ownRef: `refs/heads/${b}`,
+        }),
         'deny',
         b,
       );
@@ -122,7 +127,10 @@ describe('evaluateLeasePush — denied', () => {
   });
 
   it('denies when own branch is unknown or detached or odd', () => {
-    assert.equal(verdict(`git push --force-with-lease origin ${OWN}`, { ownRef: null }), 'deny');
+    assert.equal(
+      verdict(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, { ownRef: null }),
+      'deny',
+    );
     assert.equal(
       verdict(`git push --force-with-lease origin x`, { ownRef: 'refs/heads/x y' }),
       'deny',
@@ -131,10 +139,13 @@ describe('evaluateLeasePush — denied', () => {
 
   it('denies when remotes unknown (git remote failed)', () => {
     assert.equal(
-      verdict(`git push --force-with-lease origin ${OWN}`, { remotes: undefined }),
+      verdict(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, { remotes: undefined }),
       'deny',
     );
-    assert.equal(verdict(`git push --force-with-lease origin ${OWN}`, { remotes: [] }), 'deny');
+    assert.equal(
+      verdict(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, { remotes: [] }),
+      'deny',
+    );
   });
 
   it('deny reason is informative', () => {
@@ -209,8 +220,10 @@ describe('evaluateLeasePush - git short-name resolution bypass', () => {
   it('denies a non-refs/heads own ref (tag, detached, remote-tracking)', () => {
     for (const ref of ['refs/tags/x', 'refs/remotes/origin/main', 'main', 'HEAD', '']) {
       assert.equal(
-        evaluateLeasePush(`git push --force-with-lease origin ${OWN}`, ctx({ ownRef: ref }))
-          .decision,
+        evaluateLeasePush(
+          `git push --force-with-lease origin HEAD:refs/heads/${OWN}`,
+          ctx({ ownRef: ref }),
+        ).decision,
         'deny',
         ref,
       );
@@ -259,26 +272,35 @@ describe('evaluateLeasePush - option abbreviations and parser agreement', () => 
     '--fo',
   ]) {
     it(`denies abbreviated force-class option ${flag}`, () => {
-      assert.equal(verdict(`git push ${flag} origin ${OWN}`), 'deny');
-      assert.equal(verdict(`git push --force-with-lease ${flag} origin ${OWN}`), 'deny');
+      assert.equal(verdict(`git push ${flag} origin HEAD:refs/heads/${OWN}`), 'deny');
+      assert.equal(
+        verdict(`git push --force-with-lease ${flag} origin HEAD:refs/heads/${OWN}`),
+        'deny',
+      );
     });
   }
 
   it('a benign --follow-tags push is not force-ish (unchanged); with a lease it is denied (documented)', () => {
-    assert.equal(verdict(`git push --follow-tags origin ${OWN}`), 'none');
-    assert.equal(verdict(`git push --force-with-lease --follow-tags origin ${OWN}`), 'deny');
+    assert.equal(verdict(`git push --follow-tags origin HEAD:refs/heads/${OWN}`), 'none');
+    assert.equal(
+      verdict(`git push --force-with-lease --follow-tags origin HEAD:refs/heads/${OWN}`),
+      'deny',
+    );
   });
 
   it('rejects NBSP / unicode / control separators so parser and shell cannot disagree', () => {
     assert.equal(verdict(`git push --force-with-lease origin\u00a0${OWN}`), 'deny');
     // NBSP glued into the subcommand word: git itself rejects it as an unknown command.
-    assert.equal(verdict(`git push\u00a0--force-with-lease origin ${OWN}`), 'none');
-    assert.equal(verdict(`git push --force-with-lease origin ${OWN}\u2003`), 'deny');
-    assert.equal(verdict(`git push --force-with-lease origin ${OWN}\x0b`), 'deny');
+    assert.equal(verdict(`git push\u00a0--force-with-lease origin HEAD:refs/heads/${OWN}`), 'none');
+    assert.equal(
+      verdict(`git push --force-with-lease origin HEAD:refs/heads/${OWN}\u2003`),
+      'deny',
+    );
+    assert.equal(verdict(`git push --force-with-lease origin HEAD:refs/heads/${OWN}\x0b`), 'deny');
   });
 
   it('tab-separated plain ASCII still parses like the shell would', () => {
-    assert.equal(verdict(`git\tpush\t--force-with-lease\torigin\t${OWN}`), 'allow');
+    assert.equal(verdict(`git\tpush\t--force-with-lease\torigin\tHEAD:refs/heads/${OWN}`), 'allow');
   });
 
   it('env-injected git config (GIT_CONFIG_COUNT and friends) is denied', () => {
@@ -297,6 +319,22 @@ describe('evaluateLeasePush - option abbreviations and parser agreement', () => 
     assert.equal(verdict("sh -c 'git push -f origin main'"), 'none');
     // xargs is a recognised wrapper: the push is seen and denied.
     assert.equal(verdict('xargs git push --force-with-lease origin main'), 'deny');
+  });
+});
+
+describe('evaluateLeasePush - deny reasons steer toward the accepted spelling', () => {
+  it('every generic deny names HEAD:refs/heads/<own> and never the bare no-colon spelling', () => {
+    for (const cmd of [
+      `git push --force-with-lease --receive-pack=x origin HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease origin HEAD:refs/heads/main`,
+      `git push --force-with-lease evil HEAD:refs/heads/${OWN}`,
+      `git push --force origin ${OWN}`,
+    ]) {
+      const r = evaluateLeasePush(cmd, ctx());
+      assert.equal(r.decision, 'deny', cmd);
+      assert.match(r.reason, /--force-with-lease HEAD:refs\/heads\/<own-branch>/, cmd);
+      assert.doesNotMatch(r.reason, /--force-with-lease <own-branch>/, cmd);
+    }
   });
 });
 
@@ -319,19 +357,54 @@ describe('evaluateLeasePush - short destination / alias hardening', () => {
     }
   });
 
-  it('bare no-colon form is allowed only for the own branch', () => {
-    assert.equal(dec(`git push --force-with-lease origin ${OWN}`), 'allow');
-    assert.equal(dec(`git push --force-with-lease origin refs/heads/${OWN}`), 'allow');
-    assert.equal(dec('git push --force-with-lease origin ai-sdlc/aisdlc-1-other'), 'deny');
+  it('the no-colon form is refused in every spelling, with the accepted spelling in the message', () => {
+    for (const cmd of [
+      `git push --force-with-lease origin ${OWN}`,
+      `git push --force-with-lease origin refs/heads/${OWN}`,
+      `git push --force-with-lease -u origin ${OWN}`,
+      `git push -u --force-with-lease origin ${OWN}`,
+      `git push --force-with-lease=${OWN} origin ${OWN}`,
+      `git push --force-with-lease=${OWN}:0123abcd origin ${OWN}`,
+      `git push --force-with-lease origin ai-sdlc/aisdlc-1-other`,
+      `git push --force-with-lease origin HEAD:refs/heads/${OWN} ${OWN}`,
+    ]) {
+      const r = evaluateLeasePush(cmd, ctx());
+      assert.equal(r.decision, 'deny', cmd);
+      assert.match(r.reason, /HEAD:refs\/heads\//, cmd);
+    }
+  });
+
+  it('the explicit forms (HEAD / own / full ref source, full destination, optional -u and lease value) are accepted', () => {
+    for (const cmd of [
+      `git push --force-with-lease origin HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease -u origin HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease=${OWN}:0123abcd origin HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease origin ${OWN}:refs/heads/${OWN}`,
+      `git push --force-with-lease origin refs/heads/${OWN}:refs/heads/${OWN}`,
+    ]) {
+      assert.equal(evaluateLeasePush(cmd, ctx()).decision, 'allow', cmd);
+    }
+    for (const cmd of [
+      `git push --force-with-lease=main:0123abcd origin HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease origin +HEAD:refs/heads/${OWN}`,
+      `git push --force-with-lease origin HEAD:${OWN}`,
+      'git push --force-with-lease origin HEAD:refs/heads/main',
+    ]) {
+      assert.equal(evaluateLeasePush(cmd, ctx()).decision, 'deny', cmd);
+    }
   });
 
   it('denies when another local ref answers to the name, or when that cannot be checked', () => {
     assert.equal(
-      dec(`git push --force-with-lease origin ${OWN}`, { refAliasState: () => 'collides' }),
+      dec(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, {
+        refAliasState: () => 'collides',
+      }),
       'deny',
     );
     assert.equal(
-      dec(`git push --force-with-lease origin ${OWN}`, { refAliasState: () => 'error' }),
+      dec(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, {
+        refAliasState: () => 'error',
+      }),
       'deny',
     );
     assert.equal(
@@ -341,7 +414,9 @@ describe('evaluateLeasePush - short destination / alias hardening', () => {
       'deny',
     );
     assert.equal(
-      dec(`git push --force-with-lease origin ${OWN}`, { refAliasState: undefined }),
+      dec(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, {
+        refAliasState: undefined,
+      }),
       'deny',
     );
   });
@@ -359,7 +434,8 @@ describe('evaluateLeasePush - short destination / alias hardening', () => {
 
 describe('evaluateLeasePush - task branch binding', () => {
   const dec = (over) =>
-    evaluateLeasePush(`git push --force-with-lease origin ${OWN}`, ctx(over)).decision;
+    evaluateLeasePush(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, ctx(over))
+      .decision;
 
   it('allows when .active-task, directory name and branch prefix agree', () => {
     assert.equal(dec({}), 'allow');
@@ -387,7 +463,7 @@ describe('evaluateLeasePush - task branch binding', () => {
     ]) {
       assert.equal(
         evaluateLeasePush(
-          `git push --force-with-lease origin ${b}`,
+          `git push --force-with-lease origin HEAD:refs/heads/${b}`,
           ctx({ ownRef: `refs/heads/${b}` }),
         ).decision,
         'deny',
@@ -400,7 +476,7 @@ describe('evaluateLeasePush - task branch binding', () => {
     const b = 'ai-sdlc/aisdlc-100.5-x';
     assert.equal(
       evaluateLeasePush(
-        `git push --force-with-lease origin ${b}`,
+        `git push --force-with-lease origin HEAD:refs/heads/${b}`,
         ctx({ ownRef: `refs/heads/${b}`, taskId: 'aisdlc-100.5', worktreeName: 'aisdlc-100.5' }),
       ).decision,
       'allow',

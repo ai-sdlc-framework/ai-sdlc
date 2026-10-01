@@ -646,7 +646,7 @@ The composition layer (`AI_SDLC_DEPS_COMPOSITION`) ships behind a flag — these
 1. `cd <pool>/<branch-slug>` and inspect with `git status` — files in conflict are listed.
 2. Either resolve manually (preferred for substantive conflicts) or run `git rebase --abort` to bail.
 3. If aborting: re-trigger the pipeline run; the orchestrator will re-fetch and try again. If the rebase fails the same way, the issue likely needs a different implementation approach — re-triage manually.
-4. After resolving + `git rebase --continue`: `git push --force-with-lease origin <branch>`. The orchestrator will detect the up-to-date base on next merge-gate acquisition.
+4. After resolving + `git rebase --continue`: `git push --force-with-lease origin HEAD:refs/heads/<branch>`. The orchestrator will detect the up-to-date base on next merge-gate acquisition.
 
 ### `rebase-conflict` outcome (AISDLC-232 late-rebase)
 

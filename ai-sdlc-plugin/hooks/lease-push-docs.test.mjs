@@ -52,6 +52,17 @@ function bodies() {
     const p = join(pluginRoot, 'skills', d, 'SKILL.md');
     if (existsSync(p)) out.push(p);
   }
+  // Tracked repo-local copies under .claude/ (skills, commands) must not drift either.
+  const repoRoot = join(pluginRoot, '..');
+  let tracked = [];
+  try {
+    tracked = execFileSync('git', ['ls-files', '.claude'], { cwd: repoRoot, encoding: 'utf-8' })
+      .split('\n')
+      .filter((f) => f.endsWith('.md'));
+  } catch {
+    tracked = [];
+  }
+  for (const f of tracked) out.push(join(repoRoot, f));
   return out;
 }
 
@@ -131,11 +142,26 @@ describe('push spellings prescribed in command / agent / skill bodies', () => {
     }
   });
 
+  it('also scans the tracked .claude/skills copy of the governance skill', () => {
+    assert.ok(
+      found.some((x) => x.f.includes(`${'.claude'}/skills/ai-sdlc-governance/SKILL.md`)),
+      '.claude/skills/ai-sdlc-governance/SKILL.md must show the explicit spelling and be scanned',
+    );
+  });
+
   for (const { f, line } of found) {
     it(`the guard accepts: ${line}  (${f.split('/').slice(-2).join('/')})`, () => {
       const cmd = substitute(line);
       assert.ok(!/[<>$"'`;&|]/.test(cmd), `not a literal, unquoted, standalone command: ${cmd}`);
       assert.equal(verdict(cmd), 'allow', cmd);
+    });
+
+    it(`prescribes an explicit destination, never the no-colon form: ${line}`, () => {
+      assert.match(
+        substitute(line),
+        /\sHEAD:refs\/heads\/\S+$/,
+        'must end with the explicit HEAD:refs/heads/<branch> refspec',
+      );
     });
   }
 });
@@ -143,6 +169,9 @@ describe('push spellings prescribed in command / agent / skill bodies', () => {
 describe('spellings that must stay denied (so the files above cannot drift back)', () => {
   const denied = [
     'git push --force-with-lease origin HEAD',
+    `git push --force-with-lease origin ${BRANCH}`,
+    `git push --force-with-lease -u origin ${BRANCH}`,
+    `git push --force-with-lease origin refs/heads/${BRANCH}`,
     'git push --force-with-lease --set-upstream origin HEAD',
     'git push --force-with-lease -u origin HEAD',
     `git push --force-with-lease origin HEAD:${BRANCH}`,
@@ -163,12 +192,13 @@ describe('spellings that must stay denied (so the files above cannot drift back)
     it(`denies: ${cmd}`, () => assert.equal(verdict(cmd), 'deny', cmd));
   }
 
-  it('control: the canonical spelling and the no-colon form are accepted', () => {
+  it('control: the canonical spelling is accepted and the no-colon form is refused', () => {
     assert.equal(verdict(`git push --force-with-lease origin HEAD:refs/heads/${BRANCH}`), 'allow');
     assert.equal(
       verdict(`git push --force-with-lease -u origin HEAD:refs/heads/${BRANCH}`),
       'allow',
     );
-    assert.equal(verdict(`git push --force-with-lease origin ${BRANCH}`), 'allow');
+    // The no-colon form is REFUSED (git maps it through remote.<name>.push / push.default).
+    assert.equal(verdict(`git push --force-with-lease origin ${BRANCH}`), 'deny');
   });
 });
