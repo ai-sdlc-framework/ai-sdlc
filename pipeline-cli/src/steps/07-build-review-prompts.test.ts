@@ -5,6 +5,12 @@ import { buildReviewPrompts } from './07-build-review-prompts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
 import type { TaskSpec } from '../types.js';
+import {
+  FakeJudgmentProvider,
+  REVIEWER_SET_SIGNAL_IDS,
+  resolveJudgmentConfig,
+  type EvaluateJudgmentContext,
+} from '@ai-sdlc/reference';
 
 let tmp: string;
 let savedArts: string | undefined;
@@ -259,5 +265,110 @@ describe('Step 7 — buildReviewPrompts', () => {
       runner: fake.toRunner(),
     });
     expect(r.harnessNote).toBe('');
+  });
+});
+
+describe('Step 7 — judgment-driven reviewer selection', () => {
+  const judgmentCtx = (mode: 'shadow' | 'enforce', routing = 0): EvaluateJudgmentContext => {
+    const fake = new FakeJudgmentProvider();
+    for (const id of REVIEWER_SET_SIGNAL_IDS) {
+      fake.script(id, { type: 'noul', probability: 0.01 });
+    }
+    for (const id of ['auth-session-secrets', 'input-handling', 'dependencies-ci']) {
+      fake.script(id, { type: 'noul', probability: routing });
+    }
+    const key = 'fake@fake-1';
+    return {
+      getProvider: () => fake,
+      config: resolveJudgmentConfig({
+        spec: {
+          provider: 'fake',
+          model: 'fake-1',
+          egress: { allow: ['code-diff'] },
+          judgments: {
+            'review.reviewer-set': {
+              mode,
+              thresholds: {
+                [key]: Object.fromEntries(REVIEWER_SET_SIGNAL_IDS.map((id) => [id, 0.3])),
+              },
+              promotion: { [key]: { path: 'corpus', n: 60, actBandPrecision: 0.97 } },
+            },
+            'review.routing': {
+              mode,
+              thresholds: { [key]: { 'input-handling': 0.5 } },
+              promotion: { [key]: { path: 'override', evidence: 'reviewed' } },
+            },
+          },
+        },
+      }),
+    };
+  };
+
+  const runWith = async (
+    judgment: EvaluateJudgmentContext | undefined,
+    sourceKind: 'backlog' | 'gh-issue' | undefined,
+  ) => {
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('diff --git a/src/a.ts b/src/a.ts\n+x\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('src/a.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+      artifactsDir: join(tmp, 'arts'),
+      ...(judgment ? { judgment } : {}),
+      ...(sourceKind ? { sourceKind } : {}),
+    });
+    return r.prompts.map((p) => p.reviewer);
+  };
+
+  const THREE = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
+
+  it('selects the merged set for a trusted backlog task in enforce', async () => {
+    expect(await runWith(judgmentCtx('enforce'), 'backlog')).toEqual([
+      'correctness-reviewer',
+      'security-reviewer',
+    ]);
+  });
+
+  it('keeps the three-reviewer default in shadow, for gh-issue, and with no sourceKind', async () => {
+    expect(await runWith(judgmentCtx('shadow'), 'backlog')).toEqual(THREE);
+    expect(await runWith(judgmentCtx('enforce'), 'gh-issue')).toEqual(THREE);
+    expect(await runWith(judgmentCtx('enforce'), undefined)).toEqual(THREE);
+    expect(await runWith(undefined, 'backlog')).toEqual(THREE);
+  });
+
+  it('review.routing adds reviewers back after the merged set is selected', async () => {
+    const out = await runWith(judgmentCtx('enforce', 0.9), 'backlog');
+    expect(out).toEqual([
+      'correctness-reviewer',
+      'security-reviewer',
+      'test-reviewer',
+      'code-reviewer',
+    ]);
+  });
+
+  it('offline replay never reaches the judgment layer', async () => {
+    const ctx = judgmentCtx('enforce');
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('d\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('src/a.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+      sourceKind: 'backlog',
+      recordRouting: false,
+      judgment: ctx,
+    });
+    expect(r.prompts).toHaveLength(3);
   });
 });

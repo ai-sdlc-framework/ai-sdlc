@@ -164,6 +164,33 @@ function isCiPath(p: string): boolean {
   return /(?:^|\/)(\.gitlab-ci\.yml|Jenkinsfile|azure-pipelines\.yml)$/i.test(p);
 }
 
+/** Which sensitive path families a set of changed paths matches. */
+export interface PathRisk {
+  touchesAuth: boolean;
+  touchesLockfiles: boolean;
+  touchesCi: boolean;
+}
+
+/**
+ * The deterministic auth / lockfile / CI path matches the ruleset acts on. Exported
+ * so callers can treat a match as a veto without re-deriving the patterns.
+ */
+export function classifyPathRisk(paths: readonly string[]): PathRisk {
+  // AISDLC-145: widened auth/secret detection (oauth, iam, jwt, session, login, rbac,
+  // tokens, credentials, password, signin, signup) plus `.env*`, `*.pem`, `*.key`.
+  const touchesAuth = paths.some(
+    (p) =>
+      /(?:^|\/)(auth|oauth|crypto|secrets?|iam|jwt|session|login|rbac|tokens?|credentials?|password|signin|signup)\b/i.test(
+        p,
+      ) || isSecretFilePath(p),
+  );
+  return {
+    touchesAuth,
+    touchesLockfiles: paths.some((p) => isLockfilePath(p)),
+    touchesCi: paths.some((p) => isCiPath(p)),
+  };
+}
+
 /**
  * Apply the default classifier ruleset from RFC §12.3 to a diff summary. Used
  * as the fallback when no LLM classifier is configured, and as the seed prompt
@@ -213,14 +240,7 @@ export function defaultRulesetDecision(diff: DiffSummary): ClassifierOutput {
   // reviewers via the default branch but never got the opus model bump.
   // Also: `.env*`, `*.pem`, `*.key` files are treated as auth-tier — they
   // contain or directly grant credentials.
-  const touchesAuth = diff.paths.some(
-    (p) =>
-      /(?:^|\/)(auth|oauth|crypto|secrets?|iam|jwt|session|login|rbac|tokens?|credentials?|password|signin|signup)\b/i.test(
-        p,
-      ) || isSecretFilePath(p),
-  );
-  const touchesLockfiles = diff.paths.some((p) => isLockfilePath(p));
-  const touchesCi = diff.paths.some((p) => isCiPath(p));
+  const { touchesAuth, touchesLockfiles, touchesCi } = classifyPathRisk(diff.paths);
 
   if (touchesAuth) {
     return {

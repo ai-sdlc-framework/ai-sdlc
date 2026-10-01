@@ -17,10 +17,16 @@
  * @module cli/reviews
  */
 
+import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { loadAllReviewLedgers, type ReviewLedgerRecord } from '../attestation/reviews-ledger.js';
+import {
+  corpusToJsonl,
+  gitDiffInputResolver,
+  ledgerToReviewerSetCorpus,
+} from '../judgment/reviewer-set-corpus.js';
 import { analyzeReviewLedger, formatReviewAnalysis } from '../attestation/reviews-analysis.js';
 
 function emitText(text: string): void {
@@ -79,6 +85,40 @@ export function buildReviewsCli(argv: string[]): ReturnType<typeof yargs> {
         } else {
           emitText(formatReviewAnalysis(result));
         }
+      },
+    )
+    .command(
+      'reviewer-set-corpus',
+      'Convert the ledger to a labelled JSONL corpus for ' +
+        '`cli-judgment eval review.reviewer-set`. A PR is labelled as disagreeing with a ' +
+        'merged-set selection when a code or test reviewer recorded a critical or major ' +
+        'first-pass finding.',
+      (y: Argv) =>
+        y
+          .option('repo-root', {
+            type: 'string',
+            describe: 'Repo root holding .ai-sdlc/reviews/ and the commits. Defaults to cwd.',
+          })
+          .option('base-ref', {
+            type: 'string',
+            default: 'origin/main',
+            describe: 'Ref the recorded commits are diffed against.',
+          })
+          .option('out', {
+            type: 'string',
+            describe: 'Write the JSONL here instead of stdout.',
+          }),
+      (args) => {
+        const root = resolve((args['repo-root'] as string | undefined) ?? process.cwd());
+        const { items, skipped } = ledgerToReviewerSetCorpus(
+          loadCorpus([root]),
+          gitDiffInputResolver(root, args['base-ref'] as string),
+        );
+        const text = corpusToJsonl(items);
+        const out = args['out'] as string | undefined;
+        if (out) writeFileSync(resolve(out), text);
+        else process.stdout.write(text);
+        process.stderr.write(`${items.length} PRs written, ${skipped.length} skipped\n`);
       },
     )
     .demandCommand(1, 'Specify a subcommand (e.g. analyze)')

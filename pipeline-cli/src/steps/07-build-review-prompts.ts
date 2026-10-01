@@ -12,7 +12,9 @@
  * three reviewers above; `reviewerSet: code-test-merged` (opt-in, via
  * `AI_SDLC_REVIEWER_SET` or `.ai-sdlc/review-config.yaml`) swaps in exactly
  * two — `correctness-reviewer` (merged code+test remit) + `security-reviewer`
- * (unchanged, separate). Do not hardcode a reviewer count anywhere downstream
+ * (unchanged, separate). With a judgment provider configured, `selectReviewerSet()`
+ * may pick the merged set per PR (trusted work only, never past a path veto) and
+ * `routeReviewers()` may add reviewers afterwards; neither ever shrinks a set. Do not hardcode a reviewer count anywhere downstream
  * of this step — always read `prompts.length`.
  *
  * The reviewer subagents themselves run via the LLM dispatch boundary
@@ -26,7 +28,10 @@ import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
-import { resolveReviewerSet } from './reviewer-set.js';
+import { selectReviewerSet } from './reviewer-set.js';
+import { routeReviewers } from './review-routing.js';
+import { buildJudgmentContext } from '../judgment/context.js';
+import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import { resolveModel } from '../routing/resolve-model.js';
 import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
@@ -53,6 +58,13 @@ export interface BuildReviewPromptsOptions {
    * the routing capability (offline replay must leave no trace).
    */
   recordRouting?: boolean;
+  /**
+   * Judgment context for `review.reviewer-set` and `review.routing` (test injection).
+   * Defaults to the context built from the trusted base-branch config; with no
+   * provider configured the judgments are never evaluated and the reviewers are
+   * exactly what the resolver returns.
+   */
+  judgment?: EvaluateJudgmentContext;
 }
 
 export async function buildReviewPrompts(
@@ -104,7 +116,40 @@ export async function buildReviewPrompts(
 
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
 
-  const reviewers = opts.reviewers ?? resolveReviewerSet({ workDir: opts.workDir });
+  // Offline replay (`recordRouting: false`) leaves no trace, so it never reaches a provider.
+  const judgment =
+    opts.recordRouting === false
+      ? undefined
+      : (opts.judgment ??
+        buildJudgmentContext({
+          workDir: opts.workDir,
+          artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+          ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+          taskId: opts.taskId,
+        }));
+  const selected =
+    opts.reviewers ??
+    (
+      await selectReviewerSet({
+        workDir: opts.workDir,
+        ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+        taskId: opts.taskId,
+        changedFiles,
+        diff,
+        ...(judgment ? { judgment } : {}),
+      })
+    ).reviewers;
+  // review.routing runs after set selection and can only add reviewers.
+  const reviewers = (
+    await routeReviewers({
+      reviewers: selected,
+      changedFiles,
+      diff,
+      ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+      taskId: opts.taskId,
+      ...(judgment ? { judgment } : {}),
+    })
+  ).reviewers;
 
   const taskClass = taskClassOf(opts.task.rawBody);
   const prompts: ReviewPrompt[] = reviewers.map((reviewer) => {

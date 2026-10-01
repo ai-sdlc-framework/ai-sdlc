@@ -2,7 +2,7 @@
 id: AISDLC-638
 title: >-
   RFC-0049 OQ-1: review.routing (tighten) and review.reviewer-set (relax, trusted work, corpus-only promotion)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -80,14 +80,14 @@ acceptance criterion.
    written to the judgment log. Attestation code is not changed.
 
 ## Acceptance Criteria
-- [ ] With the layer disabled or in `shadow`, the reviewers chosen for every existing classifier and reviewer-set fixture are unchanged.
-- [ ] `review.routing` adds the security reviewer when a Noul clears its threshold on a diff the path regex did not flag, and never returns a set smaller than the regex decision.
-- [ ] `selectReviewerSet` returns the merged set only when all four conditions hold; one test per condition shows that failing it alone returns the default resolver's result.
-- [ ] With `sourceKind` `gh-issue` the merged set is never selected by the judgment, whatever the answers.
-- [ ] An auth, lockfile or CI path match vetoes the merged set even when every risk Noul is near zero.
-- [ ] `security-reviewer` is present in the returned set in every test case, and no case returns fewer than two reviewers.
-- [ ] `review.reviewer-set` with a `path: override` promotion record stays in `shadow` (asserted through `evaluateJudgment`).
-- [ ] The ledger converter marks a PR with a critical or major first-pass code or test finding as disagreeing with a merged-set decision, and `cli-judgment eval review.reviewer-set` runs on its output with a fake provider.
-- [ ] The judgment-log record for a selection names the set, the source and the veto or signal that decided it.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] With the layer disabled or in `shadow`, the reviewers chosen for every existing classifier and reviewer-set fixture are unchanged.
+- [x] `review.routing` adds the security reviewer when a Noul clears its threshold on a diff the path regex did not flag, and never returns a set smaller than the regex decision.
+- [x] `selectReviewerSet` returns the merged set only when all four conditions hold; one test per condition shows that failing it alone returns the default resolver's result.
+- [x] With `sourceKind` `gh-issue` the merged set is never selected by the judgment, whatever the answers.
+- [x] An auth, lockfile or CI path match vetoes the merged set even when every risk Noul is near zero.
+- [x] `security-reviewer` is present in the returned set in every test case, and no case returns fewer than two reviewers.
+- [x] `review.reviewer-set` with a `path: override` promotion record stays in `shadow` (asserted through `evaluateJudgment`).
+- [x] The ledger converter marks a PR with a critical or major first-pass code or test finding as disagreeing with a merged-set decision, and `cli-judgment eval review.reviewer-set` runs on its output with a fake provider.
+- [x] The judgment-log record for a selection names the set, the source and the veto or signal that decided it.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
