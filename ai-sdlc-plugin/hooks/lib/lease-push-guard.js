@@ -24,8 +24,14 @@
  *   ownRef:            string | null  — FULL ref the worktree has checked out
  *                                       (`git symbolic-ref -q HEAD`); must be
  *                                       `refs/heads/<name>`
- *   tagExists:         (name) => boolean — true when a local tag `<name>` exists
- *                                       (a bare `<name>` refspec could resolve to it)
+ *   taskId:            string | null  — lower-case task id from the worktree's
+ *                                       `.active-task` (null = absent/malformed)
+ *   worktreeName:      string | null  — basename of the worktree root directory
+ *   refAliasState:     (name) => 'clear' | 'collides' | 'error'
+ *                                     — whether a local ref OTHER than
+ *                                       refs/heads/<name> answers to the short
+ *                                       name `<name>` (tag, refs/<name>,
+ *                                       refs/remotes/<name>...); 'error' = unknown
  *   protectedBranches: string[]       — policy-listed protected names (exact
  *                                       or trailing `*` prefix)
  *   remotes:           string[]       — configured remote NAMES
@@ -39,7 +45,20 @@
 
 'use strict';
 
-const ALWAYS_PROTECTED = ['main', 'master'];
+// Always protected, merged with the policy's `protectedBranches`. Entries may
+// use `*` (matches any run of characters).
+const DEFAULT_PROTECTED = [
+  'main',
+  'master',
+  'release-please--branches--*',
+  'gh-pages',
+  'production',
+  'prod',
+  'release/*',
+  'releases/*',
+];
+// Pseudo-ref names git resolves from the git dir itself (rule `<name>`).
+const PSEUDO_REF_RE = /^[A-Z_]+$/;
 const WRAPPERS = new Set(['env', 'command', 'exec', 'sudo', 'nohup', 'time', 'builtin', 'xargs']);
 const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
 // First path segments git's short-name resolution can reinterpret as a
@@ -58,7 +77,8 @@ function branchFromRef(ref) {
 
 /** A branch short name safe to compare textually against refspec text. */
 function isPlainBranchName(name) {
-  if (typeof name !== 'string' || !BRANCH_RE.test(name)) return false;
+  if (typeof name !== 'string' || !BRANCH_RE.test(name) || name.startsWith('-')) return false;
+  if (PSEUDO_REF_RE.test(name)) return false;
   if (name.startsWith('/') || name.endsWith('/') || name.includes('//') || name.includes('..')) {
     return false;
   }
@@ -66,12 +86,23 @@ function isPlainBranchName(name) {
 }
 const META_RE = /[;&|<>`$\\()\n\r*?[\]{}!#~'"]/;
 
+/** Simple `*` glob, case-insensitive; an odd pattern fails closed (matches everything). */
+function globMatch(pattern, name) {
+  const p = pattern.toLowerCase();
+  if (!/^[a-z0-9._/*-]+$/.test(p)) return true;
+  const re = new RegExp(
+    `^${p
+      .split('*')
+      .map((x) => x.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*')}$`,
+  );
+  return re.test(name.toLowerCase());
+}
+
 function isProtectedBranch(name, protectedBranches) {
-  const short = name.replace(/^refs\/heads\//, '').toLowerCase();
-  if (ALWAYS_PROTECTED.includes(short)) return true;
-  for (const raw of protectedBranches || []) {
-    const p = raw.toLowerCase();
-    if (p.endsWith('*') ? short.startsWith(p.slice(0, -1)) : short === p) return true;
+  const short = name.replace(/^refs\/heads\//, '');
+  for (const p of [...DEFAULT_PROTECTED, ...(protectedBranches || [])]) {
+    if (globMatch(p, short)) return true;
   }
   return false;
 }
@@ -169,6 +200,24 @@ function parseAllowedShape(command, ctx) {
   if (isProtectedBranch(own, ctx.protectedBranches)) {
     return `own branch '${own}' is protected`;
   }
+  // Bind "own" to the dispatched TASK branch: the task id comes from the
+  // worktree's .active-task, the worktree directory must be named after it, and
+  // the branch must carry the task prefix (pattern `ai-sdlc/{issueIdLower}-{slug}`).
+  // All three must agree; any missing piece denies (operator sessions without a
+  // sentinel get no lease push).
+  if (!ctx.taskId) return 'no valid .active-task sentinel in this worktree';
+  if (ctx.worktreeName !== ctx.taskId) {
+    return `worktree directory '${ctx.worktreeName}' does not match task '${ctx.taskId}'`;
+  }
+  if (!own.startsWith(`ai-sdlc/${ctx.taskId}-`)) {
+    return `branch '${own}' is not this task's branch (ai-sdlc/${ctx.taskId}-*)`;
+  }
+  // Short-name aliasing: git resolves a bare name against local refs with every
+  // rule (refs/tags/<x>, refs/<x>, refs/remotes/<x>, ...). Refuse unless no
+  // other local ref answers to the name (unknown counts as colliding).
+  if (typeof ctx.refAliasState !== 'function' || ctx.refAliasState(own) !== 'clear') {
+    return `a ref other than refs/heads/${own} answers to the name '${own}' (or this could not be checked)`;
+  }
   let lease = false;
   const positionals = [];
   for (const t of toks.slice(2)) {
@@ -200,22 +249,26 @@ function parseAllowedShape(command, ctx) {
   for (const spec of refspecs) {
     const parts = spec.split(':');
     if (parts.length > 2) return `refspec '${spec}' is not a simple branch refspec`;
-    const [src, dstRaw] = parts;
-    if (!src || (dstRaw !== undefined && !dstRaw)) return `refspec '${spec}' is empty or a delete`;
-    // Source may only be the own branch (short or full) or HEAD.
+    const [src, dst] = parts;
+    if (!src || (parts.length === 2 && !dst)) return `refspec '${spec}' is empty or a delete`;
+    if (parts.length === 1) {
+      // No-colon form: the destination is inferred from the source ref's own
+      // full name, which is refs/heads/<own> once refAliasState() above proved
+      // no other local ref answers to the name.
+      if (src !== own && src !== full) return `refspec '${spec}' is not the own branch`;
+      continue;
+    }
+    // Colon form: git resolves a destination that is not fully qualified
+    // against the REMOTE with every rule (`<x>`, refs/<x>, refs/tags/<x>,
+    // refs/heads/<x>, ...), tags before heads, so `<own>` could overwrite a
+    // remote tag/notes/meta ref of that name. Only the fully-qualified form is
+    // unambiguous, so it is the only one accepted: aliasing is impossible by
+    // construction and no remote lookup is needed.
     if (src !== 'HEAD' && src !== own && src !== full) {
       return `refspec source '${src}' is not the own branch`;
     }
-    // Destination must be EXACTLY the own short name or the full ref: git resolves
-    // other spellings (`heads/x`, `tags/x`, ...) against the remote's refs, which
-    // can name a different (e.g. protected) branch than the one checked here.
-    const dst = dstRaw === undefined ? src : dstRaw;
-    if (dst === 'HEAD') return 'a bare HEAD destination is inferred, not explicit';
-    if (dst !== own && dst !== full) return `target '${dst}' is not the own branch '${own}'`;
-    if (isProtectedBranch(dst, ctx.protectedBranches)) return `target '${dst}' is protected`;
-    // A bare `<own>` (no colon) is resolved locally; a same-named tag would win.
-    if (dstRaw === undefined && src === own && typeof ctx.tagExists === 'function') {
-      if (ctx.tagExists(own)) return `a local tag named '${own}' makes the refspec ambiguous`;
+    if (dst !== full) {
+      return `destination '${dst}' must be spelled refs/heads/${own} (e.g. HEAD:refs/heads/${own})`;
     }
   }
   return null;
@@ -244,4 +297,29 @@ function evaluateLeasePush(command, ctx) {
   };
 }
 
-module.exports = { evaluateLeasePush, isProtectedBranch };
+/**
+ * Force-push detection for the DEFAULT (`never`) policy: true when a `git push`
+ * segment carries a force option, `--force-with-lease`, or a `+refspec`
+ * anywhere in its args. Narrower than the lease-mode force-ish test on purpose
+ * (no delete/mirror/all/`:ref`, no `$`/alias/env heuristics) and needs no git.
+ */
+function hasForcePushOption(command) {
+  if (typeof command !== 'string') return false;
+  for (const toks of toSegments(command)) {
+    const c = classifySegment(toks, undefined);
+    if (!c.push) continue;
+    for (const t of c.rest || []) {
+      if (t.startsWith('--')) {
+        const body = t.slice(2).split('=')[0];
+        if (body.startsWith('force') || (body.length >= 3 && 'force'.startsWith(body))) return true;
+      } else if (t.startsWith('-')) {
+        if (/^-[^-]*f/.test(t)) return true;
+      } else if (t.startsWith('+')) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+module.exports = { evaluateLeasePush, isProtectedBranch, hasForcePushOption };

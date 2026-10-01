@@ -7,12 +7,18 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { evaluateLeasePush, isProtectedBranch } = require('./lease-push-guard.js');
+const {
+  evaluateLeasePush,
+  isProtectedBranch,
+  hasForcePushOption,
+} = require('./lease-push-guard.js');
 
-const OWN = 'ai-sdlc/aisdlc-663-thing';
+const OWN = 'ai-sdlc/aisdlc-1-thing';
 const ctx = (over = {}) => ({
   ownRef: `refs/heads/${OWN}`,
-  tagExists: () => false,
+  taskId: 'aisdlc-1',
+  worktreeName: 'aisdlc-1',
+  refAliasState: () => 'clear',
   protectedBranches: ['release/*', 'prod'],
   remotes: ['origin', 'fork'],
   aliasLookup: (n) => (n === 'fpush' ? 'push --force' : null),
@@ -29,9 +35,9 @@ describe('evaluateLeasePush — allowed shapes', () => {
     `git push --force-with-lease=refs/heads/${OWN} origin ${OWN}`,
     `git push --force-with-lease --force-if-includes origin ${OWN}`,
     `git push -u --force-with-lease origin ${OWN}`,
-    `git push --force-with-lease origin HEAD:${OWN}`,
     `git push --force-with-lease origin HEAD:refs/heads/${OWN}`,
-    `git push --force-with-lease origin ${OWN}:${OWN}`,
+    `git push --force-with-lease origin ${OWN}:refs/heads/${OWN}`,
+    `git push --force-with-lease origin refs/heads/${OWN}:refs/heads/${OWN}`,
     `git push --force-with-lease origin refs/heads/${OWN}`,
     `git push --force-with-lease fork ${OWN}`,
     `  git push --force-with-lease origin ${OWN}  `,
@@ -147,6 +153,9 @@ describe('evaluateLeasePush — not force-ish (unchanged behavior)', () => {
     'echo "git push --force origin main"',
     'git log --format=%H',
     'gh pr view 1',
+    'echo hi',
+    'ls',
+    'FOO=bar ls',
     '',
     '   ',
   ]) {
@@ -228,25 +237,10 @@ describe('evaluateLeasePush - git short-name resolution bypass', () => {
     }
   });
 
-  it('denies a bare own-branch refspec when a same-named local tag exists', () => {
-    assert.equal(
-      evaluateLeasePush(`git push --force-with-lease origin ${OWN}`, ctx({ tagExists: () => true }))
-        .decision,
-      'deny',
-    );
-    // explicit src:dst form is unaffected
-    assert.equal(
-      evaluateLeasePush(
-        `git push --force-with-lease origin HEAD:${OWN}`,
-        ctx({ tagExists: () => true }),
-      ).decision,
-      'allow',
-    );
-  });
-
   it('protected names compare case-insensitively', () => {
     assert.equal(withOwn('Main', 'git push --force-with-lease origin Main'), 'deny');
     assert.equal(withOwn('PROD', 'git push --force-with-lease origin PROD'), 'deny');
+    assert.ok(isProtectedBranch('Release/1', []));
   });
 });
 
@@ -303,5 +297,194 @@ describe('evaluateLeasePush - option abbreviations and parser agreement', () => 
     assert.equal(verdict("sh -c 'git push -f origin main'"), 'none');
     // xargs is a recognised wrapper: the push is seen and denied.
     assert.equal(verdict('xargs git push --force-with-lease origin main'), 'deny');
+  });
+});
+
+describe('evaluateLeasePush - short destination / alias hardening', () => {
+  const dec = (cmd, over) => evaluateLeasePush(cmd, ctx(over)).decision;
+
+  it('colon form requires the fully-qualified destination', () => {
+    assert.equal(dec(`git push --force-with-lease origin HEAD:${OWN}`), 'deny');
+    assert.equal(dec(`git push --force-with-lease origin ${OWN}:${OWN}`), 'deny');
+    assert.equal(dec(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`), 'allow');
+    for (const dst of [
+      'v1.2.3',
+      'notes/commits',
+      'refs/notes/commits',
+      'meta/config',
+      'refs/meta/config',
+      'refs/tags/v1',
+    ]) {
+      assert.equal(dec(`git push --force-with-lease origin HEAD:${dst}`), 'deny', dst);
+    }
+  });
+
+  it('bare no-colon form is allowed only for the own branch', () => {
+    assert.equal(dec(`git push --force-with-lease origin ${OWN}`), 'allow');
+    assert.equal(dec(`git push --force-with-lease origin refs/heads/${OWN}`), 'allow');
+    assert.equal(dec('git push --force-with-lease origin ai-sdlc/aisdlc-1-other'), 'deny');
+  });
+
+  it('denies when another local ref answers to the name, or when that cannot be checked', () => {
+    assert.equal(
+      dec(`git push --force-with-lease origin ${OWN}`, { refAliasState: () => 'collides' }),
+      'deny',
+    );
+    assert.equal(
+      dec(`git push --force-with-lease origin ${OWN}`, { refAliasState: () => 'error' }),
+      'deny',
+    );
+    assert.equal(
+      dec(`git push --force-with-lease origin HEAD:refs/heads/${OWN}`, {
+        refAliasState: () => 'collides',
+      }),
+      'deny',
+    );
+    assert.equal(
+      dec(`git push --force-with-lease origin ${OWN}`, { refAliasState: undefined }),
+      'deny',
+    );
+  });
+
+  it('own branch names that are pseudo refs or start with a dash are refused', () => {
+    for (const name of ['HEAD', 'ORIG_HEAD', '-x']) {
+      assert.equal(
+        dec(`git push --force-with-lease origin ${name}`, { ownRef: `refs/heads/${name}` }),
+        'deny',
+        name,
+      );
+    }
+  });
+});
+
+describe('evaluateLeasePush - task branch binding', () => {
+  const dec = (over) =>
+    evaluateLeasePush(`git push --force-with-lease origin ${OWN}`, ctx(over)).decision;
+
+  it('allows when .active-task, directory name and branch prefix agree', () => {
+    assert.equal(dec({}), 'allow');
+  });
+
+  it('denies without a valid task id (operator session / absent / malformed sentinel)', () => {
+    assert.equal(dec({ taskId: null }), 'deny');
+    assert.equal(dec({ taskId: undefined }), 'deny');
+    assert.equal(dec({ taskId: '' }), 'deny');
+  });
+
+  it('denies when the worktree directory name disagrees (rewritten sentinel)', () => {
+    assert.equal(dec({ taskId: 'aisdlc-700' }), 'deny');
+    assert.equal(dec({ worktreeName: 'aisdlc-700' }), 'deny');
+    assert.equal(dec({ worktreeName: null }), 'deny');
+  });
+
+  it('denies a branch that does not carry the task prefix', () => {
+    for (const b of [
+      'feat/x',
+      'ai-sdlc/aisdlc-2-x',
+      'ai-sdlc/aisdlc-10-x',
+      'ai-sdlc/aisdlc-1',
+      'xai-sdlc/aisdlc-1-x',
+    ]) {
+      assert.equal(
+        evaluateLeasePush(
+          `git push --force-with-lease origin ${b}`,
+          ctx({ ownRef: `refs/heads/${b}` }),
+        ).decision,
+        'deny',
+        b,
+      );
+    }
+  });
+
+  it('supports sub-task ids', () => {
+    const b = 'ai-sdlc/aisdlc-100.5-x';
+    assert.equal(
+      evaluateLeasePush(
+        `git push --force-with-lease origin ${b}`,
+        ctx({ ownRef: `refs/heads/${b}`, taskId: 'aisdlc-100.5', worktreeName: 'aisdlc-100.5' }),
+      ).decision,
+      'allow',
+    );
+  });
+});
+
+describe('isProtectedBranch - defaults', () => {
+  it('protects main, master and the default deploy/release branches', () => {
+    for (const b of [
+      'main',
+      'master',
+      'release-please--branches--main',
+      'release-please--branches--x',
+      'gh-pages',
+      'production',
+      'prod',
+      'release/1.0',
+      'releases/2.0',
+      'release/a/b',
+      'Main',
+      'GH-PAGES',
+    ]) {
+      assert.ok(isProtectedBranch(b, []), b);
+      assert.ok(isProtectedBranch(`refs/heads/${b}`, []), `refs/heads/${b}`);
+    }
+  });
+
+  it('does not over-match task branches or lookalikes', () => {
+    for (const b of [
+      'ai-sdlc/aisdlc-1-x',
+      'releasex',
+      'release',
+      'mainline',
+      'prod2',
+      'my-prod',
+      'pre-production',
+    ]) {
+      assert.ok(!isProtectedBranch(b, []), b);
+    }
+  });
+
+  it('merges policy entries with the defaults, with wildcard support', () => {
+    assert.ok(isProtectedBranch('develop', ['develop']));
+    assert.ok(isProtectedBranch('hotfix/9', ['hotfix/*']));
+    assert.ok(isProtectedBranch('main', ['develop']));
+    assert.ok(!isProtectedBranch('feature/x', ['hotfix/*']));
+  });
+
+  it('fails closed on an odd pattern (matches everything)', () => {
+    assert.ok(isProtectedBranch('anything', ['we ird$']));
+  });
+});
+
+describe('hasForcePushOption (default `never` policy)', () => {
+  const f = (c) => hasForcePushOption(c);
+  it('detects force shapes the anchored globs miss', () => {
+    for (const c of [
+      'git push origin --force main',
+      'git push origin -f HEAD:main',
+      'git push origin main --force-with-lease',
+      'git push origin +main',
+      'git push -uf origin x',
+      'git push --forc origin x',
+      'git push origin x --force-if-includes',
+    ]) {
+      assert.ok(f(c), c);
+    }
+  });
+
+  it('leaves ordinary pushes and unrelated commands alone', () => {
+    for (const c of [
+      'git push origin main',
+      'git push --follow-tags origin x',
+      'git push -u origin x',
+      'git push --fo origin x',
+      'git commit -m "fix -f flag" ',
+      'git log --force',
+      'echo git push -f',
+      'echo hi',
+      'ls',
+      undefined,
+    ]) {
+      assert.ok(!f(c), String(c));
+    }
   });
 });

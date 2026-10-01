@@ -426,14 +426,14 @@ export const agentRoleSchema = {
         allowForcePush: {
           oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['never', 'leaseOnOwnBranch'] }],
           description:
-            'Force-push policy. `never` (default; boolean `false`) = no force pushes. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the branch the current worktree has checked out, never to `main`, `master` or a protected branch.',
+            "Force-push policy. `never` (default; boolean `false`) = no force pushes. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, directory name and `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push.",
         },
         protectedBranches: {
           type: 'array',
           items: { type: 'string', pattern: '^[A-Za-z0-9._/-]+\\*?$' },
           uniqueItems: true,
           description:
-            'Additional branch names (exact, or a trailing `*` prefix match) that stay protected from force pushes. `main` and `master` are always protected.',
+            'Additional branch names (exact, or a trailing `*` prefix match) that stay protected from force pushes, merged with the always-protected defaults: `main`, `master`, `release-please--branches--*`, `gh-pages`, `production`, `prod`, `release/*`, `releases/*`.',
         },
         operational: {
           type: 'array',

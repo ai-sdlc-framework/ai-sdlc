@@ -13,10 +13,10 @@ const { join } = require('path');
 const { execSync, spawnSync } = require('child_process');
 const {
   resolveGovernanceFromYaml,
-  resolveGovernanceExtrasFromYaml,
   renderOperationalRules,
   renderSessionStartHardRules,
 } = require('./lib/governance-resolver');
+const { bannerGovernance } = require('./lib/trusted-policy');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -279,10 +279,19 @@ const maxFiles = extractField(yaml, 'maxFilesPerChange') || '15';
 const requireTests = extractField(yaml, 'requireTests') || 'true';
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
-const resolvedGovernance = resolveGovernanceFromYaml(yaml);
-const governanceExtras = resolveGovernanceExtrasFromYaml(yaml);
+// Render the force-push rule / operational grants from the SAME trusted source
+// the PreToolUse hook enforces (a worktree copy of agent-role.yaml cannot make
+// the banner claim a grant the enforcer would refuse).
+const bannerGov = bannerGovernance(
+  yaml,
+  resolveGovernanceFromYaml(yaml),
+  projectDir,
+  (typeof input?.cwd === 'string' && input.cwd) || process.cwd(),
+  process.env.AI_SDLC_HIERARCHY_ROLE,
+);
+const resolvedGovernance = bannerGov.resolved;
 const operationalRules = renderOperationalRules(
-  governanceExtras.operational,
+  bannerGov.operational,
   process.env.AI_SDLC_HIERARCHY_ROLE,
 );
 

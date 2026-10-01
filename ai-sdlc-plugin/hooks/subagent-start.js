@@ -44,10 +44,10 @@ const { execSync } = require('child_process');
 const { randomUUID } = require('crypto');
 const {
   resolveGovernanceFromYaml,
-  resolveGovernanceExtrasFromYaml,
   renderOperationalRules,
   renderSubagentHardRules,
 } = require('./lib/governance-resolver');
+const { bannerGovernance } = require('./lib/trusted-policy');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -95,9 +95,24 @@ try {
 
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
-const resolvedGovernance = resolveGovernanceFromYaml(yaml);
+// Render from the SAME trusted source the PreToolUse hook enforces (see
+// lib/trusted-policy.js): a worktree copy cannot make the banner claim a grant.
+let hookInput = {};
+try {
+  hookInput = JSON.parse(stdinRaw) || {};
+} catch {
+  // keep {}
+}
+const bannerGov = bannerGovernance(
+  yaml,
+  resolveGovernanceFromYaml(yaml),
+  projectDir,
+  (typeof hookInput.cwd === 'string' && hookInput.cwd) || process.cwd(),
+  process.env.AI_SDLC_HIERARCHY_ROLE,
+);
+const resolvedGovernance = bannerGov.resolved;
 const operationalRules = renderOperationalRules(
-  resolveGovernanceExtrasFromYaml(yaml).operational,
+  bannerGov.operational,
   process.env.AI_SDLC_HIERARCHY_ROLE,
 );
 

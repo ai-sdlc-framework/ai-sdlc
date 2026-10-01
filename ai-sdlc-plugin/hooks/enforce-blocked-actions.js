@@ -69,14 +69,14 @@
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
 const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
-const { execSync, execFileSync } = require('child_process');
-const { realpathSync } = require('fs');
+const { execSync } = require('child_process');
 const {
   resolveGovernanceFromYaml,
   resolveGovernanceExtrasFromYaml,
   STRICT_DEFAULTS,
 } = require('./lib/governance-resolver');
-const { evaluateLeasePush } = require('./lib/lease-push-guard');
+const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
+const { runGit: gitOut, probeRef, loadTrustedExtras, readTaskId } = require('./lib/trusted-policy');
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
@@ -134,58 +134,14 @@ try {
 
 // ── Own-branch lease policy (RFC-0051 §10) ───────────────────────────
 
-const GIT_TIMEOUT_MS = 2000;
-
-function gitOut(args, cwd) {
-  try {
-    return (
-      execFileSync('git', args, {
-        cwd,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: GIT_TIMEOUT_MS,
-        env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined },
-      }).trim() || null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function safeReal(p) {
-  try {
-    return realpathSync(p);
-  } catch {
-    return p;
-  }
-}
-
 /**
- * The main checkout's root for the repo that `dir` belongs to, derived from the
- * git COMMON dir (independent of which worktree the tool call runs in). Only a
- * common dir that is literally `<root>/.git` is accepted; anything else
- * (bare repo, failure, odd layout) returns null and the caller fails closed.
- */
-function mainCheckoutRoot(dir) {
-  const common = gitOut(['rev-parse', '--git-common-dir'], dir);
-  if (!common) return null;
-  const abs = resolve(dir, common);
-  if (basename(abs) !== '.git') return null;
-  return dirname(abs);
-}
-
-/**
- * Resolves the force-push policy from a TRUSTED location only.
+ * Resolves the lease policy (see lib/trusted-policy.js for the trust model).
  *
- * Step 1 reads the policy text at the hook's project dir with NO git
- * subprocess; unless it says `leaseOnOwnBranch`, the mode is `never` and
- * nothing else runs (identical to behavior before this feature). Because that
- * text may be a PR-tree copy (project dir inside a worktree), a lease value is
- * only honored after Step 2 re-reads the policy from the MAIN checkout of the
- * same repo (git common dir of the project dir, independent of the tool's cwd)
- * and it also says lease. A worktree copy can therefore only tighten, never
- * relax. The tool's cwd must belong to that same repo. Any failure fails
- * closed to `never`.
+ * Step 1 reads the project-dir policy text with NO git subprocess; unless it
+ * says `leaseOnOwnBranch`, the mode is `never` and nothing else runs. Because
+ * that text may be a PR-tree copy, the grant is only honored when the trusted
+ * main-checkout policy ALSO says lease (so a worktree copy can only tighten).
+ * Any failure fails closed to `never`.
  */
 function loadLeasePolicy() {
   const closed = { mode: 'never', protectedBranches: [], cwd: undefined };
@@ -195,17 +151,27 @@ function loadLeasePolicy() {
       return closed;
     }
     const cwd = toolCwd || process.cwd();
-    const mainRoot = mainCheckoutRoot(projectDir);
-    if (!mainRoot) return closed;
-    const cwdMain = mainCheckoutRoot(cwd);
-    if (!cwdMain || safeReal(cwdMain) !== safeReal(mainRoot)) return closed;
-    const trusted = readFileSync(join(mainRoot, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
-    const extras = resolveGovernanceExtrasFromYaml(trusted);
-    if (extras.forcePushMode !== 'leaseOnOwnBranch') return closed;
-    return { mode: 'leaseOnOwnBranch', protectedBranches: extras.protectedBranches, cwd };
+    const trusted = loadTrustedExtras(projectDir, cwd);
+    if (!trusted || trusted.forcePushMode !== 'leaseOnOwnBranch') return closed;
+    return { mode: 'leaseOnOwnBranch', protectedBranches: trusted.protectedBranches, cwd };
   } catch {
     return closed;
   }
+}
+
+/** Local refs (other than refs/heads/<name>) that git would resolve the short name to. */
+function refAliasState(name, cwd) {
+  const candidates = [
+    `refs/tags/${name}`,
+    `refs/${name}`,
+    `refs/remotes/${name}`,
+    `refs/remotes/${name}/HEAD`,
+  ];
+  for (const c of candidates) {
+    const st = probeRef(c, cwd);
+    if (st !== 'missing') return st === 'found' ? 'collides' : 'error';
+  }
+  return 'clear';
 }
 
 /** True when the command text mentions a git push (used to fail closed on errors). */
@@ -276,16 +242,24 @@ function enforceBash(command) {
   try {
     const lease = loadLeasePolicy();
     if (lease.mode === 'leaseOnOwnBranch') {
+      const top = gitOut(['rev-parse', '--show-toplevel'], lease.cwd);
       const verdict = evaluateLeasePush(trimmed, {
         ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
         protectedBranches: lease.protectedBranches,
         remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
         aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
-        tagExists: (name) =>
-          gitOut(['rev-parse', '-q', '--verify', `refs/tags/${name}`], lease.cwd) !== null,
+        taskId: top ? readTaskId(top) : null,
+        worktreeName: top ? basename(top) : null,
+        refAliasState: (name) => refAliasState(name, lease.cwd),
       });
       if (verdict.decision === 'deny') deny(verdict.reason);
       leasePushAllowed = verdict.decision === 'allow';
+    }
+    // Default policy (`never`/unset): also catch the common non-prefix shapes the
+    // anchored blockedActions globs miss (`git push origin --force main`,
+    // `git push origin -f HEAD:main`, `+refspec`). Runs no git subprocess.
+    if (lease.mode !== 'leaseOnOwnBranch' && hasForcePushOption(trimmed)) {
+      deny('force-push is not permitted by the resolved governance policy (allowForcePush: never)');
     }
   } catch {
     // A thrown error (or timeout) must not become an allow: deny pushes, ignore the rest.

@@ -7,7 +7,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -211,7 +211,7 @@ describe('render text', () => {
     for (const text of [renderSessionStartHardRules(lease), renderSubagentHardRules(lease)]) {
       assert.match(
         text,
-        /force-with-lease permitted on this worktree's own branch only; never on main/,
+        /force-with-lease permitted on this task's own branch only; never on main/,
       );
       assert.match(text, /allowForcePush: leaseOnOwnBranch/);
     }
@@ -227,24 +227,54 @@ describe('render text', () => {
   });
 });
 
-describe('hooks render the resolved policy', () => {
-  let dir;
-  before(() => {
-    dir = mkdtempSync(join(tmpdir(), 'gov-lease-render-'));
-    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
-    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), OPERATOR_SNIPPET);
-  });
-  after(() => rmSync(dir, { recursive: true, force: true }));
+describe('hooks render the resolved TRUSTED policy', () => {
+  let base;
+  let main;
+  let wt;
+  let neverMain;
+  let neverWt;
+  let env0;
 
-  function runHook(script, input, role) {
-    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+  function git(cwd, ...args) {
+    return execFileSync('git', args, { cwd, env: env0, encoding: 'utf-8' }).trim();
+  }
+  function repo(name, mainYaml, wtYaml) {
+    const root = join(base, name);
+    mkdirSync(join(root, '.ai-sdlc'), { recursive: true });
+    git(root, 'init', '-q', '-b', 'main');
+    writeFileSync(join(root, '.ai-sdlc', 'agent-role.yaml'), mainYaml);
+    git(root, 'add', '-A');
+    git(root, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'i');
+    const w = join(root, '.worktrees', 'aisdlc-1');
+    git(root, 'worktree', 'add', '-q', '-b', 'ai-sdlc/aisdlc-1-x', w);
+    if (wtYaml !== undefined) writeFileSync(join(w, '.ai-sdlc', 'agent-role.yaml'), wtYaml);
+    return { root: realpathSync(root), wt: realpathSync(w) };
+  }
+
+  before(() => {
+    base = realpathSync(mkdtempSync(join(tmpdir(), 'gov-lease-render-')));
+    const cfg = join(base, 'cfg');
+    writeFileSync(cfg, '');
+    env0 = { PATH: process.env.PATH, HOME: base, GIT_CONFIG_GLOBAL: cfg, GIT_CONFIG_NOSYSTEM: '1' };
+    const leaseRepo = repo('lease', OPERATOR_SNIPPET);
+    main = leaseRepo.root;
+    wt = leaseRepo.wt;
+    // Trusted main says never; the worktree (PR-tree) copy claims lease + operational.
+    const nv = repo('never', 'spec:\n  role: x\n', OPERATOR_SNIPPET);
+    neverMain = nv.root;
+    neverWt = nv.wt;
+  });
+  after(() => rmSync(base, { recursive: true, force: true }));
+
+  function runHook(script, input, projectDir, role) {
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: projectDir, ...env0 };
     delete env.AI_SDLC_HIERARCHY_ROLE;
     delete env.CLAUDE_PLUGIN_ROOT;
     delete env.CLAUDE_PLUGIN_DIR;
     delete env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;
     if (role) env.AI_SDLC_HIERARCHY_ROLE = role;
     const out = execFileSync('node', [join(__dirname, '..', script)], {
-      input: JSON.stringify(input),
+      input: JSON.stringify({ ...input, cwd: projectDir }),
       encoding: 'utf-8',
       env,
       timeout: 15000,
@@ -258,16 +288,36 @@ describe('hooks render the resolved policy', () => {
   ];
   for (const [script, input] of hooks) {
     it(`${script}: lease text, and operational list only for operator-dispatch`, () => {
-      const plain = runHook(script, input);
-      assert.match(plain, /own branch only; never on main/);
-      assert.doesNotMatch(plain, /Operational actions granted/);
-      const dispatch = runHook(script, input, 'operator-dispatch');
-      assert.match(dispatch, /Operational actions granted to this dispatch role/);
-      for (const op of ALL_OPS) assert.ok(dispatch.includes(`\`${op}\``), op);
-      const other = runHook(script, input, 'executor');
-      assert.doesNotMatch(other, /Operational actions granted/);
+      for (const dir of [main, wt]) {
+        const plain = runHook(script, input, dir);
+        assert.match(plain, /own branch only; never on main/);
+        assert.match(plain, /this task's own branch/);
+        assert.doesNotMatch(plain, /Operational actions granted/);
+        const dispatch = runHook(script, input, dir, 'operator-dispatch');
+        assert.match(dispatch, /Operational actions granted to this dispatch role/);
+        for (const op of ALL_OPS) assert.ok(dispatch.includes(`\`${op}\``), op);
+        assert.doesNotMatch(runHook(script, input, dir, 'executor'), /Operational actions granted/);
+      }
+    });
+
+    it(`${script}: a worktree copy saying leaseOnOwnBranch with a trusted never renders NEVER`, () => {
+      const ctx = runHook(script, input, neverWt, 'operator-dispatch');
+      assert.doesNotMatch(ctx, /own branch only/);
+      assert.match(ctx, /NEVER force push|Never force-push/);
+      assert.doesNotMatch(ctx, /Operational actions granted/);
+    });
+
+    it(`${script}: a non-git project dir with a lease copy fails closed to NEVER`, () => {
+      const plain = join(base, 'plain');
+      mkdirSync(join(plain, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(plain, '.ai-sdlc', 'agent-role.yaml'), OPERATOR_SNIPPET);
+      assert.match(
+        runHook(script, input, plain, 'operator-dispatch'),
+        /NEVER force push|Never force-push/,
+      );
     });
   }
+  void neverMain;
 });
 
 describe('resolver - comments and blank lines inside lists', () => {

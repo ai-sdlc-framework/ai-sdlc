@@ -293,7 +293,7 @@ function renderClosePrIssueRuleText(resolved) {
 
 const LEASE_FORCE_PUSH_TEXT =
   '**Force-push is allowed per repo policy** (`.ai-sdlc/agent-role.yaml` governance: `allowForcePush: leaseOnOwnBranch`) — ' +
-  "force-with-lease permitted on this worktree's own branch only; never on main.";
+  "force-with-lease permitted on this task's own branch only; never on main.";
 
 function renderForcePushRuleText(resolved) {
   return resolved.allowForcePush ? LEASE_FORCE_PUSH_TEXT : '**NEVER force push.**';

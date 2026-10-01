@@ -75,35 +75,66 @@ spec:
   GitHub-sourced work) and the deterministic `merge-if-eligible` gate
   (AISDLC-602/603, not yet implemented as of Phase 1).
 - **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
-  case: after rebasing a feature branch. The PreToolUse hook then permits a
-  push only when ALL of these hold: it is a single
-  `git push <configured-remote> --force-with-lease[=<own-branch>[:<sha>]] <refspec>...`
-  command (no chaining, quoting, wrapper, env prefix, `git -C`/`--git-dir`, or
-  extra flags); every refspec target is the branch checked out in the current
-  worktree (`<branch>`, `HEAD:<branch>`, `<branch>:<branch>`); and that branch is
-  not `main`, `master`, or listed in `protectedBranches` (exact names, or a
-  trailing `*` prefix match). Everything else that looks like a force-push
-  (plain `--force`/`-f`, `+refspec`, `--force-if-includes` alone, another branch,
-  a raw URL remote, `--delete`, `--mirror`, a push with no explicit refspec) is
-  blocked. The own-branch value is read from git state, never from the command
-  text, as the full `refs/heads/<name>` ref; branch names (own or target) that
-  git could re-read as another ref (a first segment of `refs`, `heads`, `tags`
-  or `remotes`) are refused, and a destination must be exactly the branch name
-  or its full `refs/heads/<name>` form. Option abbreviations of
-  `--force`, `--mirror`, `--delete`, `--prune` and `--all` count as force-ish and
-  are blocked; `--follow-tags` is not force-ish on its own but is not part of the
-  allowed lease shape. The policy is read from the trusted main checkout (the
-  git common dir of the project directory): a copy of `agent-role.yaml` edited in
-  a worktree or PR can only tighten the policy, never grant the lease, and any
-  failure to determine the trusted policy blocks. Under `never` the hook starts
-  no git subprocess for this check. Known conservative behavior: commands are
-  split on newlines and shell separators without understanding quoting, so a
-  multi-line quoted argument (for example a `gh pr create --body` containing a
-  line that reads like a force push) can be denied under `leaseOnOwnBranch`.
-  Wrapper payloads such as `bash -c '...'` are not parsed, exactly as before. Note that a
-  `blockedActions` pattern such as `git push --force*` also matches
-  `--force-with-lease`; under `leaseOnOwnBranch` the single allowed command shape
-  is exempted from `git push ...` patterns, every other pattern still applies.
+  case: after rebasing a dispatched task's branch. The PreToolUse hook then
+  permits a push only when ALL of these hold:
+  - it is a single `git push <configured-remote> --force-with-lease[=<own>[:<sha>]] <refspec>...`
+    command (no chaining, quoting, wrapper, env prefix, `git -C`/`--git-dir`, or
+    extra flags; plain ASCII only);
+  - every refspec is either the bare no-colon form (`<branch>` or
+    `refs/heads/<branch>`) or a colon form whose destination is spelled exactly
+    `refs/heads/<branch>` (for example `HEAD:refs/heads/<branch>`). Short
+    destinations such as `HEAD:<branch>` are refused because git resolves them
+    against the remote with every rule (tags and notes refs win over heads), and
+    names such as `heads/x`, `tags/x`, `remotes/x`, `refs/x` are refused;
+  - `<branch>` is the task's own branch: the worktree has a valid `.active-task`,
+    the worktree directory is named `<task-id-lower>`, and the branch starts
+    with `ai-sdlc/<task-id-lower>-` (the `backlog.branching.pattern` default
+    `ai-sdlc/{issueIdLower}-{slug}`, hardcoded here). Anything missing or
+    disagreeing denies. **A session with no `.active-task` sentinel (an
+    operator's own session) therefore gets no lease push**; the supported paths
+    are to run the rebase/push from the dispatched worktree (`/ai-sdlc rebase`)
+    or for the operator to push manually. Residual: an agent can rewrite its own
+    `.active-task`; the directory-name and branch-prefix agreement is the only
+    other check, and the hook does not add a broad write protection for the file;
+  - the branch is not protected: `main`, `master`, `release-please--branches--*`,
+    `gh-pages`, `production`, `prod`, `release/*`, `releases/*`, plus anything in
+    `protectedBranches` (`*` is a simple wildcard; matching is case-insensitive);
+  - no other local ref answers to the branch's short name (a local tag, `refs/<name>`,
+    `refs/remotes/<name>`); if that cannot be checked the push is denied.
+
+  Everything else that looks like a force-push (plain `--force`/`-f`, `+refspec`,
+  `--force-if-includes` alone, another branch, a raw URL remote, `--delete`,
+  `--mirror`, `--all`, a push with no explicit refspec, abbreviations of those
+  options) is blocked. `--follow-tags` is not force-ish on its own but is not part
+  of the allowed lease shape. The own branch is read from git state as the full
+  ref, never from the command text.
+
+  Policy trust: the lease is granted only when the MAIN checkout of the repo (the
+  parent of the git common dir of the project directory, independent of the tool
+  call's cwd) says `leaseOnOwnBranch`. A copy of `agent-role.yaml` edited in a
+  worktree or PR can only tighten: a copy saying `leaseOnOwnBranch` with a trusted
+  `never` has no effect, and a copy saying `never` with a trusted lease also
+  denies (deliberate, tested). Any failure to determine the trusted policy blocks.
+  The injected SessionStart/SubagentStart rule text is rendered from that same
+  trusted source. The legacy `blockedActions` / `blockedPaths` lists are still
+  read from the project directory (a PR-tree copy can clear them; this is the
+  pre-existing trust model and is unchanged).
+
+  Under `never` (or unset) the hook starts no git subprocess for this check, and
+  additionally blocks force-push shapes the anchored `blockedActions` globs miss,
+  such as `git push origin --force main`, `git push origin -f HEAD:main` and
+  `+refspec` (including `--force-with-lease` and option abbreviations).
+
+  Known limits. A `blockedActions` pattern such as `git push --force*` also
+  matches `--force-with-lease`; under `leaseOnOwnBranch` the single allowed
+  command shape is exempted only from `git push` patterns that match purely
+  because of the lease flags, so adopter patterns like `git push *develop*` keep
+  applying. Commands are split on newlines and shell separators without
+  understanding quoting, so a multi-line quoted argument (for example a
+  `gh pr create --body` containing a line that reads like a force push) can be
+  denied under `leaseOnOwnBranch`. Payloads wrapped in `bash -c '...'` or
+  `sh -c '...'` are not parsed by this hook (a pre-existing gap, unchanged);
+  `xargs git push` is recognised.
 - **`operational`** is a closed list granted to the dispatch role:
   `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`,
   `file-subid-followups`, `answer-operational-decisions`,

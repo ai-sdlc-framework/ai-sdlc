@@ -40,6 +40,7 @@ const BLOCKED = `  constraints:
 const roleYaml = (governance) =>
   `apiVersion: ai-sdlc.io/v1alpha1\nkind: AgentRole\nspec:\n  role: coding-agent\n  goal: test\n${governance}${BLOCKED}`;
 
+const OWN = 'ai-sdlc/aisdlc-1-own';
 const LEASE = `  governance:\n    allowForcePush: leaseOnOwnBranch\n    protectedBranches:\n      - release/*\n`;
 
 let base;
@@ -72,12 +73,20 @@ function makeRepo(name, policyYaml, worktreeYaml) {
   );
   git(base, 'init', '-q', '--bare', bare);
   git(root, 'remote', 'add', 'origin', bare);
-  const wt = join(root, '.worktrees', 'task');
-  git(root, 'worktree', 'add', '-q', '-b', 'feat/own', wt);
+  const wt = join(root, '.worktrees', 'aisdlc-1');
+  git(root, 'worktree', 'add', '-q', '-b', OWN, wt);
+  writeFileSync(join(wt, '.active-task'), 'AISDLC-1\n');
   if (worktreeYaml !== undefined) {
     writeFileSync(join(wt, '.ai-sdlc', 'agent-role.yaml'), worktreeYaml);
   }
   return { root: realpathSync(root), wt: realpathSync(wt) };
+}
+
+function addTaskWorktree(root, n) {
+  const dir = join(root, '.worktrees', `aisdlc-${n}`);
+  git(root, 'worktree', 'add', '-q', '-b', `ai-sdlc/aisdlc-${n}-b`, dir);
+  writeFileSync(join(dir, '.active-task'), `AISDLC-${n}\n`);
+  return realpathSync(dir);
 }
 
 function invoke(payload, { cwd, projectDir, unsetProject = false, env: extraEnv = {} }) {
@@ -132,8 +141,8 @@ before(() => {
 
 after(() => rmSync(base, { recursive: true, force: true }));
 
-const OWN = 'feat/own';
 const L = () => `git push --force-with-lease origin ${OWN}`;
+const LF = () => `git push --force-with-lease origin HEAD:refs/heads/${OWN}`;
 
 describe('leaseOnOwnBranch - allowed', () => {
   it('allows lease push of the worktree own branch (project dir = main checkout)', () => {
@@ -151,8 +160,8 @@ describe('leaseOnOwnBranch - allowed', () => {
     assert.ok(!denied(out), out);
   });
 
-  it('allows HEAD:<own> form', () => {
-    const out = run(`git push --force-with-lease origin HEAD:${OWN}`, {
+  it('allows the fully-qualified HEAD:refs/heads/<own> form', () => {
+    const out = run(LF(), {
       cwd: leaseRepo.wt,
       projectDir: leaseRepo.root,
     });
@@ -175,6 +184,8 @@ describe('leaseOnOwnBranch - blocked', () => {
     ['lease to another branch', 'git push --force-with-lease origin other'],
     ['refspec own:other', `git push --force-with-lease origin ${OWN}:other`],
     ['HEAD:other', 'git push --force-with-lease origin HEAD:other'],
+    ['HEAD:<own> (short destination)', `git push --force-with-lease origin HEAD:${OWN}`],
+    ['<own>:<own> (short destination)', `git push --force-with-lease origin ${OWN}:${OWN}`],
     ['HEAD:main', 'git push --force-with-lease origin HEAD:main'],
     ['lease to main', 'git push --force-with-lease origin main'],
     ['lease to master', 'git push --force-with-lease origin master'],
@@ -243,11 +254,26 @@ describe('never / unset / malformed - behaves exactly as before', () => {
     );
   });
 
-  it('adds no new enforcement when there is no agent-role.yaml (fail-closed, unchanged legacy path)', () => {
+  it('with no agent-role.yaml the default is never: force shapes the globs miss are still blocked', () => {
     const r = makeRepo('nopolicy', roleYaml(''));
     rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
-    const out = run(`git push origin ${OWN} --force`, { cwd: r.wt, projectDir: r.root });
-    assert.ok(!denied(out), 'no policy file: hook behaves as it did before this change');
+    assert.ok(denied(run(`git push origin ${OWN} --force`, { cwd: r.wt, projectDir: r.root })));
+    assert.ok(!denied(run(`git push origin ${OWN}`, { cwd: r.wt, projectDir: r.root })));
+  });
+
+  it('under never, non-prefix force shapes are blocked (strict mode is not bypassable by arg order)', () => {
+    const o = { cwd: neverRepo.wt, projectDir: neverRepo.root };
+    for (const cmd of [
+      'git push origin --force main',
+      'git push origin -f HEAD:main',
+      'git push origin main --force-with-lease',
+      'git push origin +main',
+      'git push --forc origin main',
+    ]) {
+      assert.ok(denied(run(cmd, o)), cmd);
+    }
+    assert.ok(!denied(run('git push origin main', o)));
+    assert.ok(!denied(run('git push --follow-tags origin x', o)));
   });
 
   for (const v of ['yes', 'always', 'LEASEONOWNBRANCH', '1']) {
@@ -345,6 +371,9 @@ echo "$*" >> "${log}"
 if [ -n "$GIT_SHIM_FAIL_COMMON" ]; then
   case "$*" in *--git-common-dir*) exit 1;; esac
 fi
+if [ -n "$GIT_SHIM_FAIL_VERIFY" ]; then
+  case "$*" in *--verify*) exit 128;; esac
+fi
 exec "${realGit}" "$@"
 `,
   );
@@ -437,7 +466,7 @@ describe('fail-closed paths and git-subprocess discipline', () => {
     rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
     mkdirSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
     // No readable policy at all: nothing new is enforced or granted.
-    assert.ok(!denied(run(`git push origin ${OWN} --force`, { cwd: r.wt, projectDir: r.root })));
+    assert.ok(!denied(run(`git push origin ${OWN}`, { cwd: r.wt, projectDir: r.root })));
   });
 
   it('git failing to report the common dir (old git): fail closed to never', () => {
@@ -465,18 +494,10 @@ describe('fail-closed paths and git-subprocess discipline', () => {
   });
 
   it('policy is resolved from the project dir repo independent of the tool cwd (other worktree)', () => {
-    git(
-      leaseRepo.root,
-      'worktree',
-      'add',
-      '-q',
-      '-b',
-      'feat/b',
-      join(leaseRepo.root, '.worktrees', 'b'),
-    );
-    const wtB = realpathSync(join(leaseRepo.root, '.worktrees', 'b'));
-    // project dir = worktree A (leaseRepo.wt), push runs from worktree B on its own branch.
-    const ok = run('git push --force-with-lease origin feat/b', {
+    const wtB = addTaskWorktree(leaseRepo.root, 2);
+    const B = 'ai-sdlc/aisdlc-2-b';
+    // project dir = worktree A (leaseRepo.wt), push runs from worktree B on its own task branch.
+    const ok = run(`git push --force-with-lease origin ${B}`, {
       cwd: wtB,
       projectDir: leaseRepo.wt,
     });
@@ -484,19 +505,10 @@ describe('fail-closed paths and git-subprocess discipline', () => {
     // ...but B's own-branch rule still applies: pushing A's branch from B is blocked.
     assert.ok(denied(run(L(), { cwd: wtB, projectDir: leaseRepo.wt })));
     // project dir = A whose copy says lease while the main checkout says never: blocked.
-    git(
-      wtCopyRepo.root,
-      'worktree',
-      'add',
-      '-q',
-      '-b',
-      'feat/b',
-      join(wtCopyRepo.root, '.worktrees', 'b'),
-    );
-    const wcB = realpathSync(join(wtCopyRepo.root, '.worktrees', 'b'));
+    const wcB = addTaskWorktree(wtCopyRepo.root, 2);
     assert.ok(
       denied(
-        run('git push --force-with-lease origin feat/b', { cwd: wcB, projectDir: wtCopyRepo.wt }),
+        run(`git push --force-with-lease origin ${B}`, { cwd: wcB, projectDir: wtCopyRepo.wt }),
       ),
     );
   });
@@ -536,13 +548,13 @@ describe('adopter blockedActions that are not about force flags keep applying to
       'adopterpattern',
       roleYaml(LEASE).replace("- 'git push -f*'", "- 'git push -f*'\n      - 'git push *develop*'"),
     );
-    git(r.wt, 'checkout', '-q', '-b', 'feat/develop-x');
+    git(r.wt, 'checkout', '-q', '-b', 'ai-sdlc/aisdlc-1-develop-x');
     assert.ok(
       denied(
         run('git push --force-with-lease origin feat/develop-x', { cwd: r.wt, projectDir: r.root }),
       ),
     );
-    git(r.wt, 'checkout', '-q', 'feat/own');
+    git(r.wt, 'checkout', '-q', OWN);
     assert.ok(!denied(run(L(), { cwd: r.wt, projectDir: r.root })));
   });
 });
@@ -594,4 +606,146 @@ describe('CI-skip floor does not depend on allowForcePush', () => {
       assert.equal(scan(r, 'chore: x (skip ci marker)').status, 0);
     });
   }
+});
+
+describe('tag / notes / alias overwrite via short destination (regression, real git)', () => {
+  const G = ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid'];
+  let r;
+  before(() => {
+    r = makeRepo('tagalias', roleYaml(LEASE));
+    git(r.root, ...G, 'commit', '-q', '--allow-empty', '-m', 'seed');
+    git(r.root, 'push', '-q', 'origin', 'main');
+    git(r.root, 'tag', 'v1.2.3');
+    git(r.root, 'push', '-q', 'origin', 'v1.2.3');
+    git(r.wt, 'fetch', '-q', 'origin');
+  });
+
+  it('REPRODUCTION: a branch named like a remote tag force-overwrites that tag via HEAD:<name>', () => {
+    git(r.wt, 'checkout', '-q', '-b', 'v1.2.3');
+    git(r.wt, ...G, 'commit', '-q', '--allow-empty', '-m', 'divergent');
+    const tagBefore = git(r.wt, 'ls-remote', 'origin', 'refs/tags/v1.2.3').split('\t')[0];
+    git(r.wt, 'push', '-q', `--force-with-lease=v1.2.3:${tagBefore}`, 'origin', 'HEAD:v1.2.3');
+    const tagAfter = git(r.wt, 'ls-remote', 'origin', 'refs/tags/v1.2.3').split('\t')[0];
+    assert.notEqual(tagBefore, tagAfter, 'the unguarded push really overwrote the remote tag');
+  });
+
+  it('the hook denies that exploit (and the lease-pinned and refs/notes variants)', () => {
+    for (const name of ['v1.2.3', 'notes/commits', 'meta/config']) {
+      git(r.wt, 'checkout', '-q', '-B', name);
+      const tag = '0123456789abcdef0123456789abcdef01234567';
+      for (const cmd of [
+        `git push --force-with-lease=${name}:${tag} origin HEAD:${name}`,
+        `git push --force-with-lease origin HEAD:${name}`,
+        `git push --force-with-lease origin ${name}:${name}`,
+        `git push --force-with-lease origin ${name}`,
+        `git push --force-with-lease origin HEAD:refs/heads/${name}`,
+      ]) {
+        assert.ok(denied(run(cmd, { cwd: r.wt, projectDir: r.root })), `${name}: ${cmd}`);
+      }
+    }
+    git(r.wt, 'checkout', '-q', OWN);
+  });
+
+  it('a task-named branch is also refused when a local tag / refs/<name> / remote-tracking ref answers to its name', () => {
+    for (const ref of [`refs/tags/${OWN}`, `refs/${OWN}`, `refs/remotes/${OWN}`]) {
+      git(r.wt, 'update-ref', ref, 'HEAD');
+      for (const cmd of [L(), LF()]) {
+        assert.ok(denied(run(cmd, { cwd: r.wt, projectDir: r.root })), `${ref}: ${cmd}`);
+      }
+      git(r.wt, 'update-ref', '-d', ref);
+    }
+    assert.ok(
+      !denied(run(LF(), { cwd: r.wt, projectDir: r.root })),
+      'clear again once the alias is gone',
+    );
+  });
+
+  it('the alias probe failing (git error, not "missing") denies', () => {
+    const shim = makeGitShim('verifyfail');
+    const out = run(LF(), {
+      cwd: r.wt,
+      projectDir: r.root,
+      env: { ...shim.env, GIT_SHIM_FAIL_VERIFY: '1' },
+    });
+    assert.ok(denied(out), out);
+  });
+});
+
+describe('own = the dispatched TASK branch', () => {
+  const sentinel = (wt) => join(wt, '.active-task');
+  let r;
+  before(() => {
+    r = makeRepo('taskbind', roleYaml(LEASE));
+  });
+
+  it('allows with a matching sentinel (baseline)', () => {
+    assert.ok(!denied(run(LF(), { cwd: r.wt, projectDir: r.root })));
+  });
+
+  it('denies with no sentinel (operator session), empty or malformed sentinel', () => {
+    for (const content of [null, '', '\n', 'not a task id', 'AISDLC-', '../../etc']) {
+      if (content === null) rmSync(sentinel(r.wt));
+      else writeFileSync(sentinel(r.wt), content);
+      assert.ok(denied(run(LF(), { cwd: r.wt, projectDir: r.root })), JSON.stringify(content));
+    }
+    writeFileSync(sentinel(r.wt), 'AISDLC-1\n');
+  });
+
+  it('denies when the agent rewrites .active-task to another task (dir name and branch disagree)', () => {
+    writeFileSync(sentinel(r.wt), 'AISDLC-700\n');
+    assert.ok(denied(run(LF(), { cwd: r.wt, projectDir: r.root })));
+    writeFileSync(sentinel(r.wt), 'AISDLC-1\n');
+  });
+
+  it('denies a branch outside the task prefix even with a consistent sentinel and directory', () => {
+    const dir = join(r.root, '.worktrees', 'aisdlc-7');
+    git(r.root, 'worktree', 'add', '-q', '-b', 'feat/not-a-task-branch', dir);
+    writeFileSync(join(dir, '.active-task'), 'AISDLC-7\n');
+    const wt7 = realpathSync(dir);
+    assert.ok(
+      denied(
+        run('git push --force-with-lease origin feat/not-a-task-branch', {
+          cwd: wt7,
+          projectDir: r.root,
+        }),
+      ),
+    );
+  });
+
+  it('denies when the worktree directory is not named after the task', () => {
+    const dir = join(r.root, '.worktrees', 'scratch');
+    git(r.root, 'worktree', 'add', '-q', '-b', 'ai-sdlc/aisdlc-8-x', dir);
+    writeFileSync(join(dir, '.active-task'), 'AISDLC-8\n');
+    const wt8 = realpathSync(dir);
+    assert.ok(
+      denied(
+        run('git push --force-with-lease origin ai-sdlc/aisdlc-8-x', {
+          cwd: wt8,
+          projectDir: r.root,
+        }),
+      ),
+    );
+  });
+});
+
+describe('an internal error while evaluating a push is a DENY, not an allow', () => {
+  it('a throwing guard (injected via a preload) denies git push but not unrelated commands', () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'lease-throw-')));
+    try {
+      const guardPath = join(__dirname, 'lib', 'lease-push-guard.js');
+      const preload = join(dir, 'preload.cjs');
+      writeFileSync(
+        preload,
+        `const m = require(${JSON.stringify(guardPath)});\nm.evaluateLeasePush = () => { throw new Error('boom'); };\n`,
+      );
+      const env = { NODE_OPTIONS: `--require ${preload}` };
+      const o = { cwd: leaseRepo.wt, projectDir: leaseRepo.root, env };
+      assert.ok(denied(run(L(), o)));
+      assert.ok(denied(run(LF(), o)));
+      assert.ok(!denied(run('echo hi', o)));
+      assert.ok(!denied(run('ls', o)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
