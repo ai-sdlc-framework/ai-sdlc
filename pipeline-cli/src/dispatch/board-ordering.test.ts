@@ -293,6 +293,66 @@ describe('requeueStaleInflight', () => {
     expect(claimNext(board, 'in-session-agent').manifest?.taskId).toBe('T-1');
   });
 
+  it('leaves a re-claimed task and its state files alone when the claim changed mid-requeue', () => {
+    writeManifest(board, mk('T-1'));
+    claimNext(board, 'in-session-agent');
+    const inflight = path.join(board, 'inflight', 'T-1.dispatch.json');
+    const state = path.join(board, 'inflight', 'T-1.state.json');
+    const resume = path.join(board, 'inflight', 'T-1.resume.json');
+    const swapped = requeueInflight(board, 'T-1', 1, {
+      afterRead: () => {
+        // A second reaper requeued the task and a Worker claimed it afresh.
+        rmSync(inflight);
+        writeFileSync(inflight, JSON.stringify(mk('T-1', { workerId: 'fresh' })));
+        writeFileSync(state, '{"fresh":true}');
+        writeFileSync(resume, '{"fresh":true}');
+      },
+    });
+    expect(swapped).toBe(false);
+    expect(readFileSync(state, 'utf-8')).toBe('{"fresh":true}');
+    expect(readFileSync(resume, 'utf-8')).toBe('{"fresh":true}');
+    expect(readInflightManifest(board, 'T-1')?.workerId).toBe('fresh');
+    expect(readInflightManifest(board, 'T-1')?.retryCount).toBeUndefined();
+    expect(existsSync(path.join(board, 'queue', 'T-1.dispatch.json'))).toBe(false);
+  });
+
+  it('returns false when the inflight manifest vanishes before the requeue', () => {
+    writeManifest(board, mk('T-1'));
+    claimNext(board, 'in-session-agent');
+    expect(
+      requeueInflight(board, 'T-1', 1, {
+        afterRead: () => rmSync(path.join(board, 'inflight', 'T-1.dispatch.json')),
+      }),
+    ).toBe(false);
+  });
+
+  it('falls back to the observed mtime when dispatchedAt is not a date', () => {
+    writeManifest(board, mk('T-1', { dispatchedAt: 'not-a-date' }));
+    const claim = claimNext(board, 'in-session-agent');
+    _setMtimeForTest(claim.manifestPath ?? '', 5_000_000);
+    expect(requeueInflight(board, 'T-1', 1)).toBe(true);
+    expect(statSync(path.join(board, 'queue', 'T-1.dispatch.json')).mtimeMs).toBe(5_000_000);
+  });
+
+  it('returns a claim to the queue at its enqueue time when recording the worker fails', () => {
+    const enqueued = Date.parse('2026-05-20T09:00:00.000Z');
+    writeManifest(board, mk('T-1', { dispatchedAt: new Date(enqueued).toISOString() }));
+    expect(() =>
+      claimNext(board, 'in-session-agent', undefined, {
+        // Serialising the worker record throws, after the claim rename succeeded.
+        workerId: {
+          toJSON() {
+            throw new Error('cannot serialise');
+          },
+        } as unknown as string,
+      }),
+    ).toThrow(/cannot serialise/);
+    const queued = path.join(board, 'queue', 'T-1.dispatch.json');
+    expect(existsSync(queued)).toBe(true);
+    expect(statSync(queued).mtimeMs).toBe(enqueued);
+    expect(readdirSync(path.join(board, 'inflight'))).toEqual([]);
+  });
+
   it('stamps the claim time so an old queued task is not reaped at once', () => {
     writeManifest(board, mk('T-1'));
     const queued = path.join(board, 'queue', 'T-1.dispatch.json');

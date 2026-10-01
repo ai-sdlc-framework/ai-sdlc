@@ -564,15 +564,22 @@ function writeIntoQueue(
 
 /**
  * Return an inflight manifest to `queue/` with `retryCount` set to the given
- * value (the reaper's requeue path). The heartbeat and any resume signal are
- * cleared first, then the manifest itself moves with one atomic rename, so a
- * crash at any point leaves the task on the board (still inflight, where the
- * next reap tick finds it again). The queue copy's mtime is reset to the
- * enqueue time (`dispatchedAt`) so the task holds its FIFO position. Returns false when no inflight manifest exists.
+ * value (the reaper's requeue path). Returns false, touching nothing, when no
+ * inflight manifest exists or the claim changed since it was read. The
+ * heartbeat and any resume signal are cleared next, then the manifest itself
+ * moves with one atomic rename, so a crash at any point leaves the task on
+ * the board (still inflight, where the next reap tick finds it again). The
+ * queue copy's mtime is reset to the enqueue time (`dispatchedAt`) so the
+ * task holds its FIFO position.
  *
  * @throws when `queue/<task-id>` already exists.
  */
-export function requeueInflight(boardDir: string, taskId: string, retryCount: number): boolean {
+export function requeueInflight(
+  boardDir: string,
+  taskId: string,
+  retryCount: number,
+  hooks: { afterRead?: () => void } = {},
+): boolean {
   ensureBoardDirs(boardDir);
   const src = manifestPathIn(boardDir, 'inflight', taskId);
   const manifest = existsSync(src) ? readManifest(src) : undefined;
@@ -583,13 +590,15 @@ export function requeueInflight(boardDir: string, taskId: string, retryCount: nu
   }
   manifest.retryCount = retryCount;
   const seen = statSync(src);
+  hooks.afterRead?.();
+  // Another reaper may have requeued this task and a Worker claimed it again
+  // since we read it. Check before touching anything, so a claim that is not
+  // the one we saw keeps its manifest, heartbeat and resume signal.
+  const now = statSync(src, { throwIfNoEntry: false });
+  if (!now || now.ino !== seen.ino || now.mtimeMs !== seen.mtimeMs) return false;
   for (const suffix of [STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
     rmSync(path.join(boardDir, 'inflight', `${taskId}${suffix}`), { force: true });
   }
-  // Another reaper may have requeued this task and a Worker claimed it again
-  // since we read it; never rewrite or move a claim that is not the one we saw.
-  const now = statSync(src, { throwIfNoEntry: false });
-  if (!now || now.ino !== seen.ino || now.mtimeMs !== seen.mtimeMs) return false;
   writeJsonAtomic(src, manifest);
   // The claim stamped the inflight mtime; the queue copy takes its FIFO
   // position from the enqueue time instead.
