@@ -252,13 +252,18 @@ function parseAllowedShape(command, ctx) {
     const [src, dst] = parts;
     if (!src || (parts.length === 2 && !dst)) return `refspec '${spec}' is empty or a delete`;
     if (parts.length === 1) {
-      // No-colon form: the destination is inferred from the source ref's own
-      // full name, which is refs/heads/<own> once refAliasState() above proved
-      // no other local ref answers to the name.
-      if (src !== own && src !== full) return `refspec '${spec}' is not the own branch`;
-      continue;
+      // The no-colon form is refused in every case. Git does NOT send `<own>` to
+      // refs/heads/<own>: it maps a no-colon refspec through `remote.<name>.push`
+      // and, under push.default=upstream|tracking, through
+      // `branch.<own>.merge`. Task branches are created from origin/main, so
+      // that is refs/heads/main. Only an explicit destination is unambiguous.
+      return (
+        `the no-colon refspec '${spec}' is refused (git maps it through remote.<name>.push / ` +
+        `push.default / branch.<own>.merge, not necessarily to refs/heads/${own}); use exactly ` +
+        `'git push --force-with-lease origin HEAD:refs/heads/${own}'`
+      );
     }
-    // Colon form: git resolves a destination that is not fully qualified
+    // Colon form (the only accepted form): git resolves a destination that is not fully qualified
     // against the REMOTE with every rule (`<x>`, refs/<x>, refs/tags/<x>,
     // refs/heads/<x>, ...), tags before heads, so `<own>` could overwrite a
     // remote tag/notes/meta ref of that name. Only the fully-qualified form is

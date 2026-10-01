@@ -166,6 +166,7 @@ describe('readTaskId', () => {
       for (const [content, want] of [
         ['AISDLC-663\n', 'aisdlc-663'],
         ['AISDLC-100.5', 'aisdlc-100.5'],
+        ['AISDLC-663.2\n', 'aisdlc-663.2'],
         ['gh-issue-123\n', 'gh-issue-123'],
         ['GH-ISSUE-9', 'gh-issue-9'],
         ['gh-issue-', null],

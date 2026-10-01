@@ -5,7 +5,7 @@
 ## Git Flow
 
 - **Always rebase** feature branches onto main; never merge main in.
-- Update branch: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease`.
+- Update branch: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease origin HEAD:refs/heads/<branch>` (explicit destination; the governance hook accepts no other lease spelling).
 - Never `gh api pulls/N/update-branch` with merge method. Keep linear history.
 - `/ai-sdlc rebase <pr>` automates mechanical conflicts (test additions to same `describe`, prettier drift) and re-signs the attestation only when `contentHash` changed. Escalates semantic conflicts, modify-vs-delete, verification failures, and 3-attempt iteration cap. Refuses force-push to `main`/`master`. **CHANGELOG.md conflicts should not arise on feature branches** — if a rebase surfaces one, remove the CHANGELOG change from the feature branch rather than merging both sides (AISDLC-401).
 

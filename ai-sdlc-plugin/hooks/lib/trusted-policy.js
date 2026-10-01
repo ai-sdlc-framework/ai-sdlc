@@ -139,7 +139,8 @@ function isUnder(child, parent) {
  *  - the worktree top (realpath, symlinks resolved) is under
  *    realpath(<mainRoot>)/.worktrees/  (so an operator's main checkout, a forged
  *    directory elsewhere such as /tmp/x/aisdlc-700, and a symlinked entry all fail);
- *  - the project dir is the main checkout or sits under <mainRoot>/.worktrees/;
+ *  - the project dir is the main checkout or sits under <mainRoot>/.worktrees/,
+ *    and when it is a worktree it must BE the worktree the tool runs in;
  *  - the worktree's own git dir lives under <mainRoot>/.git/worktrees/ and its
  *    `gitdir` back-pointer leads to <top>/.git (a hand-forged gitdir elsewhere
  *    that merely points its `commondir` at the real repo fails).
@@ -156,6 +157,11 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
     if (!topRaw) return null;
     const top = safeReal(topRaw);
     if (!isUnder(top, worktreesDir) || dirname(top) !== worktreesDir) return null;
+    // Own-session binding: a session whose project dir IS a task worktree may only
+    // use the lease from that very worktree (not from a sibling it cd'd into).
+    // A session rooted at the main checkout is bound by the checks above and by
+    // the sentinel / directory / branch agreement the caller verifies.
+    if (realProj !== realMain && realProj !== top) return null;
     const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
     if (!gitDirRaw) return null;
     const gitDir = safeReal(resolve(cwd, gitDirRaw));
