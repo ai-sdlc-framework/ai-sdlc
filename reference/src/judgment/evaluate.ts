@@ -98,7 +98,8 @@ export interface EvaluateJudgmentContext {
 const ALIAS_RE = /(^|[-:@])(latest|preview|beta|exp|nightly)$/i;
 const CORPUS_MIN_N = 50;
 
-function isLoopbackUrl(url: string | undefined): boolean {
+/** True when a URL points at the local machine (the only egress exemption). */
+export function isLoopbackUrl(url: string | undefined): boolean {
   if (!url) return false;
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -110,6 +111,14 @@ function isLoopbackUrl(url: string | undefined): boolean {
   }
 }
 
+/** The corpus-path promotion bar for a risk class (RFC section 8). */
+export function promotionCorpusBar(riskClass: JudgmentDefinition<unknown, unknown>['riskClass']): {
+  minN: number;
+  minActBandPrecision: number;
+} {
+  return { minN: CORPUS_MIN_N, minActBandPrecision: riskClass === 'relax' ? 0.95 : 0.9 };
+}
+
 /** Whether a promotion record satisfies the bar for a risk class (RFC section 8). */
 export function promotionSatisfies(
   riskClass: JudgmentDefinition<unknown, unknown>['riskClass'],
@@ -117,12 +126,12 @@ export function promotionSatisfies(
 ): boolean {
   if (!record) return false;
   if (record.path === 'corpus') {
-    const bar = riskClass === 'relax' ? 0.95 : 0.9;
+    const bar = promotionCorpusBar(riskClass);
     return (
       typeof record.n === 'number' &&
-      record.n >= CORPUS_MIN_N &&
+      record.n >= bar.minN &&
       typeof record.actBandPrecision === 'number' &&
-      record.actBandPrecision >= bar
+      record.actBandPrecision >= bar.minActBandPrecision
     );
   }
   if (record.path === 'override') {

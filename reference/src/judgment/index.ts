@@ -14,3 +14,4 @@ export * from './redact-json.js';
 export * from './cache.js';
 export * from './log-sink.js';
 export * from './builtin-providers.js';
+export * from './log-reader.js';
