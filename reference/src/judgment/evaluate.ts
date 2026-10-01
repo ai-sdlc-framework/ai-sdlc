@@ -11,7 +11,7 @@ import {
   type PromotionRecord,
   type ResolvedJudgmentConfig,
 } from './config.js';
-import { listJudgmentProviders, getJudgmentProvider } from './registry.js';
+import { resolveJudgmentProvider } from './registry.js';
 import { canonicalJson, sha256Hex } from './question-hash.js';
 import { redactSecrets } from '../security/secret-redact.js';
 import type {
@@ -80,11 +80,6 @@ export interface EvaluateJudgmentContext {
 
 const ALIAS_RE = /(^|[-:@])(latest|preview|beta|exp|nightly)$/i;
 const CORPUS_MIN_N = 50;
-
-function defaultGetProvider(name: string): JudgmentProvider | undefined {
-  if (!listJudgmentProviders().includes(name)) return undefined;
-  return getJudgmentProvider(name);
-}
 
 function isLoopbackUrl(url: string | undefined): boolean {
   if (!url) return false;
@@ -256,7 +251,9 @@ export async function evaluateJudgment<I, D>(
     rec.mode = configuredMode;
     if (!config.provider || configuredMode === 'off') return await abstain('disabled');
 
-    const provider = (ctx.getProvider ?? defaultGetProvider)(config.provider);
+    const provider = ctx.getProvider
+      ? ctx.getProvider(config.provider)
+      : resolveJudgmentProvider(config.provider, config.providerOptions, config.model);
     if (!provider) return await abstain('disabled');
     let availability: { available: boolean };
     try {
