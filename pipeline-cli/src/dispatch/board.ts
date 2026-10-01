@@ -8,6 +8,9 @@
  *   inflight/   manifests claimed by a Worker (atomic rename from queue/)
  *   done/       verdicts written by Workers on success
  *   failed/     diagnostics written by Workers (or supervisor) on failure
+ *   blocked/    manifests parked while they wait on a decision; the claim
+ *               logic never reads this directory (`unblockManifest` returns
+ *               one to queue/)
  *
  * Atomic claim — Workers and the supervisor use `fs.renameSync` on the same
  * filesystem. POSIX guarantees rename atomicity on the same FS, so two
@@ -34,6 +37,7 @@ import path from 'node:path';
 import {
   BOARD_SUBDIRS,
   DEFAULT_ITERATION_BUDGET,
+  type BoardSubdir,
   type ClaimResult,
   type DispatchManifest,
   type DispatchVerdict,
@@ -132,20 +136,84 @@ function readManifest(filePath: string): DispatchManifest | undefined {
   }
 }
 
+/** Outcome of an eligibility check on a queued manifest. */
+export type Eligibility = { eligible: true } | { eligible: false; reason: string };
+
+/** Board facts the eligibility rules read. Build once per claim / listing. */
+export interface EligibilityContext {
+  /** Task ids with a success verdict in `done/`. */
+  doneTaskIds: ReadonlySet<string>;
+  /** Sequence groups that currently have an inflight manifest, with the holder. */
+  busyGroups: ReadonlyMap<string, string>;
+}
+
+/** Read the board facts the eligibility rules need. */
+export function loadEligibilityContext(boardDir: string): EligibilityContext {
+  const doneTaskIds = new Set<string>();
+  for (const entry of safeReaddir(path.join(boardDir, 'done'))) {
+    if (!entry.endsWith(VERDICT_SUFFIX)) continue;
+    const verdict = readVerdict(path.join(boardDir, 'done', entry));
+    if (verdict && verdict.outcome === 'success') {
+      doneTaskIds.add(entry.slice(0, -VERDICT_SUFFIX.length));
+    }
+  }
+  const busyGroups = new Map<string, string>();
+  const inflightDir = path.join(boardDir, 'inflight');
+  for (const entry of safeReaddir(inflightDir)) {
+    if (!entry.endsWith(MANIFEST_SUFFIX)) continue;
+    const manifest = readManifest(path.join(inflightDir, entry));
+    if (manifest?.sequenceGroup) {
+      busyGroups.set(manifest.sequenceGroup, manifest.taskId);
+    }
+  }
+  return { doneTaskIds, busyGroups };
+}
+
+/**
+ * Apply the ordering rules to one queued manifest: a decision blocker, an
+ * unmet `after`, or a busy `sequenceGroup` each hold it back. A manifest
+ * without the ordering fields is always eligible (as before).
+ */
+export function checkEligibility(manifest: DispatchManifest, ctx: EligibilityContext): Eligibility {
+  if (manifest.blockedBy) {
+    return { eligible: false, reason: `blocked by decision ${manifest.blockedBy}` };
+  }
+  const unmet = (manifest.after ?? []).filter((id) => !ctx.doneTaskIds.has(id));
+  if (unmet.length > 0) {
+    return { eligible: false, reason: `waiting for ${unmet.join(', ')} to finish` };
+  }
+  if (manifest.sequenceGroup) {
+    const holder = ctx.busyGroups.get(manifest.sequenceGroup);
+    if (holder !== undefined && holder !== manifest.taskId) {
+      return {
+        eligible: false,
+        reason: `sequence group '${manifest.sequenceGroup}' is busy (${holder} is inflight)`,
+      };
+    }
+  }
+  return { eligible: true };
+}
+
 /**
  * Atomically claim the next eligible manifest from `queue/` matching the
  * requested Worker kind. Implementation:
  *
- *   1. List `queue/*.dispatch.json` sorted by mtime (oldest first — FIFO).
- *   2. For each candidate, parse the manifest. Skip if `workerKind` does
- *      not match the caller's kind and is not `any`. Skip if `noClaimBefore`
- *      is in the future (OQ-7 quota cool-down).
- *   3. Attempt `renameSync(queue/<id>, inflight/<id>)`. If it succeeds,
+ *   1. List `queue/*.dispatch.json` and parse each manifest.
+ *   2. Skip a manifest whose `workerKind` does not match the caller's kind
+ *      (and is not `any`), whose `noClaimBefore` is in the future (OQ-7
+ *      quota cool-down), or that fails the ordering rules (`blockedBy`,
+ *      unmet `after`, busy `sequenceGroup`).
+ *   3. Order the rest by `wave` (lower first), `priority` (higher first),
+ *      then enqueue time (file mtime, oldest first). Manifests without the
+ *      new fields all tie on wave and priority, so they stay FIFO.
+ *   4. Attempt `renameSync(queue/<id>, inflight/<id>)`. If it succeeds,
  *      this caller won the race — return the manifest. If it fails with
  *      `ENOENT`, another Worker beat us; continue to the next candidate.
  *
+ * `blocked/` is never read here.
+ *
  * Returns `{ claimed: false }` when the queue is empty (or contains only
- * non-matching / cool-down entries).
+ * non-matching / cool-down / ineligible entries).
  */
 export function claimNext(
   boardDir: string,
@@ -157,6 +225,8 @@ export function claimNext(
 
   const candidates = listManifestCandidates(queueDir);
   const wallNow = now().getTime();
+  const ctx = loadEligibilityContext(boardDir);
+  const eligible: { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] = [];
   for (const candidate of candidates) {
     const manifest = readManifest(candidate.fullPath);
     if (!manifest) continue;
@@ -172,9 +242,30 @@ export function claimNext(
       }
     }
 
+    if (!checkEligibility(manifest, ctx).eligible) continue;
+    eligible.push({ fullPath: candidate.fullPath, manifest, mtimeMs: candidate.mtimeMs });
+  }
+
+  // Array.prototype.sort is stable; candidates already arrive oldest-first.
+  eligible.sort(
+    (a, b) =>
+      (a.manifest.wave ?? 0) - (b.manifest.wave ?? 0) ||
+      (b.manifest.priority ?? 0) - (a.manifest.priority ?? 0) ||
+      a.mtimeMs - b.mtimeMs,
+  );
+
+  const claimedGroups = new Set<string>();
+  for (const { fullPath, manifest } of eligible) {
+    // Two eligible manifests may share a group; only the first in claim
+    // order may be tried, otherwise a lost race on it would let the second
+    // slip through while the group is still contended.
+    if (manifest.sequenceGroup) {
+      if (claimedGroups.has(manifest.sequenceGroup)) continue;
+      claimedGroups.add(manifest.sequenceGroup);
+    }
     const inflightPath = manifestPathIn(boardDir, 'inflight', manifest.taskId);
     try {
-      renameSync(candidate.fullPath, inflightPath);
+      renameSync(fullPath, inflightPath);
     } catch (err) {
       if (isFsErrorCode(err, 'ENOENT')) {
         // Another Worker beat us to this manifest — try the next candidate.
@@ -224,6 +315,145 @@ export function releaseInflight(boardDir: string, taskId: string): boolean {
   }
   renameSync(src, dst);
   return true;
+}
+
+/**
+ * Return a parked manifest from `blocked/` to `queue/`, clearing its
+ * `blockedBy` marker so the claim logic can pick it up. Returns false when
+ * no parked manifest exists under that task id.
+ */
+export function unblockManifest(boardDir: string, taskId: string): boolean {
+  ensureBoardDirs(boardDir);
+  const src = manifestPathIn(boardDir, 'blocked', taskId);
+  const manifest = existsSync(src) ? readManifest(src) : undefined;
+  if (!manifest) return false;
+  delete manifest.blockedBy;
+  const dst = manifestPathIn(boardDir, 'queue', taskId);
+  if (existsSync(dst)) {
+    throw new Error(`dispatch.unblock: queue/${taskId}${MANIFEST_SUFFIX} already exists`);
+  }
+  const tmp = `${dst}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, dst);
+  rmSync(src);
+  return true;
+}
+
+/**
+ * Return an inflight manifest to `queue/` with `retryCount` set to the given
+ * value (the reaper's requeue path). Clears the inflight heartbeat and any
+ * resume signal. Returns false when no inflight manifest exists.
+ */
+export function requeueInflight(boardDir: string, taskId: string, retryCount: number): boolean {
+  ensureBoardDirs(boardDir);
+  const src = manifestPathIn(boardDir, 'inflight', taskId);
+  const manifest = existsSync(src) ? readManifest(src) : undefined;
+  if (!manifest) return false;
+  manifest.retryCount = retryCount;
+  const dst = manifestPathIn(boardDir, 'queue', taskId);
+  const tmp = `${dst}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, dst);
+  for (const suffix of [MANIFEST_SUFFIX, STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
+    rmSync(path.join(boardDir, 'inflight', `${taskId}${suffix}`), { force: true });
+  }
+  return true;
+}
+
+/** Read one inflight manifest (undefined when absent or unparseable). */
+export function readInflightManifest(
+  boardDir: string,
+  taskId: string,
+): DispatchManifest | undefined {
+  const p = manifestPathIn(boardDir, 'inflight', taskId);
+  return existsSync(p) ? readManifest(p) : undefined;
+}
+
+/** One manifest or verdict on the board, with its state and eligibility. */
+export interface BoardEntry {
+  taskId: string;
+  state: BoardSubdir;
+  /** Only set for `queue/` entries. */
+  eligible?: boolean;
+  /** Set when a `queue/` entry is not eligible: which rule holds it. */
+  reason?: string;
+  wave?: number;
+  priority?: number;
+  sequenceGroup?: string;
+}
+
+/** True when the id is on the board in any state (manifest, verdict, or diagnostic). */
+export function isOnBoard(boardDir: string, taskId: string): boolean {
+  for (const sub of ['queue', 'inflight', 'blocked'] as const) {
+    if (existsSync(manifestPathIn(boardDir, sub, taskId))) return true;
+  }
+  for (const sub of ['done', 'failed'] as const) {
+    for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX]) {
+      if (existsSync(path.join(boardDir, sub, `${taskId}${suffix}`))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * List every manifest on the board by state. `queue/` entries carry their
+ * eligibility and, when held back, the rule that holds them (including a
+ * `noClaimBefore` cool-down). Queue entries are in claim order, eligible
+ * ones first.
+ */
+export function listBoard(boardDir: string, now: () => Date = () => new Date()): BoardEntry[] {
+  ensureBoardDirs(boardDir);
+  const ctx = loadEligibilityContext(boardDir);
+  const wallNow = now().getTime();
+  const entries: BoardEntry[] = [];
+  const queued: { entry: BoardEntry; mtimeMs: number }[] = [];
+  for (const candidate of listManifestCandidates(path.join(boardDir, 'queue'))) {
+    const manifest = readManifest(candidate.fullPath);
+    if (!manifest) continue;
+    let verdict = checkEligibility(manifest, ctx);
+    if (verdict.eligible && manifest.noClaimBefore) {
+      const claimAfter = Date.parse(manifest.noClaimBefore);
+      if (!Number.isNaN(claimAfter) && claimAfter > wallNow) {
+        verdict = { eligible: false, reason: `cool-down until ${manifest.noClaimBefore}` };
+      }
+    }
+    const entry: BoardEntry = {
+      taskId: manifest.taskId,
+      state: 'queue',
+      eligible: verdict.eligible,
+    };
+    if (!verdict.eligible) entry.reason = verdict.reason;
+    if (manifest.wave !== undefined) entry.wave = manifest.wave;
+    if (manifest.priority !== undefined) entry.priority = manifest.priority;
+    if (manifest.sequenceGroup) entry.sequenceGroup = manifest.sequenceGroup;
+    queued.push({ entry, mtimeMs: candidate.mtimeMs });
+  }
+  queued.sort(
+    (a, b) =>
+      Number(b.entry.eligible) - Number(a.entry.eligible) ||
+      (a.entry.wave ?? 0) - (b.entry.wave ?? 0) ||
+      (b.entry.priority ?? 0) - (a.entry.priority ?? 0) ||
+      a.mtimeMs - b.mtimeMs,
+  );
+  entries.push(...queued.map((q) => q.entry));
+  for (const sub of ['inflight', 'blocked'] as const) {
+    for (const file of safeReaddir(path.join(boardDir, sub))) {
+      if (!file.endsWith(MANIFEST_SUFFIX)) continue;
+      const entry: BoardEntry = { taskId: file.slice(0, -MANIFEST_SUFFIX.length), state: sub };
+      if (sub === 'blocked') {
+        const manifest = readManifest(path.join(boardDir, sub, file));
+        if (manifest?.blockedBy) entry.reason = `blocked by decision ${manifest.blockedBy}`;
+      }
+      entries.push(entry);
+    }
+  }
+  for (const sub of ['done', 'failed'] as const) {
+    for (const file of safeReaddir(path.join(boardDir, sub))) {
+      const suffix = [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX].find((x) => file.endsWith(x));
+      if (suffix) entries.push({ taskId: file.slice(0, -suffix.length), state: sub });
+    }
+  }
+  return entries;
 }
 
 /**

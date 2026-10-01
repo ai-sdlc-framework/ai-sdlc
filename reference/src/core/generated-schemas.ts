@@ -3830,6 +3830,40 @@ export const dispatchManifestV1Schema = {
       description:
         'OQ-7 (RFC-0041) — quota-backoff gate. When set, Workers MUST refuse to claim this manifest until the wall-clock passes this timestamp. Used by the Conductor to honor Anthropic Retry-After after a 429.',
     },
+    after: {
+      type: 'array',
+      items: { type: 'string', minLength: 1, pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$' },
+      description:
+        'Task ids that must each have a success verdict in done/ before this manifest is claimable. Omitted or empty means no ordering dependency.',
+    },
+    sequenceGroup: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Label for tasks that must not run side by side (for example 'schema-regen'). At most one inflight manifest per group; a second member is claimable only after the first leaves inflight/.",
+    },
+    priority: {
+      type: 'integer',
+      description:
+        'Ordering hint within a wave. Among eligible manifests a higher priority is claimed first. Default 0.',
+    },
+    wave: {
+      type: 'integer',
+      description:
+        'Ordering hint. Among eligible manifests a lower wave is claimed first, before priority. Default 0.',
+    },
+    blockedBy: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Decision id the task is waiting on. A manifest with this set is never claimed; it is parked in blocked/ and returned to queue/ by an unblock.',
+    },
+    retryCount: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Number of times the reaper has returned this manifest from inflight/ to queue/. Default 0.',
+    },
   },
   additionalProperties: false,
 } as const;

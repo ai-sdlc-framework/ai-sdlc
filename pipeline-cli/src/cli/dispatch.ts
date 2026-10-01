@@ -30,6 +30,20 @@
  *   - `write-manifest --json <path>` — Conductor entry point. Reads a JSON
  *     manifest from `<path>` and writes it into queue/.
  *
+ * Ordering and parking:
+ *
+ *   - `enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
+ *     [--priority <n>] [--wave <n>]` or `enqueue --from-brief <path>` —
+ *     write one manifest per task into queue/. Refuses a task already on the
+ *     board in any state; nothing is written when any task is refused.
+ *   - `board [--json]` — print every manifest by state, with eligibility and
+ *     the holding rule for queued manifests that cannot be claimed yet.
+ *   - `unblock --task-id <id>` — return a parked manifest from blocked/ to
+ *     queue/.
+ *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
+ *     stale inflight manifests to queue/ (retry count incremented), or to
+ *     failed/ once past the retry limit.
+ *
  * Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
  *
  *   - `write-resume-signal --task-id <id> --feedback <s>` — Conductor writes
@@ -75,7 +89,8 @@
  * `node -e ...` or `jq`.
  */
 
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -83,14 +98,19 @@ import {
   claimNext,
   collectVerdicts,
   DEFAULT_BOARD_DIR,
+  enqueueTasks,
+  listBoard,
   listResumeSignals,
+  parseBrief,
   peekQueue,
   probeIterationBudget,
   readResumeSignal,
   releaseInflight,
   removeResumeSignal,
+  requeueStaleInflight,
   removeVerdict,
   sweepStaleHeartbeats,
+  unblockManifest,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
   writeManifest,
@@ -98,6 +118,8 @@ import {
   writeVerdict,
 } from '../dispatch/index.js';
 import type {
+  BoardEntry,
+  EnqueueEntry,
   DispatchManifest,
   DispatchVerdict,
   InflightHeartbeat,
@@ -579,6 +601,81 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'enqueue': {
+      const workDir = path.resolve(flags['work-dir'] ?? '.');
+      try {
+        let entries: EnqueueEntry[];
+        if (flags['from-brief']) {
+          entries = parseBrief(readFileSync(path.resolve(flags['from-brief']), 'utf-8'));
+        } else {
+          const ids = argv.flatMap((tok, i) =>
+            tok === '--task' && argv[i + 1] ? [argv[i + 1]!] : [],
+          );
+          if (ids.length === 0) {
+            process.stderr.write(
+              'cli-dispatch enqueue: pass --task <id> (repeatable) or --from-brief <path>\n',
+            );
+            return 2;
+          }
+          const shared: Omit<EnqueueEntry, 'taskId'> = {};
+          if (flags['after'])
+            shared.after = flags['after']
+              .split(',')
+              .map((x) => x.trim())
+              .filter(Boolean);
+          if (flags['group']) shared.sequenceGroup = flags['group'];
+          if (flags['priority']) shared.priority = Number.parseInt(flags['priority'], 10);
+          if (flags['wave']) shared.wave = Number.parseInt(flags['wave'], 10);
+          entries = ids.map((taskId) => ({ taskId, ...shared }));
+        }
+        const paths = enqueueTasks(boardDir, entries, {
+          baseSha: flags['base-sha'] ?? resolveBaseSha(workDir),
+          dispatchedBy: flags['dispatched-by'] ?? `operator-${process.pid}`,
+          resolveTaskFile: (id) => findTaskFile(workDir, id),
+        });
+        out({ ok: true, enqueued: entries.map((e) => e.taskId), paths });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch enqueue: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
+    case 'board': {
+      const entries = listBoard(boardDir);
+      if (flags['json'] === 'true') {
+        out(entries);
+        return 0;
+      }
+      process.stdout.write(formatBoard(entries));
+      return 0;
+    }
+
+    case 'unblock': {
+      const taskId = requireFlag(flags, 'task-id');
+      if (!unblockManifest(boardDir, taskId)) {
+        process.stderr.write(`cli-dispatch unblock: ${taskId} is not parked in blocked/\n`);
+        return 1;
+      }
+      out({ ok: true, taskId });
+      return 0;
+    }
+
+    case 'reap': {
+      const opts: Parameters<typeof requeueStaleInflight>[1] = {};
+      if (flags['stale-ms']) opts.staleMs = Number.parseInt(flags['stale-ms'], 10);
+      if (flags['retry-limit']) opts.retryLimit = Number.parseInt(flags['retry-limit'], 10);
+      if (flags['roster']) {
+        opts.roster = new Set(
+          JSON.parse(readFileSync(path.resolve(flags['roster']), 'utf-8')) as string[],
+        );
+      }
+      out(requeueStaleInflight(boardDir, opts));
+      return 0;
+    }
+
     case '':
     case 'help':
     case '--help':
@@ -593,6 +690,38 @@ export async function runDispatchCli(
       return 2;
     }
   }
+}
+
+function resolveBaseSha(workDir: string): string {
+  for (const ref of ['origin/main', 'HEAD']) {
+    try {
+      return execFileSync('git', ['rev-parse', ref], { cwd: workDir, encoding: 'utf-8' }).trim();
+    } catch {
+      /* try the next ref */
+    }
+  }
+  throw new Error('cannot resolve a base commit; pass --base-sha <sha>');
+}
+
+function findTaskFile(workDir: string, taskId: string): string | undefined {
+  const dir = path.join(workDir, 'backlog', 'tasks');
+  if (!existsSync(dir)) return undefined;
+  const prefix = `${taskId.toLowerCase()} - `;
+  const hit = readdirSync(dir).find((f) => f.toLowerCase().startsWith(prefix) && f.endsWith('.md'));
+  return hit ? path.posix.join('backlog', 'tasks', hit) : undefined;
+}
+
+/** Render the board listing: one line per manifest, grouped by state. */
+export function formatBoard(entries: readonly BoardEntry[]): string {
+  if (entries.length === 0) return 'board is empty\n';
+  const lines: string[] = [];
+  for (const e of entries) {
+    const parts = [e.state.padEnd(8), e.taskId];
+    if (e.state === 'queue') parts.push(e.eligible ? 'eligible' : `held: ${e.reason}`);
+    else if (e.reason) parts.push(e.reason);
+    lines.push(parts.join('  '));
+  }
+  return lines.join('\n') + '\n';
 }
 
 function requireFlag(flags: Record<string, string>, name: string): string {
@@ -670,6 +799,11 @@ Subcommands:
   sweep [--stale-ms <n>]
   release --task-id <id>
   write-manifest --json <path>
+  enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
+          [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>
+  board [--json]
+  unblock --task-id <id>
+  reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
 
 Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
   write-resume-signal --task-id <id> --feedback <s>

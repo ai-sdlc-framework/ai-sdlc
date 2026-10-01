@@ -20,20 +20,27 @@
  */
 
 export {
+  checkEligibility,
   claimNext,
   collectVerdicts,
   DEFAULT_BOARD_DIR,
   DEFAULT_HEARTBEAT_STALE_MS,
   ensureBoardDirs,
+  isOnBoard,
+  listBoard,
   listResumeSignals,
+  loadEligibilityContext,
   peekQueue,
   probeIterationBudget,
   readHeartbeat,
+  readInflightManifest,
   readResumeSignal,
   releaseInflight,
   removeResumeSignal,
   removeVerdict,
+  requeueInflight,
   sweepStaleHeartbeats,
+  unblockManifest,
   writeDiagnostic,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
@@ -102,6 +109,12 @@ export {
   type BuildClaudePResumeArgvOpts,
 } from './claude-p-resume.js';
 
+export type { BoardEntry, Eligibility, EligibilityContext } from './board.js';
+
+export { DEFAULT_VERIFY_COMMANDS, enqueueTasks, parseBrief } from './enqueue.js';
+
+export type { EnqueueDefaults, EnqueueEntry } from './enqueue.js';
+
 export type {
   BoardSubdir,
   ClaimResult,
@@ -145,11 +158,19 @@ export type { CancelSignal, DispatchSession, SessionStatus } from './sessions.js
 // AISDLC-481: Session heartbeat reaper + cancel back-channel.
 export {
   DEFAULT_SESSION_STALE_MS,
+  DEFAULT_REQUEUE_RETRY_LIMIT,
   honorCancelIfRequested,
   reapStaleSessions,
+  requeueStaleInflight,
 } from './session-reaper.js';
 
-export type { ReapedSession, ReaperOptions, SessionReaperResult } from './session-reaper.js';
+export type {
+  ReapedSession,
+  ReaperOptions,
+  RequeueOptions,
+  RequeueResult,
+  SessionReaperResult,
+} from './session-reaper.js';
 
 // AISDLC-483: Reviewer-harness selector — routes code/test review to Codex
 // by default, keeps security on claude-native opus, developer on sonnet.

@@ -3,7 +3,7 @@
  * (RFC-0041 §4.4, AISDLC-377.1).
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -1159,5 +1159,132 @@ spec:
       const r = readLastJson(captured) as { k: number };
       expect(r.k).toBe(3);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enqueue / board / unblock / reap
+// ---------------------------------------------------------------------------
+
+describe('runDispatchCli ordering commands', () => {
+  let root: string;
+  let boardDir: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'dispatch-enqueue-'));
+    boardDir = path.join(root, 'dispatch');
+    dispatchEnsureBoardDirs(boardDir);
+    mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
+    for (const id of ['t-1', 't-2']) {
+      writeFileSync(path.join(root, 'backlog', 'tasks', `${id} - x.md`), '');
+    }
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const base = () => ['--board-dir', boardDir, '--work-dir', root, '--base-sha', 'abc1234'];
+
+  it('enqueues repeated --task with shared ordering flags, then refuses a repeat', async () => {
+    const { exit } = await captureStdout(() =>
+      runDispatchCli([
+        'enqueue',
+        '--task',
+        'T-1',
+        '--task',
+        'T-2',
+        '--group',
+        'g',
+        '--wave',
+        '1',
+        '--priority',
+        '2',
+        '--after',
+        'T-9',
+        ...base(),
+      ]),
+    );
+    expect(exit).toBe(0);
+    const m = JSON.parse(readFileSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'), 'utf-8'));
+    expect(m).toMatchObject({ sequenceGroup: 'g', wave: 1, priority: 2, after: ['T-9'] });
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const again = await runDispatchCli(['enqueue', '--task', 'T-1', ...base()]);
+    expect(again).toBe(1);
+    expect(err.mock.calls.join('')).toContain('already on the board');
+    err.mockRestore();
+  });
+
+  it('enqueues from a brief file', async () => {
+    const brief = path.join(root, 'brief.yaml');
+    writeFileSync(brief, '- T-1\n- task: T-2\n  after: [T-1]\n');
+    const { exit } = await captureStdout(() =>
+      runDispatchCli(['enqueue', '--from-brief', brief, ...base()]),
+    );
+    expect(exit).toBe(0);
+    expect(existsSync(path.join(boardDir, 'queue', 'T-2.dispatch.json'))).toBe(true);
+  });
+
+  it('requires a task source', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', ...base()])).toBe(2);
+    err.mockRestore();
+  });
+
+  it('prints the board with the reason an ineligible manifest is held', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('T-1', { after: ['T-9'] }));
+    dispatchWriteManifest(boardDir, mkManifest('T-2'));
+    const { captured } = await captureStdout(() =>
+      runDispatchCli(['board', '--board-dir', boardDir]),
+    );
+    expect(captured.raw).toContain('T-2  eligible');
+    expect(captured.raw).toContain('T-1  held: waiting for T-9 to finish');
+    const json = await captureStdout(() =>
+      runDispatchCli(['board', '--json', '--board-dir', boardDir]),
+    );
+    expect((readLastJson(json.captured) as unknown[]).length).toBe(2);
+  });
+
+  it('prints an empty board', async () => {
+    const { captured } = await captureStdout(() =>
+      runDispatchCli(['board', '--board-dir', boardDir]),
+    );
+    expect(captured.raw).toBe('board is empty\n');
+  });
+
+  it('unblocks a parked manifest', async () => {
+    writeFileSync(
+      path.join(boardDir, 'blocked', 'T-1.dispatch.json'),
+      JSON.stringify(mkManifest('T-1', { blockedBy: 'DEC-1' })),
+    );
+    const { exit } = await captureStdout(() =>
+      runDispatchCli(['unblock', '--task-id', 'T-1', '--board-dir', boardDir]),
+    );
+    expect(exit).toBe(0);
+    expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(true);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['unblock', '--task-id', 'T-1', '--board-dir', boardDir])).toBe(1);
+    err.mockRestore();
+  });
+
+  it('reaps a stale inflight manifest back to the queue', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('T-1'));
+    await captureStdout(() =>
+      runDispatchCli(['claim', '--worker-kind', 'in-session-agent', '--board-dir', boardDir]),
+    );
+    const roster = path.join(root, 'roster.json');
+    writeFileSync(roster, '["other"]');
+    const { captured } = await captureStdout(() =>
+      runDispatchCli([
+        'reap',
+        '--stale-ms',
+        '1',
+        '--retry-limit',
+        '3',
+        '--roster',
+        roster,
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect((readLastJson(captured) as { requeued: unknown[] }).requeued).toHaveLength(1);
+    expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(true);
   });
 });

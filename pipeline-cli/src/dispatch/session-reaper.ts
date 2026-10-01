@@ -19,10 +19,18 @@
  * time or filesystem globals.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { sweepStaleHeartbeats, writeDiagnostic } from './board.js';
+import {
+  DEFAULT_HEARTBEAT_STALE_MS,
+  ensureBoardDirs,
+  readHeartbeat,
+  readInflightManifest,
+  requeueInflight,
+  sweepStaleHeartbeats,
+  writeDiagnostic,
+} from './board.js';
 import { listSessions, readCancelSignal, removeCancelSignal, updateSession } from './sessions.js';
 import type { DispatchVerdict } from './types.js';
 
@@ -251,4 +259,90 @@ export function honorCancelIfRequested(
   }
 
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Requeue reaper
+// ---------------------------------------------------------------------------
+
+/** Default number of times a stale manifest is returned to `queue/` before it fails. */
+export const DEFAULT_REQUEUE_RETRY_LIMIT = 2;
+
+/** Options for {@link requeueStaleInflight}. */
+export interface RequeueOptions {
+  /** Heartbeat age limit in milliseconds (default 30 minutes). */
+  staleMs?: number;
+  /** Requeues allowed per manifest; the next stale event fails it (default 2). */
+  retryLimit?: number;
+  /**
+   * Live session names from the hierarchy roster. When given, an inflight
+   * manifest whose claiming session (the heartbeat's worker id) is not in
+   * this set is requeued regardless of heartbeat age. Omit when no roster
+   * exists.
+   */
+  roster?: ReadonlySet<string>;
+  now?: () => Date;
+}
+
+/** What the requeue reaper did with each stale inflight manifest. */
+export interface RequeueResult {
+  /** Returned to `queue/` with an incremented retry count. */
+  requeued: { taskId: string; retryCount: number; reason: string }[];
+  /** Past the retry limit; moved to `failed/` with a diagnostic. */
+  failed: { taskId: string; retryCount: number; reason: string }[];
+}
+
+/**
+ * Return stale inflight manifests to `queue/` for another executor.
+ *
+ * A manifest is stale when its heartbeat (or, with no heartbeat yet, its
+ * dispatch time) is older than `staleMs`, or when a roster is supplied and
+ * the claiming session is not on it. Each stale manifest has its retry count
+ * incremented and goes back to `queue/`; once the incremented count exceeds
+ * `retryLimit` it goes to `failed/` instead.
+ */
+export function requeueStaleInflight(boardDir: string, opts: RequeueOptions = {}): RequeueResult {
+  ensureBoardDirs(boardDir);
+  const staleMs = opts.staleMs ?? DEFAULT_HEARTBEAT_STALE_MS;
+  const retryLimit = opts.retryLimit ?? DEFAULT_REQUEUE_RETRY_LIMIT;
+  const wallNow = (opts.now ?? (() => new Date()))();
+  const cutoff = wallNow.getTime() - staleMs;
+  const result: RequeueResult = { requeued: [], failed: [] };
+
+  const inflightDir = path.join(boardDir, 'inflight');
+  for (const entry of readdirSync(inflightDir)) {
+    if (!entry.endsWith('.dispatch.json')) continue;
+    const taskId = entry.slice(0, -'.dispatch.json'.length);
+    const manifest = readInflightManifest(boardDir, taskId);
+    if (!manifest) continue;
+    const heartbeat = readHeartbeat(boardDir, taskId);
+
+    let reason: string | undefined;
+    if (opts.roster && heartbeat?.workerId && !opts.roster.has(heartbeat.workerId)) {
+      reason = `claiming session ${heartbeat.workerId} is no longer on the roster`;
+    } else {
+      const lastTickMs = Date.parse(heartbeat ? heartbeat.lastHeartbeat : manifest.dispatchedAt);
+      if (!Number.isNaN(lastTickMs) && lastTickMs <= cutoff) {
+        reason = `no heartbeat for more than ${Math.round(staleMs / 60000)} minutes`;
+      }
+    }
+    if (!reason) continue;
+
+    const retryCount = (manifest.retryCount ?? 0) + 1;
+    if (retryCount > retryLimit) {
+      writeDiagnostic(boardDir, {
+        schemaVersion: 'v1',
+        taskId,
+        outcome: 'failed',
+        completedAt: wallNow.toISOString(),
+        workerId: 'session-reaper',
+        cause: 'retry-limit-exceeded',
+        notes: `${reason}; requeued ${manifest.retryCount ?? 0} time(s), limit ${retryLimit}`,
+      });
+      result.failed.push({ taskId, retryCount, reason });
+    } else if (requeueInflight(boardDir, taskId, retryCount)) {
+      result.requeued.push({ taskId, retryCount, reason });
+    }
+  }
+  return result;
 }
