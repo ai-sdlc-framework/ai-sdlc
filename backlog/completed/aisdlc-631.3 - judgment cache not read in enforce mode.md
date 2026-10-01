@@ -2,7 +2,7 @@
 id: AISDLC-631.3
 title: >-
   RFC-0049 follow-up (security medium): enforce-mode evaluations never read the content-addressed judgment cache
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
