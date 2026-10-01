@@ -11,7 +11,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildUsageCli, renderIngestResult } from './usage.js';
+import type { PriceSource, SourcePriceRow } from '@ai-sdlc/reference';
+import {
+  buildUsageCli,
+  formatPriceList,
+  formatRefreshSummary,
+  renderIngestResult,
+} from './usage.js';
 
 let root: string;
 let writes: string[];
@@ -146,5 +152,195 @@ describe('renderIngestResult', () => {
   });
   it('explains the switched-off state', () => {
     expect(renderIngestResult({ ...base, disabled: 'switched-off' })).toContain('switched off');
+  });
+});
+
+describe('cli-usage price commands', () => {
+  const NOW = new Date('2026-10-01T09:00:00.000Z');
+
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-usage-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function row(model: string, vals: Partial<SourcePriceRow> = {}): SourcePriceRow {
+    return {
+      model,
+      inputPer1M: 1,
+      outputPer1M: 5,
+      cacheReadPer1M: 0.1,
+      cacheWrite5mPer1M: 1.25,
+      cacheWrite1hPer1M: 2,
+      url: 'https://example.test/p',
+      fetchedAt: NOW.toISOString(),
+      ...vals,
+    };
+  }
+
+  function setup(sources: PriceSource[] = []) {
+    const out: string[] = [];
+    const err: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
+    const codes: number[] = [];
+    const onCapability = vi.fn();
+    const deps = {
+      usageDir: dir,
+      now: () => NOW,
+      sources,
+      stdout: (t: string): void => void out.push(t),
+      stderr: (t: string): void => void err.push(t),
+      emit: (e: Record<string, unknown>): void => void events.push(e),
+      onCapability,
+      setExitCode: (c: number): void => void codes.push(c),
+    };
+    const run = async (...args: string[]): Promise<void> => {
+      await buildUsageCli(args, deps as never)
+        .exitProcess(false)
+        .parseAsync();
+    };
+    return { run, out, err, events, codes, onCapability };
+  }
+
+  const fakeSource = (name: string, rows: SourcePriceRow[]): PriceSource => ({
+    name,
+    fetchPrices: async () => rows,
+  });
+
+  describe('cli-usage prices', () => {
+    it('refresh prints a summary, emits ModelPriceChanged and reports the capability', async () => {
+      const t = setup([fakeSource('a', [row('claude-haiku-4-5', { inputPer1M: 1.2 })])]);
+      await t.run('prices', 'refresh');
+      expect(t.out.join('')).toContain('appended=1');
+      expect(t.events).toEqual([
+        expect.objectContaining({ type: 'ModelPriceChanged', model: 'claude-haiku-4-5' }),
+      ]);
+      expect(t.onCapability).toHaveBeenCalledWith('live');
+    });
+
+    it('refresh --json prints the result and --source filters', async () => {
+      const t = setup([fakeSource('a', [row('x1')]), fakeSource('b', [row('x2')])]);
+      await t.run('prices', 'refresh', '--source', 'b', '--json');
+      const parsed = JSON.parse(t.out.join(''));
+      expect(parsed.sources.map((s: { name: string }) => s.name)).toEqual(['b']);
+    });
+
+    it('refresh with an unknown source exits 1', async () => {
+      const t = setup([fakeSource('a', [])]);
+      await t.run('prices', 'refresh', '--source', 'nope');
+      expect(t.codes).toEqual([1]);
+      expect(t.err.join('')).toContain('Unknown price source');
+    });
+
+    it('refresh with every source failing prints a notice and does not fail', async () => {
+      const t = setup([
+        {
+          name: 'a',
+          fetchPrices: async () => {
+            throw new Error('offline');
+          },
+        },
+      ]);
+      await t.run('prices', 'refresh');
+      expect(t.out.join('')).toContain('Every source failed');
+      expect(t.codes).toEqual([]);
+      expect(t.onCapability).toHaveBeenCalledWith('degraded', expect.any(String));
+    });
+
+    it('holds a big move, lists it, and confirm promotes it', async () => {
+      const t = setup([fakeSource('a', [row('claude-haiku-4-5', { outputPer1M: 40 })])]);
+      await t.run('prices', 'refresh', '--change-factor', '3');
+      await t.run('prices', 'list');
+      const listed = t.out.join('');
+      expect(listed).toContain('HELD claude-haiku-4-5');
+      await t.run('prices', 'confirm', 'claude-haiku-4-5');
+      expect(t.out.join('')).toContain('Confirmed held price');
+      expect(
+        t.events.some((e) => e.type === 'ModelPriceChanged' && e.tokenClass === 'output'),
+      ).toBe(true);
+      await t.run('prices', 'confirm', 'claude-haiku-4-5');
+      expect(t.codes).toEqual([1]);
+    });
+
+    it('list --json returns entries', async () => {
+      const t = setup();
+      await t.run('prices', 'list', '--json');
+      const parsed = JSON.parse(t.out.join(''));
+      expect(parsed.find((e: { model: string }) => e.model === 'claude-haiku-4-5')).toBeDefined();
+    });
+
+    it('set writes a manual row and rejects bad prices', async () => {
+      const t = setup();
+      const flags = [
+        '--output',
+        '2',
+        '--cache-read',
+        '3',
+        '--cache-write-5m',
+        '4',
+        '--cache-write-1h',
+        '5',
+      ];
+      await t.run(
+        'prices',
+        'set',
+        'my-model',
+        '--input',
+        '1',
+        ...flags,
+        '--effective-from',
+        '2026-10-01',
+      );
+      expect(t.out.join('')).toContain('Manual price written for my-model');
+      await t.run('prices', 'set', 'my-model', '--input', '0', ...flags);
+      expect(t.codes).toEqual([1]);
+      expect(t.err.join('')).toContain('input');
+    });
+  });
+
+  describe('formatters', () => {
+    it('formats an empty list and a stale manual entry', () => {
+      expect(formatPriceList([])).toContain('No prices');
+      const text = formatPriceList([
+        { model: 'only-held', stale: false },
+        {
+          model: 'm',
+          stale: true,
+          ageDays: 20,
+          active: {
+            model: 'm',
+            inputPer1M: 1,
+            outputPer1M: 2,
+            cacheReadPer1M: 3,
+            cacheWrite5mPer1M: 4,
+            cacheWrite1hPer1M: 5,
+            source: 'manual',
+            url: 'manual',
+            fetchedAt: NOW.toISOString(),
+            effectiveFrom: '2026-10-01',
+            status: 'manual',
+          },
+        },
+      ]);
+      expect(text).toContain('(no active price)');
+      expect(text).toContain('STALE manual');
+    });
+
+    it('summarises held models', () => {
+      const text = formatRefreshSummary({
+        fetchedAt: NOW.toISOString(),
+        sources: [{ name: 'a', ok: true, rows: 1 }],
+        anySourceSucceeded: true,
+        appended: 0,
+        held: [{ model: 'm', reason: 'sources-disagree' }],
+        unchanged: 0,
+        incomplete: [],
+        rejected: [],
+        changes: [],
+      });
+      expect(text).toContain('held m: sources-disagree');
+    });
   });
 });

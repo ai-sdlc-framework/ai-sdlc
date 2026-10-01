@@ -44,6 +44,7 @@ import {
   type OrchestratorAdapters,
   type OrchestratorConfig,
 } from '../orchestrator/index.js';
+import { runDailyPriceRefresh } from '../orchestrator/price-refresh.js';
 import {
   resolveResultPath,
   writeDispatchResult,
@@ -153,12 +154,17 @@ function buildAdapters(
   argv: Record<string, unknown>,
   adapters?: OrchestratorAdapters,
 ): OrchestratorAdapters {
+  // Production invocations pass no adapters and get the daily price refresh;
+  // callers that inject adapters (tests) stay off the network.
+  const base: OrchestratorAdapters = adapters ?? {
+    priceRefresh: (emit) => runDailyPriceRefresh({ emit }),
+  };
   const rawSpawner = argv.spawner;
   if (rawSpawner === undefined || rawSpawner === null) {
-    return adapters ?? {};
+    return base;
   }
   return {
-    ...(adapters ?? {}),
+    ...base,
     umbrellaSpawnerKind: String(rawSpawner) as SpawnerKind,
   };
 }

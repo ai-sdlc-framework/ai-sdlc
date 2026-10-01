@@ -456,6 +456,13 @@ export interface OrchestratorAdapters {
    */
   parentBranchGuard?: () => Promise<void>;
   /**
+   * RFC-0050 A6 - daily model price refresh. Called once per tick with the
+   * tick's event emitter; the implementation decides whether it is due (the
+   * production one runs at most once per calendar day). Non-fatal: a throw or
+   * rejection is swallowed. Unset in tests, so ticks never reach the network.
+   */
+  priceRefresh?: (emit: (event: Omit<OrchestratorEvent, 'ts'>) => void) => Promise<unknown>;
+  /**
    * AISDLC-373 — single-PR operator-driven path. When set to true, the
    * §4.3 admission filter chain (DependencyReadiness, Blocked, DoR, etc.)
    * is skipped and every frontier candidate flows straight to dispatch.
@@ -552,6 +559,14 @@ export async function runOrchestratorTick(
     adapters.parentBranchGuard ??
     (() => runParentBranchGuard(config.workDir, adapters.runner, logger));
   await branchGuardFn();
+
+  if (adapters.priceRefresh) {
+    try {
+      await adapters.priceRefresh(emit);
+    } catch {
+      // Price refresh is advisory; it never blocks a tick.
+    }
+  }
 
   // AISDLC-256 — self-clean merged worktrees before frontier scan so stale
   // worktrees don't accumulate across autonomous-loop ticks. Try/catch ensures

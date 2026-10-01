@@ -90,6 +90,13 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityDefinition[] = [
     fallback: 'A stub evaluator answers instead of a model.',
     enable: 'Supply a model-backed evaluator to the policy engine.',
   },
+  {
+    id: 'pricing.feed',
+    title: 'Model price feed',
+    specifiedBy: 'RFC-0050',
+    fallback: 'The last known prices stay in force and are marked stale after the staleness limit.',
+    enable: 'Run `cli-usage prices refresh` and allow outbound access to the price sources.',
+  },
 ];
 
 for (const def of BUILT_IN_CAPABILITIES) registerCapability(def);

@@ -35,6 +35,7 @@ const EXPECTED = [
   'sa.layer3',
   'review.meta-review',
   'policy.llm-evaluator',
+  'pricing.feed',
 ];
 
 let dir: string;
@@ -44,7 +45,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('registry', () => {
-  it('has exactly the twelve built-in ids', () => {
+  it('has exactly the thirteen built-in ids', () => {
     expect(listCapabilities().map((c) => c.id)).toEqual(EXPECTED);
     expect(getCapability('dor.stage-b')?.specifiedBy).toBe('RFC-0011');
   });
@@ -73,7 +74,7 @@ describe('reporting', () => {
 
   it('unreported capabilities are never-observed', () => {
     const rows = readCapabilityState(dir);
-    expect(rows).toHaveLength(12);
+    expect(rows).toHaveLength(13);
     expect(rows.every((r) => r.status === 'never-observed')).toBe(true);
     expect(deriveCapabilityStatus(undefined)).toBe('never-observed');
   });
