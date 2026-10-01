@@ -45,8 +45,13 @@ and 9.
 1. **Skill** `ai-sdlc-plugin/commands/executor.md`, modelled on
    `ai-sdlc-plugin/commands/dispatch-worker.md` but running the full
    `/ai-sdlc execute <task-id>` rather than the developer agent alone:
-   1. read the roster to learn this session's name and the dispatch session's name;
-   2. claim the next eligible manifest through `cli-dispatch claim --worker <name>`;
+   1. read the roster (`.ai-sdlc/dispatch/hierarchy.json`, shape
+      `{{schemaVersion: 'v1', sessions: [...]}}` from AISDLC-664) to learn this
+      session's name and the dispatch session's name; the session's name is the one
+      the harness reports, which may carry a collision suffix;
+   2. claim the next eligible manifest through `cli-dispatch claim --worker <name>`,
+      passing the roster name exactly: the roster's status and down commands join
+      inflight manifests to sessions by `workerId` equal to `name`;
       when none is eligible, wait on the configured interval and try again;
    3. run `/ai-sdlc execute <task-id>` with no changes to that command;
    4. write the verdict to `done/` or a diagnostic to `failed/` through
@@ -69,7 +74,7 @@ and 9.
 5. **Docs** section in `docs/operations/parallel-dispatch.md` describing the loop.
 
 ## Acceptance Criteria
-- [ ] With a fixture board holding one eligible manifest, the skill's claim step produces an inflight manifest owned by the session's roster name.
+- [ ] With a fixture board holding one eligible manifest, the skill's claim step produces an inflight manifest whose `workerId` equals the session's roster `name` exactly.
 - [ ] The skill invokes `/ai-sdlc execute <task-id>` with no additional arguments and no modification to `execute.md`.
 - [ ] `cli-dispatch complete` writes a verdict containing outcome, PR number, follow-up ids and decision ids, and moves the manifest to `done/` or `failed/` accordingly.
 - [ ] The `SessionStart` hook injects the role block only on matcher `clear` and only for a session named in the roster; other sessions see no change (hermetic `node --test`).

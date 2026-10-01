@@ -86,7 +86,9 @@ sections B2 and B3, and the OQ-2 resolution.
    `uncategorized` when none is recorded.
 8. **Capability:** when the capability registry is present, report `routing.table` as
    `live` when a repository table is in use and `degraded` with reason `default-table`
-   otherwise.
+   otherwise. Any new capability id must also be
+   added to `KNOWN_CAPABILITY_IDS` in `scripts/check-rfc-docs.mjs`, or the RFC linter
+   fails on the `runtimeEvidence` entry that later names it.
 
 ## Acceptance Criteria
 - [ ] With no `model-routing.yaml` on the base ref, `resolveModel` returns for every role the same model the spawner's fixed map returns today (asserted against that map).
@@ -99,6 +101,6 @@ sections B2 and B3, and the OQ-2 resolution.
 - [ ] Every resolution appends one assignment-log line, and an unwritable log does not change the returned model.
 - [ ] Step 5 and Step 7 outputs include the resolved model per agent, and the step tools expose it.
 - [ ] `execute.md` passes the resolved model on the developer and reviewer agent calls and no longer writes a fixed default model into the transcript leaf.
-- [ ] The schema is registered, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
+- [ ] The schema is registered, `generated-schemas.ts` is regenerated and committed, `pnpm validate-schemas` passes, and `routing.table` is listed in `KNOWN_CAPABILITY_IDS`.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
