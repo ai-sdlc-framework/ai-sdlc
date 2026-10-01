@@ -27,6 +27,7 @@
     "cli-dor-stats": "bin/cli-dor-stats.mjs",
     "cli-dor-digest": "bin/cli-dor-digest.mjs",
     "cli-dor-corpus": "bin/cli-dor-corpus.mjs",
+    "cli-judgment": "bin/cli-judgment.mjs",
     "cli-classify-pr": "bin/cli-classify-pr.mjs",
     "cli-classifier": "bin/cli-classifier.mjs",
     "cli-incremental-decide": "bin/cli-incremental-decide.mjs",

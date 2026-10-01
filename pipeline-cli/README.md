@@ -66,6 +66,7 @@ cli-dor-corpus.mjs              # AISDLC-161 DoR calibration aggregator
 cli-dor-digest.mjs              # AISDLC-162 DoR Slack digest
 cli-dor-stats.mjs               # AISDLC-162 DoR analytics
 cli-incremental-decide.mjs      # AISDLC-142 incremental review gate
+cli-judgment.mjs                # judgment layer: doctor, list, ask, eval, replay
 cli-orchestrator.mjs            # RFC-0015 autonomous orchestrator
 cli-orchestrator-corpus.mjs     # AISDLC-178.7 orchestrator soak aggregator
 cli-pr-unstick.mjs              # PR queue rescue helper
@@ -305,6 +306,35 @@ produces / consumes):
 The adapter normalises reviewer responses into the canonical
 `ReviewerVerdict` envelope (`{ approved, findings, summary, harness:
 'codex' }`) before returning, so Step 8 aggregation runs unchanged.
+
+## `cli-judgment` - measure and inspect the judgment layer
+
+`cli-judgment` is the operator tool for the judgment layer: check the setup, run one evaluation, measure a judgment over a labelled corpus before promoting it, and replay logged answers under other thresholds. Invoke it directly:
+
+```bash
+node pipeline-cli/bin/cli-judgment.mjs <command> [options]
+```
+
+Shared options: `--cwd <dir>` (working directory), `--config <file>` (use this judgment config file instead of the one on the trusted base branch), `--artifacts-dir <dir>` (default `$ARTIFACTS_DIR`, else `.ai-sdlc/artifacts`). The API key is read from the provider's environment variable and is never printed.
+
+| Command | What it does |
+| --- | --- |
+| `doctor [--live]` | Reports whether the layer is enabled, the provider, whether its key is present, and whether the model is pinned to an exact version. `--live` sends one minimal request and reports the returned model version and latency (exit 1 if it fails). |
+| `list` | Lists every registered judgment with id, version, `riskClass`, `direction`, `egressClass`, the configured mode and the effective mode (with the reason when the runtime would downgrade or disable it). |
+| `ask <judgment-id> --input <json-file>` | Runs one forced evaluation and prints the answers with probabilities, the outcome and the thresholds used, as JSON. Refuses, naming the config key (`spec.egress.allow`), when the judgment's egress class is not allowed. |
+| `eval <judgment-id> --corpus <jsonl>` | Runs the judgment over a corpus (one `{"input": ..., "label": ...}` object per line), with the answer cache on, composes at the configured thresholds and compares with the judgment's `agrees`. Prints and writes `n`, the share of items in the act, escalate and abstain bands, act-band precision, a confusion table of decision against label, latency p50 and p95, total input tokens and cost. |
+| `replay --since <date> [--judgment <id>]` | Reads the judgment log and recomputes outcomes from the logged answers, with no provider calls. Without `--threshold` it uses the logged thresholds and reports how many logged outcomes it reproduced; it also reports agreement with the logged `incumbent` where present. The log keeps a hash of the input, not the input, so a judgment whose `compose` reads its input cannot be replayed. |
+
+`ask`, `eval` and `replay` accept `--threshold <name>=<number>` (repeatable) to override the configured thresholds, and `--source-kind <kind>` (default `backlog`; only `backlog` items may be decided permissively).
+
+`eval` extras:
+
+- `--sweep <name>=<from>:<to>:<step>` recomputes the report for each threshold value from the answers already collected, so a sweep makes no additional provider calls. `step` must be above zero and a sweep is limited to 1000 steps.
+- The report is written to `.ai-sdlc/judgment-evals/<id>-<provider>-<model>-<date>.json` under the working directory (path components are sanitised).
+- It prints the `promotion` snippet for `.ai-sdlc/judgment-config.yaml`, with `n` and `actBandPrecision` equal to the report, and states whether the result is MET or NOT MET for the judgment's `riskClass` bar (corpus path: n of at least 50 and act-band precision of at least 90%, or 95% for `relax`). Promotion itself stays an operator decision made in a pull request.
+- Exit code: non-zero only when the corpus is unreadable or malformed (the message names the line), the judgment is unknown or has no `agrees`, or a flag is invalid. It exits zero whether or not the bar is met.
+
+A live check of the provider contract (one request with a choice, a score and a yes/no question) sits next to the Jev adapter tests and runs only when `TYPESAFE_API_KEY` is set and `AI_SDLC_LIVE_CONTRACT=1`; otherwise it is reported as skipped.
 
 ## `cli-usage ingest` — usage ledger from Claude Code transcripts
 

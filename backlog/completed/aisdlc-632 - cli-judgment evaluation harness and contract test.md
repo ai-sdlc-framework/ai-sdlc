@@ -2,7 +2,7 @@
 id: AISDLC-632
 title: >-
   RFC-0049 Phase 3: cli-judgment doctor/ask/eval/replay, promotion-record output, key-gated live contract test
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:

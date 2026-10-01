@@ -372,6 +372,54 @@ describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
   });
 });
 
+describe('cli-judgment: bin shim guard', () => {
+  const binPath = join(PKG_ROOT, 'bin', 'cli-judgment.mjs');
+
+  beforeAll(() => {
+    if (!existsSync(join(PKG_ROOT, 'dist', 'cli', 'judgment.js'))) {
+      const build = spawnSync('pnpm', ['build'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      if (build.status !== 0) {
+        throw new Error(
+          `pre-test build failed (exit ${build.status}):\n${build.stdout}\n${build.stderr}`,
+        );
+      }
+    }
+  }, 60_000);
+
+  it('bin shim file exists at the expected path', () => {
+    expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
+  });
+
+  it('`--help` exits 0 and lists doctor, list, ask, eval and replay', () => {
+    const result = spawnSync(process.execPath, [binPath, '--help'], {
+      cwd: PKG_ROOT,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+      env: process.env,
+    });
+    const out = result.stdout + result.stderr;
+    const detail = `\n--- exit ${result.status} ---\n${out}`;
+    expect(result.status, `cli-judgment --help did not exit 0:${detail}`).toBe(0);
+    for (const command of ['doctor', 'list', 'ask', 'eval', 'replay']) {
+      expect(out, `--help does not list '${command}':${detail}`).toContain(command);
+    }
+  });
+
+  it('exits non-zero for an unreadable corpus', () => {
+    const result = spawnSync(
+      process.execPath,
+      [binPath, 'eval', 'no.such.judgment', '--corpus', join(tmpdir(), 'no-such-corpus.jsonl')],
+      { cwd: PKG_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 10_000, env: process.env },
+    );
+    expect(result.status).toBe(1);
+  });
+});
+
 describe('cli-usage: bin shim guard and end-to-end ingest', () => {
   const binPath = join(PKG_ROOT, 'bin', 'cli-usage.mjs');
   let tmp: string;
