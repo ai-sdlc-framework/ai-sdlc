@@ -33,6 +33,8 @@ import {
   type ResolvedJudgmentConfig,
   type Thresholds,
 } from '@ai-sdlc/reference';
+import { registerDorStageBJudgment } from '../dor/stage-b-judgment.js';
+import { dorCorpusToEvalJsonl } from '../dor/stage-b-judgment-corpus.js';
 import {
   ALL_TASK_TYPES,
   convertCorpusToEvalJsonl,
@@ -134,6 +136,7 @@ const modelOf = (config: ResolvedJudgmentConfig, provider: JudgmentProvider): st
   config.model ?? provider.modelId;
 
 function requireDefinition(id: string, deps: JudgmentCliDeps): AnyDefinition {
+  registerDorStageBJudgment();
   const def = (deps.getDefinition ?? getJudgmentDefinition)(id);
   if (!def) {
     const known = (deps.listDefinitions ?? listJudgmentDefinitions)().map((d) => d.id);
@@ -233,9 +236,34 @@ async function runDoctor(args: CommonArgs & { live?: boolean }, deps: JudgmentCl
   }
 }
 
+async function runDorCorpus(
+  args: CommonArgs & { 'corpus-root'?: string; out?: string },
+  deps: JudgmentCliDeps,
+) {
+  const out = deps.out ?? ((t) => process.stdout.write(t));
+  const workDir = resolve(args.cwd ?? deps.cwd ?? process.cwd());
+  const root = resolve(workDir, args['corpus-root'] ?? join('spec', 'dor-corpus'));
+  let text: string;
+  try {
+    text = await dorCorpusToEvalJsonl(root);
+  } catch (e) {
+    throw new JudgmentCliError(
+      `cannot read the readiness corpus '${root}': ${(e as Error).message}`,
+    );
+  }
+  if (args.out) {
+    writeFileSync(resolve(workDir, args.out), text, { mode: 0o600 });
+    out(`wrote ${text.split('\n').filter(Boolean).length} items to ${args.out}\n`);
+  } else {
+    out(text);
+  }
+  return 0;
+}
+
 function runList(args: CommonArgs, deps: JudgmentCliDeps) {
   const out = deps.out ?? ((t) => process.stdout.write(t));
   const s = openSession(args, deps);
+  registerDorStageBJudgment();
   const defs = (deps.listDefinitions ?? listJudgmentDefinitions)();
   if (defs.length === 0) {
     out('no judgments registered\n');
@@ -598,6 +626,15 @@ export function buildJudgmentCli(
       (a) => run(() => runList(a as never, deps)),
     )
     .command(
+      'dor-corpus [corpus-root]',
+      'Convert the readiness corpus (default spec/dor-corpus) to eval JSONL for dor.stage-b.',
+      (y) =>
+        y
+          .positional('corpus-root', { type: 'string' })
+          .option('out', { type: 'string', describe: 'Write the JSONL to this file.' }),
+      (a) => run(() => runDorCorpus(a as never, deps)),
+    )
+    .command(
       'ask <id>',
       'Run one forced evaluation and print answers, outcome and thresholds.',
       (y) =>
@@ -641,7 +678,10 @@ export function buildJudgmentCli(
           .option('judgment', { type: 'string', describe: 'Only this judgment id.' }),
       (a) => run(() => runReplay(a as never, deps)),
     )
-    .demandCommand(1, 'Choose a command: doctor, list, ask, eval, export-corpus or replay.')
+    .demandCommand(
+      1,
+      'Choose a command: doctor, list, dor-corpus, ask, eval, export-corpus or replay.',
+    )
     .strict()
     .exitProcess(false)
     .help();

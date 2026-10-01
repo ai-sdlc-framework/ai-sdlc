@@ -27,7 +27,8 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyAutoPass } from './auto-pass.js';
-import { evaluateIssueE2E, type EvaluateE2EOpts } from './composite.js';
+import { evaluateIssueE2EDetailed, type EvaluateE2EOpts } from './composite.js';
+import { buildJudgmentContext } from '../judgment/context.js';
 import { appendCalibrationEntry } from './calibration-log.js';
 import {
   fanoutPost,
@@ -220,7 +221,23 @@ export async function refineBacklogTask(
     evaluateOpts.autoPassReason = `auto-pass: ${autoPass.matched?.kind ?? 'matched'}`;
   }
 
-  const verdict = await evaluateIssueE2E(input, evaluateOpts);
+  // Readiness judgment (a no-op while the layer is disabled or in shadow).
+  if (!evaluateOpts.judgment) {
+    try {
+      evaluateOpts.judgment = {
+        context: buildJudgmentContext({
+          workDir,
+          taskId,
+          sourceKind: 'backlog',
+          ...(opts.artifactsDir ? { artifactsDir: opts.artifactsDir } : {}),
+        }),
+      };
+    } catch {
+      // a judgment setup problem never blocks the evaluation
+    }
+  }
+
+  const { verdict, stageBSource } = await evaluateIssueE2EDetailed(input, evaluateOpts);
 
   // Calibration log — always written, regardless of mode (RFC §5.5).
   // Author plumbed through (AISDLC-115.6) so `cli-dor-stats --by-author`
@@ -232,6 +249,7 @@ export async function refineBacklogTask(
       issue: { id: taskId, source: 'backlog', title: input.title, body },
       verdict,
       outcome: verdict.overallVerdict,
+      stageBSource,
       ...(createdBy ? { author: createdBy } : {}),
     },
     opts.artifactsDir ? { artifactsDir: opts.artifactsDir } : {},

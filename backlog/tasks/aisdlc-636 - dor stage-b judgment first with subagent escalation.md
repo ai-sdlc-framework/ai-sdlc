@@ -43,50 +43,85 @@ Stage-B-owned gates. RFC-0049 section 5, Group B.
 
 ## Scope
 1. **`dor.stage-b` definition:** `egressClass` `work-item-text`, `riskClass` `tighten`,
-   `direction` `bidirectional`. One Noul per gate that Stage B owns or re-checks,
-   derived from the existing `STAGE_B_GATE_QUESTIONS` in
+   `direction` `tighten-only`, `reducesReview` `false` (declared explicitly),
+   `capabilityId` `dor.stage-b`, with `agrees`. One Noul per gate that Stage B owns or
+   re-checks, derived from the existing `STAGE_B_GATE_QUESTIONS` in
    `pipeline-cli/src/dor/stage-b.ts`, each with explicit true and false criteria and
-   written as a literal condition. State holds the issue title, body and the resolved
-   one-hop references Stage B already receives, nothing else.
+   written as a literal condition. ONE provider request covers all Stage-B-owned gates.
+   State holds the issue title, body and the resolved one-hop references Stage B already
+   receives, nothing else (`buildState` selects only these; the text is data, not
+   instructions).
 2. **Thresholds** `pass` and `fail` per gate from the judgment config. A gate is
    `pass` at or above `pass`, `fail` at or below `fail`, otherwise `unsure`.
-3. **Compose** returns a per-gate result list in every non-abstain outcome:
-   - every gate `pass` and `permissiveAllowed` true: `act`, all gates passed at
-     confidence `high`;
-   - at least one gate `fail`: `act` with those gates failed (a tightening result,
-     allowed on any `sourceKind`) and the remaining gates reported as `pass` only when
-     `permissiveAllowed` is true, otherwise left undecided;
-   - otherwise (`unsure` gates, or passes that are not permitted): `escalate` to `llm`
-     with the per-gate results as `partial`.
-4. **Wiring** in `pipeline-cli/src/dor/composite.ts`, after Stage A:
-   - When a spawner is supplied: all-pass `act` skips the subagent; any failed or
-     undecided gate runs the existing subagent path, which writes the clarification
-     question.
-   - When no spawner is supplied (every production path today): a failed gate becomes a
-     `fail` verdict for that gate with a templated clarification question built from
-     that gate's entry in `STAGE_B_GATE_QUESTIONS`, so the overall verdict is
-     `needs-clarification`; a passed gate becomes `pass`; an undecided gate stays `skip`
-     as today.
-   - On `abstain`, the existing path runs unchanged.
-   - A deterministic Stage A block is never overridden by the judgment.
+3. **Compose** returns a per-gate result list in every non-abstain outcome: at least one
+   gate `fail` gives `act` with the per-gate results; otherwise `escalate` to `llm` with
+   the per-gate results as `partial`. Compose never reads `permissiveAllowed`: whether a
+   judged pass may be used is decided in one place, `applyJudgedGates`.
+4. **Wiring** in `pipeline-cli/src/dor/composite.ts`, after Stage A, through the single
+   function `applyJudgedGates`:
+   - A judged `fail` sets that gate to `fail` (needs-clarification) with a templated
+     clarification question built from that gate's entry in `STAGE_B_GATE_QUESTIONS`, on
+     any `sourceKind` (tightening).
+   - A judged `pass` only fills a gate that would otherwise be `skip`, only when NO
+     spawner is supplied, and only for `sourceKind` `backlog`. A judged pass never
+     overrides a Stage A fail of ANY confidence or severity, and a Stage A pass stays a
+     pass. The judged result never goes through `chooseWinner`.
+   - A supplied spawner is ALWAYS run, exactly as today (it writes the clarification
+     question). The judgment can only add a failed gate with a spawner supplied, never
+     remove a failure.
+   - Unsure gates with no spawner stay `skip`; on `abstain` (layer off, shadow, error)
+     the existing path runs unchanged; a deterministic Stage A block is never overridden.
 5. **Capability id:** the definition sets `capabilityId` `dor.stage-b`
    (RFC-0049 section 9.1).
-6. **Calibration log:** records whether Stage B verdicts came from the judgment or the
-   subagent.
+6. **Calibration log:** records whether Stage B verdicts came from the judgment, the
+   subagent, both or neither (`stageBSource`).
 7. **`agrees`** compares the judgment's per-gate result with the expected verdicts in
-   the `spec/dor-corpus/` fixtures; provide the converter from that corpus to `eval`
-   JSONL.
+   the `spec/dor-corpus/` fixtures; the converter from that corpus to `eval` JSONL is
+   `cli-judgment dor-corpus`, and its output feeds both `cli-judgment eval dor.stage-b`
+   and `cli-judgment eval dor.stage-b-pass`.
+8. **Second definition `dor.stage-b-pass`** (the relax half): `egressClass`
+   `work-item-text`, `riskClass` `relax`, `direction` `bidirectional`, `reducesReview`
+   `true`, `reducingOutcomes` `['all-gates-pass']`, `capabilityId` `dor.stage-b`, with
+   `agrees`. Its single act outcome is named `all-gates-pass`; every other result is an
+   escalate (or abstain on unusable thresholds). It acts only when `permissiveAllowed` is
+   true (trusted `backlog` work), Stage A failed no gate at any confidence, and every
+   Stage-B-owned or re-checked gate is at or above the `pass` threshold. In `composite.ts`,
+   an `all-gates-pass` act (enforce with a satisfying corpus-path relax promotion; shadow
+   and disabled have no effect) skips the subagent even when a spawner is supplied and the
+   skipped gates become `pass`. The wiring repeats the guards (backlog only, no Stage A
+   failure, no failing gate from `dor.stage-b`). It ships in shadow; promotion is by the
+   corpus path only (50 items, 0.95 act-band precision, `spec/dor-corpus` as the
+   evaluation source); the existing relax bar logic is unchanged.
+
+## Design note
+RFC-0049's premise that a wrong Stage B pass "costs a wasted developer run, not reduced
+review" was false against `composite.ts` as originally specified, for two reasons:
+(i) `chooseWinner` let a Stage B pass override a Stage A medium- or low-confidence
+blocking fail (only a high-confidence block was protected), and (ii) skipping a supplied
+spawner skips a reviewer that can fail gates 4 and 6. Because Stage B passes can reduce
+review, the work is split into two definitions (see the RFC-0049 amendment, PR #1142):
+`dor.stage-b` is `tighten-only` / `tighten` and removes both problems (a judged pass only
+fills a `skip` gate with no spawner and never touches a Stage A fail of any confidence; a
+supplied spawner always runs), and `dor.stage-b-pass` carries the review-reducing path
+under its own declarations (`relax`, `bidirectional`, `reducesReview` true,
+`reducingOutcomes` `['all-gates-pass']`), held to the relax bar and shipped in shadow.
+Each `compose` has a comment stating exactly which outcomes it can produce and why that
+matches its declarations. With both definitions configured, each makes its own provider
+request over the same questions (the answer cache dedupes them when enabled).
 
 ## Acceptance Criteria
 - [ ] With the layer disabled or in `shadow`, `evaluateIssueE2E` returns the same result as before for the existing fixtures, with and without a spawner.
-- [ ] In `enforce` with every gate above the `pass` threshold on a `backlog` item, the result is ready and the mock spawner is never called.
-- [ ] In `enforce` with a spawner supplied and one gate below `fail` or in the unsure band, the mock spawner is called once and its verdicts are used.
+- [ ] With a spawner supplied the spawner is called exactly as today regardless of the judgment, and the judgment's fail result can only add a failed gate / clarification, never remove a failure.
 - [ ] In `enforce` with no spawner and one gate below `fail`, that gate's verdict is `fail` with a templated clarification question, the overall verdict is `needs-clarification`, and this holds for `sourceKind` `gh-issue` as well.
 - [ ] In `enforce` with no spawner and a gate in the unsure band, that gate stays `skip` and the overall verdict matches Stage A alone.
-- [ ] With `sourceKind` `gh-issue`, the judgment never produces a pass by itself; the existing path decides.
+- [ ] A judged pass only fills a gate that would otherwise be `skip`, only with no spawner and only for `backlog`; with `sourceKind` `gh-issue` the judgment never produces a pass by itself.
+- [ ] A judged pass never overrides a Stage A fail of any confidence or severity, and a Stage A pass stays a pass (covered by a test across Stage A verdict permutations).
 - [ ] A Stage A block at high confidence is preserved regardless of the judgment's answers.
 - [ ] All Stage-B gate questions go out in a single provider request.
 - [ ] The calibration log entry names the source of the Stage B verdicts.
 - [ ] The corpus converter produces `eval` JSONL from `spec/dor-corpus/`, and `cli-judgment eval dor.stage-b` runs on it with a fake provider.
+- [ ] `dor.stage-b-pass` registers under the relax / bidirectional / reducesReview rules (variants violating rules (c) and (d) are rejected), acts only with the name `all-gates-pass`, and only for trusted `backlog` work with no Stage A failure and every gate above `pass`.
+- [ ] A matrix test over source kind, spawner, Stage A result (pass, fail at high, medium, low confidence), judgment result and mode (disabled, shadow, enforce with promotion, enforce without promotion) shows the relax path never acts outside backlog work, never relaxes a Stage A fail, and skips a supplied spawner only for `all-gates-pass`.
+- [ ] `cli-judgment eval dor.stage-b-pass` runs on the corpus JSONL with a fake provider.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
