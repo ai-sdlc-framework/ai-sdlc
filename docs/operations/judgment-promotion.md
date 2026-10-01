@@ -23,9 +23,11 @@ the only way to promote one is to clear the 95% corpus bar.
 "Act-band precision" is the share of items the judgment would have acted on, at the
 proposed thresholds, where the labelled outcome agrees with the decision.
 
-The runtime enforces the bar in code (the `no-promotion` downgrade): a promotion
-record that does not satisfy the judgment's `riskClass` bar leaves the judgment running
-as `shadow`. `openai-compatible` judgments cannot be promoted in v1 (they are
+The runtime checks the bar in code (the `no-promotion` downgrade): a promotion
+record whose numbers do not satisfy the judgment's `riskClass` bar leaves the judgment
+running as `shadow`. The record is self-declared. The runtime compares the `n` and
+`actBandPrecision` written in the config and never opens the cited `evalReport`, so
+the PR reviewer must verify that report, especially for a `relax` judgment. `openai-compatible` judgments cannot be promoted in v1 (they are
 uncalibrated); promotion applies to a calibrated provider such as `jev`.
 
 ---
@@ -104,7 +106,7 @@ node pipeline-cli/bin/cli-judgment.mjs eval capture.severity --corpus severity-c
 ```
 
 `<name>` must be a threshold the judgment reads (`capture.severity` reads
-`confidence`; the noul-style `capture.pr-comment` reads `distance`). A range over
+`confidence`; the yes/no judgment `capture.pr-comment` reads `distance`). A range over
 1,000 steps, `from` above `to`, or a non-positive `step` is refused.
 
 ### 4. Read the report
@@ -123,7 +125,8 @@ with the promotion PR.
 | `sweep <name>:` table | Per threshold value: counts per band and act-band precision. |
 | `MET` or `NOT MET: ...` | The bar for the judgment's `riskClass`, stated with the numbers. |
 
-If the statement says `NOT MET`, do not promote on this path. Tune thresholds, add
+`eval` exits 0 even when it prints `NOT MET`, so a script must parse the output, not
+the exit code. If the statement says `NOT MET`, do not promote on this path. Tune thresholds, add
 labelled items, or (seam and tighten only) use the override path below.
 
 ### 5. Paste the promotion record

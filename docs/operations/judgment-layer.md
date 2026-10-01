@@ -48,9 +48,10 @@ Enabling is one config file and, for the hosted provider, one environment variab
    enabled, the provider, whether its credential is present, and whether the model is
    pinned to an exact version. `list` shows every registered judgment with its
    configured and effective mode. `doctor --live` sends one minimal request; it needs a
-   registered provider and its credential, so it exits non-zero without them. Because
-   `openai-compatible` has no credential unless you set `apiKeyEnv`, `--live` only runs
-   for it when `apiKeyEnv` names a variable that is set. `ai-sdlc doctor` also runs the
+   registered provider and a set credential variable, and exits non-zero (skipping the
+   request) without them. An `openai-compatible` provider on a keyless endpoint, even a
+   local one that works at call time, has no credential variable, so the CLI skips
+   `--live` for it unless `apiKeyEnv` names a variable that is set. `ai-sdlc doctor` also runs the
    `judgment-layer` checks described in [`doctor.md`](doctor.md).
 
 A config that is missing, unreadable or fails schema validation turns the layer off
@@ -146,9 +147,14 @@ provider. `spec.egress.allow` lists the classes you permit. Naming a provider en
 A judgment whose class is not allowed abstains with `egress-not-permitted` and makes
 no call. Before anything leaves the process, the state and the question text are
 passed through secret redaction. The one exemption: a provider whose `baseUrl` is on
-the local machine (`localhost`, `127.x.x.x`, `::1`) is not subject to `egress.allow`,
-because nothing leaves the machine. Config text cannot grant that exemption; it comes
-from the endpoint address.
+the local machine (`localhost`, `127.x.x.x`, `::1`) skips `spec.egress.allow` entirely,
+for **every** class including `code-diff` and `agent-output`. The check looks only at
+the address. It assumes the endpoint serves the model itself and does not forward the
+request. A loopback gateway that forwards upstream (a LiteLLM-style proxy, an Ollama
+setup that offloads to a cloud model, an SSH tunnel to a remote host) would receive
+all of that data even though `egress.allow` appears to block it. Only point a
+loopback `baseUrl` at an endpoint you have confirmed runs the model locally. Config
+text cannot grant the exemption; it comes from the endpoint address.
 
 ## Modes
 
@@ -168,7 +174,7 @@ reason as `downgradeReason` in the log and in `list` output, when any of these h
 
 | Reason | Meaning | Fix |
 |---|---|---|
-| `model-alias` | The model is a moving alias (names ending in `latest`, `preview`, `beta`, `exp` or `nightly`). | Pin an exact version in `spec.model`. |
+| `model-alias` | The model is a moving alias (an id that is, or ends after a `-`, `:` or `@` with, `latest`, `preview`, `beta`, `exp` or `nightly`, case-insensitive; for example `jev-latest`). | Pin an exact version in `spec.model`. |
 | `model-mismatch` | `spec.model` differs from the model the provider uses, or the provider reports a different version than the one pinned. | Align `spec.model` with the provider and re-evaluate. |
 | `uncalibrated-provider` | The provider does not return calibrated probabilities (all `openai-compatible` use). | None in v1: those judgments stay in `shadow`. |
 | `no-thresholds` | No thresholds exist for the active `provider@model` key. | Add `thresholds` from an `eval` run. |
@@ -176,15 +182,18 @@ reason as `downgradeReason` in the log and in `list` output, when any of these h
 
 ## Kill switch
 
-`AI_SDLC_JUDGMENT=off` in the environment disables the layer entirely: every judgment
+`AI_SDLC_JUDGMENT=off` (exactly the lowercase value `off`; `OFF`, `0` or `false` do nothing) in the environment disables the layer entirely: every judgment
 abstains and nothing is written. It takes precedence over any config file.
 
 ```bash
 AI_SDLC_JUDGMENT=off node pipeline-cli/bin/cli-judgment.mjs doctor --config .ai-sdlc/judgment-config.yaml
 ```
 
-Removing the `provider` key, or the file, has the same effect. To leave the layer on
-but stop one judgment from acting, set its mode back to `shadow`.
+Removing the `provider` key or the file also disables the layer, but only once the
+change is on the base branch, because the runtime reads the committed copy
+(`origin/main` by default); it is not a quick stop. In an emergency use the
+environment variable. To leave the layer on but stop one judgment from acting, set
+its mode back to `shadow`.
 
 `AI_SDLC_JUDGMENT_CONFIG_PATH` (an operator-controlled environment variable) names a
 local config file to use instead of the base-branch copy.
@@ -260,15 +269,21 @@ answers.
   vendor documents that it does not train on customer requests; zero data retention is
   an enterprise-plan feature, so check your plan. With `openai-compatible`, to
   whatever `baseUrl` points at.
-- **A local endpoint sends nothing to a third party.** An `openai-compatible`
-  `baseUrl` on `localhost` keeps all data on your machine.
-- **You decide the classes.** `spec.egress.allow` is the control; a smaller list means
-  fewer judgments run. A declared compliance posture (RFC-0022) may restrict the layer
-  or its egress classes further; if your organisation requires that, keep the config
-  absent or restrict `allow` to match.
+- **A local endpoint that serves the model itself sends nothing to a third party.**
+  An `openai-compatible` `baseUrl` on `localhost` keeps all data on your machine only
+  if that endpoint runs the model and does not forward requests. A loopback `baseUrl`
+  also bypasses `spec.egress.allow` for all classes, so a forwarding gateway (a proxy,
+  a cloud-offloaded model, an SSH tunnel) would receive diffs and agent output too.
+- **You decide the classes.** For a remote provider, `spec.egress.allow` is the
+  control; a smaller list means fewer judgments run. It is not applied to a loopback
+  `baseUrl` (see above). Version 1 does not enforce a compliance posture (RFC-0022):
+  if your organisation requires one, apply it by hand, by keeping the config absent
+  or restricting `allow` to match.
 - **Kill switch.** `AI_SDLC_JUDGMENT=off` stops all calls immediately.
 - **What stays on disk.** The judgment log holds hashes of the state, not the state,
-  but it does hold the provider's answers and each outcome, so treat it as internal.
+  but it does hold the provider's answers, each outcome and the `incumbent` value the
+  caller supplied (all redacted and size-capped). An `incumbent` can summarise the
+  work item, so treat the log as internal.
 
 ## References
 
