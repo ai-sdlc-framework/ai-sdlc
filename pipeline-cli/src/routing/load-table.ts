@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { validateModelRouting } from '@ai-sdlc/reference';
 import yaml from 'js-yaml';
-import { SECURITY_REVIEWER_ROLE, type RoutingTable } from './default-table.js';
+import { DEFAULT_ROLE_MODELS, SECURITY_REVIEWER_ROLE, type RoutingTable } from './default-table.js';
 
 export const MODEL_ROUTING_PATH = '.ai-sdlc/model-routing.yaml';
 
@@ -33,6 +33,17 @@ export function readRoutingTableFromBaseRef(workDir: string, baseRef: string): s
   } catch {
     return null;
   }
+}
+
+/**
+ * A security-reviewer cell may never be weaker than the built-in default
+ * security model. When that model appears in `strength` the cell must be at
+ * or above it; otherwise the cell must be the strongest model in the list.
+ */
+function securityCellTooWeak(strength: string[], model: string): boolean {
+  const floor = strength.indexOf(DEFAULT_ROLE_MODELS[SECURITY_REVIEWER_ROLE]);
+  const required = floor >= 0 ? floor : strength.length - 1;
+  return strength.indexOf(model) < required;
 }
 
 export type ParseTableResult = { ok: true; table: RoutingTable } | { ok: false; reason: string };
@@ -56,6 +67,9 @@ export function parseRoutingTable(text: string): ParseTableResult {
   for (const [role, byClass] of Object.entries(cells)) {
     for (const cell of Object.values(byClass)) {
       if (!known.has(cell.model)) return { ok: false, reason: 'model-not-in-strength' };
+      if (role === SECURITY_REVIEWER_ROLE && securityCellTooWeak(strength, cell.model)) {
+        return { ok: false, reason: 'security-reviewer-weaker-than-default' };
+      }
       if (cell.candidates) {
         if (role === SECURITY_REVIEWER_ROLE) {
           return { ok: false, reason: 'security-reviewer-candidates' };

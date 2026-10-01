@@ -7,11 +7,21 @@ import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
 import type { TaskSpec } from '../types.js';
 
 let tmp: string;
+let savedArts: string | undefined;
+let savedUsage: string | undefined;
 beforeEach(() => {
   tmp = makeTmpProject();
+  savedArts = process.env.ARTIFACTS_DIR;
+  savedUsage = process.env.AI_SDLC_USAGE_DIR;
+  process.env.ARTIFACTS_DIR = join(tmp, 'arts');
+  process.env.AI_SDLC_USAGE_DIR = join(tmp, 'usage');
 });
 afterEach(() => {
   cleanupTmpProject(tmp);
+  if (savedArts === undefined) delete process.env.ARTIFACTS_DIR;
+  else process.env.ARTIFACTS_DIR = savedArts;
+  if (savedUsage === undefined) delete process.env.AI_SDLC_USAGE_DIR;
+  else process.env.AI_SDLC_USAGE_DIR = savedUsage;
 });
 
 const task: TaskSpec = {

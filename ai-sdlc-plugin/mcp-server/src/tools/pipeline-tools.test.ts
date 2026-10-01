@@ -377,6 +377,64 @@ describe('pipeline_step_5_build_dev_prompt', () => {
   });
 });
 
+describe('pipeline step tools - model routing', () => {
+  it('step 5 forwards sourceKind and returns model/modelArm', async () => {
+    const build = vi.fn(async () => ({
+      prompt: 'P',
+      task: FAKE_TASK,
+      model: 'm-dev',
+      modelArm: 'explore' as const,
+    }));
+    const { server, tools } = createServerStub();
+    registerPipelineTools(server, {
+      stepRunners: makeRunnersWithDefaults({ buildDeveloperPrompt: build }),
+    });
+    const result = await getTool(tools, 'pipeline_step_5_build_dev_prompt').handler({
+      taskId: 'T-1',
+      task: FAKE_TASK,
+      branch: 'b',
+      worktreePath: '/tmp/wt',
+      sourceKind: 'backlog',
+    });
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ sourceKind: 'backlog' }));
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      model: 'm-dev',
+      modelArm: 'explore',
+    });
+  });
+
+  it('step 7 forwards sourceKind/iteration and returns the per-reviewer model', async () => {
+    const build = vi.fn(async () => ({
+      prompts: [
+        { reviewer: 'security-reviewer' as const, prompt: 'P', model: 'm-sec', modelArm: 'table' },
+      ],
+      diff: '',
+      changedFiles: [],
+      harnessNote: '',
+    }));
+    const { server, tools } = createServerStub();
+    registerPipelineTools(server, {
+      stepRunners: makeRunnersWithDefaults({ buildReviewPrompts: build as never }),
+    });
+    const result = await getTool(tools, 'pipeline_step_7_build_review_prompts').handler({
+      taskId: 'T-1',
+      task: FAKE_TASK,
+      branch: 'b',
+      worktreePath: '/tmp/wt',
+      workDir: '/tmp/proj',
+      sourceKind: 'gh-issue',
+      iteration: 2,
+    });
+    expect(build).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceKind: 'gh-issue', iteration: 2 }),
+    );
+    expect(JSON.parse(result.content[0].text).prompts[0]).toMatchObject({
+      model: 'm-sec',
+      modelArm: 'table',
+    });
+  });
+});
+
 describe('pipeline_step_6_parse_dev_return', () => {
   it('forwards the developerReturn payload (string or object)', async () => {
     const parse = vi.fn(async () => ({ ok: true, developer: FAKE_DEV_RETURN }));

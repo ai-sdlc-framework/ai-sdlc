@@ -786,7 +786,7 @@ Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them
 ```bash
 # Resolve the developer model from the routing table on origin/main (none present = default arm).
 ROUTE_SOURCE_KIND=backlog; [ "$ARG_FORM" = "gh-issue" ] && ROUTE_SOURCE_KIND=gh-issue
-DEV_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model developer --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration 1 --artifacts-dir "$WORKTREE_PATH/.ai-sdlc/artifacts" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
+DEV_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model developer --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration 1 --artifacts-dir "${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
 echo "[ai-sdlc-progress] Step 5: developer model route: $DEV_ROUTE"
 ```
 
@@ -1154,7 +1154,7 @@ For each reviewer, resolve its routed model and pass it as the Agent call's `mod
 ROUTE_SOURCE_KIND=backlog; [ "${ARG_FORM:-}" = "gh-issue" ] && ROUTE_SOURCE_KIND=gh-issue
 for name in $SELECTED; do
   REVIEWER_AGENT=$(_resolve_reviewer_agent "$name")
-  REVIEWER_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$REVIEWER_AGENT" --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration "${iteration_count:-1}" --artifacts-dir "$WORKTREE_PATH/.ai-sdlc/artifacts" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
+  REVIEWER_ROUTE=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$REVIEWER_AGENT" --task-id "$TASK_ID" --source-kind "$ROUTE_SOURCE_KIND" --iteration "${iteration_count:-1}" --artifacts-dir "${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}" --work-dir "$(pwd)" 2>/dev/null || echo '{"model":"","arm":"default"}')
   echo "[ai-sdlc-progress] Step 7b: $REVIEWER_AGENT model route: $REVIEWER_ROUTE"
 done
 ```
@@ -1259,8 +1259,15 @@ for REVIEWER_NAME in $SELECTED; do
   # in Step 7b) so the harness metadata in the Merkle leaf stays consistent with
   # the agent that actually ran (AISDLC-383.8 code review MAJOR finding).
   AGENT_NAME=$(_resolve_reviewer_agent "$REVIEWER_NAME")
-  EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$AGENT_NAME" --task-id "$TASK_ID" --source-kind "${ROUTE_SOURCE_KIND:-backlog}" --iteration "${iteration_count:-1}" --artifacts-dir "$WORKTREE_PATH/.ai-sdlc/artifacts" --work-dir "$(pwd)" --skip-log 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).model||"")}catch{}})')}"
-  EMIT_MODEL="${EMIT_MODEL:-claude-sonnet-4-6}"
+  EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" resolve-model "$AGENT_NAME" --task-id "$TASK_ID" --source-kind "${ROUTE_SOURCE_KIND:-backlog}" --iteration "${iteration_count:-1}" --artifacts-dir "${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}" --work-dir "$(pwd)" --skip-log 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).model||"")}catch{}})')}"
+  # Only an agent with no routed model (codex variants, correctness-reviewer) may
+  # fall back to a fixed placeholder; a routed model always wins.
+  if [ -z "$EMIT_MODEL" ]; then
+    case "$AGENT_NAME" in
+      code-reviewer-codex|test-reviewer-codex|correctness-reviewer) EMIT_MODEL="claude-sonnet-4-6" ;;
+      *) EMIT_MODEL="unrouted" ;;
+    esac
+  fi
   case "$REVIEWER_NAME" in
     testing)
       REVIEWER_HARNESS="codex"

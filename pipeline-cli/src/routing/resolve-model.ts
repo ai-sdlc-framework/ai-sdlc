@@ -10,8 +10,8 @@
  * (value mod 10000 against `exploreShare`) and the candidate (from the same
  * hash), so the same task always resolves the same way and an assignment can
  * be audited later. It applies only to backlog work, never to the security
- * reviewer, and only on iteration 1; later iterations keep the arm logged for
- * iteration 1.
+ * reviewer. Later iterations recompute the same draw, so a task keeps the arm
+ * it started with without trusting the (writable) assignment log.
  *
  * Recording the resolution (assignment log, capability report) never throws
  * and never changes the returned model.
@@ -22,11 +22,7 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { getCapability, registerCapability, reportCapabilityOutcome } from '@ai-sdlc/reference';
-import {
-  appendAssignment,
-  findFirstIterationAssignment,
-  type RoutingArm,
-} from './assignment-log.js';
+import { appendAssignment, type RoutingArm } from './assignment-log.js';
 import {
   builtInDefaultTable,
   SECURITY_REVIEWER_ROLE,
@@ -170,23 +166,20 @@ function decide(
   usingRepoTable: boolean,
   ctx: Ctx,
 ): ResolveModelResult {
-  const { role, taskClass, iteration, taskId, artifactsDir } = ctx;
+  const { role, taskClass, taskId, artifactsDir } = ctx;
 
   // 1. Override (only ever to a stronger model; invalid entries are ignored).
   const override = findOverride(readOverrideEntries(artifactsDir), table, role, taskClass);
   if (override !== undefined) return { model: override, arm: 'override', reason: 'override' };
 
-  // 2. A later iteration keeps the arm logged for iteration 1.
-  if (iteration >= 2 && taskId) {
-    const first = findFirstIterationAssignment(artifactsDir, taskId, role);
-    if (first) return { model: first.model, arm: first.arm, reason: 'iteration-1-assignment' };
-  }
-
+  // 2. A later iteration keeps the arm it started with. That arm is
+  //    RECOMPUTED here (the draw is a pure function of task id, role and salt),
+  //    never read back from the assignment log: the log sits in a
+  //    developer-writable directory and must not be able to choose a model.
   const cell = cellFor(table, role, taskClass);
 
   // 3. Exploration.
   const eligible =
-    iteration === 1 &&
     !!taskId &&
     input.sourceKind === 'backlog' &&
     role !== SECURITY_REVIEWER_ROLE &&

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
 import {
   coerceReviewerVerdict,
   isDegenerateVerdict,
@@ -156,6 +157,42 @@ describe('Step 9 — iterateReviewLoop', () => {
     expect(r.finalVerdict.decision).toBe('APPROVED');
     expect(r.needsHumanAttention).toBe(false);
     expect(spawner.getCallCount('developer')).toBe(1);
+  });
+
+  it('passes the routed model on the iteration-2 developer and reviewer spawns', async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const ok = (type: SubagentResult['type'], parsed: unknown) =>
+      ((opts) => {
+        seen.push([opts.type, opts.model]);
+        return { type, output: '', parsed, status: 'success', durationMs: 0 } as SubagentResult;
+      }) as (o: { type: string; model?: string }) => SubagentResult;
+    const approve = { approved: true, findings: [], summary: 'ok' };
+    const spawner = new MockSpawner({
+      developer: ok('developer', goodDev),
+      'code-reviewer': ok('code-reviewer', approve),
+      'test-reviewer': ok('test-reviewer', approve),
+      'security-reviewer': ok('security-reviewer', approve),
+    });
+    const prev = process.env.ARTIFACTS_DIR;
+    process.env.ARTIFACTS_DIR = join(tmp, 'arts');
+    try {
+      await iterateReviewLoop({
+        taskId: 'AISDLC-1',
+        worktreePath: tmp,
+        task,
+        branch: 'b',
+        initialDeveloperReturn: goodDev,
+        initialVerdict: blockedVerdict(),
+        maxIterations: 2,
+        sourceKind: 'backlog',
+        spawner,
+      });
+    } finally {
+      if (prev === undefined) delete process.env.ARTIFACTS_DIR;
+      else process.env.ARTIFACTS_DIR = prev;
+    }
+    expect(seen).toContainEqual(['developer', 'claude-sonnet-4-6']);
+    expect(seen).toContainEqual(['security-reviewer', 'claude-opus-4-6']);
   });
 
   it('hits cap and flags needsHumanAttention when reviews never approve', async () => {

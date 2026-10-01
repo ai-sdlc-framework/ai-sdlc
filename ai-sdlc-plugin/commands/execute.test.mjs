@@ -776,3 +776,44 @@ describe('/ai-sdlc execute — CCR remote-sandbox guard (AISDLC-442)', () => {
     );
   });
 });
+
+describe('/ai-sdlc execute — model routing wiring', () => {
+  const section = (from, to) => {
+    const a = cmdBody.indexOf(from);
+    const b = cmdBody.indexOf(to, a + from.length);
+    assert.ok(a >= 0 && b > a, `section ${from} .. ${to} not found`);
+    return cmdBody.slice(a, b);
+  };
+
+  it('Step 5 resolves the developer model', () => {
+    assert.match(section('## Step 5 —', '## Step 6 —'), /resolve-model developer /);
+  });
+
+  it('the Step 7b reviewer loop and the Step 7c leaf emit both resolve the model', () => {
+    assert.match(section('### Step 7b —', '### Step 7b.5 —'), /resolve-model "\$REVIEWER_AGENT"/);
+    const emit = section('### Step 7c —', '## Step 8');
+    assert.match(emit, /resolve-model "\$AGENT_NAME"/);
+    assert.match(emit, /--model "\$EMIT_MODEL"/);
+  });
+
+  it('every resolve-model call uses the operator artifacts dir', () => {
+    const calls = cmdBody
+      .split('\n')
+      .filter((l) => l.includes('ai-sdlc-pipeline.mjs" resolve-model'));
+    assert.ok(calls.length >= 3);
+    for (const l of calls) {
+      assert.ok(l.includes('--artifacts-dir "${ARTIFACTS_DIR:-'), `missing ARTIFACTS_DIR: ${l}`);
+    }
+  });
+
+  it('no unconditional fixed-sonnet default is written to the leaf model', () => {
+    const emit = section('### Step 7c —', '## Step 8');
+    assert.doesNotMatch(emit, /EMIT_MODEL="\$\{EMIT_MODEL:-/);
+    assert.doesNotMatch(emit, /AISDLC_REVIEWER_MODEL:-claude/);
+    // The only fixed value is the explicit fallback for agents with no routed model.
+    const fixed = emit.split('\n').filter((l) => /EMIT_MODEL="[a-z]/.test(l));
+    assert.equal(fixed.length, 2);
+    assert.match(fixed[0], /code-reviewer-codex\|test-reviewer-codex\|correctness-reviewer\)/);
+    assert.match(emit, /if \[ -z "\$EMIT_MODEL" \]; then/);
+  });
+});

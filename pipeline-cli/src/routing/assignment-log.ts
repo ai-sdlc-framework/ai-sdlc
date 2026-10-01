@@ -9,7 +9,7 @@
  * @module routing/assignment-log
  */
 
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 export type RoutingArm = 'table' | 'explore' | 'override' | 'default';
@@ -39,28 +39,4 @@ export function appendAssignment(artifactsDir: string, rec: AssignmentRecord): b
   } catch {
     return false;
   }
-}
-
-/** The first iteration-1 record logged for a task and role, if any. */
-export function findFirstIterationAssignment(
-  artifactsDir: string,
-  taskId: string,
-  role: string,
-): AssignmentRecord | undefined {
-  let text: string;
-  try {
-    text = readFileSync(assignmentLogPath(artifactsDir), 'utf8');
-  } catch {
-    return undefined;
-  }
-  for (const line of text.split('\n')) {
-    if (!line) continue;
-    try {
-      const r = JSON.parse(line) as AssignmentRecord;
-      if (r.taskId === taskId && r.role === role && r.iteration === 1) return r;
-    } catch {
-      /* skip corrupt line */
-    }
-  }
-  return undefined;
 }
