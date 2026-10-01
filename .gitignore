@@ -133,3 +133,6 @@ orchestrator/.gitignore
 # Session hierarchy roster (machine-local)
 .ai-sdlc/dispatch/hierarchy.json
 .ai-sdlc/dispatch/hierarchy.json.tmp*
+
+# Dispatch briefs written by cli-hierarchy brief (machine-local runtime output)
+.ai-sdlc/dispatch/briefs/

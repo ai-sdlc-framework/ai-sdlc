@@ -2,6 +2,35 @@
  * Public surface of the session-hierarchy bootstrap.
  */
 
+export {
+  generateBrief,
+  isTrustSensitivePath,
+  planBrief,
+  renderBrief,
+  selectTasks,
+  type BriefOptions,
+  type BriefPlan,
+  type BriefResult,
+  type BriefSelection,
+  type BriefTask,
+  type SequenceGroup,
+} from './brief.js';
+export {
+  BRIEF_BLOCK_KEY,
+  GROUP_PATTERN,
+  MAX_BRIEF_BYTES,
+  MAX_BRIEF_ENTRIES,
+  parseBrief,
+  renderBriefBlock,
+  type BriefEntry,
+  type ParsedBrief,
+} from './brief-format.js';
+export {
+  briefMessage,
+  createTmuxBriefSender,
+  notifyDispatch,
+  type BriefSender,
+} from './brief-notify.js';
 export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
 export { listInflight, type InflightItem } from './inflight.js';
 export {

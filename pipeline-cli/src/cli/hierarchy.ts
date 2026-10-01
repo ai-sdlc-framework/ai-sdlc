@@ -9,6 +9,9 @@
  *     `ai-sdlc-hierarchy` session and write the roster. Idempotent.
  *   - `status [--json]` — the roster with each session's live state and the
  *     board's inflight task.
+ *   - `brief --tasks <id,...> | --rfc <RFC-NNNN> [--out <path>] [--force] [--notify]` —
+ *     write a dispatch brief from task metadata and optionally tell the dispatch
+ *     session about it.
  *   - `down [--role <name-or-role>]` — end sessions, return their inflight
  *     manifests to `queue/`, close their windows, update the roster.
  *
@@ -23,6 +26,10 @@ import { DEFAULT_BOARD_DIR } from '../dispatch/board.js';
 import {
   attachTmuxSession,
   createSystemRunner,
+  createTmuxBriefSender,
+  generateBrief,
+  notifyDispatch,
+  type BriefSender,
   formatStatus,
   hierarchyDown,
   hierarchyStatus,
@@ -37,6 +44,7 @@ const USAGE = `Usage: cli-hierarchy <command> [options]
 Commands:
   up       Start the planner, dispatch session and executors in tmux
   status   Show the roster with live state and inflight tasks
+  brief    Generate a dispatch brief (waves, sequence groups) from task metadata
   down     Stop sessions and return their inflight manifests to the queue
 
 Options for up:
@@ -50,6 +58,14 @@ Options for up:
 
 Options for status:
   --json                   Print machine-readable output
+
+Options for brief:
+  --tasks <id,...>         Task ids to include
+  --rfc <RFC-NNNN>         Include every open task that references the RFC
+  --out <path>             Output file (default <board-dir>/briefs/<slug>.md)
+  --force                  Replace an existing brief
+  --notify                 Message the dispatch session that the brief is ready; an existing
+                           brief is kept as edited (use --force to regenerate it)
 
 Options for down:
   --role <name-or-role>    Stop one session by name (executor-beta) or a role (executor)
@@ -93,6 +109,7 @@ export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDe
 export async function runHierarchyCli(
   argv: readonly string[] = process.argv.slice(2),
   overrides: Partial<HierarchyDeps> = {},
+  extras: { sendBrief?: BriefSender } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
   if (
@@ -128,6 +145,25 @@ export async function runHierarchyCli(
         const result = hierarchyStatus(deps);
         if (flags.json === 'true') deps.log(JSON.stringify(result));
         else for (const line of formatStatus(result)) deps.log(line);
+        return 0;
+      }
+      case 'brief': {
+        const result = generateBrief(
+          {
+            tasks: flags.tasks === 'true' ? '' : flags.tasks,
+            rfc: flags.rfc === 'true' ? '' : flags.rfc,
+            out: flags.out === 'true' ? undefined : flags.out,
+            force: flags.force === 'true',
+            keepExisting: flags.notify === 'true',
+          },
+          deps,
+        );
+        deps.log(result.reused ? `kept existing ${result.file}` : `wrote ${result.file}`);
+        if (flags.notify === 'true') {
+          const send = extras.sendBrief ?? createTmuxBriefSender(deps.run);
+          notifyDispatch(result.dispatch, result.file, deps.cwd, send);
+          deps.log(`notified '${result.dispatch?.name}'`);
+        }
         return 0;
       }
       case 'down': {
