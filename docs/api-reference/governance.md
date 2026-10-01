@@ -108,17 +108,37 @@ spec:
     name**: a commit status can be posted under any name by anyone with write
     access, so this is only meaningful once branch protection pins each required
     check to the GitHub Actions app (operator-only; tracked as "H4");
-  - the PR changes **no governance-sensitive path** (`.ai-sdlc/**`,
-    `ai-sdlc-plugin/hooks/**`, `pipeline-cli/src/governance/**`, the merge CLI and
-    its entry `pipeline-cli/bin/cli-merge-if-eligible.mjs`, `.github/**`, any
-    `CODEOWNERS`, `spec/schemas/agent-role.schema.json`, `opencode.json`,
-    `opencode.jsonc`, `.opencode/**`, any `CLAUDE.md`; compared case-insensitively,
-    and for a rename both the new and the previous name). Governance changes need
-    a human merge, in both merge and `--arm` mode, so a PR that edits the policy or
-    the gate itself (including the PR that introduced this rule, and the PR that
-    grants `allowMerge`) is merged by a human. The file list comes from the
-    paginated REST files endpoint; a failed read, or a list that reaches GitHub's
-    3000-file cap, refuses;
+  - the PR changes **no governance-sensitive path**: `.ai-sdlc/**` (except the
+    generated attestation evidence, below), `.claude/**`, `.opencode/**`,
+    `.codex/**`, `.github/**`, `.husky/**`, `ai-sdlc-plugin/hooks/**`,
+    `ai-sdlc-plugin/.claude-plugin/**`, `ai-sdlc-plugin/agents/**`,
+    `ai-sdlc-plugin/commands/**`, `ai-sdlc-plugin/scripts/**`,
+    `pipeline-cli/src/governance/**`, the merge CLI sources and
+    `pipeline-cli/bin/cli-merge-if-eligible.mjs`, `pipeline-cli/src/runtime/exec.ts`,
+    `pipeline-cli/package.json`, `pipeline-cli/tsconfig*.json`, `scripts/check-*`,
+    `spec/schemas/agent-role.schema.json`, any `CODEOWNERS`, `opencode.json`,
+    `opencode.jsonc`, any `CLAUDE.md` or `AGENTS.md`, and the bare names `.claude`,
+    `.opencode`, `.codex` (a symlink or gitlink has no trailing path). Matching is
+    case-insensitive on the normalised path (`.` and `..` resolved), and for a
+    rename both the new and the previous name count. **Exempt** are only the files
+    directly inside the generated evidence directories that every attested code PR
+    commits: `.ai-sdlc/attestations/`, `.ai-sdlc/transcript-leaves/`,
+    `.ai-sdlc/reviews/`, `.ai-sdlc/verdicts/`, `.ai-sdlc/transcripts/` and
+    `.ai-sdlc/transcript-leaves.jsonl`; a nested path, an evidence-looking name
+    elsewhere, or `.ai-sdlc/attestations/../agent-role.yaml` stays sensitive.
+    Ordinary agent PRs (source, tests, docs, `backlog/`, `spec/rfcs`, other
+    schemas, `reference/`, `orchestrator/`) are unaffected. Some listed paths do
+    appear in ordinary work (for example `pipeline-cli/package.json` when adding a
+    bin, or `ai-sdlc-plugin/commands/*.md`); they stay sensitive on purpose, so a
+    human merges those. Governance changes need a human merge, in both merge and
+    `--arm` mode, so a PR that edits the policy or the gate itself (including the
+    PR that introduced this rule, and the PR that grants `allowMerge`) is merged by
+    a human. The file list is the compare between the resolved `main` SHA and the
+    PINNED head SHA (all pages, deduplicated), not the PR's current file list, so a
+    push after the head was read cannot change it. A failed or malformed read, or a
+    list that reaches GitHub's 300-file compare cap, refuses, and so does a PR with
+    no changed files (nothing to merge). This rule holds for the helper only, see
+    the residuals below;
   - the PR head commit read in the first call is still the head just before the
     merge, and the merge is issued with `--match-head-commit <sha>` so GitHub
     rejects it if the head moved after the checks were evaluated (the CLI reports
@@ -188,6 +208,25 @@ spec:
   URLs, `node -e` / `python -c` with argv arrays, `gh api graphql --input <file>`,
   shell aliases, `gh pr --repo o/r merge`-style reordering or constructed strings.
 - **Known residuals (be explicit about them):**
+  - **"Governance changes need a human merge" holds for the helper only.**
+    `.github/workflows/auto-enable-auto-merge.yml` still arms EVERY same-repo PR,
+    governance PRs included, and the in-repo arming sites (`reconcile.ts`,
+    `resume-from-draft.ts`, `execute-pipeline.ts`) arm through a child-process `gh`
+    call outside the hook. Today only GitHub-side review requirements keep a
+    governance PR human. Before the `allowMerge` grant (AISDLC-663.3), either run
+    this path rule in the workflow and route the in-repo sites through `--arm`
+    (recommended follow-up AISDLC-663.5.1), or confirm that branch protection
+    enforces required code-owner review (H4).
+  - **Operator-token power.** Agents act as the operator's `gh` login and
+    `mergeAuthors` matches that same login, so the allow-list does not separate the
+    agent from the operator. An admin-scoped token can bypass branch protection or
+    change rulesets. H4 therefore requires a non-admin agent token with no bypass
+    role, `enforce_admins` on, and an empty bypass list. CODEOWNERS is
+    `* @deefactorial`, and an author cannot approve their own PR, so a
+    governance PR still needs a second human identity to approve.
+  - **Race window.** The policy is read once at the start of a run and the merge
+    happens seconds later; a revocation landing in between is missed (the next run
+    sees it).
   - **The operator's token is not constrained here.** Everything above governs the
     agent's shell; a GitHub token with merge rights used by anything else is outside
     this change.

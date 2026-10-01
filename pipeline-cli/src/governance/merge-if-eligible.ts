@@ -447,17 +447,20 @@ export interface ChangedFile {
   status: string;
 }
 
-/** GitHub's REST file list for a PR stops at 3000 files. */
-const PR_FILES_CAP = 3000;
+/** GitHub's compare endpoint reports at most 300 files; reaching it means "cannot be sure". */
+const COMPARE_FILES_CAP = 300;
 
 /**
- * Every file the PR changes, across all pages, via the REST files endpoint
- * (which, unlike `gh pr view --json files`, reports the previous name of a
- * renamed file). `null` on any failure or when the list hit GitHub's cap
- * (cannot be sure nothing sensitive is beyond it).
+ * Every file changed between `baseSha` and `headSha` (the merge base is used
+ * automatically), read from the compare endpoint so the list is tied to the
+ * PINNED head commit, not to whatever the PR head is at the moment of the call.
+ * Previous names of renamed files are kept. All pages are read and deduplicated
+ * (the endpoint repeats the file list on every commit page). `null` on any
+ * failure, malformed output, or when the list reaches the 300-file cap.
  */
 export async function fetchChangedFiles(
-  prNumber: number,
+  baseSha: string,
+  headSha: string,
   repoSlug: string,
   runner: Runner,
   cwd?: string,
@@ -466,57 +469,100 @@ export async function fetchChangedFiles(
     'gh',
     [
       'api',
-      `repos/${repoSlug}/pulls/${prNumber}/files?per_page=100`,
+      `repos/${repoSlug}/compare/${baseSha}...${headSha}?per_page=100`,
       '--paginate',
       '--jq',
-      '.[] | {filename, previous_filename, status}',
+      '.files[]? | {filename, previous_filename, status}',
     ],
     { cwd, allowFailure: true },
   );
   if (out.code !== 0) return null;
   try {
-    const files = parseNdjson<{ filename: unknown; previous_filename?: unknown; status?: unknown }>(
-      out.stdout,
-    ).map((f) => {
+    const seen = new Map<string, ChangedFile>();
+    for (const f of parseNdjson<{
+      filename: unknown;
+      previous_filename?: unknown;
+      status?: unknown;
+    }>(out.stdout)) {
       if (typeof f.filename !== 'string') throw new Error('shape');
-      return {
+      const previousPath =
+        typeof f.previous_filename === 'string' ? f.previous_filename : undefined;
+      seen.set(`${f.filename}\u0000${previousPath ?? ''}`, {
         path: f.filename,
-        previousPath: typeof f.previous_filename === 'string' ? f.previous_filename : undefined,
+        previousPath,
         status: typeof f.status === 'string' ? f.status : '',
-      };
-    });
-    return files.length >= PR_FILES_CAP ? null : files;
+      });
+    }
+    return seen.size >= COMPARE_FILES_CAP ? null : [...seen.values()];
   } catch {
     return null;
   }
 }
 
+/** Generated attestation evidence that every attested code PR commits under `.ai-sdlc/`. */
+const EVIDENCE_PATH =
+  /^\.ai-sdlc\/(?:(?:attestations|transcript-leaves|reviews|verdicts|transcripts)\/[^/]+|transcript-leaves\.jsonl)$/;
+
+/** Lower-case, unify separators and resolve `.` / `..` / empty segments. */
+function normalizePath(rawPath: string): string {
+  const out: string[] = [];
+  for (const seg of rawPath.toLowerCase().replace(/\\/g, '/').split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  return out.join('/');
+}
+
 /**
  * Paths whose change needs a human merge: the governance policy and its
- * enforcement (hooks, the merge gate itself, the policy schema), CI and
- * ownership files, and agent-harness configuration. Compared lower-cased on the
- * normalised path.
+ * enforcement (hooks, the merge gate itself, the policy schema), the plugin's
+ * agents/commands/scripts, CI, git hooks and ownership files, and agent-harness
+ * configuration. Under `.ai-sdlc/` only the generated attestation evidence files
+ * (directly inside their directories) are exempt; everything else there is
+ * sensitive. Compared lower-cased on the normalised path, `..` resolved.
  */
 export function isGovernanceSensitivePath(rawPath: string): boolean {
-  const path = rawPath
-    .toLowerCase()
-    .replace(/\\/g, '/')
-    .replace(/^(\.\/|\/)+/, '')
-    .replace(/\/+/g, '/');
+  const path = normalizePath(rawPath);
+  if (EVIDENCE_PATH.test(path)) return false;
   const base = path.slice(path.lastIndexOf('/') + 1);
+  const prefixes = [
+    '.ai-sdlc/',
+    '.claude/',
+    '.opencode/',
+    '.codex/',
+    '.github/',
+    '.husky/',
+    'ai-sdlc-plugin/hooks/',
+    'ai-sdlc-plugin/.claude-plugin/',
+    'ai-sdlc-plugin/agents/',
+    'ai-sdlc-plugin/commands/',
+    'ai-sdlc-plugin/scripts/',
+    'pipeline-cli/src/governance/',
+    'pipeline-cli/src/cli/merge-if-eligible',
+  ];
+  const exact = [
+    '.ai-sdlc',
+    '.claude',
+    '.opencode',
+    '.codex',
+    '.github',
+    '.husky',
+    'pipeline-cli/bin/cli-merge-if-eligible.mjs',
+    'pipeline-cli/src/runtime/exec.ts',
+    'pipeline-cli/package.json',
+    'spec/schemas/agent-role.schema.json',
+  ];
   return (
-    path.startsWith('.ai-sdlc/') ||
-    path.startsWith('ai-sdlc-plugin/hooks/') ||
-    path.startsWith('pipeline-cli/src/governance/') ||
-    path.startsWith('pipeline-cli/src/cli/merge-if-eligible') ||
-    path === 'pipeline-cli/bin/cli-merge-if-eligible.mjs' ||
-    path.startsWith('.github/') ||
-    path === 'spec/schemas/agent-role.schema.json' ||
-    path.startsWith('.opencode/') ||
+    prefixes.some((x) => path.startsWith(x)) ||
+    exact.includes(path) ||
+    /^scripts\/check-[^/]*$/.test(path) ||
+    /^pipeline-cli\/tsconfig[^/]*\.json$/.test(path) ||
     base === 'codeowners' ||
     base === 'opencode.json' ||
     base === 'opencode.jsonc' ||
-    base === 'claude.md'
+    base === 'claude.md' ||
+    base === 'agents.md'
   );
 }
 
@@ -1348,12 +1394,18 @@ export async function runMergeIfEligible(
   if (trustRefusal) return refuse(trustRefusal);
 
   // Governance-sensitive changes need a human merge (merge AND arm modes).
-  const changed = await fetchChangedFiles(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+  const baseSha = await mainSha();
+  const changed = baseSha
+    ? await fetchChangedFiles(baseSha, snapshot.headRefOid, opts.repoSlug, opts.runner, opts.cwd)
+    : null;
   if (!changed) {
     return refuse(
-      'could not list every file this PR changes (GitHub error, or the list hit its cap) — ' +
+      'could not list every file this PR changes (GitHub error, or the list hit its 300-file cap) — ' +
         'refusing (fail-closed); a human merges what cannot be inspected',
     );
+  }
+  if (changed.length === 0) {
+    return refuse('the PR has no changed files relative to main — nothing to merge');
   }
   const sensitive = governanceSensitiveChanges(changed);
   if (sensitive.length > 0) {

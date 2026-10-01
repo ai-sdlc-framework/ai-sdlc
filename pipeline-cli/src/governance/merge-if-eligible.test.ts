@@ -177,10 +177,10 @@ const MAIN_REF: Record<string, Partial<ExecResult>> = {
 
 type Changed = [filename: string, status?: string, previous?: string];
 
-/** `pulls/<n>/files` answer (one JSON object per line, as `--paginate --jq` prints). */
+/** Compare-endpoint answer (one JSON object per line, as `--paginate --jq` prints). */
 function changedFiles(list: Changed[]): Record<string, Partial<ExecResult>> {
   return {
-    'pulls/42/files': {
+    'compare/': {
       stdout: list
         .map(([filename, status = 'added', previous]) =>
           JSON.stringify({ filename, status, previous_filename: previous }),
@@ -1232,7 +1232,8 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
     expect(calls.map(label)).toEqual([
       'pr view',
       `commits/${HEAD_A}`,
-      'pulls/42/files',
+      'git/ref/heads/main',
+      `compare/${MAIN_SHA}...${HEAD_A}`,
       'pr checks',
       `commits/${HEAD_A}/check-runs`,
       `commits/${HEAD_A}/status`,
@@ -1703,21 +1704,52 @@ describe('one consistent main commit for every read', () => {
 describe('governance-sensitive changes require a human merge (merge and arm)', () => {
   it.each([
     '.ai-sdlc/agent-role.yaml',
-    '.ai-sdlc/attestations/x.json',
+    '.ai-sdlc/trusted-reviewers.yaml',
+    '.ai-sdlc/templates/x.md',
+    '.ai-sdlc/autonomy.yaml',
+    '.ai-sdlc/pipeline.yaml',
+    '.ai-sdlc/transcript-leaves.jsonl.bak',
+    '.ai-sdlc/attestations/sub/x.json',
+    '.ai-sdlc/attestations',
+    '.ai-sdlc/attestations/../agent-role.yaml',
+    '.ai-sdlc/reviews/x/../../agent-role.yaml',
+    '.ai-sdlc/./agent-role.yaml',
+    '.ai-sdlc/foo/../attestations/../trusted-reviewers.yaml',
+    '.ai-sdlc',
     'ai-sdlc-plugin/hooks/enforce-blocked-actions.js',
     'ai-sdlc-plugin/hooks/lib/governance-resolver.js',
+    'ai-sdlc-plugin/.claude-plugin/plugin.json',
+    'ai-sdlc-plugin/agents/developer.md',
+    'ai-sdlc-plugin/commands/execute.md',
+    'ai-sdlc-plugin/scripts/sign-attestation.mjs',
     'pipeline-cli/src/governance/merge-if-eligible.ts',
     'pipeline-cli/src/cli/merge-if-eligible.ts',
     'pipeline-cli/src/cli/merge-if-eligible.test.ts',
     'pipeline-cli/bin/cli-merge-if-eligible.mjs',
+    'pipeline-cli/src/runtime/exec.ts',
+    'pipeline-cli/package.json',
+    'pipeline-cli/tsconfig.json',
+    'pipeline-cli/tsconfig.build.json',
     '.github/workflows/ci.yml',
     '.github/CODEOWNERS',
+    '.github',
+    '.husky/pre-push',
+    '.husky',
+    'scripts/check-coverage.sh',
+    'scripts/check-attestation-sign.test.mjs',
+    '.claude/settings.json',
+    '.claude',
+    '.opencode',
+    '.opencode/plugins/x.js',
+    '.codex',
+    '.codex/config.toml',
+    'AGENTS.md',
+    'docs/AGENTS.md',
     'CODEOWNERS',
     'docs/CODEOWNERS',
     'spec/schemas/agent-role.schema.json',
     'opencode.json',
     'opencode.jsonc',
-    '.opencode/plugins/x.js',
     'CLAUDE.md',
     'packages/app/CLAUDE.md',
     '.AI-SDLC/agent-role.yaml',
@@ -1727,19 +1759,51 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
     '/.github/workflows/x.yml',
     '.github//workflows/x.yml',
     '.ai-sdlc\\agent-role.yaml',
-  ])('path class %s is sensitive', (path) => {
+    'docs/../.github/workflows/x.yml',
+  ])('path %s is sensitive', (path) => {
     expect(isGovernanceSensitivePath(path)).toBe(true);
   });
 
   it.each([
+    '.ai-sdlc/attestations/084baa0744e41026bb02b247ec586f333de72482.v6.dsse.json',
+    '.ai-sdlc/transcript-leaves/084baa0744e41026bb02b247ec586f333de72482.jsonl',
+    '.ai-sdlc/transcript-leaves.jsonl',
+    '.ai-sdlc/reviews/aisdlc-9.jsonl',
+    '.ai-sdlc/verdicts/aisdlc-9.json',
+    '.ai-sdlc/transcripts/x.jsonl',
+    '.AI-SDLC/Attestations/X.v6.dsse.json',
+    './.ai-sdlc//attestations/x.json',
+    '.ai-sdlc\\reviews\\x.jsonl',
+    '.ai-sdlc/foo/../attestations/x.json',
+  ])('generated evidence %s is exempt', (path) => {
+    expect(isGovernanceSensitivePath(path)).toBe(false);
+  });
+
+  it.each([
     'pipeline-cli/src/foo.ts',
+    'pipeline-cli/src/foo.test.ts',
+    'pipeline-cli/src/cli/other.ts',
+    'pipeline-cli/src/runtime/other.ts',
+    'pipeline-cli/README.md',
+    'orchestrator/src/execute.ts',
+    'orchestrator/package.json',
+    'reference/src/core/validation.ts',
+    'dogfood/src/runner/index.ts',
     'docs/api-reference/governance.md',
     'backlog/completed/aisdlc-9 - x.md',
+    'backlog/tasks/aisdlc-9 - x.md',
+    'spec/rfcs/RFC-0048-x.md',
+    'spec/schemas/other.schema.json',
+    'scripts/verify-attestation.mjs',
+    'scripts/checkout-helper.sh',
+    'scripts/sub/check-x.sh',
     'sub/.github/x.yml',
-    'ai-sdlc-plugin/commands/execute.md',
+    'ai-sdlc-plugin/skills/x/SKILL.md',
+    'ai-sdlc-plugin/mcp-server/src/x.ts',
     'pipeline-cli/src/governance-notes.md',
     'my-opencode.json.bak',
-    'spec/schemas/other.schema.json',
+    'package.json',
+    'README.md',
   ])('ordinary path %s is not sensitive', (path) => {
     expect(isGovernanceSensitivePath(path)).toBe(false);
   });
@@ -1787,13 +1851,12 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
     return { r, calls: fake.calls };
   }
 
+  const TASK: Changed = ['backlog/completed/aisdlc-9 - do the thing.md'];
+
   for (const mode of ['merge', 'arm'] as const) {
     it(`${mode}: refuses a PR touching a governance path, with no merge/arm call`, async () => {
       const { r, calls } = await gate(
-        changedFiles([
-          ['backlog/completed/aisdlc-9 - do the thing.md'],
-          ['.ai-sdlc/agent-role.yaml', 'modified'],
-        ]),
+        changedFiles([TASK, ['.ai-sdlc/agent-role.yaml', 'modified']]),
         mode,
       );
       expect(r.eligibility.reason).toMatch(
@@ -1804,6 +1867,52 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
       expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
     });
 
+    it(`${mode}: a realistic attested code PR passes the path check`, async () => {
+      const { r } = await gate(
+        changedFiles([
+          TASK,
+          ['pipeline-cli/src/steps/04-flip-status.ts', 'modified'],
+          ['pipeline-cli/src/steps/04-flip-status.test.ts', 'modified'],
+          ['docs/operations/x.md', 'modified'],
+          ['.ai-sdlc/attestations/084baa0744e41026bb02b247ec586f333de72482.v6.dsse.json'],
+          ['.ai-sdlc/transcript-leaves/084baa0744e41026bb02b247ec586f333de72482.jsonl'],
+          ['.ai-sdlc/transcript-leaves.jsonl', 'modified'],
+          ['.ai-sdlc/reviews/aisdlc-9.jsonl'],
+        ]),
+        mode,
+      );
+      expect(r.eligibility.eligible).toBe(true);
+    });
+
+    it(`${mode}: the same PR that also edits the policy file is refused`, async () => {
+      const { r } = await gate(
+        changedFiles([
+          TASK,
+          ['.ai-sdlc/attestations/x.v6.dsse.json'],
+          ['.ai-sdlc/agent-role.yaml', 'modified'],
+        ]),
+        mode,
+      );
+      expect(r.eligibility.reason).toMatch(/\.ai-sdlc\/agent-role\.yaml/);
+      expect(r.eligibility.reason).not.toMatch(/attestations/);
+    });
+
+    it(`${mode}: an ordinary code, docs, backlog, spec and reference PR passes`, async () => {
+      const { r } = await gate(
+        changedFiles([
+          TASK,
+          ['orchestrator/src/execute.ts', 'modified'],
+          ['reference/src/core/validation.ts', 'modified'],
+          ['spec/rfcs/RFC-0048-x.md', 'modified'],
+          ['spec/schemas/other.schema.json', 'modified'],
+          ['docs/api-reference/x.md', 'modified'],
+          ['backlog/tasks/aisdlc-9 - x.md', 'renamed', 'backlog/completed/aisdlc-9 - x.md'],
+        ]),
+        mode,
+      );
+      expect(r.eligibility.eligible).toBe(true);
+    });
+
     it(`${mode}: refuses a rename out of a governance path`, async () => {
       const { r } = await gate(
         changedFiles([['docs/moved.yaml', 'renamed', '.ai-sdlc/old.yaml']]),
@@ -1812,31 +1921,80 @@ describe('governance-sensitive changes require a human merge (merge and arm)', (
       expect(r.eligibility.reason).toMatch(/\.ai-sdlc\/old\.yaml/);
     });
 
-    it(`${mode}: refuses when the file list cannot be read or hits GitHub's cap`, async () => {
-      const failed = await gate({ 'pulls/42/files': { code: 1, stderr: 'HTTP 500' } }, mode);
-      expect(failed.r.eligibility.reason).toMatch(/could not list every file/);
-      const capped = await gate(
-        changedFiles(Array.from({ length: 3000 }, (_, i): Changed => [`docs/f${i}.md`])),
-        mode,
-      );
-      expect(capped.r.eligibility.reason).toMatch(/could not list every file/);
-      const garbage = await gate({ 'pulls/42/files': { stdout: 'not json' } }, mode);
-      expect(garbage.r.eligibility.reason).toMatch(/could not list every file/);
-      const noName = await gate({ 'pulls/42/files': { stdout: '{"status":"added"}' } }, mode);
-      expect(noName.r.eligibility.reason).toMatch(/could not list every file/);
-    });
-
-    it(`${mode}: proceeds just under the cap with only ordinary paths`, async () => {
-      const { r } = await gate(
-        changedFiles([
-          ['backlog/completed/aisdlc-9 - do the thing.md'],
-          ...Array.from({ length: 2998 }, (_, i): Changed => [`docs/f${i}.md`]),
-        ]),
+    it(`${mode}: the file list is the compare between main's SHA and the PINNED head`, async () => {
+      // A (stale/other-head) PR files list would show a governance change; it must never be consulted.
+      const { r, calls } = await gate(
+        {
+          ...changedFiles([TASK]),
+          'pulls/42/files': { stdout: JSON.stringify({ filename: '.ai-sdlc/agent-role.yaml' }) },
+        },
         mode,
       );
       expect(r.eligibility.eligible).toBe(true);
+      const urls = calls.filter((c) => c.args[0] === 'api').map((c) => String(c.args[1]));
+      expect(urls).toContain(`repos/org/repo/compare/${MAIN_SHA}...${HEAD_A}?per_page=100`);
+      expect(urls.some((u) => u.includes('/pulls/'))).toBe(false);
+    });
+
+    it(`${mode}: refuses when the compare cannot be read, is malformed, or has no files`, async () => {
+      const failed = await gate({ 'compare/': { code: 1, stderr: 'HTTP 500' } }, mode);
+      expect(failed.r.eligibility.reason).toMatch(/could not list every file/);
+      const garbage = await gate({ 'compare/': { stdout: 'not json' } }, mode);
+      expect(garbage.r.eligibility.reason).toMatch(/could not list every file/);
+      const noName = await gate({ 'compare/': { stdout: '{"status":"added"}' } }, mode);
+      expect(noName.r.eligibility.reason).toMatch(/could not list every file/);
+      const none = await gate({ 'compare/': { stdout: '' } }, mode);
+      expect(none.r.eligibility.reason).toMatch(/no changed files relative to main/);
+      expect(none.r.merged).toBe(false);
+      expect(none.r.armed).toBeFalsy();
+    });
+
+    it(`${mode}: refuses at GitHub's 300-file compare cap, passes just under it, dedupes repeated pages`, async () => {
+      const files = (n: number): Changed[] =>
+        Array.from({ length: n }, (_, i): Changed => [`docs/f${i}.md`]);
+      const capped = await gate(changedFiles([TASK, ...files(299)]), mode);
+      expect(capped.r.eligibility.reason).toMatch(/300-file cap/);
+      const under = await gate(changedFiles([TASK, ...files(298)]), mode);
+      expect(under.r.eligibility.eligible).toBe(true);
+      // The compare endpoint repeats the file list on every commit page.
+      const page = changedFiles([TASK, ...files(200)])['compare/'].stdout ?? '';
+      const repeated = await gate({ 'compare/': { stdout: `${page}\n${page}\n${page}` } }, mode);
+      expect(repeated.r.eligibility.eligible).toBe(true);
     });
   }
+
+  it('resolves main once and reuses it for the compare base', async () => {
+    const fake = makeFakeRunner({
+      'gh pr view 42': { stdout: prView() },
+      ...MAIN_REF,
+      ...changedFiles([['backlog/completed/aisdlc-9 - do the thing.md']]),
+      ...COMMIT_OPERATOR,
+    });
+    let calls = 0;
+    const runner: Runner = async (c, a, o) => {
+      if (a.join(' ').includes('git/ref/heads/main')) {
+        calls += 1;
+        return calls === 1
+          ? { stdout: MAIN_REF['git/ref/heads/main'].stdout ?? '', stderr: '', code: 0 }
+          : { stdout: '', stderr: 'x', code: 1 };
+      }
+      return fake.runner(c, a, o);
+    };
+    // Memoised: a single resolution serves every read, so a later failure cannot matter.
+    const r = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      mode: 'arm',
+      dryRun: true,
+    });
+    expect(r.eligibility.eligible).toBe(true);
+    expect(calls).toBe(1);
+  });
 });
 
 describe('resolveRepoSlug rejects dot owners and repos', () => {

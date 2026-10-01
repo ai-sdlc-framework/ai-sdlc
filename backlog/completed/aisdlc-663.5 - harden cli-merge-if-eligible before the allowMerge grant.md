@@ -71,6 +71,7 @@ under `.ai-sdlc/`.
 
 ## Design decisions
 - **One main commit**: the main branch is resolved once through `git/ref/heads/main` (a tag named main cannot shadow it) and the policy, config and task tree are all read at that SHA.
+- **Evidence exempt, everything else sensitive**: under `.ai-sdlc/` only files directly inside the generated attestation evidence directories (and `transcript-leaves.jsonl`) are exempt, so attested code PRs stay mergeable; the compare endpoint between main's SHA and the pinned head supplies the file list.
 - **Human merge for governance changes**: merge and `--arm` refuse a PR that changes governance-sensitive paths (policy, hooks, the gate, schema, CI, ownership, agent-harness config, CLAUDE.md), judged on the full paginated file list including rename sources, and refuse when the list reaches GitHub's cap. This PR and the PR that grants `allowMerge` are therefore human-merge PRs.
 - **No override in production**: the policy root and repository cannot be set from argv or the environment; a test-only override exists solely as a programmatic option of the exported builder.
 - **GitHub-authoritative policy**: the policy and task checks come from GitHub for the PR's own slug, so a forged local ref, a worktree copy, an uncommitted edit or a git environment variable cannot change them, and revocation is immediate; the resolver is ported into the CLI and a parity test pins it to the plugin resolver.
@@ -83,6 +84,7 @@ under `.ai-sdlc/`.
 
 ## Follow-up
 - declined: fake `gh`, `PATH` or proxy in the agent's environment; part of the edited-or-copied-CLI residual
+- declined: the human-merge rule holds for the helper only; the auto-enable workflow and the in-repo arming sites still arm governance PRs, and the operator token (non-admin agent token, enforce_admins, empty bypass list) and the policy-read-to-merge race window are documented residuals
 - declined: local CLI is not a trust boundary against the governed agent. The CLI, the plugin hooks and the checkout run from the agent's own worktree, so an agent that can edit or copy them is not bound by them. GitHub-side protections (strict required checks pinned to the Actions app, enforce_admins, CODEOWNERS plus required review on governance paths, fork-PR workflow approval) are operator-only and essential
 - declined: in-repo arming call sites (the orchestrator reconcile path, `resume-from-draft.ts`, `execute-pipeline.ts`) arm through a child-process `gh` call without the gate, which is pre-existing; routing them through `--arm` is recommended as AISDLC-663.5.1
 - declined: text-level hook bypasses (`node -e` / `python -c` with argv arrays, a gh alias, `gh pr --repo o/r merge` reordering, graphql from a file, variable-expanded URLs, `eval`/base64); a static matcher cannot close them, a hardening that parses commands is recommended as AISDLC-663.5.2

@@ -109,7 +109,7 @@ const NEVER_YAML = 'spec:\n  governance:\n    allowMerge: never\n';
 
 const MAIN_REF = {
   'git/ref/heads/main': { stdout: JSON.stringify({ type: 'commit', sha: 'c'.repeat(40) }) },
-  'pulls/42/files': {
+  'compare/': {
     stdout: JSON.stringify({ filename: 'backlog/tasks/aisdlc-9 - x.md', status: 'added' }),
   },
 };
