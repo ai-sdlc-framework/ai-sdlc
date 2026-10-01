@@ -86,7 +86,10 @@ Added a full-screen usage pane to the operator TUI, opened with `u` and listed i
 - AC 5 left unchecked: root `pnpm test` is not fully green locally; the verify-runtime, bin-invocation `pnpm exec` probes and the App-level TUI render timeouts (app.test, use-terminal-dimensions) fail the same way on a clean origin/main checkout
 
 ## Follow-up
-- (none)
 - declined: sanitizing control characters and length at the Codex ingester (model id and rate-limit window keys) and the Claude model id filter is a separate ingester change; the pane sanitizes at display
 - declined: making the shared ledger reader skip non-object lines is a reference package change that also affects `cli-usage report`
 - declined: showing the pane in the overview grid is left out because the overview layout has no free slot and the task scopes the pane to a mode
+- declined: make the bounded ledger read in `pane-data.ts` take the minimum valid timestamp instead of assuming the first record is the earliest, and use the window start from `resetsAt` only when `windowMinutes` is present; both edge cases (out-of-order appends within a month file, an observation with `resetsAt` but no `windowMinutes`) can make the bounded read differ from a full read, they only affect a display-only pane, and the equality tests do not cover them yet
+- declined: write the bidi control characters in `sanitize-label.ts` and its test as `\u` escapes instead of literal characters (the Trojan Source pattern), and extend the replaced set with U+061C, U+2028/2029, zero-width characters and tag characters; the current set already blocks every terminal-control and line-break vector
+- declined: add a direct `Row`-level test and a lone-surrogate case to the hostile-label render test so the second sanitization layer is pinned; callers already sanitize, so it is defence in depth only
+- declined: run one more load after an in-flight load finishes when the refresh key was pressed meanwhile; today the key press is picked up by the next 15 second tick
