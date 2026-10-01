@@ -84,7 +84,7 @@ import {
 export type ProcessSpawner = (
   command: string,
   args: readonly string[],
-  options: { cwd?: string },
+  options: { cwd?: string; env?: NodeJS.ProcessEnv },
 ) => ChildProcess;
 
 /** Constructor options for `ShellClaudePSpawner`. */
@@ -107,6 +107,12 @@ export interface ShellClaudePSpawnerOptions {
    * Useful for tests + advanced use cases (model override, beta flags).
    */
   extraArgs?: readonly string[];
+  /**
+   * Value of `--permission-mode`. Default `bypassPermissions` (the pipeline's
+   * unattended-subagent contract). Callers that run a sandboxed, read-only
+   * session (reviewer replay) pass a non-bypass mode.
+   */
+  permissionMode?: string;
   /**
    * Per-role model override. Merges with `DEFAULT_MODELS` (the same per-role
    * split `ClaudeCliInlineSpawner` uses: sonnet for dev/code/test, opus for
@@ -138,6 +144,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   private readonly processSpawner: ProcessSpawner;
   private readonly defaultTimeoutMs: number;
   private readonly extraArgs: readonly string[];
+  private readonly permissionMode: string;
   private readonly models: Partial<Record<SubagentType, string>>;
 
   constructor(options: ShellClaudePSpawnerOptions = {}) {
@@ -148,6 +155,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
     this.processSpawner = options.spawn ?? (nodeSpawn as ProcessSpawner);
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.extraArgs = options.extraArgs ?? [];
+    this.permissionMode = options.permissionMode ?? 'bypassPermissions';
     this.models = { ...DEFAULT_MODELS, ...(options.models ?? {}) };
   }
 
@@ -171,7 +179,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       '--output-format',
       'json',
       '--permission-mode',
-      'bypassPermissions',
+      this.permissionMode,
       '--agent',
       opts.type,
       ...modelArgv,

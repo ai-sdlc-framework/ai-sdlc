@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -8,17 +9,20 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readModelCalls, recordModelCall, type ModelCallRecord } from '@ai-sdlc/reference';
 import {
   appendReviewLedgerRecord,
   type ReviewLedgerRecord,
 } from '../attestation/reviews-ledger.js';
 import { buildUsageCli } from '../cli/usage.js';
+import type { ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 import { buildCorpus, labelRecords, readCorpus, type CorpusFile } from './replay-corpus.js';
 import {
@@ -29,9 +33,19 @@ import {
   isCommitId,
   isSafeRef,
   mergeBaseOf,
-  withTempWorktree,
+  isReplayWorktreeCwd,
+  REPLAY_HOLDER_PREFIX,
+  sweepStaleReplayHolders,
+  withReplayClone,
 } from './replay-git.js';
+import { isUnderAiSdlc } from './replay-commands.js';
 import { estimateUnitsPerReview } from './replay-report.js';
+import {
+  checkSandboxSupport,
+  killTrackedChildren,
+  trackedChildCount,
+  trackedSpawner,
+} from './replay-sandbox.js';
 import { isOffPeakNow, nextOffPeakStart, parseOffPeakWindow } from './replay-schedule.js';
 import {
   interleaveByLabel,
@@ -42,6 +56,8 @@ import {
 } from './replay-run.js';
 import { deriveUnitWeights } from './units.js';
 import { defaultUsageConfig } from './usage-config.js';
+
+vi.setConfig({ testTimeout: 60_000 });
 
 const GIT_ENV = {
   ...process.env,
@@ -117,19 +133,19 @@ beforeEach(() => {
 
   // known-defect: blocked at iteration 1, approved at iteration 2.
   for (const t of ['D1', 'D2', 'D3']) {
-    appendReviewLedgerRecord(rec(`T-${t}`, sha[t] as string, 1, 'rejected', ['major']), repo);
-    appendReviewLedgerRecord(rec(`T-${t}`, sha.D1fix as string, 2, 'approved'), repo);
+    appendReviewLedgerRecord(rec(`T${t}-1`, sha[t] as string, 1, 'rejected', ['major']), repo);
+    appendReviewLedgerRecord(rec(`T${t}-1`, sha.D1fix as string, 2, 'approved'), repo);
   }
   // clean: approved first pass.
   for (const t of ['C1', 'C2']) {
-    appendReviewLedgerRecord(rec(`T-${t}`, sha[t] as string, 1, 'approved'), repo);
+    appendReviewLedgerRecord(rec(`T${t}-1`, sha[t] as string, 1, 'approved'), repo);
   }
   // blocked and never approved later
-  appendReviewLedgerRecord(rec('T-U1', sha.U1 as string, 1, 'rejected', ['critical']), repo);
+  appendReviewLedgerRecord(rec('TU1-1', sha.U1 as string, 1, 'rejected', ['critical']), repo);
   // other role: clean security review
-  appendReviewLedgerRecord(rec('T-S1', sha.S1 as string, 1, 'approved', [], 'security'), repo);
+  appendReviewLedgerRecord(rec('TS1-1', sha.S1 as string, 1, 'approved', [], 'security'), repo);
   // commit that does not exist in the repository
-  appendReviewLedgerRecord(rec('T-X1', 'deadbeef'.repeat(5), 1, 'approved'), repo);
+  appendReviewLedgerRecord(rec('TX1-1', 'deadbeef'.repeat(5), 1, 'approved'), repo);
 
   mkdirSync(join(repo, '.ai-sdlc', 'transcript-leaves'), { recursive: true });
   mkdirSync(join(repo, '.ai-sdlc', 'verdicts'), { recursive: true });
@@ -201,6 +217,45 @@ function makeSpawner(spawned: Spawned[], opts: { throws?: boolean; noUsage?: boo
   return create;
 }
 
+const INSTALLED_HELP = [
+  '  --permission-mode <mode>  (choices: "acceptEdits", "dontAsk", "plan")',
+  '  --permission-prompts <target>  who answers',
+  '  --setting-sources <sources>  Comma-separated list',
+  '  --strict-mcp-config  Only use MCP servers from --mcp-config',
+  '  --tools <tools...>  Specify the list of available tools',
+  '  --disallowedTools, --disallowed-tools <tools...>  deny',
+  '  --disable-slash-commands  Disable all skills',
+  '  --no-session-persistence  Disable session persistence',
+].join('\n');
+
+interface ProcCall {
+  cmd: string;
+  args: string[];
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv };
+}
+
+function fakeProc(calls: ProcCall[]): ProcessSpawner {
+  return (cmd, args, opts) => {
+    calls.push({ cmd, args: [...args], opts });
+    const child = new EventEmitter() as ChildProcess;
+    (child as unknown as { stdout: EventEmitter }).stdout = new EventEmitter();
+    (child as unknown as { stderr: EventEmitter }).stderr = new EventEmitter();
+    child.kill = (() => true) as ChildProcess['kill'];
+    setImmediate(() => {
+      (child.stdout as unknown as EventEmitter).emit(
+        'data',
+        JSON.stringify({
+          type: 'result',
+          result: JSON.stringify({ approved: true, findings: [] }),
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }),
+      );
+      child.emit('close', 0, null);
+    });
+    return child;
+  };
+}
+
 async function run(
   args: string[],
   extra: Record<string, unknown> = {},
@@ -208,7 +263,12 @@ async function run(
   let out = '';
   let err = '';
   let exit = 0;
-  await buildUsageCli(args, {
+  const argv =
+    args[0] === 'replay' && !args.includes('--dry-run') && !extra.noConfirm
+      ? [...args, '--confirm-spend']
+      : args;
+  delete extra.noConfirm;
+  await buildUsageCli(argv, {
     stdout: (t) => void (out += t),
     stderr: (t) => void (err += t),
     setExitCode: (c) => void (exit = c),
@@ -245,17 +305,17 @@ describe('labelRecords', () => {
     const a = 'a'.repeat(40);
     const b = 'b'.repeat(40);
     const { candidates, skipped } = labelRecords([
-      rec('K', a, 1, 'rejected', ['major']),
-      rec('K', b, 2, 'approved'),
-      rec('C', a, 1, 'approved', ['minor']),
-      rec('N', a, 1, 'rejected', ['critical']),
-      rec('M', a, 1, 'rejected', ['minor']),
-      rec('M', a, 1, 'rejected', ['minor']),
-      { ...rec('Z', 'not-a-sha', 1, 'approved') },
+      rec('K-1', a, 1, 'rejected', ['major']),
+      rec('K-1', b, 2, 'approved'),
+      rec('C-1', a, 1, 'approved', ['minor']),
+      rec('N-1', a, 1, 'rejected', ['critical']),
+      rec('M-1', a, 1, 'rejected', ['minor']),
+      rec('M-1', a, 1, 'rejected', ['minor']),
+      { ...rec('Z-1', 'not-a-sha', 1, 'approved') },
     ]);
     expect(candidates.map((c) => `${c.taskId}:${c.label}`).sort()).toEqual([
-      'C:clean',
-      'K:known-defect',
+      'C-1:clean',
+      'K-1:known-defect',
     ]);
     expect(skipped).toMatchObject({
       'not-resolved': 1,
@@ -268,9 +328,9 @@ describe('labelRecords', () => {
   it('does not treat a later iteration as approved when another reviewer still blocks', () => {
     const a = 'a'.repeat(40);
     const { candidates, skipped } = labelRecords([
-      rec('K', a, 1, 'rejected', ['major']),
-      rec('K', 'b'.repeat(40), 2, 'approved'),
-      rec('K', 'b'.repeat(40), 2, 'rejected', ['major'], 'security'),
+      rec('K-1', a, 1, 'rejected', ['major']),
+      rec('K-1', 'b'.repeat(40), 2, 'approved'),
+      rec('K-1', 'b'.repeat(40), 2, 'rejected', ['major'], 'security'),
     ]);
     expect(candidates).toEqual([]);
     expect(skipped['not-resolved']).toBe(2);
@@ -282,12 +342,12 @@ describe('replay-corpus build', () => {
     const corpus = await buildCorpusViaCli();
     const byTask = Object.fromEntries(corpus.items.map((i) => [`${i.taskId}:${i.role}`, i.label]));
     expect(byTask).toEqual({
-      'T-D1:code': 'known-defect',
-      'T-D2:code': 'known-defect',
-      'T-D3:code': 'known-defect',
-      'T-C1:code': 'clean',
-      'T-C2:code': 'clean',
-      'T-S1:security': 'clean',
+      'TD1-1:code': 'known-defect',
+      'TD2-1:code': 'known-defect',
+      'TD3-1:code': 'known-defect',
+      'TC1-1:code': 'clean',
+      'TC2-1:code': 'clean',
+      'TS1-1:security': 'clean',
     });
     // iteration-2 approvals (3), the unresolved block (1) and the unreachable commit (1).
     expect(corpus.skipped['not-first-pass-clean']).toBe(3);
@@ -326,7 +386,7 @@ describe('replay-corpus build', () => {
 
   it('counts a commit with no merge base as unreachable', async () => {
     const c = await buildCorpus({
-      records: [rec('T-D1', sha.D1 as string, 1, 'approved')],
+      records: [rec('TD1-1', sha.D1 as string, 1, 'approved')],
       git: createGit(),
       repoRoot: repo,
       baseRef: 'no-such-branch',
@@ -545,8 +605,9 @@ describe('replay', () => {
     expect(activeWorktreeCount()).toBe(0);
   });
 
-  it('sweeps its worktree when the spawner throws and the run continues', async () => {
+  it('sweeps its clone when the spawner throws and the run continues', async () => {
     await buildCorpusViaCli();
+    const aiSdlcBefore = snapshot(join(repo, '.ai-sdlc'));
     const spawned: Spawned[] = [];
     const r = await run(
       [
@@ -567,6 +628,7 @@ describe('replay', () => {
     expect(r.out).toContain('5 error(s) not scored');
     expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('ai-sdlc-replay-');
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(snapshot(join(repo, '.ai-sdlc'))).toBe(aiSdlcBefore);
   });
 
   it('reports reviews that carry no token counts instead of inventing units', async () => {
@@ -589,12 +651,34 @@ describe('replay', () => {
     expect(await usageRecords()).toHaveLength(0);
   });
 
+  it('stops the run with a warning when a review reports no token counts', async () => {
+    await buildCorpusViaCli();
+    const spawned: Spawned[] = [];
+    const r = await run(
+      [
+        'replay',
+        '--role',
+        'code',
+        '--model',
+        'cand-model',
+        '--max-items',
+        '10',
+        '--max-units',
+        '1000000',
+      ],
+      { createSpawner: makeSpawner(spawned, { noUsage: true }) },
+    );
+    expect(spawned).toHaveLength(1);
+    expect(r.err).toContain('--max-units cannot be enforced; stopping the run');
+    expect(r.out).toContain('no token counts, so --max-units could not be enforced');
+  });
+
   it('skips an unreachable commit, counts it, and keeps going', async () => {
     await buildCorpusViaCli();
     const path = join(artifacts, 'replay', 'corpus.json');
     const corpus = JSON.parse(readFileSync(path, 'utf8')) as CorpusFile;
     corpus.items.unshift({
-      taskId: 'T-GONE',
+      taskId: 'TGONE-1',
       role: 'code',
       commitSha: 'c'.repeat(40),
       mergeBase: 'd'.repeat(40),
@@ -664,7 +748,7 @@ describe('replay', () => {
     expect(created).toBe(0);
     expect(r.exit).toBe(0);
     expect(r.out).toContain('Dry run: no model is called. 3 of 5 corpus item(s)');
-    expect(r.out).toContain('T-D1');
+    expect(r.out).toContain('TD1-1');
     expect(r.out).toContain('Estimate: about 3,000 units');
     expect(r.out).toContain('over 2 review(s) on record');
     expect(await usageRecords()).toHaveLength(2);
@@ -804,7 +888,329 @@ describe('replay', () => {
   });
 });
 
-describe('temporary worktrees', () => {
+describe('replay spend gate, sandbox and prompt provenance', () => {
+  const BASE = [
+    'replay',
+    '--role',
+    'code',
+    '--model',
+    'cand-model',
+    '--max-items',
+    '10',
+    '--max-units',
+    '1000000',
+  ];
+
+  function recordReviewerUsage(): void {
+    const repoName = repo.split('/').pop() as string;
+    for (const taskId of ['AISDLC-1', 'AISDLC-2']) {
+      recordModelCall(
+        {
+          provider: 'anthropic',
+          model: 'cand-model',
+          tokens: { input: 1000 },
+          agentRole: 'ai-sdlc:code-reviewer',
+          scope: 'framework',
+          repo: repoName,
+          taskId,
+          ts: '2026-09-20T00:00:00Z',
+        },
+        { dir: usageDir },
+      );
+    }
+  }
+
+  it('refuses a real run without --confirm-spend and calls no model', async () => {
+    await buildCorpusViaCli();
+    const spawned: Spawned[] = [];
+    let created = 0;
+    const inner = makeSpawner(spawned);
+    const r = await run(BASE, {
+      noConfirm: true,
+      createSpawner: (o: Parameters<SpawnerFactory>[0]) => {
+        created++;
+        return inner(o);
+      },
+    });
+    expect(r.exit).toBe(1);
+    expect(r.err).toContain('--confirm-spend');
+    expect(r.out).toContain('Spend cap');
+    expect(created).toBe(0);
+    expect(spawned).toHaveLength(0);
+    expect(await usageRecords()).toHaveLength(0);
+  });
+
+  it('prints the capped cost before the first model call, bounded by --max-units', async () => {
+    await buildCorpusViaCli();
+    recordReviewerUsage();
+    const events: string[] = [];
+    const spawned: Spawned[] = [];
+    const inner = makeSpawner(spawned);
+    const wrap: SpawnerFactory = (o) => {
+      const sp = inner(o);
+      return {
+        spawn: async (x) => {
+          events.push('spawn');
+          return sp.spawn(x);
+        },
+        spawnParallel: (l) => sp.spawnParallel(l),
+      };
+    };
+    const r = await run(
+      [
+        'replay',
+        '--role',
+        'code',
+        '--model',
+        'cand-model',
+        '--max-items',
+        '3',
+        '--max-units',
+        '2000',
+      ],
+      { createSpawner: wrap, stdout: (t: string) => void events.push(`out:${t}`) },
+    );
+    expect(r.exit).toBe(0);
+    const cap = events.findIndex((e) => e.startsWith('out:Spend cap'));
+    const firstSpawn = events.indexOf('spawn');
+    expect(cap).toBe(0);
+    expect(firstSpawn).toBeGreaterThan(cap);
+    // 3 items x 1 model x 1000 units = 3000, bounded by --max-units 2000.
+    expect(events[cap]).toContain('about 2,000 units');
+    expect(events[cap]).toContain('3 item(s) x 1 model(s)');
+  });
+
+  it('says there is no estimate when no usage is on record', async () => {
+    await buildCorpusViaCli();
+    const r = await run(BASE, { createSpawner: makeSpawner([]) });
+    expect(r.out).toContain('up to 1,000,000 units (--max-units)');
+  });
+
+  it('fails closed when the installed claude lacks the sandbox flags: no spawn at all', async () => {
+    await buildCorpusViaCli();
+    const procs: ProcCall[] = [];
+    const r = await run(BASE, {
+      claudeHelp: async () =>
+        'Usage: claude [options]\n  --permission-mode <mode>  (bypassPermissions)\n',
+      processSpawn: fakeProc(procs),
+    });
+    expect(r.exit).toBe(1);
+    expect(r.err).toContain('Refusing to replay');
+    expect(r.err).toContain('--setting-sources');
+    expect(procs).toHaveLength(0);
+    expect(await usageRecords()).toHaveLength(0);
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('fails closed when claude cannot be run at all', async () => {
+    await buildCorpusViaCli();
+    const procs: ProcCall[] = [];
+    const r = await run(BASE, { claudeHelp: async () => '', processSpawn: fakeProc(procs) });
+    expect(r.exit).toBe(1);
+    expect(r.err).toContain('Refusing to replay');
+    expect(procs).toHaveLength(0);
+  });
+
+  it('runs the real spawner argv sandboxed: read-only tools, no bypass, no MCP, user settings only', async () => {
+    await buildCorpusViaCli();
+    const procs: ProcCall[] = [];
+    const r = await run(
+      [
+        'replay',
+        '--role',
+        'code',
+        '--model',
+        'cand-model',
+        '--max-items',
+        '1',
+        '--max-units',
+        '100000',
+      ],
+      { claudeHelp: async () => INSTALLED_HELP, processSpawn: fakeProc(procs) },
+    );
+    expect(r.exit).toBe(0);
+    expect(procs).toHaveLength(1);
+    const argv = (procs[0] as ProcCall).args;
+    expect(argv).not.toContain('bypassPermissions');
+    expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('dontAsk');
+    expect(argv).toContain('--tools=Read,Grep,Glob');
+    expect(argv).toContain('--setting-sources=user');
+    expect(argv).toContain('--strict-mcp-config');
+    expect(argv).toContain('--permission-prompts=none');
+    expect(argv).toContain('--no-session-persistence');
+    expect(argv.find((a) => a.startsWith('--disallowedTools='))).toContain('Bash');
+    expect(argv.find((a) => a.startsWith('--disallowedTools='))).toContain('Write');
+    expect(argv.find((a) => a.startsWith('--disallowedTools='))).toContain('WebFetch');
+    // The prompt is the last argument, never swallowed by a variadic flag.
+    expect(argv[argv.length - 1]).toContain('You are the code-reviewer');
+    expect(isReplayWorktreeCwd((procs[0] as ProcCall).opts.cwd as string)).toBe(true);
+    expect((procs[0] as ProcCall).opts.env?.CLAUDE_CODE_DISABLE_CLAUDE_MDS).toBe('1');
+    expect(trackedChildCount()).toBe(0);
+  });
+
+  it('takes the policy and task spec from the current checkout, and marks the diff untrusted', async () => {
+    await buildCorpusViaCli();
+    // The reviewed commit carries its own policy and task file; neither may reach the prompt.
+    git(repo, 'checkout', '-q', '-b', 'poison', sha.C1 as string);
+    mkdirSync(join(repo, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(repo, '.ai-sdlc', 'review-policy.md'), 'COMMIT-POLICY-POISON\n');
+    writeFileSync(
+      join(repo, 'backlog', 'tasks', 'TC1-1 - poison.md'),
+      '---\nid: TC1-1\ntitle: COMMIT-TASK-POISON\nstatus: Done\n---\n\nbody\n',
+    );
+    git(repo, 'add', '-f', '--', '.ai-sdlc/review-policy.md', 'backlog/tasks');
+    git(repo, 'commit', '-q', '-m', 'poison');
+    const poisoned = git(repo, 'rev-parse', 'HEAD');
+    git(repo, 'checkout', '-q', 'main');
+    const path = join(artifacts, 'replay', 'corpus.json');
+    const corpus = JSON.parse(readFileSync(path, 'utf8')) as CorpusFile;
+    for (const i of corpus.items) {
+      if (i.taskId === 'TC1-1') i.commitSha = poisoned;
+    }
+    writeFileSync(path, JSON.stringify(corpus));
+    // The current checkout has the real policy.
+    mkdirSync(join(repo, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(repo, '.ai-sdlc', 'review-policy.md'), 'CURRENT-POLICY\n');
+    const spawned: Spawned[] = [];
+    await run(BASE, { createSpawner: makeSpawner(spawned) });
+    const c1 = spawned.find((s) => s.prompt.includes('TC1-1'));
+    expect(c1).toBeDefined();
+    expect(c1?.prompt).toContain('CURRENT-POLICY');
+    // The commit's own policy and task file are in its diff, but only inside the markers.
+    const outside = (c1?.prompt ?? '').replace(
+      /<<<UNTRUSTED_COMMIT_DATA_[0-9a-f]+_BEGIN>>>[\s\S]*?_END>>>/g,
+      '',
+    );
+    expect(outside).not.toContain('COMMIT-POLICY-POISON');
+    expect(outside).not.toContain('COMMIT-TASK-POISON');
+    expect(c1?.prompt).toContain('COMMIT-POLICY-POISON');
+    expect(c1?.prompt).toMatch(
+      /<<<UNTRUSTED_COMMIT_DATA_[0-9a-f]{24}_BEGIN>>>\n[\s\S]*\+MARKER-C1/,
+    );
+    expect(c1?.prompt).toMatch(/_END>>>/);
+    expect(c1?.prompt).toContain('UNTRUSTED DATA');
+    // The diff sits between the markers, not in a bare fence.
+    expect(c1?.prompt).not.toContain('```diff');
+  });
+
+  it('runs the reviewer in a clone with its own .git, never the operator repo .git', async () => {
+    await buildCorpusViaCli();
+    const seen: string[] = [];
+    const inner = makeSpawner([]);
+    const wrap: SpawnerFactory = (o) => {
+      const sp = inner(o);
+      return {
+        spawn: async (x) => {
+          expect(statSync(join(x.cwd, '.git')).isDirectory()).toBe(true);
+          expect(git(x.cwd, 'remote')).toBe('');
+          seen.push(x.cwd);
+          return sp.spawn(x);
+        },
+        spawnParallel: (l) => sp.spawnParallel(l),
+      };
+    };
+    const worktreesBefore = git(repo, 'worktree', 'list', '--porcelain');
+    await run(BASE, { createSpawner: wrap });
+    expect(seen.length).toBe(5);
+    expect(new Set(seen).size).toBe(1);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).toBe(worktreesBefore);
+  });
+
+  it('skips and counts corpus items with an invalid task id', async () => {
+    await buildCorpusViaCli();
+    const path = join(artifacts, 'replay', 'corpus.json');
+    const corpus = JSON.parse(readFileSync(path, 'utf8')) as CorpusFile;
+    corpus.items.push({
+      ...(corpus.items[0] as CorpusFile['items'][number]),
+      taskId: 'x; rm -rf /',
+    });
+    writeFileSync(path, JSON.stringify(corpus));
+    const r = await run(BASE, { createSpawner: makeSpawner([]) });
+    expect(r.exit).toBe(0);
+    expect(r.out).toContain('5 item(s) replayed');
+    expect(r.out + r.err).not.toContain('rm -rf');
+  });
+});
+
+describe('replay corpus: empty diff and task ids', () => {
+  it('skips a reviewed commit that is already on the base ref and counts it', async () => {
+    const onMain = git(repo, 'rev-parse', 'main');
+    appendReviewLedgerRecord(rec('TE1-1', onMain, 1, 'approved'), repo);
+    const c = await buildCorpusViaCli();
+    expect(c.skipped['empty-diff']).toBe(1);
+    expect(c.items.some((i) => i.taskId === 'TE1-1')).toBe(false);
+  });
+
+  it('counts a ledger record with an invalid task id as invalid', () => {
+    const { candidates, skipped } = labelRecords([
+      rec('bad id; x', sha.C1 as string, 1, 'approved'),
+      rec('AISDLC-100.2', sha.C2 as string, 1, 'approved'),
+    ]);
+    expect(skipped['invalid-record']).toBe(1);
+    expect(candidates.map((c) => c.taskId)).toEqual(['AISDLC-100.2']);
+  });
+});
+
+describe('isUnderAiSdlc', () => {
+  it('compares real paths and ignores case on case-insensitive platforms', () => {
+    const root = mkdtempSync(join(tmpdir(), 'replay-ai-'));
+    try {
+      mkdirSync(join(root, '.ai-sdlc'), { recursive: true });
+      symlinkSync(join(root, '.ai-sdlc'), join(root, 'link'));
+      expect(isUnderAiSdlc(join(root, '.ai-sdlc', 'x', 'y.json'), root)).toBe(true);
+      expect(isUnderAiSdlc(join(root, 'link', 'x', 'y.json'), root)).toBe(true);
+      expect(isUnderAiSdlc(join(root, 'artifacts', 'y.json'), root)).toBe(false);
+      expect(isUnderAiSdlc(join(root, '.AI-SDLC', 'y.json'), root, 'darwin')).toBe(true);
+      expect(isUnderAiSdlc(join(root, '.AI-SDLC', 'y.json'), root, 'linux')).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('in-flight replay sessions', () => {
+  it('tracks the child and kills it on demand', () => {
+    const killed: string[] = [];
+    const spawn = trackedSpawner(() => {
+      const child = new EventEmitter() as ChildProcess;
+      child.kill = ((sig?: NodeJS.Signals) =>
+        void killed.push(String(sig)) as unknown as boolean) as ChildProcess['kill'];
+      return child;
+    });
+    const child = spawn('claude', [], {});
+    expect(trackedChildCount()).toBe(1);
+    expect(killTrackedChildren()).toBe(1);
+    expect(killed).toEqual(['SIGKILL']);
+    expect(trackedChildCount()).toBe(0);
+    const again = spawn('claude', [], {});
+    again.emit('close', 0, null);
+    expect(trackedChildCount()).toBe(0);
+    void child;
+  });
+
+  it('passes the sandbox environment to the child', () => {
+    let env: NodeJS.ProcessEnv | undefined;
+    const spawn = trackedSpawner((_c, _a, o) => {
+      env = o.env;
+      return new EventEmitter() as ChildProcess;
+    });
+    spawn('claude', [], {});
+    expect(env?.CLAUDE_CODE_DISABLE_CLAUDE_MDS).toBe('1');
+    killTrackedChildren();
+  });
+
+  it('checks the sandbox flags against the help text', () => {
+    expect(checkSandboxSupport(INSTALLED_HELP)).toBeUndefined();
+    expect(checkSandboxSupport('')).toContain('Refusing to replay');
+    expect(checkSandboxSupport(INSTALLED_HELP.replace('dontAsk', 'other'))).toContain('dontAsk');
+    expect(checkSandboxSupport(INSTALLED_HELP.replace('--strict-mcp-config', '--x'))).toContain(
+      '--strict-mcp-config',
+    );
+  });
+});
+
+describe('throwaway clone', () => {
   it('validates ids and refs', () => {
     expect(isCommitId('a'.repeat(40))).toBe(true);
     expect(isCommitId('A'.repeat(40))).toBe(false);
@@ -819,24 +1225,51 @@ describe('temporary worktrees', () => {
   });
 
   it('refuses a value that is not a commit id', async () => {
-    await expect(withTempWorktree(createGit(), repo, '--help', async () => 1)).rejects.toThrow(
-      /not a commit id/,
-    );
+    await expect(
+      withReplayClone(createGit(), repo, async (checkout) => checkout('--help'), { tmpRoot }),
+    ).rejects.toThrow(/not a commit id/);
     expect(await commitExists(createGit(), repo, 'x')).toBe(false);
     expect(await mergeBaseOf(createGit(), repo, 'x', 'main')).toBeUndefined();
+    expect(readdirSync(tmpRoot)).toEqual([]);
   });
 
-  it('removes the worktree when the callback throws', async () => {
+  it('is a separate clone: own .git directory, no remote, hooks off, operator repo untouched', async () => {
+    const worktreesBefore = git(repo, 'worktree', 'list', '--porcelain');
+    let seen = '';
+    await withReplayClone(
+      createGit(),
+      repo,
+      async (checkout) => {
+        const wt = await checkout(sha.D1 as string);
+        seen = wt;
+        expect(existsSync(join(wt, 'D1.txt'))).toBe(true);
+        expect(statSync(join(wt, '.git')).isDirectory()).toBe(true);
+        expect(git(wt, 'remote')).toBe('');
+        expect(git(wt, 'config', 'core.hooksPath')).toBe('/dev/null');
+        expect(git(wt, 'rev-parse', 'HEAD')).toBe(sha.D1);
+        expect(isReplayWorktreeCwd(wt)).toBe(true);
+        expect(activeWorktreeCount()).toBe(1);
+        // A second commit replaces the first; nothing from the first remains.
+        const wt2 = await checkout(sha.D2 as string);
+        expect(wt2).toBe(wt);
+        expect(existsSync(join(wt, 'D1.txt'))).toBe(false);
+        expect(existsSync(join(wt, 'D2.txt'))).toBe(true);
+      },
+      { tmpRoot },
+    );
+    expect(existsSync(seen)).toBe(false);
+    expect(git(repo, 'worktree', 'list', '--porcelain')).toBe(worktreesBefore);
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('removes the clone when the callback throws', async () => {
     let seen = '';
     await expect(
-      withTempWorktree(
+      withReplayClone(
         createGit(),
         repo,
-        sha.D1 as string,
-        async (wt) => {
-          seen = wt;
-          expect(existsSync(join(wt, 'D1.txt'))).toBe(true);
-          expect(activeWorktreeCount()).toBe(1);
+        async (checkout) => {
+          seen = await checkout(sha.D1 as string);
           throw new Error('boom');
         },
         { tmpRoot },
@@ -844,19 +1277,17 @@ describe('temporary worktrees', () => {
     ).rejects.toThrow('boom');
     expect(existsSync(seen)).toBe(false);
     expect(readdirSync(tmpRoot)).toEqual([]);
-    expect(git(repo, 'worktree', 'list', '--porcelain')).not.toContain('ai-sdlc-replay-');
   });
 
-  it('sweeps live worktrees synchronously, as a signal handler does', async () => {
+  it('sweeps live clones synchronously, as a signal handler does', async () => {
     let seen = '';
-    await withTempWorktree(
+    await withReplayClone(
       createGit(),
       repo,
-      sha.D1 as string,
-      async (wt) => {
-        seen = wt;
+      async (checkout) => {
+        seen = await checkout(sha.D1 as string);
         expect(cleanupActiveWorktreesSync()).toBe(1);
-        expect(existsSync(wt)).toBe(false);
+        expect(existsSync(seen)).toBe(false);
       },
       { tmpRoot },
     );
@@ -866,10 +1297,45 @@ describe('temporary worktrees', () => {
 
   it('fails cleanly when the commit cannot be checked out', async () => {
     await expect(
-      withTempWorktree(createGit(), repo, 'e'.repeat(40), async () => 1, { tmpRoot }),
-    ).rejects.toThrow(/temporary worktree/);
+      withReplayClone(createGit(), repo, async (checkout) => checkout('e'.repeat(40)), { tmpRoot }),
+    ).rejects.toThrow(/check the commit out/);
     expect(readdirSync(tmpRoot)).toEqual([]);
     expect(activeWorktreeCount()).toBe(0);
+  });
+
+  it('fails cleanly when the clone cannot be made', async () => {
+    await expect(
+      withReplayClone(createGit(), join(tmpRoot, 'not-a-repo'), async () => 1, { tmpRoot }),
+    ).rejects.toThrow(/throwaway clone/);
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('matches only replay checkout directories', () => {
+    expect(isReplayWorktreeCwd(`/tmp/${REPLAY_HOLDER_PREFIX}abc123/wt`)).toBe(true);
+    expect(isReplayWorktreeCwd(`/private/var/f/${REPLAY_HOLDER_PREFIX}abc123/wt/src`)).toBe(true);
+    expect(isReplayWorktreeCwd(`C:\\Temp\\${REPLAY_HOLDER_PREFIX}abc123\\wt`)).toBe(true);
+    expect(isReplayWorktreeCwd(`/tmp/${REPLAY_HOLDER_PREFIX}abc123`)).toBe(false);
+    expect(isReplayWorktreeCwd(`/tmp/${REPLAY_HOLDER_PREFIX}abc123/wtx`)).toBe(false);
+    expect(isReplayWorktreeCwd('/home/me/work/wt')).toBe(false);
+  });
+
+  it('sweeps stale holders only inside the OS temp directory', () => {
+    const old = join(tmpRoot, `${REPLAY_HOLDER_PREFIX}old`);
+    const fresh = join(tmpRoot, `${REPLAY_HOLDER_PREFIX}fresh`);
+    const other = join(tmpRoot, 'unrelated-dir');
+    for (const d of [old, fresh, other]) mkdirSync(join(d, 'wt'), { recursive: true });
+    const now = Date.now();
+    const sevenHoursAgo = new Date(now - 7 * 3600_000);
+    utimesSync(old, sevenHoursAgo, sevenHoursAgo);
+    utimesSync(other, sevenHoursAgo, sevenHoursAgo);
+    // Not the OS temp directory: refuses.
+    expect(sweepStaleReplayHolders({ root: tmpRoot, osTmpdir: tmpdir(), now })).toBe(0);
+    expect(existsSync(old)).toBe(true);
+    // The OS temp directory: removes only the stale holder with the prefix.
+    expect(sweepStaleReplayHolders({ root: tmpRoot, osTmpdir: tmpRoot, now })).toBe(1);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(other)).toBe(true);
   });
 });
 

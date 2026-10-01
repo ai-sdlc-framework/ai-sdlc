@@ -7,11 +7,12 @@
  * @module usage/replay-commands
  */
 
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { readModelCalls, readPriceHistory, type ModelCallRecord } from '@ai-sdlc/reference';
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
-import { ShellClaudePSpawner } from '../runtime/shell-claude-p-spawner.js';
+import { ShellClaudePSpawner, type ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 import type { Runner } from '../runtime/exec.js';
 import { repoNameFor } from './attribution.js';
 import {
@@ -22,7 +23,21 @@ import {
   writeJsonAtomic,
   REPLAY_ROLES,
 } from './replay-corpus.js';
-import { cleanupActiveWorktreesSync, createGit, isSafeRef, type Git } from './replay-git.js';
+import {
+  cleanupActiveWorktreesSync,
+  createGit,
+  isSafeRef,
+  sweepStaleReplayHolders,
+  type Git,
+} from './replay-git.js';
+import {
+  checkSandboxSupport,
+  killTrackedChildren,
+  readClaudeHelp,
+  SANDBOX_ARGS,
+  SANDBOX_PERMISSION_MODE,
+  trackedSpawner,
+} from './replay-sandbox.js';
 import { estimateUnitsPerReview, renderDryRun } from './replay-report.js';
 import {
   isOffPeakNow,
@@ -56,23 +71,95 @@ export interface ReplayDeps extends UsageViewDeps {
   createSpawner?: SpawnerFactory;
   /** Directory temporary worktrees are created under (tests). */
   tmpRoot?: string;
-  /** Install SIGINT/SIGTERM handlers that remove temporary worktrees. Default true. */
+  /** Install SIGINT/SIGTERM handlers that kill the session and remove the clone. Default true. */
   handleSignals?: boolean;
+  /** Help text of the installed claude CLI, for the sandbox check (tests). */
+  claudeHelp?: () => Promise<string>;
+  /** Process spawner behind the default reviewer spawner (tests). */
+  processSpawn?: ProcessSpawner;
 }
 
 const DEFAULT_BASE_REF = 'origin/main';
 
-function defaultSpawner(): SpawnerFactory {
-  return ({ model, type }) => new ShellClaudePSpawner({ models: { [type]: model } });
+/**
+ * The production reviewer spawner. It is sandboxed: read-only tools, no MCP, no
+ * project settings, no bypassPermissions (see replay-sandbox.ts).
+ */
+function sandboxedSpawner(processSpawn?: ProcessSpawner): SpawnerFactory {
+  return ({ model, type }) =>
+    new ShellClaudePSpawner({
+      models: { [type]: model },
+      permissionMode: SANDBOX_PERMISSION_MODE,
+      extraArgs: SANDBOX_ARGS,
+      spawn: trackedSpawner(processSpawn),
+    });
 }
+
+const REPLAY_HELP = [
+  'Cost: a replay spends real model usage. It refuses to run without --confirm-spend and prints',
+  'the capped unit cost (items x mean units per review on record, bounded by --max-units) first.',
+  '--dry-run needs no flag and calls no model.',
+  '',
+  'Sandbox: each review runs `claude -p` with read-only tools only (Read, Grep, Glob), no MCP,',
+  'only user-level settings, no slash commands, no session transcript, permission mode dontAsk',
+  'and prompts denied. It never uses bypassPermissions. If the installed claude lacks any of',
+  'these flags the command refuses to run. The commit is checked out in a throwaway local clone',
+  '(its own .git, no remote, hooks off, LFS and user git config off), never a linked worktree.',
+  'Only the diff comes from the replayed commit, and it is marked untrusted in the prompt; the',
+  'review policy and task spec come from your current checkout.',
+  'Residual risk: the session is a model reading untrusted code with read-only tools. A',
+  'malicious diff could still try to mislead the verdict or ask the model to echo file contents',
+  'it can read inside the clone; CLAUDE.md loading is disabled by environment variable only.',
+  '',
+  'Labels: known-defect means a reviewer role recorded a critical or major finding on that',
+  'commit and a later iteration of the same task was approved by every recorded reviewer with',
+  'no critical or major finding. This is an inference from the ledger, not proof the finding',
+  'was a real defect or that the later change fixed it. clean means approved on the first pass.',
+].join('\n');
+
+const CORPUS_HELP = [
+  'Labels: known-defect means a reviewer role recorded a critical or major finding on that',
+  'commit and a later iteration of the same task was approved by every recorded reviewer with',
+  'no critical or major finding. This is an inference from the ledger, not proof the finding',
+  'was a real defect or that the later change fixed it. clean means approved on the first pass',
+  'with no critical or major finding. Commits already on the base ref (empty diff) are skipped.',
+  'The corpus is built from this checkout only.',
+].join('\n');
 
 function artifactsDirFor(deps: ReplayDeps, repoRoot: string): string {
   return deps.artifactsDir ?? process.env.ARTIFACTS_DIR ?? resolve(repoRoot, 'artifacts');
 }
 
-/** True when `path` is the repository's `.ai-sdlc` directory or inside it. */
-function isUnderAiSdlc(path: string, repoRoot: string): boolean {
-  const rel = relative(join(repoRoot, '.ai-sdlc'), resolve(path));
+/** Real path of the deepest existing ancestor of `path`, with the missing tail re-appended. */
+function realDeepest(path: string): string {
+  const full = resolve(path);
+  let cur = full;
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...[...tail].reverse());
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return full;
+      tail.push(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+/**
+ * True when `path` is the repository's `.ai-sdlc` directory or inside it,
+ * compared by real path (so a symlinked parent does not hide it) and without
+ * regard to case on case-insensitive file systems.
+ */
+export function isUnderAiSdlc(
+  path: string,
+  repoRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const fold = (p: string): string =>
+    platform === 'darwin' || platform === 'win32' ? p.toLowerCase() : p;
+  const rel = relative(fold(realDeepest(join(repoRoot, '.ai-sdlc'))), fold(realDeepest(path)));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
@@ -102,6 +189,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             'Label reviewed commits from the reviews ledger and write the corpus file',
             (b) =>
               b
+                .epilog(CORPUS_HELP)
                 .option('base-ref', {
                   type: 'string',
                   default: DEFAULT_BASE_REF,
@@ -187,7 +275,13 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             array: true,
             default: [] as string[],
             description: 'Off-peak window, TZ@HH-HH or TZ@HH-HH@Day,Day (repeatable)',
-          }),
+          })
+          .option('confirm-spend', {
+            type: 'boolean',
+            default: false,
+            description: 'Authorize the printed capped unit cost; required for a real run',
+          })
+          .epilog(REPLAY_HELP),
       async (argv) => {
         const repoRoot = repoRootOf();
         const role = argv.role;
@@ -294,10 +388,42 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           }
         }
 
+        // Cost gate: say what a run is allowed to spend, then refuse without an explicit flag.
+        const shown = Math.min(maxItems, items.length);
+        const mean = estimateUnitsPerReview(records, role, weights).meanUnitsPerReview;
+        const estimated = mean === null ? null : mean * shown * models.length;
+        const cap = estimated === null ? maxUnits : Math.min(maxUnits, estimated);
+        const costLine =
+          estimated === null
+            ? `Spend cap: up to ${maxUnits.toLocaleString('en-US')} units (--max-units); no reviewer ` +
+              `usage is on record, so there is no estimate. ${shown} item(s) x ${models.length} model(s).\n`
+            : `Spend cap: about ${Math.round(cap).toLocaleString('en-US')} units ` +
+              `(${shown} item(s) x ${models.length} model(s) x mean ${Math.round(mean as number).toLocaleString('en-US')} ` +
+              `units per review, bounded by --max-units ${maxUnits.toLocaleString('en-US')}).\n`;
+        io.out(costLine);
+        if (!argv['confirm-spend']) {
+          fail(io, 'Refusing to spend model usage without --confirm-spend. No model was called.');
+          return;
+        }
+
+        // Fail closed: the production spawner needs every sandbox flag the CLI must support.
+        const injected = deps.createSpawner;
+        if (!injected) {
+          const refusal = checkSandboxSupport(
+            await (deps.claudeHelp ?? (() => readClaudeHelp(deps.runner)))(),
+          );
+          if (refusal) {
+            fail(io, refusal);
+            return;
+          }
+        }
+        sweepStaleReplayHolders();
+
         const runId = runIdFor(now);
         const controller = new AbortController();
         const onSignal = (signal: NodeJS.Signals): void => {
           controller.abort();
+          killTrackedChildren();
           cleanupActiveWorktreesSync();
           // The listener was registered with `once`, so re-raising uses the default action.
           process.removeListener('SIGINT', onSignal);
@@ -320,7 +446,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             repoRoot,
             repoName,
             git: deps.git ?? createGit(deps.runner),
-            createSpawner: deps.createSpawner ?? defaultSpawner(),
+            createSpawner: injected ?? sandboxedSpawner(deps.processSpawn),
             weights,
             usage: { dir: deps.usageDir },
             now: deps.now ?? (() => new Date()),
@@ -335,11 +461,14 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           io.out(renderReplayResults(results));
           io.out(`Wrote ${resultsPath}\n`);
           io.out(`Reviewer type: ${reviewerTypeFor(role)}; usage recorded under task id replay.\n`);
+        } catch (err) {
+          fail(io, `The replay could not complete: ${(err as Error).message}`);
         } finally {
           if (useSignals) {
             process.removeListener('SIGINT', onSignal);
             process.removeListener('SIGTERM', onSignal);
           }
+          killTrackedChildren();
           cleanupActiveWorktreesSync();
         }
       },

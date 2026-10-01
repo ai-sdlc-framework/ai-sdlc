@@ -35,6 +35,7 @@ export const SKIP_REASONS = [
   'duplicate',
   'invalid-record',
   'unreachable',
+  'empty-diff',
 ] as const;
 export type SkipReason = (typeof SKIP_REASONS)[number];
 
@@ -58,6 +59,13 @@ export function emptySkipCounts(): Record<SkipReason, number> {
   return Object.fromEntries(SKIP_REASONS.map((r) => [r, 0])) as Record<SkipReason, number>;
 }
 
+/** Shape of a task id taken from the ledger or the corpus. */
+export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9]*-\d+(?:\.\d+)*$/;
+
+export function isValidTaskId(v: unknown): v is string {
+  return typeof v === 'string' && v.length <= 64 && TASK_ID_PATTERN.test(v);
+}
+
 function isReplayRole(v: unknown): v is ReplayRole {
   return (REPLAY_ROLES as readonly unknown[]).includes(v);
 }
@@ -69,8 +77,7 @@ function blocking(r: ReviewLedgerRecord): boolean {
 function validRecord(r: ReviewLedgerRecord): boolean {
   return (
     !!r &&
-    typeof r.taskId === 'string' &&
-    r.taskId.length > 0 &&
+    isValidTaskId(r.taskId) &&
     typeof r.iteration === 'number' &&
     Number.isInteger(r.iteration) &&
     r.iteration >= 1 &&
@@ -174,6 +181,11 @@ export async function buildCorpus(input: BuildCorpusInput): Promise<CorpusFile> 
       skipped.unreachable++;
       continue;
     }
+    if (base === c.commitSha) {
+      // The commit is already on the base ref, so there is no diff to review.
+      skipped['empty-diff']++;
+      continue;
+    }
     items.push({ ...c, mergeBase: base });
   }
   return {
@@ -220,7 +232,7 @@ export function readCorpus(path: string): CorpusFile | string {
       (i.label === 'known-defect' || i.label === 'clean') &&
       isCommitId(i.commitSha) &&
       isCommitId(i.mergeBase) &&
-      typeof i.taskId === 'string'
+      isValidTaskId(i.taskId)
     ) {
       items.push({
         taskId: i.taskId,

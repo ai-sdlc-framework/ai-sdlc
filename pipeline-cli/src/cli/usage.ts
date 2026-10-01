@@ -7,7 +7,7 @@
  *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
  *   scorecard [--role ...] [--write-evidence d] quality and cost per role, model, task class
  *   replay-corpus build [--base-ref r]          label reviewed commits for reviewer replay
- *   replay --role r --model m --max-items n --max-units n [--dry-run] [--off-peak]
+ *   replay --role r --model m --max-items n --max-units n --confirm-spend [--dry-run] [--off-peak]
  *                                               replay past reviews against a candidate model
  *   snapshot --window <n> --used-pct <p>        record a calibration point
  *   allotment [--window <n>]                    implied allotment series and change detection
@@ -137,6 +137,9 @@ export function renderIngestResult(result: IngestResult): string {
     `Errors:          ${result.errors}`,
     `Limit events:    ${result.limitEvents}`,
   ];
+  if (result.replayTranscriptsSkipped > 0) {
+    lines.push(`Replay transcripts skipped: ${result.replayTranscriptsSkipped}`);
+  }
   if (result.otherScopeSkipped > 0) {
     lines.push(`Other-scope skipped: ${result.otherScopeSkipped}`);
   }
