@@ -372,4 +372,40 @@ describe('CostTracker', () => {
       expect(embEntry!.stageName).toBe('self-hosted');
     });
   });
+
+  describe('judgment cost', () => {
+    it('prices jev-1.13.0 from its own row', () => {
+      expect(CostTracker.isPriced('jev-1.13.0')).toBe(true);
+      expect(CostTracker.computeCost(1_000_000, 500, 'jev-1.13.0')).toBeCloseTo(0.042, 9);
+    });
+
+    it('writes a judgmentTokens row with the column-reuse convention', () => {
+      tracker.recordJudgmentCost({
+        provider: 'jev',
+        modelVersion: 'jev-1.13.0',
+        consumerLabel: 'dor.stage-b',
+        judgmentId: 'dor.stage-b',
+        inputTokens: 2000,
+        costUsd: 0.000084,
+      });
+      const row = store.getCostEntries({}).find((e) => e.pipelineType === 'judgmentTokens')!;
+      expect(row.agentName).toBe('dor.stage-b');
+      expect(row.model).toBe('jev@jev-1.13.0');
+      expect(row.inputTokens).toBe(2000);
+      expect(row.outputTokens).toBe(0);
+      expect(row.costUsd).toBeCloseTo(0.000084, 9);
+    });
+
+    it('computes the cost from the priced row when none is given', () => {
+      tracker.recordJudgmentCost({
+        provider: 'jev',
+        modelVersion: 'jev-1.13.0',
+        consumerLabel: 'x',
+        judgmentId: 'x',
+        inputTokens: 1_000_000,
+      });
+      const row = store.getCostEntries({}).find((e) => e.pipelineType === 'judgmentTokens')!;
+      expect(row.costUsd).toBeCloseTo(0.042, 9);
+    });
+  });
 });

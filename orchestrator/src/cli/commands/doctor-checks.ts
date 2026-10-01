@@ -46,6 +46,13 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  createBuiltInJudgmentProvider,
+  getJudgmentDefinition,
+  isModelAlias,
+  judgmentEnforceDowngradeReason,
+  loadJudgmentConfig,
+} from '@ai-sdlc/reference';
+import {
   buildProductionDoctorAdapters,
   checkAttestationGovernance,
   type DoctorAdapters,
@@ -881,6 +888,103 @@ export function checkUsageIngest(ctx: DoctorRunContext): DoctorCheckResult {
   };
 }
 
+// ── Judgment layer ──────────────────────────────────────────────────────
+
+/**
+ * Audits the judgment layer configuration (`.ai-sdlc/judgment-config.yaml`,
+ * or the file named by `AI_SDLC_JUDGMENT_CONFIG_PATH`). Reads the file in the
+ * working tree, so it reports what you are about to commit; the runtime itself
+ * reads the committed copy on the base branch.
+ *
+ * Conditions: layer disabled (informational), provider key missing, model not
+ * pinned while any judgment is `enforce`, and each `enforce` judgment the
+ * runtime would run as `shadow` (with the reason).
+ */
+export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const { env } = ctx.adapters;
+  const config = loadJudgmentConfig({
+    workDir: ctx.projectDir,
+    env,
+    readLocalFile: (p) => ctx.adapters.readFile(p),
+    readBaseConfig: (dir) => ctx.adapters.readFile(join(dir, '.ai-sdlc', 'judgment-config.yaml')),
+  });
+  if (!config.provider) {
+    return [
+      {
+        id: 'judgment-layer',
+        severity: 'pass',
+        title: 'judgment layer is disabled (no provider configured); every judgment abstains',
+        anonymizableEvidence: { enabled: false },
+      },
+    ];
+  }
+
+  const results: DoctorCheckResult[] = [];
+  const provider = createBuiltInJudgmentProvider(config.provider, { model: config.model });
+  if (!provider) {
+    return [
+      {
+        id: 'judgment-layer',
+        severity: 'warn',
+        title: `judgment provider '${config.provider}' is not built in; every judgment abstains`,
+        remediation: 'Set `spec.provider` to a built-in provider (jev) in the judgment config.',
+        anonymizableEvidence: { providerBuiltIn: false },
+      },
+    ];
+  }
+
+  if (!env[provider.requires.envVar]) {
+    results.push({
+      id: 'judgment-provider-key',
+      severity: 'warn',
+      title: `judgment provider '${provider.name}' is configured but ${provider.requires.envVar} is not set; every judgment abstains`,
+      remediation: `Export ${provider.requires.envVar} in the environment that runs the pipeline.`,
+      anonymizableEvidence: { provider: provider.name, keyPresent: false },
+    });
+  }
+
+  const enforced = Object.entries(config.judgments).filter(
+    ([, j]) => (j.mode ?? config.defaults.mode) === 'enforce',
+  );
+  if (config.defaults.mode === 'enforce' || enforced.length > 0) {
+    if (!config.model || isModelAlias(config.model)) {
+      results.push({
+        id: 'judgment-model-pin',
+        severity: 'warn',
+        title: `judgment model is ${config.model ? `the alias '${config.model}'` : 'not pinned'} while judgments are configured to enforce; they run as shadow`,
+        remediation: 'Set `spec.model` to an exact version such as jev-1.13.0.',
+        anonymizableEvidence: { pinned: false, enforceCount: enforced.length },
+      });
+    }
+  }
+
+  for (const [id] of enforced) {
+    const definition = getJudgmentDefinition(id);
+    const reason = definition
+      ? judgmentEnforceDowngradeReason(definition, config, provider)
+      : 'unknown-judgment';
+    if (reason) {
+      results.push({
+        id: 'judgment-enforce-downgrade',
+        severity: 'warn',
+        title: `judgment '${id}' is configured enforce but the runtime runs it as shadow (${reason})`,
+        remediation:
+          'Add thresholds and a promotion record for this provider and model, or set the judgment to shadow.',
+        anonymizableEvidence: { reason },
+      });
+    }
+  }
+
+  if (results.length === 0) {
+    results.push({
+      id: 'judgment-layer',
+      severity: 'pass',
+      title: `judgment layer enabled (provider ${provider.name}, model ${config.model ?? provider.modelId})`,
+    });
+  }
+  return results;
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -938,6 +1042,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'usage-ingest',
     description: 'Time of the last successful usage ingest (RFC-0050).',
     run: checkUsageIngest,
+  },
+  {
+    id: 'judgment-layer',
+    description:
+      'Judgment layer: disabled state, provider key, model pinning, and enforce judgments the runtime would run as shadow (RFC-0049).',
+    run: checkJudgmentLayer,
   },
 ];
 

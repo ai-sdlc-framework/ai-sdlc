@@ -9,10 +9,11 @@
  * or `npm` process.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { registerJudgmentDefinition, type JudgmentDefinition } from '@ai-sdlc/reference';
 import {
   DOCTOR_CHECKS,
   resolvePluginDir,
@@ -29,6 +30,7 @@ import {
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
   checkUsageIngest,
+  checkJudgmentLayer,
   runDoctorChecks,
   runDoctorFixes,
   summarizeDoctorResults,
@@ -937,6 +939,98 @@ describe('checkUsageIngest', () => {
 
   it('is registered in the check registry', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('usage-ingest');
+  });
+});
+
+// ── Judgment layer ─────────────────────────────────────────────────────
+
+describe('checkJudgmentLayer', () => {
+  const ENFORCED = 'doctor.test-enforced';
+  beforeAll(() => {
+    registerJudgmentDefinition({
+      id: ENFORCED,
+      version: 1,
+      egressClass: 'work-item-text',
+      direction: 'tighten-only',
+      riskClass: 'seam',
+      buildState: () => 'x',
+      questions: () => ({}),
+      compose: () => ({ kind: 'abstain', reason: 'n/a' }),
+    } as JudgmentDefinition<unknown, unknown>);
+  });
+
+  const config = (spec: string) =>
+    `apiVersion: ai-sdlc.io/v1alpha1\nkind: JudgmentConfig\nmetadata:\n  name: t\nspec:\n${spec}`;
+  const ctxWith = (yaml: string | null, env: NodeJS.ProcessEnv = {}) => {
+    if (yaml !== null) {
+      mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(tmpDir, '.ai-sdlc', 'judgment-config.yaml'), yaml);
+    }
+    return makeCtx(makeAdapters({ env }));
+  };
+  const ids = (rs: ReturnType<typeof checkJudgmentLayer>) => rs.map((r) => r.id);
+
+  it('reports the layer as disabled (informational) with no config', () => {
+    const rs = checkJudgmentLayer(ctxWith(null));
+    expect(rs).toHaveLength(1);
+    expect(rs[0].severity).toBe('pass');
+    expect(rs[0].title).toMatch(/disabled/);
+  });
+
+  it('warns when the provider is not built in', () => {
+    const rs = checkJudgmentLayer(ctxWith(config('  provider: mystery\n')));
+    expect(rs[0].severity).toBe('warn');
+    expect(rs[0].title).toMatch(/not built in/);
+  });
+
+  it('warns when the provider key is missing', () => {
+    const rs = checkJudgmentLayer(ctxWith(config('  provider: jev\n  model: jev-1.13.0\n')));
+    expect(ids(rs)).toContain('judgment-provider-key');
+    expect(rs.find((r) => r.id === 'judgment-provider-key')!.severity).toBe('warn');
+  });
+
+  it('warns when the model is not pinned while a judgment is enforce', () => {
+    const yaml = config(
+      `  provider: jev\n  model: jev-latest\n  judgments:\n    ${ENFORCED}:\n      mode: enforce\n`,
+    );
+    const rs = checkJudgmentLayer(ctxWith(yaml, { TYPESAFE_API_KEY: 'k' }));
+    expect(ids(rs)).toContain('judgment-model-pin');
+    expect(ids(rs)).not.toContain('judgment-provider-key');
+    const unpinned = checkJudgmentLayer(
+      ctxWith(config(`  provider: jev\n  defaults:\n    mode: enforce\n`), {
+        TYPESAFE_API_KEY: 'k',
+      }),
+    );
+    expect(unpinned.find((r) => r.id === 'judgment-model-pin')!.title).toMatch(/not pinned/);
+  });
+
+  it('reports an enforce judgment the runtime would downgrade, with the reason', () => {
+    const yaml = config(
+      `  provider: jev\n  model: jev-1.13.0\n  judgments:\n    ${ENFORCED}:\n      mode: enforce\n    unknown.one:\n      mode: enforce\n`,
+    );
+    const rs = checkJudgmentLayer(ctxWith(yaml, { TYPESAFE_API_KEY: 'k' }));
+    const titles = rs.filter((r) => r.id === 'judgment-enforce-downgrade').map((r) => r.title);
+    expect(titles.some((t) => t.includes(ENFORCED) && t.includes('no-thresholds'))).toBe(true);
+    expect(titles.some((t) => t.includes('unknown.one') && t.includes('unknown-judgment'))).toBe(
+      true,
+    );
+  });
+
+  it('passes for an enabled, healthy shadow configuration', () => {
+    const rs = checkJudgmentLayer(
+      ctxWith(config('  provider: jev\n  model: jev-1.13.0\n'), { TYPESAFE_API_KEY: 'k' }),
+    );
+    expect(rs).toHaveLength(1);
+    expect(rs[0].severity).toBe('pass');
+    expect(rs[0].title).toMatch(/enabled/);
+  });
+
+  it('honours AI_SDLC_JUDGMENT=off and is registered', () => {
+    const rs = checkJudgmentLayer(
+      ctxWith(config('  provider: jev\n'), { AI_SDLC_JUDGMENT: 'off' }),
+    );
+    expect(rs[0].title).toMatch(/disabled/);
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('judgment-layer');
   });
 });
 

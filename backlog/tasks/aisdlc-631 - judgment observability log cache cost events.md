@@ -2,7 +2,7 @@
 id: AISDLC-631
 title: >-
   RFC-0049 Phase 2: judgment log, content-addressed cache, cost attribution, events, pipeline-cli context builder, doctor check
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -80,14 +80,14 @@ is the specification. This is also the first per-call latency record in the fram
    judgment configured `enforce` that the runtime would downgrade, with the reason.
 
 ## Acceptance Criteria
-- [ ] One evaluation produces exactly one well-formed JSONL record containing every listed field, and the record does not contain the state text.
-- [ ] An unwritable log directory does not change the evaluation result.
-- [ ] A repeated evaluation with identical provider, pinned model, questions and state is served from the cache: the fake provider sees one request, the second record has `cacheHit` true and `costUsd` 0.
-- [ ] The cache is bypassed when the model is an alias or `defaults.cache` is false.
-- [ ] `costUsd` on a record equals `inputTokens` times the provider's `inputCostPer1MTokens` divided by one million.
-- [ ] `CostTracker.computeCost` for `jev-1.13.0` uses the new row, not the Sonnet fallback, and `recordJudgmentCost` writes a `cost_ledger` row with `pipelineType` `judgmentTokens`.
-- [ ] Both new event types validate against the updated events schema and appear in the type union; the schema test suite passes.
-- [ ] The pipeline-cli context builder returns a usable context with the layer disabled (no config) without throwing, and every evaluation through it abstains.
-- [ ] The doctor check reports each of its four conditions in a hermetic test and is listed in `docs/operations/doctor.md`.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] One evaluation produces exactly one well-formed JSONL record containing every listed field, and the record does not contain the state text.
+- [x] An unwritable log directory does not change the evaluation result.
+- [x] A repeated evaluation with identical provider, pinned model, questions and state is served from the cache: the fake provider sees one request, the second record has `cacheHit` true and `costUsd` 0.
+- [x] The cache is bypassed when the model is an alias or `defaults.cache` is false.
+- [x] `costUsd` on a record equals `inputTokens` times the provider's `inputCostPer1MTokens` divided by one million.
+- [x] `CostTracker.computeCost` for `jev-1.13.0` uses the new row, not the Sonnet fallback, and `recordJudgmentCost` writes a `cost_ledger` row with `pipelineType` `judgmentTokens`.
+- [x] Both new event types validate against the updated events schema and appear in the type union; the schema test suite passes.
+- [x] The pipeline-cli context builder returns a usable context with the layer disabled (no config) without throwing, and every evaluation through it abstains.
+- [x] The doctor check reports each of its four conditions in a hermetic test and is listed in `docs/operations/doctor.md`.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

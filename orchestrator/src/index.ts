@@ -770,7 +770,13 @@ export type {
 
 // Cost tracker
 export { CostTracker } from './cost-tracker.js';
-export type { CostSummary, BudgetStatus, CostTimeSeriesPoint } from './cost-tracker.js';
+export type {
+  CostSummary,
+  BudgetStatus,
+  CostTimeSeriesPoint,
+  JudgmentCostRecord,
+} from './cost-tracker.js';
+export { createJudgmentCostSink } from './judgment-cost-sink.js';
 
 // OTel bridge
 export { createOTelBridge, isOTelAvailable } from './otel-exporter.js';

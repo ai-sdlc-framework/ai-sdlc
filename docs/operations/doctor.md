@@ -57,6 +57,21 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `attestation-governance` | Attestation required-but-unconfigured; branch protection requiring `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration) | `checkAttestationGovernance` (AISDLC-560) |
 | `marketplace-catalog-drift` | Marketplace catalog cache lags the source-of-truth version — the `/plugin` "already at latest" false negative | — |
 | `npm-dist-tag-reachability` | Every `runtimeDependencies` pin actually resolves on the configured npm registry | — |
+| `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
+
+#### `judgment-layer`
+
+Reads the judgment config from the working tree (or the file named by
+`AI_SDLC_JUDGMENT_CONFIG_PATH`; `AI_SDLC_JUDGMENT=off` forces it off) and reports
+four conditions. The runtime itself reads the copy committed on the base branch,
+so run the check after you commit a config change.
+
+| Result id | Severity | Meaning |
+|---|---|---|
+| `judgment-layer` | pass | The layer is disabled (no provider configured) and every judgment abstains. Informational. Also the result when the layer is enabled and healthy. |
+| `judgment-provider-key` | warn | A provider is configured but its API key environment variable (`TYPESAFE_API_KEY` for `jev`) is not set, so every judgment abstains. |
+| `judgment-model-pin` | warn | A judgment is configured `enforce` while `spec.model` is missing or an alias such as `jev-latest`; the runtime runs it as `shadow`. Pin an exact version. |
+| `judgment-enforce-downgrade` | warn | An `enforce` judgment the runtime would run as `shadow`, with the reason (for example `no-thresholds`, `no-promotion`, `model-alias`, `uncalibrated-provider`, or `unknown-judgment`). |
 
 **Deferred to a follow-up** (seed catalog items 4, 5, 6, 8, 9, 10 from the
 AISDLC-578 task body): JSON-schema validation of `.ai-sdlc/agent-role.yaml`
