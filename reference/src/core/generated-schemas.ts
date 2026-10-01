@@ -5210,6 +5210,11 @@ export const modelCallRecordV1Schema = {
     },
     repo: { type: 'string', description: 'Repository name; framework scope only.' },
     taskId: { type: 'string', description: 'Task id; framework scope only.' },
+    breakdownMissing: {
+      type: 'boolean',
+      description:
+        'True when the harness reported only a session total, so the whole total is in tokens.input and the class split is unknown.',
+    },
     source: {
       type: 'object',
       required: ['file', 'offset'],

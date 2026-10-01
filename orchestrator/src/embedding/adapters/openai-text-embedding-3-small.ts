@@ -29,6 +29,7 @@ import type {
 } from '../types.js';
 import { EmbeddingProviderError, EmbeddingDimensionMismatch } from '../errors.js';
 import type { EmbeddingCostRecord } from '../types.js';
+import { reportApiKeyCall } from '../../usage/direct-usage.js';
 
 /** OpenAI /v1/embeddings response shape (subset used here). */
 interface OpenAIEmbeddingsResponse {
@@ -78,8 +79,12 @@ export class OpenAITextEmbedding3Small implements EmbeddingAdapter {
   /** Optional cost-tracking callback. Set by the orchestrator after adapter instantiation. */
   private costCallback?: EmbeddingCostCallback;
 
-  constructor(costCallback?: EmbeddingCostCallback) {
+  /** Usage ledger directory override. Defaults to the machine-level ledger. */
+  private readonly usageDir?: string;
+
+  constructor(costCallback?: EmbeddingCostCallback, options: { usageDir?: string } = {}) {
     this.costCallback = costCallback;
+    this.usageDir = options.usageDir;
   }
 
   /**
@@ -251,6 +256,18 @@ export class OpenAITextEmbedding3Small implements EmbeddingAdapter {
    * No-op when no callback is wired (e.g., in unit tests without a CostTracker).
    */
   private async _recordCost(tokens: number, consumerLabel: string): Promise<void> {
+    // Direct usage report, one per API call, with the token total in `input`.
+    // This adapter calls the embeddings API itself and writes no harness
+    // transcript, so the call cannot also be ingested from one: reporting it
+    // here does not double count. Reported whether or not a cost callback is wired.
+    reportApiKeyCall({
+      provider: 'openai',
+      model: this.modelId,
+      tokens: { input: tokens },
+      agentRole: 'embedding',
+      usageDir: this.usageDir,
+    });
+
     if (!this.costCallback) return;
 
     const accountId = await this.getAccountId();

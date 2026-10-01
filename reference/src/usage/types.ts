@@ -49,6 +49,11 @@ export interface ModelCallRecord {
   repo?: string;
   /** Framework scope only. */
   taskId?: string;
+  /**
+   * True when the harness reported only a session total: the whole total is in
+   * `tokens.input` and the split between token classes is unknown.
+   */
+  breakdownMissing?: boolean;
   /** Omitted for scope 'other'. */
   source?: { file: string; offset: number };
 }
