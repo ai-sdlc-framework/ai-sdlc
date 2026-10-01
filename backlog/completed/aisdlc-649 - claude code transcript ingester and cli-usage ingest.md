@@ -140,7 +140,7 @@ Added the Claude Code transcript ingester (`pipeline-cli/src/usage/`), the `cli-
 - 3 parallel reviews approved after 2 rounds (round 1 found a critical in the hook binary resolution, fixed)
 
 ## Follow-up
-- AISDLC-663 tracks unifying the limit-event writers of this ingester and the Codex ingester.
+- AISDLC-650.1 tracks unifying the limit-event writers of this ingester and the Codex ingester.
 - Declined: not filed by this task; requiring absolute paths for the env-provided binary locations in the usage hook (security review minor) is pending an operator decision.
 - Declined: not filed by this task; a batch cursor read in the reference store (cursors.json is re-parsed per call) is pending an operator decision.
 - Declined: not filed by this task; registering the `usage.ingest` capability in the doctor registry is pending an operator decision.

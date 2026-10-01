@@ -106,5 +106,5 @@ Added a Codex session ingester with rate-limit capture and its own `cli-usage-co
 - 3 parallel reviews approved (Claude-native reviewers); the reviewer leaves carry no transcript binding because the session produced no subagent start markers
 
 ## Follow-up
-- AISDLC-663: fold the Codex ingester into `cli-usage ingest` once the Claude Code ingester lands, and the review findings on limit-event duplication, total-only staleness, direct-reporter lock blocking and size caps.
+- AISDLC-650.1: fold the Codex ingester into `cli-usage ingest` once the Claude Code ingester lands, and the review findings on limit-event duplication, total-only staleness, direct-reporter lock blocking and size caps.
 <!-- SECTION:FINAL_SUMMARY:END -->
