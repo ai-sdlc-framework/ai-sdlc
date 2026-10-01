@@ -5,6 +5,7 @@
  *   ingest [--backfill] [--json]                read Claude Code transcripts into the ledger
  *   report [--group-by ...] [--format ...]      usage by model, role, task, repo, pool, day, window
  *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
+ *   scorecard [--role ...] [--write-evidence d] quality and cost per role, model, task class
  *   snapshot --window <n> --used-pct <p>        record a calibration point
  *   allotment [--window <n>]                    implied allotment series and change detection
  *   prices refresh [--source <name>] [--json]   fetch public price sources
@@ -41,6 +42,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { writeEvent, type OrchestratorEvent } from '../orchestrator/events.js';
 import { emitPriceChanges } from '../orchestrator/price-refresh.js';
+import { registerScorecardCommands, type ScorecardDeps } from '../usage/scorecard-commands.js';
 import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
 import {
   DEFAULT_MAX_SECONDS,
@@ -49,7 +51,8 @@ import {
 } from '../usage/ingest-claude.js';
 
 /** Collaborators, injectable so tests never touch the network, home dir or clock. */
-export interface UsageCliDeps extends UsageViewDeps {
+export interface UsageCliDeps
+  extends UsageViewDeps, Pick<ScorecardDeps, 'repoRoot' | 'artifactsDir' | 'assignmentLogPath'> {
   fetch?: FetchFn;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
@@ -349,6 +352,16 @@ export function buildUsageCli(
         } as OrchestratorEvent);
       }),
   };
+  registerScorecardCommands(
+    cli,
+    {
+      ...viewDeps,
+      repoRoot: deps.repoRoot,
+      artifactsDir: deps.artifactsDir,
+      assignmentLogPath: deps.assignmentLogPath,
+    },
+    io,
+  );
   return registerUsageViewCommands(cli, viewDeps, io)
     .demandCommand(1, 'Specify a command, for example: ingest, report or prices')
     .strict()

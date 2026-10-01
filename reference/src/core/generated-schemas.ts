@@ -8648,6 +8648,12 @@ export const usageConfigV1Schema = {
           description:
             'Minimum model-mix overlap (0 to 1) between two snapshots for the allotment comparison to count. Default 0.8.',
         },
+        scorecardMinTasks: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Tasks a scorecard cell needs before it stops being labelled insufficient. Default 30.',
+        },
       },
     },
   },

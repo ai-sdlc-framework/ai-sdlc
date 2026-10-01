@@ -45,6 +45,8 @@ export interface ResolvedUsageConfig {
   allotmentTolerance: number;
   /** Minimum model-mix overlap for two snapshots to be compared. */
   modelMixSimilarity: number;
+  /** Tasks a scorecard cell needs before it stops being labelled insufficient. */
+  scorecardMinTasks: number;
   source: 'machine' | 'base-ref' | 'defaults';
   warnings: string[];
 }
@@ -53,6 +55,7 @@ export const MACHINE_CONFIG_FILE = 'usage-config.yaml';
 export const BASE_CONFIG_PATH = '.ai-sdlc/usage-config.yaml';
 export const DEFAULT_ALLOTMENT_TOLERANCE = 0.25;
 export const DEFAULT_MODEL_MIX_SIMILARITY = 0.8;
+export const DEFAULT_SCORECARD_MIN_TASKS = 30;
 
 export const DEFAULT_WINDOWS: readonly WindowSpec[] = [
   { name: 'session', lengthHours: 5, mode: 'first-use' },
@@ -65,6 +68,7 @@ export function defaultUsageConfig(warnings: string[] = []): ResolvedUsageConfig
     weights: { tokenClasses: {}, modelFamilies: {} },
     allotmentTolerance: DEFAULT_ALLOTMENT_TOLERANCE,
     modelMixSimilarity: DEFAULT_MODEL_MIX_SIMILARITY,
+    scorecardMinTasks: DEFAULT_SCORECARD_MIN_TASKS,
     source: 'defaults',
     warnings,
   };
@@ -101,6 +105,7 @@ interface RawSpec {
   };
   allotmentTolerance?: number;
   modelMixSimilarity?: number;
+  scorecardMinTasks?: number;
 }
 
 /** Parse and validate one config document. Returns an error string on failure. */
@@ -144,6 +149,7 @@ export function parseUsageConfig(
     },
     allotmentTolerance: spec.allotmentTolerance ?? base.allotmentTolerance,
     modelMixSimilarity: spec.modelMixSimilarity ?? base.modelMixSimilarity,
+    scorecardMinTasks: spec.scorecardMinTasks ?? base.scorecardMinTasks,
     source,
     warnings: [],
   };
