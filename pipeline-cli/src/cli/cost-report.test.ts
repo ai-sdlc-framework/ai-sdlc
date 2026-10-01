@@ -15,8 +15,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { appendModelCalls, type ModelCallRecord } from '@ai-sdlc/reference';
 import {
   buildUnifiedReport,
+  loadUsageLedgerRows,
   convertSubscriptionWindowToCost,
   loadCostLedgerJsonl,
   loadSubscriptionLedgerDir,
@@ -380,6 +382,111 @@ describe('renderCsv', () => {
   });
 });
 
+// ── Usage ledger input ───────────────────────────────────────────────────────
+
+function usageCall(id: string, over: Partial<ModelCallRecord> = {}): ModelCallRecord {
+  return {
+    schemaVersion: 'v1',
+    callId: id,
+    ts: '2026-09-10T10:00:00.000Z',
+    harness: 'claude-code',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tokens: {
+      input: 1_000_000,
+      cacheWrite5m: 0,
+      cacheWrite1h: 0,
+      cacheRead: 2_000_000,
+      output: 100_000,
+    },
+    billingPool: 'subscription-interactive',
+    sessionId: 's',
+    agentRole: 'main-session',
+    scope: 'framework',
+    ...over,
+  };
+}
+
+describe('usage ledger input', () => {
+  let usageDir: string;
+  beforeEach(() => {
+    usageDir = join(tmp, 'usage');
+  });
+
+  it('produces a unified view from the usage ledger alone', async () => {
+    appendModelCalls(
+      [
+        usageCall('c1'),
+        usageCall('c2', { billingPool: 'api-key', agentRole: 'reviewer' }),
+        usageCall('c3', { model: 'model-without-a-price' }),
+      ],
+      { dir: usageDir },
+    );
+    const usageLedgerRows = await loadUsageLedgerRows({ usageDir });
+    const rows = buildUnifiedReport({ usageLedgerRows });
+    const sub = rows.filter(
+      (r) => r.costModel === 'subscription-quota' && r.source === 'claude-sonnet-4-6',
+    );
+    expect(sub.map((r) => r.category).sort()).toEqual([
+      'cacheReadTokens',
+      'inputTokens',
+      'outputTokens',
+    ]);
+    // Sonnet 4.6 seed price: $3 input, $0.30 cache read, $15 output per million tokens.
+    expect(sub.find((r) => r.category === 'inputTokens')?.costUsd).toBeCloseTo(3);
+    expect(sub.find((r) => r.category === 'cacheReadTokens')?.costUsd).toBeCloseTo(0.6);
+    expect(sub.find((r) => r.category === 'outputTokens')?.costUsd).toBeCloseTo(1.5);
+    expect(rows.some((r) => r.costModel === 'pay-per-token' && r.consumer === 'reviewer')).toBe(
+      true,
+    );
+    const unpriced = rows.filter((r) => r.source === 'model-without-a-price');
+    expect(unpriced.length).toBeGreaterThan(0);
+    expect(unpriced.every((r) => r.unpriced === true && r.costUsd === 0)).toBe(true);
+    // Each call is counted once, on its input row.
+    expect(rows.reduce((s, r) => s + r.recordCount, 0)).toBe(3);
+  });
+
+  it('labels unpriced models in text and csv and the total as partial', async () => {
+    appendModelCalls([usageCall('c1'), usageCall('c3', { model: 'model-without-a-price' })], {
+      dir: usageDir,
+    });
+    const rows = buildUnifiedReport({ usageLedgerRows: await loadUsageLedgerRows({ usageDir }) });
+    const text = renderTextTable(rows);
+    expect(text).toContain('unpriced');
+    expect(text).toContain('(partial: unpriced models are left out)');
+    expect(renderCsv(rows)).toContain(',unpriced,');
+  });
+
+  it('prefers the usage ledger over the other inputs when it has records', async () => {
+    appendModelCalls([usageCall('c1')], { dir: usageDir });
+    const legacy = join(tmp, 'ledger.jsonl');
+    writeJsonl(legacy, [makeChatEntry('legacy-model', 10, 10, 1)]);
+    const rows = buildUnifiedReport({
+      usageLedgerRows: await loadUsageLedgerRows({ usageDir }),
+      costLedgerJsonl: legacy,
+    });
+    expect(rows.some((r) => r.source === 'legacy-model')).toBe(false);
+  });
+
+  it('keeps the existing inputs working when the usage ledger is empty', async () => {
+    const legacy = join(tmp, 'ledger.jsonl');
+    writeJsonl(legacy, [makeChatEntry('legacy-model', 10, 10, 1)]);
+    const rows = buildUnifiedReport({
+      usageLedgerRows: await loadUsageLedgerRows({ usageDir }),
+      costLedgerJsonl: legacy,
+    });
+    expect(rows.some((r) => r.source === 'legacy-model')).toBe(true);
+  });
+
+  it('honours --since', async () => {
+    appendModelCalls([usageCall('old', { ts: '2026-08-01T00:00:00.000Z' }), usageCall('new')], {
+      dir: usageDir,
+    });
+    const rows = await loadUsageLedgerRows({ usageDir, since: new Date('2026-09-01T00:00:00Z') });
+    expect(rows.reduce((s, r) => s + r.recordCount, 0)).toBe(1);
+  });
+});
+
 // ── CLI router ───────────────────────────────────────────────────────────────
 
 describe('runCostReportCli', () => {
@@ -416,6 +523,50 @@ describe('runCostReportCli', () => {
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].category).toBe('embeddingTokens');
     writeSpy.mockRestore();
+  });
+
+  it('reads the usage ledger alone with --usage-dir', async () => {
+    const usageDir = join(tmp, 'usage');
+    appendModelCalls([usageCall('c1')], { dir: usageDir });
+    const chunks: string[] = [];
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as unknown as typeof process.stdout.write);
+    process.argv = ['node', 'cli-cost-report', '--usage-dir', usageDir, '--format', 'json'];
+    await runCostReportCli();
+    writeSpy.mockRestore();
+    const parsed = JSON.parse(chunks.join(''));
+    expect(parsed.map((r: { category: string }) => r.category)).toContain('inputTokens');
+  });
+
+  it('says the usage ledger is used when other inputs are also given', async () => {
+    const usageDir = join(tmp, 'usage');
+    appendModelCalls([usageCall('c1')], { dir: usageDir });
+    const legacy = join(tmp, 'ledger.jsonl');
+    writeJsonl(legacy, [makeChatEntry('legacy-model', 10, 10, 1)]);
+    const errChunks: string[] = [];
+    const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as never);
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(((
+      c: string | Uint8Array,
+    ) => {
+      errChunks.push(String(c));
+      return true;
+    }) as never);
+    process.argv = [
+      'node',
+      'cli-cost-report',
+      '--usage-dir',
+      usageDir,
+      '--cost-ledger-jsonl',
+      legacy,
+    ];
+    await runCostReportCli();
+    outSpy.mockRestore();
+    errSpy.mockRestore();
+    expect(errChunks.join('')).toContain('usage ledger has records');
   });
 
   it('exports SUBSCRIPTION_DEFAULTS so operators can override them visibly', () => {

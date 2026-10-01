@@ -97,6 +97,13 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityDefinition[] = [
     fallback: 'The last known prices stay in force and are marked stale after the staleness limit.',
     enable: 'Run `cli-usage prices refresh` and allow outbound access to the price sources.',
   },
+  {
+    id: 'usage.ingest',
+    title: 'Usage ingestion',
+    specifiedBy: 'RFC-0050',
+    fallback: 'The usage ledger stops growing, so usage reports and window views go stale.',
+    enable: 'Run `cli-usage ingest`, or keep the plugin Stop and SessionStart hooks installed.',
+  },
 ];
 
 for (const def of BUILT_IN_CAPABILITIES) registerCapability(def);

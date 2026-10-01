@@ -55,6 +55,7 @@ const ARTIFACT_SCHEMA_FILES = {
   RefinementVerdict: 'refinement-verdict.v1.schema.json',
   ModelCallRecord: 'model-call-record.v1.schema.json',
   HierarchyRoster: 'hierarchy-roster.v1.schema.json',
+  UsageConfig: 'usage-config.v1.schema.json',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
@@ -239,6 +240,13 @@ export function validateModelCallRecord<T = unknown>(data: unknown): ValidationR
  */
 export function validateHierarchyRoster<T = unknown>(data: unknown): ValidationResult<T> {
   return validateArtifact<T>('HierarchyRoster', data);
+}
+
+/**
+ * Convenience wrapper for the usage config (RFC-0050 A4).
+ */
+export function validateUsageConfig<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('UsageConfig', data);
 }
 
 /**

@@ -75,6 +75,19 @@ export type OrchestratorEventType =
    * tokens).
    */
   | 'ModelPriceChanged'
+  /**
+   * RFC-0050 A4 - emitted when a usage-window snapshot is recorded. Per-event
+   * fields: `window`, `usedPercent`, `unitsInWindow`, `impliedAllotment`,
+   * `observationSource` (`manual` or `harness`).
+   */
+  | 'UsageLimitObserved'
+  /**
+   * RFC-0050 A4 - emitted when two consecutive snapshots of one window imply
+   * allotments that differ beyond the tolerance while their model mix is
+   * similar. Per-event fields: `window`, `previousAllotment`,
+   * `impliedAllotment`, `changeRatio`.
+   */
+  | 'AllotmentChangeSuspected'
   | 'OrchestratorTaskAlreadyInFlight'
   | 'WorkerStateTransition'
   /**

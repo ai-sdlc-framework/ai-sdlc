@@ -3,6 +3,10 @@
  *
  * Subcommands:
  *   ingest [--backfill] [--json]                read Claude Code transcripts into the ledger
+ *   report [--group-by ...] [--format ...]      usage by model, role, task, repo, pool, day, window
+ *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
+ *   snapshot --window <n> --used-pct <p>        record a calibration point
+ *   allotment [--window <n>]                    implied allotment series and change detection
  *   prices refresh [--source <name>] [--json]   fetch public price sources
  *   prices list [--json]                        prices in force, source, age, held rows
  *   prices confirm <model>                      promote a held row to active
@@ -26,6 +30,7 @@ import {
   listPrices,
   refreshPrices,
   reportCapabilityOutcome,
+  resolveUsageDir,
   setManualPrice,
   type FetchFn,
   type PriceListEntry,
@@ -36,6 +41,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { writeEvent, type OrchestratorEvent } from '../orchestrator/events.js';
 import { emitPriceChanges } from '../orchestrator/price-refresh.js';
+import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
 import {
   DEFAULT_MAX_SECONDS,
   ingestClaudeTranscripts,
@@ -43,15 +49,15 @@ import {
 } from '../usage/ingest-claude.js';
 
 /** Collaborators, injectable so tests never touch the network, home dir or clock. */
-export interface UsageCliDeps {
+export interface UsageCliDeps extends UsageViewDeps {
   fetch?: FetchFn;
-  now?: () => Date;
-  /** Usage directory override; otherwise `AI_SDLC_USAGE_DIR` then the home default. */
-  usageDir?: string;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
-  emit?: (event: Omit<OrchestratorEvent, 'ts'>) => void;
   onCapability?: (outcome: 'live' | 'degraded', reason?: string) => void;
+  /** Reports the `usage.ingest` capability (tests). */
+  onIngestCapability?: (outcome: 'live' | 'degraded', reason?: string) => void;
+  /** Replaces the transcript ingester (tests). */
+  ingest?: typeof ingestClaudeTranscripts;
   /** Replaces the default sources (tests). */
   sources?: readonly PriceSource[];
   /** Exit code sink; defaults to `process.exitCode`. */
@@ -270,7 +276,7 @@ export function buildUsageCli(
         process.exitCode = code;
       }),
   };
-  return yargs(args)
+  const cli = yargs(args)
     .scriptName('cli-usage')
     .usage('Usage: $0 <command> [options]')
     .command(
@@ -298,22 +304,53 @@ export function buildUsageCli(
             default: false,
           }),
       async (args) => {
-        const result = await ingestClaudeTranscripts({
-          backfill: args.backfill,
-          ...(typeof args['projects-dir'] === 'string'
-            ? { projectsDir: args['projects-dir'] }
-            : {}),
-          maxSeconds: args['max-seconds'],
-        });
-        process.stdout.write(
-          args.json ? `${JSON.stringify(result)}\n` : renderIngestResult(result),
-        );
+        const report =
+          deps.onIngestCapability ??
+          ((outcome: 'live' | 'degraded', reason?: string): void =>
+            reportCapabilityOutcome('usage.ingest', outcome, {
+              reason,
+              // The ingester often runs detached with no repository cwd, so state
+              // goes to $ARTIFACTS_DIR when set, else to the usage directory.
+              artifactsDir: process.env.ARTIFACTS_DIR || resolveUsageDir({ dir: deps.usageDir }),
+              now: deps.now,
+            }));
+        let result: IngestResult;
+        try {
+          result = await (deps.ingest ?? ingestClaudeTranscripts)({
+            backfill: args.backfill,
+            ...(typeof args['projects-dir'] === 'string'
+              ? { projectsDir: args['projects-dir'] }
+              : {}),
+            maxSeconds: args['max-seconds'],
+          });
+        } catch (err) {
+          report('degraded', 'ingest failed');
+          throw err;
+        }
+        // A switched-off or sandboxed ingest never ran; it says nothing about health.
+        if (!result.disabled) {
+          if (result.errors > 0) report('degraded', `${result.errors} transcript errors`);
+          else report('live');
+        }
+        io.out(args.json ? `${JSON.stringify(result)}\n` : renderIngestResult(result));
       },
     )
     .command('prices', 'Model price feed and price history', (y) =>
       registerPricesCommands(y, deps, io),
-    )
-    .demandCommand(1, 'Specify a command, for example: ingest or prices')
+    );
+  const viewDeps: UsageViewDeps = {
+    ...deps,
+    emit:
+      deps.emit ??
+      ((event: Omit<OrchestratorEvent, 'ts'>): void => {
+        writeEvent({
+          ...event,
+          ts: (deps.now?.() ?? new Date()).toISOString(),
+        } as OrchestratorEvent);
+      }),
+  };
+  return registerUsageViewCommands(cli, viewDeps, io)
+    .demandCommand(1, 'Specify a command, for example: ingest, report or prices')
     .strict()
     .help();
 }

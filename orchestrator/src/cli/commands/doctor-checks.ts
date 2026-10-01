@@ -823,6 +823,64 @@ export function checkNpmDistTagReachability(ctx: DoctorRunContext): DoctorCheckR
   return results;
 }
 
+// ── Check: usage ingest liveness (RFC-0050) ───────────────────────────────
+
+interface UsageIngestRecord {
+  lastOutcome?: string;
+  lastLiveAt?: string;
+  lastDegradedReason?: string;
+}
+
+/**
+ * Reports the time of the last successful usage ingest, read from the
+ * capability state file the ingester writes (`_capabilities/state.json`). A
+ * degraded last outcome warns; a repo that has never ingested passes with a
+ * hint, since ingestion is additive and optional.
+ */
+export function checkUsageIngest(ctx: DoctorRunContext): DoctorCheckResult {
+  const { env } = ctx.adapters;
+  // The ingester reports into $ARTIFACTS_DIR when set, else into the
+  // machine-level usage directory (it often runs detached with no repo cwd).
+  const usageDir = env.AI_SDLC_USAGE_DIR ?? join(ctx.adapters.homeDir(), '.ai-sdlc', 'usage');
+  const candidates = [
+    ...(env.ARTIFACTS_DIR ? [env.ARTIFACTS_DIR] : []),
+    join(ctx.projectDir, '.ai-sdlc', 'artifacts'),
+    usageDir,
+  ];
+  let rec: UsageIngestRecord | undefined;
+  for (const dir of candidates) {
+    const raw = ctx.adapters.readFile(join(dir, '_capabilities', 'state.json'));
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { capabilities?: Record<string, UsageIngestRecord> };
+      const caps = parsed.capabilities;
+      rec = caps && Object.hasOwn(caps, 'usage.ingest') ? caps['usage.ingest'] : undefined;
+    } catch {
+      rec = undefined;
+    }
+    if (rec) break;
+  }
+  const last = rec?.lastLiveAt ? `last successful ingest ${rec.lastLiveAt}` : undefined;
+  if (rec?.lastOutcome === 'degraded') {
+    const reason = rec.lastDegradedReason ? ` (${rec.lastDegradedReason})` : '';
+    return {
+      id: 'usage-ingest',
+      severity: 'warn',
+      title: `usage ingest degraded${reason}${last ? `; ${last}` : '; no successful ingest recorded'}`,
+      remediation: 'Run `cli-usage ingest` and check the reason above.',
+      anonymizableEvidence: { lastOutcome: 'degraded', lastLiveAt: rec.lastLiveAt ?? null },
+    };
+  }
+  if (last) {
+    return { id: 'usage-ingest', severity: 'pass', title: `usage ingest live; ${last}` };
+  }
+  return {
+    id: 'usage-ingest',
+    severity: 'pass',
+    title: 'usage ingest has not run yet (run `cli-usage ingest` to build the usage ledger)',
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -875,6 +933,11 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'npm-dist-tag-reachability',
     description: 'Every runtimeDependencies pin actually resolves on the configured npm registry.',
     run: checkNpmDistTagReachability,
+  },
+  {
+    id: 'usage-ingest',
+    description: 'Time of the last successful usage ingest (RFC-0050).',
+    run: checkUsageIngest,
   },
 ];
 

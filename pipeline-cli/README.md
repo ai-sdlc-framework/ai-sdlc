@@ -335,6 +335,35 @@ The result reports files scanned, calls written, repeats skipped and errors.
 
 **Triggers.** The plugin's `Stop` and `SessionStart` hooks and each orchestrator tick launch ingestion as a detached background process with a time limit, so a session or tick is never delayed and any failure is swallowed.
 
+## `cli-usage` reports — where the allotment is going
+
+Reports read the usage ledger built by `cli-usage ingest`. They print counts, ids and attribution only, never prompt, response, file content or tool output.
+
+```bash
+cli-usage report --group-by model [--group-by role ...] [--since <iso>] [--until <iso>] [--scope framework|other|all] [--format text|json|csv]
+cli-usage window                       # units used in the current session and weekly windows, implied allotment, time to the limit
+cli-usage task <id>                    # tokens and units for one task, split by role
+cli-usage context                      # per session: first-call tokens, turns, total cache read
+cli-usage snapshot --window weekly --used-pct 42
+cli-usage allotment [--window weekly]  # implied allotment per snapshot, with probable changes marked
+```
+
+`--group-by` takes `model`, `role`, `task`, `repo`, `pool`, `day` or `window` and can be repeated. Each row shows calls, input, cache write (5 minute and 1 hour), cache read and output tokens, weighted units and API-equivalent cost. A model with no price shows `unpriced`, is left out of the cost totals, and the total is labelled partial. `--until` is exclusive.
+
+**Units are a proxy.** The provider reports subscription use as a percentage and publishes no conversion from tokens, so reports weigh each call in units. By default one input token of the reference model is one unit and every other token class and model is weighed against it using the current price history, so the weights follow the price feed. Weights set in the usage config override the derived ones. Every report that shows units says that the weights are a proxy.
+
+**Calibration.** `cli-usage snapshot` records the percentage the provider shows for a window, together with the units the ledger counted in that window at that moment (written to `snapshots.jsonl` in the usage directory). The implied allotment is units divided by the fraction used. Window observations that a harness wrote to `limit-events.jsonl` are used as snapshots too. When two consecutive snapshots of one window imply allotments that differ by more than the tolerance while their model mix is similar, the row is marked as a probable allotment change and `AllotmentChangeSuspected` is emitted. Recording a snapshot emits `UsageLimitObserved`.
+
+**Config.** Plan name, monthly price, windows, unit weights and the tolerance live in `.ai-sdlc/usage-config.yaml` (kind `UsageConfig`). It is read from the base branch (`origin/main`), never from the working tree. A `usage-config.yaml` in the usage directory takes precedence on that machine. With no file the defaults apply: a 5 hour session window that opens at the first call, a trailing 168 hour weekly window, a 25% tolerance and a model-mix overlap of at least 0.8. `ai-sdlc init` ships a commented template at `.ai-sdlc/templates/usage-config.yaml`.
+
+**Window modes.** `first-use` opens a window at the first call after the previous one ended; `fixed` counts repeating cycles from an `anchor` (your plan's reset time); `trailing` is the last `lengthHours`. The projected time to the limit divides the implied allotment still unused by the rate since the window's first call.
+
+**Context overhead.** `cli-usage context` shows the size of the context at the first call of each session (the fixed prefix every later turn re-reads), the number of turns and the total cache read, largest first. Sessions outside a framework repository (`other` scope) show no path.
+
+**Cost report.** `cli-cost-report --usage-ledger` (or `--usage-dir <path>`) builds the unified view from the usage ledger and prefers it over `--cost-ledger-jsonl` and `--ledger-dir` when it has records. The existing inputs keep working without it.
+
+**Health.** A successful ingest reports the `usage.ingest` capability as live and a failed one as degraded with a reason. `ai-sdlc doctor` shows the time of the last successful ingest.
+
 ## Quickstart — Tier 1 (slash command body)
 
 The `/ai-sdlc execute` slash command body (in `ai-sdlc-plugin/commands/execute.md`)

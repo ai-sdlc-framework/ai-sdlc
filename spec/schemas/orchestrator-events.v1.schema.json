@@ -97,6 +97,41 @@
       "exclusiveMinimum": 0,
       "description": "New price in USD per million tokens - present on `ModelPriceChanged`."
     },
+    "window": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Usage window name (for example `session` or `weekly`) - present on `UsageLimitObserved` and `AllotmentChangeSuspected` (RFC-0050)."
+    },
+    "usedPercent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Percent of the window the provider reported as used - present on `UsageLimitObserved`."
+    },
+    "unitsInWindow": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Weighted units consumed in the window at the moment of the observation - present on `UsageLimitObserved`."
+    },
+    "observationSource": {
+      "type": "string",
+      "enum": ["manual", "harness"],
+      "description": "Whether the operator entered the observation or a harness reported it - present on `UsageLimitObserved`."
+    },
+    "impliedAllotment": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Implied allotment in weighted units (units divided by the fraction used) - present on `UsageLimitObserved` and `AllotmentChangeSuspected`."
+    },
+    "previousAllotment": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Implied allotment of the previous snapshot of the same window - present on `AllotmentChangeSuspected`."
+    },
+    "changeRatio": {
+      "type": "number",
+      "description": "Relative change between the two implied allotments (new minus previous, divided by previous) - present on `AllotmentChangeSuspected`."
+    },
     "context": {
       "type": "object",
       "description": "Free-form structured context bag for the event. Schema-less by design so future event types can carry per-type payload without a v2 bump.",
@@ -337,7 +372,7 @@
   "$defs": {
     "OrchestratorEventType": {
       "type": "string",
-      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       "enum": [
         "OrchestratorTick",
         "OrchestratorDispatched",
@@ -365,7 +400,9 @@
         "PrOpened",
         "ReconcileCompleted",
         "DispatchToMergeCompleted",
-        "ModelPriceChanged"
+        "ModelPriceChanged",
+        "UsageLimitObserved",
+        "AllotmentChangeSuspected"
       ]
     }
   }

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/usage-config.v1.schema.json",
+  "title": "AI-SDLC UsageConfig",
+  "description": "Plan, usage windows, unit weights and allotment-change tolerance for usage reports (RFC-0050 A4). Read from .ai-sdlc/usage-config.yaml on the base branch, or from usage-config.yaml in the machine-level usage directory, which takes precedence. Every field is optional; documented defaults apply when absent.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "UsageConfig"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Subscription plan name, shown in reports."
+            },
+            "monthlyPriceUsd": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Monthly price of the plan in USD."
+            }
+          }
+        },
+        "windows": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Usage windows. Defaults to a 5 hour session window and a 168 hour weekly window.",
+          "items": {
+            "type": "object",
+            "required": ["name", "lengthHours"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "lengthHours": { "type": "number", "exclusiveMinimum": 0 },
+              "mode": {
+                "type": "string",
+                "enum": ["first-use", "fixed", "trailing"],
+                "description": "How the window is bounded. first-use: opens at the first call after the previous window ended. fixed: repeating cycles counted from anchor. trailing: the last lengthHours. Defaults to fixed when anchor is set, otherwise trailing."
+              },
+              "anchor": {
+                "type": "string",
+                "format": "date-time",
+                "description": "A reset instant, required for mode fixed."
+              }
+            }
+          }
+        },
+        "weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Unit weights. They are a proxy for how the provider counts consumption. Absent values are derived from the current price history.",
+          "properties": {
+            "tokenClasses": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Units per token for each token class, before the model family multiplier.",
+              "properties": {
+                "input": { "type": "number", "minimum": 0 },
+                "cacheWrite5m": { "type": "number", "minimum": 0 },
+                "cacheWrite1h": { "type": "number", "minimum": 0 },
+                "cacheRead": { "type": "number", "minimum": 0 },
+                "output": { "type": "number", "minimum": 0 }
+              }
+            },
+            "modelFamilies": {
+              "type": "object",
+              "description": "Multiplier per model family, keyed by a substring of the model id (for example opus, sonnet, haiku).",
+              "additionalProperties": { "type": "number", "minimum": 0 }
+            }
+          }
+        },
+        "allotmentTolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Relative change between consecutive implied allotments of one window above which a change is suspected. Default 0.25."
+        },
+        "modelMixSimilarity": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "description": "Minimum model-mix overlap (0 to 1) between two snapshots for the allotment comparison to count. Default 0.8."
+        }
+      }
+    }
+  }
+}

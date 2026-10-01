@@ -5465,6 +5465,48 @@ export const orchestratorEventsV1Schema = {
       exclusiveMinimum: 0,
       description: 'New price in USD per million tokens - present on `ModelPriceChanged`.',
     },
+    window: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Usage window name (for example `session` or `weekly`) - present on `UsageLimitObserved` and `AllotmentChangeSuspected` (RFC-0050).',
+    },
+    usedPercent: {
+      type: 'number',
+      minimum: 0,
+      maximum: 100,
+      description:
+        'Percent of the window the provider reported as used - present on `UsageLimitObserved`.',
+    },
+    unitsInWindow: {
+      type: 'number',
+      minimum: 0,
+      description:
+        'Weighted units consumed in the window at the moment of the observation - present on `UsageLimitObserved`.',
+    },
+    observationSource: {
+      type: 'string',
+      enum: ['manual', 'harness'],
+      description:
+        'Whether the operator entered the observation or a harness reported it - present on `UsageLimitObserved`.',
+    },
+    impliedAllotment: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      description:
+        'Implied allotment in weighted units (units divided by the fraction used) - present on `UsageLimitObserved` and `AllotmentChangeSuspected`.',
+    },
+    previousAllotment: {
+      type: 'number',
+      exclusiveMinimum: 0,
+      description:
+        'Implied allotment of the previous snapshot of the same window - present on `AllotmentChangeSuspected`.',
+    },
+    changeRatio: {
+      type: 'number',
+      description:
+        'Relative change between the two implied allotments (new minus previous, divided by previous) - present on `AllotmentChangeSuspected`.',
+    },
     context: {
       type: 'object',
       description:
@@ -5749,7 +5791,7 @@ export const orchestratorEventsV1Schema = {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -5778,6 +5820,8 @@ export const orchestratorEventsV1Schema = {
         'ReconcileCompleted',
         'DispatchToMergeCompleted',
         'ModelPriceChanged',
+        'UsageLimitObserved',
+        'AllotmentChangeSuspected',
       ],
     },
   },
@@ -8499,6 +8543,116 @@ export const untrustedPrReportV1Schema = {
   },
 } as const;
 
+export const usageConfigV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/usage-config.v1.schema.json',
+  title: 'AI-SDLC UsageConfig',
+  description:
+    'Plan, usage windows, unit weights and allotment-change tolerance for usage reports (RFC-0050 A4). Read from .ai-sdlc/usage-config.yaml on the base branch, or from usage-config.yaml in the machine-level usage directory, which takes precedence. Every field is optional; documented defaults apply when absent.',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'UsageConfig',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        plan: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: {
+              type: 'string',
+              minLength: 1,
+              description: 'Subscription plan name, shown in reports.',
+            },
+            monthlyPriceUsd: {
+              type: 'number',
+              minimum: 0,
+              description: 'Monthly price of the plan in USD.',
+            },
+          },
+        },
+        windows: {
+          type: 'array',
+          minItems: 1,
+          description:
+            'Usage windows. Defaults to a 5 hour session window and a 168 hour weekly window.',
+          items: {
+            type: 'object',
+            required: ['name', 'lengthHours'],
+            additionalProperties: false,
+            properties: {
+              name: { type: 'string', minLength: 1 },
+              lengthHours: { type: 'number', exclusiveMinimum: 0 },
+              mode: {
+                type: 'string',
+                enum: ['first-use', 'fixed', 'trailing'],
+                description:
+                  'How the window is bounded. first-use: opens at the first call after the previous window ended. fixed: repeating cycles counted from anchor. trailing: the last lengthHours. Defaults to fixed when anchor is set, otherwise trailing.',
+              },
+              anchor: {
+                type: 'string',
+                format: 'date-time',
+                description: 'A reset instant, required for mode fixed.',
+              },
+            },
+          },
+        },
+        weights: {
+          type: 'object',
+          additionalProperties: false,
+          description:
+            'Unit weights. They are a proxy for how the provider counts consumption. Absent values are derived from the current price history.',
+          properties: {
+            tokenClasses: {
+              type: 'object',
+              additionalProperties: false,
+              description:
+                'Units per token for each token class, before the model family multiplier.',
+              properties: {
+                input: { type: 'number', minimum: 0 },
+                cacheWrite5m: { type: 'number', minimum: 0 },
+                cacheWrite1h: { type: 'number', minimum: 0 },
+                cacheRead: { type: 'number', minimum: 0 },
+                output: { type: 'number', minimum: 0 },
+              },
+            },
+            modelFamilies: {
+              type: 'object',
+              description:
+                'Multiplier per model family, keyed by a substring of the model id (for example opus, sonnet, haiku).',
+              additionalProperties: { type: 'number', minimum: 0 },
+            },
+          },
+        },
+        allotmentTolerance: {
+          type: 'number',
+          exclusiveMinimum: 0,
+          description:
+            'Relative change between consecutive implied allotments of one window above which a change is suspected. Default 0.25.',
+        },
+        modelMixSimilarity: {
+          type: 'number',
+          exclusiveMinimum: 0,
+          maximum: 1,
+          description:
+            'Minimum model-mix overlap (0 to 1) between two snapshots for the allotment comparison to count. Default 0.8.',
+        },
+      },
+    },
+  },
+} as const;
+
 export const variantConfigSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/variant-config.schema.json',
@@ -8935,6 +9089,7 @@ export const SCHEMAS: Record<string, object> = {
   'subscription-plan.schema.json': subscriptionPlanSchema,
   'substrate-contract.v1.schema.json': substrateContractV1Schema,
   'untrusted-pr-report.v1.schema.json': untrustedPrReportV1Schema,
+  'usage-config.v1.schema.json': usageConfigV1Schema,
   'variant-config.schema.json': variantConfigSchema,
   'vector-store-entry.v1.schema.json': vectorStoreEntryV1Schema,
   'work-item.schema.json': workItemSchema,
