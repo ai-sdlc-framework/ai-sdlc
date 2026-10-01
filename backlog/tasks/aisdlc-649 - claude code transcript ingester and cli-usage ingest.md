@@ -2,7 +2,7 @@
 id: AISDLC-649
 title: >-
   RFC-0050 Part A: Claude Code transcript ingester, attribution, scope collapse, cli-usage ingest, hook and tick wiring
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-30'
 labels:

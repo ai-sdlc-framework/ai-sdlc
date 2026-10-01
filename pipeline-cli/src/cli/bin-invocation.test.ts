@@ -372,6 +372,82 @@ describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
   });
 });
 
+describe('cli-usage: bin shim guard and end-to-end ingest', () => {
+  const binPath = join(PKG_ROOT, 'bin', 'cli-usage.mjs');
+  let tmp: string;
+
+  beforeAll(() => {
+    if (!existsSync(join(PKG_ROOT, 'dist', 'cli', 'usage.js'))) {
+      const build = spawnSync('pnpm', ['build'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      if (build.status !== 0) {
+        throw new Error(
+          `pre-test build failed (exit ${build.status}):\n${build.stdout}\n${build.stderr}`,
+        );
+      }
+    }
+  }, 60_000);
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'bin-invocation-usage-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('bin shim file exists at the expected path', () => {
+    expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
+  });
+
+  it('is invokable via `node <pkg-root>/bin/cli-usage.mjs --help` and exits 0', () => {
+    const result = spawnSync(process.execPath, [binPath, '--help'], {
+      cwd: PKG_ROOT,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+      env: process.env,
+    });
+    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
+    expect(result.status, `cli-usage --help did not exit 0:${detail}`).toBe(0);
+    expect(/Usage:/.test(result.stdout + result.stderr), detail).toBe(true);
+  });
+
+  it('`ingest --json` reports scanned, written, skipped and error counts', () => {
+    const projects = join(tmp, 'projects', 'p1');
+    mkdirSync(projects, { recursive: true });
+    const call = (id: string): string =>
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-09-02T10:00:00Z',
+        sessionId: 's1',
+        cwd: join(tmp, 'elsewhere'),
+        message: { id, model: 'claude-x', usage: { input_tokens: 1, output_tokens: 1 } },
+      });
+    writeFileSync(join(projects, 's1.jsonl'), `${call('m1')}\n${call('m1')}\n{broken\n`);
+    const env: NodeJS.ProcessEnv = { ...process.env, AI_SDLC_USAGE_DIR: join(tmp, 'usage') };
+    delete env['CLAUDE_CODE_ENV'];
+    delete env['CLAUDE_REMOTE_EXECUTION'];
+    delete env['AI_SDLC_USAGE_INGEST'];
+    const result = spawnSync(
+      process.execPath,
+      [binPath, 'ingest', '--json', '--projects-dir', join(tmp, 'projects')],
+      { cwd: PKG_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 20_000, env },
+    );
+    const detail = `\n--- exit ${result.status} ---\n${result.stdout}\n${result.stderr}`;
+    expect(result.status, detail).toBe(0);
+    expect(JSON.parse(result.stdout), detail).toMatchObject({
+      filesScanned: 1,
+      callsWritten: 1,
+      repeatsSkipped: 1,
+      errors: 1,
+    });
+  });
+});
+
 // ── AISDLC-209: end-to-end bin shim integration tests (AC#6) ─────────
 //
 // Previous guard (AISDLC-203) only asserted `--help` exits 0.  These tests

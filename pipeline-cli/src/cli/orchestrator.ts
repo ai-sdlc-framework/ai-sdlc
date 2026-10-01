@@ -57,6 +57,7 @@ import {
   runWatcherTick,
   type WatcherTickResult,
 } from '../runtime/ci-failure-watcher.js';
+import { launchUsageIngestDetached } from '../usage/launch.js';
 import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
 import { SPAWNER_KINDS, type SpawnerKind } from './execute.js';
 
@@ -578,5 +579,5 @@ export function buildOrchestratorCli(
  * fakes; the bin shim has no fakes to inject.
  */
 export async function runOrchestratorCli(): Promise<void> {
-  await buildOrchestratorCli().parseAsync();
+  await buildOrchestratorCli({ usageIngest: () => void launchUsageIngestDetached() }).parseAsync();
 }

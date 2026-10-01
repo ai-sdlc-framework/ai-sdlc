@@ -219,6 +219,13 @@ export interface OrchestratorAdapters {
   /** Logger — defaults to console. */
   logger?: PipelineLogger;
   /**
+   * Usage-ledger ingestion trigger, called once at the start of every tick.
+   * Must return immediately (production launches a detached, time-limited
+   * child). Failures are swallowed. Left unset in tests so no tick reads the
+   * real transcripts directory.
+   */
+  usageIngest?: () => void;
+  /**
    * Optional injected `SubagentSpawner` for the default dispatcher. Tests
    * usually override `dispatch` directly instead of going through this.
    */
@@ -526,6 +533,14 @@ export async function runOrchestratorTick(
   // a try/catch so a thrown injected sink never crashes the tick.
   // Built early so the sweep block below can emit events with runId + tick.
   const emit = buildEmitter(config, adapters, tickNumber);
+
+  // Usage-ledger ingestion: fire-and-forget at tick start; never delays or
+  // fails the tick.
+  try {
+    adapters.usageIngest?.();
+  } catch {
+    // ingestion is best effort
+  }
 
   // AISDLC-358 — parent-branch guard: enforce Pattern-C contract that the
   // parent working tree is on `main` before any frontier work begins.
