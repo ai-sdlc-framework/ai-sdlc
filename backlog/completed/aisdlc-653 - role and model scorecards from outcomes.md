@@ -2,7 +2,7 @@
 id: AISDLC-653
 title: >-
   RFC-0050 Part B: join usage to outcomes and report quality and cost per role, model and task class
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -70,12 +70,12 @@ the scorecard that every routing decision cites. RFC-0050 section B1.
    current repository only.
 
 ## Acceptance Criteria
-- [ ] From a synthetic reviews ledger and usage ledger, a task approved by all reviewers at iteration 1 with only minor findings is `firstPassApproved`, and one with a major finding at iteration 1 is not.
-- [ ] The scorecard row for a role, model and class reports the hand-computed approval rate, mean iterations and mean units for a fixture of known tasks.
-- [ ] A cell with 29 tasks is labelled `insufficient` and one with 30 is not.
-- [ ] A task with an assignment-log entry uses that model; a task without one uses the majority model from the usage ledger, and the row says which.
-- [ ] Explored tasks are counted separately in each row.
-- [ ] `--write-evidence` writes one file per cell listing the included task ids and contains no `other`-scope data.
-- [ ] A task present in the usage ledger with no reviews-ledger rows is excluded from approval rates and counted in a reported `no-outcome` total.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] From a synthetic reviews ledger and usage ledger, a task approved by all reviewers at iteration 1 with only minor findings is `firstPassApproved`, and one with a major finding at iteration 1 is not.
+- [x] The scorecard row for a role, model and class reports the hand-computed approval rate, mean iterations and mean units for a fixture of known tasks.
+- [x] A cell with 29 tasks is labelled `insufficient` and one with 30 is not.
+- [x] A task with an assignment-log entry uses that model; a task without one uses the majority model from the usage ledger, and the row says which.
+- [x] Explored tasks are counted separately in each row.
+- [x] `--write-evidence` writes one file per cell listing the included task ids and contains no `other`-scope data.
+- [x] A task present in the usage ledger with no reviews-ledger rows is excluded from approval rates and counted in a reported `no-outcome` total.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

@@ -150,7 +150,7 @@ export class AttributionResolver {
   }
 }
 
-function repoNameFor(root: string): string {
+export function repoNameFor(root: string): string {
   const parent = dirname(root);
   const name = basename(parent) === '.worktrees' ? basename(dirname(parent)) : basename(root);
   return name.slice(0, MAX_REPO_NAME);

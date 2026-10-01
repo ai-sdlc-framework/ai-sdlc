@@ -23,6 +23,7 @@ describe('UsageConfig schema', () => {
         },
         allotmentTolerance: 0.25,
         modelMixSimilarity: 0.8,
+        scorecardMinTasks: 30,
       },
     });
     expect(r.valid).toBe(true);
@@ -37,6 +38,7 @@ describe('UsageConfig schema', () => {
     ['missing spec', { ...base }],
     ['unknown spec field', { ...base, spec: { surprise: true } }],
     ['zero tolerance', { ...base, spec: { allotmentTolerance: 0 } }],
+    ['non-integer scorecard threshold', { ...base, spec: { scorecardMinTasks: 2.5 } }],
     ['similarity above 1', { ...base, spec: { modelMixSimilarity: 1.5 } }],
     ['negative weight', { ...base, spec: { weights: { tokenClasses: { input: -1 } } } }],
     ['zero-length window', { ...base, spec: { windows: [{ name: 'w', lengthHours: 0 }] } }],

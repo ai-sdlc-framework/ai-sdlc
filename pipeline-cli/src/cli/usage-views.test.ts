@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -462,5 +470,89 @@ describe('cli-usage ingest reports the usage.ingest capability', () => {
     const after = readCapabilityState(usageDir).find((r) => r.id === 'usage.ingest');
     expect(after?.status).toBe('degraded');
     expect(after?.lastDegradedReason).toBe('1 transcript errors');
+  });
+});
+
+describe('cli-usage scorecard', () => {
+  let repo: string;
+  beforeEach(() => {
+    repo = join(root, 'repo-a');
+    mkdirSync(join(repo, '.ai-sdlc', 'reviews'), { recursive: true });
+    const rec = (iteration: number, verdict: string, severities: string[] = []) =>
+      JSON.stringify({
+        taskId: 'TASK-1',
+        prNumber: null,
+        commitSha: 'a'.repeat(40),
+        iteration,
+        role: 'code',
+        harness: 'claude-code',
+        timestamp: 't',
+        verdict,
+        findings: severities.map((severity) => ({ severity, summary: 's', title: 't' })),
+      });
+    writeFileSync(
+      join(repo, '.ai-sdlc', 'reviews', 'task-1.jsonl'),
+      `${rec(1, 'approved', ['minor'])}\n`,
+    );
+    appendModelCalls(
+      [
+        call('s1', 0, { agentRole: 'ai-sdlc:developer', repo: 'repo-a' }),
+        call('s2', 1, { agentRole: 'ai-sdlc:developer', repo: 'repo-a', taskId: 'TASK-9' }),
+        call('s3', 1, { agentRole: 'ai-sdlc:developer', repo: 'repo-b', taskId: 'TASK-7' }),
+      ],
+      { dir: usageDir },
+    );
+    // The store strips repo and task from other-scope calls, so write a hand-made
+    // line to prove the reader's scope filter, not the writer, keeps it out.
+    appendFileSync(
+      join(usageDir, 'ledger-2026-09.jsonl'),
+      `${JSON.stringify(
+        call('s4', 1, {
+          scope: 'other',
+          repo: 'repo-a',
+          taskId: 'TASK-OTHER',
+          agentRole: 'ai-sdlc:developer',
+        }),
+      )}\n`,
+    );
+  });
+
+  it('prints a scorecard for the current repository and writes evidence without other-scope data', async () => {
+    const evidence = join(root, 'evidence');
+    const text = await run(['scorecard', '--format', 'json', '--write-evidence', evidence], T0, {
+      repoRoot: repo,
+      artifactsDir: join(root, 'art'),
+    });
+    const json = JSON.parse(text);
+    expect(json.rows).toHaveLength(1);
+    expect(json.rows[0]).toMatchObject({ role: 'developer', tasks: 1, approved: 1 });
+    expect(json.noOutcome).toBe(1);
+    expect(json.minTasks).toBe(30);
+    const files = readdirSync(evidence);
+    expect(files).toHaveLength(1);
+    const body = readFileSync(join(evidence, files[0]), 'utf8');
+    expect(body).not.toContain('TASK-7');
+    expect(body).not.toContain('"other"');
+    expect(text).not.toContain('TASK-OTHER');
+    for (const f of files) {
+      expect(readFileSync(join(evidence, f), 'utf8')).not.toContain('TASK-OTHER');
+    }
+    expect(err.join('')).toContain('Wrote 1 evidence file');
+  });
+
+  it('supports text and csv output, role and since filters', async () => {
+    const extra = { repoRoot: repo, artifactsDir: join(root, 'art') };
+    expect(await run(['scorecard', '--role', 'developer'], T0, extra)).toContain('insufficient');
+    out.length = 0;
+    expect(await run(['scorecard', '--format', 'csv'], T0, extra)).toContain('first_pass');
+    out.length = 0;
+    expect(await run(['scorecard', '--since', '2030-01-01'], T0, extra)).toContain(
+      'No scored tasks',
+    );
+  });
+
+  it('rejects a bad --since', async () => {
+    await run(['scorecard', '--since', 'nope'], T0, { repoRoot: repo });
+    expect(exitCode).toBe(1);
   });
 });
