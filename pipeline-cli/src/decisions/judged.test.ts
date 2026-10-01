@@ -433,3 +433,10 @@ describe('Stage B signals', () => {
     });
   });
 });
+
+describe('DECISION_JUDGMENT_SOURCE_KIND', () => {
+  it('is not the trusted backlog kind, so a permissive outcome is never allowed', async () => {
+    const { DECISION_JUDGMENT_SOURCE_KIND } = await import('./judged.js');
+    expect(DECISION_JUDGMENT_SOURCE_KIND).not.toBe('backlog');
+  });
+});

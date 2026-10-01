@@ -599,7 +599,12 @@ export interface BaselineStageBInput {
  * type-check here.
  */
 export function runBaselineStageB(input: BaselineStageBInput): BaselineStageBOutput {
-  return brandBaseline(runStageB(input));
+  // The type omits `signals`, but a non-literal object can still carry it: drop it at runtime.
+  const { signals: _signals, ...rest } = input as BaselineStageBInput & {
+    signals?: LlmConfidenceSignals;
+  };
+  void _signals;
+  return brandBaseline(runStageB(rest));
 }
 
 export interface StageBWithJudgmentInput {
@@ -642,7 +647,9 @@ export function runStageBWithJudgment(input: StageBWithJudgmentInput): StageBWit
   if (!judgedStageA && !signals) {
     return { gatingStageA, gating, judgedCompositeScore: gating.compositeScore, judged: gating };
   }
-  const judgedA = runStageA({ ...stageAInput, ...(judgedStageA ? { judged: judgedStageA } : {}) });
+  const { judged: _carried, ...cleanAInput } = stageAInput as StageAInput;
+  void _carried;
+  const judgedA = runStageA({ ...cleanAInput, ...(judgedStageA ? { judged: judgedStageA } : {}) });
   const judgedRun = runStageB({
     decision,
     stageA: judgedA,

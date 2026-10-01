@@ -96,8 +96,28 @@ describe('score-a with the judgment layer', () => {
     const id = await seed('choose a deployment strategy');
     const r = await run('score-a', id, '--format', 'json');
     const stageA = r.stageA as { blastRadius: { affectedPillars: string[] } };
-    expect(stageA.blastRadius.affectedPillars).toEqual(['design', 'engineering', 'product']);
+    const judgedStageA = r.judgedStageA as { blastRadius: { affectedPillars: string[] } };
+    // The judged view is display only; the returned (and stored) stageA is the baseline.
+    expect(stageA.blastRadius.affectedPillars).toEqual(['engineering', 'product']);
+    expect(judgedStageA.blastRadius.affectedPillars).toEqual(['design', 'engineering', 'product']);
     expect(provider.requests.length).toBeGreaterThan(0);
+  });
+
+  it('--store persists the baseline Stage A, never the judged one', async () => {
+    const provider = new FakeJudgmentProvider({ name: 'fake-dec-cli-store' })
+      .script('engineering', { type: 'noul', probability: 0.9 })
+      .script('product', { type: 'noul', probability: 0.9 })
+      .script('design', { type: 'noul', probability: 0.9 });
+    registerJudgmentProvider(provider);
+    configure('fake-dec-cli-store');
+    const id = await seed('choose a deployment strategy');
+    await run('score-a', id, '--store', '--format', 'json');
+    expect(provider.requests.length).toBeGreaterThan(0);
+    const { projectDecision } = await import('../decisions/index.js');
+    const stored = projectDecision(id, { workDir: tmp })?.status.evaluation?.stageA as
+      | { blastRadius: { affectedPillars: string[] } }
+      | undefined;
+    expect(stored?.blastRadius.affectedPillars).toEqual(['engineering', 'product']);
   });
 });
 

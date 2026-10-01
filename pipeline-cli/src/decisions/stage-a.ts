@@ -822,7 +822,10 @@ export function runStageA(input: StageAInput): StageAOutput {
  * judged answer cannot be passed in.
  */
 export function runBaselineStageA(input: Omit<StageAInput, 'judged'>): BaselineStageAOutput {
-  return brandBaseline(runStageA(input));
+  // The type omits `judged`, but a non-literal object can still carry it: drop it at runtime.
+  const { judged: _judged, ...rest } = input as StageAInput;
+  void _judged;
+  return brandBaseline(runStageA(rest));
 }
 
 // ── Coverage metric (AC#6) ────────────────────────────────────────────────────

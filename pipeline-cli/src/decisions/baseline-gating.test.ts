@@ -241,3 +241,58 @@ describe('type boundary', () => {
     expect(shouldFireStageC(base)).toBe(inBand(base.compositeScore));
   });
 });
+
+describe('runtime strip of judged input carried by a non-literal object', () => {
+  it('runBaselineStageA drops a carried `judged`', () => {
+    blockTasks(3);
+    const d = decision({ summary: 'Pick approach with a breaking change', reversible: true });
+    const carrying = {
+      decision: d,
+      openDecisions: [],
+      workDir: tmp,
+      judged: { pillars: ['design'], reversibility: 'one-way' },
+    };
+    const via = runBaselineStageA(carrying as unknown as Parameters<typeof runBaselineStageA>[0]);
+    const plain = runBaselineStageA({ decision: d, openDecisions: [], workDir: tmp });
+    expect(via).toEqual(plain);
+    expect(runStageA(carrying as never)).not.toEqual(plain);
+  });
+
+  it('runBaselineStageB drops carried `signals`', () => {
+    blockTasks(3);
+    const d = decision({
+      summary: 'Pick approach with a breaking change',
+      tier: 'm',
+      deadlineDays: 2,
+    });
+    const stageA = runBaselineStageA({ decision: d, openDecisions: [], workDir: tmp });
+    const carrying = { decision: d, stageA, signals: SIGNALS_LOW };
+    const via = runBaselineStageB(carrying as unknown as Parameters<typeof runBaselineStageB>[0]);
+    expect(via).toEqual(runBaselineStageB({ decision: d, stageA }));
+    expect(runStageB(carrying as never)).not.toEqual(via);
+  });
+
+  it('the baseline leg of runStageBWithJudgment ignores a judged input smuggled in stageAInput', () => {
+    blockTasks(3);
+    const d = decision({
+      summary: 'Pick approach with a breaking change',
+      tier: 'm',
+      deadlineDays: 2,
+    });
+    const smuggled = {
+      decision: d,
+      openDecisions: [],
+      workDir: tmp,
+      judged: { pillars: ['design'] },
+    };
+    const r = runStageBWithJudgment({
+      decision: d,
+      stageAInput: smuggled as unknown as Parameters<
+        typeof runStageBWithJudgment
+      >[0]['stageAInput'],
+    });
+    expect(r.gatingStageA).toEqual(pair(d).gatingStageA);
+    expect(r.gating).toEqual(pair(d).gating);
+    expect(r.judgedCompositeScore).toBe(r.gating.compositeScore);
+  });
+});

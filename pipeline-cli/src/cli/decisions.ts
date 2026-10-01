@@ -81,6 +81,7 @@ import {
   judgeStageA,
   judgeStageBSignals,
   DECISION_JUDGMENT_SOURCE_KIND,
+  runBaselineStageA,
   runStageA,
   runStageBWithJudgment,
   runStageC,
@@ -1057,23 +1058,35 @@ export function buildDecisionsCli(): Argv {
         const judged = await judgeStageA(decision, openDecisions, runner, {
           sourceKind: DECISION_JUDGMENT_SOURCE_KIND,
         });
-        const stageA = runStageA({
-          decision,
-          openDecisions,
-          graph,
-          workDir,
-          ...(judged ? { judged } : {}),
-        });
+        // What is stored (and returned as `stageA`) is the BASELINE Stage A: a saved actor
+        // takes precedence in later routing and a saved resolvedByStageA feeds coverage, so
+        // no judged answer may reach it. The judged view is for display only.
+        const baselineStageA = runBaselineStageA({ decision, openDecisions, graph, workDir });
+        const judgedStageA = judged
+          ? runStageA({ decision, openDecisions, graph, workDir, judged })
+          : undefined;
+        const stageA = judgedStageA ?? baselineStageA;
 
         if (argv.store) {
-          const event = makeRecommendationIssuedEvent({ decisionId: id, stageAOutput: stageA });
+          const event = makeRecommendationIssuedEvent({
+            decisionId: id,
+            stageAOutput: baselineStageA,
+          });
           appendDecisionEvent(event, { workDir });
         }
 
         if (String(argv.format) === 'json') {
-          emit({ ok: true, enabled: true, decisionId: id, stageA, stored: Boolean(argv.store) });
+          emit({
+            ok: true,
+            enabled: true,
+            decisionId: id,
+            stageA: baselineStageA,
+            ...(judgedStageA ? { judgedStageA } : {}),
+            stored: Boolean(argv.store),
+          });
         } else {
           emitText(`Stage A score for ${id}`);
+          if (judgedStageA) emitText('  (display shows the judged result; the baseline is stored)');
           emitText(`  priority:       ${stageA.prioritySignal.toFixed(3)}`);
           emitText(`  resolvedByStageA: ${stageA.resolvedByStageA}`);
           emitText(`  routingActor:   ${stageA.routingActor ?? '(none — needs Stage B)'}`);

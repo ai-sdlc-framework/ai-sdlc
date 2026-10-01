@@ -43,15 +43,17 @@ export const DUPLICATE_SHORTLIST_MAX = 5;
 export const STAGE_B_EXEMPLAR_LIMIT = 8;
 
 /**
- * The `sourceKind` the CLI judges decisions under. `Decision.metadata.source` records a
- * decision's origin as one of `DECISION_SOURCES` (dor-clarification, rfc-open-question,
- * emergent-finding, framework-calibration, subagent-escalation, ad-hoc). All are internal
- * origins and none identifies untrusted external text such as a gh issue, so there is no
- * field to derive a stricter kind from: decisions are treated as trusted work-item text.
- * The judgments consulted here are also nominal in the permissive direction (their
- * reducesReview rationales), so this does not widen what a model answer can do.
+ * The `sourceKind` the CLI judges decisions under. Only `'backlog'` lets a judgment decide
+ * in the permissive direction (reference/src/judgment/evaluate.ts), so any other value
+ * escalates permissive outcomes. Decision text is not trusted work-item text: a
+ * subagent-escalation decision's summary/body is written by a dispatched developer agent
+ * that may be working on an external contributor's issue, and a dor-clarification summary
+ * is an evaluator-generated question taken verbatim from the task. `Decision.metadata.source`
+ * cannot separate those from the rest, so every decision is judged as untrusted text.
+ * No existing kind names this, so 'untrusted-external' is used (non-'backlog' is all the
+ * evaluator checks).
  */
-export const DECISION_JUDGMENT_SOURCE_KIND = 'backlog';
+export const DECISION_JUDGMENT_SOURCE_KIND = 'untrusted-external';
 
 export interface JudgeOptions {
   /** Kind of the work item. Only `'backlog'` may decide in the permissive direction. */
