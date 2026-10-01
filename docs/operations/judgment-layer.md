@@ -196,7 +196,8 @@ environment variable. To leave the layer on but stop one judgment from acting, s
 its mode back to `shadow`.
 
 `AI_SDLC_JUDGMENT_CONFIG_PATH` (an operator-controlled environment variable) names a
-local config file to use instead of the base-branch copy.
+local config file to use instead of the base-branch copy. While it is set,
+removing the committed config does not disable the layer.
 
 ## Judgment log
 
@@ -259,12 +260,15 @@ answers.
 ## For adopters: what leaves your machine
 
 - **Off by default.** Nothing is sent unless `.ai-sdlc/judgment-config.yaml` names a
-  provider on your base branch.
+  provider on your base branch, or `AI_SDLC_JUDGMENT_CONFIG_PATH` points at a local
+  config file (an operator-controlled variable that turns the layer on from that
+  file).
 - **What is sent.** Only the state of judgments whose egress class you allow. By
   default that is `work-item-text`: the text of tasks, issues, decisions and capture
   findings. Diffs (`code-diff`) and agent output (`agent-output`) are sent only if you
-  list those classes. Secrets matching the framework's secret patterns are redacted
-  first.
+  list those classes, except that a loopback `baseUrl` skips that check (see the local
+  endpoint bullet below). Secrets matching the framework's secret patterns are
+  redacted first.
 - **To whom.** With `jev`, to the Jev API (or the host in `TYPESAFE_BASE_URL`). The
   vendor documents that it does not train on customer requests; zero data retention is
   an enterprise-plan feature, so check your plan. With `openai-compatible`, to
@@ -274,6 +278,9 @@ answers.
   if that endpoint runs the model and does not forward requests. A loopback `baseUrl`
   also bypasses `spec.egress.allow` for all classes, so a forwarding gateway (a proxy,
   a cloud-offloaded model, an SSH tunnel) would receive diffs and agent output too.
+  The exemption looks only at the provider's `baseUrl`, so it applies to `jev` as
+  well: pointing `TYPESAFE_BASE_URL` at a local forwarding proxy sends diffs and agent
+  output to the Jev API regardless of `spec.egress.allow`.
 - **You decide the classes.** For a remote provider, `spec.egress.allow` is the
   control; a smaller list means fewer judgments run. It is not applied to a loopback
   `baseUrl` (see above). Version 1 does not enforce a compliance posture (RFC-0022):
