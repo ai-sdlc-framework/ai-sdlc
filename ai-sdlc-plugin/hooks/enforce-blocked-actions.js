@@ -68,7 +68,7 @@
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
-const { join, resolve, isAbsolute, relative, sep, dirname } = require('path');
+const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
 const { execSync, execFileSync } = require('child_process');
 const { realpathSync } = require('fs');
 const {
@@ -134,6 +134,8 @@ try {
 
 // ── Own-branch lease policy (RFC-0051 §10) ───────────────────────────
 
+const GIT_TIMEOUT_MS = 2000;
+
 function gitOut(args, cwd) {
   try {
     return (
@@ -141,6 +143,7 @@ function gitOut(args, cwd) {
         cwd,
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: GIT_TIMEOUT_MS,
         env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined },
       }).trim() || null
     );
@@ -158,33 +161,56 @@ function safeReal(p) {
 }
 
 /**
- * Resolves the force-push policy from a TRUSTED location only. The hook's
- * project dir normally is the operator's checkout; but when it resolves to the
- * very worktree the agent is pushing from (a PR-tree copy the governed party
- * can edit), the policy is read from the main checkout instead (the parent of
- * the git common dir), so a worktree copy of agent-role.yaml setting
- * `leaseOnOwnBranch` has no effect. Any failure fails closed to `never`.
+ * The main checkout's root for the repo that `dir` belongs to, derived from the
+ * git COMMON dir (independent of which worktree the tool call runs in). Only a
+ * common dir that is literally `<root>/.git` is accepted; anything else
+ * (bare repo, failure, odd layout) returns null and the caller fails closed.
+ */
+function mainCheckoutRoot(dir) {
+  const common = gitOut(['rev-parse', '--git-common-dir'], dir);
+  if (!common) return null;
+  const abs = resolve(dir, common);
+  if (basename(abs) !== '.git') return null;
+  return dirname(abs);
+}
+
+/**
+ * Resolves the force-push policy from a TRUSTED location only.
+ *
+ * Step 1 reads the policy text at the hook's project dir with NO git
+ * subprocess; unless it says `leaseOnOwnBranch`, the mode is `never` and
+ * nothing else runs (identical to behavior before this feature). Because that
+ * text may be a PR-tree copy (project dir inside a worktree), a lease value is
+ * only honored after Step 2 re-reads the policy from the MAIN checkout of the
+ * same repo (git common dir of the project dir, independent of the tool's cwd)
+ * and it also says lease. A worktree copy can therefore only tighten, never
+ * relax. The tool's cwd must belong to that same repo. Any failure fails
+ * closed to `never`.
  */
 function loadLeasePolicy() {
   const closed = { mode: 'never', protectedBranches: [], cwd: undefined };
   try {
+    const localText = readFileSync(join(projectDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+    if (resolveGovernanceExtrasFromYaml(localText).forcePushMode !== 'leaseOnOwnBranch') {
+      return closed;
+    }
     const cwd = toolCwd || process.cwd();
-    const top = gitOut(['rev-parse', '--show-toplevel'], cwd);
-    if (!top) return closed;
-    const common = gitOut(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd);
-    const mainRoot = common ? dirname(common) : top;
-    let policyDir = projectDir;
-    const realTop = safeReal(top);
-    const realProj = safeReal(projectDir);
-    const inWorktree = realProj === realTop || realProj.startsWith(realTop + sep);
-    if (inWorktree && safeReal(mainRoot) !== realTop) policyDir = mainRoot;
-    else if (inWorktree) policyDir = projectDir; // main checkout itself
-    const yaml = readFileSync(join(policyDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
-    const extras = resolveGovernanceExtrasFromYaml(yaml);
-    return { mode: extras.forcePushMode, protectedBranches: extras.protectedBranches, cwd };
+    const mainRoot = mainCheckoutRoot(projectDir);
+    if (!mainRoot) return closed;
+    const cwdMain = mainCheckoutRoot(cwd);
+    if (!cwdMain || safeReal(cwdMain) !== safeReal(mainRoot)) return closed;
+    const trusted = readFileSync(join(mainRoot, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+    const extras = resolveGovernanceExtrasFromYaml(trusted);
+    if (extras.forcePushMode !== 'leaseOnOwnBranch') return closed;
+    return { mode: 'leaseOnOwnBranch', protectedBranches: extras.protectedBranches, cwd };
   } catch {
     return closed;
   }
+}
+
+/** True when the command text mentions a git push (used to fail closed on errors). */
+function looksLikeGitPush(command) {
+  return /\bgit\b[\s\S]*\bpush\b/i.test(command.replace(/['"\\]/g, ''));
 }
 
 // ── Merge-governance token allowlists (AISDLC-602) ───────────────────
@@ -247,28 +273,43 @@ function enforceBash(command) {
   // malformed) this is a no-op and the blockedActions patterns below behave
   // exactly as before.
   let leasePushAllowed = false;
-  const lease = loadLeasePolicy();
-  if (lease.mode === 'leaseOnOwnBranch') {
-    const verdict = evaluateLeasePush(trimmed, {
-      ownBranch: gitOut(['symbolic-ref', '--short', '-q', 'HEAD'], lease.cwd),
-      protectedBranches: lease.protectedBranches,
-      remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
-      aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
-    });
-    if (verdict.decision === 'deny') deny(verdict.reason);
-    leasePushAllowed = verdict.decision === 'allow';
+  try {
+    const lease = loadLeasePolicy();
+    if (lease.mode === 'leaseOnOwnBranch') {
+      const verdict = evaluateLeasePush(trimmed, {
+        ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
+        protectedBranches: lease.protectedBranches,
+        remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
+        aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
+        tagExists: (name) =>
+          gitOut(['rev-parse', '-q', '--verify', `refs/tags/${name}`], lease.cwd) !== null,
+      });
+      if (verdict.decision === 'deny') deny(verdict.reason);
+      leasePushAllowed = verdict.decision === 'allow';
+    }
+  } catch {
+    // A thrown error (or timeout) must not become an allow: deny pushes, ignore the rest.
+    if (looksLikeGitPush(trimmed))
+      deny('could not evaluate the own-branch lease policy for this git push');
   }
 
   if (blockedActions.length === 0) return;
 
+  const withoutLeaseFlags = trimmed
+    .replace(/\s--force-with-lease(=\S*)?/g, '')
+    .replace(/\s--force-if-includes/g, '');
+
   for (const pattern of blockedActions) {
-    // The one command shape the lease policy positively allowed is exempt from
-    // the generic `git push --force*` / `-f*` patterns (which would otherwise
-    // also match `--force-with-lease`). Every other pattern still applies.
-    if (leasePushAllowed && /^git\s+push\b/i.test(pattern)) continue;
     const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
     const regexStr = escaped.replace(/\*/g, '.*');
     const regex = new RegExp(`^${regexStr}$`, 'i');
+    // The one command shape the lease policy positively allowed is exempt only
+    // from `git push` patterns that match PURELY because of the lease flags
+    // (e.g. `git push --force*`). A pattern that still matches once those flags
+    // are removed (e.g. `git push *develop*`) keeps applying.
+    if (leasePushAllowed && /^git\s+push\b/i.test(pattern) && !regex.test(withoutLeaseFlags)) {
+      continue;
+    }
     if (regex.test(trimmed)) {
       deny(`command matches blockedAction pattern '${pattern}'`);
     }

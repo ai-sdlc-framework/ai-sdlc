@@ -6,8 +6,17 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -71,8 +80,8 @@ function makeRepo(name, policyYaml, worktreeYaml) {
   return { root: realpathSync(root), wt: realpathSync(wt) };
 }
 
-function invoke(payload, { cwd, projectDir, unsetProject = false }) {
-  const env = { ...gitEnv };
+function invoke(payload, { cwd, projectDir, unsetProject = false, env: extraEnv = {} }) {
+  const env = { ...gitEnv, ...extraEnv };
   if (!unsetProject) env.CLAUDE_PROJECT_DIR = projectDir;
   try {
     return execFileSync('node', [hookScript], {
@@ -150,9 +159,9 @@ describe('leaseOnOwnBranch - allowed', () => {
     assert.ok(!denied(out), out);
   });
 
-  it('a worktree copy that disables the policy has no effect on the trusted lease policy', () => {
+  it('a worktree copy can only TIGHTEN: copy says never while trusted says lease -> blocked (fail closed)', () => {
     const out = run(L(), { cwd: inverseRepo.wt, projectDir: inverseRepo.wt });
-    assert.ok(!denied(out), out);
+    assert.ok(denied(out), out);
   });
 
   it('plain non-force push of own branch is unaffected', () => {
@@ -319,4 +328,270 @@ describe('fixed integrity rules stay blocked under leaseOnOwnBranch', () => {
   it('the lease allowance does not exempt other blockedActions (chained reset)', () => {
     assert.ok(denied(run(`${L()}; git reset --hard`, ctx())));
   });
+});
+
+// ── Round-2 additions ────────────────────────────────────────────────
+
+/** Installs a logging `git` shim in front of PATH; optionally failing --git-common-dir. */
+function makeGitShim(name) {
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf-8' }).trim();
+  const dir = join(base, `shim-${name}`);
+  mkdirSync(dir, { recursive: true });
+  const log = join(dir, 'calls.log');
+  writeFileSync(
+    join(dir, 'git'),
+    `#!/bin/sh
+echo "$*" >> "${log}"
+if [ -n "$GIT_SHIM_FAIL_COMMON" ]; then
+  case "$*" in *--git-common-dir*) exit 1;; esac
+fi
+exec "${realGit}" "$@"
+`,
+  );
+  chmodSync(join(dir, 'git'), 0o755);
+  return { dir, log, env: { PATH: `${dir}:${process.env.PATH}` } };
+}
+const calls = (shim) => (existsSync(shim.log) ? readFileSync(shim.log, 'utf-8').trim() : '');
+
+describe('protected-branch bypass via git short-name resolution (regression)', () => {
+  let r;
+  before(() => {
+    r = makeRepo(
+      'shortname',
+      roleYaml(
+        `  governance:\n    allowForcePush: leaseOnOwnBranch\n    protectedBranches:\n      - develop\n`,
+      ),
+    );
+    git(r.root, 'push', '-q', 'origin', 'main:develop');
+    git(r.wt, 'fetch', '-q', 'origin');
+    git(r.wt, 'checkout', '-q', '-b', 'heads/develop', 'origin/develop');
+  });
+
+  it('REPRODUCTION: git really resolves HEAD:heads/develop to the remote refs/heads/develop', () => {
+    git(
+      r.wt,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@example.invalid',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'diverge',
+    );
+    const before = git(r.wt, 'ls-remote', 'origin', 'refs/heads/develop');
+    git(r.wt, 'push', '-q', '--force-with-lease', 'origin', 'HEAD:heads/develop');
+    const after = git(r.wt, 'ls-remote', 'origin', 'refs/heads/develop');
+    assert.notEqual(before, after, 'the unguarded push updated the remote develop branch');
+  });
+
+  for (const cmd of [
+    'git push --force-with-lease origin HEAD:heads/develop',
+    'git push --force-with-lease origin heads/develop:heads/develop',
+    'git push --force-with-lease origin heads/develop',
+    'git push --force-with-lease origin HEAD:refs/heads/develop',
+  ]) {
+    it(`blocks ${cmd}`, () => {
+      assert.ok(denied(run(cmd, { cwd: r.wt, projectDir: r.root })), cmd);
+    });
+  }
+
+  it('blocks ambiguously named own branches (heads/main, refs/heads/main, tags/x, remotes/origin/main)', () => {
+    for (const name of ['heads/main', 'refs/heads/main', 'tags/x', 'remotes/origin/main']) {
+      git(r.wt, 'checkout', '-q', '-B', name);
+      for (const cmd of [
+        `git push --force-with-lease origin HEAD:${name}`,
+        `git push --force-with-lease origin ${name}`,
+        'git push --force-with-lease origin HEAD:heads/main',
+      ]) {
+        assert.ok(denied(run(cmd, { cwd: r.wt, projectDir: r.root })), `${name}: ${cmd}`);
+      }
+    }
+  });
+});
+
+describe('fail-closed paths and git-subprocess discipline', () => {
+  it('non-git cwd under a lease policy: lease push is denied', () => {
+    const nongit = realpathSync(mkdtempSync(join(tmpdir(), 'lease-nongit-')));
+    try {
+      assert.ok(denied(run(L(), { cwd: nongit, projectDir: leaseRepo.root })));
+    } finally {
+      rmSync(nongit, { recursive: true, force: true });
+    }
+  });
+
+  it('cwd in a DIFFERENT repo than the project dir: denied', () => {
+    const other = makeRepo('otherrepo', roleYaml(LEASE));
+    assert.ok(denied(run(L(), { cwd: other.wt, projectDir: leaseRepo.root })));
+  });
+
+  it('trusted main-checkout policy unreadable while the project-dir copy says lease: denied', () => {
+    const r = makeRepo('nomain', roleYaml(LEASE), roleYaml(LEASE));
+    rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
+    assert.ok(denied(run(L(), { cwd: r.wt, projectDir: r.wt })));
+  });
+
+  it('project-dir copy unreadable (directory in its place): no lease, blockedActions behave as before', () => {
+    const r = makeRepo('unreadable', roleYaml(LEASE));
+    rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
+    mkdirSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
+    // No readable policy at all: nothing new is enforced or granted.
+    assert.ok(!denied(run(`git push origin ${OWN} --force`, { cwd: r.wt, projectDir: r.root })));
+  });
+
+  it('git failing to report the common dir (old git): fail closed to never', () => {
+    const shim = makeGitShim('nocommon');
+    const out = run(L(), {
+      cwd: leaseRepo.wt,
+      projectDir: leaseRepo.root,
+      env: { ...shim.env, GIT_SHIM_FAIL_COMMON: '1' },
+    });
+    assert.ok(denied(out), out);
+  });
+
+  it('`never` runs NO git subprocess at all (policy decided from file text)', () => {
+    const shim = makeGitShim('never');
+    const out = run(L(), { cwd: neverRepo.wt, projectDir: neverRepo.root, env: shim.env });
+    assert.ok(denied(out), 'still blocked by blockedActions');
+    assert.equal(calls(shim), '', 'no git calls');
+  });
+
+  it('lease mode does run git (sanity check on the shim)', () => {
+    const shim = makeGitShim('lease');
+    run(L(), { cwd: leaseRepo.wt, projectDir: leaseRepo.root, env: shim.env });
+    assert.match(calls(shim), /symbolic-ref -q HEAD/);
+    assert.match(calls(shim), /--git-common-dir/);
+  });
+
+  it('policy is resolved from the project dir repo independent of the tool cwd (other worktree)', () => {
+    git(
+      leaseRepo.root,
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'feat/b',
+      join(leaseRepo.root, '.worktrees', 'b'),
+    );
+    const wtB = realpathSync(join(leaseRepo.root, '.worktrees', 'b'));
+    // project dir = worktree A (leaseRepo.wt), push runs from worktree B on its own branch.
+    const ok = run('git push --force-with-lease origin feat/b', {
+      cwd: wtB,
+      projectDir: leaseRepo.wt,
+    });
+    assert.ok(!denied(ok), ok);
+    // ...but B's own-branch rule still applies: pushing A's branch from B is blocked.
+    assert.ok(denied(run(L(), { cwd: wtB, projectDir: leaseRepo.wt })));
+    // project dir = A whose copy says lease while the main checkout says never: blocked.
+    git(
+      wtCopyRepo.root,
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'feat/b',
+      join(wtCopyRepo.root, '.worktrees', 'b'),
+    );
+    const wcB = realpathSync(join(wtCopyRepo.root, '.worktrees', 'b'));
+    assert.ok(
+      denied(
+        run('git push --force-with-lease origin feat/b', { cwd: wcB, projectDir: wtCopyRepo.wt }),
+      ),
+    );
+  });
+});
+
+describe('shell wrappers and env tricks (documented; unchanged from before this feature)', () => {
+  const ctx = () => ({ cwd: leaseRepo.wt, projectDir: leaseRepo.root });
+
+  it('bash -c / sh -c payloads are not parsed by this hook or by the legacy prefix patterns', () => {
+    assert.ok(!denied(run("bash -c 'git push --force-with-lease origin main'", ctx())));
+    assert.ok(!denied(run("sh -c 'git push -f origin main'", ctx())));
+  });
+
+  it('xargs git push is seen and blocked', () => {
+    assert.ok(denied(run('xargs git push --force-with-lease origin main', ctx())));
+  });
+
+  it('NBSP-separated lease push is blocked', () => {
+    assert.ok(denied(run(`git push --force-with-lease origin\u00a0${OWN}`, ctx())));
+  });
+
+  it('env-prefixed GIT_CONFIG_COUNT alias injection is blocked', () => {
+    assert.ok(
+      denied(
+        run(
+          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.zz GIT_CONFIG_VALUE_0=push git zz --force origin main',
+          ctx(),
+        ),
+      ),
+    );
+  });
+});
+
+describe('adopter blockedActions that are not about force flags keep applying to an allowed lease push', () => {
+  it('a `git push *develop*` pattern still blocks, while the force patterns are exempted', () => {
+    const r = makeRepo(
+      'adopterpattern',
+      roleYaml(LEASE).replace("- 'git push -f*'", "- 'git push -f*'\n      - 'git push *develop*'"),
+    );
+    git(r.wt, 'checkout', '-q', '-b', 'feat/develop-x');
+    assert.ok(
+      denied(
+        run('git push --force-with-lease origin feat/develop-x', { cwd: r.wt, projectDir: r.root }),
+      ),
+    );
+    git(r.wt, 'checkout', '-q', 'feat/own');
+    assert.ok(!denied(run(L(), { cwd: r.wt, projectDir: r.root })));
+  });
+});
+
+describe('CI-skip floor does not depend on allowForcePush', () => {
+  // The PreToolUse hook deliberately does NOT enforce CI-skip tokens; the
+  // pre-push gate script does, and it never reads governance policy at all.
+  // This pins that: the script blocks a token-carrying commit under both settings.
+  const script = join(__dirname, '..', '..', 'scripts', 'check-skip-ci-marker.sh');
+  // Built at runtime so no literal magic token appears in any committed file.
+  const token = ['[', 'skip', ' ', 'ci', ']'].join('');
+  const ZERO = '0'.repeat(40);
+
+  function scan(repo, message) {
+    git(
+      repo.root,
+      '-c',
+      'user.name=t',
+      '-c',
+      'user.email=t@example.invalid',
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      message,
+    );
+    const sha = git(repo.root, 'rev-parse', 'HEAD');
+    return spawnSync('bash', [script], {
+      cwd: repo.root,
+      env: gitEnv,
+      input: `refs/heads/x ${sha} refs/heads/x ${ZERO}\n`,
+      encoding: 'utf-8',
+    });
+  }
+
+  for (const [label, gov] of [
+    ['never', ''],
+    ['leaseOnOwnBranch', LEASE],
+  ]) {
+    it(`blocks a commit carrying a CI-skip token under ${label}`, () => {
+      const r = makeRepo(`ciskip-${label}`, roleYaml(gov));
+      const res = scan(r, `chore: x ${token}`);
+      assert.equal(res.status, 1, res.stderr);
+      assert.match(res.stderr, /CI-skip magic token/);
+    });
+
+    it(`passes a clean commit under ${label}`, () => {
+      const r = makeRepo(`ciskipclean-${label}`, roleYaml(gov));
+      assert.equal(scan(r, 'chore: x (skip ci marker)').status, 0);
+    });
+  }
 });

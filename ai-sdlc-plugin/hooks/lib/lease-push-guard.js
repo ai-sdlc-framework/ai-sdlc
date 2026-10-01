@@ -21,7 +21,11 @@
  * global options. Anything else that looks like a force-ish push is denied.
  *
  * ctx (all injected so tests never touch git):
- *   ownBranch:         string | null  — current worktree's checked-out branch
+ *   ownRef:            string | null  — FULL ref the worktree has checked out
+ *                                       (`git symbolic-ref -q HEAD`); must be
+ *                                       `refs/heads/<name>`
+ *   tagExists:         (name) => boolean — true when a local tag `<name>` exists
+ *                                       (a bare `<name>` refspec could resolve to it)
  *   protectedBranches: string[]       — policy-listed protected names (exact
  *                                       or trailing `*` prefix)
  *   remotes:           string[]       — configured remote NAMES
@@ -38,12 +42,35 @@
 const ALWAYS_PROTECTED = ['main', 'master'];
 const WRAPPERS = new Set(['env', 'command', 'exec', 'sudo', 'nohup', 'time', 'builtin', 'xargs']);
 const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+// First path segments git's short-name resolution can reinterpret as a
+// different ref namespace (`heads/x` -> refs/heads/x, `tags/x`, `remotes/...`).
+const AMBIGUOUS_FIRST_SEGMENTS = new Set(['refs', 'heads', 'tags', 'remotes']);
+// Long options (after `--`) whose abbreviations must be treated as force-ish.
+const FORCEISH_LONG = ['force', 'mirror', 'delete', 'prune', 'all'];
+const FORCE_CONFIG_ENV_RE = /^GIT_CONFIG_(COUNT|KEY_|VALUE_|PARAMETERS)/;
+
+/** `refs/heads/<x>` -> `<x>`; otherwise null. */
+function branchFromRef(ref) {
+  return typeof ref === 'string' && ref.startsWith('refs/heads/')
+    ? ref.slice('refs/heads/'.length)
+    : null;
+}
+
+/** A branch short name safe to compare textually against refspec text. */
+function isPlainBranchName(name) {
+  if (typeof name !== 'string' || !BRANCH_RE.test(name)) return false;
+  if (name.startsWith('/') || name.endsWith('/') || name.includes('//') || name.includes('..')) {
+    return false;
+  }
+  return !AMBIGUOUS_FIRST_SEGMENTS.has(name.split('/')[0]);
+}
 const META_RE = /[;&|<>`$\\()\n\r*?[\]{}!#~'"]/;
 
 function isProtectedBranch(name, protectedBranches) {
-  const short = name.replace(/^refs\/heads\//, '');
+  const short = name.replace(/^refs\/heads\//, '').toLowerCase();
   if (ALWAYS_PROTECTED.includes(short)) return true;
-  for (const p of protectedBranches || []) {
+  for (const raw of protectedBranches || []) {
+    const p = raw.toLowerCase();
     if (p.endsWith('*') ? short.startsWith(p.slice(0, -1)) : short === p) return true;
   }
   return false;
@@ -54,7 +81,7 @@ function toSegments(command) {
   const flat = command.replace(/['"\\]/g, '');
   return flat
     .split(/[;&|\n\r`(){}]|\$\(/)
-    .map((seg) => seg.trim().split(/\s+/).filter(Boolean))
+    .map((seg) => seg.split(/[ \t]+/).filter(Boolean)) // bash word splitting, not JS \s
     .filter((toks) => toks.length > 0);
 }
 
@@ -76,12 +103,10 @@ function findGitIndex(toks) {
 
 function isForceish(tok) {
   if (tok.startsWith('--')) {
-    return (
-      tok.startsWith('--f') ||
-      tok === '--mirror' ||
-      tok.startsWith('--delete') ||
-      tok.startsWith('--prune')
-    );
+    const body = tok.slice(2).split('=')[0];
+    if (body === '') return false;
+    // Any (abbreviated) prefix of a force-class option; `--follow-tags` is not.
+    return FORCEISH_LONG.some((o) => o.startsWith(body) || body.startsWith('force'));
   }
   if (tok.startsWith('-')) return /^-[^-]*[fd]/.test(tok);
   return tok.startsWith('+') || tok.startsWith(':') || /:$/.test(tok);
@@ -92,6 +117,7 @@ function classifySegment(toks, aliasLookup) {
   const gi = findGitIndex(toks);
   if (gi === -1) return { push: false };
   const after = toks.slice(gi + 1);
+  const envConfig = toks.slice(0, gi).some((t) => FORCE_CONFIG_ENV_RE.test(t));
   const hasDollar = toks.some((t) => t.includes('$'));
   // Skip git global options to find the subcommand.
   let i = 0;
@@ -121,17 +147,25 @@ function classifySegment(toks, aliasLookup) {
   if (aliasOverride || (hasDollar && after.some((t) => t === 'push' || t.includes('$')))) {
     isPush = isPush || after.some((t) => t === 'push' || t.includes('push'));
   }
-  return { push: isPush, rest: after.slice(i + 1), unparseable: aliasOverride || hasDollar };
+  if (envConfig) isPush = true; // injected git config can define any alias
+  return {
+    push: isPush,
+    rest: after.slice(i + 1),
+    unparseable: aliasOverride || hasDollar || envConfig,
+  };
 }
 
 function parseAllowedShape(command, ctx) {
+  if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
   if (META_RE.test(command)) return 'shell metacharacters, quoting or expansion present';
-  const toks = command.trim().split(/\s+/);
+  const toks = command.trim().split(/[ \t]+/);
   if (toks[0] !== 'git' || toks[1] !== 'push') {
     return 'must be exactly `git push ...` (no wrapper, env prefix or git global options)';
   }
-  const own = ctx.ownBranch;
-  if (!own || !BRANCH_RE.test(own)) return 'current worktree branch cannot be determined';
+  const own = branchFromRef(ctx.ownRef);
+  if (!own || !isPlainBranchName(own)) {
+    return 'current worktree branch cannot be determined or has an ambiguous name';
+  }
   if (isProtectedBranch(own, ctx.protectedBranches)) {
     return `own branch '${own}' is protected`;
   }
@@ -162,19 +196,27 @@ function parseAllowedShape(command, ctx) {
     return `remote '${remote}' is not a configured remote name`;
   }
   if (refspecs.length === 0) return 'no explicit refspec (target would be inferred)';
+  const full = `refs/heads/${own}`;
   for (const spec of refspecs) {
     const parts = spec.split(':');
     if (parts.length > 2) return `refspec '${spec}' is not a simple branch refspec`;
     const [src, dstRaw] = parts;
-    const dst = dstRaw === undefined ? src : dstRaw;
-    if (!src || !dst) return `refspec '${spec}' is empty or a delete`;
-    const srcShort = src.replace(/^refs\/heads\//, '');
-    if (src !== 'HEAD' && srcShort !== own) {
+    if (!src || (dstRaw !== undefined && !dstRaw)) return `refspec '${spec}' is empty or a delete`;
+    // Source may only be the own branch (short or full) or HEAD.
+    if (src !== 'HEAD' && src !== own && src !== full) {
       return `refspec source '${src}' is not the own branch`;
     }
-    const dstShort = dst.replace(/^refs\/heads\//, '');
-    if (dstShort !== own) return `target '${dst}' is not the own branch '${own}'`;
+    // Destination must be EXACTLY the own short name or the full ref: git resolves
+    // other spellings (`heads/x`, `tags/x`, ...) against the remote's refs, which
+    // can name a different (e.g. protected) branch than the one checked here.
+    const dst = dstRaw === undefined ? src : dstRaw;
+    if (dst === 'HEAD') return 'a bare HEAD destination is inferred, not explicit';
+    if (dst !== own && dst !== full) return `target '${dst}' is not the own branch '${own}'`;
     if (isProtectedBranch(dst, ctx.protectedBranches)) return `target '${dst}' is protected`;
+    // A bare `<own>` (no colon) is resolved locally; a same-named tag would win.
+    if (dstRaw === undefined && src === own && typeof ctx.tagExists === 'function') {
+      if (ctx.tagExists(own)) return `a local tag named '${own}' makes the refspec ambiguous`;
+    }
   }
   return null;
 }

@@ -86,8 +86,21 @@ spec:
   (plain `--force`/`-f`, `+refspec`, `--force-if-includes` alone, another branch,
   a raw URL remote, `--delete`, `--mirror`, a push with no explicit refspec) is
   blocked. The own-branch value is read from git state, never from the command
-  text. The policy is read from the trusted main checkout, so a copy of
-  `agent-role.yaml` edited in a worktree or PR has no effect. Note that a
+  text, as the full `refs/heads/<name>` ref; branch names (own or target) that
+  git could re-read as another ref (a first segment of `refs`, `heads`, `tags`
+  or `remotes`) are refused, and a destination must be exactly the branch name
+  or its full `refs/heads/<name>` form. Option abbreviations of
+  `--force`, `--mirror`, `--delete`, `--prune` and `--all` count as force-ish and
+  are blocked; `--follow-tags` is not force-ish on its own but is not part of the
+  allowed lease shape. The policy is read from the trusted main checkout (the
+  git common dir of the project directory): a copy of `agent-role.yaml` edited in
+  a worktree or PR can only tighten the policy, never grant the lease, and any
+  failure to determine the trusted policy blocks. Under `never` the hook starts
+  no git subprocess for this check. Known conservative behavior: commands are
+  split on newlines and shell separators without understanding quoting, so a
+  multi-line quoted argument (for example a `gh pr create --body` containing a
+  line that reads like a force push) can be denied under `leaseOnOwnBranch`.
+  Wrapper payloads such as `bash -c '...'` are not parsed, exactly as before. Note that a
   `blockedActions` pattern such as `git push --force*` also matches
   `--force-with-lease`; under `leaseOnOwnBranch` the single allowed command shape
   is exempted from `git push ...` patterns, every other pattern still applies.

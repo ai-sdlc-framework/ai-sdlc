@@ -269,3 +269,31 @@ describe('hooks render the resolved policy', () => {
     });
   }
 });
+
+describe('resolver - comments and blank lines inside lists', () => {
+  it('protectedBranches survives interleaved comments, blank lines and trailing comments', () => {
+    const y =
+      'spec:\n  governance:\n    protectedBranches:\n      - release/*\n      # keep prod\n\n      - prod # trailing\n  # dedented comment\n      - staging\n    allowMerge: never\n';
+    assert.deepEqual(resolveGovernanceExtrasFromYaml(y).protectedBranches, [
+      'release/*',
+      'prod',
+      'staging',
+    ]);
+  });
+
+  it('operational survives interleaved comments, blank lines and trailing comments', () => {
+    const y =
+      'spec:\n  governance:\n    operational:\n      - requeue # a\n      # note\n\n      - retrigger-ci\n        # indented note\n      - clear-executor-context\n';
+    assert.deepEqual(resolveGovernanceExtrasFromYaml(y).operational, [
+      'requeue',
+      'retrigger-ci',
+      'clear-executor-context',
+    ]);
+  });
+
+  it('a real following key still ends the list', () => {
+    const y =
+      'spec:\n  governance:\n    operational:\n      - requeue\n    allowMerge: never\n      - retrigger-ci\n';
+    assert.deepEqual(resolveGovernanceExtrasFromYaml(y).operational, ['requeue']);
+  });
+});

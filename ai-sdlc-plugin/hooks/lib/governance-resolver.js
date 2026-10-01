@@ -104,6 +104,9 @@ function parseGovernanceBlock(yamlText) {
     }
 
     if (/^\s*$/.test(line)) continue; // blank lines don't end the block
+    // Comment-only lines (any indent) never end the block or a list: a comment
+    // between list items must not drop the later entries.
+    if (/^\s*#/.test(line)) continue;
 
     const indentMatch = line.match(/^(\s*)/);
     const indent = indentMatch[1].length;
