@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -415,5 +424,81 @@ describe('sources', () => {
     expect(evidenceFileName({ role: 'a b', model: 'M/X', taskClass: 'bug' })).toBe(
       'a-b.bug.m-x.json',
     );
+  });
+
+  it('keeps colliding cell names as separate files', () => {
+    const models = ['Model-B', 'model-b', 'model/b', 'foo:bar', 'foo-bar'];
+    const card = buildScorecard({
+      records: models.map((m, i) => call(`T-${i}`, { model: m })),
+      outcomes: deriveOutcomes(models.map((_, i) => rev(`T-${i}`, 1, 'code', 'approved'))),
+      taskInfo: new Map(),
+      assignments: new Map(),
+      weights,
+    });
+    const out = join(dir, 'evidence');
+    const paths = writeEvidenceFiles(out, card, { repo: 'repo-a', generatedAt: 'now' });
+    expect(new Set(paths).size).toBe(5);
+    expect(readdirSync(out)).toHaveLength(5);
+    const seen = paths.map((p) => JSON.parse(readFileSync(p, 'utf8')).cell.model).sort();
+    expect(seen).toEqual([...models].sort());
+  });
+
+  it('replaces a symlink at an evidence path instead of following it', () => {
+    const card = buildScorecard({
+      records: [call('T-1')],
+      outcomes: deriveOutcomes([rev('T-1', 1, 'code', 'approved')]),
+      taskInfo: new Map(),
+      assignments: new Map(),
+      weights,
+    });
+    const out = join(dir, 'evidence');
+    mkdirSync(out);
+    const target = join(dir, 'outside.txt');
+    writeFileSync(target, 'keep');
+    symlinkSync(target, join(out, 'developer.uncategorized.model-a.json'));
+    writeEvidenceFiles(out, card, { repo: 'repo-a', generatedAt: 'now' });
+    expect(readFileSync(target, 'utf8')).toBe('keep');
+    expect(lstatSync(join(out, 'developer.uncategorized.model-a.json')).isSymbolicLink()).toBe(
+      false,
+    );
+  });
+});
+
+describe('hostile input', () => {
+  it('counts hostile size keys as plain data', () => {
+    const sizes = ['__proto__', 'constructor', 'toString'];
+    const info = new Map(sizes.map((s, i) => [`T-${i}`, { taskClass: 'bug' as const, size: s }]));
+    const card = buildScorecard({
+      records: sizes.map((_, i) => call(`T-${i}`)),
+      outcomes: deriveOutcomes(sizes.map((_, i) => rev(`T-${i}`, 1, 'code', 'approved'))),
+      taskInfo: info,
+      assignments: new Map(),
+      weights,
+    });
+    const row = card.rows[0];
+    expect(Object.keys(row.sizes).sort()).toEqual(['__proto__', 'constructor', 'toString']);
+    expect(Object.getOwnPropertyDescriptor(row.sizes, '__proto__')?.value).toBe(1);
+    expect(JSON.parse(renderScorecardJson(card)).rows[0].sizes.constructor).toBe(1);
+  });
+
+  it('skips malformed ledger records and non-finite units', () => {
+    const bad = [
+      call('T-1', { agentRole: undefined as unknown as string }),
+      call('T-1', { model: 5 as unknown as string }),
+      call('T-1', { ts: undefined as unknown as string }),
+      call('T-1', {
+        tokens: { input: Number.NaN, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 },
+      }),
+    ];
+    const card = buildScorecard({
+      records: [...bad, call('T-1')],
+      outcomes: deriveOutcomes([rev('T-1', 1, 'code', 'approved')]),
+      taskInfo: new Map(),
+      assignments: new Map(),
+      weights,
+    });
+    expect(card.rows).toHaveLength(1);
+    expect(card.rows[0].meanUnitsPerTask).toBe(100);
+    expect(JSON.parse(renderScorecardJson(card)).rows[0].meanUnitsPerTask).toBe(100);
   });
 });

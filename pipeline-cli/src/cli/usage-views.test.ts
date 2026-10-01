@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -491,9 +499,21 @@ describe('cli-usage scorecard', () => {
         call('s1', 0, { agentRole: 'ai-sdlc:developer', repo: 'repo-a' }),
         call('s2', 1, { agentRole: 'ai-sdlc:developer', repo: 'repo-a', taskId: 'TASK-9' }),
         call('s3', 1, { agentRole: 'ai-sdlc:developer', repo: 'repo-b', taskId: 'TASK-7' }),
-        call('s4', 1, { scope: 'other', repo: undefined, taskId: undefined }),
       ],
       { dir: usageDir },
+    );
+    // The store strips repo and task from other-scope calls, so write a hand-made
+    // line to prove the reader's scope filter, not the writer, keeps it out.
+    appendFileSync(
+      join(usageDir, 'ledger-2026-09.jsonl'),
+      `${JSON.stringify(
+        call('s4', 1, {
+          scope: 'other',
+          repo: 'repo-a',
+          taskId: 'TASK-OTHER',
+          agentRole: 'ai-sdlc:developer',
+        }),
+      )}\n`,
     );
   });
 
@@ -513,6 +533,10 @@ describe('cli-usage scorecard', () => {
     const body = readFileSync(join(evidence, files[0]), 'utf8');
     expect(body).not.toContain('TASK-7');
     expect(body).not.toContain('"other"');
+    expect(text).not.toContain('TASK-OTHER');
+    for (const f of files) {
+      expect(readFileSync(join(evidence, f), 'utf8')).not.toContain('TASK-OTHER');
+    }
     expect(err.join('')).toContain('Wrote 1 evidence file');
   });
 

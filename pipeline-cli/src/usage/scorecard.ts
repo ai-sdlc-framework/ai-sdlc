@@ -145,7 +145,10 @@ export interface BuildScorecardInput {
   assignments: ReadonlyMap<string, AssignmentEntry>;
   weights: UnitWeights;
   minTasks?: number;
-  /** Only this role (normalized). */
+  /**
+   * Only this role (normalized). The `noOutcome` total is computed after this
+   * filter, so it counts tasks with usage for that role only.
+   */
   role?: string;
 }
 
@@ -185,7 +188,14 @@ export function buildScorecard(input: BuildScorecardInput): Scorecard {
   const acc = new Map<string, TaskRoleAcc>();
   const usageTasks = new Set<string>();
   for (const r of input.records) {
-    if (!r.taskId) continue;
+    if (
+      !r.taskId ||
+      typeof r.agentRole !== 'string' ||
+      typeof r.model !== 'string' ||
+      typeof r.ts !== 'string'
+    ) {
+      continue;
+    }
     const role = normalizeRole(r.agentRole);
     if (wanted && role !== wanted) continue;
     usageTasks.add(r.taskId);
@@ -196,7 +206,8 @@ export function buildScorecard(input: BuildScorecardInput): Scorecard {
       acc.set(key, a);
     }
     a.calls.set(r.model, (a.calls.get(r.model) ?? 0) + 1);
-    a.units += unitsForCall(r, input.weights);
+    const u = unitsForCall(r, input.weights);
+    a.units += Number.isFinite(u) ? u : 0;
     if (r.ts < a.first) a.first = r.ts;
     if (r.ts > a.last) a.last = r.ts;
   }
@@ -244,8 +255,14 @@ export function buildScorecard(input: BuildScorecardInput): Scorecard {
     const scored = usesOutcome(c.role);
     const approved = c.outcomes.filter((o) => o.firstPassApproved).length;
     const sources = new Set(c.tasks.map((t) => t.source));
-    const sizes: Record<string, number> = {};
-    for (const t of c.tasks) sizes[t.size ?? 'unknown'] = (sizes[t.size ?? 'unknown'] ?? 0) + 1;
+    // A Map, then fromEntries: sizes come from recorded estimates and must not
+    // reach the object prototype (`__proto__`, `constructor`, ...).
+    const sizeCounts = new Map<string, number>();
+    for (const t of c.tasks) {
+      const k = t.size ?? 'unknown';
+      sizeCounts.set(k, (sizeCounts.get(k) ?? 0) + 1);
+    }
+    const sizes = Object.fromEntries(sizeCounts);
     return {
       role: c.role,
       model: c.model,

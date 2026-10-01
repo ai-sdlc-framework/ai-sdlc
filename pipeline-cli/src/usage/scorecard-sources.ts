@@ -7,7 +7,15 @@
  * @module usage/scorecard-sources
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { TASK_CLASSES, type TaskClass } from '../estimation/types.js';
 import { readRecentEvents } from '../orchestrator/events.js';
@@ -144,18 +152,37 @@ export function evidenceFileName(row: Pick<ScorecardRow, 'role' | 'model' | 'tas
   return `${fileSafe(row.role)}.${fileSafe(row.taskClass)}.${fileSafe(row.model)}.json`;
 }
 
+/** Write through a fresh exclusive temp file, then rename, so a symlink at `path` is replaced, never followed. */
+function writeFileNoFollow(path: string, text: string): void {
+  const tmp = `${path}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
+  writeFileSync(tmp, text, { flag: 'wx' });
+  renameSync(tmp, path);
+}
+
 /**
  * Write one JSON file per cell. The caller passes a scorecard built from
  * framework-scope data of `meta.repo` only, so the files hold nothing else.
+ * Cells whose sanitized names collide get a short hash of the raw cell key.
+ * Files from an earlier run that no longer match a cell are left in place.
  * Returns the written paths.
  */
 export function writeEvidenceFiles(dir: string, card: Scorecard, meta: EvidenceMeta): string[] {
   mkdirSync(dir, { recursive: true });
   const paths: string[] = [];
+  const used = new Set<string>();
   for (const row of card.rows) {
     const { taskDetails, ...summary } = row;
-    const path = join(dir, evidenceFileName(row));
-    writeFileSync(
+    let name = evidenceFileName(row);
+    if (used.has(name)) {
+      const h = createHash('sha256')
+        .update(`${row.role}|${row.taskClass}|${row.model}`)
+        .digest('hex')
+        .slice(0, 8);
+      name = name.replace(/\.json$/, `-${h}.json`);
+    }
+    used.add(name);
+    const path = join(dir, name);
+    writeFileNoFollow(
       path,
       `${JSON.stringify(
         {

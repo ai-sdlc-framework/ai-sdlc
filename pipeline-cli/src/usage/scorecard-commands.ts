@@ -44,7 +44,11 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
     'Quality and cost per role, model and task class, from reviews and usage',
     (c) =>
       c
-        .option('role', { type: 'string', description: 'Only this role, for example developer' })
+        .option('role', {
+          type: 'string',
+          description:
+            'Only this role, for example developer (the no-outcome total is counted after this filter)',
+        })
         .option('since', { type: 'string', description: 'Include calls at or after this ISO date' })
         .option('format', {
           type: 'string',
