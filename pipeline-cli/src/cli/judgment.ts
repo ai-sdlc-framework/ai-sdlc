@@ -12,7 +12,7 @@
  *   cli-judgment replay --since <date> [--judgment <id>]
  */
 
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -32,6 +32,12 @@ import {
   type ResolvedJudgmentConfig,
   type Thresholds,
 } from '@ai-sdlc/reference';
+import {
+  ALL_TASK_TYPES,
+  convertCorpusToEvalJsonl,
+  registerSubstrateJudgments,
+  type ClassifierTaskType,
+} from '../classifier/substrate/index.js';
 import {
   JudgmentCliError,
   buildPromotion,
@@ -310,6 +316,32 @@ async function runAsk(args: CommonArgs & { id: string; input: string }, deps: Ju
   return 0;
 }
 
+async function runExportCorpus(
+  args: CommonArgs & { 'task-type': string; 'corpus-dir'?: string; out?: string },
+  deps: JudgmentCliDeps,
+) {
+  const out = deps.out ?? ((t) => process.stdout.write(t));
+  const taskType = args['task-type'];
+  if (!(ALL_TASK_TYPES as readonly string[]).includes(taskType)) {
+    throw new JudgmentCliError(
+      `unknown task type '${taskType}' (known: ${ALL_TASK_TYPES.join(', ')})`,
+    );
+  }
+  const workDir = resolve(args.cwd ?? deps.cwd ?? process.cwd());
+  const jsonl = convertCorpusToEvalJsonl(
+    workDir,
+    taskType as ClassifierTaskType,
+    args['corpus-dir'] ? resolve(workDir, args['corpus-dir']) : undefined,
+  );
+  if (args.out) {
+    writeFileSync(resolve(workDir, args.out), jsonl, { mode: 0o600 });
+    out(`wrote ${jsonl.split('\n').filter(Boolean).length} rows to ${args.out}\n`);
+  } else {
+    out(jsonl);
+  }
+  return 0;
+}
+
 const pct = (x: number | null): string => (x === null ? 'n/a' : `${(x * 100).toFixed(1)}%`);
 
 async function runEval(
@@ -548,6 +580,8 @@ export function buildJudgmentCli(
   setResult: (p: Promise<number>) => void,
 ): Argv {
   const run = (fn: () => number | Promise<number>) => setResult(Promise.resolve().then(fn));
+  // The classifier substrate's judgments are part of the built-in catalog.
+  if (!deps.getDefinition) registerSubstrateJudgments();
   return commonOptions(yargs(argv))
     .scriptName('cli-judgment')
     .command(
@@ -585,6 +619,19 @@ export function buildJudgmentCli(
       (a) => run(() => runEval(a as never, deps)),
     )
     .command(
+      'export-corpus <task-type>',
+      'Turn a classifier calibration corpus with operator overrides into eval JSONL.',
+      (y) =>
+        y
+          .positional('task-type', { type: 'string', demandOption: true })
+          .option('corpus-dir', {
+            type: 'string',
+            describe: 'Corpus directory (default: .ai-sdlc/classifier-corpus).',
+          })
+          .option('out', { type: 'string', describe: 'Write the JSONL here instead of stdout.' }),
+      (a) => run(() => runExportCorpus(a as never, deps)),
+    )
+    .command(
       'replay',
       'Recompute logged outcomes under other thresholds; no provider calls.',
       (y) =>
@@ -593,7 +640,7 @@ export function buildJudgmentCli(
           .option('judgment', { type: 'string', describe: 'Only this judgment id.' }),
       (a) => run(() => runReplay(a as never, deps)),
     )
-    .demandCommand(1, 'Choose a command: doctor, list, ask, eval or replay.')
+    .demandCommand(1, 'Choose a command: doctor, list, ask, eval, export-corpus or replay.')
     .strict()
     .exitProcess(false)
     .help();

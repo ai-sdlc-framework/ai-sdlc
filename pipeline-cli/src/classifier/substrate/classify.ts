@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 
 import { appendCorpusEntry } from './corpus.js';
 import { loadSubstrateConfig } from './config.js';
+import { classifyViaJudgment } from './judgment-bridge.js';
 import { buildPrompt, isAllowedClassification } from './task-prompts.js';
 import type {
   CalibrationCorpusEntry,
@@ -72,8 +73,8 @@ export async function classify(
   // (set below) still wins overall — that's the substrate's documented
   // resolution order.
   const config = loadSubstrateConfig(taskType, repoRoot, opts.agentRole);
-  const effectiveThreshold = opts.threshold ?? config.threshold;
-  const model = opts.model ?? config.model;
+  let effectiveThreshold = opts.threshold ?? config.threshold;
+  let model = opts.model ?? config.model;
 
   const prompt = buildPrompt(taskType, input);
 
@@ -81,7 +82,17 @@ export async function classify(
   let parseError: string | null = null;
   let invokerError: string | null = null;
 
-  if (!opts.invoker) {
+  // Judgment bridge: with no invoker, an `act` from the matching judgment is the
+  // classification. Abstain and escalate leave the existing path below untouched.
+  const judged = opts.invoker
+    ? undefined
+    : await classifyViaJudgment(input, taskType, opts, repoRoot);
+
+  if (judged) {
+    // Thresholds come from the judgment config; the substrate default is not reused.
+    effectiveThreshold = judged.threshold ?? effectiveThreshold;
+    model = judged.model;
+  } else if (!opts.invoker) {
     invokerError = 'no invoker supplied';
   } else {
     try {
@@ -104,7 +115,11 @@ export async function classify(
   let confidence = 0;
   let reasoning = '';
 
-  if (llmResponse) {
+  if (judged) {
+    classification = judged.classification;
+    confidence = judged.confidence;
+    reasoning = judged.reasoning;
+  } else if (llmResponse) {
     const validation = validateResponse(llmResponse, taskType, input);
     if (validation.ok) {
       classification = validation.classification;
@@ -126,10 +141,11 @@ export async function classify(
   }
 
   const metBehindThreshold =
-    typeof confidence === 'number' &&
-    confidence >= effectiveThreshold &&
-    !parseError &&
-    !invokerError;
+    judged !== undefined ||
+    (typeof confidence === 'number' &&
+      confidence >= effectiveThreshold &&
+      !parseError &&
+      !invokerError);
 
   // ── Corpus capture ──────────────────────────────────────────────────────
   let corpusEntryId: string | null = null;

@@ -47,6 +47,7 @@ function makeDef(over: Partial<JudgmentDefinition<In, Dec>> = {}): JudgmentDefin
     egressClass: 'work-item-text',
     direction: 'tighten-only',
     riskClass: 'seam',
+    fallback: 'pending',
     buildState: (i: In) => ({ p: i.p }),
     questions: () => ({ ok: { type: 'noul', instructions: 'Is it fine?' } }),
     compose: (answers, _input, t) => {
