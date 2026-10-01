@@ -104,6 +104,13 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityDefinition[] = [
     fallback: 'The usage ledger stops growing, so usage reports and window views go stale.',
     enable: 'Run `cli-usage ingest`, or keep the plugin Stop and SessionStart hooks installed.',
   },
+  {
+    id: 'routing.table',
+    title: 'Model routing table',
+    specifiedBy: 'RFC-0050',
+    fallback: 'Each role uses its built-in default model.',
+    enable: 'Add .ai-sdlc/model-routing.yaml to the base branch.',
+  },
 ];
 
 for (const def of BUILT_IN_CAPABILITIES) registerCapability(def);

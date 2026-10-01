@@ -367,6 +367,7 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
           runner: pinnedRunner(input.runner ?? defaultRunner, item.mergeBase),
           codexAvailable: true,
           reviewers: [type],
+          recordRouting: false,
         });
         const prompt = wrapUntrusted(
           built.prompts[0]?.prompt ?? '',

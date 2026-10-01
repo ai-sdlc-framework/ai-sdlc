@@ -15,6 +15,7 @@
 export * from './types.js';
 export * from './runtime/index.js';
 export * from './steps/index.js';
+export * from './routing/index.js';
 export * from './deps/index.js';
 export { executePipeline } from './execute-pipeline.js';
 

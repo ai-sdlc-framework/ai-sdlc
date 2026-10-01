@@ -27,6 +27,9 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
 import { resolveReviewerSet } from './reviewer-set.js';
+import { resolveModel } from '../routing/resolve-model.js';
+import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
+import { taskClassOf } from '../routing/task-class.js';
 
 export interface BuildReviewPromptsOptions {
   taskId: string;
@@ -39,6 +42,17 @@ export interface BuildReviewPromptsOptions {
   codexAvailable?: boolean;
   /** Override the resolved reviewer set (test injection / explicit caller choice). AISDLC-617. */
   reviewers?: ReviewerType[];
+  /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
+  sourceKind?: 'backlog' | 'gh-issue';
+  /** Review iteration (default 1). */
+  iteration?: number;
+  /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
+  artifactsDir?: string;
+  /**
+   * Set false to resolve models without writing the assignment log or reporting
+   * the routing capability (offline replay must leave no trace).
+   */
+  recordRouting?: boolean;
 }
 
 export async function buildReviewPrompts(
@@ -92,20 +106,36 @@ export async function buildReviewPrompts(
 
   const reviewers = opts.reviewers ?? resolveReviewerSet({ workDir: opts.workDir });
 
-  const prompts: ReviewPrompt[] = reviewers.map((reviewer) => ({
-    reviewer,
-    prompt: buildPrompt(reviewer, {
+  const taskClass = taskClassOf(opts.task.rawBody);
+  const prompts: ReviewPrompt[] = reviewers.map((reviewer) => {
+    const routed = resolveModel({
+      role: reviewer,
+      taskClass,
       taskId: opts.taskId,
-      title: opts.task.title,
-      description: opts.task.description,
-      acList,
-      diff,
-      changedFiles,
-      branch: opts.branch,
-      policy,
-      harnessNote,
-    }),
-  }));
+      sourceKind: opts.sourceKind,
+      iteration: opts.iteration ?? 1,
+      workDir: opts.workDir,
+      artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+      record:
+        opts.recordRouting !== false && routingRecordable(opts.worktreePath, opts.artifactsDir),
+    });
+    return {
+      reviewer,
+      ...(routed.model !== undefined ? { model: routed.model } : {}),
+      modelArm: routed.arm,
+      prompt: buildPrompt(reviewer, {
+        taskId: opts.taskId,
+        title: opts.task.title,
+        description: opts.task.description,
+        acList,
+        diff,
+        changedFiles,
+        branch: opts.branch,
+        policy,
+        harnessNote,
+      }),
+    };
+  });
 
   return { prompts, diff, changedFiles, harnessNote };
 }

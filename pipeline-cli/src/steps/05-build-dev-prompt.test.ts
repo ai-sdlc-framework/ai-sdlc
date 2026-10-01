@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
 import type { TaskSpec } from '../types.js';
 
@@ -14,6 +17,24 @@ const task: TaskSpec = {
   rawBody: '',
   filePath: '',
 };
+
+let pinned: string;
+let savedArts: string | undefined;
+let savedUsage: string | undefined;
+beforeEach(() => {
+  pinned = mkdtempSync(join(tmpdir(), 'step5-'));
+  savedArts = process.env.ARTIFACTS_DIR;
+  savedUsage = process.env.AI_SDLC_USAGE_DIR;
+  process.env.ARTIFACTS_DIR = join(pinned, 'arts');
+  process.env.AI_SDLC_USAGE_DIR = join(pinned, 'usage');
+});
+afterEach(() => {
+  rmSync(pinned, { recursive: true, force: true });
+  if (savedArts === undefined) delete process.env.ARTIFACTS_DIR;
+  else process.env.ARTIFACTS_DIR = savedArts;
+  if (savedUsage === undefined) delete process.env.AI_SDLC_USAGE_DIR;
+  else process.env.AI_SDLC_USAGE_DIR = savedUsage;
+});
 
 describe('Step 5 — buildDeveloperPrompt', () => {
   it('includes title, description, ACs, refs, externalPaths, branch', async () => {
@@ -71,5 +92,16 @@ describe('Step 5 — buildDeveloperPrompt', () => {
     });
     expect(r.prompt).toContain('## References\n(none)');
     expect(r.prompt).toContain('## Permitted external paths (cross-repo writes)\nnone');
+  });
+
+  it('returns the resolved developer model (default arm without a repo table)', async () => {
+    const r = await buildDeveloperPrompt({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: '/tmp/wt',
+    });
+    expect(r.model).toBe('claude-sonnet-4-6');
+    expect(r.modelArm).toBe('default');
   });
 });

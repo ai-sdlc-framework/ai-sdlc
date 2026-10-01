@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildReviewPrompts } from './07-build-review-prompts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
@@ -7,11 +7,21 @@ import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
 import type { TaskSpec } from '../types.js';
 
 let tmp: string;
+let savedArts: string | undefined;
+let savedUsage: string | undefined;
 beforeEach(() => {
   tmp = makeTmpProject();
+  savedArts = process.env.ARTIFACTS_DIR;
+  savedUsage = process.env.AI_SDLC_USAGE_DIR;
+  process.env.ARTIFACTS_DIR = join(tmp, 'arts');
+  process.env.AI_SDLC_USAGE_DIR = join(tmp, 'usage');
 });
 afterEach(() => {
   cleanupTmpProject(tmp);
+  if (savedArts === undefined) delete process.env.ARTIFACTS_DIR;
+  else process.env.ARTIFACTS_DIR = savedArts;
+  if (savedUsage === undefined) delete process.env.AI_SDLC_USAGE_DIR;
+  else process.env.AI_SDLC_USAGE_DIR = savedUsage;
 });
 
 const task: TaskSpec = {
@@ -47,6 +57,47 @@ describe('Step 7 — buildReviewPrompts', () => {
     ]);
     expect(r.changedFiles).toEqual(['a.ts', 'b.ts']);
     expect(r.diff).toContain('diff content');
+  });
+
+  it('returns the resolved model per reviewer (security on opus, others on sonnet)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('d\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+      artifactsDir: join(tmp, 'arts'),
+    });
+    expect(r.prompts.map((p) => [p.reviewer, p.model, p.modelArm])).toEqual([
+      ['code-reviewer', 'claude-sonnet-4-6', 'default'],
+      ['test-reviewer', 'claude-sonnet-4-6', 'default'],
+      ['security-reviewer', 'claude-opus-4-6', 'default'],
+    ]);
+  });
+
+  it('records the routing assignment by default and leaves no trace when recordRouting is false', async () => {
+    const mk = () =>
+      new FakeRunner()
+        .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+        .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'));
+    const base = {
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      codexAvailable: false,
+      artifactsDir: join(tmp, 'arts'),
+    };
+    await buildReviewPrompts({ ...base, runner: mk().toRunner(), recordRouting: false });
+    expect(existsSync(join(tmp, 'arts', '_routing', 'assignments.jsonl'))).toBe(false);
+    await buildReviewPrompts({ ...base, runner: mk().toRunner() });
+    expect(existsSync(join(tmp, 'arts', '_routing', 'assignments.jsonl'))).toBe(true);
   });
 
   // AISDLC-617 — opt-in merged reviewer set: exactly 2 reviewers. Opted in

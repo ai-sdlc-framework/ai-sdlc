@@ -20,6 +20,7 @@ export {
   validateModelCallRecord,
   validateHierarchyRoster,
   validateUsageConfig,
+  validateModelRouting,
   formatValidationErrors,
   type ValidationResult,
   type ValidationError,

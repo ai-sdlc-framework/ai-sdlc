@@ -88,6 +88,20 @@ describe('ShellClaudePSpawner', () => {
       ]);
     });
 
+    it('uses opts.model (already routed) over the resolver, and an explicit pin over both', () => {
+      const routed = new ShellClaudePSpawner().buildArgv(opts({ model: 'routed-model' }));
+      expect(routed[routed.indexOf('--model') + 1]).toBe('routed-model');
+      const pinned = new ShellClaudePSpawner({ models: { developer: 'pinned' } }).buildArgv(
+        opts({ model: 'routed-model' }),
+      );
+      expect(pinned[pinned.indexOf('--model') + 1]).toBe('pinned');
+    });
+
+    it('emits no --model for a role with no pinned model', () => {
+      const argv = new ShellClaudePSpawner().buildArgv(opts({ type: 'correctness-reviewer' }));
+      expect(argv).not.toContain('--model');
+    });
+
     it('includes extraArgs BEFORE the prompt positional', () => {
       const spawner = new ShellClaudePSpawner({
         extraArgs: ['--effort', 'high'],
