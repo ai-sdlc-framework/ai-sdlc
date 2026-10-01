@@ -2,7 +2,7 @@
 id: AISDLC-654
 title: >-
   RFC-0050 Part B: model-routing table, resolveModel, deterministic exploration, assignment log, wiring
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
