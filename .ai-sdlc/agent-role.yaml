@@ -15,12 +15,33 @@ spec:
     - code-editor
     - terminal
     - test-runner
+  # Lease-on-own-branch force-push policy (AISDLC-663 / RFC-0051). Executors may
+  # lease-push their own task branches; pushes to main/master stay denied and
+  # the blockedActions entries below remain in force for every other form.
+  governance:
+    allowForcePush: leaseOnOwnBranch
+    operational:
+      - rebase-own-branch
+      - lease-push-own-branch
+      - retrigger-ci
+      - requeue
+      - file-subid-followups
+      - answer-operational-decisions
+      - clear-executor-context
   constraints:
     maxFilesPerChange: 15
     requireTests: true
     blockedPaths:
       - '.github/workflows/**'
       - '.ai-sdlc/**'
+      # OpenCode governance + config (AISDLC-660): the agent-writable worktree
+      # must not be able to rewrite its own governance plugin or permissions.
+      - 'opencode.json'
+      - 'opencode.jsonc'
+      - '.opencode/**'
+      - '**/opencode.json'
+      - '**/opencode.jsonc'
+      - '**/.opencode/**'
       # Block Write/Edit on the attestation verifier so a dev subagent cannot
       # disable verification by modifying it. (The per-reviewer sub-attestation
       # script `scripts/verify-reviewer-sub-attestations.mjs` was deleted in
