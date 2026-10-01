@@ -7,13 +7,14 @@
  * @module usage/replay-commands
  */
 
-import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readModelCalls, readPriceHistory, type ModelCallRecord } from '@ai-sdlc/reference';
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
 import { ShellClaudePSpawner, type ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 import type { Runner } from '../runtime/exec.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { repoNameFor } from './attribution.js';
 import {
   buildCorpus,
@@ -129,7 +130,7 @@ const CORPUS_HELP = [
 ].join('\n');
 
 function artifactsDirFor(deps: ReplayDeps, repoRoot: string): string {
-  return deps.artifactsDir ?? process.env.ARTIFACTS_DIR ?? resolve(repoRoot, 'artifacts');
+  return resolveArtifactsDir(repoRoot, deps.artifactsDir);
 }
 
 /** Real path of the deepest existing ancestor of `path`, with the missing tail re-appended. */
@@ -150,9 +151,14 @@ function realDeepest(path: string): string {
 }
 
 /**
- * True when `path` is the repository's `.ai-sdlc` directory or inside it,
- * compared by real path (so a symlinked parent does not hide it) and without
- * regard to case on case-insensitive file systems.
+ * True when `path` must not be used for replay output: the repository's
+ * `.ai-sdlc` directory or anything inside it, EXCEPT the single subdirectory
+ * `.ai-sdlc/artifacts` (gitignored runtime output) and its descendants.
+ *
+ * Compared by real path (a symlinked parent does not hide it) and without
+ * regard to case on case-insensitive file systems. A symlinked `.ai-sdlc` or
+ * `.ai-sdlc/artifacts`, and a symlink beneath `artifacts` that resolves
+ * outside it, are refused rather than followed.
  */
 export function isUnderAiSdlc(
   path: string,
@@ -161,8 +167,40 @@ export function isUnderAiSdlc(
 ): boolean {
   const fold = (p: string): string =>
     platform === 'darwin' || platform === 'win32' ? p.toLowerCase() : p;
-  const rel = relative(fold(realDeepest(join(repoRoot, '.ai-sdlc'))), fold(realDeepest(path)));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  const within = (base: string, p: string): boolean => {
+    const rel = relative(fold(base), fold(p));
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  };
+  const isLink = (p: string): boolean => {
+    try {
+      return lstatSync(p).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  };
+
+  const aiLexical = resolve(repoRoot, '.ai-sdlc');
+  const aiReal = realDeepest(aiLexical);
+  const target = resolve(path);
+  const real = realDeepest(target);
+
+  const lexUnderAi = within(aiLexical, target);
+  const realUnderAi = within(aiReal, real);
+  if (!lexUnderAi && !realUnderAi) return false;
+
+  const lexUnderArtifacts = within(join(aiLexical, 'artifacts'), target);
+  const realUnderArtifacts = within(join(aiReal, 'artifacts'), real);
+  // A path that is lexically `.ai-sdlc/artifacts/...` or really so is allowed
+  // only when both views agree and no link on the way redirects it.
+  if (
+    realUnderArtifacts &&
+    (lexUnderArtifacts || !lexUnderAi) &&
+    !isLink(aiLexical) &&
+    !isLink(join(aiLexical, 'artifacts'))
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function fail(io: UsageIo, message: string): void {
@@ -222,6 +260,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
                 now: deps.now?.() ?? new Date(),
               });
               writeCorpus(out, corpus);
+              io.out(`Artifacts directory: ${artifactsDirFor(deps, repoRoot)}\n`);
               io.out(renderCorpusSummary(corpus, out));
             },
           )
@@ -312,7 +351,19 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
         const now = deps.now?.() ?? new Date();
         const artifactsDir = artifactsDirFor(deps, repoRoot);
         if (isUnderAiSdlc(artifactsDir, repoRoot)) {
-          fail(io, 'Refusing to use an artifacts directory under .ai-sdlc.');
+          fail(
+            io,
+            'Refusing to use an artifacts directory under .ai-sdlc (only .ai-sdlc/artifacts is allowed).',
+          );
+          return;
+        }
+        const runId = runIdFor(now);
+        const resultsPath = join(artifactsDir, 'replay', `results-${role}-${runId}.json`);
+        if (isUnderAiSdlc(resultsPath, repoRoot)) {
+          fail(
+            io,
+            'Refusing to write replay results under .ai-sdlc (only .ai-sdlc/artifacts is allowed).',
+          );
           return;
         }
 
@@ -349,7 +400,9 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           records.push(r);
         }
 
+        const dirLine = `Artifacts directory: ${artifactsDir}\n`;
         if (argv['dry-run']) {
+          io.out(dirLine);
           io.out(
             renderDryRun({
               items: interleaveByLabel(items),
@@ -377,6 +430,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
               `(${shown} item(s) x ${models.length} model(s) x mean ${Math.round(mean as number).toLocaleString('en-US')} ` +
               `units per review, bounded by --max-units ${maxUnits.toLocaleString('en-US')}).\n`;
         io.out(costLine);
+        io.out(dirLine);
         if (!argv['confirm-spend']) {
           fail(io, 'Refusing to spend model usage without --confirm-spend. No model was called.');
           return;
@@ -422,7 +476,6 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
         }
         sweepStaleReplayHolders();
 
-        const runId = runIdFor(now);
         const controller = new AbortController();
         const onSignal = (signal: NodeJS.Signals): void => {
           controller.abort();
@@ -459,7 +512,14 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             signal: controller.signal,
             onProgress: (line) => io.err(`${line}\n`),
           });
-          const resultsPath = join(artifactsDir, 'replay', `results-${role}-${runId}.json`);
+          // Re-check right before writing: the directory may have been swapped for a link mid-run.
+          if (isUnderAiSdlc(resultsPath, repoRoot)) {
+            fail(
+              io,
+              'Refusing to write replay results under .ai-sdlc (only .ai-sdlc/artifacts is allowed).',
+            );
+            return;
+          }
           writeJsonAtomic(resultsPath, results);
           io.out(renderReplayResults(results));
           io.out(`Wrote ${resultsPath}\n`);

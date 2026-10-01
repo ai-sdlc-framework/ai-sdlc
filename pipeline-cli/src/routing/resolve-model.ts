@@ -20,8 +20,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
+import { resolveArtifactsDir } from './artifacts-dir.js';
 import { appendAssignment, type RoutingArm } from './assignment-log.js';
 import {
   builtInDefaultTable,
@@ -94,8 +94,7 @@ export function resolveModel(input: ResolveModelInput): ResolveModelResult {
   const iteration = input.iteration ?? 1;
   const taskId = input.taskId ?? '';
   const workDir = input.workDir ?? process.cwd();
-  const artifactsDir =
-    input.artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(workDir, '.ai-sdlc', 'artifacts');
+  const artifactsDir = resolveArtifactsDir(workDir, input.artifactsDir);
 
   const loaded = loadRoutingTable({
     workDir,

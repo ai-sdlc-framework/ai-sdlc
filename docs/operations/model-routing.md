@@ -144,7 +144,9 @@ Every resolution made with a task id is appended to `$ARTIFACTS_DIR/_routing/ass
 
 This log is what makes an outcome attributable to a model and separates an explored comparison from a pinned one. Writing it never changes the model that is returned, and a write failure is ignored.
 
-**Set `ARTIFACTS_DIR`.** The resolver's default when `ARTIFACTS_DIR` is unset is `<project>/.ai-sdlc/artifacts`, while `cli-usage scorecard` and `cli-usage replay-corpus build` default to `<project>/artifacts`. The defaults differ today, and setting `ARTIFACTS_DIR` once makes the assignment log, the scorecard and the replay corpus agree on one place.
+**One artifacts directory.** The model resolver, `cli-usage scorecard`, `cli-usage replay-corpus build` and `cli-usage replay` all use `<project>/.ai-sdlc/artifacts` by default, so the assignment log the resolver writes is the one the scorecard reads. That directory is gitignored in this repository; adopters should add `.ai-sdlc/artifacts/` to their own ignore list. Until the `execute.md` anchoring fix ships, pipeline runs (`/ai-sdlc execute`) need `ARTIFACTS_DIR` exported to one shared directory so the resolver's assignment log and the scorecard read the same directory. Set `ARTIFACTS_DIR` to use another directory, and set it to the same value for every command. There is no fallback to the old `<project>/artifacts` location: a log or corpus left there is not read, so move it into the new directory if you want to keep it. The scorecard and the replay commands print the directory they resolved (`Artifacts directory: <path>`), so a wrong one is visible.
+
+Replay refuses to write under `<project>/.ai-sdlc`, which holds committed configuration and signed records, with one exception: the `artifacts` subdirectory and everything inside it. The check follows symlinks, so a symlinked `.ai-sdlc` or `.ai-sdlc/artifacts`, or a link inside `artifacts` that leads elsewhere, is refused.
 
 ## Overrides
 
@@ -185,6 +187,7 @@ A missing or unreadable overrides file is treated as empty. Nothing in the frame
 
 ```console
 $ cli-usage scorecard
+Artifacts directory: <project>/.ai-sdlc/artifacts
 role          model              class          tasks  first_pass  mean_iter  mean_blocking  mean_units  explored  model_source    note
 developer     claude-sonnet-4-6  uncategorized  1      100% (1/1)  1.0        0.0            65,600      0         usage-majority  insufficient
 main-session  claude-haiku-4-5   uncategorized  1      -           -          -              200,567     0         usage-majority  insufficient
@@ -219,6 +222,7 @@ Reviewer models cannot be compared on live work without risk, so they are compar
 
 ```console
 $ cli-usage replay-corpus build
+Artifacts directory: <project>/.ai-sdlc/artifacts
 Replay corpus: 4 item(s) (known-defect 1, clean 3).
 Skipped: not-resolved=0 not-first-pass-clean=3 duplicate=0 invalid-record=0 unreachable=0 empty-diff=0
 Wrote <artifacts>/replay/corpus.json
@@ -235,6 +239,7 @@ Commits already on the base ref (an empty diff) are skipped. Options: `--base-re
 
 ```console
 $ cli-usage replay --role code --model claude-haiku-4-5 --max-items 5 --max-units 100000 --dry-run
+Artifacts directory: <project>/.ai-sdlc/artifacts
 Dry run: no model is called. 2 of 2 corpus item(s) for role code would be replayed with claude-haiku-4-5.
   DEMO-1  3b2eac4a68dd  known-defect
   DEMO-2  cf24ccfb6f7e  clean
@@ -261,6 +266,7 @@ Without `--confirm-spend` a run prints the cap and stops:
 ```console
 $ cli-usage replay --role code --model claude-haiku-4-5 --max-items 5 --max-units 100000
 Spend cap: up to 100,000 units (--max-units); no reviewer usage is on record, so there is no estimate. 2 item(s) x 1 model(s).
+Artifacts directory: <project>/.ai-sdlc/artifacts
 Refusing to spend model usage without --confirm-spend. No model was called.
 ```
 
@@ -311,7 +317,7 @@ Until this automation ships, you can do the same by hand: read `cli-usage scorec
 | No task is ever explored | No `candidates`, `exploreShare` is 0, or the task is not from the backlog | Check the cell, the share and `--source-kind` |
 | An override is ignored | Its model is not in `strength`, or is not stronger than the cell's model | Choose a stronger model that is in `strength` |
 | Scorecard shows `insufficient` | Fewer than 30 tasks in the cell | Gather more tasks; do not change the table on this evidence |
-| Scorecard shows no explored tasks | The assignment log is in a different directory from the one the scorecard reads | Set `ARTIFACTS_DIR` to one directory for both |
+| Scorecard shows no explored tasks | The assignment log is in a different directory from the one the scorecard reads, for example `ARTIFACTS_DIR` was set for one command only, or the log is in the old `<project>/artifacts` | Compare the `Artifacts directory:` line with where the log is, and set `ARTIFACTS_DIR` to one directory for every command |
 | `The corpus has no items for role <role>.` | No reviewed commits for that role in the reviews ledger | Build the corpus from a checkout with review history |
 | `Refusing to spend model usage without --confirm-spend.` | A real replay needs explicit authorization | Review the printed cap, then add `--confirm-spend` |
 
