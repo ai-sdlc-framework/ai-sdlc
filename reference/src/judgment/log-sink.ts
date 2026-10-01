@@ -69,6 +69,7 @@ export function judgmentLogLine(rec: JudgmentEvaluationRecord): string {
     outputTokens: rec.outputTokens,
     costUsd: rec.costUsd,
     cacheHit: rec.cacheHit,
+    cacheMissReason: rec.cacheMissReason ?? null,
     taskId: rec.taskId ?? null,
     sourceKind: rec.sourceKind ?? null,
   });
