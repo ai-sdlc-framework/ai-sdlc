@@ -2,7 +2,7 @@
 id: AISDLC-639
 title: >-
   RFC-0049 Group C: complexity.factors, failure.class and triage.injection-screen judgments (tighten-only)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
