@@ -12,6 +12,7 @@ import {
   type ResolvedJudgmentConfig,
 } from './config.js';
 import { resolveJudgmentProvider } from './registry.js';
+import { snapshotJudgmentDefinition } from './catalog.js';
 import { canonicalJson, sha256Hex } from './question-hash.js';
 import { judgmentCacheKey, type JudgmentCache } from './cache.js';
 import { redactJsonValue as redactValue } from './redact-json.js';
@@ -249,11 +250,17 @@ async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
  * what it did before the judgment layer existed.
  */
 export async function evaluateJudgment<I, D>(
-  definition: JudgmentDefinition<I, D>,
+  rawDefinition: JudgmentDefinition<I, D>,
   input: I,
   ctx: EvaluateJudgmentContext,
 ): Promise<JudgmentOutcome<D>> {
   const now = ctx.now ?? (() => new Date());
+  // Read the definition once and re-check the registration safety rules, so an
+  // unregistered definition cannot skip them.
+  const snap = snapshotJudgmentDefinition(rawDefinition);
+  const definition = (
+    snap.ok ? snap.definition : ({ id: snap.id, version: 0 } as unknown)
+  ) as JudgmentDefinition<I, D>;
   const rec: JudgmentEvaluationRecord = {
     ts: now().toISOString(),
     judgmentId: definition.id,
@@ -310,6 +317,7 @@ export async function evaluateJudgment<I, D>(
   };
 
   try {
+    if (!snap.ok) return await abstain('definition-error');
     const { config } = ctx;
     const settings = config.judgments[definition.id];
     const configuredMode: JudgmentMode = settings?.mode ?? config.defaults.mode;

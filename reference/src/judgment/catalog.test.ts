@@ -33,8 +33,8 @@ describe('judgment catalog', () => {
   it('registers, gets and lists; rejects duplicates', () => {
     const d = def('catalog.test.one');
     registerJudgmentDefinition(d);
-    expect(getJudgmentDefinition('catalog.test.one')).toBe(d);
-    expect(listJudgmentDefinitions()).toContain(d);
+    expect(getJudgmentDefinition('catalog.test.one')).toMatchObject({ id: 'catalog.test.one' });
+    expect(listJudgmentDefinitions().map((x) => x.id)).toContain(d.id);
     expect(() => registerJudgmentDefinition(def('catalog.test.one'))).toThrow(/already registered/);
     expect(getJudgmentDefinition('catalog.test.missing')).toBeUndefined();
   });
@@ -57,7 +57,12 @@ describe('registration-time safety rules', () => {
   });
 
   it('rule (b): seam + bidirectional needs explicit empty reducingOutcomes', () => {
-    const base: Over = { riskClass: 'seam', fallback: 'pending', direction: 'bidirectional' };
+    const base: Over = {
+      riskClass: 'seam',
+      fallback: 'pending',
+      direction: 'bidirectional',
+      reducesReview: false,
+    };
     bad('safety.b1', base, /rule \(b\)/);
     bad('safety.b2', { ...base, reducingOutcomes: ['skip'] }, /rule \(b\)/);
     registerJudgmentDefinition(mk('safety.b3', { ...base, direction: 'tighten-only' }));
@@ -75,17 +80,73 @@ describe('registration-time safety rules', () => {
     bad('safety.c4', { reducingOutcomes: ['skip'], reducesReview: false }, /rule \(c\)/);
   });
 
+  it('rule (d): bidirectional must declare reducesReview explicitly', () => {
+    bad('safety.d1', { riskClass: 'tighten', direction: 'bidirectional' }, /rule \(d\)/);
+    bad('safety.d2', { riskClass: 'relax', direction: 'bidirectional' }, /rule \(d\)/);
+    registerJudgmentDefinition(
+      mk('safety.d3', { riskClass: 'relax', direction: 'bidirectional', reducesReview: true }),
+    );
+    registerJudgmentDefinition(mk('safety.d4', { direction: 'tighten-only' }));
+  });
+
+  it('rejects an empty id and empty-string reducing outcomes', () => {
+    expect(() => registerJudgmentDefinition(mk('', {}))).toThrow(/id must be a non-empty/);
+    bad(
+      'safety.e1',
+      { riskClass: 'relax', reducesReview: true, reducingOutcomes: [''] },
+      /non-empty strings/,
+    );
+  });
+
+  it('stores a frozen snapshot immune to later mutation', () => {
+    const d = mk('safety.f1', { riskClass: 'relax', reducesReview: true, reducingOutcomes: ['x'] });
+    registerJudgmentDefinition(d);
+    (d as { riskClass: string }).riskClass = 'tighten';
+    (d.reducingOutcomes as string[]).push('y');
+    const stored = getJudgmentDefinition('safety.f1')!;
+    expect(stored.riskClass).toBe('relax');
+    expect(stored.reducingOutcomes).toEqual(['x']);
+    expect(Object.isFrozen(stored)).toBe(true);
+    expect(stored.compose({}, { n: 1 }, {}, { permissiveAllowed: false })).toEqual({
+      kind: 'abstain',
+      reason: 'x',
+    });
+  });
+
+  it('reads each field once, so a stateful getter cannot pass validation then change', () => {
+    let reads = 0;
+    const d = mk('safety.f2', {});
+    Object.defineProperty(d, 'riskClass', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? 'tighten' : 'seam'),
+    });
+    registerJudgmentDefinition(d);
+    expect(getJudgmentDefinition('safety.f2')!.riskClass).toBe('tighten');
+    expect(reads).toBe(1);
+  });
+
+  it('rejects a definition whose getter throws', () => {
+    const d = mk('safety.f3', {});
+    Object.defineProperty(d, 'direction', {
+      get: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(() => registerJudgmentDefinition(d)).toThrow(/could not be read/);
+    expect(getJudgmentDefinition('safety.f3')).toBeUndefined();
+  });
+
   it('rejects garbage runtime values', () => {
     bad('safety.g1', { riskClass: 'nope' as never }, /riskClass must be/);
     bad('safety.g2', { direction: 'sideways' as never }, /direction must be/);
     bad('safety.g3', { reducesReview: 'yes' as never }, /reducesReview must be a boolean/);
-    bad('safety.g4', { reducingOutcomes: 'skip' as never }, /array of strings/);
-    bad('safety.g5', { reducingOutcomes: [1] as never }, /array of strings/);
+    bad('safety.g4', { reducingOutcomes: 'skip' as never }, /array of non-empty strings/);
+    bad('safety.g5', { reducingOutcomes: [1] as never }, /array of non-empty strings/);
   });
 
   it('accepts the conforming shapes', () => {
     registerJudgmentDefinition(
-      mk('safety.p1', { riskClass: 'tighten', direction: 'bidirectional' }),
+      mk('safety.p1', { riskClass: 'tighten', direction: 'bidirectional', reducesReview: false }),
     );
     registerJudgmentDefinition(
       mk('safety.p2', {
@@ -93,6 +154,7 @@ describe('registration-time safety rules', () => {
         fallback: 'pending',
         direction: 'bidirectional',
         reducingOutcomes: [],
+        reducesReview: false,
       }),
     );
     registerJudgmentDefinition(
