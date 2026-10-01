@@ -20,7 +20,7 @@ references:
   - pipeline-cli/src/steps/reviewer-set.ts
   - spec/schemas/dor-config.v1.schema.json
   - reference/src/core/generated-schemas.ts
-  - .ai-sdlc/templates/capture-config.yaml
+  - orchestrator/src/cli/commands/init-templates.ts
   - reference/src/index.ts
 priority: high
 dispatchable: true
@@ -44,6 +44,14 @@ are the specification. The central property: `evaluateJudgment` never throws, an
 - Every new module is reachable from a non-test importer or a barrel re-export, so the
   dark-code gate passes (`pnpm dark-code:check`).
 - Strings an adopter can see (errors, CLI output, templates) carry no internal task ids.
+
+## Files under `.ai-sdlc/` are never written by the developer agent
+The governance hook refuses every agent `Write`/`Edit` under `.ai-sdlc/**`, and policy
+is read from the base branch only. Templates are shipped from
+`orchestrator/src/cli/commands/init-templates.ts` (the map that already carries
+`framework-bug-report.md`), not as files under `.ai-sdlc/templates/`. Any change to
+this repository's own `.ai-sdlc/*.yaml` is an operator step, listed separately below,
+and is never an acceptance criterion the developer must satisfy.
 
 ## Scope
 1. **Definition types** (RFC-0049 section 3): `JudgmentDefinition<I, D>` with `id`,
@@ -109,9 +117,11 @@ are the specification. The central property: `evaluateJudgment` never throws, an
 8. **Redaction move:** move the module at `pipeline-cli/src/dor/secret-redact.ts` into
    `reference/src/security/` and leave a re-export at the old path so existing imports
    and tests keep working unchanged.
-9. **Init template:** add `.ai-sdlc/templates/judgment-config.yaml`, fully commented,
-   shipped the same way as `.ai-sdlc/templates/capture-config.yaml`. It shows
-   `egress.allow` with each class on its own commented line.
+9. **Init template:** add a fully commented `judgment-config.yaml` template to the
+   template map in `orchestrator/src/cli/commands/init-templates.ts`, keyed
+   `.ai-sdlc/templates/judgment-config.yaml`, so `ai-sdlc init` writes it. It shows
+   `egress.allow` with each class on its own commented line. Do not create the file
+   under `.ai-sdlc/` in this repository.
 
 ## Acceptance Criteria
 - [ ] With no config file on the base ref, `evaluateJudgment` returns abstain `disabled` and the provider is never called.
@@ -127,6 +137,6 @@ are the specification. The central property: `evaluateJudgment` never throws, an
 - [ ] The config schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
 - [ ] The loader reads only from the base ref or the explicit env path; a test proves a working-tree copy of the file is ignored.
 - [ ] `redactSecrets` and `SECRET_PATTERNS` are importable from both the new `reference` location and the old `pipeline-cli` path, and the existing redaction tests pass unmodified.
-- [ ] `.ai-sdlc/templates/judgment-config.yaml` exists and validates against the schema once uncommented.
+- [ ] The `judgment-config.yaml` template is present in the init-templates map and validates against the schema once uncommented (test renders it from the map).
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
