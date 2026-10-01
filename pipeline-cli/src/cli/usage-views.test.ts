@@ -425,6 +425,7 @@ describe('cli-usage ingest reports the usage.ingest capability', () => {
     errors: 0,
     limitEvents: 0,
     otherScopeSkipped: 0,
+    replayTranscriptsSkipped: 0,
     timedOut: false,
   };
 

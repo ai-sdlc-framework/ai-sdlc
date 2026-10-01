@@ -6,6 +6,9 @@
  *   report [--group-by ...] [--format ...]      usage by model, role, task, repo, pool, day, window
  *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
  *   scorecard [--role ...] [--write-evidence d] quality and cost per role, model, task class
+ *   replay-corpus build [--base-ref r]          label reviewed commits for reviewer replay
+ *   replay --role r --model m --max-items n --max-units n --confirm-spend [--dry-run] [--off-peak]
+ *                                               replay past reviews against a candidate model
  *   snapshot --window <n> --used-pct <p>        record a calibration point
  *   allotment [--window <n>]                    implied allotment series and change detection
  *   prices refresh [--source <name>] [--json]   fetch public price sources
@@ -42,6 +45,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { writeEvent, type OrchestratorEvent } from '../orchestrator/events.js';
 import { emitPriceChanges } from '../orchestrator/price-refresh.js';
+import { registerReplayCommands, type ReplayDeps } from '../usage/replay-commands.js';
 import { registerScorecardCommands, type ScorecardDeps } from '../usage/scorecard-commands.js';
 import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
 import {
@@ -52,7 +56,10 @@ import {
 
 /** Collaborators, injectable so tests never touch the network, home dir or clock. */
 export interface UsageCliDeps
-  extends UsageViewDeps, Pick<ScorecardDeps, 'repoRoot' | 'artifactsDir' | 'assignmentLogPath'> {
+  extends
+    UsageViewDeps,
+    Pick<ScorecardDeps, 'repoRoot' | 'artifactsDir' | 'assignmentLogPath'>,
+    Pick<ReplayDeps, 'git' | 'runner' | 'createSpawner' | 'tmpRoot' | 'handleSignals'> {
   fetch?: FetchFn;
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
@@ -130,6 +137,9 @@ export function renderIngestResult(result: IngestResult): string {
     `Errors:          ${result.errors}`,
     `Limit events:    ${result.limitEvents}`,
   ];
+  if (result.replayTranscriptsSkipped > 0) {
+    lines.push(`Replay transcripts skipped: ${result.replayTranscriptsSkipped}`);
+  }
   if (result.otherScopeSkipped > 0) {
     lines.push(`Other-scope skipped: ${result.otherScopeSkipped}`);
   }
@@ -359,6 +369,20 @@ export function buildUsageCli(
       repoRoot: deps.repoRoot,
       artifactsDir: deps.artifactsDir,
       assignmentLogPath: deps.assignmentLogPath,
+    },
+    io,
+  );
+  registerReplayCommands(
+    cli,
+    {
+      ...viewDeps,
+      repoRoot: deps.repoRoot,
+      artifactsDir: deps.artifactsDir,
+      git: deps.git,
+      runner: deps.runner,
+      createSpawner: deps.createSpawner,
+      tmpRoot: deps.tmpRoot,
+      handleSignals: deps.handleSignals,
     },
     io,
   );

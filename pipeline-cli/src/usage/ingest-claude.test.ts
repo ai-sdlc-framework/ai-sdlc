@@ -19,6 +19,7 @@ import {
   ingestClaudeTranscripts,
   isIngestSwitchedOff,
 } from './ingest-claude.js';
+import { REPLAY_CHECKOUT_DIR, REPLAY_HOLDER_PREFIX } from './replay-git.js';
 
 const BODY = 'SENTINEL-BODY-TEXT-MUST-NEVER-BE-STORED';
 const DESCRIPTION = 'SENTINEL-DESCRIPTION-MUST-NEVER-BE-STORED';
@@ -387,6 +388,29 @@ describe('ingestClaudeTranscripts', () => {
     }
     // cursors must not leak the transcript path either
     expect(readFileSync(join(usage, 'cursors.json'), 'utf-8')).not.toContain('p9');
+  });
+
+  it('skips a transcript whose cwd is a replay checkout and still ingests a normal one', async () => {
+    const repo = mkRepo(join(root, 'work', 'myrepo'));
+    // The replay records its own usage, so its session transcript must not count a second time.
+    const replayCwd = join(root, `${REPLAY_HOLDER_PREFIX}abc123`, REPLAY_CHECKOUT_DIR);
+    writeSession('p1', 'sess1', [assistant({ id: 'n1', cwd: repo })]);
+    writeSession('p2', 'sess2', [
+      JSON.stringify({ type: 'user', cwd: replayCwd, message: { content: BODY } }),
+      assistant({ id: 'r1', cwd: replayCwd }),
+      assistant({ id: 'r2', cwd: replayCwd }),
+    ]);
+    const res = await ingest();
+    expect(res.callsWritten).toBe(1);
+    expect(res.replayTranscriptsSkipped).toBe(1);
+    expect(res.otherScopeSkipped).toBe(0);
+    const records = await ledger();
+    expect(records.map((r) => r.callId)).toHaveLength(1);
+    expect(records.every((r) => r.sessionId === 'sess1')).toBe(true);
+    // A replay cwd is skipped in framework-only mode too.
+    const again = await ingest({ backfill: true }, { AI_SDLC_USAGE_SCOPE: 'framework-only' });
+    expect(again.replayTranscriptsSkipped).toBe(1);
+    expect(await ledger()).toHaveLength(1);
   });
 
   it('framework-only skips other-scope transcripts entirely', async () => {

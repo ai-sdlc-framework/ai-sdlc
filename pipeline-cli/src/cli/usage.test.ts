@@ -143,6 +143,7 @@ describe('renderIngestResult', () => {
     errors: 0,
     limitEvents: 0,
     otherScopeSkipped: 4,
+    replayTranscriptsSkipped: 0,
     timedOut: true,
   };
   it('mentions skipped other-scope and the time limit', () => {

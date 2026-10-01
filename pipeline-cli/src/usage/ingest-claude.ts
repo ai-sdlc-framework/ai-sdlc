@@ -37,6 +37,7 @@ import {
   type ParsedCall,
 } from './claude-transcript.js';
 import { readLines } from './line-reader.js';
+import { isReplayWorktreeCwd } from './replay-git.js';
 
 const SESSION_FILE = /^([A-Za-z0-9_-]{1,128})\.jsonl$/;
 const SUBAGENT_FILE = /^agent-([A-Za-z0-9_-]{1,128})\.jsonl$/;
@@ -78,6 +79,11 @@ export interface IngestResult {
   limitEvents: number;
   /** Calls and whole transcripts skipped because `AI_SDLC_USAGE_SCOPE=framework-only` excludes them. */
   otherScopeSkipped: number;
+  /**
+   * Whole transcripts skipped because they ran inside a reviewer-replay checkout.
+   * The replay records its usage directly, so ingesting the transcript would count it twice.
+   */
+  replayTranscriptsSkipped: number;
   timedOut: boolean;
   disabled?: IngestDisabledReason;
 }
@@ -90,6 +96,7 @@ function emptyResult(): IngestResult {
     errors: 0,
     limitEvents: 0,
     otherScopeSkipped: 0,
+    replayTranscriptsSkipped: 0,
     timedOut: false,
   };
 }
@@ -342,7 +349,9 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
       const batch = new Map<string, ModelCallRecord>();
       const limits: LimitEvent[] = [];
       let scopeDecided = !frameworkOnly;
+      let cwdChecked = false;
       let skipFile = false;
+      let replayFile = false;
       let lines = 0;
       let timedOutHere = false;
 
@@ -366,13 +375,21 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
             timedOutHere = true;
             return false;
           }
-          if (!scopeDecided) {
+          if (!cwdChecked || !scopeDecided) {
             const cwd = peekCwd(line);
             if (cwd !== undefined) {
-              scopeDecided = true;
-              if (!resolver.frameworkFor(cwd)) {
+              cwdChecked = true;
+              if (isReplayWorktreeCwd(cwd)) {
                 skipFile = true;
+                replayFile = true;
                 return false;
+              }
+              if (!scopeDecided) {
+                scopeDecided = true;
+                if (!resolver.frameworkFor(cwd)) {
+                  skipFile = true;
+                  return false;
+                }
               }
             }
           }
@@ -407,7 +424,8 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
 
       result.errors += read.oversizeLines;
       if (skipFile) {
-        result.otherScopeSkipped++;
+        if (replayFile) result.replayTranscriptsSkipped++;
+        else result.otherScopeSkipped++;
         continue;
       }
       flush(read.consumed);
