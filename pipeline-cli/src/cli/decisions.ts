@@ -1236,10 +1236,11 @@ export function buildDecisionsCli(): Argv {
             warnToStderr('[score-c] dep-graph unavailable — blast-radius defaults to zeros');
           }
         }
-        // Decisions are internal work-item text (the catalog's sources are all internal
-        // origins; there is no external-issue source), so they are judged as trusted
-        // backlog items. Every judgment consulted here is nominal in the permissive
-        // direction anyway (see their reducesReview rationales).
+        // Decision text is judged as untrusted (see DECISION_JUDGMENT_SOURCE_KIND): a
+        // subagent-escalation decision can carry text from an external contributor's issue,
+        // so permissive outcomes are escalated, not acted on. Do not switch this back to
+        // 'backlog'. Every judgment consulted here also cannot reduce review (see their
+        // reducesReview rationales).
         const runner = createJudgmentRunner({ workDir });
         const judged = await judgeStageA(decision, openDecisions, runner, {
           sourceKind: DECISION_JUDGMENT_SOURCE_KIND,
