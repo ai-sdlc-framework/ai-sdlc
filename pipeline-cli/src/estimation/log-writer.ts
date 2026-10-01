@@ -136,7 +136,7 @@ export interface EstimateLogRecord {
   /** RFC §7.1 — optional structured scope factors the agent considered. */
   scopeFactors?: string[];
   /** RFC §7.1 — class assignment provenance (cached / source: heuristic|frontmatter|default|llm). */
-  classSource: 'frontmatter' | 'heuristic' | 'default' | 'llm';
+  classSource: 'frontmatter' | 'judgment' | 'heuristic' | 'default' | 'llm';
   /** Whether the class assignment was served from the §6.5 cache (Phase 2 AC #3). */
   classCached: boolean;
 }

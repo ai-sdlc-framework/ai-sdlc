@@ -78,6 +78,8 @@ import {
   resolveResearchSubagentThreshold,
   resolveStageCRuntimeConfig,
   runCalibrationSweep,
+  judgeStageA,
+  judgeStageBSignals,
   runStageA,
   runStageB,
   runStageC,
@@ -95,6 +97,7 @@ import {
   type PendingExemplar,
 } from '../decisions/index.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
+import { createJudgmentRunner } from '../judgment/runner.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
 import { isCompositionEnabled } from '../deps/snapshot.js';
 
@@ -1049,7 +1052,17 @@ export function buildDecisionsCli(): Argv {
           }
         }
 
-        const stageA = runStageA({ decision, openDecisions, graph, workDir });
+        const runner = createJudgmentRunner({ workDir });
+        const judged = await judgeStageA(decision, openDecisions, runner, {
+          sourceKind: 'backlog',
+        });
+        const stageA = runStageA({
+          decision,
+          openDecisions,
+          graph,
+          workDir,
+          ...(judged ? { judged } : {}),
+        });
 
         if (argv.store) {
           const event = makeRecommendationIssuedEvent({ decisionId: id, stageAOutput: stageA });
@@ -1209,8 +1222,21 @@ export function buildDecisionsCli(): Argv {
             warnToStderr('[score-c] dep-graph unavailable — blast-radius defaults to zeros');
           }
         }
-        const stageA = runStageA({ decision, openDecisions, graph, workDir });
-        const stageB = runStageB({ decision, stageA });
+        const runner = createJudgmentRunner({ workDir });
+        const judged = await judgeStageA(decision, openDecisions, runner, {
+          sourceKind: 'backlog',
+        });
+        const stageA = runStageA({
+          decision,
+          openDecisions,
+          graph,
+          workDir,
+          ...(judged ? { judged } : {}),
+        });
+        const signals = await judgeStageBSignals(decision, workDir, runner, {
+          sourceKind: 'backlog',
+        });
+        const stageB = runStageB({ decision, stageA, ...(signals ? { signals } : {}) });
 
         // CLI requires no real invoker by design — the CLI is a dry-run
         // surface for operators inspecting "what would Stage C say?". The

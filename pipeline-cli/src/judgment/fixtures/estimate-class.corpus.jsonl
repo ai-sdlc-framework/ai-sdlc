@@ -1,0 +1,8 @@
+{"input": {"title": "fix login crash on timeout"}, "label": "bug"}
+{"input": {"title": "add csv export to reports"}, "label": "feature"}
+{"input": {"title": "tidy up lint config"}, "label": "chore"}
+{"input": {"title": "add retries to fetch"}, "label": "feature"}
+{"input": {"title": "tidy the readme"}, "label": "chore"}
+{"input": {"title": "fix typo in docs"}, "label": "chore"}
+{"input": {"title": "maybe rework thing"}, "label": "feature"}
+{"input": {"title": "unclear request"}, "label": "uncategorized"}

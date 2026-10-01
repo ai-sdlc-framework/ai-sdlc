@@ -187,19 +187,32 @@ export function scoreLoadBearing(
 // ── 2. LLM-confidence rubric ──────────────────────────────────────────────────
 
 /**
+ * The two signals the judgment layer can supply, each in [0,1]. Absent means the
+ * constant 0.5 for both.
+ */
+export interface LlmConfidenceSignals {
+  novelty: number;
+  exemplarSimilarity: number;
+}
+
+/**
  * Score the LLM-confidence rubric (§5.2 — deterministic subset only).
  *
  * Phase 3 implements 2/4 deterministic dimensions:
  *   rfcStatedPositionPresence (30%) — body mentions an RFC resolution/position
  *   evidenceCompleteness      (40%) — has body + options with consequences
  *
- * Phase 5 placeholders (both default to 0.5 — conservative mid-band):
+ * Judgment-layer signals (both default to 0.5 — conservative mid-band — and stay there
+ * when the layer is disabled or abstains):
  *   novelty           (15%) — degree of novelty vs exemplar history (LLM)
  *   exemplarSimilarity (15%) — similarity to labelled exemplars (LLM)
  *
- * AC#5 — No LLM calls: novelty and exemplarSimilarity are 0.5 until Phase 5.
+ * AC#5 — No LLM calls here: the caller passes the judged signals in, or neither is set.
  */
-export function scoreLlmConfidence(decision: Decision): StageBLlmConfidenceScore {
+export function scoreLlmConfidence(
+  decision: Decision,
+  signals?: LlmConfidenceSignals,
+): StageBLlmConfidenceScore {
   const bodyText = decision.spec.body ?? '';
 
   // RFC stated position: does the body reference an RFC resolution or stated position?
@@ -217,9 +230,10 @@ export function scoreLlmConfidence(decision: Decision): StageBLlmConfidenceScore
     totalOptions > 0 ? Math.min(optionsWithConsequences / totalOptions, 1.0) : 0;
   const evidenceCompleteness = (hasBody ? 0.5 : 0) + consequenceCoverage * 0.5;
 
-  // Phase 3 placeholders — conservative 0.5 (neither confident nor unconfident)
-  const novelty = 0.5;
-  const exemplarSimilarity = 0.5;
+  // Conservative 0.5 (neither confident nor unconfident) unless the judgment layer
+  // supplied both signals.
+  const novelty = signals?.novelty ?? 0.5;
+  const exemplarSimilarity = signals?.exemplarSimilarity ?? 0.5;
 
   const score =
     rfcStatedPositionPresence * 0.3 +
@@ -486,6 +500,11 @@ export interface StageBInput {
   pillarOwners?: PillarOwnerConfig;
   /** Optional current timestamp (tests). */
   now?: Date;
+  /**
+   * Novelty and exemplar-similarity from the judgment layer (`judgeStageBSignals`).
+   * Absent means both stay at the constant 0.5.
+   */
+  signals?: LlmConfidenceSignals;
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -516,7 +535,7 @@ export function runStageB(input: StageBInput): StageBOutput {
     decision.status?.deadline ?? null,
   );
 
-  const llmConfidence = scoreLlmConfidence(decision);
+  const llmConfidence = scoreLlmConfidence(decision, input.signals);
 
   const actorFit = scoreActorFit(stageA.blastRadius.affectedPillars, stageA.capacityCheck);
 
