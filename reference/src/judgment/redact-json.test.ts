@@ -34,3 +34,46 @@ describe('redactJsonValue (secret shapes)', () => {
     expect(out).toBe('{"TOKEN=[REDACTED:ENV_SECRET]":"v"}');
   });
 });
+
+describe('redactJsonValue (ids and secrets in separate values)', () => {
+  const ID = 'AKIA' + 'IOSFODNN7EXAMPLE';
+  const R = '[REDACTED:AWS_SECRET_KEY]';
+
+  it('redacts a 40-char secret next to an access key id in an array', () => {
+    expect(redactJsonValue({ creds: [ID, AWS_SECRET], note: 'ok' })).toEqual({
+      creds: ['[REDACTED:AWS_ACCESS_KEY]', R],
+      note: 'ok',
+    });
+  });
+
+  it('redacts a 40-char secret under a sibling key of an access key id', () => {
+    expect(redactJsonValue({ accessKeyId: ID, key: AWS_SECRET, region: 'x' })).toEqual({
+      accessKeyId: '[REDACTED:AWS_ACCESS_KEY]',
+      key: R,
+      region: 'x',
+    });
+  });
+
+  it('redacts array elements under a secret-named key', () => {
+    expect(redactJsonValue({ secrets: [AWS_SECRET, 'prod-db'], other: 1 })).toEqual({
+      secrets: [R, 'prod-db'],
+      other: 1,
+    });
+  });
+
+  it('keeps 40-hex SHAs and id-less 40-char tokens unchanged', () => {
+    const sha = 'a'.repeat(20) + '1'.repeat(20);
+    expect(redactJsonValue({ secret_commit: sha, secrets: [sha] })).toEqual({
+      secret_commit: sha,
+      secrets: [sha],
+    });
+    expect(redactJsonValue({ key: AWS_SECRET, list: [AWS_SECRET] })).toEqual({
+      key: AWS_SECRET,
+      list: [AWS_SECRET],
+    });
+    expect(redactJsonValue({ accessKeyId: ID, key: sha })).toEqual({
+      accessKeyId: '[REDACTED:AWS_ACCESS_KEY]',
+      key: sha,
+    });
+  });
+});

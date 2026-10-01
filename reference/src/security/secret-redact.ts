@@ -156,34 +156,46 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   // is left alone.
   //
   // (a) a key NAME containing `secret` (case-insensitive) followed by a bounded
-  //     name tail ([\w .[\]-]{0,64}, so `Secret Access Key`, `aws_secret_access_key`,
-  //     `fs.s3a.secret.key`, `AWS Secret Access Key [None]`), an optional closing
-  //     quote/backtick, and a separator: `:` `=` `:=` `=>` `>` (so `]:` works via
+  //     name tail ([\w .[\]*-]{0,64}, so `Secret Access Key`, `aws_secret_access_key`,
+  //     `fs.s3a.secret.key`, `AWS Secret Access Key [None]` and the masked re-run
+  //     prompt `AWS Secret Access Key [****************EKEY]`), an optional
+  //     closing quote/backtick (optionally backslash-escaped, so JSON embedded in
+  //     a string works), and a separator: `:` `=` `:=` `=>` `>` (so `]:` works via
   //     the tail), plain whitespace (`aws configure set aws_secret_access_key X`),
-  //     or an XML close+open tag pair (`</name><value>`). The value may be wrapped
-  //     in a quote or backtick. All quantifiers are bounded so a long run of
-  //     `secret` repeats, spaces, `[` or backticks stays linear.
+  //     or an XML close+open tag pair (`</name><value>`). ONE optional line break
+  //     (CRLF too) plus indentation is allowed after the `:`/`=` and as the
+  //     whitespace separator, so a label and its value on separate lines are
+  //     caught (`Secret access key\nX`, `SecretAccessKey:\n  X`, a pasted
+  //     `aws configure get aws_secret_access_key` followed by the value). The
+  //     value may be wrapped in a quote or backtick. A `secret` that is part of
+  //     one of our own `[REDACTED:...SECRET]` markers is not a label (bounded
+  //     lookbehind), which keeps a second pass over `TOKEN=abc X` idempotent. All
+  //     quantifiers are bounded so a long run of `secret` repeats, spaces,
+  //     newlines, `[`, `*`, backslashes or backticks stays linear.
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /(secret[\w .[\]-]{0,64}?(?:["'`]?[ \t]{0,20}(?::=|=>|[:=>])[ \t]{0,20}|["'`]?[ \t]{1,20}|<\/\w{1,32}>\s{0,20}<\w{1,32}>\s{0,20})["'`]?)(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
+      /(secret(?<!\[REDACTED:[A-Z_]{0,32}secret)[\w .[\]*-]{0,64}?(?:\\{0,3}["'`]?[ \t]{0,20}(?::=|=>|[:=>])[ \t]{0,20}(?:\r?\n[ \t]{0,20})?|\\{0,3}["'`]?(?:[ \t]{1,20}(?:\r?\n[ \t]{0,20})?|\r?\n[ \t]{0,20})|<\/\w{1,32}>\s{0,20}<\w{1,32}>\s{0,20})\\{0,3}["'`]?)(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
     replacement: '$1[REDACTED:AWS_SECRET_KEY]',
   },
-  // (b) an access key id (AKIA/ASIA + 16) followed within a short separator
-  //     (whitespace , : ; | = quotes backticks) by a 40-char token. The id is
+  // (b) an access key id (AKIA/ASIA + 16) followed within a separator of up to
+  //     32 chars (whitespace , : ; | = quotes backticks: padded markdown tables
+  //     included), optionally followed by an ISO-8601 timestamp and a second
+  //     separator (`aws iam create-access-key` / `aws sts assume-role --output
+  //     text` rows), by a 40-char token. The id is
   //     kept here; AWS_ACCESS_KEY redacts it next. `=` is a separator, so it is
   //     NOT in the value-boundary lookbehind class.
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /((?:AKIA|ASIA)[0-9A-Z]{16}[\s,:;|="'`]{1,8})(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/g,
+      /((?:AKIA|ASIA)[0-9A-Z]{16}[\s,:;|="'`]{1,32}(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?[\s,:;|="'`]{1,32})?)(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/g,
     replacement: '$1[REDACTED:AWS_SECRET_KEY]',
   },
   // (c) the mirror order: a 40-char token followed by an access key id.
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])(?=[\s,:;|="'`]{1,8}(?:AKIA|ASIA)[0-9A-Z]{16})/g,
+      /(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])(?=[\s,:;|="'`]{1,32}(?:AKIA|ASIA)[0-9A-Z]{16})/g,
   },
   // AWS access key IDs (`AKIA<16>`, plus `ASIA<16>` STS temporary ids).
   // Quantifier is `{16,}` so trailing alphanumerics get redacted along
@@ -263,10 +275,10 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   // unterminated quote (to end of line). Empty values, `==`, and values that
   // are already a `[REDACTED:` marker are left alone (idempotence).
   //
-  // RESIDUAL GAPS (known, must be closed before any provider-enabling work
+  // RESIDUAL GAPS (known; they MUST be closed before any provider-enabling work
   // relies on this redactor as its only defense):
-  //  - colon / header / flag forms: `POSTGRES_PASSWORD: hunter2`,
-  //    `"password":"x"`, `Authorization: Bearer ...`, `--password x`,
+  //  - colon / header / flag forms: `POSTGRES_PASSWORD: x`, `"password":"x"`,
+  //    `Authorization: Bearer ...` / `Basic ...`, `X-Api-Key: x`, `--password x`,
   //    `curl -u user:pw`, `.netrc`;
   //  - names `APIKEY=`, `api-key=`, `apiKey=` (only `API_KEY` is a keyword) and
   //    camelCase `dbPass=`;
@@ -276,9 +288,18 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   //  - unquoted multi-token values (`TOKEN=Bearer abc def` redacts only
   //    `Bearer`);
   //  - structured-state values under secret-named keys in the JSON walk
-  //    (`{"password":"hunter2"}` is not redacted except the exact-40-char AWS
-  //    case);
-  //  - known false positives: `MAX_TOKENS=4096`, `PWD=/home/me`.
+  //    (`redact-json.ts`): `{"password":"x"}` is not redacted. Only an
+  //    exactly-40-char base64 string (never 40 hex) under a `secret`-named key
+  //    (also as an array element), or next to a sibling / array element that is
+  //    an `AKIA`/`ASIA` access key id in the SAME object or array, is redacted;
+  //    an id and a secret in different containers (`{"id":{...},"key":"X"}`) or
+  //    under a non-secret-named key without a sibling id are not;
+  //  - known false positives (a leak costs more than a lost value):
+  //    `MAX_TOKENS=4096`, `SECRETARY=bob`, `TOKENS=3`, `PASS-THROUGH=1`,
+  //    `PWD=/home/me`, prose `the secret <40 base64-alphabet chars>` (including a
+  //    line ending in `secret` followed by a line that starts with a 40-char
+  //    non-hex identifier; 40-hex SHAs are excluded in both the string redactor
+  //    and the JSON walk).
   {
     name: 'ENV_ASSIGNMENT',
     regex:

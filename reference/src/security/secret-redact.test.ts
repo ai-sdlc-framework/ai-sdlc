@@ -327,3 +327,166 @@ describe('registry hardening', () => {
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
+
+describe('AWS secret access keys: masked prompts, multi-line and structured layouts', () => {
+  const R = '[REDACTED:AWS_SECRET_KEY]';
+  const A = '[REDACTED:AWS_ACCESS_KEY]';
+  const cases: Array<[string, string, string]> = [
+    [
+      'masked aws configure re-run prompt',
+      `AWS Access Key ID [****************MPLE]: ${ID}\nAWS Secret Access Key [****************EKEY]: ${AWS_SECRET}\nDefault region name [None]:`,
+      `AWS Access Key ID [****************MPLE]: ${A}\nAWS Secret Access Key [****************EKEY]: ${R}\nDefault region name [None]:`,
+    ],
+    [
+      'IAM console copy, label and value on separate lines',
+      `Access key\n${ID}\nSecret access key\n${AWS_SECRET}\nDone`,
+      `Access key\n${A}\nSecret access key\n${R}\nDone`,
+    ],
+    [
+      'IAM console copy with CRLF',
+      `Secret access key\r\n${AWS_SECRET}\r\nDone`,
+      `Secret access key\r\n${R}\r\nDone`,
+    ],
+    [
+      'shell paste of aws configure get',
+      `$ aws configure get aws_secret_access_key\n${AWS_SECRET}\n$ echo ok`,
+      `$ aws configure get aws_secret_access_key\n${R}\n$ echo ok`,
+    ],
+    [
+      'YAML key with the value on the next line',
+      `creds:\n  SecretAccessKey:\n    ${AWS_SECRET}\n  region: x`,
+      `creds:\n  SecretAccessKey:\n    ${R}\n  region: x`,
+    ],
+    [
+      'env assignment with the value on the next line',
+      `aws_secret_access_key =\n${AWS_SECRET}\nnext`,
+      `aws_secret_access_key =\n${R}\nnext`,
+    ],
+    [
+      'create-access-key text row (id, timestamp, secret)',
+      `ACCESSKEY\t${ID}\t2026-10-01T12:00:00+00:00\t${AWS_SECRET}\tActive\tbob`,
+      `ACCESSKEY\t${A}\t2026-10-01T12:00:00+00:00\t${R}\tActive\tbob`,
+    ],
+    [
+      'assume-role text row (id, Z timestamp, secret)',
+      `CREDENTIALS\tASIA${'B'.repeat(16)}\t2026-10-01T12:00:00Z\t${AWS_SECRET}\tFwoGZXIvYXdz`,
+      `CREDENTIALS\t${A}\t2026-10-01T12:00:00Z\t${R}\tFwoGZXIvYXdz`,
+    ],
+    [
+      'padded markdown table',
+      `| ${ID}${' '.repeat(12)} | ${AWS_SECRET} |`,
+      `| ${A}${' '.repeat(12)} | ${R} |`,
+    ],
+    [
+      'padded markdown table, secret first',
+      `| ${AWS_SECRET}${' '.repeat(12)} | ${ID} |`,
+      `| ${R}${' '.repeat(12)} | ${A} |`,
+    ],
+    [
+      'JSON embedded in a JSON string',
+      '{\\"msg\\":\\"{\\\\\\"SecretAccessKey\\\\\\":\\\\\\"' + AWS_SECRET + '\\\\\\"}\\"}',
+      '{\\"msg\\":\\"{\\\\\\"SecretAccessKey\\\\\\":\\\\\\"' + R + '\\\\\\"}\\"}',
+    ],
+    [
+      'single-level escaped JSON',
+      `x={\\"SecretAccessKey\\":\\"${AWS_SECRET}\\"} y`,
+      `x={\\"SecretAccessKey\\":\\"${R}\\"} y`,
+    ],
+  ];
+  for (const [name, input, expected] of cases) {
+    it(`redacts: ${name}`, () => {
+      expect(redactSecrets(input)).toBe(expected);
+    });
+  }
+
+  it('keeps the [None] prompt form working with surrounding text intact', () => {
+    expect(redactSecrets(`AWS Secret Access Key [None]: ${AWS_SECRET}\nnext`)).toBe(
+      `AWS Secret Access Key [None]: ${R}\nnext`,
+    );
+  });
+
+  it('does not over-match a line ending in secret followed by a SHA or prose', () => {
+    const sha = 'a'.repeat(20) + '1'.repeat(20);
+    const upperSha = sha.toUpperCase();
+    for (const t of [
+      `rotate the secret\n${sha}\nnext`,
+      `rotate the secret\r\n${upperSha}\r\nnext`,
+      `rotate the secret\n  ${sha} merged`,
+      'rotate the secret\nthen restart the service and check the logs',
+      `rotate the secret\n\n${AWS_SECRET}`,
+      `Secret access key:\n\n${AWS_SECRET}`,
+      `secret\n${AWS_SECRET}A`,
+    ]) {
+      expect(redactSecrets(t)).toBe(t);
+    }
+  });
+
+  it('keeps a bare id-less 40-char token after a non-secret line unchanged', () => {
+    expect(redactSecrets(`Access key\n${AWS_SECRET}\nSecret`)).toBe(
+      `Access key\n${AWS_SECRET}\nSecret`,
+    );
+  });
+});
+
+describe('idempotence over markers that contain SECRET', () => {
+  it('does not treat our own markers as a secret label on a second pass', () => {
+    const X = AWS_SECRET;
+    const inputs = [
+      `TOKEN=abc ${X}`,
+      `sk_live_${'a'.repeat(24)} ${X}`,
+      `aws_secret_access_key=${X} ${X}`,
+      `PASSWORD=x\n${X}`,
+    ];
+    for (const i of inputs) {
+      const once = redactSecrets(i);
+      expect(redactSecrets(once)).toBe(once);
+    }
+    expect(redactSecrets(`TOKEN=abc ${AWS_SECRET} tail`)).toBe(
+      `TOKEN=[REDACTED:ENV_SECRET] ${AWS_SECRET} tail`,
+    );
+    expect(redactSecrets(`TOKEN=[REDACTED:ENV_SECRET] ${AWS_SECRET} tail`)).toBe(
+      `TOKEN=[REDACTED:ENV_SECRET] ${AWS_SECRET} tail`,
+    );
+  });
+});
+
+describe('.env-style assignments: dotted and long name tails', () => {
+  it('redacts names whose tail needs the dot or is long', () => {
+    expect(redactSecrets('secret.key=abc rest')).toBe('secret.key=[REDACTED:ENV_SECRET] rest');
+    expect(redactSecrets('my.secret.value=abc rest')).toBe(
+      'my.secret.value=[REDACTED:ENV_SECRET] rest',
+    );
+    expect(redactSecrets('SECRET_ACCESS_KEY_FOR_PROD_ENV=x rest')).toBe(
+      'SECRET_ACCESS_KEY_FOR_PROD_ENV=[REDACTED:ENV_SECRET] rest',
+    );
+  });
+});
+
+describe('ReDoS: round 3 regexes stay linear on adversarial input', () => {
+  it('handles 200k-char newline, bracket, star, backslash and timestamp runs', () => {
+    const n = 200_000;
+    const TS = '2026-10-01T12:00:00+00:00';
+    const inputs = [
+      'secret' + '\n '.repeat(n / 2),
+      'secret\r\n'.repeat(n / 8),
+      'secret:' + '\n '.repeat(n / 2),
+      'secret ' + '\n'.repeat(n),
+      'secret[' + ']'.repeat(n),
+      'secret' + '['.repeat(n),
+      'secret' + '*'.repeat(n),
+      'secret [' + '*'.repeat(n) + ']: ',
+      'secret' + '\\'.repeat(n),
+      'secret\\"'.repeat(n / 8),
+      '[REDACTED:' + 'A_'.repeat(n / 2) + 'secret',
+      '[REDACTED:ENV_SECRET]'.repeat(n / 21),
+      ('AKIA' + 'A'.repeat(16) + ' ' + TS + ' ').repeat(n / 46),
+      'AKIA' + 'A'.repeat(16) + ' '.repeat(n),
+      'AKIA' + 'A'.repeat(16) + ' ' + TS + ' '.repeat(n),
+      'A'.repeat(40) + ' '.repeat(n) + 'AKIA' + 'A'.repeat(16),
+      ('A'.repeat(40) + ' ').repeat(n / 41),
+    ];
+    const start = Date.now();
+    for (const i of inputs) redactSecrets(i);
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+});
