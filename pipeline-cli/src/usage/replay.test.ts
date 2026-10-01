@@ -1641,6 +1641,15 @@ describe('commit-supplied config under case and compatibility variants', () => {
     }
   }
 
+  /** True when `text` names `path` either literally or the way git C-quotes non-ASCII paths. */
+  function inGitOutput(text: string, path: string): boolean {
+    if (text.includes(path)) return true;
+    const quoted = [...Buffer.from(path, 'utf8')]
+      .map((b) => (b >= 0x80 ? `\\${b.toString(8).padStart(3, '0')}` : String.fromCharCode(b)))
+      .join('');
+    return text.includes(`"${quoted}"`);
+  }
+
   // The spellings that fold to one name on a case-insensitive fs are created only where the fs
   // keeps them distinct; every other spelling is valid on both kinds of fs.
   const LONG_S = '.mcp.j\u017Fon';
@@ -1703,7 +1712,10 @@ describe('commit-supplied config under case and compatibility variants', () => {
     expect(cwdFiles.filter((f) => /claude|mcp/i.test(f))).toEqual([]);
     expect(cwdFiles).not.toContain(LONG_S);
     expect(prompt).toContain('.MCP.json');
-    if (longSDistinct) expect(prompt).toContain(LONG_S);
+    // git prints a path with non-ASCII bytes in C-quoted form (core.quotePath defaults to true), so
+    // the prompt carries `".mcp.j\305\277on"`, not the literal spelling, on every fs and platform.
+    if (longSDistinct) expect(inGitOutput(prompt, LONG_S)).toBe(true);
+    expect(inGitOutput(prompt, 'sub/ＣLAUDE.md')).toBe(true);
     expect(prompt).toContain('sub/CLAUDE.MD');
   });
 });
