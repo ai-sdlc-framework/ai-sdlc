@@ -359,6 +359,32 @@ export interface DeveloperReturn {
 
 export type VerificationStatus = 'passed' | 'failed' | 'skipped';
 
+/** One acceptance criterion's advisory coverage verdict (`dev.ac-coverage`). */
+export interface AcCoverageEntry {
+  /** Index into the task's acceptance criteria. */
+  index: number;
+  probability: number;
+  likelyUncovered: boolean;
+}
+
+/** Advisory `dev.ac-coverage` result. */
+export interface AcCoverageResult {
+  criteria: AcCoverageEntry[];
+  /** Number of criteria flagged likely-uncovered. */
+  uncovered: number;
+  /** Set when the runtime abstained for a reportable reason (`state-too-large`). */
+  abstainReason?: string;
+}
+
+/** One advisory annotation from `review.finding-grounding`. */
+export interface FindingGroundingAnnotation {
+  agentId: string;
+  findingIndex: number;
+  file: string;
+  line: number;
+  relation: 'supports' | 'contradicts' | 'unrelated' | 'cannot-tell' | 'location-not-found';
+}
+
 export interface ParseDeveloperReturnResult {
   ok: boolean;
   reason?: string;
@@ -372,6 +398,8 @@ export interface ParseDeveloperReturnResult {
    * not be parsed as JSON OR was not an object.
    */
   contractViolation?: boolean;
+  /** Advisory `dev.ac-coverage` result; present only when the judgment layer ran. */
+  acCoverage?: AcCoverageResult;
 }
 
 // ── Step 7 — Build review prompts ────────────────────────────────────
@@ -434,6 +462,11 @@ export interface AggregatedVerdict {
   verdicts: ReviewerVerdict[];
   harnessNote: string;
   summary: string;
+  /**
+   * Advisory `review.finding-grounding` annotations; present only when the
+   * judgment layer ran. Never affects `approved`, `counts` or `decision`.
+   */
+  groundingAnnotations?: FindingGroundingAnnotation[];
 }
 
 // ── Step 9 — Iteration loop ──────────────────────────────────────────
@@ -538,6 +571,10 @@ export interface PushAndPrOptions {
    * Used to format `(closes #N)` in the title and `Closes #N` in the body.
    */
   issueNumber?: number;
+  /** Advisory `dev.ac-coverage` result for the "Judgment notes (advisory)" PR-body section. */
+  acCoverage?: AcCoverageResult;
+  /** Advisory grounding annotations for the same section (falls back to `verdict.groundingAnnotations`). */
+  groundingAnnotations?: FindingGroundingAnnotation[];
 }
 
 export interface PushAndPrResult {

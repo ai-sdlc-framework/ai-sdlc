@@ -14,6 +14,7 @@ import {
   createJudgmentCache,
   createJudgmentLogSink,
   loadJudgmentConfig,
+  registerBuiltInJudgmentDefinitions,
   registerBuiltInJudgmentProvider,
   type EvaluateJudgmentContext,
   type LoadJudgmentConfigOpts,
@@ -55,6 +56,7 @@ export function resolveJudgmentArtifactsDir(
 export function buildJudgmentContext(
   opts: BuildJudgmentContextOptions = {},
 ): EvaluateJudgmentContext {
+  registerBuiltInJudgmentDefinitions();
   const perCall = {
     ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),

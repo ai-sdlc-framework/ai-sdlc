@@ -32,6 +32,7 @@ import {
 } from './steps/index.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
+import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
 import {
   DEFAULT_LOGGER,
   type AggregatedVerdict,
@@ -68,6 +69,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   // An inline taskSpec with no sourceKind came from outside the backlog: untrusted.
   const reviewSourceKind: 'backlog' | 'gh-issue' | undefined =
     opts.taskSpec && opts.sourceKind === undefined ? undefined : sourceKind;
+  // RFC-0049 advisory judgments: with no judgment config the context has no
+  // provider and every check below is a no-op.
+  const judgmentCtx = buildJudgmentContext({
+    workDir: opts.workDir,
+    taskId: opts.taskId,
+    sourceKind,
+  });
 
   // Step 1 — Validate task.
   //
@@ -249,6 +257,16 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // Step 6 — parse developer return (AISDLC-176: retry once on JSON
     // contract violation before failing the dispatch).
     const parsedDev = await parseDeveloperReturnWithRetry({
+      acCoverage: {
+        ctx: judgmentCtx,
+        acceptanceCriteria: task.acceptanceCriteria,
+        getDiff: () =>
+          getMergeBaseDiff({
+            workDir: opts.workDir,
+            worktreePath: branch.worktreePath,
+            runner: opts.runner,
+          }),
+      },
       initialResult: devSpawn,
       cwd: branch.worktreePath,
       spawner: opts.spawner,
@@ -329,6 +347,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
 
     // Step 8 — aggregate
     const initialVerdict = await aggregateVerdicts({
+      grounding: { ctx: judgmentCtx, worktreePath: branch.worktreePath },
       verdicts: initialVerdicts,
       harnessNote: reviewBuild.harnessNote,
     });
@@ -410,6 +429,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       developerReturn: loop.finalDeveloperReturn,
       verdict: loop.finalVerdict,
       needsHumanAttention: loop.needsHumanAttention,
+      ...(parsedDev.acCoverage ? { acCoverage: parsedDev.acCoverage } : {}),
+      ...(initialVerdict.groundingAnnotations
+        ? { groundingAnnotations: initialVerdict.groundingAnnotations }
+        : {}),
       runner: opts.runner,
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.

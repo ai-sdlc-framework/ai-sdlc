@@ -2,7 +2,7 @@
 id: AISDLC-637
 title: >-
   RFC-0049 Group B: advisory dev.ac-coverage and review.finding-grounding judgments
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -73,13 +73,13 @@ reviewer set or the attestation. RFC-0049 section 5, Group B.
    re-rank findings).
 
 ## Acceptance Criteria
-- [ ] With the layer disabled, the outputs of Step 6, Step 8 and Step 11 are unchanged on existing fixtures.
-- [ ] `dev.ac-coverage` sends one Noul per acceptance criterion in a single request and flags criteria below the threshold as `likely-uncovered`.
-- [ ] A diff larger than the state budget results in abstain `state-too-large` and no provider request.
-- [ ] `review.finding-grounding` annotates a finding citing a missing file or an out-of-range line as `location-not-found` without calling the provider for it.
-- [ ] Verdict aggregation output (`approved`, counts by severity, blocking) is identical with and without grounding annotations present.
-- [ ] `review.finding-grounding` does not run when only one of `agent-output` and `code-diff` is allowed.
-- [ ] Step 11 adds the advisory section only when there is something to report, and the section contains no internal task ids.
-- [ ] A `JudgmentEscalated` event is emitted for an uncovered criterion and for a `contradicts` finding.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] With the layer disabled, the outputs of Step 6, Step 8 and Step 11 are unchanged on existing fixtures.
+- [x] `dev.ac-coverage` sends one Noul per acceptance criterion in a single request and flags criteria below the threshold as `likely-uncovered`.
+- [x] A diff larger than the state budget results in abstain `state-too-large` and no provider request.
+- [x] `review.finding-grounding` annotates a finding citing a missing file or an out-of-range line as `location-not-found` without calling the provider for it.
+- [x] Verdict aggregation output (`approved`, counts by severity, blocking) is identical with and without grounding annotations present.
+- [x] `review.finding-grounding` does not run when only one of `agent-output` and `code-diff` is allowed.
+- [x] Step 11 adds the advisory section only when there is something to report, and the section contains no internal task ids.
+- [x] A `JudgmentEscalated` event is emitted for an uncovered criterion and for a `contradicts` finding.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

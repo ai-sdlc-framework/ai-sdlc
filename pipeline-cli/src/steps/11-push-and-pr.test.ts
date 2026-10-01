@@ -250,6 +250,70 @@ describe('Step 11 — composeBody', () => {
     expect(body).toContain('References AISDLC-1');
   });
 
+  it('omits the judgment section when there is nothing to report', () => {
+    const base = {
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+    };
+    const plain = composeBody(base);
+    expect(plain).not.toContain('Judgment notes');
+    expect(
+      composeBody({
+        ...base,
+        acCoverage: {
+          criteria: [{ index: 0, probability: 0.9, likelyUncovered: false }],
+          uncovered: 0,
+        },
+        groundingAnnotations: [
+          {
+            agentId: 'code-reviewer',
+            findingIndex: 0,
+            file: 'a.ts',
+            line: 1,
+            relation: 'supports',
+          },
+        ],
+      }),
+    ).toBe(plain);
+  });
+
+  it('adds an advisory judgment section when something is flagged', () => {
+    const body = composeBody({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: {
+        ...approved,
+        groundingAnnotations: [
+          {
+            agentId: 'code-reviewer',
+            findingIndex: 0,
+            file: 'a.ts',
+            line: 9,
+            relation: 'contradicts',
+          },
+        ],
+      },
+      acCoverage: {
+        criteria: [{ index: 0, probability: 0.1, likelyUncovered: true }],
+        uncovered: 1,
+      },
+    });
+    expect(body).toContain('## Judgment notes (advisory)');
+    expect(body).toContain('a.ts:9');
+    const section = body.slice(body.indexOf('## Judgment notes'), body.indexOf('References'));
+    expect(section).not.toMatch(/AISDLC/);
+    expect(body.indexOf('Judgment notes')).toBeLessThan(body.indexOf('References AISDLC-1'));
+  });
+
   it('opens with the [needs-human-attention] warning when flagged', () => {
     const body = composeBody({
       taskId: 'AISDLC-1',
