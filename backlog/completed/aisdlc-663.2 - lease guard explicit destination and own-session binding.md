@@ -100,10 +100,12 @@ The lease-push guard now accepts only `git push --force-with-lease[=<branch>:<sh
 - **Out of scope by design**: `remote.<name>.pushurl` / `pushInsteadOf` redirect the branch name to another repository, which is not this guard's trust boundary.
 
 ## Verification
-- `pnpm build` clean; governance gate 502 passing; reference suite 1591 passing; lint, format:check, dark-code:check, validate-schemas clean.
+- `pnpm build` clean; governance gate 506 passing; reference suite 1591 passing; lint, format:check, dark-code:check, validate-schemas clean.
 - `pnpm -r test` fails only on the known environmental pipeline-cli items (verify-runtime, bin-invocation `pnpm exec` probes, TUI render timeouts), so AC 7 is left unchecked.
 
 ## Follow-up
 - declined: hook-level protection of `.active-task` writes, the directory-name and branch-prefix agreement is the accepted check
 - declined: parsing `bash -c` payloads, pre-existing matcher limit documented in governance.md
-
+- AISDLC-569 tracks retiring the stale tracked `.claude/hooks/enforce-blocked-actions.*` copy, which is not registered anywhere and cannot grant a lease.
+- declined: protect `ai-sdlc-plugin/hooks/**` and `.claude/**` in `blockedPaths` and load the hook from the main checkout; a worktree-rooted agent can still overwrite its own checkout's hook copy, which is a pre-existing design residual outside this change, and disallowing force pushes on main in server-side branch protection is the real backstop
+- declined: switch the remaining operator and rollback recipes in `docs/operations/` that show a bare or `HEAD` lease push to the explicit spelling; they are operator and CI-bot flows that never receive the lease
