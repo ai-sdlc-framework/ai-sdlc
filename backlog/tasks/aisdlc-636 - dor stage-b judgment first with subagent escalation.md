@@ -12,6 +12,7 @@ labels:
   - dor
 dependencies:
   - AISDLC-631
+  - AISDLC-630.1
 references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - pipeline-cli/src/dor/stage-b.ts
