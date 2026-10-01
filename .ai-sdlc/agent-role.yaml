@@ -39,6 +39,9 @@ spec:
       - 'opencode.json'
       - 'opencode.jsonc'
       - '.opencode/**'
+      - '**/opencode.json'
+      - '**/opencode.jsonc'
+      - '**/.opencode/**'
       # Block Write/Edit on the attestation verifier so a dev subagent cannot
       # disable verification by modifying it. (The per-reviewer sub-attestation
       # script `scripts/verify-reviewer-sub-attestations.mjs` was deleted in
