@@ -63,13 +63,15 @@ under `.ai-sdlc/`.
 ## Changes
 - `pipeline-cli/src/governance/merge-if-eligible.ts` (rewritten core): native verified-main-root (git environment cleaned, replace objects off) and governance resolution (no plugin file loaded), GitHub contents/trees API policy, task-prefix and task-file reads, paginated head-SHA check runs/statuses, the merge and arm calls kept private to the module, one `gh pr view` snapshot, `evaluatePrTrust` (fork, base `main`, `mergeAuthors`, head commit author, task id with the repo's prefix on `origin/main` or in the PR diff), head-SHA check runs/statuses (`fetchShaChecks`), head re-read and `--match-head-commit` pin.
 - `pipeline-cli/src/cli/merge-if-eligible.ts` (modified): `--repo-root`/`--repo` removed; the repository slug comes only from `gh repo view` in the verified checkout and a failure prints a clean REFUSED line; tests inject a root through the builder option.
-- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` (modified): `enforceApiMergeGovernance`, every raw merge/arm form denied (the arming allow-list is gone), GraphQL arming mutation denied, refusal of commands naming the removed override variable.
+- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` (modified): `enforceApiMergeGovernance`, every raw merge/arm form denied (the arming allow-list is gone), GraphQL arming mutation denied, refusal of commands naming the removed override variable, whole-text matching with no heredoc stripping (documentation heredocs that quote the command are denied too; accepted).
 - `pipeline-cli/src/governance/merge-if-eligible.ts`, `pipeline-cli/src/cli/merge-if-eligible.ts` (modified): `--arm` mode (`armPr`, `armed` result, ARMED output).
 - `ai-sdlc-plugin/commands/{execute,rebase,resolve-conflicts,orchestrator-tick}.md`, `ai-sdlc-plugin/agents/ci-conflict-resolver.md` (modified): re-arm wording now calls the helper.
 - `ai-sdlc-plugin/hooks/lib/governance-resolver.js`, `spec/schemas/agent-role.schema.json`, `sdk-go/core/schemas/agent-role.schema.json`, `reference/src/core/generated-schemas.ts` (modified): `mergeAuthors` with an aligned login pattern.
 - Tests in the four test files plus `reference/src/core/validation.test.ts`; `docs/api-reference/governance.md` and `ai-sdlc-plugin/commands/execute.md` (modified).
 
 ## Design decisions
+- **One main commit**: the main branch is resolved once through `git/ref/heads/main` (a tag named main cannot shadow it) and the policy, config and task tree are all read at that SHA.
+- **Human merge for governance changes**: merge and `--arm` refuse a PR that changes governance-sensitive paths (policy, hooks, the gate, schema, CI, ownership, agent-harness config, CLAUDE.md), judged on the full paginated file list including rename sources, and refuse when the list reaches GitHub's cap. This PR and the PR that grants `allowMerge` are therefore human-merge PRs.
 - **No override in production**: the policy root and repository cannot be set from argv or the environment; a test-only override exists solely as a programmatic option of the exported builder.
 - **GitHub-authoritative policy**: the policy and task checks come from GitHub for the PR's own slug, so a forged local ref, a worktree copy, an uncommitted edit or a git environment variable cannot change them, and revocation is immediate; the resolver is ported into the CLI and a parity test pins it to the plugin resolver.
 - **Task file tension**: a task file counts on `origin/main` OR in the PR's own diff (the repo creates and completes a task in one PR). It is a provenance hint, not a trust signal; the author allow-list is the real signal.
@@ -80,6 +82,7 @@ under `.ai-sdlc/`.
 - Mutation check in a scratch copy: all key-rule mutations killed.
 
 ## Follow-up
+- declined: fake `gh`, `PATH` or proxy in the agent's environment; part of the edited-or-copied-CLI residual
 - declined: local CLI is not a trust boundary against the governed agent. The CLI, the plugin hooks and the checkout run from the agent's own worktree, so an agent that can edit or copy them is not bound by them. GitHub-side protections (strict required checks pinned to the Actions app, enforce_admins, CODEOWNERS plus required review on governance paths, fork-PR workflow approval) are operator-only and essential
 - declined: in-repo arming call sites (the orchestrator reconcile path, `resume-from-draft.ts`, `execute-pipeline.ts`) arm through a child-process `gh` call without the gate, which is pre-existing; routing them through `--arm` is recommended as AISDLC-663.5.1
 - declined: text-level hook bypasses (`node -e` / `python -c` with argv arrays, a gh alias, `gh pr --repo o/r merge` reordering, graphql from a file, variable-expanded URLs, `eval`/base64); a static matcher cannot close them, a hardening that parses commands is recommended as AISDLC-663.5.2

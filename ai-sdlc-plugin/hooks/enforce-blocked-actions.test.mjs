@@ -1061,21 +1061,72 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
   }
 
   for (const policy of ['strict', 'green']) {
-    it(`ignores merge text quoted in an inert heredoc but still denies an executed one under ${policy}`, () => {
-      const quoted = "cat <<'EOF'\ngh pr merge 42 --auto\nEOF";
-      assert.ok(!isDenied(run(policy, quoted)), 'documentation in a heredoc is not a command');
-      const commit = 'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF';
-      assert.ok(!isDenied(run(policy, commit)));
-      for (const executed of [
-        'bash <<EOF\ngh pr merge 42 --auto\nEOF',
-        "sh <<'EOF'\ngh pr merge 42\nEOF",
-        'cat <<EOF | bash\ngh pr merge 42 --squash\nEOF',
-        'python3 - <<EOF\nimport os\nEOF\ngh pr merge 42',
-      ]) {
-        assert.ok(isDenied(run(policy, executed)), `expected deny: ${executed}`);
+    it(`heredoc handling is whole-text and fail-closed under ${policy}: no spelling hides a merge`, () => {
+      const commands = [
+        'gh pr merge 42 --auto',
+        'gh pr merge 42 --squash',
+        'gh api repos/acme/widgets/pulls/42/merge -X PUT',
+        'curl -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+      ];
+      // Fake "heredoc openers" that never open a heredoc: the command that follows is real.
+      const fakeOpeners = [
+        'echo hi <<<x',
+        'echo "<<X"',
+        'true # <<X',
+        'echo $((1<<X))',
+        "echo '<<EOF'",
+        'cat <<< "<<EOF"',
+      ];
+      // Real heredocs fed to something that executes the body, or to something inert:
+      // the merge text inside the body is denied regardless of the opener.
+      const openers = [
+        'bash <<EOF',
+        "sh <<'EOF'",
+        'bash -s <<EOF',
+        'cat <<EOF | sh',
+        'cat <<EOF | bash',
+        'cat <<EOF > x.sh',
+        'cat <<EOF',
+        "cat <<'EOF'",
+        'python3 - <<EOF',
+        'python <<EOF',
+        'node - <<EOF',
+        'nodejs <<EOF',
+        'perl <<EOF',
+        'ruby <<EOF',
+        'eval "$(cat <<EOF',
+        'xargs -0 sh -c <<EOF',
+        'source /dev/stdin <<EOF',
+        '. /dev/stdin <<EOF',
+        '${SHELL} <<EOF',
+        'git commit -F - <<EOF',
+        'tee note.txt <<EOF',
+      ];
+      for (const cmd of commands) {
+        for (const opener of fakeOpeners) {
+          const text = `${opener}\n${cmd}`;
+          assert.ok(isDenied(run(policy, text)), `expected deny: ${JSON.stringify(text)}`);
+        }
+        for (const opener of openers) {
+          const text = `${opener}\n${cmd}\nEOF`;
+          assert.ok(isDenied(run(policy, text)), `expected deny: ${JSON.stringify(text)}`);
+        }
+        // The opener line itself is a real command and is always checked.
+        assert.ok(isDenied(run(policy, `${cmd} <<'EOF'\nbody\nEOF`)));
       }
-      // The opener line itself is a real command and is always checked.
-      assert.ok(isDenied(run(policy, "gh pr merge 42 --auto <<'EOF'\nbody\nEOF")));
+    });
+
+    it(`documentation quoting the command in a heredoc is also denied (accepted false denial) under ${policy}`, () => {
+      assert.ok(isDenied(run(policy, "cat <<'EOF'\ngh pr merge 42 --auto\nEOF")));
+      assert.ok(
+        isDenied(
+          run(policy, 'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF'),
+        ),
+      );
+      // Prose that does not contain the command text is unaffected.
+      assert.ok(
+        !isDenied(run(policy, 'git commit -F - <<EOF\nnote: use the merge helper instead\nEOF')),
+      );
     });
 
     it(`API-merge deny message no longer claims arming stays allowed under ${policy}`, () => {
@@ -1118,8 +1169,6 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
     // text that merely mentions the path, no network/interpreter tool
     'grep -rn "pulls/42/merge" docs',
     'cat docs/api-reference/governance.md',
-    // heredoc body quoting the path as documentation
-    "cat <<'EOF'\ngh api repos/acme/widgets/pulls/42/merge -X PUT\nEOF",
   ];
 
   for (const policy of ['strict', 'green']) {

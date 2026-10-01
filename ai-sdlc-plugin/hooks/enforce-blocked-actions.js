@@ -329,11 +329,18 @@ function enforceBash(command) {
  * (any one raw-merge segment blocks the whole command); quotes are tolerated
  * when detecting the token span (`gh "pr" merge`); case is ignored.
  *
+ * Heredoc bodies are deliberately NOT stripped: every line of the command text is
+ * matched, because a heredoc can be fed to a shell, `source`, `eval`, `xargs` or
+ * written to a script, and no static opener list can be complete (and the `<<`
+ * text is easy to fake in comments, quotes, here-strings and arithmetic). The
+ * price is false denials on documentation or commit messages that merely quote
+ * the command; write such text with a file tool, or describe it in words.
+ *
  * Commands that don't invoke `gh pr merge` at all are untouched; they still flow
  * through the generic `blockedActions` pattern matching in enforceBash().
  */
 function enforceMergeGovernance(trimmed) {
-  for (const segment of splitShellSegments(stripInertHeredocBodies(trimmed))) {
+  for (const segment of splitShellSegments(trimmed)) {
     if (!segmentInvokesGhPrMerge(segment)) continue;
     deny(
       `raw 'gh pr merge' (including 'gh pr merge --auto') is not a permitted merge path ` +
@@ -343,23 +350,6 @@ function enforceMergeGovernance(trimmed) {
         `real policy, fork, author, base, task and head-commit checks.`,
     );
   }
-}
-
-/**
- * Removes heredoc bodies (see stripHeredocBodies) so documentation or a commit
- * message quoted through `cat <<EOF` does not look like a command, BUT only when
- * no opener line feeds the body to something that would EXECUTE it (a shell, an
- * interpreter, eval, source, xargs): then the text is left intact so a real
- * command hidden in a heredoc is still caught (fail closed).
- */
-function stripInertHeredocBodies(command) {
-  const openers = command.split('\n').filter((line) => /<<-?\s*['"]?[A-Za-z_]/.test(line));
-  const executes = openers.some((line) =>
-    /(^|[\s;&|(`=/])(?:(?:ba|z|da|k|c|fi)?sh|python[0-9.]*|nodejs|node|deno|bun|ruby|perl|php|eval|source|xargs|env|sudo|exec)(?=$|[\s;&|)<>`])/i.test(
-      line,
-    ),
-  );
-  return executes ? command : stripHeredocBodies(command);
 }
 
 // ── API-merge governance ─────────────────────────────────────────────
@@ -381,15 +371,15 @@ function stripInertHeredocBodies(command) {
  * Raw `gh pr merge` in every form is denied separately; see enforceMergeGovernance().
  *
  * Detection runs on a normalized copy of the command (variables collapsed like
- * a default shell, quotes/backslashes/percent-escapes removed, heredoc bodies
- * dropped) and is deliberately text-level: like every matcher here it cannot
+ * a default shell, quotes/backslashes/percent-escapes removed; heredoc bodies are
+ * NOT stripped, see enforceMergeGovernance) and is deliberately text-level: like every matcher here it cannot
  * defeat `eval`, base64 pipelines or constructed strings; branch protection +
  * required checks remain the backstop. It ONLY fires when the command also
  * contains a network or interpreter tool word, so `grep`/`cat`/`git log` on
  * text that merely mentions such a path stay allowed.
  */
 function enforceApiMergeGovernance(command) {
-  const text = normalizeForApiMerge(stripHeredocBodies(command));
+  const text = normalizeForApiMerge(command);
   const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
   const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
   if (!mergePath.test(text) && !mergeMutation.test(text)) return;

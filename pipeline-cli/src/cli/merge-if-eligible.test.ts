@@ -107,6 +107,13 @@ const GREEN_YAML =
   'spec:\n  governance:\n    allowMerge: onGreenClean\n    mergeAuthors: [operator]\n';
 const NEVER_YAML = 'spec:\n  governance:\n    allowMerge: never\n';
 
+const MAIN_REF = {
+  'git/ref/heads/main': { stdout: JSON.stringify({ type: 'commit', sha: 'c'.repeat(40) }) },
+  'pulls/42/files': {
+    stdout: JSON.stringify({ filename: 'backlog/tasks/aisdlc-9 - x.md', status: 'added' }),
+  },
+};
+
 const GOOD_PR = JSON.stringify({
   headRefOid: HEAD,
   headRefName: 'ai-sdlc/aisdlc-9-x',
@@ -209,6 +216,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     const fake = makeFakeRunner({
       ...repoView,
       'gh pr view 42': { stdout: GOOD_PR },
+      ...MAIN_REF,
       [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
       'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
       [`commits/${HEAD}/check-runs`]: {
@@ -230,6 +238,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     const fake = makeFakeRunner({
       ...repoView,
       'gh pr view 42': { stdout: GOOD_PR },
+      ...MAIN_REF,
       [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
       'contents/backlog/config.yml': { stdout: "task_prefix: 'AISDLC'\n" },
       'gh pr merge 42': {},
@@ -248,6 +257,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     const ok = makeFakeRunner({
       ...repoView,
       'gh pr view 42': { stdout: GOOD_PR },
+      ...MAIN_REF,
       [`commits/${HEAD} --jq {author`]: { stdout: '{"author":"operator","committer":"operator"}' },
       'contents/backlog/config.yml': { stdout: 'x: 1\n' },
       'gh pr merge 42': {},

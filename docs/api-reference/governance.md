@@ -108,6 +108,17 @@ spec:
     name**: a commit status can be posted under any name by anyone with write
     access, so this is only meaningful once branch protection pins each required
     check to the GitHub Actions app (operator-only; tracked as "H4");
+  - the PR changes **no governance-sensitive path** (`.ai-sdlc/**`,
+    `ai-sdlc-plugin/hooks/**`, `pipeline-cli/src/governance/**`, the merge CLI and
+    its entry `pipeline-cli/bin/cli-merge-if-eligible.mjs`, `.github/**`, any
+    `CODEOWNERS`, `spec/schemas/agent-role.schema.json`, `opencode.json`,
+    `opencode.jsonc`, `.opencode/**`, any `CLAUDE.md`; compared case-insensitively,
+    and for a rename both the new and the previous name). Governance changes need
+    a human merge, in both merge and `--arm` mode, so a PR that edits the policy or
+    the gate itself (including the PR that introduced this rule, and the PR that
+    grants `allowMerge`) is merged by a human. The file list comes from the
+    paginated REST files endpoint; a failed read, or a list that reaches GitHub's
+    3000-file cap, refuses;
   - the PR head commit read in the first call is still the head just before the
     merge, and the merge is issued with `--match-head-commit <sha>` so GitHub
     rejects it if the head moved after the checks were evaluated (the CLI reports
@@ -121,8 +132,11 @@ spec:
 - **What is authoritative (policy trust):** the policy
   (`spec.governance.allowMerge` + `mergeAuthors`), `backlog/config.yml`
   (`task_prefix`) and the task-file existence check are read from GitHub
-  (`gh api repos/<slug>/contents/<path>?ref=main` and the git trees API), against
-  the SAME repository slug as the PR being merged or armed. They are not read from
+  (`gh api repos/<slug>/contents/<path>?ref=<sha>` and the git trees API), against
+  the SAME repository slug as the PR being merged or armed. The `main` BRANCH is
+  resolved once (`git/ref/heads/main`, so a tag named `main` cannot shadow it; a
+  non-commit object or any error refuses) and every one of those reads uses that
+  one commit SHA. They are not read from
   any local ref, working tree, worktree copy or git environment variable, so a
   forged local `origin/main`, an uncommitted edit, `GIT_COMMON_DIR` and friends
   have no effect, and a revocation on `main` applies on the very next run with no
@@ -164,8 +178,11 @@ spec:
   flags in any order), `curl`/`wget` to the same endpoint, and the GraphQL
   `mergePullRequest` and `enablePullRequestAutoMerge` mutations, under every
   `allowMerge` value. The sanctioned helper (merge mode and `--arm`) stays allowed.
-  Text inside a heredoc body is ignored unless the heredoc is fed to a shell or
-  interpreter. The repository workflow `auto-enable-auto-merge.yml` still arms
+  Every line of the command text is matched, heredoc bodies included (a heredoc
+  can be fed to a shell, `source`, `eval`, `xargs` or written to a script, and no
+  opener list is complete), so documentation or a commit message that merely
+  quotes the command is also denied: write such text with a file tool or describe
+  the command in words. The repository workflow `auto-enable-auto-merge.yml` still arms
   same-repo PRs on open; it is not an agent action and is unchanged. This is a
   text-level matcher: it cannot see `eval`, base64 pipelines, variable-expanded
   URLs, `node -e` / `python -c` with argv arrays, `gh api graphql --input <file>`,
@@ -186,10 +203,15 @@ spec:
     agent (see the list above).
   - **Forged commit statuses:** see "matched by name" above.
   - **GitHub-side protections are essential and operator-only:** required status
-    checks with strict (up-to-date) mode pinned to the GitHub Actions app,
-    `enforce_admins`, CODEOWNERS plus required review on governance paths
-    (`.ai-sdlc/**`, hooks, the merge CLI), and fork-PR workflow approval. Nothing
-    in this repository can set them.
+    checks with strict (up-to-date) mode with each check pinned to the GitHub
+    Actions app, `enforce_admins`, CODEOWNERS plus required review on the governance
+    paths (`.ai-sdlc/**`, hooks, the merge CLI), a ruleset that blocks creating a
+    tag or branch named `main` (the CLI resolves the branch by its full ref, but
+    other tools use the short name), fork-PR workflow approval, and no bypass
+    actors. Nothing in this repository can set them.
+  - **A fake `gh`, `PATH` or proxy** (anything the agent controls in the
+    environment that the CLI shells out through) can feed the CLI false answers;
+    this is part of the edited-or-copied-CLI residual above.
 - **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
   case: after rebasing a dispatched task's branch. The PreToolUse hook then
   permits a push only when ALL of these hold:

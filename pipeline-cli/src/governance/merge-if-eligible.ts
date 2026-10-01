@@ -171,14 +171,47 @@ export function resolveTrustedMainRoot(opts: {
 }
 
 /**
+ * Resolve the `main` BRANCH to one commit SHA (`git/ref/heads/main`, which
+ * cannot be shadowed by a tag named `main` the way the short ref `main` can).
+ * Every policy, config and task-tree read then uses that SHA, so they all come
+ * from one consistent commit. `null` on any error or a non-commit object.
+ */
+export async function resolveMainSha(
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<string | null> {
+  const out = await runner(
+    'gh',
+    [
+      'api',
+      `repos/${repoSlug}/git/ref/heads/main`,
+      '--jq',
+      '{type: .object.type, sha: .object.sha}',
+    ],
+    { cwd, allowFailure: true },
+  );
+  if (out.code !== 0) return null;
+  try {
+    const p = JSON.parse(out.stdout) as { type?: unknown; sha?: unknown };
+    return p.type === 'commit' && typeof p.sha === 'string' && /^[0-9a-f]{40}$/i.test(p.sha)
+      ? p.sha
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read a file from the repository's `main` branch as GitHub serves it
- * (`gh api repos/<slug>/contents/<path>?ref=main`, raw media type). This is the
+ * (`gh api repos/<slug>/contents/<path>?ref=<commit sha>`, raw media type). This is the
  * AUTHORITATIVE source for the policy and config: it does not depend on any
  * local ref, working tree or git environment. A gh failure, a non-200 answer,
  * or an empty body returns `null` (callers refuse).
  */
 export async function readFileFromMain(
   repoSlug: string,
+  ref: string,
   path: string,
   runner: Runner,
   cwd?: string,
@@ -189,7 +222,7 @@ export async function readFileFromMain(
       'api',
       '-H',
       'Accept: application/vnd.github.raw',
-      `repos/${repoSlug}/contents/${path}?ref=main`,
+      `repos/${repoSlug}/contents/${path}?ref=${ref}`,
     ],
     { cwd, allowFailure: true },
   );
@@ -199,10 +232,11 @@ export async function readFileFromMain(
 /** Backlog task id prefix from `backlog/config.yml` `task_prefix` on main; default `AISDLC`. */
 export async function readTaskPrefix(
   repoSlug: string,
+  ref: string,
   runner: Runner,
   cwd?: string,
 ): Promise<string> {
-  const text = await readFileFromMain(repoSlug, 'backlog/config.yml', runner, cwd);
+  const text = await readFileFromMain(repoSlug, ref, 'backlog/config.yml', runner, cwd);
   const m = text ? /^task_prefix:\s*['"]?([A-Za-z][A-Za-z0-9]*)['"]?\s*$/m.exec(text) : null;
   return m?.[1] ?? 'AISDLC';
 }
@@ -406,6 +440,99 @@ export async function fetchPrSnapshot(
   }
 }
 
+export interface ChangedFile {
+  path: string;
+  /** Present for renames: the path the file had before. */
+  previousPath?: string;
+  status: string;
+}
+
+/** GitHub's REST file list for a PR stops at 3000 files. */
+const PR_FILES_CAP = 3000;
+
+/**
+ * Every file the PR changes, across all pages, via the REST files endpoint
+ * (which, unlike `gh pr view --json files`, reports the previous name of a
+ * renamed file). `null` on any failure or when the list hit GitHub's cap
+ * (cannot be sure nothing sensitive is beyond it).
+ */
+export async function fetchChangedFiles(
+  prNumber: number,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<ChangedFile[] | null> {
+  const out = await runner(
+    'gh',
+    [
+      'api',
+      `repos/${repoSlug}/pulls/${prNumber}/files?per_page=100`,
+      '--paginate',
+      '--jq',
+      '.[] | {filename, previous_filename, status}',
+    ],
+    { cwd, allowFailure: true },
+  );
+  if (out.code !== 0) return null;
+  try {
+    const files = parseNdjson<{ filename: unknown; previous_filename?: unknown; status?: unknown }>(
+      out.stdout,
+    ).map((f) => {
+      if (typeof f.filename !== 'string') throw new Error('shape');
+      return {
+        path: f.filename,
+        previousPath: typeof f.previous_filename === 'string' ? f.previous_filename : undefined,
+        status: typeof f.status === 'string' ? f.status : '',
+      };
+    });
+    return files.length >= PR_FILES_CAP ? null : files;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Paths whose change needs a human merge: the governance policy and its
+ * enforcement (hooks, the merge gate itself, the policy schema), CI and
+ * ownership files, and agent-harness configuration. Compared lower-cased on the
+ * normalised path.
+ */
+export function isGovernanceSensitivePath(rawPath: string): boolean {
+  const path = rawPath
+    .toLowerCase()
+    .replace(/\\/g, '/')
+    .replace(/^(\.\/|\/)+/, '')
+    .replace(/\/+/g, '/');
+  const base = path.slice(path.lastIndexOf('/') + 1);
+  return (
+    path.startsWith('.ai-sdlc/') ||
+    path.startsWith('ai-sdlc-plugin/hooks/') ||
+    path.startsWith('pipeline-cli/src/governance/') ||
+    path.startsWith('pipeline-cli/src/cli/merge-if-eligible') ||
+    path === 'pipeline-cli/bin/cli-merge-if-eligible.mjs' ||
+    path.startsWith('.github/') ||
+    path === 'spec/schemas/agent-role.schema.json' ||
+    path.startsWith('.opencode/') ||
+    base === 'codeowners' ||
+    base === 'opencode.json' ||
+    base === 'opencode.jsonc' ||
+    base === 'claude.md'
+  );
+}
+
+/** The sensitive paths a PR touches (new or previous name); empty when none. */
+export function governanceSensitiveChanges(files: ChangedFile[]): string[] {
+  const hits: string[] = [];
+  for (const f of files) {
+    for (const candidate of [f.path, f.previousPath]) {
+      if (candidate && isGovernanceSensitivePath(candidate) && !hits.includes(candidate)) {
+        hits.push(candidate);
+      }
+    }
+  }
+  return hits;
+}
+
 /**
  * Derive the backlog task id for a PR from its head branch (`ai-sdlc/<ID>-...`,
  * the repo's branch convention) and/or its title (trailing `(<ID>)`). The id
@@ -486,10 +613,11 @@ async function fetchTree(
 export async function taskFileOnMain(
   taskId: string,
   repoSlug: string,
+  ref: string,
   runner: Runner,
   cwd?: string,
 ): Promise<boolean> {
-  const root = await fetchTree(repoSlug, 'main', runner, cwd);
+  const root = await fetchTree(repoSlug, ref, runner, cwd);
   if (!root || root.truncated) return false;
   const backlog = root.entries.find((e) => e.path === 'backlog' && e.type === 'tree');
   if (!backlog) return false;
@@ -565,6 +693,8 @@ export async function evaluatePrTrust(args: {
   mergeAuthors: string[];
   repoSlug: string;
   taskPrefix: string;
+  /** Resolves the single main commit SHA all reads use (memoised by the caller). */
+  mainSha: () => Promise<string | null>;
   runner: Runner;
   cwd?: string;
 }): Promise<string | null> {
@@ -598,7 +728,14 @@ export async function evaluatePrTrust(args: {
     (f) =>
       f.changeType?.toUpperCase() !== 'DELETED' && isBacklogTaskFileFor(derived.taskId!, f.path),
   );
-  if (!inPr && !(await taskFileOnMain(derived.taskId, args.repoSlug, args.runner, args.cwd))) {
+  let onMain = false;
+  if (!inPr) {
+    const sha = await args.mainSha();
+    if (!sha)
+      return 'could not resolve the main branch to a commit on GitHub — refusing (fail-closed)';
+    onMain = await taskFileOnMain(derived.taskId, args.repoSlug, sha, args.runner, args.cwd);
+  }
+  if (!inPr && !onMain) {
     return (
       `no backlog task file for "${derived.taskId}" exists on main (per GitHub) or in this PR's own ` +
       'diff (backlog/tasks or backlog/completed)'
@@ -1036,7 +1173,11 @@ export async function resolveRepoSlug(runner: Runner, cwd?: string): Promise<str
     { cwd, allowFailure: true },
   );
   const slug = out.stdout.trim();
-  return out.code === 0 && /^[\w.-]+\/[\w.-]+$/.test(slug) ? slug : null;
+  const [owner, name] = slug.split('/');
+  const dots = (x: string | undefined) => x === '.' || x === '..';
+  return out.code === 0 && /^[\w.-]+\/[\w.-]+$/.test(slug) && !dots(owner) && !dots(name)
+    ? slug
+    : null;
 }
 
 // ── Top-level orchestration ──────────────────────────────────────────────
@@ -1127,10 +1268,26 @@ export async function runMergeIfEligible(
     );
   }
 
-  const yamlText =
-    opts.policyYaml !== undefined
-      ? opts.policyYaml
-      : await readFileFromMain(opts.repoSlug, '.ai-sdlc/agent-role.yaml', opts.runner, opts.cwd);
+  // One consistent commit: the `main` branch is resolved to a SHA once (a tag
+  // named main cannot shadow it) and every read below uses that SHA.
+  let mainShaPromise: Promise<string | null> | undefined;
+  const mainSha = () => (mainShaPromise ??= resolveMainSha(opts.repoSlug, opts.runner, opts.cwd));
+
+  let yamlText: string | null;
+  if (opts.policyYaml !== undefined) {
+    yamlText = opts.policyYaml;
+  } else {
+    const sha = await mainSha();
+    yamlText = sha
+      ? await readFileFromMain(
+          opts.repoSlug,
+          sha,
+          '.ai-sdlc/agent-role.yaml',
+          opts.runner,
+          opts.cwd,
+        )
+      : null;
+  }
   if (yamlText === null) {
     return refusalResult(
       opts.prNumber,
@@ -1169,15 +1326,42 @@ export async function runMergeIfEligible(
     );
   }
 
+  let taskPrefix = opts.taskPrefix;
+  if (taskPrefix === undefined) {
+    const sha = await mainSha();
+    if (!sha) {
+      return refuse(
+        'could not resolve the main branch to a commit on GitHub — refusing (fail-closed)',
+      );
+    }
+    taskPrefix = await readTaskPrefix(opts.repoSlug, sha, opts.runner, opts.cwd);
+  }
   const trustRefusal = await evaluatePrTrust({
     snapshot,
     mergeAuthors,
     repoSlug: opts.repoSlug,
-    taskPrefix: opts.taskPrefix ?? (await readTaskPrefix(opts.repoSlug, opts.runner, opts.cwd)),
+    taskPrefix,
+    mainSha,
     runner: opts.runner,
     cwd: opts.cwd,
   });
   if (trustRefusal) return refuse(trustRefusal);
+
+  // Governance-sensitive changes need a human merge (merge AND arm modes).
+  const changed = await fetchChangedFiles(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+  if (!changed) {
+    return refuse(
+      'could not list every file this PR changes (GitHub error, or the list hit its cap) — ' +
+        'refusing (fail-closed); a human merges what cannot be inspected',
+    );
+  }
+  const sensitive = governanceSensitiveChanges(changed);
+  if (sensitive.length > 0) {
+    return refuse(
+      `the PR changes governance-sensitive paths (${sensitive.slice(0, 5).join(', ')}` +
+        `${sensitive.length > 5 ? `, +${sensitive.length - 5} more` : ''}) — these require a human merge`,
+    );
+  }
 
   if (opts.mode === 'arm') {
     const armEligibility: MergeEligibilityResult = {
