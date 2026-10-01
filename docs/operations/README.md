@@ -65,6 +65,8 @@ Admission filter that ensures tasks are properly specified before agent dispatch
 
 | Runbook | Description |
 |---------|-------------|
+| [`judgment-layer.md`](judgment-layer.md) | Operator runbook and adopter guide: enabling, providers (`jev`, `openai-compatible`), egress classes, modes, downgrade reasons, log, cost, kill switch, troubleshooting (RFC-0049) |
+| [`judgment-promotion.md`](judgment-promotion.md) | Corpus path vs. override path for flipping a judgment from `shadow` to `enforce`, per `riskClass` |
 | [`judgment-definitions.md`](judgment-definitions.md) | Registration-time safety rules for judgment definitions (`fallback`, `reducesReview`, `reducingOutcomes`) |
 
 ---
