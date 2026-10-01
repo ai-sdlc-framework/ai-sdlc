@@ -11,7 +11,10 @@
  *   governance:
  *     preset: strict | operator-trusted   # sugar layer, see below
  *     allowMerge: never | onGreenClean    # default: never
- *     allowForcePush: bool                # default: false
+ *     allowForcePush: never | leaseOnOwnBranch | bool   # default: never
+ *                                         # (true = leaseOnOwnBranch, false = never)
+ *     operational: [..closed set..]       # default: [] (dispatch-role grants)
+ *     protectedBranches: [..names..]      # default: [] (adds to main/master)
  *     allowClosePrIssue: bool             # default: false
  *     allowBranchDelete: bool             # default: false
  *     allowResetHard: bool                # default: false
@@ -56,7 +59,19 @@ const STRICT_DEFAULTS = Object.freeze({
   allowResetHard: false,
 });
 
+/** Closed set of operational actions grantable to the dispatch role. */
+const OPERATIONAL_ACTIONS = Object.freeze([
+  'rebase-own-branch',
+  'lease-push-own-branch',
+  'retrigger-ci',
+  'requeue',
+  'file-subid-followups',
+  'answer-operational-decisions',
+  'clear-executor-context',
+]);
+
 const KNOWN_PRESETS = new Set(['strict', 'operator-trusted']);
+const LIST_KEYS = new Set(['operational', 'protectedBranches']);
 const BOOLEAN_KEYS = ['allowForcePush', 'allowClosePrIssue', 'allowBranchDelete', 'allowResetHard'];
 
 /**
@@ -76,6 +91,7 @@ function parseGovernanceBlock(yamlText) {
   let govIndent = null;
   const raw = {};
   let found = false;
+  let listKey = null;
 
   for (const line of lines) {
     if (govIndent === null) {
@@ -93,12 +109,44 @@ function parseGovernanceBlock(yamlText) {
     const indent = indentMatch[1].length;
     if (indent <= govIndent) break; // dedent — end of the governance block
 
+    const item = line.match(/^\s*-\s+(.*)$/);
+    if (item) {
+      if (listKey) {
+        const v = item[1]
+          .replace(/\s+#.*$/, '')
+          .trim()
+          .replace(/^['"]/, '')
+          .replace(/['"]$/, '');
+        raw[listKey].push(v);
+      }
+      continue;
+    }
+    listKey = null;
+
     const kv = line.match(/^\s*([A-Za-z0-9_]+):\s*(.*)$/);
     if (!kv) continue;
 
     const key = kv[1];
     let value = kv[2].replace(/\s+#.*$/, '').trim();
-    if (value === '') continue; // nested map/list — not part of this schema
+    if (value === '') {
+      // Block list for the two list-valued keys; any other nested map/list is
+      // not part of this schema and is skipped.
+      if (LIST_KEYS.has(key)) {
+        raw[key] = [];
+        listKey = key;
+      }
+      continue;
+    }
+    if (LIST_KEYS.has(key)) {
+      const inline = value.match(/^\[(.*)\]$/);
+      raw[key] = inline
+        ? inline[1]
+            .split(',')
+            .map((x) => x.trim().replace(/^['"]/, '').replace(/['"]$/, ''))
+            .filter((x) => x !== '')
+        : [value]; // scalar where a list belongs: malformed, fails closed later
+      continue;
+    }
 
     value = value.replace(/^['"]/, '').replace(/['"]$/, '');
 
@@ -149,7 +197,70 @@ function resolveGovernance(rawGovernance) {
     // malformed value (non-boolean): fail closed — ignore.
   }
 
+  // allowForcePush also accepts the enum: leaseOnOwnBranch reads as truthy
+  // (the boolean stays the back-compat view), `never` as false.
+  if (typeof rawGovernance.allowForcePush === 'string') {
+    if (rawGovernance.allowForcePush === 'leaseOnOwnBranch') resolved.allowForcePush = true;
+    else if (rawGovernance.allowForcePush === 'never') resolved.allowForcePush = false;
+  }
+
   return resolved;
+}
+
+/**
+ * Resolves the force-push mode. `leaseOnOwnBranch` and boolean `true` →
+ * 'leaseOnOwnBranch'; everything else (absent, `never`, `false`, malformed)
+ * → 'never' (fail closed). Presets never influence it.
+ */
+function resolveForcePushMode(rawGovernance) {
+  if (!rawGovernance || typeof rawGovernance !== 'object') return 'never';
+  const v = rawGovernance.allowForcePush;
+  return v === true || v === 'leaseOnOwnBranch' ? 'leaseOnOwnBranch' : 'never';
+}
+
+/**
+ * Resolves the `operational` list against the CLOSED set: unknown entries and
+ * non-string entries are dropped (never granted); a non-array value yields [].
+ * De-duplicated, order-preserving.
+ */
+function resolveOperational(rawGovernance) {
+  if (!rawGovernance || typeof rawGovernance !== 'object') return [];
+  const list = rawGovernance.operational;
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const entry of list) {
+    if (typeof entry === 'string' && OPERATIONAL_ACTIONS.includes(entry) && !out.includes(entry)) {
+      out.push(entry);
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolves additional protected branch names (adds to the always-protected
+ * main/master). Only well-formed branch-name strings are kept; a trailing `*`
+ * means prefix match. Malformed input yields [] — which can only ever mean
+ * LESS protection than configured, never a relaxation of main/master.
+ */
+function resolveProtectedBranches(rawGovernance) {
+  if (!rawGovernance || typeof rawGovernance !== 'object') return [];
+  const list = rawGovernance.protectedBranches;
+  if (!Array.isArray(list)) return [];
+  return list.filter((b) => typeof b === 'string' && /^[A-Za-z0-9._/-]+\*?$/.test(b));
+}
+
+/**
+ * Resolves the force-push mode, operational list and protected branches from
+ * raw agent-role.yaml text. Kept separate from `resolveGovernance` so that
+ * function's resolved shape (and its callers) stay unchanged.
+ */
+function resolveGovernanceExtrasFromYaml(yamlText) {
+  const raw = parseGovernanceBlock(yamlText);
+  return {
+    forcePushMode: resolveForcePushMode(raw),
+    operational: resolveOperational(raw),
+    protectedBranches: resolveProtectedBranches(raw),
+  };
 }
 
 /** Convenience: parse + resolve in one call, given raw agent-role.yaml text. */
@@ -177,10 +288,30 @@ function renderClosePrIssueRuleText(resolved) {
     : '**NEVER close issues or PRs.**';
 }
 
+const LEASE_FORCE_PUSH_TEXT =
+  '**Force-push is allowed per repo policy** (`.ai-sdlc/agent-role.yaml` governance: `allowForcePush: leaseOnOwnBranch`) — ' +
+  "force-with-lease permitted on this worktree's own branch only; never on main.";
+
 function renderForcePushRuleText(resolved) {
-  return resolved.allowForcePush
-    ? '**Force-push is allowed per repo policy** (`.ai-sdlc/agent-role.yaml` governance: `allowForcePush: true`) — still use `--force-with-lease`.'
-    : '**NEVER force push.**';
+  return resolved.allowForcePush ? LEASE_FORCE_PUSH_TEXT : '**NEVER force push.**';
+}
+
+/**
+ * Renders the `operational` grants for the dispatch role. Returns '' when the
+ * session is not the dispatch role or nothing is granted, so every other
+ * session's banner is unchanged.
+ *
+ * @param {string[]} operational resolved (closed-set) list
+ * @param {string | undefined} hierarchyRole value of AI_SDLC_HIERARCHY_ROLE
+ */
+function renderOperationalRules(operational, hierarchyRole) {
+  if (hierarchyRole !== 'operator-dispatch') return '';
+  if (!Array.isArray(operational) || operational.length === 0) return '';
+  return (
+    '**Operational actions granted to this dispatch role** (`.ai-sdlc/agent-role.yaml` governance: `operational`): ' +
+    operational.map((a) => `\`${a}\``).join(', ') +
+    '. Each is permitted only within the permanently fixed integrity rules.'
+  );
 }
 
 function renderBranchDeleteRuleText(resolved) {
@@ -239,6 +370,12 @@ module.exports = {
   parseGovernanceBlock,
   resolveGovernance,
   resolveGovernanceFromYaml,
+  OPERATIONAL_ACTIONS,
+  resolveForcePushMode,
+  resolveOperational,
+  resolveProtectedBranches,
+  resolveGovernanceExtrasFromYaml,
+  renderOperationalRules,
   renderSessionStartHardRules,
   renderSubagentHardRules,
 };

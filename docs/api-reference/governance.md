@@ -59,7 +59,7 @@ spec:
   governance:
     preset: strict            # or: operator-trusted (sugar, see below)
     allowMerge: never          # never | onGreenClean
-    allowForcePush: false
+    allowForcePush: never      # never | leaseOnOwnBranch (booleans: true = leaseOnOwnBranch, false = never)
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
@@ -74,6 +74,30 @@ spec:
   the work item's trust tier (internal backlog tasks vs. external
   GitHub-sourced work) and the deterministic `merge-if-eligible` gate
   (AISDLC-602/603, not yet implemented as of Phase 1).
+- **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
+  case: after rebasing a feature branch. The PreToolUse hook then permits a
+  push only when ALL of these hold: it is a single
+  `git push <configured-remote> --force-with-lease[=<own-branch>[:<sha>]] <refspec>...`
+  command (no chaining, quoting, wrapper, env prefix, `git -C`/`--git-dir`, or
+  extra flags); every refspec target is the branch checked out in the current
+  worktree (`<branch>`, `HEAD:<branch>`, `<branch>:<branch>`); and that branch is
+  not `main`, `master`, or listed in `protectedBranches` (exact names, or a
+  trailing `*` prefix match). Everything else that looks like a force-push
+  (plain `--force`/`-f`, `+refspec`, `--force-if-includes` alone, another branch,
+  a raw URL remote, `--delete`, `--mirror`, a push with no explicit refspec) is
+  blocked. The own-branch value is read from git state, never from the command
+  text. The policy is read from the trusted main checkout, so a copy of
+  `agent-role.yaml` edited in a worktree or PR has no effect. Note that a
+  `blockedActions` pattern such as `git push --force*` also matches
+  `--force-with-lease`; under `leaseOnOwnBranch` the single allowed command shape
+  is exempted from `git push ...` patterns, every other pattern still applies.
+- **`operational`** is a closed list granted to the dispatch role:
+  `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`,
+  `file-subid-followups`, `answer-operational-decisions`,
+  `clear-executor-context`. Unknown entries are dropped, not granted. It is
+  rendered into the injected rules only for sessions started with
+  `AI_SDLC_HIERARCHY_ROLE=operator-dispatch`, and it does not relax any hook on
+  its own (force-push is governed solely by `allowForcePush`).
 - **Fail-closed:** any unknown key, unknown preset name, or malformed value
   (wrong type / not in the enumerated set) is ignored — the resolved value
   falls back to whatever the preset/default already produced. Malformed

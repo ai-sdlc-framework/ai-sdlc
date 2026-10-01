@@ -69,8 +69,14 @@
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
 const { join, resolve, isAbsolute, relative, sep, dirname } = require('path');
-const { execSync } = require('child_process');
-const { resolveGovernanceFromYaml, STRICT_DEFAULTS } = require('./lib/governance-resolver');
+const { execSync, execFileSync } = require('child_process');
+const { realpathSync } = require('fs');
+const {
+  resolveGovernanceFromYaml,
+  resolveGovernanceExtrasFromYaml,
+  STRICT_DEFAULTS,
+} = require('./lib/governance-resolver');
+const { evaluateLeasePush } = require('./lib/lease-push-guard');
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
@@ -124,6 +130,61 @@ try {
   // hardcoded floors enforced regardless of config (AISDLC-567), so we must
   // NOT exit early here the way the Bash-only enforcement used to.
   // resolvedGovernance stays at STRICT_DEFAULTS (fail-closed).
+}
+
+// ── Own-branch lease policy (RFC-0051 §10) ───────────────────────────
+
+function gitOut(args, cwd) {
+  try {
+    return (
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined },
+      }).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function safeReal(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Resolves the force-push policy from a TRUSTED location only. The hook's
+ * project dir normally is the operator's checkout; but when it resolves to the
+ * very worktree the agent is pushing from (a PR-tree copy the governed party
+ * can edit), the policy is read from the main checkout instead (the parent of
+ * the git common dir), so a worktree copy of agent-role.yaml setting
+ * `leaseOnOwnBranch` has no effect. Any failure fails closed to `never`.
+ */
+function loadLeasePolicy() {
+  const closed = { mode: 'never', protectedBranches: [], cwd: undefined };
+  try {
+    const cwd = toolCwd || process.cwd();
+    const top = gitOut(['rev-parse', '--show-toplevel'], cwd);
+    if (!top) return closed;
+    const common = gitOut(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd);
+    const mainRoot = common ? dirname(common) : top;
+    let policyDir = projectDir;
+    const realTop = safeReal(top);
+    const realProj = safeReal(projectDir);
+    const inWorktree = realProj === realTop || realProj.startsWith(realTop + sep);
+    if (inWorktree && safeReal(mainRoot) !== realTop) policyDir = mainRoot;
+    else if (inWorktree) policyDir = projectDir; // main checkout itself
+    const yaml = readFileSync(join(policyDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+    const extras = resolveGovernanceExtrasFromYaml(yaml);
+    return { mode: extras.forcePushMode, protectedBranches: extras.protectedBranches, cwd };
+  } catch {
+    return closed;
+  }
 }
 
 // ── Merge-governance token allowlists (AISDLC-602) ───────────────────
@@ -181,9 +242,30 @@ function enforceBash(command) {
   // independent of whatever blockedActions patterns the project configured.
   enforceStashGovernance(trimmed);
 
+  // RFC-0051 §10: own-branch force-with-lease. Only active when the TRUSTED
+  // policy resolved to `leaseOnOwnBranch`; under `never` (default, absent,
+  // malformed) this is a no-op and the blockedActions patterns below behave
+  // exactly as before.
+  let leasePushAllowed = false;
+  const lease = loadLeasePolicy();
+  if (lease.mode === 'leaseOnOwnBranch') {
+    const verdict = evaluateLeasePush(trimmed, {
+      ownBranch: gitOut(['symbolic-ref', '--short', '-q', 'HEAD'], lease.cwd),
+      protectedBranches: lease.protectedBranches,
+      remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
+      aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
+    });
+    if (verdict.decision === 'deny') deny(verdict.reason);
+    leasePushAllowed = verdict.decision === 'allow';
+  }
+
   if (blockedActions.length === 0) return;
 
   for (const pattern of blockedActions) {
+    // The one command shape the lease policy positively allowed is exempt from
+    // the generic `git push --force*` / `-f*` patterns (which would otherwise
+    // also match `--force-with-lease`). Every other pattern still applies.
+    if (leasePushAllowed && /^git\s+push\b/i.test(pattern)) continue;
     const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
     const regexStr = escaped.replace(/\*/g, '.*');
     const regex = new RegExp(`^${regexStr}$`, 'i');

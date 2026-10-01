@@ -2,7 +2,7 @@
 id: AISDLC-663
 title: >-
   RFC-0051 OQ-2: allowForcePush leaseOnOwnBranch, own-branch enforcement, governance.operational list and render
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -77,14 +77,14 @@ acceptance criterion.
    describe the enum, the own-branch rule and the operational list.
 
 ## Acceptance Criteria
-- [ ] The schema accepts `never`, `leaseOnOwnBranch`, `true` and `false` for `allowForcePush` and rejects any other value; `pnpm validate-schemas` passes.
-- [ ] With `leaseOnOwnBranch`, `git push --force-with-lease origin <own-branch>` is allowed in a worktree checked out on that branch.
-- [ ] With `leaseOnOwnBranch`, a lease push to a branch other than the worktree's own is blocked.
-- [ ] With `leaseOnOwnBranch`, a lease push to `main`, `master` or a protected branch is blocked, and plain `--force` is blocked everywhere.
-- [ ] With `never`, unset, or a malformed value, every force push is blocked exactly as before this change (existing tests pass unchanged).
-- [ ] The policy is resolved from the base branch; a worktree copy of `agent-role.yaml` setting `leaseOnOwnBranch` has no effect.
-- [ ] The injected rule text reflects the resolved value in both hooks, and the `operational` list is rendered only for the dispatch role.
-- [ ] CI-skip tokens, attestation and verdict edits, and governance relaxation from a PR tree remain blocked under every setting (regression tests).
+- [x] The schema accepts `never`, `leaseOnOwnBranch`, `true` and `false` for `allowForcePush` and rejects any other value; `pnpm validate-schemas` passes.
+- [x] With `leaseOnOwnBranch`, `git push --force-with-lease origin <own-branch>` is allowed in a worktree checked out on that branch.
+- [x] With `leaseOnOwnBranch`, a lease push to a branch other than the worktree's own is blocked.
+- [x] With `leaseOnOwnBranch`, a lease push to `main`, `master` or a protected branch is blocked, and plain `--force` is blocked everywhere.
+- [x] With `never`, unset, or a malformed value, every force push is blocked exactly as before this change (existing tests pass unchanged).
+- [x] The policy is resolved from the base branch; a worktree copy of `agent-role.yaml` setting `leaseOnOwnBranch` has no effect.
+- [x] The injected rule text reflects the resolved value in both hooks, and the `operational` list is rendered only for the dispatch role.
+- [x] CI-skip tokens, attestation and verdict edits, and governance relaxation from a PR tree remain blocked under every setting (regression tests).
 - [ ] This repository's `.ai-sdlc/agent-role.yaml` carries the new values and resolves without warnings.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

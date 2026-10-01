@@ -42,7 +42,12 @@ const { readFileSync, readSync, existsSync, mkdirSync, writeFileSync } = require
 const { join } = require('path');
 const { execSync } = require('child_process');
 const { randomUUID } = require('crypto');
-const { resolveGovernanceFromYaml, renderSubagentHardRules } = require('./lib/governance-resolver');
+const {
+  resolveGovernanceFromYaml,
+  resolveGovernanceExtrasFromYaml,
+  renderOperationalRules,
+  renderSubagentHardRules,
+} = require('./lib/governance-resolver');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -91,6 +96,10 @@ try {
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
 const resolvedGovernance = resolveGovernanceFromYaml(yaml);
+const operationalRules = renderOperationalRules(
+  resolveGovernanceExtrasFromYaml(yaml).operational,
+  process.env.AI_SDLC_HIERARCHY_ROLE,
+);
 
 // ── Build subagent governance context ────────────────────────────────
 //
@@ -104,7 +113,7 @@ You are running as a Claude Code subagent. The orchestrating command will
 gate your output (reviews, PR creation). Stay focused on your assigned task.
 
 ### Hard rules — NEVER violate
-${renderSubagentHardRules(resolvedGovernance)}`;
+${renderSubagentHardRules(resolvedGovernance)}${operationalRules ? `\n- ${operationalRules}` : ''}`;
 
 if (blockedPaths.length > 0) {
   context += `\n\n### Blocked paths (PreToolUse hook enforces — no edits)
