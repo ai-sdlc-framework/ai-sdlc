@@ -18,7 +18,15 @@ export {
   type SettingsView,
 } from './preflight.js';
 export { findStartedSession, readSessionRegistry } from './registry.js';
-export { emptyRoster, readRoster, ROSTER_FILENAME, rosterPath, writeRoster } from './roster.js';
+export {
+  emptyRoster,
+  readRoster,
+  readRosterChecked,
+  ROSTER_FILENAME,
+  rosterPath,
+  unsafeEntryReason,
+  writeRoster,
+} from './roster.js';
 export {
   formatStatus,
   hierarchyStatus,

@@ -46,6 +46,7 @@ Options for up:
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
   --attach                 Attach to the tmux session when done
+  --allow-planner-bypass   Allow the planner to start in bypassPermissions mode
 
 Options for status:
   --json                   Print machine-readable output
@@ -117,6 +118,7 @@ export async function runHierarchyCli(
             executorModel: flags['executor-model'] ?? 'sonnet',
             noPlanner: flags['no-planner'] === 'true',
             attach: flags.attach === 'true',
+            allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
           },
           deps,
         );

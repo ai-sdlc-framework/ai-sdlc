@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -25,6 +33,7 @@ import {
   parseMemInfo,
   parseVmStat,
   readRoster,
+  readRosterChecked,
   readSessionRegistry,
   readSettingsView,
   roleOfDefaultName,
@@ -99,13 +108,15 @@ function makeFakeTmux(registryDir: string): FakeTmux {
       }
       case 'display-message': {
         const target = args[args.indexOf('-t') + 1] as string;
-        return ok((paneOf.get(target.split(':')[1] as string) ?? '') + '\n');
+        const pane = paneOf.get(target.split(':')[1] as string) ?? '';
+        return ok((args[args.length - 1] === '#{pane_id}' ? pane.split(' ')[0] : pane) + '\n');
       }
       case 'send-keys': {
         if (fake.exitsOnRequest) {
           const target = args[args.indexOf('-t') + 1] as string;
           for (const [w, pane] of paneOf) {
-            if (pane.startsWith(`${target} `)) fake.windows = fake.windows.filter((x) => x !== w);
+            if (pane.startsWith(`${target} `) || target.endsWith(`:${w}`))
+              fake.windows = fake.windows.filter((x) => x !== w);
           }
         }
         return ok();
@@ -460,6 +471,21 @@ describe('hierarchy status', () => {
     expect(hierarchyStatus(deps).rows[0]?.state).toBe('starting');
   });
 
+  it('reports gone when the window is dead even if a registry file exists', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    fake.windows = fake.windows.filter((w) => w !== 'executor-alpha');
+    const row = hierarchyStatus(deps).rows.find((r) => r.entry.name === 'executor-alpha');
+    expect(row?.state).toBe('gone');
+  });
+
+  it('maps an unknown registry status to unknown, not idle', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);
+    const file = path.join(registryDir, '4000.json');
+    const doc = JSON.parse(readFileSync(file, 'utf-8'));
+    writeFileSync(file, JSON.stringify({ ...doc, status: 'weird' }));
+    expect(hierarchyStatus(deps).rows[0]?.state).toBe('unknown');
+  });
+
   it('handles an empty roster', () => {
     const result = hierarchyStatus(deps);
     expect(formatStatus(result)).toEqual(['no sessions in the roster']);
@@ -520,7 +546,116 @@ describe('hierarchy down', () => {
   });
 });
 
+function craftedEntry(over: Record<string, unknown>) {
+  return {
+    role: 'executor',
+    name: 'victim',
+    tmuxSession: 'main',
+    tmuxWindow: 'editor',
+    paneId: '%1',
+    pid: 1,
+    model: 'sonnet',
+    permissionMode: 'default',
+    startedAt: NOW.toISOString(),
+    status: 'running',
+    ...over,
+  };
+}
+
+function writeRawRoster(sessions: unknown[]): void {
+  mkdirSync(boardDir, { recursive: true });
+  writeFileSync(rosterPath(boardDir), JSON.stringify({ schemaVersion: 'v1', sessions }));
+}
+
+describe('untrusted roster entries', () => {
+  it.each([
+    ['another tmux session', { tmuxSession: 'main' }],
+    ['another window name', { tmuxSession: 'ai-sdlc-hierarchy', tmuxWindow: 'a;b' }],
+    ['a malformed pane id', { tmuxSession: 'ai-sdlc-hierarchy', paneId: '%1; rm' }],
+  ])('down never sends keys to or kills an entry naming %s', async (_n, over) => {
+    fake.windows = ['editor'];
+    writeRawRoster([craftedEntry(over)]);
+    const r = await hierarchyDown({}, deps);
+    expect(r.stopped).toEqual([]);
+    expect(
+      fake.calls.filter((c) => c.args[0] === 'send-keys' || c.args[0] === 'kill-window'),
+    ).toEqual([]);
+    expect(fake.windows).toEqual(['editor']);
+    expect(logs.some((l) => l.includes('ignored') && l.includes('not touched'))).toBe(true);
+  });
+
+  it('status and up report and skip a crafted entry', async () => {
+    writeRawRoster([craftedEntry({})]);
+    expect(hierarchyStatus(deps).rows).toEqual([]);
+    expect(logs.some((l) => l.includes('ignored'))).toBe(true);
+    const r = await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);
+    expect(r.warnings.some((w) => w.includes('ignored'))).toBe(true);
+    expect(readRosterChecked(boardDir).roster.sessions.map((s) => s.name)).toEqual([
+      'operator-dispatch',
+    ]);
+  });
+
+  it('targets the window by name when the recorded pane id is stale', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const roster = readRoster(boardDir);
+    const alpha = roster.sessions.find((s) => s.name === 'executor-alpha');
+    if (alpha) alpha.paneId = '%999';
+    writeRoster(boardDir, roster);
+    await hierarchyDown({ role: 'executor-alpha' }, deps);
+    const send = fake.calls.find((c) => c.args[0] === 'send-keys');
+    expect(send?.args[send.args.indexOf('-t') + 1]).toBe('=ai-sdlc-hierarchy:executor-alpha');
+    expect(fake.windows).toEqual(['operator-dispatch']);
+  });
+
+  it('uses the pane id when it still belongs to the roster window', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    await hierarchyDown({ role: 'executor-alpha' }, deps);
+    const send = fake.calls.find((c) => c.args[0] === 'send-keys');
+    expect(send?.args[send.args.indexOf('-t') + 1]).toMatch(/^%[0-9]+$/);
+  });
+
+  it('matches inflight manifests by session name only, not window', async () => {
+    fake.nameFor = (n) => (n === 'executor-alpha' ? 'executor-alpha-2' : n);
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    putInflight('AISDLC-400', 'executor-alpha');
+    const r = await hierarchyDown({ role: 'executor-alpha' }, deps);
+    expect(r.stopped[0]?.requeued).toBeUndefined();
+    expect(hierarchyStatus(deps).rows.every((x) => x.inflightTask === undefined)).toBe(true);
+  });
+});
+
+describe('planner bypass guard', () => {
+  it('refuses a bypassPermissions planner without the flag, allows it with the flag', async () => {
+    writeSettings({
+      crossSessionInbound: 'accept',
+      permissions: { defaultMode: 'bypassPermissions' },
+    });
+    await expect(hierarchyUp(baseOpts, deps)).rejects.toThrow(/allow-planner-bypass/);
+    expect(newWindowCommands()).toEqual([]);
+    const r = await hierarchyUp({ ...baseOpts, allowPlannerBypass: true }, deps);
+    expect(r.started[0]?.permissionMode).toBe('bypassPermissions');
+  });
+
+  it('does not check the planner mode when no planner will be started', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
+    writeSettings({
+      crossSessionInbound: 'accept',
+      permissions: { defaultMode: 'bypassPermissions' },
+    });
+    const r = await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
+    expect(r.existing.map((e) => e.name)).toContain('planner');
+    expect(r.started).toEqual([]);
+  });
+});
+
 describe('roster', () => {
+  it('writes through a unique temp name and leaves none behind', () => {
+    writeRoster(boardDir, { schemaVersion: 'v1', sessions: [] });
+    writeRoster(boardDir, { schemaVersion: 'v1', sessions: [] });
+    expect(readdirSync(boardDir).filter((f) => f.includes('.tmp'))).toEqual([]);
+    expect(existsSync(rosterPath(boardDir))).toBe(true);
+  });
+
   it('returns an empty roster when the file is missing', () => {
     expect(readRoster(boardDir)).toEqual({ schemaVersion: 'v1', sessions: [] });
   });
@@ -554,6 +689,15 @@ describe('registry helpers', () => {
     expect(findStartedSession(reg, 'p', 0, new Set())?.pid).toBe(6);
     expect(findStartedSession(reg, 'p', 0, new Set(['p']))?.pid).toBe(5);
     expect(findStartedSession(reg, 'p', 100, new Set())).toBeUndefined();
+  });
+
+  it('does not adopt a longer unrelated name as the requested one', () => {
+    const reg = [
+      { pid: 1, name: 'planner-notes', startedAt: 10, status: 'idle' },
+      { pid: 2, name: 'planner-2', startedAt: 10, status: 'idle' },
+    ];
+    expect(findStartedSession(reg, 'planner', 0, new Set())?.pid).toBe(2);
+    expect(findStartedSession(reg.slice(0, 1), 'planner', 0, new Set())).toBeUndefined();
   });
 });
 

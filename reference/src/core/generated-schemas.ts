@@ -4482,17 +4482,19 @@ export const hierarchyRosterV1Schema = {
         },
         tmuxSession: {
           type: 'string',
-          minLength: 1,
-          description: "tmux session hosting the window (for example 'ai-sdlc-hierarchy').",
+          const: 'ai-sdlc-hierarchy',
+          description:
+            "tmux session hosting the window. Always the dedicated hierarchy session 'ai-sdlc-hierarchy'; entries naming any other session are never acted on.",
         },
         tmuxWindow: {
           type: 'string',
-          minLength: 1,
+          pattern: '^[a-z][a-z0-9-]{0,47}$',
           description:
             'tmux window name. Always the name that was requested, so a later up can recognise its own window.',
         },
         paneId: {
           type: 'string',
+          pattern: '^(%[0-9]+)?$',
           description: "tmux pane id (for example '%14'). Empty string when it could not be read.",
         },
         pid: {

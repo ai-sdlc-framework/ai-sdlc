@@ -70,6 +70,7 @@ export interface InboundCheck {
 export function checkCrossSessionInbound(
   view: SettingsView,
   userSettingsFile: string,
+  projectLocalSettingsFile = '.claude/settings.local.json',
 ): InboundCheck {
   if (view.crossSessionInbound === REQUIRED_INBOUND_VALUE) return { ok: true };
   const current =
@@ -79,13 +80,13 @@ export function checkCrossSessionInbound(
   const message = [
     `crossSessionInbound ${current}; the dispatch and executor sessions need "accept" so messages from the other tiers are delivered instead of held for approval.`,
     '',
-    `Add this to ${userSettingsFile} (or to the project's .claude/settings.local.json), then run the command again:`,
+    `Add this to ${projectLocalSettingsFile} (project-local, recommended), or alternatively to ${userSettingsFile} (user-global), then run the command again:`,
     '',
     '  {',
     `    "crossSessionInbound": "${REQUIRED_INBOUND_VALUE}"`,
     '  }',
     '',
-    'The setting applies to every session that reads that settings file.',
+    'The setting applies to every session that reads that settings file, including the planner. It only controls delivery of messages from other sessions; it does not change tool approvals.',
   ].join('\n');
   return { ok: false, message };
 }

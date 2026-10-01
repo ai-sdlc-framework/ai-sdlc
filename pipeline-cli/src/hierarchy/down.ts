@@ -5,8 +5,8 @@
 
 import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
-import { readRoster, writeRoster } from './roster.js';
-import { killWindow, listWindows, sendExit } from './tmux.js';
+import { readRosterChecked, writeRoster } from './roster.js';
+import { killWindow, listWindows, resolveSendTarget, sendExit } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** What happened to one session. */
@@ -33,7 +33,8 @@ export async function hierarchyDown(
   options: { role?: string },
   deps: HierarchyDeps,
 ): Promise<DownResult> {
-  const roster = readRoster(deps.boardDir);
+  const { roster, rejected } = readRosterChecked(deps.boardDir);
+  for (const r of rejected) deps.log(`warning: ${r}; not touched`);
   const selected: RosterEntry[] = options.role
     ? roster.sessions.filter(
         (e) => e.name === options.role || e.tmuxWindow === options.role || e.role === options.role,
@@ -48,16 +49,17 @@ export async function hierarchyDown(
     const isOpen = () => listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow);
     let forced = false;
     if (isOpen()) {
-      sendExit(deps.run, entry.paneId || `=${entry.tmuxSession}:${entry.tmuxWindow}`);
+      sendExit(
+        deps.run,
+        resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId),
+      );
       for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
       if (isOpen()) {
         killWindow(deps.run, entry.tmuxSession, entry.tmuxWindow);
         forced = true;
       }
     }
-    const held = listInflight(deps.boardDir).find(
-      (i) => i.workerId === entry.name || i.workerId === entry.tmuxWindow,
-    );
+    const held = listInflight(deps.boardDir).find((i) => i.workerId === entry.name);
     let requeued: string | undefined;
     if (held && releaseInflight(deps.boardDir, held.taskId)) requeued = held.taskId;
 

@@ -7,12 +7,12 @@ import { peekQueue } from '../dispatch/board.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
 import { readSessionRegistry } from './registry.js';
-import { readRoster } from './roster.js';
+import { readRosterChecked } from './roster.js';
 import { listWindows } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** Live state of one roster entry. */
-export type LiveState = 'busy' | 'idle' | 'starting' | 'gone';
+export type LiveState = 'busy' | 'idle' | 'starting' | 'gone' | 'unknown';
 
 /** One row of the status table. */
 export interface StatusRow {
@@ -30,7 +30,8 @@ export interface StatusResult {
 
 /** Join the roster with the registry, tmux and the board. */
 export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
-  const roster = readRoster(deps.boardDir);
+  const { roster, rejected } = readRosterChecked(deps.boardDir);
+  for (const r of rejected) deps.log(`warning: ${r}; not touched`);
   const registry = readSessionRegistry(deps.registryDir);
   const windows = new Set<string>();
   for (const tmuxSession of new Set(roster.sessions.map((e) => e.tmuxSession))) {
@@ -43,10 +44,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       registry.find((r) => r.name === entry.name) ??
       registry.find((r) => r.pid === entry.pid && entry.pid > 0);
     let state: LiveState;
-    if (live) state = live.status === 'busy' ? 'busy' : 'idle';
-    else if (windows.has(`${entry.tmuxSession}:${entry.tmuxWindow}`)) state = 'starting';
-    else state = 'gone';
-    const held = inflight.find((i) => i.workerId === entry.name || i.workerId === entry.tmuxWindow);
+    const alive = windows.has(`${entry.tmuxSession}:${entry.tmuxWindow}`);
+    if (!alive) state = 'gone';
+    else if (live) {
+      state = live.status === 'busy' ? 'busy' : live.status === 'idle' ? 'idle' : 'unknown';
+    } else state = 'starting';
+    const held = inflight.find((i) => i.workerId === entry.name);
     return { entry, state, inflightTask: held?.taskId };
   });
   return { rows, board: peekQueue(deps.boardDir) };

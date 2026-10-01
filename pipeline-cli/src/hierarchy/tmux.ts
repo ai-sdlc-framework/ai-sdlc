@@ -66,3 +66,20 @@ export function sendExit(run: CommandRunner, target: string): CommandResult {
 export function killWindow(run: CommandRunner, session: string, window: string): CommandResult {
   return run('tmux', ['kill-window', '-t', `=${session}:${window}`]);
 }
+
+/**
+ * Target for keys sent to a roster entry. The recorded pane id is used only when
+ * tmux confirms it still belongs to the roster window; otherwise the window is
+ * targeted by name so a recycled pane id can never receive the keys.
+ */
+export function resolveSendTarget(
+  run: CommandRunner,
+  session: string,
+  window: string,
+  paneId: string,
+): string {
+  const windowTarget = `=${session}:${window}`;
+  if (!paneId) return windowTarget;
+  const r = run('tmux', ['display-message', '-p', '-t', windowTarget, '#{pane_id}']);
+  return r.status === 0 && r.stdout.trim() === paneId ? paneId : windowTarget;
+}

@@ -4,9 +4,11 @@
  * window each, and record them in the roster.
  */
 
+import path from 'node:path';
+
 import { findStartedSession, readSessionRegistry } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
-import { readRoster, writeRoster } from './roster.js';
+import { readRosterChecked, writeRoster } from './roster.js';
 import { hasSession, listWindows, paneInfo, startWindow } from './tmux.js';
 import {
   HIERARCHY_TMUX_SESSION,
@@ -34,6 +36,8 @@ export interface UpOptions {
   attach: boolean;
   /** Overrides the planner permission mode; otherwise the operator's own setting is used. */
   plannerPermissionMode?: string;
+  /** Allow a planner that would start in bypassPermissions mode. */
+  allowPlannerBypass?: boolean;
 }
 
 /** Result of `up`. */
@@ -133,7 +137,6 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
 
   const settings = readSettingsView(deps.settingsFiles);
   const plannerMode = opts.plannerPermissionMode ?? settings.defaultMode ?? FALLBACK_PLANNER_MODE;
-  assertPermissionMode(plannerMode);
   const planned = plan(opts, count, plannerMode);
   for (const s of planned) assertSessionName(s.name);
 
@@ -143,7 +146,8 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   const warnings: string[] = [];
 
   // Drop roster entries whose window is gone; they are restarted below if planned.
-  const loaded = readRoster(deps.boardDir);
+  const { roster: loaded, rejected } = readRosterChecked(deps.boardDir);
+  for (const r of rejected) warnings.push(`${r}; not touched`);
   const kept = loaded.sessions.filter((e) => liveWindows.has(e.tmuxWindow));
   for (const e of loaded.sessions) {
     if (!liveWindows.has(e.tmuxWindow)) {
@@ -175,9 +179,23 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     }
   }
 
+  const plannerToStart = toStart.find((s) => s.role === 'planner');
+  if (plannerToStart) {
+    assertPermissionMode(plannerToStart.permissionMode);
+    if (plannerToStart.permissionMode === BYPASS_MODE && !opts.allowPlannerBypass) {
+      throw new Error(
+        `the planner would start in ${BYPASS_MODE} mode (from the settings in force or --planner-permission-mode); refusing. The planner is the operator-facing tier and should keep its approval prompts. Pass --allow-planner-bypass to start it anyway, or set a different defaultMode.`,
+      );
+    }
+  }
+
   if (toStart.length > 0) {
     if (toStart.some((s) => s.permissionMode === BYPASS_MODE)) {
-      const inbound = checkCrossSessionInbound(settings, deps.userSettingsFile);
+      const inbound = checkCrossSessionInbound(
+        settings,
+        deps.userSettingsFile,
+        path.join(deps.cwd, '.claude', 'settings.local.json'),
+      );
       if (!inbound.ok) throw new Error(inbound.message);
     }
     const refusal = evaluateResourceGate(deps.resources(), deps.env);

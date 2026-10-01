@@ -39,7 +39,7 @@ export function readSessionRegistry(dir: string): RegistrySession[] {
  * Find the registry entry the harness gave a session that was just started.
  *
  * A collision with an existing session name makes the harness add a suffix, so
- * the match is the exact requested name or the requested name plus a suffix,
+ * the match is the exact requested name or `<requested>-<digits>`,
  * restricted to sessions that started at or after `spawnedAtMs` and whose name
  * is not already `claimedNames`. An exact match wins over a suffixed one.
  */
@@ -49,9 +49,10 @@ export function findStartedSession(
   spawnedAtMs: number,
   claimedNames: ReadonlySet<string>,
 ): RegistrySession | undefined {
+  const escaped = requestedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const collision = new RegExp(`^${escaped}(-[0-9]+)?$`);
   const candidates = registry.filter(
-    (s) =>
-      s.startedAt >= spawnedAtMs && !claimedNames.has(s.name) && s.name.startsWith(requestedName),
+    (s) => s.startedAt >= spawnedAtMs && !claimedNames.has(s.name) && collision.test(s.name),
   );
   return candidates.find((s) => s.name === requestedName) ?? candidates[0];
 }
