@@ -46,6 +46,14 @@ degraded.
   dark-code gate passes (`pnpm dark-code:check`).
 - Strings an adopter can see (errors, CLI output, templates) carry no internal task ids.
 
+## Files under `.ai-sdlc/` are never written by the developer agent
+The governance hook refuses every agent `Write`/`Edit` under `.ai-sdlc/**`, and policy
+is read from the base branch only. Templates are shipped from
+`orchestrator/src/cli/commands/init-templates.ts` (the map that already carries
+`framework-bug-report.md`), not as files under `.ai-sdlc/templates/`. Any change to
+this repository's own `.ai-sdlc/*.yaml` is an operator step, listed separately below,
+and is never an acceptance criterion the developer must satisfy.
+
 ## Scope
 1. **Schema and loader:** new `spec/schemas/capabilities-config.v1.schema.json` for
    kind `CapabilitiesConfig` with `spec.required` (list of capability ids). Register it
@@ -72,11 +80,14 @@ degraded.
    stated date). At most one Decision per capability per calendar day, and none while
    an open Decision for that capability exists. The tick continues normally in every
    case; a failure to file is logged and swallowed.
-5. **This repository's declaration:** add `.ai-sdlc/capabilities.yaml` requiring the
-   eight capabilities that have an owning wiring task in the RFC-0049 section 9.1
-   table.
-6. **Init template:** `.ai-sdlc/templates/capabilities.yaml`, commented, with an empty
-   required list.
+5. **Init template:** add a commented `capabilities.yaml` template with an empty
+   required list to the template map in
+   `orchestrator/src/cli/commands/init-templates.ts`, keyed
+   `.ai-sdlc/templates/capabilities.yaml`.
+6. **Operator step (not a developer AC):** after merge, the operator commits
+   `.ai-sdlc/capabilities.yaml` to `main` requiring the eight capabilities that have an
+   owning wiring task in the RFC-0049 section 9.1 table. Put the exact YAML in the PR
+   body, tested against the schema, for the operator to apply.
 7. **Docs:** `docs/operations/capability-liveness.md` (what a capability is, the three
    outcomes, the state file, the doctor table, how to declare requirements, what the
    Decision means and how to answer it), linked from `docs/operations/README.md`, and
@@ -92,7 +103,7 @@ degraded.
 - [ ] `CapabilityDegraded` validates against the updated events schema and appears in the type union.
 - [ ] The config schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
 - [ ] The loader ignores a working-tree copy of the file and reads only the base ref.
-- [ ] `.ai-sdlc/capabilities.yaml` in this repository lists exactly the eight capabilities with an owning wiring task, and the init template lists none.
+- [ ] The `capabilities.yaml` template in the init-templates map validates against the schema with an empty required list, and the PR body carries the tested YAML for this repository's eight required capabilities for the operator to commit.
 - [ ] `docs/operations/capability-liveness.md` exists, cites `RFC-0049`, is linked from `docs/operations/README.md`, and contains no internal task ids.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

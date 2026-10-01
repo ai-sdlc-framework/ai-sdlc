@@ -46,13 +46,21 @@ RFC-0050 sections A4 and A5.
 - Every new module is reachable from a non-test importer or a barrel re-export
   (`pnpm dark-code:check`). Adopter-visible strings carry no internal task ids.
 
+## Files under `.ai-sdlc/` are never written by the developer agent
+The governance hook refuses every agent `Write`/`Edit` under `.ai-sdlc/**`, and policy
+is read from the base branch only. Templates are shipped from
+`orchestrator/src/cli/commands/init-templates.ts` (the map that already carries
+`framework-bug-report.md`), not as files under `.ai-sdlc/templates/`. Any change to
+this repository's own `.ai-sdlc/*.yaml` is an operator step, listed separately below,
+and is never an acceptance criterion the developer must satisfy.
+
 ## Scope
 1. **Usage config:** `spec/schemas/usage-config.v1.schema.json` for kind `UsageConfig`:
    plan name, monthly price, windows (name and length), unit weights per token class
    and per model family, and the allotment-change tolerance. Loaded from
    `.ai-sdlc/usage-config.yaml` on the base ref, with a machine-level file in the usage
    directory taking precedence when present. Register with AJV and regenerate the
-   generated schemas. Defaults apply with no file. Ship a commented init template.
+   generated schemas. Defaults apply with no file. Ship a commented init template through the template map in `orchestrator/src/cli/commands/init-templates.ts` (keyed `.ai-sdlc/templates/usage-config.yaml`); the developer agent never writes under `.ai-sdlc/` directly.
 2. **Weighted units:** `unitsForCall(record, weights)`. Default weights are derived
    from the current rows of the price history (ratios between token classes and
    between models), so they follow the price feed; explicit weights in the usage
