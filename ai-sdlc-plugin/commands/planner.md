@@ -27,8 +27,8 @@ answer looks obvious. Present the options, get the operator's choice, and only
 then record it. If a task or RFC is blocked on an unresolved question, say so and
 stop.
 
-This command never creates or edits files under `.ai-sdlc/`. Briefs are written
-by `cli-hierarchy brief` at runtime into `.ai-sdlc/dispatch/briefs/`.
+This command never edits `.ai-sdlc/` configuration. The only files it touches
+there are briefs under `.ai-sdlc/dispatch/briefs/`, written by `cli-hierarchy brief`.
 
 ## Step 1 — Resolve the CLI
 
@@ -64,10 +64,13 @@ BRIEFS_DIR="$BOARD_DIR/briefs"
 if ls "$BRIEFS_DIR"/*.md >/dev/null 2>&1; then
   for brief in "$BRIEFS_DIR"/*.md; do
     total=0; done_count=0
-    for id in $(grep -E '^[[:space:]]*- task: ' "$brief" | sed -E 's/^[[:space:]]*- task:[[:space:]]*//'); do
+    set -f
+    while IFS= read -r id; do
+      printf '%s\n' "$id" | grep -Eq '^[A-Z][A-Z0-9]+-[0-9]+(\.[0-9]+)*$' || continue
       total=$((total + 1))
       [ -f "$BOARD_DIR/done/$id.verdict.json" ] && done_count=$((done_count + 1))
-    done
+    done < <(grep -E '^[[:space:]]*- task: ' "$brief" | sed -E 's/^[[:space:]]*- task:[[:space:]]*//')
+    set +f
     echo "$(basename "$brief"): $done_count of $total task(s) done"
   done
 else
@@ -100,7 +103,8 @@ To send work to dispatch:
    It writes `.ai-sdlc/dispatch/briefs/<slug>.md` with waves from task
    dependencies, sequence groups from overlapping references, the tasks that must
    not be dispatched, the trust-sensitive ones, and any external prerequisites.
-   An existing brief is never overwritten unless you pass `--force`.
+   External prerequisites are not gated by the YAML block: resolve them yourself
+   before dispatch. An existing brief is never overwritten unless you pass `--force`.
 
 2. Edit the brief with the operator. The prose sections are yours to change. The
    `dispatchBrief` YAML block is what the dispatch session reads: remove an entry

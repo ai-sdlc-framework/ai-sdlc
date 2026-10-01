@@ -20,14 +20,14 @@ export type BriefSender = (entry: RosterEntry, message: string) => void;
 export function briefMessage(briefFile: string, cwd: string): string {
   const rel = path.relative(cwd, briefFile);
   const shown = rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : briefFile;
-  // One line, no control characters: the text is typed into a terminal.
-  const clean = [...shown]
-    .map((ch) => {
-      const code = ch.charCodeAt(0);
-      return code < 0x20 || code === 0x7f ? ' ' : ch;
-    })
-    .join('');
-  return `A dispatch brief is ready: ${clean}. Read it and ingest it.`;
+  // The text is typed into a terminal: only plain path characters, never a sanitised guess.
+  if (!/^[A-Za-z0-9._/-]+$/.test(shown)) {
+    throw new Error(
+      `refusing to announce '${briefFile.replace(/[^\x20-\x7e]/g, '?')}': ` +
+        'the path has characters other than letters, digits, ".", "_", "/" and "-"; move or rename the brief',
+    );
+  }
+  return `A dispatch brief is ready: ${shown}. Read it and ingest it.`;
 }
 
 /**

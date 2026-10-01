@@ -10,7 +10,7 @@
  *         after: [PROJ-10]
  *         sequenceGroup: schema-regen
  *         wave: 2
- *         priority: high
+ *         priority: 1
  *     ```
  *
  * `renderBriefBlock` and `parseBrief` are the only places that know this
@@ -25,8 +25,13 @@ import { isValidTaskId } from './validate.js';
 /** Key of the YAML list inside the brief's fenced block. */
 export const BRIEF_BLOCK_KEY = 'dispatchBrief';
 
-const GROUP_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
-const PRIORITY_PATTERN = /^[a-z][a-z0-9-]{0,15}$/;
+/** Pattern every sequence group name must satisfy (generated and parsed alike). */
+export const GROUP_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+
+/** Largest brief `parseBrief` accepts, in bytes. */
+export const MAX_BRIEF_BYTES = 256 * 1024;
+/** Most dispatch entries `parseBrief` accepts. */
+export const MAX_BRIEF_ENTRIES = 500;
 
 /** One dispatchable task in a brief. */
 export interface BriefEntry {
@@ -38,8 +43,12 @@ export interface BriefEntry {
   sequenceGroup?: string;
   /** 1-based wave number derived from dependencies. */
   wave: number;
-  /** Optional ordering hint copied from the task. */
-  priority?: string;
+  /**
+   * Optional integer ordering hint, matching the dispatch manifest `priority`:
+   * claim order is wave, then priority (lower first), then enqueue time.
+   * Backlog priorities map high=1, medium=2, low=3; absent when the task has none.
+   */
+  priority?: number;
 }
 
 /** A parsed brief. */
@@ -88,8 +97,8 @@ function validateEntry(raw: unknown, index: number): BriefEntry {
     entry.sequenceGroup = r.sequenceGroup;
   }
   if (r.priority !== undefined && r.priority !== null) {
-    if (typeof r.priority !== 'string' || !PRIORITY_PATTERN.test(r.priority)) {
-      throw new Error(`${label}.priority is not a valid priority`);
+    if (typeof r.priority !== 'number' || !Number.isInteger(r.priority)) {
+      throw new Error(`${label}.priority must be a whole number`);
     }
     entry.priority = r.priority;
   }
@@ -101,6 +110,9 @@ function validateEntry(raw: unknown, index: number): BriefEntry {
  * @throws when there is no block, more than one, or an entry is malformed.
  */
 export function parseBrief(markdown: string): ParsedBrief {
+  if (Buffer.byteLength(markdown, 'utf8') > MAX_BRIEF_BYTES) {
+    throw new Error(`brief is larger than ${MAX_BRIEF_BYTES / 1024} KB`);
+  }
   const fence = /^```yaml[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm;
   const blocks: unknown[] = [];
   let m: RegExpExecArray | null;
@@ -122,6 +134,9 @@ export function parseBrief(markdown: string): ParsedBrief {
   const list = blocks[0];
   if (list === null || list === undefined) return { entries: [] };
   if (!Array.isArray(list)) throw new Error(`'${BRIEF_BLOCK_KEY}' must be a list`);
+  if (list.length > MAX_BRIEF_ENTRIES) {
+    throw new Error(`brief has more than ${MAX_BRIEF_ENTRIES} entries`);
+  }
   const entries = list.map((raw, i) => validateEntry(raw, i));
   const seen = new Set<string>();
   for (const e of entries) {

@@ -8,12 +8,23 @@
  * (see brief-format.ts).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  constants as fsConstants,
+  lstatSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeSync,
+  type Stats,
+} from 'node:fs';
 import path from 'node:path';
 
 import { buildDependencyGraph, type DependencyNode } from '../deps/dependency-graph.js';
 import { parseSimpleYaml } from '../steps/01-validate.js';
-import { renderBriefBlock, type BriefEntry } from './brief-format.js';
+import { GROUP_PATTERN, renderBriefBlock, type BriefEntry } from './brief-format.js';
 import { readRosterChecked } from './roster.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 import { isValidTaskId } from './validate.js';
@@ -61,6 +72,81 @@ const FIXED_GROUPS: { match: (file: string) => boolean; name: string }[] = [
   },
   { match: (f) => path.posix.basename(f) === 'events.ts', name: 'events' },
 ];
+
+/**
+ * Backlog priority word to the integer the dispatch manifest carries.
+ * Lower runs earlier (claim order: wave, then priority, then enqueue time).
+ * Any other value yields no priority.
+ */
+const PRIORITY_RANK: Readonly<Record<string, number>> = { high: 1, medium: 2, low: 3 };
+
+/** Control, bidi-override and line-separator characters that must not reach the Markdown. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]+/g;
+
+/** Collapse control characters to a space and neutralise backticks (inline text). */
+function mdText(value: string): string {
+  return value.replace(UNSAFE_TEXT, ' ').replace(/`/g, '\\`').trim();
+}
+
+/** Same as {@link mdText} for text inside a code span, where a backslash cannot escape. */
+function mdCode(value: string): string {
+  return value.replace(UNSAFE_TEXT, ' ').replace(/`/g, "'").trim();
+}
+
+function sanitizeGroupName(raw: string): string {
+  return raw
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/-+\./g, '.')
+    .replace(/[-._]+$/, '')
+    .slice(0, 100);
+}
+
+function hashName(file: string): string {
+  return `file-${createHash('sha1').update(file).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * Names for shared files, keyed by full path. A name is the sanitized basename;
+ * colliding basenames get the shortest path suffix that tells them apart
+ * (`a/index.ts` and `b/index.ts` become `a-index.ts` and `b-index.ts`).
+ * Every result satisfies GROUP_PATTERN and none equals a reserved name.
+ */
+function deriveGroupNames(
+  files: readonly string[],
+  reserved: ReadonlySet<string>,
+): Map<string, string> {
+  const segs = (f: string): string[] => f.split('/').filter(Boolean);
+  const nameAt = (f: string, k: number): string => sanitizeGroupName(segs(f).slice(-k).join('-'));
+  const result = new Map<string, string>();
+  const sorted = [...new Set(files)].sort();
+  const byBase = new Map<string, string[]>();
+  for (const f of sorted) {
+    const b = nameAt(f, 1);
+    byBase.set(b, [...(byBase.get(b) ?? []), f]);
+  }
+  const used = new Set<string>(reserved);
+  for (const group of byBase.values()) {
+    let k = 1;
+    const maxK = Math.max(...group.map((f) => segs(f).length));
+    let names = group.map((f) => nameAt(f, k));
+    while (k < maxK && new Set(names).size !== names.length) {
+      k++;
+      names = group.map((f) => nameAt(f, k));
+    }
+    group.forEach((f, i) => {
+      let name = names[i]!;
+      if (!name || !GROUP_PATTERN.test(name) || used.has(name)) {
+        name = hashName(f);
+      }
+      used.add(name);
+      result.set(f, name);
+    });
+  }
+  return result;
+}
 
 function normalizeRef(ref: string): string {
   return ref.trim().replace(/\\/g, '/').replace(/^\.\//, '');
@@ -162,11 +248,19 @@ export function planBrief(
       tasksOfFile.get(f)!.add(t.id);
     }
   }
+  const reserved = new Set(FIXED_GROUPS.map((g) => g.name));
+  const derivedNames = deriveGroupNames(
+    [...tasksOfFile.entries()]
+      .filter(([f, ts]) => ts.size >= 2 && !fixedGroupName(f))
+      .map(([f]) => f),
+    reserved,
+  );
   const groupOfFile = (f: string): { name: string; rank: number } | undefined => {
     const fixed = fixedGroupName(f);
     if (fixed) return { name: fixed, rank: Number.MAX_SAFE_INTEGER };
     const n = tasksOfFile.get(f)?.size ?? 0;
-    return n >= 2 ? { name: path.posix.basename(f), rank: n } : undefined;
+    const name = derivedNames.get(f);
+    return n >= 2 && name ? { name, rank: n } : undefined;
   };
   const groupMembers = new Map<string, SequenceGroup>();
   const groupOfTask = new Map<string, string>();
@@ -198,7 +292,8 @@ export function planBrief(
       };
       const group = groupOfTask.get(t.id);
       if (group) entry.sequenceGroup = group;
-      if (/^[a-z][a-z0-9-]{0,15}$/.test(t.priority)) entry.priority = t.priority;
+      const rank = PRIORITY_RANK[t.priority];
+      if (rank !== undefined) entry.priority = rank;
       return entry;
     })
     .sort((a, b) => a.wave - b.wave || a.task.localeCompare(b.task, 'en', { numeric: true }));
@@ -270,23 +365,24 @@ export function selectTasks(workDir: string, selection: BriefSelection): Selecte
   const openNodes = graph.openIds.map((k) => graph.nodes.get(k)!).filter(Boolean);
 
   if (selection.rfc !== undefined) {
-    if (!/^RFC-[0-9]{4}$/.test(selection.rfc)) {
+    const rfc = selection.rfc.toUpperCase();
+    if (!/^RFC-[0-9]{4}$/.test(rfc)) {
       throw new Error(`invalid --rfc '${selection.rfc}': expected RFC-NNNN`);
     }
-    const prefix = `${selection.rfc}-`;
+    const prefix = `${rfc}-`;
     const tasks = openNodes.map(readFrontmatterMeta).filter((t) =>
       t.references.some((r) => {
         const base = path.posix.basename(normalizeRef(r));
-        return base === `${selection.rfc}.md` || base.startsWith(prefix);
+        return base.toUpperCase() === `${rfc}.MD` || base.toUpperCase().startsWith(prefix);
       }),
     );
-    if (tasks.length === 0) throw new Error(`no open task references ${selection.rfc}`);
+    if (tasks.length === 0) throw new Error(`no open task references ${rfc}`);
     return {
       tasks,
       warnings,
       isCompleted,
-      slug: selection.rfc.toLowerCase(),
-      title: selection.rfc,
+      slug: rfc.toLowerCase(),
+      title: rfc,
     };
   }
 
@@ -323,9 +419,9 @@ export function renderBrief(
   plan: BriefPlan,
   context: { title: string; generatedAt: string; planner?: RosterEntry; dispatch?: RosterEntry },
 ): string {
-  const t = (id: string): string => `${id}: ${plan.tasks.get(id)?.title ?? ''}`.trimEnd();
+  const t = (id: string): string => `${id}: ${mdText(plan.tasks.get(id)?.title ?? '')}`.trimEnd();
   const lines: string[] = [];
-  lines.push(`# Dispatch brief: ${context.title}`, '');
+  lines.push(`# Dispatch brief: ${mdText(context.title)}`, '');
   lines.push(
     `Generated ${context.generatedAt}. Edit the prose and the YAML block, then hand it to dispatch.`,
     '',
@@ -348,10 +444,22 @@ export function renderBrief(
   if (waves.length === 0) lines.push('No dispatchable tasks.', '');
   for (const w of waves) {
     lines.push(`### Wave ${w}`, '');
-    for (const e of plan.entries.filter((x) => x.wave === w)) {
+    const inWave = plan.entries.filter((x) => x.wave === w);
+    for (const e of inWave) {
       const after = e.after.length ? ` (after ${e.after.join(', ')})` : '';
       const group = e.sequenceGroup ? ` [group: ${e.sequenceGroup}]` : '';
       lines.push(`- ${t(e.task)}${after}${group}`);
+    }
+    const ids = new Set(inWave.map((e) => e.task));
+    const open = plan.external.filter((x) => ids.has(x.task));
+    if (open.length > 0) {
+      lines.push(
+        '',
+        'Not gated by the YAML: the prerequisites below are outside this brief, so the board will not hold these tasks back. Resolve them before dispatching this wave.',
+      );
+      for (const x of open) {
+        lines.push(`- ${x.task} needs ${mdText(x.prerequisite)} (${x.reason})`);
+      }
     }
     lines.push('');
   }
@@ -359,9 +467,11 @@ export function renderBrief(
   lines.push('## Sequence groups', '');
   lines.push('At most one task of a group runs at a time.', '');
   if (plan.groups.length === 0) lines.push('None.');
-  for (const g of plan.groups) lines.push(`- \`${g.name}\` (${g.file}): ${g.tasks.join(', ')}`);
+  for (const g of plan.groups) {
+    lines.push(`- \`${g.name}\` (${mdCode(g.file)}): ${g.tasks.join(', ')}`);
+  }
   for (const s of plan.secondaryOverlaps) {
-    lines.push(`- Also overlaps, review by hand: ${s.task} touches \`${s.file}\``);
+    lines.push(`- Also overlaps, review by hand: ${s.task} touches \`${mdCode(s.file)}\``);
   }
   lines.push('');
 
@@ -376,17 +486,27 @@ export function renderBrief(
     '',
   );
   if (plan.trustSensitive.length === 0) lines.push('None.');
-  for (const s of plan.trustSensitive) lines.push(`- ${t(s.task)}: ${s.paths.join(', ')}`);
+  for (const s of plan.trustSensitive) {
+    lines.push(`- ${t(s.task)}: ${s.paths.map(mdText).join(', ')}`);
+  }
   lines.push('');
 
   lines.push('## External prerequisites', '');
+  lines.push(
+    'These are NOT gated by the YAML block. The operator must resolve them before dispatching the affected tasks.',
+    '',
+  );
   if (plan.external.length === 0) lines.push('None.');
-  for (const x of plan.external) lines.push(`- ${x.task} needs ${x.prerequisite} (${x.reason})`);
+  for (const x of plan.external) {
+    lines.push(`- ${x.task} needs ${mdText(x.prerequisite)} (${x.reason})`);
+  }
   lines.push('');
 
   lines.push('## Dispatch entries', '');
   lines.push(
     `The dispatch session reads this block. Remove an entry to hold a task back; keep \`after\`, \`sequenceGroup\` and \`wave\` consistent with the sections above.`,
+    '',
+    '`priority` is a whole number matching the dispatch manifest: 1 is high, 2 is medium, 3 is low. Within a wave the lower number is claimed first. It is left out when the task has no priority.',
     '',
   );
   lines.push(renderBriefBlock(plan.entries), '');
@@ -398,6 +518,32 @@ export function renderBrief(
     '',
   );
   return lines.join('\n');
+}
+
+function lstatOrNull(p: string): Stats | null {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** True when `file` is `dir` or below it, by path. */
+function isInside(dir: string, file: string): boolean {
+  const rel = path.relative(path.resolve(dir), path.resolve(file));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/** True when the file's real parent directory is the real briefs directory (or below it). */
+function realParentInside(dir: string, file: string): boolean {
+  try {
+    return isInside(
+      realpathSync(dir),
+      path.join(realpathSync(path.dirname(file)), path.basename(file)),
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Options for {@link generateBrief}. */
@@ -436,23 +582,58 @@ export function generateBrief(options: BriefOptions, deps: HierarchyDeps): Brief
   const planner = roster.sessions.find((e) => e.role === 'planner');
   const dispatch = roster.sessions.find((e) => e.role === 'operator-dispatch');
 
+  const briefsDir = path.join(deps.boardDir, 'briefs');
   const file = options.out
     ? path.resolve(deps.cwd, options.out)
-    : path.join(deps.boardDir, 'briefs', `${selected.slug}.md`);
-  if (existsSync(file) && !options.force) {
-    if (options.keepExisting) return { file, plan, dispatch, reused: true };
-    throw new Error(`${file} already exists; pass --force to replace it`);
+    : path.join(briefsDir, `${selected.slug}.md`);
+  if (!options.out && !isInside(briefsDir, file)) {
+    throw new Error(`${file} is outside ${briefsDir}`);
+  }
+  if (!options.out && lstatOrNull(briefsDir)?.isSymbolicLink()) {
+    throw new Error(`${briefsDir} is a symbolic link; refusing to write a brief through it`);
+  }
+  const existing = lstatOrNull(file);
+  if (existing?.isSymbolicLink()) {
+    throw new Error(`${file} is a symbolic link; refusing to use it`);
+  }
+  if (existing && !options.force) {
+    if (!options.keepExisting)
+      throw new Error(`${file} already exists; pass --force to replace it`);
+    if (!existing.isFile() || !isInside(briefsDir, file) || !realParentInside(briefsDir, file)) {
+      throw new Error(`${file} is not a regular file inside ${briefsDir}; refusing to announce it`);
+    }
+    return { file, plan, dispatch, reused: true };
   }
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(
-    file,
-    renderBrief(plan, {
-      title: selected.title,
-      generatedAt: deps.now().toISOString(),
-      planner,
-      dispatch,
-    }),
-    'utf-8',
-  );
+  // Exclusive create without --force (no check-then-write race); with --force, never
+  // follow a link that appeared after the check.
+  const flags =
+    fsConstants.O_WRONLY |
+    fsConstants.O_CREAT |
+    (options.force ? fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW ?? 0) : fsConstants.O_EXCL);
+  const content = renderBrief(plan, {
+    title: selected.title,
+    generatedAt: deps.now().toISOString(),
+    planner,
+    dispatch,
+  });
+  let fd: number;
+  try {
+    fd = openSync(file, flags, 0o644);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') {
+      throw new Error(`${file} already exists; pass --force to replace it`, { cause: err });
+    }
+    if (code === 'ELOOP') {
+      throw new Error(`${file} is a symbolic link; refusing to use it`, { cause: err });
+    }
+    throw err;
+  }
+  try {
+    writeSync(fd, content);
+  } finally {
+    closeSync(fd);
+  }
   return { file, plan, dispatch, reused: false };
 }

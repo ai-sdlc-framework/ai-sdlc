@@ -17,6 +17,9 @@ export {
 } from './brief.js';
 export {
   BRIEF_BLOCK_KEY,
+  GROUP_PATTERN,
+  MAX_BRIEF_BYTES,
+  MAX_BRIEF_ENTRIES,
   parseBrief,
   renderBriefBlock,
   type BriefEntry,

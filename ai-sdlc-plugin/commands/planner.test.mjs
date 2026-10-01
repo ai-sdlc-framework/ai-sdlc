@@ -41,7 +41,18 @@ describe('planner command', () => {
   it('is an orientation, not a loop, and never writes under .ai-sdlc', () => {
     assert.match(match[2], /not a loop/);
     assert.doesNotMatch(match[2], /ScheduleWakeup/);
-    assert.match(match[2], /never creates or edits files under `\.ai-sdlc\/`/);
+    assert.match(match[2], /never edits `\.ai-sdlc\/` configuration/);
+    assert.match(
+      match[2],
+      /only files it touches\s+there are briefs under `\.ai-sdlc\/dispatch\/briefs\/`/,
+    );
+  });
+
+  it('reads brief task ids safely, skipping anything that is not a task id', () => {
+    assert.match(match[2], /set -f/);
+    assert.match(match[2], /while IFS= read -r id/);
+    assert.match(match[2], /\^\[A-Z\]\[A-Z0-9\]\+-\[0-9\]\+/);
+    assert.doesNotMatch(match[2], /for id in \$\(/);
   });
 
   it('carries no internal task ids', () => {

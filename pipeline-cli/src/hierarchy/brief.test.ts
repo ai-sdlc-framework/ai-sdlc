@@ -3,7 +3,15 @@
  * tmux is a fake runner and the notify sender is injected.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -14,10 +22,14 @@ import {
   briefMessage,
   createTmuxBriefSender,
   generateBrief,
+  GROUP_PATTERN,
+  MAX_BRIEF_BYTES,
+  MAX_BRIEF_ENTRIES,
   isTrustSensitivePath,
   notifyDispatch,
   parseBrief,
   planBrief,
+  renderBrief,
   renderBriefBlock,
   writeRoster,
   type BriefSender,
@@ -37,14 +49,21 @@ let deps: HierarchyDeps;
 function task(
   dir: 'tasks' | 'completed',
   id: string,
-  opts: { deps?: string[]; refs?: string[]; dispatchable?: boolean; status?: string } = {},
+  opts: {
+    deps?: string[];
+    refs?: string[];
+    dispatchable?: boolean;
+    status?: string;
+    priority?: string;
+    title?: string;
+  } = {},
 ): void {
   const fm = [
     '---',
     `id: ${id}`,
-    `title: Task ${id}`,
+    `title: ${opts.title ?? `Task ${id}`}`,
     `status: ${opts.status ?? (dir === 'completed' ? 'Done' : 'To Do')}`,
-    'priority: medium',
+    `priority: ${opts.priority ?? 'medium'}`,
     'dependencies:',
     ...(opts.deps ?? []).map((d) => `  - ${d}`),
     'references:',
@@ -298,7 +317,7 @@ describe('brief file and contract with the ingester', () => {
 describe('parseBrief', () => {
   const entries = [
     { task: 'AB-1', after: [], wave: 1 },
-    { task: 'AB-2', after: ['AB-1'], sequenceGroup: 'g', wave: 2, priority: 'high' },
+    { task: 'AB-2', after: ['AB-1'], sequenceGroup: 'g', wave: 2, priority: 1 },
   ];
 
   it('round-trips rendered entries', () => {
@@ -340,6 +359,16 @@ describe('parseBrief', () => {
       /priority/,
     ],
     [
+      'string priority',
+      '```yaml\ndispatchBrief:\n  - {task: AB-1, wave: 1, priority: "2"}\n```',
+      /priority/,
+    ],
+    [
+      'non-integer priority',
+      '```yaml\ndispatchBrief:\n  - {task: AB-1, wave: 1, priority: 1.5}\n```',
+      /priority/,
+    ],
+    [
       'duplicate',
       '```yaml\ndispatchBrief:\n  - {task: AB-1, wave: 1}\n  - {task: AB-1, wave: 2}\n```',
       /more than once/,
@@ -378,7 +407,21 @@ describe('notify', () => {
 
   it('shows a path outside the working directory in full', () => {
     expect(briefMessage('/elsewhere/b.md', '/repo')).toContain('/elsewhere/b.md');
-    expect(briefMessage('/repo/a\nb.md', '/repo')).not.toMatch(/\n/);
+  });
+
+  it('refuses to announce a path with characters outside the whitelist', () => {
+    for (const bad of [
+      '/repo/a\nb.md',
+      '/repo/a b.md',
+      '/repo/a;b.md',
+      '/repo/$(x).md',
+      '/repo/a`b.md',
+    ]) {
+      expect(() => briefMessage(bad, '/repo')).toThrow(/refusing to announce/);
+    }
+    expect(briefMessage('/repo/.ai-sdlc/dispatch/briefs/rfc-0051.md', '/repo')).toContain(
+      '.ai-sdlc/dispatch/briefs/rfc-0051.md',
+    );
   });
 });
 
@@ -473,5 +516,230 @@ describe('cli brief', () => {
       1,
     );
     expect(existsSync(path.join(deps.boardDir, 'briefs', 'rfc-0099.md'))).toBe(true);
+  });
+});
+
+describe('priority as an integer', () => {
+  it('maps backlog priorities to integers and omits unknown ones', () => {
+    const plan = planBrief(
+      [
+        { ...base('AB-1'), priority: 'high' },
+        { ...base('AB-2'), priority: 'medium' },
+        { ...base('AB-3'), priority: 'low' },
+        { ...base('AB-4'), priority: 'urgent' },
+        { ...base('AB-5'), priority: '' },
+      ],
+      () => true,
+    );
+    expect(plan.entries.map((e) => e.priority)).toEqual([1, 2, 3, undefined, undefined]);
+    expect(parseBrief(`${renderBriefBlock(plan.entries)}\n`).entries).toEqual(plan.entries);
+  });
+
+  it('writes the integer into a generated brief that parses back equal', () => {
+    task('tasks', 'PRI-1', { priority: 'high' });
+    task('tasks', 'PRI-2', { priority: 'low' });
+    const { file, plan } = brief({ tasks: 'PRI-1,PRI-2' });
+    const md = readFileSync(file, 'utf-8');
+    expect(md).toMatch(/priority: 1\n/);
+    expect(md).toMatch(/1 is high, 2 is medium, 3 is low/);
+    expect(parseBrief(md).entries).toEqual(plan.entries);
+    expect(parseBrief(md).entries.map((e) => e.priority)).toEqual([1, 3]);
+  });
+
+  it('rejects a string priority in a hand-edited brief', () => {
+    const md = readFileSync(brief({ tasks: 'DEMO-1' }).file, 'utf-8').replace(
+      /priority: 2/,
+      'priority: high',
+    );
+    expect(() => parseBrief(md)).toThrow(/priority/);
+  });
+});
+
+describe('derived sequence group names', () => {
+  const oddBases = [
+    '.prettierrc',
+    '_helpers.ts',
+    '[id].tsx',
+    'my file.ts',
+    '...',
+    '__',
+    'a$b(c).ts',
+    '日本語.ts',
+    'x'.repeat(300) + '.ts',
+  ];
+
+  it('round-trips through parseBrief for odd basenames', () => {
+    const tasks: BriefTask[] = [];
+    oddBases.forEach((b, i) => {
+      tasks.push({ ...base(`OD-${i * 2 + 1}`), references: [`dir${i}/${b}`] });
+      tasks.push({ ...base(`OD-${i * 2 + 2}`), references: [`dir${i}/${b}`] });
+    });
+    const plan = planBrief(tasks, () => true);
+    expect(plan.groups).toHaveLength(oddBases.length);
+    for (const g of plan.groups) expect(GROUP_PATTERN.test(g.name)).toBe(true);
+    expect(new Set(plan.groups.map((g) => g.name)).size).toBe(oddBases.length);
+    for (const e of plan.entries) expect(e.sequenceGroup).toBeDefined();
+    expect(parseBrief(`${renderBriefBlock(plan.entries)}\n`).entries).toEqual(plan.entries);
+  });
+
+  it('strips leading dots and underscores', () => {
+    const plan = planBrief(
+      [
+        { ...base('AB-1'), references: ['.prettierrc'] },
+        { ...base('AB-2'), references: ['.prettierrc'] },
+        { ...base('AB-3'), references: ['_helpers.ts'] },
+        { ...base('AB-4'), references: ['_helpers.ts'] },
+      ],
+      () => true,
+    );
+    expect(plan.groups.map((g) => g.name).sort()).toEqual(['helpers.ts', 'prettierrc']);
+  });
+
+  it('keeps colliding basenames apart with the shortest distinguishing suffix', () => {
+    const plan = planBrief(
+      [
+        { ...base('AB-1'), references: ['a/index.ts'] },
+        { ...base('AB-2'), references: ['a/index.ts'] },
+        { ...base('AB-3'), references: ['b/index.ts'] },
+        { ...base('AB-4'), references: ['b/index.ts'] },
+      ],
+      () => true,
+    );
+    expect(plan.groups.map((g) => g.name)).toEqual(['a-index.ts', 'b-index.ts']);
+    const byTask = Object.fromEntries(plan.entries.map((e) => [e.task, e.sequenceGroup]));
+    expect(byTask).toEqual({
+      'AB-1': 'a-index.ts',
+      'AB-2': 'a-index.ts',
+      'AB-3': 'b-index.ts',
+      'AB-4': 'b-index.ts',
+    });
+  });
+
+  it('never reuses a fixed group name for a derived one', () => {
+    const plan = planBrief(
+      [
+        { ...base('AB-1'), references: ['x/events'] },
+        { ...base('AB-2'), references: ['x/events'] },
+      ],
+      () => true,
+    );
+    expect(plan.entries[0]?.sequenceGroup).not.toBe('events');
+    expect(GROUP_PATTERN.test(plan.entries[0]!.sequenceGroup!)).toBe(true);
+  });
+});
+
+describe('untrusted text in the brief', () => {
+  it('collapses control characters and escapes backticks in titles and references', () => {
+    const nasty = 'Evil\r\n## Injected\u202e\u2028\u0007 `tick`';
+    const tasks = [
+      { ...base('NS-1'), title: nasty, references: ['dir/a`b\u202e\n.ts', 'dir/same.ts'] },
+      { ...base('NS-2'), references: ['dir/same.ts'] },
+    ];
+    const md = renderBriefOf(planBrief(tasks, () => true));
+    expect(md).not.toMatch(
+      // eslint-disable-next-line no-control-regex
+      /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/,
+    );
+    expect(md).not.toMatch(/^## Injected/m);
+    expect(md).toContain('Evil ## Injected');
+    expect(md).toContain('\\`tick\\`');
+    expect(parseBrief(md).entries).toHaveLength(2);
+  });
+});
+
+function renderBriefOf(plan: ReturnType<typeof planBrief>): string {
+  return renderBrief(plan, { title: 'T', generatedAt: NOW.toISOString() });
+}
+
+describe('external prerequisites are called out', () => {
+  it('states next to the affected wave that the YAML does not gate them', () => {
+    const md = readFileSync(brief({ rfc: 'RFC-0099' }).file, 'utf-8');
+    const wave = md.split('## Sequence groups')[0]!;
+    expect(wave).toMatch(/Not gated by the YAML/);
+    expect(wave).toMatch(/DEMO-6 needs EXT-9/);
+    expect(md.split('## External prerequisites')[1]!.split('## ')[0]).toMatch(/NOT gated/);
+  });
+});
+
+describe('--rfc normalisation', () => {
+  it('accepts a lower-case identifier', () => {
+    const r = brief({ rfc: 'rfc-0099' });
+    expect(r.file).toMatch(/rfc-0099\.md$/);
+    expect(r.plan.entries.length).toBeGreaterThan(0);
+  });
+});
+
+describe('writing the brief file safely', () => {
+  it('refuses to write through a symlink, with and without --force', () => {
+    const victim = path.join(tmp, 'victim.txt');
+    writeFileSync(victim, 'keep me');
+    mkdirSync(path.join(deps.boardDir, 'briefs'), { recursive: true });
+    const link = path.join(deps.boardDir, 'briefs', 'tasks-demo-1.md');
+    symlinkSync(victim, link);
+    expect(() => brief({ tasks: 'DEMO-1' })).toThrow(/symbolic link/);
+    expect(() => brief({ tasks: 'DEMO-1' }, { force: true })).toThrow(/symbolic link/);
+    expect(readFileSync(victim, 'utf-8')).toBe('keep me');
+  });
+
+  it('refuses a dangling symlink given with --out', () => {
+    const link = path.join(tmp, 'dangling.md');
+    symlinkSync(path.join(tmp, 'nowhere.md'), link);
+    expect(() => generateBrief({ tasks: 'DEMO-1', out: 'dangling.md' }, deps)).toThrow(
+      /symbolic link/,
+    );
+    expect(existsSync(path.join(tmp, 'nowhere.md'))).toBe(false);
+  });
+
+  it('refuses a briefs directory that is a symlink', () => {
+    const elsewhere = path.join(tmp, 'elsewhere');
+    mkdirSync(elsewhere);
+    mkdirSync(deps.boardDir, { recursive: true });
+    symlinkSync(elsewhere, path.join(deps.boardDir, 'briefs'));
+    expect(() => brief({ tasks: 'DEMO-1' })).toThrow(/symbolic link/);
+    expect(existsSync(path.join(elsewhere, 'tasks-demo-1.md'))).toBe(false);
+  });
+
+  it('does not announce an existing symlink or a file outside the briefs directory', () => {
+    const real = path.join(tmp, 'real.md');
+    writeFileSync(real, 'x');
+    mkdirSync(path.join(deps.boardDir, 'briefs'), { recursive: true });
+    symlinkSync(real, path.join(deps.boardDir, 'briefs', 'tasks-demo-1.md'));
+    expect(() => generateBrief({ tasks: 'DEMO-1', keepExisting: true }, deps)).toThrow(
+      /symbolic link/,
+    );
+    expect(() =>
+      generateBrief({ tasks: 'DEMO-1', keepExisting: true, out: 'real.md' }, deps),
+    ).toThrow(/regular file inside/);
+  });
+
+  it('does not announce an existing directory in place of a brief', () => {
+    mkdirSync(path.join(deps.boardDir, 'briefs', 'tasks-demo-1.md'), { recursive: true });
+    expect(() => generateBrief({ tasks: 'DEMO-1', keepExisting: true }, deps)).toThrow(
+      /regular file inside/,
+    );
+  });
+
+  it('creates exclusively without --force', () => {
+    const first = brief({ tasks: 'DEMO-1' });
+    writeFileSync(first.file, 'edited');
+    expect(() => brief({ tasks: 'DEMO-1' })).toThrow(/--force/);
+    expect(readFileSync(first.file, 'utf-8')).toBe('edited');
+  });
+});
+
+describe('parseBrief input caps', () => {
+  it('rejects input over the size cap', () => {
+    const big =
+      renderBriefBlock([{ task: 'AB-1', after: [], wave: 1 }]) + '\n' + 'x'.repeat(MAX_BRIEF_BYTES);
+    expect(() => parseBrief(big)).toThrow(/larger than/);
+  });
+
+  it('rejects more entries than the cap and accepts exactly the cap', () => {
+    const mk = (n: number) =>
+      renderBriefBlock(
+        Array.from({ length: n }, (_, i) => ({ task: `AB-${i + 1}`, after: [], wave: 1 })),
+      );
+    expect(parseBrief(mk(MAX_BRIEF_ENTRIES)).entries).toHaveLength(MAX_BRIEF_ENTRIES);
+    expect(() => parseBrief(mk(MAX_BRIEF_ENTRIES + 1))).toThrow(/more than 500 entries/);
   });
 });
