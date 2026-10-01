@@ -2,7 +2,7 @@
 id: AISDLC-633
 title: >-
   RFC-0049 OQ-5: generic OpenAI-compatible judgment adapter (Ollama, OpenAI, compatible gateways), shadow-only
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
