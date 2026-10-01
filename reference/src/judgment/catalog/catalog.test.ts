@@ -15,8 +15,18 @@ describe('catalog registration', () => {
   it('registers both definitions once and is idempotent', () => {
     registerBuiltInJudgmentDefinitions();
     registerBuiltInJudgmentDefinitions();
-    expect(getJudgmentDefinition('dev.ac-coverage')).toBe(acCoverageJudgment);
-    expect(getJudgmentDefinition('review.finding-grounding')).toBe(findingGroundingJudgment);
+    // Registration stores its own copy of a definition, so compare content, not identity.
+    for (const def of [acCoverageJudgment, findingGroundingJudgment]) {
+      const registered = getJudgmentDefinition(def.id);
+      expect(registered).toMatchObject({
+        id: def.id,
+        version: def.version,
+        egressClass: def.egressClass,
+        riskClass: def.riskClass,
+        direction: def.direction,
+      });
+      expect(typeof registered?.questions).toBe('function');
+    }
   });
 
   it('declares the required classes', () => {
