@@ -452,6 +452,7 @@ describe('openai-compatible provider: selection and runtime integration', () => 
       egressClass,
       direction: 'tighten-only',
       riskClass: 'seam',
+      fallback: 'pending',
       buildState: () => ({ text: 'hello' }),
       questions: () => ({ q1: { type: 'noul', instructions: 'Fine?' } }),
       compose: () => ({ kind: 'act', decision: true }),

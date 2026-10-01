@@ -959,6 +959,7 @@ describe('checkJudgmentLayer', () => {
       egressClass: 'work-item-text',
       direction: 'tighten-only',
       riskClass: 'seam',
+      fallback: 'pending',
       buildState: () => 'x',
       questions: () => ({}),
       compose: () => ({ kind: 'abstain', reason: 'n/a' }),

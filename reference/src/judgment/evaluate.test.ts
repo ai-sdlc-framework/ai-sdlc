@@ -24,6 +24,9 @@ function makeDef(over: Partial<JudgmentDefinition<Input, Decision>> = {}) {
     egressClass: 'work-item-text',
     direction: 'bidirectional',
     riskClass: 'seam',
+    fallback: 'pending',
+    reducingOutcomes: [],
+    reducesReview: false,
     buildState: (i: Input) => ({ text: i.text }),
     questions: () => ({ q1: { type: 'noul', instructions: 'Is it fine?' } }),
     compose: (_a, _i, _t, c) => ({
@@ -220,6 +223,31 @@ describe('evaluateJudgment', () => {
       );
       expect(outcome).toEqual({ kind: 'abstain', reason: 'definition-error' });
     }
+  });
+
+  it('re-checks safety rules on an unregistered definition without calling the provider', async () => {
+    const violating = [
+      { riskClass: 'tighten' as const, reducesReview: undefined },
+      { riskClass: 'seam' as const, fallback: undefined },
+      { riskClass: 'tighten' as const, reducesReview: true },
+    ];
+    for (const over of violating) {
+      const p = new FakeJudgmentProvider().script('q1', YES);
+      const { outcome } = await run(
+        makeDef(over as Partial<JudgmentDefinition<Input, Decision>>),
+        cfg(enforceSpec()),
+        p,
+      );
+      expect(outcome).toEqual({ kind: 'abstain', reason: 'definition-error' });
+      expect(p.requests.length).toBe(0);
+    }
+  });
+
+  it('still evaluates a conforming unregistered definition', async () => {
+    const p = new FakeJudgmentProvider().script('q1', YES);
+    const { outcome } = await run(makeDef(), cfg(), p);
+    expect(outcome).toEqual({ kind: 'abstain', reason: 'shadow' });
+    expect(p.requests.length).toBe(1);
   });
 
   it('enforce returns the composed outcome', async () => {

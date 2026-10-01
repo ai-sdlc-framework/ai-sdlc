@@ -21,6 +21,7 @@ const def = {
   egressClass: 'work-item-text',
   direction: 'tighten-only',
   riskClass: 'seam',
+  fallback: 'pending',
   buildState: (i: Input) => ({ text: i.text }),
   questions: () => ({ q1: { type: 'noul', instructions: 'ok?' } }),
   compose: () => ({ kind: 'act', decision: true }),
