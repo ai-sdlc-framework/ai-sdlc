@@ -17,9 +17,13 @@
  */
 import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { validate } from '@ai-sdlc/reference';
+import { validate, validateUsageConfig } from '@ai-sdlc/reference';
 import { PIPELINE_YAML } from './init.js';
-import { SIGNAL_INGESTION_CONFIG_STUB } from './init-templates.js';
+import {
+  BASELINE_WORKFLOW_TEMPLATES,
+  SIGNAL_INGESTION_CONFIG_STUB,
+  USAGE_CONFIG_TEMPLATE_STUB,
+} from './init-templates.js';
 import {
   loadSignalIngestionConfig,
   DEFAULT_SIGNAL_INGESTION_CONFIG,
@@ -195,5 +199,37 @@ describe('AISDLC-434 — signal-ingestion init template YAML validation', () => 
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('usage-config init template', () => {
+  it('ships through the baseline template map under .ai-sdlc/templates/', () => {
+    expect(BASELINE_WORKFLOW_TEMPLATES.files['.ai-sdlc/templates/usage-config.yaml']).toBe(
+      USAGE_CONFIG_TEMPLATE_STUB,
+    );
+  });
+
+  it('is all comments, so it changes nothing until uncommented', () => {
+    const doc = parseYaml(USAGE_CONFIG_TEMPLATE_STUB);
+    expect(doc ?? null).toBeNull();
+  });
+
+  it('validates against the UsageConfig schema once uncommented', () => {
+    const lines = USAGE_CONFIG_TEMPLATE_STUB.split('\n');
+    const start = lines.findIndex((l) => l.startsWith('# apiVersion:'));
+    const body = lines
+      .slice(start)
+      .map((l) => l.replace(/^# ?/, ''))
+      .filter((l) => !l.trim().startsWith('#') || l.trim() === '');
+    const doc = parseYaml(body.join('\n'));
+    const result = validateUsageConfig(doc);
+    if (!result.valid) {
+      throw new Error((result.errors ?? []).map((e) => `${e.path}: ${e.message}`).join('\n'));
+    }
+    expect(result.valid).toBe(true);
+  });
+
+  it('carries no internal task ids', () => {
+    expect(USAGE_CONFIG_TEMPLATE_STUB).not.toMatch(/AISDLC-\d+/);
   });
 });

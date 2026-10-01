@@ -409,6 +409,45 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts UsageLimitObserved with the window, percentage and units', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'UsageLimitObserved',
+      window: 'weekly',
+      usedPercent: 42,
+      unitsInWindow: 4200,
+      impliedAllotment: 10000,
+      observationSource: 'manual',
+    });
+  });
+
+  it('rejects UsageLimitObserved with a percentage above 100 or an unknown source', () => {
+    const base = { ts: baseTs, type: 'UsageLimitObserved', window: 'weekly' };
+    expectInvalid({ ...base, usedPercent: 101 });
+    expectInvalid({ ...base, usedPercent: 10, observationSource: 'guess' });
+  });
+
+  it('accepts AllotmentChangeSuspected with both allotments and the change', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'AllotmentChangeSuspected',
+      window: 'weekly',
+      previousAllotment: 10000,
+      impliedAllotment: 5000,
+      changeRatio: -0.5,
+    });
+  });
+
+  it('rejects AllotmentChangeSuspected with a non-positive allotment', () => {
+    expectInvalid({
+      ts: baseTs,
+      type: 'AllotmentChangeSuspected',
+      window: 'weekly',
+      previousAllotment: 0,
+      impliedAllotment: 5000,
+    });
+  });
+
   it('rejects ModelPriceChanged with an unknown token class or a non-positive price', () => {
     const base = { ts: baseTs, type: 'ModelPriceChanged', model: 'm', oldPrice: 1, newPrice: 2 };
     expectInvalid({ ...base, tokenClass: 'bogus' });

@@ -28,6 +28,7 @@ import {
   checkAttestationGovernanceCheck,
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
+  checkUsageIngest,
   runDoctorChecks,
   runDoctorFixes,
   summarizeDoctorResults,
@@ -866,6 +867,76 @@ describe('checkNpmDistTagReachability', () => {
     const results = checkNpmDistTagReachability(makeCtx(makeAdapters()));
     expect(results).toHaveLength(1);
     expect(results[0].severity).toBe('pass');
+  });
+});
+
+// ── checkUsageIngest ────────────────────────────────────────────────────
+
+describe('checkUsageIngest', () => {
+  function writeState(capabilities: Record<string, unknown>, base?: string): void {
+    const dir = join(base ?? join(tmpDir, '.ai-sdlc', 'artifacts'), '_capabilities');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ version: 1, capabilities }));
+  }
+
+  it('passes with a hint when ingest has never run', () => {
+    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toMatch(/has not run yet/);
+  });
+
+  it('shows the time of the last successful ingest', () => {
+    writeState({ 'usage.ingest': { lastOutcome: 'live', lastLiveAt: '2026-09-30T10:00:00.000Z' } });
+    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('last successful ingest 2026-09-30T10:00:00.000Z');
+  });
+
+  it('warns with the reason when the last ingest degraded', () => {
+    writeState({
+      'usage.ingest': {
+        lastOutcome: 'degraded',
+        lastLiveAt: '2026-09-29T10:00:00.000Z',
+        lastDegradedReason: 'ledger locked',
+      },
+    });
+    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('ledger locked');
+    expect(r.title).toContain('2026-09-29T10:00:00.000Z');
+  });
+
+  it('warns without a time when degraded and never live', () => {
+    writeState({ 'usage.ingest': { lastOutcome: 'degraded' } });
+    const r = checkUsageIngest(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('no successful ingest recorded');
+  });
+
+  it('reads the machine-level usage directory when the project has no state', () => {
+    writeState(
+      { 'usage.ingest': { lastOutcome: 'live', lastLiveAt: '2026-09-30T11:00:00.000Z' } },
+      join(tmpDir, 'usage'),
+    );
+    const r = checkUsageIngest(
+      makeCtx(makeAdapters({ env: { AI_SDLC_USAGE_DIR: join(tmpDir, 'usage') } })),
+    );
+    expect(r.title).toContain('2026-09-30T11:00:00.000Z');
+  });
+
+  it('honours ARTIFACTS_DIR and tolerates a corrupt state file', () => {
+    const dir = join(tmpDir, 'elsewhere', '_capabilities');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'state.json'), '{not json');
+    const r = checkUsageIngest(
+      makeCtx(makeAdapters({ env: { ARTIFACTS_DIR: join(tmpDir, 'elsewhere') } })),
+    );
+    expect(r.severity).toBe('pass');
+    expect(r.title).toMatch(/has not run yet/);
+  });
+
+  it('is registered in the check registry', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('usage-ingest');
   });
 });
 

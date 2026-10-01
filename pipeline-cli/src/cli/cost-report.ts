@@ -18,6 +18,13 @@
  *                                Reads every `*.json` file as PersistedState and
  *                                cost-converts via `--subscription-monthly-usd`.
  *
+ *   --usage-ledger               Read the machine-level usage ledger (RFC-0050). When it
+ *                                has records it is PREFERRED: the two inputs above are
+ *                                then ignored, since they describe the same calls. It can
+ *                                be used alone.
+ *   --usage-dir <path>           Usage directory (default $AI_SDLC_USAGE_DIR, then
+ *                                ~/.ai-sdlc/usage). Implies --usage-ledger.
+ *
  * Output:
  *   --format text|json|csv       Default: text (operator-friendly table).
  *
@@ -41,6 +48,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { UNPRICED, priceCallBreakdown, readModelCalls, readPriceHistory } from '@ai-sdlc/reference';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
@@ -91,6 +99,8 @@ export interface UnifiedCostRow {
   costUsd: number;
   /** Count of underlying records in the bucket. */
   recordCount: number;
+  /** True when the model has no price: `costUsd` is then excluded from totals. */
+  unpriced?: boolean;
 }
 
 /** Bucket key for aggregation. */
@@ -182,6 +192,7 @@ function aggregate(rows: UnifiedCostRow[]): UnifiedCostRow[] {
       existing.tokens += row.tokens;
       existing.costUsd += row.costUsd;
       existing.recordCount += row.recordCount;
+      if (row.unpriced) existing.unpriced = true;
     } else {
       buckets.set(key, { ...row });
     }
@@ -282,6 +293,68 @@ export function loadSubscriptionLedgerDir(
   return rows;
 }
 
+// ── Usage ledger input (RFC-0050) ────────────────────────────────────────────
+
+type TokenKey = 'input' | 'cacheWrite' | 'cacheRead' | 'output';
+
+const USAGE_CATEGORY: Record<TokenKey, string> = {
+  input: 'inputTokens',
+  cacheWrite: 'cacheWriteTokens',
+  cacheRead: 'cacheReadTokens',
+  output: 'outputTokens',
+};
+
+/**
+ * Read the machine-level usage ledger as unified rows: one row per token class,
+ * model and agent role. Subscription pools are `subscription-quota` rows whose
+ * cost is the API-equivalent figure (what the same calls cost outside the
+ * plan); API-key, pay-per-token and unknown pools are `pay-per-token`. A model
+ * with no price is marked `unpriced` and left out of cost totals.
+ */
+export async function loadUsageLedgerRows(
+  options: { usageDir?: string; since?: Date } = {},
+): Promise<UnifiedCostRow[]> {
+  const priceRows = readPriceHistory({ dir: options.usageDir });
+  const rows: UnifiedCostRow[] = [];
+  for await (const r of readModelCalls(options.since ? { from: options.since } : {}, {
+    dir: options.usageDir,
+  })) {
+    const cost = priceCallBreakdown(r, { rows: priceRows });
+    const unpriced = cost === UNPRICED;
+    const costModel =
+      r.billingPool === 'api-key' ||
+      r.billingPool === 'pay-per-token' ||
+      r.billingPool === 'unknown'
+        ? 'pay-per-token'
+        : 'subscription-quota';
+    const parts: Array<[TokenKey, number, number]> = [
+      ['input', r.tokens.input, unpriced ? 0 : cost.input],
+      [
+        'cacheWrite',
+        r.tokens.cacheWrite5m + r.tokens.cacheWrite1h,
+        unpriced ? 0 : cost.cacheWrite5m + cost.cacheWrite1h,
+      ],
+      ['cacheRead', r.tokens.cacheRead, unpriced ? 0 : cost.cacheRead],
+      ['output', r.tokens.output, unpriced ? 0 : cost.output],
+    ];
+    for (const [key, tokens, costUsd] of parts) {
+      // The call is counted once, on its input row, which is always emitted.
+      if (tokens === 0 && key !== 'input') continue;
+      rows.push({
+        costModel,
+        category: USAGE_CATEGORY[key],
+        source: r.model,
+        consumer: r.agentRole,
+        tokens,
+        costUsd,
+        recordCount: key === 'input' ? 1 : 0,
+        ...(unpriced ? { unpriced: true } : {}),
+      });
+    }
+  }
+  return rows;
+}
+
 // ── Rendering ────────────────────────────────────────────────────────────────
 
 /** Render rows as a plain-text table. */
@@ -295,7 +368,7 @@ export function renderTextTable(rows: UnifiedCostRow[]): string {
     r.source,
     r.consumer,
     r.tokens.toLocaleString('en-US'),
-    `$${r.costUsd.toFixed(4)}`,
+    r.unpriced ? 'unpriced' : `$${r.costUsd.toFixed(4)}`,
     String(r.recordCount),
   ]);
 
@@ -309,10 +382,12 @@ export function renderTextTable(rows: UnifiedCostRow[]): string {
 
   // Totals.
   const totalTokens = rows.reduce((s, r) => s + r.tokens, 0);
-  const totalCost = rows.reduce((s, r) => s + r.costUsd, 0);
+  const totalCost = rows.reduce((s, r) => s + (r.unpriced ? 0 : r.costUsd), 0);
+  const partial = rows.some((r) => r.unpriced);
   lines.push(widths.map((w) => '-'.repeat(w)).join('  '));
   lines.push(
-    `TOTAL: tokens=${totalTokens.toLocaleString('en-US')}  costUsd=$${totalCost.toFixed(4)}\n`,
+    `TOTAL: tokens=${totalTokens.toLocaleString('en-US')}  costUsd=$${totalCost.toFixed(4)}` +
+      `${partial ? ' (partial: unpriced models are left out)' : ''}\n`,
   );
   return lines.join('\n') + '\n';
 }
@@ -323,7 +398,7 @@ export function renderCsv(rows: UnifiedCostRow[]): string {
     .map(
       (r) =>
         `${r.costModel},${r.category},${escapeCsv(r.source)},${escapeCsv(r.consumer)},` +
-        `${r.tokens},${r.costUsd.toFixed(6)},${r.recordCount}`,
+        `${r.tokens},${r.unpriced ? 'unpriced' : r.costUsd.toFixed(6)},${r.recordCount}`,
     )
     .join('\n');
   return header + '\n' + body + (rows.length > 0 ? '\n' : '');
@@ -339,6 +414,8 @@ function escapeCsv(value: string): string {
 // ── Orchestration ────────────────────────────────────────────────────────────
 
 export interface UnifiedReportOptions {
+  /** Rows from the usage ledger. When non-empty they replace the two inputs below. */
+  usageLedgerRows?: UnifiedCostRow[];
   costLedgerJsonl?: string;
   ledgerDir?: string;
   since?: Date;
@@ -360,6 +437,12 @@ export const SUBSCRIPTION_DEFAULTS = {
  */
 export function buildUnifiedReport(options: UnifiedReportOptions): UnifiedCostRow[] {
   const rows: UnifiedCostRow[] = [];
+
+  // The usage ledger sees every model call, so it is preferred over the narrower
+  // inputs, which describe a subset of the same calls.
+  if (options.usageLedgerRows && options.usageLedgerRows.length > 0) {
+    return aggregate(options.usageLedgerRows);
+  }
 
   if (options.costLedgerJsonl) {
     rows.push(...loadCostLedgerJsonl(options.costLedgerJsonl, { since: options.since }));
@@ -402,9 +485,19 @@ export async function runCostReportCli(): Promise<void> {
         'Path to SubscriptionLedger persistence directory (default $ARTIFACTS_DIR/_ledger).',
       default: process.env.ARTIFACTS_DIR ? join(process.env.ARTIFACTS_DIR, '_ledger') : undefined,
     })
+    .option('usage-ledger', {
+      type: 'boolean',
+      description:
+        'Read the machine-level usage ledger and prefer it over the other inputs. ' +
+        'Usable on its own, without --cost-ledger-jsonl or --ledger-dir.',
+    })
+    .option('usage-dir', {
+      type: 'string',
+      description: 'Usage directory (default $AI_SDLC_USAGE_DIR, then ~/.ai-sdlc/usage).',
+    })
     .option('since', {
       type: 'string',
-      description: 'ISO 8601 timestamp. Only include cost-ledger entries with createdAt >= since.',
+      description: 'ISO 8601 timestamp. Only include entries at or after this time.',
     })
     .option('subscription-monthly-usd', {
       type: 'number',
@@ -431,9 +524,10 @@ export async function runCostReportCli(): Promise<void> {
     .strict()
     .parseAsync();
 
-  if (!argv['cost-ledger-jsonl'] && !argv['ledger-dir']) {
+  const useUsageLedger = argv['usage-ledger'] === true || argv['usage-dir'] !== undefined;
+  if (!useUsageLedger && !argv['cost-ledger-jsonl'] && !argv['ledger-dir']) {
     process.stderr.write(
-      '[cli-cost-report] At least one of --cost-ledger-jsonl or --ledger-dir is required.\n' +
+      '[cli-cost-report] At least one of --cost-ledger-jsonl, --ledger-dir or --usage-ledger is required.\n' +
         'See docs/operations/embedding-providers.md#unified-cost-report for the runbook.\n',
     );
     process.exit(1);
@@ -445,7 +539,17 @@ export async function runCostReportCli(): Promise<void> {
     process.exit(1);
   }
 
+  const usageLedgerRows = useUsageLedger
+    ? await loadUsageLedgerRows({ usageDir: argv['usage-dir'], since })
+    : [];
+  if (usageLedgerRows.length > 0 && (argv['cost-ledger-jsonl'] || argv['ledger-dir'])) {
+    process.stderr.write(
+      '[cli-cost-report] The usage ledger has records, so it is used instead of the other inputs.\n',
+    );
+  }
+
   const rows = buildUnifiedReport({
+    usageLedgerRows,
     costLedgerJsonl: argv['cost-ledger-jsonl'],
     ledgerDir: argv['ledger-dir'],
     since,

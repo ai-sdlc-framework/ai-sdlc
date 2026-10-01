@@ -932,6 +932,62 @@ spec:
 }
 
 /**
+ * `.ai-sdlc/templates/usage-config.yaml` - commented template for the usage
+ * report settings. Copy it to `.ai-sdlc/usage-config.yaml` (committed, read from
+ * the base branch) or to `usage-config.yaml` in the machine-level usage
+ * directory (takes precedence) and uncomment what you need. Every value below
+ * is the default that applies when no file exists.
+ */
+export const USAGE_CONFIG_TEMPLATE_STUB = `# Usage report settings for \`cli-usage\`.
+#
+# Copy this file to \`.ai-sdlc/usage-config.yaml\` to share it with the repository
+# (it is read from the base branch), or to \`usage-config.yaml\` in the usage
+# directory (\`~/.ai-sdlc/usage\`, or \`AI_SDLC_USAGE_DIR\`) for this machine only.
+# The machine file wins when both exist. Every field is optional.
+#
+# apiVersion: ai-sdlc.io/v1alpha1
+# kind: UsageConfig
+# metadata:
+#   name: usage
+# spec:
+#   plan:
+#     name: claude-code-max-20x
+#     monthlyPriceUsd: 200
+#
+#   # Usage windows. Modes:
+#   #   first-use  opens at the first call after the previous window ended
+#   #   fixed      repeating cycles counted from \`anchor\` (your plan's reset time)
+#   #   trailing   the last lengthHours before now
+#   windows:
+#     - name: session
+#       lengthHours: 5
+#       mode: first-use
+#     - name: weekly
+#       lengthHours: 168
+#       mode: trailing
+#
+#   # Unit weights. They are a proxy for how the provider counts consumption.
+#   # Leave them out to derive them from the current model prices; set a value
+#   # here to override one.
+#   weights:
+#     tokenClasses:
+#       input: 1
+#       cacheWrite5m: 1.25
+#       cacheWrite1h: 2
+#       cacheRead: 0.1
+#       output: 5
+#     modelFamilies:
+#       opus: 1.7
+#       sonnet: 1
+#       haiku: 0.33
+#
+#   # A change in implied allotment above this fraction between two snapshots of
+#   # one window, with a similar model mix, is reported as a probable change.
+#   allotmentTolerance: 0.25
+#   modelMixSimilarity: 0.8
+`;
+
+/**
  * The set of feature templates exported as a single map so the wizard
  * dispatcher can iterate without each feature growing its own switch
  * statement.
@@ -1459,5 +1515,6 @@ export const BASELINE_WORKFLOW_TEMPLATES: FeatureTemplateSet = {
     '.github/workflows/ai-sdlc-gate.yml': AI_SDLC_GATE_WORKFLOW,
     '.ai-sdlc/quality-monitoring.yaml': QUALITY_MONITORING_CONFIG_STUB,
     '.ai-sdlc/templates/framework-bug-report.md': FRAMEWORK_BUG_REPORT_TEMPLATE_STUB,
+    '.ai-sdlc/templates/usage-config.yaml': USAGE_CONFIG_TEMPLATE_STUB,
   },
 };

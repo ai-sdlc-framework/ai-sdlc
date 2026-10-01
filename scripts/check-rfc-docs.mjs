@@ -863,6 +863,7 @@ export const KNOWN_CAPABILITY_IDS = [
   'review.meta-review',
   'policy.llm-evaluator',
   'pricing.feed',
+  'usage.ingest',
 ];
 
 /**

@@ -2,7 +2,7 @@
 id: AISDLC-651
 title: >-
   RFC-0050 Part A: cli-usage report, window/task/context views, weighted units, snapshots, allotment change detection
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -95,15 +95,46 @@ and is never an acceptance criterion the developer must satisfy.
    fails on the `runtimeEvidence` entry that later names it.
 
 ## Acceptance Criteria
-- [ ] `cli-usage report --group-by model` over a synthetic ledger prints one row per model with each token class in its own column, and the JSON and CSV outputs carry the same numbers.
-- [ ] Grouping by `role`, `task`, `pool`, `day` and `window`, alone and combined, produces totals that each sum to the ungrouped total.
-- [ ] An unpriced model shows `unpriced`, is left out of the cost total, and the total is labelled partial.
-- [ ] `cli-usage window` reports units in the current session window and the weekly window from a ledger with a known distribution, and the projection matches a hand calculation.
-- [ ] `cli-usage context` lists sessions with first-call tokens and turn counts and contains no path for `other`-scope sessions.
-- [ ] `cli-usage snapshot` appends a calibration point, and `cli-usage allotment` prints implied allotment for it equal to units divided by the fraction used.
-- [ ] Two snapshots whose implied allotments differ beyond the tolerance with a similar model mix emit `AllotmentChangeSuspected`; two within tolerance do not.
-- [ ] The config schema is registered, `generated-schemas.ts` is regenerated and committed, and running with no config file uses the documented defaults.
-- [ ] `cli-cost-report` produces a unified view from the usage ledger alone.
-- [ ] `usage.ingest` appears in the capability state as `live` after a successful ingest and `degraded` after a failed one, and is listed in `KNOWN_CAPABILITY_IDS`.
+- [x] `cli-usage report --group-by model` over a synthetic ledger prints one row per model with each token class in its own column, and the JSON and CSV outputs carry the same numbers.
+- [x] Grouping by `role`, `task`, `pool`, `day` and `window`, alone and combined, produces totals that each sum to the ungrouped total.
+- [x] An unpriced model shows `unpriced`, is left out of the cost total, and the total is labelled partial.
+- [x] `cli-usage window` reports units in the current session window and the weekly window from a ledger with a known distribution, and the projection matches a hand calculation.
+- [x] `cli-usage context` lists sessions with first-call tokens and turn counts and contains no path for `other`-scope sessions.
+- [x] `cli-usage snapshot` appends a calibration point, and `cli-usage allotment` prints implied allotment for it equal to units divided by the fraction used.
+- [x] Two snapshots whose implied allotments differ beyond the tolerance with a similar model mix emit `AllotmentChangeSuspected`; two within tolerance do not.
+- [x] The config schema is registered, `generated-schemas.ts` is regenerated and committed, and running with no config file uses the documented defaults.
+- [x] `cli-cost-report` produces a unified view from the usage ledger alone.
+- [x] `usage.ingest` appears in the capability state as `live` after a successful ingest and `degraded` after a failed one, and is listed in `KNOWN_CAPABILITY_IDS`.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+Added the usage reports on top of the ledger: `cli-usage report` (any grouping, text, JSON or CSV), the `window`, `task` and `context` views, calibration snapshots with implied allotment and change detection, the `UsageConfig` schema and loader, weighted units derived from the price history, and a usage-ledger input to `cli-cost-report`. A successful ingest now reports the `usage.ingest` capability as live and a failed one as degraded, and `ai-sdlc doctor` shows the time of the last successful ingest.
+
+## Changes
+- `pipeline-cli/src/usage/{usage-config,units,windows,snapshots,report,commands}.ts` (new) with tests; `pipeline-cli/src/cli/usage.ts` wires the commands and the capability report
+- `pipeline-cli/src/cli/cost-report.ts`: `--usage-ledger` / `--usage-dir`, preferred over the older inputs when the ledger has records
+- `spec/schemas/usage-config.v1.schema.json` (new), registered in `reference/src/core/validation.ts`, `generated-schemas.ts` regenerated
+- `spec/schemas/orchestrator-events.v1.schema.json` and `pipeline-cli/src/orchestrator/events.ts`: `UsageLimitObserved`, `AllotmentChangeSuspected`
+- `reference/src/capabilities/registry.ts`, its test, and `KNOWN_CAPABILITY_IDS` in `scripts/check-rfc-docs.mjs`: `usage.ingest`
+- `orchestrator/src/cli/commands/doctor-checks.ts` (usage-ingest line) and `init-templates.ts` (commented template keyed `.ai-sdlc/templates/usage-config.yaml`)
+- `pipeline-cli/README.md`: reports section
+
+## Design decisions
+- **Units:** one input token of the reference model is one unit; other classes and models are weighed by current price ratios, so weights follow the feed. Config weights override. Every report states the weights are a proxy.
+- **Windows:** `first-use`, `fixed` (anchor) or `trailing`; the time to the limit is the unused implied allotment divided by the rate since the window's first call.
+- **Change detection:** two consecutive snapshots of one window, relative change above the tolerance and model-mix overlap at or above the similarity threshold. `snapshot` emits the events; `allotment` marks rows.
+- **Config:** machine file in the usage directory first, then the base ref via `git show`, then defaults. An invalid file is skipped with a warning.
+- **Capability state** goes to `$ARTIFACTS_DIR` when set, otherwise the usage directory, because ingestion often runs detached with no repository cwd.
+
+## Verification
+- `pnpm build`, `pnpm lint`, `pnpm format:check`, `pnpm dark-code:check`, `pnpm validate-schemas` clean; reference and orchestrator suites green
+- About 98% line coverage on the new usage modules
+- AC 11 (root `pnpm test`): not fully green locally; the bin-invocation `pnpm exec` probes, TUI timeouts, verify-runtime, and the sign-attestation and verify-attestation-plugin gates fail only inside `.worktrees/` (the latter two pass on a clean origin/main checkout outside it); CI to confirm
+
+## Follow-up
+- (none)
+- Declined: not filed by this task; limit notices from Claude Code transcripts carry no percentage, so only harness observations that include one (Codex) become automatic snapshots, and automatic snapshots do not emit `AllotmentChangeSuspected` on their own.
+- Declined: not filed by this task; the TUI usage pane named in the design is not part of this task's scope.
