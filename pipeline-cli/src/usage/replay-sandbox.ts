@@ -12,6 +12,7 @@
  */
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import { delimiter } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 
@@ -53,9 +54,15 @@ export const REQUIRED_FLAGS: readonly string[] = [
 /** Environment for the session: also ask the CLI not to load CLAUDE.md files. */
 export const SANDBOX_ENV: Record<string, string> = { CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' };
 
-function hasFlag(help: string, flag: string): boolean {
+/**
+ * True when the help text DEFINES the flag: an option line that starts with the
+ * flag (after an optional short form), not a line that merely mentions it in
+ * another option's description.
+ */
+export function hasFlag(help: string, flag: string): boolean {
   const escaped = flag.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
-  return new RegExp(`(?:^|[\\s,])${escaped}(?=[\\s,<=\\[]|$)`, 'm').test(help);
+  const def = `^\\s+(?:-\\w, )?(?:--[\\w-]+, )*${escaped}(?=[\\s,<=\\[]|$)`;
+  return new RegExp(def, 'm').test(help);
 }
 
 /**
@@ -86,12 +93,72 @@ export async function readClaudeHelp(runner: Runner = defaultRunner): Promise<st
 /** Children started by the replay and not yet exited, so a signal handler can kill them. */
 const children = new Set<ChildProcess>();
 
-/** A process spawner that passes the sandbox environment and tracks every child. */
+/** Variable names never passed to the session: they name the operator's session or repository. */
+const REMOVED_ENV_NAMES = new Set([
+  'CLAUDECODE',
+  'CLAUDE_PROJECT_DIR',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SSE_PORT',
+  'CLAUDE_CODE_ENV',
+  'CLAUDE_REMOTE_EXECUTION',
+  'INIT_CWD',
+  'PWD',
+  'OLDPWD',
+]);
+const REMOVED_ENV_PREFIXES = ['AI_SDLC_', 'npm_', 'PNPM_'];
+
+function pathSegmentUnder(segment: string, dir: string): boolean {
+  return segment === dir || segment.startsWith(`${dir}/`) || segment.startsWith(`${dir}\\`);
+}
+
+/**
+ * Environment for the sandboxed session. Removes the operator's Claude Code
+ * session variables (CLAUDECODE, CLAUDE_PROJECT_DIR, ...), every AI_SDLC_*
+ * variable (including AI_SDLC_ACTIVE_TASK_ID), package-manager variables that
+ * name the repository, and any other variable whose value names the operator
+ * repository. PATH keeps its entries but loses those inside the repository.
+ * Everything else is kept so the CLI can run and authenticate: PATH, HOME,
+ * ANTHROPIC_* (including ANTHROPIC_API_KEY), CLAUDE_CODE_OAUTH_TOKEN,
+ * CLAUDE_CONFIG_DIR, cloud-provider credentials and proxy settings.
+ */
+export function sandboxEnvFrom(
+  env: NodeJS.ProcessEnv,
+  operatorRepo?: string,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if (REMOVED_ENV_NAMES.has(name) || REMOVED_ENV_PREFIXES.some((p) => name.startsWith(p))) {
+      continue;
+    }
+    if (name === 'PATH' && operatorRepo) {
+      out[name] = value
+        .split(delimiter)
+        .filter((seg) => !pathSegmentUnder(seg, operatorRepo))
+        .join(delimiter);
+      continue;
+    }
+    if (operatorRepo && value.includes(operatorRepo)) continue;
+    out[name] = value;
+  }
+  return { ...out, ...SANDBOX_ENV };
+}
+
+export interface TrackedSpawnerOptions {
+  /** Operator repository root; variables naming it are not passed to the session. */
+  operatorRepo?: string;
+  /** Source environment (tests). Defaults to the process environment. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/** A process spawner that passes the scrubbed sandbox environment and tracks every child. */
 export function trackedSpawner(
   inner: ProcessSpawner = nodeSpawn as ProcessSpawner,
+  opts: TrackedSpawnerOptions = {},
 ): ProcessSpawner {
   return (command, args, options) => {
-    const child = inner(command, args, { ...options, env: { ...process.env, ...SANDBOX_ENV } });
+    const env = sandboxEnvFrom(opts.env ?? process.env, opts.operatorRepo);
+    const child = inner(command, args, { ...options, env });
     children.add(child);
     const forget = (): void => void children.delete(child);
     child.on('close', forget);

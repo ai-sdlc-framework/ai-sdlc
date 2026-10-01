@@ -383,7 +383,10 @@ export async function runReplay(input: RunReplayInput): Promise<ReplayResults> {
               timeout: REVIEW_TIMEOUT_MS,
             });
           } catch {
+            // A thrown or timed-out spawn may still have spent tokens we cannot see: treat it
+            // like a missing usage report so --max-units cannot be bypassed.
             outcomes[model] = 'error';
+            usageGap = true;
             continue;
           }
           outcomes[model] = verdictOf(result).outcome;

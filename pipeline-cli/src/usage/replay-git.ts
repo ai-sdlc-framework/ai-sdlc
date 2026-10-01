@@ -12,7 +12,16 @@
  * @module usage/replay-git
  */
 
-import { lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  type Stats,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
@@ -104,6 +113,48 @@ export async function mergeBaseOf(
   return r.code === 0 && isCommitId(out) ? out : undefined;
 }
 
+/** Names removed at any depth: per-directory instruction files and per-directory settings. */
+const CONFIG_NAMES_ANY_DEPTH = new Set(['CLAUDE.md', 'CLAUDE.local.md', '.claude']);
+/** Names removed at the top of the tree only. */
+const CONFIG_NAMES_TOP_LEVEL = new Set(['.mcp.json', '.claude.json']);
+
+/**
+ * Delete every Claude Code configuration the replayed commit carries, so no
+ * hook, agent, MCP server, setting or instruction file from it can load into
+ * the session whatever the CLI's flags do: `.claude/` (any depth), `.mcp.json`,
+ * `.claude.json`, and every `CLAUDE.md` / `CLAUDE.local.md`. Uses lstat and
+ * removes a link itself, never what it points to. The review diff is computed
+ * commit to commit, so removing working-tree files does not change it.
+ * Returns the number of entries removed.
+ */
+export function removeCommitClaudeConfig(root: string): number {
+  let removed = 0;
+  const walk = (dir: string, top: boolean): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const path = join(dir, e.name);
+      if (CONFIG_NAMES_ANY_DEPTH.has(e.name) || (top && CONFIG_NAMES_TOP_LEVEL.has(e.name))) {
+        try {
+          rmSync(path, { recursive: true, force: true });
+          removed++;
+        } catch {
+          // best effort; a leftover is caught by the sandbox flags
+        }
+        continue;
+      }
+      // A symlink Dirent is neither a directory nor a file here: it is never followed.
+      if (e.isDirectory() && e.name !== '.git') walk(path, false);
+    }
+  };
+  walk(root, true);
+  return removed;
+}
+
 /** Clones created and not yet removed, so a signal handler can remove them. */
 const active = new Map<string, { holder: string }>();
 
@@ -130,6 +181,42 @@ export function activeWorktreeCount(): number {
   return active.size;
 }
 
+/** Current uid, or undefined where the platform has none (Windows). */
+function currentUid(): number | undefined {
+  return typeof process.getuid === 'function' ? process.getuid() : undefined;
+}
+
+/** True when the entry belongs to `uid`; with no uid to compare, every entry counts as owned. */
+export function isOwnedByUser(st: Pick<Stats, 'uid'>, uid: number | undefined): boolean {
+  return uid === undefined || st.uid === uid;
+}
+
+/** Name of the private per-user parent that holds run holders inside a shared temp directory. */
+export function privateParentName(uid: number | undefined): string {
+  return `${REPLAY_HOLDER_PREFIX}u${uid ?? 'x'}`;
+}
+
+/**
+ * Create (or verify) the private 0700 per-user parent under a shared temp
+ * directory. A pre-planted symlink, a foreign-owned directory or a looser mode
+ * that cannot be tightened is refused, so another local user cannot swap the
+ * parent or read the holders.
+ */
+function ensurePrivateParent(root: string, uid: number | undefined): string {
+  const dir = join(root, privateParentName(uid));
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+  }
+  const st = lstatSync(dir);
+  if (st.isSymbolicLink() || !st.isDirectory() || !isOwnedByUser(st, uid)) {
+    throw new Error('The replay temp parent is not a private directory owned by this user.');
+  }
+  if ((st.mode & 0o077) !== 0) chmodSync(dir, 0o700);
+  return dir;
+}
+
 export const STALE_HOLDER_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export interface SweepOptions {
@@ -139,6 +226,8 @@ export interface SweepOptions {
   osTmpdir?: string;
   now?: number;
   maxAgeMs?: number;
+  /** Only entries owned by this uid are removed. Defaults to the current uid. */
+  uid?: number;
 }
 
 /**
@@ -154,34 +243,51 @@ export function sweepStaleReplayHolders(opts: SweepOptions = {}): number {
   } catch {
     return 0;
   }
+  const uid = opts.uid ?? currentUid();
   const live = new Set([...active.values()].map((a) => a.holder));
   const cutoff = (opts.now ?? Date.now()) - (opts.maxAgeMs ?? STALE_HOLDER_MAX_AGE_MS);
-  let n = 0;
-  let names: string[];
-  try {
-    names = readdirSync(root);
-  } catch {
-    return 0;
-  }
-  for (const name of names) {
-    if (!name.startsWith(REPLAY_HOLDER_PREFIX)) continue;
-    const path = join(root, name);
-    if (live.has(path)) continue;
+  const sweepDir = (dir: string, nested: boolean): number => {
+    let n = 0;
+    let names: string[];
     try {
-      const st = lstatSync(path);
-      if (st.isSymbolicLink() || !st.isDirectory() || st.mtimeMs > cutoff) continue;
-      rmSync(path, { recursive: true, force: true });
-      n++;
+      names = readdirSync(dir);
     } catch {
-      // best effort
+      return 0;
     }
-  }
-  return n;
+    for (const name of names) {
+      if (!name.startsWith(REPLAY_HOLDER_PREFIX)) continue;
+      const path = join(dir, name);
+      if (live.has(path)) continue;
+      try {
+        const st = lstatSync(path);
+        // Never follow a link, and never touch another user's entry in a shared directory.
+        if (st.isSymbolicLink() || !st.isDirectory() || !isOwnedByUser(st, uid)) continue;
+        if (!nested && name === privateParentName(uid)) {
+          n += sweepDir(path, true);
+          continue;
+        }
+        if (st.mtimeMs > cutoff) continue;
+        rmSync(path, { recursive: true, force: true });
+        n++;
+      } catch {
+        // best effort
+      }
+    }
+    return n;
+  };
+  return sweepDir(root, false);
 }
 
 export interface TempCloneOptions {
   /** Directory to create the holder under. Defaults to the OS temp directory. */
   tmpRoot?: string;
+  /**
+   * Put the holder under a private 0700 per-user parent. Defaults to true when
+   * `tmpRoot` is the OS temp directory (shared between users), false otherwise.
+   */
+  privateParent?: boolean;
+  /** Owner uid the private parent must have (tests). Defaults to the current uid. */
+  uid?: number;
 }
 
 /** Checks a commit out into the throwaway clone and returns the clone path. */
@@ -200,12 +306,35 @@ export async function withReplayClone<T>(
   fn: (checkout: CheckoutFn) => Promise<T>,
   opts: TempCloneOptions = {},
 ): Promise<T> {
-  const holder = mkdtempSync(join(opts.tmpRoot ?? tmpdir(), REPLAY_HOLDER_PREFIX));
+  const root = opts.tmpRoot ?? tmpdir();
+  const usePrivate =
+    opts.privateParent ??
+    (() => {
+      try {
+        return realpathSync(root) === realpathSync(tmpdir());
+      } catch {
+        return true;
+      }
+    })();
+  const parent = usePrivate ? ensurePrivateParent(root, opts.uid ?? currentUid()) : root;
+  const holder = mkdtempSync(join(parent, REPLAY_HOLDER_PREFIX));
   const path = join(holder, REPLAY_CHECKOUT_DIR);
   active.set(path, { holder });
   try {
     const clone = await git(
-      ['clone', '--quiet', '--no-hardlinks', '--local', '--no-checkout', '--', repoRoot, path],
+      [
+        // Committed symlinks become plain files, so a session cannot follow one out of the clone.
+        '-c',
+        'core.symlinks=false',
+        'clone',
+        '--quiet',
+        '--no-hardlinks',
+        '--local',
+        '--no-checkout',
+        '--',
+        repoRoot,
+        path,
+      ],
       holder,
     );
     if (clone.code !== 0) throw new Error('Could not create a throwaway clone for the replay.');
@@ -213,6 +342,7 @@ export async function withReplayClone<T>(
     await git(['remote', 'remove', 'origin'], path);
     await git(['config', 'core.hooksPath', '/dev/null'], path);
     await git(['config', 'core.fsmonitor', 'false'], path);
+    await git(['config', 'core.symlinks', 'false'], path);
     const checkout: CheckoutFn = async (sha) => {
       if (!isCommitId(sha)) {
         throw new Error('Refusing to check out a value that is not a commit id.');
@@ -220,6 +350,7 @@ export async function withReplayClone<T>(
       const r = await git(['checkout', '--quiet', '--force', '--detach', sha], path);
       if (r.code !== 0) throw new Error('Could not check the commit out in the throwaway clone.');
       await git(['clean', '-ffdxq'], path);
+      removeCommitClaudeConfig(path);
       return path;
     };
     return await fn(checkout);

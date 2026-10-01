@@ -60,7 +60,7 @@ export function emptySkipCounts(): Record<SkipReason, number> {
 }
 
 /** Shape of a task id taken from the ledger or the corpus. */
-export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9]*-\d+(?:\.\d+)*$/;
+export const TASK_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*-\d+(?:\.\d+)*$/;
 
 export function isValidTaskId(v: unknown): v is string {
   return typeof v === 'string' && v.length <= 64 && TASK_ID_PATTERN.test(v);

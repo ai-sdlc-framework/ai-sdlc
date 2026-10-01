@@ -85,13 +85,13 @@ const DEFAULT_BASE_REF = 'origin/main';
  * The production reviewer spawner. It is sandboxed: read-only tools, no MCP, no
  * project settings, no bypassPermissions (see replay-sandbox.ts).
  */
-function sandboxedSpawner(processSpawn?: ProcessSpawner): SpawnerFactory {
+function sandboxedSpawner(operatorRepo: string, processSpawn?: ProcessSpawner): SpawnerFactory {
   return ({ model, type }) =>
     new ShellClaudePSpawner({
       models: { [type]: model },
       permissionMode: SANDBOX_PERMISSION_MODE,
       extraArgs: SANDBOX_ARGS,
-      spawn: trackedSpawner(processSpawn),
+      spawn: trackedSpawner(processSpawn, { operatorRepo }),
     });
 }
 
@@ -105,11 +105,13 @@ const REPLAY_HELP = [
   'and prompts denied. It never uses bypassPermissions. If the installed claude lacks any of',
   'these flags the command refuses to run. The commit is checked out in a throwaway local clone',
   '(its own .git, no remote, hooks off, LFS and user git config off), never a linked worktree.',
+  'The clone is stripped of every .claude/, .mcp.json and CLAUDE.md the commit carries, symlinks',
+  'become plain files, and the session environment drops CLAUDE_PROJECT_DIR, CLAUDECODE and AI_SDLC_*.',
   'Only the diff comes from the replayed commit, and it is marked untrusted in the prompt; the',
   'review policy and task spec come from your current checkout.',
   'Residual risk: the session is a model reading untrusted code with read-only tools. A',
   'malicious diff could still try to mislead the verdict or ask the model to echo file contents',
-  'it can read inside the clone; CLAUDE.md loading is disabled by environment variable only.',
+  'it can read inside the clone.',
   '',
   'Labels: known-defect means a reviewer role recorded a critical or major finding on that',
   'commit and a later iteration of the same task was approved by every recorded reviewer with',
@@ -361,6 +363,25 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
           return;
         }
 
+        // Cost gate (before any off-peak deferral, so a missing flag is never hidden by a wait):
+        // say what a run is allowed to spend, then refuse without an explicit flag.
+        const shown = Math.min(maxItems, items.length);
+        const mean = estimateUnitsPerReview(records, role, weights).meanUnitsPerReview;
+        const estimated = mean === null ? null : mean * shown * models.length;
+        const cap = estimated === null ? maxUnits : Math.min(maxUnits, estimated);
+        const costLine =
+          estimated === null
+            ? `Spend cap: up to ${maxUnits.toLocaleString('en-US')} units (--max-units); no reviewer ` +
+              `usage is on record, so there is no estimate. ${shown} item(s) x ${models.length} model(s).\n`
+            : `Spend cap: about ${Math.round(cap).toLocaleString('en-US')} units ` +
+              `(${shown} item(s) x ${models.length} model(s) x mean ${Math.round(mean as number).toLocaleString('en-US')} ` +
+              `units per review, bounded by --max-units ${maxUnits.toLocaleString('en-US')}).\n`;
+        io.out(costLine);
+        if (!argv['confirm-spend']) {
+          fail(io, 'Refusing to spend model usage without --confirm-spend. No model was called.');
+          return;
+        }
+
         if (argv['off-peak']) {
           const windows: OffPeakWindow[] = [];
           for (const text of argv['off-peak-window'] as string[]) {
@@ -386,24 +407,6 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             );
             return;
           }
-        }
-
-        // Cost gate: say what a run is allowed to spend, then refuse without an explicit flag.
-        const shown = Math.min(maxItems, items.length);
-        const mean = estimateUnitsPerReview(records, role, weights).meanUnitsPerReview;
-        const estimated = mean === null ? null : mean * shown * models.length;
-        const cap = estimated === null ? maxUnits : Math.min(maxUnits, estimated);
-        const costLine =
-          estimated === null
-            ? `Spend cap: up to ${maxUnits.toLocaleString('en-US')} units (--max-units); no reviewer ` +
-              `usage is on record, so there is no estimate. ${shown} item(s) x ${models.length} model(s).\n`
-            : `Spend cap: about ${Math.round(cap).toLocaleString('en-US')} units ` +
-              `(${shown} item(s) x ${models.length} model(s) x mean ${Math.round(mean as number).toLocaleString('en-US')} ` +
-              `units per review, bounded by --max-units ${maxUnits.toLocaleString('en-US')}).\n`;
-        io.out(costLine);
-        if (!argv['confirm-spend']) {
-          fail(io, 'Refusing to spend model usage without --confirm-spend. No model was called.');
-          return;
         }
 
         // Fail closed: the production spawner needs every sandbox flag the CLI must support.
@@ -446,7 +449,7 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             repoRoot,
             repoName,
             git: deps.git ?? createGit(deps.runner),
-            createSpawner: injected ?? sandboxedSpawner(deps.processSpawn),
+            createSpawner: injected ?? sandboxedSpawner(repoRoot, deps.processSpawn),
             weights,
             usage: { dir: deps.usageDir },
             now: deps.now ?? (() => new Date()),
