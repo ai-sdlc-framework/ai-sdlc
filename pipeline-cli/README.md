@@ -306,6 +306,35 @@ The adapter normalises reviewer responses into the canonical
 `ReviewerVerdict` envelope (`{ approved, findings, summary, harness:
 'codex' }`) before returning, so Step 8 aggregation runs unchanged.
 
+## `cli-usage ingest` — usage ledger from Claude Code transcripts
+
+`cli-usage ingest` reads the Claude Code session and subagent transcripts on this machine and appends one record per model call to the machine-level usage ledger (`~/.ai-sdlc/usage/ledger-YYYY-MM.jsonl`, or the directory in `AI_SDLC_USAGE_DIR`). The ledger is never committed.
+
+```bash
+node pipeline-cli/bin/cli-usage.mjs ingest [--backfill] [--projects-dir <path>] [--max-seconds <n>] [--json]
+```
+
+| Option           | Meaning                                                                                 |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `--backfill`     | Ignore stored cursors and read every transcript from the start (already-seen calls are skipped, so this is safe to repeat). |
+| `--projects-dir` | Transcript projects directory. Default: `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`. |
+| `--max-seconds`  | Stop starting new work after this many seconds (default 30). Progress is saved; the next run continues. |
+| `--json`         | Print the result as JSON.                                                               |
+
+The result reports files scanned, calls written, repeats skipped and errors.
+
+**Repeated lines for one message.** The same message id appears on several transcript lines. Within one batch (up to 2000 records, flushed at the end of each transcript) the line with the largest output count is kept; across batches and runs the first record written wins and later repeats are skipped. A message whose lines straddle a batch boundary or two runs can therefore keep a slightly lower output count than its final line reports. This is a known limitation.
+
+**What is stored.** Counts, ids, model, timestamp, harness, billing pool and attribution only. No prompt, response, file content, tool output or subagent description is ever read into a record, logged or printed. A usage or rate-limit notice found in a transcript becomes a line in `limit-events.jsonl` holding its timestamp, session id and a short fixed category, never the message text.
+
+**Scope.** A call made inside a repository that has an `.ai-sdlc/` directory is `framework` scope and keeps its repository, task and source file. Every other call is `other` scope: tokens, model, timestamp and harness are kept; repository, task, working directory, branch and source are not written. Set `AI_SDLC_USAGE_SCOPE=framework-only` to skip transcripts of other projects entirely.
+
+**Attribution.** The agent role is the subagent sidecar's `agentType` (`main-session` for a session transcript, `subagent-unknown` when the sidecar is missing). The task comes from a `.worktrees/<task-id>` path segment, then a task id in the branch name that has a backlog file, then the worktree's `.active-task` file. The billing pool is set only when the transcript states its entrypoint; otherwise it is `unknown`.
+
+**Safety.** Transcripts are treated as untrusted input: symlinks are not followed, file and directory names are validated, lines over 4 MiB are skipped and counted as errors, and a truncated last line is retried on the next run. Ingestion does nothing in a remote sandbox (`CLAUDE_CODE_ENV=ccr` or `CLAUDE_REMOTE_EXECUTION=1`). Set `AI_SDLC_USAGE_INGEST=off` to switch it off.
+
+**Triggers.** The plugin's `Stop` and `SessionStart` hooks and each orchestrator tick launch ingestion as a detached background process with a time limit, so a session or tick is never delayed and any failure is swallowed.
+
 ## Quickstart — Tier 1 (slash command body)
 
 The `/ai-sdlc execute` slash command body (in `ai-sdlc-plugin/commands/execute.md`)

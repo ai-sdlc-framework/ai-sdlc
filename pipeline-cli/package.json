@@ -58,7 +58,8 @@
     "cli-embedding-bump": "bin/cli-embedding-bump.mjs",
     "cli-cost-report": "bin/cli-cost-report.mjs",
     "cli-merge-if-eligible": "bin/cli-merge-if-eligible.mjs",
-    "cli-usage-codex": "bin/cli-usage-codex.mjs"
+    "cli-usage-codex": "bin/cli-usage-codex.mjs",
+    "cli-usage": "bin/cli-usage.mjs"
   },
   "exports": {
     ".": {
