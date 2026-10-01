@@ -91,6 +91,25 @@ config area drifts between the two.
   MAIN clone (AISDLC-385); otherwise re-anchored MCP entries are
   dropped fail-soft.
 
+### Security-review mediums explicitly DECLINED (documented best-effort limits)
+
+The governance plugin's shell-command matching is best-effort defence in
+depth; server-side GitHub rulesets (no force-push/deletion on main/master)
+are the required authoritative control. The following were reviewed and
+declined, not filed as tasks, and are listed in
+`docs/operations/opencode-harness.md`:
+
+- Piecewise-built subcommands (`P=pus; git ${P}h --force ...`) and brace
+  expansion (`git {push,--force} ...`, `--force-with-lease {origin,main}`).
+- Glued `env -C../x` / `sudo -D/x` directory changes.
+- Quoted `;`/`&`/`|` inside a ref name splitting the segment
+  (`"HEAD:feat;" HEAD:main`), named-fd redirection `{x}>&1`, and a
+  background `&` immediately followed by `<` (`sleep 0 &<x git ...`) keeping
+  two commands in one segment. Cheap fixes exist (fail closed on an
+  unterminated quote or `{` before `<`/`>`; lookahead `(?<![<>&])&(?![>&])`)
+  but need a real shell parser to close fully.
+- `evaluateStashSegment` not stripping a leading redirection or wrapper.
+
 ## Acceptance criteria
 
 - [x] All 5 deliverables land in one PR.
