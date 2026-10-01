@@ -2,7 +2,7 @@
 id: AISDLC-630
 title: >-
   RFC-0049 Phase 1: evaluateJudgment runtime, Judgment Catalog, JudgmentConfig schema and loader, redaction move
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -124,19 +124,19 @@ and is never an acceptance criterion the developer must satisfy.
    under `.ai-sdlc/` in this repository.
 
 ## Acceptance Criteria
-- [ ] With no config file on the base ref, `evaluateJudgment` returns abstain `disabled` and the provider is never called.
-- [ ] With a provider named and nothing else, a `work-item-text` judgment runs in `shadow` (provider called, sink receives one record, caller gets abstain `shadow`) and a `code-diff` judgment returns abstain `egress-not-permitted` with no provider call.
-- [ ] A state containing a string matched by `SECRET_PATTERNS` reaches the provider redacted (asserted on the fake provider's recorded request).
-- [ ] An input whose state exceeds `maxStateTokens` returns abstain `state-too-large` and makes no provider call.
-- [ ] A provider error, a missing answer, and a throwing `compose` each resolve to an abstain outcome; `evaluateJudgment` does not throw in any test.
-- [ ] `enforce` with an alias model, with a provider declaring `calibratedProbabilities: false`, with no thresholds for the active key, or with no satisfying promotion record runs as `shadow` and records the reason; one test per condition.
-- [ ] A `relax` definition with a `path: override` promotion record, or a corpus record below `n` 50 or precision 0.95, is not enforced; a `seam` definition with a non-empty override `evidence` is.
-- [ ] `permissiveAllowed` is true only for a `bidirectional` definition with `sourceKind` `backlog`; false for `gh-issue`, for an absent `sourceKind`, and for any `tighten-only` definition.
-- [ ] With an `onCapabilityOutcome` callback supplied, one evaluation calls it exactly once with `live`, `shadow` or `degraded` as specified, and a throwing callback does not change the evaluation result.
-- [ ] `questionSetHash` is stable across runs and changes when a question's text, an option, or the definition `version` changes.
-- [ ] The config schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
-- [ ] The loader reads only from the base ref or the explicit env path; a test proves a working-tree copy of the file is ignored.
-- [ ] `redactSecrets` and `SECRET_PATTERNS` are importable from both the new `reference` location and the old `pipeline-cli` path, and the existing redaction tests pass unmodified.
-- [ ] The `judgment-config.yaml` template is present in the init-templates map and validates against the schema once uncommented (test renders it from the map).
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] With no config file on the base ref, `evaluateJudgment` returns abstain `disabled` and the provider is never called.
+- [x] With a provider named and nothing else, a `work-item-text` judgment runs in `shadow` (provider called, sink receives one record, caller gets abstain `shadow`) and a `code-diff` judgment returns abstain `egress-not-permitted` with no provider call.
+- [x] A state containing a string matched by `SECRET_PATTERNS` reaches the provider redacted (asserted on the fake provider's recorded request).
+- [x] An input whose state exceeds `maxStateTokens` returns abstain `state-too-large` and makes no provider call.
+- [x] A provider error, a missing answer, and a throwing `compose` each resolve to an abstain outcome; `evaluateJudgment` does not throw in any test.
+- [x] `enforce` with an alias model, with a provider declaring `calibratedProbabilities: false`, with no thresholds for the active key, or with no satisfying promotion record runs as `shadow` and records the reason; one test per condition.
+- [x] A `relax` definition with a `path: override` promotion record, or a corpus record below `n` 50 or precision 0.95, is not enforced; a `seam` definition with a non-empty override `evidence` is.
+- [x] `permissiveAllowed` is true only for a `bidirectional` definition with `sourceKind` `backlog`; false for `gh-issue`, for an absent `sourceKind`, and for any `tighten-only` definition.
+- [x] With an `onCapabilityOutcome` callback supplied, one evaluation calls it exactly once with `live`, `shadow` or `degraded` as specified, and a throwing callback does not change the evaluation result.
+- [x] `questionSetHash` is stable across runs and changes when a question's text, an option, or the definition `version` changes.
+- [x] The config schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
+- [x] The loader reads only from the base ref or the explicit env path; a test proves a working-tree copy of the file is ignored.
+- [x] `redactSecrets` and `SECRET_PATTERNS` are importable from both the new `reference` location and the old `pipeline-cli` path, and the existing redaction tests pass unmodified.
+- [x] The `judgment-config.yaml` template is present in the init-templates map and validates against the schema once uncommented (test renders it from the map).
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

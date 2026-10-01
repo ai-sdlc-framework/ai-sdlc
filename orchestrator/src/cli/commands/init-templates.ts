@@ -1231,6 +1231,60 @@ export const QUALITY_MONITORING_TEMPLATES: FeatureTemplateSet = {
 };
 
 /**
+ * `.ai-sdlc/templates/judgment-config.yaml` — fully commented starter for the
+ * judgment layer configuration. Lines starting with a double hash are prose;
+ * lines starting with a single hash are configuration, valid once uncommented.
+ * Copy to `.ai-sdlc/judgment-config.yaml` and commit it to the default branch
+ * (the file is read from the base branch only).
+ */
+export const JUDGMENT_CONFIG_TEMPLATE = `## Judgment layer configuration.
+##
+## Copy this file to .ai-sdlc/judgment-config.yaml and uncomment what you need.
+## It is read from the default branch only, so a pull request cannot relax the
+## configuration it is governed by. With no file, or no provider, the layer is
+## disabled and every caller keeps its existing behavior.
+##
+## The provider API key is read from the environment at call time and is never
+## stored in this file.
+
+# apiVersion: ai-sdlc.io/v1alpha1
+# kind: JudgmentConfig
+# metadata:
+#   name: ai-sdlc-judgment
+# spec:
+#   provider: jev
+#   ## An exact version is required for any judgment to run in enforce mode.
+#   ## Aliases such as -latest and -preview are accepted in shadow mode only.
+#   model: jev-1.13.0
+#   egress:
+#     ## Data classes that may be sent to the provider. The default when a
+#     ## provider is named is work-item-text only. Delete the lines you do not want.
+#     allow:
+#       - work-item-text
+#       - code-diff
+#       - agent-output
+#   defaults:
+#     ## off | shadow | enforce. Shadow calls the provider and records the
+#     ## answer but never changes what your pipeline does.
+#     mode: shadow
+#     timeoutMs: 10000
+#     cache: true
+#   judgments:
+#     dor.stage-b:
+#       mode: shadow
+#       ## Thresholds are keyed by provider@model and never carry between versions.
+#       thresholds:
+#         jev@jev-1.13.0: { pass: 0.85, fail: 0.15 }
+#       ## A promotion record is required before mode: enforce takes effect.
+#       promotion:
+#         jev@jev-1.13.0:
+#           path: corpus
+#           n: 75
+#           actBandPrecision: 0.97
+#           evalReport: .ai-sdlc/judgment-evals/dor.stage-b-jev-1.13.0.json
+`;
+
+/**
  * `.ai-sdlc/signal-ingestion.yaml` stub — RFC-0030 Signal Ingestion Pipeline.
  *
  * AISDLC-348 / Phase 6: ships the full §11 config schema with every block
@@ -1516,5 +1570,6 @@ export const BASELINE_WORKFLOW_TEMPLATES: FeatureTemplateSet = {
     '.ai-sdlc/quality-monitoring.yaml': QUALITY_MONITORING_CONFIG_STUB,
     '.ai-sdlc/templates/framework-bug-report.md': FRAMEWORK_BUG_REPORT_TEMPLATE_STUB,
     '.ai-sdlc/templates/usage-config.yaml': USAGE_CONFIG_TEMPLATE_STUB,
+    '.ai-sdlc/templates/judgment-config.yaml': JUDGMENT_CONFIG_TEMPLATE,
   },
 };

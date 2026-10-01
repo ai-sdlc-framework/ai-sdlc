@@ -60,3 +60,5 @@ export {
   type OpenShellEndpoint,
   type PolicyGenerationOptions,
 } from './openshell-policy.js';
+
+export { SECRET_PATTERNS, redactSecrets, type SecretPattern } from './secret-redact.js';

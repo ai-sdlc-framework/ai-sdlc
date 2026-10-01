@@ -95,6 +95,7 @@ describe('createJevProvider round-trips against recorded fixtures', () => {
     const [url, init] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.typesafe.ai/v1/systemone');
     expect(init.method).toBe('POST');
+    expect(init.redirect).toBe('error');
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe(`Bearer ${KEY}`);
     expect(headers['Content-Type']).toBe('application/json');

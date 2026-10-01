@@ -89,6 +89,7 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body,
+        redirect: 'error',
         signal: controller.signal,
       });
       return {
@@ -159,6 +160,9 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
     modelId: model,
     capabilities: JEV_CAPABILITIES,
     requires: { envVar: API_KEY_ENV },
+    get baseUrl() {
+      return getBaseUrl();
+    },
     async isAvailable() {
       return getKey()
         ? { available: true }

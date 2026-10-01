@@ -58,6 +58,8 @@ export interface JudgmentProvider {
   readonly modelId: string;
   readonly capabilities: JudgmentCapabilities;
   readonly requires: { envVar: string };
+  /** Endpoint base URL when the provider is network-backed (used for the loopback egress rule). */
+  readonly baseUrl?: string;
   isAvailable(): Promise<{ available: boolean; reason?: string }>;
   /** One-way hash of the credential, or null when none is configured. */
   getAccountId(): Promise<string | null>;
