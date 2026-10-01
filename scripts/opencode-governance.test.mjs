@@ -517,6 +517,12 @@ describe('round-4 hardening (redirection spelling, expansion, generic fallback)'
     'env --chdir=/etc git push --force-with-lease origin feat/x',
     'sudo -D /etc git push --force-with-lease origin feat/x',
     'env -C a git -C b push --force-with-lease origin feat/x',
+    // '&' forms of redirection must not swallow (or split off) the refspec that follows
+    'git push --force-with-lease origin 2>&1 HEAD:main',
+    'git push --force-with-lease origin &>/dev/null main',
+    'git push --force-with-lease origin >&1 main',
+    'git push --force-with-lease origin >&- HEAD:main',
+    'git push --force-with-lease origin 2>&1 main',
     // looser export/declare/local spellings taint the following push
     'export -- GIT_DIR=/tmp/x && git push --force-with-lease origin feat/x',
     'declare -gx GIT_DIR=/tmp/x; git push --force-with-lease origin feat/x',
@@ -530,6 +536,12 @@ describe('round-4 hardening (redirection spelling, expansion, generic fallback)'
     'git push --force-with-lease origin feat/x 2>/dev/null',
     'git push --force-with-lease origin feat/x >>/tmp/log 2>&1',
     'git push --force-with-lease origin feat/x </dev/null',
+    'git push --force-with-lease origin feat/x &>/dev/null',
+    'git push --force-with-lease origin feat/x &>>/tmp/log',
+    'git push --force-with-lease origin feat/x >&2',
+    'git push origin feature-x 2>&1 | tail',
+    'git status && git push --force-with-lease origin feat/x',
+    'sleep 1 & git push --force-with-lease origin feat/x', // a genuine background '&' still splits
     // controls
     'echo $HOME',
     'git commit -m "cost $5" && git push origin feature-x',

@@ -147,7 +147,8 @@ Known bypass classes that are NOT handled (non-exhaustive):
   directory change makes the branch/target unverifiable): write
   `git -C sub push ...` instead.
 
-Redirections are detected on the RAW text and only when unquoted and unescaped
+Redirections are handled on the RAW segment (including the `&` forms `2>&1`, `>&2`,
+`&>`, `<&`, which are not command separators) and only when unquoted and unescaped
 (`<`/`>` are legal inside quoted or escaped ref names). A quoted/escaped `<`/`>`,
 or a redirection target containing `:`, makes a lease push fail closed, as does any
 `$`/backtick in a push. When a segment contains an expansion next to a push and a
@@ -155,6 +156,10 @@ force-ish token anywhere in the command, it is denied even if the expansion hide
 subcommand (`P=push; git $P --force ...`). A generic fallback also denies any segment
 with `git` ... `push` ... a force-ish token that could not be evaluated as a push
 (unrecognised wrapper flags such as `env -S`, `exec -a`, `stdbuf -o L`; a quoted `#`).
+The expansion check depends on the literal word `push` appearing, so piecewise-built
+subcommands (`P=pus; git ${P}h ...`), brace expansion (`git {push,--force} ...`,
+`--force-with-lease {origin,main}`) and glued `env -C../x` / `sudo -D/x` remain documented
+best-effort gaps.
 
 Known FALSE-POSITIVE denials (over-blocking, fail closed): text that merely MENTIONS a
 force push (`echo "git push --force" > notes.txt`, heredoc bodies or commit-message

@@ -211,10 +211,14 @@ const SAFE_ARM_FLAGS = new Set([
 const VALUE_FLAGS = new Set(['-R', '--repo']);
 
 function splitShellSegments(command) {
-  return command
-    .split(/(?:&&|\|\||;|\||&|\n)/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return (
+    command
+      // A single `&` adjacent to `<`/`>` is part of a redirection (`2>&1`, `>&2`, `&>`,
+      // `&>>`, `<&`), not a command separator; a genuine background `&` still splits.
+      .split(/(?:&&|\|\||;|\||\n|(?<![<>&])&(?![<>&]))/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
 }
 
 /** Removes an unquoted trailing shell comment and all quote characters. */
@@ -560,12 +564,19 @@ function stripRedirections(raw) {
       i++;
       continue;
     }
-    if (c === '<' || c === '>') {
+    if (c === '<' || c === '>' || (c === '&' && raw[i + 1] === '>')) {
       out = out.replace(/(^|\s)\d+$/, '$1'); // standalone fd number: `2>`
+      if (c === '&') i++; // `&>` / `&>>`
       while (raw[i] === '<' || raw[i] === '>') i++;
       if (raw[i] === '&') {
         i++;
-        while (/[\d-]/.test(raw[i] ?? '')) i++;
+        if (/[\d-]/.test(raw[i] ?? '')) {
+          // `>&1`, `2>&-`: the fd digits / '-' ARE the whole target. Do NOT read a
+          // further word (it would swallow a following refspec such as `HEAD:main`).
+          while (/[\d-]/.test(raw[i] ?? '')) i++;
+          out += ' ';
+          continue;
+        }
       }
       while (raw[i] === ' ' || raw[i] === '\t') i++;
       let target = '';
