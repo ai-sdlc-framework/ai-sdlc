@@ -24,6 +24,7 @@ import { isModeKey, modeForKey, type ModeId } from '../keymap.js';
 import { BlockersPane } from '../panes/blockers.js';
 import { PrsPane } from '../panes/prs.js';
 import { AnalyticsPane } from '../panes/analytics.js';
+import { UsagePane } from '../panes/usage.js';
 import { HelpScreen } from './help.js';
 import { DepsFullScreen } from './deps-full.js';
 import { ConfigBrowserPane } from '../config-browser/pane.js';
@@ -305,6 +306,8 @@ function ModeContent({
       return <AnalyticsPane />;
     case 'decisions':
       return <DecisionsPendingPane />;
+    case 'usage':
+      return <UsagePane />;
     case 'help':
       return <HelpScreen />;
     case 'overview':

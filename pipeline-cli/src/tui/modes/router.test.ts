@@ -35,6 +35,7 @@ describe('routeKey — mode-switch keys', () => {
     ['c', 'config'],
     ['a', 'analytics'],
     ['n', 'decisions'],
+    ['u', 'usage'],
     ['?', 'help'],
   ] as const)('%s switches to %s mode (consumed)', (key, mode) => {
     const actions = makeActions();

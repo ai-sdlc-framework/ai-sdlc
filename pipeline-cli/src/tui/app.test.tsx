@@ -56,11 +56,11 @@ describe('App (Overview Mode layout)', () => {
     expect(frame).toContain('pipeline self-driving');
   });
 
-  it('footer renders all 10 keystroke bindings', () => {
+  it('footer renders all 11 keystroke bindings', () => {
     const { lastFrame } = render(<App />);
     const frame = lastFrame() ?? '';
 
-    const expectedKeys = ['b', 'p', 'd', 'c', 'a', 'n', '/', 'r', '?', 'q'];
+    const expectedKeys = ['b', 'p', 'd', 'c', 'a', 'n', 'u', '/', 'r', '?', 'q'];
     expect(FOOTER_KEYS.map(([k]) => k)).toEqual(expectedKeys);
 
     for (const key of expectedKeys) {
@@ -77,6 +77,7 @@ describe('App (Overview Mode layout)', () => {
     expect(frame).toContain('PRs');
     expect(frame).toContain('quit');
     expect(frame).toContain('analytics');
+    expect(frame).toContain('usage');
   });
 });
 

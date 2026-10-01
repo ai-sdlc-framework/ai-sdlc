@@ -11,8 +11,20 @@ import { describe, expect, it } from 'vitest';
 import { KEYMAP, isModeKey, modeForKey } from './keymap.js';
 
 describe('KEYMAP', () => {
-  it('contains exactly 10 entries (b/p/d/c/a/n// /r/?/q)', () => {
-    expect(KEYMAP.map((b) => b.key)).toEqual(['b', 'p', 'd', 'c', 'a', 'n', '/', 'r', '?', 'q']);
+  it('contains exactly 11 entries (b/p/d/c/a/n/u// /r/?/q)', () => {
+    expect(KEYMAP.map((b) => b.key)).toEqual([
+      'b',
+      'p',
+      'd',
+      'c',
+      'a',
+      'n',
+      'u',
+      '/',
+      'r',
+      '?',
+      'q',
+    ]);
   });
 
   it('every binding has a non-empty footerLabel and description', () => {
@@ -22,9 +34,9 @@ describe('KEYMAP', () => {
     }
   });
 
-  it('mode-switch keys (b/p/d/c/a/n/?) carry a mode; others do not', () => {
+  it('mode-switch keys (b/p/d/c/a/n/u/?) carry a mode; others do not', () => {
     const modeKeys = KEYMAP.filter((b) => b.mode !== null).map((b) => b.key);
-    expect(modeKeys.sort()).toEqual(['?', 'a', 'b', 'c', 'd', 'n', 'p'].sort());
+    expect(modeKeys.sort()).toEqual(['?', 'a', 'b', 'c', 'd', 'n', 'p', 'u'].sort());
   });
 });
 
@@ -36,6 +48,7 @@ describe('modeForKey', () => {
     expect(modeForKey('c')).toBe('config');
     expect(modeForKey('a')).toBe('analytics');
     expect(modeForKey('n')).toBe('decisions');
+    expect(modeForKey('u')).toBe('usage');
     expect(modeForKey('?')).toBe('help');
   });
 
