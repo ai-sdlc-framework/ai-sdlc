@@ -944,6 +944,12 @@ describe('checkUsageIngest', () => {
 
 // ── Judgment layer ─────────────────────────────────────────────────────
 
+const hasControl = (t: string): boolean =>
+  [...t].some((ch) => {
+    const c = ch.codePointAt(0) ?? 0;
+    return c <= 0x1f || (c >= 0x7f && c <= 0x9f);
+  });
+
 describe('checkJudgmentLayer', () => {
   const ENFORCED = 'doctor.test-enforced';
   beforeAll(() => {
@@ -1023,6 +1029,18 @@ describe('checkJudgmentLayer', () => {
     expect(rs).toHaveLength(1);
     expect(rs[0].severity).toBe('pass');
     expect(rs[0].title).toMatch(/enabled/);
+  });
+
+  it('strips control characters from config-derived text in titles', () => {
+    const yaml = config(
+      `  provider: "jev"\n  model: "jev-1.13.0"\n  judgments:\n    "ev\\e[31mil.one":\n      mode: enforce\n`,
+    );
+    const rs = checkJudgmentLayer(ctxWith(yaml, { TYPESAFE_API_KEY: 'k' }));
+    const t = rs.find((r) => r.id === 'judgment-enforce-downgrade')!.title;
+    expect(t).toContain('evil.one'.replace('evil', 'ev[31mil'));
+    expect(hasControl(t)).toBe(false);
+    const unknown = checkJudgmentLayer(ctxWith(config('  provider: "my\\e[1mstery"\n')));
+    expect(hasControl(unknown[0].title)).toBe(false);
   });
 
   it('honours AI_SDLC_JUDGMENT=off and is registered', () => {

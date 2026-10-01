@@ -2,10 +2,12 @@
  * Content-addressed cache for judgment answers. One file per key under
  * `<artifactsDir>/_judgment/cache/`. The cache holds answers only (never the
  * state or the question text). Every read is validated; a corrupt, oversized,
- * symlinked or tampered file is a miss, never an error.
+ * symlinked, planted (wrong owner or non-private mode) or tampered file is a miss,
+ * never an error.
  */
 
 import {
+  chmodSync,
   closeSync,
   constants as fsConstants,
   fstatSync,
@@ -63,12 +65,40 @@ export function judgmentCacheKey(parts: JudgmentCacheKeyParts): string {
   );
 }
 
-/** Make a directory (mode 0700) and refuse a symlinked or non-directory path. */
+/** The current uid, or undefined where the platform has none (the cache is then disabled). */
+function currentUid(): number | undefined {
+  return typeof process.getuid === 'function' ? process.getuid() : undefined;
+}
+
+/**
+ * Make a directory (mode 0700) and verify it: a real directory, not a symlink,
+ * owned by the current user. An existing directory with group/other bits is
+ * tightened to 0700 when we own it; anything else is refused. Without a uid
+ * (non-POSIX) it is refused, so nothing is trusted.
+ */
 export function ensurePrivateDir(dir: string): boolean {
   try {
+    const uid = currentUid();
+    if (uid === undefined) return false;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const st = lstatSync(dir);
-    return st.isDirectory() && !st.isSymbolicLink();
+    if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== uid) return false;
+    if ((st.mode & 0o077) !== 0) chmodSync(dir, 0o700);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Verify an existing directory like `ensurePrivateDir`, without creating it. */
+function checkPrivateDir(dir: string): boolean {
+  try {
+    const uid = currentUid();
+    if (uid === undefined) return false;
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== uid) return false;
+    if ((st.mode & 0o077) !== 0) chmodSync(dir, 0o700);
+    return true;
   } catch {
     return false;
   }
@@ -77,11 +107,16 @@ export function ensurePrivateDir(dir: string): boolean {
 function readSmallFile(path: string): string | undefined {
   let fd: number | undefined;
   try {
+    const uid = currentUid();
+    if (uid === undefined) return undefined;
     const st = lstatSync(path);
     if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_CACHE_FILE_BYTES) return undefined;
     fd = openSync(path, fsConstants.O_RDONLY | NOFOLLOW);
     const fst = fstatSync(fd);
     if (!fst.isFile() || fst.size > MAX_CACHE_FILE_BYTES) return undefined;
+    // Only files this user wrote with private permissions are trusted: a checked-out
+    // or restored file (typically 0644) could be planted by someone else.
+    if (fst.uid !== uid || (fst.mode & 0o077) !== 0) return undefined;
     const buf = Buffer.alloc(fst.size);
     let off = 0;
     while (off < buf.length) {
@@ -111,6 +146,7 @@ export function createJudgmentCache(artifactsDir: string): JudgmentCache {
     get(key, validate) {
       try {
         if (!KEY_RE.test(key)) return undefined;
+        if (!checkPrivateDir(judgmentDir) || !checkPrivateDir(dir)) return undefined;
         const raw = readSmallFile(join(dir, `${key}.json`));
         if (raw === undefined) return undefined;
         const parsed = JSON.parse(raw) as Partial<JudgmentCacheEntry> & { key?: unknown };

@@ -19,7 +19,7 @@ import { resolveJudgmentConfig } from './config.js';
 import type { JudgmentDefinition } from './definition.js';
 import type { JudgmentAnswer } from './types.js';
 import { createJudgmentCache, judgmentCacheKey } from './cache.js';
-import { createJudgmentLogSink, judgmentLogPath } from './log-sink.js';
+import { createJudgmentLogSink, judgmentLogLine, judgmentLogPath } from './log-sink.js';
 import {
   BUILT_IN_JUDGMENT_PROVIDERS,
   createBuiltInJudgmentProvider,
@@ -433,5 +433,200 @@ describe('built-in providers', () => {
     expect(p?.modelId).toBe('jev-9.9.9');
     expect(registerBuiltInJudgmentProvider('jev')).toBe(true);
     expect(listJudgmentProviders()).toContain('jev');
+  });
+});
+
+describe('cache trust and normalisation', () => {
+  const run = (p: FakeJudgmentProvider, def = makeDef()) =>
+    evaluateJudgment(
+      def,
+      { text: 'a' },
+      {
+        config: cfg({ defaults: { cache: true } }),
+        getProvider: () => p,
+        cache: createJudgmentCache(dir),
+        sinks: [createJudgmentLogSink({ artifactsDir: dir })],
+      },
+    );
+  /** Run and return the answers the sink saw (post-normalisation). */
+  const runAnswers = async (p: FakeJudgmentProvider, def: ReturnType<typeof makeDef>) => {
+    let answers: Record<string, unknown> = {};
+    await evaluateJudgment(
+      def,
+      { text: 'a' },
+      {
+        config: cfg({ defaults: { cache: true } }),
+        getProvider: () => p,
+        cache: createJudgmentCache(dir),
+        sinks: [
+          createJudgmentLogSink({ artifactsDir: dir }),
+          { record: (r) => void (answers = (r.answers ?? {}) as Record<string, unknown>) },
+        ],
+      },
+    );
+    return answers;
+  };
+  const cacheFile = () => {
+    const cdir = join(dir, '_judgment', 'cache');
+    return join(cdir, readdirSync(cdir).filter((f) => f.endsWith('.json'))[0]);
+  };
+
+  it('treats a group/other-readable (planted or checked-out) file as a miss', async () => {
+    const p = costed();
+    await run(p);
+    chmodSync(cacheFile(), 0o644);
+    await run(p);
+    expect(p.requests).toHaveLength(2);
+  });
+
+  it('tightens an existing loose directory but still ignores a loose planted file', async () => {
+    const p = costed();
+    await run(p);
+    const file = cacheFile();
+    chmodSync(join(dir, '_judgment', 'cache'), 0o755);
+    chmodSync(join(dir, '_judgment'), 0o755);
+    chmodSync(file, 0o644);
+    await run(p);
+    expect(p.requests).toHaveLength(2);
+    expect(statSync(join(dir, '_judgment', 'cache')).mode & 0o077).toBe(0);
+    expect(statSync(join(dir, '_judgment')).mode & 0o077).toBe(0);
+  });
+
+  it('is disabled where no uid is available', async () => {
+    const p = costed();
+    await run(p);
+    const original = process.getuid;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (process as any).getuid = undefined;
+    try {
+      await run(p);
+    } finally {
+      process.getuid = original;
+    }
+    expect(p.requests).toHaveLength(2);
+  });
+
+  it('rebuilds cached answers from the question set: extra ids and fields are dropped', async () => {
+    const p = costed();
+    await run(p);
+    const file = cacheFile();
+    const entry = JSON.parse(readFileSync(file, 'utf8'));
+    entry.answers.zz = { type: 'noul', probability: 0.1 };
+    entry.answers.q1.evil = 'EXTRA-FIELD';
+    writeFileSync(file, JSON.stringify(entry));
+    const seen = await runAnswers(p, makeDef());
+    expect(p.requests).toHaveLength(1);
+    expect(Object.keys(seen)).toEqual(['q1']);
+    expect(JSON.stringify(seen)).not.toContain('EXTRA-FIELD');
+    expect(readFileSync(judgmentLogPath(dir, new Date()), 'utf8')).not.toContain('EXTRA-FIELD');
+  });
+
+  it('normalises choice and score answers', async () => {
+    const def = makeDef({
+      questions: () => ({
+        c: { type: 'choice', instructions: 'pick', options: { a: 'A', b: 'B' } },
+        s: { type: 'score', instructions: 'rate', levels: ['lo', 'hi'] },
+      }),
+    });
+    const p = new FakeJudgmentProvider({ modelId: 'fake-1.0' })
+      .script('c', {
+        type: 'choice',
+        choice: 'a',
+        probabilities: { a: 0.9, b: 0.1 },
+        confidence: 0.8,
+      })
+      .script('s', { type: 'score', score: 1, probabilities: [0.2, 0.8], confidence: 0.7 });
+    await run(p, def);
+    const file = cacheFile();
+    const entry = JSON.parse(readFileSync(file, 'utf8'));
+    entry.answers.c.probabilities.zzz = 0.5;
+    entry.answers.s.extra = 1;
+    writeFileSync(file, JSON.stringify(entry));
+    const seen = (await runAnswers(p, def)) as Record<string, { probabilities?: unknown }>;
+    expect(p.requests).toHaveLength(1);
+    expect(seen.c.probabilities).toEqual({ a: 0.9, b: 0.1 });
+    expect(seen.s).toEqual({ type: 'score', score: 1, probabilities: [0.2, 0.8], confidence: 0.7 });
+  });
+
+  it('caps oversized answers in the log line', () => {
+    const rec = {
+      ts: '2026-10-01T00:00:00Z',
+      judgmentId: 'j',
+      version: 1,
+      consumerLabel: 'j',
+      questionSetHash: null,
+      stateHash: null,
+      provider: null,
+      providerModelKey: null,
+      modelVersion: null,
+      mode: 'shadow' as const,
+      answers: { q: { type: 'noul' as const, probability: 0.5, pad: 'x'.repeat(100_000) } },
+      thresholds: null,
+      outcome: { kind: 'abstain' as const, reason: 'r' },
+      latencyMs: null,
+      inputTokens: null,
+      outputTokens: null,
+      called: false,
+      costUsd: null,
+      cacheHit: false,
+    };
+    expect(JSON.parse(judgmentLogLine(rec as never)).answers).toBe('[truncated]');
+  });
+});
+
+describe('token accounting', () => {
+  it('clamps negative token counts so cost is never negative', async () => {
+    const p = costed();
+    const base = p.evaluate.bind(p);
+    p.evaluate = async (r) => ({
+      ...(await base(r)),
+      usage: { inputTokens: -500, outputTokens: -1 },
+    });
+    const recs: {
+      inputTokens: number | null;
+      outputTokens: number | null;
+      costUsd: number | null;
+    }[] = [];
+    await evaluateJudgment(
+      makeDef(),
+      { text: 'a' },
+      {
+        config: cfg(),
+        getProvider: () => p,
+        sinks: [{ record: (r) => void recs.push(r) }],
+      },
+    );
+    expect(recs[0]).toMatchObject({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
+  });
+
+  it('records usage for a billed call whose answers were unusable', async () => {
+    const p = costed();
+    const base = p.evaluate.bind(p);
+    p.evaluate = async (r) => ({
+      ...(await base(r)),
+      answers: {},
+      usage: { inputTokens: 2000, outputTokens: 0 },
+    });
+    const recs: {
+      called: boolean;
+      inputTokens: number | null;
+      costUsd: number | null;
+      modelVersion: string | null;
+      outcome: unknown;
+    }[] = [];
+    const out = await evaluateJudgment(
+      makeDef(),
+      { text: 'a' },
+      {
+        config: cfg(),
+        getProvider: () => p,
+        sinks: [{ record: (r) => void recs.push(r) }],
+      },
+    );
+    expect(out).toEqual({ kind: 'abstain', reason: 'provider-error' });
+    expect(recs[0].called).toBe(true);
+    expect(recs[0].inputTokens).toBe(2000);
+    expect(recs[0].costUsd).toBeCloseTo((2000 * 0.042) / 1e6, 12);
+    expect(recs[0].modelVersion).toBe('fake-1.0');
   });
 });

@@ -200,6 +200,37 @@ export function answerMatches(q: JudgmentQuestion, a: JudgmentAnswer | undefined
   );
 }
 
+/**
+ * Rebuild an answer from the question set, keeping only known fields, so extra ids
+ * or fields in a cached entry never reach `compose` or the log.
+ */
+function normalizeAnswer(q: JudgmentQuestion, a: JudgmentAnswer): JudgmentAnswer {
+  if (q.type === 'noul') {
+    return { type: 'noul', probability: (a as { probability: number }).probability };
+  }
+  const ans = a as Exclude<JudgmentAnswer, { type: 'noul' }>;
+  if (q.type === 'choice') {
+    const c = ans as Extract<JudgmentAnswer, { type: 'choice' }>;
+    const probabilities: Record<string, number> = {};
+    for (const k of Object.keys(q.options)) {
+      if (Object.hasOwn(c.probabilities, k)) probabilities[k] = c.probabilities[k];
+    }
+    return { type: 'choice', choice: c.choice, probabilities, confidence: c.confidence };
+  }
+  const sc = ans as Extract<JudgmentAnswer, { type: 'score' }>;
+  return {
+    type: 'score',
+    score: sc.score,
+    probabilities: [...sc.probabilities],
+    confidence: sc.confidence,
+  };
+}
+
+/** A finite, non-negative token count, or null when the provider reported nothing usable. */
+function tokenCount(n: unknown): number | null {
+  return typeof n === 'number' && Number.isFinite(n) ? Math.max(0, n) : null;
+}
+
 async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -366,8 +397,12 @@ export async function evaluateJudgment<I, D>(
         Object.keys(questions).every((id) => answerMatches(questions[id], answers[id])),
       );
       if (hit && hit.modelVersion === model) {
+        const answers: Record<string, JudgmentAnswer> = {};
+        for (const id of Object.keys(questions)) {
+          answers[id] = normalizeAnswer(questions[id], hit.answers[id]);
+        }
         response = {
-          answers: hit.answers,
+          answers,
           modelVersion: hit.modelVersion,
           usage: { inputTokens: 0, outputTokens: 0 },
           latencyMs: 0,
@@ -385,6 +420,14 @@ export async function evaluateJudgment<I, D>(
       } catch {
         return await abstain('provider-error');
       }
+      // A billed call is recorded even when its answers turn out unusable.
+      rec.inputTokens = tokenCount(response?.usage?.inputTokens);
+      rec.outputTokens = tokenCount(response?.usage?.outputTokens);
+      rec.costUsd =
+        rec.inputTokens === null
+          ? null
+          : (rec.inputTokens * provider.capabilities.inputCostPer1MTokens) / 1_000_000;
+      if (typeof response?.modelVersion === 'string') rec.modelVersion = response.modelVersion;
       if (
         !response ||
         !response.answers ||
@@ -405,8 +448,8 @@ export async function evaluateJudgment<I, D>(
     rec.answers = response.answers;
     rec.modelVersion = response.modelVersion;
     rec.latencyMs = response.latencyMs;
-    rec.inputTokens = response.usage?.inputTokens ?? null;
-    rec.outputTokens = response.usage?.outputTokens ?? null;
+    rec.inputTokens = tokenCount(response.usage?.inputTokens);
+    rec.outputTokens = tokenCount(response.usage?.outputTokens);
     rec.costUsd =
       rec.inputTokens === null
         ? null

@@ -73,6 +73,15 @@ so run the check after you commit a config change.
 | `judgment-model-pin` | warn | A judgment is configured `enforce` while `spec.model` is missing or an alias such as `jev-latest`; the runtime runs it as `shadow`. Pin an exact version. |
 | `judgment-enforce-downgrade` | warn | An `enforce` judgment the runtime would run as `shadow`, with the reason (for example `no-thresholds`, `no-promotion`, `model-alias`, `uncalibrated-provider`, or `unknown-judgment`). |
 
+Judgment log contents: each evaluation appends one record to
+`$ARTIFACTS_DIR/_judgment/log-YYYY-MM-DD.jsonl`. The state text is never written, but
+`answers`, `outcome` and `incumbent` are (secret-redacted and size-capped), and the
+`reason` of a `JudgmentEscalated` event is too. Judgment authors must not put state
+fragments in an outcome's `decision`, `partial` or `reason`. `stateHash` is an unsalted
+SHA-256 of the state: do not export the log to a place where the hash could be used to
+confirm a guessed state. The answer cache (`_judgment/cache/`) only trusts files owned by
+the current user with no group or other permissions; anything else is ignored.
+
 **Deferred to a follow-up** (seed catalog items 4, 5, 6, 8, 9, 10 from the
 AISDLC-578 task body): JSON-schema validation of `.ai-sdlc/agent-role.yaml`
 and `.ai-sdlc/dor-config.yaml` against the existing schemas, a new

@@ -900,6 +900,16 @@ export function checkUsageIngest(ctx: DoctorRunContext): DoctorCheckResult {
  * pinned while any judgment is `enforce`, and each `enforce` judgment the
  * runtime would run as `shadow` (with the reason).
  */
+/** Remove control characters (C0, DEL, C1, including ESC) from config-derived text. */
+function cleanText(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c > 0x1f && (c < 0x7f || c > 0x9f)) out += ch;
+  }
+  return out;
+}
+
 export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
   const { env } = ctx.adapters;
   const config = loadJudgmentConfig({
@@ -926,7 +936,7 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
       {
         id: 'judgment-layer',
         severity: 'warn',
-        title: `judgment provider '${config.provider}' is not built in; every judgment abstains`,
+        title: `judgment provider '${cleanText(config.provider)}' is not built in; every judgment abstains`,
         remediation: 'Set `spec.provider` to a built-in provider (jev) in the judgment config.',
         anonymizableEvidence: { providerBuiltIn: false },
       },
@@ -937,7 +947,7 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
     results.push({
       id: 'judgment-provider-key',
       severity: 'warn',
-      title: `judgment provider '${provider.name}' is configured but ${provider.requires.envVar} is not set; every judgment abstains`,
+      title: `judgment provider '${cleanText(provider.name)}' is configured but ${provider.requires.envVar} is not set; every judgment abstains`,
       remediation: `Export ${provider.requires.envVar} in the environment that runs the pipeline.`,
       anonymizableEvidence: { provider: provider.name, keyPresent: false },
     });
@@ -951,7 +961,7 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
       results.push({
         id: 'judgment-model-pin',
         severity: 'warn',
-        title: `judgment model is ${config.model ? `the alias '${config.model}'` : 'not pinned'} while judgments are configured to enforce; they run as shadow`,
+        title: `judgment model is ${config.model ? `the alias '${cleanText(config.model)}'` : 'not pinned'} while judgments are configured to enforce; they run as shadow`,
         remediation: 'Set `spec.model` to an exact version such as jev-1.13.0.',
         anonymizableEvidence: { pinned: false, enforceCount: enforced.length },
       });
@@ -967,7 +977,7 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
       results.push({
         id: 'judgment-enforce-downgrade',
         severity: 'warn',
-        title: `judgment '${id}' is configured enforce but the runtime runs it as shadow (${reason})`,
+        title: `judgment '${cleanText(id)}' is configured enforce but the runtime runs it as shadow (${reason})`,
         remediation:
           'Add thresholds and a promotion record for this provider and model, or set the judgment to shadow.',
         anonymizableEvidence: { reason },
@@ -979,7 +989,7 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
     results.push({
       id: 'judgment-layer',
       severity: 'pass',
-      title: `judgment layer enabled (provider ${provider.name}, model ${config.model ?? provider.modelId})`,
+      title: `judgment layer enabled (provider ${cleanText(provider.name)}, model ${cleanText(config.model ?? provider.modelId)})`,
     });
   }
   return results;

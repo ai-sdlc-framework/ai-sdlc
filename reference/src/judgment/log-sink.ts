@@ -2,6 +2,12 @@
  * JSONL judgment log: one record per evaluation at
  * `<artifactsDir>/_judgment/log-YYYY-MM-DD.jsonl`. The state is never written,
  * only its hash. A write failure is swallowed.
+ *
+ * What is logged: `outcome`, `incumbent` and `answers` are written secret-redacted
+ * and size-capped, but they are written. Definition authors must not put state
+ * fragments in an outcome's `decision`, `partial` or `reason`. `stateHash` is an
+ * unsalted SHA-256 of the state; do not export the log to a place where that hash
+ * could be used to confirm a guessed state.
  */
 
 import { closeSync, constants as fsConstants, openSync, writeSync } from 'node:fs';
@@ -13,6 +19,7 @@ import type { JsonValue } from './types.js';
 
 const NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 const MAX_FIELD_CHARS = 4096;
+const MAX_ANSWERS_CHARS = 65_536;
 
 export interface JudgmentLogSinkOptions {
   artifactsDir: string;
@@ -26,13 +33,15 @@ export function judgmentLogPath(artifactsDir: string, date: Date): string {
 }
 
 /** JSON-safe, secret-redacted, size-capped copy of a caller- or definition-supplied value. */
-function sanitize(value: unknown): JsonValue {
+function sanitize(value: unknown, cap = MAX_FIELD_CHARS): JsonValue {
   if (value === undefined) return null;
   try {
     const text = JSON.stringify(value);
     if (text === undefined) return null;
+    // Cap on the raw text first: bounds the redaction work as well as the line size.
+    if (text.length > cap) return '[truncated]';
     const clean = redactJsonValue(JSON.parse(text) as JsonValue);
-    return JSON.stringify(clean).length > MAX_FIELD_CHARS ? '[truncated]' : clean;
+    return JSON.stringify(clean).length > cap ? '[truncated]' : clean;
   } catch {
     return '[unserializable]';
   }
@@ -51,7 +60,7 @@ export function judgmentLogLine(rec: JudgmentEvaluationRecord): string {
     configuredMode: rec.configuredMode ?? rec.mode,
     effectiveMode: rec.mode,
     downgradeReason: rec.downgradeReason ?? null,
-    answers: rec.answers,
+    answers: sanitize(rec.answers, MAX_ANSWERS_CHARS),
     thresholds: rec.thresholds,
     outcome: sanitize(rec.outcome),
     incumbent: sanitize(rec.incumbent),
