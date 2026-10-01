@@ -16,6 +16,8 @@
  * Top-level options for `executePipeline()` (Tier 2 composite entry point).
  */
 export interface PipelineOptions {
+  /** Pre-built judgment context (tests); defaults to the one loaded from the repo's config. */
+  judgment?: import('@ai-sdlc/reference').EvaluateJudgmentContext;
   /** Backlog task ID (e.g. "AISDLC-100.1"). Case-insensitive — internally normalised to lowercase. */
   taskId: string;
   /** Project root (where `backlog/`, `.ai-sdlc/`, `.worktrees/` live). Defaults to `process.cwd()`. */

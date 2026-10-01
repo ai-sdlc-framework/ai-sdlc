@@ -71,11 +71,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     opts.taskSpec && opts.sourceKind === undefined ? undefined : sourceKind;
   // RFC-0049 advisory judgments: with no judgment config the context has no
   // provider and every check below is a no-op.
-  const judgmentCtx = buildJudgmentContext({
-    workDir: opts.workDir,
-    taskId: opts.taskId,
-    sourceKind,
-  });
+  const judgmentCtx =
+    opts.judgment ??
+    buildJudgmentContext({
+      workDir: opts.workDir,
+      taskId: opts.taskId,
+      sourceKind,
+    });
 
   // Step 1 — Validate task.
   //
@@ -347,7 +349,11 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
 
     // Step 8 — aggregate
     const initialVerdict = await aggregateVerdicts({
-      grounding: { ctx: judgmentCtx, worktreePath: branch.worktreePath },
+      grounding: {
+        ctx: judgmentCtx,
+        worktreePath: branch.worktreePath,
+        ...(opts.runner ? { runner: opts.runner } : {}),
+      },
       verdicts: initialVerdicts,
       harnessNote: reviewBuild.harnessNote,
     });
@@ -429,8 +435,11 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       developerReturn: loop.finalDeveloperReturn,
       verdict: loop.finalVerdict,
       needsHumanAttention: loop.needsHumanAttention,
-      ...(parsedDev.acCoverage ? { acCoverage: parsedDev.acCoverage } : {}),
-      ...(initialVerdict.groundingAnnotations
+      // The advisory results describe the first dev run and first review round.
+      // After a review iteration the code and findings have changed, so they
+      // are not carried into the PR body.
+      ...(loop.iterations <= 1 && parsedDev.acCoverage ? { acCoverage: parsedDev.acCoverage } : {}),
+      ...(loop.iterations <= 1 && initialVerdict.groundingAnnotations
         ? { groundingAnnotations: initialVerdict.groundingAnnotations }
         : {}),
       runner: opts.runner,

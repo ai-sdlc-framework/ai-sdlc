@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,13 +14,17 @@ import {
 import {
   composeJudgmentNotes,
   getMergeBaseDiff,
+  estimateGroundingItemTokens,
   isFlaggedAnnotation,
   runAcCoverage,
   runFindingGrounding,
 } from './agent-output-checks.js';
 import { createJudgmentEventsSink } from './events-sink.js';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
-import { parseDeveloperReturn } from '../steps/06-parse-dev-return.js';
+import {
+  parseDeveloperReturn,
+  parseDeveloperReturnWithRetry,
+} from '../steps/06-parse-dev-return.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { ReviewerVerdict } from '../types.js';
 import type { Runner } from '../runtime/exec.js';
@@ -56,10 +61,36 @@ function enforceConfig(
 }
 
 let dir: string;
+const SAVED_GIT_ENV: Record<string, string | undefined> = {};
+const GIT_ENV_KEYS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'];
+function git(...args: string[]): void {
+  execFileSync(
+    'git',
+    ['-c', 'user.email=t@example.com', '-c', 'user.name=T', '-c', 'commit.gpgsign=false', ...args],
+    { cwd: dir, stdio: 'pipe' },
+  );
+}
+function commitAll(): void {
+  git('add', '-A');
+  git('commit', '-q', '-m', 'x');
+}
 beforeEach(() => {
+  for (const k of GIT_ENV_KEYS) {
+    SAVED_GIT_ENV[k] = process.env[k];
+    delete process.env[k];
+  }
   dir = mkdtempSync(join(tmpdir(), 'agent-output-checks-'));
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(dir, 'README.md'), 'x\n');
+  commitAll();
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  for (const k of GIT_ENV_KEYS) {
+    if (SAVED_GIT_ENV[k] === undefined) delete process.env[k];
+    else process.env[k] = SAVED_GIT_ENV[k];
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
 
 function harness(
   provider: FakeJudgmentProvider,
@@ -235,6 +266,7 @@ function writeFile(name: string, lines: number) {
     join(dir, name),
     Array.from({ length: lines }, (_, i) => `l${i + 1}`).join('\n') + '\n',
   );
+  commitAll();
 }
 
 const verdict = (
@@ -298,26 +330,37 @@ describe('review.finding-grounding', () => {
     expect(h.events.filter((e) => e.type === 'JudgmentEscalated')).toHaveLength(1);
   });
 
-  it('splits into several requests when the state budget requires it', async () => {
+  it('sends the packed batches as separate requests', async () => {
     writeFile('src/a.ts', 100);
-    const provider = new FakeJudgmentProvider({ capabilities: { maxStateTokens: 450 } })
-      .script('finding-0', choice('supports'))
-      .script('finding-1', choice('supports'))
-      .script('finding-2', choice('supports'));
-    const h = harness(provider, enforceConfig('review.finding-grounding', egress, provider));
-    // finding ids restart per request, so scripts cover every batch
     const findings = [10, 20, 30].map((line) => ({
       severity: 'minor' as const,
       file: 'src/a.ts',
       line,
       message: 'm',
     }));
+    // Two findings fit a request, the third does not: exactly [2, 1].
+    const one = estimateGroundingItemTokens({
+      id: 'finding-0',
+      agentId: 'code-reviewer',
+      findingIndex: 0,
+      claim: 'm',
+      file: 'src/a.ts',
+      line: 10,
+      excerptStart: 1,
+      excerpt: Array.from({ length: 41 }, (_, i) => `l${i + 1}`).join('\n'),
+    });
+    const provider = new FakeJudgmentProvider({
+      capabilities: { maxStateTokens: Math.floor(one * 2.6) },
+    });
+    for (const id of ['finding-0', 'finding-1', 'finding-2']) {
+      provider.script(id, choice('supports'));
+    }
+    const h = harness(provider, enforceConfig('review.finding-grounding', egress, provider));
     const ann = await runFindingGrounding([verdict('code-reviewer', findings)], {
       ctx: h.ctx,
       worktreePath: dir,
     });
-    expect(provider.requests.length).toBeGreaterThan(1);
-    expect(provider.requests.length).toBeLessThan(4);
+    expect(provider.requests.map((r) => Object.keys(r.questions).length)).toEqual([2, 1]);
     expect(ann).toHaveLength(3);
     expect(h.events).toHaveLength(0);
   });
@@ -380,7 +423,7 @@ describe('review.finding-grounding', () => {
         {
           ctx: h.ctx,
           worktreePath: dir,
-          readFile: () => {
+          readFile: async () => {
             throw new Error('boom');
           },
         },
@@ -389,7 +432,7 @@ describe('review.finding-grounding', () => {
   });
 
   it('reads a directory path as not found', async () => {
-    mkdirSync(join(dir, 'src'), { recursive: true });
+    writeFile('src/a.ts', 3);
     const provider = new FakeJudgmentProvider();
     const h = harness(provider, enforceConfig('review.finding-grounding', egress, provider));
     const ann = await runFindingGrounding(
@@ -516,9 +559,9 @@ describe('composeJudgmentNotes', () => {
     expect(notes).toContain('criterion 2');
     expect(notes).toContain('0.12');
     expect(notes).toContain('...');
-    expect(notes).toContain('a.ts:4 is contradicted');
-    expect(notes).toContain('b.ts:5 is unrelated');
-    expect(notes).toContain('c.ts:6 cites a location that was not found');
+    expect(notes).toContain('`a.ts:4` is contradicted');
+    expect(notes).toContain('`b.ts:5` is unrelated');
+    expect(notes).toContain('`c.ts:6` cites a location that was not found');
     expect(notes).not.toMatch(/AISDLC|RFC-\d|[A-Z]{2,}-\d+/);
     expect(
       isFlaggedAnnotation({
@@ -529,5 +572,66 @@ describe('composeJudgmentNotes', () => {
         relation: 'supports',
       }),
     ).toBe(false);
+  });
+});
+
+describe('acCoverage forwarding through parseDeveloperReturnWithRetry', () => {
+  const dev = {
+    summary: 'ok',
+    filesChanged: ['a.ts'],
+    commitSha: 'abc1234',
+    verifications: { build: 'passed', test: 'passed', lint: 'passed', format: 'passed' },
+    acceptanceCriteriaMet: [1],
+  };
+  const result = (parsed?: unknown, output = '') => ({
+    type: 'developer' as const,
+    output,
+    ...(parsed ? { parsed } : {}),
+    status: 'success' as const,
+    durationMs: 0,
+  });
+
+  it('runs on the initial parse', async () => {
+    const provider = new FakeJudgmentProvider().script('ac-0', noul(0.05));
+    const h = harness(provider, enforceConfig('dev.ac-coverage', ['code-diff'], provider));
+    let spawns = 0;
+    const r = await parseDeveloperReturnWithRetry({
+      initialResult: result(dev),
+      cwd: dir,
+      spawner: {
+        spawn: async () => {
+          spawns++;
+          return result(dev);
+        },
+        spawnParallel: async () => [],
+      },
+      acCoverage: { ctx: h.ctx, acceptanceCriteria: ['a'], getDiff: async () => 'd' },
+    });
+    expect(spawns).toBe(0);
+    expect(r.acCoverage?.uncovered).toBe(1);
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it('runs on the retry parse after a contract violation, exactly once', async () => {
+    const provider = new FakeJudgmentProvider().script('ac-0', noul(0.05));
+    const h = harness(provider, enforceConfig('dev.ac-coverage', ['code-diff'], provider));
+    const r = await parseDeveloperReturnWithRetry({
+      initialResult: result(undefined, 'Done, prose only'),
+      cwd: dir,
+      spawner: { spawn: async () => result(dev), spawnParallel: async () => [] },
+      acCoverage: { ctx: h.ctx, acceptanceCriteria: ['a'], getDiff: async () => 'd' },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.acCoverage?.uncovered).toBe(1);
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it('adds no key when the hook is absent', async () => {
+    const r = await parseDeveloperReturnWithRetry({
+      initialResult: result(dev),
+      cwd: dir,
+      spawner: { spawn: async () => result(dev), spawnParallel: async () => [] },
+    });
+    expect('acCoverage' in r).toBe(false);
   });
 });
