@@ -2,7 +2,7 @@
 id: AISDLC-640
 title: >-
   RFC-0049 docs: operator runbook, adopter opt-in guide and promotion runbook for the judgment layer
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
