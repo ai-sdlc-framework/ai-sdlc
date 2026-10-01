@@ -218,7 +218,6 @@ const SAFE_ARM_FLAGS = new Set([
   '--rebase',
   '--delete-branch',
   '-d',
-  '--admin',
 ]);
 // Flags that consume the NEXT token as their value (safe to skip both).
 const VALUE_FLAGS = new Set(['-R', '--repo']);
@@ -259,6 +258,12 @@ function enforceBash(command) {
   // command and must not be a side door around the sanctioned helper (denied
   // under every allowMerge value).
   enforceApiMergeGovernance(trimmed);
+
+  // Defense in depth: no legitimate command mentions the removed policy-root
+  // override, so any attempt to name it is refused.
+  if (/AI_SDLC_MERGE_POLICY_ROOT/i.test(trimmed)) {
+    deny('overriding the merge policy root is not a permitted action');
+  }
 
   // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
   // independent of whatever blockedActions patterns the project configured.

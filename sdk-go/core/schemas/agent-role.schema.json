@@ -234,9 +234,13 @@
         },
         "mergeAuthors": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$" },
+          "items": {
+            "type": "string",
+            "maxLength": 39,
+            "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$"
+          },
           "uniqueItems": true,
-          "description": "GitHub logins whose pull requests the deterministic merge gate (`cli-merge-if-eligible`) may merge when `allowMerge: onGreenClean`. Read only from the verified main checkout. Absent or empty means nobody: every merge is refused (fail closed)."
+          "description": "GitHub logins whose pull requests the deterministic merge gate (`cli-merge-if-eligible`) may merge when `allowMerge: onGreenClean`. Read only from the file as committed on origin/main in the verified main checkout. Logins have no leading, trailing or consecutive hyphens. Absent or empty means nobody: every merge is refused (fail closed)."
         },
         "operational": {
           "type": "array",

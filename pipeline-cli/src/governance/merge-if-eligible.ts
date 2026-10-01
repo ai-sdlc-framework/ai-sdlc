@@ -2,15 +2,10 @@
  * `merge-if-eligible` — deterministic merge gate (RFC-0048 Phase 3 / AISDLC-603).
  *
  * The green+CLEAN merge gate MUST live in a deterministic CLI helper, never
- * in LLM-honored command-body prose ("anything mechanical → hook/workflow,
- * never LLM" per the framework's governing principle). This module is that
- * helper's pure core: it resolves the repo's `spec.governance` policy
- * (AISDLC-601's resolver), evaluates a PR's real required-checks state +
- * `mergeStateStatus` + work-item `sourceKind` against that policy, and
- * refuses (with an auditable reason) unless every condition holds.
- *
- * AISDLC-602 will make this helper the ONLY merge route (its reconciled
- * hook blocks raw `gh pr merge`) — this task only builds the helper.
+ * in LLM-honored command-body prose. This module is that helper's core: it
+ * reads the repo's `spec.governance` policy, evaluates a PR's real check state
+ * + `mergeStateStatus` + provenance against that policy, and refuses (with an
+ * auditable reason) unless every condition holds.
  *
  * Design decisions:
  *
@@ -18,32 +13,34 @@
  *    of the caller-supplied `sourceKind` (kept as an additional input), the
  *    helper requires facts read from the PR itself: same-repo (not a fork),
  *    base branch `main`, an author on the policy's `mergeAuthors` allow-list,
- *    and a matching backlog task (see `evaluatePrTrust`). Policy and the
- *    allow-list are read ONLY from the verified main checkout.
- *  - **`sourceKind` is an explicit input, never inferred from PR content.**
- *    Every other AISDLC-393 call site (`composeTitle`, `composeBody` in
- *    `steps/11-push-and-pr.ts`) threads `sourceKind` through as an option
- *    supplied by the pipeline that knows the work item's provenance — this
- *    helper follows the same contract. Inferring trust from PR body/branch
- *    text (e.g. scanning for "Closes #") would let an adversarial PR spoof
- *    trust by copying that text; an explicit caller-supplied value keeps the
- *    trust boundary at the pipeline that actually dispatched the work.
- *  - **Fail-closed on every axis.** An unresolved/malformed policy resolves
- *    to `STRICT_DEFAULTS` (mirrors AISDLC-601). A `sourceKind` that isn't
- *    literally `'backlog'` is untrusted. An empty required-checks list is
- *    treated as a fetch/config problem and refused, not treated as
- *    vacuously green.
- *  - **All GitHub/gh calls go through the injectable `Runner` seam** (same
- *    pattern as `cli/pr-unstick.ts`), and policy resolution is injectable
- *    too, so hermetic tests never shell out or touch the filesystem.
+ *    a head commit authored by an allow-listed login, and a matching backlog
+ *    task (see `evaluatePrTrust`).
+ *  - **Policy comes from git, not a working tree.** The policy and allow-list
+ *    are read with `git show origin/main:.ai-sdlc/agent-role.yaml` in the
+ *    verified main checkout, so uncommitted edits (or a worktree copy) are
+ *    ignored, and the resolver is implemented natively here: no plugin file
+ *    chosen through an environment variable is ever loaded for this decision.
+ *    There is no argv or environment override of the policy root; tests inject
+ *    one programmatically through the exported builder.
+ *  - **Checks are bound to the head commit.** The check runs and statuses are
+ *    queried for the exact `headRefOid` read from the PR, the head is re-read
+ *    before merging, and the merge itself carries `--match-head-commit`.
+ *  - **Fail-closed on every axis.** An unreadable/malformed policy resolves to
+ *    `STRICT_DEFAULTS`. A `sourceKind` that isn't literally `'backlog'` is
+ *    untrusted. An empty checks list is refused, never vacuously green.
+ *  - **All GitHub/git calls go through the injectable `Runner` seam**, so
+ *    hermetic tests never touch the network.
+ *
+ * Residuals (also in docs/api-reference/governance.md): this is a local CLI,
+ * so an agent that can edit the CLI/plugin code in its own checkout is not
+ * bound by it; GitHub-side protections remain essential.
  *
  * @module governance/merge-if-eligible
  */
 
-import { createRequire } from 'node:module';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { Runner } from '../runtime/exec.js';
 
 // ── Governance policy types (mirrors ai-sdlc-plugin/hooks/lib/governance-resolver.js) ──
@@ -67,201 +64,26 @@ export const STRICT_DEFAULTS: GovernancePolicy = Object.freeze({
   allowResetHard: false,
 });
 
-interface GovernanceResolverModule {
-  resolveGovernanceFromYaml(yamlText: string): GovernancePolicy;
-  /** Absent on older installed plugin versions — the allow-list then resolves to `[]` (refuse). */
-  resolveMergeAuthorsFromYaml?(yamlText: string): string[];
-}
+// ── Verified main checkout (native; never loads plugin code) ────────────
 
-/** The slice of `hooks/lib/trusted-policy.js` this module uses. */
-export interface TrustedPolicyModule {
-  verifiedMainRoot(dir: string): string | null;
-}
+/** Sync git runner used only to verify the main checkout; null on any failure. */
+export type GitSync = (args: string[], cwd: string) => string | null;
 
-// ── Installed-plugin resolver-path resolution (AISDLC-607 Defect 1) ─────
-
-/**
- * Numeric, dot-separated version compare. Missing/non-numeric segments sort
- * as 0. Mirrors `agent-dir-resolver.ts`'s `compareVersionStrings` (AISDLC-583)
- * — duplicated rather than imported so this module has no cross-directory
- * coupling to the attestation package for a two-line helper.
- */
-function compareVersionStrings(a: string, b: string): number {
-  const pa = a.split('.').map((n) => Number.parseInt(n, 10));
-  const pb = b.split('.').map((n) => Number.parseInt(n, 10));
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i += 1) {
-    const va = Number.isFinite(pa[i]) ? pa[i] : 0;
-    const vb = Number.isFinite(pb[i]) ? pb[i] : 0;
-    if (va !== vb) return va - vb;
-  }
-  return 0;
-}
-
-/** Default plugin-cache root: `~/.claude/plugins/cache`. */
-export function defaultPluginCacheRoot(): string {
-  return join(homedir(), '.claude', 'plugins', 'cache');
-}
-
-/**
- * Walk `<cacheRoot>/<marketplace>/ai-sdlc/<version>/hooks/lib/governance-resolver.js`
- * across every marketplace cache dir, returning the highest-version match (or
- * `null` when the cache root doesn't exist or nothing matches).
- *
- * `cacheRoot` is injectable so the walk is deterministic in hermetic tests
- * (CI runners have no real `~/.claude/plugins/cache`) — mirrors
- * `highestVersionCacheAgentsDir` in `attestation/agent-dir-resolver.ts`
- * (AISDLC-583).
- */
-export function highestVersionCacheGovernanceResolverPath(
-  cacheRoot: string = defaultPluginCacheRoot(),
-): string | null {
-  if (!existsSync(cacheRoot)) return null;
-
-  let marketplaces: string[];
+const defaultGitSync: GitSync = (args, cwd) => {
   try {
-    // Filter to directories: a stray file at the marketplace level would be
-    // skipped by the downstream existsSync guards anyway, but the explicit
-    // filter makes the walk's intent clear.
-    marketplaces = readdirSync(cacheRoot, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
+    return (
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 5000,
+        env: { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined },
+      }).trim() || null
+    );
   } catch {
     return null;
   }
-
-  let best: { version: string; path: string } | null = null;
-  for (const marketplace of marketplaces) {
-    const versionsDir = join(cacheRoot, marketplace, 'ai-sdlc');
-    if (!existsSync(versionsDir)) continue;
-    let versions: string[];
-    try {
-      versions = readdirSync(versionsDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    } catch {
-      continue;
-    }
-    for (const version of versions) {
-      const candidate = join(versionsDir, version, 'hooks', 'lib', 'governance-resolver.js');
-      if (!existsSync(candidate)) continue;
-      if (!best || compareVersionStrings(version, best.version) > 0) {
-        best = { version, path: candidate };
-      }
-    }
-  }
-  return best?.path ?? null;
-}
-
-/**
- * Resolve the INSTALLED Claude Code plugin's `governance-resolver.js` path
- * (AISDLC-607 Defect 1). A marketplace/npm consumer install never has
- * `ai-sdlc-plugin` as a sibling of `pipeline-cli/` — the pre-fix monorepo-only
- * lookup returned `null` on 100% of adopter repos, silently downgrading a
- * correctly-configured `allowMerge: onGreenClean` policy to `STRICT_DEFAULTS`.
- *
- * Resolution order (first existing match wins):
- *   1. `$CLAUDE_PLUGIN_ROOT/hooks/lib/governance-resolver.js` /
- *      `$CLAUDE_PLUGIN_DIR/hooks/lib/governance-resolver.js` — set by the
- *      Claude Code harness for a standard marketplace install.
- *   2. `~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/hooks/lib/governance-resolver.js`
- *      — the plugin cache probe; highest installed version wins.
- *
- * Returns `null` when neither resolves — never throws. The caller
- * (`loadGovernanceResolverModule`) falls back to the monorepo-sibling path
- * (dogfood), then finally to `null` (fail-closed to `STRICT_DEFAULTS`).
- */
-export function resolveInstalledPluginGovernanceResolverPath(cacheRoot?: string): string | null {
-  for (const pluginDir of [process.env['CLAUDE_PLUGIN_ROOT'], process.env['CLAUDE_PLUGIN_DIR']]) {
-    if (!pluginDir) continue;
-    const candidate = join(pluginDir, 'hooks', 'lib', 'governance-resolver.js');
-    if (existsSync(candidate)) return candidate;
-  }
-  return highestVersionCacheGovernanceResolverPath(cacheRoot);
-}
-
-/**
- * Locate AISDLC-601's CJS resolver module. Tries, in order: the INSTALLED
- * plugin (env-var-pointed or cache-probed — AISDLC-607 Defect 1), then the
- * monorepo-sibling path (`<repo-root>/ai-sdlc-plugin/hooks/lib/governance-resolver.js`,
- * one level above `pkgRoot`, dogfood-only). Returns `null` when NEITHER
- * resolves — e.g. an adopter repo with no plugin install signal at all.
- * Callers fail closed to `STRICT_DEFAULTS` in that case (see
- * `resolveRepoGovernancePolicy`) — this preserves AC-2's fail-closed
- * guarantee; only the false-negative (resolver present in an installed
- * plugin but not found) is fixed.
- *
- * `locateGovernanceResolverPaths` returns EVERY existing candidate in that
- * preference order (installed plugin first, then the monorepo sibling).
- */
-export function locateGovernanceResolverPaths(pkgRoot: string, cacheRoot?: string): string[] {
-  const installedCandidate = resolveInstalledPluginGovernanceResolverPath(cacheRoot);
-  const monorepoCandidate = join(
-    pkgRoot,
-    '..',
-    'ai-sdlc-plugin',
-    'hooks',
-    'lib',
-    'governance-resolver.js',
-  );
-  const out: string[] = [];
-  if (installedCandidate) out.push(installedCandidate);
-  if (existsSync(monorepoCandidate) && monorepoCandidate !== installedCandidate) {
-    out.push(monorepoCandidate);
-  }
-  return out;
-}
-
-export function loadGovernanceResolverModule(
-  pkgRoot: string,
-  cacheRoot?: string,
-): GovernanceResolverModule | null {
-  const candidate = locateGovernanceResolverPaths(pkgRoot, cacheRoot)[0];
-  if (!candidate) return null;
-  const require = createRequire(import.meta.url);
-  return require(candidate) as GovernanceResolverModule;
-}
-
-/**
- * Load `trusted-policy.js` from the first plugin `hooks/lib` directory (same
- * installed-plugin then monorepo-sibling order as the resolver) that has one:
- * an older installed plugin without it falls through to the next candidate.
- * `null` when none loads: the caller then cannot establish a verified main
- * checkout and MUST refuse (fail closed).
- */
-export function loadTrustedPolicyModule(
-  pkgRoot: string,
-  cacheRoot?: string,
-): TrustedPolicyModule | null {
-  const require = createRequire(import.meta.url);
-  for (const resolverPath of locateGovernanceResolverPaths(pkgRoot, cacheRoot)) {
-    const candidate = join(dirname(resolverPath), 'trusted-policy.js');
-    if (!existsSync(candidate)) continue;
-    try {
-      const mod = require(candidate) as Partial<TrustedPolicyModule>;
-      if (typeof mod.verifiedMainRoot === 'function') return mod as TrustedPolicyModule;
-    } catch {
-      // try the next candidate
-    }
-  }
-  return null;
-}
-
-/**
- * TEST-ONLY escape hatch. When set to exactly `1`, an explicit `--repo-root`
- * is honoured instead of the verified main checkout. Production invocations
- * never set this; without it `--repo-root` is ignored.
- */
-export const TEST_ONLY_POLICY_ROOT_ENV = 'AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS';
-
-export interface TrustedRootResult {
-  /** The verified main checkout, or `null` when none could be established. */
-  root: string | null;
-  /** Why `root` is null (empty when it is set). */
-  reason: string;
-  /** True when the test-only override supplied `root`. */
-  testOverride: boolean;
-}
+};
 
 function safeReal(p: string): string {
   try {
@@ -272,129 +94,201 @@ function safeReal(p: string): string {
 }
 
 /**
- * Establish the trusted policy root. Production: the MAIN checkout (git common
- * dir, cross-checked against the filesystem by `verifiedMainRoot`) of the repo
- * that contains the running CLI (`anchorDir`), and it must be the SAME main
- * checkout the invocation's `cwd` belongs to — otherwise an agent could `cd`
- * into a repo it controls and have that repo's policy honoured. A missing or
- * unverifiable main root yields `root: null` (the caller refuses).
- *
- * The `--repo-root` override is honoured only when `AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1`.
+ * Main checkout root of the repo `dir` belongs to: the parent of the git COMMON
+ * dir, accepted only when `<root>/.git` is a real directory (not a file or
+ * symlink: the `.git` file / gitdir / commondir chain of a worktree is
+ * writable by the governed agent). Anything else returns null (fail closed).
+ */
+export function verifiedMainRoot(dir: string, git: GitSync = defaultGitSync): string | null {
+  const common = git(['rev-parse', '--git-common-dir'], dir);
+  if (!common) return null;
+  const dotGit = resolve(dir, common);
+  if (basename(dotGit) !== '.git') return null;
+  try {
+    const st = lstatSync(dotGit);
+    if (!st.isDirectory() || st.isSymbolicLink()) return null;
+  } catch {
+    return null;
+  }
+  return dirname(dotGit);
+}
+
+export interface TrustedRootResult {
+  /** The verified main checkout, or `null` when none could be established. */
+  root: string | null;
+  /** Why `root` is null (empty when it is set). */
+  reason: string;
+}
+
+/**
+ * Establish the trusted root: the MAIN checkout of the repo that contains the
+ * running CLI (`anchorDir`), which must be the SAME main checkout the
+ * invocation's `cwd` belongs to, otherwise an agent could `cd` into a repo it
+ * controls. A missing or unverifiable root yields `root: null` (refuse). There
+ * is deliberately no flag or environment variable that supplies a root.
  */
 export function resolveTrustedMainRoot(opts: {
   cwd: string;
   anchorDir: string;
-  repoRootOverride?: string;
-  trustedModule: TrustedPolicyModule | null;
-  env?: NodeJS.ProcessEnv;
+  git?: GitSync;
 }): TrustedRootResult {
-  const env = opts.env ?? process.env;
-  if (env[TEST_ONLY_POLICY_ROOT_ENV] === '1' && opts.repoRootOverride) {
-    return { root: opts.repoRootOverride, reason: '', testOverride: true };
-  }
-  const refuse = (reason: string): TrustedRootResult => ({
-    root: null,
-    reason,
-    testOverride: false,
-  });
-  if (!opts.trustedModule) {
-    return refuse(
-      'the trusted-policy helper (plugin hooks/lib/trusted-policy.js) could not be loaded',
-    );
-  }
-  let anchorMain: string | null;
-  let cwdMain: string | null;
-  try {
-    anchorMain = opts.trustedModule.verifiedMainRoot(opts.anchorDir);
-    cwdMain = opts.trustedModule.verifiedMainRoot(opts.cwd);
-  } catch {
-    return refuse('verifying the main checkout failed');
-  }
+  const anchorMain = verifiedMainRoot(opts.anchorDir, opts.git);
   if (!anchorMain) {
-    return refuse('could not verify the main checkout of the repo containing this CLI');
+    return {
+      root: null,
+      reason: 'could not verify the main checkout of the repo containing this CLI',
+    };
   }
+  const cwdMain = verifiedMainRoot(opts.cwd, opts.git);
   if (!cwdMain || safeReal(cwdMain) !== safeReal(anchorMain)) {
-    return refuse(
-      'the working directory does not belong to the same verified main checkout as this CLI',
-    );
+    return {
+      root: null,
+      reason:
+        'the working directory does not belong to the same verified main checkout as this CLI',
+    };
   }
-  return { root: anchorMain, reason: '', testOverride: false };
+  return { root: anchorMain, reason: '' };
+}
+
+/** `git` args pinned to the verified checkout's own git dir (ignores GIT_DIR in the environment). */
+function gitArgs(repoRoot: string, args: string[]): string[] {
+  return ['--git-dir', join(repoRoot, '.git'), ...args];
 }
 
 /**
- * Resolve the repo's governance policy from a TRUSTED base-branch checkout.
- *
- * `repoRoot` MUST point at the operator/base checkout on disk — NOT a PR
- * worktree — so the governed party can never relax its own rules by editing
- * `.ai-sdlc/agent-role.yaml` inside the PR diff (mirrors the trust-boundary
- * contract documented in `governance-resolver.js`'s file header and honored
- * by every existing caller, `session-start.js` / `subagent-start.js`).
- *
- * Absent `agent-role.yaml`, absent `governance:` block, or an unresolvable
- * resolver module all fail closed to `STRICT_DEFAULTS` — never a laxer
- * default.
+ * Read a file as committed on `origin/main` (`git show`), never from the
+ * working tree. `null` when git or the ref/path is unavailable (fail closed).
  */
-export function resolveRepoGovernancePolicy(
+export async function readFileFromOriginMain(
   repoRoot: string,
-  pkgRoot: string,
-  resolverModule?: GovernanceResolverModule | null,
-): GovernancePolicy {
-  const mod = resolverModule !== undefined ? resolverModule : loadGovernanceResolverModule(pkgRoot);
-  if (!mod) return { ...STRICT_DEFAULTS };
+  path: string,
+  runner: Runner,
+): Promise<string | null> {
+  const out = await runner('git', gitArgs(repoRoot, ['show', `origin/main:${path}`]), {
+    cwd: repoRoot,
+    allowFailure: true,
+  });
+  return out.code === 0 ? out.stdout : null;
+}
 
-  const agentRolePath = join(repoRoot, '.ai-sdlc', 'agent-role.yaml');
-  let yamlText = '';
-  if (existsSync(agentRolePath)) {
-    try {
-      yamlText = readFileSync(agentRolePath, 'utf-8');
-    } catch {
-      yamlText = '';
+/** Backlog task id prefix from `backlog/config.yml` `task_prefix` on origin/main; default `AISDLC`. */
+export async function readTaskPrefix(repoRoot: string, runner: Runner): Promise<string> {
+  const text = await readFileFromOriginMain(repoRoot, 'backlog/config.yml', runner);
+  const m = text ? /^task_prefix:\s*['"]?([A-Za-z][A-Za-z0-9]*)['"]?\s*$/m.exec(text) : null;
+  return m?.[1] ?? 'AISDLC';
+}
+
+// ── Native governance resolution (mirrors ai-sdlc-plugin/hooks/lib/governance-resolver.js) ──
+
+const LIST_KEYS = new Set(['operational', 'protectedBranches', 'mergeAuthors']);
+const BOOLEAN_KEYS = [
+  'allowForcePush',
+  'allowClosePrIssue',
+  'allowBranchDelete',
+  'allowResetHard',
+] as const;
+const LOGIN_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+
+/** Extract the raw `governance:` block (scalars and the known list keys); null when absent. */
+export function parseGovernanceBlock(yamlText: string): Record<string, unknown> | null {
+  let govIndent: number | null = null;
+  const raw: Record<string, unknown> = {};
+  let found = false;
+  let listKey: string | null = null;
+
+  for (const line of yamlText.split('\n')) {
+    if (govIndent === null) {
+      const m = /^(\s*)governance:\s*$/.exec(line);
+      if (m) {
+        govIndent = m[1].length;
+        found = true;
+      }
+      continue;
     }
+    if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;
+    const indent = /^(\s*)/.exec(line)![1].length;
+    if (indent <= govIndent) break;
+
+    const item = /^\s*-\s+(.*)$/.exec(line);
+    if (item) {
+      if (listKey) {
+        const v = item[1]
+          .replace(/\s+#.*$/, '')
+          .trim()
+          .replace(/^['"]/, '')
+          .replace(/['"]$/, '');
+        (raw[listKey] as string[]).push(v);
+      }
+      continue;
+    }
+    listKey = null;
+
+    const kv = /^\s*([A-Za-z0-9_]+):\s*(.*)$/.exec(line);
+    if (!kv) continue;
+    const key = kv[1];
+    let value = kv[2].replace(/\s+#.*$/, '').trim();
+    if (value === '') {
+      if (LIST_KEYS.has(key)) {
+        raw[key] = [];
+        listKey = key;
+      }
+      continue;
+    }
+    if (LIST_KEYS.has(key)) {
+      const inline = /^\[(.*)\]$/.exec(value);
+      raw[key] = inline
+        ? inline[1]
+            .split(',')
+            .map((x) => x.trim().replace(/^['"]/, '').replace(/['"]$/, ''))
+            .filter((x) => x !== '')
+        : [value];
+      continue;
+    }
+    value = value.replace(/^['"]/, '').replace(/['"]$/, '');
+    raw[key] = value === 'true' ? true : value === 'false' ? false : value;
   }
-  try {
-    return mod.resolveGovernanceFromYaml(yamlText);
-  } catch {
-    return { ...STRICT_DEFAULTS };
-  }
+  return found ? raw : null;
 }
 
 /**
- * Read the `spec.governance.mergeAuthors` allow-list (GitHub logins whose PRs
- * the agent may merge) from the SAME trusted main-checkout `agent-role.yaml`
- * as the policy. Absent key, malformed value, missing resolver support or an
- * unreadable file all yield `[]`, and an empty list refuses every merge.
+ * Resolve the merge-relevant governance policy and the `mergeAuthors`
+ * allow-list from committed `agent-role.yaml` text. Unknown/malformed values
+ * fall back to the strict defaults; malformed logins are dropped; absent or
+ * empty `mergeAuthors` trusts nobody.
  */
-export function resolveRepoMergeAuthors(
-  repoRoot: string,
-  pkgRoot: string,
-  resolverModule?: GovernanceResolverModule | null,
-): string[] {
-  let mod: GovernanceResolverModule | null | undefined = resolverModule;
-  if (mod === undefined) {
-    // An older installed plugin may predate the allow-list: use the first
-    // candidate resolver that supports it.
-    mod = null;
-    const require = createRequire(import.meta.url);
-    for (const path of locateGovernanceResolverPaths(pkgRoot)) {
-      try {
-        const candidate = require(path) as GovernanceResolverModule;
-        if (typeof candidate.resolveMergeAuthorsFromYaml === 'function') {
-          mod = candidate;
-          break;
-        }
-      } catch {
-        // try the next candidate
+export function resolveGovernanceFromYaml(yamlText: string): {
+  policy: GovernancePolicy;
+  mergeAuthors: string[];
+} {
+  const policy: GovernancePolicy = { ...STRICT_DEFAULTS };
+  const raw = parseGovernanceBlock(yamlText);
+  if (!raw) return { policy, mergeAuthors: [] };
+
+  if (raw['preset'] === 'operator-trusted') policy.allowMerge = 'onGreenClean';
+  if (raw['allowMerge'] === 'never' || raw['allowMerge'] === 'onGreenClean') {
+    policy.allowMerge = raw['allowMerge'];
+  }
+  for (const key of BOOLEAN_KEYS) {
+    if (typeof raw[key] === 'boolean') policy[key] = raw[key] as boolean;
+  }
+  if (raw['allowForcePush'] === 'leaseOnOwnBranch') policy.allowForcePush = true;
+  else if (raw['allowForcePush'] === 'never') policy.allowForcePush = false;
+
+  const mergeAuthors: string[] = [];
+  const list = raw['mergeAuthors'];
+  if (Array.isArray(list)) {
+    for (const entry of list) {
+      if (
+        typeof entry === 'string' &&
+        entry.length <= 39 &&
+        LOGIN_RE.test(entry) &&
+        !mergeAuthors.some((x) => x.toLowerCase() === entry.toLowerCase())
+      ) {
+        mergeAuthors.push(entry);
       }
     }
   }
-  if (!mod || typeof mod.resolveMergeAuthorsFromYaml !== 'function') return [];
-  try {
-    const text = readFileSync(join(repoRoot, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
-    const list = mod.resolveMergeAuthorsFromYaml(text);
-    return Array.isArray(list) ? list.filter((x) => typeof x === 'string' && x !== '') : [];
-  } catch {
-    return [];
-  }
+  return { policy, mergeAuthors };
 }
 
 // ── Work-item trust boundary (OQ-2) ─────────────────────────────────────
@@ -483,21 +377,22 @@ export async function fetchPrSnapshot(
   }
 }
 
-const TASK_ID_BODY = '[A-Za-z][A-Za-z0-9]*-\\d+(?:\\.\\d+)*';
-const BRANCH_TASK_ID = new RegExp(`^ai-sdlc/(${TASK_ID_BODY})(?:-|$)`);
-const TITLE_TASK_ID = new RegExp(`\\((${TASK_ID_BODY})\\)\\s*$`);
-
 /**
- * Derive the backlog task id for a PR from its head branch (`ai-sdlc/<id>-...`,
- * the repo's branch convention) and/or its title (trailing `(<ID>)`). When both
+ * Derive the backlog task id for a PR from its head branch (`ai-sdlc/<ID>-...`,
+ * the repo's branch convention) and/or its title (trailing `(<ID>)`). The id
+ * must have the repo's backlog shape: `<prefix>-<number>[.<number>...]` with the
+ * prefix from `backlog/config.yml` (`task_prefix`, default `AISDLC`), so
+ * `issue-N` / `gh-issue-N` style ids never qualify. When both branch and title
  * yield an id they must agree. Neither → `null`.
  */
 export function deriveTaskId(
   headRefName: string,
   title: string,
+  prefix = 'AISDLC',
 ): { taskId: string | null; conflict?: string } {
-  const fromBranch = BRANCH_TASK_ID.exec(headRefName)?.[1];
-  const fromTitle = TITLE_TASK_ID.exec(title.trim())?.[1];
+  const body = `${escapeRegExp(prefix)}-\\d+(?:\\.\\d+)*`;
+  const fromBranch = new RegExp(`^ai-sdlc/(${body})(?:-|$)`, 'i').exec(headRefName)?.[1];
+  const fromTitle = new RegExp(`\\((${body})\\)\\s*$`, 'i').exec(title.trim())?.[1];
   if (fromBranch && fromTitle && fromBranch.toLowerCase() !== fromTitle.toLowerCase()) {
     return {
       taskId: null,
@@ -526,7 +421,15 @@ export async function taskFileOnOriginMain(
 ): Promise<boolean> {
   const out = await runner(
     'git',
-    ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/tasks', 'backlog/completed'],
+    gitArgs(repoRoot, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      'origin/main',
+      '--',
+      'backlog/tasks',
+      'backlog/completed',
+    ]),
     { cwd: repoRoot, allowFailure: true },
   );
   if (out.code !== 0) return false;
@@ -534,20 +437,66 @@ export async function taskFileOnOriginMain(
 }
 
 /**
+ * Author and committer logins of a commit, read from the REST commits API for
+ * that exact SHA. A login is `null` when GitHub cannot link the commit email to
+ * an account. These are commit METADATA (set by whoever made the commit), not
+ * authentication: they narrow who can look like an allow-listed author, but
+ * the author allow-list on the PR plus GitHub-side protections are the real
+ * signals.
+ */
+export async function fetchCommitLogins(
+  sha: string,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<{ author: string | null; committer: string | null } | null> {
+  const out = await runner(
+    'gh',
+    [
+      'api',
+      `repos/${repoSlug}/commits/${sha}`,
+      '--jq',
+      '{author: .author.login, committer: .committer.login}',
+    ],
+    { cwd, allowFailure: true },
+  );
+  if (out.code !== 0) return null;
+  try {
+    const p = JSON.parse(out.stdout) as { author?: unknown; committer?: unknown };
+    return {
+      author: typeof p.author === 'string' ? p.author : null,
+      committer: typeof p.committer === 'string' ? p.committer : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Evaluate the GitHub-derived trust facts. Returns a refusal reason, or `null`
  * when every fact holds:
  *   - same-repo PR (`isCrossRepository === false`) — fork PRs refused;
  *   - base branch is exactly `main`;
- *   - author login is on the (non-empty) `mergeAuthors` allow-list;
- *   - a backlog task matching the id derived from the branch/title exists on
- *     `origin/main` OR is added by the PR's own diff (the repo convention is
- *     that a task file is created and completed in the same PR).
+ *   - PR author login is on the (non-empty) `mergeAuthors` allow-list;
+ *   - a backlog task with the repo's id shape, derived from the branch/title,
+ *     exists on `origin/main` OR is added by the PR's own diff. A PR that adds
+ *     its own task file is accepted because the repo creates and completes a
+ *     task in one PR; that makes the task a provenance hint, NOT a trust
+ *     signal. The author allow-list is the real signal;
+ *   - the head commit's author login (resolved by GitHub) is on the allow-list;
+ *     an unlinked/unknown author refuses.
+ * Note: `files` from `gh pr view --json` is capped by GitHub (about 100
+ * entries). A task file beyond the cap is missed in the PR diff, which can only
+ * turn into a refusal (the origin/main check then decides).
  */
 export async function evaluatePrTrust(args: {
   snapshot: PrSnapshot;
   mergeAuthors: string[];
   repoRoot: string;
+  repoSlug: string;
+  taskPrefix: string;
   runner: Runner;
+  cwd?: string;
 }): Promise<string | null> {
   const { snapshot: pr, mergeAuthors } = args;
   if (pr.isCrossRepository !== false) {
@@ -558,20 +507,21 @@ export async function evaluatePrTrust(args: {
   }
   if (mergeAuthors.length === 0) {
     return (
-      'no spec.governance.mergeAuthors allow-list is configured in the verified main checkout ' +
-      '.ai-sdlc/agent-role.yaml — refusing (fail-closed; an empty list trusts nobody)'
+      'no spec.governance.mergeAuthors allow-list is configured in .ai-sdlc/agent-role.yaml on ' +
+      'origin/main — refusing (fail-closed; an empty list trusts nobody)'
     );
   }
-  const author = pr.authorLogin.toLowerCase();
-  if (!mergeAuthors.some((a) => a.toLowerCase() === author)) {
+  const allowed = (login: string) =>
+    mergeAuthors.some((a) => a.toLowerCase() === login.toLowerCase());
+  if (!allowed(pr.authorLogin)) {
     return `PR author "${pr.authorLogin}" is not on the spec.governance.mergeAuthors allow-list`;
   }
-  const derived = deriveTaskId(pr.headRefName, pr.title);
+  const derived = deriveTaskId(pr.headRefName, pr.title, args.taskPrefix);
   if (derived.conflict) return `ambiguous task id: ${derived.conflict}`;
   if (!derived.taskId) {
     return (
-      `no backlog task id could be derived from head branch "${pr.headRefName}" ` +
-      '(expected ai-sdlc/<id>-...) or the PR title (trailing "(<ID>)")'
+      `no backlog task id (${args.taskPrefix}-<n>[.<n>]) could be derived from head branch ` +
+      `"${pr.headRefName}" (expected ai-sdlc/<id>-...) or the PR title (trailing "(<ID>)")`
     );
   }
   const inPr = pr.files.some(
@@ -584,6 +534,14 @@ export async function evaluatePrTrust(args: {
       'diff (backlog/tasks or backlog/completed) — if it was merged recently, run ' +
       '"git fetch origin main" in the main checkout first'
     );
+  }
+  const logins = await fetchCommitLogins(pr.headRefOid, args.repoSlug, args.runner, args.cwd);
+  if (!logins) return 'could not read the head commit author from GitHub — refusing (fail-closed)';
+  if (!logins.author) {
+    return 'the head commit author is not linked to a GitHub account — refusing (cannot be determined)';
+  }
+  if (!allowed(logins.author)) {
+    return `the head commit author "${logins.author}" is not on the spec.governance.mergeAuthors allow-list`;
   }
   return null;
 }
@@ -856,32 +814,70 @@ export async function fetchRequiredChecks(
 }
 
 /**
- * Fetch the PR's REAL (unfiltered) check-runs via `gh pr checks` (no
- * `--required`) — used as the AISDLC-607 Defect 2 fallback when
- * `fetchRequiredChecks` succeeds but finds zero required contexts (a repo
- * with no branch protection configured). Same fetch-failure semantics as
- * `fetchRequiredChecks`: `fetchFailed: true` on non-zero `gh` exit or
- * unparseable output, never silently treated as an empty-but-successful
- * fetch.
+ * Check runs and commit statuses for the EXACT commit `sha` (not "the PR's
+ * current head"), so the evaluation is bound to the head that will be merged.
+ * Check runs: `status != completed` is PENDING, otherwise the upper-cased
+ * conclusion. Statuses: the upper-cased state. `fetchFailed` on any gh error,
+ * unparseable output, or a truncated list (more runs than one page).
  */
-export async function fetchAllCheckRuns(
-  prNumber: number,
+export async function fetchShaChecks(
+  sha: string,
   repoSlug: string,
   runner: Runner,
   cwd?: string,
 ): Promise<ChecksFetchResult> {
-  const out = await runner(
+  const runsOut = await runner(
     'gh',
-    ['pr', 'checks', String(prNumber), '--json', 'name,state', '--repo', repoSlug],
+    [
+      'api',
+      `repos/${repoSlug}/commits/${sha}/check-runs?per_page=100`,
+      '--jq',
+      '{total: .total_count, runs: [.check_runs[] | {name, status, conclusion}]}',
+    ],
     { cwd, allowFailure: true },
   );
-  if (out.code !== 0) return { checks: [], fetchFailed: true };
+  const statusOut = await runner(
+    'gh',
+    [
+      'api',
+      `repos/${repoSlug}/commits/${sha}/status?per_page=100`,
+      '--jq',
+      '{total: .total_count, statuses: [.statuses[] | {context, state}]}',
+    ],
+    { cwd, allowFailure: true },
+  );
+  if (runsOut.code !== 0 || statusOut.code !== 0) return { checks: [], fetchFailed: true };
   try {
-    const parsed = JSON.parse(out.stdout) as Array<{ name: string; state: string }>;
-    return { checks: parsed.map((p) => ({ name: p.name, state: p.state })), fetchFailed: false };
+    const r = JSON.parse(runsOut.stdout) as {
+      total: number;
+      runs: Array<{ name: string; status: string; conclusion: string | null }>;
+    };
+    const s = JSON.parse(statusOut.stdout) as {
+      total: number;
+      statuses: Array<{ context: string; state: string }>;
+    };
+    if (!Array.isArray(r.runs) || !Array.isArray(s.statuses)) throw new Error('shape');
+    if (r.total > r.runs.length || s.total > s.statuses.length) {
+      return { checks: [], fetchFailed: true };
+    }
+    const checks: RequiredCheckStatus[] = [
+      ...r.runs.map((c) => ({
+        name: c.name,
+        state: c.status !== 'completed' ? 'PENDING' : (c.conclusion ?? 'UNKNOWN').toUpperCase(),
+      })),
+      ...s.statuses.map((c) => ({ name: c.context, state: c.state.toUpperCase() })),
+    ];
+    return { checks, fetchFailed: false };
   } catch {
     return { checks: [], fetchFailed: true };
   }
+}
+
+/** State of the required check `name` among the head commit's results (MISSING when absent). */
+export function stateForRequired(name: string, results: RequiredCheckStatus[]): string {
+  const matches = results.filter((c) => c.name === name);
+  if (matches.length === 0) return 'MISSING';
+  return matches.find((c) => c.state.toUpperCase() !== 'SUCCESS')?.state ?? 'SUCCESS';
 }
 
 export interface MergePrResult {
@@ -922,13 +918,15 @@ export async function mergePr(
   return { ok: out.code === 0, error: out.stderr.trim() };
 }
 
-export async function resolveRepoSlug(runner: Runner, cwd?: string): Promise<string> {
+/** `owner/repo` of the checkout at `cwd` via `gh repo view`; `null` on failure or empty output. */
+export async function resolveRepoSlug(runner: Runner, cwd?: string): Promise<string | null> {
   const out = await runner(
     'gh',
     ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
-    { cwd },
+    { cwd, allowFailure: true },
   );
-  return out.stdout.trim();
+  const slug = out.stdout.trim();
+  return out.code === 0 && /^[\w.-]+\/[\w.-]+$/.test(slug) ? slug : null;
 }
 
 // ── Top-level orchestration ──────────────────────────────────────────────
@@ -938,22 +936,23 @@ export interface RunMergeIfEligibleOptions {
   sourceKind: SourceKind | undefined;
   repoSlug: string;
   /**
-   * The VERIFIED main checkout (see `resolveTrustedMainRoot`) to read
-   * `.ai-sdlc/agent-role.yaml` from. `null` = none could be established →
-   * refuse (fail closed); `rootRefusal` then carries the reason.
+   * The VERIFIED main checkout (see `resolveTrustedMainRoot`). `null` = none
+   * could be established → refuse (fail closed); `rootRefusal` carries the reason.
    */
   repoRoot: string | null;
   rootRefusal?: string;
-  /** This package's root, used to locate the CJS governance resolver. */
-  pkgRoot: string;
   runner: Runner;
   cwd?: string;
   mergeMethod?: 'squash' | 'merge' | 'rebase';
   dryRun?: boolean;
-  /** Injection seam for hermetic tests — bypasses filesystem policy read. */
-  loadPolicy?: (repoRoot: string, pkgRoot: string) => GovernancePolicy;
-  /** Injection seam for hermetic tests — bypasses the allow-list read. */
-  loadMergeAuthors?: (repoRoot: string, pkgRoot: string) => string[];
+  /**
+   * Programmatic injection (tests): committed `agent-role.yaml` text, or `null`
+   * for "unreadable". When omitted the text is read with `git show
+   * origin/main:.ai-sdlc/agent-role.yaml` in the verified checkout.
+   */
+  policyYaml?: string | null;
+  /** Programmatic injection (tests): backlog id prefix (default: read from origin/main). */
+  taskPrefix?: string;
 }
 
 export interface RunMergeIfEligibleResult {
@@ -984,10 +983,12 @@ export function refusalResult(
  * Compose policy resolution + PR-state fetch + evaluation + (conditionally)
  * the merge call. Order, each step failing closed:
  *   1. verified main checkout (else refuse);
- *   2. policy `allowMerge` and caller `sourceKind` (no `gh` calls spent on a refusal);
+ *   2. committed policy on origin/main, `allowMerge` and caller `sourceKind`
+ *      (no `gh` calls spent on a refusal);
  *   3. ONE `gh pr view` read (head commit, merge state, fork/author/base/title/files)
  *      then the trust facts (`evaluatePrTrust`);
- *   4. the required-checks (or check-run fallback) fetch;
+ *   4. the required check names, then the check runs / statuses of that exact
+ *      head commit (or all of them when no required contexts exist);
  *   5. eligibility evaluation;
  *   6. just before merging, re-read the PR: the head commit must still be the
  *      one the checks were evaluated against and still CLEAN, then merge with
@@ -1006,9 +1007,20 @@ export async function runMergeIfEligible(
     );
   }
   const repoRoot = opts.repoRoot;
-  const policy =
-    opts.loadPolicy?.(repoRoot, opts.pkgRoot) ??
-    resolveRepoGovernancePolicy(repoRoot, opts.pkgRoot);
+
+  const yamlText =
+    opts.policyYaml !== undefined
+      ? opts.policyYaml
+      : await readFileFromOriginMain(repoRoot, '.ai-sdlc/agent-role.yaml', opts.runner);
+  if (yamlText === null) {
+    return refusalResult(
+      opts.prNumber,
+      'could not read .ai-sdlc/agent-role.yaml as committed on origin/main (uncommitted and ' +
+        'worktree copies are never used) — refusing (fail-closed)',
+      opts.dryRun,
+    );
+  }
+  const { policy, mergeAuthors } = resolveGovernanceFromYaml(yamlText);
 
   // Policy gate, then the caller-supplied trust boundary: both can refuse
   // before any network call is spent.
@@ -1038,53 +1050,48 @@ export async function runMergeIfEligible(
     );
   }
 
-  const mergeAuthors =
-    opts.loadMergeAuthors?.(repoRoot, opts.pkgRoot) ??
-    resolveRepoMergeAuthors(repoRoot, opts.pkgRoot);
   const trustRefusal = await evaluatePrTrust({
     snapshot,
     mergeAuthors,
     repoRoot,
+    repoSlug: opts.repoSlug,
+    taskPrefix: opts.taskPrefix ?? (await readTaskPrefix(repoRoot, opts.runner)),
     runner: opts.runner,
+    cwd: opts.cwd,
   });
   if (trustRefusal) return refuse(trustRefusal);
 
+  // Which contexts are REQUIRED comes from `gh pr checks --required` (names
+  // only; it reports the PR's current head). Their STATE comes from the exact
+  // head commit read above. No required contexts at all (successful fetch) →
+  // every check run / status of that commit; a failed fetch never falls back.
   const requiredResult = await fetchRequiredChecks(
     opts.prNumber,
     opts.repoSlug,
     opts.runner,
     opts.cwd,
   );
+  let requiredChecks: RequiredCheckStatus[] = [];
+  let checksSource: ChecksSource = 'required-contexts';
+  let checksFetchFailed = requiredResult.fetchFailed;
 
-  // AISDLC-607 Defect 2: distinguish "branch protection has no required
-  // contexts" (successful fetch, empty array → fall back to real check-runs)
-  // from "the required-checks fetch itself failed/errored" (fail closed,
-  // NEVER fall back — AC-5).
-  let requiredChecks: RequiredCheckStatus[];
-  let checksSource: ChecksSource;
-  let checksFetchFailed: boolean;
-
-  if (requiredResult.fetchFailed) {
-    checksSource = 'required-contexts';
-    checksFetchFailed = true;
-    requiredChecks = [];
-  } else if (requiredResult.checks.length > 0) {
-    // Required contexts ARE configured — byte-identical historical path (AC-6).
-    checksSource = 'required-contexts';
-    checksFetchFailed = false;
-    requiredChecks = requiredResult.checks;
-  } else {
-    // Fetch succeeded but found zero required contexts (no branch
-    // protection) — fall back to the PR's real check-runs.
-    const fallbackResult = await fetchAllCheckRuns(
-      opts.prNumber,
+  if (!requiredResult.fetchFailed) {
+    const shaResult = await fetchShaChecks(
+      snapshot.headRefOid,
       opts.repoSlug,
       opts.runner,
       opts.cwd,
     );
-    checksSource = 'check-run-fallback';
-    checksFetchFailed = fallbackResult.fetchFailed;
-    requiredChecks = fallbackResult.checks;
+    checksFetchFailed = shaResult.fetchFailed;
+    if (requiredResult.checks.length > 0) {
+      requiredChecks = requiredResult.checks.map((c) => ({
+        name: c.name,
+        state: stateForRequired(c.name, shaResult.checks),
+      }));
+    } else {
+      checksSource = 'check-run-fallback';
+      requiredChecks = shaResult.checks;
+    }
   }
 
   const eligibility = evaluateMergeEligibility({

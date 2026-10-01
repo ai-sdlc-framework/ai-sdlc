@@ -74,50 +74,88 @@ spec:
   itself grant merge capability. The only sanctioned merge route is
   `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog`,
   which merges only when ALL of these hold (each fails closed):
-  - the policy is read from the **verified main checkout** only (see below);
+  - the policy is read from the **verified main checkout**, as committed on
+    `origin/main` (see below);
   - `allowMerge` resolves to `onGreenClean` there, and `--source-kind` is
     `backlog` (`gh-issue` is always refused);
   - facts read from the PR itself via one `gh pr view` call: it is **not from a
-    fork** (`isCrossRepository` is `false`), its **base branch is `main`**, its
-    **author login is on `governance.mergeAuthors`**, and a **backlog task**
-    matching the PR exists. The task id comes from the head branch
-    (`ai-sdlc/<id>-...`) and/or a trailing `(<ID>)` in the title (when both are
-    present they must agree), and a `backlog/tasks/<id> - *.md` or
-    `backlog/completed/<id> - *.md` file must exist on `origin/main` (checked
-    with `git ls-tree`, so run `git fetch origin main` first) **or** be added by
-    the PR's own diff (the repo creates and completes a task in the same PR);
-  - the required checks (or, with no branch-protection contexts, every
-    non-skipped check run) are green and `mergeStateStatus` is `CLEAN`;
+    fork** (`isCrossRepository` is `false`), its **base branch is `main`**, and its
+    **author login is on `governance.mergeAuthors`**;
+  - the **head commit's author login** (resolved by GitHub for that exact SHA) is
+    on `governance.mergeAuthors`; a commit whose email is not linked to a GitHub
+    account refuses. This is commit *metadata* set by whoever made the commit, not
+    authentication: it narrows who can look like an allow-listed author, it does
+    not prove who pushed;
+  - a **backlog task** matching the PR exists. The id must have the repo's backlog
+    shape (`<task_prefix>-<n>[.<n>...]`, prefix from `backlog/config.yml` on
+    `origin/main`, default `AISDLC`; `issue-N` / `gh-issue-N` ids never qualify),
+    comes from the head branch (`ai-sdlc/<id>-...`) and/or a trailing `(<ID>)` in
+    the title (they must agree), and a `backlog/tasks/<id> - *.md` or
+    `backlog/completed/<id> - *.md` file must exist on `origin/main` (checked with
+    `git ls-tree`, so run `git fetch origin main` first) **or** be added by the
+    PR's own diff. A PR that adds its own task file is accepted because the repo
+    creates and completes a task in one PR, so the task is a provenance hint, NOT a
+    trust signal; the author allow-list is the real trust signal. The PR file list
+    comes from `gh pr view --json files`, which GitHub caps at roughly 100 files; a
+    task file past the cap is simply not seen in the diff (which can only refuse);
+  - the required checks (or, when branch protection has no required contexts,
+    every check run and commit status) are green **for the head commit read from
+    the PR**: required context names come from `gh pr checks --required`, but
+    their state is read from the REST check-runs and status endpoints for that SHA
+    (a required context with no result is `MISSING` and refuses; a truncated list
+    refuses), and `mergeStateStatus` is `CLEAN`;
   - the PR head commit read in the first call is still the head just before the
     merge, and the merge is issued with `--match-head-commit <sha>` so GitHub
     rejects it if the head moved after the checks were evaluated (the CLI reports
     the refusal and exits non-zero).
 - **`mergeAuthors`** is an optional list of GitHub logins (compared
-  case-insensitively) whose PRs the merge gate may merge, for example
+  case-insensitively; no leading, trailing or consecutive hyphens, at most 39
+  characters) whose PRs the merge gate may merge, for example
   `mergeAuthors: [octocat]`. Absent, empty or malformed means nobody, so every
-  merge is refused until the operator sets it. It is read only from the verified
-  main checkout's `.ai-sdlc/agent-role.yaml`, and needs a plugin version that
-  includes the key (an older installed plugin resolves it to empty).
-- **Verified main checkout (policy trust):** the merge CLI reads
-  `.ai-sdlc/agent-role.yaml` only from the main checkout of the repo that
-  contains the running CLI, verified like the lease policy (real `.git`
-  directory matching the git common dir) and required to be the same checkout
-  as the invocation's working directory. A worktree copy of the file, a
-  different repository's policy, or a `--repo-root` flag has no effect; if the
-  main checkout cannot be verified the CLI refuses. `--repo-root` is
-  **test-only**: it is honoured solely when
-  `AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1` is set in the environment (do not set
-  it in production). A `--repo` slug that differs from the verified checkout's
-  repository is refused.
+  merge is refused until the operator sets it. It is read only from the policy
+  file as committed on `origin/main`.
+- **Verified main checkout and committed policy:** the merge CLI finds the main
+  checkout of the repo that contains the running CLI (a real `.git` directory
+  matching the git common dir, not a file or symlink), requires it to be the same
+  checkout as the invocation's working directory, and reads the policy with
+  `git show origin/main:.ai-sdlc/agent-role.yaml` there. So a worktree copy, an
+  uncommitted edit of the main checkout's file, or a different repository's policy
+  has no effect, and if the root or the committed file cannot be read the CLI
+  refuses. The policy is resolved by code inside the CLI itself: no plugin file
+  selected through `CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DIR` is loaded for the
+  merge decision. There is **no** flag or environment variable that overrides the
+  policy root or the repository (`--repo-root` and `--repo` were removed; the
+  repository comes only from `gh repo view` in the verified checkout). Tests inject
+  a root and policy text programmatically through the exported
+  `buildMergeIfEligibleCli({ trustedRootOverride })`, which argv and the environment
+  cannot reach, and the hook refuses any shell command that names the old override
+  variable.
 - **API merges are blocked:** the PreToolUse hook denies
   `gh api .../pulls/<n>/merge` (any method, with or without a leading slash,
   flags in any order), `curl`/`wget` to the same endpoint, and the GraphQL
-  `mergePullRequest` mutation, under every `allowMerge` value. Arming auto-merge
-  (`gh pr merge --auto`) and the sanctioned helper stay allowed. This is a
-  text-level matcher: it cannot see `eval`, base64 pipelines or constructed
-  strings, so branch protection remains the backstop. Residual: the CLI and
-  plugin code run from the agent's own checkout and are not protected from
-  edits by this change.
+  `mergePullRequest` mutation, under every `allowMerge` value. The sanctioned
+  helper stays allowed. `--admin` is not an accepted companion flag of arming
+  (`gh pr merge --auto --admin` is denied). This is a text-level matcher: it cannot
+  see `eval`, base64 pipelines or constructed strings.
+- **Known residuals (be explicit about them):**
+  - **Arming is still allowed (open operator decision).** The hook allows
+    `gh pr merge --auto`, and the repository workflow arms same-repo PRs itself, so
+    an agent can still arm auto-merge on ANY PR (fork PRs and non-allow-listed
+    authors included), which becomes a merge as soon as GitHub's own checks pass.
+    The helper's checks do not apply to arming; only GitHub-side protections
+    mitigate it until the operator chooses to deny agent-side arming or route it
+    through the helper.
+  - **An agent-editable local CLI is not a trust boundary against that agent.** The
+    CLI, the plugin hooks and the repository checkout run from the agent's own
+    worktree, so an agent that can edit them is not bound by them; the verified-root
+    anchor is the checkout containing the (possibly copied) CLI. The local
+    `origin/main` ref is also readable and writable by the agent's git.
+  - **The hook is text-level** and not a boundary against a deliberately hostile
+    agent (`eval`, constructed strings, other tools).
+  - **GitHub-side protections are essential and operator-only:** required status
+    checks with strict (up-to-date) mode, `enforce_admins`, CODEOWNERS plus
+    required review on governance paths (`.ai-sdlc/**`, hooks, the merge CLI), and
+    fork-PR workflow approval. Nothing in this repository can set them.
 - **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
   case: after rebasing a dispatched task's branch. The PreToolUse hook then
   permits a push only when ALL of these hold:

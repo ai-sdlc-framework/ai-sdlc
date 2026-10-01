@@ -15,7 +15,6 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
-  loadTrustedPolicyModule,
   refusalResult,
   resolveRepoSlug,
   resolveTrustedMainRoot,
@@ -70,6 +69,12 @@ export function renderJsonResult(result: RunMergeIfEligibleResult): string {
 export interface BuildCliOptions {
   /** Inject a Runner — tests pass a fake; the bin shim defaults to live exec. */
   runner?: Runner;
+  /**
+   * PROGRAMMATIC test seam: supplies the trusted root and the committed policy
+   * text directly. It is NOT reachable from argv or the environment — only code
+   * that imports this builder can set it (the bin shim never does).
+   */
+  trustedRootOverride?: { root: string; policyYaml: string | null };
 }
 
 export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
@@ -101,17 +106,6 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
               'Work-item provenance for the OQ-2 trust boundary. Only "backlog" (internal, ' +
               'dispatched by our own orchestrator) is trusted for agent-initiated merge.',
           })
-          .option('repo', {
-            type: 'string',
-            describe: 'owner/repo slug (default: derived from cwd via `gh repo view`).',
-          })
-          .option('repo-root', {
-            type: 'string',
-            describe:
-              'TEST-ONLY. Honoured solely when AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1; otherwise ' +
-              'ignored. Production always reads .ai-sdlc/agent-role.yaml from the verified main ' +
-              'checkout of the repo containing this CLI, never from cwd or a worktree copy.',
-          })
           .option('cwd', {
             type: 'string',
             describe: 'Working directory for gh calls (default: process.cwd()).',
@@ -139,56 +133,38 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
         const mergeMethod = argv['merge-method'] as 'squash' | 'merge' | 'rebase';
         const dryRun = Boolean(argv['dry-run']);
         const format = String(argv.format) as 'text' | 'json';
-        const pkgRoot = packageRoot();
 
-        // H3: the policy root is the VERIFIED main checkout only; --repo-root is
-        // honoured solely under the explicit test-only env var.
-        const trusted = resolveTrustedMainRoot({
-          cwd,
-          anchorDir: pkgRoot,
-          repoRootOverride: argv['repo-root'] as string | undefined,
-          trustedModule: loadTrustedPolicyModule(pkgRoot),
-        });
+        // The policy root is the VERIFIED main checkout only. There is no flag
+        // or environment variable that supplies one; the override below is a
+        // programmatic option of this builder.
+        const override = opts.trustedRootOverride;
+        const trusted = override
+          ? { root: override.root, reason: '' }
+          : resolveTrustedMainRoot({ cwd, anchorDir: packageRoot() });
 
-        if (argv['repo-root'] !== undefined && !trusted.testOverride) {
-          process.stderr.write(
-            '[merge-if-eligible] --repo-root is test-only and was ignored; policy is read from the ' +
-              'verified main checkout.\n',
-          );
-        }
+        // The repository slug comes only from `gh repo view` in the verified checkout.
+        const repoSlug = trusted.root === null ? null : await resolveRepoSlug(runner, trusted.root);
 
-        let result: RunMergeIfEligibleResult;
-        let repoSlug = (argv.repo as string | undefined) ?? '';
-        let slugMismatch: string | null = null;
-        if (trusted.root !== null && !trusted.testOverride) {
-          // Derive the slug from the verified checkout; a conflicting --repo is refused.
-          const derived = await resolveRepoSlug(runner, trusted.root);
-          if (repoSlug && repoSlug.toLowerCase() !== derived.toLowerCase()) {
-            slugMismatch =
-              `--repo "${repoSlug}" does not match the verified checkout's repository ` +
-              `"${derived}" — refusing`;
-          }
-          repoSlug = derived;
-        } else if (trusted.root !== null && !repoSlug) {
-          repoSlug = await resolveRepoSlug(runner, cwd);
-        }
-
-        if (slugMismatch) {
-          result = refusalResult(prNumber, slugMismatch, dryRun);
-        } else {
-          result = await runMergeIfEligible({
-            prNumber,
-            sourceKind,
-            repoSlug,
-            repoRoot: trusted.root,
-            rootRefusal: trusted.reason,
-            pkgRoot,
-            runner,
-            cwd,
-            mergeMethod,
-            dryRun,
-          });
-        }
+        const result =
+          trusted.root !== null && repoSlug === null
+            ? refusalResult(
+                prNumber,
+                'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
+                  'main checkout — refusing (fail-closed)',
+                dryRun,
+              )
+            : await runMergeIfEligible({
+                prNumber,
+                sourceKind,
+                repoSlug: repoSlug ?? '',
+                repoRoot: trusted.root,
+                rootRefusal: trusted.reason,
+                runner,
+                cwd,
+                mergeMethod,
+                dryRun,
+                policyYaml: override?.policyYaml,
+              });
 
         if (format === 'json') {
           process.stdout.write(renderJsonResult(result));

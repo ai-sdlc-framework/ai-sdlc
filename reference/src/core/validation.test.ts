@@ -317,7 +317,16 @@ describe('AgentRole spec.governance (RFC-0048 / AISDLC-601)', () => {
     expect(validateResource(doc).valid).toBe(true);
     (doc.spec as Record<string, unknown>).governance = { mergeAuthors: [] };
     expect(validateResource(doc).valid).toBe(true);
-    for (const bad of [['has space'], ['-lead'], ['x'.repeat(40)], [42], ['a', 'a'], 'octocat']) {
+    for (const bad of [
+      ['has space'],
+      ['-lead'],
+      ['trail-'],
+      ['a--b'],
+      ['x'.repeat(40)],
+      [42],
+      ['a', 'a'],
+      'octocat',
+    ]) {
       (doc.spec as Record<string, unknown>).governance = { mergeAuthors: bad };
       expect(validateResource(doc).valid).toBe(false);
     }

@@ -1,51 +1,43 @@
 /**
  * Hermetic tests for the `merge-if-eligible` deterministic core
- * (RFC-0048 Phase 3 / AISDLC-603).
- *
- * No real `gh` calls: every test drives a `FakeRunner`. Policy resolution
- * is exercised both via the injectable `loadPolicy` seam (pure-evaluator
- * tests) and via a real temp-directory `.ai-sdlc/agent-role.yaml` +
- * a stub resolver module (integration-flavoured tests for
- * `resolveRepoGovernancePolicy`).
+ * (RFC-0048 Phase 3). No real `gh` calls: every test drives a `FakeRunner`;
+ * the policy-from-git and verified-root tests use real git in temp dirs.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   deriveTaskId,
   evaluateMergeEligibility,
   evaluatePrTrust,
-  fetchAllCheckRuns,
+  fetchCommitLogins,
   fetchPrSnapshot,
   fetchRequiredChecks,
-  highestVersionCacheGovernanceResolverPath,
+  fetchShaChecks,
   isBacklogTaskFileFor,
   isTrustedSourceKind,
-  loadGovernanceResolverModule,
-  loadTrustedPolicyModule,
   mergePr,
-  resolveRepoMergeAuthors,
-  resolveTrustedMainRoot,
-  TEST_ONLY_POLICY_ROOT_ENV,
-  resolveInstalledPluginGovernanceResolverPath,
-  resolveRepoGovernancePolicy,
+  parseGovernanceBlock,
+  readFileFromOriginMain,
+  readTaskPrefix,
+  resolveGovernanceFromYaml,
   resolveRepoSlug,
+  resolveTrustedMainRoot,
   runMergeIfEligible,
   STRICT_DEFAULTS,
+  stateForRequired,
+  verifiedMainRoot,
   type GovernancePolicy,
   type PrSnapshot,
+  type RunMergeIfEligibleOptions,
 } from './merge-if-eligible.js';
-import type { ExecResult, Runner } from '../runtime/exec.js';
+import { defaultRunner, type ExecResult, type Runner } from '../runtime/exec.js';
 
 const ORIGINAL_ENV = { ...process.env };
-
-function resetPluginEnv(): void {
-  delete process.env['CLAUDE_PLUGIN_DIR'];
-  delete process.env['CLAUDE_PLUGIN_ROOT'];
-}
 
 // ── FakeRunner ────────────────────────────────────────────────────────
 
@@ -84,6 +76,9 @@ const GREEN_CLEAN_POLICY: GovernancePolicy = {
 
 const HEAD_A = 'a'.repeat(40);
 const HEAD_B = 'b'.repeat(40);
+const GREEN_YAML =
+  'spec:\n  governance:\n    allowMerge: onGreenClean\n    mergeAuthors: [operator]\n';
+const NEVER_YAML = 'spec:\n  governance:\n    allowMerge: never\n    mergeAuthors: [operator]\n';
 
 /** A trusted, mergeable PR-view response; override single fields. */
 function prView(overrides: Record<string, unknown> = {}): string {
@@ -110,6 +105,39 @@ const SNAPSHOT: PrSnapshot = {
   mergeStateStatus: 'CLEAN',
   files: [],
 };
+
+type Run = [name: string, status: string, conclusion: string | null];
+
+/** Handlers for the head-commit check runs + statuses queries. */
+function shaChecks(
+  sha: string,
+  runs: Run[],
+  statuses: Array<[string, string]> = [],
+  extra: { runsTotal?: number; statusTotal?: number } = {},
+): Record<string, Partial<ExecResult>> {
+  return {
+    [`commits/${sha}/check-runs`]: {
+      stdout: JSON.stringify({
+        total: extra.runsTotal ?? runs.length,
+        runs: runs.map(([name, status, conclusion]) => ({ name, status, conclusion })),
+      }),
+    },
+    [`commits/${sha}/status`]: {
+      stdout: JSON.stringify({
+        total: extra.statusTotal ?? statuses.length,
+        statuses: statuses.map(([context, state]) => ({ context, state })),
+      }),
+    },
+  };
+}
+
+const COMMIT_OPERATOR = {
+  [`commits/${HEAD_A} --jq {author`]: {
+    stdout: JSON.stringify({ author: 'operator', committer: 'operator' }),
+  },
+};
+
+// ── evaluateMergeEligibility (pure) ──────────────────────────────────
 
 // ── evaluateMergeEligibility (pure) ──────────────────────────────────
 
@@ -223,219 +251,6 @@ describe('isTrustedSourceKind', () => {
   });
 });
 
-// ── resolveRepoGovernancePolicy ──────────────────────────────────────
-
-describe('resolveRepoGovernancePolicy', () => {
-  let dir: string;
-
-  beforeEach(resetPluginEnv);
-
-  afterEach(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true });
-    process.env = { ...ORIGINAL_ENV };
-  });
-
-  it('fails closed to STRICT_DEFAULTS when the resolver module cannot be located', () => {
-    dir = mkdtempSync(join(tmpdir(), 'aisdlc-603-'));
-    const policy = resolveRepoGovernancePolicy(dir, join(dir, 'nonexistent-pkg-root'));
-    expect(policy).toEqual(STRICT_DEFAULTS);
-  });
-
-  it('AC-1 — simulated marketplace/consumer layout: loads the REAL resolver via CLAUDE_PLUGIN_ROOT (not the monorepo sibling) and returns onGreenClean', () => {
-    dir = mkdtempSync(join(tmpdir(), 'aisdlc-607-e2e-'));
-    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
-    writeFileSync(
-      join(dir, '.ai-sdlc', 'agent-role.yaml'),
-      'spec:\n  governance:\n    preset: operator-trusted\n',
-      'utf-8',
-    );
-
-    const pluginRoot = join(dir, 'installed-plugin');
-    const hooksLibDir = join(pluginRoot, 'hooks', 'lib');
-    mkdirSync(hooksLibDir, { recursive: true });
-    const realResolverPath = join(
-      __dirname,
-      '..',
-      '..',
-      '..',
-      'ai-sdlc-plugin',
-      'hooks',
-      'lib',
-      'governance-resolver.js',
-    );
-    cpSync(realResolverPath, join(hooksLibDir, 'governance-resolver.js'));
-    process.env['CLAUDE_PLUGIN_ROOT'] = pluginRoot;
-
-    // pkgRoot points at a nonexistent monorepo sibling — the ONLY way this
-    // resolves is via the installed-plugin (env-var) path.
-    const policy = resolveRepoGovernancePolicy(dir, join(dir, 'nonexistent-pipeline-cli-pkg-root'));
-    expect(policy.allowMerge).toBe('onGreenClean');
-  });
-
-  it('fails closed to STRICT_DEFAULTS when agent-role.yaml is absent', () => {
-    dir = mkdtempSync(join(tmpdir(), 'aisdlc-603-'));
-    const stubResolver = {
-      resolveGovernanceFromYaml: (yamlText: string): GovernancePolicy =>
-        yamlText.includes('onGreenClean') ? GREEN_CLEAN_POLICY : { ...STRICT_DEFAULTS },
-    };
-    const policy = resolveRepoGovernancePolicy(dir, '/unused', stubResolver);
-    expect(policy).toEqual(STRICT_DEFAULTS);
-  });
-
-  it('reads governance from the given repoRoot (trusted base checkout), not a PR tree', () => {
-    dir = mkdtempSync(join(tmpdir(), 'aisdlc-603-'));
-    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
-    writeFileSync(
-      join(dir, '.ai-sdlc', 'agent-role.yaml'),
-      'spec:\n  governance:\n    allowMerge: onGreenClean\n',
-      'utf-8',
-    );
-    const stubResolver = {
-      resolveGovernanceFromYaml: (yamlText: string): GovernancePolicy =>
-        yamlText.includes('onGreenClean') ? GREEN_CLEAN_POLICY : { ...STRICT_DEFAULTS },
-    };
-    const policy = resolveRepoGovernancePolicy(dir, '/unused', stubResolver);
-    expect(policy.allowMerge).toBe('onGreenClean');
-  });
-
-  it('fails closed when the resolver module throws', () => {
-    dir = mkdtempSync(join(tmpdir(), 'aisdlc-603-'));
-    const throwingResolver = {
-      resolveGovernanceFromYaml: (): GovernancePolicy => {
-        throw new Error('boom');
-      },
-    };
-    const policy = resolveRepoGovernancePolicy(dir, '/unused', throwingResolver);
-    expect(policy).toEqual(STRICT_DEFAULTS);
-  });
-});
-
-describe('loadGovernanceResolverModule', () => {
-  beforeEach(resetPluginEnv);
-  afterEach(() => {
-    process.env = { ...ORIGINAL_ENV };
-  });
-
-  it('resolves the real AISDLC-601 resolver from this monorepo checkout (dogfood fallback)', () => {
-    // pipeline-cli/src/governance/merge-if-eligible.test.ts → pkgRoot is
-    // pipeline-cli/ itself (two levels up from this file at runtime via
-    // import.meta.url in the SUT — here we pass it explicitly).
-    const pkgRoot = join(__dirname, '..', '..');
-    const mod = loadGovernanceResolverModule(pkgRoot);
-    expect(mod).not.toBeNull();
-    expect(typeof mod?.resolveGovernanceFromYaml).toBe('function');
-  });
-
-  it('AC-2 — returns null when the resolver cannot be found anywhere (fail-closed preserved)', () => {
-    const mod = loadGovernanceResolverModule(
-      '/tmp/definitely-not-a-real-monorepo-root',
-      '/tmp/definitely-not-a-real-cache-root',
-    );
-    expect(mod).toBeNull();
-  });
-
-  it('AC-1 — resolves the resolver from $CLAUDE_PLUGIN_ROOT (installed-plugin layout), NOT the monorepo sibling', () => {
-    // Simulate a marketplace/consumer install: the plugin's governance
-    // resolver lives under an installed-plugin path, NOT as a
-    // pipeline-cli sibling. loadGovernanceResolverModule must find it via
-    // the CLAUDE_PLUGIN_ROOT env var, never touching the (nonexistent)
-    // monorepo-sibling fallback.
-    const base = mkdtempSync(join(tmpdir(), 'aisdlc-607-installed-plugin-'));
-    try {
-      const hooksLibDir = join(base, 'hooks', 'lib');
-      mkdirSync(hooksLibDir, { recursive: true });
-      const realResolverPath = join(
-        __dirname,
-        '..',
-        '..',
-        '..',
-        'ai-sdlc-plugin',
-        'hooks',
-        'lib',
-        'governance-resolver.js',
-      );
-      cpSync(realResolverPath, join(hooksLibDir, 'governance-resolver.js'));
-      process.env['CLAUDE_PLUGIN_ROOT'] = base;
-
-      const mod = loadGovernanceResolverModule('/tmp/definitely-not-a-real-monorepo-root');
-      expect(mod).not.toBeNull();
-      expect(typeof mod?.resolveGovernanceFromYaml).toBe('function');
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('resolveInstalledPluginGovernanceResolverPath + highestVersionCacheGovernanceResolverPath (AISDLC-607 Defect 1)', () => {
-  let cacheRoot: string;
-
-  beforeEach(() => {
-    resetPluginEnv();
-    cacheRoot = mkdtempSync(join(tmpdir(), 'aisdlc-607-cache-'));
-  });
-  afterEach(() => {
-    process.env = { ...ORIGINAL_ENV };
-    rmSync(cacheRoot, { recursive: true, force: true });
-  });
-
-  function seed(marketplace: string, version: string): string {
-    const dir = join(cacheRoot, marketplace, 'ai-sdlc', version, 'hooks', 'lib');
-    mkdirSync(dir, { recursive: true });
-    const p = join(dir, 'governance-resolver.js');
-    writeFileSync(p, 'module.exports = { resolveGovernanceFromYaml: () => ({}) };\n');
-    return p;
-  }
-
-  it('returns null when the cache root does not exist and no env vars are set', () => {
-    expect(resolveInstalledPluginGovernanceResolverPath(join(cacheRoot, 'missing'))).toBeNull();
-  });
-
-  it('resolves from $CLAUDE_PLUGIN_ROOT/hooks/lib/governance-resolver.js when present', () => {
-    const pluginDir = join(cacheRoot, 'plugin-root');
-    const hooksLibDir = join(pluginDir, 'hooks', 'lib');
-    mkdirSync(hooksLibDir, { recursive: true });
-    const p = join(hooksLibDir, 'governance-resolver.js');
-    writeFileSync(p, 'module.exports = {};\n');
-    process.env['CLAUDE_PLUGIN_ROOT'] = pluginDir;
-
-    expect(resolveInstalledPluginGovernanceResolverPath()).toBe(p);
-  });
-
-  it('prefers $CLAUDE_PLUGIN_ROOT over $CLAUDE_PLUGIN_DIR when both resolve', () => {
-    const rootFile = join(cacheRoot, 'root', 'hooks', 'lib', 'governance-resolver.js');
-    mkdirSync(join(cacheRoot, 'root', 'hooks', 'lib'), { recursive: true });
-    writeFileSync(rootFile, 'module.exports = {};\n');
-    process.env['CLAUDE_PLUGIN_ROOT'] = join(cacheRoot, 'root');
-
-    const dirFile = join(cacheRoot, 'dir', 'hooks', 'lib', 'governance-resolver.js');
-    mkdirSync(join(cacheRoot, 'dir', 'hooks', 'lib'), { recursive: true });
-    writeFileSync(dirFile, 'module.exports = {};\n');
-    process.env['CLAUDE_PLUGIN_DIR'] = join(cacheRoot, 'dir');
-
-    expect(resolveInstalledPluginGovernanceResolverPath()).toBe(rootFile);
-  });
-
-  it('picks the highest version across multiple versions (numeric, not lexical)', () => {
-    seed('acme-marketplace', '0.9.0');
-    const newest = seed('acme-marketplace', '0.20.1'); // 0.20.1 > 0.9.0 numerically
-    expect(highestVersionCacheGovernanceResolverPath(cacheRoot)).toBe(newest);
-    expect(resolveInstalledPluginGovernanceResolverPath(cacheRoot)).toBe(newest);
-  });
-
-  it('skips a version dir without hooks/lib/governance-resolver.js', () => {
-    mkdirSync(join(cacheRoot, 'mp', 'ai-sdlc', '0.22.0'), { recursive: true }); // no hooks/lib file
-    const withFile = seed('mp', '0.20.0');
-    expect(highestVersionCacheGovernanceResolverPath(cacheRoot)).toBe(withFile);
-  });
-
-  it('never throws when env vars point at nonexistent paths', () => {
-    process.env['CLAUDE_PLUGIN_ROOT'] = join(cacheRoot, 'does-not-exist');
-    expect(() => resolveInstalledPluginGovernanceResolverPath(cacheRoot)).not.toThrow();
-  });
-});
-
-// ── GitHub data plumbing ──────────────────────────────────────────────
-
 describe('fetchRequiredChecks', () => {
   it('parses the real required-checks set from `gh pr checks --required`', async () => {
     const { runner } = makeFakeRunner({
@@ -527,54 +342,6 @@ describe('fetchRequiredChecks', () => {
   });
 });
 
-describe('fetchAllCheckRuns (AISDLC-607 Defect 2 fallback)', () => {
-  it('parses the PR real check-runs from `gh pr checks` (unfiltered, no --required)', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr checks 42 --json': {
-        stdout: JSON.stringify([
-          { name: 'ci', state: 'SUCCESS' },
-          { name: 'lint', state: 'NEUTRAL' },
-        ]),
-      },
-    });
-    const result = await fetchAllCheckRuns(42, 'org/repo', runner);
-    expect(result).toEqual({
-      fetchFailed: false,
-      checks: [
-        { name: 'ci', state: 'SUCCESS' },
-        { name: 'lint', state: 'NEUTRAL' },
-      ],
-    });
-    // Never passes --required — this is the unfiltered fallback fetch.
-    expect(calls[0]?.args).not.toContain('--required');
-  });
-
-  it('fetchFailed=true on gh failure', async () => {
-    const { runner } = makeFakeRunner({
-      'gh pr checks 42 --json': { code: 1, stderr: 'boom' },
-    });
-    const result = await fetchAllCheckRuns(42, 'org/repo', runner);
-    expect(result).toEqual({ fetchFailed: true, checks: [] });
-  });
-
-  it('fetchFailed=true on unparseable JSON', async () => {
-    const { runner } = makeFakeRunner({
-      'gh pr checks 42 --json': { stdout: 'not json' },
-    });
-    const result = await fetchAllCheckRuns(42, 'org/repo', runner);
-    expect(result).toEqual({ fetchFailed: true, checks: [] });
-  });
-});
-
-describe('resolveRepoSlug', () => {
-  it('parses the repo slug', async () => {
-    const { runner } = makeFakeRunner({
-      'gh repo view': { stdout: 'org/repo\n' },
-    });
-    expect(await resolveRepoSlug(runner)).toBe('org/repo');
-  });
-});
-
 describe('mergePr', () => {
   it('invokes the merge with the configured method, pinned to the checked head commit', async () => {
     const { runner, calls } = makeFakeRunner({ 'gh pr merge': {} });
@@ -659,6 +426,104 @@ describe('fetchPrSnapshot', () => {
   });
 });
 
+describe('resolveRepoSlug', () => {
+  it('parses the repo slug', async () => {
+    const { runner } = makeFakeRunner({ 'gh repo view': { stdout: 'org/repo\n' } });
+    expect(await resolveRepoSlug(runner)).toBe('org/repo');
+  });
+
+  it('returns null (never throws) on gh failure or an implausible slug', async () => {
+    const failing = makeFakeRunner({ 'gh repo view': { code: 1, stderr: 'not a repo' } });
+    expect(await resolveRepoSlug(failing.runner)).toBeNull();
+    const garbage = makeFakeRunner({ 'gh repo view': { stdout: 'two words\n' } });
+    expect(await resolveRepoSlug(garbage.runner)).toBeNull();
+  });
+});
+
+describe('fetchShaChecks (bound to the exact head commit)', () => {
+  it('maps check runs and statuses of THAT sha', async () => {
+    const { runner, calls } = makeFakeRunner(
+      shaChecks(
+        HEAD_A,
+        [
+          ['ci', 'completed', 'success'],
+          ['lint', 'completed', 'neutral'],
+          ['slow', 'in_progress', null],
+          ['broken', 'completed', 'failure'],
+          ['odd', 'completed', null],
+        ],
+        [['legacy/ci', 'success']],
+      ),
+    );
+    const res = await fetchShaChecks(HEAD_A, 'org/repo', runner);
+    expect(res.fetchFailed).toBe(false);
+    expect(res.checks).toEqual([
+      { name: 'ci', state: 'SUCCESS' },
+      { name: 'lint', state: 'NEUTRAL' },
+      { name: 'slow', state: 'PENDING' },
+      { name: 'broken', state: 'FAILURE' },
+      { name: 'odd', state: 'UNKNOWN' },
+      { name: 'legacy/ci', state: 'SUCCESS' },
+    ]);
+    expect(calls.map((c) => c.args[1])).toEqual([
+      `repos/org/repo/commits/${HEAD_A}/check-runs?per_page=100`,
+      `repos/org/repo/commits/${HEAD_A}/status?per_page=100`,
+    ]);
+  });
+
+  it('fails closed on gh errors, bad output and truncated lists', async () => {
+    const base = shaChecks(HEAD_A, [['ci', 'completed', 'success']]);
+    const bad = (patch: Record<string, Partial<ExecResult>>) =>
+      fetchShaChecks(HEAD_A, 'org/repo', makeFakeRunner({ ...base, ...patch }).runner);
+    expect((await bad({ [`commits/${HEAD_A}/check-runs`]: { code: 1 } })).fetchFailed).toBe(true);
+    expect((await bad({ [`commits/${HEAD_A}/status`]: { code: 1 } })).fetchFailed).toBe(true);
+    expect((await bad({ [`commits/${HEAD_A}/check-runs`]: { stdout: 'nope' } })).fetchFailed).toBe(
+      true,
+    );
+    expect((await bad({ [`commits/${HEAD_A}/status`]: { stdout: '{}' } })).fetchFailed).toBe(true);
+    const trunc = await fetchShaChecks(
+      HEAD_A,
+      'org/repo',
+      makeFakeRunner(shaChecks(HEAD_A, [['ci', 'completed', 'success']], [], { runsTotal: 150 }))
+        .runner,
+    );
+    expect(trunc.fetchFailed).toBe(true);
+  });
+});
+
+describe('stateForRequired', () => {
+  it('is MISSING when absent, SUCCESS when all match green, else the first non-green state', () => {
+    const results = [
+      { name: 'ci', state: 'SUCCESS' },
+      { name: 'dup', state: 'SUCCESS' },
+      { name: 'dup', state: 'FAILURE' },
+    ];
+    expect(stateForRequired('nope', results)).toBe('MISSING');
+    expect(stateForRequired('ci', results)).toBe('SUCCESS');
+    expect(stateForRequired('dup', results)).toBe('FAILURE');
+  });
+});
+
+describe('fetchCommitLogins', () => {
+  it('reads author and committer logins for the exact sha, null when unlinked', async () => {
+    const { runner, calls } = makeFakeRunner({
+      [`commits/${HEAD_A} --jq {author`]: { stdout: '{"author":"operator","committer":null}' },
+    });
+    expect(await fetchCommitLogins(HEAD_A, 'org/repo', runner)).toEqual({
+      author: 'operator',
+      committer: null,
+    });
+    expect(calls[0].args[1]).toBe(`repos/org/repo/commits/${HEAD_A}`);
+  });
+
+  it('returns null on gh failure or unparseable output', async () => {
+    const f = makeFakeRunner({ 'commits/': { code: 1 } });
+    expect(await fetchCommitLogins(HEAD_A, 'org/repo', f.runner)).toBeNull();
+    const g = makeFakeRunner({ 'commits/': { stdout: 'x' } });
+    expect(await fetchCommitLogins(HEAD_A, 'org/repo', g.runner)).toBeNull();
+  });
+});
+
 describe('deriveTaskId + isBacklogTaskFileFor', () => {
   it('derives the id from the ai-sdlc/<id>-... branch, including dotted sub-ids', () => {
     expect(deriveTaskId('ai-sdlc/aisdlc-663.5-harden-it', 'whatever').taskId).toBe('aisdlc-663.5');
@@ -673,8 +538,16 @@ describe('deriveTaskId + isBacklogTaskFileFor', () => {
     const c = deriveTaskId('ai-sdlc/aisdlc-1-a', 'fix: a (AISDLC-2)');
     expect(c.taskId).toBeNull();
     expect(c.conflict).toMatch(/aisdlc-1/i);
-    expect(deriveTaskId('ai-sdlc/issue-12', 'fix: a').taskId).toBe('issue-12');
     expect(deriveTaskId('feature/foo', 'fix: a').taskId).toBeNull();
+  });
+
+  it('accepts only the repo backlog id shape: issue-N and gh-issue-N never qualify', () => {
+    expect(deriveTaskId('ai-sdlc/issue-12', 'fix: a').taskId).toBeNull();
+    expect(deriveTaskId('ai-sdlc/gh-issue-12-x', 'fix: a (gh-issue-12)').taskId).toBeNull();
+    expect(deriveTaskId('ai-sdlc/other-5-x', 'fix: a (OTHER-5)').taskId).toBeNull();
+    // A different configured prefix is honoured, the default one is not.
+    expect(deriveTaskId('ai-sdlc/proj-5-x', 'fix: a', 'PROJ').taskId).toBe('proj-5');
+    expect(deriveTaskId('ai-sdlc/aisdlc-5-x', 'fix: a', 'PROJ').taskId).toBeNull();
   });
 
   it('matches only backlog/{tasks,completed}/<id> - <slug>.md (id is not a prefix of another id)', () => {
@@ -684,7 +557,28 @@ describe('deriveTaskId + isBacklogTaskFileFor', () => {
     expect(isBacklogTaskFileFor('aisdlc-9', 'backlog/tasks/aisdlc-9.1 - x.md')).toBe(false);
     expect(isBacklogTaskFileFor('aisdlc-9', 'backlog/other/aisdlc-9 - x.md')).toBe(false);
     expect(isBacklogTaskFileFor('aisdlc-9', 'docs/backlog/tasks/aisdlc-9 - x.md')).toBe(false);
-    expect(isBacklogTaskFileFor('aisdlc-9.1', 'backlog/tasks/aisdlc-9x1 - x.md')).toBe(false);
+  });
+});
+
+describe('readFileFromOriginMain + readTaskPrefix', () => {
+  it('reads committed text via `git --git-dir <root>/.git show origin/main:<path>`', async () => {
+    const { runner, calls } = makeFakeRunner({ 'show origin/main:': { stdout: 'text' } });
+    expect(await readFileFromOriginMain('/main', 'a/b.yaml', runner)).toBe('text');
+    expect(calls[0].args).toEqual(['--git-dir', '/main/.git', 'show', 'origin/main:a/b.yaml']);
+  });
+
+  it('returns null on failure (fail closed)', async () => {
+    const { runner } = makeFakeRunner({ 'show origin/main:': { code: 128 } });
+    expect(await readFileFromOriginMain('/main', 'a', runner)).toBeNull();
+  });
+
+  it('reads task_prefix from backlog/config.yml and defaults to AISDLC', async () => {
+    const ok = makeFakeRunner({ 'config.yml': { stdout: "x: 1\ntask_prefix: 'PROJ'\n" } });
+    expect(await readTaskPrefix('/main', ok.runner)).toBe('PROJ');
+    const none = makeFakeRunner({ 'config.yml': { stdout: 'x: 1\n' } });
+    expect(await readTaskPrefix('/main', none.runner)).toBe('AISDLC');
+    const missing = makeFakeRunner({ 'config.yml': { code: 128 } });
+    expect(await readTaskPrefix('/main', missing.runner)).toBe('AISDLC');
   });
 });
 
@@ -694,15 +588,23 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
 
   async function trust(
     overrides: Partial<PrSnapshot>,
-    opts: { authors?: string[]; lsTree?: string; lsTreeCode?: number } = {},
+    opts: {
+      authors?: string[];
+      lsTree?: string;
+      lsTreeCode?: number;
+      commit?: Partial<ExecResult>;
+    } = {},
   ) {
     const { runner, calls } = makeFakeRunner({
-      'git ls-tree': { stdout: opts.lsTree ?? onMain, code: opts.lsTreeCode ?? 0 },
+      'ls-tree': { stdout: opts.lsTree ?? onMain, code: opts.lsTreeCode ?? 0 },
+      'commits/': opts.commit ?? { stdout: '{"author":"operator","committer":"operator"}' },
     });
     const reason = await evaluatePrTrust({
       snapshot: { ...SNAPSHOT, ...overrides },
       mergeAuthors: opts.authors ?? ['operator'],
       repoRoot: '/main-checkout',
+      repoSlug: 'org/repo',
+      taskPrefix: 'AISDLC',
       runner,
     });
     return { reason, calls };
@@ -712,6 +614,8 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
     const { reason, calls } = await trust({});
     expect(reason).toBeNull();
     expect(calls[0].args).toEqual([
+      '--git-dir',
+      '/main-checkout/.git',
       'ls-tree',
       '-r',
       '--name-only',
@@ -733,7 +637,7 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
 
   it('refuses when the allow-list is empty (fail closed), without any git call', async () => {
     const { reason, calls } = await trust({}, { authors: [] });
-    expect(reason).toMatch(/allow-list is configured|empty list trusts nobody/);
+    expect(reason).toMatch(/empty list trusts nobody/);
     expect(calls).toEqual([]);
   });
 
@@ -750,18 +654,20 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
   });
 
   it('refuses when git ls-tree fails (cannot prove the task exists)', async () => {
-    const { reason } = await trust({}, { lsTreeCode: 128 });
-    expect(reason).toMatch(/no backlog task file/);
+    expect((await trust({}, { lsTreeCode: 128 })).reason).toMatch(/no backlog task file/);
   });
 
-  it('refuses when the branch/title carry no task id, or disagree', async () => {
+  it('refuses when the branch/title carry no task id, a gh-issue style id, or disagree', async () => {
     expect((await trust({ headRefName: 'feature/x', title: 'no id' })).reason).toMatch(
+      /no backlog task id/,
+    );
+    expect((await trust({ headRefName: 'ai-sdlc/gh-issue-12-x', title: 'x' })).reason).toMatch(
       /no backlog task id/,
     );
     expect((await trust({ title: 'x (AISDLC-10)' })).reason).toMatch(/ambiguous task id/);
   });
 
-  it('accepts a task file added by the PR own diff (created-and-completed in one PR) without a git call', async () => {
+  it('accepts a task file added by the PR own diff without a git ls-tree call', async () => {
     const { reason, calls } = await trust(
       {
         headRefName: 'ai-sdlc/aisdlc-77-new',
@@ -771,104 +677,106 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
       { lsTree: '' },
     );
     expect(reason).toBeNull();
-    expect(calls).toEqual([]);
+    expect(calls.every((c) => c.command === 'gh')).toBe(true);
   });
 
   it('does not count a task file the PR deletes, nor an unrelated PR file', async () => {
     const base = { headRefName: 'ai-sdlc/aisdlc-77-new', title: 'x (AISDLC-77)' };
-    expect(
-      (
-        await trust(
-          { ...base, files: [{ path: 'backlog/tasks/aisdlc-77 - new.md', changeType: 'DELETED' }] },
-          { lsTree: '' },
-        )
-      ).reason,
-    ).toMatch(/no backlog task file/);
-    expect(
-      (
-        await trust(
-          { ...base, files: [{ path: 'src/aisdlc-77 - new.md', changeType: 'ADDED' }] },
-          { lsTree: '' },
-        )
-      ).reason,
-    ).toMatch(/no backlog task file/);
+    for (const f of [
+      { path: 'backlog/tasks/aisdlc-77 - new.md', changeType: 'DELETED' },
+      { path: 'src/aisdlc-77 - new.md', changeType: 'ADDED' },
+    ]) {
+      expect((await trust({ ...base, files: [f] }, { lsTree: '' })).reason).toMatch(
+        /no backlog task file/,
+      );
+    }
+  });
+
+  it('requires the head commit author login (resolved for the exact sha) on the allow-list', async () => {
+    const other = await trust(
+      {},
+      { commit: { stdout: '{"author":"mallory","committer":"operator"}' } },
+    );
+    expect(other.reason).toMatch(/head commit author "mallory" is not on/);
+    const unlinked = await trust(
+      {},
+      { commit: { stdout: '{"author":null,"committer":"operator"}' } },
+    );
+    expect(unlinked.reason).toMatch(/not linked to a GitHub account/);
+    const failed = await trust({}, { commit: { code: 1 } });
+    expect(failed.reason).toMatch(/could not read the head commit author/);
+    const upper = await trust({}, { commit: { stdout: '{"author":"OPERATOR","committer":null}' } });
+    expect(upper.reason).toBeNull();
   });
 });
 
-describe('resolveRepoMergeAuthors', () => {
-  const pkgRoot = join(__dirname, '..', '..');
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'aisdlc-663-5-authors-'));
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+// ── Native governance resolution ─────────────────────────────────────
 
-  function writePolicy(yaml: string): void {
-    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
-    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), yaml);
-  }
-
-  it('reads the allow-list with the real resolver', () => {
-    writePolicy(
-      'spec:\n  governance:\n    allowMerge: onGreenClean\n    mergeAuthors: [octocat]\n',
-    );
-    const mod = loadGovernanceResolverModule(pkgRoot, join(dir, 'no-cache'));
-    expect(resolveRepoMergeAuthors(dir, pkgRoot, mod)).toEqual(['octocat']);
+describe('resolveGovernanceFromYaml (native)', () => {
+  it('fails closed to strict with no authors when the block is absent', () => {
+    expect(resolveGovernanceFromYaml('spec:\n  role: x\n')).toEqual({
+      policy: STRICT_DEFAULTS,
+      mergeAuthors: [],
+    });
+    expect(parseGovernanceBlock('spec:\n  role: x\n')).toBeNull();
   });
 
-  it('without an injected module, falls through an old installed plugin to one that supports the allow-list', () => {
-    writePolicy('spec:\n  governance:\n    mergeAuthors: [octocat]\n');
-    // The default lookup (installed plugin, then monorepo sibling) must still
-    // find a resolver that supports mergeAuthors in this checkout.
-    expect(resolveRepoMergeAuthors(dir, pkgRoot)).toEqual(['octocat']);
-    expect(resolveRepoMergeAuthors(dir, join(dir, 'nowhere', 'pipeline-cli'))).toEqual(
-      expect.any(Array),
-    );
-  });
-
-  it('loadTrustedPolicyModule skips an old installed plugin lacking trusted-policy.js, and is null when nothing loads', () => {
-    const cache = join(dir, 'cache');
-    const oldLib = join(cache, 'mkt', 'ai-sdlc', '0.1.0', 'hooks', 'lib');
-    mkdirSync(oldLib, { recursive: true });
-    writeFileSync(
-      join(oldLib, 'governance-resolver.js'),
-      'module.exports = { resolveGovernanceFromYaml() { return {}; } };\n',
-    );
-    delete process.env['CLAUDE_PLUGIN_ROOT'];
-    delete process.env['CLAUDE_PLUGIN_DIR'];
-    expect(typeof loadTrustedPolicyModule(pkgRoot, cache)?.verifiedMainRoot).toBe('function');
-    expect(loadTrustedPolicyModule(join(dir, 'nowhere', 'pipeline-cli'), cache)).toBeNull();
-    // A trusted-policy.js without the expected export is not accepted either.
-    writeFileSync(join(oldLib, 'trusted-policy.js'), 'module.exports = {};\n');
-    expect(loadTrustedPolicyModule(join(dir, 'nowhere', 'pipeline-cli'), cache)).toBeNull();
-    writeFileSync(join(oldLib, 'trusted-policy.js'), 'throw new Error("bad");\n');
-    expect(loadTrustedPolicyModule(join(dir, 'nowhere', 'pipeline-cli'), cache)).toBeNull();
-  });
-
-  it('is empty when the key is absent, the file is missing, the module is missing or too old', () => {
-    const mod = loadGovernanceResolverModule(pkgRoot, join(dir, 'no-cache'));
-    expect(resolveRepoMergeAuthors(dir, pkgRoot, mod)).toEqual([]); // no file
-    writePolicy('spec:\n  governance:\n    allowMerge: onGreenClean\n');
-    expect(resolveRepoMergeAuthors(dir, pkgRoot, mod)).toEqual([]); // no key
-    writePolicy('spec:\n  governance:\n    mergeAuthors: [octocat]\n');
-    expect(resolveRepoMergeAuthors(dir, pkgRoot, null)).toEqual([]);
+  it('reads allowMerge, preset and the allow-list (block and inline lists, comments)', () => {
+    const block =
+      'spec:\n  governance:\n    allowMerge: onGreenClean\n    # note\n    mergeAuthors:\n      - octocat # me\n      - "Hub-Bot9"\n    allowResetHard: true\n  other: 1\n';
+    const r = resolveGovernanceFromYaml(block);
+    expect(r.policy.allowMerge).toBe('onGreenClean');
+    expect(r.policy.allowResetHard).toBe(true);
+    expect(r.mergeAuthors).toEqual(['octocat', 'Hub-Bot9']);
+    const inline =
+      'governance:\n  preset: operator-trusted\n  mergeAuthors: [a1, b-2]\n  allowForcePush: leaseOnOwnBranch\n';
+    const i = resolveGovernanceFromYaml(inline);
+    expect(i.policy.allowMerge).toBe('onGreenClean');
+    expect(i.policy.allowForcePush).toBe(true);
+    expect(i.mergeAuthors).toEqual(['a1', 'b-2']);
     expect(
-      resolveRepoMergeAuthors(dir, pkgRoot, {
-        resolveGovernanceFromYaml: () => STRICT_DEFAULTS,
-      }),
-    ).toEqual([]);
+      resolveGovernanceFromYaml('governance:\n  allowForcePush: never\n').policy.allowForcePush,
+    ).toBe(false);
+  });
+
+  it('ignores malformed values and drops malformed or duplicate logins', () => {
+    const r = resolveGovernanceFromYaml(
+      'governance:\n  allowMerge: always\n  preset: nope\n  allowResetHard: maybe\n  mergeAuthors: [ok, OK, -bad, bad-, a--b, "x y", ' +
+        'z'.repeat(40) +
+        ']\n  operational:\n    - requeue\n  mergeAuthorsScalar: x\n',
+    );
+    expect(r.policy).toEqual(STRICT_DEFAULTS);
+    expect(r.mergeAuthors).toEqual(['ok']);
     expect(
-      resolveRepoMergeAuthors(dir, pkgRoot, {
-        resolveGovernanceFromYaml: () => STRICT_DEFAULTS,
-        resolveMergeAuthorsFromYaml: () => {
-          throw new Error('boom');
-        },
-      }),
-    ).toEqual([]);
+      resolveGovernanceFromYaml('governance:\n  mergeAuthors: octocat\n').mergeAuthors,
+    ).toEqual(['octocat']);
+    expect(resolveGovernanceFromYaml('governance:\n  mergeAuthors:\n').mergeAuthors).toEqual([]);
+  });
+
+  it('agrees with the plugin resolver on policy and allow-list for the same text', () => {
+    const require = createRequire(import.meta.url);
+    const plugin = require(
+      join(__dirname, '..', '..', '..', 'ai-sdlc-plugin', 'hooks', 'lib', 'governance-resolver.js'),
+    ) as {
+      resolveGovernanceFromYaml(t: string): GovernancePolicy;
+      resolveMergeAuthorsFromYaml(t: string): string[];
+    };
+    for (const yaml of [
+      '',
+      GREEN_YAML,
+      NEVER_YAML,
+      'governance:\n  preset: operator-trusted\n  allowMerge: never\n',
+      'governance:\n  allowForcePush: true\n  allowBranchDelete: true\n  mergeAuthors:\n    - a\n    - A\n    - b-c\n',
+      'governance:\n  allowMerge: bogus\n  mergeAuthors: [-x, y]\n',
+    ]) {
+      const native = resolveGovernanceFromYaml(yaml);
+      expect(native.policy).toEqual(plugin.resolveGovernanceFromYaml(yaml));
+      expect(native.mergeAuthors).toEqual(plugin.resolveMergeAuthorsFromYaml(yaml));
+    }
   });
 });
 
-// ── Verified main checkout (H3) ──────────────────────────────────────
+// ── Verified main checkout + policy from git ─────────────────────────
 
 function git(args: string[], cwd: string): string {
   return execFileSync('git', args, {
@@ -886,6 +794,7 @@ function git(args: string[], cwd: string): string {
   }).trim();
 }
 
+/** A repo whose committed policy is `policy`; `refs/remotes/origin/main` points at it. */
 function initRepo(root: string, policy: string): void {
   mkdirSync(root, { recursive: true });
   git(['init', '-q', '-b', 'main'], root);
@@ -894,27 +803,20 @@ function initRepo(root: string, policy: string): void {
   writeFileSync(join(root, 'README.md'), 'x\n');
   git(['add', '-A'], root);
   git(['commit', '-q', '-m', 'init'], root);
+  git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], root);
 }
 
-const NEVER_POLICY = 'spec:\n  governance:\n    allowMerge: never\n';
-const GREEN_POLICY =
-  'spec:\n  governance:\n    allowMerge: onGreenClean\n    mergeAuthors: [operator]\n';
-
-describe('resolveTrustedMainRoot + worktree policy copy (H3)', () => {
-  const realPkgRoot = join(__dirname, '..', '..');
+describe('verified main root + policy read from git', () => {
   let base: string;
   let main: string;
   let worktree: string;
 
   beforeEach(() => {
-    delete process.env[TEST_ONLY_POLICY_ROOT_ENV];
     base = mkdtempSync(join(tmpdir(), 'aisdlc-663-5-root-'));
     main = join(base, 'main');
-    initRepo(main, NEVER_POLICY);
+    initRepo(main, NEVER_YAML);
     worktree = join(main, '.worktrees', 'aisdlc-9');
     git(['worktree', 'add', '-q', '-b', 'ai-sdlc/aisdlc-9-x', worktree], main);
-    // The governed worktree rewrites ITS copy of the policy to grant itself merge.
-    writeFileSync(join(worktree, '.ai-sdlc', 'agent-role.yaml'), GREEN_POLICY);
     mkdirSync(join(worktree, 'pipeline-cli'), { recursive: true });
   });
   afterEach(() => {
@@ -922,131 +824,124 @@ describe('resolveTrustedMainRoot + worktree policy copy (H3)', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  const trustedModule = () => loadTrustedPolicyModule(realPkgRoot, join(base, 'no-cache'));
+  const real = (p: string | null) => (p ? realpathSync(p) : p);
 
-  it('loads the real trusted-policy helper from the plugin hooks/lib', () => {
-    expect(typeof trustedModule()?.verifiedMainRoot).toBe('function');
+  it('verifiedMainRoot resolves the main checkout from a worktree and refuses non-repos and odd layouts', () => {
+    expect(real(verifiedMainRoot(worktree))).toBe(realpathSync(main));
+    expect(real(verifiedMainRoot(main))).toBe(realpathSync(main));
+    const plain = join(base, 'plain');
+    mkdirSync(plain);
+    expect(verifiedMainRoot(plain)).toBeNull();
+    // A symlinked .git is refused.
+    const linked = join(base, 'linked');
+    mkdirSync(linked);
+    symlinkSync(join(main, '.git'), join(linked, '.git'));
+    expect(verifiedMainRoot(linked)).toBeNull();
+    // A bare layout (common dir not named .git) is refused.
+    expect(verifiedMainRoot(main, () => join(base, 'main.git'))).toBeNull();
+    expect(verifiedMainRoot(main, () => null)).toBeNull();
   });
 
-  it('resolves the MAIN checkout from a worktree CLI + worktree cwd', () => {
+  it('resolveTrustedMainRoot: worktree CLI + worktree cwd resolve to the MAIN checkout', () => {
     const res = resolveTrustedMainRoot({
       cwd: worktree,
       anchorDir: join(worktree, 'pipeline-cli'),
-      trustedModule: trustedModule(),
     });
-    expect(res.root && realpathSync(res.root)).toBe(realpathSync(main));
-    expect(res.testOverride).toBe(false);
+    expect(real(res.root)).toBe(realpathSync(main));
   });
 
-  it('a worktree copy saying onGreenClean is IGNORED when the verified main policy says never', async () => {
-    const res = resolveTrustedMainRoot({
-      cwd: worktree,
-      anchorDir: join(worktree, 'pipeline-cli'),
-      trustedModule: trustedModule(),
-    });
-    const mod = loadGovernanceResolverModule(realPkgRoot, join(base, 'no-cache'));
-    // Sanity: the worktree copy WOULD have granted merge.
-    expect(resolveRepoGovernancePolicy(worktree, realPkgRoot, mod).allowMerge).toBe('onGreenClean');
-    // The trusted root yields `never` and the gate refuses without any gh call.
-    expect(resolveRepoGovernancePolicy(res.root!, realPkgRoot, mod).allowMerge).toBe('never');
+  it('refuses when cwd belongs to a DIFFERENT repo than the CLI, or either is not a checkout', () => {
+    const evil = join(base, 'evil');
+    initRepo(evil, GREEN_YAML);
+    const anchorDir = join(worktree, 'pipeline-cli');
+    const r = resolveTrustedMainRoot({ cwd: evil, anchorDir });
+    expect(r.root).toBeNull();
+    expect(r.reason).toMatch(/same verified main checkout/);
+    const plain = join(base, 'plain');
+    mkdirSync(plain);
+    expect(resolveTrustedMainRoot({ cwd: main, anchorDir: plain }).reason).toMatch(
+      /containing this CLI/,
+    );
+    expect(resolveTrustedMainRoot({ cwd: plain, anchorDir }).root).toBeNull();
+  });
+
+  it('no environment variable (old override name, plugin root/dir) changes the trusted root', () => {
+    const attacker = join(base, 'attacker');
+    initRepo(attacker, GREEN_YAML);
+    process.env['AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS'] = '1';
+    process.env['CLAUDE_PLUGIN_ROOT'] = attacker;
+    process.env['CLAUDE_PLUGIN_DIR'] = attacker;
+    process.env['GIT_DIR'] = join(attacker, '.git');
+    const anchorDir = join(worktree, 'pipeline-cli');
+    expect(real(resolveTrustedMainRoot({ cwd: worktree, anchorDir }).root)).toBe(
+      realpathSync(main),
+    );
+    expect(resolveTrustedMainRoot({ cwd: attacker, anchorDir }).root).toBeNull();
+  });
+
+  it('a worktree copy and an UNCOMMITTED main-checkout edit saying onGreenClean are both ignored', async () => {
+    const granted = GREEN_YAML;
+    writeFileSync(join(worktree, '.ai-sdlc', 'agent-role.yaml'), granted);
+    writeFileSync(join(main, '.ai-sdlc', 'agent-role.yaml'), granted); // working tree, uncommitted
+    const committed = await readFileFromOriginMain(main, '.ai-sdlc/agent-role.yaml', defaultRunner);
+    expect(committed).toBe(NEVER_YAML);
     const { runner, calls } = makeFakeRunner({});
     const result = await runMergeIfEligible({
       prNumber: 9,
       sourceKind: 'backlog',
       repoSlug: 'org/repo',
-      repoRoot: res.root,
-      pkgRoot: realPkgRoot,
-      runner,
+      repoRoot: main,
+      runner: (c, a, o) => (c === 'git' ? defaultRunner(c, a, o) : runner(c, a, o)),
     });
     expect(result.eligibility.eligible).toBe(false);
     expect(result.eligibility.reason).toMatch(/allowMerge="never"/);
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([]); // no gh call spent
   });
 
-  it('refuses when cwd belongs to a DIFFERENT repo than the CLI (attacker-controlled repo)', () => {
-    const evil = join(base, 'evil');
-    initRepo(evil, GREEN_POLICY);
-    const res = resolveTrustedMainRoot({
-      cwd: evil,
-      anchorDir: join(worktree, 'pipeline-cli'),
-      trustedModule: trustedModule(),
+  it('uses the committed grant even when the working tree says never (policy comes from git)', async () => {
+    const m2 = join(base, 'main2');
+    initRepo(m2, GREEN_YAML);
+    writeFileSync(join(m2, '.ai-sdlc', 'agent-role.yaml'), NEVER_YAML); // uncommitted tightening
+    const { runner, calls } = makeFakeRunner({ 'gh pr view': { code: 1, stderr: 'x' } });
+    const result = await runMergeIfEligible({
+      prNumber: 9,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: m2,
+      runner: (c, a, o) => (c === 'git' ? defaultRunner(c, a, o) : runner(c, a, o)),
     });
-    expect(res.root).toBeNull();
-    expect(res.reason).toMatch(/same verified main checkout/);
+    // Reached the PR read, i.e. the committed onGreenClean grant was honoured.
+    expect(result.eligibility.reason).toMatch(/could not read the PR/);
+    expect(calls).toHaveLength(1);
   });
 
-  it('refuses when the CLI itself is not inside a verifiable git checkout, or cwd is not a repo', () => {
-    const plain = join(base, 'plain');
-    mkdirSync(plain);
-    expect(
-      resolveTrustedMainRoot({ cwd: main, anchorDir: plain, trustedModule: trustedModule() }).root,
-    ).toBeNull();
-    expect(
-      resolveTrustedMainRoot({ cwd: plain, anchorDir: main, trustedModule: trustedModule() }).root,
-    ).toBeNull();
-  });
-
-  it('refuses when the trusted-policy helper cannot be loaded or throws', () => {
-    expect(
-      resolveTrustedMainRoot({ cwd: main, anchorDir: main, trustedModule: null }).reason,
-    ).toMatch(/could not be loaded/);
-    const res = resolveTrustedMainRoot({
-      cwd: main,
-      anchorDir: main,
-      trustedModule: {
-        verifiedMainRoot: () => {
-          throw new Error('x');
-        },
-      },
-    });
-    expect(res.root).toBeNull();
-    expect(res.reason).toMatch(/verifying the main checkout failed/);
-  });
-
-  it('honours --repo-root ONLY with the explicit test-only env var', () => {
-    const args = {
-      cwd: worktree,
-      anchorDir: join(worktree, 'pipeline-cli'),
-      repoRootOverride: worktree,
-      trustedModule: trustedModule(),
-    };
-    // Without the env var the override is ignored (main root wins).
-    const prod = resolveTrustedMainRoot(args);
-    expect(prod.testOverride).toBe(false);
-    expect(prod.root && realpathSync(prod.root)).toBe(realpathSync(main));
-    // Any value other than exactly "1" is still production.
-    expect(
-      resolveTrustedMainRoot({ ...args, env: { [TEST_ONLY_POLICY_ROOT_ENV]: 'true' } })
-        .testOverride,
-    ).toBe(false);
-    // With it, the override is honoured and flagged.
-    const t = resolveTrustedMainRoot({ ...args, env: { [TEST_ONLY_POLICY_ROOT_ENV]: '1' } });
-    expect(t).toEqual({ root: worktree, reason: '', testOverride: true });
-  });
-
-  it('without a verified root the gate refuses and spends no gh call', async () => {
+  it('refuses when origin/main or the policy file is unreadable', async () => {
+    git(['update-ref', '-d', 'refs/remotes/origin/main'], main);
     const { runner, calls } = makeFakeRunner({});
     const result = await runMergeIfEligible({
       prNumber: 9,
       sourceKind: 'backlog',
       repoSlug: 'org/repo',
-      repoRoot: null,
-      rootRefusal: 'because',
-      pkgRoot: realPkgRoot,
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
+      repoRoot: main,
+      runner: (c, a, o) => (c === 'git' ? defaultRunner(c, a, o) : runner(c, a, o)),
     });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/verified main checkout.*because/);
-    expect(result.policy).toEqual(STRICT_DEFAULTS);
+    expect(result.eligibility.reason).toMatch(/as committed on origin\/main/);
     expect(calls).toEqual([]);
   });
 });
 
-describe('runMergeIfEligible — hardened trust + head pin (H1/H2)', () => {
+describe('runMergeIfEligible — hardened trust + head pin', () => {
+  const ALL_OK: Record<string, Partial<ExecResult>> = {
+    'gh pr view 42': { stdout: prView() },
+    'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
+    ...COMMIT_OPERATOR,
+    ...shaChecks(HEAD_A, [['ci', 'completed', 'success']]),
+    'gh pr merge 42': {},
+  };
+
   function run(
     handlers: Record<string, Partial<ExecResult> | Error>,
-    extra: Partial<Parameters<typeof runMergeIfEligible>[0]> = {},
+    extra: Partial<RunMergeIfEligibleOptions> = {},
   ) {
     const fake = makeFakeRunner(handlers);
     const promise = runMergeIfEligible({
@@ -1054,109 +949,206 @@ describe('runMergeIfEligible — hardened trust + head pin (H1/H2)', () => {
       sourceKind: 'backlog',
       repoSlug: 'org/repo',
       repoRoot: '/unused',
-      pkgRoot: '/unused',
       runner: fake.runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
       ...extra,
     });
     return { promise, calls: fake.calls };
   }
-  const CHECKS = {
-    'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
-  };
-  const mergeCalls = (calls: Array<{ args: string[] }>) =>
-    calls.filter((c) => c.args.includes('merge'));
+  const mergeCalls = (calls: RecordedCall[]) => calls.filter((c) => c.args.includes('merge'));
 
-  it('refuses a fork PR before spending a checks call or a merge', async () => {
-    const { promise, calls } = run({
-      'gh pr view 42': { stdout: prView({ isCrossRepository: true }) },
-    });
-    const r = await promise;
-    expect(r.eligibility.eligible).toBe(false);
-    expect(r.eligibility.reason).toMatch(/fork/);
-    expect(calls.every((c) => c.args[1] === 'view')).toBe(true);
+  it('refuses under strict policy / untrusted sourceKind / no root / unreadable policy, spending no gh call', async () => {
+    for (const extra of [
+      { policyYaml: NEVER_YAML },
+      { sourceKind: 'gh-issue' as const },
+      { repoRoot: null, rootRefusal: 'because' },
+      { policyYaml: null },
+    ]) {
+      const { promise, calls } = run({}, extra);
+      const r = await promise;
+      expect(r.eligibility.eligible).toBe(false);
+      expect(r.merged).toBe(false);
+      expect(calls).toEqual([]);
+    }
+    const noRoot = await run({}, { repoRoot: null, rootRefusal: 'because' }).promise;
+    expect(noRoot.eligibility.reason).toMatch(/verified main checkout.*because/);
+    expect(noRoot.policy).toEqual(STRICT_DEFAULTS);
   });
 
-  it('refuses the wrong author', async () => {
-    const { promise, calls } = run({
-      ...CHECKS,
-      'gh pr view 42': { stdout: prView({ author: { login: 'mallory' } }) },
-    });
-    const r = await promise;
-    expect(r.eligibility.reason).toMatch(/"mallory" is not on the/);
-    expect(mergeCalls(calls)).toEqual([]);
-  });
-
-  it('refuses when the allow-list is empty', async () => {
+  it('reads the policy with git show origin/main in the verified checkout when not injected', async () => {
     const { promise, calls } = run(
-      { ...CHECKS, 'gh pr view 42': { stdout: prView() } },
-      { loadMergeAuthors: () => [] },
+      { ...ALL_OK, 'show origin/main:.ai-sdlc/agent-role.yaml': { stdout: GREEN_YAML } },
+      { policyYaml: undefined },
     );
-    const r = await promise;
-    expect(r.eligibility.reason).toMatch(/mergeAuthors/);
-    expect(mergeCalls(calls)).toEqual([]);
+    expect((await promise).merged).toBe(true);
+    expect(calls[0]).toEqual({
+      command: 'git',
+      args: ['--git-dir', '/unused/.git', 'show', 'origin/main:.ai-sdlc/agent-role.yaml'],
+    });
   });
 
-  it('refuses a non-main base', async () => {
-    const { promise } = run({
-      ...CHECKS,
-      'gh pr view 42': { stdout: prView({ baseRefName: 'dev' }) },
-    });
-    expect((await promise).eligibility.reason).toMatch(/base branch is "dev"/);
+  it('reads the task prefix from origin/main when not injected', async () => {
+    const { promise } = run(
+      { ...ALL_OK, 'show origin/main:backlog/config.yml': { stdout: 'task_prefix: AISDLC\n' } },
+      { taskPrefix: undefined },
+    );
+    expect((await promise).merged).toBe(true);
   });
 
-  it('refuses when no matching backlog task exists (PR diff has none, origin/main has none)', async () => {
-    const { promise, calls } = run({
-      ...CHECKS,
-      'gh pr view 42': { stdout: prView({ files: [] }) },
-      'git ls-tree': { stdout: 'backlog/tasks/aisdlc-1 - other.md\n' },
-    });
+  it('merges when green + CLEAN + trusted, pinned to the head commit, in the expected order', async () => {
+    const { promise, calls } = run(ALL_OK);
     const r = await promise;
-    expect(r.eligibility.reason).toMatch(/no backlog task file for "aisdlc-9"/);
-    expect(mergeCalls(calls)).toEqual([]);
+    expect(r.eligibility.eligible).toBe(true);
+    expect(r.merged).toBe(true);
+    expect(mergeCalls(calls)[0].args).toEqual(
+      expect.arrayContaining(['--match-head-commit', HEAD_A, '--squash']),
+    );
+    const label = (c: RecordedCall) =>
+      c.args[0] === 'api'
+        ? String(c.args[1])
+            .replace(/^repos\/org\/repo\//, '')
+            .split('?')[0]
+        : c.args.slice(0, 2).join(' ');
+    expect(calls.map(label)).toEqual([
+      'pr view',
+      `commits/${HEAD_A}`,
+      'pr checks',
+      `commits/${HEAD_A}/check-runs`,
+      `commits/${HEAD_A}/status`,
+      'pr view',
+      'pr merge',
+    ]);
+  });
+
+  it('refuses a fork PR, the wrong author, an empty allow-list, a non-main base and a missing task', async () => {
+    const cases: Array<[Record<string, unknown>, Partial<RunMergeIfEligibleOptions>, RegExp]> = [
+      [{ isCrossRepository: true }, {}, /fork/],
+      [{ author: { login: 'mallory' } }, {}, /"mallory" is not on the/],
+      [{}, { policyYaml: 'governance:\n  allowMerge: onGreenClean\n' }, /mergeAuthors/],
+      [{ baseRefName: 'dev' }, {}, /base branch is "dev"/],
+      [{ files: [] }, {}, /no backlog task file for "aisdlc-9"/],
+    ];
+    for (const [pr, extra, re] of cases) {
+      const { promise, calls } = run(
+        { ...ALL_OK, 'gh pr view 42': { stdout: prView(pr) }, 'ls-tree': { stdout: '' } },
+        extra,
+      );
+      const r = await promise;
+      expect(r.eligibility.reason).toMatch(re);
+      expect(r.merged).toBe(false);
+      expect(mergeCalls(calls)).toEqual([]);
+    }
   });
 
   it('merges when the task exists on origin/main (not in the PR diff)', async () => {
     const { promise } = run({
-      ...CHECKS,
+      ...ALL_OK,
       'gh pr view 42': { stdout: prView({ files: [] }) },
-      'git ls-tree': { stdout: 'backlog/completed/aisdlc-9 - do the thing.md\n' },
-      'gh pr merge 42': {},
+      'ls-tree': { stdout: 'backlog/completed/aisdlc-9 - do the thing.md\n' },
     });
     expect((await promise).merged).toBe(true);
   });
 
   it('refuses when the PR cannot be read in one call', async () => {
     const { promise } = run({ 'gh pr view 42': { code: 1, stderr: 'nope' } });
-    const r = await promise;
-    expect(r.eligibility.reason).toMatch(/could not read the PR/);
-    expect(r.merged).toBe(false);
+    expect((await promise).eligibility.reason).toMatch(/could not read the PR/);
   });
 
-  it('pins the merge to the head commit the checks were evaluated against', async () => {
+  it('refuses when the head commit author is not allow-listed (and spends no checks call)', async () => {
     const { promise, calls } = run({
-      ...CHECKS,
-      'gh pr view 42': { stdout: prView() },
-      'gh pr merge 42': {},
+      ...ALL_OK,
+      [`commits/${HEAD_A} --jq {author`]: { stdout: '{"author":"mallory","committer":"operator"}' },
     });
     const r = await promise;
-    expect(r.merged).toBe(true);
-    const merge = mergeCalls(calls)[0];
-    expect(merge.args).toEqual(expect.arrayContaining(['--match-head-commit', HEAD_A, '--squash']));
-    // Head read, checks, head re-read, merge — in that order.
-    expect(calls.map((c) => c.args.slice(0, 2).join(' '))).toEqual([
-      'pr view',
-      'pr checks',
-      'pr view',
-      'pr merge',
-    ]);
+    expect(r.eligibility.reason).toMatch(/head commit author "mallory"/);
+    expect(calls.some((c) => c.args.includes('checks'))).toBe(false);
+    expect(mergeCalls(calls)).toEqual([]);
+  });
+
+  it('evaluates REQUIRED checks against the head commit: a green current-head report does not hide a failing sha', async () => {
+    const { promise, calls } = run({
+      ...ALL_OK,
+      ...shaChecks(HEAD_A, [['ci', 'completed', 'failure']]),
+    });
+    const r = await promise;
+    expect(r.eligibility.reason).toMatch(/ci=FAILURE/);
+    expect(mergeCalls(calls)).toEqual([]);
+  });
+
+  it('a required context with no result for the head commit is MISSING and refuses', async () => {
+    const { promise } = run({
+      ...ALL_OK,
+      ...shaChecks(HEAD_A, [['other', 'completed', 'success']]),
+    });
+    expect((await promise).eligibility.reason).toMatch(/ci=MISSING/);
+  });
+
+  it('refuses when the head-commit checks fetch fails or is truncated', async () => {
+    const failed = await run({ ...ALL_OK, [`commits/${HEAD_A}/status`]: { code: 1 } }).promise;
+    expect(failed.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+    const trunc = await run({
+      ...ALL_OK,
+      ...shaChecks(HEAD_A, [['ci', 'completed', 'success']], [], { runsTotal: 500 }),
+    }).promise;
+    expect(trunc.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+  });
+
+  it('no required contexts: every check run and status of the head commit must be green (fallback)', async () => {
+    const base = {
+      ...ALL_OK,
+      'gh pr checks 42 --required': { stdout: '[]' },
+    };
+    const ok = await run({
+      ...base,
+      ...shaChecks(
+        HEAD_A,
+        [
+          ['ci', 'completed', 'success'],
+          ['lint', 'completed', 'neutral'],
+          ['skipped-job', 'completed', 'skipped'],
+        ],
+        [['legacy', 'success']],
+      ),
+    }).promise;
+    expect(ok.eligibility.reason).toMatch(/check-run fallback/);
+    expect(ok.merged).toBe(true);
+    // A real no-branch-protection repo: gh exits 1 with the sentinel.
+    const sentinel = await run({
+      ...base,
+      'gh pr checks 42 --required': {
+        code: 1,
+        stderr: "no required checks reported on the 'main' branch",
+      },
+    }).promise;
+    expect(sentinel.merged).toBe(true);
+    for (const [runs, statuses, re] of [
+      [[['ci', 'completed', 'failure']], [], /ci=FAILURE/],
+      [[['ci', 'in_progress', null]], [], /ci=PENDING/],
+      [[['ci', 'completed', 'success']], [['legacy', 'failure']], /legacy=FAILURE/],
+      [[], [], /no branch-protection required contexts AND no/],
+    ] as Array<[Run[], Array<[string, string]>, RegExp]>) {
+      const r = await run({ ...base, ...shaChecks(HEAD_A, runs, statuses) }).promise;
+      expect(r.eligibility.reason).toMatch(re);
+      expect(r.merged).toBe(false);
+    }
+  });
+
+  it('a failed REQUIRED-checks fetch refuses without falling back to head-commit check runs', async () => {
+    const { promise, calls } = run({
+      ...ALL_OK,
+      'gh pr checks 42 --required': { code: 1, stderr: 'gh: authentication required' },
+    });
+    const r = await promise;
+    expect(r.eligibility.reason).toMatch(/fetch itself failed\/errored/);
+    expect(calls.some((c) => String(c.args[1]).includes('/check-runs'))).toBe(false);
   });
 
   it('head moved between check and merge: refuses, never calls the merge', async () => {
     let views = 0;
-    const calls: Array<{ command: string; args: string[] }> = [];
-    const runner: Runner = async (command, args) => {
+    const calls: RecordedCall[] = [];
+    const delegate = makeFakeRunner({ ...ALL_OK, 'gh pr view 42': { stdout: prView() } }).runner;
+    const runner: Runner = async (command, args, o) => {
       calls.push({ command, args });
       if (args[1] === 'view') {
         views += 1;
@@ -1166,31 +1158,25 @@ describe('runMergeIfEligible — hardened trust + head pin (H1/H2)', () => {
           code: 0,
         };
       }
-      if (args[1] === 'checks') {
-        return { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]), stderr: '', code: 0 };
-      }
-      throw new Error(`unexpected ${command} ${args.join(' ')}`);
+      return delegate(command, args, o);
     };
     const r = await runMergeIfEligible({
       prNumber: 42,
       sourceKind: 'backlog',
       repoSlug: 'org/repo',
       repoRoot: '/unused',
-      pkgRoot: '/unused',
       runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
     });
     expect(r.merged).toBe(false);
-    expect(r.eligibility.eligible).toBe(false);
     expect(r.eligibility.reason).toMatch(/head moved from a{40} to b{40}/);
     expect(mergeCalls(calls)).toEqual([]);
   });
 
   it('head moved after the re-read (GitHub refuses the pinned merge): fails closed with a clear reason', async () => {
     const { promise } = run({
-      ...CHECKS,
-      'gh pr view 42': { stdout: prView() },
+      ...ALL_OK,
       'gh pr merge 42': { code: 1, stderr: 'Head branch was modified. Review and try again.' },
     });
     const r = await promise;
@@ -1200,424 +1186,46 @@ describe('runMergeIfEligible — hardened trust + head pin (H1/H2)', () => {
   });
 
   it('refuses when the pre-merge re-read fails or the PR is no longer CLEAN', async () => {
-    let views = 0;
-    const mk =
-      (second: () => { stdout: string; code: number }): Runner =>
-      async (_c, args) => {
-        if (args[1] === 'view') {
+    for (const [second, re] of [
+      [{ code: 1, stdout: '' }, /could not re-read the PR/],
+      [{ code: 0, stdout: prView({ mergeStateStatus: 'BEHIND' }) }, /BEHIND.*pre-merge re-read/],
+    ] as Array<[Partial<ExecResult>, RegExp]>) {
+      let views = 0;
+      const delegate = makeFakeRunner(ALL_OK).runner;
+      const runner: Runner = async (c, a, o) => {
+        if (a[1] === 'view') {
           views += 1;
           return views === 1
             ? { stdout: prView(), stderr: '', code: 0 }
-            : { ...second(), stderr: '' };
+            : { stdout: '', stderr: '', code: 0, ...second };
         }
-        return { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]), stderr: '', code: 0 };
+        return delegate(c, a, o);
       };
-    const base = {
-      prNumber: 42,
-      sourceKind: 'backlog' as const,
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    };
-    views = 0;
-    const failed = await runMergeIfEligible({
-      ...base,
-      runner: mk(() => ({ stdout: '', code: 1 })),
-    });
-    expect(failed.eligibility.reason).toMatch(/could not re-read the PR/);
-    views = 0;
-    const dirty = await runMergeIfEligible({
-      ...base,
-      runner: mk(() => ({ stdout: prView({ mergeStateStatus: 'BEHIND' }), code: 0 })),
-    });
-    expect(dirty.eligibility.reason).toMatch(/BEHIND.*pre-merge re-read/);
-    expect(dirty.merged).toBe(false);
+      const r = await runMergeIfEligible({
+        prNumber: 42,
+        sourceKind: 'backlog',
+        repoSlug: 'org/repo',
+        repoRoot: '/unused',
+        runner,
+        policyYaml: GREEN_YAML,
+        taskPrefix: 'AISDLC',
+      });
+      expect(r.merged).toBe(false);
+      expect(r.eligibility.reason).toMatch(re);
+    }
   });
 
-  it('dry-run evaluates the trust facts but never re-reads or merges', async () => {
-    const { promise, calls } = run(
-      { ...CHECKS, 'gh pr view 42': { stdout: prView() } },
-      { dryRun: true },
-    );
+  it('refuses a non-CLEAN merge state and dry-run never re-reads or merges', async () => {
+    const dirty = await run({
+      ...ALL_OK,
+      'gh pr view 42': { stdout: prView({ mergeStateStatus: 'DIRTY' }) },
+    }).promise;
+    expect(dirty.eligibility.reason).toMatch(/DIRTY/);
+    const { promise, calls } = run(ALL_OK, { dryRun: true });
     const r = await promise;
     expect(r.eligibility.eligible).toBe(true);
     expect(r.merged).toBe(false);
     expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(1);
     expect(mergeCalls(calls)).toEqual([]);
-  });
-});
-
-// ── runMergeIfEligible (composition) ─────────────────────────────────
-
-describe('runMergeIfEligible', () => {
-  it('AC1 — never calls gh at all under strict policy, refuses non-zero-equivalent', async () => {
-    const { runner, calls } = makeFakeRunner({});
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => STRICT_DEFAULTS,
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.merged).toBe(false);
-    expect(calls).toEqual([]); // no gh calls at all — short-circuited
-  });
-
-  it('AC3 — never calls gh at all for an untrusted sourceKind under onGreenClean', async () => {
-    const { runner, calls } = makeFakeRunner({});
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'gh-issue',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.merged).toBe(false);
-    expect(calls).toEqual([]);
-  });
-
-  it('AC2 — merges when green + CLEAN + trusted', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': {
-        stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]),
-      },
-      'gh pr merge 42': {},
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(true);
-    expect(result.merged).toBe(true);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
-  });
-
-  it('refuses (no merge call) when a required check is not green', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': {
-        stdout: JSON.stringify([{ name: 'ci', state: 'FAILURE' }]),
-      },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.merged).toBe(false);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
-  });
-
-  it('refuses (no merge call) when mergeStateStatus is not CLEAN', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView({ mergeStateStatus: 'DIRTY' }) },
-      'gh pr checks 42 --required': {
-        stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]),
-      },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.merged).toBe(false);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
-  });
-
-  it('dry-run never calls gh pr merge even when eligible', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': {
-        stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]),
-      },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-      dryRun: true,
-    });
-    expect(result.eligibility.eligible).toBe(true);
-    expect(result.merged).toBe(false);
-    expect(result.dryRun).toBe(true);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
-  });
-
-  it('uses the real filesystem-backed resolveRepoGovernancePolicy when loadPolicy is omitted', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'aisdlc-603-run-'));
-    try {
-      // No .ai-sdlc/agent-role.yaml and no ai-sdlc-plugin sibling at this
-      // synthetic pkgRoot → fails closed to STRICT_DEFAULTS → refused,
-      // zero gh calls.
-      const { runner, calls } = makeFakeRunner({});
-      const result = await runMergeIfEligible({
-        prNumber: 42,
-        sourceKind: 'backlog',
-        repoSlug: 'org/repo',
-        repoRoot: dir,
-        pkgRoot: join(dir, 'pipeline-cli'),
-        runner,
-      });
-      expect(result.eligibility.eligible).toBe(false);
-      expect(result.policy).toEqual(STRICT_DEFAULTS);
-      expect(calls).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  // ── AISDLC-607 Defect 2: check-run fallback when no required contexts ──
-
-  it('AC-3 — no required contexts, all real check-runs SUCCESS/NEUTRAL/none-pending → ELIGIBLE', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': { stdout: '[]' }, // branch protection: no required contexts
-      'gh pr checks 42 --json': {
-        stdout: JSON.stringify([
-          { name: 'ci', state: 'SUCCESS' },
-          { name: 'lint', state: 'NEUTRAL' },
-          { name: 'legacy-skipped-job', state: 'SKIPPED' },
-        ]),
-      },
-      'gh pr merge 42': {},
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(true);
-    expect(result.eligibility.reason).toMatch(/check-run fallback/);
-    expect(result.merged).toBe(true);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
-  });
-
-  it('AISDLC-620 AC-1 — real no-branch-protection repo (gh --required exits 1 with "no required checks reported"), green + CLEAN → ELIGIBLE via check-run fallback', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': {
-        code: 1,
-        stderr: "no required checks reported on the 'main' branch",
-      },
-      'gh pr checks 42 --json': {
-        stdout: JSON.stringify([
-          { name: 'ci', state: 'SUCCESS' },
-          { name: 'lint', state: 'NEUTRAL' },
-        ]),
-      },
-      'gh pr merge 42': {},
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(true);
-    expect(result.eligibility.reason).toMatch(/check-run fallback/);
-    expect(result.merged).toBe(true);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(true);
-  });
-
-  it('AISDLC-620 AC-2 — a genuine required-checks fetch error (NOT the sentinel) on a no-protection-looking exit-1 still REFUSES fail-closed', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': {
-        code: 1,
-        stderr: 'gh: authentication required. run `gh auth login`',
-      },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/fetch itself failed\/errored/);
-    // MUST NOT have fallen through to the unfiltered check-runs fetch —
-    // a genuine auth/network error is never conflated with "no required
-    // checks configured".
-    expect(calls.some((c) => c.args.includes('checks') && !c.args.includes('--required'))).toBe(
-      false,
-    );
-    expect(result.merged).toBe(false);
-  });
-
-  it('AC-4 — no required contexts, a check-run FAILURE → REFUSES with an auditable reason', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': { stdout: '[]' },
-      'gh pr checks 42 --json': {
-        stdout: JSON.stringify([
-          { name: 'ci', state: 'SUCCESS' },
-          { name: 'security-scan', state: 'FAILURE' },
-        ]),
-      },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/security-scan=FAILURE/);
-    expect(result.merged).toBe(false);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
-  });
-
-  it('AC-4 — no required contexts, a check-run PENDING → REFUSES with an auditable reason', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': { stdout: '[]' },
-      'gh pr checks 42 --json': {
-        stdout: JSON.stringify([
-          { name: 'ci', state: 'SUCCESS' },
-          { name: 'slow-integration-test', state: 'PENDING' },
-        ]),
-      },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/slow-integration-test=PENDING/);
-    expect(result.merged).toBe(false);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
-  });
-
-  it('AC-5 — the check-run fetch itself errors → REFUSES (fail-closed), NOT treated as vacuously green', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': { stdout: '[]' },
-      'gh pr checks 42 --json': { code: 1, stderr: 'gh: unexpected error' },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/fetch itself failed\/errored/);
-    expect(result.merged).toBe(false);
-    expect(calls.some((c) => c.args.includes('merge'))).toBe(false);
-  });
-
-  it('AC-5 — the REQUIRED-checks fetch itself errors (not merely empty) → REFUSES without falling back to check-runs', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': { code: 1, stderr: '403 branch protection unavailable' },
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(false);
-    expect(result.eligibility.reason).toMatch(/fetch itself failed\/errored/);
-    // MUST NOT have fallen through to the unfiltered check-runs fetch —
-    // an errored required-checks fetch is never conflated with "no branch
-    // protection configured".
-    expect(calls.some((c) => c.args.includes('checks') && !c.args.includes('--required'))).toBe(
-      false,
-    );
-    expect(result.merged).toBe(false);
-  });
-
-  it('AC-6 — required contexts present: behavior is byte-identical to the pre-AISDLC-607 path (no fallback fetch at all)', async () => {
-    const { runner, calls } = makeFakeRunner({
-      'gh pr view 42': { stdout: prView() },
-      'gh pr checks 42 --required': {
-        stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]),
-      },
-      'gh pr merge 42': {},
-    });
-    const result = await runMergeIfEligible({
-      prNumber: 42,
-      sourceKind: 'backlog',
-      repoSlug: 'org/repo',
-      repoRoot: '/unused',
-      pkgRoot: '/unused',
-      runner,
-      loadPolicy: () => GREEN_CLEAN_POLICY,
-      loadMergeAuthors: () => ['operator'],
-    });
-    expect(result.eligibility.eligible).toBe(true);
-    expect(result.eligibility.reason).toMatch(/all 1 required check\(s\) green/);
-    expect(result.eligibility.reason).not.toMatch(/check-run fallback/);
-    expect(result.merged).toBe(true);
-    // The unfiltered `gh pr checks 42 --json ...` (no --required) fallback
-    // fetch must NOT have been invoked — required contexts were found.
-    expect(calls.some((c) => c.args.includes('checks') && !c.args.includes('--required'))).toBe(
-      false,
-    );
   });
 });

@@ -1017,6 +1017,25 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
     }
   }
 
+  for (const policy of ['strict', 'green']) {
+    it(`denies arming with --admin (an admin merge bypass) under ${policy}`, () => {
+      assert.ok(isDenied(run(policy, 'gh pr merge 42 --auto --admin')));
+      assert.ok(isDenied(run(policy, 'gh pr merge 42 --admin --squash')));
+    });
+
+    it(`denies any command naming the removed policy-root override under ${policy}`, () => {
+      const result = run(
+        policy,
+        'AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1 node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog',
+      );
+      assert.ok(isDenied(result));
+      assert.match(
+        JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason,
+        /policy root/,
+      );
+    });
+  }
+
   const ALLOWED = [
     // arming is not merging
     'gh pr merge 42 --auto',
