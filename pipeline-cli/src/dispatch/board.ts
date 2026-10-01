@@ -294,11 +294,11 @@ export interface ClaimHooks {
 }
 
 /** Ascending priority order; an absent priority sorts after every number. */
-function comparePriority(a: number | undefined, b: number | undefined): number {
-  if (a === b) return 0;
-  if (a === undefined) return 1;
-  if (b === undefined) return -1;
-  return a - b;
+function comparePriority(a: unknown, b: unknown): number {
+  const x = typeof a === 'number' && Number.isFinite(a) ? a : Infinity;
+  const y = typeof b === 'number' && Number.isFinite(b) ? b : Infinity;
+  if (x === y) return 0;
+  return x < y ? -1 : 1;
 }
 
 /**
@@ -409,6 +409,14 @@ export function claimNext(
         if (!isFsErrorCode(err, 'ENOENT')) throw err;
       }
       continue;
+    }
+    // The claim rename keeps the queue mtime; stamp the claim time so a reap
+    // tick measures a heartbeat-less claim from now, not from enqueue.
+    try {
+      const claimedAt = new Date();
+      utimesSync(inflightPath, claimedAt, claimedAt);
+    } catch {
+      /* best effort: the reaper falls back to dispatchedAt */
     }
     if (hooks.workerId !== undefined) {
       try {
@@ -554,11 +562,11 @@ function writeIntoQueue(
 
 /**
  * Return an inflight manifest to `queue/` with `retryCount` set to the given
- * value (the reaper's requeue path). Clears the inflight manifest, heartbeat
- * and any resume signal before the queue copy appears, so a Worker cannot
- * claim the fresh copy and have the cleanup delete its claim. The original
- * mtime is kept so the task holds its FIFO position. Returns false when no
- * inflight manifest exists.
+ * value (the reaper's requeue path). The heartbeat and any resume signal are
+ * cleared first, then the manifest itself moves with one atomic rename, so a
+ * crash at any point leaves the task on the board (still inflight, where the
+ * next reap tick finds it again). The original mtime is kept so the task
+ * holds its FIFO position. Returns false when no inflight manifest exists.
  *
  * @throws when `queue/<task-id>` already exists.
  */
@@ -573,12 +581,22 @@ export function requeueInflight(boardDir: string, taskId: string, retryCount: nu
   }
   manifest.retryCount = retryCount;
   const times = statSync(src);
-  writeIntoQueue(dst, manifest, times, () => {
-    for (const suffix of [MANIFEST_SUFFIX, STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
-      rmSync(path.join(boardDir, 'inflight', `${taskId}${suffix}`), { force: true });
-    }
-  });
+  for (const suffix of [STATE_SUFFIX, RESUME_SIGNAL_SUFFIX]) {
+    rmSync(path.join(boardDir, 'inflight', `${taskId}${suffix}`), { force: true });
+  }
+  writeJsonAtomic(src, manifest);
+  utimesSync(src, times.atime, times.mtime);
+  renameSync(src, dst);
   return true;
+}
+
+/** Epoch ms when an inflight manifest was claimed (its mtime), or undefined. */
+export function inflightClaimedAtMs(boardDir: string, taskId: string): number | undefined {
+  try {
+    return statSync(manifestPathIn(boardDir, 'inflight', taskId)).mtimeMs;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Read one inflight manifest (undefined when absent or unparseable). */

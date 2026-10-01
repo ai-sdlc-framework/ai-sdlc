@@ -151,6 +151,26 @@ describe('claim rules', () => {
     expect(order).toEqual(['T-9', 'T-5', 'T-6', 'T-3', 'T-4', 'T-2', 'T-7', 'T-8', 'T-1']);
   });
 
+  it('treats a malformed priority as absent so the order stays total', () => {
+    for (const [id, raw, t] of [
+      ['T-1', '"abc"', 1],
+      ['T-2', '2', 2],
+      ['T-3', 'null', 3],
+      ['T-4', '1', 4],
+    ] as [string, string, number][]) {
+      const file = path.join(board, 'queue', `${id}.dispatch.json`);
+      writeFileSync(file, JSON.stringify(mk(id)).replace(/}$/, `,"priority":${raw}}`));
+      _setMtimeForTest(file, 1_000_000 + t * 1000);
+    }
+    const order: string[] = [];
+    for (;;) {
+      const r = claimNext(board, 'in-session-agent');
+      if (!r.claimed) break;
+      order.push(r.manifest?.taskId ?? '');
+    }
+    expect(order).toEqual(['T-4', 'T-2', 'T-1', 'T-3']);
+  });
+
   it('lists the queue in the same order it is claimed', () => {
     for (const [id, extra, t] of [
       ['T-1', {}, 1],
@@ -236,11 +256,32 @@ describe('requeueStaleInflight', () => {
 
   it('fails a manifest past the retry limit', () => {
     writeManifest(board, mk('T-1', { retryCount: 2 }));
-    claimNext(board, 'in-session-agent');
+    const claim = claimNext(board, 'in-session-agent');
+    _setMtimeForTest(claim.manifestPath ?? '', now().getTime() - 3_600_000);
     const r = requeueStaleInflight(board, { now, retryLimit: 2 });
     expect(r.failed).toEqual([expect.objectContaining({ taskId: 'T-1', retryCount: 3 })]);
     expect(existsSync(path.join(board, 'failed', 'T-1.diagnostic.json'))).toBe(true);
     expect(readInflightManifest(board, 'T-1')).toBeUndefined();
+  });
+
+  it('measures a claim with no heartbeat from the claim, not from enqueue', () => {
+    writeManifest(board, mk('T-1', { dispatchedAt: '2020-01-01T00:00:00.000Z' }));
+    claimNext(board, 'in-session-agent');
+    const justClaimed = requeueStaleInflight(board, { now: () => new Date() });
+    expect(justClaimed.requeued).toHaveLength(0);
+    expect(readInflightManifest(board, 'T-1')).toBeDefined();
+  });
+
+  it('keeps the queue position and leaves no temporary file when requeueing', () => {
+    writeManifest(board, mk('T-1'));
+    const claim = claimNext(board, 'in-session-agent');
+    const old = 1_000_000_000;
+    _setMtimeForTest(claim.manifestPath ?? '', old);
+    expect(requeueStaleInflight(board, { now, staleMs: 1000 }).requeued).toHaveLength(1);
+    const queueFile = path.join(board, 'queue', 'T-1.dispatch.json');
+    expect(statSync(queueFile).mtimeMs).toBe(old);
+    expect(readdirSync(path.join(board, 'queue'))).toEqual(['T-1.dispatch.json']);
+    expect(readdirSync(path.join(board, 'inflight'))).toEqual([]);
   });
 
   it('leaves a live manifest alone', () => {

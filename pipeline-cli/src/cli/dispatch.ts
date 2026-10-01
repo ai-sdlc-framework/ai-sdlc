@@ -151,11 +151,12 @@ import {
 function intFlag(flags: Record<string, string>, name: string): number | undefined | null {
   const raw = flags[name];
   if (raw === undefined || raw === '') return undefined;
-  if (!/^-?\d+$/.test(raw.trim())) {
+  const value = Number.parseInt(raw, 10);
+  if (!/^-?\d+$/.test(raw.trim()) || !Number.isSafeInteger(value)) {
     process.stderr.write(`cli-dispatch: --${name} must be an integer (got '${raw}')\n`);
     return null;
   }
-  return Number.parseInt(raw, 10);
+  return value;
 }
 
 /**

@@ -3,7 +3,15 @@
  * (RFC-0041 §4.4, AISDLC-377.1).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -1308,6 +1316,16 @@ describe('runDispatchCli ordering commands', () => {
     expect(read('TT-2').priority).toBeUndefined();
   });
 
+  it('rejects a one-letter task prefix in a brief while --task still accepts it', async () => {
+    const brief = path.join(root, 'short.md');
+    writeFileSync(brief, '```yaml\ndispatchBrief:\n  - task: T-1\n    wave: 1\n```\n');
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(1);
+    expect(err.mock.calls.join('')).toContain('not a valid task id');
+    err.mockRestore();
+    expect(await runDispatchCli(['enqueue', '--task', 'T-1', ...base()])).toBe(0);
+  });
+
   it('rejects a brief that is not a dispatchBrief block', async () => {
     const brief = path.join(root, 'bad.yaml');
     writeFileSync(brief, '- TT-1\n');
@@ -1364,6 +1382,8 @@ describe('runDispatchCli ordering commands', () => {
     await captureStdout(() =>
       runDispatchCli(['claim', '--worker-kind', 'in-session-agent', '--board-dir', boardDir]),
     );
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    utimesSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'), hourAgo, hourAgo);
     const roster = path.join(root, 'roster.json');
     writeFileSync(roster, '["other"]');
     const { captured } = await captureStdout(() =>

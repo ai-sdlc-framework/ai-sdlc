@@ -27,6 +27,7 @@ import {
   ensureBoardDirs,
   readHeartbeat,
   readInflightManifest,
+  inflightClaimedAtMs,
   requeueInflight,
   sweepStaleHeartbeats,
   writeDiagnostic,
@@ -297,7 +298,7 @@ export interface RequeueResult {
  * Return stale inflight manifests to `queue/` for another executor.
  *
  * A manifest is stale when its heartbeat (or, with no heartbeat yet, its
- * dispatch time) is older than `staleMs`, or when a roster is supplied and
+ * claim time) is older than `staleMs`, or when a roster is supplied and
  * the claiming session is not on it. Each stale manifest has its retry count
  * incremented and goes back to `queue/`; once the incremented count exceeds
  * `retryLimit` it goes to `failed/` instead.
@@ -322,7 +323,9 @@ export function requeueStaleInflight(boardDir: string, opts: RequeueOptions = {}
     if (opts.roster && heartbeat?.workerId && !opts.roster.has(heartbeat.workerId)) {
       reason = `claiming session ${heartbeat.workerId} is no longer on the roster`;
     } else {
-      const lastTickMs = Date.parse(heartbeat ? heartbeat.lastHeartbeat : manifest.dispatchedAt);
+      const lastTickMs = heartbeat
+        ? Date.parse(heartbeat.lastHeartbeat)
+        : (inflightClaimedAtMs(boardDir, taskId) ?? Date.parse(manifest.dispatchedAt));
       if (!Number.isNaN(lastTickMs) && lastTickMs <= cutoff) {
         reason = `no heartbeat for more than ${Math.round(staleMs / 60000)} minutes`;
       }
