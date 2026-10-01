@@ -21,7 +21,7 @@
 
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { getCapability, registerCapability, reportCapabilityOutcome } from '@ai-sdlc/reference';
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
 import { appendAssignment, type RoutingArm } from './assignment-log.js';
 import {
   builtInDefaultTable,
@@ -88,17 +88,6 @@ function cellFor(table: RoutingTable, role: string, taskClass: string) {
   return undefined;
 }
 
-function ensureCapabilityRegistered(): void {
-  if (getCapability(ROUTING_CAPABILITY_ID)) return;
-  registerCapability({
-    id: ROUTING_CAPABILITY_ID,
-    title: 'Model routing table',
-    specifiedBy: 'RFC-0050',
-    fallback: 'Each role uses its built-in default model.',
-    enable: 'Add .ai-sdlc/model-routing.yaml to the base branch.',
-  });
-}
-
 export function resolveModel(input: ResolveModelInput): ResolveModelResult {
   const role = input.role;
   const taskClass = input.taskClass ?? 'uncategorized';
@@ -136,7 +125,6 @@ export function resolveModel(input: ResolveModelInput): ResolveModelResult {
         arm: result.arm,
         reason: result.reason,
       });
-      ensureCapabilityRegistered();
       if (usingRepoTable) {
         reportCapabilityOutcome(ROUTING_CAPABILITY_ID, 'live', { artifactsDir });
       } else {

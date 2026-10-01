@@ -864,6 +864,7 @@ export const KNOWN_CAPABILITY_IDS = [
   'policy.llm-evaluator',
   'pricing.feed',
   'usage.ingest',
+  'routing.table',
 ];
 
 /**
