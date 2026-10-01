@@ -78,6 +78,11 @@ export interface DispatchManifest {
   blockedBy?: string;
   /** Times the reaper has returned this manifest to `queue/`. */
   retryCount?: number;
+  /**
+   * The claiming session's roster name, recorded when the manifest is claimed.
+   * In a hierarchy it equals the roster `name` exactly, collision suffix included.
+   */
+  workerId?: string;
 }
 
 /**

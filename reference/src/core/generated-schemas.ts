@@ -3832,7 +3832,11 @@ export const dispatchManifestV1Schema = {
     },
     after: {
       type: 'array',
-      items: { type: 'string', minLength: 1, pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$' },
+      items: {
+        type: 'string',
+        minLength: 1,
+        pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$',
+      },
       description:
         'Task ids that must each have a success verdict in done/ before this manifest is claimable. Omitted or empty means no ordering dependency.',
     },
@@ -3863,6 +3867,12 @@ export const dispatchManifestV1Schema = {
       minimum: 0,
       description:
         'Number of times the reaper has returned this manifest from inflight/ to queue/. Default 0.',
+    },
+    workerId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "The claiming session's roster name, recorded verbatim when the manifest is claimed. In a hierarchy it equals the roster name exactly, collision suffix included.",
     },
   },
   additionalProperties: false,

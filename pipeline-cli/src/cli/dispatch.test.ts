@@ -1212,6 +1212,67 @@ describe('runDispatchCli ordering commands', () => {
     err.mockRestore();
   });
 
+  it('claim --worker records the name verbatim and completion reuses it', async () => {
+    await runDispatchCli(['enqueue', '--task', 'T-1', ...base()]);
+    const claim = await captureStdout(() =>
+      runDispatchCli([
+        'claim',
+        '--worker-kind',
+        'in-session-agent',
+        '--worker',
+        'executor-beta',
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect(
+      (readLastJson(claim.captured) as { manifest: { workerId: string } }).manifest.workerId,
+    ).toBe('executor-beta');
+    const onDisk = JSON.parse(
+      readFileSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'), 'utf-8'),
+    );
+    expect(onDisk.workerId).toBe('executor-beta');
+    await runDispatchCli([
+      'heartbeat',
+      '--task-id',
+      'T-1',
+      '--worker-kind',
+      'in-session-agent',
+      '--board-dir',
+      boardDir,
+    ]);
+    const hb = JSON.parse(readFileSync(path.join(boardDir, 'inflight', 'T-1.state.json'), 'utf-8'));
+    expect(hb.workerId).toBe('executor-beta');
+    await runDispatchCli([
+      'write-verdict',
+      '--task-id',
+      'T-1',
+      '--outcome',
+      'success',
+      '--board-dir',
+      boardDir,
+    ]);
+    const verdict = JSON.parse(
+      readFileSync(path.join(boardDir, 'done', 'T-1.verdict.json'), 'utf-8'),
+    );
+    expect(verdict.workerId).toBe('executor-beta');
+  });
+
+  it('claim --worker rejects an empty name', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const code = await runDispatchCli([
+      'claim',
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      '',
+      '--board-dir',
+      boardDir,
+    ]);
+    err.mockRestore();
+    expect(code).toBe(2);
+  });
+
   it('enqueues from a brief file', async () => {
     const brief = path.join(root, 'brief.yaml');
     writeFileSync(brief, '- T-1\n- task: T-2\n  after: [T-1]\n');

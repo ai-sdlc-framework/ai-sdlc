@@ -9,7 +9,7 @@
  * Subcommands:
  *
  *   - `peek` — print queue/inflight/done/failed counts as JSON.
- *   - `claim --worker-kind <kind> [--worker-id <id>]` — atomic claim of the
+ *   - `claim --worker-kind <kind> [--worker <name>]` — atomic claim of the
  *     next eligible manifest. Prints the manifest JSON on stdout when a
  *     claim succeeds; prints `{"claimed":false}` and exits 0 when the queue
  *     has no eligible manifest. (Empty-queue is NOT an error — it's the
@@ -104,6 +104,7 @@ import {
   parseBrief,
   peekQueue,
   probeIterationBudget,
+  readInflightManifest,
   readResumeSignal,
   releaseInflight,
   removeResumeSignal,
@@ -183,6 +184,25 @@ export function parseArgv(argv: readonly string[]): {
   return { subcommand, flags };
 }
 
+/**
+ * The worker name for a task: an explicit `--worker` / `--worker-id`, else the
+ * name recorded on the inflight manifest at claim time, so a claim, its
+ * heartbeats and its completion all carry the same value.
+ */
+function resolveWorkerId(
+  boardDir: string,
+  flags: Record<string, string>,
+  taskId: string,
+): string | undefined {
+  const explicit = flags['worker'] ?? flags['worker-id'];
+  if (explicit !== undefined && explicit !== '' && explicit !== 'true') return explicit;
+  try {
+    return readInflightManifest(boardDir, taskId)?.workerId;
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveBoardDir(flags: Record<string, string>): string {
   return path.resolve(flags['board-dir'] ?? DEFAULT_BOARD_DIR);
 }
@@ -217,7 +237,23 @@ export async function runDispatchCli(
         process.stderr.write(`cli-dispatch claim: invalid --worker-kind '${kind}'\n`);
         return 2;
       }
-      const result = claimNext(boardDir, kind as WorkerKind);
+      const named = flags['worker'];
+      const legacy = flags['worker-id'];
+      if (named !== undefined && legacy !== undefined && named !== legacy) {
+        process.stderr.write('cli-dispatch claim: --worker and --worker-id disagree\n');
+        return 2;
+      }
+      const workerId = named ?? legacy;
+      if (workerId !== undefined && (workerId === '' || workerId === 'true')) {
+        process.stderr.write('cli-dispatch claim: --worker needs a non-empty name\n');
+        return 2;
+      }
+      const result = claimNext(
+        boardDir,
+        kind as WorkerKind,
+        undefined,
+        workerId === undefined ? {} : { workerId },
+      );
       if (!result.claimed) {
         out({ claimed: false });
         return 0;
@@ -240,7 +276,7 @@ export async function runDispatchCli(
     case 'write-verdict': {
       const taskId = requireFlag(flags, 'task-id');
       const outcome = requireFlag(flags, 'outcome') as VerdictOutcome;
-      const workerId = flags['worker-id'] ?? `worker-${process.pid}`;
+      const workerId = resolveWorkerId(boardDir, flags, taskId) ?? `worker-${process.pid}`;
       const verdict: DispatchVerdict = {
         schemaVersion: 'v1',
         taskId,
@@ -386,7 +422,7 @@ export async function runDispatchCli(
 
     case 'heartbeat': {
       const taskId = requireFlag(flags, 'task-id');
-      const workerId = requireFlag(flags, 'worker-id');
+      const workerId = resolveWorkerId(boardDir, flags, taskId) ?? requireFlag(flags, 'worker-id');
       const workerKind = requireFlag(flags, 'worker-kind') as WorkerKind;
       const hb: InflightHeartbeat = {
         taskId,
@@ -824,7 +860,7 @@ Usage:
 
 Subcommands:
   peek
-  claim --worker-kind {in-session-agent|claude-p-shell}
+  claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>]
   collect-verdicts [--include-failed]
   write-verdict --task-id <id> --outcome <enum> [--commit-sha <s>]
                 [--iterations-attempted <n>] [--session-id <uuid>] ...

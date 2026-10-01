@@ -11,6 +11,7 @@ import {
   statSync,
   renameSync,
   readdirSync,
+  chmodSync,
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { getCapability, readCapabilityState } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -26,7 +28,12 @@ import {
   ensureBoardDirs,
   isOnBoard,
   listBoard,
+  patchDoneVerdict,
   readInflightManifest,
+  readResumeSignal,
+  removeResumeSignal,
+  writeDiagnostic,
+  writeResumeSignal,
   releaseInflight,
   removeVerdict,
   requeueInflight,
@@ -391,6 +398,7 @@ describe('sequence group race', () => {
     const queued = path.join(board, 'queue', 'T-1.dispatch.json');
     const before = statSync(queued).mtimeMs;
     const first = claimNext(board, 'in-session-agent', undefined, {
+      groupSettleMs: 0,
       beforeClaimRename: (m) => {
         // A rival Worker claims the other manifest of the group right now.
         if (m.taskId === 'T-1') {
@@ -405,6 +413,157 @@ describe('sequence group race', () => {
     expect(readdirSync(path.join(board, 'inflight'))).toEqual(['T-2.dispatch.json']);
     expect(existsSync(queued)).toBe(true);
     expect(statSync(queued).mtimeMs).toBe(before);
+  });
+});
+
+describe('symmetric group claim tie-break', () => {
+  it('lets the lowest task id keep its claim when the rival hands its own back', () => {
+    writeManifest(board, mk('T-1', { sequenceGroup: 'g' }));
+    writeManifest(board, mk('T-2', { sequenceGroup: 'g' }));
+    const result = claimNext(board, 'in-session-agent', undefined, {
+      beforeClaimRename: (m) => {
+        // The rival claims T-2 at the same moment as we claim T-1.
+        if (m.taskId === 'T-1') {
+          renameSync(
+            path.join(board, 'queue', 'T-2.dispatch.json'),
+            path.join(board, 'inflight', 'T-2.dispatch.json'),
+          );
+        }
+      },
+      sleep: () => {
+        // While we wait, the rival (higher id) sees us and hands its claim back.
+        const held = path.join(board, 'inflight', 'T-2.dispatch.json');
+        if (existsSync(held)) renameSync(held, path.join(board, 'queue', 'T-2.dispatch.json'));
+      },
+    });
+    expect(result.claimed).toBe(true);
+    expect(readdirSync(path.join(board, 'inflight'))).toEqual(['T-1.dispatch.json']);
+  });
+
+  it('hands a claim back at once when a rival holds a lower id', () => {
+    writeManifest(board, mk('T-1', { sequenceGroup: 'g' }));
+    writeManifest(board, mk('T-2', { sequenceGroup: 'g' }));
+    let slept = 0;
+    const result = claimNext(board, 'in-session-agent', undefined, {
+      sleep: () => {
+        slept++;
+      },
+      beforeClaimRename: (m) => {
+        if (m.taskId === 'T-1') {
+          // T-2 is tried first only if T-1 is ineligible; here the rival holds T-0.
+          writeFileSync(
+            path.join(board, 'inflight', 'T-0.dispatch.json'),
+            JSON.stringify(mk('T-0', { sequenceGroup: 'g' })),
+          );
+        }
+      },
+    });
+    expect(result.claimed).toBe(false);
+    expect(slept).toBe(0);
+    expect(existsSync(path.join(board, 'queue', 'T-1.dispatch.json'))).toBe(true);
+  });
+});
+
+describe('malformed ids', () => {
+  it('claimNext skips a queued manifest with a bad id and claims the rest', () => {
+    writeManifest(board, mk('T-1'));
+    writeFileSync(
+      path.join(board, 'queue', 'bad.dispatch.json'),
+      JSON.stringify({ ...mk('T-9'), taskId: '../../escape' }),
+    );
+    const result = claimNext(board, 'in-session-agent');
+    expect(result.claimed && result.manifest?.taskId).toBe('T-1');
+    expect(existsSync(path.join(board, 'queue', 'bad.dispatch.json'))).toBe(true);
+  });
+
+  it('every task-id path helper rejects a traversal id before writing anything', () => {
+    ensureBoardDirs(board);
+    const evil = '../../escape';
+    const verdict = {
+      schemaVersion: 'v1',
+      taskId: evil,
+      outcome: 'success',
+      completedAt: '2026-01-01T00:00:00Z',
+      workerId: 'w',
+    } as const;
+    const calls: (() => unknown)[] = [
+      () => writeVerdict(board, verdict),
+      () => writeVerdict(board, { ...verdict, outcome: 'failed' }),
+      () => writeDiagnostic(board, verdict),
+      () =>
+        writeHeartbeat(board, {
+          taskId: evil,
+          workerId: 'w',
+          workerKind: 'in-session-agent',
+          startedAt: 'x',
+          lastHeartbeat: 'x',
+        }),
+      () => writeResumeSignal(board, { taskId: evil } as never),
+      () => readResumeSignal(board, evil),
+      () => removeResumeSignal(board, evil),
+    ];
+    for (const call of calls) expect(call).toThrow(/not a valid task id/);
+    // These two ignore a malformed id instead of throwing; neither touches disk.
+    expect(patchDoneVerdict(board, evil, { signedAt: 'x' })).toBe(false);
+    expect(() => removeVerdict(board, evil)).not.toThrow();
+    const parent = path.dirname(board);
+    expect(readdirSync(parent)).toEqual([path.basename(board)]);
+    for (const sub of ['queue', 'inflight', 'done', 'failed']) {
+      expect(readdirSync(path.join(board, sub))).toEqual([]);
+    }
+  });
+});
+
+describe('worker identity and hierarchy.board capability', () => {
+  let artifacts: string;
+  let prev: string | undefined;
+  beforeEach(() => {
+    prev = process.env.ARTIFACTS_DIR;
+    artifacts = mkdtempSync(path.join(tmpdir(), 'board-artifacts-'));
+    process.env.ARTIFACTS_DIR = artifacts;
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.ARTIFACTS_DIR;
+    else process.env.ARTIFACTS_DIR = prev;
+    rmSync(artifacts, { recursive: true, force: true });
+  });
+  const state = () => readCapabilityState(artifacts).find((r) => r.id === 'hierarchy.board');
+
+  it('records the worker name verbatim on the claimed manifest', () => {
+    writeManifest(board, mk('T-1'));
+    const result = claimNext(board, 'in-session-agent', undefined, { workerId: 'Executor-beta_2' });
+    expect(result.claimed && result.manifest?.workerId).toBe('Executor-beta_2');
+    expect(readInflightManifest(board, 'T-1')?.workerId).toBe('Executor-beta_2');
+  });
+
+  it('reports live after a claim', () => {
+    expect(getCapability('hierarchy.board')).toBeDefined();
+    writeManifest(board, mk('T-1'));
+    claimNext(board, 'in-session-agent');
+    expect(state()?.status).toBe('live');
+  });
+
+  it('reports degraded with a reason when the board directory is unreadable', () => {
+    const notADir = path.join(artifacts, 'file');
+    writeFileSync(notADir, 'x');
+    expect(() => claimNext(notADir, 'in-session-agent')).toThrow();
+    const row = state();
+    expect(row?.status).toBe('degraded');
+    expect(row?.lastDegradedReason).toContain('board directory unreadable');
+  });
+
+  it('reports degraded with a reason when the claim rename fails', () => {
+    writeManifest(board, mk('T-1'));
+    const inflight = path.join(board, 'inflight');
+    chmodSync(inflight, 0o500);
+    try {
+      expect(() => claimNext(board, 'in-session-agent')).toThrow();
+    } finally {
+      chmodSync(inflight, 0o700);
+    }
+    const row = state();
+    expect(row?.status).toBe('degraded');
+    expect(row?.lastDegradedReason).toContain('claim rename failed');
   });
 });
 

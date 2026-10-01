@@ -34,6 +34,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { reportCapabilityOutcome } from '@ai-sdlc/reference';
+
 import {
   BOARD_SUBDIRS,
   DEFAULT_ITERATION_BUDGET,
@@ -91,12 +93,49 @@ export function ensureBoardDirs(boardDir: string): void {
   }
 }
 
+/** Throw unless `taskId` is a well-formed task id. Run before any path is built from it. */
+function assertTaskId(taskId: string): void {
+  if (typeof taskId !== 'string' || !TASK_ID_RE.test(taskId)) {
+    throw new Error(`dispatch: '${String(taskId)}' is not a valid task id`);
+  }
+}
+
+/**
+ * The one place a board file path is built from a task id. Validates the id
+ * first, so a traversal id can never reach a write.
+ */
+function boardFile(boardDir: string, sub: string, taskId: string, suffix: string): string {
+  assertTaskId(taskId);
+  return path.join(boardDir, sub, `${taskId}${suffix}`);
+}
+
 /** Build the absolute path for a manifest in a given subdir. */
 function manifestPathIn(boardDir: string, sub: string, taskId: string): string {
-  if (!TASK_ID_RE.test(taskId)) {
-    throw new Error(`dispatch: '${taskId}' is not a valid task id`);
-  }
-  return path.join(boardDir, sub, `${taskId}${MANIFEST_SUFFIX}`);
+  return boardFile(boardDir, sub, taskId, MANIFEST_SUFFIX);
+}
+
+// ---------------------------------------------------------------------------
+// hierarchy.board capability
+// ---------------------------------------------------------------------------
+
+/** Capability id for the shared dispatch board (registered as a built-in in the reference registry). */
+export const HIERARCHY_BOARD_CAPABILITY = 'hierarchy.board';
+
+/** Where capability state goes: $ARTIFACTS_DIR, else a sibling of the board directory. */
+function artifactsDirFor(boardDir: string): string {
+  return process.env.ARTIFACTS_DIR ?? path.join(path.dirname(path.resolve(boardDir)), 'artifacts');
+}
+
+function reportBoard(boardDir: string, outcome: 'live' | 'degraded', reason?: string): void {
+  reportCapabilityOutcome(HIERARCHY_BOARD_CAPABILITY, outcome, {
+    artifactsDir: artifactsDirFor(boardDir),
+    ...(reason !== undefined ? { reason } : {}),
+  });
+}
+
+function degradedReason(what: string, err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return `${what}${code ? ` (${code})` : ''}`;
 }
 
 /**
@@ -243,6 +282,15 @@ export function checkEligibility(manifest: DispatchManifest, ctx: EligibilityCon
 /** Test seam for `claimNext`: runs between the eligibility check and the claim rename. */
 export interface ClaimHooks {
   beforeClaimRename?: (manifest: DispatchManifest) => void;
+  /**
+   * The claiming session's roster name. Recorded verbatim as the manifest's
+   * `workerId` (no normalisation).
+   */
+  workerId?: string;
+  /** How long a lower-id group claimant waits for a rival to hand its claim back. Default 200. */
+  groupSettleMs?: number;
+  /** Sleep used while settling; tests inject a stand-in. */
+  sleep?: (ms: number) => void;
 }
 
 /**
@@ -272,16 +320,25 @@ export function claimNext(
   now: () => Date = () => new Date(),
   hooks: ClaimHooks = {},
 ): ClaimResult {
-  ensureBoardDirs(boardDir);
   const queueDir = path.join(boardDir, 'queue');
-
-  const candidates = listManifestCandidates(queueDir);
+  let candidates: ManifestCandidate[];
+  try {
+    ensureBoardDirs(boardDir);
+    readdirSync(queueDir);
+    candidates = listManifestCandidates(queueDir);
+  } catch (err) {
+    reportBoard(boardDir, 'degraded', degradedReason('board directory unreadable', err));
+    throw err;
+  }
   const wallNow = now().getTime();
   const ctx = loadEligibilityContext(boardDir);
   const eligible: { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] = [];
   for (const candidate of candidates) {
     const manifest = readManifest(candidate.fullPath);
     if (!manifest) continue;
+    // A manifest with a malformed id is never claimed; it stays where it is so
+    // the rest of the queue keeps flowing.
+    if (typeof manifest.taskId !== 'string' || !TASK_ID_RE.test(manifest.taskId)) continue;
 
     if (manifest.workerKind !== 'any' && manifest.workerKind !== workerKind) {
       continue;
@@ -324,15 +381,19 @@ export function claimNext(
         // Another Worker beat us to this manifest — try the next candidate.
         continue;
       }
+      reportBoard(boardDir, 'degraded', degradedReason('claim rename failed', err));
       throw err;
     }
     // The group check above is check-then-act: another Worker may have claimed
     // a different manifest of the same group in the meantime. Re-scan after
-    // our rename; when any other holder exists, hand ours back (the rename
-    // keeps its mtime and contents, so its queue position and retry count are
-    // unchanged). Every Worker re-scans after its own rename, so at least one
-    // of two racing claimants sees the other and the group never has two.
-    if (manifest.sequenceGroup && groupHasOtherHolder(boardDir, manifest)) {
+    // our rename and settle it deterministically: a claimant that sees a rival
+    // with a lower task id hands its claim back at once; the claimant with the
+    // lowest id keeps its claim and waits briefly for the rivals to hand theirs
+    // back. Two symmetric claimants therefore never both roll back, and a
+    // rival that holds on past the wait (a settled earlier claim) gets ours
+    // returned instead. A returned manifest keeps its mtime and contents, so
+    // its queue position and retry count are unchanged.
+    if (manifest.sequenceGroup && !settleGroupClaim(boardDir, manifest, hooks)) {
       try {
         renameSync(inflightPath, fullPath);
       } catch (err) {
@@ -340,15 +401,31 @@ export function claimNext(
       }
       continue;
     }
+    if (hooks.workerId !== undefined) {
+      try {
+        manifest.workerId = hooks.workerId;
+        writeJsonAtomic(inflightPath, manifest);
+      } catch (err) {
+        try {
+          renameSync(inflightPath, fullPath);
+        } catch {
+          /* best effort: the reaper returns an orphaned claim */
+        }
+        reportBoard(boardDir, 'degraded', degradedReason('recording the worker failed', err));
+        throw err;
+      }
+    }
+    reportBoard(boardDir, 'live');
     return { claimed: true, manifestPath: inflightPath, manifest };
   }
 
   return { claimed: false };
 }
 
-/** True when an inflight manifest other than `manifest` carries the same sequence group. */
-function groupHasOtherHolder(boardDir: string, manifest: DispatchManifest): boolean {
+/** Task ids of the other inflight manifests that carry `manifest`'s sequence group. */
+function otherGroupHolders(boardDir: string, manifest: DispatchManifest): string[] {
   const inflightDir = path.join(boardDir, 'inflight');
+  const holders: string[] = [];
   for (const entry of safeReaddir(inflightDir)) {
     if (!entry.endsWith(MANIFEST_SUFFIX)) continue;
     const other = readManifest(path.join(inflightDir, entry));
@@ -357,10 +434,41 @@ function groupHasOtherHolder(boardDir: string, manifest: DispatchManifest): bool
       other.sequenceGroup === manifest.sequenceGroup &&
       other.taskId !== manifest.taskId
     ) {
-      return true;
+      holders.push(other.taskId);
     }
   }
-  return false;
+  return holders;
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Decide whether a just-made group claim stands. True keeps it, false means
+ * the caller must hand it back.
+ */
+function settleGroupClaim(
+  boardDir: string,
+  manifest: DispatchManifest,
+  hooks: ClaimHooks,
+): boolean {
+  let holders = otherGroupHolders(boardDir, manifest);
+  if (holders.length === 0) return true;
+  if (holders.some((id) => id < manifest.taskId)) return false;
+  const sleep = hooks.sleep ?? sleepSync;
+  const deadline = (hooks.groupSettleMs ?? 200) / 10;
+  for (let i = 0; i < deadline && holders.length > 0; i++) {
+    sleep(10);
+    holders = otherGroupHolders(boardDir, manifest);
+  }
+  return holders.length === 0;
+}
+
+function writeJsonAtomic(target: string, body: unknown): void {
+  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, target);
 }
 
 /**
@@ -651,13 +759,18 @@ function readVerdict(filePath: string): DispatchVerdict | undefined {
  * Returns the final verdict path.
  */
 export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string {
+  assertTaskId(verdict.taskId);
   ensureBoardDirs(boardDir);
   const targetSubdir =
     verdict.outcome === 'success' || verdict.outcome === 'iterate-needed' ? 'done' : 'failed';
-  const verdictPath = path.join(boardDir, targetSubdir, `${verdict.taskId}${VERDICT_SUFFIX}`);
-  const tmp = `${verdictPath}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(verdict, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, verdictPath);
+  const verdictPath = boardFile(boardDir, targetSubdir, verdict.taskId, VERDICT_SUFFIX);
+  try {
+    writeJsonAtomic(verdictPath, verdict);
+  } catch (err) {
+    reportBoard(boardDir, 'degraded', degradedReason('verdict write failed', err));
+    throw err;
+  }
+  reportBoard(boardDir, 'live');
 
   const isIteratePending = verdict.outcome === 'iterate-needed';
 
@@ -673,7 +786,7 @@ export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string
         /* ignore — verdict landing is the source of truth */
       }
     }
-    const inflightState = path.join(boardDir, 'inflight', `${verdict.taskId}${STATE_SUFFIX}`);
+    const inflightState = boardFile(boardDir, 'inflight', verdict.taskId, STATE_SUFFIX);
     if (existsSync(inflightState)) {
       try {
         rmSync(inflightState);
@@ -705,11 +818,7 @@ export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string
   // previous iteration cycle, and we don't want the Worker's next-poll
   // resume check to see a stale signal. The Conductor will write a fresh
   // one if (and only if) it decides to trigger another iteration.
-  const inflightResume = path.join(
-    boardDir,
-    'inflight',
-    `${verdict.taskId}${RESUME_SIGNAL_SUFFIX}`,
-  );
+  const inflightResume = boardFile(boardDir, 'inflight', verdict.taskId, RESUME_SIGNAL_SUFFIX);
   if (existsSync(inflightResume)) {
     try {
       rmSync(inflightResume);
@@ -726,8 +835,9 @@ export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string
  * never visible to the sweeper.
  */
 export function writeHeartbeat(boardDir: string, heartbeat: InflightHeartbeat): string {
+  assertTaskId(heartbeat.taskId);
   ensureBoardDirs(boardDir);
-  const target = path.join(boardDir, 'inflight', `${heartbeat.taskId}${STATE_SUFFIX}`);
+  const target = boardFile(boardDir, 'inflight', heartbeat.taskId, STATE_SUFFIX);
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(heartbeat, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
@@ -855,8 +965,9 @@ export function sweepStaleHeartbeats(
  * across the iteration). On budget exhaustion the slot must be released.
  */
 export function writeDiagnostic(boardDir: string, verdict: DispatchVerdict): string {
+  assertTaskId(verdict.taskId);
   ensureBoardDirs(boardDir);
-  const target = path.join(boardDir, 'failed', `${verdict.taskId}${DIAGNOSTIC_SUFFIX}`);
+  const target = boardFile(boardDir, 'failed', verdict.taskId, DIAGNOSTIC_SUFFIX);
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(verdict, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
@@ -876,7 +987,7 @@ export function writeDiagnostic(boardDir: string, verdict: DispatchVerdict): str
       /* ignore — diagnostic landing is the source of truth */
     }
   }
-  const inflightState = path.join(boardDir, 'inflight', `${verdict.taskId}${STATE_SUFFIX}`);
+  const inflightState = boardFile(boardDir, 'inflight', verdict.taskId, STATE_SUFFIX);
   if (existsSync(inflightState)) {
     try {
       rmSync(inflightState);
@@ -884,11 +995,7 @@ export function writeDiagnostic(boardDir: string, verdict: DispatchVerdict): str
       /* ignore */
     }
   }
-  const inflightResume = path.join(
-    boardDir,
-    'inflight',
-    `${verdict.taskId}${RESUME_SIGNAL_SUFFIX}`,
-  );
+  const inflightResume = boardFile(boardDir, 'inflight', verdict.taskId, RESUME_SIGNAL_SUFFIX);
   if (existsSync(inflightResume)) {
     try {
       rmSync(inflightResume);
@@ -917,8 +1024,10 @@ export function patchDoneVerdict(
     Pick<DispatchVerdict, 'reviewerStartedAt' | 'reviewerCompletedAt' | 'signedAt' | 'prOpenedAt'>
   >,
 ): boolean {
+  // A malformed id patches nothing.
+  if (!TASK_ID_RE.test(taskId)) return false;
   ensureBoardDirs(boardDir);
-  const verdictPath = path.join(boardDir, 'done', `${taskId}${VERDICT_SUFFIX}`);
+  const verdictPath = boardFile(boardDir, 'done', taskId, VERDICT_SUFFIX);
   if (!existsSync(verdictPath)) return false;
   const existing = readVerdict(verdictPath);
   if (!existing) return false;
@@ -948,14 +1057,16 @@ export function removeVerdict(
   taskId: string,
   subdir: 'done' | 'failed' = 'done',
 ): void {
+  // A malformed id removes nothing.
+  if (!TASK_ID_RE.test(taskId)) return;
   ensureBoardDirs(boardDir);
   if (subdir === 'done') {
     // Leave a completion marker behind a success verdict so dependents stay
     // claimable and the id stays taken once the verdict has been handled.
-    const verdictFile = path.join(boardDir, 'done', `${taskId}${VERDICT_SUFFIX}`);
+    const verdictFile = boardFile(boardDir, 'done', taskId, VERDICT_SUFFIX);
     const verdict = existsSync(verdictFile) ? readVerdict(verdictFile) : undefined;
     if (verdict?.outcome === 'success') {
-      const marker = path.join(boardDir, 'done', `${taskId}${COMPLETED_SUFFIX}`);
+      const marker = boardFile(boardDir, 'done', taskId, COMPLETED_SUFFIX);
       const tmp = `${marker}.tmp-${process.pid}-${Date.now()}`;
       const body = { schemaVersion: 'v1', taskId, completedAt: verdict.completedAt };
       writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n', 'utf-8');
@@ -964,7 +1075,7 @@ export function removeVerdict(
   }
   // Verdicts and diagnostics use different suffixes; check both.
   for (const suffix of [VERDICT_SUFFIX, DIAGNOSTIC_SUFFIX]) {
-    const target = path.join(boardDir, subdir, `${taskId}${suffix}`);
+    const target = boardFile(boardDir, subdir, taskId, suffix);
     if (existsSync(target)) {
       try {
         rmSync(target);
@@ -1005,6 +1116,7 @@ export function writeResumeSignal(
   signal: ResumeSignal,
   opts: { iterationBudget?: number; iterationsAttempted?: number } = {},
 ): string {
+  assertTaskId(signal.taskId);
   ensureBoardDirs(boardDir);
   const inflightManifestPath = manifestPathIn(boardDir, 'inflight', signal.taskId);
   if (!existsSync(inflightManifestPath)) {
@@ -1027,7 +1139,7 @@ export function writeResumeSignal(
     );
   }
 
-  const target = path.join(boardDir, 'inflight', `${signal.taskId}${RESUME_SIGNAL_SUFFIX}`);
+  const target = boardFile(boardDir, 'inflight', signal.taskId, RESUME_SIGNAL_SUFFIX);
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(signal, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
@@ -1040,7 +1152,7 @@ export function writeResumeSignal(
  * exists (the normal case — the Worker only resumes when one was written).
  */
 export function readResumeSignal(boardDir: string, taskId: string): ResumeSignal | undefined {
-  const target = path.join(boardDir, 'inflight', `${taskId}${RESUME_SIGNAL_SUFFIX}`);
+  const target = boardFile(boardDir, 'inflight', taskId, RESUME_SIGNAL_SUFFIX);
   if (!existsSync(target)) return undefined;
   try {
     return JSON.parse(readFileSync(target, 'utf-8')) as ResumeSignal;
@@ -1084,7 +1196,7 @@ export function listResumeSignals(boardDir: string): { taskId: string; signalPat
  * spurious second resume on the next Worker poll.
  */
 export function removeResumeSignal(boardDir: string, taskId: string): void {
-  const target = path.join(boardDir, 'inflight', `${taskId}${RESUME_SIGNAL_SUFFIX}`);
+  const target = boardFile(boardDir, 'inflight', taskId, RESUME_SIGNAL_SUFFIX);
   if (existsSync(target)) {
     try {
       rmSync(target);
