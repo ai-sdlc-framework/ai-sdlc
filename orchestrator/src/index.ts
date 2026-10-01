@@ -777,6 +777,12 @@ export type {
   JudgmentCostRecord,
 } from './cost-tracker.js';
 export { createJudgmentCostSink } from './judgment-cost-sink.js';
+export {
+  buildOrchestratorJudgmentContext,
+  type BuildOrchestratorJudgmentContextOptions,
+} from './judgment-context.js';
+export * from './judgment/complexity-factors.js';
+export * from './judgment/injection-screen.js';
 
 // OTel bridge
 export { createOTelBridge, isOTelAvailable } from './otel-exporter.js';

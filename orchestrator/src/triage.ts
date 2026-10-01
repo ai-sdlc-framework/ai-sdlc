@@ -9,7 +9,7 @@
  */
 
 import { join } from 'node:path';
-import type { IssueTracker } from '@ai-sdlc/reference';
+import type { EvaluateJudgmentContext, IssueTracker } from '@ai-sdlc/reference';
 import { loadConfigAsync, type AiSdlcConfig } from './config.js';
 import { resolveIssueTrackerFromConfig } from './adapters.js';
 import { getGitHubConfig } from './shared.js';
@@ -20,6 +20,11 @@ import {
   type TriageVerdict,
 } from './runners/security-triage.js';
 import { createLogger, type Logger } from './logger.js';
+import {
+  mergeInjectionScreen,
+  screenIssueText,
+  type InjectionScreenFlag,
+} from './judgment/injection-screen.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -34,6 +39,11 @@ export interface TriageOptions {
   workDir?: string;
   /** If true, skip posting a comment to the issue. */
   dryRun?: boolean;
+  /**
+   * Judgment-layer context. When supplied, an injection screen runs on the issue text
+   * before the security triage. Omit it and triage behaves exactly as before.
+   */
+  judgment?: EvaluateJudgmentContext;
 }
 
 export interface TriageResult {
@@ -45,6 +55,8 @@ export interface TriageResult {
   labelApplied?: string;
   /** Error message if the triage pipeline failed. */
   error?: string;
+  /** Set only when the injection screen flagged the text; its findings are in the verdict. */
+  suspicious?: true;
 }
 
 // ── Labels ──────────────────────────────────────────────────────────
@@ -129,6 +141,15 @@ export async function executeTriage(
   const issue = await tracker.getIssue(issueId);
   log.info(`[triage] Fetched issue: "${issue.title}"`);
 
+  // ── Injection screen (before the existing triage, which always runs) ──
+  let flag: InjectionScreenFlag | undefined;
+  if (options.judgment) {
+    flag = await screenIssueText(
+      { title: issue.title, body: issue.description ?? '' },
+      options.judgment,
+    );
+  }
+
   // ── Run triage ──────────────────────────────────────────────────
   const runner = new SecurityTriageRunner(options.triageConfig);
 
@@ -147,23 +168,29 @@ export async function executeTriage(
 
   if (!agentResult.success) {
     log.error(`[triage] Triage failed: ${agentResult.error}`);
-    return {
-      issueId,
-      verdict: {
-        safe: false,
-        riskScore: 7,
-        findings: ['Triage pipeline error — treating as suspicious'],
-        sanitizedDescription: '',
-        rationale: agentResult.error ?? 'Unknown error',
+    return mergeInjectionScreen(
+      {
+        issueId,
+        verdict: {
+          safe: false,
+          riskScore: 7,
+          findings: ['Triage pipeline error — treating as suspicious'],
+          sanitizedDescription: '',
+          rationale: agentResult.error ?? 'Unknown error',
+        },
+        rejected: true,
+        error: agentResult.error,
       },
-      rejected: true,
-      error: agentResult.error,
-    };
+      flag,
+    );
   }
 
   // ── Parse verdict ───────────────────────────────────────────────
-  const verdict: TriageVerdict = JSON.parse(agentResult.summary);
-  const rejected = verdict.riskScore >= runner.rejectThreshold;
+  const parsed: TriageVerdict = JSON.parse(agentResult.summary);
+  const rejected = parsed.riskScore >= runner.rejectThreshold;
+  // Carry the screen forward: findings are appended, nothing else in the verdict changes.
+  const { verdict, suspicious } = mergeInjectionScreen({ verdict: parsed }, flag);
+  const carried = suspicious ? ({ suspicious } as const) : {};
 
   log.info(
     `[triage] Verdict: riskScore=${verdict.riskScore}, safe=${verdict.safe}, rejected=${rejected}`,
@@ -190,12 +217,12 @@ export async function executeTriage(
         ],
       });
       log.info(`[triage] Applied label "${label}" to issue ${issueId}`);
-      return { issueId, verdict, rejected, labelApplied: label };
+      return { issueId, verdict, rejected, labelApplied: label, ...carried };
     } catch (err) {
       log.error(`[triage] Failed to apply label: ${err}`);
-      return { issueId, verdict, rejected, error: `Label application failed: ${err}` };
+      return { issueId, verdict, rejected, error: `Label application failed: ${err}`, ...carried };
     }
   }
 
-  return { issueId, verdict, rejected };
+  return { issueId, verdict, rejected, ...carried };
 }
