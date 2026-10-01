@@ -1274,13 +1274,47 @@ describe('runDispatchCli ordering commands', () => {
   });
 
   it('enqueues from a brief file', async () => {
-    const brief = path.join(root, 'brief.yaml');
-    writeFileSync(brief, '- T-1\n- task: T-2\n  after: [T-1]\n');
+    for (const id of ['tt-1', 'tt-2']) {
+      writeFileSync(path.join(root, 'backlog', 'tasks', `${id} - x.md`), '');
+    }
+    const brief = path.join(root, 'brief.md');
+    writeFileSync(
+      brief,
+      [
+        '# Brief',
+        '',
+        '```yaml',
+        'dispatchBrief:',
+        '  - task: TT-1',
+        '    wave: 1',
+        '    priority: 2',
+        '  - task: TT-2',
+        '    after: [TT-1]',
+        '    sequenceGroup: g',
+        '    wave: 2',
+        '```',
+        '',
+      ].join('\n'),
+    );
     const { exit } = await captureStdout(() =>
       runDispatchCli(['enqueue', '--from-brief', brief, ...base()]),
     );
     expect(exit).toBe(0);
-    expect(existsSync(path.join(boardDir, 'queue', 'T-2.dispatch.json'))).toBe(true);
+    const read = (id: string) =>
+      JSON.parse(readFileSync(path.join(boardDir, 'queue', `${id}.dispatch.json`), 'utf-8'));
+    expect(read('TT-1')).toMatchObject({ wave: 1, priority: 2 });
+    expect(read('TT-1').after).toBeUndefined();
+    expect(read('TT-2')).toMatchObject({ after: ['TT-1'], sequenceGroup: 'g', wave: 2 });
+    expect(read('TT-2').priority).toBeUndefined();
+  });
+
+  it('rejects a brief that is not a dispatchBrief block', async () => {
+    const brief = path.join(root, 'bad.yaml');
+    writeFileSync(brief, '- TT-1\n');
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(1);
+    err.mockRestore();
+    expect(existsSync(path.join(boardDir, 'queue', 'TT-1.dispatch.json'))).toBe(false);
   });
 
   it('requires a task source', async () => {

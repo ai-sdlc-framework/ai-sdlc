@@ -101,7 +101,6 @@ import {
   enqueueTasks,
   listBoard,
   listResumeSignals,
-  parseBrief,
   peekQueue,
   probeIterationBudget,
   readInflightManifest,
@@ -130,6 +129,7 @@ import type {
   WorkerKind,
 } from '../dispatch/index.js';
 import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
+import { parseBrief } from '../hierarchy/index.js';
 import {
   countInFlightBgAgents,
   DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
@@ -655,7 +655,17 @@ export async function runDispatchCli(
       try {
         let entries: EnqueueEntry[];
         if (flags['from-brief']) {
-          entries = parseBrief(readFileSync(path.resolve(flags['from-brief']), 'utf-8'));
+          entries = parseBrief(
+            readFileSync(path.resolve(flags['from-brief']), 'utf-8'),
+          ).entries.map(
+            (e): EnqueueEntry => ({
+              taskId: e.task,
+              ...(e.after.length > 0 ? { after: e.after } : {}),
+              ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
+              ...(e.priority !== undefined ? { priority: e.priority } : {}),
+              wave: e.wave,
+            }),
+          );
         } else {
           const ids = argv.flatMap((tok, i) =>
             tok === '--task' && argv[i + 1] ? [argv[i + 1]!] : [],

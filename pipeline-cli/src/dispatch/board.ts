@@ -293,6 +293,14 @@ export interface ClaimHooks {
   sleep?: (ms: number) => void;
 }
 
+/** Ascending priority order; an absent priority sorts after every number. */
+function comparePriority(a: number | undefined, b: number | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined) return 1;
+  if (b === undefined) return -1;
+  return a - b;
+}
+
 /**
  * Atomically claim the next eligible manifest from `queue/` matching the
  * requested Worker kind. Implementation:
@@ -302,9 +310,10 @@ export interface ClaimHooks {
  *      (and is not `any`), whose `noClaimBefore` is in the future (OQ-7
  *      quota cool-down), or that fails the ordering rules (`blockedBy`,
  *      unmet `after`, busy `sequenceGroup`).
- *   3. Order the rest by `wave` (lower first), `priority` (higher first),
- *      then enqueue time (file mtime, oldest first). Manifests without the
- *      new fields all tie on wave and priority, so they stay FIFO.
+ *   3. Order the rest by `wave` (lower first), `priority` (lower first; a
+ *      manifest with no priority sorts after every one that has one), then
+ *      enqueue time (file mtime, oldest first). Manifests without the new
+ *      fields all tie on wave and priority, so they stay FIFO.
  *   4. Attempt `renameSync(queue/<id>, inflight/<id>)`. If it succeeds,
  *      this caller won the race — return the manifest. If it fails with
  *      `ENOENT`, another Worker beat us; continue to the next candidate.
@@ -359,7 +368,7 @@ export function claimNext(
   eligible.sort(
     (a, b) =>
       (a.manifest.wave ?? 0) - (b.manifest.wave ?? 0) ||
-      (b.manifest.priority ?? 0) - (a.manifest.priority ?? 0) ||
+      comparePriority(a.manifest.priority, b.manifest.priority) ||
       a.mtimeMs - b.mtimeMs,
   );
 
@@ -644,7 +653,7 @@ export function listBoard(boardDir: string, now: () => Date = () => new Date()):
     (a, b) =>
       Number(b.entry.eligible) - Number(a.entry.eligible) ||
       (a.entry.wave ?? 0) - (b.entry.wave ?? 0) ||
-      (b.entry.priority ?? 0) - (a.entry.priority ?? 0) ||
+      comparePriority(a.entry.priority, b.entry.priority) ||
       a.mtimeMs - b.mtimeMs,
   );
   entries.push(...queued.map((q) => q.entry));

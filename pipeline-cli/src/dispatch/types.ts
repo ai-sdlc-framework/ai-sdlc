@@ -70,7 +70,7 @@ export interface DispatchManifest {
   after?: string[];
   /** At most one inflight manifest per group. */
   sequenceGroup?: string;
-  /** Higher is claimed first within a wave (default 0). */
+  /** Lower is claimed first within a wave; absent sorts last. */
   priority?: number;
   /** Lower is claimed first (default 0). */
   wave?: number;

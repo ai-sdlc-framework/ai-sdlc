@@ -3849,7 +3849,7 @@ export const dispatchManifestV1Schema = {
     priority: {
       type: 'integer',
       description:
-        'Ordering hint within a wave. Among eligible manifests a higher priority is claimed first. Default 0.',
+        'Ordering hint within a wave. Among eligible manifests a lower priority number is claimed first; absent sorts last.',
     },
     wave: {
       type: 'integer',

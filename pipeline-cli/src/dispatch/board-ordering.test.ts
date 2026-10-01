@@ -42,7 +42,7 @@ import {
   writeManifest,
   writeVerdict,
 } from './board.js';
-import { enqueueTasks, parseBrief } from './enqueue.js';
+import { enqueueTasks } from './enqueue.js';
 import { requeueStaleInflight } from './session-reaper.js';
 import type { DispatchManifest } from './types.js';
 
@@ -124,14 +124,17 @@ describe('claim rules', () => {
     expect(claimNext(board, 'in-session-agent').claimed).toBe(true);
   });
 
-  it('claims six manifests by wave, then priority, then enqueue time', () => {
+  it('claims by wave, then priority (lower first, absent last), then enqueue time', () => {
     const specs: [string, Partial<DispatchManifest>, number][] = [
       ['T-1', { wave: 2 }, 1],
-      ['T-2', { wave: 1, priority: 0 }, 2],
-      ['T-3', { wave: 1, priority: 5 }, 3],
-      ['T-4', { wave: 1, priority: 5 }, 4],
+      ['T-2', { wave: 1, priority: 3 }, 2],
+      ['T-3', { wave: 1, priority: 2 }, 3],
+      ['T-4', { wave: 1, priority: 2 }, 4],
       ['T-5', {}, 5],
-      ['T-6', { wave: 1, priority: 9 }, 6],
+      ['T-6', { wave: 1, priority: 1 }, 6],
+      ['T-7', { wave: 1 }, 7],
+      ['T-8', { wave: 2, priority: 1 }, 8],
+      ['T-9', { priority: 2 }, 9],
     ];
     for (const [id, extra, t] of specs) {
       const p = writeManifest(board, mk(id, extra));
@@ -143,8 +146,20 @@ describe('claim rules', () => {
       if (!r.claimed) break;
       order.push(r.manifest?.taskId ?? '');
     }
-    // wave 0 first (T-5), then wave 1 by priority desc then age, then wave 2.
-    expect(order).toEqual(['T-5', 'T-6', 'T-3', 'T-4', 'T-2', 'T-1']);
+    // wave 0: T-9 (priority 2) before T-5 (none); wave 1: priority 1, the 2 tie by age, 3, then none;
+    // wave 2: priority 1 before none.
+    expect(order).toEqual(['T-9', 'T-5', 'T-6', 'T-3', 'T-4', 'T-2', 'T-7', 'T-8', 'T-1']);
+  });
+
+  it('lists the queue in the same order it is claimed', () => {
+    for (const [id, extra, t] of [
+      ['T-1', {}, 1],
+      ['T-2', { priority: 3 }, 2],
+      ['T-3', { priority: 1 }, 3],
+    ] as [string, Partial<DispatchManifest>, number][]) {
+      _setMtimeForTest(writeManifest(board, mk(id, extra)), 1_000_000 + t * 1000);
+    }
+    expect(listBoard(board).map((e) => e.taskId)).toEqual(['T-3', 'T-2', 'T-1']);
   });
 
   it('skips a blockedBy manifest and ignores blocked/, until unblocked', () => {
@@ -290,35 +305,6 @@ describe('enqueue', () => {
     expect(() =>
       enqueueTasks(board, [{ taskId: 'T-1' }], { ...defaults, resolveTaskFile: () => undefined }),
     ).toThrow(/no backlog task file/);
-  });
-});
-
-describe('parseBrief', () => {
-  it('reads a YAML list of ids and mappings', () => {
-    const entries = parseBrief(
-      ['- T-1', '- task: T-2', '  after: [T-1]', '  group: g', '  priority: 2', '  wave: 1'].join(
-        '\n',
-      ),
-    );
-    expect(entries).toEqual([
-      { taskId: 'T-1' },
-      { taskId: 'T-2', after: ['T-1'], sequenceGroup: 'g', priority: 2, wave: 1 },
-    ]);
-  });
-
-  it('accepts a tasks key and a single after id', () => {
-    expect(parseBrief('tasks:\n  - taskId: T-3\n    after: T-1\n    sequenceGroup: s')).toEqual([
-      { taskId: 'T-3', after: ['T-1'], sequenceGroup: 's' },
-    ]);
-  });
-
-  it('rejects malformed briefs', () => {
-    expect(() => parseBrief('a: 1')).toThrow(/YAML list/);
-    expect(() => parseBrief('- 5')).toThrow(/task id or a mapping/);
-    expect(() => parseBrief('- {after: [T-1]}')).toThrow(/no task id/);
-    expect(() => parseBrief('- {task: T-1, wave: x}')).toThrow(/integer/);
-    expect(() => parseBrief('- {task: T-1, after: [1]}')).toThrow(/task ids/);
-    expect(() => parseBrief('- {task: T-1, group: 3}')).toThrow(/text/);
   });
 });
 

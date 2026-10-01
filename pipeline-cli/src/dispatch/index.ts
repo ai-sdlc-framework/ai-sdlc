@@ -112,7 +112,7 @@ export {
 
 export type { BoardEntry, Eligibility, EligibilityContext } from './board.js';
 
-export { DEFAULT_VERIFY_COMMANDS, enqueueTasks, parseBrief } from './enqueue.js';
+export { DEFAULT_VERIFY_COMMANDS, enqueueTasks } from './enqueue.js';
 
 export type { EnqueueDefaults, EnqueueEntry } from './enqueue.js';
 
