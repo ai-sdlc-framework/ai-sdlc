@@ -1,0 +1,317 @@
+import type {
+  ComposeContext,
+  EgressClass,
+  JudgmentDefinition,
+  JudgmentOutcome,
+  Thresholds,
+} from './definition.js';
+import {
+  providerModelKey,
+  type JudgmentMode,
+  type PromotionRecord,
+  type ResolvedJudgmentConfig,
+} from './config.js';
+import { listJudgmentProviders, getJudgmentProvider } from './registry.js';
+import { canonicalJson, sha256Hex } from './question-hash.js';
+import { redactSecrets } from '../security/secret-redact.js';
+import type { JsonValue, JudgmentAnswer, JudgmentProvider, JudgmentResponse } from './types.js';
+
+export type CapabilityReport = 'live' | 'shadow' | 'degraded';
+
+/** One record per evaluation, handed to every sink. */
+export interface JudgmentEvaluationRecord {
+  ts: string;
+  judgmentId: string;
+  version: number;
+  consumerLabel: string;
+  questionSetHash: string | null;
+  stateHash: string | null;
+  /** Provider name, or null when none was used. */
+  provider: string | null;
+  /** Active provider@model key, or null when none. */
+  providerModelKey: string | null;
+  modelVersion: string | null;
+  /** Effective mode the evaluation ran in. */
+  mode: JudgmentMode;
+  /** Mode the config asked for, when it differs from the effective mode. */
+  configuredMode?: JudgmentMode;
+  /** Why an enforce judgment ran as shadow. */
+  downgradeReason?: string;
+  answers: Record<string, JudgmentAnswer> | null;
+  thresholds: Thresholds | null;
+  outcome: JudgmentOutcome<unknown>;
+  latencyMs: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** True when the provider was called. */
+  called: boolean;
+  taskId?: string;
+}
+
+export interface JudgmentSink {
+  record(record: JudgmentEvaluationRecord): void | Promise<void>;
+}
+
+export interface EvaluateJudgmentContext {
+  config: ResolvedJudgmentConfig;
+  /** Provider lookup; defaults to the registered-provider registry. */
+  getProvider?: (name: string) => JudgmentProvider | undefined;
+  /** Kind of the work item; only `'backlog'` is trusted for permissive decisions. */
+  sourceKind?: string;
+  taskId?: string;
+  sinks?: JudgmentSink[];
+  /** Cost-attribution tag sent with the request. Defaults to the judgment id. */
+  consumerLabel?: string;
+  /** Called once per evaluation when the definition names a capability. */
+  onCapabilityOutcome?: (report: {
+    capabilityId: string;
+    outcome: CapabilityReport;
+    reason?: string;
+  }) => void;
+  /** Clock for tests. */
+  now?: () => Date;
+}
+
+const ALIAS_RE = /-(latest|preview)$/;
+const CORPUS_MIN_N = 50;
+
+function defaultGetProvider(name: string): JudgmentProvider | undefined {
+  if (!listJudgmentProviders().includes(name)) return undefined;
+  return getJudgmentProvider(name);
+}
+
+function isLoopbackUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === 'localhost' || host === '[::1]' || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function redactValue(value: JsonValue): JsonValue {
+  if (typeof value === 'string') return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value !== null && typeof value === 'object') {
+    const out: { [key: string]: JsonValue } = {};
+    for (const [k, v] of Object.entries(value)) out[k] = redactValue(v);
+    return out;
+  }
+  return value;
+}
+
+/** Whether a promotion record satisfies the bar for a risk class (RFC section 8). */
+export function promotionSatisfies(
+  riskClass: JudgmentDefinition<unknown, unknown>['riskClass'],
+  record: PromotionRecord | undefined,
+): boolean {
+  if (!record) return false;
+  if (record.path === 'corpus') {
+    const bar = riskClass === 'relax' ? 0.95 : 0.9;
+    return (
+      typeof record.n === 'number' &&
+      record.n >= CORPUS_MIN_N &&
+      typeof record.actBandPrecision === 'number' &&
+      record.actBandPrecision >= bar
+    );
+  }
+  if (record.path === 'override') {
+    return riskClass !== 'relax' && !!record.evidence && record.evidence.trim().length > 0;
+  }
+  return false;
+}
+
+/** Reason an enforce judgment must run as shadow, or undefined when it may enforce. */
+function enforceDowngradeReason(
+  definition: JudgmentDefinition<unknown, unknown>,
+  config: ResolvedJudgmentConfig,
+  provider: JudgmentProvider,
+  key: string,
+  model: string,
+): string | undefined {
+  if (ALIAS_RE.test(model)) return 'model-alias';
+  if (provider.capabilities.calibratedProbabilities === false) return 'uncalibrated-provider';
+  const settings = config.judgments[definition.id];
+  if (!settings?.thresholds[key]) return 'no-thresholds';
+  if (!promotionSatisfies(definition.riskClass, settings.promotion[key])) return 'no-promotion';
+  return undefined;
+}
+
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Evaluate one judgment. Never throws. `abstain` always means the caller does
+ * what it did before the judgment layer existed.
+ */
+export async function evaluateJudgment<I, D>(
+  definition: JudgmentDefinition<I, D>,
+  input: I,
+  ctx: EvaluateJudgmentContext,
+): Promise<JudgmentOutcome<D>> {
+  const now = ctx.now ?? (() => new Date());
+  const rec: JudgmentEvaluationRecord = {
+    ts: now().toISOString(),
+    judgmentId: definition.id,
+    version: definition.version,
+    consumerLabel: ctx.consumerLabel ?? definition.id,
+    questionSetHash: null,
+    stateHash: null,
+    provider: null,
+    providerModelKey: null,
+    modelVersion: null,
+    mode: 'off',
+    answers: null,
+    thresholds: null,
+    outcome: { kind: 'abstain', reason: 'disabled' },
+    latencyMs: null,
+    inputTokens: null,
+    outputTokens: null,
+    called: false,
+    ...(ctx.taskId ? { taskId: ctx.taskId } : {}),
+  };
+  let report: CapabilityReport = 'degraded';
+
+  const finish = async (outcome: JudgmentOutcome<D>): Promise<JudgmentOutcome<D>> => {
+    rec.outcome = outcome as JudgmentOutcome<unknown>;
+    for (const sink of ctx.sinks ?? []) {
+      try {
+        await sink.record(rec);
+      } catch {
+        // a sink failure never changes the result
+      }
+    }
+    if (definition.capabilityId && ctx.onCapabilityOutcome) {
+      try {
+        ctx.onCapabilityOutcome({
+          capabilityId: definition.capabilityId,
+          outcome: report,
+          ...(report === 'degraded' && outcome.kind === 'abstain'
+            ? { reason: outcome.reason }
+            : {}),
+        });
+      } catch {
+        // swallowed
+      }
+    }
+    return outcome;
+  };
+  const abstain = (reason: string): Promise<JudgmentOutcome<D>> => {
+    report = 'degraded';
+    return finish({ kind: 'abstain', reason });
+  };
+
+  try {
+    const { config } = ctx;
+    const settings = config.judgments[definition.id];
+    const configuredMode: JudgmentMode = settings?.mode ?? config.defaults.mode;
+    rec.mode = configuredMode;
+    if (!config.provider || configuredMode === 'off') return await abstain('disabled');
+
+    const provider = (ctx.getProvider ?? defaultGetProvider)(config.provider);
+    if (!provider) return await abstain('disabled');
+    let availability: { available: boolean };
+    try {
+      availability = await provider.isAvailable();
+    } catch {
+      return await abstain('disabled');
+    }
+    if (!availability.available) return await abstain('disabled');
+
+    const model = config.model ?? provider.modelId;
+    const key = providerModelKey(provider.name, model);
+    rec.provider = provider.name;
+    rec.providerModelKey = key;
+
+    if (!config.egressAllow.includes(definition.egressClass as EgressClass)) {
+      const baseUrl =
+        provider.baseUrl ?? (config.providerOptions[provider.name]?.baseUrl as string | undefined);
+      if (!isLoopbackUrl(baseUrl)) return await abstain('egress-not-permitted');
+    }
+
+    let mode = configuredMode;
+    if (configuredMode === 'enforce') {
+      const reason = enforceDowngradeReason(definition, config, provider, key, model);
+      if (reason) {
+        mode = 'shadow';
+        rec.mode = 'shadow';
+        rec.configuredMode = 'enforce';
+        rec.downgradeReason = reason;
+      }
+    }
+
+    let state: JsonValue;
+    let questions: ReturnType<typeof definition.questions>;
+    try {
+      state = redactValue(definition.buildState(input));
+      questions = definition.questions(input);
+    } catch {
+      return await abstain('definition-error');
+    }
+    rec.questionSetHash = sha256Hex(canonicalJson({ questions, version: definition.version }));
+    const stateJson = canonicalJson(state);
+    rec.stateHash = sha256Hex(stateJson);
+    if (stateJson.length / 4 > provider.capabilities.maxStateTokens) {
+      return await abstain('state-too-large');
+    }
+
+    let response: JudgmentResponse;
+    try {
+      rec.called = true;
+      response = await withTimeout(
+        provider.evaluate({ state, questions, consumerLabel: rec.consumerLabel }),
+        config.defaults.timeoutMs,
+      );
+    } catch {
+      return await abstain('provider-error');
+    }
+    if (
+      !response ||
+      !response.answers ||
+      Object.keys(questions).some((id) => !response.answers[id])
+    ) {
+      return await abstain('provider-error');
+    }
+    rec.answers = response.answers;
+    rec.modelVersion = response.modelVersion;
+    rec.latencyMs = response.latencyMs;
+    rec.inputTokens = response.usage?.inputTokens ?? null;
+    rec.outputTokens = response.usage?.outputTokens ?? null;
+
+    if (mode === 'shadow') {
+      report = 'shadow';
+      return await finish({ kind: 'abstain', reason: 'shadow' });
+    }
+
+    const thresholds = settings?.thresholds[key] ?? {};
+    rec.thresholds = thresholds;
+    const composeCtx: ComposeContext<D> = {
+      permissiveAllowed: definition.direction === 'bidirectional' && ctx.sourceKind === 'backlog',
+      ...(definition.agrees ? { agrees: definition.agrees.bind(definition) } : {}),
+      ...(definition.capabilityId ? { capabilityId: definition.capabilityId } : {}),
+    };
+    let outcome: JudgmentOutcome<D>;
+    try {
+      outcome = definition.compose(response.answers, input, thresholds, composeCtx);
+    } catch {
+      return await abstain('definition-error');
+    }
+    report = outcome.kind === 'abstain' ? 'degraded' : 'live';
+    return await finish(outcome);
+  } catch {
+    return abstain('definition-error');
+  }
+}

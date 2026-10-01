@@ -18,7 +18,8 @@ export type ResourceKind =
   | 'DesignSystemBinding'
   | 'DesignIntentDocument'
   | 'DorConfig'
-  | 'CompliancePosture';
+  | 'CompliancePosture'
+  | 'JudgmentConfig';
 
 export interface Metadata {
   name: string;

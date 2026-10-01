@@ -78,6 +78,9 @@ const KIND_KEY: Record<
     // (`.ai-sdlc/compliance.yaml`) — it is NOT loaded through the generic
     // config-directory walk, so it doesn't need a `KIND_KEY` mapping here.
     | 'CompliancePosture'
+    // Judgment layer config has its own loader (`loadJudgmentConfig` in
+    // `@ai-sdlc/reference`, base-ref read) — not part of the directory walk.
+    | 'JudgmentConfig'
   >,
   keyof AiSdlcConfig
 > = {

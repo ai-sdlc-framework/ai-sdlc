@@ -5148,6 +5148,120 @@ export const journeyV1Schema = {
   },
 } as const;
 
+export const judgmentConfigV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/judgment-config.v1.schema.json',
+  title: 'AI-SDLC JudgmentConfig',
+  description:
+    'Per-repository configuration for the judgment layer: which provider answers closed-set questions, what data classes may leave the machine, and per-judgment mode, thresholds and promotion records. Lives at .ai-sdlc/judgment-config.yaml and is read from the trusted base branch only.',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'JudgmentConfig',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      properties: {
+        provider: {
+          type: 'string',
+          minLength: 1,
+          description: 'Provider name. Omit to disable the judgment layer.',
+        },
+        model: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Model id. An exact version is required for any judgment to run in enforce mode.',
+        },
+        providerOptions: {
+          type: 'object',
+          description: 'Free-form options keyed by provider name.',
+          additionalProperties: { type: 'object' },
+        },
+        egress: {
+          type: 'object',
+          properties: {
+            allow: {
+              type: 'array',
+              description:
+                'Data classes that may be sent to the provider. Defaults to [work-item-text] when a provider is named.',
+              items: { $ref: '#/$defs/egressClass' },
+              uniqueItems: true,
+            },
+          },
+          additionalProperties: false,
+        },
+        defaults: {
+          type: 'object',
+          properties: {
+            mode: { $ref: '#/$defs/mode' },
+            timeoutMs: { type: 'integer', minimum: 1 },
+            cache: { type: 'boolean' },
+          },
+          additionalProperties: false,
+        },
+        judgments: {
+          type: 'object',
+          description: 'Per-judgment settings keyed by judgment id.',
+          additionalProperties: { $ref: '#/$defs/judgment' },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+  $defs: {
+    egressClass: {
+      type: 'string',
+      enum: ['work-item-text', 'code-diff', 'agent-output'],
+    },
+    mode: {
+      type: 'string',
+      enum: ['off', 'shadow', 'enforce'],
+    },
+    judgment: {
+      type: 'object',
+      properties: {
+        mode: { $ref: '#/$defs/mode' },
+        thresholds: {
+          type: 'object',
+          description: 'Thresholds keyed by provider@model.',
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: { type: 'number' },
+          },
+        },
+        promotion: {
+          type: 'object',
+          description: 'Promotion records keyed by provider@model.',
+          additionalProperties: { $ref: '#/$defs/promotionRecord' },
+        },
+      },
+      additionalProperties: false,
+    },
+    promotionRecord: {
+      type: 'object',
+      required: ['path'],
+      properties: {
+        path: { type: 'string', enum: ['corpus', 'override'] },
+        n: { type: 'integer', minimum: 0 },
+        actBandPrecision: { type: 'number', minimum: 0, maximum: 1 },
+        evalReport: { type: 'string' },
+        evidence: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+  },
+} as const;
+
 export const metricSnapshotV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/metric-snapshot.v1.schema.json',
@@ -9082,6 +9196,7 @@ export const SCHEMAS: Record<string, object> = {
   'hierarchy-roster.v1.schema.json': hierarchyRosterV1Schema,
   'journey-config.v1.schema.json': journeyConfigV1Schema,
   'journey.v1.schema.json': journeyV1Schema,
+  'judgment-config.v1.schema.json': judgmentConfigV1Schema,
   'metric-snapshot.v1.schema.json': metricSnapshotV1Schema,
   'model-call-record.v1.schema.json': modelCallRecordV1Schema,
   'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,

@@ -159,6 +159,9 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
     modelId: model,
     capabilities: JEV_CAPABILITIES,
     requires: { envVar: API_KEY_ENV },
+    get baseUrl() {
+      return getBaseUrl();
+    },
     async isAvailable() {
       return getKey()
         ? { available: true }
