@@ -12,7 +12,8 @@
  */
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import { delimiter } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { delimiter, resolve } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 
@@ -111,6 +112,17 @@ function pathSegmentUnder(segment: string, dir: string): boolean {
   return segment === dir || segment.startsWith(`${dir}/`) || segment.startsWith(`${dir}\\`);
 }
 
+/** The repository path as given and as the filesystem resolves it (symlinks), de-duplicated. */
+function repoSpellings(operatorRepo: string): string[] {
+  const spellings = new Set([resolve(operatorRepo)]);
+  try {
+    spellings.add(realpathSync(operatorRepo));
+  } catch {
+    // not on disk: only the lexical spelling applies
+  }
+  return [...spellings];
+}
+
 /**
  * Environment for the sandboxed session. Removes the operator's Claude Code
  * session variables (CLAUDECODE, CLAUDE_PROJECT_DIR, ...), every AI_SDLC_*
@@ -126,19 +138,20 @@ export function sandboxEnvFrom(
   operatorRepo?: string,
 ): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = {};
+  const repos = operatorRepo ? repoSpellings(operatorRepo) : [];
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined) continue;
     if (REMOVED_ENV_NAMES.has(name) || REMOVED_ENV_PREFIXES.some((p) => name.startsWith(p))) {
       continue;
     }
-    if (name === 'PATH' && operatorRepo) {
+    if (name === 'PATH' && repos.length > 0) {
       out[name] = value
         .split(delimiter)
-        .filter((seg) => !pathSegmentUnder(seg, operatorRepo))
+        .filter((seg) => !repos.some((r) => pathSegmentUnder(seg, r)))
         .join(delimiter);
       continue;
     }
-    if (operatorRepo && value.includes(operatorRepo)) continue;
+    if (repos.some((r) => value.includes(r))) continue;
     out[name] = value;
   }
   return { ...out, ...SANDBOX_ENV };

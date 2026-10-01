@@ -20,10 +20,11 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  utimesSync,
   type Stats,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 
 const COMMIT_ID = /^[0-9a-f]{40}$/;
@@ -113,19 +114,30 @@ export async function mergeBaseOf(
   return r.code === 0 && isCommitId(out) ? out : undefined;
 }
 
-/** Names removed at any depth: per-directory instruction files and per-directory settings. */
-const CONFIG_NAMES_ANY_DEPTH = new Set(['CLAUDE.md', 'CLAUDE.local.md', '.claude']);
-/** Names removed at the top of the tree only. */
+/**
+ * Names removed at any depth, lowercase: per-directory instruction files and
+ * per-directory settings. Compared after NFKC normalisation and lowercasing, so
+ * every case or compatibility spelling is removed on every platform: a
+ * case-insensitive filesystem (macOS APFS default) resolves `.Claude/` or
+ * `CLAUDE.MD` to the files Claude Code looks up, and a compatibility form
+ * (U+017F, the long s, folds to `s`) must not survive either.
+ */
+const CONFIG_NAMES_ANY_DEPTH = new Set(['claude.md', 'claude.local.md', '.claude']);
+/** Names removed at the top of the tree only, lowercase. */
 const CONFIG_NAMES_TOP_LEVEL = new Set(['.mcp.json', '.claude.json']);
+
+function foldName(name: string): string {
+  return name.normalize('NFKC').toLowerCase();
+}
 
 /**
  * Delete every Claude Code configuration the replayed commit carries, so no
  * hook, agent, MCP server, setting or instruction file from it can load into
  * the session whatever the CLI's flags do: `.claude/` (any depth), `.mcp.json`,
- * `.claude.json`, and every `CLAUDE.md` / `CLAUDE.local.md`. Uses lstat and
- * removes a link itself, never what it points to. The review diff is computed
- * commit to commit, so removing working-tree files does not change it.
- * Returns the number of entries removed.
+ * `.claude.json`, and every `CLAUDE.md` / `CLAUDE.local.md`, in any letter case.
+ * Uses lstat and removes a link itself, never what it points to. The review
+ * diff is computed commit to commit, so removing working-tree files does not
+ * change it. Returns the number of entries removed.
  */
 export function removeCommitClaudeConfig(root: string): number {
   let removed = 0;
@@ -138,7 +150,8 @@ export function removeCommitClaudeConfig(root: string): number {
     }
     for (const e of entries) {
       const path = join(dir, e.name);
-      if (CONFIG_NAMES_ANY_DEPTH.has(e.name) || (top && CONFIG_NAMES_TOP_LEVEL.has(e.name))) {
+      const folded = foldName(e.name);
+      if (CONFIG_NAMES_ANY_DEPTH.has(folded) || (top && CONFIG_NAMES_TOP_LEVEL.has(folded))) {
         try {
           rmSync(path, { recursive: true, force: true });
           removed++;
@@ -236,6 +249,8 @@ export interface SweepOptions {
  * `maxAgeMs`, not symlinks, and not owned by a live run. Returns the count.
  */
 export function sweepStaleReplayHolders(opts: SweepOptions = {}): number {
+  // Fail closed: without a uid, ownership cannot be checked, so nothing is swept.
+  if (currentUid() === undefined) return 0;
   const os = opts.osTmpdir ?? tmpdir();
   const root = opts.root ?? os;
   try {
@@ -288,6 +303,8 @@ export interface TempCloneOptions {
   privateParent?: boolean;
   /** Owner uid the private parent must have (tests). Defaults to the current uid. */
   uid?: number;
+  /** Clock used to refresh the run's holder timestamp (tests). Defaults to `Date.now`. */
+  now?: () => number;
 }
 
 /** Checks a commit out into the throwaway clone and returns the clone path. */
@@ -351,6 +368,13 @@ export async function withReplayClone<T>(
       if (r.code !== 0) throw new Error('Could not check the commit out in the throwaway clone.');
       await git(['clean', '-ffdxq'], path);
       removeCommitClaudeConfig(path);
+      // A long run keeps its holder fresh so a concurrent sweep never treats it as stale.
+      try {
+        const t = new Date((opts.now ?? Date.now)());
+        utimesSync(dirname(path), t, t);
+      } catch {
+        // best effort
+      }
       return path;
     };
     return await fn(checkout);
