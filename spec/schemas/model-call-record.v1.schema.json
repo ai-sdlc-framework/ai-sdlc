@@ -86,6 +86,12 @@
       "description": "'framework' calls keep repository, task and source; 'other' calls do not."
     },
     "repo": { "type": "string", "description": "Repository name; framework scope only." },
+    "repoId": {
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^[A-Za-z0-9._~:/-]+#[0-9a-f]{40,64}$",
+      "description": "Stable repository identity: normalized origin remote URL (no credentials) joined with the root commit hash; framework scope only. Absent on records that predate it."
+    },
     "taskId": { "type": "string", "description": "Task id; framework scope only." },
     "breakdownMissing": {
       "type": "boolean",

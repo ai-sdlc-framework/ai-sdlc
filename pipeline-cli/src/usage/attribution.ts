@@ -12,12 +12,15 @@
 import { lstatSync, type Stats, openSync, closeSync, readSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { repoIdFor } from './repo-id.js';
 
 export interface FrameworkContext {
   /** Repository (or worktree) root that contains `.ai-sdlc/`. */
   root: string;
   /** Repository name; for a task worktree, the owning repository's name. */
   repo: string;
+  /** Stable repository identity; absent when the repository has no commits. */
+  repoId?: string;
 }
 
 const MAX_WALK_DEPTH = 64;
@@ -72,7 +75,8 @@ export class AttributionResolver {
     let dir = start;
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       if (dir !== this.home && isRealDir(join(dir, '.ai-sdlc')) && hasGitEntry(dir)) {
-        found = { root: dir, repo: repoNameFor(dir) };
+        const repoId = repoIdFor(dir);
+        found = { root: dir, repo: repoNameFor(dir), ...(repoId ? { repoId } : {}) };
         break;
       }
       const parent = dirname(dir);

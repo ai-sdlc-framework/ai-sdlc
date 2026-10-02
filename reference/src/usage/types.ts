@@ -47,6 +47,8 @@ export interface ModelCallRecord {
   scope: UsageScope;
   /** Framework scope only. */
   repo?: string;
+  /** Framework scope only. Normalized origin URL joined with the root commit hash; absent on older records. */
+  repoId?: string;
   /** Framework scope only. */
   taskId?: string;
   /**
@@ -80,6 +82,7 @@ export interface ModelCallFilter {
   agentRole?: string;
   scope?: UsageScope;
   repo?: string;
+  repoId?: string;
   taskId?: string;
   billingPool?: BillingPool;
 }

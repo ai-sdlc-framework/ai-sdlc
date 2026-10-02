@@ -299,6 +299,7 @@ function buildRecord(
   return {
     ...base,
     repo: framework.repo,
+    ...(framework.repoId ? { repoId: framework.repoId } : {}),
     ...(taskId ? { taskId } : {}),
     source: { file: file.path, offset: lineStart },
   };

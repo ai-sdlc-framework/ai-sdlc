@@ -13,7 +13,10 @@ import {
   type ModelCallRecord,
   type PriceRow,
 } from '@ai-sdlc/reference';
+import { resolve } from 'node:path';
 import type { Argv } from 'yargs';
+import { repoNameFor } from './attribution.js';
+import { repoIdFor, resolveRepoFilter } from './repo-id.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import {
   GROUP_KEYS,
@@ -232,6 +235,10 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
             default: [] as string[],
             description: 'Grouping (repeatable): model, role, task, repo, pool, day, window',
           })
+          .option('repo', {
+            type: 'string',
+            description: 'Only this repository: a directory name or a repoId',
+          })
           .option('format', {
             type: 'string',
             choices: ['text', 'json', 'csv'] as const,
@@ -241,7 +248,16 @@ export function registerUsageViewCommands(y: Argv, deps: UsageViewDeps, io: Usag
         const filter = rangeFilter(argv, io);
         if (!filter) return;
         const ctx = context(deps, io);
-        const records = await loadRecords(deps, filter);
+        let records = await loadRecords(deps, filter);
+        if (argv.repo !== undefined) {
+          const res = resolveRepoFilter(records, argv.repo, {
+            repoName: repoNameFor(resolve(deps.workDir ?? process.cwd())),
+            repoId: repoIdFor(resolve(deps.workDir ?? process.cwd())),
+          });
+          records = res.records;
+          if (argv.format === 'text') io.out(`${res.line}\n`);
+          else io.err(`${res.line}\n`);
+        }
         const windowSpec = [...ctx.config.windows].sort((a, b) => a.lengthHours - b.lengthHours)[0];
         const report = buildUsageReport({
           records,

@@ -8,10 +8,12 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, sep } from 'node:path';
+import { repoIdFor } from './repo-id.js';
 
 export interface CodexAttribution {
   scope: 'framework' | 'other';
   repo?: string;
+  repoId?: string;
   taskId?: string;
 }
 
@@ -78,9 +80,11 @@ export function attributeCodexSession(
     result = { scope: 'other' };
   } else {
     const taskId = taskFromWorktreePath(cwd) ?? taskFromBranch(branch) ?? taskFromSentinel(root);
+    const repoId = repoIdFor(root);
     result = {
       scope: 'framework',
       repo: repoName(root, cwd),
+      ...(repoId ? { repoId } : {}),
       ...(taskId ? { taskId } : {}),
     };
   }
