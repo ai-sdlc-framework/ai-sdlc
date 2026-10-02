@@ -11,8 +11,6 @@ requires: []
 assumes: [RFC-0004, RFC-0010, RFC-0011, RFC-0016, RFC-0019, RFC-0024, RFC-0035, RFC-0042, RFC-0043, RFC-0046, RFC-0048]
 requiresDocs:
   - operator-runbook
-deferredDocs: true
-deferredDocsDeadline: '2026-11-30'
 ---
 
 # RFC-0049: System One Judgment Layer (Typed-Question Provider Adapter, Jev First)
