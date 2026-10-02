@@ -2,7 +2,7 @@
 id: AISDLC-653.1
 title: >-
   RFC-0050 follow-up: record a stable repoId at ingest and match scorecards on it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
@@ -42,8 +42,8 @@ before AISDLC-656 applies evidence to routing automatically.
 3. `cli-usage report --repo` accepts either form and prints the `repoId` it resolved.
 
 ## Acceptance Criteria
-- [ ] Two checkouts with the same directory name and different root commits produce records with different `repoId` values, and a scorecard for one contains nothing from the other.
-- [ ] Records without `repoId` are included only under the legacy fallback and the report labels them.
-- [ ] The ledger record schema accepts the new field and `pnpm validate-schemas` passes.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] Two checkouts with the same directory name and different root commits produce records with different `repoId` values, and a scorecard for one contains nothing from the other.
+- [x] Records without `repoId` are included only under the legacy fallback and the report labels them.
+- [x] The ledger record schema accepts the new field and `pnpm validate-schemas` passes.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
