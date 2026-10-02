@@ -71,6 +71,8 @@ function generate(): Case[] {
       add(`env ${kw} value prefix ${en}`, `${kw}=${e}-tailvalue9Zx`, 'tailvalue9Zx');
       add(`env ${kw} neighbour ${en}`, `${e} ${kw}=tailvalue9Zx`, 'tailvalue9Zx');
       add(`env ${kw} quoted ${en}`, `${kw}_${e}="tail value9Zx"`, 'value9Zx');
+      add(`env ${kw} unterminated dq ${en}`, `${kw}="${e}-tailvalue9Zx more`, 'tailvalue9Zx');
+      add(`env ${kw} unterminated sq ${en}`, `${kw}='${e}-tailvalue9Zx`, 'tailvalue9Zx');
     }
     // AWS 40-char secret: label forms with an earlier shape in the label tail
     const labels = [

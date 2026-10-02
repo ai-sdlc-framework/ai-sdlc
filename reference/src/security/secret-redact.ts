@@ -73,8 +73,8 @@ export interface SecretPattern {
  *   3. AWS_ACCESS_KEY, PRIVATE_KEY_BLOCK, JWT.
  *   4. URL_CREDENTIALS / URL_PASSWORD, then ENV_ASSIGNMENT. These run AFTER
  *      the specific shapes so `TOKEN=ghp_...` keeps the GITHUB_PAT marker
- *      (ENV_ASSIGNMENT skips values that are already a `[REDACTED:` marker,
- *      which also keeps every pattern idempotent), and AFTER
+ *      (ENV_ASSIGNMENT skips only values that are ENTIRELY a
+ *      `[REDACTED:` marker, which also keeps every pattern idempotent), and AFTER
  *      PRIVATE_KEY_BLOCK so a multi-line `PRIVATE_KEY="-----BEGIN..."` is
  *      consumed whole first.
  *   5. HIGH-ENTROPY last.
@@ -330,11 +330,11 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   // earlier rule's `[REDACTED:...]` marker (URL user, env-name tail, label tail)
   // accepts that marker in the context position, and ENV_ASSIGNMENT skips only
   // values that are ENTIRELY a marker. The property test in
-  // secret-redact.test.ts enforces this over cross-rule combinations.
+  // secret-redact.order.test.ts enforces this over cross-rule combinations.
   {
     name: 'ENV_ASSIGNMENT',
     regex:
-      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))(?:[A-Za-z0-9_.-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:[A-Z_-]{1,32}\](?!\S))[^\s]+|["'](?!["'])(?!\[REDACTED:)[^\n]*)/gi,
+      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))(?:[A-Za-z0-9_.-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:[A-Z_-]{1,32}\](?!\S))[^\s]+|["'](?!["'])(?!\[REDACTED:[A-Z_-]{1,32}\](?:["']|[ \t]*(?:\r?\n|$)))[^\n]*)/gi,
     replacement: '$1$2[REDACTED:ENV_SECRET]$2',
   },
   // The `(?<![A-Za-z0-9_-])` run-start anchor does not change what matches (a
