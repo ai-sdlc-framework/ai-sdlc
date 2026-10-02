@@ -2,7 +2,7 @@
 id: AISDLC-630.2
 title: >-
   RFC-0049 follow-up: close redactSecrets gaps (40-char AWS secrets, URL credentials, .env-style assignments)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
