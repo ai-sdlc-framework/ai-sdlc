@@ -68,6 +68,7 @@ sections 5 and 6, and the OQ-3 resolution.
 6. **Independence**: tiers computed per leaf; the set's tier is the weakest leaf.
 
 ## Acceptance Criteria
+- [ ] When `buildFallbackPlan` (AISDLC-673) returns `{ ok: false, rejections }`, the staged review does not run and the existing reviewer set handles the change; a test covers the fail-closed path and the rejections are surfaced in the dispatch record.
 - [ ] `reviewerSet: staged` on the base ref selects the staged pipeline; a working-tree copy is ignored; `gh-issue` work falls back to `three` with a logged reason.
 - [ ] Step 7 for the staged set produces one verdict and Step 8 aggregates it with the same blocking rules as today (fixture with a critical finding blocks; without, approves).
 - [ ] One leaf is emitted per planner, per probe and per synthesizer transcript with the matching `stage`, executor leaves carry no findings, and an envelope with these leaves verifies.
