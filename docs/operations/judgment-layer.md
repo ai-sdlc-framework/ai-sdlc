@@ -51,7 +51,8 @@ Enabling is one config file and, for the hosted provider, one environment variab
    registered provider and a set credential variable, and exits non-zero (skipping the
    request) without them. An `openai-compatible` provider on a keyless endpoint, even a
    local one that works at call time, has no credential variable, so the CLI skips
-   `--live` for it unless `apiKeyEnv` names a variable that is set. `ai-sdlc doctor` also runs the
+   `--live` for it unless `apiKeyEnv` names a variable that is set. A keyed `http` loopback
+config is not just skipped: it is rejected and the provider is reported disabled. `ai-sdlc doctor` also runs the
    `judgment-layer` checks described in [`doctor.md`](doctor.md).
 
 A config that is missing, unreadable or fails schema validation turns the layer off
@@ -95,16 +96,20 @@ abstains. Its probabilities are the model's own self-report, so it declares
 uncalibrated probabilities and **every judgment on it runs in `shadow` only**, whatever
 the config says (downgrade reason `uncalibrated-provider`).
 
-Options live under `spec.providerOptions.openai-compatible`:
+Options live under `spec.providerOptions.openai-compatible`. Only the keys in this table
+are accepted. Any other key (for example `fetchImpl` or an environment-shaped key)
+makes the provider report itself disabled, and the reason names the offending key.
+Values are checked before defaults are applied.
 
 | Option | Meaning | Default |
 |---|---|---|
-| `baseUrl` | Endpoint base, for example `http://localhost:11434/v1`. Required. | none |
+| `baseUrl` | Endpoint base, for example `http://localhost:11434/v1`. Required. Must be `https`, except that `http` is accepted for a loopback host (`localhost`, `::1`, `127.0.0.0/8`) when `apiKeyEnv` is not set. | none |
 | `model` | Model id sent to the endpoint. Taken from `spec.model` when omitted. | none |
-| `apiKeyEnv` | Name of the environment variable that holds the key. Optional for a local endpoint. | none |
+| `apiKeyEnv` | Name of the environment variable that holds the key. Optional for a keyless local endpoint. Setting it requires an `https` `baseUrl`, so an `http` loopback endpoint with a key is rejected. Names of secrets that are not provider keys (for example `GITHUB_TOKEN`, `NPM_TOKEN`, `ANTHROPIC_API_KEY`, `AWS_SECRET_ACCESS_KEY`) and any name ending in `_PRIVATE_KEY` are rejected, as is any name that is not a valid environment variable identifier. | none |
 | `timeoutMs` | Per-attempt timeout. | 10000 |
-| `maxRetries` | Retries after the first attempt on 429 and 5xx. | 2 |
-| `maxStateTokens`, `maxRequestTokens`, `maxChoiceOptions`, `maxScoreLevels` | Size limits the runtime enforces before calling. | 8000, 16000, 50, 10 |
+| `maxRetries` | Retries after the first attempt on 429 and 5xx. Above 5 it is clamped to 5 and a warning is logged. | 2 |
+| `maxResponseBytes` | Largest response body read. A larger response is aborted with a `bad-response` error. Above 8 MiB it is clamped to 8 MiB with a warning. | 1 MiB |
+| `maxStateTokens` | State size limit the runtime enforces before calling. | 8000 |
 | `inputCostPer1MTokens`, `outputCostPer1MTokens` | Prices used for cost attribution. | 0 |
 
 Minimal config for a local Ollama endpoint:
@@ -130,7 +135,8 @@ spec:
 
 For a hosted gateway, use an `https` `baseUrl` and add `apiKeyEnv: <YOUR_KEY_VAR>`;
 the variable must be set or the provider reports itself unavailable and every judgment
-abstains.
+abstains. The request size limits `maxRequestTokens` (16000), `maxChoiceOptions` (50) and
+`maxScoreLevels` (10) are fixed and cannot be set in the config.
 
 ## Egress classes
 
@@ -250,7 +256,7 @@ answers.
 
 | Abstain reason | Cause | What to do |
 |---|---|---|
-| `disabled` | No provider configured, the mode is `off`, `AI_SDLC_JUDGMENT=off` is set, or the provider is unavailable (not registered, key missing, `baseUrl` unset). | Run `cli-judgment doctor`. Check the key variable and `baseUrl`. |
+| `disabled` | No provider configured, the mode is `off`, `AI_SDLC_JUDGMENT=off` is set, or the provider is unavailable (not registered, key missing, `baseUrl` unset), or its `providerOptions` were rejected (an unknown key, an `http` host that is not loopback or that is paired with `apiKeyEnv`, a denylisted `apiKeyEnv` name). | Run `cli-judgment doctor`. Check the key variable, `baseUrl` and the option names. |
 | `egress-not-permitted` | The judgment's egress class is not in `spec.egress.allow`. | Add the class if you accept that data leaving, otherwise leave it. |
 | `provider-error` | Timeout, network error, rate limit after retries, or the provider returned an answer that is missing, malformed or out of the option set. | Check connectivity, raise `timeoutMs`, or try a larger model for `openai-compatible`. |
 | `state-too-large` | The state exceeds the provider's size budget. | None: the caller falls back. Raise `maxStateTokens` for `openai-compatible` if the model can take more. |
