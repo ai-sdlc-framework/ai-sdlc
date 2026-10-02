@@ -175,7 +175,7 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   {
     name: 'AWS_SECRET_KEY',
     regex:
-      /(secret(?<!\[REDACTED:[A-Z_]{0,32}secret)[\w .[\]*-]{0,64}?(?:\\{0,3}["'`]?[ \t]{0,20}(?::=|=>|[:=>])[ \t]{0,20}(?:\r?\n[ \t]{0,20})?|\\{0,3}["'`]?(?:[ \t]{1,20}(?:\r?\n[ \t]{0,20})?|\r?\n[ \t]{0,20})|<\/\w{1,32}>\s{0,20}<\w{1,32}>\s{0,20})\\{0,3}["'`]?)(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
+      /(secret(?<!\[REDACTED:[A-Z_]{0,32}secret)(?:[\w .[\]*-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}?(?:\\{0,3}["'`]?[ \t]{0,20}(?::=|=>|[:=>|])[ \t]{0,20}(?:\r?\n[ \t]{0,20})?|\\{0,3}["'`]?(?:[ \t]{1,20}(?:\r?\n[ \t]{0,20})?|\r?\n[ \t]{0,20})|<\/\w{1,32}>\s{0,20}<\w{1,32}>\s{0,20})\\{0,3}["'`]?)(?<![A-Za-z0-9/+])(?=[A-Za-z0-9/+]{0,39}[^0-9a-f])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])/gi,
     replacement: '$1[REDACTED:AWS_SECRET_KEY]',
   },
   // (b) an access key id (AKIA/ASIA + 16) followed within a separator of up to
@@ -242,6 +242,9 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   //  - A plain user without a password (`ssh://git@host`,
   //    `https://token@host`) is kept: it is a username, not a credential.
   //  - IPv6 hosts (`[::1]`) contain no `@` and are untouched.
+  //  - The user position also accepts `[REDACTED:...]` markers (an earlier
+  //    rule may already have replaced an AWS id / Twilio SID / PAT user), so the
+  //    password is redacted whatever the rule order.
   //  - Residual gap: a raw `/`, `#` or `?` inside a password ends the match
   //    (`scheme://user:pa/ss@host` keeps `ss`), and an `@` in the user part is
   //    not handled; widening would over-match URLs with `@` in a path/query.
@@ -255,7 +258,8 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   },
   {
     name: 'URL_PASSWORD',
-    regex: /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s/?#@:[\]]{0,512}:)[^\s/?#]{1,512}@/g,
+    regex:
+      /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/(?:[^\s/?#@:[\]]|\[REDACTED:[A-Z_-]{1,32}\]){0,512}:)[^\s/?#]{1,512}@/g,
     replacement: '$1[REDACTED:URL_PASSWORD]@',
   },
   // `.env`-style assignments: `NAME=value` where NAME CONTAINS (case-
@@ -276,34 +280,61 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   // are already a `[REDACTED:` marker are left alone (idempotence).
   //
   // RESIDUAL GAPS (known; they MUST be closed before any provider-enabling work
-  // relies on this redactor as its only defense):
+  // relies on this redactor as its only defense; AISDLC-641 depends on both
+  // follow-ups below). Each gap says who owns it:
   //  - colon / header / flag forms: `POSTGRES_PASSWORD: x`, `"password":"x"`,
   //    `Authorization: Bearer ...` / `Basic ...`, `X-Api-Key: x`, `--password x`,
-  //    `curl -u user:pw`, `.netrc`;
-  //  - names `APIKEY=`, `api-key=`, `apiKey=` (only `API_KEY` is a keyword) and
-  //    camelCase `dbPass=`;
+  //    `curl -u user:pw`, `.netrc`; and names `APIKEY=`, `api-key=`, `apiKey=`
+  //    (only `API_KEY` is a keyword) and camelCase `dbPass=`. Owner: AISDLC-630.3
+  //    (this file, reference/src/security/secret-redact.ts);
+  //  - structured-state values under secret-named keys in the JSON walk
+  //    (reference/src/judgment/redact-json.ts): `{"password":"x"}` is not
+  //    redacted. Only an exactly-40-char base64 string (never 40 hex) under a
+  //    `secret`-named key (also as an array element), or next to a sibling /
+  //    array element that is an `AKIA`/`ASIA` access key id in the SAME object
+  //    or array, is redacted; an id and a secret in different containers
+  //    (`{"id":{...},"key":"X"}`) or under a non-secret-named key without a
+  //    sibling id are not. Owner: AISDLC-630.4;
+  //  - AWS secret layouts (rule (a)): a label and its value separated by a blank
+  //    line or by more than one line break are not matched (ONE optional line
+  //    break plus indentation is allowed). Accepted and documented: widening
+  //    would join unrelated paragraphs; not covered by either follow-up;
+  //  - a backslash-escaped newline (the two characters `\` `n`) between a label
+  //    and its value inside JSON-encoded text is not a line break for these
+  //    regexes when redactSecrets runs on raw serialized text. Mitigated where
+  //    the JSON walk decodes the string first; for raw text, AISDLC-630.4 covers
+  //    it by redacting structured state before serialisation;
+  //  - AWS id/secret adjacency (rules (b) and (c)): the separator between an
+  //    access key id and its secret is bounded at 32 characters; a wider gap is
+  //    not matched. Accepted and documented (a wider window over-matches);
   //  - URL passwords: a raw `/`, `#` or `?` inside the password ends the match
   //    (widening would over-match URLs that merely contain `@` in a path or
-  //    query), and an `@` in the URL user part;
+  //    query), and an `@` in the URL user part. Accepted and documented;
   //  - unquoted multi-token values (`TOKEN=Bearer abc def` redacts only
-  //    `Bearer`);
-  //  - structured-state values under secret-named keys in the JSON walk
-  //    (`redact-json.ts`): `{"password":"x"}` is not redacted. Only an
-  //    exactly-40-char base64 string (never 40 hex) under a `secret`-named key
-  //    (also as an array element), or next to a sibling / array element that is
-  //    an `AKIA`/`ASIA` access key id in the SAME object or array, is redacted;
-  //    an id and a secret in different containers (`{"id":{...},"key":"X"}`) or
-  //    under a non-secret-named key without a sibling id are not;
+  //    `Bearer`). Owner: AISDLC-630.3;
+  //  - a bare Twilio auth token (32 hex, no label, outside a URL) has no
+  //    documented prefix and is not caught below the 48-char catch-all.
+  //    Accepted and documented;
+  //  - JSON walk: a key such as `secretary` or `secret_name` counts as a secret
+  //    key (substring match), so a 40-char base64 value under it is redacted:
+  //    harmless over-redaction, accepted and documented (AISDLC-630.4 may
+  //    narrow it);
   //  - known false positives (a leak costs more than a lost value):
   //    `MAX_TOKENS=4096`, `SECRETARY=bob`, `TOKENS=3`, `PASS-THROUGH=1`,
   //    `PWD=/home/me`, prose `the secret <40 base64-alphabet chars>` (including a
   //    line ending in `secret` followed by a line that starts with a 40-char
   //    non-hex identifier; 40-hex SHAs are excluded in both the string redactor
-  //    and the JSON walk).
+  //    and the JSON walk). Accepted and documented.
+  //
+  // Rule-order independence: a rule whose match context can be rewritten by an
+  // earlier rule's `[REDACTED:...]` marker (URL user, env-name tail, label tail)
+  // accepts that marker in the context position, and ENV_ASSIGNMENT skips only
+  // values that are ENTIRELY a marker. The property test in
+  // secret-redact.test.ts enforces this over cross-rule combinations.
   {
     name: 'ENV_ASSIGNMENT',
     regex:
-      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))[A-Za-z0-9_.-]{0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:)[^\s]+|["'](?!["'])(?!\[REDACTED:)[^\n]*)/gi,
+      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))(?:[A-Za-z0-9_.-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:[A-Z_-]{1,32}\](?!\S))[^\s]+|["'](?!["'])(?!\[REDACTED:)[^\n]*)/gi,
     replacement: '$1$2[REDACTED:ENV_SECRET]$2',
   },
   // The `(?<![A-Za-z0-9_-])` run-start anchor does not change what matches (a

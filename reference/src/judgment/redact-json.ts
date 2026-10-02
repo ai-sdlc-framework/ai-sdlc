@@ -41,8 +41,17 @@ export function redactJsonValue(value: JsonValue): JsonValue {
   if (value !== null && typeof value === 'object') {
     const idAdjacent = holdsAccessKeyId(Object.values(value));
     const out: { [key: string]: JsonValue } = {};
-    for (const [k, v] of Object.entries(value))
-      out[redactSecrets(k)] = redactEntry(k, v, idAdjacent);
+    for (const [k, v] of Object.entries(value)) {
+      // defineProperty keeps an own key such as `__proto__` as plain data
+      // (assignment would set the prototype). Two keys that redact to the same
+      // text collide: the later one wins.
+      Object.defineProperty(out, redactSecrets(k), {
+        value: redactEntry(k, v, idAdjacent),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
     return out;
   }
   return value;

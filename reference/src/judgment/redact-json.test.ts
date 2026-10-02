@@ -77,3 +77,21 @@ describe('redactJsonValue (ids and secrets in separate values)', () => {
     });
   });
 });
+
+describe('redactJsonValue (own keys)', () => {
+  it('keeps an own `__proto__` key as data instead of setting the prototype', () => {
+    const input = JSON.parse('{"__proto__":{"polluted":"yes"},"ok":1}');
+    const out = redactJsonValue(input) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.keys(out)).toEqual(['__proto__', 'ok']);
+    expect((out as { polluted?: string }).polluted).toBeUndefined();
+    expect(JSON.stringify(out)).toBe('{"__proto__":{"polluted":"yes"},"ok":1}');
+  });
+
+  it('collides two keys that redact to the same text (the later key wins)', () => {
+    const k1 = 'AKIAIOSFODNN7EXAMPLE';
+    const k2 = 'AKIAIOSFODNN7EXAMPLF';
+    const out = redactJsonValue({ [k1]: 1, [k2]: 2 }) as Record<string, number>;
+    expect(out).toEqual({ '[REDACTED:AWS_ACCESS_KEY]': 2 });
+  });
+});
