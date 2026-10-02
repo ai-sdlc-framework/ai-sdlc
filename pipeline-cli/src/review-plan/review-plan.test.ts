@@ -10,6 +10,7 @@ import {
   ABSOLUTE_MAX_PROBES,
   BaselineInputError,
   buildFallbackPlan,
+  escapesRoot,
   probeSafetyProblems,
   isHighRisk,
   readStagedConfigFromBaseRef,
@@ -25,6 +26,7 @@ import {
   type RejectionReason,
   type ReviewPlan,
   type RiskMapInput,
+  type SecurityCategory,
 } from './index.js';
 
 const riskMap: RiskMapInput = {
@@ -616,151 +618,195 @@ describe('validatePlan', () => {
 });
 
 describe('buildFallbackPlan', () => {
-  const h9 = {
-    id: 'h9',
+  const opts = { riskThreshold: 0.5, commandAllowlist: DEFAULT_COMMAND_ALLOWLIST };
+  const hunk = (over: Record<string, unknown>) => ({
+    id: 'hn',
     file: 'src/new.ts',
     fileClass: 'source' as const,
     startLine: 1,
     endLine: 2,
-    riskScore: 0.99,
+    riskScore: 0.01,
     judged: true,
-    flags: [],
-  };
+    flags: [] as SecurityCategory[],
+    ...over,
+  });
+  const build = (rm: RiskMapInput, lim: PlanLimits = limits) =>
+    buildFallbackPlan(buildBaselineProbes(rm, task, opts), rm, lim);
+  const reasonsOf = (r: ReturnType<typeof build>) => r.rejections.map((x) => x.reason);
 
-  it('is the baseline with no model-authored probe, and passes validation', () => {
+  it('is the unmodified baseline, passes validation, and has no rejections', () => {
     const b = baseline();
-    const { ok, plan, rejections } = buildFallbackPlan(b, riskMap, limits);
-    expect(ok).toBe(true);
-    expect(rejections).toEqual([]);
-    expect(plan.probes.filter((p) => p.baseline)).toEqual(b.probes);
-    expect(validatePlan(plan, b, riskMap, limits).valid).toBe(true);
+    const r = buildFallbackPlan(b, riskMap, limits);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.rejections).toEqual([]);
+    expect(r.plan.probes).toEqual(b.probes);
+    expect(validatePlan(r.plan, b, riskMap, limits).valid).toBe(true);
   });
 
-  it('adds a read probe per uncovered high-risk hunk', () => {
-    const rm: RiskMapInput = { ...riskMap, hunks: [...riskMap.hunks, h9] };
+  it.each([
+    ['a high-risk hunk', { riskScore: 0.99 }],
+    ['an unjudged hunk', { judged: false }],
+    ['a security-flagged low-risk hunk', { flags: ['secrets'] }],
+  ])('adds a read probe for an uncovered %s', (_n, over) => {
+    // The hunk is in no changed source file, so the baseline does not cover it.
+    const rm: RiskMapInput = { ...riskMap, hunks: [...riskMap.hunks, hunk({ id: 'h9', ...over })] };
     const b = baseline();
-    const { plan } = buildFallbackPlan(b, rm, limits);
-    const added = plan.probes.filter((p) => !p.baseline);
+    const r = buildFallbackPlan(b, rm, limits);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const added = r.plan.probes.slice(b.probes.length);
+    expect(r.plan.probes.slice(0, b.probes.length)).toEqual(b.probes);
     expect(added).toHaveLength(1);
     expect(added[0]).toMatchObject({ type: 'read', covers: ['h9'] });
-    expect(added[0]!.id.startsWith('fallback-')).toBe(true);
-    expect(validatePlan(plan, b, rm, limits).valid).toBe(true);
+    expect(added[0]!.baseline).toBeUndefined();
   });
 
-  it('drops probes with unsafe or escaping paths and records each drop', () => {
+  it('adds no read for a low-risk unflagged hunk', () => {
+    const rm: RiskMapInput = { ...riskMap, hunks: [...riskMap.hunks, hunk({ id: 'h9' })] };
+    const r = buildFallbackPlan(baseline(), rm, limits);
+    expect(r.ok && r.plan.probes.length).toBe(baseline().probes.length);
+  });
+
+  const unsafeCases: Array<[string, (rm: RiskMapInput) => RiskMapInput]> = [
+    [
+      'a file-read source path',
+      (rm) => ({
+        ...rm,
+        changedSourceFiles: [...rm.changedSourceFiles, { path: '-src.ts', changedTests: [] }],
+      }),
+    ],
+    [
+      'a hunk path',
+      (rm) => ({ ...rm, hunks: [...rm.hunks, hunk({ id: 'hz', file: '*x.ts', riskScore: 0.9 })] }),
+    ],
+    [
+      'a changed test (tests-run)',
+      (rm) => ({ ...rm, changedTestFiles: [...rm.changedTestFiles, '~t.test.ts'] }),
+    ],
+    [
+      'a scope-search path',
+      (rm) => ({ ...rm, changedFiles: [...rm.changedFiles, 'bad\\name.ts'] }),
+    ],
+    [
+      'a security-flagged low-risk hunk',
+      (rm) => ({
+        ...rm,
+        hunks: [...rm.hunks, hunk({ id: 'hs', file: '-evil.ts', flags: ['authentication'] })],
+      }),
+    ],
+    [
+      'a .git-segment path',
+      (rm) => ({
+        ...rm,
+        hunks: [...rm.hunks, hunk({ id: 'hg', file: 'a/.git/config', riskScore: 0.9 })],
+      }),
+    ],
+    [
+      'a .GIT-segment path',
+      (rm) => ({
+        ...rm,
+        hunks: [...rm.hunks, hunk({ id: 'hg', file: 'a/.GIT/config', riskScore: 0.9 })],
+      }),
+    ],
+    [
+      'a zero-width character',
+      (rm) => ({ ...rm, changedFiles: [...rm.changedFiles, 'a\u200bb.ts'] }),
+    ],
+  ];
+
+  it.each(unsafeCases)('is ok:false with no plan for %s', (_n, mutate) => {
+    const r = build(mutate(riskMap));
+    expect(r.ok).toBe(false);
+    expect('plan' in r).toBe(false);
+    expect(reasonsOf(r)).toContain('unsafe-path');
+    expect(reasonsOf(r)).toContain('unreviewable-input');
+  });
+
+  it('is ok:false for a symlink out of the repo and for a symlink into .git, any case', () => {
     const root = mkdtempSync(join(tmpdir(), 'rp-fb-'));
     const outside = mkdtempSync(join(tmpdir(), 'rp-fb-out-'));
+    mkdirSync(join(root, '.GIT'));
     symlinkSync(outside, join(root, 'link'));
-    const rm: RiskMapInput = {
-      ...riskMap,
-      hunks: [
-        ...riskMap.hunks,
-        { ...h9, id: 'hx', file: '../../etc/passwd' },
-        { ...h9, id: 'hy', file: 'link/secret.ts' },
-      ],
-    };
-    const b = buildBaselineProbes(rm, task, {
-      riskThreshold: 0.5,
-      commandAllowlist: DEFAULT_COMMAND_ALLOWLIST,
-    });
-    const { ok, plan, rejections } = buildFallbackPlan(b, rm, { ...limits, repoRoot: root });
-    expect(ok).toBe(false);
-    const paths = plan.probes.flatMap((p) => (p.target.files ?? []).map((f) => f.path));
-    expect(paths).not.toContain('../../etc/passwd');
-    expect(paths).not.toContain('link/secret.ts');
-    expect(rejections.filter((r) => r.reason === 'unsafe-path').length).toBeGreaterThan(0);
-    expect(rejections.some((r) => r.reason === 'uncovered-high-risk-hunk')).toBe(true);
+    symlinkSync(join(root, '.GIT'), join(root, 'g'));
+    for (const file of ['link/secret.ts', 'g/config']) {
+      const rm: RiskMapInput = {
+        ...riskMap,
+        hunks: [...riskMap.hunks, hunk({ id: 'hl', file, riskScore: 0.9 })],
+      };
+      const r = build(rm, { ...limits, repoRoot: root });
+      expect(r.ok, file).toBe(false);
+      expect('plan' in r).toBe(false);
+    }
+    expect(escapesRoot(root, 'g/config')).toBe(true);
   });
 
-  it('drops a run probe whose command is no longer allowlisted', () => {
+  // Hand-built baselines for refs the baseline builder cannot itself produce.
+  const withProbe = (extra: Probe): Baseline => ({
+    version: BASELINE_CHECKLIST_VERSION,
+    probes: [...baseline().probes, extra],
+  });
+
+  it('is ok:false for an unsafe scope-search query', () => {
     const b = baseline();
-    const { ok, plan, rejections } = buildFallbackPlan(b, riskMap, {
+    const bad: Baseline = {
+      ...b,
+      probes: b.probes.map((p) =>
+        p.id === 'scope-search' ? { ...p, target: { query: '-rf' } } : p,
+      ),
+    };
+    const r = buildFallbackPlan(bad, riskMap, limits);
+    expect(r.ok).toBe(false);
+    expect(r.rejections.map((x) => x.reason)).toContain('unsafe-query');
+  });
+
+  it('is ok:false for an unsafe criteria-vs-tests ref', () => {
+    const b = baseline();
+    const bad: Baseline = {
+      ...b,
+      probes: b.probes.map((p) =>
+        p.id === 'criteria-vs-tests' ? { ...p, target: { files: [{ path: '../x' }] } } : p,
+      ),
+    };
+    const r = buildFallbackPlan(bad, riskMap, limits);
+    expect(r.ok).toBe(false);
+    expect(r.rejections.some((x) => x.probeId === 'criteria-vs-tests')).toBe(true);
+  });
+
+  it('is ok:false for an unsafe security probe ref', () => {
+    const b = baseline();
+    const bad: Baseline = {
+      ...b,
+      probes: b.probes.map((p) =>
+        p.id.startsWith('sec-') ? { ...p, target: { files: [{ path: '/etc/passwd' }] } } : p,
+      ),
+    };
+    const r = buildFallbackPlan(bad, riskMap, limits);
+    expect(r.ok).toBe(false);
+    expect(r.rejections.some((x) => x.probeId?.startsWith('sec-'))).toBe(true);
+  });
+
+  it('is ok:false for an unsafe revision and a non-allowlisted run command', () => {
+    const rev = withProbe({
+      id: 'cmp',
+      type: 'compare',
+      target: { revisions: { base: '--output=x', head: 'HEAD' } },
+      question: 'q',
+      covers: [],
+      baseline: true,
+    });
+    expect(buildFallbackPlan(rev, riskMap, limits).rejections.map((x) => x.reason)).toContain(
+      'unsafe-revision',
+    );
+    const r = buildFallbackPlan(baseline(), riskMap, {
       ...limits,
       commandAllowlist: ['pnpm lint'],
     });
-    // The test run is a critical baseline probe, so losing it is not ok.
-    expect(ok).toBe(false);
-    expect(rejections.map((r) => r.reason)).toContain('critical-baseline-probe-lost');
-    expect(plan.probes.some((p) => p.type === 'run')).toBe(false);
-    expect(rejections.map((r) => r.reason)).toContain('run-target-not-allowed');
-  });
-
-  const lowRisk = (over: Record<string, unknown>) => ({
-    id: 'hs',
-    file: 'src/safe.ts',
-    fileClass: 'source' as const,
-    startLine: 1,
-    endLine: 3,
-    riskScore: 0.01,
-    judged: true,
-    flags: [] as never[],
-    ...over,
-  });
-  const opts = { riskThreshold: 0.5, commandAllowlist: DEFAULT_COMMAND_ALLOWLIST };
-
-  it('fails when a security-flagged low-risk hunk loses its probes to an unsafe path', () => {
-    const rm: RiskMapInput = {
-      ...riskMap,
-      hunks: [
-        lowRisk({ id: 'hs', file: '-evil.ts', flags: ['secrets'] }),
-        lowRisk({ id: 'hq', file: 'src/ok.ts' }),
-      ],
-      changedSourceFiles: [{ path: '-evil.ts', changedTests: [] }],
-    };
-    const b = buildBaselineProbes(rm, task, opts);
-    expect(b.probes.some((p) => p.id.startsWith('sec-'))).toBe(true);
-    const r = buildFallbackPlan(b, rm, limits);
     expect(r.ok).toBe(false);
-    const lost = r.rejections.filter((x) => x.reason === 'critical-baseline-probe-lost');
-    expect(lost.some((x) => x.probeId?.startsWith('sec-'))).toBe(true);
-    expect(r.rejections.map((x) => x.reason)).toContain('uncovered-high-risk-hunk');
-    expect(r.plan.probes.some((p) => p.covers.includes('hs'))).toBe(false);
+    expect(r.rejections.map((x) => x.reason)).toContain('run-target-not-allowed');
   });
 
-  it('strips only the unsafe changed-test ref from tests-run and keeps the probe', () => {
-    const rm: RiskMapInput = {
-      ...riskMap,
-      changedTestFiles: ['src/auth.test.ts', '-bad.test.ts'],
-    };
-    const b = buildBaselineProbes(rm, task, opts);
-    const r = buildFallbackPlan(b, rm, limits);
-    const run = r.plan.probes.find((p) => p.id === 'tests-run');
-    expect(run?.target.files).toEqual([{ path: 'src/auth.test.ts' }]);
-    expect(r.rejections.some((x) => x.probeId === 'tests-run' && x.reason === 'unsafe-path')).toBe(
-      true,
-    );
-    expect(r.rejections.map((x) => x.reason)).not.toContain('critical-baseline-probe-lost');
-    expect(r.ok).toBe(true);
-  });
-
-  it('is not ok when every target of a critical probe is unsafe', () => {
-    const rm: RiskMapInput = { ...riskMap, changedTestFiles: ['-bad.test.ts'] };
-    const b = buildBaselineProbes(rm, task, opts);
-    const r = buildFallbackPlan(b, rm, limits);
-    expect(r.plan.probes.some((p) => p.id === 'tests-run')).toBe(false);
-    expect(r.ok).toBe(false);
-    expect(
-      r.rejections.some(
-        (x) => x.reason === 'critical-baseline-probe-lost' && x.probeId === 'tests-run',
-      ),
-    ).toBe(true);
-  });
-
-  it('keeps a probe whose file refs are all stripped when another target remains', () => {
-    const rm: RiskMapInput = {
-      ...riskMap,
-      changedFiles: [...riskMap.changedFiles, '-odd.ts'],
-    };
-    const b = buildBaselineProbes(rm, task, opts);
-    const scope = b.probes.find((p) => p.id === 'scope-search')!;
-    expect(scope.target.files?.map((f) => f.path)).toContain('-odd.ts');
-    const r = buildFallbackPlan(b, rm, limits);
-    const kept = r.plan.probes.find((p) => p.id === 'scope-search');
-    expect(kept?.target.files).toEqual([{ path: 'other/x.ts' }]);
-    expect(r.ok).toBe(true);
-  });
-
-  it('reports a fallback over the absolute ceiling', () => {
+  it('is ok:false over the absolute ceiling', () => {
     const b: Baseline = {
       version: BASELINE_CHECKLIST_VERSION,
       probes: Array.from({ length: ABSOLUTE_MAX_PROBES + 1 }, (_, i) => ({
@@ -772,9 +818,9 @@ describe('buildFallbackPlan', () => {
         baseline: true,
       })),
     };
-    const { ok, rejections } = buildFallbackPlan(b, { ...riskMap, hunks: [] }, limits);
-    expect(ok).toBe(false);
-    expect(rejections.map((r) => r.reason)).toContain('baseline-over-ceiling');
+    const r = buildFallbackPlan(b, { ...riskMap, hunks: [] }, limits);
+    expect(r.ok).toBe(false);
+    expect(r.rejections.map((x) => x.reason)).toContain('baseline-over-ceiling');
   });
 });
 

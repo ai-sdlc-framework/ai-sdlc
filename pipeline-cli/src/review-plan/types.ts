@@ -128,7 +128,8 @@ export type RejectionReason =
   | 'baseline-over-ceiling'
   | 'unsafe-query'
   | 'duplicate-run-probe'
-  | 'critical-baseline-probe-lost';
+  | 'unsafe-revision'
+  | 'unreviewable-input';
 
 export interface Rejection {
   reason: RejectionReason;

@@ -108,6 +108,8 @@ export function escapesRoot(repoRoot: string, p: string): boolean {
   return rel.split(sep).some(isGitSegment);
 }
 
+const REVISION = /^[A-Za-z0-9_@^~][A-Za-z0-9._/@^~-]{0,99}$/;
+
 /** Command and query problems: those that make a whole probe unusable. */
 export function probeNonFileProblems(p: Probe, limits: PlanLimits): Rejection[] {
   const out: Rejection[] = [];
@@ -126,6 +128,12 @@ export function probeNonFileProblems(p: Probe, limits: PlanLimits): Rejection[] 
   // Queries are passed to executors after `--`; a leading '-' would read as an option.
   if (typeof p.target.query === 'string' && p.target.query.startsWith('-'))
     add('unsafe-query', `probe ${p.id} query starts with '-'`);
+  const rev = p.target.revisions;
+  if (rev) {
+    for (const r of [rev.base, rev.head])
+      if (!REVISION.test(r) || r.includes('..'))
+        add('unsafe-revision', `probe ${p.id} names an unsafe revision`);
+  }
   return out;
 }
 
