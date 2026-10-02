@@ -93,7 +93,7 @@ Review-plan schema registered with AJV, the baseline checklist as versioned code
 - **Coverage ignores altered or unknown baseline probes**: a hunk covered only by a tampered baseline probe is still uncovered.
 - **Risk-map input is a narrow structural type defined here**: the real risk map must satisfy it; a conformance test belongs in the risk-map task.
 - **Limits measure what the plan adds**: the baseline is mandatory, so `maxProbes` and `maxTargetBytes` (counted in bytes) apply to non-baseline probes only; absolute ceilings bound the total and a baseline over a ceiling is reported as `baseline-over-ceiling`.
-- **The fallback plan is held to the same path, symlink, run-target and ceiling checks**: unsafe probes are dropped and each drop is returned as a rejection, so a change cannot force the fallback to carry a bad path.
+- **The fallback plan is held to the same path, symlink, run-target and ceiling checks as a planner plan**: every baseline probe and every added read goes through the shared safety check, so a change cannot force the fallback to carry a bad path (an unsafe reference makes the fallback fail closed, below).
 - **`repoRoot` is required and the containment check walks to the deepest existing ancestor**: dangling symlinks and unresolvable roots fail closed. Run probes may name only changed test files. Base refs containing a colon are refused. A non-finite risk score counts as high risk.
 - **The fallback returns a discriminated `ok` result; `.git` path segments and queries starting with a dash are rejected; an added run probe may not duplicate another run probe.** The allowlist docs state that it pins the command string only, acceptable because the staged set is limited to trusted work.
 - **The fallback fails closed instead of stripping**: when any baseline probe carries an unsafe reference (path, containment, query, revision, run command) the result is `ok: false` with no plan, and the caller falls back to the existing reviewer set. When every probe is safe the plan is the unmodified baseline plus a read per uncovered high-risk or security-flagged hunk. Security-flagged hunks need coverage like high-risk ones. Path checks also refuse `.git` variants, invisible format characters and symlinks into `.git`, and run-probe dedupe compares the set of paths only.
@@ -101,11 +101,11 @@ Review-plan schema registered with AJV, the baseline checklist as versioned code
 
 ## Verification
 - `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 84 passed
-- `pnpm --filter @ai-sdlc/reference exec vitest run` on the schema tests - 17 passed
+- `pnpm --filter @ai-sdlc/reference exec vitest run src/core/review-plan-schema.test.ts` - 4 passed
 - `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on touched paths - clean
 
 ## Follow-up
 - conformance test in the risk-map task (AISDLC-672)
 - declined: restricting plan-added read and search paths to git-tracked files to avoid reading gitignored secrets; read containment and secret redaction of evidence belong to the executor (AISDLC-675) and v1 is limited to trusted work
-- declined: the baseline can emit probes over the schema's per-probe caps (200 files, 500 covers, startLine >= 1) for huge PRs or new or deleted files; this fails closed to the model-free fallback, and the staged set is limited to trusted work in v1
+- declined: the baseline can emit probes over the schema's per-probe caps (200 files, 500 covers, startLine >= 1) for huge PRs or new or deleted files; the fallback passes such a baseline through unchanged and a later schema validation reports it as `schema-invalid`, so the caller must treat that result as unreviewable and use the existing reviewer set, and the staged set is limited to trusted work in v1
 <!-- SECTION:FINAL_SUMMARY:END -->
