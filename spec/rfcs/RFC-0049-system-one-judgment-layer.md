@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-09-30
-updated: 2026-09-30
+updated: 2026-10-01
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0004, RFC-0010, RFC-0011, RFC-0016, RFC-0019, RFC-0024, RFC-0035, RFC-0042, RFC-0043, RFC-0046, RFC-0048]
@@ -397,8 +397,8 @@ downgrade or wave through anything on untrusted input.
 Each definition also declares a `riskClass`, which selects its promotion bar:
 `seam` (the only alternative is a `pending` sentinel and every action is reversible),
 `tighten` (a wrong answer costs extra scrutiny) or `relax` (a wrong answer reduces
-review of code that merges). Exactly one `relax` judgment exists in v1,
-`review.reviewer-set` (OQ-1).
+review of code that merges). Two `relax` judgments exist in v1: `review.reviewer-set`
+(OQ-1) and `dor.stage-b-pass` (amendment of 2026-10-01, below).
 
 The reason is the provider's own disclosure that adversarial content in the state can
 move an answer. Tighten-only bounds what a steered answer can do to "more review than
@@ -422,9 +422,13 @@ themselves are written and tuned in the phase that ships each group.
 **Group A: dormant seams (no incumbent to regress).**
 
 All Group A judgments are `riskClass: seam`. Every judgment in Groups B and C is
-`riskClass: tighten` except `review.reviewer-set`, which is `relax`. (`dor.stage-b` can
-pass a gate, but a wrong pass costs a wasted developer run, not reduced review, so it
-is `tighten`.)
+`riskClass: tighten` except `review.reviewer-set` and `dor.stage-b-pass`, which are
+`relax`. (The first version of this RFC classified a passing `dor.stage-b` as `tighten`
+on the premise that a wrong pass only wastes a developer run. Implementation of
+AISDLC-636 showed the premise false: in `composite.ts` a judged pass can override a
+Stage A fail recorded at medium or low confidence, and on the spawner path it skips the
+`refinement-reviewer`. Both reduce review, so the pass side is split out as a `relax`
+definition; see the `dor.stage-b` paragraph below.)
 
 | Judgment id | Seam today | Shape | Escalates to |
 | --- | --- | --- | --- |
@@ -454,12 +458,22 @@ are not carried over; each judgment's thresholds are set from its evaluation run
 | `review.finding-grounding` | the unwired `metaReview` hook | Per finding: Choice over `supports/contradicts/unrelated` for the cited code | tighten-only |
 
 `dor.stage-b` makes the semantic gates (4, scope; 6, done-state) run for the first
-time in production. The judgment decides pass, fail or unsure per gate. When a caller
-supplies a spawner, a fail or unsure escalates to the `refinement-reviewer`, because
-writing a tailored clarification question is generation. When no spawner is supplied,
-which is every production path today, a fail yields `needs-clarification` for that gate
-with a templated question built from the gate's own wording (a tightening action, so
-allowed on any `sourceKind`), and an unsure leaves the gate at `skip` exactly as now. `dev.ac-coverage` and
+time in production. It is two definitions over the same request (amendment of
+2026-10-01):
+
+- `dor.stage-b` (`tighten`, tighten-only): a judged fail sets that gate to fail, so the
+  verdict is `needs-clarification` with a templated question built from the gate's own
+  wording (allowed on any `sourceKind`). A judged pass fills only a gate that would
+  otherwise be `skip` when no spawner is supplied. It never overrides a Stage A fail of
+  any confidence, and a supplied spawner is always run.
+- `dor.stage-b-pass` (`relax`, bidirectional, `reducesReview: true`, reducing outcome
+  `all-gates-pass`): when every gate passes on trusted work it may skip the
+  `refinement-reviewer` and admit. It ships in `shadow` and is promoted only by the
+  corpus path (section 8); the 75-fixture `spec/dor-corpus/` feeds its evaluation.
+
+When a caller supplies a spawner, a fail or unsure still escalates to the
+`refinement-reviewer`, because writing a tailored clarification question is
+generation. `dev.ac-coverage` and
 `review.finding-grounding` are advisory in v1: they annotate the judgment log, the PR
 body and the operator surface, and do not change a verdict.
 
@@ -864,7 +878,9 @@ provenance, never on content. **Substrate surveyed:** AISDLC-617 shipped the opt
 merged set (`correctness-reviewer` + `security-reviewer`, `reviewer-set.ts`), resolved
 from the base branch and always preserving `security-reviewer`; AISDLC-616 shipped the
 first-pass findings ledger that measures each reviewer's marginal value. **Refinement
-over the draft:** a new `relax` risk class with one member, `review.reviewer-set`,
+over the draft:** a new `relax` risk class with one member, `review.reviewer-set`
+(a second member, `dor.stage-b-pass`, was added by the amendment of 2026-10-01 with
+operator approval),
 which turns 617's repo-wide opt-in into a per-PR choice. Floors: `security-reviewer`
 always runs; nothing selects fewer reviewers than the merged set; a path-regex match
 (auth, lockfile, CI) vetoes relaxation; untrusted work is tighten-only; finding
@@ -1076,3 +1092,4 @@ only** because that is today's behaviour.
 | 2026-09-30 | **Draft → Ready for Review.** All 5 OQs resolved via operator rubric walkthrough: (1) relaxation on trusted work, bounded to per-PR selection of the AISDLC-617 merged reviewer set with security always run (operator override of the tighten-only recommendation); (2) `work-item-text` egress by default, other classes explicit; (3) thin `fetch` adapter in `reference`, no vendor SDK; (4) promotion tiered by `riskClass`, relax-class corpus-only against the AISDLC-616 ledger; (5) generic OpenAI-compatible adapter added, shadow-only (operator override of the Jev-only recommendation). Added `riskClass`, `calibratedProbabilities`, `(provider, model)`-keyed thresholds, the `review.reviewer-set` judgment; `complexity.factors` narrowed to tighten-only. Phase plan reconciled to AISDLC-629 to AISDLC-641. |
 | 2026-09-30 | **Ready for Review → Signed Off** (Engineering + Operator). Added runtime evidence that the classifier substrate, DoR Stage B and Decision Catalog Stage C have never produced a model-backed answer in this repository, with the documented cause (AISDLC-321/275 dependency constraint; AISDLC-289 follow-up never filed); `dor.stage-b` specified for the no-spawner path. Phase tasks AISDLC-629 to AISDLC-641 dispatchable (641 operator-only). |
 | 2026-09-30 | **Amendment (lifecycle unchanged, sign-off confirmed by operator for the extension).** Added section 9, capability liveness: registry and `live` / `shadow` / `degraded` outcome reporting, doctor check and Decisions for required capabilities, `runtimeEvidence` and the `Signed Off → Implemented` evidence rule, the follow-up gate, and the stub-in-production rule. OQ-6 (annotate the four `Implemented` RFCs per capability) and OQ-7 (doctor fail plus Decision, nothing blocked) resolved via operator rubric. Phase tasks AISDLC-642 to AISDLC-647 added; RFC-0049 had merged as #1094 before this amendment. |
+| 2026-10-01 | **Amendment (lifecycle unchanged, operator-approved).** Corrected the `dor.stage-b` risk classification: a judged pass can override a medium- or low-confidence Stage A fail and skip the `refinement-reviewer` (found during AISDLC-636), so the pass side is split into `dor.stage-b-pass`, a second `relax`-class judgment, shadow-only until it clears the corpus bar; `dor.stage-b` itself is now strictly tighten-only. Section 4 and 5 text and the OQ-1 resolution note updated. |
