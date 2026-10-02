@@ -63,6 +63,7 @@ spec:
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
+    mergeAuthors: []           # GitHub logins the merge gate may merge for; empty = nobody
 ```
 
 - **`preset: operator-trusted`** is sugar for `{ allowMerge: onGreenClean }`
@@ -70,10 +71,186 @@ spec:
   merge once CI is fully green" case. Explicit granular keys override the
   preset.
 - **`allowMerge: onGreenClean`** only softens the *narration*; it does not by
-  itself grant merge capability — merge eligibility is additionally gated on
-  the work item's trust tier (internal backlog tasks vs. external
-  GitHub-sourced work) and the deterministic `merge-if-eligible` gate
-  (AISDLC-602/603, not yet implemented as of Phase 1).
+  itself grant merge capability. The only sanctioned merge route is
+  `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog`,
+  which merges only when ALL of these hold (each fails closed):
+  - the policy is read from the repository's **`main` as GitHub serves it** (see
+    below);
+  - `allowMerge` resolves to `onGreenClean` there, and `--source-kind` is
+    `backlog` (`gh-issue` is always refused);
+  - facts read from the PR itself via one `gh pr view` call: it is **not from a
+    fork** (`isCrossRepository` is `false`), its **base branch is `main`**, and its
+    **author login is on `governance.mergeAuthors`**;
+  - the **head commit's author login** (resolved by GitHub for that exact SHA) is
+    on `governance.mergeAuthors`; a commit whose email is not linked to a GitHub
+    account refuses. This is commit *metadata* set by whoever made the commit, not
+    authentication: it narrows who can look like an allow-listed author, it does
+    not prove who pushed. **Only the head commit's author is checked**; authors of
+    earlier commits on the branch are not;
+  - a **backlog task** matching the PR exists. The id must have the repo's backlog
+    shape (`<task_prefix>-<n>[.<n>...]`, prefix from `backlog/config.yml` on
+    `main`, default `AISDLC`; `issue-N` / `gh-issue-N` ids never qualify),
+    comes from the head branch (`ai-sdlc/<id>-...`) and/or a trailing `(<ID>)` in
+    the title (they must agree), and a `backlog/tasks/<id> - *.md` or
+    `backlog/completed/<id> - *.md` file must exist on `main` (read with the git
+    trees API; a failed or truncated listing refuses) **or** be added by the PR's
+    own diff. A PR that adds its own task file is accepted because the repo
+    creates and completes a task in one PR, so the task is a provenance hint, NOT a
+    trust signal; the author allow-list is the real trust signal. The PR file list
+    comes from `gh pr view --json files`, which GitHub caps at roughly 100 files; a
+    task file past the cap is simply not seen in the diff (which can only refuse);
+  - the required checks (or, when branch protection has no required contexts,
+    every check run and commit status) are green **for the head commit read from
+    the PR**: required context names come from `gh pr checks --required`, but
+    their state is read, across all pages, from the REST check-runs and status
+    endpoints for that SHA (a required context with no result is `MISSING` and
+    refuses), and `mergeStateStatus` is `CLEAN`. Required checks are matched **by
+    name**: a commit status can be posted under any name by anyone with write
+    access, so this is only meaningful once branch protection pins each required
+    check to the GitHub Actions app (operator-only; tracked as "H4");
+  - the PR changes **no governance-sensitive path**: `.ai-sdlc/**` (except the
+    generated attestation evidence, below), `.claude/**`, `.opencode/**`,
+    `.codex/**`, `.github/**`, `.husky/**`, `ai-sdlc-plugin/hooks/**`,
+    `ai-sdlc-plugin/.claude-plugin/**`, `ai-sdlc-plugin/agents/**`,
+    `ai-sdlc-plugin/commands/**`, `ai-sdlc-plugin/scripts/**`,
+    `pipeline-cli/src/governance/**`, the merge CLI sources and
+    `pipeline-cli/bin/cli-merge-if-eligible.mjs`, `pipeline-cli/src/runtime/exec.ts`,
+    `pipeline-cli/package.json`, `pipeline-cli/tsconfig*.json`, `scripts/check-*`,
+    `spec/schemas/agent-role.schema.json`, any `CODEOWNERS`, `opencode.json`,
+    `opencode.jsonc`, any `CLAUDE.md` or `AGENTS.md`, and the bare names `.claude`,
+    `.opencode`, `.codex` (a symlink or gitlink has no trailing path). Matching is
+    case-insensitive on the normalised path (`.` and `..` resolved), and for a
+    rename both the new and the previous name count. **Exempt** are only the files
+    directly inside the generated evidence directories that every attested code PR
+    commits: `.ai-sdlc/attestations/`, `.ai-sdlc/transcript-leaves/`,
+    `.ai-sdlc/reviews/`, `.ai-sdlc/verdicts/`, `.ai-sdlc/transcripts/` and
+    `.ai-sdlc/transcript-leaves.jsonl`; a nested path, an evidence-looking name
+    elsewhere, or `.ai-sdlc/attestations/../agent-role.yaml` stays sensitive.
+    Ordinary agent PRs (source, tests, docs, `backlog/`, `spec/rfcs`, other
+    schemas, `reference/`, `orchestrator/`) are unaffected. Some listed paths do
+    appear in ordinary work (for example `pipeline-cli/package.json` when adding a
+    bin, or `ai-sdlc-plugin/commands/*.md`); they stay sensitive on purpose, so a
+    human merges those. Governance changes need a human merge, in both merge and
+    `--arm` mode, so a PR that edits the policy or the gate itself (including the
+    PR that introduced this rule, and the PR that grants `allowMerge`) is merged by
+    a human. The file list is the compare between the resolved `main` SHA and the
+    PINNED head SHA (all pages, deduplicated), not the PR's current file list, so a
+    push after the head was read cannot change it. A failed or malformed read, or a
+    list that reaches GitHub's 300-file compare cap, refuses, and so does a PR with
+    no changed files (nothing to merge). This rule holds for the helper only, see
+    the residuals below;
+  - the PR head commit read in the first call is still the head just before the
+    merge, and the merge is issued with `--match-head-commit <sha>` so GitHub
+    rejects it if the head moved after the checks were evaluated (the CLI reports
+    the refusal and exits non-zero).
+- **`mergeAuthors`** is an optional list of GitHub logins (compared
+  case-insensitively; no leading, trailing or consecutive hyphens, at most 39
+  characters) whose PRs the merge gate may merge, for example
+  `mergeAuthors: [octocat]`. Absent, empty or malformed means nobody, so every
+  merge is refused until the operator sets it. It is read only from the policy
+  file on `main` as GitHub serves it.
+- **What is authoritative (policy trust):** the policy
+  (`spec.governance.allowMerge` + `mergeAuthors`), `backlog/config.yml`
+  (`task_prefix`) and the task-file existence check are read from GitHub
+  (`gh api repos/<slug>/contents/<path>?ref=<sha>` and the git trees API), against
+  the SAME repository slug as the PR being merged or armed. The `main` BRANCH is
+  resolved once (`git/ref/heads/main`, so a tag named `main` cannot shadow it; a
+  non-commit object or any error refuses) and every one of those reads uses that
+  one commit SHA. They are not read from
+  any local ref, working tree, worktree copy or git environment variable, so a
+  forged local `origin/main`, an uncommitted edit, `GIT_COMMON_DIR` and friends
+  have no effect, and a revocation on `main` applies on the very next run with no
+  local fetch. Any gh/API failure, non-200 answer or empty body refuses. The slug
+  comes only from `gh repo view` in the verified main checkout (a real `.git`
+  directory matching the git common dir, not a file or symlink, which must be the
+  same checkout as the invocation's working directory); that checkout is an extra
+  anchor, not the policy source. The policy is resolved by code inside the CLI
+  itself: no plugin file selected through `CLAUDE_PLUGIN_ROOT` /
+  `CLAUDE_PLUGIN_DIR` is loaded for the merge decision. There is **no** flag or
+  environment variable that overrides the policy root or the repository
+  (`--repo-root` and `--repo` were removed). Tests inject a root and policy text
+  programmatically through the exported
+  `buildMergeIfEligibleCli({ trustedRootOverride })`, which argv and the
+  environment cannot reach, and the hook refuses any shell command that names the
+  old override variable. What this does NOT cover: an agent that edits or copies
+  the CLI itself is not bound by it (see the residuals below).
+- **Arming goes through the helper (`--arm`):**
+  `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`
+  arms auto-merge (`gh pr merge <n> --auto --squash --match-head-commit <sha>`,
+  matching the repository workflow's squash method) only when the same policy gate
+  and trust checks pass: `allowMerge: onGreenClean` on `main`,
+  `--source-kind backlog`, not a fork, base `main`, author and head commit author on
+  `mergeAuthors`, a backlog task, and the head re-read unchanged just before arming.
+  It does NOT require the checks to be green or `mergeStateStatus` to be `CLEAN`,
+  because waiting for GitHub's checks is the point of arming, and it adds
+  `--dry-run`, `--format json` and the `REFUSED` / `ARMED` output and exit codes of
+  merge mode. An armed PR is a merge in waiting, so arming needs the same grant as
+  merging: under the default `allowMerge: never` it is refused. Neither the head
+  re-read nor `--match-head-commit` bounds pushes made AFTER arming: GitHub keeps
+  auto-merge enabled when someone with write access pushes again, so an armed PR
+  can merge a later commit once its checks pass. Because
+  `auto-enable-auto-merge.yml` already arms every same-repo PR on open, the
+  `--arm` trust checks matter mainly for fork PRs and for re-arming.
+- **Raw merge commands and API merges are blocked:** the PreToolUse hook denies
+  EVERY raw `gh pr merge` invocation, whatever the flags (`--auto`, `--squash`,
+  `--rebase`, `--admin`, `--delete-branch`, `--disable-auto`), and
+  `gh api .../pulls/<n>/merge` (any method, with or without a leading slash,
+  flags in any order), `curl`/`wget` to the same endpoint, and the GraphQL
+  `mergePullRequest` and `enablePullRequestAutoMerge` mutations, under every
+  `allowMerge` value. The sanctioned helper (merge mode and `--arm`) stays allowed.
+  Every line of the command text is matched, heredoc bodies included (a heredoc
+  can be fed to a shell, `source`, `eval`, `xargs` or written to a script, and no
+  opener list is complete), so documentation or a commit message that merely
+  quotes the command is also denied: write such text with a file tool or describe
+  the command in words. The repository workflow `auto-enable-auto-merge.yml` still arms
+  same-repo PRs on open; it is not an agent action and is unchanged. This is a
+  text-level matcher: it cannot see `eval`, base64 pipelines, variable-expanded
+  URLs, `node -e` / `python -c` with argv arrays, `gh api graphql --input <file>`,
+  shell aliases, `gh pr --repo o/r merge`-style reordering or constructed strings.
+- **Known residuals (be explicit about them):**
+  - **"Governance changes need a human merge" holds for the helper only.**
+    `.github/workflows/auto-enable-auto-merge.yml` still arms EVERY same-repo PR,
+    governance PRs included, and the in-repo arming sites (`reconcile.ts`,
+    `resume-from-draft.ts`, `execute-pipeline.ts`) arm through a child-process `gh`
+    call outside the hook. Today only GitHub-side review requirements keep a
+    governance PR human. Before the `allowMerge` grant (AISDLC-663.3), either run
+    this path rule in the workflow and route the in-repo sites through `--arm`
+    (recommended follow-up AISDLC-663.5.1), or confirm that branch protection
+    enforces required code-owner review (H4).
+  - **Operator-token power.** Agents act as the operator's `gh` login and
+    `mergeAuthors` matches that same login, so the allow-list does not separate the
+    agent from the operator. An admin-scoped token can bypass branch protection or
+    change rulesets. H4 therefore requires a non-admin agent token with no bypass
+    role, `enforce_admins` on, and an empty bypass list. CODEOWNERS is
+    `* @deefactorial`, and an author cannot approve their own PR, so a
+    governance PR still needs a second human identity to approve.
+  - **Race window.** The policy is read once at the start of a run and the merge
+    happens seconds later; a revocation landing in between is missed (the next run
+    sees it).
+  - **The operator's token is not constrained here.** Everything above governs the
+    agent's shell; a GitHub token with merge rights used by anything else is outside
+    this change.
+  - **An agent-editable local CLI is not a trust boundary against that agent.** The
+    CLI, the plugin hooks and the repository checkout run from the agent's own
+    worktree, so an agent that can edit or copy them is not bound by them; the
+    verified-root anchor is the checkout containing the (possibly copied) CLI.
+  - **In-repo arming call sites are not gated.** `pipeline-cli` code that arms
+    through a child-process `gh` call (the orchestrator reconcile path,
+    `resume-from-draft.ts`, `execute-pipeline.ts`) bypasses the hook, which only
+    sees Bash tool calls. Routing them through `--arm` is a recommended follow-up.
+  - **The hook is text-level** and not a boundary against a deliberately hostile
+    agent (see the list above).
+  - **Forged commit statuses:** see "matched by name" above.
+  - **GitHub-side protections are essential and operator-only:** required status
+    checks with strict (up-to-date) mode with each check pinned to the GitHub
+    Actions app, `enforce_admins`, CODEOWNERS plus required review on the governance
+    paths (`.ai-sdlc/**`, hooks, the merge CLI), a ruleset that blocks creating a
+    tag or branch named `main` (the CLI resolves the branch by its full ref, but
+    other tools use the short name), fork-PR workflow approval, and no bypass
+    actors. Nothing in this repository can set them.
+  - **A fake `gh`, `PATH` or proxy** (anything the agent controls in the
+    environment that the CLI shells out through) can feed the CLI false answers;
+    this is part of the edited-or-copied-CLI residual above.
 - **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
   case: after rebasing a dispatched task's branch. The PreToolUse hook then
   permits a push only when ALL of these hold:

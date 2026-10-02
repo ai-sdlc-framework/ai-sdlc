@@ -26,16 +26,22 @@
  *
  * 4. **Merge governance (AISDLC-602)** — reconciles the `blockedActions`
  *    mechanism (Bash-command glob matching against `git merge*` etc.) with
- *    the resolved `spec.governance` policy (AISDLC-601's resolver). A raw
- *    `gh pr merge` (i.e. WITHOUT `--auto`) is always blocked here regardless
- *    of the resolved `allowMerge` policy — the only sanctioned merge path is
- *    the AISDLC-603 `node pipeline-cli/bin/cli-merge-if-eligible.mjs` helper,
- *    which owns the real green+CLEAN+trusted-sourceKind evaluation (never
- *    reimplemented in this hook). Arming auto-merge (`gh pr merge --auto`)
- *    is NOT merging and stays allowed under every policy. This closes the
- *    pre-AISDLC-602 gap where `blockedActions: git merge*` never matched
- *    `gh pr merge` at all, so the loudest governance rule ("never merge")
- *    wasn't actually enforced by this hook.
+ *    the resolved `spec.governance` policy (AISDLC-601's resolver). EVERY
+ *    `gh pr merge` invocation is blocked here regardless of the resolved
+ *    `allowMerge` policy and regardless of flags: that includes arming
+ *    (`--auto`), `--squash`/`--rebase`/`--admin`/`--delete-branch` and
+ *    `--disable-auto`. The only sanctioned routes are the
+ *    `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr>` helper (merge mode)
+ *    and `... <pr> --arm` (arming), which own the real policy, fork, author,
+ *    base, task and head-commit checks (never reimplemented in this hook).
+ *    Arming used to be allowed as "not merging", but an armed PR merges as
+ *    soon as GitHub's checks pass, so it is a merge in waiting and must
+ *    pass the same gate.
+ *
+ * 4b. **API-merge governance** — merging through the GitHub API (the REST
+ *    `.../pulls/<n>/merge` endpoint via `gh api`, `curl` or `wget`, or the
+ *    GraphQL `mergePullRequest` mutation) is denied under every `allowMerge`
+ *    value (see `enforceApiMergeGovernance`); the sanctioned helper stays allowed.
  *
  * 5. **Destructive-stash governance (AISDLC-611)** — the git stash stack is
  *    shared across the main checkout, all worktrees, and concurrent
@@ -199,24 +205,10 @@ function looksLikeGitPush(command) {
   return /\bgit\b[\s\S]*\bpush\b/i.test(command.replace(/['"\\]/g, ''));
 }
 
-// ── Merge-governance token allowlists (AISDLC-602) ───────────────────
+// ── Module-level constants ───────────────────────────────────────────
 // Declared BEFORE the top-level dispatch below so they are initialized before
-// enforceBash() → enforceMergeGovernance() runs at module load — a `const` in
-// the temporal dead zone here would crash the hook (fail-OPEN). Do not move
-// these below the dispatch.
-
-// Value-less flags that are safe to accompany an auto-arm.
-const SAFE_ARM_FLAGS = new Set([
-  '--auto',
-  '--squash',
-  '--merge',
-  '--rebase',
-  '--delete-branch',
-  '-d',
-  '--admin',
-]);
-// Flags that consume the NEXT token as their value (safe to skip both).
-const VALUE_FLAGS = new Set(['-R', '--repo']);
+// enforceBash() runs at module load — a `const` in the temporal dead zone here
+// would crash the hook (fail-OPEN). Do not move these below the dispatch.
 
 // AISDLC-611: same temporal-dead-zone constraint applies to the stash
 // governance constants — must be initialized before enforceBash() →
@@ -249,6 +241,17 @@ function enforceBash(command) {
   // of whatever blockedActions patterns the project has (or hasn't)
   // configured. See enforceMergeGovernance() for the exact rules.
   enforceMergeGovernance(trimmed);
+
+  // Merging through the REST/GraphQL API is the same act as a raw merge
+  // command and must not be a side door around the sanctioned helper (denied
+  // under every allowMerge value).
+  enforceApiMergeGovernance(trimmed);
+
+  // Defense in depth: no legitimate command mentions the removed policy-root
+  // override, so any attempt to name it is refused.
+  if (/AI_SDLC_MERGE_POLICY_ROOT/i.test(trimmed)) {
+    deny('overriding the merge policy root is not a permitted action');
+  }
 
   // AISDLC-611: no-bare-stash governance is enforced unconditionally too —
   // independent of whatever blockedActions patterns the project configured.
@@ -313,59 +316,109 @@ function enforceBash(command) {
 // ── Merge governance (AISDLC-602) ────────────────────────────────────
 
 /**
- * Enforces the merge rule from the resolved governance policy, closing the
- * pre-existing gap where `blockedActions: git merge*` never matched
- * `gh pr merge` at all.
+ * Denies every raw `gh pr merge` invocation (any flags, including arming) so the
+ * only route is `node pipeline-cli/bin/cli-merge-if-eligible.mjs` (merge mode
+ * or `--arm`). The deny does not depend on the resolved `allowMerge` value.
  *
- * Rules (apply regardless of the resolved `allowMerge` value):
- *   - Arming auto-merge (`gh pr merge --auto`, in any flag order/combination
- *     e.g. `--auto --squash`) is NOT merging and is ALLOWED.
- *   - Any OTHER `gh pr merge` invocation is BLOCKED. The only sanctioned merge
- *     path when policy permits merge is the AISDLC-603 `cli-merge-if-eligible`
- *     helper (`node pipeline-cli/bin/cli-merge-if-eligible.mjs`), which owns the
- *     real green+CLEAN+trusted-sourceKind evaluation — never reimplemented here.
- *     Under strict policy the helper self-refuses anyway (fail-closed on its own
- *     governance-resolver read), so blocking the raw command here is sufficient
- *     defense-in-depth for both policies.
+ * This runs against a raw shell command STRING, not a parsed argv, so the match
+ * is best-effort defense-in-depth, NOT an impenetrable sandbox: command
+ * substitution, backticks, base64|sh, aliases and similar are out of scope for
+ * a string matcher, and the real backstop is GitHub-side branch protection. What
+ * it does close, fail-closed: the command is split on shell control operators
+ * (`&&`, `||`, `;`, `|`, `&`, newline) and each segment evaluated on its own
+ * (any one raw-merge segment blocks the whole command); quotes are tolerated
+ * when detecting the token span (`gh "pr" merge`); case is ignored.
  *
- * ── Fail-closed matching (AISDLC-602 security review) ──────────────────
- * This runs against a raw shell command STRING, not a parsed argv, so the
- * match is best-effort defense-in-depth — NOT an impenetrable sandbox. A
- * determined agent with Bash access can always obfuscate (command
- * substitution `$(...)`, backticks, base64|sh, aliases). Those are out of
- * scope for a string matcher; the real backstop is branch protection +
- * humans-merge. What this DOES close, fail-closed, are the realistic
- * bypasses a reviewer found:
- *   1. The `--auto` decision is scoped to the SPECIFIC `gh pr merge`
- *      invocation's own tokens, not the whole command string — so a stray
- *      `--auto` in a chained command / comment / quoted arg cannot unblock
- *      an embedded raw merge (`gh pr merge 5 && echo --auto`).
- *   2. Only a BARE `--auto` token counts as arming; `--auto=false`/`--auto=0`
- *      (which are IMMEDIATE merges) do not, and are blocked.
- *   3. The command is split on shell control operators (`&&`, `||`, `;`,
- *      `|`, `&`, newline) and each segment evaluated independently; any one
- *      raw-merge segment blocks the whole command.
- *   4. Quotes are tolerated when detecting the `gh pr merge` token span
- *      (`gh "pr" merge`), and an ALLOWLIST of known-safe arming tokens is
- *      required — any unrecognized token (unknown flag, value-bearing flag
- *      like `--body`, `--auto=…`) makes the segment NOT a clean arm, so it
- *      is blocked. Over-blocking an exotic-but-legit arm is the safe bias.
+ * Heredoc bodies are deliberately NOT stripped: every line of the command text is
+ * matched, because a heredoc can be fed to a shell, `source`, `eval`, `xargs` or
+ * written to a script, and no static opener list can be complete (and the `<<`
+ * text is easy to fake in comments, quotes, here-strings and arithmetic). The
+ * price is false denials on documentation or commit messages that merely quote
+ * the command; write such text with a file tool, or describe it in words.
  *
- * Commands that don't invoke `gh pr merge` at all are untouched — they still
- * flow through the generic `blockedActions` pattern matching in enforceBash().
+ * Commands that don't invoke `gh pr merge` at all are untouched; they still flow
+ * through the generic `blockedActions` pattern matching in enforceBash().
  */
 function enforceMergeGovernance(trimmed) {
   for (const segment of splitShellSegments(trimmed)) {
     if (!segmentInvokesGhPrMerge(segment)) continue;
-    if (isCleanAutoArmSegment(segment)) continue; // arming is not merging — allowed
     deny(
-      `raw 'gh pr merge' is not a permitted merge path (resolved governance allowMerge=` +
-        `"${resolvedGovernance.allowMerge}"). Merges must go through ` +
-        `'node pipeline-cli/bin/cli-merge-if-eligible.mjs' (AISDLC-603), which enforces the ` +
-        `real green+CLEAN+trusted-sourceKind gate — never a raw 'gh pr merge' call. Arming ` +
-        `auto-merge ('gh pr merge --auto') remains allowed.`,
+      `raw 'gh pr merge' (including 'gh pr merge --auto') is not a permitted merge path ` +
+        `(resolved governance allowMerge="${resolvedGovernance.allowMerge}"). Merges go through ` +
+        `'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr>' and arming auto-merge goes ` +
+        `through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --arm'; both enforce the ` +
+        `real policy, fork, author, base, task and head-commit checks.`,
     );
   }
+}
+
+// ── API-merge governance ─────────────────────────────────────────────
+
+/**
+ * Denies merging a PR through the GitHub API instead of the sanctioned
+ * `node pipeline-cli/bin/cli-merge-if-eligible.mjs` helper, under EVERY
+ * `allowMerge` value (the helper, not the hook, owns the real eligibility
+ * gate and performs the merge itself, so nothing legitimate needs the API
+ * route from a Bash tool call). Covered:
+ *   - the REST endpoint `.../pulls/<n>/merge`, any HTTP method (a GET only
+ *     reads, but the whole path is denied: simpler and safer), in the
+ *     `gh api repos/<o>/<r>/pulls/<n>/merge` and `gh api /repos/...` spellings,
+ *     flags in any order (`-X PUT`, `--method=PUT`, `-f merge_method=...`),
+ *     `curl`/`wget`/`http` to `https://api.github.com/repos/<o>/<r>/pulls/<n>/merge`,
+ *     and script-runner (`node -e`, `python -c`, ...) spellings;
+ *   - the GraphQL `mergePullRequest` and `enablePullRequestAutoMerge` (arming)
+ *     mutations sent through `gh api graphql` / `curl`.
+ * Raw `gh pr merge` in every form is denied separately; see enforceMergeGovernance().
+ *
+ * Detection runs on a normalized copy of the command (variables collapsed like
+ * a default shell, quotes/backslashes/percent-escapes removed; heredoc bodies are
+ * NOT stripped, see enforceMergeGovernance) and is deliberately text-level: like every matcher here it cannot
+ * defeat `eval`, base64 pipelines or constructed strings; branch protection +
+ * required checks remain the backstop. It ONLY fires when the command also
+ * contains a network or interpreter tool word, so `grep`/`cat`/`git log` on
+ * text that merely mentions such a path stay allowed.
+ */
+function enforceApiMergeGovernance(command) {
+  const text = normalizeForApiMerge(command);
+  const mergePath = /(?:^|[/\s])pulls\/[^\s/]*\/merge(?![A-Za-z0-9_.-])/i;
+  const mergeMutation = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/i;
+  if (!mergePath.test(text) && !mergeMutation.test(text)) return;
+  // Network/interpreter tool as a standalone word (also when path-qualified
+  // or wrapped by sh -c / xargs / env / sudo).
+  const tool =
+    /(^|[\s;&|(<>`=:/])(gh|curl|wget|http|https|xh|httpie|python[0-9.]*|node|nodejs|deno|bun|ruby|perl|php|bash|sh|zsh|eval|xargs|env|sudo|exec|nohup|time)(?=$|[\s;&|)<>`])/i;
+  if (!tool.test(text)) return;
+  deny(
+    `merging a PR through the GitHub API ('.../pulls/<n>/merge' or the mergePullRequest ` +
+      `mutation) is not a permitted merge path under any governance allowMerge value. ` +
+      `Merges must go through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs', which ` +
+      `enforces the real eligibility gate, and arming auto-merge goes through the same helper with --arm.`,
+  );
+}
+
+/**
+ * Normalizes a command for API-merge DETECTION only (never alters what runs).
+ * Mirrors a default shell for variables (`$IFS` splits, any other `$VAR` is
+ * empty so its neighbours concatenate), drops quotes and backslashes (so
+ * `pu''lls` / `pulls\/5` collapse), and decodes `%XX` escapes. Unlike the stash
+ * normalizer it KEEPS braces/parens so `{owner}` placeholders and URLs stay intact.
+ */
+function normalizeForApiMerge(text) {
+  let out = text;
+  out = out.replace(/\$\{IFS\}/g, ' ');
+  out = out.replace(/\$\{IFS[^}A-Za-z0-9_][^}]*\}/g, ' ');
+  out = out.replace(/\$IFS\b/g, ' ');
+  out = out.replace(/\$\{[^}]*\}/g, '');
+  out = out.replace(/\$[A-Za-z_][A-Za-z0-9_]*/g, '');
+  out = out.replace(/['"]/g, '');
+  out = out.replace(/\\\n/g, '');
+  out = out.replace(/\\/g, '');
+  try {
+    out = decodeURIComponent(out);
+  } catch {
+    out = out.replace(/%([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+  return out;
 }
 
 /**
@@ -400,80 +453,6 @@ function stripCommentAndQuotes(segment) {
  */
 function segmentInvokesGhPrMerge(segment) {
   return /\bgh\s+pr\s+merge\b/i.test(stripCommentAndQuotes(segment));
-}
-
-/**
- * Minimal shell-ish tokenizer: splits on unquoted whitespace, honoring single
- * and double quotes so a quoted value (`--body "--auto"`) stays one token and
- * its inner `--auto` is NOT mistaken for the arming flag. Backslash-escapes are
- * not interpreted (rare in this surface; erring toward more tokens = more
- * likely to hit the unknown-token deny path = fail-closed).
- */
-function tokenizeShellish(segment) {
-  const tokens = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let m;
-  while ((m = re.exec(segment)) !== null) {
-    tokens.push(m[1] ?? m[2] ?? m[3]);
-  }
-  return tokens;
-}
-
-/**
- * True ONLY for a recognized clean auto-arm: `gh pr merge [<pr>] --auto [safe
- * flags...]`. A bare `--auto` token must be present, and every token must be in
- * the allowlist (or a single PR-ref positional, or a `-R/--repo <value>` pair).
- * Anything else — `--auto=false`, an unknown/value-bearing flag, extra
- * positionals — returns false so the caller blocks (fail-closed).
- */
-function isCleanAutoArmSegment(segment) {
-  const tokens = tokenizeShellish(stripComment(segment));
-  let i = 0;
-  // Skip a leading run of `VAR=value` env assignments.
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-  if (tokens[i] !== 'gh' || tokens[i + 1] !== 'pr' || tokens[i + 2] !== 'merge') {
-    // Quote-obfuscated `gh "pr" merge` reaches here as a non-clean arm →
-    // caller blocks (segmentInvokesGhPrMerge already matched it).
-    return false;
-  }
-  i += 3;
-  let sawAuto = false;
-  let sawPositional = false;
-  for (; i < tokens.length; i++) {
-    const tok = tokens[i];
-    if (tok === '--auto') {
-      sawAuto = true;
-      continue;
-    }
-    if (SAFE_ARM_FLAGS.has(tok)) continue;
-    if (VALUE_FLAGS.has(tok)) {
-      // Skip the next token as this flag's value WITHOUT validating it — this
-      // intentionally matches gh's own parser (it consumes the token after
-      // `-R`/`--repo` positionally as the repo value), so there is no
-      // divergence a raw merge could exploit. Segments were already split on
-      // control operators, so this can never swallow `&&`/`;`/`|`.
-      i++; // consume the flag's value token
-      continue;
-    }
-    // A single PR-ref positional (number, owner/repo#n, or a PR URL) is allowed.
-    if (
-      !sawPositional &&
-      !tok.startsWith('-') &&
-      /^(\d+|[^/]+\/[^/]+#\d+|https?:\/\/\S+)$/.test(tok)
-    ) {
-      sawPositional = true;
-      continue;
-    }
-    // Anything else (unknown flag, `--auto=false`, `--body`, extra positional,
-    // a stray token) → not a clean arm.
-    return false;
-  }
-  return sawAuto;
-}
-
-/** Removes only a trailing unquoted shell comment (quotes preserved). */
-function stripComment(segment) {
-  return segment.replace(/#.*$/, '');
 }
 
 // ── No-bare-stash governance (AISDLC-611) ────────────────────────────

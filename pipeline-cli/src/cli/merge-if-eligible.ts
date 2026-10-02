@@ -15,7 +15,9 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
+  refusalResult,
   resolveRepoSlug,
+  resolveTrustedMainRoot,
   runMergeIfEligible,
   type RunMergeIfEligibleResult,
   type SourceKind,
@@ -41,6 +43,8 @@ export function renderResult(result: RunMergeIfEligibleResult): string {
     );
   } else if (result.merged) {
     lines.push(`${prefix} | MERGED | ${result.eligibility.reason}`);
+  } else if (result.armed) {
+    lines.push(`${prefix} | ARMED | ${result.eligibility.reason}`);
   } else {
     lines.push(`${prefix} | REFUSED | ${result.eligibility.reason}`);
   }
@@ -54,6 +58,7 @@ export function renderJsonResult(result: RunMergeIfEligibleResult): string {
         ok: result.eligibility.eligible,
         prNumber: result.prNumber,
         merged: result.merged,
+        armed: Boolean(result.armed),
         dryRun: result.dryRun,
         policy: result.policy,
         reason: result.eligibility.reason,
@@ -67,6 +72,12 @@ export function renderJsonResult(result: RunMergeIfEligibleResult): string {
 export interface BuildCliOptions {
   /** Inject a Runner — tests pass a fake; the bin shim defaults to live exec. */
   runner?: Runner;
+  /**
+   * PROGRAMMATIC test seam: supplies the trusted root and the committed policy
+   * text directly. It is NOT reachable from argv or the environment — only code
+   * that imports this builder can set it (the bin shim never does).
+   */
+  trustedRootOverride?: { root: string; policyYaml: string | null };
 }
 
 export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
@@ -78,6 +89,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
       'Usage: $0 <pr> --source-kind <backlog|gh-issue> [options]\n\n' +
         '  merge-if-eligible 176 --source-kind backlog          # merge iff green+CLEAN+trusted\n' +
         '  merge-if-eligible 176 --source-kind backlog --dry-run  # evaluate only, never merge\n' +
+        '  merge-if-eligible 176 --source-kind backlog --arm    # arm auto-merge iff trusted (same policy gate)\n' +
         '  merge-if-eligible 176 --source-kind gh-issue         # always refused (untrusted)',
     )
     .command(
@@ -98,16 +110,6 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
               'Work-item provenance for the OQ-2 trust boundary. Only "backlog" (internal, ' +
               'dispatched by our own orchestrator) is trusted for agent-initiated merge.',
           })
-          .option('repo', {
-            type: 'string',
-            describe: 'owner/repo slug (default: derived from cwd via `gh repo view`).',
-          })
-          .option('repo-root', {
-            type: 'string',
-            describe:
-              'Trusted base-branch checkout to read .ai-sdlc/agent-role.yaml from (default: cwd). ' +
-              'MUST NOT be a PR worktree/tree — the governed party must not relax its own rules.',
-          })
           .option('cwd', {
             type: 'string',
             describe: 'Working directory for gh calls (default: process.cwd()).',
@@ -117,6 +119,13 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
             choices: ['squash', 'merge', 'rebase'] as const,
             default: 'squash' as const,
             describe: "The repo's configured merge method, used only when eligible.",
+          })
+          .option('arm', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Arm auto-merge instead of merging now. Needs the same allowMerge grant and the same ' +
+              'fork/author/base/task/head checks; GitHub then merges once its own required checks pass.',
           })
           .option('dry-run', {
             type: 'boolean',
@@ -130,25 +139,45 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
           }),
       async (argv) => {
         const cwd = (argv.cwd as string | undefined) ?? process.cwd();
-        const repoRoot = (argv['repo-root'] as string | undefined) ?? process.cwd();
-        const repoSlug = (argv.repo as string | undefined) ?? (await resolveRepoSlug(runner, cwd));
         const prNumber = argv.pr as number;
         const sourceKind = argv['source-kind'] as SourceKind;
         const mergeMethod = argv['merge-method'] as 'squash' | 'merge' | 'rebase';
         const dryRun = Boolean(argv['dry-run']);
+        const mode = argv.arm ? ('arm' as const) : ('merge' as const);
         const format = String(argv.format) as 'text' | 'json';
 
-        const result = await runMergeIfEligible({
-          prNumber,
-          sourceKind,
-          repoSlug,
-          repoRoot,
-          pkgRoot: packageRoot(),
-          runner,
-          cwd,
-          mergeMethod,
-          dryRun,
-        });
+        // The policy root is the VERIFIED main checkout only. There is no flag
+        // or environment variable that supplies one; the override below is a
+        // programmatic option of this builder.
+        const override = opts.trustedRootOverride;
+        const trusted = override
+          ? { root: override.root, reason: '' }
+          : resolveTrustedMainRoot({ cwd, anchorDir: packageRoot() });
+
+        // The repository slug comes only from `gh repo view` in the verified checkout.
+        const repoSlug = trusted.root === null ? null : await resolveRepoSlug(runner, trusted.root);
+
+        const result =
+          trusted.root !== null && repoSlug === null
+            ? refusalResult(
+                prNumber,
+                'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
+                  'main checkout — refusing (fail-closed)',
+                dryRun,
+              )
+            : await runMergeIfEligible({
+                prNumber,
+                sourceKind,
+                repoSlug: repoSlug ?? '',
+                repoRoot: trusted.root,
+                rootRefusal: trusted.reason,
+                runner,
+                cwd,
+                mergeMethod,
+                dryRun,
+                mode,
+                policyYaml: override?.policyYaml,
+              });
 
         if (format === 'json') {
           process.stdout.write(renderJsonResult(result));

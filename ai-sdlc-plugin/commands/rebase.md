@@ -316,7 +316,8 @@ auto-merge request on every force-push (AISDLC-356):
 ```bash
 PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo '')
 if [ -n "$PR_NUMBER" ]; then
-  gh pr merge "$PR_NUMBER" --auto 2>/dev/null || true
+  node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" --source-kind backlog --arm 2>/dev/null || true
+  # refused (policy never / untrusted PR) is fine: the repo workflow re-arms on push
 fi
 ```
 

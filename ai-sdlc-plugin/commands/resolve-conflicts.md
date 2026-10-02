@@ -25,10 +25,12 @@ same architecture pattern as `/ai-sdlc rebase` and `/ai-sdlc execute`.
 
 ## Hard rules (NEVER violate)
 
-1. **Never merge a PR.** Do not run `gh pr merge` for merge —
-   `gh pr merge --auto` is the re-arm path the agent owns and is
-   explicitly permitted (it does NOT merge; it only re-attaches the
-   auto-merge request that the force-push cleared per AISDLC-356).
+1. **Never merge a PR.** Do not run `gh pr merge` in any form (the hook
+   denies it, `--auto` included). The re-arm path the agent owns is
+   `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog --arm`,
+   which applies the repo's merge policy and trust checks before
+   re-attaching the auto-merge request that the force-push cleared
+   (AISDLC-356).
 2. **Never force-push with plain `--force` / `-f`.** Always use
    `--force-with-lease`. The agent enforces this; this command does
    not push directly.
@@ -198,9 +200,8 @@ Print a tight summary:
 
 ## What this command DOES NOT do (intentional)
 
-- **Never runs `gh pr merge`** (the merge variant; `--auto` re-arm is
-  delegated to the agent, which only re-attaches the auto-merge
-  request).
+- **Never runs `gh pr merge`** (any form; re-arming is delegated to the
+  agent, which uses `cli-merge-if-eligible.mjs <pr> --arm`).
 - **Never deletes the worktree on escalation.** The worktree is left
   in a clean state so the operator can inspect.
 - **Never force-pushes from the slash body itself.** The agent owns

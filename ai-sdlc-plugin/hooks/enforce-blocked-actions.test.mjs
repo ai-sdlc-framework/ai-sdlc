@@ -792,14 +792,29 @@ blockedActions: []
     assert.ok(isDenied(result), 'raw gh pr merge with --squash (no --auto) is still a real merge');
   });
 
-  it('allows arming "gh pr merge --auto" under strict', () => {
+  it('blocks arming "gh pr merge --auto" under strict (arming is a merge in waiting)', () => {
     const result = run('gh pr merge 42 --auto');
-    assert.ok(!isDenied(result), 'arming --auto is NOT merging and must stay allowed under strict');
+    assert.ok(isDenied(result), 'raw arming must go through the helper --arm mode');
+    assert.match(
+      JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason,
+      /cli-merge-if-eligible\.mjs <pr> --arm/,
+    );
   });
 
-  it('allows arming "gh pr merge --auto --squash" under strict (flag order/combination)', () => {
-    const result = run('gh pr merge 42 --auto --squash');
-    assert.ok(!isDenied(result), '--auto combined with --squash is still an arm, not a merge');
+  it('blocks arming "gh pr merge --auto --squash" under strict (flag order/combination)', () => {
+    assert.ok(isDenied(run('gh pr merge 42 --auto --squash')));
+    assert.ok(isDenied(run('gh pr merge --squash --auto 42')));
+  });
+
+  it('allows the helper in merge mode and in --arm mode under strict', () => {
+    assert.ok(!isDenied(run('node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --arm')));
+    assert.ok(
+      !isDenied(
+        run(
+          'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --arm --format json',
+        ),
+      ),
+    );
   });
 
   it('allows the cli-merge-if-eligible helper invocation under strict', () => {
@@ -870,9 +885,32 @@ blockedActions: []
     assert.ok(isDenied(result), 'quote-obfuscated gh pr merge must still be detected and blocked');
   });
 
-  it('allows a clean arm with an explicit repo flag ("gh pr merge 42 --auto -R owner/repo")', () => {
+  it('blocks an arm with an explicit repo flag ("gh pr merge 42 --auto -R owner/repo")', () => {
     const result = run('gh pr merge 42 --auto -R owner/repo');
-    assert.ok(!isDenied(result), '-R <repo> alongside a bare --auto is still a clean arm');
+    assert.ok(isDenied(result), 'no raw arming form is allowed any more');
+  });
+
+  it('blocks every raw merge/arm flag combination and the disarm form', () => {
+    for (const cmd of [
+      'gh pr merge 42 --auto --squash --match-head-commit abc',
+      'gh pr merge 42 --auto --rebase --delete-branch',
+      'gh pr merge 42 -d --auto',
+      'gh pr merge 42 --merge',
+      'gh pr merge 42 --rebase',
+      'gh pr merge 42 --admin',
+      'gh pr merge --disable-auto 42',
+      'gh pr merge',
+      'gh pr merge https://github.com/o/r/pull/42 --auto',
+      'GH_TOKEN=x gh pr merge 42 --auto',
+      'cd repo && gh pr merge 42 --auto',
+      '(gh pr merge 42 --auto)',
+      'GH PR MERGE 42 --AUTO',
+      'gh \'pr\' "merge" 42 --auto',
+      'gh pr merge 42 --auto 2>&1',
+      'gh pr merge 42 --auto | cat',
+    ]) {
+      assert.ok(isDenied(run(cmd)), `expected deny: ${cmd}`);
+    }
   });
 
   it('fails CLOSED: raw "gh pr merge" is blocked even when agent-role.yaml is entirely missing', () => {
@@ -928,9 +966,13 @@ blockedActions: []
     );
   });
 
-  it('still allows arming "gh pr merge --auto" under onGreenClean', () => {
+  it('blocks arming "gh pr merge --auto" under onGreenClean too (helper --arm is the route)', () => {
     const result = run('gh pr merge 42 --auto');
-    assert.ok(!isDenied(result), 'arming remains allowed regardless of policy');
+    assert.ok(isDenied(result), 'raw arming is denied regardless of policy');
+  });
+
+  it('allows the helper --arm mode under onGreenClean', () => {
+    assert.ok(!isDenied(run('node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --arm')));
   });
 
   it('allows the cli-merge-if-eligible helper invocation under onGreenClean', () => {
@@ -945,6 +987,198 @@ blockedActions: []
     const parsed = JSON.parse(result.output);
     assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /allowMerge="onGreenClean"/);
   });
+});
+
+// ── API-merge governance (denied under every allowMerge value) ───────────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', () => {
+  const dirs = {};
+
+  before(() => {
+    for (const [name, governance] of [
+      ['strict', ''],
+      ['green', 'governance:\n  allowMerge: onGreenClean\n'],
+    ]) {
+      const d = join(tmpdir(), `enforce-blocked-apimerge-${name}-${Date.now()}`);
+      mkdirSync(join(d, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(d, '.ai-sdlc', 'agent-role.yaml'),
+        `role: coding-agent\ngoal: Test agent\n${governance}blockedActions: []\n`,
+      );
+      dirs[name] = d;
+    }
+  });
+
+  after(() => {
+    for (const d of Object.values(dirs)) rmSync(d, { recursive: true, force: true });
+  });
+
+  function run(policy, command) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command } });
+    return runHookRaw(input, { CLAUDE_PROJECT_DIR: dirs[policy] });
+  }
+
+  const DENIED = [
+    'gh api repos/acme/widgets/pulls/42/merge -X PUT',
+    'gh api -X PUT repos/acme/widgets/pulls/42/merge',
+    'gh api /repos/acme/widgets/pulls/42/merge --method PUT -f merge_method=squash',
+    'gh api --method=PUT repos/acme/widgets/pulls/42/merge',
+    'gh api repos/acme/widgets/pulls/42/merge',
+    'gh api -f merge_method=squash -F sha=abc123 repos/acme/widgets/pulls/42/merge -X PUT',
+    'gh api "repos/acme/widgets/pulls/42/merge" -X PUT',
+    "gh api 'repos/acme/widgets/pu''lls/42/merge' -X PUT",
+    'gh api repos/acme/widgets/pulls/42/merge/ -X PUT',
+    'gh api repos/{owner}/{repo}/pulls/42/merge -X PUT',
+    'gh api repos/$OWNER/$REPO/pulls/$PR/merge -X PUT',
+    'gh api repos/${OWNER}/${REPO}/pulls/${PR}/merge -X PUT',
+    'gh api repos/acme/widgets/pulls/42/%6Derge -X PUT',
+    'gh api repos/acme/widgets/pulls/42/merge -X PUT && echo done',
+    'echo start; gh api repos/acme/widgets/pulls/42/merge -X PUT',
+    'gh api graphql -f query=\'mutation { mergePullRequest(input:{pullRequestId:"x"}) { clientMutationId } }\'',
+    'gh api graphql -f query=\'mutation { enablePullRequestAutoMerge(input:{pullRequestId:"x"}) { clientMutationId } }\'',
+    'curl -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    'curl -sS -H "Authorization: Bearer $GH_TOKEN" -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge -d \'{"merge_method":"squash"}\'',
+    'curl --request PUT --url https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    '/usr/bin/curl -X PUT api.github.com/repos/acme/widgets/pulls/42/merge',
+    'wget --method=PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    'http PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+    'bash -c "gh api repos/acme/widgets/pulls/42/merge -X PUT"',
+    'echo repos/acme/widgets/pulls/42/merge | xargs gh api -X PUT',
+    "node -e \"fetch('https://api.github.com/repos/acme/widgets/pulls/42/merge',{method:'PUT'})\"",
+    'python3 -c "import requests; requests.put(\'https://api.github.com/repos/acme/widgets/pulls/42/merge\')"',
+  ];
+
+  for (const policy of ['strict', 'green']) {
+    for (const cmd of DENIED) {
+      it(`denies under ${policy}: ${cmd}`, () => {
+        const result = run(policy, cmd);
+        assert.ok(isDenied(result), `expected deny: ${cmd}`);
+        const parsed = JSON.parse(result.output);
+        assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /GitHub API/);
+        assert.match(parsed.hookSpecificOutput.permissionDecisionReason, /cli-merge-if-eligible/);
+      });
+    }
+  }
+
+  for (const policy of ['strict', 'green']) {
+    it(`heredoc handling is whole-text and fail-closed under ${policy}: no spelling hides a merge`, () => {
+      const commands = [
+        'gh pr merge 42 --auto',
+        'gh pr merge 42 --squash',
+        'gh api repos/acme/widgets/pulls/42/merge -X PUT',
+        'curl -X PUT https://api.github.com/repos/acme/widgets/pulls/42/merge',
+      ];
+      // Fake "heredoc openers" that never open a heredoc: the command that follows is real.
+      const fakeOpeners = [
+        'echo hi <<<x',
+        'echo "<<X"',
+        'true # <<X',
+        'echo $((1<<X))',
+        "echo '<<EOF'",
+        'cat <<< "<<EOF"',
+      ];
+      // Real heredocs fed to something that executes the body, or to something inert:
+      // the merge text inside the body is denied regardless of the opener.
+      const openers = [
+        'bash <<EOF',
+        "sh <<'EOF'",
+        'bash -s <<EOF',
+        'cat <<EOF | sh',
+        'cat <<EOF | bash',
+        'cat <<EOF > x.sh',
+        'cat <<EOF',
+        "cat <<'EOF'",
+        'python3 - <<EOF',
+        'python <<EOF',
+        'node - <<EOF',
+        'nodejs <<EOF',
+        'perl <<EOF',
+        'ruby <<EOF',
+        'eval "$(cat <<EOF',
+        'xargs -0 sh -c <<EOF',
+        'source /dev/stdin <<EOF',
+        '. /dev/stdin <<EOF',
+        '${SHELL} <<EOF',
+        'git commit -F - <<EOF',
+        'tee note.txt <<EOF',
+      ];
+      for (const cmd of commands) {
+        for (const opener of fakeOpeners) {
+          const text = `${opener}\n${cmd}`;
+          assert.ok(isDenied(run(policy, text)), `expected deny: ${JSON.stringify(text)}`);
+        }
+        for (const opener of openers) {
+          const text = `${opener}\n${cmd}\nEOF`;
+          assert.ok(isDenied(run(policy, text)), `expected deny: ${JSON.stringify(text)}`);
+        }
+        // The opener line itself is a real command and is always checked.
+        assert.ok(isDenied(run(policy, `${cmd} <<'EOF'\nbody\nEOF`)));
+      }
+    });
+
+    it(`documentation quoting the command in a heredoc is also denied (accepted false denial) under ${policy}`, () => {
+      assert.ok(isDenied(run(policy, "cat <<'EOF'\ngh pr merge 42 --auto\nEOF")));
+      assert.ok(
+        isDenied(
+          run(policy, 'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF'),
+        ),
+      );
+      // Prose that does not contain the command text is unaffected.
+      assert.ok(
+        !isDenied(run(policy, 'git commit -F - <<EOF\nnote: use the merge helper instead\nEOF')),
+      );
+    });
+
+    it(`API-merge deny message no longer claims arming stays allowed under ${policy}`, () => {
+      const result = run(policy, 'gh api repos/acme/widgets/pulls/42/merge -X PUT');
+      const reason = JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason;
+      assert.doesNotMatch(reason, /remains allowed/);
+      assert.match(reason, /--arm/);
+    });
+
+    it(`denies arming with --admin (an admin merge bypass) under ${policy}`, () => {
+      assert.ok(isDenied(run(policy, 'gh pr merge 42 --auto --admin')));
+      assert.ok(isDenied(run(policy, 'gh pr merge 42 --admin --squash')));
+    });
+
+    it(`denies any command naming the removed policy-root override under ${policy}`, () => {
+      const result = run(
+        policy,
+        'AI_SDLC_MERGE_POLICY_ROOT_FOR_TESTS=1 node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog',
+      );
+      assert.ok(isDenied(result));
+      assert.match(
+        JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason,
+        /policy root/,
+      );
+    });
+  }
+
+  const ALLOWED = [
+    // the sanctioned helper (merge and arm modes)
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --arm',
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --arm --dry-run',
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog',
+    'node pipeline-cli/bin/cli-merge-if-eligible.mjs 42 --source-kind backlog --dry-run',
+    // reads and unrelated API calls
+    'gh api repos/acme/widgets/pulls/42',
+    'gh api repos/acme/widgets/pulls/42/files',
+    'gh api repos/acme/widgets/pulls/42/comments -f body=hi',
+    'gh api repos/acme/widgets/pulls/42/merge-queue-entry',
+    'curl -s https://api.github.com/repos/acme/widgets/pulls/42',
+    // text that merely mentions the path, no network/interpreter tool
+    'grep -rn "pulls/42/merge" docs',
+    'cat docs/api-reference/governance.md',
+  ];
+
+  for (const policy of ['strict', 'green']) {
+    for (const cmd of ALLOWED) {
+      it(`allows under ${policy}: ${cmd.split('\n')[0]}`, () => {
+        const result = run(policy, cmd);
+        assert.ok(!isDenied(result), `expected allow: ${cmd}`);
+      });
+    }
+  }
 });
 
 // ── AISDLC-567 stale-base guard ──────────────────────────────────────────
