@@ -22,15 +22,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { PipelineResult } from '@ai-sdlc/pipeline-cli';
 
+// AISDLC-680: a cold CI runner needs several seconds to evaluate the whole
+// pipeline-cli barrel. Every test re-imports the module under test after
+// `vi.resetModules()`, which re-runs the `vi.mock` factory, so importing the
+// actual barrel inside the factory paid that cost again inside each test's budget
+// (the first test timed out at the 5000 ms default). Load it once here, outside
+// any test, and let the factory reuse it.
+//
+// The first test still pays for the cold dynamic import of `./cli-watch.js`
+// itself, so this file alone (never the workspace) gets a larger budget as a
+// backstop. AISDLC-680.
+vi.setConfig({ testTimeout: 30_000 });
+const actualPipelineCli =
+  await vi.importActual<typeof import('@ai-sdlc/pipeline-cli')>('@ai-sdlc/pipeline-cli');
+
 const executePipelineMock = vi.fn();
 
-vi.mock('@ai-sdlc/pipeline-cli', async () => {
-  // Pull in the real MockSpawner so resolveSpawner('mock') still returns a
+vi.mock('@ai-sdlc/pipeline-cli', () => {
+  // Reuse the real MockSpawner so resolveSpawner('mock') still returns a
   // working instance — only `executePipeline` and `defaultSpawner` are stubbed.
-  const actual =
-    await vi.importActual<typeof import('@ai-sdlc/pipeline-cli')>('@ai-sdlc/pipeline-cli');
   return {
-    ...actual,
+    ...actualPipelineCli,
     executePipeline: (...args: unknown[]) => executePipelineMock(...args),
     defaultSpawner: vi.fn(async () => ({
       spawn: vi.fn(),

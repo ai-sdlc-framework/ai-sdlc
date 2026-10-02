@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HOOK_JS = join(here, 'usage-ingest.js');
@@ -43,8 +43,56 @@ let root;
 before(() => {
   root = mkdtempSync(join(tmpdir(), 'usage-ingest-hook-'));
 });
-after(() => {
-  rmSync(root, { recursive: true, force: true });
+
+// AISDLC-680: the hook launches the ingester detached and unref'd, so a test can
+// never `close`-await it through the hook. Every ingester a test launches (see
+// `fakeBin`) records its own pid instead, and teardown waits for those processes
+// to exit before it removes the sandbox. Otherwise a late write from a still-running
+// ingester lands inside `root` while `rmSync` is emptying it (ENOTEMPTY).
+const pidFiles = [];
+
+function recordedPids() {
+  const pids = [];
+  for (const file of pidFiles) {
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, 'utf-8').split('\n')) {
+      const pid = Number(line);
+      if (Number.isInteger(pid) && pid > 0) pids.push(pid);
+    }
+  }
+  return pids;
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+async function settleIngesters(waitMs = 30_000) {
+  // give an ingester launched by the last test time to start and record its pid
+  await new Promise((r) => setTimeout(r, 300));
+  const end = Date.now() + waitMs;
+  while (Date.now() < end && recordedPids().some(isAlive)) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  for (const pid of recordedPids().filter(isAlive)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+  await new Promise((r) => setTimeout(r, 100));
+}
+
+after(async () => {
+  await settleIngesters();
+  // backstop for a write that still slips in between the last check and the removal
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function sandbox(name) {
@@ -62,12 +110,25 @@ function sandbox(name) {
   };
 }
 
-/** A fake pipeline-cli bin dir whose cli-usage.mjs runs `body`. */
+/** A fake pipeline-cli bin dir whose cli-usage.mjs runs `body`, recording its pid first. */
 function fakeBin(dir, body) {
   const bin = join(dir, 'fakebin');
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, 'cli-usage.mjs'), body);
+  const pidFile = join(dir, 'ingester-pids.txt');
+  pidFiles.push(pidFile);
+  writeFileSync(
+    join(bin, 'cli-usage.mjs'),
+    `import { appendFileSync as recordPid } from 'node:fs';
+recordPid(${JSON.stringify(pidFile)}, process.pid + '\\n');
+${body}`,
+  );
   return bin;
+}
+
+/** The real ingester behind a pid-recording wrapper, so teardown can wait for it. */
+function realIngesterBin(dir) {
+  const realBin = pathToFileURL(join(REAL_BIN_DIR, 'cli-usage.mjs')).href;
+  return fakeBin(dir, `await import(${JSON.stringify(realBin)});`);
 }
 
 function runHook(script, env) {
@@ -216,7 +277,7 @@ await new Promise((r) => setTimeout(r, 4000));`,
           })}\n`,
         );
       }
-      const res = runHook(HOOK_JS, { ...env, PIPELINE_CLI_BIN: REAL_BIN_DIR });
+      const res = runHook(HOOK_JS, { ...env, PIPELINE_CLI_BIN: realIngesterBin(dir) });
       assert.equal(res.status, 0);
       assert.ok(res.ms < hookTimeoutMs(), `hook took ${res.ms}ms, limit ${hookTimeoutMs()}ms`);
       const ledgerDir = env.AI_SDLC_USAGE_DIR;
