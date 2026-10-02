@@ -11,17 +11,14 @@
 import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-export function resolveMaxWorkers(
-  env: NodeJS.ProcessEnv = process.env,
-  ncpu: number = availableParallelism(),
-): number {
+export function resolveMaxWorkers(env = process.env, ncpu = availableParallelism()) {
   const raw = env.AI_SDLC_VITEST_MAX_WORKERS;
   if (raw !== undefined && /^[1-9][0-9]*$/.test(raw.trim())) return Number(raw.trim());
   return Math.max(1, Math.min(4, Math.floor(ncpu / 2)));
 }
 
 export const sharedTestConfig = {
-  pool: 'forks' as const,
+  pool: 'forks',
   maxWorkers: resolveMaxWorkers(),
-  setupFiles: [fileURLToPath(new URL('./vitest.parent-watch.setup.ts', import.meta.url))],
+  setupFiles: [fileURLToPath(new URL('./vitest.parent-watch.setup.mjs', import.meta.url))],
 };
