@@ -415,8 +415,9 @@ export async function evaluateJudgment<I, D>(
     // the key is derivable and the file can be planted by any same-user process. Uses
     // the effective mode (after downgrade); shadow/replay keep reading the cache.
     // Writes continue in every mode. A keyed (HMAC) cache is the escalation path.
-    const skipCacheRead = mode === 'enforce';
-    if (skipCacheRead && cacheKey) rec.cacheMissReason = 'enforce';
+    // Fail closed: only an exactly-`shadow` evaluation may read the cache.
+    const skipCacheRead = mode !== 'shadow';
+    if (mode === 'enforce' && cacheKey) rec.cacheMissReason = 'enforce';
     if (ctx.cache && cacheKey && !skipCacheRead) {
       const hit = ctx.cache.get(cacheKey, (answers) =>
         Object.keys(questions).every((id) => answerMatches(questions[id], answers[id])),

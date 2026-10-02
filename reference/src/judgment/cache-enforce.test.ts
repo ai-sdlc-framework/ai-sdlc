@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeJudgmentProvider } from './fake-provider.js';
@@ -8,6 +8,8 @@ import { resolveJudgmentConfig } from './config.js';
 import type { JudgmentDefinition } from './definition.js';
 import type { JudgmentAnswer } from './types.js';
 import { createJudgmentCache, judgmentCacheKey } from './cache.js';
+import { createJudgmentLogSink, judgmentLogLine, judgmentLogPath } from './log-sink.js';
+import { readJudgmentLog } from './log-reader.js';
 import { canonicalJson, sha256Hex } from './question-hash.js';
 
 const PROVIDER_ANSWER: JudgmentAnswer = { type: 'noul', probability: 0.95 };
@@ -137,8 +139,53 @@ describe('enforce mode never reads the judgment cache', () => {
     expect(second.provider.requests).toHaveLength(0);
   });
 
+  it('fails closed: an off-enum mode never reads the cache', async () => {
+    plant(PLANTED_ANSWER);
+    const base = shadowCfg();
+    const odd = { ...base, defaults: { ...base.defaults, mode: 'Enforce' as never } };
+    const { provider, rec } = await run(odd);
+    expect(provider.requests).toHaveLength(1);
+    expect(rec.cacheHit).toBe(false);
+  });
+
   it('records no reason when the cache is off', async () => {
     const { rec } = await run(enforced(false));
     expect(rec.cacheMissReason).toBeUndefined();
+  });
+});
+
+describe('cacheMissReason log round-trip', () => {
+  const base: JudgmentEvaluationRecord = {
+    ts: '2026-10-01T00:00:00.000Z',
+    judgmentId: 'test.judgment',
+    version: 1,
+    consumerLabel: 'x',
+    questionSetHash: null,
+    stateHash: null,
+    provider: 'fake',
+    providerModelKey: null,
+    modelVersion: null,
+    mode: 'enforce',
+    answers: null,
+    thresholds: null,
+    outcome: { kind: 'abstain', reason: 'x' },
+    latencyMs: null,
+    inputTokens: null,
+    outputTokens: null,
+    called: true,
+    costUsd: null,
+    cacheHit: false,
+  };
+
+  it('survives sink -> reader, and old lines without the field parse to null', () => {
+    const sink = createJudgmentLogSink({ artifactsDir: dir });
+    void sink.record({ ...base, cacheMissReason: 'enforce' });
+    const line = JSON.parse(judgmentLogLine(base)) as Record<string, unknown>;
+    delete line.cacheMissReason;
+    appendFileSync(judgmentLogPath(dir, new Date(base.ts)), `${JSON.stringify(line)}\n`);
+    const { entries } = readJudgmentLog(dir);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].cacheMissReason).toBe('enforce');
+    expect(entries[1].cacheMissReason).toBeNull();
   });
 });
