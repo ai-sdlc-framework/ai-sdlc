@@ -29,7 +29,8 @@ export const BASELINE_CHECKLIST_VERSION = '1';
 export const DEFAULT_TEST_COMMAND = 'pnpm test';
 
 export function isHighRisk(hunk: RiskHunk, threshold: number): boolean {
-  return !hunk.judged || hunk.riskScore >= threshold;
+  // Fail closed: a missing, NaN or infinite score is treated as high risk.
+  return !hunk.judged || !Number.isFinite(hunk.riskScore) || hunk.riskScore >= threshold;
 }
 
 interface SecurityCheck {
@@ -143,6 +144,12 @@ export function pickTestCommand(allowlist: readonly string[]): string | undefine
   return allowlist.find((c) => /(^|[ :])test($|[ :])/.test(c));
 }
 
+const HUNK_ID = /^[A-Za-z0-9._:/#@-]{1,128}$/;
+const SYMBOL = /^[A-Za-z_$][A-Za-z0-9_$.#:<>-]{0,199}$/;
+
+/** Thrown when the risk map contains a value the plan schema cannot carry. */
+export class BaselineInputError extends Error {}
+
 export interface BuildBaselineOpts {
   riskThreshold: number;
   commandAllowlist: readonly string[];
@@ -154,7 +161,14 @@ export function buildBaselineProbes(
   opts: BuildBaselineOpts,
 ): Baseline {
   const probes: Probe[] = [];
-  const hunks = [...riskMap.hunks].sort(byId);
+  for (const h of riskMap.hunks) {
+    if (!HUNK_ID.test(h.id))
+      throw new BaselineInputError(`hunk id outside the plan schema: ${safeId(h.id)}`);
+  }
+  // Symbols are optional hints; ones the schema cannot carry are dropped.
+  const hunks = [...riskMap.hunks]
+    .map((h) => (h.symbols ? { ...h, symbols: h.symbols.filter((x) => SYMBOL.test(x)) } : h))
+    .sort(byId);
 
   // Per changed source file: its hunks in context and its changed tests.
   const sources = [...riskMap.changedSourceFiles].sort((a, b) => (a.path < b.path ? -1 : 1));

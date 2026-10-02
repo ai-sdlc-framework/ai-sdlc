@@ -2,11 +2,16 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { validateReviewPlan } from '@ai-sdlc/reference';
 import { describe, expect, it } from 'vitest';
 import {
   BASELINE_CHECKLIST_VERSION,
   buildBaselineProbes,
+  ABSOLUTE_MAX_PROBES,
+  BaselineInputError,
   buildFallbackPlan,
+  isHighRisk,
+  readStagedConfigFromBaseRef,
   DEFAULT_COMMAND_ALLOWLIST,
   loadStagedReviewConfig,
   parseStagedReviewConfig,
@@ -72,6 +77,7 @@ const limits: PlanLimits = {
   maxProbes: 100,
   maxTargetBytes: 100_000,
   commandAllowlist: DEFAULT_COMMAND_ALLOWLIST,
+  repoRoot: mkdtempSync(join(tmpdir(), 'rp-root-')),
 };
 const baseline = (): Baseline =>
   buildBaselineProbes(riskMap, task, {
@@ -256,9 +262,61 @@ describe('validatePlan', () => {
     expect(reasons(p)).toContain('uncovered-high-risk-hunk');
   });
 
-  it('rejects exceeding the probe limit and the target size limit', () => {
-    expect(reasons(full(), { ...limits, maxProbes: 3 })).toContain('probe-limit-exceeded');
-    expect(reasons(full(), { ...limits, maxTargetBytes: 50 })).toContain('target-size-exceeded');
+  const extra = (n: number): Probe[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `add-${i}`,
+      type: 'search' as const,
+      target: { query: 'x'.repeat(100) },
+      question: 'q',
+      covers: [],
+    }));
+
+  it('measures the probe and size limits against probes the plan adds, not the baseline', () => {
+    const baseCount = baseline().probes.length;
+    // The baseline alone is larger than both limits and is still accepted.
+    expect(
+      validatePlan(full(), baseline(), riskMap, { ...limits, maxProbes: 1, maxTargetBytes: 1 })
+        .valid,
+    ).toBe(true);
+    const p = full();
+    p.probes.push(...extra(3));
+    expect(baseCount).toBeGreaterThan(3);
+    expect(reasons(p, { ...limits, maxProbes: 2 })).toContain('probe-limit-exceeded');
+    expect(reasons(p, { ...limits, maxProbes: 3 })).not.toContain('probe-limit-exceeded');
+    expect(reasons(p, { ...limits, maxTargetBytes: 50 })).toContain('target-size-exceeded');
+  });
+
+  it('counts target size in bytes, not characters', () => {
+    const p = full();
+    p.probes.push({
+      id: 'u',
+      type: 'search',
+      target: { query: '\u00e9'.repeat(60) },
+      question: 'q',
+      covers: [],
+    });
+    // 60 two-byte characters serialize to well over 100 bytes but under 100 characters.
+    expect(reasons(p, { ...limits, maxTargetBytes: 100 })).toContain('target-size-exceeded');
+  });
+
+  it('enforces the absolute ceiling and reports an oversize baseline explicitly', () => {
+    const p = full();
+    p.probes.push(...extra(ABSOLUTE_MAX_PROBES));
+    // Over the absolute ceiling the plan is refused (the schema caps the probe array too).
+    expect(reasons(p, { ...limits, maxProbes: 10_000 })).not.toEqual([]);
+    const huge: Baseline = {
+      version: BASELINE_CHECKLIST_VERSION,
+      probes: Array.from({ length: ABSOLUTE_MAX_PROBES + 1 }, (_, i) => ({
+        id: `b${i}`,
+        type: 'search' as const,
+        target: { query: 'x' },
+        question: 'q',
+        covers: [],
+        baseline: true,
+      })),
+    };
+    const r = validatePlan(planOf(huge.probes), huge, riskMap, limits);
+    expect(!r.valid && r.rejections.map((x) => x.reason)).toContain('baseline-over-ceiling');
   });
 
   it.each([
@@ -333,7 +391,6 @@ describe('validatePlan', () => {
     '-rf',
     'a\0b',
     'src/*.ts',
-    '$HOME/x',
   ])('rejects the unsafe path %j', (path) => {
     const p = full();
     p.probes.push({
@@ -362,6 +419,60 @@ describe('validatePlan', () => {
     });
     expect(reasons(p, { ...limits, repoRoot: root })).toContain('unsafe-path');
     expect(reasons(p)).not.toContain('unsafe-path');
+    // A symlinked parent with a missing leaf is still caught.
+    p.probes[p.probes.length - 1]!.target = { files: [{ path: 'src/link/missing/deep.ts' }] };
+    expect(reasons(p, { ...limits, repoRoot: root })).toContain('unsafe-path');
+    // A dangling symlink fails closed.
+    symlinkSync('/nonexistent-target-xyz', join(root, 'dangling'));
+    p.probes[p.probes.length - 1]!.target = { files: [{ path: 'dangling' }] };
+    expect(reasons(p, { ...limits, repoRoot: root })).toContain('unsafe-path');
+    // An unresolvable root fails closed.
+    expect(reasons(p, { ...limits, repoRoot: join(root, 'no-such-root') })).toContain(
+      'unsafe-path',
+    );
+  });
+
+  it.each(['app/[id]/page.tsx', 'routes/$route.tsx', 'a b/c.ts', "it's/x.ts"])(
+    'accepts the legitimate path %j',
+    (path) => {
+      const p = full();
+      p.probes.push({
+        id: 'rd',
+        type: 'read',
+        target: { files: [{ path }] },
+        question: 'q',
+        covers: [],
+      });
+      expect(reasons(p)).toEqual([]);
+    },
+  );
+
+  it('rejects run files that are not changed tests', () => {
+    const p = full();
+    p.probes.push({
+      id: 'rn',
+      type: 'run',
+      target: { command: 'pnpm test', files: [{ path: 'src/auth.ts' }] },
+      question: 'q',
+      covers: [],
+    });
+    expect(reasons(p)).toContain('run-files-not-changed-tests');
+    p.probes[p.probes.length - 1]!.target.files = [{ path: 'src/auth.test.ts' }];
+    expect(reasons(p)).toEqual([]);
+  });
+
+  it('rejects a run probe naming an unsafe allowlist entry', () => {
+    const p = full();
+    p.probes.push({
+      id: 'rn',
+      type: 'run',
+      target: { command: 'pnpm test; x' },
+      question: 'q',
+      covers: [],
+    });
+    expect(reasons(p, { ...limits, commandAllowlist: ['pnpm test; x'] })).toContain(
+      'run-target-not-allowed',
+    );
   });
 
   it('rejects an inverted line range', () => {
@@ -378,37 +489,127 @@ describe('validatePlan', () => {
 });
 
 describe('buildFallbackPlan', () => {
+  const h9 = {
+    id: 'h9',
+    file: 'src/new.ts',
+    fileClass: 'source' as const,
+    startLine: 1,
+    endLine: 2,
+    riskScore: 0.99,
+    judged: true,
+    flags: [],
+  };
+
   it('is the baseline with no model-authored probe, and passes validation', () => {
     const b = baseline();
-    const plan = buildFallbackPlan(b, riskMap, 0.5);
+    const { plan, rejections } = buildFallbackPlan(b, riskMap, limits);
+    expect(rejections).toEqual([]);
     expect(plan.probes.filter((p) => p.baseline)).toEqual(b.probes);
     expect(validatePlan(plan, b, riskMap, limits).valid).toBe(true);
   });
 
   it('adds a read probe per uncovered high-risk hunk', () => {
-    const rm: RiskMapInput = {
-      ...riskMap,
-      hunks: [
-        ...riskMap.hunks,
-        {
-          id: 'h9',
-          file: 'src/new.ts',
-          fileClass: 'source',
-          startLine: 1,
-          endLine: 2,
-          riskScore: 0.99,
-          judged: true,
-          flags: [],
-        },
-      ],
-    };
+    const rm: RiskMapInput = { ...riskMap, hunks: [...riskMap.hunks, h9] };
     const b = baseline();
-    const plan = buildFallbackPlan(b, rm, 0.5);
+    const { plan } = buildFallbackPlan(b, rm, limits);
     const added = plan.probes.filter((p) => !p.baseline);
     expect(added).toHaveLength(1);
     expect(added[0]).toMatchObject({ type: 'read', covers: ['h9'] });
     expect(added[0]!.id.startsWith('fallback-')).toBe(true);
     expect(validatePlan(plan, b, rm, limits).valid).toBe(true);
+  });
+
+  it('drops probes with unsafe or escaping paths and records each drop', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rp-fb-'));
+    const outside = mkdtempSync(join(tmpdir(), 'rp-fb-out-'));
+    symlinkSync(outside, join(root, 'link'));
+    const rm: RiskMapInput = {
+      ...riskMap,
+      hunks: [
+        ...riskMap.hunks,
+        { ...h9, id: 'hx', file: '../../etc/passwd' },
+        { ...h9, id: 'hy', file: 'link/secret.ts' },
+      ],
+    };
+    const b = buildBaselineProbes(rm, task, {
+      riskThreshold: 0.5,
+      commandAllowlist: DEFAULT_COMMAND_ALLOWLIST,
+    });
+    const { plan, rejections } = buildFallbackPlan(b, rm, { ...limits, repoRoot: root });
+    const paths = plan.probes.flatMap((p) => (p.target.files ?? []).map((f) => f.path));
+    expect(paths).not.toContain('../../etc/passwd');
+    expect(paths).not.toContain('link/secret.ts');
+    expect(rejections.filter((r) => r.reason === 'unsafe-path').length).toBeGreaterThan(0);
+    expect(rejections.some((r) => r.reason === 'uncovered-high-risk-hunk')).toBe(true);
+  });
+
+  it('drops a run probe whose command is no longer allowlisted', () => {
+    const b = baseline();
+    const { plan, rejections } = buildFallbackPlan(b, riskMap, {
+      ...limits,
+      commandAllowlist: ['pnpm lint'],
+    });
+    expect(plan.probes.some((p) => p.type === 'run')).toBe(false);
+    expect(rejections.map((r) => r.reason)).toContain('run-target-not-allowed');
+  });
+
+  it('reports a fallback over the absolute ceiling', () => {
+    const b: Baseline = {
+      version: BASELINE_CHECKLIST_VERSION,
+      probes: Array.from({ length: ABSOLUTE_MAX_PROBES + 1 }, (_, i) => ({
+        id: `b${i}`,
+        type: 'search' as const,
+        target: { query: 'x' },
+        question: 'q',
+        covers: [],
+        baseline: true,
+      })),
+    };
+    const { rejections } = buildFallbackPlan(b, { ...riskMap, hunks: [] }, limits);
+    expect(rejections.map((r) => r.reason)).toContain('baseline-over-ceiling');
+  });
+});
+
+describe('baseline input hardening', () => {
+  const opts = { riskThreshold: 0.5, commandAllowlist: DEFAULT_COMMAND_ALLOWLIST };
+
+  it('produces probes the plan schema accepts', () => {
+    const b = baseline();
+    const r = validateReviewPlan(planOf(b.probes));
+    expect(r.valid).toBe(true);
+  });
+
+  it('rejects hunk ids outside the schema and drops symbols outside it', () => {
+    const bad = { ...riskMap, hunks: [{ ...riskMap.hunks[0]!, id: 'h 1;rm' }] };
+    expect(() => buildBaselineProbes(bad, task, opts)).toThrow(BaselineInputError);
+    const syms = {
+      ...riskMap,
+      hunks: [{ ...riskMap.hunks[0]!, symbols: ['login', 'a b;c', '1bad'] }],
+    };
+    const b = buildBaselineProbes(syms, task, opts);
+    expect(b.probes.find((p) => p.id.startsWith('hunk-trace-'))?.target.symbols).toEqual(['login']);
+    expect(validateReviewPlan(planOf(b.probes)).valid).toBe(true);
+  });
+
+  it('yields no duplicate probe ids for duplicate flags on one hunk', () => {
+    const rm = {
+      ...riskMap,
+      hunks: [
+        {
+          ...riskMap.hunks[0]!,
+          flags: ['secrets', 'secrets', 'authentication', 'secrets'] as const,
+        },
+      ],
+    };
+    const ids = buildBaselineProbes(rm, task, opts).probes.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('treats a non-finite risk score as high risk', () => {
+    const h = { ...riskMap.hunks[1]!, riskScore: Number.NaN };
+    expect(isHighRisk(h, 0.5)).toBe(true);
+    expect(isHighRisk({ ...h, riskScore: Number.POSITIVE_INFINITY }, 2)).toBe(true);
+    expect(isHighRisk({ ...h, riskScore: 0.1 }, 0.5)).toBe(false);
   });
 });
 
@@ -472,12 +673,36 @@ describe('staged review config', () => {
     expect(toPlanLimits(c, dir).repoRoot).toBe(dir);
   });
 
+  it('reads the supplied base ref, not HEAD', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rp-git2-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+    git('config', 'commit.gpgsign', 'false');
+    mkdirSync(join(dir, '.ai-sdlc'));
+    const cfg = join(dir, '.ai-sdlc', 'review-config.yaml');
+    writeFileSync(cfg, 'staged:\n  executorCommandAllowlist: ["pnpm lint"]\n  maxProbes: 7\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'a');
+    git('tag', 'older');
+    writeFileSync(cfg, 'staged:\n  executorCommandAllowlist: ["pnpm test"]\n  maxProbes: 9\n');
+    git('commit', '-q', '-am', 'b');
+    const older = loadStagedReviewConfig({ workDir: dir, baseRef: 'older' });
+    expect(older.commandAllowlist).toEqual(['pnpm lint']);
+    expect(older.maxProbes).toBe(7);
+    const head = loadStagedReviewConfig({ workDir: dir, baseRef: 'HEAD' });
+    expect(head.commandAllowlist).toEqual(['pnpm test']);
+  });
+
   it('uses defaults for a missing ref, an option-like ref and a throwing reader', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rp-none-'));
     expect(loadStagedReviewConfig({ workDir: dir, baseRef: 'nope' }).commandAllowlist).toEqual([
       ...DEFAULT_COMMAND_ALLOWLIST,
     ]);
     expect(loadStagedReviewConfig({ workDir: dir, baseRef: '--output=/tmp/x' }).maxProbes).toBe(40);
+    for (const ref of [':', ':.ai-sdlc/review-config.yaml', 'main:other', 'a b'])
+      expect(readStagedConfigFromBaseRef(dir, ref)).toBeNull();
     expect(
       loadStagedReviewConfig({
         readBaseConfig: () => {
@@ -485,6 +710,5 @@ describe('staged review config', () => {
         },
       }).maxProbes,
     ).toBe(40);
-    expect(toPlanLimits(parseStagedReviewConfig(null)).repoRoot).toBeUndefined();
   });
 });

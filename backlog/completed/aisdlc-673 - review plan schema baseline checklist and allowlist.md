@@ -92,10 +92,13 @@ Review-plan schema registered with AJV, the baseline checklist as versioned code
 - **Malformed base config falls back per field to the defaults, and a bad allowlist to the default allowlist**: never to something broader.
 - **Coverage ignores altered or unknown baseline probes**: a hunk covered only by a tampered baseline probe is still uncovered.
 - **Risk-map input is a narrow structural type defined here**: the real risk map must satisfy it; a conformance test belongs in the risk-map task.
+- **Limits measure what the plan adds**: the baseline is mandatory, so `maxProbes` and `maxTargetBytes` (counted in bytes) apply to non-baseline probes only; absolute ceilings bound the total and a baseline over a ceiling is reported as `baseline-over-ceiling`.
+- **The fallback plan is held to the same path, symlink, run-target and ceiling checks**: unsafe probes are dropped and each drop is returned as a rejection, so a change cannot force the fallback to carry a bad path.
+- **`repoRoot` is required and the containment check walks to the deepest existing ancestor**: dangling symlinks and unresolvable roots fail closed. Run probes may name only changed test files. Base refs containing a colon are refused. A non-finite risk score counts as high risk.
 - **The test-run probe is omitted when no changed test exists or the allowlist has no test command**: there is nothing legitimate to run.
 
 ## Verification
-- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 50 passed
+- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 65 passed
 - `pnpm --filter @ai-sdlc/reference exec vitest run` on the schema tests - 17 passed
 - `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on touched paths - clean
 

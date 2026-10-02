@@ -7,8 +7,8 @@
  * @module review-plan/validate
  */
 
-import { realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { validateReviewPlan } from '@ai-sdlc/reference';
 import { isHighRisk } from './baseline.js';
 import { isSafeCommandString } from './config.js';
@@ -34,33 +34,101 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Lexical path check: relative, no traversal, no separators tricks. */
+/** Absolute ceilings that bound fan-out even for the mandatory baseline. */
+export const ABSOLUTE_MAX_PROBES = 500;
+export const ABSOLUTE_MAX_TARGET_BYTES = 1_000_000;
+
+export function targetBytes(target: unknown): number {
+  return Buffer.byteLength(canonical(target), 'utf8');
+}
+
+/**
+ * Lexical path check. The plan is never interpolated into a shell, so this
+ * rejects only what is dangerous or ambiguous: NUL and control characters,
+ * backslashes, absolute and drive-letter paths, a leading `-` or `~`, glob
+ * wildcards `*` and `?`, and empty, `.` or `..` segments. Names such as
+ * `app/[id]/page.tsx` and `routes/$route.tsx` are legitimate.
+ */
 export function isSafeRelativePath(p: string): boolean {
   if (p.length === 0 || p.length > 300) return false;
   // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f\\:~*?[\]{}<>|;&$`"'!#%^]/.test(p)) return false;
-  if (p.startsWith('/') || p.startsWith('-') || /^\s|\s$/.test(p)) return false;
-  if (isAbsolute(p)) return false;
+  if (/[\x00-\x1f\x7f\\*?]/.test(p)) return false;
+  if (p.startsWith('/') || p.startsWith('-') || p.startsWith('~') || /^\s|\s$/.test(p))
+    return false;
+  if (/^[A-Za-z]:/.test(p) || isAbsolute(p)) return false;
   return p.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 }
 
-function escapesRoot(repoRoot: string, p: string): boolean {
+/**
+ * True when `p` (already lexically safe) resolves outside the repository, or
+ * when that cannot be determined. Checks the deepest EXISTING ancestor, so a
+ * symlinked parent with a missing leaf is still caught, and a dangling symlink
+ * fails closed.
+ */
+export function escapesRoot(repoRoot: string, p: string): boolean {
   let realRoot: string;
   try {
     realRoot = realpathSync(repoRoot);
   } catch {
     return true;
   }
-  const full = resolve(realRoot, p);
+  let cur = resolve(realRoot, p);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      lstatSync(cur);
+      break;
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return true;
+      rest.unshift(basename(cur));
+      cur = parent;
+    }
+  }
   let real: string;
   try {
-    real = realpathSync(full);
+    real = realpathSync(cur);
   } catch {
-    // Not on disk (for example a deleted file): lexical containment already holds.
-    return false;
+    return true;
   }
-  const rel = relative(realRoot, real);
+  const rel = relative(realRoot, resolve(real, ...rest));
   return rel === '..' || rel.startsWith('../') || isAbsolute(rel);
+}
+
+/** Path, line-range and run-target problems for one probe. Shared with the fallback builder. */
+export function probeSafetyProblems(
+  p: Probe,
+  riskMap: RiskMapInput,
+  limits: PlanLimits,
+): Rejection[] {
+  const out: Rejection[] = [];
+  const add = (reason: Rejection['reason'], detail: string): void => {
+    out.push({ reason, detail, probeId: p.id });
+  };
+  if (p.type === 'run') {
+    const cmd = p.target.command;
+    if (
+      typeof cmd !== 'string' ||
+      !isSafeCommandString(cmd) ||
+      !limits.commandAllowlist.includes(cmd)
+    )
+      add('run-target-not-allowed', `run probe ${p.id} names a non-allowlisted command`);
+    const tests = new Set(riskMap.changedTestFiles);
+    for (const f of p.target.files ?? [])
+      if (!tests.has(f.path))
+        add(
+          'run-files-not-changed-tests',
+          `run probe ${p.id} names a file that is not a changed test`,
+        );
+  }
+  for (const f of p.target.files ?? []) {
+    if (!isSafeRelativePath(f.path)) add('unsafe-path', `probe ${p.id} has an unsafe path`);
+    else if (escapesRoot(limits.repoRoot, f.path))
+      add('unsafe-path', `probe ${p.id} path resolves outside the repository`);
+    if (f.startLine !== undefined && f.endLine !== undefined && f.endLine < f.startLine)
+      add('unsafe-path', `probe ${p.id} has an inverted line range`);
+  }
+  return out;
 }
 
 export function validatePlan(
@@ -69,6 +137,18 @@ export function validatePlan(
   riskMap: RiskMapInput,
   limits: PlanLimits,
 ): ValidatePlanResult {
+  // An oversize baseline is reported first and explicitly, before any plan check.
+  const baselineBytes = baseline.probes.reduce((n, p) => n + targetBytes(p.target), 0);
+  const baselineOver =
+    baseline.probes.length > ABSOLUTE_MAX_PROBES || baselineBytes > ABSOLUTE_MAX_TARGET_BYTES;
+  const overRejection: Rejection[] = baselineOver
+    ? [
+        {
+          reason: 'baseline-over-ceiling',
+          detail: 'the baseline alone exceeds the absolute probe or size ceiling',
+        },
+      ]
+    : [];
   const schema = validateReviewPlan<{
     baselineVersion: string;
     probes: Probe[];
@@ -80,11 +160,14 @@ export function validatePlan(
       .join('; ');
     return {
       valid: false,
-      rejections: [{ reason: 'schema-invalid', detail: detail || 'schema validation failed' }],
+      rejections: [
+        ...overRejection,
+        { reason: 'schema-invalid', detail: detail || 'schema validation failed' },
+      ],
     };
   }
   const { probes, baselineVersion } = schema.data;
-  const rejections: Rejection[] = [];
+  const rejections: Rejection[] = [...overRejection];
   const reject = (reason: Rejection['reason'], detail: string, probeId?: string): void => {
     rejections.push({ reason, detail, ...(probeId ? { probeId } : {}) });
   };
@@ -93,13 +176,6 @@ export function validatePlan(
     reject(
       'baseline-version-mismatch',
       `plan baseline ${baselineVersion} differs from ${baseline.version}`,
-    );
-  }
-
-  if (probes.length > limits.maxProbes) {
-    reject(
-      'probe-limit-exceeded',
-      `${probes.length} probes exceeds the limit of ${limits.maxProbes}`,
     );
   }
 
@@ -135,36 +211,29 @@ export function validatePlan(
       if (!hunkIds.has(c)) reject('unknown-hunk', `probe ${p.id} covers unknown hunk ${c}`, p.id);
   }
 
-  // Target size.
-  const total = probes.reduce((n, p) => n + canonical(p.target).length, 0);
-  if (total > limits.maxTargetBytes) {
+  // Limits. The baseline is mandatory and exempt from the plan limits, but it is
+  // bounded by absolute ceilings, and a baseline over a ceiling is reported
+  // explicitly. maxProbes and maxTargetBytes measure only what the plan adds.
+  const added = probes.filter((p) => !baselineById.has(p.id));
+  if (added.length > limits.maxProbes)
+    reject(
+      'probe-limit-exceeded',
+      `${added.length} added probes exceeds the limit of ${limits.maxProbes}`,
+    );
+  if (probes.length > ABSOLUTE_MAX_PROBES)
+    reject('probe-limit-exceeded', `${probes.length} probes exceeds the absolute ceiling`);
+  const addedBytes = added.reduce((n, p) => n + targetBytes(p.target), 0);
+  const totalBytes = addedBytes + baselineBytes;
+  if (addedBytes > limits.maxTargetBytes)
     reject(
       'target-size-exceeded',
-      `targets total ${total} exceeds the limit of ${limits.maxTargetBytes}`,
+      `added targets total ${addedBytes} bytes, over ${limits.maxTargetBytes}`,
     );
-  }
+  if (totalBytes > ABSOLUTE_MAX_TARGET_BYTES)
+    reject('target-size-exceeded', 'targets exceed the absolute size ceiling');
 
   // Run targets and file paths.
-  for (const p of probes) {
-    if (p.type === 'run') {
-      const cmd = p.target.command;
-      if (
-        typeof cmd !== 'string' ||
-        !isSafeCommandString(cmd) ||
-        !limits.commandAllowlist.includes(cmd)
-      )
-        reject('run-target-not-allowed', `run probe ${p.id} names a non-allowlisted command`, p.id);
-    }
-    for (const f of p.target.files ?? []) {
-      if (!isSafeRelativePath(f.path)) {
-        reject('unsafe-path', `probe ${p.id} has an unsafe path`, p.id);
-      } else if (limits.repoRoot && escapesRoot(limits.repoRoot, f.path)) {
-        reject('unsafe-path', `probe ${p.id} path resolves outside the repository`, p.id);
-      }
-      if (f.startLine !== undefined && f.endLine !== undefined && f.endLine < f.startLine)
-        reject('unsafe-path', `probe ${p.id} has an inverted line range`, p.id);
-    }
-  }
+  for (const p of probes) rejections.push(...probeSafetyProblems(p, riskMap, limits));
 
   // Coverage: a high-risk hunk must be covered by a probe that is not an altered
   // or removed baseline probe. Probes that failed the baseline check do not count.

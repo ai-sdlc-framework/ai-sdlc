@@ -123,7 +123,9 @@ export type RejectionReason =
   | 'probe-limit-exceeded'
   | 'target-size-exceeded'
   | 'run-target-not-allowed'
-  | 'unsafe-path';
+  | 'unsafe-path'
+  | 'run-files-not-changed-tests'
+  | 'baseline-over-ceiling';
 
 export interface Rejection {
   reason: RejectionReason;
@@ -133,16 +135,22 @@ export interface Rejection {
 
 export interface PlanLimits {
   riskThreshold: number;
+  /**
+   * Cap on the probes the PLAN adds beyond the baseline. The baseline is
+   * mandatory and is not capped by this limit; it is bounded only by the
+   * absolute ceilings in `validate.ts`.
+   */
   maxProbes: number;
-  /** Total serialized size of every probe target, in characters. */
+  /** Cap, in bytes, on the serialized targets of the probes the plan adds beyond the baseline. */
   maxTargetBytes: number;
   /** Exact command strings a `run` probe may name. */
   commandAllowlist: readonly string[];
   /**
-   * When set, file targets are also checked against the real filesystem: a path
-   * that resolves (through symlinks) outside this root is rejected.
+   * Repository root. Required: file targets are checked against the real
+   * filesystem, and a path that resolves (through symlinks) outside this root,
+   * or whose root cannot be resolved, is rejected.
    */
-  repoRoot?: string;
+  repoRoot: string;
 }
 
 export type ValidatePlanResult = { valid: true } | { valid: false; rejections: Rejection[] };

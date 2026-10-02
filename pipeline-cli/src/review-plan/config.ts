@@ -67,7 +67,7 @@ export function defaultStagedReviewConfig(): StagedReviewConfig {
 
 /** Read the config text as committed on `baseRef`. Returns null on any failure. */
 export function readStagedConfigFromBaseRef(workDir: string, baseRef: string): string | null {
-  if (!baseRef || baseRef.startsWith('-') || /[\s\0]/.test(baseRef)) return null;
+  if (!baseRef || baseRef.startsWith('-') || /[\s\0:]/.test(baseRef)) return null;
   try {
     return execFileSync('git', ['show', `${baseRef}:${REVIEW_CONFIG_PATH}`], {
       cwd: workDir,
@@ -143,12 +143,12 @@ export function loadStagedReviewConfig(opts: LoadStagedConfigOpts = {}): StagedR
   return parseStagedReviewConfig(text);
 }
 
-export function toPlanLimits(config: StagedReviewConfig, repoRoot?: string): PlanLimits {
+export function toPlanLimits(config: StagedReviewConfig, repoRoot: string): PlanLimits {
   return {
     riskThreshold: config.riskThreshold,
     maxProbes: config.maxProbes,
     maxTargetBytes: config.maxTargetBytes,
     commandAllowlist: config.commandAllowlist,
-    ...(repoRoot ? { repoRoot } : {}),
+    repoRoot,
   };
 }
