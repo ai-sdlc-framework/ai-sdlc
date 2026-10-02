@@ -33,6 +33,7 @@ import {
   checkOrphanedVitestWorkers,
   parseEtimeSeconds,
   checkJudgmentLayer,
+  checkRuntimeGitignore,
   runDoctorChecks,
   runDoctorFixes,
   summarizeDoctorResults,
@@ -1052,6 +1053,50 @@ describe('checkJudgmentLayer', () => {
     );
     expect(rs[0].title).toMatch(/disabled/);
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('judgment-layer');
+  });
+});
+
+// ── checkRuntimeGitignore ───────────────────────────────────────────────
+
+describe('checkRuntimeGitignore', () => {
+  it('warns when .gitignore lacks the artifacts entry, and names the fix', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n.ai-sdlc/state/\n');
+    const r = checkRuntimeGitignore(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('.ai-sdlc/artifacts/');
+    expect(r.remediation).toContain('.ai-sdlc/artifacts/');
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true });
+  });
+
+  it('warns when there is no .gitignore at all', () => {
+    const r = checkRuntimeGitignore(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toMatch(/no \.gitignore found/);
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: false });
+  });
+
+  it('is quiet when the entry is present', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '# ai-sdlc:runtime-gitignore\n.ai-sdlc/artifacts/\n');
+    const r = checkRuntimeGitignore(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.remediation).toBeUndefined();
+  });
+
+  it.each(['.ai-sdlc/artifacts', '/.ai-sdlc/artifacts/', '  .ai-sdlc/artifacts/  '])(
+    'accepts the equivalent spelling %j',
+    (line) => {
+      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
+      expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('pass');
+    },
+  );
+
+  it('does not count a different directory or a comment as covering the entry', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '# .ai-sdlc/artifacts/\n.ai-sdlc/artifacts-old/\n');
+    expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
+  });
+
+  it('is registered in the check registry', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('runtime-gitignore');
   });
 });
 

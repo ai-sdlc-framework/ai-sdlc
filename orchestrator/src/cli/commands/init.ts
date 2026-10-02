@@ -36,6 +36,11 @@ import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './wo
 import { detectGitRemote, applyRemoteToPipelineYaml } from './git-remote.js';
 import { resolveVersions, formatVersionBlock } from '../versions.js';
 import {
+  RUNTIME_GITIGNORE_SENTINEL,
+  insertIntoSentinelBlock,
+  missingRuntimeGitignorePaths,
+} from '../../runtime-gitignore.js';
+import {
   applyFeatureSelection,
   buildProductionAdapters,
   ensureClaudeMdPointer,
@@ -378,19 +383,12 @@ export function scaffoldSoulDsbs(
   }
 }
 
-const GITIGNORE_PATHS = ['.ai-sdlc/state.db', '.ai-sdlc/state/', '.ai-sdlc/audit.jsonl'];
-
 /** Ensure .gitignore includes AI-SDLC runtime artifact entries. */
 function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = ''): void {
   const gitignorePath = join(projectDir, '.gitignore');
   const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
 
-  const SENTINEL = '# ai-sdlc:runtime-gitignore';
-  if (existing.includes(SENTINEL)) return;
-
-  const missing = GITIGNORE_PATHS.filter(
-    (entry) => !existing.split('\n').some((line) => line.trim() === entry),
-  );
+  const missing = missingRuntimeGitignorePaths(existing);
   if (missing.length === 0) return;
 
   if (dryRun) {
@@ -398,8 +396,17 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
     return;
   }
 
-  const block = (existing.length > 0 ? '\n' : '') + `${SENTINEL}\n` + missing.join('\n') + '\n';
-  appendFileSync(gitignorePath, block, 'utf-8');
+  if (existing.includes(RUNTIME_GITIGNORE_SENTINEL)) {
+    // An earlier init wrote the block: add the new entries under it, not a second block.
+    writeFileSync(gitignorePath, insertIntoSentinelBlock(existing, missing), 'utf-8');
+  } else {
+    const block =
+      (existing.length > 0 ? '\n' : '') +
+      `${RUNTIME_GITIGNORE_SENTINEL}\n` +
+      missing.join('\n') +
+      '\n';
+    appendFileSync(gitignorePath, block, 'utf-8');
+  }
   console.log(`${prefix}  updated .gitignore`);
 }
 
