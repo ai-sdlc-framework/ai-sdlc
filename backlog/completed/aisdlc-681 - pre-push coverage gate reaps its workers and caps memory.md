@@ -2,8 +2,9 @@
 id: AISDLC-681
 title: >-
   Pre-push coverage gate must reap its vitest workers on exit and cap concurrent test memory
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-beta
 created_date: '2026-10-02'
 labels:
   - ci

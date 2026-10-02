@@ -16,6 +16,7 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 - [Liveness detection and session reaper](#liveness-detection-and-session-reaper)
 - [Cancel back-channel](#cancel-back-channel)
 - [Cleanup](#cleanup)
+- [Pre-push gate resource use](#pre-push-gate-resource-use)
 - [Troubleshooting](#troubleshooting)
 - [Session file schema](#session-file-schema)
 - [Status definitions](#status-definitions)
@@ -478,6 +479,39 @@ After killing manually, archive the session files:
 mv .ai-sdlc/dispatch/sessions/aisdlc-462.session.json \
    .ai-sdlc/dispatch/sessions/archived/
 ```
+
+---
+
+## Pre-push gate resource use
+
+AISDLC-681. Parallel sessions all run the pre-push coverage gate
+(`scripts/check-coverage.sh`), and each gate run fans out vitest workers, so the
+gate is bounded on three axes:
+
+- **Reaping.** The build and the coverage run execute in their own process group
+  (`scripts/run-in-process-group.mjs`). When the hook ends (normally, by timeout, or
+  via SIGINT/SIGTERM/SIGHUP) that whole group is killed, so no vitest worker is left
+  with parent pid 1. Separately, every package's vitest config imports the shared
+  preset (`vitest.shared.mjs`): `pool: 'forks'`, and each worker exits when its parent
+  disappears (it polls the parent pid every 2 s). This protects any test run, including
+  subagent runs killed by a Bash-tool timeout, not only the gate. Neither is env-gated.
+- **Timeout.** `AI_SDLC_COVERAGE_TIMEOUT_SEC` (default `900`) is a hard wall-clock limit
+  per build and per coverage run. On expiry the group is killed and the gate FAILS with a
+  message naming the timeout; a timeout is never a pass.
+- **Worker ceiling.** Two variables, default `min(4, ncpu/2)` each:
+  `AI_SDLC_COVERAGE_MAX_WORKERS` sets the `--maxWorkers` the gate passes to the
+  coverage run; `AI_SDLC_VITEST_MAX_WORKERS` sets the default ceiling the shared
+  preset applies to every vitest run (local and CI). When both apply to a gate run,
+  the gate's explicit `--maxWorkers` wins.
+- **Lock.** Only one gate runs per repository at a time. The lock is the directory
+  `<main checkout>/.ai-sdlc/runtime/coverage-gate.lock` (the main checkout is resolved
+  from `git rev-parse --git-common-dir`, so sibling worktrees share it). A waiting push
+  prints the holder's pid, host, worktree, and start time. A lock is reclaimed when it is
+  older than the timeout, or when its holder pid is dead on the same host. A symlinked
+  lock path is refused. A push waits up to the timeout, then fails.
+
+`ai-sdlc doctor` (check `orphaned-vitest-workers`) warns about vitest processes with
+parent pid 1 older than two minutes and prints the `kill` command.
 
 ---
 
