@@ -127,7 +127,8 @@ export type RejectionReason =
   | 'run-files-not-changed-tests'
   | 'baseline-over-ceiling'
   | 'unsafe-query'
-  | 'duplicate-run-probe';
+  | 'duplicate-run-probe'
+  | 'critical-baseline-probe-lost';
 
 export interface Rejection {
   reason: RejectionReason;

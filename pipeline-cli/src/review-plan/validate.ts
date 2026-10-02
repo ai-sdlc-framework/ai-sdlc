@@ -8,7 +8,7 @@
  */
 
 import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { validateReviewPlan } from '@ai-sdlc/reference';
 import { isHighRisk } from './baseline.js';
 import { isSafeCommandString } from './config.js';
@@ -42,12 +42,18 @@ export function targetBytes(target: unknown): number {
   return Buffer.byteLength(canonical(target), 'utf8');
 }
 
+/** `.git`, case-insensitive, also after trailing dots and spaces are stripped (`.git.`, `.git `). */
+function isGitSegment(seg: string): boolean {
+  return seg.replace(/[. ]+$/, '').toLowerCase() === '.git';
+}
+
 /**
  * Lexical path check. The plan is never interpolated into a shell, so this
  * rejects only what is dangerous or ambiguous: NUL and control characters,
  * backslashes, absolute and drive-letter paths, a leading `-` or `~`, glob
  * wildcards `*` and `?`, empty, `.` or `..` segments, and any `.git` segment
- * (case-insensitive; `.github` and `foo.gitignore` are fine). Names such as
+ * (case-insensitive, trailing dots and spaces ignored; `.github` and `foo.gitignore` are
+ * fine), and invisible Unicode format characters. Names such as
  * `app/[id]/page.tsx` and `routes/$route.tsx` are legitimate.
  */
 export function isSafeRelativePath(p: string): boolean {
@@ -57,13 +63,15 @@ export function isSafeRelativePath(p: string): boolean {
   if (p.startsWith('/') || p.startsWith('-') || p.startsWith('~') || /^\s|\s$/.test(p))
     return false;
   if (/^[A-Za-z]:/.test(p) || isAbsolute(p)) return false;
+  // Zero-width and other invisible format characters hide what a name really is.
+  if (/\p{Cf}/u.test(p)) return false;
   return p
     .split('/')
-    .every((seg) => seg !== '' && seg !== '.' && seg !== '..' && seg.toLowerCase() !== '.git');
+    .every((seg) => seg !== '' && seg !== '.' && seg !== '..' && !isGitSegment(seg));
 }
 
 /**
- * True when `p` (already lexically safe) resolves outside the repository, or
+ * True when `p` (already lexically safe) resolves outside the repository or into `.git`, or
  * when that cannot be determined. Checks the deepest EXISTING ancestor, so a
  * symlinked parent with a missing leaf is still caught, and a dangling symlink
  * fails closed.
@@ -95,15 +103,13 @@ export function escapesRoot(repoRoot: string, p: string): boolean {
     return true;
   }
   const rel = relative(realRoot, resolve(real, ...rest));
-  return rel === '..' || rel.startsWith('../') || isAbsolute(rel);
+  if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return true;
+  // A committed symlink such as docs/g -> ../.git resolves inside the root but into git internals.
+  return rel.split(sep).some(isGitSegment);
 }
 
-/** Path, line-range and run-target problems for one probe. Shared with the fallback builder. */
-export function probeSafetyProblems(
-  p: Probe,
-  riskMap: RiskMapInput,
-  limits: PlanLimits,
-): Rejection[] {
+/** Command and query problems: those that make a whole probe unusable. */
+export function probeNonFileProblems(p: Probe, limits: PlanLimits): Rejection[] {
   const out: Rejection[] = [];
   const add = (reason: Rejection['reason'], detail: string): void => {
     out.push({ reason, detail, probeId: p.id });
@@ -116,29 +122,49 @@ export function probeSafetyProblems(
       !limits.commandAllowlist.includes(cmd)
     )
       add('run-target-not-allowed', `run probe ${p.id} names a non-allowlisted command`);
-    const tests = new Set(riskMap.changedTestFiles);
-    for (const f of p.target.files ?? [])
-      if (!tests.has(f.path))
-        add(
-          'run-files-not-changed-tests',
-          `run probe ${p.id} names a file that is not a changed test`,
-        );
   }
   // Queries are passed to executors after `--`; a leading '-' would read as an option.
   if (typeof p.target.query === 'string' && p.target.query.startsWith('-'))
     add('unsafe-query', `probe ${p.id} query starts with '-'`);
-  for (const f of p.target.files ?? []) {
-    if (!isSafeRelativePath(f.path)) add('unsafe-path', `probe ${p.id} has an unsafe path`);
-    else if (escapesRoot(limits.repoRoot, f.path))
-      add('unsafe-path', `probe ${p.id} path resolves outside the repository`);
-    if (f.startLine !== undefined && f.endLine !== undefined && f.endLine < f.startLine)
-      add('unsafe-path', `probe ${p.id} has an inverted line range`);
-  }
   return out;
 }
 
+/** Problems with a single file reference of probe `p`. Empty means the ref is usable. */
+export function fileRefProblems(
+  p: Probe,
+  f: { path: string; startLine?: number; endLine?: number },
+  riskMap: RiskMapInput,
+  limits: PlanLimits,
+): Rejection[] {
+  const out: Rejection[] = [];
+  const add = (reason: Rejection['reason'], detail: string): void => {
+    out.push({ reason, detail, probeId: p.id });
+  };
+  if (p.type === 'run' && !riskMap.changedTestFiles.includes(f.path))
+    add('run-files-not-changed-tests', `run probe ${p.id} names a file that is not a changed test`);
+  if (!isSafeRelativePath(f.path)) add('unsafe-path', `probe ${p.id} has an unsafe path`);
+  else if (escapesRoot(limits.repoRoot, f.path))
+    add('unsafe-path', `probe ${p.id} path resolves outside the repository or into .git`);
+  if (f.startLine !== undefined && f.endLine !== undefined && f.endLine < f.startLine)
+    add('unsafe-path', `probe ${p.id} has an inverted line range`);
+  return out;
+}
+
+/** Path, line-range and run-target problems for one probe. Used to validate whole plans. */
+export function probeSafetyProblems(
+  p: Probe,
+  riskMap: RiskMapInput,
+  limits: PlanLimits,
+): Rejection[] {
+  return [
+    ...probeNonFileProblems(p, limits),
+    ...(p.target.files ?? []).flatMap((f) => fileRefProblems(p, f, riskMap, limits)),
+  ];
+}
+
 function runKey(p: Probe): string {
-  const files = (p.target.files ?? []).map((f) => canonical(f)).sort();
+  // Paths only: line ranges, order and repeats do not make a run probe different.
+  const files = [...new Set((p.target.files ?? []).map((f) => f.path))].sort();
   return `${p.target.command ?? ''}\n${files.join('|')}`;
 }
 

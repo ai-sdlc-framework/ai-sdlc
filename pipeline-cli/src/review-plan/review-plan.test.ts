@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateReviewPlan } from '@ai-sdlc/reference';
@@ -164,6 +164,7 @@ describe('buildBaselineProbes', () => {
 });
 
 describe('validatePlan', () => {
+  const opts2 = { riskThreshold: 0.5, commandAllowlist: DEFAULT_COMMAND_ALLOWLIST };
   const full = (): ReviewPlan => planOf(clone(baseline().probes));
 
   it('accepts the baseline itself, reordered, with an added probe', () => {
@@ -423,6 +424,12 @@ describe('validatePlan', () => {
     // A symlinked parent with a missing leaf is still caught.
     p.probes[p.probes.length - 1]!.target = { files: [{ path: 'src/link/missing/deep.ts' }] };
     expect(reasons(p, { ...limits, repoRoot: root })).toContain('unsafe-path');
+    // A committed symlink into .git resolves inside the root but is refused.
+    mkdirSync(join(root, '.git'));
+    mkdirSync(join(root, 'docs'));
+    symlinkSync(join(root, '.git'), join(root, 'docs', 'g'));
+    p.probes[p.probes.length - 1]!.target = { files: [{ path: 'docs/g/config' }] };
+    expect(reasons(p, { ...limits, repoRoot: root })).toContain('unsafe-path');
     // A dangling symlink fails closed.
     symlinkSync('/nonexistent-target-xyz', join(root, 'dangling'));
     p.probes[p.probes.length - 1]!.target = { files: [{ path: 'dangling' }] };
@@ -489,7 +496,11 @@ describe('validatePlan', () => {
     for (const path of [
       'src/../other.ts',
       '.git/config',
+      '.git./config',
+      '.git /config',
       'sub/.git/hooks/x',
+      'a/b\u200bc.ts',
+      'a\u2060.ts',
       '.GIT/config',
       'a/.Git',
     ]) {
@@ -545,6 +556,45 @@ describe('validatePlan', () => {
     expect(reasons(p)).toEqual([]);
     p.probes.push(run('r2'));
     expect(reasons(p)).toEqual(['duplicate-run-probe']);
+    // Reordered files, a repeated entry and an added line range are all the same run.
+    const rm2: RiskMapInput = { ...riskMap, changedTestFiles: ['a.test.ts', 'b.test.ts'] };
+    const b2 = buildBaselineProbes(rm2, task, opts2);
+    const base2 = planOf(clone(b2.probes));
+    const rn = (
+      id: string,
+      files: Array<{ path: string; startLine?: number; endLine?: number }>,
+    ): Probe => ({
+      id,
+      type: 'run',
+      target: { command: 'pnpm lint', files },
+      question: 'q',
+      covers: [],
+    });
+    const check = (files: Array<{ path: string; startLine?: number; endLine?: number }>) => {
+      const plan = planOf([
+        ...clone(base2.probes),
+        rn('d1', [{ path: 'a.test.ts' }, { path: 'b.test.ts' }]),
+        rn('d2', files),
+      ]);
+      const r = validatePlan(plan, b2, rm2, limits);
+      return r.valid ? [] : r.rejections.map((x) => x.reason);
+    };
+    expect(check([{ path: 'b.test.ts' }, { path: 'a.test.ts' }])).toEqual(['duplicate-run-probe']);
+    expect(check([{ path: 'a.test.ts' }, { path: 'b.test.ts' }, { path: 'a.test.ts' }])).toEqual([
+      'duplicate-run-probe',
+    ]);
+    expect(check([{ path: 'a.test.ts', startLine: 1, endLine: 4 }, { path: 'b.test.ts' }])).toEqual(
+      ['duplicate-run-probe'],
+    );
+    expect(check([{ path: 'a.test.ts' }])).toEqual([]);
+    // The baseline test run with files in the opposite order is also a duplicate.
+    const swapped = planOf([
+      ...clone(base2.probes),
+      rn('d3', [{ path: 'b.test.ts' }, { path: 'a.test.ts' }]),
+    ]);
+    swapped.probes[swapped.probes.length - 1]!.target.command = 'pnpm test';
+    const sr = validatePlan(swapped, b2, rm2, limits);
+    expect(!sr.valid && sr.rejections.map((x) => x.reason)).toContain('duplicate-run-probe');
     // A copy of the baseline test run is also a duplicate.
     const q = full();
     const b = baseline().probes.find((x) => x.id === 'tests-run')!;
@@ -628,10 +678,86 @@ describe('buildFallbackPlan', () => {
       ...limits,
       commandAllowlist: ['pnpm lint'],
     });
-    // Dropping the run probe loses no hunk coverage, so the fallback stays usable.
-    expect(ok).toBe(true);
+    // The test run is a critical baseline probe, so losing it is not ok.
+    expect(ok).toBe(false);
+    expect(rejections.map((r) => r.reason)).toContain('critical-baseline-probe-lost');
     expect(plan.probes.some((p) => p.type === 'run')).toBe(false);
     expect(rejections.map((r) => r.reason)).toContain('run-target-not-allowed');
+  });
+
+  const lowRisk = (over: Record<string, unknown>) => ({
+    id: 'hs',
+    file: 'src/safe.ts',
+    fileClass: 'source' as const,
+    startLine: 1,
+    endLine: 3,
+    riskScore: 0.01,
+    judged: true,
+    flags: [] as never[],
+    ...over,
+  });
+  const opts = { riskThreshold: 0.5, commandAllowlist: DEFAULT_COMMAND_ALLOWLIST };
+
+  it('fails when a security-flagged low-risk hunk loses its probes to an unsafe path', () => {
+    const rm: RiskMapInput = {
+      ...riskMap,
+      hunks: [
+        lowRisk({ id: 'hs', file: '-evil.ts', flags: ['secrets'] }),
+        lowRisk({ id: 'hq', file: 'src/ok.ts' }),
+      ],
+      changedSourceFiles: [{ path: '-evil.ts', changedTests: [] }],
+    };
+    const b = buildBaselineProbes(rm, task, opts);
+    expect(b.probes.some((p) => p.id.startsWith('sec-'))).toBe(true);
+    const r = buildFallbackPlan(b, rm, limits);
+    expect(r.ok).toBe(false);
+    const lost = r.rejections.filter((x) => x.reason === 'critical-baseline-probe-lost');
+    expect(lost.some((x) => x.probeId?.startsWith('sec-'))).toBe(true);
+    expect(r.rejections.map((x) => x.reason)).toContain('uncovered-high-risk-hunk');
+    expect(r.plan.probes.some((p) => p.covers.includes('hs'))).toBe(false);
+  });
+
+  it('strips only the unsafe changed-test ref from tests-run and keeps the probe', () => {
+    const rm: RiskMapInput = {
+      ...riskMap,
+      changedTestFiles: ['src/auth.test.ts', '-bad.test.ts'],
+    };
+    const b = buildBaselineProbes(rm, task, opts);
+    const r = buildFallbackPlan(b, rm, limits);
+    const run = r.plan.probes.find((p) => p.id === 'tests-run');
+    expect(run?.target.files).toEqual([{ path: 'src/auth.test.ts' }]);
+    expect(r.rejections.some((x) => x.probeId === 'tests-run' && x.reason === 'unsafe-path')).toBe(
+      true,
+    );
+    expect(r.rejections.map((x) => x.reason)).not.toContain('critical-baseline-probe-lost');
+    expect(r.ok).toBe(true);
+  });
+
+  it('is not ok when every target of a critical probe is unsafe', () => {
+    const rm: RiskMapInput = { ...riskMap, changedTestFiles: ['-bad.test.ts'] };
+    const b = buildBaselineProbes(rm, task, opts);
+    const r = buildFallbackPlan(b, rm, limits);
+    expect(r.plan.probes.some((p) => p.id === 'tests-run')).toBe(false);
+    expect(r.ok).toBe(false);
+    expect(
+      r.rejections.some(
+        (x) => x.reason === 'critical-baseline-probe-lost' && x.probeId === 'tests-run',
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps a probe whose file refs are all stripped when another target remains', () => {
+    const rm: RiskMapInput = {
+      ...riskMap,
+      changedFiles: [...riskMap.changedFiles, '-odd.ts'],
+    };
+    const b = buildBaselineProbes(rm, task, opts);
+    const scope = b.probes.find((p) => p.id === 'scope-search')!;
+    expect(scope.target.files?.map((f) => f.path)).toContain('-odd.ts');
+    const r = buildFallbackPlan(b, rm, limits);
+    const kept = r.plan.probes.find((p) => p.id === 'scope-search');
+    expect(kept?.target.files).toEqual([{ path: 'other/x.ts' }]);
+    expect(r.ok).toBe(true);
   });
 
   it('reports a fallback over the absolute ceiling', () => {
@@ -816,6 +942,13 @@ describe('staged review config', () => {
       ...DEFAULT_COMMAND_ALLOWLIST,
     ]);
     expect(loadStagedReviewConfig({ workDir: dir, baseRef: '--output=/tmp/x' }).maxProbes).toBe(40);
+    // An option-like ref must never reach git: with the guard removed, git would write a file.
+    const out = mkdtempSync(join(tmpdir(), 'rp-out-'));
+    execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+    // Pre-create the directory git would write into so an unguarded call would succeed.
+    mkdirSync(join(out, 'pwned:.ai-sdlc'));
+    expect(readStagedConfigFromBaseRef(dir, `--output=${join(out, 'pwned')}`)).toBeNull();
+    expect(readdirSync(join(out, 'pwned:.ai-sdlc'))).toEqual([]);
     for (const ref of [':', ':.ai-sdlc/review-config.yaml', 'main:other', 'a b'])
       expect(readStagedConfigFromBaseRef(dir, ref)).toBeNull();
     expect(

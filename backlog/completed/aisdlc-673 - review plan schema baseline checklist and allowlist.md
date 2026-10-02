@@ -96,14 +96,16 @@ Review-plan schema registered with AJV, the baseline checklist as versioned code
 - **The fallback plan is held to the same path, symlink, run-target and ceiling checks**: unsafe probes are dropped and each drop is returned as a rejection, so a change cannot force the fallback to carry a bad path.
 - **`repoRoot` is required and the containment check walks to the deepest existing ancestor**: dangling symlinks and unresolvable roots fail closed. Run probes may name only changed test files. Base refs containing a colon are refused. A non-finite risk score counts as high risk.
 - **The fallback returns a discriminated `ok` result; `.git` path segments and queries starting with a dash are rejected; an added run probe may not duplicate another run probe.** The allowlist docs state that it pins the command string only, acceptable because the staged set is limited to trusted work.
+- **The fallback strips only unsafe file refs from a baseline probe and records each**: a probe that loses every target, or a security, scope, test or hunk-covering probe that is dropped, makes the result not ok. Security-flagged hunks need coverage like high-risk ones. Path checks also refuse `.git` variants, invisible format characters and symlinks into `.git`, and run-probe dedupe compares the set of paths only.
 - **The test-run probe is omitted when no changed test exists or the allowlist has no test command**: there is nothing legitimate to run.
 
 ## Verification
-- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 70 passed
+- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 74 passed
 - `pnpm --filter @ai-sdlc/reference exec vitest run` on the schema tests - 17 passed
 - `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on touched paths - clean
 
 ## Follow-up
 - conformance test in the risk-map task (AISDLC-672)
+- declined: restricting plan-added read and search paths to git-tracked files to avoid reading gitignored secrets; read containment and secret redaction of evidence belong to the executor (AISDLC-675) and v1 is limited to trusted work
 - declined: the baseline can emit probes over the schema's per-probe caps (200 files, 500 covers, startLine >= 1) for huge PRs or new or deleted files; this fails closed to the model-free fallback, and the staged set is limited to trusted work in v1
 <!-- SECTION:FINAL_SUMMARY:END -->
