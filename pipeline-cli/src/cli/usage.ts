@@ -61,7 +61,7 @@ export interface UsageCliDeps
   extends
     UsageViewDeps,
     Pick<ScorecardDeps, 'repoRoot' | 'artifactsDir' | 'assignmentLogPath'>,
-    Pick<RouteDeps, 'loadTable' | 'decisionsWorkDir' | 'env' | 'readBaseTable'>,
+    Pick<RouteDeps, 'loadTable' | 'decisionsWorkDir' | 'env' | 'readBaseTable' | 'afterPrecheck'>,
     Pick<ReplayDeps, 'git' | 'runner' | 'createSpawner' | 'tmpRoot' | 'handleSignals'> {
   fetch?: FetchFn;
   stdout?: (text: string) => void;
@@ -386,6 +386,7 @@ export function buildUsageCli(
       decisionsWorkDir: deps.decisionsWorkDir,
       env: deps.env,
       readBaseTable: deps.readBaseTable,
+      afterPrecheck: deps.afterPrecheck,
     },
     io,
   );

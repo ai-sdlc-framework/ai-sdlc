@@ -94,6 +94,10 @@ export interface CellEvaluation {
   proposed?: CandidateEvaluation;
 }
 
+function validThreshold(n: number | undefined): number | undefined {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 function attributable(sc: EvidenceScorecard): boolean {
   return sc.legacyRecords === 0 && sc.unavailableRecords === 0;
 }
@@ -108,15 +112,37 @@ function rowsFor(cell: CellRef, sc: EvidenceScorecard, model: string): Scorecard
   );
 }
 
-function aggregate(rows: readonly ScorecardRow[]): { tasks: number; approved: number } {
+export const MALFORMED_EVIDENCE_REASON =
+  'evidence is malformed (non-numeric or out-of-range counts)';
+
+function aggregate(rows: readonly ScorecardRow[]): {
+  tasks: number;
+  approved: number;
+  malformed: boolean;
+} {
   let tasks = 0;
   let approved = 0;
+  let malformed = false;
   for (const r of rows) {
     if (r.approved === null) continue;
+    if (!isCount(r.tasks) || !isCount(r.approved) || (r.approved as number) > (r.tasks as number)) {
+      malformed = true;
+      continue;
+    }
     tasks += r.tasks;
     approved += r.approved;
   }
-  return { tasks, approved };
+  return { tasks, approved, malformed };
+}
+
+/** A finite, non-negative integer. */
+function isCount(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 && Number.isInteger(n);
+}
+
+/** A finite rate within [0, 1]. */
+function isRate(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 }
 
 /** Both models priced, and the candidate strictly cheaper. */
@@ -139,6 +165,9 @@ function evaluateDeveloper(
   const cand = aggregate(rowsFor(cell, sc, candidate));
   const cur = aggregate(rowsFor(cell, sc, cell.model));
   const reasons: string[] = [];
+  if (cand.malformed || cur.malformed) {
+    return { qualifies: false, reasons: [MALFORMED_EVIDENCE_REASON] };
+  }
   if (cand.tasks < minTasks) {
     reasons.push(`${cand.tasks} compared tasks, ${minTasks} needed`);
   }
@@ -182,6 +211,20 @@ function evaluateReviewer(
     const cur = rows.find((r) => r.runId === runId && r.model === cell.model);
     if (!cand || !cur) continue;
     const reasons: string[] = [];
+    // Null rates mean "nothing to score"; anything else must be a real rate.
+    const rateOk = (n: unknown): boolean => n === null || isRate(n);
+    if (
+      !isCount(cand.reviews) ||
+      !isCount(cur.reviews) ||
+      !rateOk(cand.recall) ||
+      !rateOk(cand.falseBlockRate) ||
+      !rateOk(cur.recall) ||
+      !rateOk(cur.falseBlockRate)
+    ) {
+      const r = { qualifies: false, reasons: [MALFORMED_EVIDENCE_REASON] };
+      best ??= r;
+      continue;
+    }
     const items = Math.min(cand.reviews, cur.reviews);
     if (items < minTasks) reasons.push(`${items} replay items, ${minTasks} needed`);
     if (
@@ -236,8 +279,9 @@ export function evaluateCell(
   scorecard: EvidenceScorecard,
   config: EvaluateConfig,
 ): CellEvaluation {
-  const minTasks = config.minTasks ?? DEFAULT_MIN_TASKS;
-  const margin = config.marginPoints ?? DEFAULT_MARGIN_POINTS;
+  // A non-finite or negative threshold would make every comparison pass.
+  const minTasks = validThreshold(config.minTasks) ?? DEFAULT_MIN_TASKS;
+  const margin = validThreshold(config.marginPoints) ?? DEFAULT_MARGIN_POINTS;
   const isAttributable = attributable(scorecard);
   const candidates: CandidateEvaluation[] = [];
 

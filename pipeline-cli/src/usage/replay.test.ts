@@ -27,6 +27,7 @@ import { buildUsageCli } from '../cli/usage.js';
 import type { ProcessSpawner } from '../runtime/shell-claude-p-spawner.js';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 import { buildCorpus, labelRecords, readCorpus, type CorpusFile } from './replay-corpus.js';
+import { repoIdFor } from './repo-id.js';
 import {
   activeWorktreeCount,
   isOwnedByUser,
@@ -461,6 +462,9 @@ describe('replay', () => {
     expect(raw).not.toContain('MARKER-');
     expect(raw).not.toContain('You are the');
     expect(JSON.parse(raw).scores[0]).toMatchObject({ recall: 2 / 3, falseBlockRate: 0.5 });
+    // The results record the repository they were produced for.
+    expect(JSON.parse(raw).repoId).toBe(repoIdFor(repo));
+    expect(JSON.parse(raw).repoId).toMatch(/\S/);
   });
 
   it('also replays a reference model on the same items', async () => {

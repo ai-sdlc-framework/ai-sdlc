@@ -8,9 +8,10 @@
  * @module orchestrator/routing-proposal
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDecisionCatalogEnabled } from '../decisions/index.js';
+import { writeFileNoFollow } from '../usage/scorecard-sources.js';
 import { runRoutePropose, type ProposeResult, type RouteDeps } from '../usage/route-commands.js';
 
 /** Where the last-attempted week is kept, relative to the artifacts directory. */
@@ -59,7 +60,7 @@ export async function runWeeklyRoutingProposal(
     const statePath = join(opts.artifactsDir, ROUTING_PROPOSAL_STATE_RELATIVE);
     if (readLastWeek(statePath) === week) return 'skipped';
     mkdirSync(dirname(statePath), { recursive: true });
-    writeFileSync(statePath, `${JSON.stringify({ lastWeek: week, at: now.toISOString() })}\n`);
+    writeFileNoFollow(statePath, `${JSON.stringify({ lastWeek: week, at: now.toISOString() })}\n`);
     const deps: RouteDeps = {
       repoRoot: opts.workDir,
       workDir: opts.workDir,

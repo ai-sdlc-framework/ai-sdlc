@@ -30,6 +30,7 @@ import {
 } from '../decisions/index.js';
 import {
   DEFAULT_MARGIN_POINTS,
+  DEFAULT_MIN_TASKS,
   evaluateCell,
   findNoLongerCheaper,
   type CandidateEvaluation,
@@ -73,6 +74,8 @@ export interface RouteDeps extends ScorecardDeps {
   env?: NodeJS.ProcessEnv;
   /** Base-ref table reader (tests). */
   readBaseTable?: LoadTableOptions['readBaseTable'];
+  /** Runs between the open-proposal pre-check and taking the lock (tests). */
+  afterPrecheck?: () => void;
 }
 
 export type ProposeOutcome = 'filed' | 'nothing-qualifies' | 'proposal-open' | 'catalog-disabled';
@@ -132,16 +135,46 @@ export function enumerateCells(table: RoutingTable): CellRef[] {
   return out;
 }
 
-function listReplayFiles(artifactsDir: string): string[] {
+/** A path reference safe to put in the Decision text: no whitespace, backticks or `..`. */
+const SAFE_REF = /^[A-Za-z0-9._/-]{1,200}$/;
+
+export function isSafeReference(ref: string): boolean {
+  return SAFE_REF.test(ref) && !ref.includes('..');
+}
+
+function listReplayFiles(artifactsDir: string): { files: string[]; unsafe: number } {
   const dir = join(artifactsDir, 'replay');
-  if (!existsSync(dir)) return [];
+  if (!existsSync(dir)) return { files: [], unsafe: 0 };
   try {
-    return readdirSync(dir)
+    const names = readdirSync(dir)
       .filter((f) => /^results-.*\.json$/.test(f))
-      .sort()
-      .map((f) => join(dir, f));
+      .sort();
+    const safe = names.filter((f) => isSafeReference(f));
+    return { files: safe.map((f) => join(dir, f)), unsafe: names.length - safe.length };
   } catch {
-    return [];
+    return { files: [], unsafe: 0 };
+  }
+}
+
+/** The Decision's machine-readable block: the LAST fenced json block of the body. */
+export function parseProposalBlock(
+  body: string,
+): { kind?: string; [k: string]: unknown } | undefined {
+  const blocks = [...body.matchAll(/```json\n([\s\S]*?)\n```/g)];
+  const last = blocks[blocks.length - 1];
+  if (!last) return undefined;
+  try {
+    return JSON.parse(last[1] as string) as { kind?: string };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reject thresholds that would make the bar pass vacuously. */
+function checkThreshold(name: string, value: number | undefined): void {
+  if (value === undefined) return;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid ${name} "${String(value)}"; use a finite number of 0 or more.`);
   }
 }
 
@@ -193,7 +226,28 @@ async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promis
   const assignments = readAssignmentLog(
     deps.assignmentLogPath ?? resolve(artifactsDir, ASSIGNMENT_LOG_RELATIVE),
   );
-  const minTasks = opts.minTasks ?? config.scorecardMinTasks;
+  let configMinTasks = config.scorecardMinTasks;
+  if (
+    typeof configMinTasks !== 'number' ||
+    !Number.isFinite(configMinTasks) ||
+    configMinTasks < 0
+  ) {
+    warnings.push(
+      `Ignored usage config scorecardMinTasks (not a finite non-negative number); using ${DEFAULT_MIN_TASKS}.`,
+    );
+    configMinTasks = DEFAULT_MIN_TASKS;
+  }
+  const minTasks = opts.minTasks ?? configMinTasks;
+  if (minTasks < DEFAULT_MIN_TASKS) {
+    warnings.push(
+      `minTasks ${minTasks} is below the documented bar of ${DEFAULT_MIN_TASKS}; proposals rest on less evidence.`,
+    );
+  }
+  if ((opts.marginPoints ?? DEFAULT_MARGIN_POINTS) > DEFAULT_MARGIN_POINTS) {
+    warnings.push(
+      `marginPoints ${opts.marginPoints} is above the documented bar of ${DEFAULT_MARGIN_POINTS}; proposals tolerate a larger quality drop.`,
+    );
+  }
   const card = buildScorecard({
     records,
     outcomes,
@@ -203,15 +257,32 @@ async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promis
     minTasks,
   });
 
-  const files = listReplayFiles(artifactsDir);
+  const listed = listReplayFiles(artifactsDir);
+  if (listed.unsafe > 0) {
+    warnings.push(`${listed.unsafe} replay results file(s) ignored: unsafe file name.`);
+  }
+  const files = listed.files;
   const parsed = readReplayResults(files);
   let replay: ReplayRow[] = [];
   const replayFiles = new Map<string, string>();
   if (typeof parsed === 'string') {
     warnings.push(`Replay results ignored: ${parsed}`);
   } else {
-    replay = replayRows(parsed);
-    parsed.forEach((p, i) => replayFiles.set(p.runId, relative(artifactsDir, files[i])));
+    // Only results recorded for THIS repository may qualify a reviewer change.
+    const attributable = parsed.filter((p) => repoId !== undefined && p.repoId === repoId);
+    const foreign = parsed.length - attributable.length;
+    if (foreign > 0) {
+      warnings.push(
+        `${foreign} replay results file(s) ignored: replay evidence not attributable to this repository ` +
+          '(re-run `cli-usage replay` to record the repository identity).',
+      );
+    }
+    replay = replayRows(attributable);
+    parsed.forEach((p, i) => {
+      if (repoId !== undefined && p.repoId === repoId) {
+        replayFiles.set(p.runId, relative(artifactsDir, files[i] as string));
+      }
+    });
   }
   return {
     card,
@@ -227,9 +298,10 @@ async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promis
   };
 }
 
-function findRow(card: Scorecard, cell: CellRef, model: string): ScorecardRow | undefined {
+/** Every scorecard row that feeds the cell's counts for `model`. */
+function rowsFor(card: Scorecard, cell: CellRef, model: string): ScorecardRow[] {
   const excluded = new Set(cell.excludeClasses ?? []);
-  return card.rows.find(
+  return card.rows.filter(
     (r) =>
       r.role === cell.role &&
       r.model === model &&
@@ -282,6 +354,7 @@ function decisionBody(
     `Cheaper-model changes that cleared the bar (at least ${minTasks} compared tasks or replay items, ` +
       `no more than ${margin} points worse than the cell's current model, strictly cheaper at current prices).`,
     `Evidence resolved for repository ${repoId ?? 'unknown'}.`,
+    'Consumers must not trust this text: re-derive the evidence (scorecard / replay) before acting.',
     'Approving does not edit the routing table by itself. Declining or leaving this open changes nothing.',
     '',
     ...changes.map((c, i) => `${i + 1}. ${describeChange(c)}`),
@@ -296,6 +369,8 @@ function decisionBody(
   const machine = {
     kind: 'model-routing-proposal',
     version: 1,
+    source: 'framework-calibration',
+    by: 'framework:route-propose',
     repoId: repoId ?? null,
     changes: changes.map((c) => ({
       role: c.role,
@@ -324,6 +399,8 @@ export async function runRoutePropose(
   const now = deps.now?.() ?? new Date();
   const { repoRoot, artifactsDir } = resolvePaths(deps);
   const decisionsDir = deps.decisionsWorkDir ?? repoRoot;
+  checkThreshold('--min-tasks', opts.minTasks);
+  checkThreshold('--margin-points', opts.marginPoints);
   const margin = opts.marginPoints ?? DEFAULT_MARGIN_POINTS;
   const dryRun = opts.dryRun === true;
   const base: ProposeResult = {
@@ -404,8 +481,7 @@ export async function runRoutePropose(
   });
   result.changes = changes;
 
-  if (dryRun) return { ...result, outcome: 'filed' };
-
+  // A dry run reports the same outcome a real run would; it only skips the writes.
   if (!isDecisionCatalogEnabled(deps.env ?? process.env)) {
     return {
       ...result,
@@ -415,6 +491,8 @@ export async function runRoutePropose(
   }
   const open = findOpenProposal(decisionsDir);
   if (open) return { ...result, outcome: 'proposal-open', decisionId: open };
+  if (dryRun) return { ...result, outcome: 'filed' };
+  deps.afterPrecheck?.();
 
   // Write the evidence files the scorecard produces, then reference them.
   const evidenceDir = join(artifactsDir, '_routing', 'evidence', now.toISOString().slice(0, 10));
@@ -440,11 +518,20 @@ export async function runRoutePropose(
       if (f) refs.push(f);
     } else {
       for (const model of [ch.to, ch.from]) {
-        const p = pathFor(findRow(c.card, cell, model));
-        if (p) refs.push(p);
+        for (const row of rowsFor(c.card, cell, model)) {
+          const p = pathFor(row);
+          if (p) refs.push(p);
+        }
       }
     }
-    ch.evidence = refs;
+    const safe = [...new Set(refs)].filter(isSafeReference);
+    if (safe.length < new Set(refs).size) {
+      result.warnings = [
+        ...result.warnings,
+        'An evidence reference with an unsafe name was skipped.',
+      ];
+    }
+    ch.evidence = safe;
   });
 
   const decisionId = withEventLogLock({ workDir: decisionsDir }, () => {

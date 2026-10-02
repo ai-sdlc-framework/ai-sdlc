@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,5 +123,26 @@ describe('runWeeklyRoutingProposal', () => {
     writeFileSync(join(dir, ROUTING_PROPOSAL_STATE_RELATIVE), '{broken');
     await runWeeklyRoutingProposal({ ...base(), now: () => WED, run });
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runWeeklyRoutingProposal state file', () => {
+  it('does not follow a symlink at the state path', async () => {
+    const target = join(dir, 'victim.txt');
+    writeFileSync(target, 'keep');
+    const statePath = join(dir, ROUTING_PROPOSAL_STATE_RELATIVE);
+    mkdirSync(join(dir, '_routing'), { recursive: true });
+    symlinkSync(target, statePath);
+    const run = vi.fn(async (_d: RouteDeps) => RESULT);
+    await runWeeklyRoutingProposal({
+      workDir: dir,
+      artifactsDir: dir,
+      now: () => WED,
+      run,
+      env: {},
+    });
+    expect(readFileSync(target, 'utf8')).toBe('keep');
+    expect(lstatSync(statePath).isSymbolicLink()).toBe(false);
+    expect(JSON.parse(readFileSync(statePath, 'utf8')).lastWeek).toBe('2026-W40');
   });
 });

@@ -386,3 +386,82 @@ describe('findNoLongerCheaper', () => {
     ]);
   });
 });
+
+describe('evaluateCell malformed evidence', () => {
+  const rcell: CellRef = {
+    role: 'code-reviewer',
+    taskClass: '*',
+    model: 'sonnet',
+    candidates: ['haiku'],
+  };
+  const good = (model: string, over: Record<string, unknown> = {}): ReplayRow =>
+    ({
+      model,
+      role: 'code',
+      runId: 'x',
+      reviews: 40,
+      recall: 0.9,
+      falseBlockRate: 0.1,
+      ...over,
+    }) as unknown as ReplayRow;
+
+  it('does not qualify a reviewer candidate with missing or non-numeric scores', () => {
+    for (const bad of [
+      { reviews: undefined },
+      { recall: undefined },
+      { falseBlockRate: undefined },
+      { recall: Number.NaN },
+      { recall: 1.5 },
+      { reviews: 2.5 },
+      { reviews: -1 },
+      { falseBlockRate: '0.1' },
+    ]) {
+      const r = evaluateCell(rcell, card([]), {
+        weights,
+        replay: [good('sonnet'), good('haiku', bad)],
+      });
+      expect(r.proposed).toBeUndefined();
+      expect(r.candidates[0].reasons.join(' ')).toContain('malformed');
+    }
+    const r = evaluateCell(rcell, card([]), {
+      weights,
+      replay: [
+        { model: 'sonnet', role: 'code', runId: 'x' } as unknown as ReplayRow,
+        { model: 'haiku', role: 'code', runId: 'x' } as unknown as ReplayRow,
+      ],
+    });
+    expect(r.proposed).toBeUndefined();
+  });
+
+  it('does not qualify developer rows with non-finite counts', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -3]) {
+      const rows = [
+        row('developer', 'sonnet', 'chore', 100, 80),
+        row('developer', 'haiku', 'chore', bad, 40),
+      ];
+      expect(evaluateCell(cell, card(rows), { weights }).proposed).toBeUndefined();
+    }
+    const over = [
+      row('developer', 'sonnet', 'chore', 100, 80),
+      row('developer', 'haiku', 'chore', 40, 99),
+    ];
+    expect(evaluateCell(cell, card(over), { weights }).proposed).toBeUndefined();
+  });
+
+  it('falls back to the default thresholds when given invalid ones', () => {
+    const rows = [
+      row('developer', 'sonnet', 'chore', 100, 80),
+      row('developer', 'haiku', 'chore', 5, 4),
+    ];
+    for (const minTasks of [Number.NaN, -1]) {
+      expect(evaluateCell(cell, card(rows), { weights, minTasks }).proposed).toBeUndefined();
+    }
+    const margin = [
+      row('developer', 'sonnet', 'chore', 100, 100),
+      row('developer', 'haiku', 'chore', 100, 10),
+    ];
+    expect(
+      evaluateCell(cell, card(margin), { weights, marginPoints: Number.NaN }).proposed,
+    ).toBeUndefined();
+  });
+});

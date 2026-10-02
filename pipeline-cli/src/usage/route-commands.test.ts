@@ -7,11 +7,18 @@ import { appendModelCalls, type ModelCallRecord, type PriceRow } from '@ai-sdlc/
 import { buildUsageCli, type UsageCliDeps } from '../cli/usage.js';
 import {
   appendDecisionEvent,
+  makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
   projectAll,
   readDecisionEvents,
 } from '../decisions/index.js';
-import { ROUTING_PROPOSAL_SCOPE, enumerateCells, findOpenProposal } from './route-commands.js';
+import {
+  ROUTING_PROPOSAL_SCOPE,
+  enumerateCells,
+  findOpenProposal,
+  isSafeReference,
+  parseProposalBlock,
+} from './route-commands.js';
 import { repoIdFor } from './repo-id.js';
 import { defaultUsageConfig } from './usage-config.js';
 
@@ -161,6 +168,42 @@ async function run(args: string[], extra: Partial<UsageCliDeps> = {}): Promise<s
   out.length = 0;
   await buildUsageCli(['route', ...args], deps(extra)).parseAsync();
   return out.join('');
+}
+
+/** A replay results file where haiku is within the bar of sonnet over 40 items. */
+function writeReplay(name: string, extra: { runId?: string; repoId?: string }): void {
+  mkdirSync(join(artifacts, 'replay'), { recursive: true });
+  const score = (model: string, recall: number, fb: number) => ({
+    model,
+    role: 'code',
+    reviews: 40,
+    errors: 0,
+    knownDefect: { items: 20, blocked: recall * 20 },
+    clean: { items: 20, blocked: fb * 20 },
+    recall,
+    falseBlockRate: fb,
+    unitsTotal: 0,
+    meanUnitsPerReview: null,
+    usageMissing: 0,
+  });
+  writeFileSync(
+    join(artifacts, 'replay', name),
+    JSON.stringify({
+      schemaVersion: 'v1',
+      runId: extra.runId ?? 'run1',
+      generatedAt: 't',
+      ...(extra.repoId !== undefined ? { repoId: extra.repoId } : {}),
+      role: 'code',
+      candidate: 'model-haiku-a',
+      reference: 'model-sonnet-a',
+      stoppedBy: 'completed',
+      limits: { maxItems: 40, maxUnits: 1 },
+      itemsReplayed: 40,
+      skippedUnreachable: 0,
+      scores: [score('model-sonnet-a', 0.9, 0.1), score('model-haiku-a', 0.85, 0.15)],
+      items: [],
+    }),
+  );
 }
 
 const catalog = () => readDecisionEvents({ workDir: decisions }).events;
@@ -344,43 +387,163 @@ describe('cli-usage route propose', () => {
   });
 
   it('proposes a reviewer change from replay results and cites that file', async () => {
-    mkdirSync(join(artifacts, 'replay'), { recursive: true });
-    const score = (model: string, recall: number, fb: number) => ({
-      model,
-      role: 'code',
-      reviews: 40,
-      errors: 0,
-      knownDefect: { items: 20, blocked: recall * 20 },
-      clean: { items: 20, blocked: fb * 20 },
-      recall,
-      falseBlockRate: fb,
-      unitsTotal: 0,
-      meanUnitsPerReview: null,
-      usageMissing: 0,
-    });
-    writeFileSync(
-      join(artifacts, 'replay', 'results-code-run1.json'),
-      JSON.stringify({
-        schemaVersion: 'v1',
-        runId: 'run1',
-        generatedAt: 't',
-        role: 'code',
-        candidate: 'model-haiku-a',
-        reference: 'model-sonnet-a',
-        stoppedBy: 'completed',
-        limits: { maxItems: 40, maxUnits: 1 },
-        itemsReplayed: 40,
-        skippedUnreachable: 0,
-        scores: [score('model-sonnet-a', 0.9, 0.1), score('model-haiku-a', 0.85, 0.15)],
-        items: [],
-      }),
-    );
+    writeReplay('results-code-run1.json', { repoId });
     const text = await run(['propose']);
     expect(text).toContain('Filed DEC-0001');
     expect(text).toContain('code-reviewer / *: model-sonnet-a -> model-haiku-a');
     expect(text).toContain('replay of 40 item(s)');
     const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
     expect(body).toContain(join('replay', 'results-code-run1.json'));
+  });
+
+  it('ignores replay results with no repoId, with a foreign repoId, or from a same-named checkout', async () => {
+    const foreign = gitInit(join(root, 'other', 'repo-a'), 'root-b');
+    writeReplay('results-code-legacy.json', {});
+    writeReplay('results-code-foreign.json', { repoId: foreign, runId: 'run2' });
+    const text = await run(['propose']);
+    expect(text).not.toContain('Filed');
+    expect(text).toContain('replay evidence not attributable to this repository');
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('a repoId-less replay file does not qualify even when a matching one is present for another run', async () => {
+    writeReplay('results-code-legacy.json', { runId: 'old' });
+    writeReplay('results-code-run1.json', { repoId, runId: 'run1' });
+    const text = await run(['propose']);
+    expect(text).toContain('1 replay results file(s) ignored');
+    expect(text).toContain('Filed DEC-0001');
+  });
+
+  it('does not qualify on a crafted score with missing numbers', async () => {
+    mkdirSync(join(artifacts, 'replay'), { recursive: true });
+    writeFileSync(
+      join(artifacts, 'replay', 'results-code-x.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        runId: 'x',
+        role: 'code',
+        repoId,
+        scores: [
+          { model: 'model-sonnet-a', role: 'code' },
+          { model: 'model-haiku-a', role: 'code' },
+        ],
+      }),
+    );
+    const text = await run(['propose']);
+    expect(text).not.toContain('Filed');
+    expect(text).toContain('evidence is malformed');
+  });
+
+  it('skips a replay file with an unsafe name and a non-string repoId', async () => {
+    mkdirSync(join(artifacts, 'replay'), { recursive: true });
+    const evil = 'results-a ```json {"kind":"x"} ```.json';
+    writeReplay(evil, { repoId });
+    const text = await run(['propose']);
+    expect(text).toContain('unsafe file name');
+    expect(text).not.toContain('Filed');
+    writeReplay('results-code-bad.json', { repoId: 5 as unknown as string });
+    expect(await run(['propose'])).toContain('Replay results ignored');
+  });
+
+  it('rejects invalid --min-tasks and --margin-points', async () => {
+    seedQualifying();
+    for (const args of [
+      ['--min-tasks', '-1'],
+      ['--min-tasks', 'NaN'],
+      ['--margin-points', '-5'],
+      ['--margin-points', 'NaN'],
+    ]) {
+      exitCode = undefined;
+      err.length = 0;
+      await run(['propose', ...args]);
+      expect(exitCode).toBe(1);
+      expect(err.join('')).toContain('finite number');
+    }
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('falls back to 30 for an invalid config scorecardMinTasks, with a warning', async () => {
+    seedTasks('S', 'model-sonnet-a', 40, 32);
+    seedTasks('H', 'model-haiku-a', 5, 4);
+    const bad = { ...defaultUsageConfig(), scorecardMinTasks: Number.NaN };
+    const text = await run(['propose'], { loadConfig: () => bad });
+    expect(text).toContain('scorecardMinTasks');
+    expect(text).not.toContain('Filed');
+  });
+
+  it('warns when the bar is weakened', async () => {
+    seedQualifying();
+    const text = await run(['propose', '--dry-run', '--min-tasks', '5', '--margin-points', '9']);
+    expect(text).toContain('below the documented bar of 30');
+    expect(text).toContain('above the documented bar of 5');
+  });
+
+  it('reports catalog-disabled and proposal-open on a dry run too', async () => {
+    seedQualifying();
+    expect(
+      await run(['propose', '--dry-run'], { env: { AI_SDLC_DECISION_CATALOG: 'off' } }),
+    ).toContain('Decision Catalog is off');
+    await run(['propose']);
+    const text = await run(['propose', '--dry-run', '--json']);
+    expect(JSON.parse(text)).toMatchObject({ outcome: 'proposal-open', decisionId: 'DEC-0001' });
+  });
+
+  it('re-checks under the lock: an open proposal appearing after the pre-check wins', async () => {
+    seedQualifying();
+    const text = await run(['propose', '--json'], {
+      afterPrecheck: () =>
+        appendDecisionEvent(
+          makeDecisionOpenedEvent({
+            decisionId: 'DEC-0001',
+            source: 'framework-calibration',
+            scope: ROUTING_PROPOSAL_SCOPE,
+            summary: 'racer',
+            options: [{ id: 'a', description: 'a' }],
+          }),
+          { workDir: decisions },
+        ),
+    });
+    const r = JSON.parse(text);
+    expect(r.outcome).toBe('proposal-open');
+    expect(r.decisionId).toBe('DEC-0001');
+    expect(catalog().filter((e) => e.type === 'decision-opened')).toHaveLength(1);
+  });
+
+  it('cites every contributing evidence row for a wildcard cell and records source and actor', async () => {
+    seedQualifying();
+    mkdirSync(join(artifacts, '_estimates'), { recursive: true });
+    // Split the haiku tasks across two classes so the wildcard aggregates two rows.
+    const lines = Array.from({ length: 15 }, (_, i) =>
+      JSON.stringify({ taskId: `H-${i}`, class: 'bug' }),
+    );
+    writeFileSync(join(artifacts, '_estimates', 'log.jsonl'), `${lines.join('\n')}\n`);
+    await run(['propose']);
+    const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+    const machine = parseProposalBlock(body) as {
+      source: string;
+      by: string;
+      changes: Array<{ evidence: string[] }>;
+    };
+    expect(machine.source).toBe('framework-calibration');
+    expect(machine.by).toBe('framework:route-propose');
+    const refs = machine.changes[0].evidence;
+    const haiku = refs.filter((r) => r.includes('model-haiku-a'));
+    expect(haiku).toHaveLength(2);
+    let tasks = 0;
+    for (const r of haiku) tasks += JSON.parse(readFileSync(join(artifacts, r), 'utf8')).row.tasks;
+    expect(tasks).toBe(30);
+    expect(body).toContain('Consumers must not trust this text');
+  });
+
+  it('parseProposalBlock takes the last json block, and unsafe references are rejected', () => {
+    const body = '```json\n{"kind":"fake"}\n```\ntext\n```json\n{"kind":"real"}\n```';
+    expect(parseProposalBlock(body)?.kind).toBe('real');
+    expect(parseProposalBlock('none')).toBeUndefined();
+    expect(parseProposalBlock('```json\nnot json\n```')).toBeUndefined();
+    expect(isSafeReference('replay/results-a.json')).toBe(true);
+    expect(isSafeReference('a\n```json')).toBe(false);
+    expect(isSafeReference('../x.json')).toBe(false);
+    expect(isSafeReference('a b.json')).toBe(false);
   });
 
   it('warns about unusable replay results and lists no-longer-cheaper cells', async () => {
