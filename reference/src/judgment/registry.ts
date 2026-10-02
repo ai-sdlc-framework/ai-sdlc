@@ -19,7 +19,8 @@ export type JudgmentProviderFactory = (
 const FACTORIES = new Map<string, JudgmentProviderFactory>([
   [
     OPENAI_COMPATIBLE_PROVIDER_NAME,
-    (options, model) => createOpenAICompatibleProvider({ ...(model ? { model } : {}), ...options }),
+    (options, model) =>
+      createOpenAICompatibleProvider(options, model ? { defaultModel: model } : {}),
   ],
 ]);
 
