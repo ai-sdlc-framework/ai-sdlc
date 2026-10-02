@@ -14,6 +14,7 @@ dependencies: []
 references:
   - scripts/check-coverage.sh
   - .husky/pre-push
+  - pipeline-cli/vitest.config.ts
   - docs/operations/parallel-dispatch.md
 priority: high
 dispatchable: true
@@ -31,13 +32,22 @@ worker processes being killed. With five executor sessions pushing in the same w
 the live runs multiplied on top of the orphans. Recovery required killing the orphans
 by hand; a crash would have cost the whole day's session state.
 
-Two defects, both to fix here:
+Second occurrence one hour later: 20 more orphans (10.8 GB) from executor and
+reviewer subagent test runs, not the pre-push gate. Any vitest run whose parent is
+killed (Claude Code Bash tool timeout, Ctrl-C, session exit) leaves its worker pool
+alive, so the fix must sit in the test configuration itself, not only in the gate
+script.
+
+Three defects, all to fix here:
 
 1. **Workers outlive the gate.** The script starts pnpm in the foreground with no
    process-group handling and no `trap`. When the hook is killed (timeout, Ctrl-C,
    parent session exit) pnpm dies but the vitest worker pool is reparented to pid 1
    and keeps running to completion or forever.
-2. **No memory ceiling.** Each package's vitest run spawns a worker per CPU and the
+2. **Workers outlive any interrupted run** (second occurrence): the pool has no
+   parent-death handling of its own, so the gate fix alone would not cover subagent
+   runs.
+3. **No memory ceiling.** Each package's vitest run spawns a worker per CPU and the
    affected-package filter still runs the whole workspace for any cross-cutting
    change (a push that touches `reference/` is cross-cutting for most packages).
    Several concurrent pushes therefore run several full workspace suites at once.
@@ -50,6 +60,12 @@ Two defects, both to fix here:
   unchanged.
 
 ## Scope
+0. **Workers die with their parent, everywhere:** in one shared vitest preset imported by every package vitest.config.ts
+   set `pool: 'forks'` and a workspace-wide `maxWorkers` default of
+   `min(4, ncpu/2)`, and add a tiny global setup that, in each worker, exits when the
+   parent pid becomes 1 (poll `process.ppid` every 2 s) so no pool worker can outlive
+   the run that started it, regardless of how the parent died. This applies to every
+   package and to subagent runs, not only the gate.
 1. **Reaping:** run the coverage command in its own process group (`setsid` where
    available, else a `node` wrapper using `detached: true` plus `process.kill(-pgid)`)
    and install `trap` handlers for EXIT, INT, TERM and HUP that kill the whole group.
@@ -71,6 +87,7 @@ Two defects, both to fix here:
    paragraph with the env vars and the lock behaviour.
 
 ## Acceptance Criteria
+- [ ] Starting any package's vitest run and SIGKILLing its parent `pnpm`/`vitest` process leaves no worker alive after 5 seconds (test per the fixture harness); `pool: 'forks'` and the worker ceiling apply workspace-wide.
 - [ ] Killing the pre-push hook process with SIGTERM or SIGINT during the coverage run leaves no `vitest` process alive after 5 seconds (test spawns the script against a fixture package with a sleeping test).
 - [ ] A coverage run exceeding the timeout is killed as a group and the gate exits non-zero with the timeout named.
 - [ ] The vitest invocation carries the worker ceiling, defaulting to `min(4, ncpu/2)`, overridable by env.
