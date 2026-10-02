@@ -74,6 +74,18 @@ function runner(): FakeRunner {
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
     .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
     .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'))
+    .on(
+      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      ok('--- diff content ---\n'),
+    )
+    .on(
+      /^git -c core\.quotePath=false diff --numstat -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      ok('1\t0\ta.ts\0'),
+    )
+    .on(
+      /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      ok('a.ts\0'),
+    )
     .on(/^git push -u origin/, ok())
     .on(/^gh pr create/, ok('https://github.com/owner/repo/pull/42\n'));
 }

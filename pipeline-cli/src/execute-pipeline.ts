@@ -375,6 +375,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       sourceKind,
       reviewSourceKind,
       spawner: opts.spawner,
+      ...(opts.runner ? { runner: opts.runner } : {}),
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry
         ? { onDeveloperContractRetry: opts.onDeveloperContractRetry }
