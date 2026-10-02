@@ -30,6 +30,8 @@ import {
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
   checkUsageIngest,
+  checkOrphanedVitestWorkers,
+  parseEtimeSeconds,
   checkJudgmentLayer,
   runDoctorChecks,
   runDoctorFixes,
@@ -1164,5 +1166,55 @@ describe('renderFullDoctorReport', () => {
     const results = runDoctorChecks(makeCtx(makeAdapters()));
     const lines = renderFullDoctorReport(results);
     expect(lines.some((l) => l === 'Auditing: no plugin install detected')).toBe(true);
+  });
+});
+
+// ── checkOrphanedVitestWorkers (AISDLC-681) ─────────────────────────────
+
+describe('checkOrphanedVitestWorkers', () => {
+  const psOut = (lines: string[]) => ({ stdout: lines.join('\n') + '\n', exitCode: 0 });
+
+  it('parses ps etime formats', () => {
+    expect(parseEtimeSeconds('00:05')).toBe(5);
+    expect(parseEtimeSeconds('12:30')).toBe(750);
+    expect(parseEtimeSeconds('01:02:03')).toBe(3723);
+    expect(parseEtimeSeconds('2-00:00:01')).toBe(172801);
+    expect(parseEtimeSeconds('garbage')).toBeUndefined();
+  });
+
+  it('is quiet when there are no orphans', () => {
+    const adapters = makeAdapters({
+      runCommand: () =>
+        psOut([
+          '  100     1 10:00 /usr/bin/something else',
+          '  200   150 15:00 node (vitest 2)', // live parent
+          '  300     1 00:30 node (vitest 3)', // orphan but younger than 2 minutes
+        ]),
+    });
+    expect(checkOrphanedVitestWorkers(makeCtx(adapters))).toEqual([]);
+  });
+
+  it('warns on vitest workers with ppid 1 older than 2 minutes and prints the kill command', () => {
+    const adapters = makeAdapters({
+      runCommand: () =>
+        psOut([
+          '  400     1 12:00 node (vitest 1)',
+          '  401     1 03:00 node /x/node_modules/vitest/dist/workers/forks.js',
+          '  402     1 30:00 node server.js',
+        ]),
+    });
+    const [r, ...rest] = checkOrphanedVitestWorkers(makeCtx(adapters));
+    expect(rest).toEqual([]);
+    expect(r.severity).toBe('warn');
+    expect(r.remediation).toBe('Kill them: kill 400 401');
+  });
+
+  it('is quiet when ps fails', () => {
+    const adapters = makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) });
+    expect(checkOrphanedVitestWorkers(makeCtx(adapters))).toEqual([]);
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('orphaned-vitest-workers');
   });
 });

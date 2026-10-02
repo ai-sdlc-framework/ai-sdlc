@@ -888,6 +888,47 @@ export function checkUsageIngest(ctx: DoctorRunContext): DoctorCheckResult {
   };
 }
 
+// ── Orphaned vitest workers (AISDLC-681) ─────────────────────────────────
+
+/** Parse `ps` etime (`[[dd-]hh:]mm:ss`) to seconds; `undefined` if unparseable. */
+export function parseEtimeSeconds(etime: string): number | undefined {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim());
+  if (!m) return undefined;
+  const [, d, h, mi, se] = m;
+  return Number(d ?? 0) * 86400 + Number(h ?? 0) * 3600 + Number(mi) * 60 + Number(se);
+}
+
+const ORPHAN_MIN_AGE_SECONDS = 120;
+
+/**
+ * Warns on vitest pool workers whose parent is pid 1 (orphaned by a killed
+ * test run) older than two minutes, and prints the kill command. Returns NO
+ * result when there are none, so a healthy machine sees nothing.
+ */
+export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const ps = ctx.adapters.runCommand('ps', ['-axo', 'pid=,ppid=,etime=,command=']);
+  if (ps.exitCode !== 0) return [];
+  const orphans: number[] = [];
+  for (const line of ps.stdout.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const [, pid, ppid, etime, command] = m;
+    if (ppid !== '1' || !/\bvitest\b/.test(command)) continue;
+    const age = parseEtimeSeconds(etime);
+    if (age !== undefined && age > ORPHAN_MIN_AGE_SECONDS) orphans.push(Number(pid));
+  }
+  if (orphans.length === 0) return [];
+  return [
+    {
+      id: 'orphaned-vitest-workers',
+      severity: 'warn',
+      title: `${orphans.length} orphaned vitest worker process(es) (parent pid 1, older than 2 minutes)`,
+      remediation: `Kill them: kill ${orphans.join(' ')}`,
+      anonymizableEvidence: { orphanCount: orphans.length },
+    },
+  ];
+}
+
 // ── Judgment layer ──────────────────────────────────────────────────────
 
 /**
@@ -1052,6 +1093,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'usage-ingest',
     description: 'Time of the last successful usage ingest (RFC-0050).',
     run: checkUsageIngest,
+  },
+  {
+    id: 'orphaned-vitest-workers',
+    description:
+      'Orphaned vitest workers (parent pid 1, older than 2 minutes) left by killed test runs (AISDLC-681).',
+    run: checkOrphanedVitestWorkers,
   },
   {
     id: 'judgment-layer',
