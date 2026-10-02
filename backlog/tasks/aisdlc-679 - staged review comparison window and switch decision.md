@@ -13,7 +13,6 @@ dependencies:
   - AISDLC-677
 references:
   - spec/rfcs/RFC-0052-staged-review-pipeline.md
-  - spec/rfcs/RFC-0052-staged-review-pipeline.md
   - docs/operations/reviewer-dispatch-defaults.md
 priority: high
 dispatchable: false
@@ -26,7 +25,7 @@ dispatchableReason: "Operator-only: needs the live comparison window, judgment o
 Operator-run. The comparison window and the two decisions it feeds.
 
 ## Scope
-1. Enable `staged.shadow: true` on `main` (operator config PR) once AISDLC-677 ships.
+1. Enable `staged.shadow: true` on `main` (operator config PR, per RFC-0052) when the head-to-head shadow run from the preceding task is in place.
 2. Let the head-to-head run over at least 50 trusted PRs. Review every flagged case as
    it appears and record, per case, which side was right.
 3. Run `cli-usage replay --set staged` over the reviews-ledger corpus and record the
