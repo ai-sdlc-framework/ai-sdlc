@@ -2,8 +2,9 @@
 id: AISDLC-656.1
 title: >-
   RFC-0050 OQ-3 part 1: routing bar evaluation, cli-usage route propose, additive table fields and the weekly tick hook
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-alpha
 created_date: '2026-10-02'
 labels:
   - rfc-0050
@@ -71,12 +72,12 @@ automatic revert and strength-only overrides are AISDLC-656.3.
    new proposal is not filed while it is open.
 
 ## Acceptance Criteria
-- [ ] A candidate with 30 compared tasks and an approval rate 4 points below the current model qualifies; one with 29 tasks, or 6 points below, does not.
-- [ ] A reviewer candidate is judged on replay recall and false-block rate with the same margin and minimum count.
-- [ ] A candidate that is not cheaper than the current model at current prices is never proposed.
-- [ ] Evidence with legacy or repoId-unavailable records, or without those counts, never qualifies a candidate; replay evidence from another repoId is ignored.
-- [ ] `route propose` files exactly one Decision listing all qualifying cells, files none when nothing qualifies, and files none while a proposal Decision is open.
-- [ ] The tick runs the proposal once per calendar week and not again in the same week.
-- [ ] The additive table fields parse and are ignored by the resolver when absent.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] A candidate with 30 compared tasks and an approval rate 4 points below the current model qualifies; one with 29 tasks, or 6 points below, does not.
+- [x] A reviewer candidate is judged on replay recall and false-block rate with the same margin and minimum count.
+- [x] A candidate that is not cheaper than the current model at current prices is never proposed.
+- [x] Evidence with legacy or repoId-unavailable records, or without those counts, never qualifies a candidate; replay evidence from another repoId is ignored.
+- [x] `route propose` files exactly one Decision listing all qualifying cells, files none when nothing qualifies, and files none while a proposal Decision is open.
+- [x] The tick runs the proposal once per calendar week and not again in the same week.
+- [x] The additive table fields parse and are ignored by the resolver when absent.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
