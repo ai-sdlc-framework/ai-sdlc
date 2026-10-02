@@ -67,11 +67,11 @@ import {
   type LlmInvoker,
 } from '../classifier/substrate/index.js';
 
+import type { BaselineStageBOutput } from './baseline-brand.js';
 import type {
   Decision,
   OperatorAnsweredEvent,
   OverriddenEvent,
-  StageBOutput,
   StageCCompletedEvent,
   StageCOutput,
   StageCRecommendation,
@@ -126,10 +126,16 @@ export function resolveStageCThreshold(loaded: DecisionsConfig): number {
  * missing (no rubric ran yet) so callers can invoke it directly for
  * exploration / spot-checks.
  *
+ * Takes the BASELINE Stage B output only (a type boundary): the composite is not monotonic
+ * in review, so the band must be tested on the composite computed with no judged input.
+ *
  * Pass `forceFire: true` to bypass the band check (used by the CLI
  * `score-c --force` flag for operator spot-checks).
  */
-export function shouldFireStageC(stageB: StageBOutput | undefined, forceFire = false): boolean {
+export function shouldFireStageC(
+  stageB: BaselineStageBOutput | undefined,
+  forceFire = false,
+): boolean {
   if (forceFire) return true;
   if (!stageB) return true; // exploratory / spot-check path
   const c = stageB.compositeScore;
@@ -142,7 +148,7 @@ export interface RunStageCInput {
   /** The decision being evaluated. */
   decision: Decision;
   /** Stage B output. Optional — Stage C can be invoked standalone for spot-checks. */
-  stageB?: StageBOutput;
+  stageB?: BaselineStageBOutput;
   /** LLM invoker injected by the caller (mirrors substrate convention). */
   invoker?: LlmInvoker;
   /** Project root — passed to the substrate for config + corpus paths. */

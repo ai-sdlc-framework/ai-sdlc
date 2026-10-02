@@ -29,7 +29,7 @@ import {
   locDeltaSignal,
   reviewerIterationSignal,
 } from './signals.js';
-import type { SignalOutput, StageAResult } from './types.js';
+import type { SignalOutput, StageAResult, TaskClass } from './types.js';
 
 export interface StageAOptions {
   taskId: string;
@@ -56,6 +56,11 @@ export interface StageAOptions {
    * row from a previous run can't shadow the fresh classification.
    */
   skipClassCache?: boolean;
+  /**
+   * Class chosen by the judgment layer (`judgeTaskClass`, an `act` outcome only).
+   * Used after a frontmatter class and before the regex. Absent by default.
+   */
+  judgedClass?: TaskClass;
 }
 
 /**
@@ -84,26 +89,31 @@ export function runStageA(opts: StageAOptions): StageAResult {
   // pair. Phase 4+ swaps the underlying assigner for the real LLM with
   // zero changes here.
   const frontmatterClass = readFrontmatterClass(taskFilePath);
-  const cls = opts.skipClassCache
-    ? assignClass({ frontmatterClass, title: task.title })
-    : (() => {
-        const cached = assignClassCached({
-          taskId: task.id,
-          title: task.title,
-          description: task.description ?? '',
-          ...(frontmatterClass !== undefined ? { frontmatterClass } : {}),
-          ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
-        });
-        // The Stage A result type's `classSource` is the narrower
-        // assigner-side enum (`frontmatter | heuristic | default`).
-        // `llm` is reserved for Phase 4+ when the assigner gets swapped;
-        // it cannot appear in Phase 2 (the underlying assigner is still
-        // the heuristic). Narrow defensively in case the cache is
-        // pre-populated from a future-version assigner.
-        const source: 'frontmatter' | 'heuristic' | 'default' =
-          cached.source === 'llm' ? 'default' : cached.source;
-        return { taskClass: cached.taskClass, source };
-      })();
+  // A judged class bypasses the cache: the cache keys on the task text alone, so a
+  // heuristic verdict stored earlier would otherwise hide the judgment, and a judged
+  // class would outlive the layer being turned off.
+  const cls = opts.judgedClass
+    ? assignClass({ frontmatterClass, title: task.title, judgedClass: opts.judgedClass })
+    : opts.skipClassCache
+      ? assignClass({ frontmatterClass, title: task.title })
+      : (() => {
+          const cached = assignClassCached({
+            taskId: task.id,
+            title: task.title,
+            description: task.description ?? '',
+            ...(frontmatterClass !== undefined ? { frontmatterClass } : {}),
+            ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+          });
+          // The Stage A result type's `classSource` is the narrower
+          // assigner-side enum (`frontmatter | heuristic | default`).
+          // `llm` is reserved for Phase 4+ when the assigner gets swapped;
+          // it cannot appear in Phase 2 (the underlying assigner is still
+          // the heuristic). Narrow defensively in case the cache is
+          // pre-populated from a future-version assigner.
+          const source: 'frontmatter' | 'judgment' | 'heuristic' | 'default' =
+            cached.source === 'llm' ? 'default' : cached.source;
+          return { taskClass: cached.taskClass, source };
+        })();
 
   const references = task.references ?? [];
 
@@ -162,9 +172,9 @@ export function runStageA(opts: StageAOptions): StageAResult {
 /**
  * Read the `class:` field directly from the task's YAML frontmatter.
  * Returns `undefined` when the file is missing or the field is absent.
- * Kept private — exposed only via `runStageA`'s composite output.
+ * Exported for the judgment seam, which skips the model when a class is set.
  */
-function readFrontmatterClass(taskFilePath: string): string | undefined {
+export function readFrontmatterClass(taskFilePath: string): string | undefined {
   try {
     const raw = readFileSync(taskFilePath, 'utf8');
     const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);

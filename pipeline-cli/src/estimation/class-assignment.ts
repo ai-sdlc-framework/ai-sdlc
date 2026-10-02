@@ -9,14 +9,17 @@
  *     operator or a Phase 2+ LLM has already labelled the task, that
  *     value wins. This is the long-term steady state once Phase 2
  *     caches the LLM verdict into frontmatter.
- *  2. Fall back to a conventional-commit keyword heuristic on the
+ *  2. When the judgment layer is configured and acted, its class
+ *     (`judgedClass`) wins over the heuristic. Absent or abstaining,
+ *     step 3 runs as before.
+ *  3. Fall back to a conventional-commit keyword heuristic on the
  *     task title. The starter triad (`bug` / `feature` / `chore`)
  *     was chosen precisely because it overlaps with the
  *     conventional-commit prefixes most backlog titles already use
  *     (`feat:`, `fix:`, `chore:`, etc.) — so a keyword match
  *     correctly assigns the class in the dogfood corpus the operator
  *     has already accumulated.
- *  3. Fall back to `feature` (the most common class) as a final
+ *  4. Fall back to `feature` (the most common class) as a final
  *     default. NOT `uncategorized` — `uncategorized` is reserved for
  *     the Phase 2+ LLM confidence-gate path (< 0.70 confidence per
  *     §6.1) and ALSO excluded from calibration math; surfacing it
@@ -36,11 +39,16 @@ export interface AssignClassInput {
   frontmatterClass?: string | undefined;
   /** Task title — used for the keyword heuristic. */
   title: string;
+  /**
+   * The class the judgment layer chose (an `act` outcome only, see `judgeTaskClass`).
+   * Consulted after frontmatter and before the regex.
+   */
+  judgedClass?: TaskClass | undefined;
 }
 
 export interface AssignClassResult {
   taskClass: TaskClass;
-  source: 'frontmatter' | 'heuristic' | 'default';
+  source: 'frontmatter' | 'judgment' | 'heuristic' | 'default';
 }
 
 /**
@@ -84,13 +92,18 @@ export function assignClass(input: AssignClassInput): AssignClassResult {
     return { taskClass: fm as TaskClass, source: 'frontmatter' };
   }
 
-  // 2. Conventional-commit keyword heuristic on the title.
+  // 2. The judgment layer's answer, when it acted.
+  if (input.judgedClass && (TASK_CLASSES as readonly string[]).includes(input.judgedClass)) {
+    return { taskClass: input.judgedClass, source: 'judgment' };
+  }
+
+  // 3. Conventional-commit keyword heuristic on the title.
   for (const { class: cls, pattern } of HEURISTIC_PATTERNS) {
     if (pattern.test(input.title)) {
       return { taskClass: cls, source: 'heuristic' };
     }
   }
 
-  // 3. Default. NOT `uncategorized` — see module doc.
+  // 4. Default. NOT `uncategorized` — see module doc.
   return { taskClass: 'feature', source: 'default' };
 }

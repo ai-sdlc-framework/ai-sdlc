@@ -33,6 +33,8 @@ import {
   resolveStageCRuntimeConfig,
   resolveStageCThreshold,
   runStageA,
+  runBaselineStageA,
+  runBaselineStageB,
   runStageB,
   runStageC,
   shouldFireStageC,
@@ -41,9 +43,9 @@ import {
   STAGE_C_MID_BAND_LOW,
   type Decision,
   type DecisionOption,
-  type StageBOutput,
   type StageCOutput,
 } from './index.js';
+import { brandBaseline, type BaselineStageBOutput } from './baseline-brand.js';
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -84,8 +86,8 @@ function seedDecision(
   return d;
 }
 
-function makeStageBOutput(compositeScore: number): StageBOutput {
-  return {
+function makeStageBOutput(compositeScore: number): BaselineStageBOutput {
+  return brandBaseline({
     compositeScore,
     resolvedByStageB: false,
     rubricScores: {
@@ -123,7 +125,7 @@ function makeStageBOutput(compositeScore: number): StageBOutput {
       rationale: 'test',
       llmEligible: false,
     },
-  };
+  });
 }
 
 // ── Threshold resolution ─────────────────────────────────────────────────────
@@ -653,8 +655,8 @@ describe('end-to-end Stage A → B → C composition', () => {
     const decision = seedDecision('DEC-0041', 'irreversible high-confidence decision', {
       reversible: false,
     });
-    const stageA = runStageA({ decision, openDecisions: [], workDir: tmp });
-    const stageB = runStageB({ decision, stageA });
+    const stageA = runBaselineStageA({ decision, openDecisions: [], workDir: tmp });
+    const stageB = runBaselineStageB({ decision, stageA });
     const invoker = new FakeLlmInvoker({
       'decision-recommendation': {
         classification: 'opt-a',

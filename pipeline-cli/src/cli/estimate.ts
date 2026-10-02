@@ -27,6 +27,8 @@ import {
 } from '../estimation/feature-flag.js';
 import { captureEstimate } from '../estimation/log-writer.js';
 import { runStageA } from '../estimation/stage-a.js';
+import { judgeClassForTask } from '../estimation/judged-class.js';
+import { createJudgmentRunner } from '../judgment/runner.js';
 import type { SignalOutput, StageAResult, TaskClass } from '../estimation/types.js';
 import { TASK_CLASSES } from '../estimation/types.js';
 import { computeBiasStats, computeStageAVsStageBAccuracy } from '../estimation/bias.js';
@@ -246,7 +248,7 @@ export function buildEstimateCli(): Argv {
             describe:
               'Append the verdict to $ARTIFACTS_DIR/_estimates/log.jsonl (RFC-0016 Phase 2). Use --no-capture to preview without writing.',
           }),
-      (argv) => {
+      async (argv) => {
         if (!isEstimationEnabled()) {
           // Degrade-open per AC #5: print the disabled notice on
           // stderr (so JSON consumers still see a clean stdout) and
@@ -264,10 +266,15 @@ export function buildEstimateCli(): Argv {
         try {
           const workDir = String(argv.workdir);
           const taskId = String(argv['task-id']);
+          const judgedClass = await judgeClassForTask(
+            { taskId, workDir },
+            createJudgmentRunner({ workDir }),
+          );
           const result = runStageA({
             taskId,
             workDir,
             ...(argv.loc !== undefined ? { loc: Number(argv.loc) } : {}),
+            ...(judgedClass ? { judgedClass } : {}),
           });
           // RFC-0016 Phase 2 capture (AC #1) — append to log.jsonl
           // unless explicitly opted out with --no-capture. Best-effort:
@@ -423,7 +430,7 @@ export function buildEstimateCli(): Argv {
             type: 'string',
             describe: 'Actual bucket (XS/S/M/L/XL) — appended post-merge by the actuals collector.',
           }),
-      (argv) => {
+      async (argv) => {
         if (!isEstimationEnabled()) {
           process.stderr.write(estimationDisabledMessage() + '\n');
           emit({
@@ -441,7 +448,15 @@ export function buildEstimateCli(): Argv {
           const artifactsDir = resolveArtifactsDir(workDir);
 
           // Run Stage A to get signals + class.
-          const stageAResult = runStageA({ taskId, workDir });
+          const judgedClass = await judgeClassForTask(
+            { taskId, workDir },
+            createJudgmentRunner({ workDir }),
+          );
+          const stageAResult = runStageA({
+            taskId,
+            workDir,
+            ...(judgedClass ? { judgedClass } : {}),
+          });
 
           // Look up calibration state for the task class.
           const historicalActuals = queryHistoricalActuals({

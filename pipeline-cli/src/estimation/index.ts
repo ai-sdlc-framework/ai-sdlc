@@ -14,6 +14,7 @@
 export * from './types.js';
 export * from './feature-flag.js';
 export * from './class-assignment.js';
+export * from './judged-class.js';
 export * from './signals.js';
 export * from './aggregator.js';
 export { runStageA, type StageAOptions } from './stage-a.js';

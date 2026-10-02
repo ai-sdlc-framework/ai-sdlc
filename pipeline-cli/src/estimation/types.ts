@@ -135,11 +135,12 @@ export interface StageAResult {
   taskClass: TaskClass;
   /**
    * Where the class assignment came from. `frontmatter` = the task
-   * file's `class:` field was set. `heuristic` = the Phase 1 keyword
+   * file's `class:` field was set. `judgment` = the judgment layer
+   * acted. `heuristic` = the Phase 1 keyword
    * pattern picked it. `default` = neither matched, fell back to
    * `feature`.
    */
-  classSource: 'frontmatter' | 'heuristic' | 'default';
+  classSource: 'frontmatter' | 'judgment' | 'heuristic' | 'default';
   signals: SignalOutput[];
   /**
    * Single-bucket choice when confidence ≥ medium AND all voting

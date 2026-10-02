@@ -415,6 +415,12 @@ export interface StageAOutput {
   capacityCheck: { withinBudget: boolean; reason: string };
   /** 6. Reversibility — pattern-match against irreversible categories. */
   reversibility: 'reversible' | 'one-way' | 'unknown';
+  /**
+   * Present only when the judgment layer answered `reversible` for a decision the phrase
+   * list left `unknown`. Informational: `reversibility` stays `unknown`, because only an
+   * explicit field or the operator may let a decision be routed to the framework.
+   */
+  judgedReversibility?: 'reversible';
   /** 7. Duplicate detection — Levenshtein against open decisions. */
   duplicateDetection: StageADuplicateCheck;
   /** Composite priority signal [0,1]. Higher = more urgent. */
@@ -464,9 +470,9 @@ export interface StageBLlmConfidenceScore {
   rfcStatedPositionPresence: number;
   /** Completeness of the decision's evidence (body + option consequences). */
   evidenceCompleteness: number;
-  /** Novelty score — 0.5 (placeholder) until Phase 5. */
+  /** Novelty score — 0.5 unless the judgment layer supplied one. */
   novelty: number;
-  /** Exemplar-similarity score — 0.5 (placeholder) until Phase 5. */
+  /** Exemplar-similarity score — 0.5 unless the judgment layer supplied one. */
   exemplarSimilarity: number;
 }
 

@@ -38,6 +38,12 @@
  * @module decisions/stage-b
  */
 
+import {
+  brandBaseline,
+  type BaselineStageAOutput,
+  type BaselineStageBOutput,
+} from './baseline-brand.js';
+import { runBaselineStageA, runStageA, type StageAInput, type StageAJudgments } from './stage-a.js';
 import type {
   Decision,
   DecisionRouting,
@@ -187,19 +193,32 @@ export function scoreLoadBearing(
 // ── 2. LLM-confidence rubric ──────────────────────────────────────────────────
 
 /**
+ * The two signals the judgment layer can supply, each in [0,1]. Absent means the
+ * constant 0.5 for both.
+ */
+export interface LlmConfidenceSignals {
+  novelty: number;
+  exemplarSimilarity: number;
+}
+
+/**
  * Score the LLM-confidence rubric (§5.2 — deterministic subset only).
  *
  * Phase 3 implements 2/4 deterministic dimensions:
  *   rfcStatedPositionPresence (30%) — body mentions an RFC resolution/position
  *   evidenceCompleteness      (40%) — has body + options with consequences
  *
- * Phase 5 placeholders (both default to 0.5 — conservative mid-band):
+ * Judgment-layer signals (both default to 0.5 — conservative mid-band — and stay there
+ * when the layer is disabled or abstains):
  *   novelty           (15%) — degree of novelty vs exemplar history (LLM)
  *   exemplarSimilarity (15%) — similarity to labelled exemplars (LLM)
  *
- * AC#5 — No LLM calls: novelty and exemplarSimilarity are 0.5 until Phase 5.
+ * AC#5 — No LLM calls here: the caller passes the judged signals in, or neither is set.
  */
-export function scoreLlmConfidence(decision: Decision): StageBLlmConfidenceScore {
+export function scoreLlmConfidence(
+  decision: Decision,
+  signals?: LlmConfidenceSignals,
+): StageBLlmConfidenceScore {
   const bodyText = decision.spec.body ?? '';
 
   // RFC stated position: does the body reference an RFC resolution or stated position?
@@ -217,9 +236,10 @@ export function scoreLlmConfidence(decision: Decision): StageBLlmConfidenceScore
     totalOptions > 0 ? Math.min(optionsWithConsequences / totalOptions, 1.0) : 0;
   const evidenceCompleteness = (hasBody ? 0.5 : 0) + consequenceCoverage * 0.5;
 
-  // Phase 3 placeholders — conservative 0.5 (neither confident nor unconfident)
-  const novelty = 0.5;
-  const exemplarSimilarity = 0.5;
+  // Conservative 0.5 (neither confident nor unconfident) unless the judgment layer
+  // supplied both signals.
+  const novelty = signals?.novelty ?? 0.5;
+  const exemplarSimilarity = signals?.exemplarSimilarity ?? 0.5;
 
   const score =
     rfcStatedPositionPresence * 0.3 +
@@ -486,6 +506,11 @@ export interface StageBInput {
   pillarOwners?: PillarOwnerConfig;
   /** Optional current timestamp (tests). */
   now?: Date;
+  /**
+   * Novelty and exemplar-similarity from the judgment layer (`judgeStageBSignals`).
+   * Absent means both stay at the constant 0.5.
+   */
+  signals?: LlmConfidenceSignals;
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -516,7 +541,7 @@ export function runStageB(input: StageBInput): StageBOutput {
     decision.status?.deadline ?? null,
   );
 
-  const llmConfidence = scoreLlmConfidence(decision);
+  const llmConfidence = scoreLlmConfidence(decision, input.signals);
 
   const actorFit = scoreActorFit(stageA.blastRadius.affectedPillars, stageA.capacityCheck);
 
@@ -555,6 +580,87 @@ export function runStageB(input: StageBInput): StageBOutput {
     compositeScore,
     resolvedByStageB,
   };
+}
+
+// ── Baseline / judged boundary ───────────────────────────────────────────────
+
+/** Input for `runBaselineStageB`: no judged signals, and a Stage A that is itself baseline. */
+export interface BaselineStageBInput {
+  decision: Decision;
+  stageA: BaselineStageAOutput;
+  pillarOwners?: PillarOwnerConfig;
+  now?: Date;
+}
+
+/**
+ * Stage B from a baseline Stage A and with both Stage B signals at 0.5. This is the only
+ * way to obtain a `BaselineStageBOutput`, which every gate (the Stage C band test, Stage C
+ * auto-apply, the framework route) requires. A judged Stage A or judged signals do not
+ * type-check here.
+ */
+export function runBaselineStageB(input: BaselineStageBInput): BaselineStageBOutput {
+  // The type omits `signals`, but a non-literal object can still carry it: drop it at runtime.
+  const { signals: _signals, ...rest } = input as BaselineStageBInput & {
+    signals?: LlmConfidenceSignals;
+  };
+  void _signals;
+  return brandBaseline(runStageB(rest));
+}
+
+export interface StageBWithJudgmentInput {
+  decision: Decision;
+  /** Stage A inputs; the judged answers are passed separately so the baseline never sees them. */
+  stageAInput: Omit<StageAInput, 'judged'>;
+  judgedStageA?: StageAJudgments;
+  signals?: LlmConfidenceSignals;
+  pillarOwners?: PillarOwnerConfig;
+  now?: Date;
+}
+
+export interface StageBWithJudgmentResult {
+  /** Baseline Stage A. Gates read only this. */
+  gatingStageA: BaselineStageAOutput;
+  /** Baseline Stage B. The Stage C band, auto-apply and framework route read only this. */
+  gating: BaselineStageBOutput;
+  /**
+   * Composite computed with the judged answers. DISPLAY AND SCORING ONLY: never read by a
+   * gate. Equals `gating.compositeScore` when nothing was judged.
+   */
+  judgedCompositeScore: number;
+  /** The judged Stage B result, for display. Not accepted by any gate (no baseline brand). */
+  judged: StageBOutput;
+}
+
+/**
+ * Run the baseline Stage A/B that gates use, plus a judged run for display. The judged run
+ * is skipped (and `judgedCompositeScore` equals the baseline) when no judged input exists.
+ */
+export function runStageBWithJudgment(input: StageBWithJudgmentInput): StageBWithJudgmentResult {
+  const { decision, stageAInput, judgedStageA, signals, pillarOwners, now } = input;
+  const gatingStageA = runBaselineStageA(stageAInput);
+  const gating = runBaselineStageB({
+    decision,
+    stageA: gatingStageA,
+    ...(pillarOwners ? { pillarOwners } : {}),
+    ...(now ? { now } : {}),
+  });
+  if (!judgedStageA && !signals) {
+    return { gatingStageA, gating, judgedCompositeScore: gating.compositeScore, judged: gating };
+  }
+  const { judged: _carried, ...cleanAInput } = stageAInput as StageAInput;
+  void _carried;
+  const judgedA = runStageA({ ...cleanAInput, ...(judgedStageA ? { judged: judgedStageA } : {}) });
+  const judgedRun = runStageB({
+    decision,
+    stageA: judgedA,
+    ...(signals ? { signals } : {}),
+    ...(pillarOwners ? { pillarOwners } : {}),
+    ...(now ? { now } : {}),
+  });
+  // The route can never be judged: the framework route and llmEligible come from the
+  // baseline run, so the displayed judged result carries the baseline routing.
+  const judged: StageBOutput = { ...judgedRun, routing: gating.routing };
+  return { gatingStageA, gating, judgedCompositeScore: judged.compositeScore, judged };
 }
 
 // ── Event factory ─────────────────────────────────────────────────────────────

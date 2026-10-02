@@ -32,6 +32,7 @@ import type { DependencyGraph } from '../deps/dependency-graph.js';
 import { buildDependencyGraph, impact as graphImpact } from '../deps/dependency-graph.js';
 import { computeEffectivePriorities } from '../deps/effective-priority.js';
 
+import { brandBaseline, type BaselineStageAOutput } from './baseline-brand.js';
 import type {
   Decision,
   DecisionOption,
@@ -165,6 +166,22 @@ export interface StageAInput {
    * current usage). Used for capacity arithmetic. Defaults to all-zero.
    */
   todayUsage?: Partial<Record<string, number>>;
+  /**
+   * Judgment-layer answers gathered ahead of time by `judgeStageA`. Absent (the default)
+   * means every sub-check runs exactly as before. Each answer can only keep or add
+   * scrutiny; see the `apply*` helpers below.
+   */
+  judged?: StageAJudgments;
+}
+
+/** Judgment-layer answers for the three Stage A sub-checks that have one. */
+export interface StageAJudgments {
+  /** The judged reversibility for a decision with no explicit field. */
+  reversibility?: 'reversible' | 'one-way' | 'unknown';
+  /** Pillars the judgment found affected. */
+  pillars?: readonly string[];
+  /** A candidate the judgment declared the decision duplicates. */
+  duplicate?: { candidateId: string; similarity: number };
 }
 
 // ── Levenshtein + normalisation (§5.1 duplicate detection) ──────────────────
@@ -328,6 +345,16 @@ export function deriveAffectedPillars(decision: Decision): string[] {
 }
 
 /**
+ * Add the pillars the judgment found to the keyword result. Judged pillars are only ever
+ * added: the pillar set decides who must sign off (more than one pillar routes to the
+ * operator), so dropping a keyword pillar could mean less review.
+ */
+export function mergeJudgedPillars(keyword: string[], judged?: readonly string[]): string[] {
+  if (!judged || judged.length === 0) return keyword;
+  return [...new Set([...keyword, ...judged])].sort();
+}
+
+/**
  * 2. Blast radius — RFC-0014 dep-graph traversal (AC#2).
  *
  * Counts:
@@ -343,6 +370,7 @@ export function computeBlastRadius(
   decision: Decision,
   graph?: DependencyGraph,
   workDir?: string,
+  judgedPillars?: readonly string[],
 ): StageABlastRadius {
   const decisionId = decision.metadata.id;
 
@@ -387,7 +415,7 @@ export function computeBlastRadius(
   const rfcId = scopeToRfcId(decision.metadata.scope);
   if (rfcId) blockedRfcCount = 1;
 
-  const affectedPillars = deriveAffectedPillars(decision);
+  const affectedPillars = mergeJudgedPillars(deriveAffectedPillars(decision), judgedPillars);
 
   return { blockedTaskCount, blockedRfcCount, affectedPillars };
 }
@@ -494,6 +522,45 @@ export function assessReversibility(decision: Decision): 'reversible' | 'one-way
 
   // Can't determine without LLM — Stage B will handle.
   return 'unknown';
+}
+
+/**
+ * Combine the phrase-list result with a judged reversibility. Only a decision the phrase
+ * list left `unknown` is affected, and only in the direction of more scrutiny:
+ *
+ *   - `one-way` replaces `unknown` (a keyword `one-way` hit, and an explicit field, stand).
+ *   - `reversible` is recorded in `judgedReversibility` but the gating value stays
+ *     `unknown`: `reversible` is what lets Stage A and Stage B route a decision to the
+ *     framework to auto-decide, and a model answer must not grant that.
+ */
+export function applyJudgedReversibility(
+  keyword: 'reversible' | 'one-way' | 'unknown',
+  judged?: 'reversible' | 'one-way' | 'unknown',
+): { reversibility: 'reversible' | 'one-way' | 'unknown'; judgedReversibility?: 'reversible' } {
+  if (keyword !== 'unknown' || judged === undefined) return { reversibility: keyword };
+  if (judged === 'one-way') return { reversibility: 'one-way' };
+  if (judged === 'reversible') {
+    return { reversibility: 'unknown', judgedReversibility: 'reversible' };
+  }
+  return { reversibility: 'unknown' };
+}
+
+/**
+ * Combine the edit-distance duplicate check with a judged duplicate. A judged duplicate
+ * can flag a pair the edit distance missed; a duplicate the edit distance found is never
+ * cleared (a duplicate only removes a decision from the Stage A resolved set, so a flag is
+ * the stricter outcome).
+ */
+export function applyJudgedDuplicate(
+  keyword: StageADuplicateCheck,
+  judged?: { candidateId: string; similarity: number },
+): StageADuplicateCheck {
+  if (keyword.isDuplicate || !judged) return keyword;
+  return {
+    isDuplicate: true,
+    candidateId: judged.candidateId,
+    similarity: Math.round(judged.similarity * 1000) / 1000,
+  };
 }
 
 /**
@@ -678,7 +745,7 @@ export function runStageA(input: StageAInput): StageAOutput {
 
   const schemaValidity = checkSchemaValidity(decision);
 
-  const blastRadius = computeBlastRadius(decision, graph, input.workDir);
+  const blastRadius = computeBlastRadius(decision, graph, input.workDir, input.judged?.pillars);
 
   const referenceResolution = checkReferenceResolution(decision, graph, openDecisions);
 
@@ -686,9 +753,15 @@ export function runStageA(input: StageAInput): StageAOutput {
 
   const capacityCheck = checkCapacityArithmetic(decision, capacityConfig, todayUsage);
 
-  const reversibility = assessReversibility(decision);
+  const { reversibility, judgedReversibility } = applyJudgedReversibility(
+    assessReversibility(decision),
+    input.judged?.reversibility,
+  );
 
-  const duplicateDetection = detectDuplicates(decision, openDecisions);
+  const duplicateDetection = applyJudgedDuplicate(
+    detectDuplicates(decision, openDecisions),
+    input.judged?.duplicate,
+  );
 
   // ── RFC-0014 effective-priority uplift ────────────────────────────────────
 
@@ -735,11 +808,24 @@ export function runStageA(input: StageAInput): StageAOutput {
     decisionTreeDepth,
     capacityCheck,
     reversibility,
+    ...(judgedReversibility ? { judgedReversibility } : {}),
     duplicateDetection,
     prioritySignal,
     resolvedByStageA,
     routingActor,
   };
+}
+
+/**
+ * Stage A with NO judged input. This is the only way to obtain a `BaselineStageAOutput`,
+ * the type every gating read of Stage B accepts. The input type omits `judged`, so a
+ * judged answer cannot be passed in.
+ */
+export function runBaselineStageA(input: Omit<StageAInput, 'judged'>): BaselineStageAOutput {
+  // The type omits `judged`, but a non-literal object can still carry it: drop it at runtime.
+  const { judged: _judged, ...rest } = input as StageAInput;
+  void _judged;
+  return brandBaseline(runStageA(rest));
 }
 
 // ── Coverage metric (AC#6) ────────────────────────────────────────────────────
