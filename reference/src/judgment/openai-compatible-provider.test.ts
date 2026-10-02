@@ -49,15 +49,18 @@ type FetchMock = ReturnType<typeof vi.fn>;
 
 function make(fetchImpl: FetchMock, extra: Record<string, unknown> = {}) {
   const sleep = vi.fn(async (_ms: number) => undefined);
-  const provider = createOpenAICompatibleProvider({
-    baseUrl: BASE,
-    model: 'gpt-x',
-    apiKeyEnv: 'MY_KEY',
-    env: { MY_KEY: KEY },
-    fetchImpl: fetchImpl as unknown as typeof fetch,
-    sleep,
-    ...extra,
-  });
+  const {
+    env = { MY_KEY: KEY },
+    warn,
+    ...options
+  } = extra as {
+    env?: Record<string, string | undefined>;
+    warn?: (m: string) => void;
+  };
+  const provider = createOpenAICompatibleProvider(
+    { baseUrl: BASE, model: 'gpt-x', apiKeyEnv: 'MY_KEY', ...options },
+    { env, fetchImpl: fetchImpl as unknown as typeof fetch, sleep, ...(warn ? { warn } : {}) },
+  );
   return { provider, sleep };
 }
 
@@ -355,17 +358,11 @@ describe('openai-compatible provider: validation, availability, capabilities', (
     expect(d.maxStateTokens).toBe(8000);
     const o = make(never, {
       maxStateTokens: 100,
-      maxRequestTokens: 200,
-      maxChoiceOptions: 3,
-      maxScoreLevels: 4,
       inputCostPer1MTokens: 1.5,
       outputCostPer1MTokens: 2,
     }).provider.capabilities;
     expect(o).toMatchObject({
       maxStateTokens: 100,
-      maxRequestTokens: 200,
-      maxChoiceOptions: 3,
-      maxScoreLevels: 4,
       inputCostPer1MTokens: 1.5,
       outputCostPer1MTokens: 2,
     });
@@ -373,17 +370,22 @@ describe('openai-compatible provider: validation, availability, capabilities', (
 
   it('rejects malformed requests with validation before any call', async () => {
     const f = vi.fn();
-    const { provider } = make(f, { maxChoiceOptions: 2, maxScoreLevels: 2 });
+    const { provider } = make(f);
+    const manyOptions = Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`o${i}`, 'x']));
     const bad: JudgmentRequest[] = [
       { ...req, questions: {} },
       { ...req, questions: { c: { type: 'choice', instructions: 'x', options: { a: null } } } },
+      { ...req, questions: { c: { type: 'choice', instructions: 'x', options: manyOptions } } },
       {
         ...req,
         questions: {
-          c: { type: 'choice', instructions: 'x', options: { a: '1', b: '2', c: '3' } },
+          s: {
+            type: 'score',
+            instructions: 'x',
+            levels: Array.from({ length: 11 }, (_, i) => `l${i}`),
+          },
         },
       },
-      { ...req, questions: { s: { type: 'score', instructions: 'x', levels: ['a', 'b', 'c'] } } },
       { ...req, questions: { s: { type: 'bogus', instructions: 'x' } as never } },
     ];
     for (const r of bad) expect(await kindOf(provider.evaluate(r))).toBe('validation');
@@ -408,7 +410,7 @@ describe('openai-compatible provider: validation, availability, capabilities', (
     expect(noKey.available).toBe(false);
     expect(noKey.reason).toContain('MY_KEY');
     expect(
-      (await make(never, { env: {}, baseUrl: 'http://127.0.0.1:8080/v1' }).provider.isAvailable())
+      (await make(never, { env: {}, baseUrl: 'https://127.0.0.1:8080/v1' }).provider.isAvailable())
         .available,
     ).toBe(true);
     const id = await make(never).provider.getAccountId();
@@ -418,7 +420,7 @@ describe('openai-compatible provider: validation, availability, capabilities', (
   });
 
   it('uses defaults when options are absent', async () => {
-    const p = createOpenAICompatibleProvider();
+    const p = createOpenAICompatibleProvider({});
     expect(p.name).toBe('openai-compatible');
     expect(p.requires.envVar).toBe('');
     expect((await p.isAvailable()).available).toBe(false);
@@ -520,10 +522,175 @@ describe('openai-compatible provider: selection and runtime integration', () => 
     const { outcome } = await run('code-diff', provider, {});
     expect(outcome).toEqual({ kind: 'abstain', reason: 'egress-not-permitted' });
     expect(f).not.toHaveBeenCalled();
-    const lookalike = make(reply(), { baseUrl: 'http://localhost.evil.example/v1' }).provider;
+    const lookalike = make(reply(), { baseUrl: 'https://localhost.evil.example/v1' }).provider;
     expect((await run('code-diff', lookalike, {})).outcome).toEqual({
       kind: 'abstain',
       reason: 'egress-not-permitted',
     });
+  });
+});
+
+describe('openai-compatible provider: config hardening (AISDLC-633.1)', () => {
+  const noFetch = vi.fn(async () => completion(GOOD));
+  const build = (opts: unknown, warn?: (m: string) => void) =>
+    createOpenAICompatibleProvider(opts, {
+      fetchImpl: noFetch as unknown as typeof fetch,
+      env: { OPENAI_API_KEY: KEY },
+      ...(warn ? { warn } : {}),
+    });
+
+  it('rejects an unknown providerOptions key and names it in the disabled reason', async () => {
+    const bad = ['fetchImpl', 'env', 'sleep', 'maxRequestTokens', 'EXTRA'];
+    for (const key of bad) {
+      const p = build({ baseUrl: 'http://localhost:1/v1', model: 'm', [key]: 1 });
+      const a = await p.isAvailable();
+      expect(a.available).toBe(false);
+      expect(a.reason).toContain(`'${key}'`);
+      expect(await kindOf(p.evaluate(req))).toBe('validation');
+    }
+    expect(noFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects prototype-shaped keys from parsed JSON/YAML', async () => {
+    for (const key of ['__proto__', 'constructor', 'prototype']) {
+      const raw = JSON.parse(`{"baseUrl":"http://localhost:1/v1","model":"m","${key}":{"x":1}}`);
+      const a = await build(raw).isAvailable();
+      expect(a.available).toBe(false);
+      expect(a.reason).toContain(`'${key}'`);
+    }
+  });
+
+  it('rejects non-object options and registry config goes through the same validator', async () => {
+    expect((await build([]).isAvailable()).available).toBe(false);
+    const viaRegistry = resolveJudgmentProvider('openai-compatible', {
+      'openai-compatible': { baseUrl: 'http://localhost:1/v1', fetchImpl: 1 } as never,
+    });
+    const a = await viaRegistry!.isAvailable();
+    expect(a.available).toBe(false);
+    expect(a.reason).toContain("'fetchImpl'");
+  });
+
+  it('enforces https for non-loopback hosts and for any host when a key is set', async () => {
+    const ok = (o: Record<string, unknown>) => build({ model: 'm', ...o }).isAvailable();
+    expect((await ok({ baseUrl: 'http://example.com/v1' })).available).toBe(false);
+    expect((await ok({ baseUrl: 'http://localhost:11434/v1' })).available).toBe(true);
+    expect((await ok({ baseUrl: 'http://127.0.0.1:11434/v1' })).available).toBe(true);
+    expect((await ok({ baseUrl: 'http://[::1]:11434/v1' })).available).toBe(true);
+    const keyed = await ok({ baseUrl: 'http://localhost:11434/v1', apiKeyEnv: 'OPENAI_API_KEY' });
+    expect(keyed.available).toBe(false);
+    expect(keyed.reason).toContain('https');
+    expect(
+      (await ok({ baseUrl: 'https://api.example.com/v1', apiKeyEnv: 'OPENAI_API_KEY' })).available,
+    ).toBe(true);
+  });
+
+  it('parses baseUrl strictly', async () => {
+    const bad = [
+      'http://localhost@evil.com/v1',
+      'https://user:pw@api.example.com/v1',
+      'http://localhost.evil.com/v1',
+      'http://127.0.0.1.evil.com/v1',
+      'ftp://localhost/v1',
+      'file:///etc/passwd',
+      'not a url',
+      'localhost:11434/v1',
+    ];
+    for (const baseUrl of bad) {
+      expect((await build({ baseUrl, model: 'm' }).isAvailable()).available).toBe(false);
+    }
+  });
+
+  it('rejects denylisted apiKeyEnv names and invalid identifiers, accepts provider keys', async () => {
+    const base = { baseUrl: 'https://api.example.com/v1', model: 'm' };
+    const denied = [
+      'GITHUB_TOKEN',
+      'NPM_TOKEN',
+      'AI_SDLC_PAT',
+      'ANTHROPIC_API_KEY',
+      'TYPESAFE_API_KEY',
+      'AWS_SECRET_ACCESS_KEY',
+      'SIGNING_PRIVATE_KEY',
+      'github_token',
+      'my_private_key',
+      'BAD NAME',
+      '1KEY',
+      'A-B',
+      '__proto__',
+    ];
+    for (const apiKeyEnv of denied) {
+      const a = await build({ ...base, apiKeyEnv }).isAvailable();
+      expect(a.available, apiKeyEnv).toBe(false);
+      expect(a.reason).toContain('apiKeyEnv');
+    }
+    for (const apiKeyEnv of ['OPENAI_API_KEY', 'LOCAL_LLM_KEY']) {
+      const p = createOpenAICompatibleProvider(
+        { ...base, apiKeyEnv },
+        { env: { [apiKeyEnv]: KEY } },
+      );
+      expect((await p.isAvailable()).available).toBe(true);
+    }
+  });
+
+  it('clamps maxRetries above the cap and logs a warning', async () => {
+    const warn = vi.fn();
+    const f = vi.fn(async () => status(503));
+    const sleep = vi.fn(async () => undefined);
+    const p = createOpenAICompatibleProvider(
+      { baseUrl: BASE, model: 'm', maxRetries: 50 },
+      { fetchImpl: f as unknown as typeof fetch, sleep, warn },
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxRetries'));
+    expect(await kindOf(p.evaluate(req))).toBe('overloaded');
+    expect(f).toHaveBeenCalledTimes(6); // 1 attempt + 5 retries
+  });
+
+  it('defaults maxRetries to 2 and warns on an above-cap maxResponseBytes', () => {
+    const warn = vi.fn();
+    build({ baseUrl: BASE, model: 'm', maxResponseBytes: 999_999_999 }, warn);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxResponseBytes'));
+    const quiet = vi.fn();
+    build({ baseUrl: BASE, model: 'm', maxRetries: 5, maxResponseBytes: 1024 }, quiet);
+    expect(quiet).not.toHaveBeenCalled();
+  });
+
+  it('aborts an oversized body with bad-response while streaming', async () => {
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(400));
+        if (pulled > 100) controller.close();
+      },
+    });
+    const f = vi.fn(async () => new Response(stream, { status: 200 }));
+    const p = createOpenAICompatibleProvider(
+      { baseUrl: BASE, model: 'm', maxResponseBytes: 1000 },
+      { fetchImpl: f as unknown as typeof fetch },
+    );
+    expect(await kindOf(p.evaluate(req))).toBe('bad-response');
+    expect(pulled).toBeLessThan(10);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects early on an oversized content-length', async () => {
+    const f = vi.fn(
+      async () =>
+        new Response('{}', { status: 200, headers: { 'content-length': String(5_000_000) } }),
+    );
+    const p = createOpenAICompatibleProvider(
+      { baseUrl: BASE, model: 'm' },
+      { fetchImpl: f as unknown as typeof fetch },
+    );
+    expect(await kindOf(p.evaluate(req))).toBe('bad-response');
+  });
+
+  it('accepts a response under the cap', async () => {
+    const f = vi.fn(async () => completion(GOOD));
+    const p = createOpenAICompatibleProvider(
+      { baseUrl: BASE, model: 'm' },
+      { fetchImpl: f as unknown as typeof fetch },
+    );
+    const res = await p.evaluate(req);
+    expect(res.answers.dept).toBeDefined();
   });
 });

@@ -24,30 +24,71 @@ const CHAT_PATH = '/chat/completions';
 const BACKOFF_BASE_MS = 500;
 const MAX_RETRY_AFTER_MS = 60_000;
 
+/** The only keys `providerOptions.openai-compatible` accepts. Anything else disables the provider. */
+export const OPENAI_COMPATIBLE_ALLOWED_OPTION_KEYS = [
+  'baseUrl',
+  'model',
+  'apiKeyEnv',
+  'timeoutMs',
+  'maxRetries',
+  'maxResponseBytes',
+  'maxStateTokens',
+  'inputCostPer1MTokens',
+  'outputCostPer1MTokens',
+] as const;
+
+export const DEFAULT_MAX_RETRIES = 2;
+export const MAX_RETRIES_CAP = 5;
+export const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
+export const MAX_RESPONSE_BYTES_CAP = 8 * 1024 * 1024;
+
+/** Secret-bearing env var names that are never provider keys. Compared upper-cased. */
+const API_KEY_ENV_DENYLIST = new Set([
+  'GITHUB_TOKEN',
+  'NPM_TOKEN',
+  'AI_SDLC_PAT',
+  'ANTHROPIC_API_KEY',
+  'TYPESAFE_API_KEY',
+  'AWS_SECRET_ACCESS_KEY',
+]);
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Configuration surface: exactly the allowlisted keys, nothing injectable. */
 export interface OpenAICompatibleProviderOptions {
   /** Endpoint base, e.g. `http://localhost:11434/v1`. Required for the provider to be available. */
   baseUrl?: string;
   /** Model id sent to the endpoint. */
   model?: string;
-  /** Name of the env var holding the API key. Optional for local endpoints. */
+  /** Name of the env var holding the API key. Optional for local endpoints; requires https. */
   apiKeyEnv?: string;
   /** Per-attempt timeout in ms. Default 10000. */
   timeoutMs?: number;
-  /** Retries after the first attempt on 429/5xx. Default 2. */
+  /** Retries after the first attempt on 429/5xx. Default 2, max 5. */
   maxRetries?: number;
+  /** Maximum response body size in bytes. Default 1 MiB, max 8 MiB. */
+  maxResponseBytes?: number;
   maxStateTokens?: number;
-  maxRequestTokens?: number;
-  maxChoiceOptions?: number;
-  maxScoreLevels?: number;
   inputCostPer1MTokens?: number;
   outputCostPer1MTokens?: number;
+}
+
+/** Test/host seams. Never reachable from config. */
+export interface OpenAICompatibleProviderDeps {
   /** Injectable fetch; tests never touch the network. */
   fetchImpl?: typeof fetch;
   /** Injectable sleep used for backoff. */
   sleep?: (ms: number) => Promise<void>;
   /** Injectable environment for the key lookup. Defaults to `process.env`. */
   env?: Record<string, string | undefined>;
+  /** Model used when the options carry none (the config's top-level `spec.model`). */
+  defaultModel?: string;
+  /** Warning sink for clamped values. Defaults to `console.warn`. */
+  warn?: (message: string) => void;
 }
+
+export type OpenAICompatibleOptionsValidation =
+  | { ok: true; options: OpenAICompatibleProviderOptions; warnings: string[] }
+  | { ok: false; errors: string[] };
 
 interface RawResult {
   status: number;
@@ -65,6 +106,7 @@ const posInt = (v: unknown, fallback: number): number =>
 const nonNeg = (v: unknown): number => (isFiniteNumber(v) && v >= 0 ? v : 0);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
+/** Same predicate as `isLoopbackUrl` in evaluate.ts (localhost, ::1, 127.0.0.0/8). */
 function isLoopbackHost(url: string): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -76,15 +118,177 @@ function isLoopbackHost(url: string): boolean {
   }
 }
 
+/** Own-property read so inherited / prototype-polluted values never leak in. */
+const own = (o: Record<string, unknown>, k: string): unknown =>
+  Object.hasOwn(o, k) ? o[k] : undefined;
+
+/** Strict baseUrl check. Returns an error string or undefined. */
+function baseUrlProblem(raw: string, hasKey: boolean): string | undefined {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return 'baseUrl is not a parseable URL';
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    return 'baseUrl must use http or https';
+  }
+  if (u.username || u.password || raw.includes('@') || raw.includes('\\')) {
+    return 'baseUrl must not contain credentials or userinfo';
+  }
+  if (u.protocol === 'http:') {
+    if (hasKey) return 'baseUrl must use https when apiKeyEnv is set';
+    if (!isLoopbackHost(raw)) return 'baseUrl must use https for a non-loopback host';
+  }
+  return undefined;
+}
+
+/**
+ * Validate raw parsed `providerOptions.openai-compatible` BEFORE any defaulting.
+ * The single validator shared by the registry factory and direct construction.
+ */
+export function validateOpenAICompatibleOptions(raw: unknown): OpenAICompatibleOptionsValidation {
+  if (raw === undefined) return { ok: true, options: {}, warnings: [] };
+  if (!isRecord(raw)) return { ok: false, errors: ['providerOptions must be an object'] };
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const allowed = new Set<string>(OPENAI_COMPATIBLE_ALLOWED_OPTION_KEYS);
+  for (const k of Reflect.ownKeys(raw)) {
+    const name = typeof k === 'symbol' ? k.toString() : k;
+    if (!allowed.has(name)) errors.push(`unknown providerOptions key '${name}'`);
+  }
+
+  const baseUrl = own(raw, 'baseUrl');
+  const apiKeyEnv = own(raw, 'apiKeyEnv');
+  if (baseUrl !== undefined && typeof baseUrl !== 'string') errors.push('baseUrl must be a string');
+  if (apiKeyEnv !== undefined && typeof apiKeyEnv !== 'string') {
+    errors.push('apiKeyEnv must be a string');
+  }
+  if (typeof apiKeyEnv === 'string' && apiKeyEnv) {
+    if (!ENV_NAME_RE.test(apiKeyEnv)) {
+      errors.push('apiKeyEnv is not a valid environment variable name');
+    } else {
+      const norm = apiKeyEnv.toUpperCase();
+      if (norm === '__PROTO__' || API_KEY_ENV_DENYLIST.has(norm) || norm.endsWith('_PRIVATE_KEY')) {
+        errors.push(`apiKeyEnv '${apiKeyEnv}' is a denylisted secret name`);
+      }
+    }
+  }
+  if (typeof baseUrl === 'string' && baseUrl) {
+    const problem = baseUrlProblem(baseUrl, typeof apiKeyEnv === 'string' && apiKeyEnv !== '');
+    if (problem) errors.push(problem);
+  }
+  if (errors.length > 0) return { ok: false, errors };
+
+  const options: OpenAICompatibleProviderOptions = {};
+  for (const k of OPENAI_COMPATIBLE_ALLOWED_OPTION_KEYS) {
+    const v = own(raw, k);
+    if (v !== undefined) (options as Record<string, unknown>)[k] = v;
+  }
+  if (isFiniteNumber(options.maxRetries) && options.maxRetries > MAX_RETRIES_CAP) {
+    warnings.push(
+      `maxRetries ${options.maxRetries} exceeds the cap; clamped to ${MAX_RETRIES_CAP}`,
+    );
+    options.maxRetries = MAX_RETRIES_CAP;
+  }
+  if (
+    isFiniteNumber(options.maxResponseBytes) &&
+    options.maxResponseBytes > MAX_RESPONSE_BYTES_CAP
+  ) {
+    warnings.push(
+      `maxResponseBytes ${options.maxResponseBytes} exceeds the cap; clamped to ${MAX_RESPONSE_BYTES_CAP}`,
+    );
+    options.maxResponseBytes = MAX_RESPONSE_BYTES_CAP;
+  }
+  return { ok: true, options, warnings };
+}
+
+/** A provider that is permanently unavailable, carrying the reason (shown by doctor). */
+function createDisabledProvider(reason: string): JudgmentProvider {
+  const fail = (): never => {
+    throw new JudgmentProviderError('validation', reason);
+  };
+  return {
+    name: OPENAI_COMPATIBLE_PROVIDER_NAME,
+    modelId: '',
+    capabilities: {
+      maxStateTokens: 8000,
+      maxRequestTokens: 16000,
+      maxChoiceOptions: 50,
+      maxScoreLevels: 10,
+      billingModel: 'pay-per-token',
+      inputCostPer1MTokens: 0,
+      outputCostPer1MTokens: 0,
+      calibratedProbabilities: false,
+    },
+    requires: { envVar: '' },
+    async isAvailable() {
+      return { available: false, reason };
+    },
+    async getAccountId() {
+      return null;
+    },
+    evaluate: async () => fail(),
+  };
+}
+
+/** Read a response body without ever holding more than `cap` bytes; abort on overflow. */
+async function readCapped(
+  res: Response,
+  cap: number,
+  controller: AbortController,
+): Promise<string> {
+  const tooBig = (): JudgmentProviderError => {
+    controller.abort();
+    return new JudgmentProviderError('bad-response', `Response exceeded maxResponseBytes (${cap})`);
+  };
+  const declared = res.headers?.get?.('content-length');
+  if (declared && /^\d+$/.test(declared) && Number(declared) > cap) {
+    void res.body?.cancel?.().catch(() => undefined);
+    throw tooBig();
+  }
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    const text = await res.text();
+    if (Buffer.byteLength(text, 'utf8') > cap) throw tooBig();
+    return text;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > cap) {
+      void reader.cancel().catch(() => undefined);
+      throw tooBig();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 export function createOpenAICompatibleProvider(
-  opts: OpenAICompatibleProviderOptions = {},
+  rawOpts: unknown = {},
+  deps: OpenAICompatibleProviderDeps = {},
 ): JudgmentProvider {
+  const validation = validateOpenAICompatibleOptions(rawOpts);
+  if (!validation.ok) {
+    return createDisabledProvider(`invalid providerOptions: ${validation.errors.join('; ')}`);
+  }
+  const opts = validation.options;
+  const warn = deps.warn ?? ((m: string) => console.warn(`[judgment] openai-compatible: ${m}`));
+  for (const w of validation.warnings) warn(w);
   const timeoutMs = posInt(opts.timeoutMs, 10_000);
-  const maxRetries = isFiniteNumber(opts.maxRetries) && opts.maxRetries >= 0 ? opts.maxRetries : 2;
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  const sleep = opts.sleep ?? defaultSleep;
-  const env = opts.env ?? process.env;
-  const model = str(opts.model) ?? '';
+  const maxRetries =
+    isFiniteNumber(opts.maxRetries) && opts.maxRetries >= 0
+      ? Math.floor(opts.maxRetries)
+      : DEFAULT_MAX_RETRIES;
+  const maxResponseBytes = posInt(opts.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES);
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const sleep = deps.sleep ?? defaultSleep;
+  const env = deps.env ?? process.env;
+  const model = str(opts.model) ?? str(deps.defaultModel) ?? '';
   const apiKeyEnv = str(opts.apiKeyEnv);
 
   // Strip trailing slashes with a linear scan (a `/\/+$/` regex is quadratic on long runs).
@@ -93,16 +297,17 @@ export function createOpenAICompatibleProvider(
 
   const capabilities: JudgmentCapabilities = {
     maxStateTokens: posInt(opts.maxStateTokens, 8000),
-    maxRequestTokens: posInt(opts.maxRequestTokens, 16000),
-    maxChoiceOptions: posInt(opts.maxChoiceOptions, 50),
-    maxScoreLevels: posInt(opts.maxScoreLevels, 10),
+    maxRequestTokens: 16000,
+    maxChoiceOptions: 50,
+    maxScoreLevels: 10,
     billingModel: 'pay-per-token',
     inputCostPer1MTokens: nonNeg(opts.inputCostPer1MTokens),
     outputCostPer1MTokens: nonNeg(opts.outputCostPer1MTokens),
     calibratedProbabilities: false,
   };
 
-  const getKey = (): string | undefined => (apiKeyEnv ? env[apiKeyEnv] || undefined : undefined);
+  const getKey = (): string | undefined =>
+    apiKeyEnv && Object.hasOwn(env, apiKeyEnv) ? env[apiKeyEnv] || undefined : undefined;
 
   /** Strip the key from any text that may end up in an error. */
   const redact = (text: string, key: string | undefined): string =>
@@ -131,7 +336,7 @@ export function createOpenAICompatibleProvider(
       return {
         status: res.status,
         retryAfter: res.headers?.get?.('retry-after') ?? null,
-        text: await res.text(),
+        text: await readCapped(res, maxResponseBytes, controller),
       };
     })();
     work.catch(() => undefined); // a late rejection after the timeout won must not be unhandled

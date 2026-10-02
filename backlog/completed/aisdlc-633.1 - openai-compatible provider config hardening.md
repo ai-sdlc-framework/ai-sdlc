@@ -2,7 +2,7 @@
 id: AISDLC-633.1
 title: >-
   RFC-0049 follow-up: harden openai-compatible providerOptions (key allowlist, https, secret-name denylist, caps)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
