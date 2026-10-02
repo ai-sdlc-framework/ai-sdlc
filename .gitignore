@@ -127,6 +127,9 @@ build/
 orchestrator/.gitignore
 .worktrees/
 
+# AISDLC-681: pre-push coverage gate lock (machine-local runtime state in the main checkout)
+.ai-sdlc/runtime/
+
 # AISDLC-557: orchestrator gate-failure backoff state (runtime, per-machine)
 .ai-sdlc/dispatch/gate-failure-count
 
