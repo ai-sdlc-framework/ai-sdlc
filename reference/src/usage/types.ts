@@ -49,6 +49,8 @@ export interface ModelCallRecord {
   repo?: string;
   /** Framework scope only. Normalized origin URL joined with the root commit hash; absent on older records. */
   repoId?: string;
+  /** Framework scope only. True when repoId could not be computed at ingest; such records are never matched by name. */
+  repoIdUnavailable?: true;
   /** Framework scope only. */
   taskId?: string;
   /**

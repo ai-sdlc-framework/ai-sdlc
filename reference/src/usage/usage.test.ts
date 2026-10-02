@@ -121,6 +121,27 @@ describe('validateModelCallRecord', () => {
     expect(validateModelCallRecord(rec('bad\nid')).valid).toBe(false);
     expect(validateModelCallRecord({ ...rec('x'), tokens: { input: -1 } }).valid).toBe(false);
   });
+
+  it('accepts a well-formed repoId and rejects malformed ones', () => {
+    const h = 'a'.repeat(40);
+    for (const good of [`github.com/o/r#${h}`, `local#${h}`, `h.example/my_org/r%2B1#${h}`]) {
+      expect(validateModelCallRecord(rec('g', { repoId: good })).valid).toBe(true);
+    }
+    for (const bad of [
+      'github.com/o/r',
+      `a b#${h}`,
+      `h/r#${'z'.repeat(40)}`,
+      `h/r#${'a'.repeat(10)}`,
+    ]) {
+      expect(validateModelCallRecord(rec('b', { repoId: bad })).valid).toBe(false);
+    }
+  });
+
+  it('accepts the repoIdUnavailable marker only as true', () => {
+    expect(validateModelCallRecord(rec('u', { repoIdUnavailable: true })).valid).toBe(true);
+    const bad = { ...rec('u2'), repoIdUnavailable: false };
+    expect(validateModelCallRecord(bad).valid).toBe(false);
+  });
 });
 
 describe('appendModelCalls', () => {
@@ -202,6 +223,26 @@ describe('appendModelCalls', () => {
     expect(line.repo).toBeUndefined();
     expect(line.taskId).toBeUndefined();
     expect(line.source).toBeUndefined();
+  });
+
+  it('strips repoId and repoIdUnavailable for scope other', () => {
+    const id = `h.example/r#${'a'.repeat(40)}`;
+    appendModelCalls(
+      [
+        rec('o1', { scope: 'other', repoId: id }),
+        rec('o2', { scope: 'other', repoIdUnavailable: true }),
+      ],
+      { dir },
+    );
+    const lines = readFileSync(join(dir, 'ledger-2026-09.jsonl'), 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as ModelCallRecord);
+    expect(lines).toHaveLength(2);
+    for (const l of lines) {
+      expect(l.repoId).toBeUndefined();
+      expect(l.repoIdUnavailable).toBeUndefined();
+    }
   });
 
   it('keeps every line intact with ten concurrent processes appending', async () => {

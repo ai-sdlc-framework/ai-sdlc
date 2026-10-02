@@ -5451,9 +5451,15 @@ export const modelCallRecordV1Schema = {
     repoId: {
       type: 'string',
       maxLength: 300,
-      pattern: '^[A-Za-z0-9._~:/-]+#[0-9a-f]{40,64}$',
+      pattern: '^[A-Za-z0-9._~:/%-]+#[0-9a-f]{40,64}$',
       description:
         'Stable repository identity: normalized origin remote URL (no credentials) joined with the root commit hash; framework scope only. Absent on records that predate it.',
+    },
+    repoIdUnavailable: {
+      type: 'boolean',
+      const: true,
+      description:
+        'Positive marker: repoId could not be computed at ingest (no commits, unreadable git directory, git failure). Such records are never matched by directory name; framework scope only.',
     },
     taskId: { type: 'string', description: 'Task id; framework scope only.' },
     breakdownMissing: {

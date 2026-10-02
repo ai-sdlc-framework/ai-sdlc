@@ -143,11 +143,17 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
         unitsNote: describeWeights(weights),
         repoId: repoId ?? null,
         legacyRecords: selection.legacy,
+        unavailableRecords: selection.unavailable,
       };
 
       if (argv.format === 'json') {
         const json = JSON.parse(renderScorecardJson(card)) as Record<string, unknown>;
-        const withRepo = { repoId: card.repoId, legacyRecords: card.legacyRecords, ...json };
+        const withRepo = {
+          repoId: card.repoId,
+          legacyRecords: card.legacyRecords,
+          unavailableRecords: card.unavailableRecords,
+          ...json,
+        };
         io.out(`${JSON.stringify(replay.length ? { ...withRepo, replay } : withRepo, null, 2)}\n`);
       } else if (argv.format === 'csv') {
         io.out(renderScorecardCsv(card));
@@ -164,6 +170,7 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
           repo,
           ...(repoId ? { repoId } : {}),
           legacyRecords: selection.legacy,
+          unavailableRecords: selection.unavailable,
           generatedAt: now.toISOString(),
         });
         io.err(`Wrote ${paths.length} evidence file(s) to ${resolve(argv['write-evidence'])}.\n`);

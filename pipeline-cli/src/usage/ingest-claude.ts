@@ -300,6 +300,7 @@ function buildRecord(
     ...base,
     repo: framework.repo,
     ...(framework.repoId ? { repoId: framework.repoId } : {}),
+    ...(framework.repoIdUnavailable ? { repoIdUnavailable: true as const } : {}),
     ...(taskId ? { taskId } : {}),
     source: { file: file.path, offset: lineStart },
   };

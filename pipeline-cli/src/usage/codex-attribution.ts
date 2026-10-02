@@ -14,6 +14,7 @@ export interface CodexAttribution {
   scope: 'framework' | 'other';
   repo?: string;
   repoId?: string;
+  repoIdUnavailable?: true;
   taskId?: string;
 }
 
@@ -84,7 +85,7 @@ export function attributeCodexSession(
     result = {
       scope: 'framework',
       repo: repoName(root, cwd),
-      ...(repoId ? { repoId } : {}),
+      ...(repoId ? { repoId } : { repoIdUnavailable: true as const }),
       ...(taskId ? { taskId } : {}),
     };
   }

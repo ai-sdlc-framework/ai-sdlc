@@ -607,6 +607,7 @@ describe('cli-usage scorecard repo identity', () => {
         call('i1', 0, { ...dev, repoId: idMine, taskId: 'TASK-MINE' }),
         call('i2', 1, { ...dev, repoId: idOther, taskId: 'TASK-OTHER-CHECKOUT' }),
         call('i3', 2, { ...dev, taskId: 'TASK-LEGACY' }),
+        call('i4', 3, { ...dev, repoIdUnavailable: true, taskId: 'TASK-UNAVAILABLE' }),
       ],
       { dir: usageDir },
     );
@@ -619,16 +620,21 @@ describe('cli-usage scorecard repo identity', () => {
     expect(json.repoId).toBe(idMine);
     expect(json.legacyRecords).toBe(1);
     expect(text).not.toContain('TASK-OTHER-CHECKOUT');
+    expect(text).not.toContain('TASK-UNAVAILABLE');
+    expect(json.unavailableRecords).toBe(1);
     const body = readdirSync(evidence)
       .map((f) => readFileSync(join(evidence, f), 'utf8'))
       .join('');
     expect(body).not.toContain('TASK-OTHER-CHECKOUT');
     expect(body).toContain(idMine);
     expect(body).toContain('"legacyRecords": 1');
+    expect(body).toContain('"unavailableRecords": 1');
+    expect(body).not.toContain('TASK-UNAVAILABLE');
     out.length = 0;
     const txt = await run(['scorecard'], T0, { repoRoot: mine, artifactsDir: join(root, 'art') });
     expect(txt).toContain(`Repository: ${idMine}`);
     expect(txt).toContain('legacy fallback');
+    expect(txt).toContain('repoId unavailable');
     out.length = 0;
     await run(['scorecard', '--format', 'csv'], T0, {
       repoRoot: mine,

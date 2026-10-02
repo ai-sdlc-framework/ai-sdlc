@@ -21,6 +21,8 @@ export interface FrameworkContext {
   repo: string;
   /** Stable repository identity; absent when the repository has no commits. */
   repoId?: string;
+  /** True when the repository has no computable identity (never name-matched). */
+  repoIdUnavailable?: true;
 }
 
 const MAX_WALK_DEPTH = 64;
@@ -76,7 +78,11 @@ export class AttributionResolver {
     for (let depth = 0; depth < MAX_WALK_DEPTH; depth++) {
       if (dir !== this.home && isRealDir(join(dir, '.ai-sdlc')) && hasGitEntry(dir)) {
         const repoId = repoIdFor(dir);
-        found = { root: dir, repo: repoNameFor(dir), ...(repoId ? { repoId } : {}) };
+        found = {
+          root: dir,
+          repo: repoNameFor(dir),
+          ...(repoId ? { repoId } : { repoIdUnavailable: true as const }),
+        };
         break;
       }
       const parent = dirname(dir);

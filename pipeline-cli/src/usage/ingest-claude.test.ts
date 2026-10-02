@@ -11,6 +11,7 @@ import {
   truncateSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readModelCalls, type ModelCallRecord } from '@ai-sdlc/reference';
@@ -19,6 +20,7 @@ import {
   ingestClaudeTranscripts,
   isIngestSwitchedOff,
 } from './ingest-claude.js';
+import { selectByRepo } from './repo-id.js';
 import { REPLAY_CHECKOUT_DIR, REPLAY_HOLDER_PREFIX } from './replay-git.js';
 
 const BODY = 'SENTINEL-BODY-TEXT-MUST-NEVER-BE-STORED';
@@ -128,6 +130,51 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+});
+
+describe('ingestClaudeTranscripts repoId wiring', () => {
+  const genv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.invalid',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.invalid',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+  };
+  function realRepo(path: string, commit: boolean): string {
+    mkdirSync(join(path, '.ai-sdlc'), { recursive: true });
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: path, env: genv });
+    g('init', '-q');
+    if (commit) {
+      writeFileSync(join(path, 'f.txt'), path);
+      g('add', 'f.txt');
+      g('commit', '-q', '-m', 'init');
+    }
+    return path;
+  }
+
+  it('stamps repoId for a checkout with commits and the unavailable marker without', async () => {
+    const good = realRepo(join(root, 'a', 'proj'), true);
+    const bare = realRepo(join(root, 'b', 'proj'), false);
+    writeSession('p1', 'sess1', [
+      assistant({ id: 'g1', cwd: good }),
+      assistant({ id: 'n1', cwd: bare }),
+    ]);
+    await ingest();
+    const byId = new Map((await ledger()).map((r) => [r.callId, r]));
+    expect(byId.get('g1')?.repoId).toMatch(/^local#[0-9a-f]{40,64}$/);
+    expect(byId.get('g1')?.repoIdUnavailable).toBeUndefined();
+    expect(byId.get('n1')?.repoId).toBeUndefined();
+    expect(byId.get('n1')?.repoIdUnavailable).toBe(true);
+    const sel = selectByRepo([...byId.values()], {
+      repoName: 'proj',
+      repoId: byId.get('g1')?.repoId,
+    });
+    expect(sel.records.map((r) => r.callId)).toEqual(['g1']);
+    expect(sel.unavailable).toBe(1);
+    expect(sel.legacy).toBe(0);
+  });
 });
 
 describe('ingestClaudeTranscripts', () => {

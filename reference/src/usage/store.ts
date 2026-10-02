@@ -118,7 +118,14 @@ function endsWithoutNewline(path: string): boolean {
 /** Drop fields that must never be written for scope 'other'. */
 function sanitize(record: ModelCallRecord): ModelCallRecord {
   if (record.scope !== 'other') return record;
-  const { repo: _repo, repoId: _repoId, taskId: _taskId, source: _source, ...rest } = record;
+  const {
+    repo: _repo,
+    repoId: _repoId,
+    repoIdUnavailable: _unavailable,
+    taskId: _taskId,
+    source: _source,
+    ...rest
+  } = record;
   return rest;
 }
 
