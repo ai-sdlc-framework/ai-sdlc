@@ -30,6 +30,7 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
 import { selectReviewerSet } from './reviewer-set.js';
+import { diffHasBinaryHunk } from './review-judgment-support.js';
 import { routeReviewers } from './review-routing.js';
 import { buildJudgmentContext } from '../judgment/context.js';
 import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
@@ -50,7 +51,7 @@ export interface BuildReviewPromptsOptions {
   reviewers?: ReviewerType[];
   /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
   sourceKind?: 'backlog' | 'gh-issue';
-  /** Review iteration (default 1). */
+  /** Review iteration (default 1). Missing means 1; NaN counts as a re-run (never relaxes review). */
   iteration?: number;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
@@ -79,16 +80,48 @@ export async function buildReviewPrompts(
   const targetBranch = resolveTargetBranch(opts.workDir);
   const baseRef = `origin/${targetBranch}`;
 
-  // `--text` stops a `-diff` attribute hiding content behind a binary stub.
+  // `--text` stops a `-diff` attribute hiding content behind a binary stub, but it also
+  // means git never prints `Binary files ... differ`, so binary files are detected
+  // separately (numstat below, and NUL / U+FFFD in the text). `--no-ext-diff` and
+  // `--no-textconv` keep repo-configured drivers from rewriting what reviewers read.
   // `core.quotePath=false` keeps non-ASCII bytes literal; `-z` separates paths with NUL
   // and never quotes them; `--no-renames` lists both sides of a rename. The path rules
   // that veto a relaxation match on these plain paths.
   const diffResult = await runner(
     'git',
-    ['-c', 'core.quotePath=false', 'diff', '--text', `${baseRef}...HEAD`],
+    [
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--text',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef}...HEAD`,
+    ],
     { cwd: opts.worktreePath, allowFailure: true },
   );
-  const diff = diffResult.code === 0 ? diffResult.stdout : '';
+  const rawDiff = diffResult.code === 0 ? diffResult.stdout : '';
+
+  // Without `--text`, git reports a binary file as `-\t-\t<path>`.
+  const numstatResult = await runner(
+    'git',
+    [
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--numstat',
+      '-z',
+      '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef}...HEAD`,
+    ],
+    { cwd: opts.worktreePath, allowFailure: true },
+  );
+  const binaryPaths =
+    numstatResult.code === 0 ? parseBinaryNumstat(numstatResult.stdout) : new Set<string>();
+  const { diff, stubbed } = stubBinaryHunks(rawDiff, binaryPaths);
+  const binaryDiff = stubbed || binaryPaths.size > 0 || diffHasBinaryHunk(rawDiff);
 
   const filesResult = await runner(
     'git',
@@ -99,6 +132,8 @@ export async function buildReviewPrompts(
       '--name-only',
       '-z',
       '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
       `${baseRef}...HEAD`,
     ],
     { cwd: opts.worktreePath, allowFailure: true },
@@ -110,6 +145,7 @@ export async function buildReviewPrompts(
   const diffUnavailable =
     diffResult.code !== 0 ||
     filesResult.code !== 0 ||
+    numstatResult.code !== 0 ||
     (changedFiles.length > 0 && diff.trim() === '');
 
   // Codex independence detection
@@ -153,6 +189,7 @@ export async function buildReviewPrompts(
         changedFiles,
         diff,
         diffUnavailable,
+        binaryDiff,
         ...(opts.iteration !== undefined ? { iteration: opts.iteration } : {}),
         ...(judgment ? { judgment } : {}),
       })
@@ -200,7 +237,45 @@ export async function buildReviewPrompts(
     };
   });
 
-  return { prompts, diff, changedFiles, harnessNote };
+  return { prompts, diff, changedFiles, harnessNote, diffUnavailable };
+}
+
+/** Paths git reports as binary (`-\t-\t<path>`) in `--numstat -z --no-renames` output. */
+export function parseBinaryNumstat(out: string): Set<string> {
+  const paths = new Set<string>();
+  for (const rec of out.split('\0')) {
+    const m = /^-\t-\t(.+)$/s.exec(rec);
+    if (m) paths.add(m[1]);
+  }
+  return paths;
+}
+
+const MAX_LISTED_BINARY_CHARS = 200_000;
+
+/**
+ * Replace the diff section of every binary file (holding a NUL byte, or listed by
+ * numstat and very large) with git's own one-line binary stub, so the prompt carries no NUL bytes and
+ * no large binary payload.
+ */
+export function stubBinaryHunks(
+  diff: string,
+  binaryPaths: ReadonlySet<string>,
+): { diff: string; stubbed: boolean } {
+  if (diff === '') return { diff, stubbed: false };
+  let stubbed = false;
+  const sections = diff.split(/^(?=diff --git )/m).map((section) => {
+    const header = /^diff --git a\/(.+) b\/(.+)$/m.exec(section.split('\n', 1)[0]);
+    // A NUL byte is what git itself treats as binary. A numstat-binary file with no NUL
+    // (a `-diff` attribute) keeps its text, unless it is huge.
+    const listed = header !== null && (binaryPaths.has(header[1]) || binaryPaths.has(header[2]));
+    const binary =
+      section.includes('\u0000') || (listed && section.length > MAX_LISTED_BINARY_CHARS);
+    if (!binary) return section;
+    stubbed = true;
+    if (!header) return 'Binary files a/(unreadable) and b/(unreadable) differ\n';
+    return `${section.split('\n', 1)[0]}\nBinary files a/${header[1]} and b/${header[2]} differ\n`;
+  });
+  return { diff: sections.join(''), stubbed };
 }
 
 interface PromptInputs {

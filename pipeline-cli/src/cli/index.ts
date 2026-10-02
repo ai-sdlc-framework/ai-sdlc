@@ -552,6 +552,10 @@ export function buildCli(): Argv {
               type: 'string',
               choices: ['backlog', 'gh-issue'] as const,
               describe: 'Kind of the work item. Absent means untrusted (never relaxes review).',
+            })
+            .option('iteration', {
+              type: 'number',
+              describe: 'Review iteration (default 1). A re-run never relaxes review.',
             }),
         async (argv) => {
           const v = await validateTask({
@@ -574,8 +578,14 @@ export function buildCli(): Argv {
             ...(argv['source-kind']
               ? { sourceKind: argv['source-kind'] as 'backlog' | 'gh-issue' }
               : {}),
+            ...(argv['iteration'] !== undefined ? { iteration: argv['iteration'] as number } : {}),
           });
           emit(result);
+          if (result.diffUnavailable) {
+            fail(
+              'review diff unavailable (git diff failed or came back empty); do not spawn reviewers',
+            );
+          }
         },
       )
       // Model routing (RFC-0050 B2) - resolved model for one agent role

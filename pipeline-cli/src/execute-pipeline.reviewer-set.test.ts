@@ -21,7 +21,7 @@ vi.mock('./steps/07-build-review-prompts.js', async (importOriginal) => {
 
 import { executePipeline } from './execute-pipeline.js';
 import { MockSpawner } from './runtime/subagent-spawner.js';
-import { FakeRunner, ok } from './__test-helpers/fake-runner.js';
+import { FakeRunner, fail, ok } from './__test-helpers/fake-runner.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from './__test-helpers/make-task.js';
 import type { DeveloperReturn } from './types.js';
 
@@ -67,7 +67,7 @@ const inlineSpec = {
   filePath: '<inline>',
 };
 
-async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false) {
+async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false, diffFails = false) {
   writeTaskFile(tmp, { id: 'AISDLC-300', title: 'x', status: 'To Do', acceptanceCriteria: ['a'] });
   mkdirSync(join(tmp, '.worktrees', 'aisdlc-300'), { recursive: true });
   const spawner = new MockSpawner({
@@ -81,11 +81,14 @@ async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false) {
     .on(/^git fetch/, ok())
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
-    .on(/^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/, ok('diff\n'))
+    .on(
+      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+      diffFails ? fail('boom', 1) : ok('diff\n'),
+    )
     .on(/^git -c core\.quotePath=false diff --name-only/, ok('a.ts\0'))
     .on(/^git push -u origin/, ok())
     .on(/^gh pr create/, ok('https://github.com/o/r/pull/1\n'));
-  return executePipeline({
+  const result = await executePipeline({
     taskId: 'AISDLC-300',
     workDir: tmp,
     spawner,
@@ -95,7 +98,14 @@ async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false) {
     ...(sourceKind ? { sourceKind } : {}),
     ...(inline ? { taskSpec: inlineSpec } : {}),
   });
+  return Object.assign(result, { reviewerSpawns: reviewerSpawns(spawner) });
 }
+
+const reviewerSpawns = (spawner: MockSpawner) =>
+  (['code-reviewer', 'test-reviewer', 'security-reviewer', 'correctness-reviewer'] as const).reduce(
+    (n, t) => n + spawner.getCallCount(t),
+    0,
+  );
 
 describe('executePipeline reviewer-set wiring', () => {
   it('a backlog dispatch with no explicit sourceKind reaches Step 7 as backlog', async () => {
@@ -125,5 +135,12 @@ describe('executePipeline reviewer-set wiring', () => {
       'correctness-reviewer',
       'security-reviewer',
     ]);
+  });
+
+  it('refuses to spawn reviewers when the review diff is unavailable', async () => {
+    const result = await run(undefined, false, true);
+    expect(result.outcome).toBe('aborted');
+    expect(result.notes).toMatch(/diff unavailable/);
+    expect(result.reviewerSpawns).toBe(0);
   });
 });

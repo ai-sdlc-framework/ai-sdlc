@@ -303,6 +303,16 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       runner: opts.runner,
       sourceKind: reviewSourceKind,
     });
+    // Reviewers must never run on an empty or partial diff.
+    if (reviewBuild.diffUnavailable) {
+      return abort(
+        opts,
+        branch.branch,
+        branch.worktreePath,
+        null,
+        'review diff unavailable (git diff failed or came back empty); reviewers not spawned',
+      );
+    }
 
     // Step 7b — spawn 3 reviewers in parallel
     const reviewerResults = await opts.spawner.spawnParallel(
@@ -337,7 +347,8 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       initialDeveloperReturn: initialDev,
       initialVerdict,
       maxIterations: opts.maxReviewIterations ?? 2,
-      sourceKind: reviewSourceKind,
+      sourceKind,
+      reviewSourceKind,
       spawner: opts.spawner,
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry

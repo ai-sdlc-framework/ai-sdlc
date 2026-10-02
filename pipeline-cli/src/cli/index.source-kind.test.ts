@@ -4,14 +4,21 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const seen: { sourceKind?: string }[] = [];
+const seen: { sourceKind?: string; iteration?: number }[] = [];
+let unavailable = false;
 vi.mock('../steps/07-build-review-prompts.js', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../steps/07-build-review-prompts.js')>();
   return {
     ...orig,
     buildReviewPrompts: async (opts: Parameters<typeof orig.buildReviewPrompts>[0]) => {
-      seen.push({ sourceKind: opts.sourceKind });
-      return { prompts: [], diff: '', changedFiles: [], harnessNote: '' };
+      seen.push({ sourceKind: opts.sourceKind, iteration: opts.iteration });
+      return {
+        prompts: [],
+        diff: '',
+        changedFiles: [],
+        harnessNote: '',
+        diffUnavailable: unavailable,
+      };
     },
   };
 });
@@ -28,6 +35,7 @@ beforeEach(() => {
   savedWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = (() => true) as typeof process.stdout.write;
   seen.length = 0;
+  unavailable = false;
   writeTaskFile(tmp, { id: 'AISDLC-1', title: 'cli demo', status: 'To Do' });
 });
 afterEach(() => {
@@ -50,6 +58,26 @@ describe('build-review-prompts --source-kind', () => {
 
   it('stays undefined (untrusted) when absent', async () => {
     await run();
-    expect(seen).toEqual([{ sourceKind: undefined }]);
+    expect(seen).toEqual([{ sourceKind: undefined, iteration: undefined }]);
+  });
+
+  it('passes --iteration through, NaN included', async () => {
+    await run('--iteration', '2');
+    await run('--iteration', 'abc');
+    expect(seen[0].iteration).toBe(2);
+    expect(Number.isNaN(seen[1].iteration)).toBe(true);
+  });
+
+  it('refuses (exit 1) when the review diff is unavailable', async () => {
+    unavailable = true;
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    await expect(run()).rejects.toThrow('exit');
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(String(err.mock.calls[0][0])).toContain('diff unavailable');
+    exit.mockRestore();
+    err.mockRestore();
   });
 });

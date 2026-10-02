@@ -7,6 +7,7 @@ import type { ReviewerType } from '../types.js';
 
 const calls: { iteration?: number; sourceKind?: string }[] = [];
 let reviewers: ReviewerType[] = [];
+let unavailable = false;
 vi.mock('./07-build-review-prompts.js', () => ({
   buildReviewPrompts: async (opts: { iteration?: number; sourceKind?: string }) => {
     calls.push({ iteration: opts.iteration, sourceKind: opts.sourceKind });
@@ -15,6 +16,7 @@ vi.mock('./07-build-review-prompts.js', () => ({
       diff: '',
       changedFiles: [],
       harnessNote: '',
+      diffUnavailable: unavailable,
     };
   },
 }));
@@ -28,6 +30,7 @@ let tmp: string;
 beforeEach(() => {
   tmp = makeTmpProject();
   calls.length = 0;
+  unavailable = false;
 });
 afterEach(() => cleanupTmpProject(tmp));
 
@@ -71,7 +74,11 @@ const ok = (type: ReviewerType) => ({
   durationMs: 0,
 });
 
-async function loop(set: ReviewerType[], sourceKind?: 'backlog' | 'gh-issue') {
+async function loop(
+  set: ReviewerType[],
+  sourceKind?: 'backlog' | 'gh-issue',
+  extra: { reviewSourceKind?: 'backlog' | 'gh-issue' } = {},
+) {
   reviewers = set;
   const spawner = new MockSpawner({
     developer: { type: 'developer', output: '', parsed: dev, status: 'success', durationMs: 0 },
@@ -90,6 +97,7 @@ async function loop(set: ReviewerType[], sourceKind?: 'backlog' | 'gh-issue') {
     maxIterations: 2,
     spawner,
     ...(sourceKind ? { sourceKind } : {}),
+    ...extra,
   });
 }
 
@@ -127,5 +135,17 @@ describe('iterateReviewLoop reviewer labels and Step 7 inputs', () => {
   it('leaves sourceKind undefined when the caller gave none', async () => {
     await loop(['code-reviewer']);
     expect(calls).toEqual([{ iteration: 2, sourceKind: undefined }]);
+  });
+
+  it('passes the untrusted reviewSourceKind to the review path only', async () => {
+    await loop(['code-reviewer'], 'backlog', { reviewSourceKind: undefined });
+    expect(calls).toEqual([{ iteration: 2, sourceKind: undefined }]);
+  });
+
+  it('does not spawn reviewers when the review diff is unavailable', async () => {
+    unavailable = true;
+    const r = await loop(['code-reviewer', 'test-reviewer', 'security-reviewer'], 'backlog');
+    expect(r.finalVerdict.decision).toBe('CHANGES_REQUESTED');
+    expect(r.finalVerdict.verdicts.map((v) => v.agentId)).toEqual(['code-reviewer']);
   });
 });

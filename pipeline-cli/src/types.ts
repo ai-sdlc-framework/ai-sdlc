@@ -399,6 +399,11 @@ export interface BuildReviewPromptsResult {
   diff: string;
   changedFiles: string[];
   harnessNote: string;
+  /**
+   * True when the diff or file list could not be read completely. Callers must not
+   * spawn reviewers on such a result: they would review an empty or partial diff.
+   */
+  diffUnavailable?: boolean;
 }
 
 // ── Step 8 — Aggregate verdicts ──────────────────────────────────────
@@ -438,6 +443,11 @@ export interface IterateReviewLoopOptions {
   /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
   sourceKind?: 'backlog' | 'gh-issue';
   /**
+   * Source kind the review path sees. Present-but-undefined means untrusted (never
+   * relaxes review); absent falls back to `sourceKind`.
+   */
+  reviewSourceKind?: 'backlog' | 'gh-issue' | undefined;
+  /**
    * Path to the per-task git worktree. Steps 5/7 inside the loop need to read
    * the diff against the worktree HEAD, so this is the worktree path, NOT the
    * project root. (The composite `executePipeline()` passes `branch.worktreePath`.)
@@ -456,6 +466,8 @@ export interface IterateReviewLoopOptions {
    */
   maxIterations?: number;
   spawner?: SubagentSpawner;
+  /** Command runner for the review diff (test injection). */
+  runner?: import('./runtime/exec.js').Runner;
   onIteration?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;
   /**
    * AISDLC-184 — fired when the iteration-path Step 6 retry helper recovered

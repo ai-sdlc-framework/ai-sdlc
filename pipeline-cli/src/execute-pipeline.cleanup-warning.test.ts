@@ -86,11 +86,11 @@ function makeHappyRunner(): FakeRunner {
     .on(/^git worktree add/, ok())
     .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
     .on(
-      /^git -c core\.quotePath=false diff --text origin\/main\.\.\.HEAD$/,
+      /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
       ok('--- diff content ---\n'),
     )
     .on(
-      /^git -c core\.quotePath=false diff --name-only -z --no-renames origin\/main\.\.\.HEAD$/,
+      /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
       ok('a.ts\0'),
     )
     .on(/^git push -u origin/, ok())

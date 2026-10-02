@@ -92,21 +92,40 @@ const GOVERNANCE_PATH_RES: readonly RegExp[] = [
   // Settings that change how diffs or packages are read.
   /(?:^|\/)\.gitattributes$/i,
   /(?:^|\/)\.npmrc$/i,
+  /(?:^|\/)\.yarnrc\.yml$/i,
+  /(?:^|\/)\.pnpmfile\.cjs$/i,
+  /(?:^|\/)pnpm-workspace\.yaml$/i,
+  /(?:^|\/)\.mcp\.json$/i,
+  /(?:^|\/)\.claude\//i,
   // The selection and judgment code itself.
   /(?:^|\/)pipeline-cli\/src\/steps\/reviewer-set(?:\.|-)[^/]*$/i,
-  /(?:^|\/)pipeline-cli\/src\/steps\/review-[^/]*$/i,
+  /(?:^|\/)pipeline-cli\/src\/steps\/(?:.*\/)?review-[^/]*$/i,
   /(?:^|\/)pipeline-cli\/src\/steps\/07-build-review-prompts[^/]*$/i,
   /(?:^|\/)reference\/src\/judgment\//i,
+  /(?:^|\/)pipeline-cli\/src\/classifier\//i,
+  /(?:^|\/)pipeline-cli\/src\/judgment\//i,
+  /(?:^|\/)pipeline-cli\/src\/routing\//i,
+  /(?:^|\/)pipeline-cli\/src\/execute-pipeline[^/]*$/i,
+  /(?:^|\/)pipeline-cli\/src\/steps\/08-aggregate-verdicts[^/]*$/i,
+  /(?:^|\/)pipeline-cli\/src\/steps\/09-iterate[^/]*$/i,
   // Agents, commands and signing scripts that define what review means.
   /(?:^|\/)ai-sdlc-plugin\/agents\//i,
   /(?:^|\/)ai-sdlc-plugin\/commands\//i,
-  /(?:^|\/)ai-sdlc-plugin\/scripts\/sign-[^/]*$/i,
+  /(?:^|\/)ai-sdlc-plugin\/scripts\/(?:.*\/)?sign-[^/]*$/i,
   /(?:^|\/)scripts\/is-docs-only-changeset\.mjs$/i,
 ];
 
-/** True when the diff holds a binary or unreadable hunk the judgment could not read. */
+/**
+ * True when the diff holds a binary or unreadable hunk the judgment could not read: a
+ * git binary stub, or NUL / U+FFFD in the text (a `--text` diff prints binary content
+ * as text and never emits the stub).
+ */
 export function diffHasBinaryHunk(diff: string): boolean {
-  return /^(?:Binary files .* differ|GIT binary patch)$/m.test(diff);
+  return (
+    /^(?:Binary files .* differ|GIT binary patch)$/m.test(diff) ||
+    diff.includes('\u0000') ||
+    diff.includes('\uFFFD')
+  );
 }
 
 /**

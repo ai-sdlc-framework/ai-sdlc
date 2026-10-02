@@ -270,6 +270,16 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     expect((await run({ diffUnavailable: true })).sel.decidedBy).toBe('veto:diff-unavailable');
   });
 
+  it('a NUL byte or replacement character in the diff vetoes as a binary diff', async () => {
+    for (const diff of ['diff --git a/x b/x\n+a\u0000b\n', 'diff --git a/x b/x\n+a\uFFFDb\n']) {
+      expect((await run({ diff })).sel.decidedBy).toBe('veto:binary-diff');
+    }
+  });
+
+  it('a binaryDiff flag from numstat vetoes', async () => {
+    expect((await run({ binaryDiff: true })).sel.decidedBy).toBe('veto:binary-diff');
+  });
+
   it('an empty diff with changed files vetoes', async () => {
     const { sel, fake } = await run({ diff: '  \n' });
     expect(sel.decidedBy).toBe('veto:diff-unavailable');
@@ -308,6 +318,19 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     'ai-sdlc-plugin/scripts/sign-attestation.mjs',
     'ai-sdlc-plugin/scripts/sign-other.mjs',
     'scripts/is-docs-only-changeset.mjs',
+    'pipeline-cli/src/classifier/classifier.ts',
+    'pipeline-cli/src/judgment/context.ts',
+    'pipeline-cli/src/routing/resolve-model.ts',
+    'pipeline-cli/src/execute-pipeline.ts',
+    'pipeline-cli/src/steps/08-aggregate-verdicts.ts',
+    'pipeline-cli/src/steps/09-iterate.ts',
+    '.claude/settings.json',
+    '.mcp.json',
+    '.pnpmfile.cjs',
+    'pnpm-workspace.yaml',
+    '.yarnrc.yml',
+    'pipeline-cli/src/steps/sub/review-x.ts',
+    'ai-sdlc-plugin/scripts/lib/sign-x.mjs',
   ])('governance path %s vetoes the merged set', async (path) => {
     const { sel, fake } = await run({ changedFiles: [path] });
     expect(sel.reviewers).toEqual(THREE);
@@ -329,6 +352,10 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     'docs/gitattributes.md',
     'docs/npmrc.md',
     'pipeline-cli/attestation-corex/a.ts',
+    'pipeline-cli/src/classifiers/a.ts',
+    'pipeline-cli/src/routings/a.ts',
+    'pipeline-cli/src/execute-pipelinex/a.ts',
+    'docs/pnpm-workspace.md',
     'src/not-scripts/run.sh.txt',
   ])('lookalike path %s does not veto', async (path) => {
     const { sel } = await run({ changedFiles: [path] });
@@ -339,6 +366,7 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
   it.each([
     ['iteration 2', 2],
     ['iteration 3', 3],
+    ['a NaN iteration', Number.NaN],
   ])('%s never relaxes review', async (_n, iteration) => {
     const { sel, fake } = await run({ iteration });
     expect(sel.reviewers).toEqual(THREE);

@@ -196,6 +196,8 @@ export interface SelectReviewerSetOpts extends ResolveReviewerSetOpts {
    * file names alone.
    */
   diffUnavailable?: boolean;
+  /** True when git reported any binary file in the diff (numstat `-\t-` row). */
+  binaryDiff?: boolean;
   /** Review iteration (1 = first pass). A re-run never relaxes review. */
   iteration?: number;
   /** Ready judgment context; omit (or leave the layer unconfigured) to keep today's behaviour. */
@@ -297,12 +299,13 @@ export async function selectReviewerSet(
 
   if (pinned !== null) return vetoed(`config:explicit-${pinned}`);
   if (opts.sourceKind !== 'backlog') return vetoed('veto:source-kind');
-  if ((opts.iteration ?? 1) > 1) return vetoed('veto:iteration');
+  // `!(n <= 1)` so a NaN iteration counts as a re-run and never relaxes review.
+  if (!((opts.iteration ?? 1) <= 1)) return vetoed('veto:iteration');
   if (opts.changedFiles.length === 0) return vetoed('veto:no-changed-files');
   if (opts.diffUnavailable === true || opts.diff.trim() === '') {
     return vetoed('veto:diff-unavailable');
   }
-  if (diffHasBinaryHunk(opts.diff)) return vetoed('veto:binary-diff');
+  if (opts.binaryDiff === true || diffHasBinaryHunk(opts.diff)) return vetoed('veto:binary-diff');
   if (scan.unparseable) return vetoed('veto:unparseable-path');
   if (risk.touchesAuth) return vetoed('veto:path-auth');
   if (risk.touchesLockfiles) return vetoed('veto:path-lockfile');
