@@ -506,9 +506,13 @@ gate is bounded on three axes:
 - **Lock.** Only one gate runs per repository at a time. The lock is the directory
   `<main checkout>/.ai-sdlc/runtime/coverage-gate.lock` (the main checkout is resolved
   from `git rev-parse --git-common-dir`, so sibling worktrees share it). A waiting push
-  prints the holder's pid, host, worktree, and start time. A lock is reclaimed when it is
-  older than the timeout, or when its holder pid is dead on the same host. A symlinked
-  lock path is refused. A push waits up to the timeout, then fails.
+  prints the holder's pid, host, worktree, and start time. A same-host holder is
+  trusted by pid liveness only (alive keeps the lock however old; dead releases it). An
+  ownerless lock (hook killed mid-create) is reclaimed after 10 s; a foreign-host or
+  unparsable owner after 2 x timeout + 60 s. Reclaiming runs under a short mutex and
+  verifies the owner it judged stale. A symlinked lock path is refused. A push waits up
+  to 2 x timeout + 60 s (`AI_SDLC_COVERAGE_LOCK_WAIT_SEC` overrides), then fails.
+  `AI_SDLC_COVERAGE_TIMEOUT_SEC` is clamped to 86400.
 
 `ai-sdlc doctor` (check `orphaned-vitest-workers`) warns about vitest processes with
 parent pid 1 older than two minutes and prints the `kill` command.
