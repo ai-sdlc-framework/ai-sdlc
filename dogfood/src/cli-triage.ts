@@ -15,7 +15,11 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { executeTriage, ClaudeCodeAdapter } from '@ai-sdlc/orchestrator';
+import {
+  executeTriage,
+  ClaudeCodeAdapter,
+  buildOrchestratorJudgmentContext,
+} from '@ai-sdlc/orchestrator';
 import { resolveRepoRoot } from '@ai-sdlc/orchestrator';
 import type { SecurityTriageConfig } from '@ai-sdlc/orchestrator';
 
@@ -125,6 +129,12 @@ async function main(): Promise<void> {
       workDir,
       dryRun: args.dryRun,
       triageConfig,
+      // Injection screen runs before the security triage; a disabled layer abstains.
+      judgment: buildOrchestratorJudgmentContext({
+        workDir,
+        sourceKind: 'triage',
+        taskId: args.issueId,
+      }),
     });
 
     console.log('\n── Security Triage Result ──');
@@ -132,6 +142,9 @@ async function main(): Promise<void> {
     console.log(`Risk Score: ${result.verdict.riskScore}/10`);
     console.log(`Safe:       ${result.verdict.safe}`);
     console.log(`Rejected:   ${result.rejected}`);
+    if (result.suspicious) {
+      console.log('Suspicious: true (injection screen)');
+    }
     if (result.labelApplied) {
       console.log(`Label:      ${result.labelApplied}`);
     }
