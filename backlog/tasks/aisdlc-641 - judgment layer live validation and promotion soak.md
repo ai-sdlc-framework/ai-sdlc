@@ -12,6 +12,8 @@ labels:
   - operator
   - soak
 dependencies:
+  - AISDLC-630.3
+  - AISDLC-630.4
   - AISDLC-632
   - AISDLC-633
   - AISDLC-634
