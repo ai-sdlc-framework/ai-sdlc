@@ -21,7 +21,9 @@ import {
   type GateResult,
   type Gate,
   type EvaluationContext,
+  type EvaluateJudgmentContext,
 } from '@ai-sdlc/reference';
+import { applyComplexityFactorJudgment } from './judgment/complexity-factors.js';
 
 /**
  * Create a Rego-based policy evaluator for gate rules.
@@ -78,6 +80,30 @@ export function scorePipelineComplexity(input: ComplexityInput): number {
  */
 export function evaluatePipelineComplexityRouting(input: ComplexityInput): ComplexityResult {
   return evaluateComplexity(input);
+}
+
+/**
+ * Judgment-aware variant of {@link scorePipelineComplexity}. Tighten-only: the boolean
+ * factors may be raised from the work item text, never lowered. Without a context (or
+ * when the layer is disabled, shadow, abstains or errors) the result equals the sync form.
+ */
+export async function scorePipelineComplexityWithJudgment(
+  input: ComplexityInput,
+  workItemText: string,
+  judgment?: EvaluateJudgmentContext,
+): Promise<number> {
+  if (!judgment) return scoreComplexity(input);
+  return scoreComplexity(await applyComplexityFactorJudgment(input, workItemText, judgment));
+}
+
+/** Judgment-aware variant of {@link evaluatePipelineComplexityRouting}; same tighten-only rules. */
+export async function evaluatePipelineComplexityRoutingWithJudgment(
+  input: ComplexityInput,
+  workItemText: string,
+  judgment?: EvaluateJudgmentContext,
+): Promise<ComplexityResult> {
+  if (!judgment) return evaluateComplexity(input);
+  return evaluateComplexity(await applyComplexityFactorJudgment(input, workItemText, judgment));
 }
 
 // Direct re-exports (passthrough)

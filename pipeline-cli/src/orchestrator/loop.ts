@@ -114,6 +114,10 @@ import { rollbackDispatch, type RollbackResult } from './rollback.js';
 // standard RFC-0024 rubric; auto-quarantine is delegated to `maybeRollback()`.
 import { recordFrameworkCoverageGap } from '../tui/analytics/coverage-gap.js';
 import { loadQualityMonitoringConfig } from '../tui/analytics/quality-monitoring-config.js';
+import { buildJudgmentContext } from '../judgment/context.js';
+import { attachAdvisoryFailureClass } from '../judgment/failure-class.js';
+import type { FailureClass } from '../tui/analytics/quality-classifier.js';
+import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import {
   countCheckpointCommits,
   countCommitsBeyondMain,
@@ -200,6 +204,11 @@ export function defaultOrchestratorConfig(
 }
 
 export interface OrchestratorAdapters {
+  /**
+   * Judgment-layer context for advisory labels. When omitted the loop builds one
+   * from the repo config; a disabled layer abstains and changes nothing.
+   */
+  judgment?: EvaluateJudgmentContext;
   /** Frontier source — defaults to a `cli-deps frontier`-equivalent in-process call. */
   frontier?: FrontierFn;
   /** Dispatcher — defaults to a real `executePipeline()` call. */
@@ -1286,11 +1295,20 @@ export async function runOrchestratorTick(
         prUrl: null,
       };
       escalations.push(await pushEscalation(escalateFn, record));
+      // failure.class: advisory label beside the unchanged outcome, only for
+      // failures the playbook left unmatched. Nothing is derived from it.
+      const advisoryFailureClass = await advisoryClassForUnmatched(
+        value.taskId,
+        value.error,
+        config,
+        adapters,
+      );
       outcomes.push({
         taskId: value.taskId,
         outcome: 'unknown-failure',
         prUrl: null,
         error: value.error,
+        ...(advisoryFailureClass ? { advisoryFailureClass } : {}),
       });
       emit({
         type: 'OrchestratorFailed',
@@ -1540,6 +1558,36 @@ interface MaybeRollbackArgs {
   branch?: string;
   /** Worktree path from the dispatcher's result (when available). */
   worktreePath?: string;
+}
+
+/**
+ * failure.class: advisory label for a failure the playbook did not match. Returns
+ * undefined whenever the layer is disabled, abstains or errors; never throws.
+ */
+async function advisoryClassForUnmatched(
+  taskId: string,
+  error: string,
+  config: OrchestratorConfig,
+  adapters: OrchestratorAdapters,
+): Promise<FailureClass | undefined> {
+  try {
+    const judgment =
+      adapters.judgment ??
+      buildJudgmentContext({
+        workDir: config.workDir,
+        sourceKind: 'orchestrator',
+        taskId,
+      });
+    if (!judgment.config.provider) return undefined;
+    const result = await attachAdvisoryFailureClass(
+      { stderr: error, exitCode: null },
+      'UnknownFailureMode',
+      judgment,
+    );
+    return result.advisoryClass;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -9,7 +9,6 @@
 import {
   routeByComplexity,
   evaluatePromotion,
-  evaluateComplexity,
   selectModel,
   withSpan,
   getMeter,
@@ -95,8 +94,10 @@ import {
   evaluatePipelineGate,
   scorePipelineComplexity,
   evaluatePipelineComplexityRouting,
+  evaluatePipelineComplexityRoutingWithJudgment,
   parseDuration,
 } from './policy-evaluators.js';
+import { buildOrchestratorJudgmentContext } from './judgment-context.js';
 import {
   verifyAuditIntegrity,
   createFileAuditLog,
@@ -197,6 +198,8 @@ export interface ExecuteOptions {
   llmEvaluator?: LLMEvaluator;
   /** Callback invoked when promotion eligibility is evaluated. */
   promotionCallback?: (result: PromotionResult) => void | Promise<void>;
+  /** Judgment-layer context for the post-agent complexity factors. Built from config when omitted. */
+  judgment?: import('@ai-sdlc/reference').EvaluateJudgmentContext;
   /** Security context for kill switch, JIT credentials, and approval workflow. */
   security?: SecurityContext;
   /** Use the reference structured logger instead of the plain console logger. */
@@ -1203,10 +1206,21 @@ async function executePipelineBody(
     const deleteMatch = diffStat.match(/(\d+) deletions?\(-\)/);
     const linesOfChange =
       (insertMatch ? Number(insertMatch[1]) : 0) + (deleteMatch ? Number(deleteMatch[1]) : 0);
-    const postAgentComplexity = evaluateComplexity({
-      filesAffected: result.filesChanged.length,
-      linesOfChange,
-    });
+    // Tighten-only factor judgment; an absent/disabled/abstaining context returns the
+    // same result as the plain evaluation.
+    const postAgentComplexity = await evaluatePipelineComplexityRoutingWithJudgment(
+      {
+        filesAffected: result.filesChanged.length,
+        linesOfChange,
+      },
+      `${issue.title}\n\n${issue.description ?? ''}`,
+      options.judgment ??
+        buildOrchestratorJudgmentContext({
+          workDir,
+          sourceKind: 'execute',
+          taskId: String(issueId),
+        }),
+    );
     auditLog.record({
       actor: 'system',
       action: 'evaluate',

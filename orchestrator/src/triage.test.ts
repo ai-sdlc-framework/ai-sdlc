@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { executeTriage } from './triage.js';
-import type { IssueTracker } from '@ai-sdlc/reference';
+import {
+  FakeJudgmentProvider,
+  resolveJudgmentConfig,
+  type EvaluateJudgmentContext,
+  type IssueTracker,
+} from '@ai-sdlc/reference';
 
 function createMockTracker(overrides: Partial<IssueTracker> = {}): IssueTracker {
   return {
@@ -352,5 +357,114 @@ describe('executeTriage', () => {
     expect(result.labelApplied).toBeUndefined();
     expect(tracker.addComment).not.toHaveBeenCalled();
     expect(tracker.updateIssue).not.toHaveBeenCalled();
+  });
+});
+
+describe('executeTriage injection screen', () => {
+  const verdictData = {
+    safe: true,
+    riskScore: 1,
+    findings: ['existing finding'],
+    sanitizedDescription: 'x',
+    rationale: 'ok',
+  };
+
+  function mockTriageFetch() {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: JSON.stringify(verdictData) }],
+            usage: { input_tokens: 1, output_tokens: 1 },
+            model: 'claude-sonnet-4-5-20250929',
+          }),
+          { status: 200 },
+        ),
+    );
+  }
+
+  function screenCtx(prob: number): EvaluateJudgmentContext {
+    const fake = new FakeJudgmentProvider();
+    for (const id of ['addressesModel', 'requestsSecrets', 'requestsDisable']) {
+      fake.script(id, { type: 'noul', probability: id === 'requestsSecrets' ? prob : 0 });
+    }
+    return {
+      config: resolveJudgmentConfig({
+        spec: {
+          provider: 'fake',
+          model: 'fake-1',
+          judgments: {
+            'triage.injection-screen': {
+              mode: 'enforce',
+              thresholds: { 'fake@fake-1': { flag: 0.7 } },
+              promotion: { 'fake@fake-1': { path: 'override', evidence: 'reviewed' } },
+            },
+          },
+        },
+      }),
+      getProvider: () => fake,
+    };
+  }
+
+  beforeEach(() => {
+    process.env.ANTHROPIC_API_KEY = 'test-api-key';
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('adds a finding and the suspicious flag, and still runs the existing triage', async () => {
+    const fetchSpy = mockTriageFetch();
+    const result = await executeTriage('42', {
+      tracker: createMockTracker(),
+      dryRun: true,
+      judgment: screenCtx(0.95),
+    });
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(result.suspicious).toBe(true);
+    expect(result.verdict.findings[0]).toBe('existing finding');
+    expect(result.verdict.findings).toHaveLength(2);
+    expect(result.verdict.safe).toBe(true);
+    expect(result.verdict.riskScore).toBe(1);
+    expect(result.rejected).toBe(false);
+  });
+
+  it('low probability and no judgment both leave the result byte-identical', async () => {
+    mockTriageFetch();
+    const plain = await executeTriage('42', { tracker: createMockTracker(), dryRun: true });
+    const low = await executeTriage('42', {
+      tracker: createMockTracker(),
+      dryRun: true,
+      judgment: screenCtx(0.1),
+    });
+    expect(JSON.stringify(low)).toBe(JSON.stringify(plain));
+    expect('suspicious' in low).toBe(false);
+  });
+
+  it('carries the flag onto the posted comment, the applied label result and the error path', async () => {
+    mockTriageFetch();
+    const tracker = createMockTracker();
+    const result = await executeTriage('42', { tracker, judgment: screenCtx(0.95) });
+    expect(result.suspicious).toBe(true);
+    expect(result.labelApplied).toBe('triage-passed');
+    expect((tracker.addComment as ReturnType<typeof vi.fn>).mock.calls[0][1]).toContain(
+      'Injection screen',
+    );
+    const failing = createMockTracker({
+      updateIssue: vi.fn().mockRejectedValue(new Error('nope')),
+    });
+    const r2 = await executeTriage('42', { tracker: failing, judgment: screenCtx(0.95) });
+    expect(r2.suspicious).toBe(true);
+    expect(r2.error).toContain('Label application failed');
+
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
+    const r3 = await executeTriage('42', {
+      tracker: createMockTracker(),
+      dryRun: true,
+      judgment: screenCtx(0.95),
+    });
+    expect(r3.rejected).toBe(true);
+    expect(r3.suspicious).toBe(true);
   });
 });

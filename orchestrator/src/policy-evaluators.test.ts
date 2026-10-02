@@ -17,6 +17,73 @@ import {
   DEFAULT_THRESHOLDS,
 } from './policy-evaluators.js';
 
+import {
+  FakeJudgmentProvider,
+  disabledJudgmentConfig,
+  resolveJudgmentConfig,
+  scoreComplexity,
+  evaluateComplexity,
+  type ComplexityInput,
+  type EvaluateJudgmentContext,
+} from '@ai-sdlc/reference';
+import {
+  scorePipelineComplexityWithJudgment,
+  evaluatePipelineComplexityRoutingWithJudgment,
+} from './policy-evaluators.js';
+import {
+  BOOLEAN_COMPLEXITY_FACTORS,
+  COMPLEXITY_FACTORS_ID,
+} from './judgment/complexity-factors.js';
+
+function factorCtx(probs: Record<string, number>): EvaluateJudgmentContext {
+  const fake = new FakeJudgmentProvider();
+  for (const f of BOOLEAN_COMPLEXITY_FACTORS) {
+    fake.script(f, { type: 'noul', probability: probs[f] ?? 0 });
+  }
+  const config = resolveJudgmentConfig({
+    spec: {
+      provider: 'fake',
+      model: 'fake-1',
+      judgments: {
+        [COMPLEXITY_FACTORS_ID]: {
+          mode: 'enforce',
+          thresholds: { 'fake@fake-1': { raise: 0.8 } },
+          promotion: { 'fake@fake-1': { path: 'override', evidence: 'reviewed samples' } },
+        },
+      },
+    },
+  });
+  return { config, getProvider: () => fake };
+}
+
+describe('Policy evaluators with complexity.factors judgment', () => {
+  const base: ComplexityInput = { filesAffected: 6, linesOfChange: 250 };
+
+  it('absent or disabled context equals the sync result', async () => {
+    const disabled = { config: disabledJudgmentConfig() } satisfies EvaluateJudgmentContext;
+    for (const ctx of [undefined, disabled]) {
+      expect(await scorePipelineComplexityWithJudgment(base, 'x', ctx)).toBe(scoreComplexity(base));
+      expect(await evaluatePipelineComplexityRoutingWithJudgment(base, 'x', ctx)).toEqual(
+        evaluateComplexity(base),
+      );
+    }
+  });
+
+  it('an enabled judgment raises a factor and the score goes up', async () => {
+    const ctx = factorCtx({ securitySensitive: 0.95 });
+    const score = await scorePipelineComplexityWithJudgment(base, 'rotate keys', ctx);
+    expect(score).toBeGreaterThan(scoreComplexity(base));
+    const routed = await evaluatePipelineComplexityRoutingWithJudgment(base, 'rotate keys', ctx);
+    expect(routed.score).toBe(score);
+  });
+
+  it('never lowers an already-true factor', async () => {
+    const start: ComplexityInput = { ...base, securitySensitive: true };
+    const score = await scorePipelineComplexityWithJudgment(start, 'x', factorCtx({}));
+    expect(score).toBe(scoreComplexity(start));
+  });
+});
+
 describe('Policy evaluators', () => {
   describe('createPipelineRegoEvaluator()', () => {
     it('creates a Rego evaluator', () => {

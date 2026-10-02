@@ -544,6 +544,11 @@ export interface TaskDispatchOutcome {
   /** Set when the result already had a `notes` field. */
   notes?: string;
   /**
+   * Advisory failure class for an unmatched failure. Informational only: no retry,
+   * recovery or routing is derived from it.
+   */
+  advisoryFailureClass?: import('../tui/analytics/quality-classifier.js').FailureClass;
+  /**
    * AISDLC-229 — populated when the `ai-sdlc-pipeline execute` umbrella ran to
    * completion (success or failure). `undefined` when the orchestrator short-
    * circuited before calling the umbrella (e.g. spawner-resolution error, in-flight

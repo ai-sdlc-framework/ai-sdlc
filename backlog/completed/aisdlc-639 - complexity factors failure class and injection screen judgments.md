@@ -2,7 +2,7 @@
 id: AISDLC-639
 title: >-
   RFC-0049 Group C: complexity.factors, failure.class and triage.injection-screen judgments (tighten-only)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -82,3 +82,24 @@ Group C.
 - [ ] Each of the three definitions is registered with `direction` `tighten-only` and provides `agrees`.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+## Summary
+Wired the three judgments at their real call sites. `orchestrator/src/admission-score.ts` never builds the boolean factor input (it derives a single numeric complexity for the PPA input), so it is untouched; `complexity.factors` is wired where `ComplexityInput` is actually built.
+
+## Changes
+- `orchestrator/src/policy-evaluators.ts` (modified): new optional-context `scorePipelineComplexityWithJudgment` and `evaluatePipelineComplexityRoutingWithJudgment`; the sync wrappers keep their signatures. Exported from `orchestrator/src/index.ts`.
+- `orchestrator/src/execute.ts` (modified): the post-agent `evaluateComplexity` step now goes through the judgment-aware wrapper using `options.judgment` or `buildOrchestratorJudgmentContext`.
+- `orchestrator/src/judgment/injection-screen.ts` (modified): `screenVerdictSummary` screens the analyze-only verdict JSON.
+- `dogfood/src/cli-triage.ts` (modified): the analyze-only path (--title/--body) now runs the same injection screen, so it no longer bypasses it. Screen results only add findings and the suspicious flag; `safe`, `riskScore` and the reject threshold are unchanged.
+- `pipeline-cli/src/orchestrator/loop.ts` (modified earlier): `failure.class` attached in the unmatched branch.
+
+## Design decisions
+- **Optional async variants instead of changing sync signatures**: existing callers behave byte-for-byte as before.
+
+## Verification
+- orchestrator, dogfood suites, `pnpm dark-code:check`, eslint and prettier clean
+
+## Follow-up
+(none)
