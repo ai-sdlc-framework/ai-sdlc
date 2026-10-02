@@ -100,7 +100,7 @@ Review-plan schema registered with AJV, the baseline checklist as versioned code
 - **The test-run probe is omitted when no changed test exists or the allowlist has no test command**: there is nothing legitimate to run.
 
 ## Verification
-- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 84 passed
+- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 126 passed
 - `pnpm --filter @ai-sdlc/reference exec vitest run src/core/review-plan-schema.test.ts` - 4 passed
 - `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on touched paths - clean
 

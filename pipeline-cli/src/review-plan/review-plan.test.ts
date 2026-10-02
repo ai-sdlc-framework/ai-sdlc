@@ -8,6 +8,8 @@ import {
   BASELINE_CHECKLIST_VERSION,
   buildBaselineProbes,
   ABSOLUTE_MAX_PROBES,
+  ABSOLUTE_MAX_TARGET_BYTES,
+  targetBytes,
   BaselineInputError,
   buildFallbackPlan,
   escapesRoot,
@@ -804,6 +806,122 @@ describe('buildFallbackPlan', () => {
     });
     expect(r.ok).toBe(false);
     expect(r.rejections.map((x) => x.reason)).toContain('run-target-not-allowed');
+  });
+
+  describe('synthesized read probes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'rp-syn-'));
+    const outside = mkdtempSync(join(tmpdir(), 'rp-syn-out-'));
+    symlinkSync(outside, join(root, 'link'));
+    const kinds: Array<[string, Record<string, unknown>]> = [
+      ['high-risk', { riskScore: 0.99 }],
+      ['unjudged', { judged: false }],
+      ['security-flagged low-risk', { flags: ['secrets'] }],
+    ];
+    const paths = ['-x.ts', '~x.ts', 'a/.git/x', 'a/.GIT/x', 'a/*.ts', 'link/x.ts'];
+    const cases = kinds.flatMap(([k, over]) => paths.map((path) => [k, over, path] as const));
+
+    it.each(cases)('is ok:false for an uncovered %s hunk at %j', (_k, over, path) => {
+      // The baseline is built WITHOUT this hunk, so only the synthesized read touches the path.
+      const b = baseline();
+      const rm: RiskMapInput = {
+        ...riskMap,
+        hunks: [...riskMap.hunks, hunk({ id: 'h9', file: path, ...over })],
+      };
+      const r = buildFallbackPlan(b, rm, { ...limits, repoRoot: root });
+      expect(r.ok).toBe(false);
+      expect('plan' in r).toBe(false);
+      expect(
+        r.rejections.some(
+          (x) => x.reason === 'unsafe-path' && x.probeId?.startsWith('fallback-read-'),
+        ),
+      ).toBe(true);
+      expect(r.rejections.map((x) => x.reason)).toContain('unreviewable-input');
+    });
+  });
+
+  describe('revision rules', () => {
+    const cmp = (base: string, head: string): Probe => ({
+      id: 'cmp',
+      type: 'compare',
+      target: { revisions: { base, head } },
+      question: 'q',
+      covers: [],
+      baseline: true,
+    });
+    const bad: Array<[string, string]> = [
+      ['-p', 'HEAD'],
+      ['-c', 'HEAD'],
+      ['a..b', 'HEAD'],
+      ['main', '-p'],
+      ['main', '-c'],
+      ['main', 'a..b'],
+      ['main', 'x y'],
+    ];
+
+    it.each(bad)('probe checks reject base %j head %j with unsafe-revision', (base, head) => {
+      const out = probeSafetyProblems(cmp(base, head), riskMap, limits);
+      expect(out.map((x) => x.reason)).toContain('unsafe-revision');
+    });
+
+    it.each(bad)('fallback is ok:false for base %j head %j', (base, head) => {
+      const b = baseline();
+      const r = buildFallbackPlan(
+        { ...b, probes: [...b.probes, cmp(base, head)] },
+        riskMap,
+        limits,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.rejections.map((x) => x.reason)).toContain('unsafe-revision');
+    });
+
+    it.each(bad)(
+      'validatePlan refuses base %j head %j (the schema pattern catches it first)',
+      (base, head) => {
+        const b = baseline();
+        const plan = planOf([...clone(b.probes), cmp(base, head)]);
+        expect(reasons(plan)).toEqual(['schema-invalid']);
+      },
+    );
+
+    it('accepts safe revisions', () => {
+      expect(probeSafetyProblems(cmp('origin/main', 'HEAD~1'), riskMap, limits)).toEqual([]);
+    });
+  });
+
+  describe('byte ceiling', () => {
+    // Fewer probes than the count ceiling, but more bytes than the size ceiling.
+    const heavy = (): Baseline => ({
+      version: BASELINE_CHECKLIST_VERSION,
+      probes: Array.from({ length: 20 }, (_, i) => ({
+        id: `h${i}`,
+        type: 'read' as const,
+        target: {
+          files: Array.from({ length: 200 }, (_, j) => ({
+            path: `d${i}/${j}/${'a'.repeat(270)}`,
+          })),
+        },
+        question: 'q',
+        covers: [],
+        baseline: true,
+      })),
+    });
+
+    it('fallback is ok:false with baseline-over-ceiling', () => {
+      const b = heavy();
+      expect(b.probes.length).toBeLessThan(ABSOLUTE_MAX_PROBES);
+      expect(b.probes.reduce((n, p) => n + targetBytes(p.target), 0)).toBeGreaterThan(
+        ABSOLUTE_MAX_TARGET_BYTES,
+      );
+      const r = buildFallbackPlan(b, { ...riskMap, hunks: [] }, limits);
+      expect(r.ok).toBe(false);
+      expect(r.rejections.map((x) => x.reason)).toContain('baseline-over-ceiling');
+    });
+
+    it('validatePlan reports baseline-over-ceiling', () => {
+      const b = heavy();
+      const r = validatePlan(planOf(clone(b.probes)), b, { ...riskMap, hunks: [] }, limits);
+      expect(!r.valid && r.rejections.map((x) => x.reason)).toContain('baseline-over-ceiling');
+    });
   });
 
   it('is ok:false over the absolute ceiling', () => {
