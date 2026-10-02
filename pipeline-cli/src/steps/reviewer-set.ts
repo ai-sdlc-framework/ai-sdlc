@@ -43,7 +43,24 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import {
+  REVIEWER_SET_MERGED,
+  evaluateJudgment,
+  reviewerSetDefinition,
+  type EvaluateJudgmentContext,
+  type JudgmentMode,
+} from '@ai-sdlc/reference';
 import type { ReviewerType } from '../types.js';
+import { classifyPathRisk } from '../classifier/classifier.js';
+import {
+  diffHasBinaryHunk,
+  governancePathMatch,
+  judgmentLayerActive,
+  scanReviewPaths,
+  selectionLogRecord,
+  withCapturedRecord,
+  writeSelectionRecord,
+} from './review-judgment-support.js';
 
 export type ReviewerSetMode = 'three' | 'code-test-merged';
 
@@ -150,4 +167,182 @@ export function parseReviewerSetModeYaml(yaml: string): ReviewerSetMode | null {
 export function resolveReviewerSet(opts: ResolveReviewerSetOpts = {}): ReviewerType[] {
   const mode = resolveReviewerSetMode(opts);
   return mode === 'code-test-merged' ? [...CODE_TEST_MERGED_REVIEWER_SET] : [...THREE_REVIEWER_SET];
+}
+
+// ── Per-PR selection (review.reviewer-set judgment) ──────────────────────────────────
+
+/** Where the selected set came from. */
+export type ReviewerSetSource = 'judgment' | 'config';
+
+export interface ReviewerSetSelection {
+  reviewers: ReviewerType[];
+  mode: ReviewerSetMode;
+  source: ReviewerSetSource;
+  /** The veto, pin or signal that decided the outcome (also written to the judgment log). */
+  decidedBy: string;
+}
+
+export interface SelectReviewerSetOpts extends ResolveReviewerSetOpts {
+  /** Kind of the work item; only `'backlog'` can ever select the merged set. */
+  sourceKind?: string;
+  taskId?: string;
+  /** Paths changed by the diff. */
+  changedFiles: readonly string[];
+  /** Unified diff text. */
+  diff: string;
+  /**
+   * True when the diff or the file list could not be read completely (a failed or
+   * truncated git call). The judgment then never relaxes review: it must not judge
+   * file names alone.
+   */
+  diffUnavailable?: boolean;
+  /** True when git reported any binary file in the diff (numstat `-\t-` row). */
+  binaryDiff?: boolean;
+  /** Review iteration (1 = first pass). A re-run never relaxes review. */
+  iteration?: number;
+  /** Ready judgment context; omit (or leave the layer unconfigured) to keep today's behaviour. */
+  judgment?: EvaluateJudgmentContext;
+}
+
+/**
+ * The mode an operator pinned through env or base-branch config, or `null` when
+ * neither names one. Mirrors the resolver's precedence and sources.
+ */
+export function explicitReviewerSetMode(opts: ResolveReviewerSetOpts = {}): ReviewerSetMode | null {
+  const env = opts.env ?? process.env;
+  const envValue = env.AI_SDLC_REVIEWER_SET;
+  if (envValue === 'code-test-merged' || envValue === 'three') return envValue;
+  const raw = (opts.readBaseConfig ?? readReviewConfigFromBaseRef)(
+    opts.workDir ?? process.cwd(),
+    opts.baseRef ?? 'origin/main',
+  );
+  return raw ? parseReviewerSetModeYaml(raw) : null;
+}
+
+/** Enforce the floors on any set: security always present, never fewer than the merged set. */
+export function applyReviewerSetFloors(set: readonly ReviewerType[]): ReviewerType[] {
+  const out = [...new Set(set)];
+  if (!out.includes('security-reviewer')) out.push('security-reviewer');
+  return out.length < CODE_TEST_MERGED_REVIEWER_SET.length ? [...THREE_REVIEWER_SET] : out;
+}
+
+const setOf = (mode: ReviewerSetMode): ReviewerType[] =>
+  applyReviewerSetFloors(
+    mode === 'code-test-merged' ? CODE_TEST_MERGED_REVIEWER_SET : THREE_REVIEWER_SET,
+  );
+
+/**
+ * Choose the reviewer set for one PR.
+ *
+ * The merged two-reviewer set comes from the judgment only when ALL hold: the
+ * judgment's effective mode is `enforce` (the runtime requires a corpus promotion
+ * record), `sourceKind` is `backlog`, the path classifier raised no auth, lockfile or
+ * CI match, and the judgment returned `act`. Anything else returns exactly what
+ * `resolveReviewerSetMode` returns, and an explicit mode from env or base-branch
+ * config always applies as it does without the judgment.
+ */
+export async function selectReviewerSet(
+  opts: SelectReviewerSetOpts,
+): Promise<ReviewerSetSelection> {
+  const mode = resolveReviewerSetMode(opts);
+  const base = (source: ReviewerSetSource, decidedBy: string): ReviewerSetSelection => ({
+    reviewers: setOf(mode),
+    mode,
+    source,
+    decidedBy,
+  });
+  const ctx = opts.judgment;
+  if (!ctx || !judgmentLayerActive(ctx)) return base('config', 'config:layer-disabled');
+
+  const pinned = explicitReviewerSetMode(opts);
+  // The selection record uses an id with no registered definition on purpose: it is an
+  // audit line, not an evaluation, so `cli-judgment replay` and `eval` skip it.
+  const log = (
+    sel: ReviewerSetSelection,
+    inputs: Record<string, unknown>,
+    effective: JudgmentMode,
+  ) =>
+    writeSelectionRecord(
+      ctx,
+      selectionLogRecord(
+        'review.reviewer-set.selection',
+        { ...ctx, ...(opts.taskId ? { taskId: opts.taskId } : {}) },
+        {
+          set: sel.mode,
+          reviewers: sel.reviewers,
+          source: sel.source,
+          decidedBy: sel.decidedBy,
+          inputs,
+        },
+        { set: mode },
+        effective,
+      ),
+    );
+
+  const scan = scanReviewPaths(opts.changedFiles, opts.diff);
+  const risk = classifyPathRisk(scan.paths);
+  const governance = governancePathMatch(scan.paths);
+  const inputs = {
+    sourceKind: opts.sourceKind ?? null,
+    changedFiles: opts.changedFiles.length,
+    pathAuth: risk.touchesAuth,
+    pathLockfile: risk.touchesLockfiles,
+    pathCi: risk.touchesCi,
+    pathGovernance: governance !== undefined,
+    pinned,
+  };
+  const vetoed = async (decidedBy: string): Promise<ReviewerSetSelection> => {
+    const sel = base('config', decidedBy);
+    await log(sel, inputs, 'off');
+    return sel;
+  };
+
+  if (pinned !== null) return vetoed(`config:explicit-${pinned}`);
+  if (opts.sourceKind !== 'backlog') return vetoed('veto:source-kind');
+  // `!(n <= 1)` so a NaN iteration counts as a re-run and never relaxes review.
+  if (!((opts.iteration ?? 1) <= 1)) return vetoed('veto:iteration');
+  if (opts.changedFiles.length === 0) return vetoed('veto:no-changed-files');
+  if (opts.diffUnavailable === true || opts.diff.trim() === '') {
+    return vetoed('veto:diff-unavailable');
+  }
+  if (opts.binaryDiff === true || diffHasBinaryHunk(opts.diff)) return vetoed('veto:binary-diff');
+  if (scan.unparseable) return vetoed('veto:unparseable-path');
+  if (risk.touchesAuth) return vetoed('veto:path-auth');
+  if (risk.touchesLockfiles) return vetoed('veto:path-lockfile');
+  if (risk.touchesCi) return vetoed('veto:path-ci');
+  if (governance !== undefined) return vetoed('veto:path-governance');
+
+  const { value: outcome, record } = await withCapturedRecord(
+    { ...ctx, sourceKind: 'backlog', ...(opts.taskId ? { taskId: opts.taskId } : {}) },
+    (c) =>
+      evaluateJudgment(
+        reviewerSetDefinition,
+        { changedFiles: [...opts.changedFiles], diff: opts.diff },
+        { ...c, incumbent: { set: mode } },
+      ),
+  );
+  const effective: JudgmentMode = record?.mode ?? 'off';
+  if (
+    outcome.kind === 'act' &&
+    effective === 'enforce' &&
+    outcome.decision.set === REVIEWER_SET_MERGED
+  ) {
+    const sel: ReviewerSetSelection = {
+      reviewers: setOf('code-test-merged'),
+      mode: 'code-test-merged',
+      source: 'judgment',
+      decidedBy: 'judgment:all-signals-below-threshold',
+    };
+    await log(sel, { ...inputs, signals: outcome.decision.signals, defaultMode: mode }, effective);
+    return sel;
+  }
+  const why =
+    effective !== 'enforce'
+      ? `judgment:not-enforced:${record?.downgradeReason ?? effective}`
+      : outcome.kind === 'abstain'
+        ? `judgment:${outcome.reason}`
+        : `judgment:${outcome.kind}`;
+  const sel = base('config', why);
+  await log(sel, inputs, effective);
+  return sel;
 }

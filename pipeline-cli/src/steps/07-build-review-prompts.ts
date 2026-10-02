@@ -12,8 +12,11 @@
  * three reviewers above; `reviewerSet: code-test-merged` (opt-in, via
  * `AI_SDLC_REVIEWER_SET` or `.ai-sdlc/review-config.yaml`) swaps in exactly
  * two — `correctness-reviewer` (merged code+test remit) + `security-reviewer`
- * (unchanged, separate). Do not hardcode a reviewer count anywhere downstream
- * of this step — always read `prompts.length`.
+ * (unchanged, separate). With a judgment provider configured, `selectReviewerSet()`
+ * may pick the merged set per PR (trusted work only, never past a path veto) and
+ * `routeReviewers()` may add reviewers afterwards; neither ever shrinks a set. Do not
+ * hardcode a reviewer count anywhere downstream of this step: always read
+ * `prompts.length`.
  *
  * The reviewer subagents themselves run via the LLM dispatch boundary
  * (Step 7b) which is NOT part of this step.
@@ -26,7 +29,11 @@ import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
-import { resolveReviewerSet } from './reviewer-set.js';
+import { selectReviewerSet } from './reviewer-set.js';
+import { diffHasBinaryHunk } from './review-judgment-support.js';
+import { routeReviewers } from './review-routing.js';
+import { buildJudgmentContext } from '../judgment/context.js';
+import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import { resolveModel } from '../routing/resolve-model.js';
 import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
@@ -44,7 +51,7 @@ export interface BuildReviewPromptsOptions {
   reviewers?: ReviewerType[];
   /** Source of the work; only an explicit `backlog` is eligible for model exploration. */
   sourceKind?: 'backlog' | 'gh-issue';
-  /** Review iteration (default 1). */
+  /** Review iteration (default 1). Missing means 1; NaN counts as a re-run (never relaxes review). */
   iteration?: number;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
@@ -53,6 +60,13 @@ export interface BuildReviewPromptsOptions {
    * the routing capability (offline replay must leave no trace).
    */
   recordRouting?: boolean;
+  /**
+   * Judgment context for `review.reviewer-set` and `review.routing` (test injection).
+   * Defaults to the context built from the trusted base-branch config; with no
+   * provider configured the judgments are never evaluated and the reviewers are
+   * exactly what the resolver returns.
+   */
+  judgment?: EvaluateJudgmentContext;
 }
 
 export async function buildReviewPrompts(
@@ -66,23 +80,73 @@ export async function buildReviewPrompts(
   const targetBranch = resolveTargetBranch(opts.workDir);
   const baseRef = `origin/${targetBranch}`;
 
-  const diffResult = await runner('git', ['diff', `${baseRef}...HEAD`], {
-    cwd: opts.worktreePath,
-    allowFailure: true,
-  });
-  const diff = diffResult.code === 0 ? diffResult.stdout : '';
+  // `--text` stops a `-diff` attribute hiding content behind a binary stub, but it also
+  // means git never prints `Binary files ... differ`, so binary files are detected
+  // separately (numstat below, and NUL / U+FFFD in the text). `--no-ext-diff` and
+  // `--no-textconv` keep repo-configured drivers from rewriting what reviewers read.
+  // `core.quotePath=false` keeps non-ASCII bytes literal; `-z` separates paths with NUL
+  // and never quotes them; `--no-renames` lists both sides of a rename. The path rules
+  // that veto a relaxation match on these plain paths.
+  const diffResult = await runner(
+    'git',
+    [
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--text',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef}...HEAD`,
+    ],
+    { cwd: opts.worktreePath, allowFailure: true },
+  );
+  const rawDiff = diffResult.code === 0 ? diffResult.stdout : '';
 
-  const filesResult = await runner('git', ['diff', '--name-only', `${baseRef}...HEAD`], {
-    cwd: opts.worktreePath,
-    allowFailure: true,
-  });
+  // Without `--text`, git reports a binary file as `-\t-\t<path>`.
+  const numstatResult = await runner(
+    'git',
+    [
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--numstat',
+      '-z',
+      '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef}...HEAD`,
+    ],
+    { cwd: opts.worktreePath, allowFailure: true },
+  );
+  const binaryPaths =
+    numstatResult.code === 0 ? parseBinaryNumstat(numstatResult.stdout) : new Set<string>();
+  const { diff, stubbed } = stubBinaryHunks(rawDiff, binaryPaths);
+  const binaryDiff = stubbed || binaryPaths.size > 0 || diffHasBinaryHunk(rawDiff);
+
+  const filesResult = await runner(
+    'git',
+    [
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      '--name-only',
+      '-z',
+      '--no-renames',
+      '--no-ext-diff',
+      '--no-textconv',
+      `${baseRef}...HEAD`,
+    ],
+    { cwd: opts.worktreePath, allowFailure: true },
+  );
   const changedFiles =
-    filesResult.code === 0
-      ? filesResult.stdout
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean)
-      : [];
+    filesResult.code === 0 ? filesResult.stdout.split('\0').filter((p) => p !== '') : [];
+  // A failed git call, or a diff that came back empty for a non-empty file list, means the
+  // judgment would see file names alone. It must not relax review in that case.
+  const diffUnavailable =
+    diffResult.code !== 0 ||
+    filesResult.code !== 0 ||
+    numstatResult.code !== 0 ||
+    (changedFiles.length > 0 && diff.trim() === '');
 
   // Codex independence detection
   let codexAvailable = opts.codexAvailable;
@@ -104,7 +168,43 @@ export async function buildReviewPrompts(
 
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join('\n');
 
-  const reviewers = opts.reviewers ?? resolveReviewerSet({ workDir: opts.workDir });
+  // Offline replay (`recordRouting: false`) leaves no trace, so it never reaches a provider.
+  const judgment =
+    opts.recordRouting === false
+      ? undefined
+      : (opts.judgment ??
+        buildJudgmentContext({
+          workDir: opts.workDir,
+          artifactsDir: routingArtifactsDir(opts.worktreePath, opts.artifactsDir),
+          ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+          taskId: opts.taskId,
+        }));
+  const selected =
+    opts.reviewers ??
+    (
+      await selectReviewerSet({
+        workDir: opts.workDir,
+        ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+        taskId: opts.taskId,
+        changedFiles,
+        diff,
+        diffUnavailable,
+        binaryDiff,
+        ...(opts.iteration !== undefined ? { iteration: opts.iteration } : {}),
+        ...(judgment ? { judgment } : {}),
+      })
+    ).reviewers;
+  // review.routing runs after set selection and can only add reviewers.
+  const reviewers = (
+    await routeReviewers({
+      reviewers: selected,
+      changedFiles,
+      diff,
+      ...(opts.sourceKind ? { sourceKind: opts.sourceKind } : {}),
+      taskId: opts.taskId,
+      ...(judgment ? { judgment } : {}),
+    })
+  ).reviewers;
 
   const taskClass = taskClassOf(opts.task.rawBody);
   const prompts: ReviewPrompt[] = reviewers.map((reviewer) => {
@@ -137,7 +237,45 @@ export async function buildReviewPrompts(
     };
   });
 
-  return { prompts, diff, changedFiles, harnessNote };
+  return { prompts, diff, changedFiles, harnessNote, diffUnavailable };
+}
+
+/** Paths git reports as binary (`-\t-\t<path>`) in `--numstat -z --no-renames` output. */
+export function parseBinaryNumstat(out: string): Set<string> {
+  const paths = new Set<string>();
+  for (const rec of out.split('\0')) {
+    const m = /^-\t-\t(.+)$/s.exec(rec);
+    if (m) paths.add(m[1]);
+  }
+  return paths;
+}
+
+const MAX_LISTED_BINARY_CHARS = 200_000;
+
+/**
+ * Replace the diff section of every binary file (holding a NUL byte, or listed by
+ * numstat and very large) with git's own one-line binary stub, so the prompt carries no NUL bytes and
+ * no large binary payload.
+ */
+export function stubBinaryHunks(
+  diff: string,
+  binaryPaths: ReadonlySet<string>,
+): { diff: string; stubbed: boolean } {
+  if (diff === '') return { diff, stubbed: false };
+  let stubbed = false;
+  const sections = diff.split(/^(?=diff --git )/m).map((section) => {
+    const header = /^diff --git a\/(.+) b\/(.+)$/m.exec(section.split('\n', 1)[0]);
+    // A NUL byte is what git itself treats as binary. A numstat-binary file with no NUL
+    // (a `-diff` attribute) keeps its text, unless it is huge.
+    const listed = header !== null && (binaryPaths.has(header[1]) || binaryPaths.has(header[2]));
+    const binary =
+      section.includes('\u0000') || (listed && section.length > MAX_LISTED_BINARY_CHARS);
+    if (!binary) return section;
+    stubbed = true;
+    if (!header) return 'Binary files a/(unreadable) and b/(unreadable) differ\n';
+    return `${section.split('\n', 1)[0]}\nBinary files a/${header[1]} and b/${header[2]} differ\n`;
+  });
+  return { diff: sections.join(''), stubbed };
 }
 
 interface PromptInputs {

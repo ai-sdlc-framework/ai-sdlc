@@ -6,6 +6,7 @@ import {
   iterateReviewLoop,
   spawnReviewerWithRetry,
 } from './09-iterate.js';
+import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
 import { aggregateVerdicts } from './08-aggregate-verdicts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
@@ -17,6 +18,12 @@ import type {
   SubagentResult,
   TaskSpec,
 } from '../types.js';
+
+// A real diff for the review step; without one the loop refuses to spawn reviewers.
+const diffRunner = new FakeRunner()
+  .on(/diff --name-only/, ok('a.ts\0'))
+  .on(/diff --text/, ok('diff --git a/a.ts b/a.ts\n+x\n'))
+  .toRunner();
 
 let tmp: string;
 beforeEach(() => {
@@ -92,6 +99,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       initialVerdict: approvedVerdict(),
       maxIterations: 2,
       spawner,
+      runner: diffRunner,
     });
     expect(r.iterations).toBe(1);
     expect(r.needsHumanAttention).toBe(false);
@@ -152,6 +160,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       initialVerdict: blockedVerdict(),
       maxIterations: 2,
       spawner,
+      runner: diffRunner,
     });
     expect(r.iterations).toBe(2);
     expect(r.finalVerdict.decision).toBe('APPROVED');
@@ -186,6 +195,7 @@ describe('Step 9 — iterateReviewLoop', () => {
         maxIterations: 2,
         sourceKind: 'backlog',
         spawner,
+        runner: diffRunner,
       });
     } finally {
       if (prev === undefined) delete process.env.ARTIFACTS_DIR;
@@ -239,6 +249,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       initialVerdict: blockedVerdict(),
       maxIterations: 2,
       spawner,
+      runner: diffRunner,
     });
     expect(r.iterations).toBe(2);
     expect(r.needsHumanAttention).toBe(true);
@@ -262,6 +273,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       initialVerdict: blockedVerdict(),
       maxIterations: 3,
       spawner,
+      runner: diffRunner,
     });
     // Developer subagent failed → loop bails; iteration counter increments past 1.
     expect(r.iterations).toBeGreaterThanOrEqual(1);
@@ -325,6 +337,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       initialVerdict: blockedVerdict(),
       maxIterations: 2,
       spawner,
+      runner: diffRunner,
       onDeveloperContractRetry: (info) => {
         events.push(info);
       },
@@ -399,6 +412,7 @@ describe('Step 9 — iterateReviewLoop', () => {
       initialVerdict: blockedVerdict(),
       maxIterations: 2,
       spawner,
+      runner: diffRunner,
     });
     expect(r.iterations).toBe(2);
     expect(r.finalVerdict.decision).toBe('APPROVED');

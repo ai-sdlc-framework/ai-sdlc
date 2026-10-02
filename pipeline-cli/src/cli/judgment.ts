@@ -27,6 +27,7 @@ import {
   loadJudgmentConfig,
   providerModelKey,
   readJudgmentLog,
+  registerReviewJudgmentDefinitions,
   resolveJudgmentProvider,
   type JudgmentProvider,
   type ResolvedJudgmentConfig,
@@ -652,6 +653,7 @@ export async function runJudgmentCli(
   deps: JudgmentCliDeps = {},
 ): Promise<number> {
   const err = deps.err ?? ((t: string) => process.stderr.write(t));
+  registerReviewJudgmentDefinitions();
   let result: Promise<number> | undefined;
   try {
     await buildJudgmentCli(argv, deps, (p) => {

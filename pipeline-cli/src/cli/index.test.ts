@@ -5,7 +5,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { buildCli } from './index.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
@@ -112,6 +113,39 @@ describe('CLI router', () => {
     setArgv('resolve-model', 'developer', '--task-id', 'GONE-9', '--skip-log', '--work-dir', tmp);
     await buildCli().parseAsync();
     expect(stdoutJson()).toMatchObject({ model: 'claude-sonnet-4-6', arm: 'default' });
+  });
+
+  it('build-review-prompts accepts --source-kind and rejects other values', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'cli demo', status: 'To Do' });
+    // A real diff against origin/main: reviewers are never built from an unreadable diff.
+    const git = (...g: string[]) => execFileSync('git', g, { cwd: tmp, stdio: 'pipe' });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'dev@example.invalid');
+    git('config', 'user.name', 'Dev');
+    git('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(tmp, 'a.txt'), 'one\n');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'base');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    writeFileSync(join(tmp, 'a.txt'), 'two\n');
+    git('commit', '-qam', 'change');
+    for (const kind of ['backlog', 'gh-issue']) {
+      stdoutChunks.length = 0;
+      setArgv(
+        'build-review-prompts',
+        'AISDLC-1',
+        '--source-kind',
+        kind,
+        '--work-dir',
+        tmp,
+        '--worktree-path',
+        tmp,
+      );
+      await buildCli().parseAsync();
+      expect((stdoutJson() as { prompts: unknown[] }).prompts).toHaveLength(3);
+    }
+    setArgv('build-review-prompts', 'AISDLC-1', '--source-kind', 'bogus', '--work-dir', tmp);
+    await expect(async () => buildCli().parseAsync()).rejects.toThrow(/process\.exit/);
   });
 
   it('validate-task emits ok=true for a valid task', async () => {

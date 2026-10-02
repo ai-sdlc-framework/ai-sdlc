@@ -57,14 +57,11 @@ import {
   DEFAULT_LOGGER,
   type AggregatedVerdict,
   type PipelineLogger,
-  type ReviewerType,
   type ReviewerVerdict,
   type SubagentSpawner,
 } from '../types.js';
 import { writeVerdictFile } from './execute.js';
 import { PROTECTED_BRANCHES } from './rework-pr.js';
-
-const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
 
 /**
  * Bug 2b (AISDLC-356) — title-search fallback for when a PR exists but was
@@ -527,11 +524,11 @@ export async function runResumeFromDraft(
   // results are retried once before falling through to the synthetic-critical
   // placeholder. Runs the 3 reviewers in parallel (same as the main pipeline).
   const verdicts: ReviewerVerdict[] = await Promise.all(
-    reviewBuild.prompts.map((p, i) =>
+    reviewBuild.prompts.map((p) =>
       spawnReviewerWithRetry(
         opts.spawner,
         { type: p.reviewer, prompt: p.prompt, cwd: worktreePath },
-        REVIEWER_TYPES[i],
+        p.reviewer,
         logger,
       ),
     ),

@@ -29,8 +29,6 @@ import type {
   SubagentSpawner,
 } from '../types.js';
 
-const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
-
 const DEFAULT_MAX_ITERATIONS = 2;
 
 /**
@@ -126,18 +124,22 @@ export async function iterateReviewLoop(
     }
     currentDev = parsedDev.developer;
 
-    const { prompts } = await buildReviewPrompts({
+    const { prompts, diffUnavailable } = await buildReviewPrompts({
       taskId: opts.taskId,
       task: opts.task,
       branch: opts.branch,
       worktreePath: opts.worktreePath,
       workDir: opts.worktreePath,
       iteration,
-      sourceKind: opts.sourceKind,
+      ...(opts.runner ? { runner: opts.runner } : {}),
+      // The review path gets the untrusted value (undefined when not trusted backlog work).
+      sourceKind: 'reviewSourceKind' in opts ? opts.reviewSourceKind : opts.sourceKind,
     });
+    // Never spawn reviewers on an empty or partial diff; stop and keep the current verdict.
+    if (diffUnavailable) break;
 
     const newVerdicts: ReviewerVerdict[] = await Promise.all(
-      prompts.map((p, i) =>
+      prompts.map((p) =>
         spawnReviewerWithRetry(
           opts.spawner!,
           {
@@ -146,7 +148,7 @@ export async function iterateReviewLoop(
             cwd: opts.worktreePath,
             ...(p.model ? { model: p.model } : {}),
           },
-          REVIEWER_TYPES[i],
+          p.reviewer,
         ),
       ),
     );
