@@ -82,6 +82,11 @@ describe('check-coverage.sh — resource safety (AISDLC-681)', () => {
     const script = `#!/usr/bin/env bash
 CMD_STR="$*"
 if [[ "$CMD_STR" == *"list"*"--json"* ]]; then echo '[]'; exit 0; fi
+if [[ "$CMD_STR" == *" build"* ]] && [ -n "\${FAKE_BUILD_SLEEP:-}" ]; then
+  node -e 'require("fs").appendFileSync(process.env.FAKE_DIR+"/worker.pids", process.pid+"\\n"); setInterval(()=>{},1000)' fake-build-worker &
+  sleep "$FAKE_BUILD_SLEEP"
+  exit 0
+fi
 if [[ "$CMD_STR" == *"test:coverage"* ]]; then
   echo "$CMD_STR" >> "$FAKE_DIR/coverage.args"
   echo "start $$ $(date +%s)" >> "$FAKE_DIR/events.log"
@@ -210,16 +215,114 @@ exit 0
     assert.match(h.output(), /reclaiming stale lock/);
   });
 
-  it('reclaims a lock older than the timeout even when the holder pid is alive', async () => {
+  it('reclaims a foreign-host lock older than 2 x timeout + 60s', async () => {
     const lock = join(lockDir, 'coverage-gate.lock');
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, 'owner'), `${process.pid}\tother-host\t/elsewhere\t1\n`);
-    const old = new Date(Date.now() - 60_000);
+    const old = new Date(Date.now() - 86_400_000);
     utimesSync(lock, old, old);
     const h = start({ AI_SDLC_COVERAGE_TIMEOUT_SEC: '5' });
     const r = await h.done;
     assert.equal(r.code, 0, h.output());
     assert.match(h.output(), /reclaiming stale lock/);
+  });
+
+  const LOCK = () => join(lockDir, 'coverage-gate.lock');
+  const host = () => spawnSync('hostname', { encoding: 'utf-8' }).stdout.trim();
+  const ageDir = (p, ms) => {
+    const t = new Date(Date.now() - ms);
+    utimesSync(p, t, t);
+  };
+
+  it('does NOT reclaim an old lock whose same-host holder pid is alive', async () => {
+    const holder = spawn('sleep', ['120'], { stdio: 'ignore' });
+    try {
+      mkdirSync(LOCK(), { recursive: true });
+      writeFileSync(join(LOCK(), 'owner'), `${holder.pid}\t${host()}\t/elsewhere\t1\n`);
+      ageDir(LOCK(), 86_400_000);
+      const h = start({ AI_SDLC_COVERAGE_LOCK_WAIT_SEC: '3' });
+      const r = await h.done;
+      assert.notEqual(r.code, 0);
+      assert.match(h.output(), /timed out after 3s waiting for the coverage-gate lock held by pid/);
+      assert.doesNotMatch(h.output(), /reclaiming/);
+      assert.ok(existsSync(join(LOCK(), 'owner')), 'live holder keeps its lock');
+    } finally {
+      holder.kill('SIGKILL');
+    }
+  });
+
+  it('does not reclaim a fresh ownerless lock, but reclaims one older than ~10s', async () => {
+    mkdirSync(LOCK(), { recursive: true });
+    const fresh = start({ AI_SDLC_COVERAGE_LOCK_WAIT_SEC: '3' });
+    const rf = await fresh.done;
+    assert.notEqual(rf.code, 0);
+    assert.doesNotMatch(fresh.output(), /reclaiming/);
+    ageDir(LOCK(), 60_000);
+    const old = start();
+    const ro = await old.done;
+    assert.equal(ro.code, 0, old.output());
+    assert.match(old.output(), /reclaiming stale lock/);
+  });
+
+  it('two concurrent waiters on one stale lock result in exactly one holder at a time', async () => {
+    mkdirSync(LOCK(), { recursive: true });
+    writeFileSync(join(LOCK(), 'owner'), `999999\t${host()}\t/elsewhere\t1\n`);
+    const a = start({ FAKE_COVERAGE_SLEEP: '2' });
+    const b = start({ FAKE_COVERAGE_SLEEP: '2' });
+    const [ra, rb] = await Promise.all([a.done, b.done]);
+    assert.equal(ra.code, 0, a.output());
+    assert.equal(rb.code, 0, b.output());
+    const events = readFileSync(join(tmp, 'events.log'), 'utf-8')
+      .trim()
+      .split('\n')
+      .map((e) => e.split(' ')[0]);
+    assert.deepEqual(events, ['start', 'end', 'start', 'end']);
+  });
+
+  it('a build-step timeout fails naming the pre-coverage build TIMEOUT', async () => {
+    const h = start({ FAKE_BUILD_SLEEP: '120', AI_SDLC_COVERAGE_TIMEOUT_SEC: '2' });
+    const r = await h.done;
+    assert.notEqual(r.code, 0);
+    assert.match(h.output(), /pre-coverage build TIMEOUT after 2s/);
+    const pids = readPids(tmp);
+    assert.ok(await waitFor(() => pids.every((p) => !alive(p)), 5000), 'build worker survived');
+  });
+
+  it('clamps an oversized AI_SDLC_COVERAGE_TIMEOUT_SEC with a notice', async () => {
+    const h = start({ AI_SDLC_COVERAGE_TIMEOUT_SEC: '99999999999' });
+    const r = await h.done;
+    assert.equal(r.code, 0, h.output());
+    assert.match(h.output(), /exceeds the 86400 maximum; clamping/);
+  });
+
+  it('the runner kills its group when its parent dies', async () => {
+    const runner = join(__dirname, 'run-in-process-group.mjs');
+    const pidFile = join(tmp, 'group-child.pid');
+    // middle shell starts the runner, then exits, orphaning the runner.
+    spawnSync(
+      'bash',
+      [
+        '-c',
+        'node "$1" --timeout-sec 120 -- bash -c "echo \\$\\$ > \\"$2\\"; exec sleep 120" >/dev/null 2>&1 & sleep 1.5',
+        'bash',
+        runner,
+        pidFile,
+      ],
+      { stdio: 'ignore' },
+    );
+    try {
+      assert.ok(existsSync(pidFile), 'group child never started');
+      const pid = Number(readFileSync(pidFile, 'utf-8'));
+      assert.ok(await waitFor(() => !alive(pid), 6000), 'group child outlived the runner parent');
+    } finally {
+      if (existsSync(pidFile)) {
+        try {
+          process.kill(Number(readFileSync(pidFile, 'utf-8')), 'SIGKILL');
+        } catch {
+          /* gone */
+        }
+      }
+    }
   });
 
   it('refuses a symlinked lock path', async () => {

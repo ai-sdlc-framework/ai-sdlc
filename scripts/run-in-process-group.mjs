@@ -33,7 +33,7 @@ for (let i = 0; i < opts.length; i += 2) {
     process.exit(2);
   }
 }
-if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+if (!Number.isFinite(timeoutSec) || timeoutSec <= 0 || timeoutSec > 86400) {
   console.error(`invalid --timeout-sec: ${timeoutSec}`);
   process.exit(2);
 }
@@ -96,7 +96,11 @@ const timer = setTimeout(() => {
 timer.unref();
 
 // If whoever started us died uncleanly (SIGKILL), do not outlive them.
-const parentWatch = setInterval(() => {
-  if (process.ppid === 1) finish(143);
-}, 1000);
-parentWatch.unref();
+// Disabled when we start already orphaned (ppid 1, e.g. container pid 1 parent).
+const initialParent = process.ppid;
+if (initialParent > 1) {
+  const parentWatch = setInterval(() => {
+    if (process.ppid === 1 || process.ppid !== initialParent) finish(143);
+  }, 1000);
+  parentWatch.unref();
+}

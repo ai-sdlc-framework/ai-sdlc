@@ -899,6 +899,13 @@ export function parseEtimeSeconds(etime: string): number | undefined {
 }
 
 const ORPHAN_MIN_AGE_SECONDS = 120;
+/**
+ * vitest sets its process title to `node (vitest N)` / `node (vitest)` on both
+ * macOS and Linux; forks workers can also show their `vitest/dist/workers/`
+ * entrypoint. Anything else merely mentioning "vitest" (vitest.config.ts args,
+ * launchd jobs) is NOT matched.
+ */
+const VITEST_WORKER_COMMAND = /\(vitest(?: \d+)?\)|[\\/]vitest[\\/]dist[\\/]workers[\\/]/;
 
 /**
  * Warns on vitest pool workers whose parent is pid 1 (orphaned by a killed
@@ -913,7 +920,7 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
     const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
     if (!m) continue;
     const [, pid, ppid, etime, command] = m;
-    if (ppid !== '1' || !/\bvitest\b/.test(command)) continue;
+    if (ppid !== '1' || !VITEST_WORKER_COMMAND.test(command)) continue;
     const age = parseEtimeSeconds(etime);
     if (age !== undefined && age > ORPHAN_MIN_AGE_SECONDS) orphans.push(Number(pid));
   }
@@ -923,7 +930,7 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
       id: 'orphaned-vitest-workers',
       severity: 'warn',
       title: `${orphans.length} orphaned vitest worker process(es) (parent pid 1, older than 2 minutes)`,
-      remediation: `Kill them: kill ${orphans.join(' ')}`,
+      remediation: `Verify these pids are orphaned vitest workers (ps -p <pid>), then kill them: kill ${orphans.join(' ')}`,
       anonymizableEvidence: { orphanCount: orphans.length },
     },
   ];

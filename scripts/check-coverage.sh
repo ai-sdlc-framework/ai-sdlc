@@ -84,6 +84,11 @@ if ! is_posint "$TIMEOUT_SEC"; then
   TIMEOUT_SEC=900
 fi
 
+if [ "$TIMEOUT_SEC" -gt 86400 ]; then
+  echo "[coverage-gate] AI_SDLC_COVERAGE_TIMEOUT_SEC=${TIMEOUT_SEC} exceeds the 86400 maximum; clamping to 86400" >&2
+  TIMEOUT_SEC=86400
+fi
+
 NCPU="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 is_posint "$NCPU" || NCPU=2
 DEFAULT_WORKERS=$((NCPU / 2))
@@ -104,6 +109,7 @@ else
   if [ -n "$COMMON_DIR" ] && [ -d "$COMMON_DIR" ]; then
     LOCK_ROOT="$(dirname "$COMMON_DIR")/.ai-sdlc/runtime"
   else
+    echo "[coverage-gate] note: git cannot resolve an absolute git-common-dir; using the per-worktree lock path (sibling worktrees will NOT serialise)" >&2
     LOCK_ROOT="${ROOT}/.ai-sdlc/runtime"
   fi
 fi
@@ -149,21 +155,89 @@ release_lock() {
   fi
 }
 
+THIS_HOST="$(hostname 2>/dev/null || echo unknown)"
+OWNERLESS_SEC=10
+# A legitimate run can take build timeout + coverage timeout + post-processing.
+FOREIGN_STALE_SEC=$((2 * TIMEOUT_SEC + 60))
+LOCK_WAIT_SEC="${AI_SDLC_COVERAGE_LOCK_WAIT_SEC:-$FOREIGN_STALE_SEC}"
+is_posint "$LOCK_WAIT_SEC" || LOCK_WAIT_SEC="$FOREIGN_STALE_SEC"
+
+# Seconds since the lock directory was last modified (empty when unreadable).
+lock_age_sec() {
+  local m
+  m="$(node -e 'try{process.stdout.write(String(Math.floor(require("fs").statSync(process.argv[1]).mtimeMs/1000)))}catch{}' "$LOCK_DIR" 2>/dev/null || true)"
+  [ -n "$m" ] && echo $(($(date +%s) - m))
+  return 0
+}
+
+# Stale rules (the owner file is data, never evaluated):
+#  - same-host holder with a parseable pid: trust pid liveness ONLY (alive = not
+#    stale regardless of age; dead = stale);
+#  - ownerless lock (killed between create and owner write): stale after ${OWNERLESS_SEC}s;
+#  - foreign-host or unparsable owner: stale after 2 x timeout + 60 s.
 lock_is_stale() {
-  local owner_pid owner_host lock_mtime now age
+  local owner_pid owner_host age
   owner_pid="$(lock_owner_field 1)"
   owner_host="$(lock_owner_field 2)"
-  now="$(date +%s)"
-  lock_mtime="$(node -e 'try{process.stdout.write(String(Math.floor(require("fs").statSync(process.argv[1]).mtimeMs/1000)))}catch{}' "$LOCK_DIR" 2>/dev/null || true)"
-  if [ -n "$lock_mtime" ]; then
-    age=$((now - lock_mtime))
-    [ "$age" -gt "$TIMEOUT_SEC" ] && return 0
+  age="$(lock_age_sec)"
+  if [ -z "$owner_pid" ] && [ -z "$owner_host" ]; then
+    [ -n "$age" ] && [ "$age" -gt "$OWNERLESS_SEC" ] && return 0
+    return 1
   fi
-  # Holder on this host that is no longer running: reclaim immediately.
-  if is_posint "$owner_pid" && [ "$owner_host" = "$(hostname 2>/dev/null || echo unknown)" ]; then
-    kill -0 "$owner_pid" 2>/dev/null || return 0
+  if is_posint "$owner_pid" && [ "$owner_host" = "$THIS_HOST" ]; then
+    kill -0 "$owner_pid" 2>/dev/null && return 1
+    ps -p "$owner_pid" >/dev/null 2>&1 && return 1
+    return 0
   fi
+  [ -n "$age" ] && [ "$age" -gt "$FOREIGN_STALE_SEC" ] && return 0
   return 1
+}
+
+# Publish a fully-written lock atomically: build it in a temp dir (owner inside),
+# then rename(2) it into place. rename onto an existing non-empty directory
+# fails, so exactly one creator wins and no ownerless live lock window exists.
+try_create_lock() {
+  local tmp="${LOCK_ROOT}/coverage-gate.lock.new.$$"
+  rm -rf "$tmp" 2>/dev/null || true
+  mkdir "$tmp" 2>/dev/null || return 1
+  printf '%s\t%s\t%s\t%s\n' "$$" "$THIS_HOST" "$ROOT" "$(date +%s)" > "${tmp}/owner"
+  if node -e 'const fs=require("fs");const [a,b]=process.argv.slice(1);try{fs.lstatSync(b);process.exit(1)}catch{}try{fs.renameSync(a,b)}catch{process.exit(1)}' "$tmp" "$LOCK_DIR" 2>/dev/null; then
+    return 0
+  fi
+  rm -rf "$tmp" 2>/dev/null || true
+  return 1
+}
+
+# Reclaim under a short mutex so two waiters cannot both judge the same lock
+# stale and have the second one remove the winner's fresh lock. After the move
+# the trashed owner is verified against the one judged stale; a mismatch means
+# we grabbed a live lock, so it is moved back.
+reclaim_stale_lock() {
+  local rl="${LOCK_ROOT}/coverage-gate.lock.reclaim" judged now_owner trash
+  if [ -d "$rl" ] && [ ! -L "$rl" ]; then
+    local ra
+    ra="$(node -e 'try{process.stdout.write(String(Math.floor((Date.now()-require("fs").statSync(process.argv[1]).mtimeMs)/1000)))}catch{}' "$rl" 2>/dev/null || true)"
+    if [ -n "$ra" ] && [ "$ra" -gt 30 ]; then rm -rf "$rl" 2>/dev/null || true; fi
+  fi
+  mkdir "$rl" 2>/dev/null || return 1
+  judged="$(cat "${LOCK_DIR}/owner" 2>/dev/null || true)"
+  if [ -L "$LOCK_DIR" ] || ! [ -d "$LOCK_DIR" ] || ! lock_is_stale; then
+    rmdir "$rl" 2>/dev/null || true
+    return 1
+  fi
+  echo "[coverage-gate] reclaiming stale lock (holder pid $(lock_owner_field 1))" >&2
+  trash="${LOCK_ROOT}/coverage-gate.lock.stale.$$.$(date +%s)"
+  if mv "$LOCK_DIR" "$trash" 2>/dev/null; then
+    now_owner="$(cat "${trash}/owner" 2>/dev/null || true)"
+    if [ "$now_owner" != "$judged" ]; then
+      echo "[coverage-gate] lock changed owner during reclaim; restoring it" >&2
+      mv "$trash" "$LOCK_DIR" 2>/dev/null || true
+    else
+      rm -rf "$trash" 2>/dev/null || true
+    fi
+  fi
+  rmdir "$rl" 2>/dev/null || true
+  return 0
 }
 
 acquire_lock() {
@@ -174,21 +248,16 @@ acquire_lock() {
       echo "[coverage-gate] FAIL: lock path ${LOCK_DIR} is a symlink; refusing to use it" >&2
       return 1
     fi
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-      printf '%s\t%s\t%s\t%s\n' "$$" "$(hostname 2>/dev/null || echo unknown)" "$ROOT" "$(date +%s)" > "${LOCK_DIR}/owner"
+    if try_create_lock; then
       HAVE_LOCK=1
       return 0
     fi
     if [ -d "$LOCK_DIR" ] && lock_is_stale; then
-      echo "[coverage-gate] reclaiming stale lock (holder pid $(lock_owner_field 1))" >&2
-      local trash="${LOCK_ROOT}/coverage-gate.lock.stale.$$.$(date +%s)"
-      if mv "$LOCK_DIR" "$trash" 2>/dev/null; then
-        rm -rf "$trash" 2>/dev/null || true
-      fi
+      reclaim_stale_lock || true
       continue
     fi
-    if [ "$waited" -ge "$TIMEOUT_SEC" ]; then
-      echo "[coverage-gate] FAIL: timed out after ${TIMEOUT_SEC}s waiting for the coverage-gate lock held by pid $(lock_owner_field 1) (${LOCK_DIR})" >&2
+    if [ "$waited" -ge "$LOCK_WAIT_SEC" ]; then
+      echo "[coverage-gate] FAIL: timed out after ${LOCK_WAIT_SEC}s waiting for the coverage-gate lock held by pid $(lock_owner_field 1) (${LOCK_DIR})" >&2
       return 1
     fi
     if [ $((waited / 30)) -ne "$announced" ]; then

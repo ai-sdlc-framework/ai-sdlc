@@ -1206,7 +1206,31 @@ describe('checkOrphanedVitestWorkers', () => {
     const [r, ...rest] = checkOrphanedVitestWorkers(makeCtx(adapters));
     expect(rest).toEqual([]);
     expect(r.severity).toBe('warn');
-    expect(r.remediation).toBe('Kill them: kill 400 401');
+    expect(r.remediation).toMatch(/^Verify these pids .*: kill 400 401$/);
+  });
+
+  it('pins the 2 minute age boundary (exactly 120s is not yet an orphan)', () => {
+    const at = (etime: string) =>
+      checkOrphanedVitestWorkers(
+        makeCtx(
+          makeAdapters({ runCommand: () => psOut([`  500     1 ${etime} node (vitest 1)`]) }),
+        ),
+      );
+    expect(at('02:00')).toEqual([]);
+    expect(at('02:01')).toHaveLength(1);
+  });
+
+  it('ignores ppid-1 non-worker processes that merely mention vitest', () => {
+    const adapters = makeAdapters({
+      runCommand: () =>
+        psOut([
+          '  600     1 20:00 /usr/bin/node /srv/app --config vitest.config.ts',
+          '  601     1 20:00 /sbin/launchd-job run-vitest-nightly',
+          '  602     1 20:00 node /repo/node_modules/vitest/dist/workers/forks.js',
+        ]),
+    });
+    const [r] = checkOrphanedVitestWorkers(makeCtx(adapters));
+    expect(r.remediation).toMatch(/kill 602$/);
   });
 
   it('is quiet when ps fails', () => {
