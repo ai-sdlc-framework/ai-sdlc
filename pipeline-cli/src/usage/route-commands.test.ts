@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,7 @@ import {
   readDecisionEvents,
 } from '../decisions/index.js';
 import { ROUTING_PROPOSAL_SCOPE, enumerateCells, findOpenProposal } from './route-commands.js';
+import { repoIdFor } from './repo-id.js';
 import { defaultUsageConfig } from './usage-config.js';
 
 const T0 = Date.parse('2026-09-10T00:00:00Z');
@@ -23,6 +25,20 @@ let decisions: string;
 let out: string[];
 let err: string[];
 let exitCode: number | undefined;
+let repoId: string;
+
+/** A real git checkout with one commit, so repoIdFor resolves an identity. */
+function gitInit(dir: string, message: string): string {
+  mkdirSync(dir, { recursive: true });
+  const git = (...a: string[]) =>
+    execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t.invalid', ...a], {
+      stdio: 'ignore',
+      env: { PATH: process.env.PATH ?? '', HOME: root },
+    });
+  git('init', '-q');
+  git('commit', '-q', '--allow-empty', '-m', message);
+  return repoIdFor(dir) as string;
+}
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'route-propose-'));
@@ -31,6 +47,7 @@ beforeEach(() => {
   artifacts = join(root, 'art');
   decisions = join(root, 'decisions');
   mkdirSync(join(repo, '.ai-sdlc', 'reviews'), { recursive: true });
+  repoId = gitInit(repo, 'root-a');
   out = [];
   err = [];
   exitCode = undefined;
@@ -72,7 +89,15 @@ spec:
 `;
 
 /** `n` tasks for `model`, of which `approved` were approved first pass. */
-function seedTasks(prefix: string, model: string, n: number, approved: number): void {
+function seedTasks(
+  prefix: string,
+  model: string,
+  n: number,
+  approved: number,
+  identity: { repoId?: string; unavailable?: boolean } | 'legacy' = {},
+): void {
+  const id: { repoId?: string; unavailable?: boolean } =
+    identity === 'legacy' ? {} : { repoId, ...identity };
   const calls: ModelCallRecord[] = [];
   const lines: string[] = [];
   for (let i = 0; i < n; i++) {
@@ -90,6 +115,8 @@ function seedTasks(prefix: string, model: string, n: number, approved: number): 
       agentRole: 'ai-sdlc:developer',
       scope: 'framework',
       repo: 'repo-a',
+      ...(id.repoId ? { repoId: id.repoId } : {}),
+      ...(id.unavailable ? { repoIdUnavailable: true } : {}),
       taskId,
     });
     const ok = i < approved;
@@ -126,7 +153,6 @@ function deps(extra: Partial<UsageCliDeps> = {}): UsageCliDeps {
     artifactsDir: artifacts,
     decisionsWorkDir: decisions,
     readBaseTable: () => TABLE,
-    attributionCounts: () => ({ legacyRecords: 0, unavailableRecords: 0 }),
     ...extra,
   };
 }
@@ -155,15 +181,46 @@ describe('cli-usage route propose', () => {
     expect(existsSync(join(artifacts, '_routing', 'evidence'))).toBe(false);
   });
 
-  it('never qualifies without attribution counts, and says why', async () => {
-    seedQualifying();
-    const text = await run(['propose'], { attributionCounts: undefined });
-    expect(text).toContain('evidence not attributable to this repository');
+  it('never qualifies when the evidence is legacy, unavailable or foreign, and says why', async () => {
+    const reason = 'evidence not attributable to this repository';
+    seedTasks('S', 'model-sonnet-a', 40, 32, 'legacy');
+    seedTasks('H', 'model-haiku-a', 30, 24, 'legacy');
+    expect(await run(['propose'])).toContain(reason);
     expect(catalog()).toHaveLength(0);
+  });
+
+  it('a same-named foreign checkout does not influence the counts or the rates', async () => {
+    const foreign = gitInit(join(root, 'other', 'repo-a'), 'root-b');
+    expect(foreign).not.toBe(repoId);
+    // Foreign-only evidence: nothing for this repository, so nothing qualifies.
+    seedTasks('FS', 'model-sonnet-a', 40, 40, { repoId: foreign });
+    seedTasks('FH', 'model-haiku-a', 30, 30, { repoId: foreign });
+    const text = await run(['propose']);
+    expect(text).not.toContain('Filed');
+    expect(catalog()).toHaveLength(0);
+    // Attributed evidence qualifies; the foreign records still do not count.
+    seedQualifying();
     out.length = 0;
-    await run(['propose'], {
-      attributionCounts: () => ({ legacyRecords: 2, unavailableRecords: 0 }),
-    });
+    const filed = await run(['propose']);
+    expect(filed).toContain('Filed DEC-0001');
+    const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+    expect(body).toContain('24/30 first-pass approved');
+    expect(body).toContain('32/40');
+  });
+
+  it('unavailable-id records block qualification', async () => {
+    seedQualifying();
+    seedTasks('U', 'model-sonnet-a', 1, 1, { unavailable: true });
+    expect(await run(['propose'])).toContain('evidence not attributable to this repository');
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('does not qualify when the repository has no identity', async () => {
+    seedQualifying();
+    const bare = join(root, 'bare', 'repo-a');
+    mkdirSync(join(bare, '.ai-sdlc', 'reviews'), { recursive: true });
+    const text = await run(['propose'], { repoRoot: bare, workDir: bare });
+    expect(text).not.toContain('Filed');
     expect(catalog()).toHaveLength(0);
   });
 
@@ -190,10 +247,13 @@ describe('cli-usage route propose', () => {
     expect(body).toContain('24/30 first-pass approved');
     expect(body).toContain('32/40');
     expect(body).toContain('"kind": "model-routing-proposal"');
+    expect(body).toContain(repoId);
     // counts and attribution only: no per-task ids, no source content
     expect(body).not.toMatch(/\bS-\d+\b|\bH-\d+\b/);
 
     const machine = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(body)?.[1] ?? '{}');
+    expect(machine.repoId).toBe(repoId);
+    expect(machine.changes[0].repoId).toBe(repoId);
     expect(machine.changes).toHaveLength(1);
     const refs: string[] = machine.changes[0].evidence;
     expect(refs).toHaveLength(2);

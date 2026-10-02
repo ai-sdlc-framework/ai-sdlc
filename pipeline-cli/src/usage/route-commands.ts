@@ -16,7 +16,7 @@
 
 import { existsSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { readModelCalls, readPriceHistory, type ModelCallRecord } from '@ai-sdlc/reference';
+import { readPriceHistory } from '@ai-sdlc/reference';
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
 import {
@@ -41,7 +41,8 @@ import {
 import { loadRoutingTable, type LoadTableOptions } from '../routing/load-table.js';
 import type { RoutingTable } from '../routing/default-table.js';
 import { repoNameFor } from './attribution.js';
-import { REPLAY_TASK_ID } from './replay-run.js';
+import { repoIdFor } from './repo-id.js';
+import { selectScorecardRecords } from './scorecard-commands.js';
 import { readReplayResults, replayRows, type ReplayRow } from './replay-report.js';
 import { buildScorecard, deriveOutcomes, type Scorecard, type ScorecardRow } from './scorecard.js';
 import {
@@ -72,13 +73,6 @@ export interface RouteDeps extends ScorecardDeps {
   env?: NodeJS.ProcessEnv;
   /** Base-ref table reader (tests). */
   readBaseTable?: LoadTableOptions['readBaseTable'];
-  /**
-   * Counts of usage records that are not attributable to this repository
-   * (recorded before repository identity existed, or with identity
-   * unavailable). When absent the evidence is treated as not attributable and
-   * nothing qualifies.
-   */
-  attributionCounts?: () => { legacyRecords: number; unavailableRecords: number };
 }
 
 export type ProposeOutcome = 'filed' | 'nothing-qualifies' | 'proposal-open' | 'catalog-disabled';
@@ -159,6 +153,10 @@ interface Collected {
   replayFiles: Map<string, string>;
   warnings: string[];
   repo: string;
+  /** Repository identity the evidence was resolved for; undefined when none could be computed. */
+  repoId?: string;
+  legacyRecords: number;
+  unavailableRecords: number;
 }
 
 async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promise<Collected> {
@@ -179,13 +177,11 @@ async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promis
     from = new Date(opts.since);
     if (Number.isNaN(from.getTime())) throw new Error(`Invalid --since value "${opts.since}".`);
   }
-  const records: ModelCallRecord[] = [];
-  for await (const r of readModelCalls(
-    { scope: 'framework', repo, ...(from ? { from } : {}) },
-    { dir: deps.usageDir },
-  )) {
-    if (r.taskId && r.taskId !== REPLAY_TASK_ID) records.push(r);
-  }
+  // Same selection the scorecard and evidence writer use (repoId match, legacy
+  // directory-name fallback and unavailable-id exclusion counted).
+  const repoId = repoIdFor(repoRoot);
+  const selection = await selectScorecardRecords(deps.usageDir, from, { repoId, repoName: repo });
+  const records = selection.records;
   const outcomes = deriveOutcomes(
     loadAllReviewLedgers(repoRoot),
     loadContractRetries(artifactsDir),
@@ -217,7 +213,18 @@ async function collect(deps: RouteDeps, opts: ProposeOptions, now: Date): Promis
     replay = replayRows(parsed);
     parsed.forEach((p, i) => replayFiles.set(p.runId, relative(artifactsDir, files[i])));
   }
-  return { card, weights, minTasks, replay, replayFiles, warnings, repo };
+  return {
+    card,
+    weights,
+    minTasks,
+    replay,
+    replayFiles,
+    warnings,
+    repo,
+    ...(repoId ? { repoId } : {}),
+    legacyRecords: selection.legacy,
+    unavailableRecords: selection.unavailable,
+  };
 }
 
 function findRow(card: Scorecard, cell: CellRef, model: string): ScorecardRow | undefined {
@@ -269,10 +276,12 @@ function decisionBody(
   stale: readonly StaleChange[],
   margin: number,
   minTasks: number,
+  repoId: string | undefined,
 ): string {
   const lines = [
     `Cheaper-model changes that cleared the bar (at least ${minTasks} compared tasks or replay items, ` +
       `no more than ${margin} points worse than the cell's current model, strictly cheaper at current prices).`,
+    `Evidence resolved for repository ${repoId ?? 'unknown'}.`,
     'Approving does not edit the routing table by itself. Declining or leaving this open changes nothing.',
     '',
     ...changes.map((c, i) => `${i + 1}. ${describeChange(c)}`),
@@ -287,11 +296,13 @@ function decisionBody(
   const machine = {
     kind: 'model-routing-proposal',
     version: 1,
+    repoId: repoId ?? null,
     changes: changes.map((c) => ({
       role: c.role,
       taskClass: c.taskClass,
       from: c.from,
       to: c.to,
+      repoId: repoId ?? null,
       evidence: c.evidence,
       comparison: c.comparison,
     })),
@@ -334,7 +345,11 @@ export async function runRoutePropose(
   const table = loaded.table;
   const c = await collect(deps, opts, now);
   const cells = enumerateCells(table);
-  const evidence: EvidenceScorecard = { ...c.card, ...(deps.attributionCounts?.() ?? {}) };
+  // Without a resolved repoId nothing is attributable: leave the counts off so
+  // evaluateCell fails closed.
+  const evidence: EvidenceScorecard = c.repoId
+    ? { ...c.card, legacyRecords: c.legacyRecords, unavailableRecords: c.unavailableRecords }
+    : { ...c.card };
 
   const evaluations: CellEvaluation[] = cells.map((cell) =>
     evaluateCell(cell, evidence, {
@@ -405,6 +420,9 @@ export async function runRoutePropose(
   const evidenceDir = join(artifactsDir, '_routing', 'evidence', now.toISOString().slice(0, 10));
   const paths = writeEvidenceFiles(evidenceDir, c.card, {
     repo: c.repo,
+    ...(c.repoId ? { repoId: c.repoId } : {}),
+    legacyRecords: c.legacyRecords,
+    unavailableRecords: c.unavailableRecords,
     generatedAt: now.toISOString(),
   });
   const pathFor = (row: ScorecardRow | undefined): string | undefined => {
@@ -440,7 +458,7 @@ export async function runRoutePropose(
         source: 'framework-calibration',
         scope: ROUTING_PROPOSAL_SCOPE,
         summary: `Weekly model routing proposal: ${changes.length} cheaper-model change(s) qualify`,
-        body: decisionBody(changes, noLongerCheaper, margin, c.minTasks),
+        body: decisionBody(changes, noLongerCheaper, margin, c.minTasks, c.repoId),
         reversible: true,
         options: PROPOSAL_OPTIONS,
         by: 'framework:route-propose',
