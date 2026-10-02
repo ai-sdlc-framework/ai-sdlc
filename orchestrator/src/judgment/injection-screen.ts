@@ -141,3 +141,27 @@ export function mergeInjectionScreen<R extends { verdict: VerdictLike }>(
     suspicious: true,
   };
 }
+
+/**
+ * Screen the analyze-only triage path, whose output is the raw verdict JSON string.
+ * Returns the string unchanged unless a hazard cleared its threshold and the string
+ * parses as a verdict object; then findings are appended and `suspicious` is set,
+ * with `safe` and `riskScore` left as the triage produced them.
+ */
+export async function screenVerdictSummary(
+  summary: string,
+  input: InjectionScreenInput,
+  ctx: EvaluateJudgmentContext,
+): Promise<string> {
+  const flag = await screenIssueText(input, ctx);
+  if (!flag) return summary;
+  try {
+    const parsed = JSON.parse(summary) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return summary;
+    const findings = Array.isArray(parsed.findings) ? (parsed.findings as string[]) : [];
+    const { verdict, suspicious } = mergeInjectionScreen({ verdict: { findings } }, flag);
+    return JSON.stringify({ ...parsed, findings: verdict.findings, suspicious });
+  } catch {
+    return summary;
+  }
+}

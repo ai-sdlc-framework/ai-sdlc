@@ -522,6 +522,8 @@ export {
   evaluatePipelineGate,
   scorePipelineComplexity,
   evaluatePipelineComplexityRouting,
+  scorePipelineComplexityWithJudgment,
+  evaluatePipelineComplexityRoutingWithJudgment,
 } from './policy-evaluators.js';
 
 // Adapter ecosystem

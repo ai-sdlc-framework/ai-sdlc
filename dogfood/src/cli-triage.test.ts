@@ -16,6 +16,7 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
   }),
   resolveRepoRoot: vi.fn().mockResolvedValue('/tmp/mock-repo'),
   buildOrchestratorJudgmentContext: vi.fn().mockReturnValue({ judgmentCtx: true }),
+  screenVerdictSummary: vi.fn(async (summary: string) => summary),
   SecurityTriageRunner: vi.fn(function () {
     return {
       run: vi.fn().mockResolvedValue({
@@ -110,6 +111,20 @@ describe('cli-triage.ts', () => {
     expect(executeTriage).toHaveBeenCalledWith(
       '42',
       expect.objectContaining({ judgment: { judgmentCtx: true } }),
+    );
+  });
+
+  it('screens the analyze-only path with the same judgment context', async () => {
+    process.argv = ['node', 'cli-triage.ts', '--title', 'T', '--body', 'B'];
+
+    await import('./cli-triage.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const { screenVerdictSummary } = await import('@ai-sdlc/orchestrator');
+    expect(screenVerdictSummary).toHaveBeenCalledWith(
+      expect.stringContaining('"riskScore":1'),
+      { title: 'T', body: 'B' },
+      { judgmentCtx: true },
     );
   });
 

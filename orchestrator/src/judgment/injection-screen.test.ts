@@ -13,6 +13,7 @@ import {
   injectionScreenDefinition,
   mergeInjectionScreen,
   screenIssueText,
+  screenVerdictSummary,
   type InjectionHazard,
 } from './injection-screen.js';
 
@@ -129,5 +130,30 @@ describe('triage.injection-screen', () => {
     for (const q of Object.values(injectionScreenDefinition.questions(input))) {
       expect(JSON.stringify(q)).toContain('quoted data');
     }
+  });
+});
+
+describe('screenVerdictSummary (analyze-only path)', () => {
+  const verdict = JSON.stringify({ safe: true, riskScore: 1, findings: ['a'], rationale: 'ok' });
+
+  it('returns the summary byte-for-byte when disabled or not flagged', async () => {
+    const disabled = { config: disabledJudgmentConfig() } satisfies EvaluateJudgmentContext;
+    expect(await screenVerdictSummary(verdict, input, disabled)).toBe(verdict);
+    expect(await screenVerdictSummary(verdict, input, ctxFor({}))).toBe(verdict);
+  });
+
+  it('adds findings and the suspicious flag but never edits safe or riskScore', async () => {
+    const out = JSON.parse(
+      await screenVerdictSummary(verdict, input, ctxFor({ addressesModel: 0.9 })),
+    );
+    expect(out.suspicious).toBe(true);
+    expect(out.findings).toHaveLength(2);
+    expect(out.findings[0]).toBe('a');
+    expect(out.safe).toBe(true);
+    expect(out.riskScore).toBe(1);
+  });
+
+  it('leaves a non-JSON summary untouched', async () => {
+    expect(await screenVerdictSummary('nope', input, ctxFor({ addressesModel: 0.9 }))).toBe('nope');
   });
 });

@@ -19,6 +19,7 @@ import {
   executeTriage,
   ClaudeCodeAdapter,
   buildOrchestratorJudgmentContext,
+  screenVerdictSummary,
 } from '@ai-sdlc/orchestrator';
 import { resolveRepoRoot } from '@ai-sdlc/orchestrator';
 import type { SecurityTriageConfig } from '@ai-sdlc/orchestrator';
@@ -119,7 +120,18 @@ async function main(): Promise<void> {
     }
 
     // Output raw verdict JSON to stdout for the report job
-    console.log(result.summary);
+    // Same injection screen as the full path; a disabled layer returns the verdict as is.
+    console.log(
+      await screenVerdictSummary(
+        result.summary,
+        { title: args.title, body: args.body ?? '' },
+        buildOrchestratorJudgmentContext({
+          workDir,
+          sourceKind: 'triage',
+          taskId: args.issueId,
+        }),
+      ),
+    );
     return;
   }
 
