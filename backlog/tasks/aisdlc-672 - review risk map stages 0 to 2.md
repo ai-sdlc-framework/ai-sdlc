@@ -71,6 +71,7 @@ sections 1 (stages 0 to 2) and 3.
    JSON file written under the artifacts directory for the run.
 
 ## Acceptance Criteria
+- [ ] A conformance test asserts the review-risk-map.v1 output satisfies the structural input type that AISDLC-673's baseline-probe checklist declares (per hunk: id, file, class, risk score, judged flag, flagged categories, tests-changed; per criterion: coverage result).
 - [ ] For a fixture diff touching three files, the risk map lists every hunk with file class, changed-test flag, changed symbols and coverage lines, and validates against the schema.
 - [ ] With the judgment layer disabled, every hunk is `judged: false` and ranked high; with a fake provider, the Nouls and Score appear on each hunk and the ranking follows the Score.
 - [ ] A hunk in an unsupported language is marked `structural: unavailable` and ranked high.
