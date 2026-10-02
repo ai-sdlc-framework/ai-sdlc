@@ -88,11 +88,11 @@ Three defects, all to fix here:
    paragraph with the env vars and the lock behaviour.
 
 ## Acceptance Criteria
-- [ ] Starting any package's vitest run and SIGKILLing its parent `pnpm`/`vitest` process leaves no worker alive after 5 seconds (test per the fixture harness); `pool: 'forks'` and the worker ceiling apply workspace-wide.
-- [ ] Killing the pre-push hook process with SIGTERM or SIGINT during the coverage run leaves no `vitest` process alive after 5 seconds (test spawns the script against a fixture package with a sleeping test).
-- [ ] A coverage run exceeding the timeout is killed as a group and the gate exits non-zero with the timeout named.
-- [ ] The vitest invocation carries the worker ceiling, defaulting to `min(4, ncpu/2)`, overridable by env.
-- [ ] Two gate runs started concurrently from sibling worktrees serialise on the lock; a stale lock is reclaimed.
-- [ ] `doctor` warns on orphaned vitest workers and is quiet when there are none.
+- [x] Starting any package's vitest run and SIGKILLing its parent `pnpm`/`vitest` process leaves no worker alive after 5 seconds (test per the fixture harness); `pool: 'forks'` and the worker ceiling apply workspace-wide.
+- [x] Killing the pre-push hook process with SIGTERM or SIGINT during the coverage run leaves no `vitest` process alive after 5 seconds (test spawns the script against a fixture package with a sleeping test).
+- [x] A coverage run exceeding the timeout is killed as a group and the gate exits non-zero with the timeout named.
+- [x] The vitest invocation carries the worker ceiling, defaulting to `min(4, ncpu/2)`, overridable by env.
+- [x] Two gate runs started concurrently from sibling worktrees serialise on the lock; a stale lock is reclaimed.
+- [x] `doctor` warns on orphaned vitest workers and is quiet when there are none.
 - [ ] Runbook paragraph present; `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
