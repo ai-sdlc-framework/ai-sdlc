@@ -20,7 +20,8 @@ references:
   - pipeline-cli/src/orchestrator/events.ts
   - spec/schemas/orchestrator-events.v1.schema.json
 priority: high
-dispatchable: true
+dispatchable: false
+dispatchableReason: 'Split on 2026-10-02 into AISDLC-656.1 (bar evaluation and weekly proposal), AISDLC-656.2 (route apply) and AISDLC-656.3 (automatic revert and strength-only overrides). This umbrella is not dispatched; it completes when all three merge.'
 ---
 
 ## Description
