@@ -22,11 +22,15 @@ import {
 } from './validate.js';
 import type { Baseline, PlanLimits, Probe, Rejection, ReviewPlan, RiskMapInput } from './types.js';
 
-export interface FallbackResult {
-  plan: ReviewPlan;
-  /** Every probe dropped for safety, and any ceiling the plan exceeds. */
-  rejections: Rejection[];
-}
+/**
+ * `ok` is what callers branch on. `ok: false` means coverage was lost: a
+ * high-risk hunk has no safe probe, or the plan exceeds an absolute ceiling.
+ * `plan` is still returned for inspection, but must not be run as a complete
+ * review. `rejections` lists every drop, whether or not `ok` is true.
+ */
+export type FallbackResult =
+  | { ok: true; plan: ReviewPlan; rejections: Rejection[] }
+  | { ok: false; plan: ReviewPlan; rejections: Rejection[] };
 
 export function buildFallbackPlan(
   baseline: Baseline,
@@ -74,8 +78,9 @@ export function buildFallbackPlan(
         detail: `high-risk hunk ${h.id} has no safe probe in the fallback plan`,
       });
 
-  return {
-    plan: { schemaVersion: 1, baselineVersion: baseline.version, probes: kept },
-    rejections,
-  };
+  const plan: ReviewPlan = { schemaVersion: 1, baselineVersion: baseline.version, probes: kept };
+  const lostCoverage = rejections.some(
+    (r) => r.reason === 'uncovered-high-risk-hunk' || r.reason === 'baseline-over-ceiling',
+  );
+  return lostCoverage ? { ok: false, plan, rejections } : { ok: true, plan, rejections };
 }

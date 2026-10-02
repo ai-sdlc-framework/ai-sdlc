@@ -46,7 +46,8 @@ export function targetBytes(target: unknown): number {
  * Lexical path check. The plan is never interpolated into a shell, so this
  * rejects only what is dangerous or ambiguous: NUL and control characters,
  * backslashes, absolute and drive-letter paths, a leading `-` or `~`, glob
- * wildcards `*` and `?`, and empty, `.` or `..` segments. Names such as
+ * wildcards `*` and `?`, empty, `.` or `..` segments, and any `.git` segment
+ * (case-insensitive; `.github` and `foo.gitignore` are fine). Names such as
  * `app/[id]/page.tsx` and `routes/$route.tsx` are legitimate.
  */
 export function isSafeRelativePath(p: string): boolean {
@@ -56,7 +57,9 @@ export function isSafeRelativePath(p: string): boolean {
   if (p.startsWith('/') || p.startsWith('-') || p.startsWith('~') || /^\s|\s$/.test(p))
     return false;
   if (/^[A-Za-z]:/.test(p) || isAbsolute(p)) return false;
-  return p.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+  return p
+    .split('/')
+    .every((seg) => seg !== '' && seg !== '.' && seg !== '..' && seg.toLowerCase() !== '.git');
 }
 
 /**
@@ -121,6 +124,9 @@ export function probeSafetyProblems(
           `run probe ${p.id} names a file that is not a changed test`,
         );
   }
+  // Queries are passed to executors after `--`; a leading '-' would read as an option.
+  if (typeof p.target.query === 'string' && p.target.query.startsWith('-'))
+    add('unsafe-query', `probe ${p.id} query starts with '-'`);
   for (const f of p.target.files ?? []) {
     if (!isSafeRelativePath(f.path)) add('unsafe-path', `probe ${p.id} has an unsafe path`);
     else if (escapesRoot(limits.repoRoot, f.path))
@@ -129,6 +135,11 @@ export function probeSafetyProblems(
       add('unsafe-path', `probe ${p.id} has an inverted line range`);
   }
   return out;
+}
+
+function runKey(p: Probe): string {
+  const files = (p.target.files ?? []).map((f) => canonical(f)).sort();
+  return `${p.target.command ?? ''}\n${files.join('|')}`;
 }
 
 export function validatePlan(
@@ -231,6 +242,16 @@ export function validatePlan(
     );
   if (totalBytes > ABSOLUTE_MAX_TARGET_BYTES)
     reject('target-size-exceeded', 'targets exceed the absolute size ceiling');
+
+  // An added run probe may not repeat another run probe's command and file set.
+  const seenRuns = new Set(baseline.probes.filter((b) => b.type === 'run').map((b) => runKey(b)));
+  for (const p of added) {
+    if (p.type !== 'run') continue;
+    const key = runKey(p);
+    if (seenRuns.has(key))
+      reject('duplicate-run-probe', `run probe ${p.id} repeats another run probe`, p.id);
+    seenRuns.add(key);
+  }
 
   // Run targets and file paths.
   for (const p of probes) rejections.push(...probeSafetyProblems(p, riskMap, limits));

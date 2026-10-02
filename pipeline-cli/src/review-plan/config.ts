@@ -25,6 +25,12 @@ import type { PlanLimits } from './types.js';
 
 export const REVIEW_CONFIG_PATH = '.ai-sdlc/review-config.yaml';
 
+/**
+ * The allowlist pins the command STRING, not what it executes: `pnpm test` runs
+ * the scripts in the pull request's own checkout. That is acceptable only
+ * because the staged set is limited to trusted work. Do not enable it for
+ * untrusted pull requests unless run probes are sandboxed.
+ */
 export const DEFAULT_COMMAND_ALLOWLIST: readonly string[] = [
   'pnpm test',
   'pnpm lint',

@@ -10,6 +10,7 @@ import {
   ABSOLUTE_MAX_PROBES,
   BaselineInputError,
   buildFallbackPlan,
+  probeSafetyProblems,
   isHighRisk,
   readStagedConfigFromBaseRef,
   DEFAULT_COMMAND_ALLOWLIST,
@@ -452,7 +453,7 @@ describe('validatePlan', () => {
     p.probes.push({
       id: 'rn',
       type: 'run',
-      target: { command: 'pnpm test', files: [{ path: 'src/auth.ts' }] },
+      target: { command: 'pnpm lint', files: [{ path: 'src/auth.ts' }] },
       question: 'q',
       covers: [],
     });
@@ -461,18 +462,94 @@ describe('validatePlan', () => {
     expect(reasons(p)).toEqual([]);
   });
 
-  it('rejects a run probe naming an unsafe allowlist entry', () => {
-    const p = full();
-    p.probes.push({
-      id: 'rn',
+  it('rejects an unsafe command even when it is in the allowlist, and accepts a safe sibling', () => {
+    const allow = ['pnpm test', 'pnpm test; x'];
+    const run = (id: string, command: string): Probe => ({
+      id,
       type: 'run',
-      target: { command: 'pnpm test; x' },
+      target: { command },
       question: 'q',
       covers: [],
     });
-    expect(reasons(p, { ...limits, commandAllowlist: ['pnpm test; x'] })).toContain(
-      'run-target-not-allowed',
-    );
+    const unsafe = full();
+    unsafe.probes.push(run('rn', 'pnpm test; x'));
+    const r = validatePlan(unsafe, baseline(), riskMap, { ...limits, commandAllowlist: allow });
+    expect(!r.valid && r.rejections.map((x) => x.reason)).toContain('run-target-not-allowed');
+    const safe = full();
+    safe.probes.push(run('rn', 'pnpm lint'));
+    expect(
+      validatePlan(safe, baseline(), riskMap, {
+        ...limits,
+        commandAllowlist: [...allow, 'pnpm lint'],
+      }).valid,
+    ).toBe(true);
+  });
+
+  it('rejects inner traversal that stays inside the root, and .git segments', () => {
+    for (const path of [
+      'src/../other.ts',
+      '.git/config',
+      'sub/.git/hooks/x',
+      '.GIT/config',
+      'a/.Git',
+    ]) {
+      const p = full();
+      p.probes.push({
+        id: 'rd',
+        type: 'read',
+        target: { files: [{ path }] },
+        question: 'q',
+        covers: [],
+      });
+      expect(reasons(p), path).toContain('unsafe-path');
+    }
+    for (const path of ['.github/workflows/ci.yml', 'foo.gitignore', 'src/.gitignore']) {
+      const p = full();
+      p.probes.push({
+        id: 'rd',
+        type: 'read',
+        target: { files: [{ path }] },
+        question: 'q',
+        covers: [],
+      });
+      expect(reasons(p), path).toEqual([]);
+    }
+  });
+
+  it('rejects a query starting with a dash', () => {
+    const probe: Probe = {
+      id: 'sq',
+      type: 'search',
+      target: { query: '--exec=x' },
+      question: 'q',
+      covers: [],
+    };
+    expect(probeSafetyProblems(probe, riskMap, limits).map((r) => r.reason)).toEqual([
+      'unsafe-query',
+    ]);
+    const p = full();
+    p.probes.push(probe);
+    expect(reasons(p)).toEqual(['schema-invalid']);
+  });
+
+  it('rejects an identical duplicate plan-added run probe', () => {
+    const run = (id: string): Probe => ({
+      id,
+      type: 'run',
+      target: { command: 'pnpm lint' },
+      question: 'q',
+      covers: [],
+    });
+    const p = full();
+    p.probes.push(run('r1'));
+    expect(reasons(p)).toEqual([]);
+    p.probes.push(run('r2'));
+    expect(reasons(p)).toEqual(['duplicate-run-probe']);
+    // A copy of the baseline test run is also a duplicate.
+    const q = full();
+    const b = baseline().probes.find((x) => x.id === 'tests-run')!;
+    q.probes.push({ ...clone(b), id: 'tests-run-2', baseline: undefined });
+    expect(reasons(q)).toContain('duplicate-run-probe');
   });
 
   it('rejects an inverted line range', () => {
@@ -502,7 +579,8 @@ describe('buildFallbackPlan', () => {
 
   it('is the baseline with no model-authored probe, and passes validation', () => {
     const b = baseline();
-    const { plan, rejections } = buildFallbackPlan(b, riskMap, limits);
+    const { ok, plan, rejections } = buildFallbackPlan(b, riskMap, limits);
+    expect(ok).toBe(true);
     expect(rejections).toEqual([]);
     expect(plan.probes.filter((p) => p.baseline)).toEqual(b.probes);
     expect(validatePlan(plan, b, riskMap, limits).valid).toBe(true);
@@ -535,7 +613,8 @@ describe('buildFallbackPlan', () => {
       riskThreshold: 0.5,
       commandAllowlist: DEFAULT_COMMAND_ALLOWLIST,
     });
-    const { plan, rejections } = buildFallbackPlan(b, rm, { ...limits, repoRoot: root });
+    const { ok, plan, rejections } = buildFallbackPlan(b, rm, { ...limits, repoRoot: root });
+    expect(ok).toBe(false);
     const paths = plan.probes.flatMap((p) => (p.target.files ?? []).map((f) => f.path));
     expect(paths).not.toContain('../../etc/passwd');
     expect(paths).not.toContain('link/secret.ts');
@@ -545,10 +624,12 @@ describe('buildFallbackPlan', () => {
 
   it('drops a run probe whose command is no longer allowlisted', () => {
     const b = baseline();
-    const { plan, rejections } = buildFallbackPlan(b, riskMap, {
+    const { ok, plan, rejections } = buildFallbackPlan(b, riskMap, {
       ...limits,
       commandAllowlist: ['pnpm lint'],
     });
+    // Dropping the run probe loses no hunk coverage, so the fallback stays usable.
+    expect(ok).toBe(true);
     expect(plan.probes.some((p) => p.type === 'run')).toBe(false);
     expect(rejections.map((r) => r.reason)).toContain('run-target-not-allowed');
   });
@@ -565,7 +646,8 @@ describe('buildFallbackPlan', () => {
         baseline: true,
       })),
     };
-    const { rejections } = buildFallbackPlan(b, { ...riskMap, hunks: [] }, limits);
+    const { ok, rejections } = buildFallbackPlan(b, { ...riskMap, hunks: [] }, limits);
+    expect(ok).toBe(false);
     expect(rejections.map((r) => r.reason)).toContain('baseline-over-ceiling');
   });
 });
@@ -693,6 +775,39 @@ describe('staged review config', () => {
     expect(older.maxProbes).toBe(7);
     const head = loadStagedReviewConfig({ workDir: dir, baseRef: 'HEAD' });
     expect(head.commandAllowlist).toEqual(['pnpm test']);
+  });
+
+  it('refuses a colon ref that git would otherwise resolve to the index', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rp-git3-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    mkdirSync(join(dir, '.ai-sdlc'));
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'review-config.yaml'),
+      'staged:\n  executorCommandAllowlist: ["pnpm build"]\n',
+    );
+    // Staged only: ':0:<path>' names the index copy, which a PR controls.
+    git('add', '-A');
+    const text = execFileSync('git', ['show', ':0:.ai-sdlc/review-config.yaml'], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    expect(text).toContain('pnpm build');
+    expect(readStagedConfigFromBaseRef(dir, ':0')).toBeNull();
+    expect(loadStagedReviewConfig({ workDir: dir, baseRef: ':0' }).commandAllowlist).toEqual([
+      ...DEFAULT_COMMAND_ALLOWLIST,
+    ]);
+  });
+
+  it('defaults the base ref to origin/main and the work dir to the cwd', () => {
+    const seen: Array<[string, string]> = [];
+    loadStagedReviewConfig({
+      readBaseConfig: (w, r) => {
+        seen.push([w, r]);
+        return null;
+      },
+    });
+    expect(seen).toEqual([[process.cwd(), 'origin/main']]);
   });
 
   it('uses defaults for a missing ref, an option-like ref and a throwing reader', () => {

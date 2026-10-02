@@ -125,7 +125,9 @@ export type RejectionReason =
   | 'run-target-not-allowed'
   | 'unsafe-path'
   | 'run-files-not-changed-tests'
-  | 'baseline-over-ceiling';
+  | 'baseline-over-ceiling'
+  | 'unsafe-query'
+  | 'duplicate-run-probe';
 
 export interface Rejection {
   reason: RejectionReason;

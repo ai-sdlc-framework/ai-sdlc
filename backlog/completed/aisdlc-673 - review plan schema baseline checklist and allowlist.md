@@ -95,13 +95,15 @@ Review-plan schema registered with AJV, the baseline checklist as versioned code
 - **Limits measure what the plan adds**: the baseline is mandatory, so `maxProbes` and `maxTargetBytes` (counted in bytes) apply to non-baseline probes only; absolute ceilings bound the total and a baseline over a ceiling is reported as `baseline-over-ceiling`.
 - **The fallback plan is held to the same path, symlink, run-target and ceiling checks**: unsafe probes are dropped and each drop is returned as a rejection, so a change cannot force the fallback to carry a bad path.
 - **`repoRoot` is required and the containment check walks to the deepest existing ancestor**: dangling symlinks and unresolvable roots fail closed. Run probes may name only changed test files. Base refs containing a colon are refused. A non-finite risk score counts as high risk.
+- **The fallback returns a discriminated `ok` result; `.git` path segments and queries starting with a dash are rejected; an added run probe may not duplicate another run probe.** The allowlist docs state that it pins the command string only, acceptable because the staged set is limited to trusted work.
 - **The test-run probe is omitted when no changed test exists or the allowlist has no test command**: there is nothing legitimate to run.
 
 ## Verification
-- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 65 passed
+- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 70 passed
 - `pnpm --filter @ai-sdlc/reference exec vitest run` on the schema tests - 17 passed
 - `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on touched paths - clean
 
 ## Follow-up
 - conformance test in the risk-map task (AISDLC-672)
+- declined: the baseline can emit probes over the schema's per-probe caps (200 files, 500 covers, startLine >= 1) for huge PRs or new or deleted files; this fails closed to the model-free fallback, and the staged set is limited to trusted work in v1
 <!-- SECTION:FINAL_SUMMARY:END -->

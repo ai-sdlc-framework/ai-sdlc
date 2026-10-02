@@ -7914,7 +7914,14 @@ export const reviewPlanV1Schema = {
             head: { $ref: '#/$defs/revision' },
           },
         },
-        query: { type: 'string', minLength: 1, maxLength: 500 },
+        query: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+          not: { pattern: '^-' },
+          description:
+            "Search or compare query. Must not start with '-'; executors pass it after '--'.",
+        },
       },
     },
     revision: {
