@@ -29,6 +29,7 @@ function matches(r: ModelCallRecord, f: ModelCallFilter, fromMs?: number, toMsV?
   if (f.agentRole !== undefined && r.agentRole !== f.agentRole) return false;
   if (f.scope !== undefined && r.scope !== f.scope) return false;
   if (f.repo !== undefined && r.repo !== f.repo) return false;
+  if (f.repoId !== undefined && r.repoId !== f.repoId) return false;
   if (f.taskId !== undefined && r.taskId !== f.taskId) return false;
   if (f.billingPool !== undefined && r.billingPool !== f.billingPool) return false;
   return true;

@@ -144,6 +144,12 @@ function fileSafe(s: string): string {
 
 export interface EvidenceMeta {
   repo: string;
+  /** Stable repository identity the cells were selected by; absent when it could not be computed. */
+  repoId?: string;
+  /** Records matched by directory name only because they predate `repoId`. */
+  legacyRecords?: number;
+  /** Records excluded because their repoId could not be computed at ingest. */
+  unavailableRecords?: number;
   generatedAt: string;
 }
 
@@ -189,6 +195,9 @@ export function writeEvidenceFiles(dir: string, card: Scorecard, meta: EvidenceM
           schemaVersion: 'v1',
           scope: 'framework',
           repo: meta.repo,
+          repoId: meta.repoId ?? null,
+          legacyRecords: meta.legacyRecords ?? 0,
+          unavailableRecords: meta.unavailableRecords ?? 0,
           generatedAt: meta.generatedAt,
           minTasks: card.minTasks,
           cell: { role: row.role, model: row.model, taskClass: row.taskClass },

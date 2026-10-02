@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   appendFileSync,
   mkdirSync,
@@ -18,6 +19,7 @@ import {
 } from '@ai-sdlc/reference';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { IngestResult } from '../usage/ingest-claude.js';
+import { repoIdFor } from '../usage/repo-id.js';
 import { defaultUsageConfig } from '../usage/usage-config.js';
 import { buildUsageCli, type UsageCliDeps } from './usage.js';
 
@@ -555,5 +557,111 @@ describe('cli-usage scorecard', () => {
   it('rejects a bad --since', async () => {
     await run(['scorecard', '--since', 'nope'], T0, { repoRoot: repo });
     expect(exitCode).toBe(1);
+  });
+});
+
+describe('cli-usage scorecard repo identity', () => {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.invalid',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.invalid',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+  };
+  function gitRepo(parent: string): string {
+    const dir = join(parent, 'proj');
+    mkdirSync(join(dir, '.ai-sdlc', 'reviews'), { recursive: true });
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: dir, env });
+    g('init', '-q');
+    writeFileSync(join(dir, 'f.txt'), parent);
+    g('add', 'f.txt');
+    g('commit', '-q', '-m', parent);
+    return dir;
+  }
+
+  it('excludes a same-named checkout and labels legacy records', async () => {
+    const mine = gitRepo(join(root, 'one'));
+    const other = gitRepo(join(root, 'two'));
+    const idMine = repoIdFor(mine) as string;
+    const idOther = repoIdFor(other) as string;
+    expect(idMine).not.toBe(idOther);
+    writeFileSync(
+      join(mine, '.ai-sdlc', 'reviews', 'task-mine.jsonl'),
+      `${JSON.stringify({
+        taskId: 'TASK-MINE',
+        prNumber: null,
+        commitSha: 'a'.repeat(40),
+        iteration: 1,
+        role: 'code',
+        harness: 'claude-code',
+        timestamp: 't',
+        verdict: 'approved',
+        findings: [],
+      })}\n`,
+    );
+    const dev = { agentRole: 'ai-sdlc:developer', repo: 'proj' };
+    appendModelCalls(
+      [
+        call('i1', 0, { ...dev, repoId: idMine, taskId: 'TASK-MINE' }),
+        call('i2', 1, { ...dev, repoId: idOther, taskId: 'TASK-OTHER-CHECKOUT' }),
+        call('i3', 2, { ...dev, taskId: 'TASK-LEGACY' }),
+        call('i4', 3, { ...dev, repoIdUnavailable: true, taskId: 'TASK-UNAVAILABLE' }),
+      ],
+      { dir: usageDir },
+    );
+    const evidence = join(root, 'evidence');
+    const text = await run(['scorecard', '--format', 'json', '--write-evidence', evidence], T0, {
+      repoRoot: mine,
+      artifactsDir: join(root, 'art'),
+    });
+    const json = JSON.parse(text);
+    expect(json.repoId).toBe(idMine);
+    expect(json.legacyRecords).toBe(1);
+    expect(text).not.toContain('TASK-OTHER-CHECKOUT');
+    expect(text).not.toContain('TASK-UNAVAILABLE');
+    expect(json.unavailableRecords).toBe(1);
+    const body = readdirSync(evidence)
+      .map((f) => readFileSync(join(evidence, f), 'utf8'))
+      .join('');
+    expect(body).not.toContain('TASK-OTHER-CHECKOUT');
+    expect(body).toContain(idMine);
+    expect(body).toContain('"legacyRecords": 1');
+    expect(body).toContain('"unavailableRecords": 1');
+    expect(body).not.toContain('TASK-UNAVAILABLE');
+    out.length = 0;
+    const txt = await run(['scorecard'], T0, { repoRoot: mine, artifactsDir: join(root, 'art') });
+    expect(txt).toContain(`Repository: ${idMine}`);
+    expect(txt).toContain('legacy fallback');
+    expect(txt).toContain('repoId unavailable');
+    out.length = 0;
+    await run(['scorecard', '--format', 'csv'], T0, {
+      repoRoot: mine,
+      artifactsDir: join(root, 'art'),
+    });
+    expect(err.join('')).toContain(`Repository ${idMine}`);
+  });
+
+  it('report --repo accepts a directory name or a repoId and prints the resolved repoId', async () => {
+    const mine = gitRepo(join(root, 'one'));
+    const idMine = repoIdFor(mine) as string;
+    const idOther = 'x.example/o/proj#' + 'c'.repeat(40);
+    appendModelCalls(
+      [
+        call('r1', 0, { repo: 'proj', repoId: idMine }),
+        call('r2', 1, { repo: 'proj', repoId: idOther }),
+        call('r3', 2, { repo: 'elsewhere' }),
+      ],
+      { dir: usageDir },
+    );
+    const byName = await run(['report', '--repo', 'proj'], T0, { workDir: mine });
+    expect(byName).toContain(`repoId ${idMine}`);
+    out.length = 0;
+    const byId = JSON.parse(
+      await run(['report', '--repo', idOther, '--format', 'json'], T0, { workDir: mine }),
+    );
+    expect(byId.totals.calls).toBe(1);
+    expect(err.join('')).toContain(idOther);
   });
 });

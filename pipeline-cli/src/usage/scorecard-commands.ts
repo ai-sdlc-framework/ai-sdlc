@@ -11,6 +11,7 @@ import { readModelCalls, readPriceHistory, type ModelCallRecord } from '@ai-sdlc
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
 import { repoNameFor } from './attribution.js';
+import { legacyNote, repoIdFor, selectByRepo } from './repo-id.js';
 import {
   buildScorecard,
   deriveOutcomes,
@@ -89,6 +90,7 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
       }
       const repoRoot = resolve(deps.repoRoot ?? deps.workDir ?? process.cwd());
       const repo = repoNameFor(repoRoot);
+      const repoId = repoIdFor(repoRoot);
       const artifactsDir =
         deps.artifactsDir ?? process.env.ARTIFACTS_DIR ?? resolve(repoRoot, 'artifacts');
 
@@ -103,14 +105,19 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
 
       // Framework scope of this repository only: no `other` scope data, and no
       // task ids from other repositories joined against this one's reviews.
-      const records: ModelCallRecord[] = [];
+      // Records are matched on `repoId`; only records that predate it fall back to the
+      // directory name, and the output says so.
+      const candidates: ModelCallRecord[] = [];
       for await (const r of readModelCalls(
-        { scope: 'framework', repo, ...(from ? { from } : {}) },
+        { scope: 'framework', ...(from ? { from } : {}) },
         { dir: deps.usageDir },
       )) {
         // Replay calls carry the `replay` task id and are not real task cost.
-        if (r.taskId && r.taskId !== REPLAY_TASK_ID) records.push(r);
+        if (r.taskId && r.taskId !== REPLAY_TASK_ID) candidates.push(r);
       }
+      const selection = selectByRepo(candidates, { repoId, repoName: repo });
+      const records = selection.records;
+      const legacy = legacyNote(selection);
 
       const outcomes = deriveOutcomes(
         loadAllReviewLedgers(repoRoot),
@@ -134,15 +141,26 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
           ...(argv.role ? { role: argv.role } : {}),
         }),
         unitsNote: describeWeights(weights),
+        repoId: repoId ?? null,
+        legacyRecords: selection.legacy,
+        unavailableRecords: selection.unavailable,
       };
 
       if (argv.format === 'json') {
         const json = JSON.parse(renderScorecardJson(card)) as Record<string, unknown>;
-        io.out(`${JSON.stringify(replay.length ? { ...json, replay } : json, null, 2)}\n`);
+        const withRepo = {
+          repoId: card.repoId,
+          legacyRecords: card.legacyRecords,
+          unavailableRecords: card.unavailableRecords,
+          ...json,
+        };
+        io.out(`${JSON.stringify(replay.length ? { ...withRepo, replay } : withRepo, null, 2)}\n`);
       } else if (argv.format === 'csv') {
         io.out(renderScorecardCsv(card));
         io.err(`${card.unitsNote}\n`);
+        io.err(`Repository ${repoId ?? `${repo} (no repoId)`}. ${legacy}\n`);
       } else {
+        io.out(`Repository: ${repoId ?? `${repo} (no repoId)`}\n${legacy ? `${legacy}\n` : ''}`);
         io.out(renderScorecardText(card));
         io.out(renderReplayRows(replay));
       }
@@ -150,6 +168,9 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
       if (argv['write-evidence']) {
         const paths = writeEvidenceFiles(resolve(argv['write-evidence']), card, {
           repo,
+          ...(repoId ? { repoId } : {}),
+          legacyRecords: selection.legacy,
+          unavailableRecords: selection.unavailable,
           generatedAt: now.toISOString(),
         });
         io.err(`Wrote ${paths.length} evidence file(s) to ${resolve(argv['write-evidence'])}.\n`);

@@ -34,6 +34,7 @@ describe('AttributionResolver', () => {
     expect(r.frameworkFor(join(main, '.worktrees', 'gone-1', 'sub'))).toEqual({
       root: main,
       repo: 'main',
+      repoIdUnavailable: true,
     });
   });
 
@@ -42,7 +43,7 @@ describe('AttributionResolver', () => {
     const wt = repo(join(main, '.worktrees', 'aisdlc-1'));
     const r = new AttributionResolver({ homeDir: join(root, 'home') });
     const ctx = r.frameworkFor(wt)!;
-    expect(ctx).toEqual({ root: wt, repo: 'main' });
+    expect(ctx).toEqual({ root: wt, repo: 'main', repoIdUnavailable: true });
     expect(r.frameworkFor(wt)).toBe(ctx);
   });
 

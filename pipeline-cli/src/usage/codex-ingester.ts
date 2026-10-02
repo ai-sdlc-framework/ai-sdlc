@@ -261,6 +261,8 @@ function processFile(
     agentRole: 'main-session',
     scope: attr.scope,
     ...(attr.repo ? { repo: attr.repo } : {}),
+    ...(attr.repoId ? { repoId: attr.repoId } : {}),
+    ...(attr.repoIdUnavailable ? { repoIdUnavailable: true as const } : {}),
     ...(attr.taskId ? { taskId: attr.taskId } : {}),
     ...(attr.scope === 'framework' ? { source: { file: path, offset } } : {}),
   });

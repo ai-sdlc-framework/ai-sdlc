@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readModelCalls, type ModelCallRecord } from '@ai-sdlc/reference';
@@ -15,6 +16,7 @@ import {
   ingestCodexSessions,
   LIMIT_EVENTS_FILE,
 } from './codex-ingester.js';
+import { selectByRepo } from './repo-id.js';
 import { attributeCodexSession } from './codex-attribution.js';
 import { formatCodexIngestSummary } from '../cli/usage-codex.js';
 
@@ -72,6 +74,54 @@ function frameworkRepo(): string {
   mkdirSync(join(repo, '.worktrees', 'aisdlc-650'), { recursive: true });
   return repo;
 }
+
+describe('ingestCodexSessions repoId wiring', () => {
+  const genv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@example.invalid',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.invalid',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_SYSTEM: '/dev/null',
+  };
+  function realRepo(path: string, commit: boolean): string {
+    mkdirSync(join(path, '.ai-sdlc'), { recursive: true });
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: path, env: genv });
+    g('init', '-q');
+    if (commit) {
+      writeFileSync(join(path, 'f.txt'), path);
+      g('add', 'f.txt');
+      g('commit', '-q', '-m', 'init');
+    }
+    return path;
+  }
+
+  it('stamps repoId for a checkout with commits and the unavailable marker without', async () => {
+    const good = realRepo(join(root, 'a', 'proj'), true);
+    const bare = realRepo(join(root, 'b', 'proj'), false);
+    const one = usageObj(10, 0, 5, 0);
+    writeFileSync(
+      join(sessions, 'rollout-good.jsonl'),
+      meta('sess-good', good) + tc('2026-09-01T10:01:00.000Z', one, one),
+    );
+    writeFileSync(
+      join(sessions, 'rollout-bare.jsonl'),
+      meta('sess-bare', bare) + tc('2026-09-01T10:01:00.000Z', one, one),
+    );
+    ingestCodexSessions(opts());
+    const recs = await readAll();
+    const g = recs.find((r) => r.sessionId === 'sess-good');
+    const n = recs.find((r) => r.sessionId === 'sess-bare');
+    expect(g?.repoId).toMatch(/^local#[0-9a-f]{40,64}$/);
+    expect(g?.repoIdUnavailable).toBeUndefined();
+    expect(n?.repoId).toBeUndefined();
+    expect(n?.repoIdUnavailable).toBe(true);
+    const sel = selectByRepo(recs, { repoName: 'proj', repoId: g?.repoId });
+    expect(sel.records.map((r) => r.sessionId)).toEqual(['sess-good']);
+    expect(sel.unavailable).toBe(1);
+  });
+});
 
 describe('ingestCodexSessions', () => {
   it('writes one record per token_count event with token classes mapped', async () => {
@@ -267,6 +317,7 @@ describe('attributeCodexSession', () => {
     expect(attributeCodexSession(repo, 'ai-sdlc/aisdlc-12-thing')).toEqual({
       scope: 'framework',
       repo: 'r2',
+      repoIdUnavailable: true,
       taskId: 'AISDLC-12',
     });
     writeFileSync(join(repo, '.active-task'), 'AISDLC-99\n');
