@@ -28,6 +28,8 @@ export interface JudgmentLogEntry {
   incumbent: unknown;
   latencyMs: number | null;
   cacheHit: boolean;
+  /** Why the cache was not read (`enforce`), when recorded. */
+  cacheMissReason: string | null;
 }
 
 export interface ReadJudgmentLogOptions {
@@ -78,6 +80,7 @@ function parseEntry(line: string): JudgmentLogEntry | undefined {
     incumbent: raw.incumbent ?? null,
     latencyMs: typeof raw.latencyMs === 'number' ? raw.latencyMs : null,
     cacheHit: raw.cacheHit === true,
+    cacheMissReason: str(raw.cacheMissReason),
   };
 }
 
