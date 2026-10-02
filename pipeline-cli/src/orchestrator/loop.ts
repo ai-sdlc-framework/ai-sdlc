@@ -472,6 +472,13 @@ export interface OrchestratorAdapters {
    */
   priceRefresh?: (emit: (event: Omit<OrchestratorEvent, 'ts'>) => void) => Promise<unknown>;
   /**
+   * RFC-0050 B5 - weekly model routing proposal. Called once per tick; the
+   * implementation decides whether it is due (the production one runs at most
+   * once per calendar week). Non-fatal: a throw or rejection is logged as a
+   * warning. Unset in tests.
+   */
+  routingProposal?: (ctx: { workDir: string; artifactsDir: string }) => Promise<unknown>;
+  /**
    * AISDLC-373 — single-PR operator-driven path. When set to true, the
    * §4.3 admission filter chain (DependencyReadiness, Blocked, DoR, etc.)
    * is skipped and every frontier candidate flows straight to dispatch.
@@ -574,6 +581,20 @@ export async function runOrchestratorTick(
       await adapters.priceRefresh(emit);
     } catch {
       // Price refresh is advisory; it never blocks a tick.
+    }
+  }
+
+  if (adapters.routingProposal) {
+    try {
+      await adapters.routingProposal({
+        workDir: config.workDir,
+        artifactsDir:
+          adapters.artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(config.workDir, 'artifacts'),
+      });
+    } catch (err) {
+      logger.warn(
+        `[orchestrator] routing proposal failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

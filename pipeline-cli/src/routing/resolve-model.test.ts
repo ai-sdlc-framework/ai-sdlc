@@ -134,6 +134,47 @@ describe('security reviewer floor', () => {
   });
 });
 
+describe('applied-change record fields (evidence, previousModel)', () => {
+  const withCell = (cell: string) =>
+    TABLE.replace('bug: { model: sonnet }', `bug: { model: sonnet, ${cell} }`);
+
+  it('loads an evidence reference and a previous model onto the cell', () => {
+    const parsed = parseRoutingTable(withCell('evidence: ev/dev.bug.json, previousModel: opus'));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.table.cells.developer.bug).toEqual({
+        model: 'sonnet',
+        evidence: 'ev/dev.bug.json',
+        previousModel: 'opus',
+      });
+    }
+  });
+
+  it('ignores the whole table when previousModel is not in strength or the fields are invalid', () => {
+    expect(parseRoutingTable(withCell('previousModel: unknown'))).toEqual({
+      ok: false,
+      reason: 'model-not-in-strength',
+    });
+    expect(parseRoutingTable(withCell('previousModel: ""')).ok).toBe(false);
+    expect(parseRoutingTable(withCell('evidence: ""')).ok).toBe(false);
+    expect(parseRoutingTable(withCell(`evidence: ${'x'.repeat(501)}`)).ok).toBe(false);
+  });
+
+  it('does not change what the resolver returns', () => {
+    const text = withCell('evidence: ev.json, previousModel: opus');
+    const r = resolveModel({
+      role: 'developer',
+      taskClass: 'bug',
+      taskId: 'T-1',
+      sourceKind: 'backlog',
+      workDir: dir,
+      record: false,
+      readBaseTable: () => text,
+    });
+    expect(r).toMatchObject({ model: 'sonnet', arm: 'table' });
+  });
+});
+
 describe('base ref only', () => {
   it('ignores a working-tree copy and reads the committed table', () => {
     const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });

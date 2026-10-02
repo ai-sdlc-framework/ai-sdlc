@@ -24,6 +24,10 @@ export const SECURITY_REVIEWER_ROLE = 'security-reviewer';
 export interface RoutingCell {
   model: string;
   candidates?: string[];
+  /** Reference to the evidence that justified `model` (a path or id, never content). */
+  evidence?: string;
+  /** The model this cell used before the change `evidence` records. */
+  previousModel?: string;
 }
 
 export interface RoutingTable {
