@@ -111,6 +111,14 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityDefinition[] = [
     fallback: 'Each role uses its built-in default model.',
     enable: 'Add .ai-sdlc/model-routing.yaml to the base branch.',
   },
+  {
+    id: 'hierarchy.board',
+    title: 'Hierarchy dispatch board',
+    specifiedBy: 'RFC-0051',
+    fallback:
+      'Sessions cannot claim or complete work through the shared board and continue without it.',
+    enable: 'Make the board directory readable and writable by every session in the hierarchy.',
+  },
 ];
 
 for (const def of BUILT_IN_CAPABILITIES) registerCapability(def);

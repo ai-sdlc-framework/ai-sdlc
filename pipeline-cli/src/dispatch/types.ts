@@ -17,7 +17,7 @@
  */
 
 /** Subdirectory layout under `.ai-sdlc/dispatch/`. */
-export const BOARD_SUBDIRS = ['queue', 'inflight', 'done', 'failed'] as const;
+export const BOARD_SUBDIRS = ['queue', 'inflight', 'done', 'failed', 'blocked'] as const;
 export type BoardSubdir = (typeof BOARD_SUBDIRS)[number];
 
 /** Worker backend kinds (RFC-0041 §4.3). */
@@ -66,6 +66,23 @@ export interface DispatchManifest {
    * claim this manifest until the wall clock passes this ISO-8601 timestamp.
    */
   noClaimBefore?: string;
+  /** Task ids that must each have a success verdict in `done/` before this manifest is claimable. */
+  after?: string[];
+  /** At most one inflight manifest per group. */
+  sequenceGroup?: string;
+  /** Lower is claimed first within a wave; absent sorts last. */
+  priority?: number;
+  /** Lower is claimed first (default 0). */
+  wave?: number;
+  /** Decision id this manifest is waiting on; such a manifest is never claimed. */
+  blockedBy?: string;
+  /** Times the reaper has returned this manifest to `queue/`. */
+  retryCount?: number;
+  /**
+   * The claiming session's roster name, recorded when the manifest is claimed.
+   * In a hierarchy it equals the roster `name` exactly, collision suffix included.
+   */
+  workerId?: string;
 }
 
 /**

@@ -865,6 +865,7 @@ export const KNOWN_CAPABILITY_IDS = [
   'pricing.feed',
   'usage.ingest',
   'routing.table',
+  'hierarchy.board',
 ];
 
 /**

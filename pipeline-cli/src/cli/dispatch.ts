@@ -9,7 +9,7 @@
  * Subcommands:
  *
  *   - `peek` — print queue/inflight/done/failed counts as JSON.
- *   - `claim --worker-kind <kind> [--worker-id <id>]` — atomic claim of the
+ *   - `claim --worker-kind <kind> [--worker <name>]` — atomic claim of the
  *     next eligible manifest. Prints the manifest JSON on stdout when a
  *     claim succeeds; prints `{"claimed":false}` and exits 0 when the queue
  *     has no eligible manifest. (Empty-queue is NOT an error — it's the
@@ -29,6 +29,20 @@
  *     the claim without writing a verdict).
  *   - `write-manifest --json <path>` — Conductor entry point. Reads a JSON
  *     manifest from `<path>` and writes it into queue/.
+ *
+ * Ordering and parking:
+ *
+ *   - `enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
+ *     [--priority <n>] [--wave <n>]` or `enqueue --from-brief <path>` —
+ *     write one manifest per task into queue/. Refuses a task already on the
+ *     board in any state; nothing is written when any task is refused.
+ *   - `board [--json]` — print every manifest by state, with eligibility and
+ *     the holding rule for queued manifests that cannot be claimed yet.
+ *   - `unblock --task-id <id>` — return a parked manifest from blocked/ to
+ *     queue/.
+ *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
+ *     stale inflight manifests to queue/ (retry count incremented), or to
+ *     failed/ once past the retry limit.
  *
  * Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
  *
@@ -75,7 +89,8 @@
  * `node -e ...` or `jq`.
  */
 
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -83,14 +98,20 @@ import {
   claimNext,
   collectVerdicts,
   DEFAULT_BOARD_DIR,
+  enqueueTasks,
+  listBoard,
   listResumeSignals,
   peekQueue,
   probeIterationBudget,
+  readInflightManifest,
   readResumeSignal,
   releaseInflight,
   removeResumeSignal,
+  requeueStaleInflight,
   removeVerdict,
+  TASK_ID_RE,
   sweepStaleHeartbeats,
+  unblockManifest,
   writeHeartbeat,
   writeIterationExhaustedDiagnostic,
   writeManifest,
@@ -98,6 +119,8 @@ import {
   writeVerdict,
 } from '../dispatch/index.js';
 import type {
+  BoardEntry,
+  EnqueueEntry,
   DispatchManifest,
   DispatchVerdict,
   InflightHeartbeat,
@@ -106,6 +129,7 @@ import type {
   WorkerKind,
 } from '../dispatch/index.js';
 import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
+import { parseBrief } from '../hierarchy/index.js';
 import {
   countInFlightBgAgents,
   DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
@@ -122,6 +146,18 @@ import {
   updatePassiveTickState,
   writePassiveTickState,
 } from '../orchestrator/stale-cache-reverify.js';
+
+/** Parse an optional integer flag. Returns null (after writing an error) when malformed. */
+function intFlag(flags: Record<string, string>, name: string): number | undefined | null {
+  const raw = flags[name];
+  if (raw === undefined || raw === '') return undefined;
+  const value = Number.parseInt(raw, 10);
+  if (!/^-?\d+$/.test(raw.trim()) || !Number.isSafeInteger(value)) {
+    process.stderr.write(`cli-dispatch: --${name} must be an integer (got '${raw}')\n`);
+    return null;
+  }
+  return value;
+}
 
 /**
  * Minimal argv parser — yargs would be overkill for a JSON-out CLI.
@@ -147,6 +183,25 @@ export function parseArgv(argv: readonly string[]): {
     }
   }
   return { subcommand, flags };
+}
+
+/**
+ * The worker name for a task: an explicit `--worker` / `--worker-id`, else the
+ * name recorded on the inflight manifest at claim time, so a claim, its
+ * heartbeats and its completion all carry the same value.
+ */
+function resolveWorkerId(
+  boardDir: string,
+  flags: Record<string, string>,
+  taskId: string,
+): string | undefined {
+  const explicit = flags['worker'] ?? flags['worker-id'];
+  if (explicit !== undefined && explicit !== '' && explicit !== 'true') return explicit;
+  try {
+    return readInflightManifest(boardDir, taskId)?.workerId;
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveBoardDir(flags: Record<string, string>): string {
@@ -183,7 +238,23 @@ export async function runDispatchCli(
         process.stderr.write(`cli-dispatch claim: invalid --worker-kind '${kind}'\n`);
         return 2;
       }
-      const result = claimNext(boardDir, kind as WorkerKind);
+      const named = flags['worker'];
+      const legacy = flags['worker-id'];
+      if (named !== undefined && legacy !== undefined && named !== legacy) {
+        process.stderr.write('cli-dispatch claim: --worker and --worker-id disagree\n');
+        return 2;
+      }
+      const workerId = named ?? legacy;
+      if (workerId !== undefined && (workerId === '' || workerId === 'true')) {
+        process.stderr.write('cli-dispatch claim: --worker needs a non-empty name\n');
+        return 2;
+      }
+      const result = claimNext(
+        boardDir,
+        kind as WorkerKind,
+        undefined,
+        workerId === undefined ? {} : { workerId },
+      );
       if (!result.claimed) {
         out({ claimed: false });
         return 0;
@@ -206,7 +277,7 @@ export async function runDispatchCli(
     case 'write-verdict': {
       const taskId = requireFlag(flags, 'task-id');
       const outcome = requireFlag(flags, 'outcome') as VerdictOutcome;
-      const workerId = flags['worker-id'] ?? `worker-${process.pid}`;
+      const workerId = resolveWorkerId(boardDir, flags, taskId) ?? `worker-${process.pid}`;
       const verdict: DispatchVerdict = {
         schemaVersion: 'v1',
         taskId,
@@ -352,7 +423,7 @@ export async function runDispatchCli(
 
     case 'heartbeat': {
       const taskId = requireFlag(flags, 'task-id');
-      const workerId = requireFlag(flags, 'worker-id');
+      const workerId = resolveWorkerId(boardDir, flags, taskId) ?? requireFlag(flags, 'worker-id');
       const workerKind = requireFlag(flags, 'worker-kind') as WorkerKind;
       const hb: InflightHeartbeat = {
         taskId,
@@ -369,7 +440,8 @@ export async function runDispatchCli(
     }
 
     case 'sweep': {
-      const staleMs = flags['stale-ms'] ? Number.parseInt(flags['stale-ms'], 10) : undefined;
+      const staleMs = intFlag(flags, 'stale-ms');
+      if (staleMs === null) return 2;
       const result = sweepStaleHeartbeats(boardDir, { staleMs });
       out(result);
       return 0;
@@ -579,6 +651,112 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'enqueue': {
+      const workDir = path.resolve(flags['work-dir'] ?? '.');
+      try {
+        let entries: EnqueueEntry[];
+        if (flags['from-brief']) {
+          entries = parseBrief(
+            readFileSync(path.resolve(flags['from-brief']), 'utf-8'),
+          ).entries.map(
+            (e): EnqueueEntry => ({
+              taskId: e.task,
+              ...(e.after.length > 0 ? { after: e.after } : {}),
+              ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
+              ...(e.priority !== undefined ? { priority: e.priority } : {}),
+              wave: e.wave,
+            }),
+          );
+        } else {
+          const ids = argv.flatMap((tok, i) =>
+            tok === '--task' && argv[i + 1] ? [argv[i + 1]!] : [],
+          );
+          if (ids.length === 0) {
+            process.stderr.write(
+              'cli-dispatch enqueue: pass --task <id> (repeatable) or --from-brief <path>\n',
+            );
+            return 2;
+          }
+          const shared: Omit<EnqueueEntry, 'taskId'> = {};
+          if (flags['after'])
+            shared.after = flags['after']
+              .split(',')
+              .map((x) => x.trim())
+              .filter(Boolean);
+          if (flags['group']) shared.sequenceGroup = flags['group'];
+          const priority = intFlag(flags, 'priority');
+          const wave = intFlag(flags, 'wave');
+          if (priority === null || wave === null) return 2;
+          if (priority !== undefined) shared.priority = priority;
+          if (wave !== undefined) shared.wave = wave;
+          entries = ids.map((taskId) => ({ taskId, ...shared }));
+        }
+        const paths = enqueueTasks(boardDir, entries, {
+          baseSha: flags['base-sha'] ?? resolveBaseSha(workDir),
+          dispatchedBy: flags['dispatched-by'] ?? `operator-${process.pid}`,
+          resolveTaskFile: (id) => findTaskFile(workDir, id),
+        });
+        out({ ok: true, enqueued: entries.map((e) => e.taskId), paths });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch enqueue: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
+    case 'board': {
+      const entries = listBoard(boardDir);
+      if (flags['json'] === 'true') {
+        out(entries);
+        return 0;
+      }
+      process.stdout.write(formatBoard(entries));
+      return 0;
+    }
+
+    case 'unblock': {
+      const taskId = requireFlag(flags, 'task-id');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch unblock: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      if (!unblockManifest(boardDir, taskId)) {
+        process.stderr.write(`cli-dispatch unblock: ${taskId} is not parked in blocked/\n`);
+        return 1;
+      }
+      out({ ok: true, taskId });
+      return 0;
+    }
+
+    case 'reap': {
+      const opts: Parameters<typeof requeueStaleInflight>[1] = {};
+      const staleMs = intFlag(flags, 'stale-ms');
+      const retryLimit = intFlag(flags, 'retry-limit');
+      if (staleMs === null || retryLimit === null) return 2;
+      if (staleMs !== undefined) opts.staleMs = staleMs;
+      if (retryLimit !== undefined) opts.retryLimit = retryLimit;
+      if (flags['roster']) {
+        let names: unknown;
+        try {
+          names = JSON.parse(readFileSync(path.resolve(flags['roster']), 'utf-8'));
+        } catch (err) {
+          process.stderr.write(
+            `cli-dispatch: --roster must be a readable JSON file (${err instanceof Error ? err.message : String(err)})\n`,
+          );
+          return 2;
+        }
+        if (!Array.isArray(names) || !names.every((n) => typeof n === 'string')) {
+          process.stderr.write('cli-dispatch: --roster must be a JSON array of strings\n');
+          return 2;
+        }
+        opts.roster = new Set(names as string[]);
+      }
+      out(requeueStaleInflight(boardDir, opts));
+      return 0;
+    }
+
     case '':
     case 'help':
     case '--help':
@@ -593,6 +771,38 @@ export async function runDispatchCli(
       return 2;
     }
   }
+}
+
+function resolveBaseSha(workDir: string): string {
+  for (const ref of ['origin/main', 'HEAD']) {
+    try {
+      return execFileSync('git', ['rev-parse', ref], { cwd: workDir, encoding: 'utf-8' }).trim();
+    } catch {
+      /* try the next ref */
+    }
+  }
+  throw new Error('cannot resolve a base commit; pass --base-sha <sha>');
+}
+
+function findTaskFile(workDir: string, taskId: string): string | undefined {
+  const dir = path.join(workDir, 'backlog', 'tasks');
+  if (!existsSync(dir)) return undefined;
+  const prefix = `${taskId.toLowerCase()} - `;
+  const hit = readdirSync(dir).find((f) => f.toLowerCase().startsWith(prefix) && f.endsWith('.md'));
+  return hit ? path.posix.join('backlog', 'tasks', hit) : undefined;
+}
+
+/** Render the board listing: one line per manifest, grouped by state. */
+export function formatBoard(entries: readonly BoardEntry[]): string {
+  if (entries.length === 0) return 'board is empty\n';
+  const lines: string[] = [];
+  for (const e of entries) {
+    const parts = [e.state.padEnd(8), e.taskId];
+    if (e.state === 'queue') parts.push(e.eligible ? 'eligible' : `held: ${e.reason}`);
+    else if (e.reason) parts.push(e.reason);
+    lines.push(parts.join('  '));
+  }
+  return lines.join('\n') + '\n';
 }
 
 function requireFlag(flags: Record<string, string>, name: string): string {
@@ -661,7 +871,7 @@ Usage:
 
 Subcommands:
   peek
-  claim --worker-kind {in-session-agent|claude-p-shell}
+  claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>]
   collect-verdicts [--include-failed]
   write-verdict --task-id <id> --outcome <enum> [--commit-sha <s>]
                 [--iterations-attempted <n>] [--session-id <uuid>] ...
@@ -670,6 +880,11 @@ Subcommands:
   sweep [--stale-ms <n>]
   release --task-id <id>
   write-manifest --json <path>
+  enqueue --task <id> [--task <id> ...] [--after <ids>] [--group <name>]
+          [--priority <n>] [--wave <n>] [--base-sha <sha>] | --from-brief <path>
+  board [--json]
+  unblock --task-id <id>
+  reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
 
 Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
   write-resume-signal --task-id <id> --feedback <s>

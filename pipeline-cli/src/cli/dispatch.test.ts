@@ -3,7 +3,15 @@
  * (RFC-0041 §4.4, AISDLC-377.1).
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -245,7 +253,7 @@ describe('runDispatchCli', () => {
 
   it('remove-verdict idempotent for missing files', async () => {
     const { exit } = await captureStdout(() =>
-      runDispatchCli(['remove-verdict', '--board-dir', boardDir, '--task-id', 'AISDLC-NOPE']),
+      runDispatchCli(['remove-verdict', '--board-dir', boardDir, '--task-id', 'AISDLC-9992']),
     );
     expect(exit).toBe(0);
   });
@@ -396,7 +404,7 @@ describe('runDispatchCli', () => {
           '--board-dir',
           boardDir,
           '--task-id',
-          'AISDLC-NOPE',
+          'AISDLC-9992',
           '--feedback',
           'fb',
         ]),
@@ -408,7 +416,7 @@ describe('runDispatchCli', () => {
 
     it('read-resume-signal returns {present:false} when no signal exists', async () => {
       const { captured } = await captureStdout(() =>
-        runDispatchCli(['read-resume-signal', '--board-dir', boardDir, '--task-id', 'AISDLC-NOPE']),
+        runDispatchCli(['read-resume-signal', '--board-dir', boardDir, '--task-id', 'AISDLC-9992']),
       );
       expect(readLastJson(captured)).toEqual({ present: false });
     });
@@ -449,7 +457,7 @@ describe('runDispatchCli', () => {
           '--board-dir',
           boardDir,
           '--task-id',
-          'AISDLC-NOPE',
+          'AISDLC-9992',
         ]),
       );
       expect(exit).toBe(0);
@@ -533,7 +541,7 @@ describe('runDispatchCli', () => {
           '--board-dir',
           boardDir,
           '--task-id',
-          'AISDLC-MISSING',
+          'AISDLC-9991',
         ]),
       );
       const result = readLastJson(captured) as { hasManifest: boolean };
@@ -1159,5 +1167,261 @@ spec:
       const r = readLastJson(captured) as { k: number };
       expect(r.k).toBe(3);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// enqueue / board / unblock / reap
+// ---------------------------------------------------------------------------
+
+describe('runDispatchCli ordering commands', () => {
+  let root: string;
+  let boardDir: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'dispatch-enqueue-'));
+    boardDir = path.join(root, 'dispatch');
+    dispatchEnsureBoardDirs(boardDir);
+    mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
+    for (const id of ['t-1', 't-2']) {
+      writeFileSync(path.join(root, 'backlog', 'tasks', `${id} - x.md`), '');
+    }
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const base = () => ['--board-dir', boardDir, '--work-dir', root, '--base-sha', 'abc1234'];
+
+  it('enqueues repeated --task with shared ordering flags, then refuses a repeat', async () => {
+    const { exit } = await captureStdout(() =>
+      runDispatchCli([
+        'enqueue',
+        '--task',
+        'T-1',
+        '--task',
+        'T-2',
+        '--group',
+        'g',
+        '--wave',
+        '1',
+        '--priority',
+        '2',
+        '--after',
+        'T-9',
+        ...base(),
+      ]),
+    );
+    expect(exit).toBe(0);
+    const m = JSON.parse(readFileSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'), 'utf-8'));
+    expect(m).toMatchObject({ sequenceGroup: 'g', wave: 1, priority: 2, after: ['T-9'] });
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const again = await runDispatchCli(['enqueue', '--task', 'T-1', ...base()]);
+    expect(again).toBe(1);
+    expect(err.mock.calls.join('')).toContain('already on the board');
+    err.mockRestore();
+  });
+
+  it('claim --worker records the name verbatim and completion reuses it', async () => {
+    await runDispatchCli(['enqueue', '--task', 'T-1', ...base()]);
+    const claim = await captureStdout(() =>
+      runDispatchCli([
+        'claim',
+        '--worker-kind',
+        'in-session-agent',
+        '--worker',
+        'executor-beta',
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect(
+      (readLastJson(claim.captured) as { manifest: { workerId: string } }).manifest.workerId,
+    ).toBe('executor-beta');
+    const onDisk = JSON.parse(
+      readFileSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'), 'utf-8'),
+    );
+    expect(onDisk.workerId).toBe('executor-beta');
+    await runDispatchCli([
+      'heartbeat',
+      '--task-id',
+      'T-1',
+      '--worker-kind',
+      'in-session-agent',
+      '--board-dir',
+      boardDir,
+    ]);
+    const hb = JSON.parse(readFileSync(path.join(boardDir, 'inflight', 'T-1.state.json'), 'utf-8'));
+    expect(hb.workerId).toBe('executor-beta');
+    await runDispatchCli([
+      'write-verdict',
+      '--task-id',
+      'T-1',
+      '--outcome',
+      'success',
+      '--board-dir',
+      boardDir,
+    ]);
+    const verdict = JSON.parse(
+      readFileSync(path.join(boardDir, 'done', 'T-1.verdict.json'), 'utf-8'),
+    );
+    expect(verdict.workerId).toBe('executor-beta');
+  });
+
+  it('claim --worker rejects an empty name', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const code = await runDispatchCli([
+      'claim',
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      '',
+      '--board-dir',
+      boardDir,
+    ]);
+    err.mockRestore();
+    expect(code).toBe(2);
+  });
+
+  it('enqueues from a brief file', async () => {
+    for (const id of ['tt-1', 'tt-2']) {
+      writeFileSync(path.join(root, 'backlog', 'tasks', `${id} - x.md`), '');
+    }
+    const brief = path.join(root, 'brief.md');
+    writeFileSync(
+      brief,
+      [
+        '# Brief',
+        '',
+        '```yaml',
+        'dispatchBrief:',
+        '  - task: TT-1',
+        '    wave: 1',
+        '    priority: 2',
+        '  - task: TT-2',
+        '    after: [TT-1]',
+        '    sequenceGroup: g',
+        '    wave: 2',
+        '```',
+        '',
+      ].join('\n'),
+    );
+    const { exit } = await captureStdout(() =>
+      runDispatchCli(['enqueue', '--from-brief', brief, ...base()]),
+    );
+    expect(exit).toBe(0);
+    const read = (id: string) =>
+      JSON.parse(readFileSync(path.join(boardDir, 'queue', `${id}.dispatch.json`), 'utf-8'));
+    expect(read('TT-1')).toMatchObject({ wave: 1, priority: 2 });
+    expect(read('TT-1').after).toBeUndefined();
+    expect(read('TT-2')).toMatchObject({ after: ['TT-1'], sequenceGroup: 'g', wave: 2 });
+    expect(read('TT-2').priority).toBeUndefined();
+  });
+
+  it('rejects a one-letter task prefix in a brief while --task still accepts it', async () => {
+    const brief = path.join(root, 'short.md');
+    writeFileSync(brief, '```yaml\ndispatchBrief:\n  - task: T-1\n    wave: 1\n```\n');
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(1);
+    expect(err.mock.calls.join('')).toContain('not a valid task id');
+    err.mockRestore();
+    expect(await runDispatchCli(['enqueue', '--task', 'T-1', ...base()])).toBe(0);
+  });
+
+  it('rejects a brief that is not a dispatchBrief block', async () => {
+    const brief = path.join(root, 'bad.yaml');
+    writeFileSync(brief, '- TT-1\n');
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', '--from-brief', brief, ...base()])).toBe(1);
+    err.mockRestore();
+    expect(existsSync(path.join(boardDir, 'queue', 'TT-1.dispatch.json'))).toBe(false);
+  });
+
+  it('requires a task source', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['enqueue', ...base()])).toBe(2);
+    err.mockRestore();
+  });
+
+  it('prints the board with the reason an ineligible manifest is held', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('T-1', { after: ['T-9'] }));
+    dispatchWriteManifest(boardDir, mkManifest('T-2'));
+    const { captured } = await captureStdout(() =>
+      runDispatchCli(['board', '--board-dir', boardDir]),
+    );
+    expect(captured.raw).toContain('T-2  eligible');
+    expect(captured.raw).toContain('T-1  held: task T-9 is not on the board');
+    const json = await captureStdout(() =>
+      runDispatchCli(['board', '--json', '--board-dir', boardDir]),
+    );
+    expect((readLastJson(json.captured) as unknown[]).length).toBe(2);
+  });
+
+  it('prints an empty board', async () => {
+    const { captured } = await captureStdout(() =>
+      runDispatchCli(['board', '--board-dir', boardDir]),
+    );
+    expect(captured.raw).toBe('board is empty\n');
+  });
+
+  it('unblocks a parked manifest', async () => {
+    writeFileSync(
+      path.join(boardDir, 'blocked', 'T-1.dispatch.json'),
+      JSON.stringify(mkManifest('T-1', { blockedBy: 'DEC-1' })),
+    );
+    const { exit } = await captureStdout(() =>
+      runDispatchCli(['unblock', '--task-id', 'T-1', '--board-dir', boardDir]),
+    );
+    expect(exit).toBe(0);
+    expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(true);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(await runDispatchCli(['unblock', '--task-id', 'T-1', '--board-dir', boardDir])).toBe(1);
+    err.mockRestore();
+  });
+
+  it('reaps a stale inflight manifest back to the queue', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('T-1'));
+    await captureStdout(() =>
+      runDispatchCli(['claim', '--worker-kind', 'in-session-agent', '--board-dir', boardDir]),
+    );
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    utimesSync(path.join(boardDir, 'inflight', 'T-1.dispatch.json'), hourAgo, hourAgo);
+    const roster = path.join(root, 'roster.json');
+    writeFileSync(roster, '["other"]');
+    const { captured } = await captureStdout(() =>
+      runDispatchCli([
+        'reap',
+        '--stale-ms',
+        '1',
+        '--retry-limit',
+        '3',
+        '--roster',
+        roster,
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect((readLastJson(captured) as { requeued: unknown[] }).requeued).toHaveLength(1);
+    expect(existsSync(path.join(boardDir, 'queue', 'T-1.dispatch.json'))).toBe(true);
+  });
+
+  it('rejects non-integer numeric flags and a malformed roster', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const run = (args: string[]) => runDispatchCli([...args, '--board-dir', boardDir]);
+    expect(await run(['enqueue', '--task', 'T-1', '--priority', 'high', '--work-dir', root])).toBe(
+      2,
+    );
+    expect(await run(['enqueue', '--task', 'T-1', '--wave', '1.5', '--work-dir', root])).toBe(2);
+    expect(await run(['sweep', '--stale-ms', 'soon'])).toBe(2);
+    expect(await run(['reap', '--retry-limit', 'x'])).toBe(2);
+    expect(await run(['reap', '--stale-ms', '1e3'])).toBe(2);
+    const roster = path.join(root, 'bad-roster.json');
+    writeFileSync(roster, '{"a":1}');
+    expect(await run(['reap', '--roster', roster])).toBe(2);
+    writeFileSync(roster, '[1]');
+    expect(await run(['reap', '--roster', roster])).toBe(2);
+    writeFileSync(roster, 'not json');
+    expect(await run(['reap', '--roster', roster])).toBe(2);
+    expect(await run(['unblock', '--task-id', '../../x'])).toBe(2);
+    expect(err.mock.calls.join('')).toContain('--priority must be an integer');
+    err.mockRestore();
   });
 });
