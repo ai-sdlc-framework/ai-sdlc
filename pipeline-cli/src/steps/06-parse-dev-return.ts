@@ -31,12 +31,18 @@ import type {
   SubagentSpawner,
   VerificationStatus,
 } from '../types.js';
+import { runAcCoverage, type AcCoverageHook } from '../judgment/agent-output-checks.js';
 
 const VALID_VERIFICATION_STATUSES: VerificationStatus[] = ['passed', 'failed', 'skipped'];
 
 export interface ParseDeveloperReturnOptions {
   /** Either a JSON string or a parsed object. */
   developerReturn: string | unknown;
+  /**
+   * Advisory `dev.ac-coverage` wiring. When omitted, or when the judgment layer
+   * is disabled, the result is exactly what it was before this option existed.
+   */
+  acCoverage?: AcCoverageHook;
 }
 
 export async function parseDeveloperReturn(
@@ -134,7 +140,12 @@ export async function parseDeveloperReturn(
     }
   }
 
-  return { ok: true, developer: obj as unknown as DeveloperReturn };
+  const developer = obj as unknown as DeveloperReturn;
+  if (opts.acCoverage) {
+    const acCoverage = await runAcCoverage(opts.acCoverage);
+    if (acCoverage) return { ok: true, developer, acCoverage };
+  }
+  return { ok: true, developer };
 }
 
 // ── AISDLC-176 — retry-once-on-contract-violation helper ────────────────
@@ -156,6 +167,8 @@ export interface ParseDeveloperReturnWithRetryOptions {
    * usually quicker since the work is already on disk).
    */
   timeoutMs?: number;
+  /** Advisory `dev.ac-coverage` wiring, forwarded to the parse. */
+  acCoverage?: AcCoverageHook;
   /**
    * Optional hook fired when the retry succeeds (parse-then-good-envelope).
    * Used by callers (executePipeline, iterateReviewLoop) to emit the
@@ -213,6 +226,7 @@ export async function parseDeveloperReturnWithRetry(
 ): Promise<ParseDeveloperReturnResult> {
   const initial = await parseDeveloperReturn({
     developerReturn: opts.initialResult.parsed ?? opts.initialResult.output,
+    ...(opts.acCoverage ? { acCoverage: opts.acCoverage } : {}),
   });
   if (initial.ok || !initial.contractViolation) return initial;
 
@@ -230,6 +244,7 @@ export async function parseDeveloperReturnWithRetry(
 
   const retryParsed = await parseDeveloperReturn({
     developerReturn: retryResult.parsed ?? retryResult.output,
+    ...(opts.acCoverage ? { acCoverage: opts.acCoverage } : {}),
   });
 
   if (retryParsed.ok) {

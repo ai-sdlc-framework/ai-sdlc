@@ -14,10 +14,17 @@
  */
 
 import type { AggregatedVerdict, ReviewerFinding, ReviewerVerdict, Severity } from '../types.js';
+import { runFindingGrounding, type FindingGroundingHook } from '../judgment/agent-output-checks.js';
 
 export interface AggregateVerdictsOptions {
   verdicts: ReviewerVerdict[];
   harnessNote?: string;
+  /**
+   * Advisory `review.finding-grounding` wiring. Runs before aggregation but only
+   * annotates: findings, severities, counts and `approved` are computed from the
+   * unmodified verdicts. Omitted or disabled means the output is unchanged.
+   */
+  grounding?: FindingGroundingHook;
 }
 
 const SEVERITIES: Severity[] = ['critical', 'major', 'minor', 'suggestion'];
@@ -25,6 +32,10 @@ const SEVERITIES: Severity[] = ['critical', 'major', 'minor', 'suggestion'];
 export async function aggregateVerdicts(
   opts: AggregateVerdictsOptions,
 ): Promise<AggregatedVerdict> {
+  const groundingAnnotations = opts.grounding
+    ? await runFindingGrounding(opts.verdicts, opts.grounding)
+    : undefined;
+
   const counts: Record<Severity, number> = {
     critical: 0,
     major: 0,
@@ -60,6 +71,7 @@ export async function aggregateVerdicts(
     verdicts: opts.verdicts,
     harnessNote,
     summary: summaryLines.join('\n'),
+    ...(groundingAnnotations ? { groundingAnnotations } : {}),
   };
 }
 

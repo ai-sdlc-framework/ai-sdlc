@@ -42,6 +42,7 @@ import {
   resolveTargetBranch,
 } from './02-compute-branch.js';
 import { lateRebase } from './11-late-rebase.js';
+import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
@@ -167,6 +168,14 @@ export function composeBody(opts: PushAndPrOptions): string {
       }\n\n</details>\n`
     : '';
 
+  // Advisory judgment notes: only when something was flagged (empty string otherwise).
+  const judgmentNotes = composeJudgmentNotes({
+    ...(opts.acCoverage ? { acCoverage: opts.acCoverage } : {}),
+    groundingAnnotations: opts.groundingAnnotations ?? opts.verdict.groundingAnnotations ?? [],
+    acceptanceCriteria: opts.task.acceptanceCriteria,
+  });
+  const notesBlock = judgmentNotes ? `\n${judgmentNotes}` : '';
+
   const footer = isGhIssue ? `\nCloses #${opts.issueNumber}\n` : `\nReferences ${opts.taskId}\n`;
 
   return (
@@ -175,6 +184,7 @@ export function composeBody(opts: PushAndPrOptions): string {
     `${opts.developerReturn.summary}\n\n` +
     `## Changed files\n${filesBlock}\n` +
     reviewBlock +
+    notesBlock +
     footer
   );
 }
