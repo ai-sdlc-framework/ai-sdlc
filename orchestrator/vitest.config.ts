@@ -2,9 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { sharedTestConfig } from '../vitest.shared';
 
 export default defineConfig({
   test: {
+    ...sharedTestConfig,
     // Direct usage reporters write to the machine-level ledger by default.
     // Point them at a throwaway directory so tests never touch the real home.
     env: { AI_SDLC_USAGE_DIR: mkdtempSync(join(tmpdir(), 'orchestrator-usage-')) },
