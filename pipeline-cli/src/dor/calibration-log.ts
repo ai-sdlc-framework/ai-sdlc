@@ -68,6 +68,8 @@ export interface CalibrationEntryInput {
    * without re-walking the graph.
    */
   highestDownstreamPriority?: number;
+  /** Where the Stage B verdicts came from: the judgment, the subagent, both, or neither. */
+  stageBSource?: 'none' | 'judgment' | 'subagent' | 'judgment+subagent';
 }
 
 export interface CalibrationLogOpts {
@@ -129,6 +131,8 @@ export interface CalibrationEntry {
    * "(unknown)" bucket in `cli-dor-corpus --blast-radius`.
    */
   highestDownstreamPriority?: number;
+  /** Where the Stage B verdicts came from (judgment, subagent, both, or none). */
+  stageBSource?: 'none' | 'judgment' | 'subagent' | 'judgment+subagent';
 }
 
 /**
@@ -180,7 +184,16 @@ export function buildEntry(
   input: CalibrationEntryInput,
   opts: CalibrationLogOpts = {},
 ): CalibrationEntry {
-  const { verdict, issue, outcome, notes, author, blastRadius, highestDownstreamPriority } = input;
+  const {
+    verdict,
+    issue,
+    outcome,
+    notes,
+    author,
+    blastRadius,
+    highestDownstreamPriority,
+    stageBSource,
+  } = input;
   const now = opts.now ?? (() => new Date());
 
   const failedGates = verdict.gates
@@ -235,6 +248,7 @@ export function buildEntry(
     ...(authorClean !== undefined ? { author: authorClean } : {}),
     ...(blastRadiusClean !== undefined ? { blastRadius: blastRadiusClean } : {}),
     ...(highestDownstreamPriority !== undefined ? { highestDownstreamPriority } : {}),
+    ...(stageBSource !== undefined ? { stageBSource } : {}),
   };
 }
 

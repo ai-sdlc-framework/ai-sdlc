@@ -83,6 +83,15 @@ describe('resolveCalibrationLogPath', () => {
   });
 });
 
+describe('buildEntry stageBSource', () => {
+  it('records where the Stage B verdicts came from, and omits it otherwise', () => {
+    const now = () => new Date('2026-05-01T00:00:00.000Z');
+    const withSource = buildEntry({ verdict: verdict(), stageBSource: 'judgment' }, { now });
+    expect(withSource.stageBSource).toBe('judgment');
+    expect('stageBSource' in buildEntry({ verdict: verdict() }, { now })).toBe(false);
+  });
+});
+
 describe('buildEntry', () => {
   it('captures the verdict and derives failedGates', () => {
     const v = verdict({

@@ -16,6 +16,8 @@ export * from './evaluate.js';
 export * from './corpus.js';
 export * from './stage-b.js';
 export * from './composite.js';
+export * from './stage-b-judgment.js';
+export * from './stage-b-judgment-corpus.js';
 export * from './calibration-log.js';
 export * from './secret-redact.js';
 export * from './corpus-e2e.js';

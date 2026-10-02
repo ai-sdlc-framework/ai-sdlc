@@ -21,7 +21,18 @@
  *     (act + spot-check). Else 'high'.
  */
 
+import { evaluateJudgment, type EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import { evaluateIssue, type EvaluateOpts } from './evaluate.js';
+import {
+  applyJudgedGates,
+  buildDorJudgmentInput,
+  ALL_GATES_PASS,
+  dorStageBJudgment,
+  dorStageBPassJudgment,
+  judgedGatesOf,
+  judgmentSourceKind,
+  type DorJudgmentDecision,
+} from './stage-b-judgment.js';
 import {
   evaluateStageB,
   pickStageBGates,
@@ -48,6 +59,20 @@ export interface EvaluateE2EOpts extends EvaluateOpts {
   stageB?: StageBOpts;
   /** Override the composite evaluator version stamp. */
   e2eEvaluatorVersion?: string;
+  /**
+   * Judgment layer context for the Stage B readiness judgment. Omitted means the
+   * judgment is not consulted. When the layer is disabled, in shadow, or abstains,
+   * the result is identical to running without it.
+   */
+  judgment?: { context: EvaluateJudgmentContext };
+}
+
+/** Where the Stage B verdicts of an evaluation came from (recorded in the calibration log). */
+export type StageBSource = 'none' | 'judgment' | 'subagent' | 'judgment+subagent';
+
+export interface EvaluateE2EDetailed {
+  verdict: RefinementVerdict;
+  stageBSource: StageBSource;
 }
 
 const E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
@@ -62,16 +87,125 @@ export async function evaluateIssueE2E(
   input: IssueInput,
   opts: EvaluateE2EOpts = {},
 ): Promise<RefinementVerdict> {
+  return (await evaluateIssueE2EDetailed(input, opts)).verdict;
+}
+
+/**
+ * Same as `evaluateIssueE2E`, also reporting whether the Stage B verdicts came from
+ * the judgment, the subagent or both.
+ *
+ * Judgment rules (the tighten half; the relax half is `allGatesPass`):
+ *   - a supplied spawner always runs, exactly as without the judgment; a judged fail can
+ *     only add a failed gate, never remove one;
+ *   - with no spawner, a judged fail fails the gate (any source kind) and a judged pass
+ *     only fills a gate that would otherwise be `skip` (backlog items only);
+ *   - a gate Stage A failed stays failed at any confidence, and a Stage A pass stays a
+ *     pass; the judged result never goes through `chooseWinner`.
+ */
+export async function evaluateIssueE2EDetailed(
+  input: IssueInput,
+  opts: EvaluateE2EOpts = {},
+): Promise<EvaluateE2EDetailed> {
   const stageA = await evaluateIssue(input, opts);
+  const version = opts.e2eEvaluatorVersion ?? E2E_EVALUATOR_VERSION;
+
+  const judged = opts.judgment
+    ? await runJudgment(input, stageA, opts.judgment.context)
+    : undefined;
+
+  // The relax half: skip the reviewer only on an `all-gates-pass` act from the pass
+  // judgment. Runs only for trusted backlog work, only when Stage A failed nothing, and only
+  // when the tighten judgment found no failing gate; in shadow or disabled it abstains.
+  if (opts.judgment && (await allGatesPass(input, stageA, judged, opts.judgment.context))) {
+    const everyGate = Object.fromEntries(
+      pickStageBGates(stageA).map((id) => [`${id}`, 'pass' as const]),
+    );
+    const applied = applyJudgedGates(stageA.gates, everyGate, { fillPass: true });
+    return {
+      verdict: finalizeVerdict(
+        stageA,
+        applied.gates,
+        opts.e2eEvaluatorVersion ?? `e2e-judgment-pass-v${dorStageBPassJudgment.version}`,
+      ),
+      stageBSource: 'judgment',
+    };
+  }
 
   if (!opts.stageB) {
-    // No spawner provided — return Stage A as-is, schema-shaped.
-    return stripDurationMs(stageA);
+    if (judged) {
+      const applied = applyJudgedGates(stageA.gates, judged, {
+        fillPass: input.source === 'backlog',
+      });
+      if (applied.changed.length > 0) {
+        return {
+          verdict: finalizeVerdict(
+            stageA,
+            applied.gates,
+            opts.e2eEvaluatorVersion ?? `e2e-judgment-v${dorStageBJudgment.version}`,
+          ),
+          stageBSource: 'judgment',
+        };
+      }
+    }
+    // No spawner and nothing the judgment may change: Stage A as-is, schema-shaped.
+    return { verdict: stripDurationMs(stageA), stageBSource: 'none' };
   }
 
   const stageB = await evaluateStageB(input, stageA, opts.stageB);
+  const merged = mergeVerdicts(stageA, stageB, version);
+  if (judged) {
+    // Extension point: a separate, bidirectional "pass" judgment would plug in here.
+    // It is intentionally not built; today the judgment can only add failures.
+    const applied = applyJudgedGates(merged.gates, judged, { fillPass: false });
+    if (applied.changed.length > 0) {
+      return {
+        verdict: finalizeVerdict(stageA, applied.gates, version),
+        stageBSource: 'judgment+subagent',
+      };
+    }
+  }
+  return { verdict: merged, stageBSource: 'subagent' };
+}
 
-  return mergeVerdicts(stageA, stageB, opts.e2eEvaluatorVersion ?? E2E_EVALUATOR_VERSION);
+/**
+ * True only when `dor.stage-b-pass` acted with `all-gates-pass` for trusted backlog work.
+ * The checks here repeat the compose guards on purpose: the wiring must not rely on the
+ * judgment alone to keep the relax path off untrusted sources or off a Stage A failure.
+ */
+async function allGatesPass(
+  input: IssueInput,
+  stageA: StageAVerdict,
+  tightened: DorJudgmentDecision['gates'] | undefined,
+  context: EvaluateJudgmentContext,
+): Promise<boolean> {
+  if (input.source !== 'backlog') return false;
+  if (stageA.gates.some((g) => g.verdict === 'fail')) return false;
+  if (tightened && Object.values(tightened).includes('fail')) return false;
+  const judgmentInput = buildDorJudgmentInput(input, stageA);
+  if (judgmentInput.gateIds.length === 0) return false;
+  const outcome = await evaluateJudgment(dorStageBPassJudgment, judgmentInput, {
+    ...context,
+    sourceKind: judgmentSourceKind(input.source),
+  });
+  return outcome.kind === 'act' && outcome.decision.outcome === ALL_GATES_PASS;
+}
+
+/** Run the Stage B judgment; undefined when it abstains or has nothing to ask. */
+async function runJudgment(
+  input: IssueInput,
+  stageA: StageAVerdict,
+  context: EvaluateJudgmentContext,
+): Promise<DorJudgmentDecision['gates'] | undefined> {
+  const judgmentInput = buildDorJudgmentInput(input, stageA);
+  if (judgmentInput.gateIds.length === 0) return undefined;
+  const outcome = await evaluateJudgment(dorStageBJudgment, judgmentInput, {
+    ...context,
+    sourceKind: judgmentSourceKind(input.source),
+    incumbent: {
+      gates: Object.fromEntries(stageA.gates.map((g) => [`${g.gateId}`, g.verdict])),
+    },
+  });
+  return judgedGatesOf(outcome);
 }
 
 /**
@@ -94,6 +228,16 @@ export function mergeVerdicts(
     return chooseWinner(aGate, bGate);
   });
 
+  return finalizeVerdict(stageA, mergedGates, evaluatorVersion, stageB.summary);
+}
+
+/** Build the composite verdict from final per-gate evaluations. */
+function finalizeVerdict(
+  stageA: StageAVerdict,
+  mergedGates: GateEvaluation[],
+  evaluatorVersion: string,
+  agentSummary?: string,
+): RefinementVerdict {
   const blockingFails = mergedGates.filter((g) => g.verdict === 'fail' && g.severity === 'block');
   const overallVerdict: OverallVerdict = blockingFails.length > 0 ? 'needs-clarification' : 'admit';
 
@@ -102,7 +246,7 @@ export function mergeVerdicts(
     .filter((q): q is string => typeof q === 'string' && q.length > 0);
 
   const overallConfidence = aggregateConfidence(mergedGates);
-  const summary = stageB.summary ?? buildE2ESummary(mergedGates, overallVerdict);
+  const summary = agentSummary ?? buildE2ESummary(mergedGates, overallVerdict);
 
   return {
     issueId: stageA.issueId,
