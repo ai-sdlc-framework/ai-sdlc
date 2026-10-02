@@ -7777,6 +7777,154 @@ export const refinementVerdictV1Schema = {
   additionalProperties: false,
 } as const;
 
+export const reviewPlanV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/review-plan.v1.schema.json',
+  title: 'AI-SDLC ReviewPlan',
+  description:
+    'A staged-review plan: an ordered list of probes that cheaper executors run read-only. The plan is model-authored and therefore untrusted; it is validated against the code-defined baseline checklist before any probe runs.',
+  type: 'object',
+  required: ['schemaVersion', 'baselineVersion', 'probes'],
+  additionalProperties: false,
+  properties: {
+    schemaVersion: { type: 'integer', const: 1 },
+    baselineVersion: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 32,
+      description: 'Version of the baseline checklist this plan was built against.',
+    },
+    probes: {
+      type: 'array',
+      maxItems: 500,
+      items: { $ref: '#/$defs/probe' },
+    },
+  },
+  $defs: {
+    probe: {
+      type: 'object',
+      required: ['id', 'type', 'target', 'question', 'covers'],
+      additionalProperties: false,
+      properties: {
+        id: { type: 'string', pattern: '^[a-z0-9][a-z0-9._:-]{0,63}$' },
+        type: { type: 'string', enum: ['read', 'trace', 'run', 'compare', 'search'] },
+        target: { $ref: '#/$defs/target' },
+        question: { type: 'string', minLength: 1, maxLength: 1000 },
+        covers: {
+          type: 'array',
+          maxItems: 500,
+          items: { type: 'string', pattern: '^[A-Za-z0-9._:/#@-]{1,128}$' },
+          description: 'Ids of the hunks this probe covers.',
+        },
+        baseline: {
+          type: 'boolean',
+          description:
+            'True for checklist probes. A baseline probe must match the checklist exactly.',
+        },
+      },
+      allOf: [
+        {
+          if: { properties: { type: { const: 'read' } } },
+          then: { properties: { target: { required: ['files'] } } },
+        },
+        {
+          if: { properties: { type: { const: 'run' } } },
+          then: {
+            properties: {
+              target: {
+                required: ['command'],
+                not: {
+                  anyOf: [
+                    { required: ['symbols'] },
+                    { required: ['revisions'] },
+                    { required: ['query'] },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        {
+          if: { properties: { type: { const: 'search' } } },
+          then: { properties: { target: { required: ['query'] } } },
+        },
+        {
+          if: { properties: { type: { const: 'trace' } } },
+          then: {
+            properties: {
+              target: { anyOf: [{ required: ['symbols'] }, { required: ['files'] }] },
+            },
+          },
+        },
+        {
+          if: { properties: { type: { const: 'compare' } } },
+          then: {
+            properties: {
+              target: {
+                anyOf: [
+                  { required: ['revisions'] },
+                  { required: ['files'] },
+                  { required: ['query'] },
+                ],
+              },
+            },
+          },
+        },
+        {
+          if: { properties: { type: { enum: ['read', 'trace', 'compare', 'search'] } } },
+          then: { properties: { target: { not: { required: ['command'] } } } },
+        },
+      ],
+    },
+    target: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        files: {
+          type: 'array',
+          maxItems: 200,
+          items: {
+            type: 'object',
+            required: ['path'],
+            additionalProperties: false,
+            properties: {
+              path: { type: 'string', minLength: 1, maxLength: 300 },
+              startLine: { type: 'integer', minimum: 1 },
+              endLine: { type: 'integer', minimum: 1 },
+            },
+          },
+        },
+        symbols: {
+          type: 'array',
+          maxItems: 100,
+          items: { type: 'string', pattern: '^[A-Za-z_$][A-Za-z0-9_$.#:<>-]{0,199}$' },
+        },
+        command: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'Exact allowlisted command. Never interpolated into a shell.',
+        },
+        revisions: {
+          type: 'object',
+          required: ['base', 'head'],
+          additionalProperties: false,
+          properties: {
+            base: { $ref: '#/$defs/revision' },
+            head: { $ref: '#/$defs/revision' },
+          },
+        },
+        query: { type: 'string', minLength: 1, maxLength: 500 },
+      },
+    },
+    revision: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9_@^~][A-Za-z0-9._/@^~-]{0,99}$',
+      not: { pattern: '\\.\\.' },
+    },
+  },
+} as const;
+
 export const rfcSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/rfc.schema.json',
@@ -9372,6 +9520,7 @@ export const SCHEMAS: Record<string, object> = {
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
   'refinement-verdict.v1.schema.json': refinementVerdictV1Schema,
+  'review-plan.v1.schema.json': reviewPlanV1Schema,
   'rfc.schema.json': rfcSchema,
   'sa-exemplar.schema.json': saExemplarSchema,
   'signal-ingestion-config.v1.schema.json': signalIngestionConfigV1Schema,

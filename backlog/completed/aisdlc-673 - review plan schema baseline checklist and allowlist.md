@@ -2,8 +2,9 @@
 id: AISDLC-673
 title: >-
   RFC-0052: review-plan schema, the baseline checklist as code, plan validation and coverage rejection, executor command allowlist
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-delta
 created_date: '2026-10-01'
 labels:
   - rfc-0052
@@ -67,10 +68,37 @@ baseline checklist is the part of that contract no plan can remove. RFC-0052 sec
    and evidence budget are read the same way with documented defaults.
 
 ## Acceptance Criteria
-- [ ] A plan missing a baseline probe, modifying one, leaving a high-risk hunk uncovered, exceeding the probe limit, or naming a non-allowlisted command is rejected with that reason (one test each).
-- [ ] The baseline for a fixture risk map contains every probe RFC-0052 section 2 lists, and a hunk flagged for authentication gets the security probe set.
-- [ ] The fallback plan covers every high-risk hunk and contains no model-authored probe.
-- [ ] A working-tree copy of `review-config.yaml` is ignored; only the base ref is read.
-- [ ] The schema is registered and `pnpm validate-schemas` passes.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] A plan missing a baseline probe, modifying one, leaving a high-risk hunk uncovered, exceeding the probe limit, or naming a non-allowlisted command is rejected with that reason (one test each).
+- [x] The baseline for a fixture risk map contains every probe RFC-0052 section 2 lists, and a hunk flagged for authentication gets the security probe set.
+- [x] The fallback plan covers every high-risk hunk and contains no model-authored probe.
+- [x] A working-tree copy of `review-config.yaml` is ignored; only the base ref is read.
+- [x] The schema is registered and `pnpm validate-schemas` passes.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Review-plan schema registered with AJV, the baseline checklist as versioned code, plan validation that returns a reason per rejection, a model-free fallback plan, and the executor command allowlist, risk threshold, probe limit and evidence budget read from the base ref only.
+
+## Changes
+- `spec/schemas/review-plan.v1.schema.json` (new): probe list schema with per-type target requirements; `reference/src/core/{validation,index,generated-schemas}.ts` (modified) register it and export `validateReviewPlan`.
+- `pipeline-cli/src/review-plan/` (new): `types.ts` (narrow risk-map input type), `baseline.ts`, `validate.ts`, `fallback.ts`, `config.ts`, barrel re-exported from `pipeline-cli/src/index.ts`.
+- `pipeline-cli/src/review-plan/review-plan.test.ts`, `reference/src/core/review-plan-schema.test.ts` (new): one test per rejection reason plus path, command and config hardening.
+
+## Design decisions
+- **Run targets match the allowlist exactly and must also pass a metacharacter check**: the plan is model-authored, so the command is never interpolated and arguments cannot ride along.
+- **Malformed base config falls back per field to the defaults, and a bad allowlist to the default allowlist**: never to something broader.
+- **Coverage ignores altered or unknown baseline probes**: a hunk covered only by a tampered baseline probe is still uncovered.
+- **Risk-map input is a narrow structural type defined here**: the real risk map must satisfy it; a conformance test belongs in the risk-map task.
+- **The test-run probe is omitted when no changed test exists or the allowlist has no test command**: there is nothing legitimate to run.
+
+## Verification
+- `pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/review-plan` - 50 passed
+- `pnpm --filter @ai-sdlc/reference exec vitest run` on the schema tests - 17 passed
+- `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on touched paths - clean
+
+## Follow-up
+- conformance test in the risk-map task (AISDLC-672)
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -21,6 +21,7 @@ export {
   validateHierarchyRoster,
   validateUsageConfig,
   validateModelRouting,
+  validateReviewPlan,
   formatValidationErrors,
   type ValidationResult,
   type ValidationError,
