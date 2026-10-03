@@ -298,9 +298,10 @@ jobs:
       # baseline stays accurate.
       - name: Coverage (PR — changed files only)
         if: github.event_name == 'pull_request'
-        run: |
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
-          pnpm -r exec -- vitest run --coverage --changed origin/main || pnpm test:coverage
+        # AISDLC-662.1: diff against the merge ref's first parent (HEAD^1), not the
+        # current origin/main, and fall back to the full run when no tests were
+        # selected. See scripts/pr-coverage.sh.
+        run: bash scripts/pr-coverage.sh
       - name: Coverage (push / merge_group — full)
         if: github.event_name != 'pull_request'
         run: pnpm test:coverage
