@@ -39,6 +39,7 @@ import {
   type EvidenceScorecard,
   type StaleChange,
 } from '../routing/evaluate-cell.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { loadRoutingTable, type LoadTableOptions } from '../routing/load-table.js';
 import type { RoutingTable } from '../routing/default-table.js';
 import { repoNameFor } from './attribution.js';
@@ -112,8 +113,7 @@ export interface ProposeOptions {
 
 function resolvePaths(deps: RouteDeps): { repoRoot: string; artifactsDir: string } {
   const repoRoot = resolve(deps.repoRoot ?? deps.workDir ?? process.cwd());
-  const artifactsDir =
-    deps.artifactsDir ?? process.env.ARTIFACTS_DIR ?? resolve(repoRoot, 'artifacts');
+  const artifactsDir = resolveArtifactsDir(repoRoot, deps.artifactsDir);
   return { repoRoot, artifactsDir };
 }
 

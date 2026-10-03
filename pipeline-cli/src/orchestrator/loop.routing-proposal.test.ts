@@ -61,6 +61,28 @@ describe('runOrchestratorTick routing proposal hook', () => {
     expect(routingProposal).toHaveBeenCalledWith({ workDir: '/tmp', artifactsDir });
   });
 
+  it('defaults the artifacts directory to <workDir>/.ai-sdlc/artifacts, like the scorecard and replay', async () => {
+    const saved = process.env.ARTIFACTS_DIR;
+    delete process.env.ARTIFACTS_DIR;
+    try {
+      const routingProposal = vi.fn(async () => undefined);
+      const { adapters: a } = adapters({ routingProposal, artifactsDir: undefined });
+      const cfg = defaultOrchestratorConfig({
+        workDir: artifactsDir,
+        maxConcurrent: 1,
+        maxTicks: 1,
+      });
+      await runOrchestratorTick(cfg, a, 1);
+      expect(routingProposal).toHaveBeenCalledWith({
+        workDir: artifactsDir,
+        artifactsDir: join(artifactsDir, '.ai-sdlc', 'artifacts'),
+      });
+    } finally {
+      if (saved === undefined) delete process.env.ARTIFACTS_DIR;
+      else process.env.ARTIFACTS_DIR = saved;
+    }
+  });
+
   it('logs a warning for a rejecting proposal and still completes the tick', async () => {
     const {
       adapters: a,

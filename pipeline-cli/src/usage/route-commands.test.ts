@@ -396,6 +396,48 @@ describe('cli-usage route propose', () => {
     expect(body).toContain(join('replay', 'results-code-run1.json'));
   });
 
+  it('reads replay results from the default .ai-sdlc/artifacts directory that replay writes to', async () => {
+    const saved = process.env.ARTIFACTS_DIR;
+    delete process.env.ARTIFACTS_DIR;
+    const injected = artifacts;
+    try {
+      // A lookalike in the old <repo>/artifacts location must not be read.
+      artifacts = join(repo, 'artifacts');
+      writeReplay('results-code-stale.json', { runId: 'stale', repoId });
+      artifacts = join(repo, '.ai-sdlc', 'artifacts');
+      writeReplay('results-code-run1.json', { repoId });
+      const text = await run(['propose'], { artifactsDir: undefined });
+      expect(text).toContain('Filed DEC-0001');
+      expect(text).toContain('code-reviewer / *: model-sonnet-a -> model-haiku-a');
+      const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+      expect(body).toContain(join('replay', 'results-code-run1.json'));
+      expect(body).not.toContain('results-code-stale.json');
+      expect(existsSync(join(repo, '.ai-sdlc', 'artifacts', '_routing'))).toBe(true);
+      expect(existsSync(join(repo, 'artifacts'))).toBe(true);
+    } finally {
+      artifacts = injected;
+      if (saved === undefined) delete process.env.ARTIFACTS_DIR;
+      else process.env.ARTIFACTS_DIR = saved;
+    }
+  });
+
+  it('lets ARTIFACTS_DIR override the default artifacts directory for replay results', async () => {
+    const saved = process.env.ARTIFACTS_DIR;
+    const injected = artifacts;
+    try {
+      artifacts = join(root, 'env-art');
+      process.env.ARTIFACTS_DIR = artifacts;
+      writeReplay('results-code-run1.json', { repoId });
+      const text = await run(['propose'], { artifactsDir: undefined });
+      expect(text).toContain('Filed DEC-0001');
+      expect(text).toContain('replay of 40 item(s)');
+    } finally {
+      artifacts = injected;
+      if (saved === undefined) delete process.env.ARTIFACTS_DIR;
+      else process.env.ARTIFACTS_DIR = saved;
+    }
+  });
+
   it('ignores replay results with no repoId, with a foreign repoId, or from a same-named checkout', async () => {
     const foreign = gitInit(join(root, 'other', 'repo-a'), 'root-b');
     writeReplay('results-code-legacy.json', {});

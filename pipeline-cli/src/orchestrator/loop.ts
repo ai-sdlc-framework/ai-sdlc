@@ -64,6 +64,7 @@ import {
 import { buildDependencyGraph, frontier, type DependencyGraph } from '../deps/dependency-graph.js';
 import { sortFrontierByEffectivePriority } from '../deps/dispatch.js';
 import { executePipeline } from '../execute-pipeline.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { runExecuteCommand, type ExecuteCommandResult, type SpawnerKind } from '../cli/execute.js';
@@ -588,8 +589,7 @@ export async function runOrchestratorTick(
     try {
       await adapters.routingProposal({
         workDir: config.workDir,
-        artifactsDir:
-          adapters.artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(config.workDir, 'artifacts'),
+        artifactsDir: resolveArtifactsDir(config.workDir, adapters.artifactsDir),
       });
     } catch (err) {
       logger.warn(
