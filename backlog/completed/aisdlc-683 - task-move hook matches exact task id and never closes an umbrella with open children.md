@@ -2,7 +2,7 @@
 id: AISDLC-683
 title: >-
   check-task-moved.sh: match the exact task id and refuse to auto-close an umbrella task that still has open children
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
