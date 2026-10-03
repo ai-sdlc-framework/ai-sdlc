@@ -1,0 +1,26 @@
+# Model routing table (RFC-0050). Read from origin/main only, never the working tree.
+# Models are unpinned aliases: each resolves to the latest release of that family.
+# Pin a full model id in a cell only if a new release causes a problem.
+# No exploration: no candidates, exploreShare 0.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  # Weakest first. Every model named in a cell must appear here.
+  # The security reviewer must sit on the strongest entry, so do not add a
+  # model above opus here unless the security reviewer moves to it.
+  strength: [sonnet, opus]
+  exploreShare: 0
+  salt: ai-sdlc-2026-10
+  cells:
+    developer:
+      '*': { model: sonnet }
+    code-reviewer:
+      '*': { model: sonnet }
+    test-reviewer:
+      '*': { model: sonnet }
+    security-reviewer:
+      '*': { model: opus }
+    review-executor:
+      '*': { model: sonnet }
