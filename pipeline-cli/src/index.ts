@@ -25,6 +25,9 @@ export * from './judgment/index.js';
 // Staged review: plan schema validation, baseline checklist, fallback plan, base-ref limits.
 export * from './review-plan/index.js';
 
+// Staged review: risk map (deterministic facts, structural facts, judgment request).
+export * from './review-risk-map/index.js';
+
 // RFC-0015 Phase 1 — autonomous-pipeline orchestrator (AISDLC-169.1).
 export {
   buildOrchestratorStatus,

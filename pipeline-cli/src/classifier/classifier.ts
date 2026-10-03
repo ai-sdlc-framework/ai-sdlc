@@ -140,7 +140,7 @@ const DOCS_EXTENSIONS_RE = /\.(md|rst|txt|png|jpe?g|svg|gif|ico|pdf)$/i;
 const DOCS_DENYLIST_RE = /(?:^|\/)(\.env(?:\..+)?|.+\.pem|.+\.key|.+\.sh|Dockerfile.*|.+\.lock)$/i;
 
 /** True iff the path is safe to treat as documentation-only (no security review). */
-function isDocsLikePath(p: string): boolean {
+export function isDocsLikePath(p: string): boolean {
   if (DOCS_DENYLIST_RE.test(p)) return false;
   return DOCS_EXTENSIONS_RE.test(p);
 }
@@ -151,14 +151,14 @@ function isSecretFilePath(p: string): boolean {
 }
 
 /** Supply-chain lockfile detection (widened in AISDLC-145). */
-function isLockfilePath(p: string): boolean {
+export function isLockfilePath(p: string): boolean {
   return /(?:^|\/)(package(-lock)?\.json|requirements\.txt|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|go\.sum|bun\.lockb)$/i.test(
     p,
   );
 }
 
 /** CI-config detection (widened beyond GitHub Actions in AISDLC-145). */
-function isCiPath(p: string): boolean {
+export function isCiPath(p: string): boolean {
   if (p.startsWith('.github/workflows/')) return true;
   if (p.startsWith('.circleci/')) return true;
   return /(?:^|\/)(\.gitlab-ci\.yml|Jenkinsfile|azure-pipelines\.yml)$/i.test(p);
