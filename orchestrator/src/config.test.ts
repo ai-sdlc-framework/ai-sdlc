@@ -236,6 +236,81 @@ spec:
     }
   });
 
+  it('loads a valid model routing table without a warning', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-routing-'));
+    try {
+      writeFileSync(
+        join(tmp, 'model-routing.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  strength: [sonnet, opus]
+  cells:
+    developer:
+      '*': { model: sonnet }
+`,
+      );
+      const config = loadConfig(tmp);
+      expect(config.warnings).toBeUndefined();
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('warns when a model routing table fails its schema', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-routing-bad-'));
+    try {
+      writeFileSync(
+        join(tmp, 'model-routing.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  cells: {}
+`,
+      );
+      const config = loadConfig(tmp);
+      expect(config.warnings).toHaveLength(1);
+      expect(config.warnings![0].file).toBe('model-routing.yaml');
+      expect(config.warnings![0].error).toContain('validation failed');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('still warns on a typo of the model routing kind', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-routing-typo-'));
+    try {
+      writeFileSync(
+        join(tmp, 'model-routing.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRoutng
+metadata:
+  name: model-routing
+spec: {}
+`,
+      );
+      const config = loadConfig(tmp);
+      expect(config.warnings).toHaveLength(1);
+      expect(config.warnings![0].error).toContain('ModelRoutng');
+      expect(config.warnings![0].error).toContain('skipped');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
   it('does not include warnings field when every file loads cleanly', () => {
     const config = loadConfig(CONFIG_DIR);
     expect(config.warnings).toBeUndefined();

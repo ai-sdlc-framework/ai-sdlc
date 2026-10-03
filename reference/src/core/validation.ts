@@ -63,6 +63,18 @@ const ARTIFACT_SCHEMA_FILES = {
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
 
+/**
+ * Artifact kinds that carry the resource envelope (`apiVersion` + `kind`) and
+ * live as YAML files in the config directory, each read by its own loader.
+ * `validateResource` validates them against their schema instead of reporting
+ * them as an unknown kind, so a repository that adopts one does not get a
+ * false "unknown kind" warning from the config directory walk.
+ */
+const ENVELOPE_ARTIFACT_KINDS: ReadonlySet<string> = new Set<ArtifactKind>([
+  'ModelRouting',
+  'UsageConfig',
+]);
+
 type AjvInstance = InstanceType<typeof Ajv2020>;
 type ValidatorFn = ReturnType<AjvInstance['compile']>;
 
@@ -278,6 +290,9 @@ export function validateResource(data: unknown): ValidationResult {
   }
 
   const kind = (data as { kind: string }).kind as ResourceKind;
+  if (typeof kind === 'string' && ENVELOPE_ARTIFACT_KINDS.has(kind)) {
+    return validateArtifact(kind as ArtifactKind, data);
+  }
   if (!(kind in SCHEMA_FILES)) {
     // Unknown kinds are loader-private or adopter-extension resources that
     // AI-SDLC has no schema for.  Rather than emit a false-positive warning
