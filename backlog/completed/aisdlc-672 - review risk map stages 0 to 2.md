@@ -2,7 +2,7 @@
 id: AISDLC-672
 title: >-
   RFC-0052: review risk map (deterministic facts, structural facts, judgment request) and its schema
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
@@ -71,12 +71,38 @@ sections 1 (stages 0 to 2) and 3.
    JSON file written under the artifacts directory for the run.
 
 ## Acceptance Criteria
-- [ ] A conformance test asserts the review-risk-map.v1 output satisfies the structural input type that AISDLC-673's baseline-probe checklist declares (per hunk: id, file, class, risk score, judged flag, flagged categories, tests-changed; per criterion: coverage result).
-- [ ] For a fixture diff touching three files, the risk map lists every hunk with file class, changed-test flag, changed symbols and coverage lines, and validates against the schema.
-- [ ] With the judgment layer disabled, every hunk is `judged: false` and ranked high; with a fake provider, the Nouls and Score appear on each hunk and the ranking follows the Score.
-- [ ] A hunk in an unsupported language is marked `structural: unavailable` and ranked high.
-- [ ] A secret matched by `redactSecrets` in the diff appears in the map as a redacted marker, never as the secret.
-- [ ] The injection-screen and acceptance-criteria results appear at the diff level, and the map file is written under the artifacts directory.
-- [ ] The schema is registered and `pnpm validate-schemas` passes.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] A conformance test asserts the review-risk-map.v1 output satisfies the structural input type that AISDLC-673's baseline-probe checklist declares (per hunk: id, file, class, risk score, judged flag, flagged categories, tests-changed; per criterion: coverage result).
+- [x] For a fixture diff touching three files, the risk map lists every hunk with file class, changed-test flag, changed symbols and coverage lines, and validates against the schema.
+- [x] With the judgment layer disabled, every hunk is `judged: false` and ranked high; with a fake provider, the Nouls and Score appear on each hunk and the ranking follows the Score.
+- [x] A hunk in an unsupported language is marked `structural: unavailable` and ranked high.
+- [x] A secret matched by `redactSecrets` in the diff appears in the map as a redacted marker, never as the secret.
+- [x] The injection-screen and acceptance-criteria results appear at the diff level, and the map file is written under the artifacts directory.
+- [x] The schema is registered and `pnpm validate-schemas` passes.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Notes
+- Scope narrowed per DEC-0025 (option 3): the schema, Stage 0, Stage 2 and `buildRiskMap` ship here. Stage 1 sits behind an injected `StructuralProvider` whose default returns `undefined`, so every hunk is `structural: unavailable` and ranked high. The "unsupported language" AC therefore covers every hunk in v1, because the RFC's Stage 1 inputs are a path gate and a task dependency graph, not a parser or a call graph. The choice of extractor is an open RFC-0052 question reserved to the operator.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+The review-risk-map.v1 schema, deterministic stage 0 facts, the stage 2 judgment request and `buildRiskMap` ship, with stage 1 behind an injected `StructuralProvider` (DEC-0025).
+
+## Changes
+- `spec/schemas/review-risk-map.v1.schema.json` (new), registered in `reference/src/core/{validation,index,generated-schemas}.ts`.
+- `pipeline-cli/src/review-risk-map/` (new): diff parsing, stage 0, structural provider seam, stage 2, `buildRiskMap`, barrel export from `pipeline-cli/src/index.ts`.
+- `pipeline-cli/src/classifier/classifier.ts` (modified): three path helpers exported for reuse.
+
+## Design decisions
+- **Default provider returns undefined**: every hunk is `structural: unavailable` and ranked high in v1, because the existing path gate and task dependency graph are not a parser or call graph. The unsupported-language AC therefore covers every hunk. Choosing an extractor is reserved to the operator.
+
+## Verification
+- `pnpm build` of reference, orchestrator, pipeline-cli: clean; `pnpm validate-schemas`, `pnpm dark-code:check`, eslint and prettier on changed files: clean.
+- New risk map test file 29/29 (95% lines on new code); classifier tests 82/82; reference schema and validation tests pass.
+- Not run: workspace-wide `pnpm test` and `pnpm lint` (one package at a time under the machine resource rule).
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->

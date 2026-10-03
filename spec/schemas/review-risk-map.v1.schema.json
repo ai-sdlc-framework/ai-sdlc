@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/review-risk-map.v1.schema.json",
+  "title": "AI-SDLC ReviewRiskMap",
+  "description": "The staged-review risk map: per-hunk facts computed by code, per-hunk judgment probabilities, and diff-level results (acceptance-criteria coverage, injection screen, routing). Hunks are ranked by risk. A hunk the judgment layer did not judge, or whose structural facts are unavailable, is ranked as high risk.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "stats",
+    "flags",
+    "changedFiles",
+    "changedTestFiles",
+    "changedSourceFiles",
+    "hunks",
+    "criteria",
+    "acCoverage",
+    "injectionScreen",
+    "routing"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedAt": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "stats": {
+      "type": "object",
+      "required": ["filesChanged", "linesAdded", "linesRemoved", "hunks", "unparseableHeaders"],
+      "additionalProperties": false,
+      "properties": {
+        "filesChanged": { "type": "integer", "minimum": 0 },
+        "linesAdded": { "type": "integer", "minimum": 0 },
+        "linesRemoved": { "type": "integer", "minimum": 0 },
+        "hunks": { "type": "integer", "minimum": 0 },
+        "unparseableHeaders": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "File headers in the diff that could not be read as a plain path."
+        }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "required": ["dependencyManifestChanged", "workflowChanged", "secretsFound"],
+      "additionalProperties": false,
+      "properties": {
+        "dependencyManifestChanged": { "type": "boolean" },
+        "workflowChanged": { "type": "boolean" },
+        "secretsFound": { "type": "boolean" }
+      }
+    },
+    "verifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Results the developer already produced.",
+      "properties": {
+        "build": { "$ref": "#/$defs/verificationStatus" },
+        "test": { "$ref": "#/$defs/verificationStatus" },
+        "lint": { "$ref": "#/$defs/verificationStatus" },
+        "format": { "$ref": "#/$defs/verificationStatus" },
+        "patchCoveragePercent": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "changedFiles": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+    },
+    "changedTestFiles": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+    },
+    "changedSourceFiles": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object",
+        "required": ["path", "changedTests"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "changedTests": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "description": "Changed test files that exercise this source file. Empty when no test changed."
+          }
+        }
+      }
+    },
+    "hunks": {
+      "type": "array",
+      "maxItems": 10000,
+      "description": "Every hunk in the diff, ranked from highest risk to lowest.",
+      "items": { "$ref": "#/$defs/hunk" }
+    },
+    "criteria": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "likelyUncovered"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$" },
+          "text": { "type": "string", "maxLength": 2000 },
+          "likelyUncovered": {
+            "type": "boolean",
+            "description": "True when the coverage judgment marked the criterion likely uncovered, or when coverage was not evaluated."
+          },
+          "coverageProbability": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "acCoverage": {
+      "type": "object",
+      "required": ["status", "uncovered"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["evaluated", "unavailable"] },
+        "uncovered": { "type": "integer", "minimum": 0 },
+        "abstainReason": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "injectionScreen": {
+      "type": "object",
+      "required": ["status", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["clean", "suspicious", "unavailable"] },
+        "findings": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": ["status", "reviewers", "added", "signals"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["judged", "path-rules-only"] },
+        "reviewers": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "enum": ["testing", "critic", "security"] }
+        },
+        "added": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "enum": ["testing", "critic", "security"] }
+        },
+        "signals": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "maxLength": 100 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "verificationStatus": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+    "fileClass": {
+      "type": "string",
+      "enum": ["source", "test", "config", "workflow", "docs", "lockfile", "migration", "manifest"]
+    },
+    "securityCategory": {
+      "type": "string",
+      "enum": [
+        "authentication",
+        "authorization",
+        "input-handling",
+        "secrets",
+        "shell-or-path",
+        "manifest-or-workflow"
+      ]
+    },
+    "stringList": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+    },
+    "probability": { "type": "number", "minimum": 0, "maximum": 1 },
+    "hunk": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "header",
+        "startLine",
+        "endLine",
+        "fileClass",
+        "testsChanged",
+        "structural",
+        "judged",
+        "riskScore",
+        "flags",
+        "secretMarkers",
+        "rank"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/#@-]{1,128}$" },
+        "file": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "header": { "type": "string", "maxLength": 512 },
+        "startLine": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "fileClass": { "$ref": "#/$defs/fileClass" },
+        "testsChanged": {
+          "type": "boolean",
+          "description": "True when a changed test file exercises this hunk's file."
+        },
+        "symbols": {
+          "$ref": "#/$defs/stringList",
+          "description": "Changed symbols. Present only when structural facts are available."
+        },
+        "structural": {
+          "type": "object",
+          "required": ["status"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "type": "string", "enum": ["available", "unavailable"] },
+            "callers": { "$ref": "#/$defs/stringList" },
+            "callees": { "$ref": "#/$defs/stringList" },
+            "referencingTests": { "$ref": "#/$defs/stringList" },
+            "schemaConsumers": { "$ref": "#/$defs/stringList" },
+            "coverageLines": {
+              "type": "array",
+              "maxItems": 10000,
+              "items": { "type": "integer", "minimum": 1 },
+              "description": "Patch-coverage lines for the hunk."
+            }
+          }
+        },
+        "judged": {
+          "type": "boolean",
+          "description": "False when the judgment layer was off or abstained on this hunk."
+        },
+        "nouls": {
+          "type": "object",
+          "required": [
+            "authAuthz",
+            "statePersistence",
+            "concurrency",
+            "inputHandling",
+            "errorHandling",
+            "behaviourWithoutTestChange"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "authAuthz": { "$ref": "#/$defs/probability" },
+            "statePersistence": { "$ref": "#/$defs/probability" },
+            "concurrency": { "$ref": "#/$defs/probability" },
+            "inputHandling": { "$ref": "#/$defs/probability" },
+            "errorHandling": { "$ref": "#/$defs/probability" },
+            "behaviourWithoutTestChange": { "$ref": "#/$defs/probability" }
+          }
+        },
+        "judgmentScore": {
+          "$ref": "#/$defs/probability",
+          "description": "The judged change-risk Score scaled to 0..1. Present only when judged."
+        },
+        "riskScore": {
+          "$ref": "#/$defs/probability",
+          "description": "Ranking score. 1 for an unjudged hunk and for a hunk with unavailable structural facts; otherwise the judged Score."
+        },
+        "flags": {
+          "type": "array",
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/securityCategory" },
+          "description": "Security categories flagged for this hunk."
+        },
+        "secretMarkers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 100 },
+          "description": "Redaction markers for secrets found in the hunk. The secret itself is never recorded."
+        },
+        "rank": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@ export {
   validateUsageConfig,
   validateModelRouting,
   validateReviewPlan,
+  validateReviewRiskMap,
   formatValidationErrors,
   type ValidationResult,
   type ValidationError,
