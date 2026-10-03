@@ -80,7 +80,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 /** The two trust classes a transcript leaf can be assigned. */
 export type VerdictClass = 'independent' | 'self-authored';
@@ -166,13 +166,152 @@ export function subagentSessionsDir(repoRoot: string): string {
 }
 
 /**
+ * Harness agent ids are opaque tokens. Anything outside this charset is
+ * refused before it is compared or used in a path.
+ */
+export const AGENT_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+/** What a caller knows about the reviewer run a marker must belong to. */
+export interface SubagentMarkerQuery {
+  /**
+   * Directories that may hold `.ai-sdlc/subagent-sessions/`, in preference
+   * order. The harness writes markers under the directory the SESSION was
+   * started in (usually the main checkout), while the pipeline's
+   * `--repo-root` is usually a task worktree, so both must be searched.
+   */
+  roots: readonly string[];
+  transcriptMtimeMs: number;
+  /**
+   * The reviewer the leaf is for, e.g. `code-reviewer` (a plugin namespace
+   * prefix is ignored). A marker typed for another role never matches.
+   */
+  reviewerName?: string;
+  /** Harness agent id of the reviewer run. When given, only that agent's marker matches. */
+  agentId?: string;
+  /** Accept markers that carry no `agentType` (written before AISDLC-572). Default false. */
+  allowUntyped?: boolean;
+  /** Accept only markers whose role is one of `REVIEWER_AGENT_TYPES`. Default false. */
+  reviewerRolesOnly?: boolean;
+}
+
+export interface SubagentMarkerSelection {
+  marker: SubagentStartMarker;
+  /** Absolute path of the marker file, so the caller can consume exactly this one. */
+  filePath: string;
+}
+
+/**
+ * Select the one `SubagentStart` marker that belongs to a reviewer run.
+ *
+ * The match is by identity, not by timing alone: the marker's role must be
+ * the reviewer's role, and when the caller knows the harness agent id the
+ * marker must be that agent's. The time window (`MARKER_MAX_AGE_MS`) only
+ * bounds how old a marker may be. Before this function existed, the first
+ * marker inside the window was taken regardless of role, so three reviewers
+ * finishing together had their leaves bound to each other's markers.
+ *
+ * When several markers qualify (same role, no agent id given), the choice
+ * is deterministic: typed before untyped, then the most recent `firedAt`,
+ * then agent id, then path. Directory listing order never decides.
+ *
+ * Read-only and fail-safe: unreadable directories and malformed files are
+ * skipped, and `null` is returned when nothing qualifies. It never throws.
+ */
+export function selectSubagentMarker(query: SubagentMarkerQuery): SubagentMarkerSelection | null {
+  const expectedRole =
+    query.reviewerName !== undefined ? stripAgentTypeNamespace(query.reviewerName) : undefined;
+  if (query.reviewerName !== undefined && !expectedRole) return null;
+  if (query.agentId !== undefined && !AGENT_ID_PATTERN.test(query.agentId)) return null;
+
+  const seenRoots = new Set<string>();
+  const seenFiles = new Set<string>();
+  const candidates: Array<SubagentMarkerSelection & { firedAtMs: number; typed: boolean }> = [];
+
+  for (const root of query.roots) {
+    if (typeof root !== 'string' || root.length === 0) continue;
+    const absRoot = resolve(root);
+    if (seenRoots.has(absRoot)) continue;
+    seenRoots.add(absRoot);
+
+    const dir = subagentSessionsDir(absRoot);
+    let entries: string[];
+    try {
+      if (!existsSync(dir)) continue;
+      entries = readdirSync(dir).filter((f) => f.endsWith('.json'));
+    } catch {
+      continue;
+    }
+
+    for (const fileName of entries) {
+      const filePath = join(dir, fileName);
+      if (seenFiles.has(filePath)) continue;
+      seenFiles.add(filePath);
+      try {
+        const marker = JSON.parse(readFileSync(filePath, 'utf8')) as Partial<SubagentStartMarker>;
+        if (typeof marker.agentId !== 'string' || marker.agentId.length === 0) continue;
+        if (typeof marker.firedAt !== 'string') continue;
+        const firedAtMs = new Date(marker.firedAt).getTime();
+        if (Number.isNaN(firedAtMs)) continue;
+        if (Math.abs(query.transcriptMtimeMs - firedAtMs) > MARKER_MAX_AGE_MS) continue;
+
+        if (query.agentId !== undefined && marker.agentId !== query.agentId) continue;
+
+        const role =
+          typeof marker.agentType === 'string' ? stripAgentTypeNamespace(marker.agentType) : null;
+        if (role === null) {
+          if (!query.allowUntyped) continue;
+        } else {
+          if (expectedRole !== undefined && role !== expectedRole) continue;
+          if (
+            query.reviewerRolesOnly &&
+            !REVIEWER_AGENT_TYPES.includes(role as ReviewerAgentType)
+          ) {
+            continue;
+          }
+        }
+
+        candidates.push({
+          marker: {
+            agentId: marker.agentId,
+            agentType: typeof marker.agentType === 'string' ? marker.agentType : null,
+            firedAt: marker.firedAt,
+          },
+          filePath,
+          firedAtMs,
+          typed: role !== null,
+        });
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    if (a.typed !== b.typed) return a.typed ? -1 : 1;
+    if (a.firedAtMs !== b.firedAtMs) return b.firedAtMs - a.firedAtMs;
+    if (a.marker.agentId !== b.marker.agentId) return a.marker.agentId < b.marker.agentId ? -1 : 1;
+    return a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0;
+  });
+  const best = candidates[0]!;
+  return { marker: best.marker, filePath: best.filePath };
+}
+
+/**
  * Determine the verdict class for a transcript leaf.
  *
- * Scans `subagentSessionsDir(repoRoot)` for marker files whose `firedAt`
- * timestamp is within `MARKER_MAX_AGE_MS` of `transcriptMtimeMs` (either
- * side — a subagent may be dispatched slightly before its transcript's
- * final write). The first qualifying marker found is CONSUMED (deleted) so
- * it cannot legitimize a second leaf.
+ * Looks for an UNCONSUMED reviewer marker (see {@link selectSubagentMarker})
+ * whose `firedAt` is within `MARKER_MAX_AGE_MS` of `transcriptMtimeMs`
+ * (either side — a subagent may be dispatched slightly before its
+ * transcript's final write). The selected marker is CONSUMED (deleted) so it
+ * cannot legitimize a second leaf.
+ *
+ * Callers that know which reviewer the leaf is for pass `reviewerName` (and
+ * `agentId` when they have it); the marker must then belong to that
+ * reviewer, so one reviewer's marker is never consumed for another's leaf.
+ * `extraRoots` adds directories to search besides `repoRoot` — the main
+ * checkout when `repoRoot` is a task worktree. A call without `reviewerName`
+ * keeps the earlier behaviour of accepting any reviewer-role marker.
  *
  * Fail-safe: any error (missing dir, unreadable file, malformed JSON,
  * missing/invalid `firedAt`) is treated as "no marker" and this function
@@ -181,65 +320,34 @@ export function subagentSessionsDir(repoRoot: string): string {
 export function determineVerdictClass(opts: {
   repoRoot: string;
   transcriptMtimeMs: number;
+  reviewerName?: string;
+  agentId?: string;
+  extraRoots?: readonly string[];
 }): VerdictClass {
-  const { repoRoot, transcriptMtimeMs } = opts;
-  const dir = subagentSessionsDir(repoRoot);
-
-  let entries: string[];
+  let selection: SubagentMarkerSelection | null;
   try {
-    if (!existsSync(dir)) return 'self-authored';
-    entries = readdirSync(dir).filter((f) => f.endsWith('.json'));
+    selection = selectSubagentMarker({
+      roots: [opts.repoRoot, ...(opts.extraRoots ?? [])],
+      transcriptMtimeMs: opts.transcriptMtimeMs,
+      reviewerName: opts.reviewerName,
+      agentId: opts.agentId,
+      allowUntyped: false,
+      reviewerRolesOnly: true,
+    });
   } catch {
     return 'self-authored';
   }
+  if (!selection) return 'self-authored';
 
-  for (const fileName of entries) {
-    const filePath = join(dir, fileName);
-    try {
-      const raw = readFileSync(filePath, 'utf8');
-      const marker = JSON.parse(raw) as Partial<SubagentStartMarker>;
-
-      // AISDLC-572: role gate BEFORE the timing check. A non-reviewer or
-      // missing/null agentType (including legacy pre-572 markers) never
-      // qualifies, regardless of how well its timing lines up.
-      //
-      // AISDLC-589 Gap B: normalize via stripAgentTypeNamespace() before
-      // matching — the marker's `agentType` may carry a plugin namespace
-      // prefix (`ai-sdlc:code-reviewer`) that REVIEWER_AGENT_TYPES does not.
-      const normalizedAgentType = stripAgentTypeNamespace(marker.agentType);
-      if (
-        typeof marker.agentType !== 'string' ||
-        !normalizedAgentType ||
-        !REVIEWER_AGENT_TYPES.includes(normalizedAgentType as ReviewerAgentType)
-      ) {
-        continue;
-      }
-
-      if (typeof marker.firedAt !== 'string') continue;
-      const firedAtMs = new Date(marker.firedAt).getTime();
-      if (Number.isNaN(firedAtMs)) continue;
-
-      const deltaMs = Math.abs(transcriptMtimeMs - firedAtMs);
-      if (deltaMs <= MARKER_MAX_AGE_MS) {
-        // Consume: remove so a single subagent spawn cannot back-stop
-        // multiple leaves. Best-effort — if the unlink fails we still
-        // return 'independent' for THIS leaf (the marker existed and
-        // matched); a leftover file only risks over-crediting a future
-        // leaf, which is the fail-open direction we accept here since the
-        // window is short (30 min, MARKER_MAX_AGE_MS) and the file is local-disk only.
-        try {
-          unlinkSync(filePath);
-        } catch {
-          // ignore — best-effort consumption
-        }
-        return 'independent';
-      }
-    } catch {
-      continue;
-    }
+  // Consume exactly the selected marker so it cannot be re-used for another leaf.
+  try {
+    unlinkSync(selection.filePath);
+  } catch {
+    // Best-effort: if deletion fails the marker is still considered consumed
+    // for this call; a re-use would need a second matching leaf inside the
+    // same window, which is the same residual gap as before.
   }
-
-  return 'self-authored';
+  return 'independent';
 }
 
 /**

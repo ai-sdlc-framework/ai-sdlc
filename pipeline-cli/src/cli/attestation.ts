@@ -52,7 +52,7 @@ import {
   normalizeReviewerRole,
 } from '../attestation/reviews-ledger.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
-import { determineVerdictClass } from '../attestation/verdict-class.js';
+import { AGENT_ID_PATTERN, determineVerdictClass } from '../attestation/verdict-class.js';
 import { loadVerifyCore } from '../attestation/verify-core-loader.js';
 import {
   loadAttestationRuntime,
@@ -60,6 +60,7 @@ import {
 } from '../attestation/verify-runtime.js';
 import {
   computeHarnessTranscriptHash,
+  markerSearchRoots,
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
 import {
@@ -69,6 +70,26 @@ import {
 } from '../attestation/independence-policy.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
+
+/**
+ * Read the harness agent id that `persist-reviewer-artifacts.sh` records next
+ * to a persisted reviewer transcript (`<name>.jsonl` -> `<name>.agent-id`).
+ * Returns `undefined` when the sidecar is missing, unreadable or does not
+ * hold a single well-formed id; the caller then falls back to matching the
+ * marker by reviewer role.
+ */
+export function readAgentIdSidecar(transcriptPath: string): string | undefined {
+  try {
+    if (!transcriptPath.endsWith('.jsonl')) return undefined;
+    const sidecar = transcriptPath.slice(0, -'.jsonl'.length) + '.agent-id';
+    if (!existsSync(sidecar)) return undefined;
+    if (statSync(sidecar).size > 256) return undefined;
+    const value = readFileSync(sidecar, 'utf8').trim();
+    return AGENT_ID_PATTERN.test(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Resolve the repo root from `--repo-root`, `REPO_ROOT` env, or `process.cwd()`.
@@ -574,9 +595,24 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 'When omitted, falls back to the most-recently-modified session directory ' +
                 'under the resolved project slug (disclosed race window, AISDLC-216-style).',
             })
+            .option('agent-id', {
+              type: 'string',
+              describe:
+                'Harness agent id of the reviewer subagent run this leaf is for (the id the ' +
+                'Agent tool returned at spawn, also the SubagentStart marker file name). ' +
+                'When given, the leaf is bound to exactly that run: only the marker and ' +
+                'harness transcript of that agent are used, whatever order or timing the ' +
+                'reviewers finished in. When omitted, the id is read from the ' +
+                '`<transcript>.agent-id` sidecar that persist-reviewer-artifacts.sh writes ' +
+                'next to --transcript-path; when that is absent too, the marker is matched ' +
+                'by reviewer role.',
+            })
             .option('project-dir', {
               type: 'string',
               describe:
+                'Also searched for SubagentStart markers ' +
+                '(<project-dir>/.ai-sdlc/subagent-sessions/), next to --repo-root and the ' +
+                'main checkout. ' +
                 'AISDLC-589: explicit override for the directory whose slug is used to ' +
                 'resolve ~/.claude/projects/<slug>/. In a Pattern-C layout (non-bare parent ' +
                 'repo + .worktrees/<task-id>/ isolates), --repo-root points at the WORKTREE ' +
@@ -690,6 +726,22 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           }
           const claudeSessionId = args['claude-session-id'] as string | undefined;
           const projectDirOverride = args['project-dir'] as string | undefined;
+
+          // Identity of the reviewer run this leaf belongs to. An explicit
+          // --agent-id wins; otherwise the sidecar written next to the
+          // persisted transcript. Either way the value is only ever compared
+          // against marker contents and used as a sanitised file-name segment.
+          let agentId = args['agent-id'] as string | undefined;
+          if (agentId !== undefined && !AGENT_ID_PATTERN.test(agentId)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --agent-id may only contain [A-Za-z0-9._-] ` +
+                `(got ${JSON.stringify(agentId.slice(0, 80))})\n`,
+            );
+            process.exit(1);
+          }
+          if (agentId === undefined) {
+            agentId = readAgentIdSidecar(transcriptPath);
+          }
 
           // RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY anchor evidence — carried
           // through as-is, NEVER defaulted. All three fields must be provided
@@ -872,6 +924,8 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             nonce,
             claudeSessionId,
             projectDirOverride,
+            reviewerName,
+            agentId,
           });
           process.stderr.write(
             `[cli-attestation] emit-leaf: harnessTranscriptHash=${
@@ -887,7 +941,13 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // for the full mechanism + honest limits. Runs AFTER
           // computeHarnessTranscriptHash (see comment above) since this call
           // CONSUMES (deletes) the marker file on a match.
-          const verdictClass = determineVerdictClass({ repoRoot, transcriptMtimeMs });
+          const verdictClass = determineVerdictClass({
+            repoRoot,
+            transcriptMtimeMs,
+            reviewerName,
+            agentId,
+            extraRoots: markerSearchRoots({ repoRoot, projectDirOverride }),
+          });
 
           // RFC-0046 Phase 1 (AISDLC-588): independenceTier derived from the
           // SAME signal as verdictClass at this phase — 'attested' where
@@ -1106,6 +1166,18 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             output += `independenceTier=${out.overallIndependenceTier}\n`;
           }
           process.stdout.write(output);
+          if (out.status === 'valid' && out.overallVerdictClass === 'self-authored') {
+            // `verify` checks integrity (signature, Merkle proof, head
+            // binding). It does not require independent review; say so, so a
+            // green `verify` is not read as "independently reviewed".
+            process.stderr.write(
+              '[cli-attestation] verify: NOTE the envelope is valid but at least one leaf is ' +
+                'self-authored (no harness SubagentStart marker matched its reviewer). `verify` ' +
+                'does not enforce independence. To gate on it, set `requiredTier: attested` in ' +
+                '.ai-sdlc/independence-policy.yaml and run `cli-attestation independence-policy` ' +
+                'with the same --head and --base.\n',
+            );
+          }
           process.exitCode = out.status === 'valid' ? 0 : 1;
         },
       )

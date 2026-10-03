@@ -160,6 +160,40 @@ caller actually invokes the comparison. Branch-protection repos get this for
 free via `ai-sdlc-gate.yml`; procedural-gate repos must wire the call
 themselves into their own ship flow, per the recipe above.
 
+## `verify` is not an independence gate
+
+`cli-attestation verify` answers one question: is the envelope intact and bound to this
+head (signature, Merkle proof, head binding)? It exits 0 for a valid envelope whose
+leaves are all `self-authored`. A CI job that runs only `verify` therefore passes a pull
+request that no independent reviewer looked at.
+
+To gate on independence, set `requiredTier: attested` (or `isolated`) in
+`.ai-sdlc/independence-policy.yaml` and run `cli-attestation independence-policy` with
+the same `--head` and `--base`. It runs the same verifier and exits non-zero when the
+envelope's tier is below the required one. When `verify` sees a valid but self-authored
+envelope it prints a note on stderr that says this.
+
+## How a leaf is bound to its reviewer
+
+`emit-leaf` classes a leaf `independent` only when the harness wrote a `SubagentStart`
+marker for that reviewer's run. The marker is selected by identity:
+
+| Input | Effect |
+| --- | --- |
+| `--reviewer` | The marker's role must be this reviewer. A plugin prefix (`ai-sdlc:code-reviewer`) is ignored. |
+| `--agent-id`, or the `<transcript>.agent-id` file that `persist-reviewer-artifacts.sh` writes | Only the marker and harness transcript of that agent run are used. |
+| Neither id source | The most recent unconsumed marker of the reviewer's role inside the 30-minute window. |
+
+Markers are searched under `--repo-root`, under the main checkout when `--repo-root` is
+a worktree, and under `--project-dir` when given. The harness writes them under the
+directory the Claude Code session was started in, which in the worktree layout is the
+main checkout. A session started somewhere else (for example a parent folder of the
+repository) needs `--project-dir <that folder>`.
+
+Reviewers can run in parallel and their leaves can be emitted back to back. Each leaf's
+`harnessTranscriptHash` is the hash of its own reviewer's harness transcript; the session
+directory is found by the agent id, not by which session was written to last.
+
 ## See also
 
 - [RFC-0046 — Attested Reviewer Independence](../../spec/rfcs/RFC-0046-attested-reviewer-independence.md) — §Proposal (Rollout), OQ-5.

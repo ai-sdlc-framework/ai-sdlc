@@ -107,10 +107,9 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
-  MARKER_MAX_AGE_MS,
   REVIEWER_AGENT_TYPES,
+  selectSubagentMarker,
   stripAgentTypeNamespace,
-  subagentSessionsDir,
   type ReviewerAgentType,
 } from './verdict-class.js';
 
@@ -152,45 +151,32 @@ export interface HarnessMarkerMatch {
 export function findMatchingSubagentMarker(opts: {
   repoRoot: string;
   transcriptMtimeMs: number;
+  /** The reviewer the leaf is for. A marker typed for another role never matches. */
+  reviewerName?: string;
+  /** Harness agent id of the reviewer run. When given, only that agent's marker matches. */
+  agentId?: string;
+  /** Further directories to search for markers (see {@link markerSearchRoots}). */
+  extraRoots?: readonly string[];
 }): HarnessMarkerMatch | null {
-  const { repoRoot, transcriptMtimeMs } = opts;
-  const dir = subagentSessionsDir(repoRoot);
-
-  let entries: string[];
   try {
-    if (!existsSync(dir)) return null;
-    entries = readdirSync(dir).filter((f) => f.endsWith('.json'));
+    const selection = selectSubagentMarker({
+      roots: [opts.repoRoot, ...(opts.extraRoots ?? [])],
+      transcriptMtimeMs: opts.transcriptMtimeMs,
+      reviewerName: opts.reviewerName,
+      agentId: opts.agentId,
+      // Legacy markers carry no role; the caller then checks the harness's
+      // own `.meta.json` role claim before trusting the transcript.
+      allowUntyped: true,
+    });
+    if (!selection) return null;
+    return {
+      agentId: selection.marker.agentId,
+      agentType: selection.marker.agentType,
+      firedAt: selection.marker.firedAt,
+    };
   } catch {
     return null;
   }
-
-  for (const fileName of entries) {
-    const filePath = join(dir, fileName);
-    try {
-      const raw = readFileSync(filePath, 'utf8');
-      const marker = JSON.parse(raw) as {
-        agentId?: unknown;
-        agentType?: unknown;
-        firedAt?: unknown;
-      };
-      if (typeof marker.agentId !== 'string' || typeof marker.firedAt !== 'string') continue;
-      const firedAtMs = new Date(marker.firedAt).getTime();
-      if (Number.isNaN(firedAtMs)) continue;
-
-      const deltaMs = Math.abs(transcriptMtimeMs - firedAtMs);
-      if (deltaMs <= MARKER_MAX_AGE_MS) {
-        return {
-          agentId: marker.agentId,
-          agentType: typeof marker.agentType === 'string' ? marker.agentType : null,
-          firedAt: marker.firedAt,
-        };
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
 }
 
 /**
@@ -266,6 +252,35 @@ export function resolveClaudeProjectRoot(opts: {
 }
 
 /**
+ * Directories that may hold the harness-written `SubagentStart` markers for
+ * a pipeline run, besides `repoRoot` itself.
+ *
+ * The `SubagentStart` hook writes a marker under the directory the Claude
+ * Code SESSION was started in. In the worktree layout (`--repo-root` is
+ * `.worktrees/<task-id>/`) that is the main checkout, not the worktree, so
+ * a lookup that only reads `<repoRoot>/.ai-sdlc/subagent-sessions/` never
+ * finds a marker and every leaf is classed `self-authored` even though
+ * independent reviewers ran. This returns the main checkout root (derived
+ * from git) and the explicit `--project-dir` override, when they differ
+ * from `repoRoot`.
+ */
+export function markerSearchRoots(opts: {
+  repoRoot: string;
+  projectDirOverride?: string;
+}): string[] {
+  const own = resolve(opts.repoRoot);
+  const roots: string[] = [];
+  const add = (dir: string | null | undefined): void => {
+    if (!dir) return;
+    const abs = resolve(dir);
+    if (abs !== own && !roots.includes(abs)) roots.push(abs);
+  };
+  add(resolveMainCheckoutRoot(opts.repoRoot));
+  add(opts.projectDirOverride);
+  return roots;
+}
+
+/**
  * Strict charset a `--claude-session-id` value must match: bare token, no
  * path separators, no `.` at all (so `..` traversal is impossible by
  * construction, not just by luck of `path.join` normalization). Real Claude
@@ -334,9 +349,51 @@ export function resolveMostRecentSessionDir(projectSlugDir: string): string | nu
 export interface ResolveHarnessTranscriptPathResult {
   transcriptPath: string | null;
   metaPath: string | null;
-  /** True when the fallback most-recently-modified heuristic was used (not an explicit session id). */
+  /**
+   * True when a most-recently-modified heuristic decided the session
+   * directory: no explicit session id was given AND the agent's transcript
+   * could not be pinned to exactly one session directory by its agent id.
+   */
   usedFallbackHeuristic: boolean;
   reason?: string;
+}
+
+/**
+ * Find the session directory under `projectSlugDir` that holds
+ * `subagents/agent-<safeAgentId>.jsonl`.
+ *
+ * Agent ids are unique per subagent run, so this normally yields exactly one
+ * directory, and the result does not depend on which session was written to
+ * last. That matters when several Claude Code sessions share one project
+ * directory (an operator session plus executors): "the most recently
+ * modified session" is then usually the wrong one. If more than one
+ * directory holds the file, the one whose transcript is newest is returned
+ * and `unique` is false.
+ */
+export function locateSessionDirByAgentId(
+  projectSlugDir: string,
+  safeAgentId: string,
+): { sessionDir: string | null; unique: boolean } {
+  let entries: string[];
+  try {
+    entries = readdirSync(projectSlugDir).sort();
+  } catch {
+    return { sessionDir: null, unique: false };
+  }
+  const hits: Array<{ path: string; mtimeMs: number }> = [];
+  for (const entry of entries) {
+    const dir = join(projectSlugDir, entry);
+    try {
+      if (!statSync(dir).isDirectory()) continue;
+      const st = statSync(join(dir, 'subagents', `agent-${safeAgentId}.jsonl`));
+      if (st.isFile()) hits.push({ path: dir, mtimeMs: st.mtimeMs });
+    } catch {
+      continue;
+    }
+  }
+  if (hits.length === 0) return { sessionDir: null, unique: false };
+  hits.sort((x, y) => y.mtimeMs - x.mtimeMs || (x.path < y.path ? -1 : 1));
+  return { sessionDir: hits[0]!.path, unique: hits.length === 1 };
 }
 
 /**
@@ -392,7 +449,8 @@ export function resolveHarnessTranscriptPath(opts: {
     };
   }
 
-  const usedFallbackHeuristic = !claudeSessionId;
+  const safeAgentId = agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  let usedFallbackHeuristic = !claudeSessionId;
   let sessionDir: string | null;
 
   if (claudeSessionId) {
@@ -428,7 +486,16 @@ export function resolveHarnessTranscriptPath(opts: {
     }
     sessionDir = candidate;
   } else {
-    sessionDir = resolveMostRecentSessionDir(slugDir);
+    // Pin the session by the agent's own transcript file; fall back to the
+    // most-recently-modified session only when no session holds it (the
+    // "not found" result below then names the path that was expected).
+    const located = locateSessionDirByAgentId(slugDir, safeAgentId);
+    if (located.sessionDir) {
+      sessionDir = located.sessionDir;
+      usedFallbackHeuristic = !located.unique;
+    } else {
+      sessionDir = resolveMostRecentSessionDir(slugDir);
+    }
   }
 
   if (!sessionDir) {
@@ -440,7 +507,6 @@ export function resolveHarnessTranscriptPath(opts: {
     };
   }
 
-  const safeAgentId = agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
   const transcriptPath = join(sessionDir, 'subagents', `agent-${safeAgentId}.jsonl`);
   const metaPath = join(sessionDir, 'subagents', `agent-${safeAgentId}.meta.json`);
 
@@ -513,6 +579,15 @@ export interface ComputeHarnessTranscriptHashOptions {
    * git-derived main-checkout root is used — see `resolveClaudeProjectRoot`.
    */
   projectDirOverride?: string;
+  /**
+   * The reviewer the leaf is for (`--reviewer`). The marker, and the role the
+   * harness recorded for the transcript, must be this reviewer's; otherwise
+   * the hash stays `null`. Without it any reviewer-role marker is accepted
+   * (earlier behaviour).
+   */
+  reviewerName?: string;
+  /** Harness agent id of the reviewer run, when the caller has it. */
+  agentId?: string;
 }
 
 export interface ComputeHarnessTranscriptHashResult {
@@ -538,6 +613,12 @@ export function computeHarnessTranscriptHash(
     const marker = findMatchingSubagentMarker({
       repoRoot: opts.repoRoot,
       transcriptMtimeMs: opts.transcriptMtimeMs,
+      reviewerName: opts.reviewerName,
+      agentId: opts.agentId,
+      extraRoots: markerSearchRoots({
+        repoRoot: opts.repoRoot,
+        projectDirOverride: opts.projectDirOverride,
+      }),
     });
     if (!marker) {
       return {
@@ -577,6 +658,17 @@ export function computeHarnessTranscriptHash(
       };
     }
 
+    // Bind to the reviewer the leaf names: a transcript the harness recorded
+    // for a different reviewer role must never back this leaf.
+    const expectedRole =
+      opts.reviewerName !== undefined ? stripAgentTypeNamespace(opts.reviewerName) : null;
+    if (expectedRole && agentType !== expectedRole) {
+      return {
+        harnessTranscriptHash: null,
+        reason: `resolved agentType '${agentType}' does not match the leaf's reviewer '${expectedRole}'`,
+      };
+    }
+
     if (!transcriptContainsNonce(resolved.transcriptPath, opts.nonce)) {
       return {
         harnessTranscriptHash: null,
@@ -593,7 +685,9 @@ export function computeHarnessTranscriptHash(
       harnessTranscriptHash,
       reason: resolved.usedFallbackHeuristic
         ? 'ok (session-id resolved via most-recently-modified heuristic — disclosed race window, AISDLC-216-style)'
-        : 'ok (explicit --claude-session-id)',
+        : opts.claudeSessionId
+          ? 'ok (explicit --claude-session-id)'
+          : 'ok (session resolved by the agent id of the marker)',
     };
   } catch (err) {
     return {
