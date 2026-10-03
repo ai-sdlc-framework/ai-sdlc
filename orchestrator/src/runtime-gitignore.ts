@@ -62,7 +62,12 @@ function parseRule(raw: string): IgnoreRule | null {
   const leadingSlash = text.startsWith('/');
   text = stripSlashes(text);
   if (text === '') return null;
-  const segments = text.split('/').filter((segment) => segment !== '');
+  // Consecutive `**` segments match the same paths as one, and collapsing them keeps
+  // `pathMatches` from exploring every way to split the path between them.
+  const segments = text
+    .split('/')
+    .filter((segment) => segment !== '')
+    .filter((segment, i, all) => !(segment === '**' && all[i - 1] === '**'));
   return { negated, dirOnly, anchored: leadingSlash || segments.length > 1, segments };
 }
 
@@ -138,8 +143,12 @@ export function gitignoreCovers(gitignore: string, entry: string): boolean {
  * Arguments for `git` that ask whether `entry` is ignored in the repository at `dir`:
  * exit 0 means ignored, 1 means not. `--no-index` ignores whether a file is tracked, the
  * empty `core.excludesFile` keeps one developer's global ignore from hiding a repository
- * that other clones would still commit. (`.git/info/exclude` still applies.) A directory
- * entry is probed through a file inside it, so `dir/*`-style patterns count.
+ * that other clones would still commit. A directory entry is probed through a file inside
+ * it, so `dir/*`-style patterns count.
+ *
+ * Known gap (disclosed in the PR): `.git/info/exclude` is just as local to one clone and
+ * git cannot be told to skip it here, so an entry listed only there reads as ignored and
+ * `execute` does not write it to the shared .gitignore. Doctor reports the same pass.
  */
 export function gitCheckIgnoreArgs(dir: string, entry: string): string[] {
   const probe = entry.endsWith('/') ? `${entry}${DIRECTORY_PROBE}` : entry;

@@ -13,6 +13,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { registerJudgmentDefinition, type JudgmentDefinition } from '@ai-sdlc/reference';
 import {
   DOCTOR_CHECKS,
@@ -41,6 +42,8 @@ import {
   type DoctorCheckAdapters,
   type DoctorRunContext,
 } from './doctor-checks.js';
+import { SPAWN_FAILED_EXIT_CODE, buildProductionDoctorAdapters } from './doctor.js';
+import { cleanGitEnv } from '../../runtime/git-env.js';
 
 let tmpDir: string;
 
@@ -1143,12 +1146,61 @@ describe('checkRuntimeGitignore', () => {
     expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('warn');
   });
 
-  it('falls back to the text when git fails to run (exit 128) or is not installed', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(gitSays(128))).severity).toBe('pass');
-    writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
-    expect(checkRuntimeGitignore(makeCtx(gitSays(128))).severity).toBe('warn');
+  it.each([128, SPAWN_FAILED_EXIT_CODE])(
+    'falls back to the text when git cannot answer (exit %i)',
+    (code) => {
+      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('pass');
+      writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('warn');
+    },
+  );
+
+  it('with the production adapter and no git binary on PATH, falls back to the text (no exit status at all)', () => {
+    const savedPath = process.env.PATH;
+    process.env.PATH = join(tmpDir, 'empty-bin');
+    try {
+      const adapters = makeAdapters({ runCommand: buildProductionDoctorAdapters().runCommand });
+      expect(adapters.runCommand('git', ['--version']).exitCode).toBe(SPAWN_FAILED_EXIT_CODE);
+      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
+      writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('warn');
+    } finally {
+      process.env.PATH = savedPath;
+    }
   });
+
+  it.skipIf(spawnSync('git', ['--version']).status !== 0)(
+    'the production adapter runs git without GIT_DIR / GIT_WORK_TREE from the surrounding environment',
+    () => {
+      const saved = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
+      const gitEnv = cleanGitEnv();
+      const init = spawnSync('git', ['-c', 'init.templateDir=', 'init', '-q', tmpDir], {
+        env: gitEnv,
+      });
+      expect(init.status).toBe(0);
+      process.env.GIT_DIR = join(tmpDir, 'not-a-git-dir');
+      process.env.GIT_WORK_TREE = join(tmpDir, 'not-a-work-tree');
+      try {
+        const r = buildProductionDoctorAdapters().runCommand('git', [
+          '-C',
+          tmpDir,
+          'rev-parse',
+          '--git-dir',
+        ]);
+        expect(r.exitCode).toBe(0);
+      } finally {
+        for (const [key, value] of [
+          ['GIT_DIR', saved.dir],
+          ['GIT_WORK_TREE', saved.tree],
+        ] as const) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    },
+  );
 
   it('is registered in the check registry', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('runtime-gitignore');

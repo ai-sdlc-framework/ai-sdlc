@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { cleanGitEnv } from './runtime/git-env.js';
 import {
   ARTIFACTS_GITIGNORE_ENTRY,
   RUNTIME_GITIGNORE_PATHS,
@@ -70,13 +71,16 @@ describe('gitignoreCovers', () => {
 // Real-git agreement (DEC-0020): the text reading must give the answer
 // `git check-ignore` gives for every pattern shape it claims to understand. The cases
 // include the ones where git is counter-intuitive (a parent directory excluded for good).
-const gitAvailable = spawnSync('git', ['--version']).status === 0;
+// Every git call below strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE (husky pre-push
+// exports them from a worktree) so the repository under test is the one in the tmpdir.
+const gitEnv = cleanGitEnv();
+const gitAvailable = spawnSync('git', ['--version'], { env: gitEnv }).status === 0;
 
 describe.skipIf(!gitAvailable)('gitignoreCovers agrees with git check-ignore', () => {
   let repo: string;
   beforeAll(() => {
     repo = mkdtempSync(join(tmpdir(), 'ai-sdlc-check-ignore-'));
-    execFileSync('git', ['init', '-q', repo]);
+    execFileSync('git', ['-c', 'init.templateDir=', 'init', '-q', repo], { env: gitEnv });
   });
   afterAll(() => {
     rmSync(repo, { recursive: true, force: true });
@@ -84,7 +88,7 @@ describe.skipIf(!gitAvailable)('gitignoreCovers agrees with git check-ignore', (
 
   const gitSays = (gitignore: string, entry: string): boolean | null => {
     writeFileSync(join(repo, '.gitignore'), gitignore);
-    const r = spawnSync('git', gitCheckIgnoreArgs(repo, entry));
+    const r = spawnSync('git', gitCheckIgnoreArgs(repo, entry), { env: gitEnv });
     return interpretCheckIgnoreExit(r.status ?? -1);
   };
 
@@ -124,7 +128,7 @@ describe.skipIf(!gitAvailable)('gitignoreCovers agrees with git check-ignore', (
     const outside = mkdtempSync(join(tmpdir(), 'ai-sdlc-not-a-repo-'));
     try {
       const r = spawnSync('git', gitCheckIgnoreArgs(outside, entry), {
-        env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() },
+        env: { ...gitEnv, GIT_CEILING_DIRECTORIES: tmpdir() },
       });
       expect(interpretCheckIgnoreExit(r.status ?? -1)).toBeNull();
     } finally {
@@ -178,6 +182,25 @@ describe('gitignoreCovers without git: broader lines and globs', () => {
     expect(gitignoreCovers('state.db/\n', '.ai-sdlc/state.db')).toBe(false);
     expect(gitignoreCovers('state.db\n', '.ai-sdlc/state.db')).toBe(true);
   });
+
+  it('consecutive `**` segments mean the same as one', () => {
+    expect(gitignoreCovers('**/**/**/artifacts/\n', ARTIFACTS_GITIGNORE_ENTRY)).toBe(true);
+    expect(gitignoreCovers('.ai-sdlc/**/**/probe\n', ARTIFACTS_GITIGNORE_ENTRY)).toBe(true);
+    expect(gitignoreCovers('**/**/nothing-here/\n', ARTIFACTS_GITIGNORE_ENTRY)).toBe(false);
+  });
+
+  it('a long run of `**` segments does not blow up (bound is generous: it took minutes before)', () => {
+    for (const tail of ['zzz', 'artifacts', '']) {
+      const line = `${'**/'.repeat(2000)}${tail}`;
+      const started = Date.now();
+      gitignoreCovers(`${line}\n`, ARTIFACTS_GITIGNORE_ENTRY);
+      expect(Date.now() - started).toBeLessThan(5000);
+    }
+    // the same with the segments split apart by an empty component
+    const started = Date.now();
+    gitignoreCovers(`${'**//'.repeat(1500)}zzz\n`, ARTIFACTS_GITIGNORE_ENTRY);
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 30000);
 
   it('a hostile glob line is matched in bounded time', () => {
     const hostile = `${'*'.repeat(5000)}a${'*'.repeat(5000)}b/\n`;
