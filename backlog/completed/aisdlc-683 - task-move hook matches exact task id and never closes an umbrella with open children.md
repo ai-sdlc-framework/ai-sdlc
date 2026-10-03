@@ -14,7 +14,6 @@ dependencies: []
 references:
   - scripts/check-task-moved.sh
   - pipeline-cli/bin/cli-task-complete.mjs
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/1161'
 priority: medium
 dispatchable: true
 ---

@@ -23,6 +23,7 @@ export {
   validateModelRouting,
   validateReviewPlan,
   validateReviewRiskMap,
+  validateReviewEvidence,
   formatValidationErrors,
   type ValidationResult,
   type ValidationError,

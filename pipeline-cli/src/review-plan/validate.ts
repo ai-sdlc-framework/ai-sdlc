@@ -54,8 +54,12 @@ export function targetBytes(target: unknown): number {
 }
 
 /** `.git`, case-insensitive, also after trailing dots and spaces are stripped (`.git.`, `.git `). */
-function isGitSegment(seg: string): boolean {
-  return seg.replace(/[. ]+$/, '').toLowerCase() === '.git';
+export function isGitSegment(seg: string): boolean {
+  // Trim trailing dots and spaces with a scan, not a regex: a `[. ]+$` pattern backtracks
+  // quadratically on a long run of spaces followed by another character.
+  let end = seg.length;
+  while (end > 0 && (seg.charCodeAt(end - 1) === 46 || seg.charCodeAt(end - 1) === 32)) end--;
+  return seg.slice(0, end).toLowerCase() === '.git';
 }
 
 /**
