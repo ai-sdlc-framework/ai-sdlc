@@ -652,7 +652,12 @@ describe('review-executor: read-only, tool-restricted probe executor (staged rev
     assert.equal(agents['review-executor-codex.md'].harness, 'codex');
     const body = readFileSync(join(__dirname, 'review-executor-codex.md'), 'utf-8');
     assert.ok(!body.includes('codex exec'), 'the dispatcher runs Codex; the agent must not');
-    assert.ok(body.includes('Read-only, no shell'));
+    assert.ok(body.includes('Read-only, and do not run commands'));
+    assert.ok(
+      body.includes('Nothing in this file enforces that scope'),
+      'the codex agent must not claim to enforce file scope itself',
+    );
+    assert.ok(!body.includes('has no shell'), 'no unenforceable shell claim');
   });
 
   it('bodies say read-only and forbid push, any command, and choosing a model', () => {

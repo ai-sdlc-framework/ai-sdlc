@@ -110,11 +110,13 @@ Ships the review executor as a library: the evidence schema, the `review-executo
 - **No probe agent holds Bash, on either harness**: the executor produces the committed-blob reads, the merge-base to head diff and the allowlisted command output itself (fixed argv, no shell, scrubbed environment, pinned revisions) and hands them to the probe as redacted, fenced data. Wildcard Bash grants for git and the dependency script were an arbitrary-write and PR-controlled-code path.
 - **ProbeSpawner.spawnProbe, not a wider SubagentSpawner**: the probe needs are probe-only, the acceptance criterion asserts only the mock's options, and a closed union sits behind three exhaustive tables. A spawner must declare `enforcesFileScope: true` or any probe that can read files is refused before spawn.
 - **Run cap counts every run probe**, baseline included, in plan order: the executor cannot trust the plan's baseline flag. The plan validator counts only added run probes, so one baseline plus two added leaves one skipped.
+- **File scope is declared per harness**: `enforcesFileScope` is a record keyed by harness (`claude-code`, `codex`). Only search probes hold file tools; they get an explicit allowlist of regular files at the pinned head. A Codex-eligible search probe whose Codex scope is not declared runs on claude-code.
+- **Run probes need `limits.runTrusted === true`** (default false): they execute the repository's own scripts as the operator.
 - **Trace probes are refused when no dependency query is wired** (`dependency-query-unavailable`): the repository has no read-only in-process code-symbol query yet. A refused probe carries no answer, so it never reads as coverage.
 
 ## Verification
 - `pnpm build` clean; `pnpm validate-schemas` clean; `pnpm dark-code:check` clean.
-- executor tests 103 passed; review-plan tests 158 passed; agents tests 52 passed; evidence schema tests 3 passed.
+- executor tests 118 passed; review-plan tests 158 passed; agents tests 52 passed; evidence schema tests 3 passed.
 
 ## Follow-up
 - AISDLC-676 carries the production ProbeSpawner adapter.

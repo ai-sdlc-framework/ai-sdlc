@@ -12,11 +12,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateReviewEvidence } from '@ai-sdlc/reference';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
+  disposeScratchHome,
   dropPartialLine,
+  dropUnterminatedPem,
+  trimTruncated,
   readBlobAtCommit,
   readDiff,
+  listRegularFilesAtCommit,
   resolvePinnedHead,
   runCommand,
   runGit,
@@ -49,6 +53,17 @@ import {
 const SECRET = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
 const MERGE_BASE = 'a'.repeat(40);
 
+const tempRoots: string[] = [];
+const tmp = (prefix: string): string => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const d of tempRoots) rmSync(d, { recursive: true, force: true });
+  disposeScratchHome();
+});
+
 interface Repo {
   dir: string;
   outside: string;
@@ -59,7 +74,7 @@ interface Repo {
  * holding a secret, and a sibling directory outside the repository with a secret in it.
  */
 function makeRepo(): Repo {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'rp-exec-')));
+  const root = realpathSync(tmp('rp-exec-'));
   const dir = join(root, 'repo');
   const outside = join(root, 'outside');
   mkdirSync(join(dir, 'src'), { recursive: true });
@@ -125,6 +140,10 @@ const limits = (dir: string, extra: Partial<ExecutorLimits> = {}): ExecutorLimit
   ...extra,
 });
 
+/** Limits for tests that exercise run probes: the caller asserts trust. */
+const runLimits = (dir: string, extra: Partial<ExecutorLimits> = {}): ExecutorLimits =>
+  limits(dir, { runTrusted: true, ...extra });
+
 const evidence = (over: Record<string, unknown> = {}): string =>
   JSON.stringify({
     observations: ['seen'],
@@ -142,8 +161,10 @@ const okResult = (over: Record<string, unknown> = {}): ProbeSpawnResult => ({
 function mockSpawner(
   respond: (opts: ProbeSpawnOpts) => ProbeSpawnResult | Promise<ProbeSpawnResult> = () =>
     okResult(),
-  enforcesFileScope = true,
+  scope: boolean | ProbeSpawner['enforcesFileScope'] = true,
 ): { spawner: ProbeSpawner; calls: ProbeSpawnOpts[] } {
+  const enforcesFileScope =
+    typeof scope === 'boolean' ? { 'claude-code': scope, codex: scope } : scope;
   const calls: ProbeSpawnOpts[] = [];
   return {
     calls,
@@ -190,6 +211,8 @@ const noAdded: ExecutorHooks = {
   runCommand: fakeRun,
   dependencyQuery: () => 'login is called by handler',
 };
+/** `src/staged.ts` is staged but not committed: the diff adds it, so it is read from the working tree. */
+const stagedHooks: ExecutorHooks = { ...noAdded, listAddedFiles: () => ['src/staged.ts'] };
 const noQuery: ExecutorHooks = { listAddedFiles: () => [], runCommand: fakeRun };
 
 describe('executePlan: untracked targets are refused before any read', () => {
@@ -215,12 +238,17 @@ describe('executePlan: untracked targets are refused before any read', () => {
       },
       read('r-ok', 'src/staged.ts'),
     ];
-    const bundle = await executePlan(plan(probes), spawner, limits(dir), {
-      ...noAdded,
-      beforeOpen: (p) => {
-        opened.push(p);
+    const bundle = await executePlan(
+      plan(probes),
+      spawner,
+      limits(dir, { mergeBase: MERGE_BASE }),
+      {
+        ...stagedHooks,
+        beforeOpen: (p) => {
+          opened.push(p);
+        },
       },
-    });
+    );
 
     for (const id of ['r-env', 's-env', 'c-env']) {
       const e = entryFor(bundle, id);
@@ -276,7 +304,7 @@ describe('executePlan: untracked targets are refused before any read', () => {
     expect(calls).toEqual([]);
   });
 
-  it('refuses a committed symlink even though it is tracked and resolves inside the repository', async () => {
+  it('refuses a committed symlink: it is not a regular file at the pinned head', async () => {
     const { dir } = makeRepo();
     const { spawner, calls } = mockSpawner();
     const bundle = await executePlan(
@@ -287,7 +315,7 @@ describe('executePlan: untracked targets are refused before any read', () => {
     );
     expect(entryFor(bundle, 'r1')).toMatchObject({
       status: 'refused',
-      refusals: [{ reason: 'not-a-regular-file', target: 'src/link.ts' }],
+      refusals: [{ reason: 'not-tracked', target: 'src/link.ts' }],
     });
     expect(calls).toEqual([]);
   });
@@ -311,7 +339,7 @@ describe('executePlan: untracked targets are refused before any read', () => {
       noAdded,
     );
     expect(entryFor(bundle, 'r1').refusals).toEqual([
-      { reason: 'not-a-regular-file', target: 'vendor/sub' },
+      { reason: 'not-tracked', target: 'vendor/sub' },
     ]);
     expect(calls).toEqual([]);
   });
@@ -323,14 +351,19 @@ describe('executePlan: containment is re-checked at open time', () => {
     const { spawner, calls } = mockSpawner();
     const target = join(dir, 'src', 'staged.ts');
     const seen: string[] = [];
-    const bundle = await executePlan(plan([read('r1', 'src/staged.ts')]), spawner, limits(dir), {
-      ...noAdded,
-      beforeOpen: (p) => {
-        seen.push(p);
-        rmSync(p);
-        symlinkSync(join(outside, 'secret.txt'), p);
+    const bundle = await executePlan(
+      plan([read('r1', 'src/staged.ts')]),
+      spawner,
+      limits(dir, { mergeBase: MERGE_BASE }),
+      {
+        ...stagedHooks,
+        beforeOpen: (p) => {
+          seen.push(p);
+          rmSync(p);
+          symlinkSync(join(outside, 'secret.txt'), p);
+        },
       },
-    });
+    );
     expect(seen).toEqual([target]);
     expect(entryFor(bundle, 'r1')).toMatchObject({
       status: 'refused',
@@ -343,13 +376,18 @@ describe('executePlan: containment is re-checked at open time', () => {
   it('refuses a file reached through a parent directory swapped for a symlink', async () => {
     const { dir, outside } = makeRepo();
     const { spawner, calls } = mockSpawner();
-    const bundle = await executePlan(plan([read('r1', 'src/staged.ts')]), spawner, limits(dir), {
-      ...noAdded,
-      beforeOpen: () => {
-        renameSync(join(dir, 'src'), join(dir, 'src-real'));
-        symlinkSync(join(outside, 'src'), join(dir, 'src'));
+    const bundle = await executePlan(
+      plan([read('r1', 'src/staged.ts')]),
+      spawner,
+      limits(dir, { mergeBase: MERGE_BASE }),
+      {
+        ...stagedHooks,
+        beforeOpen: () => {
+          renameSync(join(dir, 'src'), join(dir, 'src-real'));
+          symlinkSync(join(outside, 'src'), join(dir, 'src'));
+        },
       },
-    });
+    );
     expect(entryFor(bundle, 'r1').refusals).toEqual([
       { reason: 'symlink-or-escape', target: 'src/staged.ts' },
     ]);
@@ -363,8 +401,8 @@ describe('executePlan: containment is re-checked at open time', () => {
     const bundle = await executePlan(
       plan([read('r1', 'src/staged.ts')]),
       spawner,
-      limits(dir),
-      noAdded,
+      limits(dir, { mergeBase: MERGE_BASE }),
+      stagedHooks,
     );
     expect(entryFor(bundle, 'r1').status).toBe('ok');
     expect(calls[0]!.prompt).toContain('export const staged = 1;');
@@ -373,12 +411,17 @@ describe('executePlan: containment is re-checked at open time', () => {
   it('records a probe as failed when the open hook itself throws', async () => {
     const { dir } = makeRepo();
     const { spawner, calls } = mockSpawner();
-    const bundle = await executePlan(plan([read('r1', 'src/staged.ts')]), spawner, limits(dir), {
-      ...noAdded,
-      beforeOpen: () => {
-        throw new Error('boom');
+    const bundle = await executePlan(
+      plan([read('r1', 'src/staged.ts')]),
+      spawner,
+      limits(dir, { mergeBase: MERGE_BASE }),
+      {
+        ...stagedHooks,
+        beforeOpen: () => {
+          throw new Error('boom');
+        },
       },
-    });
+    );
     expect(entryFor(bundle, 'r1').status).toBe('failed');
     expect(calls).toEqual([]);
   });
@@ -515,20 +558,17 @@ describe('executePlan: redaction', () => {
 
   it('redacts before truncating so a cut cannot leave part of a secret', async () => {
     const { dir } = makeRepo();
-    // 100 characters of padding, then the secret: after redaction the text is over the
-    // 90-byte budget, so it is cut. No fragment of the secret may survive either way.
-    const padding = 'word '.repeat(20);
+    // 3980 characters of padding, then the secret. The 4000-character cap on one string
+    // falls 20 characters into the secret. Redacting first turns the secret into a 21
+    // character marker, so the cap cuts the marker. Cutting first would leave
+    // 'ghp_AbCdEfGhIjKlMnOpQrSt', which is too short for the redactor to recognise.
+    const padding = 'word '.repeat(796);
     const { spawner } = mockSpawner(() => okResult({ observations: [`${padding}${SECRET}`] }));
-    const bundle = await executePlan(
-      plan([read('r1')]),
-      spawner,
-      limits(dir, { perProbeBytes: 90 }),
-      noAdded,
-    );
+    const bundle = await executePlan(plan([read('r1')]), spawner, limits(dir), noAdded);
     const json = JSON.stringify(bundle);
     expect(json).not.toContain('ghp_');
     expect(json).not.toContain('AbCd');
-    expect(entryFor(bundle, 'r1').truncated).toBe(true);
+    expect(entryFor(bundle, 'r1').observations[0]).toHaveLength(4000);
   });
 });
 
@@ -537,7 +577,7 @@ describe('executePlan: run probes', () => {
     const { dir } = makeRepo();
     const { spawner, calls } = mockSpawner();
     const probes = [run('t1'), run('t2'), run('t3'), run('t4'), read('r1')];
-    const bundle = await executePlan(plan(probes), spawner, limits(dir), noAdded);
+    const bundle = await executePlan(plan(probes), spawner, runLimits(dir), noAdded);
     expect(calls.map((c) => c.probeId).sort()).toEqual(['r1', 't1', 't2']);
     for (const id of ['t3', 't4']) {
       expect(entryFor(bundle, id)).toMatchObject({
@@ -556,7 +596,7 @@ describe('executePlan: run probes', () => {
     await executePlan(
       plan([run('t1'), run('t2')]),
       one.spawner,
-      limits(dir, { maxRunProbes: 1 }),
+      runLimits(dir, { maxRunProbes: 1 }),
       noAdded,
     );
     expect(one.calls.map((c) => c.probeId)).toEqual(['t1']);
@@ -564,7 +604,7 @@ describe('executePlan: run probes', () => {
     const bundle = await executePlan(
       plan([run('t1')]),
       none.spawner,
-      limits(dir, { maxRunProbes: 0 }),
+      runLimits(dir, { maxRunProbes: 0 }),
       noAdded,
     );
     expect(none.calls).toEqual([]);
@@ -577,7 +617,7 @@ describe('executePlan: run probes', () => {
     const bundle = await executePlan(
       plan([run('bad', 'pnpm build'), run('t1'), run('t2'), run('t3')]),
       spawner,
-      limits(dir),
+      runLimits(dir),
       noAdded,
     );
     expect(calls.map((c) => c.probeId).sort()).toEqual(['t1', 't2']);
@@ -596,7 +636,7 @@ describe('executePlan: run probes', () => {
         run('d', 'pnpm test && pnpm lint'),
       ]),
       spawner,
-      limits(dir),
+      runLimits(dir),
       noAdded,
     );
     expect(calls).toEqual([]);
@@ -640,17 +680,17 @@ describe('executePlan: tools by probe type', () => {
     const bundle = await executePlan(
       plan(probes),
       spawner,
-      limits(dir, { mergeBase: MERGE_BASE }),
+      runLimits(dir, { mergeBase: MERGE_BASE }),
       noAdded,
     );
     expect(bundle.entries.every((e) => e.status === 'ok')).toBe(true);
 
-    expect(callFor(calls, 'p-read').tools).toEqual(['Read']);
+    // Only a search probe has file tools. Every other probe gets its data embedded and no tools.
+    expect(callFor(calls, 'p-read').tools).toEqual([]);
     expect(callFor(calls, 'p-search').tools).toEqual(['Read', 'Grep', 'Glob']);
-    expect(callFor(calls, 'p-trace').tools).toEqual(['Read']);
-    // A run probe gets the command's output as data and no tools at all.
+    expect(callFor(calls, 'p-trace').tools).toEqual([]);
     expect(callFor(calls, 'p-run').tools).toEqual([]);
-    expect(callFor(calls, 'p-compare').tools).toEqual(['Read']);
+    expect(callFor(calls, 'p-compare').tools).toEqual([]);
 
     for (const c of calls) {
       // No probe, of any type, is ever spawned with Bash in any form.
@@ -664,20 +704,30 @@ describe('executePlan: tools by probe type', () => {
     }
   });
 
-  it('scopes file access to the probe target and marks a file-less search tracked-only', async () => {
+  it('gives only a search probe an allowlist, and none to a probe without file tools', async () => {
     const { dir } = makeRepo();
     const { spawner, calls } = mockSpawner();
     const probes: Probe[] = [
-      read('p-read', 'src/a.ts', {
-        target: { files: [{ path: 'src/a.ts' }, { path: 'src/a.ts', startLine: 1, endLine: 2 }] },
-      }),
+      read('p-read'),
       { id: 'p-search', type: 'search', target: { query: 'x' }, question: 'q', covers: ['h1'] },
+      {
+        id: 'p-named',
+        type: 'search',
+        target: { query: 'x', files: [{ path: 'src/a.ts' }, { path: 'src/a.ts', startLine: 1 }] },
+        question: 'q',
+        covers: ['h1'],
+      },
     ];
     await executePlan(plan(probes), spawner, limits(dir), noAdded);
-    expect(callFor(calls, 'p-read').allowedPaths).toEqual(['src/a.ts']);
-    expect(callFor(calls, 'p-read').trackedOnly).toBe(true);
-    expect(callFor(calls, 'p-search').allowedPaths).toBeUndefined();
-    expect(callFor(calls, 'p-search').trackedOnly).toBe(true);
+    expect(callFor(calls, 'p-read').allowedPaths).toBeUndefined();
+    expect(callFor(calls, 'p-read').trackedOnly).toBeUndefined();
+    expect(callFor(calls, 'p-named').allowedPaths).toEqual(['src/a.ts']);
+    const all = callFor(calls, 'p-search');
+    expect(all.trackedOnly).toBe(true);
+    // The explicit list holds regular files at the pinned head, and nothing else.
+    expect(all.allowedPaths).toEqual(
+      expect.arrayContaining(['src/a.ts', 'src/b.ts', '.gitignore', 'src/secret-holder.ts']),
+    );
   });
 
   it('passes the routed model, defaulting to sonnet, and the repository as cwd', async () => {
@@ -708,7 +758,10 @@ describe('executePlan: tools by probe type', () => {
       expect(disallowedTools).toContain('Bash');
     }
     expect(toolsForProbe({ type: 'run' }).tools).toEqual([]);
-    expect(toolsForProbe({ type: 'compare' }).tools).toEqual(['Read']);
+    // Only a search probe gets file tools; read, trace and compare have their content embedded.
+    for (const type of ['read', 'trace', 'compare'] as const)
+      expect(toolsForProbe({ type }).tools).toEqual([]);
+    expect(toolsForProbe({ type: 'search' }).tools).toEqual(['Read', 'Grep', 'Glob']);
   });
 });
 
@@ -880,6 +933,7 @@ describe('executePlan: fan-out and the bundle', () => {
     const { dir } = makeRepo();
     const names = ['big1.ts', 'big2.ts', 'big3.ts', 'big4.ts'];
     for (const n of names) writeFileSync(join(dir, 'src', n), `${'x'.repeat(99)}\n`.repeat(1000));
+    commitAll(dir);
     const { spawner, calls } = mockSpawner();
     const probe = read('r1', 'src/big1.ts', {
       target: { files: names.map((n) => ({ path: `src/${n}` })) },
@@ -1140,7 +1194,7 @@ describe('executePlan: Codex option', () => {
     const bundle = await executePlan(
       plan(probes),
       spawner,
-      limits(dir, { codex: { available: true, trusted: true } }),
+      runLimits(dir, { codex: { available: true, trusted: true } }),
       noAdded,
     );
 
@@ -1155,6 +1209,11 @@ describe('executePlan: Codex option', () => {
       harness: 'claude-code',
     });
     expect(entryFor(bundle, 'p-run').harness).toBe('claude-code');
+    for (const c of calls) {
+      // Neither harness is ever spawned with Bash.
+      expect(c.tools.some((t) => t.startsWith('Bash'))).toBe(false);
+      expect(c.disallowedTools).toContain('Bash');
+    }
     expectValid(bundle);
   });
 
@@ -1320,12 +1379,47 @@ describe('checkProbeTargets', () => {
 });
 
 describe('resolveTargetSet', () => {
-  it('lists the tracked files with git ls-files and leaves out a gitignored file', async () => {
+  it('lists regular files at the pinned head, not the index, and leaves out ignored, staged and non-regular entries', async () => {
     const { dir } = makeRepo();
-    const set = await resolveTargetSet({ repoRoot: dir });
+    execFileSync(
+      'git',
+      ['update-index', '--add', '--cacheinfo', `160000,${headSha(dir)},vendor/sub`],
+      {
+        cwd: dir,
+        stdio: 'ignore',
+      },
+    );
+    // Keep the staged-only file out of this commit: it must stay index-only.
+    execFileSync('git', ['reset', '-q', '--', 'src/staged.ts'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-q', '-m', 'add gitlink'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['add', 'src/staged.ts'], { cwd: dir, stdio: 'ignore' });
+    const set = await resolveTargetSet({ repoRoot: dir }, {}, headSha(dir));
     expect(set.has('src/a.ts')).toBe(true);
     expect(set.has('.gitignore')).toBe(true);
     expect(set.has('.env')).toBe(false);
+    expect(set.has('src/link.ts')).toBe(false);
+    expect(set.has('vendor/sub')).toBe(false);
+    // Staged in the index but never committed.
+    expect(set.has('src/staged.ts')).toBe(false);
+    const regular = await listRegularFilesAtCommit(runGit, dir, headSha(dir));
+    expect(regular).not.toContain('src/link.ts');
+    expect(regular).not.toContain('vendor/sub');
+  });
+
+  it('is empty, failing closed, when the tree listing is truncated or no head is pinned', async () => {
+    const { dir } = makeRepo();
+    const truncated: GitRunner = async () => ({
+      stdout: Buffer.from('100644 blob ab\tpart'),
+      truncated: true,
+    });
+    expect((await resolveTargetSet({ repoRoot: dir }, { git: truncated }, headSha(dir))).size).toBe(
+      0,
+    );
+    expect((await resolveTargetSet({ repoRoot: dir })).size).toBe(0);
+    await expect(listRegularFilesAtCommit(truncated, dir, headSha(dir))).rejects.toThrow(
+      /truncated/,
+    );
+    await expect(listRegularFilesAtCommit(runGit, dir, 'HEAD')).rejects.toThrow(/full commit SHA/);
   });
 
   it('adds the paths the diff adds, using git diff against the merge-base', async () => {
@@ -1338,6 +1432,7 @@ describe('resolveTargetSet', () => {
     const set = await resolveTargetSet(
       { repoRoot: dir, mergeBase: base },
       { listTrackedFiles: () => [] },
+      headSha(dir),
     );
     expect(set.has('src/added.ts')).toBe(true);
     expect(set.has('src/a.ts')).toBe(false);
@@ -1350,13 +1445,13 @@ describe('resolveTargetSet', () => {
   });
 
   it('is empty when git cannot list anything', async () => {
-    const notARepo = mkdtempSync(join(tmpdir(), 'rp-exec-norepo-'));
+    const notARepo = tmp('rp-exec-norepo-');
     const set = await resolveTargetSet({ repoRoot: notARepo, mergeBase: MERGE_BASE });
     expect(set.size).toBe(0);
   });
 });
 
-describe('executePlan: file scope must be enforced by the spawner (fail closed)', () => {
+describe('executePlan: file scope must be declared per harness (fail closed)', () => {
   const search = (id: string): Probe => ({
     id,
     type: 'search',
@@ -1364,62 +1459,6 @@ describe('executePlan: file scope must be enforced by the spawner (fail closed)'
     question: 'q',
     covers: ['h1'],
   });
-
-  it('refuses a search probe before any spawn on a spawner that does not enforce file scope', async () => {
-    const { dir } = makeRepo();
-    const { spawner, calls } = mockSpawner(() => okResult(), false);
-    const bundle = await executePlan(
-      plan([search('s1'), read('r1')]),
-      spawner,
-      limits(dir),
-      noAdded,
-    );
-    expect(calls).toEqual([]);
-    expect(bundle.entries).toHaveLength(2);
-    for (const id of ['s1', 'r1']) {
-      expect(entryFor(bundle, id)).toMatchObject({
-        status: 'refused',
-        refusals: [{ reason: 'file-scope-not-enforced', target: id }],
-      });
-    }
-    expectValid(bundle);
-  });
-
-  it('refuses when the spawner omits the member entirely', async () => {
-    const { dir } = makeRepo();
-    const calls: ProbeSpawnOpts[] = [];
-    const spawner = {
-      async spawnProbe(opts: ProbeSpawnOpts) {
-        calls.push(opts);
-        return okResult();
-      },
-    } as unknown as ProbeSpawner;
-    const bundle = await executePlan(plan([search('s1')]), spawner, limits(dir), noAdded);
-    expect(calls).toEqual([]);
-    expect(entryFor(bundle, 's1').refusals).toEqual([
-      { reason: 'file-scope-not-enforced', target: 's1' },
-    ]);
-  });
-
-  it('still runs a run probe that carries no file scope on a non-enforcing spawner', async () => {
-    const { dir } = makeRepo();
-    const { spawner, calls } = mockSpawner(() => okResult(), false);
-    const bundle = await executePlan(plan([run('t1')]), spawner, limits(dir), noAdded);
-    expect(calls.map((c) => c.probeId)).toEqual(['t1']);
-    expect(entryFor(bundle, 't1').status).toBe('ok');
-  });
-
-  it('runs the same search probe on an enforcing spawner', async () => {
-    const { dir } = makeRepo();
-    const { spawner, calls } = mockSpawner(() => okResult(), true);
-    const bundle = await executePlan(plan([search('s1')]), spawner, limits(dir), noAdded);
-    expect(calls.map((c) => c.probeId)).toEqual(['s1']);
-    expect(calls[0]!.trackedOnly).toBe(true);
-    expect(entryFor(bundle, 's1').status).toBe('ok');
-  });
-});
-
-describe('executePlan: every probe that can use file tools is scope-bearing', () => {
   const symbolsTrace: Probe = {
     id: 'tr1',
     type: 'trace',
@@ -1434,8 +1473,29 @@ describe('executePlan: every probe that can use file tools is scope-bearing', ()
     question: 'q',
     covers: ['h1'],
   };
+  const scopeRefusal = (id: string) => [{ reason: 'file-scope-not-enforced', target: id }];
 
-  it('refuses a symbols-only trace and a revisions-only compare on a non-enforcing spawner', async () => {
+  it('refuses a search probe before any spawn when the spawner enforces no file scope', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner(() => okResult(), false);
+    const bundle = await executePlan(
+      plan([search('s1'), read('r1')]),
+      spawner,
+      limits(dir),
+      noAdded,
+    );
+    expect(calls.map((c) => c.probeId)).toEqual(['r1']);
+    expect(bundle.entries).toHaveLength(2);
+    expect(entryFor(bundle, 's1')).toMatchObject({
+      status: 'refused',
+      refusals: scopeRefusal('s1'),
+    });
+    // A read probe has no file tools, so it needs no scope declaration.
+    expect(entryFor(bundle, 'r1').status).toBe('ok');
+    expectValid(bundle);
+  });
+
+  it('gives symbols-only trace and revisions-only compare probes no tools, and runs them on a non-enforcing spawner', async () => {
     const { dir } = makeRepo();
     const { spawner, calls } = mockSpawner(() => okResult(), false);
     const bundle = await executePlan(
@@ -1444,44 +1504,180 @@ describe('executePlan: every probe that can use file tools is scope-bearing', ()
       limits(dir, { mergeBase: MERGE_BASE }),
       noAdded,
     );
-    expect(calls).toEqual([]);
-    for (const id of ['tr1', 'cm1']) {
-      expect(entryFor(bundle, id).refusals).toEqual([
-        { reason: 'file-scope-not-enforced', target: id },
-      ]);
+    expect(bundle.entries.every((e) => e.status === 'ok')).toBe(true);
+    for (const c of calls) {
+      expect(c.tools).toEqual([]);
+      expect(c.allowedPaths).toBeUndefined();
+      expect(c.disallowedTools).toContain('Bash');
     }
-    expectValid(bundle);
   });
 
-  it('marks them trackedOnly on an enforcing spawner', async () => {
+  it('refuses when the spawner omits the member or declares a non-literal value', async () => {
     const { dir } = makeRepo();
-    const { spawner, calls } = mockSpawner();
-    await executePlan(
-      plan([symbolsTrace, revisionsCompare]),
-      spawner,
-      limits(dir, { mergeBase: MERGE_BASE }),
-      noAdded,
-    );
-    expect(callFor(calls, 'tr1').trackedOnly).toBe(true);
-    expect(callFor(calls, 'tr1').allowedPaths).toBeUndefined();
-    expect(callFor(calls, 'cm1').trackedOnly).toBe(true);
-  });
-
-  it('refuses a truthy but non-literal enforcesFileScope', async () => {
-    const { dir } = makeRepo();
-    for (const value of [1, 'true']) {
+    const make = (declared: unknown) => {
       const calls: ProbeSpawnOpts[] = [];
       const spawner = {
-        enforcesFileScope: value,
+        ...(declared === undefined ? {} : { enforcesFileScope: declared }),
         async spawnProbe(opts: ProbeSpawnOpts) {
           calls.push(opts);
           return okResult();
         },
       } as unknown as ProbeSpawner;
-      const bundle = await executePlan(plan([symbolsTrace]), spawner, limits(dir), noAdded);
+      return { spawner, calls };
+    };
+    for (const declared of [
+      undefined,
+      true,
+      1,
+      'true',
+      {},
+      { 'claude-code': 1, codex: 1 },
+      { 'claude-code': 'true' },
+      { codex: true },
+    ]) {
+      const { spawner, calls } = make(declared);
+      const bundle = await executePlan(plan([search('s1')]), spawner, limits(dir), noAdded);
       expect(calls).toEqual([]);
-      expect(entryFor(bundle, 'tr1').refusals![0]!.reason).toBe('file-scope-not-enforced');
+      expect(entryFor(bundle, 's1').refusals).toEqual(scopeRefusal('s1'));
     }
+  });
+
+  it('runs a search probe on an enforcing spawner, with an explicit allowlist', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner(() => okResult(), true);
+    const bundle = await executePlan(plan([search('s1')]), spawner, limits(dir), noAdded);
+    expect(entryFor(bundle, 's1').status).toBe('ok');
+    expect(calls[0]!.trackedOnly).toBe(true);
+    expect(calls[0]!.allowedPaths).toContain('src/a.ts');
+  });
+
+  it('moves a codex-eligible search probe to claude-code when only claude declares scope, and records it', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner(() => okResult(), { 'claude-code': true, codex: false });
+    const bundle = await executePlan(
+      plan([search('s1'), read('r1')]),
+      spawner,
+      limits(dir, { codex: { available: true, trusted: true } }),
+      noAdded,
+    );
+    expect(callFor(calls, 's1')).toMatchObject({
+      harness: 'claude-code',
+      agent: 'review-executor',
+    });
+    expect(entryFor(bundle, 's1').harness).toBe('claude-code');
+    // A probe with no file tools may still go to codex.
+    expect(callFor(calls, 'r1').harness).toBe('codex');
+    expect(calls.filter((c) => c.probeId === 's1' && c.harness === 'codex')).toEqual([]);
+  });
+
+  it('refuses a search probe when neither harness declares scope', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner(() => okResult(), {
+      'claude-code': false,
+      codex: false,
+    });
+    const bundle = await executePlan(
+      plan([search('s1')]),
+      spawner,
+      limits(dir, { codex: { available: true, trusted: true } }),
+      noAdded,
+    );
+    expect(calls).toEqual([]);
+    expect(entryFor(bundle, 's1').refusals).toEqual(scopeRefusal('s1'));
+  });
+
+  it('runs a search probe on codex when codex declares scope', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner(() => okResult(), { 'claude-code': false, codex: true });
+    await executePlan(
+      plan([search('s1')]),
+      spawner,
+      limits(dir, { codex: { available: true, trusted: true } }),
+      noAdded,
+    );
+    expect(calls[0]).toMatchObject({ harness: 'codex', agent: 'review-executor-codex' });
+  });
+});
+
+describe('executePlan: the file-less search allowlist', () => {
+  const search: Probe = {
+    id: 's1',
+    type: 'search',
+    target: { query: 'export' },
+    question: 'q',
+    covers: ['h1'],
+  };
+
+  it('excludes a committed symlink, a gitlink, an ignored file and an index-only file', async () => {
+    const { dir } = makeRepo();
+    execFileSync(
+      'git',
+      ['update-index', '--add', '--cacheinfo', `160000,${headSha(dir)},vendor/sub`],
+      {
+        cwd: dir,
+        stdio: 'ignore',
+      },
+    );
+    // Keep the staged-only file out of this commit: it must stay index-only.
+    execFileSync('git', ['reset', '-q', '--', 'src/staged.ts'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-q', '-m', 'add gitlink'], { cwd: dir, stdio: 'ignore' });
+    execFileSync('git', ['add', 'src/staged.ts'], { cwd: dir, stdio: 'ignore' });
+    const { spawner, calls } = mockSpawner();
+    await executePlan(plan([search]), spawner, limits(dir), noAdded);
+    const allowed = calls[0]!.allowedPaths!;
+    expect(allowed).toContain('src/a.ts');
+    expect(allowed).not.toContain('src/link.ts');
+    expect(allowed).not.toContain('vendor/sub');
+    expect(allowed).not.toContain('.env');
+    expect(allowed).not.toContain('src/staged.ts');
+  });
+
+  it('refuses a search naming a file that is not a regular file at the pinned head', async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner();
+    const named: Probe = { ...search, target: { query: 'x', files: [{ path: 'src/link.ts' }] } };
+    const bundle = await executePlan(plan([named]), spawner, limits(dir), noAdded);
+    expect(calls).toEqual([]);
+    expect(entryFor(bundle, 's1').refusals![0]!.reason).toBe('not-tracked');
+  });
+
+  it('refuses a file-less search over the path cap', async () => {
+    const { dir } = makeRepo();
+    const entries = Array.from(
+      { length: 5001 },
+      (_, i) => `100644 blob ${'a'.repeat(40)}\tdir/file${i}.ts`,
+    );
+    const big: GitRunner = async (args, o) =>
+      args[0] === 'ls-tree'
+        ? { stdout: Buffer.from(entries.join('\0') + '\0'), truncated: false }
+        : runGit(args, o);
+    const { spawner, calls } = mockSpawner();
+    const bundle = await executePlan(plan([search]), spawner, limits(dir), {
+      ...noAdded,
+      git: big,
+    });
+    expect(calls).toEqual([]);
+    expect(entryFor(bundle, 's1').refusals![0]!.reason).toBe('scope-too-large');
+    expectValid(bundle);
+  });
+
+  it('refuses a file-less search over the path-text cap', async () => {
+    const { dir } = makeRepo();
+    const long = 'd'.repeat(250);
+    const entries = Array.from(
+      { length: 1000 },
+      (_, i) => `100644 blob ${'a'.repeat(40)}\t${long}/f${i}`,
+    );
+    const big: GitRunner = async (args, o) =>
+      args[0] === 'ls-tree'
+        ? { stdout: Buffer.from(entries.join('\0') + '\0'), truncated: false }
+        : runGit(args, o);
+    const { spawner } = mockSpawner();
+    const bundle = await executePlan(plan([search]), spawner, limits(dir), {
+      ...noAdded,
+      git: big,
+    });
+    expect(entryFor(bundle, 's1').refusals![0]!.reason).toBe('scope-too-large');
   });
 });
 
@@ -1522,22 +1718,88 @@ describe('executePlan: redaction happens before any cut', () => {
     expect(prompt).toContain('[REDACTED');
   });
 
-  it('leaves no fragment of a token that straddles the byte limit', async () => {
+  const PEM_OPEN = ['ok', '-----BEGIN PRIVATE KEY-----', PEM_BODY_1, PEM_BODY_2];
+
+  it('leaves no fragment of a PEM block whose END is past the cap of a committed file', async () => {
     const { dir } = makeRepo();
-    writeFileSync(join(dir, 'src', 'b.ts'), `ok\nconst t = '${SECRET}';\nmore\n`);
+    writeFileSync(
+      join(dir, 'src', 'b.ts'),
+      [...PEM_OPEN, '-----END PRIVATE KEY-----', ''].join('\n'),
+    );
     commitAll(dir);
     const { spawner, calls } = mockSpawner();
-    // 3 + 11 bytes precede the token; the limit of 25 cuts it in half.
+    // 'ok' + BEGIN + first body line end at byte 84. A cap of 100 cuts inside the second body
+    // line, so BEGIN and a body line are inside the cap while END is not. Redacting the cut
+    // text alone would leave the BEGIN header and body behind, because the block never closes.
     await executePlan(
       plan([read('r1', 'src/b.ts')]),
       spawner,
-      limits(dir, { maxReadBytesPerFile: 25 }),
+      limits(dir, { maxReadBytesPerFile: 100 }),
       noAdded,
     );
     const prompt = calls[0]!.prompt;
-    expect(prompt).not.toContain('ghp_');
-    expect(prompt).not.toContain('AbCd');
+    expect(prompt).not.toContain('BEGIN');
+    expect(prompt).not.toContain('MIIEvQ');
+    expect(prompt).not.toContain('x8Zk2q');
     expect(prompt).toContain('[file truncated at the read limit]');
+  });
+
+  it('leaves no fragment of a PEM block cut by the cap of a diff', async () => {
+    const { dir } = makeRepo();
+    const base = headSha(dir);
+    const cutDiff =
+      'diff --git a/x b/x\n+ok\n+-----BEGIN PRIVATE KEY-----\n+' + PEM_BODY_1 + '\n+x8Zk';
+    const git: GitRunner = async (args, o) =>
+      args[0] === 'diff'
+        ? {
+            stdout: Buffer.from(args.includes('--stat') ? 'stat\n' : cutDiff),
+            truncated: !args.includes('--stat'),
+          }
+        : runGit(args, o);
+    const { spawner, calls } = mockSpawner();
+    const probe: Probe = {
+      id: 'cmp',
+      type: 'compare',
+      target: { revisions: { base, head: 'HEAD' } },
+      question: 'q',
+      covers: ['h1'],
+    };
+    await executePlan(plan([probe]), spawner, limits(dir, { mergeBase: base }), {
+      ...noAdded,
+      git,
+    });
+    const prompt = calls[0]!.prompt;
+    expect(prompt).not.toContain('BEGIN');
+    expect(prompt).not.toContain('MIIEvQ');
+    expect(prompt).toContain('[data truncated at the size limit]');
+  });
+
+  it("leaves no fragment of a PEM block cut by the cap of a run probe's output", async () => {
+    const { dir } = makeRepo();
+    const { spawner, calls } = mockSpawner();
+    const bundle = await executePlan(plan([run('t1')]), spawner, runLimits(dir), {
+      ...noAdded,
+      runCommand: async () => ({
+        exitStatus: 1,
+        output: [...PEM_OPEN, 'x8Zk2'].join('\n'),
+        truncated: true,
+        timedOut: false,
+      }),
+    });
+    expect(calls[0]!.prompt).not.toContain('BEGIN');
+    expect(calls[0]!.prompt).not.toContain('MIIEvQ');
+    expect(JSON.stringify(bundle)).not.toContain('MIIEvQ');
+  });
+
+  it('keeps a complete line before the cut and drops the open PEM block after it', () => {
+    expect(trimTruncated(`a\nb\n-----BEGIN KEY-----\nMIIE`)).toBe('a\nb\n');
+    expect(trimTruncated('line one\nline tw')).toBe('line one');
+    expect(dropUnterminatedPem('x\n-----BEGIN K-----\nbody\n-----END K-----\ny')).toBe(
+      'x\n-----BEGIN K-----\nbody\n-----END K-----\ny',
+    );
+    expect(
+      dropUnterminatedPem('-----BEGIN A-----\n-----END A-----\nz\n-----BEGIN B-----\nbody'),
+    ).toBe('-----BEGIN A-----\n-----END A-----\nz\n');
   });
 });
 
@@ -1593,6 +1855,7 @@ describe('executor-git: git access', () => {
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_TERMINAL_PROMPT: '0',
+      GIT_LITERAL_PATHSPECS: '1',
     });
   });
 
@@ -1743,6 +2006,24 @@ describe('executor-git: running commands', () => {
     expect(Buffer.byteLength(r.output)).toBeLessThanOrEqual(100);
   });
 
+  it('drops the partial last line of each stream and any open PEM block when output is capped', async () => {
+    const script =
+      'process.stdout.write("ok\\n-----BEGIN PRIVATE KEY-----\\n" + "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\\n".repeat(50))';
+    const r = await runCommand([process.execPath, '-e', script], opts({ maxBytes: 120 }));
+    expect(r.truncated).toBe(true);
+    expect(r.output).not.toContain('BEGIN');
+    expect(r.output).not.toContain('MIIE');
+  });
+
+  it('resolves on timeout even if a grandchild keeps the output pipes open', async () => {
+    const script =
+      "require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'inherit' }); setInterval(() => {}, 1000)";
+    const started = Date.now();
+    const r = await runCommand([process.execPath, '-e', script], opts({ timeoutMs: 400 }));
+    expect(r.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it('kills the whole process group on timeout', async () => {
     const started = Date.now();
     const r = await runCommand(
@@ -1818,7 +2099,7 @@ describe('executePlan: pinned revisions', () => {
     expect(calls[0]!.prompt).not.toContain('tampered');
   });
 
-  it('refuses every revision-dependent probe when HEAD cannot be resolved, and still runs a file-less search', async () => {
+  it('refuses every revision-dependent probe when HEAD cannot be resolved, and still runs the others', async () => {
     const { dir } = makeRepo();
     const failing: GitRunner = async (args, o) => {
       if (args[0] === 'rev-parse') throw new Error('no HEAD');
@@ -1835,17 +2116,26 @@ describe('executePlan: pinned revisions', () => {
         covers: ['h1'],
       },
       { id: 's1', type: 'search', target: { query: 'export' }, question: 'q', covers: ['h1'] },
+      {
+        id: 'tr1',
+        type: 'trace',
+        target: { symbols: ['login'] },
+        question: 'q',
+        covers: ['h1'],
+      },
+      run('t1'),
     ];
-    const bundle = await executePlan(plan(probes), spawner, limits(dir), {
+    const bundle = await executePlan(plan(probes), spawner, runLimits(dir), {
       ...noAdded,
       git: failing,
     });
-    for (const id of ['r1', 'cmp']) {
+    for (const id of ['r1', 'cmp', 's1']) {
       expect(entryFor(bundle, id).refusals).toEqual([
         { reason: 'revision-unresolved', target: 'HEAD' },
       ]);
     }
-    expect(calls.map((c) => c.probeId)).toEqual(['s1']);
+    // A symbols-only trace and a run probe need no revision.
+    expect(calls.map((c) => c.probeId).sort()).toEqual(['t1', 'tr1']);
     expectValid(bundle);
   });
 
@@ -1967,7 +2257,7 @@ describe('executePlan: trace data comes from an injected in-process query', () =
     expect(calls[0]!.prompt).toContain('dependency query result');
     expect(calls[0]!.prompt).toContain('login is called by handler');
     expect(calls[0]!.prompt).not.toContain('ghp_');
-    expect(calls[0]!.tools).toEqual(['Read']);
+    expect(calls[0]!.tools).toEqual([]);
   });
 
   it('refuses a trace probe before any spawn when no dependency query is wired', async () => {
@@ -2030,7 +2320,7 @@ describe('executePlan: the executor runs allowlisted commands itself', () => {
     process.env.REVIEW_TEST_TOKEN = 'leak-me';
     const { spawner, calls } = mockSpawner();
     try {
-      await executePlan(plan([run('t1')]), spawner, limits(dir), noAdded);
+      await executePlan(plan([run('t1')]), spawner, runLimits(dir), noAdded);
     } finally {
       if (saved === undefined) delete process.env.REVIEW_TEST_TOKEN;
       else process.env.REVIEW_TEST_TOKEN = saved;
@@ -2059,7 +2349,7 @@ describe('executePlan: the executor runs allowlisted commands itself', () => {
     const { spawner, calls } = mockSpawner(() =>
       okResult({ commands: [{ command: 'pnpm test', exitStatus: 0, output: 'claimed pass' }] }),
     );
-    const bundle = await executePlan(plan([run('t1')]), spawner, limits(dir), slow);
+    const bundle = await executePlan(plan([run('t1')]), spawner, runLimits(dir), slow);
     const e = entryFor(bundle, 't1');
     expect(e.commands).toHaveLength(1);
     expect(e.commands[0]).toMatchObject({ command: 'pnpm test', exitStatus: 1 });
@@ -2085,7 +2375,7 @@ describe('executePlan: the executor runs allowlisted commands itself', () => {
     const bundle = await executePlan(
       plan([run('t1')]),
       spawner,
-      limits(dir, { commandOutputBytes: 200 }),
+      runLimits(dir, { commandOutputBytes: 200 }),
       hooks,
     );
     expect(calls[0]!.prompt).toContain('timed out');
@@ -2103,7 +2393,7 @@ describe('executePlan: the executor runs allowlisted commands itself', () => {
     await executePlan(
       plan([run('bad', 'pnpm build'), run('ok1'), run('ok2'), run('ok3')]),
       spawner,
-      limits(dir),
+      runLimits(dir),
       noAdded,
     );
     expect(runLog).toHaveLength(2);
@@ -2117,7 +2407,7 @@ describe('executePlan: the executor runs allowlisted commands itself', () => {
     const bundle = await executePlan(
       plan([run('t1', 'pnpm test; rm -rf /'), run('t2', 'pnpm test *')]),
       spawner,
-      limits(dir, { commandAllowlist: ['pnpm test; rm -rf /', 'pnpm test *'] }),
+      runLimits(dir, { commandAllowlist: ['pnpm test; rm -rf /', 'pnpm test *'] }),
       noAdded,
     );
     expect(runLog).toEqual([]);
@@ -2130,7 +2420,7 @@ describe('executePlan: the executor runs allowlisted commands itself', () => {
   it('records a probe as failed when the runner itself throws', async () => {
     const { dir } = makeRepo();
     const { spawner, calls } = mockSpawner();
-    const bundle = await executePlan(plan([run('t1')]), spawner, limits(dir), {
+    const bundle = await executePlan(plan([run('t1')]), spawner, runLimits(dir), {
       ...noAdded,
       runCommand: async () => {
         throw new Error('runner broke');
@@ -2154,7 +2444,7 @@ describe('executePlan: ordering', () => {
     await executePlan(
       plan([run('t1'), read('r1'), read('r2'), run('t2')]),
       spawner,
-      limits(dir, { width: 4, maxRunProbes: 2 }),
+      runLimits(dir, { width: 4, maxRunProbes: 2 }),
       {
         ...noAdded,
         runCommand: async (argv, opts) => {
@@ -2189,5 +2479,93 @@ describe('executePlan: exact byte match of targets', () => {
     expect(entryFor(bundle, 'exact').refusals?.[0]?.reason).not.toBe('path-case-mismatch');
     expect(calls.map((c) => c.probeId)).not.toContain('upper');
     expect(calls.map((c) => c.probeId)).not.toContain('decomposed');
+  });
+});
+
+describe('executePlan: listings that git truncates fail closed', () => {
+  it('refuses every file target when the added-paths listing is truncated', async () => {
+    const { dir } = makeRepo();
+    const base = headSha(dir);
+    const cut: GitRunner = async (args, o) =>
+      args[0] === 'diff' && args.includes('--name-only')
+        ? { stdout: Buffer.from('src/new.ts\0src/par'), truncated: true }
+        : runGit(args, o);
+    const { spawner, calls } = mockSpawner();
+    const bundle = await executePlan(
+      plan([read('r1', 'src/new.ts')]),
+      spawner,
+      limits(dir, { mergeBase: base }),
+      { runCommand: fakeRun, dependencyQuery: noAdded.dependencyQuery, git: cut },
+    );
+    expect(entryFor(bundle, 'r1').refusals![0]!.reason).toBe('not-tracked');
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('runTrusted (separable)', () => {
+  it('refuses every run probe before any command or spawn when the caller did not assert trust', async () => {
+    const { dir } = makeRepo();
+    runLog.length = 0;
+    const { spawner, calls } = mockSpawner();
+    const bundle = await executePlan(
+      plan([run('t1'), run('t2'), read('r1')]),
+      spawner,
+      limits(dir),
+      noAdded,
+    );
+    expect(runLog).toEqual([]);
+    expect(calls.map((c) => c.probeId)).toEqual(['r1']);
+    for (const id of ['t1', 't2']) {
+      const e = entryFor(bundle, id);
+      expect(e).toMatchObject({
+        status: 'refused',
+        refusals: [{ reason: 'run-not-trusted', target: id }],
+        harness: 'none',
+      });
+      expect(e.answer).toBeUndefined();
+      expect(e.commands).toEqual([]);
+    }
+    expectValid(bundle);
+  });
+
+  it('treats anything other than literal true as untrusted', async () => {
+    const { dir } = makeRepo();
+    runLog.length = 0;
+    const { spawner } = mockSpawner();
+    const bundle = await executePlan(
+      plan([run('t1')]),
+      spawner,
+      limits(dir, { runTrusted: 'true' as unknown as boolean }),
+      noAdded,
+    );
+    expect(runLog).toEqual([]);
+    expect(entryFor(bundle, 't1').refusals![0]!.reason).toBe('run-not-trusted');
+  });
+
+  it('runs run probes when the caller asserts trust', async () => {
+    const { dir } = makeRepo();
+    runLog.length = 0;
+    const { spawner, calls } = mockSpawner();
+    const bundle = await executePlan(
+      plan([run('t1')]),
+      spawner,
+      limits(dir, { runTrusted: true }),
+      noAdded,
+    );
+    expect(runLog).toHaveLength(1);
+    expect(calls.map((c) => c.probeId)).toEqual(['t1']);
+    expect(entryFor(bundle, 't1').status).toBe('ok');
+  });
+
+  it('does not let an untrusted run probe use up the run cap', async () => {
+    const { dir } = makeRepo();
+    const { spawner } = mockSpawner();
+    const bundle = await executePlan(
+      plan([run('t1'), run('t2'), run('t3')]),
+      spawner,
+      limits(dir, { runTrusted: false, maxRunProbes: 1 }),
+      noAdded,
+    );
+    expect(bundle.entries.every((e) => e.status === 'refused')).toBe(true);
   });
 });

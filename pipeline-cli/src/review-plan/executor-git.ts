@@ -10,9 +10,9 @@
  * @module review-plan/executor-git
  */
 
-import { execFile } from 'node:child_process';
-import type { ExecFileException, ExecFileOptionsWithStringEncoding } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,9 +41,35 @@ export function dropPartialLine(text: string): string {
   return text.slice(0, Math.max(0, text.lastIndexOf('\n')));
 }
 
+/**
+ * Drop everything from the first PEM `-----BEGIN` marker that has no `-----END` after
+ * it. Text cut at a byte cap can end inside a private-key block, and the redactor
+ * cannot recognise a block whose END is missing.
+ */
+export function dropUnterminatedPem(text: string): string {
+  let from = 0;
+  for (;;) {
+    const begin = text.indexOf('-----BEGIN', from);
+    if (begin < 0) return text;
+    if (text.indexOf('-----END', begin) < 0) return text.slice(0, begin);
+    from = begin + 1;
+  }
+}
+
+/** For text cut at a byte cap: drop the partial last line, then any unterminated PEM block. */
+export function trimTruncated(text: string): string {
+  return dropUnterminatedPem(dropPartialLine(text));
+}
+
 // ── Scrubbed environment ─────────────────────────────────────────────────
 
 let scratchHome: string | undefined;
+
+/** Remove the scratch home directory, if one was created. For tests and shutdown. */
+export function disposeScratchHome(): void {
+  if (scratchHome) rmSync(scratchHome, { recursive: true, force: true });
+  scratchHome = undefined;
+}
 
 /** An empty home directory for child processes, so no user config or credentials are read. */
 function emptyHome(): string {
@@ -73,6 +99,8 @@ export function scrubbedEnv(
   env.GIT_CONFIG_NOSYSTEM = '1';
   env.GIT_CONFIG_GLOBAL = '/dev/null';
   env.GIT_TERMINAL_PROMPT = '0';
+  // Paths are literal names, never pathspec patterns.
+  env.GIT_LITERAL_PATHSPECS = '1';
   return env;
 }
 
@@ -128,6 +156,7 @@ export const runGit: GitRunner = (args, opts) =>
 
 const GIT_TIMEOUT_MS = 30_000;
 const TREE_ENTRY_MAX_BYTES = 64 * 1024;
+const TREE_LIST_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Resolve `HEAD` to a full commit SHA, or `undefined` when that cannot be done. */
 export async function resolvePinnedHead(
@@ -150,6 +179,32 @@ export async function resolvePinnedHead(
 /** A path that git could read as an option, or that cannot be a path at all. */
 function unsafeGitPath(p: string): boolean {
   return p.length === 0 || p.startsWith('-') || p.includes('\0');
+}
+
+/**
+ * Every regular file (mode 100644 or 100755) in the tree of commit `sha`. Symlinks
+ * (120000) and gitlinks (160000) are left out. A truncated listing is an error.
+ */
+export async function listRegularFilesAtCommit(
+  git: GitRunner,
+  repoRoot: string,
+  sha: string,
+): Promise<string[]> {
+  if (!FULL_SHA.test(sha)) throw new Error('tree listing needs a full commit SHA');
+  const r = await git(['ls-tree', '-r', '-z', sha], {
+    cwd: repoRoot,
+    maxBytes: TREE_LIST_MAX_BYTES,
+    timeoutMs: GIT_TIMEOUT_MS,
+  });
+  if (r.truncated) throw new Error('tree listing was truncated');
+  const out: string[] = [];
+  for (const entry of r.stdout.toString('utf8').split('\0')) {
+    const tab = entry.indexOf('\t');
+    if (tab < 0) continue;
+    const [mode, type] = entry.slice(0, tab).split(' ');
+    if ((mode === '100644' || mode === '100755') && type === 'blob') out.push(entry.slice(tab + 1));
+  }
+  return out;
 }
 
 export type BlobResult =
@@ -191,7 +246,7 @@ export async function readBlobAtCommit(
     const text = blob.stdout.toString('utf8');
     return {
       kind: 'ok',
-      text: blob.truncated ? dropPartialLine(text) : text,
+      text: blob.truncated ? trimTruncated(text) : text,
       truncated: blob.truncated,
       bytesRead: blob.stdout.length,
     };
@@ -227,7 +282,7 @@ export async function readDiff(
   }
   const d = await git([...base, mergeBase, head, '--', ...paths], { ...opts, maxBytes });
   const body = d.stdout.toString('utf8');
-  return { text: stat + (d.truncated ? dropPartialLine(body) : body), truncated: d.truncated };
+  return { text: stat + (d.truncated ? trimTruncated(body) : body), truncated: d.truncated };
 }
 
 // ── allowlisted commands ─────────────────────────────────────────────────
@@ -253,60 +308,101 @@ export type CommandRunner = (
   opts: CommandRunOpts,
 ) => Promise<CommandResult>;
 
+function killGroup(child: ChildProcess): void {
+  try {
+    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+    else child.kill('SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** Cap one stream. A stream that hit its cap loses its partial last line and any open PEM block. */
+function capStream(
+  text: string,
+  limit: number,
+  overflowed: boolean,
+): { text: string; cut: boolean } {
+  if (byteLen(text) > limit) return { text: trimTruncated(utf8Prefix(text, limit)), cut: true };
+  return overflowed ? { text: trimTruncated(text), cut: true } : { text, cut: false };
+}
+
 /**
- * Run a command with `execFile` (no shell) in its own process group, so a timeout
- * can kill the command and everything it started. Output is bounded.
+ * Run a command with no shell, in its own process group, so a timeout or an output
+ * overflow can kill the command and everything it started. The promise always settles:
+ * on a timeout the pipes are destroyed, so a grandchild that outlives the command and
+ * holds them open cannot hang the caller. Output is bounded per stream.
  */
 export const runCommand: CommandRunner = (argv, opts) =>
   new Promise((resolve) => {
     const [file, ...args] = argv;
+    let child: ChildProcess;
+    try {
+      child = spawn(file ?? '', args, {
+        cwd: opts.cwd,
+        env: opts.env,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch {
+      resolve({ exitStatus: 127, output: '', truncated: false, timedOut: false });
+      return;
+    }
+    const chunks: Record<'out' | 'err', Buffer[]> = { out: [], err: [] };
+    const sizes = { out: 0, err: 0 };
+    let overflowed = false;
     let timedOut = false;
-    const timers: NodeJS.Timeout[] = [];
-    // `detached` is honoured by the child_process spawn that execFile wraps, but is missing from
-    // ExecFileOptions in the type definitions.
-    const options: ExecFileOptionsWithStringEncoding & { detached: boolean } = {
-      cwd: opts.cwd,
-      env: opts.env,
-      detached: true,
-      maxBuffer: opts.maxBytes,
-      encoding: 'utf8',
-      windowsHide: true,
+    let settled = false;
+    const timers: { kill?: NodeJS.Timeout; grace?: NodeJS.Timeout } = {};
+
+    const settle = (exitStatus: number): void => {
+      if (settled) return;
+      settled = true;
+      if (timers.kill) clearTimeout(timers.kill);
+      if (timers.grace) clearTimeout(timers.grace);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      const outText = Buffer.concat(chunks.out).toString('utf8');
+      const errText = Buffer.concat(chunks.err).toString('utf8');
+      const o = capStream(outText, opts.maxBytes, overflowed);
+      const e = capStream(errText, Math.max(0, opts.maxBytes - byteLen(o.text)), overflowed);
+      resolve({
+        exitStatus,
+        output: e.text ? `${o.text}\n[stderr]\n${e.text}` : o.text,
+        truncated: o.cut || e.cut,
+        timedOut,
+      });
     };
-    const child = execFile(
-      file ?? '',
-      args,
-      options,
-      (err: ExecFileException | null, stdout: string, stderr: string) => {
-        for (const t of timers) clearTimeout(t);
-        const e = err as { code?: string | number; signal?: string } | null;
-        let exitStatus = 0;
-        let capped = false;
-        if (timedOut) exitStatus = 124;
-        else if (e) {
-          if (e.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-            capped = true;
-            exitStatus = -1;
-          } else if (typeof e.code === 'number') exitStatus = e.code;
-          else exitStatus = e.signal ? -1 : 127;
+
+    const collect =
+      (key: 'out' | 'err') =>
+      (chunk: Buffer): void => {
+        if (sizes[key] < opts.maxBytes) {
+          chunks[key].push(chunk);
+          sizes[key] += chunk.length;
         }
-        const combined = `${stdout ?? ''}${stderr ? `\n[stderr]\n${stderr}` : ''}`;
-        const kept = utf8Prefix(combined, opts.maxBytes);
-        resolve({
-          exitStatus,
-          output: kept,
-          truncated: capped || kept.length < combined.length,
-          timedOut,
-        });
-      },
-    );
-    const killTimer = setTimeout(() => {
+        if (sizes[key] >= opts.maxBytes && !overflowed && chunk.length > 0) {
+          // At or past the cap: more output than we keep may follow, so stop the command.
+          overflowed = true;
+          killGroup(child);
+        }
+      };
+    child.stdout?.on('data', collect('out'));
+    child.stderr?.on('data', collect('err'));
+    child.on('error', () => settle(127));
+    child.on('close', (code) => settle(code ?? -1));
+    // If the pipes stay open after the command exits, settle shortly after the exit.
+    child.on('exit', (code) => {
+      timers.grace = setTimeout(() => settle(code ?? -1), 500);
+    });
+    timers.kill = setTimeout(() => {
       timedOut = true;
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
-        else child.kill('SIGKILL');
-      } catch {
-        child.kill('SIGKILL');
-      }
+      killGroup(child);
+      settle(124);
     }, opts.timeoutMs);
-    timers.push(killTimer);
   });

@@ -42,12 +42,14 @@ import {
   FULL_SHA,
   byteLen,
   dropPartialLine,
+  listRegularFilesAtCommit,
   readBlobAtCommit,
   readDiff,
   resolvePinnedHead,
   runCommand,
   runGit,
   scrubbedEnv,
+  trimTruncated,
   utf8Prefix,
   type CommandRunner,
   type GitRunner,
@@ -77,7 +79,9 @@ export type RefusalReason =
   | 'hardlinked-file'
   | 'revision-unresolved'
   | 'path-case-mismatch'
-  | 'dependency-query-unavailable';
+  | 'dependency-query-unavailable'
+  | 'scope-too-large'
+  | 'run-not-trusted';
 
 export interface EvidenceRefusal {
   reason: RefusalReason;
@@ -146,11 +150,14 @@ export interface ProbeSpawnOpts {
   /** Tools the probe must never be given. Always includes Bash. */
   disallowedTools: readonly string[];
   /**
-   * The only files the probe may open, when it names files. A spawner that
-   * enforces file scope must honour this list.
+   * The only files a probe with file tools may open. Always set for such a probe (today:
+   * `search`). "Tracked" means a regular-file entry (mode 100644 or 100755) in the tree of
+   * the pinned HEAD commit: symlinks and gitlinks are never listed. A spawner that declares
+   * `enforcesFileScope` for the probe's harness must serve committed content, deny symlinks,
+   * hard links and any path not in this list, and deny everything else by default.
    */
   allowedPaths?: readonly string[];
-  /** Set for every probe that is given file tools: it may read tracked files only. */
+  /** Set together with `allowedPaths`: the probe may read tracked (committed) files only. */
   trackedOnly?: boolean;
 }
 
@@ -167,13 +174,18 @@ export interface ProbeSpawnResult {
 /** The only thing the executor needs from a runtime: run one probe. */
 export interface ProbeSpawner {
   /**
-   * True only when the spawner denies by default any file access outside
-   * `allowedPaths` and restricts reads to tracked files when `trackedOnly` is set
-   * (not merely the frontmatter tool ceiling). Strict: anything other than the
-   * literal `true` makes the executor refuse, before any spawn, every probe that
-   * carries `allowedPaths` or `trackedOnly`.
+   * Per harness: true only when the spawner (or its bridge) denies by default any file
+   * access outside `allowedPaths`, serves committed content only, and denies symlinks and
+   * hard links, for probes run on that harness. This is not the frontmatter tool ceiling.
+   * Strict: only the literal `true` for a harness counts. A probe that is given file tools
+   * is refused, before any spawn, when its harness is not declared `true`. A Codex-eligible
+   * probe whose Codex declaration is not `true` runs on `claude-code` instead, and the
+   * entry records the harness that actually ran.
    */
-  readonly enforcesFileScope: boolean;
+  readonly enforcesFileScope: {
+    readonly 'claude-code': boolean;
+    readonly codex: boolean;
+  };
   spawnProbe(opts: ProbeSpawnOpts): Promise<ProbeSpawnResult>;
 }
 
@@ -217,6 +229,12 @@ export interface ExecutorLimits extends Pick<
    * probe with the notice 'No dependency graph data was available'.
    */
   traceWithoutQuery?: 'refuse' | 'degrade';
+  /**
+   * Run probes execute the repository's own scripts as the operator. They run only when
+   * the caller asserts trust with `true` (the staged review wiring sets it only for trusted
+   * sourceKind work); otherwise every run probe is refused. Default false.
+   */
+  runTrusted?: boolean;
   /** Timeout for an allowlisted command the executor runs. Default 600000. */
   runTimeoutMs?: number;
   /**
@@ -228,7 +246,7 @@ export interface ExecutorLimits extends Pick<
 }
 
 export interface ExecutorHooks {
-  /** Tracked files, repo-relative with `/` separators. Default: `git ls-files`. */
+  /** Regular files at the pinned head, repo-relative with `/` separators. Default: `git ls-tree -r`. */
   listTrackedFiles?: (repoRoot: string) => Promise<readonly string[]> | readonly string[];
   /** Paths the diff adds. Default: `git diff --diff-filter=A <mergeBase> HEAD`. */
   listAddedFiles?: (
@@ -275,6 +293,9 @@ export const EVIDENCE_TRUNCATION_MARKER = '[evidence truncated to fit the review
 const CODEX_ELIGIBLE: readonly ProbeType[] = ['read', 'search', 'trace', 'compare'];
 
 const MAX_READ_BYTES_PER_PROBE = 262_144;
+/** Bounds on the allowlist handed to a file-less search probe. */
+const MAX_SCOPE_PATHS = 5000;
+const MAX_SCOPE_BYTES = 200_000;
 const MAX_OBSERVATIONS = 90;
 const MAX_EXCERPTS = 50;
 const MAX_COMMANDS = 20;
@@ -299,30 +320,19 @@ const ALWAYS_DISALLOWED: readonly string[] = [
 /**
  * The tools a probe of this type may use, and the tools it may never use.
  *
- * No probe is ever given Bash. `read`, `search`, `trace` and `compare` get scoped
- * read-type tools (the spawner scopes them with `allowedPaths` and `trackedOnly`);
- * `search` also gets Grep and Glob. A `trace` probe needs a wired dependency query and receives its result,
- * a `compare` probe the diff between the merge-base and the pinned head commit, and a
- * `run` probe the output of the allowlisted command, all produced by the executor
- * and passed as redacted, fenced data. A `run` probe therefore has no tools at all.
+ * No probe is ever given Bash, and no probe is given a file tool that could reach
+ * working-tree content. `read`, `trace`, `compare` and `run` probes get no tools at
+ * all: the executor embeds the committed file content, the dependency query result
+ * (a `trace` probe needs a wired query), the diff between the merge-base and the pinned
+ * head commit, or the output of the allowlisted command it ran, as redacted, fenced data.
+ * Only `search` gets Read, Grep and Glob, scoped by an explicit `allowedPaths` list of
+ * regular files at the pinned head commit.
  */
 export function toolsForProbe(probe: Pick<Probe, 'type'>): {
   tools: string[];
   disallowedTools: string[];
 } {
-  let tools: string[];
-  switch (probe.type) {
-    case 'search':
-      tools = ['Read', 'Grep', 'Glob'];
-      break;
-    case 'read':
-    case 'trace':
-    case 'compare':
-      tools = ['Read'];
-      break;
-    default:
-      tools = [];
-  }
+  const tools = probe.type === 'search' ? ['Read', 'Grep', 'Glob'] : [];
   return { tools, disallowedTools: [...ALWAYS_DISALLOWED] };
 }
 
@@ -375,6 +385,8 @@ async function mapPool<T, R>(
 
 async function gitList(git: GitRunner, repoRoot: string, args: string[]): Promise<string[]> {
   const r = await git(args, { cwd: repoRoot, maxBytes: GIT_MAX_BUFFER, timeoutMs: GIT_TIMEOUT_MS });
+  // A truncated listing would hide files and leave a partial last record: fail closed.
+  if (r.truncated) throw new Error('git listing was truncated');
   return r.stdout
     .toString('utf8')
     .split('\0')
@@ -382,23 +394,26 @@ async function gitList(git: GitRunner, repoRoot: string, args: string[]): Promis
 }
 
 /**
- * The set of repo-relative paths a probe may read: the tracked files plus the
- * paths the diff adds. Fails closed: if either listing cannot be produced, that
- * part of the set is empty, so targets outside it are refused.
+ * The sets of repo-relative paths a probe may read: `all` is the regular files in the
+ * pinned head commit's tree plus the paths the diff adds, and `added` is only the diff's
+ * added paths. The index (`git ls-files`) is never consulted. Fails closed: if a listing
+ * cannot be produced, that part of the set is empty, so targets outside it are refused.
  */
-export async function resolveTargetSet(
+export async function resolveTargetSets(
   limits: Pick<ExecutorLimits, 'repoRoot' | 'mergeBase'>,
   hooks: Pick<ExecutorHooks, 'listTrackedFiles' | 'listAddedFiles' | 'git'> = {},
   pinnedHead?: string,
-): Promise<Set<string>> {
+): Promise<{ all: Set<string>; added: Set<string> }> {
   const git = hooks.git ?? runGit;
-  const set = new Set<string>();
+  const all = new Set<string>();
+  const added = new Set<string>();
   try {
     const tracked = await (
       hooks.listTrackedFiles ??
-      ((root: string) => gitList(git, root, ['ls-files', '-z', '--cached']))
+      ((root: string) =>
+        pinnedHead === undefined ? [] : listRegularFilesAtCommit(git, root, pinnedHead))
     )(limits.repoRoot);
-    for (const p of tracked) set.add(p);
+    for (const p of tracked) all.add(p);
   } catch {
     /* fail closed: nothing tracked is known */
   }
@@ -406,13 +421,10 @@ export async function resolveTargetSet(
   if (mergeBase !== undefined && FULL_SHA.test(mergeBase)) {
     try {
       // The default listing diffs against the pinned head SHA, never a ref name.
-      const head =
-        pinnedHead ??
-        (hooks.listAddedFiles ? undefined : await resolvePinnedHead(git, limits.repoRoot));
-      const added = await (
+      const list =
         hooks.listAddedFiles ??
         ((root: string, base: string) =>
-          head === undefined
+          pinnedHead === undefined
             ? []
             : gitList(git, root, [
                 'diff',
@@ -421,16 +433,26 @@ export async function resolveTargetSet(
                 '--no-ext-diff',
                 '--diff-filter=A',
                 base,
-                head,
+                pinnedHead,
                 '--',
-              ]))
-      )(limits.repoRoot, mergeBase);
-      for (const p of added) set.add(p);
+              ]));
+      for (const p of await list(limits.repoRoot, mergeBase)) {
+        all.add(p);
+        added.add(p);
+      }
     } catch {
       /* fail closed */
     }
   }
-  return set;
+  return { all, added };
+}
+
+export async function resolveTargetSet(
+  limits: Pick<ExecutorLimits, 'repoRoot' | 'mergeBase'>,
+  hooks: Pick<ExecutorHooks, 'listTrackedFiles' | 'listAddedFiles' | 'git'> = {},
+  pinnedHead?: string,
+): Promise<Set<string>> {
+  return (await resolveTargetSets(limits, hooks, pinnedHead)).all;
 }
 
 const foldedCache = new WeakMap<ReadonlySet<string>, Set<string>>();
@@ -607,7 +629,7 @@ export async function readTrackedFile(opts: {
     let text = buf.subarray(0, read).toString('utf8');
     // A cut at the byte limit can land inside a token. Drop the trailing partial line
     // so no fragment of one is ever emitted.
-    if (truncated) text = dropPartialLine(text);
+    if (truncated) text = trimTruncated(text);
     return { ok: true, text, truncated, bytesRead: read };
   } catch {
     return { ok: false, reason: 'unreadable' };
@@ -685,10 +707,24 @@ function truncateWithMarker(s: string, maxBytes: number): { text: string; omitte
 
 // ── Probe output ─────────────────────────────────────────────────────────
 
+/**
+ * The text of the first fenced block, or undefined. Plain string scanning, not a regex: the
+ * input is a model's output, and overlapping quantifiers on it can backtrack badly.
+ */
+function firstFencedBlock(raw: string): string | undefined {
+  const open = raw.indexOf('```');
+  if (open < 0) return undefined;
+  let start = open + 3;
+  if (raw.slice(start, start + 4).toLowerCase() === 'json') start += 4;
+  const close = raw.indexOf('```', start);
+  if (close < 0) return undefined;
+  return raw.slice(start, close).trim();
+}
+
 function parseJsonObject(raw: string): Record<string, unknown> | null {
   const attempts: string[] = [raw.trim()];
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw);
-  if (fenced?.[1]) attempts.push(fenced[1].trim());
+  const fenced = firstFencedBlock(raw);
+  if (fenced) attempts.push(fenced);
   const first = raw.indexOf('{');
   const last = raw.lastIndexOf('}');
   if (first >= 0 && last > first) attempts.push(raw.slice(first, last + 1));
@@ -801,7 +837,8 @@ const OUTPUT_CONTRACT = [
  * whitespace or another suffix, in content that came from outside this module.
  */
 function fenceSafe(s: string): string {
-  return s.replace(/<\s*\/?\s*PROBE_INPUT[^>]*>/gi, '[fence-removed]');
+  // One bounded character class and a bounded tail: no overlapping quantifiers on untrusted text.
+  return s.replace(/<[\s/]*PROBE_INPUT[^>]{0,200}>/gi, '[fence-removed]');
 }
 
 /**
@@ -864,6 +901,16 @@ function emptyEntry(probeId: string): EvidenceEntry {
   };
 }
 
+/** True only when the spawner declares file-scope enforcement for `harness` with the literal `true`. */
+function declaresFileScope(spawner: ProbeSpawner, harness: ExecutorHarness): boolean {
+  const declared = (spawner as { enforcesFileScope?: unknown }).enforcesFileScope;
+  return (
+    typeof declared === 'object' &&
+    declared !== null &&
+    (declared as Record<string, unknown>)[harness] === true
+  );
+}
+
 function selectHarness(probe: Probe, limits: ExecutorLimits): ExecutorHarness {
   const c = limits.codex;
   if (c?.available !== true || c.trusted !== true) return 'claude-code';
@@ -872,11 +919,41 @@ function selectHarness(probe: Probe, limits: ExecutorLimits): ExecutorHarness {
   return (c.probeTypes ?? CODEX_ELIGIBLE).includes(probe.type) ? 'codex' : 'claude-code';
 }
 
+// ── runTrusted (separable) ───────────────────────────────────────────────
+
+/**
+ * Run probes execute the repository's own scripts as the operator, so they are refused
+ * unless the caller asserted trust with `limits.runTrusted === true`. The staged review
+ * wiring must set it only for trusted sourceKind work. Remove this function and its one
+ * call site in `executePlan` to drop the gate.
+ */
+function runTrustRefusal(
+  probe: Probe,
+  limits: Pick<ExecutorLimits, 'runTrusted'>,
+): EvidenceRefusal[] {
+  return probe.type === 'run' && limits.runTrusted !== true
+    ? [{ reason: 'run-not-trusted', target: refusalTarget(probe.id) }]
+    : [];
+}
+
 // ── executePlan ──────────────────────────────────────────────────────────
+
+/** A probe that reads files at head, diffs against it, or searches the tree needs the pinned SHA. */
+function probeNeedsPin(probe: Probe): boolean {
+  return (
+    probe.type === 'compare' ||
+    probe.type === 'search' ||
+    (probe.type !== 'run' && (probe.target?.files ?? []).length > 0)
+  );
+}
 
 /**
  * Run a plan's probes and collect the evidence bundle: one entry per probe, in
  * plan order.
+ *
+ * Run probes execute the repository's own scripts as the operator; the caller must
+ * assert trust (`limits.runTrusted`), and the staged review wiring must set it only for
+ * trusted sourceKind work. Otherwise every run probe is refused.
  *
  * A probe whose targets are refused, or that exceeds the run cap, still has an
  * entry that says so. The plan is re-checked here, not trusted: a plan that
@@ -925,14 +1002,19 @@ export async function executePlan(
   // HEAD is resolved to a commit SHA once. Only this SHA and the code-supplied merge-base
   // are ever used as revisions; nothing revision-related comes from the plan.
   const pinnedHead = await resolvePinnedHead(git, limits.repoRoot);
-  const targetSet = await resolveTargetSet(limits, hooks, pinnedHead);
+  const { all: targetSet, added: addedSet } = await resolveTargetSets(limits, hooks, pinnedHead);
   const mergeBase =
     typeof limits.mergeBase === 'string' && FULL_SHA.test(limits.mergeBase)
       ? limits.mergeBase
       : undefined;
 
   // 1. Refuse before anything is read or spawned.
-  const refusals = plan.probes.map((p) => checkProbeTargets(p, limits, targetSet));
+  const refusals = plan.probes.map((p) =>
+    // Fail closed, and say why: with no pinned head nothing can be resolved at it.
+    probeNeedsPin(p) && pinnedHead === undefined
+      ? [{ reason: 'revision-unresolved' as const, target: 'HEAD' }]
+      : [...checkProbeTargets(p, limits, targetSet), ...runTrustRefusal(p, limits)],
+  );
 
   // 2. Cap run probes, counting only those that would actually spawn.
   const skipped = new Set<number>();
@@ -955,26 +1037,38 @@ export async function executePlan(
         status: 'refused',
         refusals: [{ reason: 'dependency-query-unavailable', target: 'dependency query' }],
       };
-    // Fail closed: a probe that reads files at head, or diffs against it, needs the pinned SHA.
-    const needsPin =
-      probe.type === 'compare' || (probe.type !== 'run' && (probe.target.files ?? []).length > 0);
-    if (needsPin && pinnedHead === undefined)
+    // Fail closed: a probe that reads files at head, diffs against it, or searches the
+    // tree needs the pinned SHA.
+    if (probeNeedsPin(probe) && pinnedHead === undefined)
       return {
         ...emptyEntry(probe.id),
         status: 'refused',
         refusals: [{ reason: 'revision-unresolved', target: 'HEAD' }],
       };
-    // Fail closed: a probe that carries a file scope only runs on a spawner that enforces it.
-    // Every probe that can use Read, Grep or Glob is scope-bearing. A run probe has no tools.
-    const carriesScope = probeUsesFileTools(probe);
-    if (carriesScope && (spawner as { enforcesFileScope?: unknown }).enforcesFileScope !== true)
+
+    // Fail closed: a probe that is given file tools only runs on a harness whose scope the
+    // spawner declares. A Codex-eligible probe whose Codex scope is not declared runs on
+    // claude-code instead; the harness actually used is recorded.
+    const scoped = probeUsesFileTools(probe);
+    let harness = selectHarness(probe, limits);
+    if (scoped && harness === 'codex' && !declaresFileScope(spawner, 'codex'))
+      harness = 'claude-code';
+    if (scoped && !declaresFileScope(spawner, harness))
       return {
         ...emptyEntry(probe.id),
         status: 'refused',
         refusals: [{ reason: 'file-scope-not-enforced', target: refusalTarget(probe.id) }],
       };
+
     try {
-      return await runProbe(probe);
+      let scopePaths: string[] | undefined;
+      if (scoped) {
+        const scope = await searchScope(probe);
+        if ('refusals' in scope)
+          return { ...emptyEntry(probe.id), status: 'refused', refusals: scope.refusals };
+        scopePaths = scope.paths;
+      }
+      return await runProbe(probe, harness, scopePaths);
     } catch {
       return {
         ...emptyEntry(probe.id),
@@ -984,11 +1078,48 @@ export async function executePlan(
     }
   };
 
-  const runProbe = async (probe: Probe): Promise<EvidenceEntry> => {
+  // The regular files at the pinned head, listed once, for probes that are given file tools.
+  let regularFiles: Promise<string[] | undefined> | undefined;
+  const getRegularFiles = (): Promise<string[] | undefined> => {
+    regularFiles ??=
+      pinnedHead === undefined
+        ? Promise.resolve(undefined)
+        : listRegularFilesAtCommit(git, limits.repoRoot, pinnedHead).catch(() => undefined);
+    return regularFiles;
+  };
+
+  /** The explicit allowlist for a probe that is given file tools, or why it is refused. */
+  const searchScope = async (
+    probe: Probe,
+  ): Promise<{ paths: string[] } | { refusals: EvidenceRefusal[] }> => {
+    const regular = await getRegularFiles();
+    if (regular === undefined)
+      return { refusals: [{ reason: 'revision-unresolved', target: 'HEAD' }] };
+    const set = new Set(regular);
+    const named = [...new Set((probe.target.files ?? []).map((f) => f.path))];
+    if (named.length > 0) {
+      const missing = named.filter((n) => !set.has(n));
+      if (missing.length > 0)
+        return {
+          refusals: missing.map((m) => ({ reason: 'not-tracked', target: refusalTarget(m) })),
+        };
+      return { paths: named };
+    }
+    const bytes = regular.reduce((n, r) => n + byteLen(r) + 1, 0);
+    if (regular.length > MAX_SCOPE_PATHS || bytes > MAX_SCOPE_BYTES)
+      return { refusals: [{ reason: 'scope-too-large', target: `${regular.length} paths` }] };
+    return { paths: [...regular].sort() };
+  };
+
+  const runProbe = async (
+    probe: Probe,
+    harness: ExecutorHarness,
+    scopePaths: string[] | undefined,
+  ): Promise<EvidenceEntry> => {
     const files = probe.target.files ?? [];
     const blocks: string[] = [];
     const extraNotes: string[] = [];
-    const allowedPaths = [...new Set(files.map((f) => f.path))];
+    const namedPaths = [...new Set(files.map((f) => f.path))];
 
     // 3. Read target files as committed at the pinned head. A path with no entry in that tree
     // (a path the diff adds that is not committed yet) is read from the working tree, with
@@ -1005,6 +1136,9 @@ export async function executePlan(
         let read: SafeReadResult;
         if (blob.kind === 'ok') read = { ...blob, ok: true };
         else if (blob.kind === 'refused') read = { ok: false, reason: blob.reason };
+        else if (!addedSet.has(f.path))
+          // The working tree is read only for paths the diff adds that the pinned tree lacks.
+          read = { ok: false, reason: 'not-tracked' };
         else
           read = await readTrackedFile({
             repoRoot: limits.repoRoot,
@@ -1034,7 +1168,7 @@ export async function executePlan(
         try {
           result = await hooks.dependencyQuery({
             symbols: probe.target.symbols ?? [],
-            files: allowedPaths,
+            files: namedPaths,
             repoRoot: limits.repoRoot,
           });
         } catch {
@@ -1053,7 +1187,7 @@ export async function executePlan(
             limits.repoRoot,
             mergeBase,
             pinnedHead!,
-            allowedPaths,
+            namedPaths,
             dataBytes,
           );
           blocks.push(
@@ -1077,9 +1211,7 @@ export async function executePlan(
         timeoutMs: runTimeoutMs,
         maxBytes: dataBytes,
       });
-      const output = redactSecrets(
-        result.truncated ? dropPartialLine(result.output) : result.output,
-      );
+      const output = redactSecrets(result.truncated ? trimTruncated(result.output) : result.output);
       const cut = truncateWithMarker(output, commandOutputBytes);
       runRecord = {
         command,
@@ -1098,7 +1230,6 @@ export async function executePlan(
       );
     }
 
-    const harness = selectHarness(probe, limits);
     const agent: ExecutorAgent = harness === 'codex' ? 'review-executor-codex' : 'review-executor';
     const { tools, disallowedTools } = toolsForProbe(probe);
     const prompt = buildPrompt(probe, blocks, extraNotes);
@@ -1113,8 +1244,7 @@ export async function executePlan(
       tools,
       disallowedTools,
       ...(harness === 'claude-code' ? { model } : {}),
-      ...(probeUsesFileTools(probe) ? { trackedOnly: true } : {}),
-      ...(probeUsesFileTools(probe) && files.length > 0 ? { allowedPaths } : {}),
+      ...(scopePaths ? { allowedPaths: scopePaths, trackedOnly: true } : {}),
     };
 
     const started = now();

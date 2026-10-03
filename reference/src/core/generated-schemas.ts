@@ -7964,6 +7964,8 @@ export const reviewEvidenceV1Schema = {
                   'revision-unresolved',
                   'path-case-mismatch',
                   'dependency-query-unavailable',
+                  'scope-too-large',
+                  'run-not-trusted',
                 ],
               },
               target: { type: 'string', maxLength: 300 },

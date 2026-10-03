@@ -66,7 +66,7 @@ sections 5 and 6, and the OQ-3 resolution.
 5. **Ledger**: `ReviewLedgerRole` gains `staged`; `reviews-analysis` treats the
    synthesizer leaf as the verdict and counts per role as before.
 6. **Independence**: tiers computed per leaf; the set's tier is the weakest leaf.
-7. Production ProbeSpawner adapter(s) for the harnesses Step 7 uses; the adapter must enforce allowedPaths and trackedOnly (deny by default, not only the frontmatter tool ceiling) and declare that it does.
+7. Production ProbeSpawner adapter(s) for the harnesses Step 7 uses; the adapter must enforce allowedPaths and trackedOnly (deny by default, not only the frontmatter tool ceiling) and declare that it does, per harness: `enforcesFileScope` is a record keyed by harness (`claude-code`, `codex`), and a harness that does not declare true gets no scope-bearing probes. The executor sets `limits.runTrusted` only for trusted sourceKind work; run probes are refused otherwise.
 
 ## Acceptance Criteria
 - [ ] When `buildFallbackPlan` (AISDLC-673) returns `{ ok: false, rejections }`, the staged review does not run and the existing reviewer set handles the change; a test covers the fail-closed path and the rejections are surfaced in the dispatch record.
