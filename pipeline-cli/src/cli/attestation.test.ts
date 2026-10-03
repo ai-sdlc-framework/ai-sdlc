@@ -15,7 +15,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   appendLeaf,
   appendLeafForPatchId,
@@ -2991,6 +2991,132 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
       'process.exit(1)',
     );
     expect(flushStderr()).toMatch(/--agent-id may only contain/);
+  });
+});
+
+describe('emit-leaf — worktree layout end to end (markers under the main checkout)', () => {
+  let mainRoot = '';
+  let worktreeRoot = '';
+
+  beforeEach(() => {
+    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'emit-leaf-worktree-home-'));
+    mainRoot = mkdtempSync(join(tmpdir(), 'emit-leaf-main-'));
+    const git = (args: string[], cwd: string): string =>
+      execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git(['init', '-q', '-b', 'main'], mainRoot);
+    git(['config', 'user.email', 'fixture@example.invalid'], mainRoot);
+    git(['config', 'user.name', 'Fixture'], mainRoot);
+    writeFileSync(join(mainRoot, 'README.md'), 'fixture\n');
+    git(['add', '.'], mainRoot);
+    git(['commit', '-q', '-m', 'init'], mainRoot);
+    worktreeRoot = join(mainRoot, '.worktrees', 'task-1');
+    git(['worktree', 'add', '-q', '-b', 'task-1', worktreeRoot], mainRoot);
+    // git may report the realpath (macOS /var -> /private/var); use what git reports.
+    const common = git(['rev-parse', '--git-common-dir'], worktreeRoot).trim();
+    mainRoot = join(common, '..');
+    process.env['REPO_ROOT'] = worktreeRoot;
+  });
+
+  afterEach(() => {
+    rmSync(mainRoot, { recursive: true, force: true });
+    rmSync(fakeHomeDirForHarnessTests, { recursive: true, force: true });
+    fakeHomeDirForHarnessTests = '';
+  });
+
+  function reviewerRun(role: string, agentId: string, nonce: string, firedAt: Date): string {
+    const markerDir = subagentSessionsDir(mainRoot);
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      join(markerDir, `${agentId}.json`),
+      JSON.stringify({ agentId, agentType: `ai-sdlc:${role}`, firedAt: firedAt.toISOString() }),
+    );
+    const subagents = join(
+      claudeProjectsDir(),
+      claudeProjectSlug(resolve(mainRoot)),
+      'session-exec',
+      'subagents',
+    );
+    mkdirSync(subagents, { recursive: true });
+    const content = `${role} review ${nonceMarkerLiteral(nonce)}\n`;
+    writeFileSync(join(subagents, `agent-${agentId}.jsonl`), content);
+    writeFileSync(
+      join(subagents, `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: `ai-sdlc:${role}` }),
+    );
+    return createHash('sha256').update(content).digest('hex');
+  }
+
+  async function emitInWorktree(reviewer: string, nonce: string): Promise<void> {
+    const dir = join(worktreeRoot, '.ai-sdlc', 'transcripts', 'task-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${reviewer}.jsonl`), `{"persisted":"${reviewer}"}\n`);
+    const verdicts = join(worktreeRoot, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdicts, { recursive: true });
+    const verdictPath = join(verdicts, `${reviewer}-task-1.json`);
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+    await buildAttestationCli([
+      'emit-leaf',
+      '--repo-root',
+      worktreeRoot,
+      '--task-id',
+      'TASK-1',
+      '--reviewer',
+      reviewer,
+      '--transcript-path',
+      join(dir, `${reviewer}.jsonl`),
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'f'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--nonce',
+      nonce,
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+  }
+
+  it('three reviewers spawned seconds apart: every leaf is independent and carries its own transcript hash', async () => {
+    const nonce = 'a7'.repeat(32);
+    const now = Date.now();
+    const expected: Record<string, string> = {
+      'security-reviewer': reviewerRun('security-reviewer', 'aaa111', nonce, new Date(now - 6000)),
+      'code-reviewer': reviewerRun('code-reviewer', 'bbb222', nonce, new Date(now - 4000)),
+      'test-reviewer': reviewerRun('test-reviewer', 'ccc333', nonce, new Date(now - 2000)),
+    };
+
+    await emitInWorktree('code-reviewer', nonce);
+    await emitInWorktree('test-reviewer', nonce);
+    await emitInWorktree('security-reviewer', nonce);
+
+    const leaves = loadLeavesUnderTest(worktreeRoot);
+    expect(leaves).toHaveLength(3);
+    for (const leaf of leaves) {
+      expect(leaf.verdictClass, leaf.reviewerName).toBe('independent');
+      expect(leaf.independenceTier, leaf.reviewerName).toBe('attested');
+      expect(leaf.harnessTranscriptHash, leaf.reviewerName).toBe(expected[leaf.reviewerName]);
+    }
+    expect(readdirSync(subagentSessionsDir(mainRoot))).toEqual([]);
+  });
+
+  it("another task's reviewer marker in the main checkout does not make this task's leaf independent", async () => {
+    reviewerRun('code-reviewer', 'other1', 'c9'.repeat(32), new Date());
+    await emitInWorktree('code-reviewer', 'e3'.repeat(32));
+
+    const leaves = loadLeavesUnderTest(worktreeRoot);
+    expect(leaves[0].verdictClass).toBe('self-authored');
+    expect(leaves[0].independenceTier).toBeUndefined();
+    expect(leaves[0].harnessTranscriptHash).toBeNull();
+    expect(readdirSync(subagentSessionsDir(mainRoot))).toEqual(['other1.json']);
   });
 });
 

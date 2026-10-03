@@ -182,7 +182,25 @@ marker for that reviewer's run. The marker is selected by identity:
 | --- | --- |
 | `--reviewer` | The marker's role must be this reviewer. A plugin prefix (`ai-sdlc:code-reviewer`) is ignored. |
 | `--agent-id`, or the `<transcript>.agent-id` file that `persist-reviewer-artifacts.sh` writes | Only the marker and harness transcript of that agent run are used. |
-| Neither id source | The most recent unconsumed marker of the reviewer's role inside the 30-minute window. |
+| Neither id source | The unconsumed markers of the reviewer's role inside the 30-minute window are tried, most recent first. |
+
+A marker is credited as `independent` in one of two ways:
+
+1. **Nonce-verified (any search location).** The marker's own harness transcript
+   contains this leaf's diff-binding nonce, the literal the coordinator embeds in the
+   reviewer prompt before the reviewer runs. That proves the run reviewed this diff. The
+   leaf gets that transcript's hash as `harnessTranscriptHash`, and that marker is
+   consumed.
+2. **Local marker (under `--repo-root` only).** With no nonce-verified marker, a marker of
+   the reviewer's role under `--repo-root` itself still earns `independent`, with
+   `harnessTranscriptHash: null`, as before.
+
+A marker under the main checkout or `--project-dir` is never credited without the nonce.
+Those directories are shared by every task run from the same checkout, and role and
+timing cannot tell this task's reviewer from another task's. If a leaf comes out
+`self-authored` in the worktree layout, check that the reviewer prompt carried the nonce
+marker and that the same nonce was passed to `emit-leaf --nonce`.
+
 
 Markers are searched under `--repo-root`, under the main checkout when `--repo-root` is
 a worktree, and under `--project-dir` when given. The harness writes them under the
@@ -190,9 +208,11 @@ directory the Claude Code session was started in, which in the worktree layout i
 main checkout. A session started somewhere else (for example a parent folder of the
 repository) needs `--project-dir <that folder>`.
 
-Reviewers can run in parallel and their leaves can be emitted back to back. Each leaf's
-`harnessTranscriptHash` is the hash of its own reviewer's harness transcript; the session
-directory is found by the agent id, not by which session was written to last.
+The reviewers of one task can run in parallel and their leaves can be emitted back to
+back. Each leaf's `harnessTranscriptHash` is the hash of its own reviewer's harness
+transcript; the session directory is found by the agent id, not by which session was
+written to last. Several tasks can run from one checkout at the same time: a leaf binds
+only to a run whose transcript carries its own task's nonce.
 
 ## See also
 

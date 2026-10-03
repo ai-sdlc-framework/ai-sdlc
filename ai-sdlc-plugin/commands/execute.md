@@ -1204,16 +1204,22 @@ Resolve each reviewer's `<agent-id>` from the `SubagentStart`-hook marker the ha
      } catch {}
      const want = process.argv[2];
      const bare = (t) => String(t || "").split(":").pop();
-     let best = null;
+     const found = new Map();
      for (const root of roots) {
        const dir = join(root, ".ai-sdlc", "subagent-sessions");
        for (const f of (() => { try { return readdirSync(dir); } catch { return []; } })()) {
          if (!f.endsWith(".json")) continue;
          let m; try { m = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
          if (bare(m.agentType) !== want || !m.agentId) continue;
-         if (!best || String(m.firedAt) > String(best.firedAt)) best = m;
+         found.set(m.agentId, m);
        }
      }
+     // The main checkout is shared by every task run from it. More than one
+     // marker of this role means another task's (or an earlier round's)
+     // reviewer is in there too, and nothing here can tell them apart.
+     // Refuse instead of guessing: use the agentId the Agent tool returned.
+     if (found.size > 1) { process.stderr.write("ambiguous: " + found.size + " SubagentStart markers for agentType=" + want + " (" + [...found.keys()].join(", ") + "); pass the agentId captured from this reviewer's Agent-tool result\n"); process.exit(1); }
+     const best = [...found.values()][0] || null;
      if (!best) { process.stderr.write("no SubagentStart marker for agentType=" + want + "\n"); process.exit(1); }
      process.stdout.write(best.agentId);
    ' "$WORKTREE_PATH" "$AGENT_NAME")
@@ -1230,7 +1236,7 @@ bash ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh \
   --verdict-file "/tmp/verdict-${TASK_ID}-${AGENT_NAME}.json"
 ```
 
-The helper also records the agent id in `$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.agent-id`. Step 7c's `emit-leaf` reads that file and binds the leaf to exactly this reviewer run: only that agent's `SubagentStart` marker and harness transcript are used. Without it `emit-leaf` matches the marker by reviewer role. Reviewers may therefore run in parallel and their leaves may be emitted back to back; there is no need to stagger them. Always pass the agent id the Agent tool returned for THIS reviewer — passing another reviewer's id yields a `self-authored` leaf.
+The helper also records the agent id in `$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.agent-id`. Step 7c's `emit-leaf` reads that file and binds the leaf to exactly this reviewer run: only that agent's `SubagentStart` marker and harness transcript are used. Without it `emit-leaf` matches the marker by reviewer role. Reviewers of one task may therefore run in parallel and their leaves may be emitted back to back; there is no need to stagger them. Always pass the agent id the Agent tool returned for THIS reviewer of THIS task. The main checkout's marker directory is shared by every task run from it, so `emit-leaf` credits a marker found there only when that run's own harness transcript contains this task's diff-binding nonce (the `$PR_NONCE_MARKER` embedded in the reviewer prompt in Step 7b). A wrong id — another reviewer's, or the same reviewer role from another task — yields a `self-authored` leaf with no `harnessTranscriptHash`.
 
 This mkdir's the destination directories, copies the resolved harness transcript to `$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl`, and copies the verdict to `$WORKTREE_PATH/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json` — exactly the paths Step 7c reads. It exits non-zero with an actionable message if no harness transcript is found for the agent-id or the verdict file is missing; treat a non-zero exit as a real failure of this step (not a benign skip) and surface it to the operator before proceeding to Step 7c.
 

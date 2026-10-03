@@ -170,6 +170,8 @@ export function subagentSessionsDir(repoRoot: string): string {
  * refused before it is compared or used in a path.
  */
 export const AGENT_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+// Not to be confused with the stricter `AGENT_ID_PATTERN` in
+// `orchestrator/reconcile.ts`, which gates the ids reconcile forwards.
 
 /** What a caller knows about the reviewer run a marker must belong to. */
 export interface SubagentMarkerQuery {
@@ -218,10 +220,23 @@ export interface SubagentMarkerSelection {
  * skipped, and `null` is returned when nothing qualifies. It never throws.
  */
 export function selectSubagentMarker(query: SubagentMarkerQuery): SubagentMarkerSelection | null {
+  return listSubagentMarkerCandidates(query)[0] ?? null;
+}
+
+/**
+ * Every marker that qualifies for `query`, best first (the order
+ * {@link selectSubagentMarker} documents). A caller that must check each
+ * candidate against further evidence — the diff-binding nonce in the
+ * candidate's harness transcript — walks this list instead of trusting the
+ * first entry. Read-only; returns an empty list on any error.
+ */
+export function listSubagentMarkerCandidates(
+  query: SubagentMarkerQuery,
+): SubagentMarkerSelection[] {
   const expectedRole =
     query.reviewerName !== undefined ? stripAgentTypeNamespace(query.reviewerName) : undefined;
-  if (query.reviewerName !== undefined && !expectedRole) return null;
-  if (query.agentId !== undefined && !AGENT_ID_PATTERN.test(query.agentId)) return null;
+  if (query.reviewerName !== undefined && !expectedRole) return [];
+  if (query.agentId !== undefined && !AGENT_ID_PATTERN.test(query.agentId)) return [];
 
   const seenRoots = new Set<string>();
   const seenFiles = new Set<string>();
@@ -286,19 +301,32 @@ export function selectSubagentMarker(query: SubagentMarkerQuery): SubagentMarker
     }
   }
 
-  if (candidates.length === 0) return null;
   candidates.sort((a, b) => {
     if (a.typed !== b.typed) return a.typed ? -1 : 1;
     if (a.firedAtMs !== b.firedAtMs) return b.firedAtMs - a.firedAtMs;
     if (a.marker.agentId !== b.marker.agentId) return a.marker.agentId < b.marker.agentId ? -1 : 1;
     return a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0;
   });
-  const best = candidates[0]!;
-  return { marker: best.marker, filePath: best.filePath };
+  return candidates.map((c) => ({ marker: c.marker, filePath: c.filePath }));
 }
 
 /**
- * Determine the verdict class for a transcript leaf.
+ * Consume (delete) a marker so it cannot legitimize a second leaf.
+ * Best-effort: a failed deletion is not an error for the caller.
+ */
+export function consumeSubagentMarker(filePath: string): void {
+  try {
+    unlinkSync(filePath);
+  } catch {
+    // The marker counts as consumed for this call. A re-use would need a
+    // second matching leaf inside the same window, the same residual gap as
+    // before.
+  }
+}
+
+/**
+ * Determine the verdict class for a transcript leaf from markers under
+ * `repoRoot` ONLY.
  *
  * Looks for an UNCONSUMED reviewer marker (see {@link selectSubagentMarker})
  * whose `firedAt` is within `MARKER_MAX_AGE_MS` of `transcriptMtimeMs`
@@ -309,9 +337,15 @@ export function selectSubagentMarker(query: SubagentMarkerQuery): SubagentMarker
  * Callers that know which reviewer the leaf is for pass `reviewerName` (and
  * `agentId` when they have it); the marker must then belong to that
  * reviewer, so one reviewer's marker is never consumed for another's leaf.
- * `extraRoots` adds directories to search besides `repoRoot` — the main
- * checkout when `repoRoot` is a task worktree. A call without `reviewerName`
- * keeps the earlier behaviour of accepting any reviewer-role marker.
+ * A call without `reviewerName` keeps the earlier behaviour of accepting any
+ * reviewer-role marker.
+ *
+ * This function deliberately does NOT search the main checkout or any other
+ * directory shared between tasks. A marker in a shared directory may belong
+ * to another task's reviewer, and role plus timing cannot tell them apart.
+ * Shared-directory markers are credited only by
+ * `bindLeafToReviewerRun` (harness-transcript.ts), which additionally
+ * requires the diff-binding nonce in that marker's own harness transcript.
  *
  * Fail-safe: any error (missing dir, unreadable file, malformed JSON,
  * missing/invalid `firedAt`) is treated as "no marker" and this function
@@ -322,12 +356,11 @@ export function determineVerdictClass(opts: {
   transcriptMtimeMs: number;
   reviewerName?: string;
   agentId?: string;
-  extraRoots?: readonly string[];
 }): VerdictClass {
   let selection: SubagentMarkerSelection | null;
   try {
     selection = selectSubagentMarker({
-      roots: [opts.repoRoot, ...(opts.extraRoots ?? [])],
+      roots: [opts.repoRoot],
       transcriptMtimeMs: opts.transcriptMtimeMs,
       reviewerName: opts.reviewerName,
       agentId: opts.agentId,
@@ -338,15 +371,7 @@ export function determineVerdictClass(opts: {
     return 'self-authored';
   }
   if (!selection) return 'self-authored';
-
-  // Consume exactly the selected marker so it cannot be re-used for another leaf.
-  try {
-    unlinkSync(selection.filePath);
-  } catch {
-    // Best-effort: if deletion fails the marker is still considered consumed
-    // for this call; a re-use would need a second matching leaf inside the
-    // same window, which is the same residual gap as before.
-  }
+  consumeSubagentMarker(selection.filePath);
   return 'independent';
 }
 

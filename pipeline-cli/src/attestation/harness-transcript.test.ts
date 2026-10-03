@@ -41,6 +41,7 @@ vi.mock('node:os', async (importOriginal) => {
 
 const {
   HARNESS_REVIEWER_AGENT_TYPES,
+  bindLeafToReviewerRun,
   claudeProjectSlug,
   claudeProjectsDir,
   computeHarnessTranscriptHash,
@@ -1162,6 +1163,196 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
     } finally {
       rmSync(sessionDir, { recursive: true, force: true });
     }
+  });
+
+  it('bindLeafToReviewerRun: a nonce-verified marker in the main checkout gives the hash and independent, and is consumed', () => {
+    const now = Date.now();
+    const nonce = 'd1'.repeat(32);
+    const expected = setUpThreeReviewers(now, nonce);
+    const resolvedMainRoot = resolveMainCheckoutRoot(worktreeRoot) as string;
+
+    const bound = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      reviewerName: 'code-reviewer',
+    });
+    expect(bound.verdictClass).toBe('independent');
+    expect(bound.harnessTranscriptHash).toBe(expected['code-reviewer']);
+    expect(readdirSync(subagentSessionsDir(resolvedMainRoot)).sort()).toEqual([
+      'agent0secu.json',
+      'agent2test.json',
+    ]);
+
+    // The consumed marker cannot back a second leaf.
+    const again = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      reviewerName: 'code-reviewer',
+    });
+    expect(again.verdictClass).toBe('self-authored');
+    expect(again.harnessTranscriptHash).toBeNull();
+  });
+
+  it("bindLeafToReviewerRun: another task's reviewer marker in the shared main checkout is never credited", () => {
+    const now = Date.now();
+    const taskANonce = 'a0'.repeat(32);
+    const taskBNonce = 'b0'.repeat(32);
+    // Task A's reviewers ran from the same main checkout, moments ago.
+    setUpThreeReviewers(now, taskANonce);
+    const resolvedMainRoot = resolveMainCheckoutRoot(worktreeRoot) as string;
+
+    // Task B (this worktree) emits a code-reviewer leaf with its own nonce.
+    // No reviewer of task B wrote a marker.
+    const bound = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce: taskBNonce,
+      reviewerName: 'code-reviewer',
+    });
+    expect(bound.verdictClass).toBe('self-authored');
+    expect(bound.harnessTranscriptHash).toBeNull();
+    expect(bound.reason).toContain('diff-binding nonce not found');
+    // Task A's markers are untouched and still bind task A's own leaves.
+    expect(readdirSync(subagentSessionsDir(resolvedMainRoot))).toHaveLength(3);
+    expect(
+      bindLeafToReviewerRun({
+        repoRoot: worktreeRoot,
+        transcriptMtimeMs: now,
+        nonce: taskANonce,
+        reviewerName: 'code-reviewer',
+      }).verdictClass,
+    ).toBe('independent');
+  });
+
+  it("bindLeafToReviewerRun: with two tasks' code reviewers in the shared directory, each nonce finds its own run even when the other is newer", () => {
+    const now = Date.now();
+    const resolvedMainRoot = resolveMainCheckoutRoot(worktreeRoot) as string;
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(resolvedMainRoot));
+    const runs = [
+      { agentId: 'taska', nonce: 'a1'.repeat(32), firedAt: now - 30_000 },
+      { agentId: 'taskb', nonce: 'b1'.repeat(32), firedAt: now - 1_000 },
+    ];
+    const hashes: Record<string, string> = {};
+    for (const run of runs) {
+      writeMarker(resolvedMainRoot, `${run.agentId}.json`, {
+        agentId: run.agentId,
+        agentType: 'ai-sdlc:code-reviewer',
+        firedAt: new Date(run.firedAt).toISOString(),
+      });
+      const content = `${run.agentId} ${nonceMarkerLiteral(run.nonce)}\n`;
+      writeHarnessTranscript({
+        projectSlugDir: slugDir,
+        sessionId: 'session-shared',
+        agentId: run.agentId,
+        content,
+        meta: { agentType: 'ai-sdlc:code-reviewer' },
+      });
+      hashes[run.agentId] = sha256Hex(content);
+    }
+
+    // Task A's leaf: the newest marker is task B's, and must be skipped.
+    const a = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce: runs[0]!.nonce,
+      reviewerName: 'code-reviewer',
+    });
+    expect(a.verdictClass).toBe('independent');
+    expect(a.harnessTranscriptHash).toBe(hashes['taska']);
+    expect(readdirSync(subagentSessionsDir(resolvedMainRoot))).toEqual(['taskb.json']);
+
+    // An agent id of the other task's run does not help: its transcript lacks this nonce.
+    const crossed = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce: runs[0]!.nonce,
+      reviewerName: 'code-reviewer',
+      agentId: 'taskb',
+    });
+    expect(crossed.verdictClass).toBe('self-authored');
+    expect(crossed.harnessTranscriptHash).toBeNull();
+    expect(readdirSync(subagentSessionsDir(resolvedMainRoot))).toEqual(['taskb.json']);
+  });
+
+  it('bindLeafToReviewerRun: without a nonce match, only a marker under repoRoot itself still earns independent', () => {
+    const now = Date.now();
+    const nonce = 'd3'.repeat(32);
+    writeMarker(worktreeRoot, 'local.json', {
+      agentId: 'local',
+      agentType: 'code-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+    const bound = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      reviewerName: 'code-reviewer',
+    });
+    expect(bound.verdictClass).toBe('independent');
+    expect(bound.harnessTranscriptHash).toBeNull();
+    expect(readdirSync(subagentSessionsDir(worktreeRoot))).toEqual([]);
+  });
+
+  it('bindLeafToReviewerRun: an untyped marker with a nonce-verified transcript gives the hash but not independent', () => {
+    const now = Date.now();
+    const nonce = 'd4'.repeat(32);
+    const resolvedMainRoot = resolveMainCheckoutRoot(worktreeRoot) as string;
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(resolvedMainRoot));
+    writeMarker(resolvedMainRoot, 'legacy.json', {
+      agentId: 'legacy',
+      firedAt: new Date(now).toISOString(),
+    });
+    const content = `legacy ${nonceMarkerLiteral(nonce)}\n`;
+    writeHarnessTranscript({
+      projectSlugDir: slugDir,
+      sessionId: 's',
+      agentId: 'legacy',
+      content,
+      meta: { agentType: 'ai-sdlc:code-reviewer' },
+    });
+    const bound = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      reviewerName: 'code-reviewer',
+    });
+    expect(bound.harnessTranscriptHash).toBe(sha256Hex(content));
+    expect(bound.verdictClass).toBe('self-authored');
+    expect(readdirSync(subagentSessionsDir(resolvedMainRoot))).toEqual(['legacy.json']);
+  });
+
+  it('bindLeafToReviewerRun binds a -codex reviewer to its own marker, not the plain role', () => {
+    const now = Date.now();
+    const nonce = 'd5'.repeat(32);
+    const resolvedMainRoot = resolveMainCheckoutRoot(worktreeRoot) as string;
+    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(resolvedMainRoot));
+    const contents: Record<string, string> = {};
+    for (const role of ['code-reviewer', 'code-reviewer-codex']) {
+      writeMarker(resolvedMainRoot, `${role}.json`, {
+        agentId: role,
+        agentType: `ai-sdlc:${role}`,
+        firedAt: new Date(now).toISOString(),
+      });
+      contents[role] = `${role} ${nonceMarkerLiteral(nonce)}\n`;
+      writeHarnessTranscript({
+        projectSlugDir: slugDir,
+        sessionId: 's',
+        agentId: role,
+        content: contents[role]!,
+        meta: { agentType: `ai-sdlc:${role}` },
+      });
+    }
+    const bound = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce,
+      reviewerName: 'code-reviewer-codex',
+    });
+    expect(bound.verdictClass).toBe('independent');
+    expect(bound.harnessTranscriptHash).toBe(sha256Hex(contents['code-reviewer-codex']!));
+    expect(readdirSync(subagentSessionsDir(resolvedMainRoot))).toEqual(['code-reviewer.json']);
   });
 
   it('markerSearchRoots lists the main checkout and the override, never repoRoot itself', () => {

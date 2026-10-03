@@ -108,9 +108,14 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
   REVIEWER_AGENT_TYPES,
+  consumeSubagentMarker,
+  determineVerdictClass,
+  listSubagentMarkerCandidates,
   selectSubagentMarker,
   stripAgentTypeNamespace,
   type ReviewerAgentType,
+  type SubagentMarkerSelection,
+  type VerdictClass,
 } from './verdict-class.js';
 
 /**
@@ -268,12 +273,24 @@ export function markerSearchRoots(opts: {
   repoRoot: string;
   projectDirOverride?: string;
 }): string[] {
-  const own = resolve(opts.repoRoot);
+  // Compare on real paths so one directory is never listed twice under two
+  // spellings (git reports /private/var/... where the caller passed /var/...).
+  const real = (dir: string): string => {
+    try {
+      return realpathSync(dir);
+    } catch {
+      return resolve(dir);
+    }
+  };
+  const own = real(opts.repoRoot);
   const roots: string[] = [];
+  const seen = new Set<string>([own]);
   const add = (dir: string | null | undefined): void => {
     if (!dir) return;
-    const abs = resolve(dir);
-    if (abs !== own && !roots.includes(abs)) roots.push(abs);
+    const key = real(dir);
+    if (seen.has(key)) return;
+    seen.add(key);
+    roots.push(resolve(dir));
   };
   add(resolveMainCheckoutRoot(opts.repoRoot));
   add(opts.projectDirOverride);
@@ -606,27 +623,18 @@ export interface ComputeHarnessTranscriptHashResult {
  * over-claims. See the module docblock for the full mechanism and honest
  * limits.
  */
-export function computeHarnessTranscriptHash(
+/**
+ * Check ONE marker against the harness evidence: its transcript must resolve
+ * inside the trusted project directory, the role the harness recorded must be
+ * a reviewer role (and the leaf's reviewer, when known), and the transcript
+ * must contain the diff-binding nonce. Returns the transcript hash, or `null`
+ * with the reason. Never throws.
+ */
+function hashForMarker(
+  marker: HarnessMarkerMatch,
   opts: ComputeHarnessTranscriptHashOptions,
 ): ComputeHarnessTranscriptHashResult {
   try {
-    const marker = findMatchingSubagentMarker({
-      repoRoot: opts.repoRoot,
-      transcriptMtimeMs: opts.transcriptMtimeMs,
-      reviewerName: opts.reviewerName,
-      agentId: opts.agentId,
-      extraRoots: markerSearchRoots({
-        repoRoot: opts.repoRoot,
-        projectDirOverride: opts.projectDirOverride,
-      }),
-    });
-    if (!marker) {
-      return {
-        harnessTranscriptHash: null,
-        reason: 'no matching SubagentStart marker found within the timing window',
-      };
-    }
-
     const resolved = resolveHarnessTranscriptPath({
       repoRoot: opts.repoRoot,
       agentId: marker.agentId,
@@ -695,4 +703,125 @@ export function computeHarnessTranscriptHash(
       reason: `unexpected error during harness-transcript resolution: ${String(err)}`,
     };
   }
+}
+
+/** Markers that could belong to this leaf's reviewer run, best first. */
+function markerCandidates(opts: ComputeHarnessTranscriptHashOptions): SubagentMarkerSelection[] {
+  return listSubagentMarkerCandidates({
+    roots: [
+      opts.repoRoot,
+      ...markerSearchRoots({
+        repoRoot: opts.repoRoot,
+        projectDirOverride: opts.projectDirOverride,
+      }),
+    ],
+    transcriptMtimeMs: opts.transcriptMtimeMs,
+    reviewerName: opts.reviewerName,
+    agentId: opts.agentId,
+    // Legacy markers carry no role; hashForMarker then checks the harness's
+    // own `.meta.json` role claim before trusting the transcript.
+    allowUntyped: true,
+  });
+}
+
+/** The candidate whose harness transcript proves it belongs to this leaf, if any. */
+function findNonceVerifiedMarker(opts: ComputeHarnessTranscriptHashOptions): {
+  selection: SubagentMarkerSelection | null;
+  result: ComputeHarnessTranscriptHashResult;
+} {
+  const candidates = markerCandidates(opts);
+  if (candidates.length === 0) {
+    return {
+      selection: null,
+      result: {
+        harnessTranscriptHash: null,
+        reason: 'no matching SubagentStart marker found within the timing window',
+      },
+    };
+  }
+  let firstFailure: ComputeHarnessTranscriptHashResult | null = null;
+  for (const selection of candidates) {
+    const result = hashForMarker(selection.marker, opts);
+    if (result.harnessTranscriptHash) return { selection, result };
+    firstFailure ??= result;
+  }
+  return { selection: null, result: firstFailure as ComputeHarnessTranscriptHashResult };
+}
+
+export function computeHarnessTranscriptHash(
+  opts: ComputeHarnessTranscriptHashOptions,
+): ComputeHarnessTranscriptHashResult {
+  try {
+    // Every candidate marker is checked, not only the first: when several
+    // tasks share a main checkout, the most recent marker of a role may be
+    // another task's reviewer, whose transcript does not carry this nonce.
+    return findNonceVerifiedMarker(opts).result;
+  } catch (err) {
+    return {
+      harnessTranscriptHash: null,
+      reason: `unexpected error during harness-transcript resolution: ${String(err)}`,
+    };
+  }
+}
+
+export interface LeafBinding extends ComputeHarnessTranscriptHashResult {
+  verdictClass: VerdictClass;
+}
+
+/**
+ * Decide, in ONE selection, which reviewer run a leaf belongs to, and derive
+ * both `harnessTranscriptHash` and `verdictClass` from it.
+ *
+ * 1. Among the markers of the leaf's reviewer (under `repoRoot`, the main
+ *    checkout and `--project-dir`), find one whose own harness transcript
+ *    carries this leaf's diff-binding nonce. That run reviewed THIS diff.
+ *    The hash is that transcript's; the class is `independent` when the
+ *    marker is typed; exactly that marker is consumed.
+ * 2. Otherwise the hash is `null`, and the class falls back to
+ *    {@link determineVerdictClass}: a role-matched marker under `repoRoot`
+ *    itself. Markers in directories shared between tasks are NOT credited
+ *    without the nonce, because role and timing cannot tell this task's
+ *    reviewer from another task's.
+ *
+ * Deriving both fields from the same marker also removes the window in which
+ * a parallel `emit-leaf` could consume the marker between two separate
+ * selections. Never throws.
+ */
+export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions): LeafBinding {
+  let found: ReturnType<typeof findNonceVerifiedMarker>;
+  try {
+    found = findNonceVerifiedMarker(opts);
+  } catch (err) {
+    found = {
+      selection: null,
+      result: {
+        harnessTranscriptHash: null,
+        reason: `unexpected error during harness-transcript resolution: ${String(err)}`,
+      },
+    };
+  }
+
+  if (found.selection && found.result.harnessTranscriptHash) {
+    const role = stripAgentTypeNamespace(found.selection.marker.agentType);
+    const typedReviewer =
+      role !== null && HARNESS_REVIEWER_AGENT_TYPES.includes(role as HarnessReviewerAgentType);
+    if (typedReviewer) {
+      consumeSubagentMarker(found.selection.filePath);
+      return { ...found.result, verdictClass: 'independent' };
+    }
+    // An untyped (legacy) marker backs the hash through the harness's own
+    // role claim, but it never earned `independent` on its own and still
+    // does not. No other marker is consulted: one leaf, one run.
+    return { ...found.result, verdictClass: 'self-authored' };
+  }
+
+  return {
+    ...found.result,
+    verdictClass: determineVerdictClass({
+      repoRoot: opts.repoRoot,
+      transcriptMtimeMs: opts.transcriptMtimeMs,
+      reviewerName: opts.reviewerName,
+      agentId: opts.agentId,
+    }),
+  };
 }

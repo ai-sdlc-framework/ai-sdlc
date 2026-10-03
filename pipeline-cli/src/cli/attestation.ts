@@ -52,17 +52,13 @@ import {
   normalizeReviewerRole,
 } from '../attestation/reviews-ledger.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
-import { AGENT_ID_PATTERN, determineVerdictClass } from '../attestation/verdict-class.js';
+import { AGENT_ID_PATTERN } from '../attestation/verdict-class.js';
 import { loadVerifyCore } from '../attestation/verify-core-loader.js';
 import {
   loadAttestationRuntime,
   TrustedRuntimeResolutionError,
 } from '../attestation/verify-runtime.js';
-import {
-  computeHarnessTranscriptHash,
-  markerSearchRoots,
-  nonceMarkerLiteral,
-} from '../attestation/harness-transcript.js';
+import { bindLeafToReviewerRun, nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import {
   evaluateIndependencePolicy,
   loadIndependencePolicy,
@@ -918,7 +914,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // `findMatchingSubagentMarker()` in harness-transcript.ts — it is a
           // deliberately READ-ONLY, non-consuming scan for exactly this
           // reason.
-          const harnessResult = computeHarnessTranscriptHash({
+          const harnessResult = bindLeafToReviewerRun({
             repoRoot,
             transcriptMtimeMs,
             nonce,
@@ -935,35 +931,16 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             } (${harnessResult.reason})\n`,
           );
 
-          // AISDLC-568: determine trust class from the SubagentStart marker
-          // signal. Fail-safe — any missing/stale/malformed marker yields the
-          // lower-trust 'self-authored' class. See attestation/verdict-class.ts
-          // for the full mechanism + honest limits. Runs AFTER
-          // computeHarnessTranscriptHash (see comment above) since this call
-          // CONSUMES (deletes) the marker file on a match.
-          const verdictClass = determineVerdictClass({
-            repoRoot,
-            transcriptMtimeMs,
-            reviewerName,
-            agentId,
-            extraRoots: markerSearchRoots({ repoRoot, projectDirOverride }),
-          });
+          // One selection decides both fields (see bindLeafToReviewerRun): a
+          // marker whose harness transcript carries this nonce gives the hash
+          // and, when typed, `independent`; without one, only a role-matched
+          // marker under --repo-root itself can still earn `independent`.
+          const verdictClass = harnessResult.verdictClass;
 
           // RFC-0046 Phase 1 (AISDLC-588): independenceTier derived from the
-          // SAME signal as verdictClass at this phase — 'attested' where
-          // verdictClass would be 'independent'. Later phases (AISDLC-589/590/591)
-          // populate 'isolated' from stronger signals.
-          //
-          // CRITICAL — omit the field for the 'none' (default) case rather than
-          // writing it explicitly. 'none' is the absent-equivalent (dual-read
-          // maps an absent field → 'none'), so leaving it undefined makes the
-          // leaf hash IDENTICALLY under verifiers that predate independenceTier
-          // (the additive-compat guarantee in merkle-core.mjs holds only for an
-          // ABSENT field — an explicit "independenceTier":"none" is bound into
-          // the JSON.stringify preimage and changes the Merkle root, which a
-          // base/consumer verifier still on the pre-RFC-0046 hashing code would
-          // reconstruct differently, producing a spurious "rootSignature did not
-          // match" failure). Only a genuinely non-default tier is bound.
+          // SAME signal as verdictClass. Omitted (undefined), never an explicit
+          // default, so the leaf hash is identical under verifiers that
+          // predate the field.
           const independenceTier: 'attested' | undefined =
             verdictClass === 'independent' ? 'attested' : undefined;
 

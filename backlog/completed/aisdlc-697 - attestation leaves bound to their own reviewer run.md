@@ -51,8 +51,12 @@ independent subagents). The operator asked for them to be fixed.
 ## Scope
 1. Marker selection by identity (`selectSubagentMarker`): reviewer role must match, the
    agent id must match when known, and the choice among several candidates is
-   deterministic. `determineVerdictClass` consumes exactly the selected marker.
-2. Markers are searched under the repo root, the main checkout and `--project-dir`.
+   deterministic.
+2. Markers are searched under the repo root, the main checkout and `--project-dir`. The
+   main checkout is shared by every task run from it, so a marker found outside the repo
+   root is credited only when its own harness transcript contains the leaf's
+   diff-binding nonce (`bindLeafToReviewerRun`). One selection yields both
+   `harnessTranscriptHash` and `verdictClass`, and exactly that marker is consumed.
 3. `emit-leaf --agent-id`, with a fallback to the `<transcript>.agent-id` file that
    `persist-reviewer-artifacts.sh` now writes. `reconcile` passes the ids it already has.
 4. The harness transcript's session directory is located by the agent id.
@@ -70,6 +74,7 @@ independent subagents). The operator asked for them to be fixed.
 - [x] The session directory is found by agent id even when another session is newer.
 - [x] `verify` exits 0 for a valid self-authored envelope and prints the note; no note for an independent or an invalid envelope.
 - [x] `persist-reviewer-artifacts.sh` writes the `.agent-id` file next to the transcript.
+- [x] With two tasks' reviewers of the same role in the shared main checkout, each leaf binds to the run whose transcript carries its own nonce; a leaf whose task has no such run is `self-authored`, and the other task's marker is not consumed.
 - [x] Callers that pass neither reviewer name nor agent id keep the earlier behaviour.
 <!-- SECTION:DESCRIPTION:END -->
 
@@ -81,12 +86,13 @@ timing alone. `verify` states that it does not enforce independence.
 
 ## Changes
 - `pipeline-cli/src/attestation/verdict-class.ts` (modified): `selectSubagentMarker`,
-  `AGENT_ID_PATTERN`; `determineVerdictClass` takes `reviewerName`, `agentId`,
-  `extraRoots` and consumes the selected marker only.
+  `listSubagentMarkerCandidates`, `consumeSubagentMarker`, `AGENT_ID_PATTERN`;
+  `determineVerdictClass` takes `reviewerName` and `agentId`, reads the repo root only,
+  and consumes the selected marker only.
 - `pipeline-cli/src/attestation/harness-transcript.ts` (modified): `markerSearchRoots`,
-  `locateSessionDirByAgentId`; `findMatchingSubagentMarker` and
-  `computeHarnessTranscriptHash` take the reviewer and agent id; the transcript's role
-  must equal the leaf's reviewer.
+  `locateSessionDirByAgentId`, `bindLeafToReviewerRun`; `findMatchingSubagentMarker`
+  and `computeHarnessTranscriptHash` take the reviewer and agent id and check every
+  candidate; the transcript's role must equal the leaf's reviewer.
 - `pipeline-cli/src/cli/attestation.ts` (modified): `emit-leaf --agent-id`,
   `readAgentIdSidecar`, the `verify` note.
 - `pipeline-cli/src/orchestrator/reconcile.ts` (modified): passes `--agent-id`.
@@ -103,6 +109,14 @@ timing alone. `verify` states that it does not enforce independence.
   adopter whose reviews are not yet marker-backed, including this repository until this
   fix ships, and the opt-in gate already exists. The note and the docs make the gate
   discoverable. Making independence the default is a policy decision for the operator.
+- **Shared-directory markers need the nonce.** The first review round's security review
+  found that searching the main checkout by role and timing let one task consume another
+  task's reviewer marker when tasks run in parallel. The class is now derived from the
+  same marker as the hash: outside the repo root, a marker counts only when its harness
+  transcript carries this leaf's nonce. A marker under the repo root itself keeps the
+  earlier rule, so existing single-directory setups are unchanged.
+- **The `execute.md` marker fallback refuses when it finds more than one marker of the
+  role**, instead of taking the newest, for the same reason.
 - **Role match is required even with an agent id.** An id that belongs to another
   reviewer gives a self-authored leaf, so a mix-up cannot produce a mis-bound
   `independent` leaf.

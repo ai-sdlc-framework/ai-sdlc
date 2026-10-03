@@ -17,8 +17,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   AGENT_ID_PATTERN,
   MARKER_MAX_AGE_MS,
+  consumeSubagentMarker,
   determineVerdictClass,
   fileMtimeMs,
+  listSubagentMarkerCandidates,
   selectSubagentMarker,
   stripAgentTypeNamespace,
   subagentSessionsDir,
@@ -336,7 +338,7 @@ describe('determineVerdictClass — bound to the reviewer the leaf is for', () =
     expect(determineVerdictClass(opts)).toBe('self-authored');
   });
 
-  it('finds the marker under an extra root (session directory differs from the worktree)', () => {
+  it('never credits a marker that lives outside repoRoot (shared directories need the nonce check)', () => {
     const now = Date.now();
     const sessionRoot = mkdtempSync(join(tmpdir(), 'verdict-class-session-'));
     try {
@@ -349,15 +351,15 @@ describe('determineVerdictClass — bound to the reviewer the leaf is for', () =
       expect(
         determineVerdictClass({ repoRoot, transcriptMtimeMs: now, reviewerName: 'code-reviewer' }),
       ).toBe('self-authored');
+      expect(existsSync(marker)).toBe(true);
+      // The selector itself can see it when asked to search that root.
       expect(
-        determineVerdictClass({
-          repoRoot,
+        selectSubagentMarker({
+          roots: [repoRoot, sessionRoot],
           transcriptMtimeMs: now,
           reviewerName: 'code-reviewer',
-          extraRoots: [sessionRoot],
-        }),
-      ).toBe('independent');
-      expect(existsSync(marker)).toBe(false);
+        })?.filePath,
+      ).toBe(marker);
     } finally {
       rmSync(sessionRoot, { recursive: true, force: true });
     }
@@ -461,5 +463,29 @@ describe('selectSubagentMarker', () => {
     const q = { roots: [repoRoot], transcriptMtimeMs: now };
     expect(selectSubagentMarker(q)?.marker.agentId).toBe('dev');
     expect(selectSubagentMarker({ ...q, reviewerRolesOnly: true })).toBeNull();
+  });
+});
+
+describe('listSubagentMarkerCandidates and consumeSubagentMarker', () => {
+  it('lists every qualifying marker best first, and an empty list for a bad query', () => {
+    const now = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    writeMarker(repoRoot, 'older.json', iso(now - 90_000), 'code-reviewer');
+    writeMarker(repoRoot, 'newer.json', iso(now - 1_000), 'code-reviewer');
+    writeMarker(repoRoot, 'sec.json', iso(now), 'security-reviewer');
+    const q = { roots: [repoRoot], transcriptMtimeMs: now, reviewerName: 'code-reviewer' };
+    expect(listSubagentMarkerCandidates(q).map((c) => c.marker.agentId)).toEqual([
+      'newer',
+      'older',
+    ]);
+    expect(listSubagentMarkerCandidates({ ...q, agentId: 'bad id' })).toEqual([]);
+    expect(listSubagentMarkerCandidates({ ...q, reviewerName: '' })).toEqual([]);
+  });
+
+  it('consumeSubagentMarker deletes the file and tolerates a missing one', () => {
+    const marker = writeMarker(repoRoot, 'code.json', new Date().toISOString());
+    consumeSubagentMarker(marker);
+    expect(existsSync(marker)).toBe(false);
+    expect(() => consumeSubagentMarker(marker)).not.toThrow();
   });
 });
