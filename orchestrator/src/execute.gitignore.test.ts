@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureRuntimeGitignore } from './execute.js';
@@ -85,5 +86,65 @@ describe('ensureRuntimeGitignore', () => {
     const missing = join(dir, 'does-not-exist');
     expect(() => ensureRuntimeGitignore(missing)).not.toThrow();
     expect(existsSync(join(missing, '.gitignore'))).toBe(false);
+  });
+});
+
+// DEC-0020: a broader line already ignores the directory, so `execute` must not append a
+// redundant block (the edit would otherwise land in an unrelated agent PR).
+describe('ensureRuntimeGitignore: a broader line already ignores the artifacts directory', () => {
+  const STATE_ONLY = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n`;
+  const gitAvailable = spawnSync('git', ['--version']).status === 0;
+  const initRepo = () => spawnSync('git', ['init', '-q', dir]);
+
+  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*', '**/artifacts/'])(
+    'in a git repository, %j: the file is left byte-for-byte alone',
+    (line) => {
+      if (!gitAvailable) return;
+      initRepo();
+      const content = `${STATE_ONLY}${line}\n`;
+      writeFileSync(gitignore(), content);
+      ensureRuntimeGitignore(dir);
+      expect(readFileSync(gitignore(), 'utf-8')).toBe(content);
+    },
+  );
+
+  it('in a git repository, adds only the three other entries when `artifacts/` is the only line', () => {
+    if (!gitAvailable) return;
+    initRepo();
+    writeFileSync(gitignore(), 'artifacts/\n');
+    ensureRuntimeGitignore(dir);
+    const out = readFileSync(gitignore(), 'utf-8');
+    expect(out).toBe(`artifacts/\n${STATE_ONLY}`);
+    expect(count(out, '.ai-sdlc/artifacts/')).toBe(0);
+  });
+
+  it('in a git repository, `.ai-sdlc/*` then a re-including `!` gets the entry appended after it, and git then ignores it', () => {
+    if (!gitAvailable) return;
+    initRepo();
+    writeFileSync(gitignore(), '.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
+    ensureRuntimeGitignore(dir);
+    const out = readFileSync(gitignore(), 'utf-8');
+    expect(out.indexOf('!.ai-sdlc/artifacts')).toBeLessThan(out.lastIndexOf('.ai-sdlc/artifacts/'));
+    const ignored = spawnSync('git', ['-C', dir, 'check-ignore', '-q', '.ai-sdlc/artifacts/probe']);
+    expect(ignored.status).toBe(0);
+    // and a second run leaves it alone
+    ensureRuntimeGitignore(dir);
+    expect(readFileSync(gitignore(), 'utf-8')).toBe(out);
+  });
+
+  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*'])(
+    'without git (not a repository), %j is read from the text and the file is left alone',
+    (line) => {
+      const content = `${STATE_ONLY}${line}\n`;
+      writeFileSync(gitignore(), content);
+      ensureRuntimeGitignore(dir);
+      expect(readFileSync(gitignore(), 'utf-8')).toBe(content);
+    },
+  );
+
+  it('without git, `.ai-sdlc/*` then a re-including `!` still gets the entry appended', () => {
+    writeFileSync(gitignore(), '.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
+    ensureRuntimeGitignore(dir);
+    expect(readFileSync(gitignore(), 'utf-8')).toContain('\n.ai-sdlc/artifacts/\n');
   });
 });

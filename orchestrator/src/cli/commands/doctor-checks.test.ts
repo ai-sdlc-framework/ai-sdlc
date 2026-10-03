@@ -1059,9 +1059,14 @@ describe('checkJudgmentLayer', () => {
 // ── checkRuntimeGitignore ───────────────────────────────────────────────
 
 describe('checkRuntimeGitignore', () => {
+  // exit 128 = git could not answer, so these cases exercise the text fallback
+  const noGit = () => makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 128 }) });
+  const gitSays = (exitCode: number) =>
+    makeAdapters({ runCommand: () => ({ stdout: '', exitCode }) });
+
   it('warns when .gitignore lacks the artifacts entry, and names the fix', () => {
     writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n.ai-sdlc/state/\n');
-    const r = checkRuntimeGitignore(makeCtx(makeAdapters()));
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
     expect(r.severity).toBe('warn');
     expect(r.title).toContain('.ai-sdlc/artifacts/');
     expect(r.remediation).toContain('.ai-sdlc/artifacts/');
@@ -1069,7 +1074,7 @@ describe('checkRuntimeGitignore', () => {
   });
 
   it('warns when there is no .gitignore at all', () => {
-    const r = checkRuntimeGitignore(makeCtx(makeAdapters()));
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
     expect(r.severity).toBe('warn');
     expect(r.title).toMatch(/no \.gitignore found/);
     expect(r.anonymizableEvidence).toEqual({ gitignorePresent: false });
@@ -1077,7 +1082,7 @@ describe('checkRuntimeGitignore', () => {
 
   it('is quiet when the entry is present', () => {
     writeFileSync(join(tmpDir, '.gitignore'), '# ai-sdlc:runtime-gitignore\n.ai-sdlc/artifacts/\n');
-    const r = checkRuntimeGitignore(makeCtx(makeAdapters()));
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
     expect(r.severity).toBe('pass');
     expect(r.remediation).toBeUndefined();
   });
@@ -1086,20 +1091,63 @@ describe('checkRuntimeGitignore', () => {
     'accepts the equivalent spelling %j',
     (line) => {
       writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
-      expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('pass');
+      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
     },
   );
 
   it('does not count a different directory or a comment as covering the entry', () => {
     writeFileSync(join(tmpDir, '.gitignore'), '# .ai-sdlc/artifacts/\n.ai-sdlc/artifacts-old/\n');
-    expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
   });
 
   it('warns when a later line negates the entry, or the entry is indented', () => {
     writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
     writeFileSync(join(tmpDir, '.gitignore'), '  .ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+  });
+
+  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*', '**/artifacts/', '.ai-sdlc/artifacts/*'])(
+    'text fallback: a broader line %j already ignores the directory',
+    (line) => {
+      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
+      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
+    },
+  );
+
+  it('text fallback: `.ai-sdlc/*` then `!.ai-sdlc/artifacts` re-includes it, but `.ai-sdlc/` then the same `!` cannot', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/\n!.ai-sdlc/artifacts\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
+  });
+
+  it('asks git about the project directory and trusts a yes over the text', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n');
+    const calls: string[][] = [];
+    const adapters = makeAdapters({
+      runCommand: (cmd, args) => {
+        calls.push([cmd, ...args]);
+        return { stdout: '', exitCode: 0 };
+      },
+    });
+    expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].slice(0, 3)).toEqual(['git', '-C', tmpDir]);
+    expect(calls[0]).toContain('check-ignore');
+    expect(calls[0].at(-1)).toBe('.ai-sdlc/artifacts/probe');
+  });
+
+  it('trusts git saying not ignored over text that looks covered (a nested rule re-includes it)', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+    expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('warn');
+  });
+
+  it('falls back to the text when git fails to run (exit 128) or is not installed', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+    expect(checkRuntimeGitignore(makeCtx(gitSays(128))).severity).toBe('pass');
+    writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+    expect(checkRuntimeGitignore(makeCtx(gitSays(128))).severity).toBe('warn');
   });
 
   it('is registered in the check registry', () => {

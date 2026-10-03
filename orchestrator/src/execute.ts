@@ -35,6 +35,8 @@ import {
   RUNTIME_GITIGNORE_SENTINEL,
   hasSentinelLine,
   insertIntoSentinelBlock,
+  gitCheckIgnoreArgs,
+  interpretCheckIgnoreExit,
   missingRuntimeGitignorePaths,
 } from './runtime-gitignore.js';
 import {
@@ -124,6 +126,7 @@ import {
   resolveIssueTrackerFromConfig,
   resolveSourceControlFromConfig,
 } from './adapters.js';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -1674,6 +1677,25 @@ async function runPipelineDiagnostics(input: DiagnosticsInput): Promise<void> {
 // ── Gitignore helper ─────────────────────────────────────────────────
 
 /**
+ * Asks git whether `entry` is already ignored in `workDir` (a broader line such as
+ * `artifacts/` counts), so `ensureRuntimeGitignore` does not append a redundant block.
+ * Null when git cannot answer (not installed, not a repository, no such directory); the
+ * caller then reads the .gitignore text instead.
+ */
+function askGitIfIgnored(workDir: string, entry: string): boolean | null {
+  try {
+    execFileSync('git', gitCheckIgnoreArgs(workDir, entry), {
+      stdio: 'ignore',
+      env: cleanGitEnv(),
+    });
+    return interpretCheckIgnoreExit(0);
+  } catch (err) {
+    const status = (err as { status?: unknown }).status;
+    return typeof status === 'number' ? interpretCheckIgnoreExit(status) : null;
+  }
+}
+
+/**
  * Ensure .gitignore in the working directory covers AI-SDLC runtime artifacts.
  * Without this the agent sees untracked runtime files and appends duplicate
  * gitignore entries on every run.
@@ -1688,7 +1710,9 @@ export function ensureRuntimeGitignore(workDir: string): void {
     const gitignorePath = join(workDir, '.gitignore');
     const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
 
-    const missing = missingRuntimeGitignorePaths(existing);
+    const missing = missingRuntimeGitignorePaths(existing, (entry) =>
+      askGitIfIgnored(workDir, entry),
+    );
     if (missing.length === 0) return;
 
     // Write atomically (writeFileSync, not appendFileSync) to avoid race conditions

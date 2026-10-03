@@ -42,23 +42,125 @@ function normalize(line: string): string {
   return stripSlashes(line.trimEnd());
 }
 
+/** The file name asked about inside a directory entry. */
+const DIRECTORY_PROBE = 'probe';
+
+interface IgnoreRule {
+  negated: boolean;
+  dirOnly: boolean;
+  /** A pattern with a slash (other than a trailing one) matches from the repository root. */
+  anchored: boolean;
+  segments: string[];
+}
+
+function parseRule(raw: string): IgnoreRule | null {
+  if (raw.trim() === '' || raw.startsWith('#')) return null;
+  let text = raw.trimEnd();
+  const negated = text.startsWith('!');
+  if (negated) text = text.slice(1);
+  const dirOnly = text.endsWith('/');
+  const leadingSlash = text.startsWith('/');
+  text = stripSlashes(text);
+  if (text === '') return null;
+  const segments = text.split('/').filter((segment) => segment !== '');
+  return { negated, dirOnly, anchored: leadingSlash || segments.length > 1, segments };
+}
+
+/** One path component against one glob segment (`*` and `?`; `[...]` is not supported). */
+function segmentMatches(glob: string, name: string): boolean {
+  if (!glob.includes('*') && !glob.includes('?')) return glob === name;
+  const body = glob
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*+/g, '*')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]');
+  return new RegExp(`^${body}$`).test(name);
+}
+
+/** Anchored match of `segments` against all of `path`; `**` spans zero or more components. */
+function pathMatches(segments: readonly string[], path: readonly string[]): boolean {
+  if (segments.length === 0) return path.length === 0;
+  const [head, ...rest] = segments;
+  if (head === '**') {
+    // A trailing `/**` matches everything inside, never the directory itself.
+    if (rest.length === 0) return path.length > 0;
+    for (let skip = 0; skip <= path.length; skip++) {
+      if (pathMatches(rest, path.slice(skip))) return true;
+    }
+    return false;
+  }
+  return path.length > 0 && segmentMatches(head, path[0]) && pathMatches(rest, path.slice(1));
+}
+
+function ruleMatches(rule: IgnoreRule, path: readonly string[], isDir: boolean): boolean {
+  if (rule.dirOnly && !isDir) return false;
+  if (!rule.anchored) return segmentMatches(rule.segments[0], path[path.length - 1]);
+  return pathMatches(rule.segments, path);
+}
+
 /**
- * True when git would ignore `entry` according to `gitignore`: some line names it and
- * no later line negates it (`!entry` re-includes the directory). A negation of a path
- * below an ignored directory has no effect in git, so it is not treated as one.
+ * True when git would ignore `entry` according to the text of `gitignore`, read the way
+ * git reads one root .gitignore: the last matching line decides, `!` re-includes, and a
+ * path below an ignored directory stays ignored whatever a later `!` says. So `artifacts/`,
+ * `.ai-sdlc/`, `.ai-sdlc/*` and `**\/artifacts/` all cover `.ai-sdlc/artifacts/`, while
+ * `.ai-sdlc/*` followed by `!.ai-sdlc/artifacts` does not.
+ *
+ * This is the fallback for when git cannot be asked (`git check-ignore`, see
+ * `gitCheckIgnoreArgs`). It differs from git in what it cannot see: `[...]` character
+ * classes and `\` escapes in patterns, nested .gitignore files, `.git/info/exclude` and
+ * the global excludes file.
  */
 export function gitignoreCovers(gitignore: string, entry: string): boolean {
-  const wanted = normalize(entry);
-  let covered = false;
-  for (const line of gitignore.split('\n')) {
-    if (line.trim() === '' || line.startsWith('#')) continue;
-    if (line.startsWith('!')) {
-      if (normalize(line.slice(1)) === wanted) covered = false;
-    } else if (normalize(line) === wanted) {
-      covered = true;
+  const rules = gitignore
+    .split('\n')
+    .map(parseRule)
+    .filter((rule): rule is IgnoreRule => rule !== null);
+  const path = stripSlashes(entry)
+    .split('/')
+    .filter((part) => part !== '');
+  if (path.length === 0) return false;
+  // A directory entry counts as covered when what is written inside it is ignored, the
+  // same question `gitCheckIgnoreArgs` asks git, so `artifacts/*` covers it too.
+  if (entry.endsWith('/')) path.push(DIRECTORY_PROBE);
+  for (let depth = 1; depth <= path.length; depth++) {
+    const prefix = path.slice(0, depth);
+    const isDir = depth < path.length;
+    let ignored = false;
+    for (const rule of rules) {
+      if (ruleMatches(rule, prefix, isDir)) ignored = !rule.negated;
     }
+    if (ignored) return true;
   }
-  return covered;
+  return false;
+}
+
+/**
+ * Arguments for `git` that ask whether `entry` is ignored in the repository at `dir`:
+ * exit 0 means ignored, 1 means not. `--no-index` ignores whether a file is tracked, the
+ * empty `core.excludesFile` keeps one developer's global ignore from hiding a repository
+ * that other clones would still commit. (`.git/info/exclude` still applies.) A directory
+ * entry is probed through a file inside it, so `dir/*`-style patterns count.
+ */
+export function gitCheckIgnoreArgs(dir: string, entry: string): string[] {
+  const probe = entry.endsWith('/') ? `${entry}${DIRECTORY_PROBE}` : entry;
+  return [
+    '-C',
+    dir,
+    '-c',
+    'core.excludesFile=/dev/null',
+    'check-ignore',
+    '-q',
+    '--no-index',
+    '--',
+    probe,
+  ];
+}
+
+/** Maps a `git check-ignore -q` exit code to ignored / not ignored / could not tell. */
+export function interpretCheckIgnoreExit(exitCode: number): boolean | null {
+  if (exitCode === 0) return true;
+  if (exitCode === 1) return false;
+  return null;
 }
 
 /** True when a non-negated line already writes `entry`, wherever it sits in the file. */
@@ -70,14 +172,21 @@ function gitignoreMentions(gitignore: string, entry: string): boolean {
 }
 
 /**
- * The runtime entries `gitignore` does not yet write, in list order. This asks "is it
- * written", not "does git effectively ignore it": a deliberate `!entry` line is left
- * for the operator (and for `doctor`, which does ask the second question), and adding
- * the entry again before that line would grow the file on every run without changing
+ * The runtime entries `gitignore` neither writes nor already gets ignored by a broader
+ * line (`artifacts/`, `.ai-sdlc/*`), in list order. `ignoredByGit` is the caller's answer
+ * from `git check-ignore` (null when it could not ask), which wins over the text reading.
+ * An entry written with a deliberate `!entry` line after it counts as written and is left
+ * for the operator: adding it again would grow the file on every run without changing
  * what git ignores.
  */
-export function missingRuntimeGitignorePaths(gitignore: string): string[] {
-  return RUNTIME_GITIGNORE_PATHS.filter((entry) => !gitignoreMentions(gitignore, entry));
+export function missingRuntimeGitignorePaths(
+  gitignore: string,
+  ignoredByGit?: (entry: string) => boolean | null,
+): string[] {
+  return RUNTIME_GITIGNORE_PATHS.filter((entry) => {
+    if (gitignoreMentions(gitignore, entry)) return false;
+    return !(ignoredByGit?.(entry) ?? gitignoreCovers(gitignore, entry));
+  });
 }
 
 /** True when a whole line (ignoring surrounding whitespace) is the sentinel. */

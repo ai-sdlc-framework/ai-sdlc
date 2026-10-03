@@ -52,7 +52,12 @@ import {
   judgmentEnforceDowngradeReason,
   loadJudgmentConfig,
 } from '@ai-sdlc/reference';
-import { ARTIFACTS_GITIGNORE_ENTRY, gitignoreCovers } from '../../runtime-gitignore.js';
+import {
+  ARTIFACTS_GITIGNORE_ENTRY,
+  gitCheckIgnoreArgs,
+  gitignoreCovers,
+  interpretCheckIgnoreExit,
+} from '../../runtime-gitignore.js';
 import {
   buildProductionDoctorAdapters,
   checkAttestationGovernance,
@@ -947,7 +952,15 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
  */
 export function checkRuntimeGitignore(ctx: DoctorRunContext): DoctorCheckResult {
   const gitignore = ctx.adapters.readFile(join(ctx.projectDir, '.gitignore'));
-  if (gitignore !== null && gitignoreCovers(gitignore, ARTIFACTS_GITIGNORE_ENTRY)) {
+  // git is the authority (it sees `artifacts/`, `.ai-sdlc/*` with a later `!`, nested
+  // .gitignore files); the text reading is the fallback when git cannot be asked.
+  const git = interpretCheckIgnoreExit(
+    ctx.adapters.runCommand('git', gitCheckIgnoreArgs(ctx.projectDir, ARTIFACTS_GITIGNORE_ENTRY))
+      .exitCode,
+  );
+  const ignored =
+    git ?? (gitignore !== null && gitignoreCovers(gitignore, ARTIFACTS_GITIGNORE_ENTRY));
+  if (ignored) {
     return {
       id: 'runtime-gitignore',
       severity: 'pass',

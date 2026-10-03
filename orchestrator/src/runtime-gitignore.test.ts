@@ -1,10 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ARTIFACTS_GITIGNORE_ENTRY,
   RUNTIME_GITIGNORE_PATHS,
   RUNTIME_GITIGNORE_SENTINEL,
+  gitCheckIgnoreArgs,
   gitignoreCovers,
   hasSentinelLine,
+  interpretCheckIgnoreExit,
   insertIntoSentinelBlock,
   missingRuntimeGitignorePaths,
 } from './runtime-gitignore.js';
@@ -61,7 +67,157 @@ describe('gitignoreCovers', () => {
   });
 });
 
+// Real-git agreement (DEC-0020): the text reading must give the answer
+// `git check-ignore` gives for every pattern shape it claims to understand. The cases
+// include the ones where git is counter-intuitive (a parent directory excluded for good).
+const gitAvailable = spawnSync('git', ['--version']).status === 0;
+
+describe.skipIf(!gitAvailable)('gitignoreCovers agrees with git check-ignore', () => {
+  let repo: string;
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'ai-sdlc-check-ignore-'));
+    execFileSync('git', ['init', '-q', repo]);
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  const gitSays = (gitignore: string, entry: string): boolean | null => {
+    writeFileSync(join(repo, '.gitignore'), gitignore);
+    const r = spawnSync('git', gitCheckIgnoreArgs(repo, entry));
+    return interpretCheckIgnoreExit(r.status ?? -1);
+  };
+
+  const entry = ARTIFACTS_GITIGNORE_ENTRY;
+  const cases: Array<[string, string, boolean]> = [
+    ['exact', '.ai-sdlc/artifacts/\n', true],
+    ['no trailing slash', '.ai-sdlc/artifacts\n', true],
+    ['bare directory name', 'artifacts/\n', true],
+    ['bare name without slash', 'artifacts\n', true],
+    ['parent directory', '.ai-sdlc/\n', true],
+    ['parent contents', '.ai-sdlc/*\n', true],
+    ['directory contents', '.ai-sdlc/artifacts/*\n', true],
+    ['recursive glob', '**/artifacts/\n', true],
+    ['wildcard name', 'art*/\n', true],
+    ['rooted', '/.ai-sdlc/artifacts/\n', true],
+    ['unrelated', 'node_modules/\ndist/\n', false],
+    ['look-alike directory', '.ai-sdlc/artifacts-old/\n', false],
+    ['file-only pattern does not ignore a directory', 'artifacts\n!artifacts/\n', false],
+    ['negated after contents pattern', '.ai-sdlc/*\n!.ai-sdlc/artifacts\n', false],
+    ['negated after exact line', '.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n', false],
+    [
+      'negation cannot re-include below an ignored parent',
+      '.ai-sdlc/\n!.ai-sdlc/artifacts\n',
+      true,
+    ],
+    ['negation before the line has no effect', '!.ai-sdlc/artifacts/\n.ai-sdlc/artifacts/\n', true],
+    ['indented line is a different pattern', '  .ai-sdlc/artifacts/\n', false],
+    ['comment', '# .ai-sdlc/artifacts/\n', false],
+  ];
+
+  it.each(cases)('%s', (_name, gitignore, expected) => {
+    expect(gitSays(gitignore, entry)).toBe(expected);
+    expect(gitignoreCovers(gitignore, entry)).toBe(expected);
+  });
+
+  it('git answers null (exit 128) outside a repository, so callers fall back to the text', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'ai-sdlc-not-a-repo-'));
+    try {
+      const r = spawnSync('git', gitCheckIgnoreArgs(outside, entry), {
+        env: { ...process.env, GIT_CEILING_DIRECTORIES: tmpdir() },
+      });
+      expect(interpretCheckIgnoreExit(r.status ?? -1)).toBeNull();
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('gitCheckIgnoreArgs / interpretCheckIgnoreExit', () => {
+  it('probes a file inside a directory entry and the path itself for a file entry', () => {
+    expect(gitCheckIgnoreArgs('/repo', '.ai-sdlc/artifacts/').at(-1)).toBe(
+      '.ai-sdlc/artifacts/probe',
+    );
+    expect(gitCheckIgnoreArgs('/repo', '.ai-sdlc/state.db').at(-1)).toBe('.ai-sdlc/state.db');
+  });
+
+  it('ignores the index and the global excludes file, and targets the given directory', () => {
+    const args = gitCheckIgnoreArgs('/repo', '.ai-sdlc/artifacts/');
+    expect(args.slice(0, 2)).toEqual(['-C', '/repo']);
+    expect(args).toContain('core.excludesFile=/dev/null');
+    expect(args).toContain('--no-index');
+    expect(args).toContain('-q');
+  });
+
+  it('maps exit codes: 0 ignored, 1 not ignored, anything else unknown', () => {
+    expect(interpretCheckIgnoreExit(0)).toBe(true);
+    expect(interpretCheckIgnoreExit(1)).toBe(false);
+    expect(interpretCheckIgnoreExit(128)).toBeNull();
+    expect(interpretCheckIgnoreExit(-1)).toBeNull();
+  });
+});
+
+describe('gitignoreCovers without git: broader lines and globs', () => {
+  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*', '**/artifacts/', '.ai-sdlc/artifacts/**'])(
+    '%j covers the artifacts directory',
+    (line) => {
+      expect(gitignoreCovers(`${line}\n`, ARTIFACTS_GITIGNORE_ENTRY)).toBe(true);
+    },
+  );
+
+  it('a negation after `.ai-sdlc/*` re-includes it; after `.ai-sdlc/` it cannot', () => {
+    expect(gitignoreCovers('.ai-sdlc/*\n!.ai-sdlc/artifacts\n', ARTIFACTS_GITIGNORE_ENTRY)).toBe(
+      false,
+    );
+    expect(gitignoreCovers('.ai-sdlc/\n!.ai-sdlc/artifacts\n', ARTIFACTS_GITIGNORE_ENTRY)).toBe(
+      true,
+    );
+  });
+
+  it('does not treat a file-name pattern as covering a directory-only entry, or the reverse', () => {
+    expect(gitignoreCovers('state.db/\n', '.ai-sdlc/state.db')).toBe(false);
+    expect(gitignoreCovers('state.db\n', '.ai-sdlc/state.db')).toBe(true);
+  });
+
+  it('a hostile glob line is matched in bounded time', () => {
+    const hostile = `${'*'.repeat(5000)}a${'*'.repeat(5000)}b/\n`;
+    const started = Date.now();
+    expect(gitignoreCovers(hostile, ARTIFACTS_GITIGNORE_ENTRY)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
 describe('missingRuntimeGitignorePaths', () => {
+  it('does not report the artifacts entry when a broader line already ignores it', () => {
+    const rest = RUNTIME_GITIGNORE_PATHS.filter((p) => p !== ARTIFACTS_GITIGNORE_ENTRY);
+    expect(missingRuntimeGitignorePaths('artifacts/\n')).toEqual(rest);
+    expect(missingRuntimeGitignorePaths('.ai-sdlc/\n')).toEqual([]);
+    expect(missingRuntimeGitignorePaths('.ai-sdlc/*\n')).toEqual([]);
+  });
+
+  it('reports it when `.ai-sdlc/*` is followed by a negation, so the new line lands after it', () => {
+    const missing = missingRuntimeGitignorePaths('.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
+    expect(missing).toContain(ARTIFACTS_GITIGNORE_ENTRY);
+  });
+
+  it("takes git's answer over the text reading, and the text reading when git cannot answer", () => {
+    expect(missingRuntimeGitignorePaths('', () => true)).toEqual([]);
+    expect(missingRuntimeGitignorePaths('artifacts/\n', () => false)).toEqual([
+      ...RUNTIME_GITIGNORE_PATHS,
+    ]);
+    const rest = RUNTIME_GITIGNORE_PATHS.filter((p) => p !== ARTIFACTS_GITIGNORE_ENTRY);
+    expect(missingRuntimeGitignorePaths('artifacts/\n', () => null)).toEqual(rest);
+  });
+
+  it('never asks git about an entry a plain line already writes', () => {
+    const asked: string[] = [];
+    missingRuntimeGitignorePaths(`${ARTIFACTS_GITIGNORE_ENTRY}\n`, (entry) => {
+      asked.push(entry);
+      return false;
+    });
+    expect(asked).not.toContain(ARTIFACTS_GITIGNORE_ENTRY);
+  });
+
   it('reports every path for an empty file and none for a complete one', () => {
     expect(missingRuntimeGitignorePaths('')).toEqual([...RUNTIME_GITIGNORE_PATHS]);
     expect(missingRuntimeGitignorePaths(RUNTIME_GITIGNORE_PATHS.join('\n') + '\n')).toEqual([]);
