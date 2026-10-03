@@ -1,6 +1,11 @@
 /**
  * `cli-hierarchy down`: end sessions cleanly, return their inflight manifests
  * to the queue, close their windows and drop them from the roster.
+ *
+ * Targets come from each roster entry's own `tmuxSession` / `tmuxWindow`, so the
+ * same code stops the current layout (one tmux session per agent) and a roster
+ * written by the old layout (windows of the shared `ai-sdlc-hierarchy` session).
+ * Closing an agent's only window ends its session.
  */
 
 import { releaseInflight } from '../dispatch/board.js';

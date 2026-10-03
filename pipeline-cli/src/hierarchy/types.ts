@@ -92,8 +92,12 @@ export interface HierarchyDeps {
   sleep: (ms: number) => Promise<void>;
   /** Writes one line of user-facing output. */
   log: (line: string) => void;
-  /** Attaches the terminal to a tmux session; returns the exit code. */
-  attach: (tmuxSession: string) => number;
+  /**
+   * Runs one interactive tmux command with the terminal's stdio inherited
+   * (`attach-session` or `switch-client`); `args` is the tmux argv, for example
+   * `['attach-session', '-t', '=planner']`. Returns the exit code.
+   */
+  attach: (args: readonly string[]) => number;
   /** Name of the `claude` executable. */
   claudeBin: string;
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */
@@ -101,5 +105,9 @@ export interface HierarchyDeps {
   pollIntervalMs: number;
 }
 
-/** Name of the tmux session that hosts every hierarchy window. */
+/**
+ * Name of the single tmux session that hosted every hierarchy window in the old
+ * layout. New rosters use one session per agent; this name is kept only so rosters
+ * written by the old layout can still be stopped, inspected and attached.
+ */
 export const HIERARCHY_TMUX_SESSION = 'ai-sdlc-hierarchy';

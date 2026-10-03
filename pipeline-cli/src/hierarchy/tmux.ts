@@ -20,22 +20,52 @@ export function listWindows(run: CommandRunner, session: string): string[] {
     .filter((l) => l.length > 0);
 }
 
+/** True when the session exists and has a window of that name. */
+export function windowLive(run: CommandRunner, session: string, window: string): boolean {
+  return hasSession(run, session) && listWindows(run, session).includes(window);
+}
+
 /**
- * Start `command` in a new window. The first window creates the session
- * detached; later windows are added to it.
+ * Start `command` in its own detached session. Session name and window name are
+ * both `name`: every agent gets a session of its own so two terminals can show
+ * two agents (clients attached to one shared session follow the same window).
  */
-export function startWindow(
+export function startSession(
   run: CommandRunner,
-  session: string,
-  window: string,
+  name: string,
   command: string,
   cwd: string,
-  sessionExists: boolean,
 ): CommandResult {
-  const args = sessionExists
-    ? ['new-window', '-t', `=${session}:`, '-n', window, '-c', cwd, command]
-    : ['new-session', '-d', '-s', session, '-n', window, '-c', cwd, command];
-  return run('tmux', args, { cwd });
+  return run('tmux', ['new-session', '-d', '-s', name, '-n', name, '-c', cwd, command], { cwd });
+}
+
+/**
+ * Label one session so a terminal attached to it is recognisable: the terminal
+ * title and the status line carry the agent name. Every option is scoped to the
+ * session with `-t`; no global or server option is ever set.
+ * @returns the first failing result, or the last successful one.
+ */
+export function setSessionTitles(run: CommandRunner, name: string): CommandResult {
+  const target = `=${name}`;
+  const options: string[][] = [
+    ['set-titles', 'on'],
+    ['set-titles-string', name],
+    ['status-left', `[${name}] `],
+  ];
+  let last: CommandResult = { status: 0, stdout: '', stderr: '' };
+  for (const [key, value] of options) {
+    last = run('tmux', ['set-option', '-t', target, key as string, value as string]);
+    if (last.status !== 0) return last;
+  }
+  return last;
+}
+
+/** True when at least one tmux client is attached to the session; false on any failure. */
+export function sessionAttached(run: CommandRunner, session: string): boolean {
+  const r = run('tmux', ['display-message', '-p', '-t', `=${session}`, '#{session_attached}']);
+  if (r.status !== 0) return false;
+  const n = Number.parseInt(r.stdout.trim(), 10);
+  return Number.isFinite(n) && n > 0;
 }
 
 /** Pane id and pane pid of a window; empty values when they cannot be read. */

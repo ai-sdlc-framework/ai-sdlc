@@ -399,6 +399,26 @@ describe('notify', () => {
     });
   });
 
+  it('notifies the dispatch session of a one-session-per-agent roster', async () => {
+    writeRoster(deps.boardDir, {
+      schemaVersion: 'v1',
+      sessions: [
+        rosterEntry({
+          role: 'planner',
+          name: 'planner',
+          tmuxSession: 'planner',
+          tmuxWindow: 'planner',
+          paneId: '',
+        }),
+        rosterEntry({ tmuxSession: 'operator-dispatch' }),
+      ],
+    });
+    const sent: { name: string; session: string }[] = [];
+    const sender: BriefSender = (e) => sent.push({ name: e.name, session: e.tmuxSession });
+    expect(await runHierarchyCliQuiet(['brief', '--rfc', 'RFC-0099', '--notify'], sender)).toBe(0);
+    expect(sent).toEqual([{ name: 'operator-dispatch', session: 'operator-dispatch' }]);
+  });
+
   it('fails clearly when there is no dispatch session', () => {
     expect(() => notifyDispatch(undefined, '/x/b.md', '/x', () => {})).toThrow(
       /no dispatch session/,
@@ -478,8 +498,31 @@ describe('tmux sender', () => {
     );
   });
 
+  it('targets the agent session in the one-session-per-agent layout', () => {
+    const entry = rosterEntry({ tmuxSession: 'operator-dispatch' });
+    const { run, calls } = runner({ pane: '%99' });
+    createTmuxBriefSender(run)(entry, 'hello');
+    expect(calls[0]).toEqual(['list-windows', '-t', '=operator-dispatch', '-F', '#{window_name}']);
+    expect(calls.find((c) => c[0] === 'send-keys')?.[2]).toBe(
+      '=operator-dispatch:operator-dispatch',
+    );
+
+    const verified = runner({ pane: '%7' });
+    createTmuxBriefSender(verified.run)(entry, 'hello');
+    const keys = verified.calls.filter((c) => c[0] === 'send-keys');
+    expect(keys.map((k) => k[2])).toEqual(['%7', '%7']);
+  });
+
   it('never targets a foreign session, window or pane', () => {
-    for (const bad of [{ tmuxSession: 'mine' }, { tmuxWindow: 'Bad;Name' }, { paneId: '%1; rm' }]) {
+    for (const bad of [
+      { tmuxSession: 'mine' },
+      { tmuxWindow: 'Bad;Name' },
+      { paneId: '%1; rm' },
+      // new layout: session must equal the window and be a default agent name
+      { tmuxSession: 'planner', tmuxWindow: 'operator-dispatch' },
+      { tmuxSession: 'mine', tmuxWindow: 'mine' },
+      { tmuxSession: 'operator-dispatch', paneId: '%1; rm' },
+    ]) {
       const { run, calls } = runner();
       expect(() => createTmuxBriefSender(run)(rosterEntry(bad), 'x')).toThrow(/refusing/);
       expect(calls).toEqual([]);

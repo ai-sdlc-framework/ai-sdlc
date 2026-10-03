@@ -13,6 +13,7 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 - [Permission model for spawned sessions](#permission-model-for-spawned-sessions)
 - [Activation](#activation)
 - [Monitoring](#monitoring)
+- [Watching the agents](#watching-the-agents)
 - [Liveness detection and session reaper](#liveness-detection-and-session-reaper)
 - [Cancel back-channel](#cancel-back-channel)
 - [The executor loop](#the-executor-loop)
@@ -229,6 +230,52 @@ tmux select-window -t ai-sdlc-parallel:exec-aisdlc-462
 ls .ai-sdlc/dispatch/sessions/
 cat .ai-sdlc/dispatch/sessions/aisdlc-462.session.json
 ```
+
+---
+
+## Watching the agents
+
+`cli-hierarchy up` starts the planner, the dispatch session and the executors as
+**one detached tmux session per agent**. The tmux session name, its window name and
+the agent name are the same (`planner`, `operator-dispatch`, `executor-alpha`, ...),
+and the roster (`.ai-sdlc/dispatch/hierarchy.json`) records it as `tmuxSession`.
+Agents do not share a session because two terminals attached to one session both
+follow its current window: they can never show two different agents.
+
+`up` prints one line per started agent with the command that shows it, and
+`cli-hierarchy status` has an `ATTACHED` column (yes or no per session).
+
+```bash
+# Show one agent in this terminal
+cli-hierarchy attach executor-alpha
+```
+
+`attach` runs `tmux switch-client` when `TMUX` is set (the terminal is already a
+tmux client; attaching would nest) and `tmux attach-session` otherwise. An unknown
+name fails and lists the names in the roster. `cli-hierarchy up --attach` does the
+same for the planner, or for the dispatch session when no planner was started.
+
+Each session sets its own terminal title to the agent name (`set-titles on` and
+`set-titles-string`, scoped to that session) and shows the name in its status line.
+No global tmux option is changed.
+
+A roster written by the earlier single-session layout (windows of one
+`ai-sdlc-hierarchy` session) is still reported by `status` and stopped by `down`;
+`up` refuses to start on top of it until `cli-hierarchy down` has been run.
+
+### Optional: one VS Code terminal per agent
+
+```bash
+cli-hierarchy terminals --vscode            # writes .vscode/tasks.json
+cli-hierarchy terminals --vscode --print    # print the JSON to merge by hand
+cli-hierarchy terminals --vscode --out ./dir --force
+```
+
+This writes a task per agent (dedicated panel, running `cli-hierarchy attach <name>`)
+plus a `hierarchy: open all agents` task that opens them all. It refuses to replace an
+existing `tasks.json` without `--force`. It is a generator only; the tmux behaviour
+above does not depend on VS Code. A VS Code terminal tab shows the agent title only
+when the `terminal.integrated.tabs.title` setting includes `${sequence}`.
 
 ---
 

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { validateHierarchyRoster } from '@ai-sdlc/reference';
 
 import { HIERARCHY_TMUX_SESSION, type Roster, type RosterEntry } from './types.js';
-import { isValidSessionName } from './validate.js';
+import { isValidSessionName, roleOfDefaultName } from './validate.js';
 
 /** Roster filename under the dispatch board directory. */
 export const ROSTER_FILENAME = 'hierarchy.json';
@@ -74,13 +74,31 @@ export interface CheckedRoster {
   rejected: string[];
 }
 
-/** Why a roster entry must never be acted on, or undefined when it is safe. */
+/** True for an entry written by the old layout (a window in the shared hierarchy session). */
+export function isLegacyLayoutEntry(entry: RosterEntry): boolean {
+  return entry.tmuxSession === HIERARCHY_TMUX_SESSION;
+}
+
+/**
+ * Why a roster entry must never be acted on, or undefined when it is safe.
+ *
+ * An entry is safe only when it names a tmux target this tool could have created:
+ * either a valid window of the legacy `ai-sdlc-hierarchy` session, or a session
+ * named exactly like its window and equal to a default hierarchy name (`planner`,
+ * `operator-dispatch`, `executor-alpha`..`executor-epsilon`). A hostile or corrupt
+ * roster can therefore never make `down` or `brief --notify` act on another session.
+ */
 export function unsafeEntryReason(entry: RosterEntry): string | undefined {
-  if (entry.tmuxSession !== HIERARCHY_TMUX_SESSION) {
-    return `names tmux session '${String(entry.tmuxSession)}', not '${HIERARCHY_TMUX_SESSION}'`;
-  }
   if (typeof entry.tmuxWindow !== 'string' || !isValidSessionName(entry.tmuxWindow)) {
     return `has an invalid tmux window '${String(entry.tmuxWindow)}'`;
+  }
+  if (!isLegacyLayoutEntry(entry)) {
+    if (entry.tmuxSession !== entry.tmuxWindow) {
+      return `names tmux session '${String(entry.tmuxSession)}', which is neither '${HIERARCHY_TMUX_SESSION}' nor the session named after window '${entry.tmuxWindow}'`;
+    }
+    if (roleOfDefaultName(entry.tmuxSession) === undefined) {
+      return `names tmux session '${entry.tmuxSession}', which is not one of the default hierarchy session names`;
+    }
   }
   if (typeof entry.paneId !== 'string' || !/^(%[0-9]+)?$/.test(entry.paneId)) {
     return `has an invalid pane id '${String(entry.paneId)}'`;

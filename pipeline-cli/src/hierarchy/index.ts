@@ -2,6 +2,14 @@
  * Public surface of the session-hierarchy bootstrap.
  */
 
+export { attachEntry, hierarchyAttach, insideTmux } from './attach.js';
+export {
+  buildVscodeTasks,
+  hierarchyTerminals,
+  OPEN_ALL_LABEL,
+  type TerminalsOptions,
+  type TerminalsResult,
+} from './terminals.js';
 export {
   generateBrief,
   isTrustSensitivePath,
@@ -49,6 +57,7 @@ export {
 export { findStartedSession, readSessionRegistry } from './registry.js';
 export {
   emptyRoster,
+  isLegacyLayoutEntry,
   readRoster,
   readRosterChecked,
   ROSTER_FILENAME,
