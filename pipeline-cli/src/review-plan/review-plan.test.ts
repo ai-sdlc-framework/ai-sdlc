@@ -15,6 +15,7 @@ import {
   buildFallbackPlanFor,
   DEFAULT_MAX_RUN_PROBES,
   escapesRoot,
+  isGitSegment,
   probeSafetyProblems,
   isHighRisk,
   readStagedConfigFromBaseRef,
@@ -1318,5 +1319,26 @@ describe('fail-closed baseline and fallback inputs (DEC-0019)', () => {
     expect(r.ok).toBe(false);
     expect(r.rejections.map((x) => x.reason)).toEqual(['schema-invalid', 'unreviewable-input']);
     expect('plan' in r).toBe(false);
+  });
+});
+
+describe('isGitSegment on adversarial segments', () => {
+  it('stays linear on a long run of spaces followed by a non-space (ReDoS shape)', () => {
+    // isSafeRelativePath caps the length first, but escapesRoot passes segments of any length.
+    const started = Date.now();
+    expect(isGitSegment(`${' '.repeat(200_000)}x`)).toBe(false);
+    expect(isGitSegment(`.git${' .'.repeat(100_000)}`)).toBe(true);
+    expect(isGitSegment(`${'. '.repeat(100_000)}x`)).toBe(false);
+    // A quadratic pattern needs many seconds for these inputs; a scan finishes in milliseconds.
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('still treats trailing dots and spaces after .git as the .git segment', () => {
+    expect(isGitSegment('.git.')).toBe(true);
+    expect(isGitSegment('.git ')).toBe(true);
+    expect(isGitSegment('.GIT. . ')).toBe(true);
+    expect(isGitSegment('.gitignore')).toBe(false);
+    expect(isGitSegment('foo.git')).toBe(false);
+    expect(isGitSegment('')).toBe(false);
   });
 });
