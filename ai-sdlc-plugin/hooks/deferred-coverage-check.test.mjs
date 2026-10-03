@@ -11,7 +11,17 @@
 
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  symlinkSync,
+  statSync,
+  chmodSync,
+} from 'node:fs';
 import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -436,6 +446,96 @@ describe('deferred-coverage-check.js — single-flight / scope / reaping (AISDLC
     assert.equal(invocations(w).length, 1);
   });
 
+  it('treats a lock whose startedAt is in the future as stale even if its pid is alive', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    writeFileSync(
+      join(w.lock, LOCK_NAME),
+      JSON.stringify({ pid: process.pid, startedAt: Date.now() + 24 * 3600 * 1000 }),
+    );
+    assert.equal(runWs(w).status, 0);
+    assert.equal(invocations(w).length, 1);
+  });
+
+  describe('untrusted lock path (shared tmpdir hardening)', () => {
+    const run = (w) =>
+      spawnSync('node', [HOOK], {
+        cwd: w.repo,
+        encoding: 'utf-8',
+        env: hookEnv(w),
+        input: '{}',
+        timeout: 20000,
+      });
+
+    it('a FIFO at the lock path neither hangs the hook nor lets it run', () => {
+      w = setupWorkspace();
+      writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+      const mk = spawnSync('mkfifo', [join(w.lock, LOCK_NAME)]);
+      assert.equal(mk.status, 0, 'mkfifo unavailable');
+      const res = run(w);
+      assert.equal(res.error, undefined, 'hook must not block reading the FIFO');
+      assert.equal(res.status, 0);
+      assert.equal(invocations(w).length, 0);
+    });
+
+    it('a symlink at the lock path is never followed or written through', () => {
+      w = setupWorkspace();
+      writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+      const target = join(w.lock, 'victim.txt');
+      writeFileSync(target, 'keep');
+      symlinkSync(target, join(w.lock, LOCK_NAME));
+      const res = run(w);
+      assert.equal(res.status, 0);
+      assert.equal(readFileSync(target, 'utf-8'), 'keep');
+      assert.equal(invocations(w).length, 0);
+    });
+
+    it('a directory at the lock path is not read as a lock and the hook does not run', () => {
+      w = setupWorkspace();
+      writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+      mkdirSync(join(w.lock, LOCK_NAME));
+      const res = run(w);
+      assert.equal(res.error, undefined);
+      assert.equal(res.status, 0);
+      assert.equal(invocations(w).length, 0);
+    });
+  });
+
+  describe('default lock directory', () => {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 'user';
+
+    it('is a private 0700 per-user directory under the tmpdir, and the lock is released', () => {
+      w = setupWorkspace();
+      writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+      const res = runWs(w, { AI_SDLC_COVERAGE_LOCK_DIR: '', TMPDIR: w.lock });
+      assert.equal(res.status, 0);
+      assert.equal(invocations(w).length, 1);
+      const dir = join(w.lock, `ai-sdlc-coverage-${uid}`);
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+      assert.equal(existsSync(join(dir, LOCK_NAME)), false, 'lock released');
+    });
+
+    it('skips instead of trusting a pre-created directory that is group/world accessible', () => {
+      w = setupWorkspace();
+      writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+      const dir = join(w.lock, `ai-sdlc-coverage-${uid}`);
+      mkdirSync(dir);
+      chmodSync(dir, 0o777);
+      const res = runWs(w, { AI_SDLC_COVERAGE_LOCK_DIR: '', TMPDIR: w.lock });
+      assert.equal(res.status, 0);
+      assert.equal(invocations(w).length, 0);
+    });
+
+    it('skips instead of trusting a regular file or symlink where the directory should be', () => {
+      w = setupWorkspace();
+      writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+      writeFileSync(join(w.lock, `ai-sdlc-coverage-${uid}`), 'not a directory');
+      const res = runWs(w, { AI_SDLC_COVERAGE_LOCK_DIR: '', TMPDIR: w.lock });
+      assert.equal(res.status, 0);
+      assert.equal(invocations(w).length, 0);
+    });
+  });
+
   it('two hooks racing over the same stale lock: exactly one proceeds', async () => {
     w = setupWorkspace();
     writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
@@ -497,18 +597,17 @@ describe('deferred-coverage-check.js — single-flight / scope / reaping (AISDLC
     assert.deepEqual(invocations(w), ['test:coverage']);
   });
 
-  it('AI_SDLC_SKIP_DEFERRED_COVERAGE=1 runs nothing (even without stdin)', () => {
+  it('AI_SDLC_SKIP_DEFERRED_COVERAGE=1 runs nothing, while the same fixture runs without it', () => {
     w = setupWorkspace();
     writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
-    const res = spawnSync('node', [HOOK], {
-      cwd: w.repo,
-      encoding: 'utf-8',
-      env: hookEnv(w, { AI_SDLC_SKIP_DEFERRED_COVERAGE: '1' }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    assert.equal(res.status, 0);
+    // Valid stdin through a pipe, so only the env skip can explain zero invocations.
+    const skipped = runWs(w, { AI_SDLC_SKIP_DEFERRED_COVERAGE: '1' });
+    assert.equal(skipped.status, 0);
     assert.equal(invocations(w).length, 0);
     assert.equal(existsSync(join(w.lock, LOCK_NAME)), false);
+    // Positive control: without the variable the identical fixture runs coverage once.
+    assert.equal(runWs(w).status, 0);
+    assert.equal(invocations(w).length, 1);
   });
 
   it('child env sets AI_SDLC_VITEST_MAX_WORKERS=2', () => {

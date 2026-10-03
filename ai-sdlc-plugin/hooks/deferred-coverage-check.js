@@ -20,6 +20,7 @@ const {
   writeSync,
   closeSync,
   statSync,
+  lstatSync,
   rmdirSync,
   realpathSync,
 } = require('fs');
@@ -375,12 +376,39 @@ function failureFingerprint(message) {
 // holds {pid, startedAt}; a live holder => exit 0 silently.
 
 const LOCK_GRACE_MS = 30000;
-const lockDir = process.env.AI_SDLC_COVERAGE_LOCK_DIR || tmpdir();
+const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+
+// A shared, world-writable tmpdir (Linux /tmp) lets another local user pre-create the lock
+// (a FIFO that hangs the read, a far-future startedAt, a takeover dir we cannot remove). So the
+// default lock lives in a per-user 0700 directory that must be a real directory owned by us;
+// when it cannot be trusted the hook skips rather than trusting it.
+function privateLockDir() {
+  const dir = join(tmpdir(), `ai-sdlc-coverage-${uid === null ? 'user' : uid}`);
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+  } catch (e) {
+    if (!e || e.code !== 'EEXIST') return null;
+  }
+  try {
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || (uid !== null && st.uid !== uid)) return null;
+    if (uid !== null && (st.mode & 0o077) !== 0) return null;
+  } catch {
+    return null;
+  }
+  return dir;
+}
+
+const lockDir = process.env.AI_SDLC_COVERAGE_LOCK_DIR || privateLockDir();
+if (!lockDir) process.exit(0);
 const lockPath = join(lockDir, 'ai-sdlc-deferred-coverage.lock');
 const takeoverGuard = lockPath + '.takeover';
 
 function readLock() {
   try {
+    // Never open anything but a regular file we own (a FIFO would block the read).
+    const st = lstatSync(lockPath);
+    if (!st.isFile() || (uid !== null && st.uid !== uid) || st.size > 1024) return null;
     return JSON.parse(readFileSync(lockPath, 'utf-8'));
   } catch {
     return null;
@@ -407,6 +435,8 @@ function lockIsStale() {
     }
   }
   if (!pidAlive(info.pid)) return true;
+  // A start time in the future cannot be a real holder (clock skew allowance of 60 s).
+  if (info.startedAt > Date.now() + 60000) return true;
   // pid reuse guard: no coverage run legitimately lasts longer than this.
   return Date.now() - info.startedAt > maxDurationMs + LOCK_GRACE_MS;
 }
