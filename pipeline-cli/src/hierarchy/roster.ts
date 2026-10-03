@@ -82,11 +82,19 @@ export function isLegacyLayoutEntry(entry: RosterEntry): boolean {
 /**
  * Why a roster entry must never be acted on, or undefined when it is safe.
  *
- * An entry is safe only when it names a tmux target this tool could have created:
- * either a valid window of the legacy `ai-sdlc-hierarchy` session, or a session
- * named exactly like its window and equal to a default hierarchy name (`planner`,
- * `operator-dispatch`, `executor-alpha`..`executor-epsilon`). A hostile or corrupt
- * roster can therefore never make `down` or `brief --notify` act on another session.
+ * This is a name check, not proof of ownership. An entry passes only when it names a
+ * target from a fixed set: either a valid window of the legacy `ai-sdlc-hierarchy`
+ * session, or a session named exactly like its window and equal to a default hierarchy
+ * name (`planner`, `operator-dispatch`, `executor-alpha`..`executor-epsilon`). A roster
+ * with any other name is rejected on every path (fail-closed by design; `up` has no name
+ * override, and widening the rule needs an operator decision), and a hostile or corrupt
+ * roster can name no session outside that set.
+ *
+ * It does not show that this tool created the session: a personal tmux session that
+ * happens to be called `planner` passes the name check. `down` and `brief --notify`
+ * therefore also require the `@ai-sdlc-hierarchy` session option that `up` sets (see
+ * `ownershipRefusal`) before typing into or closing a session. Entries of the legacy
+ * layout predate that option and have no ownership check.
  */
 export function unsafeEntryReason(entry: RosterEntry): string | undefined {
   if (typeof entry.tmuxWindow !== 'string' || !isValidSessionName(entry.tmuxWindow)) {

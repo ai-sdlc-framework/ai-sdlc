@@ -456,7 +456,9 @@ async function runHierarchyCliQuiet(argv: string[], sender: BriefSender): Promis
 }
 
 describe('tmux sender', () => {
-  function runner(opts: { windows?: string[]; pane?: string; failKeys?: number } = {}) {
+  function runner(
+    opts: { windows?: string[]; pane?: string; failKeys?: number; owned?: boolean } = {},
+  ) {
     const calls: string[][] = [];
     let keyCalls = 0;
     const run: CommandRunner = (_f, args) => {
@@ -470,6 +472,12 @@ describe('tmux sender', () => {
       }
       if (args[0] === 'display-message') {
         return { status: 0, stdout: `${opts.pane ?? '%7'}\n`, stderr: '' };
+      }
+      if (args[0] === 'show-options') {
+        // the ownership marker `up` sets on every session it starts
+        return opts.owned === false
+          ? { status: 1, stdout: '', stderr: 'unknown option' }
+          : { status: 0, stdout: '1\n', stderr: '' };
       }
       if (args[0] === 'send-keys') {
         keyCalls++;
@@ -490,20 +498,51 @@ describe('tmux sender', () => {
     ]);
   });
 
-  it('falls back to the window name when the pane id no longer belongs to it', () => {
-    const { run, calls } = runner({ pane: '%99' });
-    createTmuxBriefSender(run)(rosterEntry({}), 'hello');
-    expect(calls.find((c) => c[0] === 'send-keys')?.[2]).toBe(
-      '=ai-sdlc-hierarchy:operator-dispatch',
+  it('refuses, sending nothing, when the pane id no longer belongs to the window', () => {
+    for (const entry of [rosterEntry({}), rosterEntry({ tmuxSession: 'operator-dispatch' })]) {
+      const { run, calls } = runner({ pane: '%99' });
+      expect(() => createTmuxBriefSender(run)(entry, 'hello')).toThrow(
+        /refusing to message 'operator-dispatch'.*pane %7 does not belong/,
+      );
+      expect(calls.filter((c) => c[0] === 'send-keys')).toEqual([]);
+    }
+  });
+
+  it('refuses a session without the ownership marker, with zero send-keys (a personal session named like an agent)', () => {
+    const entry = rosterEntry({ tmuxSession: 'operator-dispatch' });
+    const { run, calls } = runner({ owned: false });
+    expect(() => createTmuxBriefSender(run)(entry, 'hello')).toThrow(
+      /refusing to message 'operator-dispatch'.*tmux session 'operator-dispatch'.*@ai-sdlc-hierarchy/,
     );
+    expect(calls.filter((c) => c[0] === 'send-keys')).toEqual([]);
+    expect(calls.some((c) => c[0] === 'show-options' && c.includes('=operator-dispatch'))).toBe(
+      true,
+    );
+  });
+
+  it('checks the marker on the entry session and proceeds when it is present', () => {
+    const entry = rosterEntry({ tmuxSession: 'operator-dispatch' });
+    const { run, calls } = runner({ owned: true });
+    createTmuxBriefSender(run)(entry, 'hello');
+    const show = calls.find((c) => c[0] === 'show-options');
+    expect(show).toEqual(['show-options', '-v', '-t', '=operator-dispatch', '@ai-sdlc-hierarchy']);
+    expect(calls.filter((c) => c[0] === 'send-keys')).toHaveLength(2);
+  });
+
+  it('applies no ownership check to a legacy-layout entry (it predates the marker)', () => {
+    const { run, calls } = runner({ owned: false });
+    createTmuxBriefSender(run)(rosterEntry({}), 'hello');
+    expect(calls.some((c) => c[0] === 'show-options')).toBe(false);
+    expect(calls.filter((c) => c[0] === 'send-keys')).toHaveLength(2);
   });
 
   it('targets the agent session in the one-session-per-agent layout', () => {
     const entry = rosterEntry({ tmuxSession: 'operator-dispatch' });
-    const { run, calls } = runner({ pane: '%99' });
+    const { run, calls } = runner({});
     createTmuxBriefSender(run)(entry, 'hello');
     expect(calls[0]).toEqual(['list-windows', '-t', '=operator-dispatch', '-F', '#{window_name}']);
-    expect(calls.find((c) => c[0] === 'send-keys')?.[2]).toBe(
+    // the recorded pane is verified through the agent's own session
+    expect(calls.find((c) => c[0] === 'display-message')?.[3]).toBe(
       '=operator-dispatch:operator-dispatch',
     );
 

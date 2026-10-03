@@ -163,7 +163,7 @@ export async function runHierarchyCli(
   try {
     switch (subcommand) {
       case 'up': {
-        await hierarchyUp(
+        const result = await hierarchyUp(
           {
             executors: flags.executors ?? '5',
             plannerModel: flags['planner-model'] ?? 'fable',
@@ -175,7 +175,7 @@ export async function runHierarchyCli(
           },
           deps,
         );
-        return 0;
+        return result.attachExitCode ?? 0;
       }
       case 'status': {
         const result = hierarchyStatus(deps);
@@ -226,8 +226,9 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'down': {
-        await hierarchyDown({ role: flags.role }, deps);
-        return 0;
+        const result = await hierarchyDown({ role: flags.role }, deps);
+        // A session left alone (not started by `up`, stale pane) is not a success.
+        return result.refused.length > 0 ? 1 : 0;
       }
       default:
         process.stderr.write(`cli-hierarchy: unknown command '${subcommand}'\n\n${USAGE}`);

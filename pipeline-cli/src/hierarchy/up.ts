@@ -12,7 +12,15 @@ import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
 import { isLegacyLayoutEntry, readRosterChecked, writeRoster } from './roster.js';
-import { hasSession, paneInfo, setSessionTitles, startSession, windowLive } from './tmux.js';
+import {
+  hasSession,
+  markSessionOwned,
+  OWNER_OPTION,
+  paneInfo,
+  setSessionTitles,
+  startSession,
+  windowLive,
+} from './tmux.js';
 import {
   HIERARCHY_TMUX_SESSION,
   type HierarchyDeps,
@@ -48,6 +56,8 @@ export interface UpResult {
   started: RosterEntry[];
   existing: RosterEntry[];
   warnings: string[];
+  /** Exit code of the tmux attach when `--attach` was requested and ran. */
+  attachExitCode?: number;
 }
 
 interface PlannedSession {
@@ -221,6 +231,13 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
         `could not start '${s.name}': ${result.stderr.trim() || 'tmux failed'} (${started.length} session(s) started before the failure)`,
       );
     }
+    // Ownership marker: `down` and `brief --notify` act only on sessions that carry it.
+    // A failure leaves the agent running but out of their reach, so say so.
+    if (markSessionOwned(deps.run, s.name).status !== 0) {
+      warnings.push(
+        `could not mark tmux session '${s.name}' with ${OWNER_OPTION}; down and brief --notify will refuse to act on it until it carries that option`,
+      );
+    }
     // Cosmetic: a failure here must not undo a started agent.
     if (setSessionTitles(deps.run, s.name).status !== 0) {
       warnings.push(`could not set the terminal title of tmux session '${s.name}'`);
@@ -262,12 +279,19 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     deps.log(`already running ${e.role} '${e.tmuxWindow}' (session left alone)`);
   for (const w of warnings) deps.log(`warning: ${w}`);
 
+  let attachExitCode: number | undefined;
   if (opts.attach) {
     const target =
       started.find((e) => e.role === 'planner') ??
       roster.sessions.find((e) => e.role === 'operator-dispatch');
-    if (target) attachEntry(target, deps);
-    else deps.log('warning: no planner or dispatch session to attach to');
+    if (target) {
+      try {
+        attachExitCode = attachEntry(target, deps);
+      } catch (err) {
+        deps.log(`warning: could not attach to '${target.tmuxWindow}': ${(err as Error).message}`);
+        attachExitCode = 1;
+      }
+    } else deps.log('warning: no planner or dispatch session to attach to');
   }
-  return { started, existing, warnings };
+  return { started, existing, warnings, attachExitCode };
 }

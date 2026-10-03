@@ -11,7 +11,7 @@
 import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
 import { readRosterChecked, writeRoster } from './roster.js';
-import { killWindow, listWindows, resolveSendTarget, sendExit } from './tmux.js';
+import { killWindow, listWindows, ownershipRefusal, resolveSendTarget, sendExit } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** What happened to one session. */
@@ -27,6 +27,8 @@ export interface DownOutcome {
 /** Result of `down`. */
 export interface DownResult {
   stopped: DownOutcome[];
+  /** Sessions left alone, with the reason: not started by `up`, or a stale pane id. */
+  refused: { name: string; reason: string }[];
 }
 
 /**
@@ -50,14 +52,30 @@ export async function hierarchyDown(
   }
 
   const stopped: DownOutcome[] = [];
+  const refused: { name: string; reason: string }[] = [];
   for (const entry of selected) {
     const isOpen = () => listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow);
     let forced = false;
     if (isOpen()) {
-      sendExit(
-        deps.run,
-        resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId),
-      );
+      // Before any keys are sent or window closed: only a session `up` started, and
+      // only through a pane id that still belongs to it. A refused entry stays in the
+      // roster and its inflight work is not touched.
+      let target: string | undefined;
+      let reason = ownershipRefusal(deps.run, entry);
+      if (!reason) {
+        try {
+          target = resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
+        } catch (err) {
+          reason = (err as Error).message;
+        }
+      }
+      if (reason || target === undefined) {
+        const why = reason ?? 'could not resolve the pane to send keys to';
+        refused.push({ name: entry.name, reason: why });
+        deps.log(`warning: not stopping '${entry.name}': ${why}`);
+        continue;
+      }
+      sendExit(deps.run, target);
       for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
       if (isOpen()) {
         killWindow(deps.run, entry.tmuxSession, entry.tmuxWindow);
@@ -75,5 +93,5 @@ export async function hierarchyDown(
       `stopped ${entry.role} '${entry.name}'${forced ? ' (window closed after no exit)' : ''}${requeued ? `; returned ${requeued} to the queue` : ''}`,
     );
   }
-  return { stopped };
+  return { stopped, refused };
 }

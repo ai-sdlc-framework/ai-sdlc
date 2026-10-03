@@ -33,7 +33,16 @@ export function attachEntry(entry: RosterEntry, deps: HierarchyDeps): number {
   }
   // Old layout: the agent is a window of the shared session; bring it to the front first.
   if (isLegacyLayoutEntry(entry)) {
-    deps.run('tmux', ['select-window', '-t', `=${entry.tmuxSession}:${entry.tmuxWindow}`]);
+    const selected = deps.run('tmux', [
+      'select-window',
+      '-t',
+      `=${entry.tmuxSession}:${entry.tmuxWindow}`,
+    ]);
+    if (selected.status !== 0) {
+      throw new Error(
+        `the window for '${entry.name}' is not open in tmux session '${entry.tmuxSession}'; start it with cli-hierarchy up`,
+      );
+    }
   }
   const mode = insideTmux(deps.env) ? 'switch-client' : 'attach-session';
   return deps.attach([mode, '-t', `=${entry.tmuxSession}`]);

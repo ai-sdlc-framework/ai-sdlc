@@ -143,6 +143,19 @@ describe('attachEntry', () => {
     expect(attached).toEqual([['switch-client', '-t', '=ai-sdlc-hierarchy']]);
   });
 
+  it('refuses a legacy entry whose window is gone instead of attaching to another agent', () => {
+    const legacy = entry('executor-alpha', { tmuxSession: 'ai-sdlc-hierarchy' });
+    const run = deps.run;
+    deps.run = (f, args, o) =>
+      args[0] === 'select-window'
+        ? { status: 1, stdout: '', stderr: "can't find window" }
+        : run(f, args, o);
+    expect(() => attachEntry(legacy, deps)).toThrow(
+      /window for 'executor-alpha' is not open in tmux session 'ai-sdlc-hierarchy'/,
+    );
+    expect(attached).toEqual([]);
+  });
+
   it('never selects a window for a new-layout entry', () => {
     attachEntry(entry('planner'), deps);
     expect(calls.some((c) => c[0] === 'select-window')).toBe(false);

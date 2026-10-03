@@ -27,17 +27,18 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 
 ## Overview
 
-| Property | Value |
-|----------|-------|
-| Max concurrent sessions | 5 |
-| Multiplexer | tmux (macOS only, v1) |
-| Session coordination | `.ai-sdlc/dispatch/sessions/<task-id>.session.json` |
-| Resource gate | `vm_stat` available pages ≥ 4 GB AND 1-min load avg < ncpu |
-| Task selection | Auto-suggest from frontier; operator confirms |
+| Property                | Value                                                      |
+| ----------------------- | ---------------------------------------------------------- |
+| Max concurrent sessions | 5                                                          |
+| Multiplexer             | tmux (macOS only, v1)                                      |
+| Session coordination    | `.ai-sdlc/dispatch/sessions/<task-id>.session.json`        |
+| Resource gate           | `vm_stat` available pages ≥ 4 GB AND 1-min load avg < ncpu |
+| Task selection          | Auto-suggest from frontier; operator confirms              |
 
 ### Why tmux?
 
 Each `/ai-sdlc execute` session needs its own independent Claude Code process with:
+
 - Its own `Agent` tool grant (plugin subagents cannot spawn sub-agents)
 - Its own worktree, signing key access, and operator filesystem
 - Its own tmux pane that survives operator detach
@@ -104,22 +105,24 @@ leaves the flag off.
 
 ### Security trade-off
 
-| Aspect | With `--dangerously-skip-permissions` | Without |
-|--------|--------------------------------------|---------|
-| Tool prompts (Edit/Write/Bash) | Skipped — sessions complete autonomously | Shown — sessions block in unmanned panes |
-| AskUserQuestion (non-tool) | Routed to Decision Catalog (AISDLC-480) | Shown in tmux pane |
-| Appropriate for | Autonomous drain with trusted backlog tasks in isolated worktrees | Operator-attached interactive sessions |
-| Risk | Spawned claude can edit files within the repo without per-edit approval | Sessions hang on first tool call |
+| Aspect                         | With `--dangerously-skip-permissions`                                   | Without                                  |
+| ------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------- |
+| Tool prompts (Edit/Write/Bash) | Skipped — sessions complete autonomously                                | Shown — sessions block in unmanned panes |
+| AskUserQuestion (non-tool)     | Routed to Decision Catalog (AISDLC-480)                                 | Shown in tmux pane                       |
+| Appropriate for                | Autonomous drain with trusted backlog tasks in isolated worktrees       | Operator-attached interactive sessions   |
+| Risk                           | Spawned claude can edit files within the repo without per-edit approval | Sessions hang on first tool call         |
 
 ### When to use each mode
 
 **Use `--dangerously-skip-permissions` (reply "yes")** when:
+
 - Running an overnight or unattended parallel drain
 - Tasks are standard backlog items executed by the AI-SDLC developer subagent
 - Each task runs in its own isolated worktree (Pattern C isolation is active)
 - You trust the task implementations that will be dispatched
 
 **Use interactive mode (reply "yes-no-skip")** when:
+
 - You plan to stay attached to the tmux session and monitor each pane
 - Tasks involve sensitive operations you want to approve individually
 - You're debugging a specific task implementation
@@ -259,6 +262,20 @@ Each session sets its own terminal title to the agent name (`set-titles on` and
 `set-titles-string`, scoped to that session) and shows the name in its status line.
 No global tmux option is changed.
 
+Safety: only the default agent names are ever acted on. In the per-agent layout a
+roster entry is accepted only when its session and window are the same default name
+(`planner`, `operator-dispatch`, `executor-alpha` to `executor-epsilon`); `up` cannot
+produce any other name, and a hand-written roster entry with another name is ignored by
+`status`, `attach`, `terminals`, `down` and `brief --notify` (it is reported as "not
+touched"). That is deliberate and fails closed; it is not widened without an explicit
+decision. A matching name is not proof that `up` created the session, so `up` also marks
+every session it starts with the session option `@ai-sdlc-hierarchy` (session-scoped,
+no global option), and `down` and `brief --notify` refuse to type into or close a
+session without it, and refuse when a recorded pane id no longer belongs to the window.
+A refused `down` leaves the entry in the roster and exits non-zero; your own tmux
+session called `planner` is therefore never closed. Entries of the earlier layout
+below predate the marker and have no ownership check.
+
 A roster written by the earlier single-session layout (windows of one
 `ai-sdlc-hierarchy` session) is still reported by `status` and stopped by `down`;
 `up` refuses to start on top of it until `cli-hierarchy down` has been run.
@@ -303,9 +320,9 @@ windows.
 The execute-parallel coordination layer has two independent substrates that
 track session state:
 
-| Substrate | File location | Purpose |
-|-----------|--------------|---------|
-| **Session file substrate** | `.ai-sdlc/dispatch/sessions/<task>.session.json` | tmux/execute-parallel coordination |
+| Substrate                    | File location                                                     | Purpose                                    |
+| ---------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
+| **Session file substrate**   | `.ai-sdlc/dispatch/sessions/<task>.session.json`                  | tmux/execute-parallel coordination         |
 | **Dispatch Board substrate** | `.ai-sdlc/dispatch/inflight/<task>.dispatch.json` + `.state.json` | Conductor/Worker Dispatch Board (RFC-0041) |
 
 When a session dies, both substrates must be updated consistently — an orphan
@@ -376,6 +393,7 @@ Step 1, before Step 5, after Step 6, after Step 7c) and performs a clean abort
 when the signal is present.
 
 On cancel:
+
 1. The cancel signal file is removed (idempotent — no spurious re-cancel on restart).
 2. The session file status is updated to `cancelled`.
 3. A board diagnostic is written to `.ai-sdlc/dispatch/failed/` so the
@@ -396,13 +414,13 @@ On cancel:
 
 Fields:
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `schemaVersion` | Yes | Always `v1` |
-| `taskId` | Yes | Task ID matching the session |
-| `cancelledAt` | Yes | ISO-8601 timestamp of signal write |
-| `reason` | No | Human-readable reason (audit trail) |
-| `cancelledBy` | No | Orchestrator / operator session identifier |
+| Field           | Required | Description                                |
+| --------------- | -------- | ------------------------------------------ |
+| `schemaVersion` | Yes      | Always `v1`                                |
+| `taskId`        | Yes      | Task ID matching the session               |
+| `cancelledAt`   | Yes      | ISO-8601 timestamp of signal write         |
+| `reason`        | No       | Human-readable reason (audit trail)        |
+| `cancelledBy`   | No       | Orchestrator / operator session identifier |
 
 ### Writing a cancel signal
 
@@ -447,12 +465,12 @@ node -e "
 
 The session checks for the cancel signal at these step boundaries:
 
-| After step | Why |
-|------------|-----|
-| Step 1 (argument validation) | Earliest safe abort — before any state mutation |
+| After step                         | Why                                                  |
+| ---------------------------------- | ---------------------------------------------------- |
+| Step 1 (argument validation)       | Earliest safe abort — before any state mutation      |
 | Before Step 5 (developer subagent) | Prevent starting a long-running developer invocation |
-| After Step 6 (developer completes) | Before starting expensive review fan-out |
-| After Step 7c (reviews complete) | Before committing / pushing |
+| After Step 6 (developer completes) | Before starting expensive review fan-out             |
+| After Step 7c (reviews complete)   | Before committing / pushing                          |
 
 The cancel is **clean** — no partial commits are left; the session terminates
 at a safe boundary. The worktree is preserved on disk for operator inspection
@@ -699,6 +717,7 @@ If some are done/failed but the session files weren't cleaned up:
 ### "SKIP TASK — already active (status=starting/in-progress)"
 
 A session file already exists for that task with a non-terminal status. Either:
+
 - The task is genuinely running in another pane — attach and check.
 - The prior session crashed without updating its status to `failed`. Manual fix:
 
@@ -719,6 +738,7 @@ Then retry `/ai-sdlc execute-parallel`.
 
 The tmux window spawned but `claude /ai-sdlc execute` hasn't emitted its first heartbeat.
 Possible causes:
+
 - `claude` CLI is not on PATH in the tmux environment.
 - The task's dependency preflight failed immediately.
 - The CCR guard refused the session (check for CCR env vars in your tmux environment).
@@ -739,6 +759,7 @@ shows `—`.
 ### Heartbeat age very stale (> 10 minutes) during `in-progress`
 
 The session may be stuck waiting for:
+
 - A long `pnpm test` run (normal for large test suites)
 - A reviewer subagent with a very long diff to analyze
 - An operator input prompt inside the tmux pane
@@ -788,13 +809,13 @@ After PR creation:
 
 ## Status definitions
 
-| Status | Description | Next action |
-|--------|-------------|-------------|
-| `starting` | tmux window created; `claude` not yet running | Wait 30-60s then check |
-| `in-progress` | Pipeline running; heartbeats flowing | Monitor with status command |
-| `done` | `/ai-sdlc execute` completed; PR opened | Review the PR |
-| `failed` | Session crashed, was killed, or heartbeat became stale (reaped) | Run cleanup, then re-dispatch |
-| `cancelled` | Session received and honored a cancel control signal (AISDLC-481) | Review diagnostic in `.ai-sdlc/dispatch/failed/` if needed |
+| Status        | Description                                                       | Next action                                                |
+| ------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- |
+| `starting`    | tmux window created; `claude` not yet running                     | Wait 30-60s then check                                     |
+| `in-progress` | Pipeline running; heartbeats flowing                              | Monitor with status command                                |
+| `done`        | `/ai-sdlc execute` completed; PR opened                           | Review the PR                                              |
+| `failed`      | Session crashed, was killed, or heartbeat became stale (reaped)   | Run cleanup, then re-dispatch                              |
+| `cancelled`   | Session received and honored a cancel control signal (AISDLC-481) | Review diagnostic in `.ai-sdlc/dispatch/failed/` if needed |
 
 ---
 
@@ -802,25 +823,25 @@ After PR creation:
 
 The `currentStep` field shows which Step 0-13 the session last completed:
 
-| Step name | Description |
-|-----------|-------------|
-| `01-validated` | Task argument parsed and validated |
-| `05-dev-running` | Developer subagent invoked |
-| `06-dev-done` | Developer subagent returned |
-| `07-reviewers-running` | Review fan-out started |
-| `07c-leaves-emitted` | Transcript leaves emitted |
-| `10-signing` | Pre-sign rebase complete |
-| `11b-pr-opened` | Draft PR opened on GitHub |
-| `done` | Pipeline complete; PR flipped to ready-for-review |
+| Step name              | Description                                       |
+| ---------------------- | ------------------------------------------------- |
+| `01-validated`         | Task argument parsed and validated                |
+| `05-dev-running`       | Developer subagent invoked                        |
+| `06-dev-done`          | Developer subagent returned                       |
+| `07-reviewers-running` | Review fan-out started                            |
+| `07c-leaves-emitted`   | Transcript leaves emitted                         |
+| `10-signing`           | Pre-sign rebase complete                          |
+| `11b-pr-opened`        | Draft PR opened on GitHub                         |
+| `done`                 | Pipeline complete; PR flipped to ready-for-review |
 
 ---
 
 ## Relation to existing dispatch patterns
 
-| Pattern | When to use |
-|---------|-------------|
-| `/ai-sdlc execute <task-id>` | Single task, interactive session |
-| `/ai-sdlc execute-parallel` | Multiple tasks, operator monitoring tmux |
+| Pattern                                                               | When to use                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------- |
+| `/ai-sdlc execute <task-id>`                                          | Single task, interactive session                        |
+| `/ai-sdlc execute-parallel`                                           | Multiple tasks, operator monitoring tmux                |
 | `/ai-sdlc orchestrator-tick` + `/ai-sdlc dispatch-worker` (Pattern Z) | Fully autonomous drain with Conductor/Worker separation |
 
 `execute-parallel` is the simplest parallel path — operator stays in the loop,

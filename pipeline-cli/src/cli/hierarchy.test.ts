@@ -82,6 +82,66 @@ describe('runHierarchyCli', () => {
     expect(String(err.mock.calls[0]?.[0])).toContain('could not start');
   });
 
+  it('down exits 1 when it refuses a session that up did not start, and sends nothing', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const boardDir = path.join(tmp, 'dispatch');
+    writeRoster(boardDir, {
+      schemaVersion: 'v1',
+      sessions: [
+        {
+          role: 'executor',
+          name: 'executor-alpha',
+          tmuxSession: 'executor-alpha',
+          tmuxWindow: 'executor-alpha',
+          paneId: '',
+          pid: 1,
+          model: 'sonnet',
+          permissionMode: 'default',
+          startedAt: '2026-10-03T12:00:00.000Z',
+          status: 'running',
+        },
+      ],
+    });
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      // the personal session exists with the agent's window, but has no ownership option
+      if (args[0] === 'list-windows') return { status: 0, stdout: 'executor-alpha\n', stderr: '' };
+      return { status: 1, stdout: '', stderr: 'unknown option' };
+    };
+    expect(await runHierarchyCli(['down'], overrides({ run }))).toBe(1);
+    expect(calls.some((c) => c[0] === 'send-keys' || c[0] === 'kill-window')).toBe(false);
+    expect(logs.some((l) => l.includes("not stopping 'executor-alpha'"))).toBe(true);
+  });
+
+  it('up --attach returns the exit code of the attach', async () => {
+    writeFileSync(
+      path.join(tmp, 'settings.json'),
+      JSON.stringify({ crossSessionInbound: 'accept' }),
+    );
+    let started = false;
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'new-session') started = true;
+      if (args[0] === 'has-session') return { status: started ? 0 : 1, stdout: '', stderr: '' };
+      if (args[0] === 'display-message') return { status: 0, stdout: '%1 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const attached: string[][] = [];
+    const code = await runHierarchyCli(
+      ['up', '--executors', '0', '--no-planner', '--attach'],
+      overrides({
+        run,
+        env: {},
+        attach: (a) => {
+          attached.push([...a]);
+          return 4;
+        },
+      }),
+    );
+    expect(code).toBe(4);
+    expect(attached).toEqual([['attach-session', '-t', '=operator-dispatch']]);
+  });
+
   it('status prints an empty roster as text and json', async () => {
     expect(await runHierarchyCli(['status'], overrides())).toBe(0);
     expect(logs).toEqual(['no sessions in the roster']);

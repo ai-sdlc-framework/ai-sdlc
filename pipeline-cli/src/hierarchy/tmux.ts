@@ -3,7 +3,8 @@
  * arguments are argv entries, never shell-interpolated.
  */
 
-import type { CommandResult, CommandRunner } from './types.js';
+import { isLegacyLayoutEntry } from './roster.js';
+import type { CommandResult, CommandRunner, RosterEntry } from './types.js';
 
 /** True when the tmux session exists. */
 export function hasSession(run: CommandRunner, session: string): boolean {
@@ -99,8 +100,10 @@ export function killWindow(run: CommandRunner, session: string, window: string):
 
 /**
  * Target for keys sent to a roster entry. The recorded pane id is used only when
- * tmux confirms it still belongs to the roster window; otherwise the window is
- * targeted by name so a recycled pane id can never receive the keys.
+ * tmux confirms it still belongs to the roster window. When it does not (or tmux
+ * cannot confirm it) nothing is sent: a stale or recycled pane id never falls back
+ * to targeting the window by name.
+ * @throws when a recorded pane id cannot be confirmed.
  */
 export function resolveSendTarget(
   run: CommandRunner,
@@ -111,5 +114,37 @@ export function resolveSendTarget(
   const windowTarget = `=${session}:${window}`;
   if (!paneId) return windowTarget;
   const r = run('tmux', ['display-message', '-p', '-t', windowTarget, '#{pane_id}']);
-  return r.status === 0 && r.stdout.trim() === paneId ? paneId : windowTarget;
+  if (r.status === 0 && r.stdout.trim() === paneId) return paneId;
+  throw new Error(
+    `the recorded pane ${paneId} does not belong to window '${window}' of tmux session '${session}' any more (the roster entry is stale); refusing to send keys to it or close it`,
+  );
+}
+
+/**
+ * Session-scoped tmux user option that `up` sets on every session it creates. `down` and
+ * `brief --notify` act on a session only when it carries it, so a personal session that
+ * happens to share an agent's name is never typed into or closed.
+ */
+export const OWNER_OPTION = '@ai-sdlc-hierarchy';
+
+/** Mark a session as started by `cli-hierarchy up` (session-scoped, never `-g`). */
+export function markSessionOwned(run: CommandRunner, name: string): CommandResult {
+  return run('tmux', ['set-option', '-t', `=${name}`, OWNER_OPTION, '1']);
+}
+
+/** True when the session carries the ownership marker. */
+export function sessionOwned(run: CommandRunner, session: string): boolean {
+  const r = run('tmux', ['show-options', '-v', '-t', `=${session}`, OWNER_OPTION]);
+  return r.status === 0 && r.stdout.trim() === '1';
+}
+
+/**
+ * Why the tool must not send keys to or close this entry's tmux session, or undefined
+ * when it may. Entries of the old layout (windows of the shared `ai-sdlc-hierarchy`
+ * session) predate the marker and carry no ownership check.
+ */
+export function ownershipRefusal(run: CommandRunner, entry: RosterEntry): string | undefined {
+  if (isLegacyLayoutEntry(entry)) return undefined;
+  if (sessionOwned(run, entry.tmuxSession)) return undefined;
+  return `tmux session '${entry.tmuxSession}' (roster entry '${entry.name}') does not carry the ${OWNER_OPTION} marker, so cli-hierarchy did not start it; refusing to send keys to it or close it. If it really is a hierarchy agent, mark it with: tmux set-option -t =${entry.tmuxSession} ${OWNER_OPTION} 1`;
 }
