@@ -116,6 +116,9 @@ const SECURITY_CHECKS: Record<SecurityCategory, readonly SecurityCheck[]> = {
 
 /** Exposed for tests and for documentation of the probe set. */
 export function securityChecksFor(category: SecurityCategory): readonly SecurityCheck[] {
+  // Own keys only: a flag such as 'constructor' must not resolve to an inherited member.
+  if (!Object.hasOwn(SECURITY_CHECKS, category))
+    throw new BaselineInputError(`unknown security category: ${safeId(String(category))}`);
   return SECURITY_CHECKS[category];
 }
 
@@ -216,9 +219,8 @@ export function buildBaselineProbes(
   hunks.forEach((h, i) => {
     const cats = [...new Set(h.flags)].sort();
     for (const cat of cats) {
-      const checks = SECURITY_CHECKS[cat];
-      if (!checks) continue;
-      for (const check of checks) {
+      // An unknown flag is an input the checklist cannot cover: fail closed, never skip it.
+      for (const check of securityChecksFor(cat)) {
         probes.push({
           id: `sec-${check.id}-${i}`,
           type: check.type,

@@ -20,7 +20,9 @@
  * @module review-plan/fallback
  */
 
-import { isHighRisk } from './baseline.js';
+import { validateReviewPlan } from '@ai-sdlc/reference';
+import { BaselineInputError, buildBaselineProbes, isHighRisk } from './baseline.js';
+import type { BuildBaselineOpts } from './baseline.js';
 import {
   ABSOLUTE_MAX_PROBES,
   ABSOLUTE_MAX_TARGET_BYTES,
@@ -35,6 +37,7 @@ import type {
   ReviewPlan,
   RiskHunk,
   RiskMapInput,
+  TaskInput,
 } from './types.js';
 
 export type FallbackResult =
@@ -78,6 +81,23 @@ export function buildFallbackPlan(
       detail: 'the fallback plan exceeds the absolute probe or size ceiling',
     });
 
+  const plan: ReviewPlan = { schemaVersion: 1, baselineVersion: baseline.version, probes };
+  // `ok: true` means the plan is runnable, so it must also satisfy the schema: a baseline built
+  // from a very large change, or a hunk with startLine 0, can break a per-probe limit that no
+  // code check above covers.
+  if (rejections.length === 0) {
+    const schema = validateReviewPlan(plan);
+    if (!schema.valid)
+      rejections.push({
+        reason: 'schema-invalid',
+        detail:
+          (schema.errors ?? [])
+            .slice(0, 5)
+            .map((e) => `${e.path || '/'} ${e.message}`)
+            .join('; ') || 'the fallback plan does not satisfy the plan schema',
+      });
+  }
+
   if (rejections.length > 0) {
     rejections.push({
       reason: 'unreviewable-input',
@@ -85,9 +105,35 @@ export function buildFallbackPlan(
     });
     return { ok: false, rejections };
   }
-  return {
-    ok: true,
-    plan: { schemaVersion: 1, baselineVersion: baseline.version, probes },
-    rejections: [],
-  };
+  return { ok: true, plan, rejections: [] };
+}
+
+/**
+ * Builds the baseline and then the fallback plan, never throwing. A risk map the checklist cannot
+ * carry (an unsafe hunk id, an unknown security category) yields `{ ok: false }` with an
+ * `unreviewable-input` rejection, the same fail-closed result as an unsafe reference, so a caller
+ * that handles only {@link FallbackResult} cannot crash and cannot run a degraded plan.
+ */
+export function buildFallbackPlanFor(
+  riskMap: RiskMapInput,
+  task: TaskInput,
+  baselineOpts: BuildBaselineOpts,
+  limits: PlanLimits,
+): FallbackResult {
+  let baseline: Baseline;
+  try {
+    baseline = buildBaselineProbes(riskMap, task, baselineOpts);
+  } catch (err) {
+    if (!(err instanceof BaselineInputError)) throw err;
+    return {
+      ok: false,
+      rejections: [
+        {
+          reason: 'unreviewable-input',
+          detail: `the change cannot be reviewed by the staged set; use the existing reviewer set (${err.message})`,
+        },
+      ],
+    };
+  }
+  return buildFallbackPlan(baseline, riskMap, limits);
 }

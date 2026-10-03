@@ -149,12 +149,17 @@ export function loadStagedReviewConfig(opts: LoadStagedConfigOpts = {}): StagedR
   return parseStagedReviewConfig(text);
 }
 
-export function toPlanLimits(config: StagedReviewConfig, repoRoot: string): PlanLimits {
+export function toPlanLimits(
+  config: StagedReviewConfig,
+  repoRoot: string,
+  mergeBase?: string,
+): PlanLimits {
   return {
     riskThreshold: config.riskThreshold,
     maxProbes: config.maxProbes,
     maxTargetBytes: config.maxTargetBytes,
     commandAllowlist: config.commandAllowlist,
     repoRoot,
+    ...(mergeBase !== undefined ? { mergeBase } : {}),
   };
 }

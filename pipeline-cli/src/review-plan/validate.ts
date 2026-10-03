@@ -4,6 +4,15 @@
  * The plan is untrusted. Every rejection carries a reason; the plan is never
  * partially accepted.
  *
+ * SCOPE: this is a necessary check, not the complete trust boundary. It validates
+ * the plan's shape, commands, paths, revisions and limits once, up front. It does
+ * NOT decide which files a probe may read: it does not restrict reads to
+ * git-tracked files (a gitignored `.env` inside the repository passes), it does
+ * not redact secrets from evidence, and it cannot stop a path from changing after
+ * validation. The executor (AISDLC-675, hard requirement, DEC-0019) must read
+ * only tracked targets plus diff-added paths, redact evidence, and re-check
+ * containment at the moment it opens each file (realpath plus O_NOFOLLOW).
+ *
  * @module review-plan/validate
  */
 
@@ -37,6 +46,8 @@ function canonical(value: unknown): string {
 /** Absolute ceilings that bound fan-out even for the mandatory baseline. */
 export const ABSOLUTE_MAX_PROBES = 500;
 export const ABSOLUTE_MAX_TARGET_BYTES = 1_000_000;
+/** Default cap on the run probes a plan adds (each one executes the repository's own scripts). */
+export const DEFAULT_MAX_RUN_PROBES = 2;
 
 export function targetBytes(target: unknown): number {
   return Buffer.byteLength(canonical(target), 'utf8');
@@ -108,7 +119,8 @@ export function escapesRoot(repoRoot: string, p: string): boolean {
   return rel.split(sep).some(isGitSegment);
 }
 
-const REVISION = /^[A-Za-z0-9_@^~][A-Za-z0-9._/@^~-]{0,99}$/;
+/** A full commit SHA in lowercase hex (SHA-1 or SHA-256), the only form a merge-base may take. */
+const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 /** Command and query problems: those that make a whole probe unusable. */
 export function probeNonFileProblems(p: Probe, limits: PlanLimits): Rejection[] {
@@ -128,11 +140,19 @@ export function probeNonFileProblems(p: Probe, limits: PlanLimits): Rejection[] 
   // Queries are passed to executors after `--`; a leading '-' would read as an option.
   if (typeof p.target.query === 'string' && p.target.query.startsWith('-'))
     add('unsafe-query', `probe ${p.id} query starts with '-'`);
+  // A plan may diff the code-supplied merge-base against HEAD and nothing else. Any other
+  // revision (a branch, a tag, the shared stash, `HEAD~1`) is refused here, not only
+  // syntax-checked: a local ref can hold content the review must never read.
   const rev = p.target.revisions;
   if (rev) {
-    for (const r of [rev.base, rev.head])
-      if (!REVISION.test(r) || r.includes('..'))
-        add('unsafe-revision', `probe ${p.id} names an unsafe revision`);
+    const mergeBase = limits.mergeBase;
+    if (
+      typeof mergeBase !== 'string' ||
+      !FULL_SHA.test(mergeBase) ||
+      rev.base !== mergeBase ||
+      rev.head !== 'HEAD'
+    )
+      add('unsafe-revision', `probe ${p.id} may only compare the merge-base commit with HEAD`);
   }
   return out;
 }
@@ -267,6 +287,14 @@ export function validatePlan(
     );
   if (probes.length > ABSOLUTE_MAX_PROBES)
     reject('probe-limit-exceeded', `${probes.length} probes exceeds the absolute ceiling`);
+  // Run probes execute the repository's own scripts, so they have their own, much lower cap.
+  const maxRunProbes = limits.maxRunProbes ?? DEFAULT_MAX_RUN_PROBES;
+  const addedRuns = added.filter((p) => p.type === 'run').length;
+  if (addedRuns > maxRunProbes)
+    reject(
+      'probe-limit-exceeded',
+      `${addedRuns} added run probes exceeds the limit of ${maxRunProbes}`,
+    );
   const addedBytes = added.reduce((n, p) => n + targetBytes(p.target), 0);
   const totalBytes = addedBytes + baselineBytes;
   if (addedBytes > limits.maxTargetBytes)

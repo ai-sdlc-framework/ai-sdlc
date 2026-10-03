@@ -155,6 +155,19 @@ export interface PlanLimits {
    * or whose root cannot be resolved, is rejected.
    */
   repoRoot: string;
+  /**
+   * The merge-base commit SHA, supplied by code (never by the plan). A `compare` probe may
+   * diff exactly this revision against `HEAD` and nothing else, so a plan cannot name another
+   * local ref (a branch, the shared stash, a tag). When absent or not a full lowercase hex SHA,
+   * every plan-supplied `revisions` is refused.
+   */
+  mergeBase?: string;
+  /**
+   * Cap on the `run` probes the plan adds beyond the baseline, independent of `maxProbes`
+   * (each run probe executes the repository's own scripts). Defaults to
+   * `DEFAULT_MAX_RUN_PROBES`.
+   */
+  maxRunProbes?: number;
 }
 
 export type ValidatePlanResult = { valid: true } | { valid: false; rejections: Rejection[] };

@@ -12,6 +12,8 @@ import {
   targetBytes,
   BaselineInputError,
   buildFallbackPlan,
+  buildFallbackPlanFor,
+  DEFAULT_MAX_RUN_PROBES,
   escapesRoot,
   probeSafetyProblems,
   isHighRisk,
@@ -303,6 +305,89 @@ describe('validatePlan', () => {
     });
     // 60 two-byte characters serialize to well over 100 bytes but under 100 characters.
     expect(reasons(p, { ...limits, maxTargetBytes: 100 })).toContain('target-size-exceeded');
+  });
+
+  it('pins the maxTargetBytes boundary: exactly the limit is accepted, one byte less is not', () => {
+    const p = full();
+    const one = extra(1);
+    p.probes.push(...one);
+    const exact = targetBytes(one[0]!.target);
+    expect(reasons(p, { ...limits, maxTargetBytes: exact })).not.toContain('target-size-exceeded');
+    expect(reasons(p, { ...limits, maxTargetBytes: exact - 1 })).toContain('target-size-exceeded');
+  });
+
+  it('pins the combined absolute byte ceiling: a baseline under it plus added probes over it', () => {
+    const bigRead = (id: string, baseline?: true): Probe => ({
+      id,
+      type: 'read',
+      target: {
+        files: Array.from({ length: 200 }, (_, j) => ({
+          path: `${id}/${j}/${'a'.repeat(240)}`,
+        })),
+      },
+      question: 'q',
+      covers: [],
+      ...(baseline ? { baseline } : {}),
+    });
+    const bl: Baseline = {
+      version: BASELINE_CHECKLIST_VERSION,
+      probes: Array.from({ length: 16 }, (_, i) => bigRead(`b${i}`, true)),
+    };
+    const baseBytes = bl.probes.reduce((n, x) => n + targetBytes(x.target), 0);
+    const addedProbes = Array.from({ length: 4 }, (_, i) => bigRead(`a${i}`));
+    const addedBytes = addedProbes.reduce((n, x) => n + targetBytes(x.target), 0);
+    expect(baseBytes).toBeLessThan(ABSOLUTE_MAX_TARGET_BYTES);
+    expect(baseBytes + addedBytes).toBeGreaterThan(ABSOLUTE_MAX_TARGET_BYTES);
+    const lim: PlanLimits = { ...limits, maxProbes: 100, maxTargetBytes: 10_000_000 };
+    const rm = { ...riskMap, hunks: [] };
+    const over = validatePlan(planOf([...clone(bl.probes), ...addedProbes]), bl, rm, lim);
+    const overReasons = over.valid ? [] : over.rejections.map((x) => x.reason);
+    expect(overReasons).toContain('target-size-exceeded');
+    expect(overReasons).not.toContain('baseline-over-ceiling');
+    // One added probe keeps the total under the ceiling.
+    const under = validatePlan(planOf([...clone(bl.probes), addedProbes[0]!]), bl, rm, lim);
+    expect(under.valid).toBe(true);
+  });
+
+  describe('run probe cap', () => {
+    const run = (id: string, command: string): Probe => ({
+      id,
+      type: 'run',
+      target: { command },
+      question: 'q',
+      covers: [],
+    });
+    const three = [run('r1', 'pnpm lint'), run('r2', 'pnpm typecheck'), run('r3', 'pnpm test')];
+
+    it('defaults to two added run probes, independent of maxProbes', () => {
+      expect(DEFAULT_MAX_RUN_PROBES).toBe(2);
+      const p = full();
+      p.probes.push(...three);
+      const roomy: PlanLimits = { ...limits, maxProbes: 100 };
+      const r = validatePlan(p, baseline(), riskMap, roomy);
+      expect(r.valid).toBe(false);
+      const hit = !r.valid && r.rejections.find((x) => x.detail.includes('run probes'));
+      expect(hit && hit.reason).toBe('probe-limit-exceeded');
+      const two = full();
+      two.probes.push(three[0]!, three[1]!);
+      expect(validatePlan(two, baseline(), riskMap, roomy).valid).toBe(true);
+    });
+
+    it('counts only added run probes: the baseline tests-run probe is exempt', () => {
+      expect(baseline().probes.some((x) => x.type === 'run')).toBe(true);
+      const p = full();
+      p.probes.push(three[0]!, three[1]!);
+      expect(reasons(p)).toEqual([]);
+    });
+
+    it('honours maxRunProbes, including zero', () => {
+      const p = full();
+      p.probes.push(...three);
+      expect(reasons(p, { ...limits, maxRunProbes: 3 })).toEqual([]);
+      const one = full();
+      one.probes.push(three[0]!);
+      expect(reasons(one, { ...limits, maxRunProbes: 0 })).toContain('probe-limit-exceeded');
+    });
   });
 
   it('enforces the absolute ceiling and reports an oversize baseline explicitly', () => {
@@ -883,9 +968,59 @@ describe('buildFallbackPlan', () => {
       },
     );
 
-    it('accepts safe revisions', () => {
-      expect(probeSafetyProblems(cmp('origin/main', 'HEAD~1'), riskMap, limits)).toEqual([]);
+    // DEC-0019: a plan may diff the code-supplied merge-base against HEAD and nothing else.
+    const MERGE_BASE = 'a'.repeat(40);
+    const withBase: PlanLimits = { ...limits, mergeBase: MERGE_BASE };
+
+    it('accepts the merge-base commit compared with HEAD', () => {
+      expect(probeSafetyProblems(cmp(MERGE_BASE, 'HEAD'), riskMap, withBase)).toEqual([]);
+      const b = baseline();
+      const plan = planOf(
+        [...clone(b.probes), cmp(MERGE_BASE, 'HEAD')].map((p, i, all) =>
+          i === all.length - 1 ? { ...p, baseline: undefined } : p,
+        ),
+      );
+      expect(reasons(plan, withBase)).toEqual([]);
     });
+
+    const otherRefs: Array<[string, string]> = [
+      ['origin/main', 'HEAD'],
+      ['stash', 'HEAD'],
+      ['stash^3', 'HEAD'],
+      ['HEAD~1', 'HEAD'],
+      [MERGE_BASE, 'stash'],
+      [MERGE_BASE, 'stash^3'],
+      [MERGE_BASE, 'HEAD~1'],
+      [MERGE_BASE, 'b'.repeat(40)],
+      ['b'.repeat(40), 'HEAD'],
+      [MERGE_BASE.toUpperCase(), 'HEAD'],
+    ];
+
+    it.each(otherRefs)('refuses base %j head %j although the syntax is safe', (base, head) => {
+      const out = probeSafetyProblems(cmp(base, head), riskMap, withBase);
+      expect(out.map((x) => x.reason)).toContain('unsafe-revision');
+    });
+
+    it('validatePlan refuses a plan-added compare against the stash with unsafe-revision only', () => {
+      const added: Probe = {
+        id: 'cmp-stash',
+        type: 'compare',
+        target: { revisions: { base: 'stash', head: 'HEAD' } },
+        question: 'q',
+        covers: [],
+      };
+      const plan = planOf([...clone(baseline().probes), added]);
+      expect(reasons(plan, withBase)).toEqual(['unsafe-revision']);
+    });
+
+    it.each([undefined, 'origin/main', 'abc123', 'A'.repeat(40), `${MERGE_BASE} `, ''])(
+      'refuses every plan revision when the merge-base is %j (not a full lowercase SHA)',
+      (mergeBase) => {
+        const lim: PlanLimits = { ...limits, mergeBase };
+        const out = probeSafetyProblems(cmp(MERGE_BASE, 'HEAD'), riskMap, lim);
+        expect(out.map((x) => x.reason)).toContain('unsafe-revision');
+      },
+    );
   });
 
   describe('byte ceiling', () => {
@@ -1005,6 +1140,14 @@ describe('staged review config', () => {
     expect(c.maxTargetBytes).toBe(500);
   });
 
+  it('accepts riskThreshold 0 and 1 and falls back to 0.5 outside 0..1 or when not a number', () => {
+    const threshold = (v: string) =>
+      parseStagedReviewConfig(`staged:\n  riskThreshold: ${v}\n`).riskThreshold;
+    expect(threshold('0')).toBe(0);
+    expect(threshold('1')).toBe(1);
+    for (const bad of ['1.5', '-1', '5', '.nan', '.inf', '"0.7"']) expect(threshold(bad)).toBe(0.5);
+  });
+
   it('falls back to the default allowlist, not a broader one, on unsafe entries', () => {
     const c = parseStagedReviewConfig(
       'staged:\n  executorCommandAllowlist: ["pnpm test", "sh -c \\"x\\"; rm"]\n',
@@ -1122,5 +1265,58 @@ describe('staged review config', () => {
         },
       }).maxProbes,
     ).toBe(40);
+  });
+});
+
+describe('fail-closed baseline and fallback inputs (DEC-0019)', () => {
+  const opts = { riskThreshold: 0.5, commandAllowlist: DEFAULT_COMMAND_ALLOWLIST };
+
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty', 'nonsense'])(
+    'refuses the flag %j instead of walking an inherited member or skipping it',
+    (flag) => {
+      const rm: RiskMapInput = {
+        ...riskMap,
+        hunks: [{ ...riskMap.hunks[0]!, flags: [flag as SecurityCategory] }],
+      };
+      expect(() => buildBaselineProbes(rm, task, opts)).toThrow(BaselineInputError);
+      expect(() => securityChecksFor(flag as SecurityCategory)).toThrow(BaselineInputError);
+      const r = buildFallbackPlanFor(rm, task, opts, limits);
+      expect(r.ok).toBe(false);
+      expect(r.rejections.map((x) => x.reason)).toEqual(['unreviewable-input']);
+    },
+  );
+
+  it('returns ok:false and does not throw for an unsafe hunk id', () => {
+    const rm: RiskMapInput = { ...riskMap, hunks: [{ ...riskMap.hunks[0]!, id: 'h 1; rm' }] };
+    expect(() => buildBaselineProbes(rm, task, opts)).toThrow(BaselineInputError);
+    let r: ReturnType<typeof buildFallbackPlanFor> | undefined;
+    expect(() => {
+      r = buildFallbackPlanFor(rm, task, opts, limits);
+    }).not.toThrow();
+    expect(r!.ok).toBe(false);
+    expect(r!.rejections.map((x) => x.reason)).toEqual(['unreviewable-input']);
+  });
+
+  it('does not swallow an unexpected error type', () => {
+    const rm = { ...riskMap, hunks: null } as unknown as RiskMapInput;
+    expect(() => buildFallbackPlanFor(rm, task, opts, limits)).toThrow();
+  });
+
+  it('builds the same plan as buildFallbackPlan for a valid risk map', () => {
+    const r = buildFallbackPlanFor(riskMap, task, opts, limits);
+    expect(r).toEqual(buildFallbackPlan(buildBaselineProbes(riskMap, task, opts), riskMap, limits));
+    expect(r.ok).toBe(true);
+  });
+
+  it('is ok:false with schema-invalid when the plan breaks a per-probe schema limit', () => {
+    // startLine 0 is below the schema minimum of 1; no path, command or ceiling check sees it.
+    const rm: RiskMapInput = {
+      ...riskMap,
+      hunks: [{ ...riskMap.hunks[0]!, startLine: 0, endLine: 3 }],
+    };
+    const r = buildFallbackPlanFor(rm, task, opts, limits);
+    expect(r.ok).toBe(false);
+    expect(r.rejections.map((x) => x.reason)).toEqual(['schema-invalid', 'unreviewable-input']);
+    expect('plan' in r).toBe(false);
   });
 });
