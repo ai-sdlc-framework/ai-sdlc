@@ -15,6 +15,7 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 - [Monitoring](#monitoring)
 - [Liveness detection and session reaper](#liveness-detection-and-session-reaper)
 - [Cancel back-channel](#cancel-back-channel)
+- [The executor loop](#the-executor-loop)
 - [Cleanup](#cleanup)
 - [Pre-push gate resource use](#pre-push-gate-resource-use)
 - [Troubleshooting](#troubleshooting)
@@ -443,6 +444,76 @@ node -e "
 
 Full pause/resume (the session waits, receives the operator answer, and
 resumes from where it was blocked) is tracked as a follow-up to this task.
+
+---
+
+## The executor loop
+
+In a session hierarchy, each executor session runs `/ai-sdlc executor` for its whole
+life. The planner and dispatch sessions are covered by their own commands; this
+section is the executor's side of the board.
+
+One pass of the loop:
+
+1. **Identify.** The executor reads the roster (`.ai-sdlc/dispatch/hierarchy.json`)
+   and finds its own entry (the session whose process is the entry's `pid`) and the
+   dispatch session's entry. The name is used exactly as the roster has it,
+   including any collision suffix the harness added.
+2. **Claim.** `cli-dispatch claim --worker-kind in-session-agent --worker <name>`
+   moves the next eligible manifest to `inflight/` with `workerId` equal to the
+   roster name. That equality is what lets `cli-hierarchy status` and `down` join an
+   inflight task to its session. When nothing is eligible, the executor schedules a
+   wake-up on the empty-queue interval (30 seconds, or
+   `spec.inSessionAgent.emptyQueueHibernateSec` from the dispatch config) and tries
+   again.
+3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
+   argument. The pipeline is not modified for executors.
+4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>
+   --worker <name> [--pr <n>] [--follow-ups <ids>] [--decisions <ids>]` writes the
+   verdict. `success` and `iterate-needed` land in `done/`; every other outcome
+   lands in `failed/`. Every outcome except `iterate-needed` also removes the task
+   from `inflight/`; on `iterate-needed` the inflight manifest stays, so the worker
+   keeps the slot across the iteration. The verdict records the
+   outcome, the pull request number, the follow-up task ids and the decision ids
+   raised. The command refuses when the task is not inflight, when a follow-up id
+   is not a sub-id of the task, and when `--worker` is missing or differs from the
+   name recorded at claim time. That match guards against a mistake (a session
+   completing the wrong task); it is not authentication, because the recorded name
+   is readable from the inflight manifest.
+5. **Tell the dispatch session.** One status line goes to the dispatch session:
+   task, outcome, pull request, decision ids. It carries status only.
+6. **Stop.** The dispatch session sees the verdict, clears the executor's context and
+   issues `/ai-sdlc executor` again.
+
+### After a clear
+
+`/clear` keeps a session's name and permission mode but empties its context. The
+plugin's `SessionStart` hook runs again with source `clear`; when the session is
+named in the roster it injects a short block with the session's role, name, the
+dispatch session's name and the command to run. The hook adds nothing for any other
+source (`startup`, `resume`, `compact`) and nothing for a session that is not in the
+roster. It finds its session by matching the roster's `pid` against the hook
+process's ancestors.
+
+### Follow-up task ids
+
+An executor never files a top-level task id. A follow-up it discovers is filed as a
+sub-id of its own task. `cli-dispatch next-subid <task-id>` prints the first
+`<task-id>.<n>` that is free in all three places a sub-id can already exist:
+
+- `backlog/` (task files, open and completed),
+- the board (a manifest or verdict in any state),
+- the file lists of open pull requests (`gh pr list`; when it cannot be reached the
+  command warns, reports `"openPrScan":"unavailable"` and checks the first two only).
+
+### Rules an executor keeps
+
+- It never messages another executor.
+- It never answers a decision, its own or another task's.
+- It never edits an RFC's Open Questions.
+- When it is blocked, it records the question with `cli-decisions escalate` and
+  stops. The routing of that decision to the dispatch session or the planner is a
+  separate step that is not part of this loop yet.
 
 ---
 
