@@ -58,6 +58,7 @@ const ARTIFACT_SCHEMA_FILES = {
   HierarchyRoster: 'hierarchy-roster.v1.schema.json',
   UsageConfig: 'usage-config.v1.schema.json',
   ModelRouting: 'model-routing.v1.schema.json',
+  ReviewPlan: 'review-plan.v1.schema.json',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
@@ -256,6 +257,13 @@ export function validateUsageConfig<T = unknown>(data: unknown): ValidationResul
  */
 export function validateModelRouting<T = unknown>(data: unknown): ValidationResult<T> {
   return validateArtifact<T>('ModelRouting', data);
+}
+
+/**
+ * Convenience wrapper for the staged-review plan shape.
+ */
+export function validateReviewPlan<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('ReviewPlan', data);
 }
 
 /**
