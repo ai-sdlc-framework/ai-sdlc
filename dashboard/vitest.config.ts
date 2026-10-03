@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { sharedTestConfig } from '../vitest.shared.mjs';
 
 export default defineConfig({
   esbuild: {
@@ -11,6 +12,7 @@ export default defineConfig({
     },
   },
   test: {
+    ...sharedTestConfig,
     include: ['src/**/*.test.{ts,tsx}'],
     coverage: {
       provider: 'v8',

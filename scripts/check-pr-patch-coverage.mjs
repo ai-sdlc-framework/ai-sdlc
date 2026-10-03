@@ -157,6 +157,12 @@ const NON_INSTRUMENTED_PATTERNS = [
   // Next.js build config (e.g. dashboard/next.config.mjs). Build config, not a
   // testable unit — same rationale as vitest.config / eslint.config above.
   /(^|\/)next\.config\.(?:ts|mjs|js)$/,
+  // AISDLC-681: the shared vitest preset and its per-worker parent-death setup
+  // file live at the repo root (outside any package's src/), so no package's
+  // coverage report can contain them. They are test configuration, exercised by
+  // scripts/vitest-parent-death.test.mjs under node --test. Exactly these two
+  // root-level filenames, anchored; any other vitest.*.mjs is not excluded.
+  /^vitest\.(?:shared|parent-watch\.setup)\.mjs$/,
   // ucvg-demo/ — zero-dependency `node --test` fixture repo used for RFC-0043
   // UCVG live-demo differential testing. Runs under `node --test`, not Vitest,
   // so no istanbul/v8 coverage data is produced for it by Vitest instrumentation.

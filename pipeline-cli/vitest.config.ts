@@ -1,7 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import { sharedTestConfig } from '../vitest.shared.mjs';
 
 export default defineConfig({
   test: {
+    ...sharedTestConfig,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     // Keep *.flaky.test.ts excluded from the default run — loop.filters.flaky.test.ts
     // documents an unresolved 6s CPU-load flake (AISDLC-368). Re-introducing it would

@@ -57,6 +57,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `attestation-governance` | Attestation required-but-unconfigured; branch protection requiring `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration) | `checkAttestationGovernance` (AISDLC-560) |
 | `marketplace-catalog-drift` | Marketplace catalog cache lags the source-of-truth version — the `/plugin` "already at latest" false negative | — |
 | `npm-dist-tag-reachability` | Every `runtimeDependencies` pin actually resolves on the configured npm registry | — |
+| `orphaned-vitest-workers` | Warns on `vitest` workers with parent pid 1 older than 2 minutes (left by a killed test run) and prints the `kill` command; prints nothing when there are none (AISDLC-681) | `ps` |
 | `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
 
 #### `judgment-layer`
