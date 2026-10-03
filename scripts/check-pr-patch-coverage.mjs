@@ -43,7 +43,7 @@
  * found under the coverage-root tree, so a multi-package monorepo PR that
  * spans pipeline-cli + orchestrator gets a fused view.
  *
- * Diff source: `git diff --unified=0 --no-color <base>..<head> -- '<file>'`
+ * Diff source: `git diff --unified=0 --no-color <merge-base(base, head)>..<head> -- '<file>'`
  * — `--unified=0` collapses context lines so we only see the actual added/
  * modified hunks. We count "+" lines from each hunk header range.
  *
@@ -205,6 +205,28 @@ export function parseArgs(argv) {
 // ── Diff parsing ─────────────────────────────────────────────────────────────
 
 /**
+ * Resolves the commit the patch is measured from: `git merge-base <base> <head>`.
+ *
+ * A two-dot `base..head` compares the base TIP to the PR head, so any file that
+ * landed on the base branch after the PR forked shows up as "changed by the PR"
+ * (in reverse) and, having no coverage data, fails the gate (AISDLC-686). The
+ * merge-base is the fork point, so only the PR's own changes are measured.
+ * Falls back to `base` when no merge-base exists (unrelated or shallow history).
+ */
+export function resolveDiffBase({ base, head, cwd }) {
+  try {
+    const mb = execFileSync('git', ['merge-base', base, head], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return mb || base;
+  } catch {
+    return base;
+  }
+}
+
+/**
  * Returns the list of files changed between `base` and `head` whose path is
  * not a pure deletion.
  *
@@ -212,7 +234,8 @@ export function parseArgs(argv) {
  * file contributes nothing to the patch we want to cover.
  */
 export function listChangedFiles({ base, head, cwd }) {
-  const out = execFileSync('git', ['diff', '--name-status', '--no-renames', `${base}..${head}`], {
+  const from = resolveDiffBase({ base, head, cwd });
+  const out = execFileSync('git', ['diff', '--name-status', '--no-renames', `${from}..${head}`], {
     cwd,
     encoding: 'utf-8',
   });
@@ -240,10 +263,11 @@ export function listChangedFiles({ base, head, cwd }) {
  */
 export function changedLinesForFile({ base, head, file, cwd }) {
   let raw;
+  const from = resolveDiffBase({ base, head, cwd });
   try {
     raw = execFileSync(
       'git',
-      ['diff', '--unified=0', '--no-color', `${base}..${head}`, '--', file],
+      ['diff', '--unified=0', '--no-color', `${from}..${head}`, '--', file],
       { cwd, encoding: 'utf-8' },
     );
   } catch {
