@@ -266,28 +266,61 @@ describe('.env-style assignments: PASS, PWD and dashed names', () => {
   });
 });
 
+/**
+ * Growth-ratio probe for ReDoS checks: times `run(n)` and `run(4n)`, each as the
+ * minimum over `reps` runs (the minimum discards GC pauses and CPU contention, so
+ * the check holds under coverage and under load), and returns t(4n) / t(n).
+ * Work linear in the input gives about 4, quadratic work about 16. The result is
+ * a ratio, so it does not depend on machine speed or on coverage instrumentation.
+ */
+function growthRatio(run: (n: number) => void, n: number, reps = 3): number {
+  const best = (size: number): number => {
+    let min = Infinity;
+    for (let i = 0; i < reps; i++) {
+      const start = performance.now();
+      run(size);
+      min = Math.min(min, performance.now() - start);
+    }
+    return min;
+  };
+  run(n); // warm-up: compile the regexes before measuring
+  return best(4 * n) / best(n);
+}
+
+/** Midway (geometrically) between linear (~4) and quadratic (~16) growth for a 4x input. */
+const LINEAR_GROWTH_LIMIT = 8;
+
 describe('ReDoS: changed regexes stay linear on adversarial input', () => {
-  it('handles 200k-char secret/whitespace/bracket/backtick runs', () => {
-    const n = 200_000;
-    const inputs = [
-      'secret'.repeat(n / 6),
-      'secret '.repeat(n / 7),
-      'secret_' + ' '.repeat(n),
-      'secret' + '['.repeat(n),
-      'secret' + '`'.repeat(n),
-      'secret:' + '`'.repeat(n),
-      'secret</a>' + ' '.repeat(n),
-      'secret</a><b>'.repeat(n / 13),
-      'secret ' + 'A'.repeat(n),
-      AKIA_RUN(n),
-      'PASS'.repeat(n / 4),
-      'PASS_' + '-'.repeat(n),
-      'secret-'.repeat(n / 7),
-      '--secret-key='.repeat(n / 13),
-    ];
-    const start = Date.now();
-    for (const i of inputs) redactSecrets(i);
-    expect(Date.now() - start).toBeLessThan(5000);
+  it('flags a known-quadratic pattern (the growth-ratio check can fail)', () => {
+    // /\s+$/ on a whitespace run that is not at the end restarts at every position.
+    const quadratic = (n: number): void => {
+      /\s+$/.test(' '.repeat(n) + 'x');
+    };
+    expect(growthRatio(quadratic, 3_000)).toBeGreaterThan(LINEAR_GROWTH_LIMIT);
+  });
+
+  // Formerly: 'handles 200k-char secret/whitespace/bracket/backtick runs' (absolute 5000 ms bound).
+  it('grows linearly on secret/whitespace/bracket/backtick runs', { timeout: 60_000 }, () => {
+    const run = (n: number): void => {
+      const inputs = [
+        'secret'.repeat(n / 6),
+        'secret '.repeat(n / 7),
+        'secret_' + ' '.repeat(n),
+        'secret' + '['.repeat(n),
+        'secret' + '`'.repeat(n),
+        'secret:' + '`'.repeat(n),
+        'secret</a>' + ' '.repeat(n),
+        'secret</a><b>'.repeat(n / 13),
+        'secret ' + 'A'.repeat(n),
+        AKIA_RUN(n),
+        'PASS'.repeat(n / 4),
+        'PASS_' + '-'.repeat(n),
+        'secret-'.repeat(n / 7),
+        '--secret-key='.repeat(n / 13),
+      ];
+      for (const i of inputs) redactSecrets(i);
+    };
+    expect(growthRatio(run, 12_500)).toBeLessThan(LINEAR_GROWTH_LIMIT);
   });
 });
 
@@ -308,24 +341,29 @@ describe('registry hardening', () => {
     expect(redactSecrets(once)).toBe(once);
   });
 
-  it('stays fast on long adversarial inputs (no catastrophic backtracking)', () => {
-    const n = 200_000;
-    const inputs = [
-      'secret'.repeat(n / 6),
-      'secret_' + ' '.repeat(n),
-      'a://'.repeat(n / 4),
-      'http://' + 'a'.repeat(n),
-      'http://' + 'a:'.repeat(n / 2),
-      'TOKEN="' + 'a\\'.repeat(n / 2),
-      'TOKEN=' + ' '.repeat(n),
-      'TOKEN="x '.repeat(n / 9),
-      'AKIA' + 'A'.repeat(n),
-      'a'.repeat(n),
-    ];
-    const start = Date.now();
-    for (const i of inputs) redactSecrets(i);
-    expect(Date.now() - start).toBeLessThan(5000);
-  });
+  // Formerly: 'stays fast on long adversarial inputs (no catastrophic backtracking)' (absolute 5000 ms bound).
+  it(
+    'grows linearly on long adversarial inputs (no catastrophic backtracking)',
+    { timeout: 60_000 },
+    () => {
+      const run = (n: number): void => {
+        const inputs = [
+          'secret'.repeat(n / 6),
+          'secret_' + ' '.repeat(n),
+          'a://'.repeat(n / 4),
+          'http://' + 'a'.repeat(n),
+          'http://' + 'a:'.repeat(n / 2),
+          'TOKEN="' + 'a\\'.repeat(n / 2),
+          'TOKEN=' + ' '.repeat(n),
+          'TOKEN="x '.repeat(n / 9),
+          'AKIA' + 'A'.repeat(n),
+          'a'.repeat(n),
+        ];
+        for (const i of inputs) redactSecrets(i);
+      };
+      expect(growthRatio(run, 12_500)).toBeLessThan(LINEAR_GROWTH_LIMIT);
+    },
+  );
 });
 
 describe('AWS secret access keys: masked prompts, multi-line and structured layouts', () => {
@@ -463,30 +501,35 @@ describe('.env-style assignments: dotted and long name tails', () => {
 });
 
 describe('ReDoS: round 3 regexes stay linear on adversarial input', () => {
-  it('handles 200k-char newline, bracket, star, backslash and timestamp runs', () => {
-    const n = 200_000;
-    const TS = '2026-10-01T12:00:00+00:00';
-    const inputs = [
-      'secret' + '\n '.repeat(n / 2),
-      'secret\r\n'.repeat(n / 8),
-      'secret:' + '\n '.repeat(n / 2),
-      'secret ' + '\n'.repeat(n),
-      'secret[' + ']'.repeat(n),
-      'secret' + '['.repeat(n),
-      'secret' + '*'.repeat(n),
-      'secret [' + '*'.repeat(n) + ']: ',
-      'secret' + '\\'.repeat(n),
-      'secret\\"'.repeat(n / 8),
-      '[REDACTED:' + 'A_'.repeat(n / 2) + 'secret',
-      '[REDACTED:ENV_SECRET]'.repeat(n / 21),
-      ('AKIA' + 'A'.repeat(16) + ' ' + TS + ' ').repeat(n / 46),
-      'AKIA' + 'A'.repeat(16) + ' '.repeat(n),
-      'AKIA' + 'A'.repeat(16) + ' ' + TS + ' '.repeat(n),
-      'A'.repeat(40) + ' '.repeat(n) + 'AKIA' + 'A'.repeat(16),
-      ('A'.repeat(40) + ' ').repeat(n / 41),
-    ];
-    const start = Date.now();
-    for (const i of inputs) redactSecrets(i);
-    expect(Date.now() - start).toBeLessThan(5000);
-  });
+  // Formerly: 'handles 200k-char newline, bracket, star, backslash and timestamp runs' (absolute 5000 ms bound).
+  it(
+    'grows linearly on newline, bracket, star, backslash and timestamp runs',
+    { timeout: 60_000 },
+    () => {
+      const run = (n: number): void => {
+        const TS = '2026-10-01T12:00:00+00:00';
+        const inputs = [
+          'secret' + '\n '.repeat(n / 2),
+          'secret\r\n'.repeat(n / 8),
+          'secret:' + '\n '.repeat(n / 2),
+          'secret ' + '\n'.repeat(n),
+          'secret[' + ']'.repeat(n),
+          'secret' + '['.repeat(n),
+          'secret' + '*'.repeat(n),
+          'secret [' + '*'.repeat(n) + ']: ',
+          'secret' + '\\'.repeat(n),
+          'secret\\"'.repeat(n / 8),
+          '[REDACTED:' + 'A_'.repeat(n / 2) + 'secret',
+          '[REDACTED:ENV_SECRET]'.repeat(n / 21),
+          ('AKIA' + 'A'.repeat(16) + ' ' + TS + ' ').repeat(n / 46),
+          'AKIA' + 'A'.repeat(16) + ' '.repeat(n),
+          'AKIA' + 'A'.repeat(16) + ' ' + TS + ' '.repeat(n),
+          'A'.repeat(40) + ' '.repeat(n) + 'AKIA' + 'A'.repeat(16),
+          ('A'.repeat(40) + ' ').repeat(n / 41),
+        ];
+        for (const i of inputs) redactSecrets(i);
+      };
+      expect(growthRatio(run, 12_500)).toBeLessThan(LINEAR_GROWTH_LIMIT);
+    },
+  );
 });
