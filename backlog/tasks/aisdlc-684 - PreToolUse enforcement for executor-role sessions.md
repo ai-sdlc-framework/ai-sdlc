@@ -64,10 +64,16 @@ roster. This task joins them.
    the claim, write nothing on refusal; document it as a mistake-guard, not
    authentication.
 
+6. **Role skip for the deferred coverage Stop hook** (deferred from AISDLC-685,
+   DEC-0022): `deferred-coverage-check.js` exits 0 without running when the session
+   holds an RFC-0051 executor or operator-dispatch role, resolved with the same
+   `hierarchy-role.js` helper; the pre-push gate covers those sessions.
+
 ## Acceptance Criteria
 - [ ] In an executor-role session, `SendMessage` to a non-dispatch recipient, `cli-decisions answer` and top-level `task_create` are denied by the hook with a message that names the rule.
 - [ ] The same calls succeed in planner and dispatch sessions and in a session with no resolvable role.
 - [ ] `write-verdict` without `--worker`, or from a worker that does not hold the claim, is refused with nothing written.
+- [ ] The deferred coverage Stop hook does not run in executor-role or dispatch-role sessions and still runs in planner and unresolved-role sessions.
 - [ ] The executor skill's hard-rule text is rendered from the resolved policy; no rule string is duplicated.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
