@@ -63,8 +63,19 @@ trust-sensitive: the security reviewer runs on Opus.
    working tree. Each refusal exits non-zero with a one-line reason and changes nothing.
 3. **Partial approval:** a Decision whose answer approves a subset applies only that
    subset and records the declined cells as information in the PR body.
+4. **Aliases by default (operator ruling, 2026-10-03).** Routing cells name a model
+   family alias (`sonnet`, `opus`, `haiku`) so a role follows new releases; a versioned
+   id is written only on request. When the table's cell or `strength` uses aliases,
+   `apply` writes the family alias of the approved model, derived from the versioned id
+   in the evidence, and refuses with a one-line reason when the id maps to no known
+   family. `--pin` writes the versioned id as given and adds it to `strength` next to
+   its family alias. Evidence rows recorded under a versioned id and rows recorded
+   under the alias of the same family are treated as the same model when the cell is an
+   alias, and the PR body says which ids were merged.
 
 ## Acceptance Criteria
+- [ ] With an alias table, an approved change whose evidence names a versioned id writes the family alias into the cell and leaves `strength` unchanged; with `--pin` it writes the versioned id and adds it to `strength`.
+- [ ] A versioned id that maps to no known family is refused with a one-line reason and nothing is changed.
 - [ ] `route apply` on an approved Decision produces a branch whose only changes are the table cells, their evidence references and the evidence files.
 - [ ] On an unanswered or declined Decision it changes nothing and exits non-zero.
 - [ ] A Decision whose evidence file digest does not match, or whose evidence no longer qualifies when re-derived, is refused with nothing written.
