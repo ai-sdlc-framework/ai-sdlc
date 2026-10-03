@@ -251,7 +251,7 @@
     "branch": {
       "type": "string",
       "minLength": 1,
-      "description": "Original branch name the dev was working on before the rollback. Present on `OrchestratorWorkQuarantined` (AISDLC-177)."
+      "description": "Original branch name the dev was working on before the rollback. Present on `OrchestratorWorkQuarantined` (AISDLC-177) and on `OperatorPlaybookAction` when a push was made or attempted (RFC-0051)."
     },
     "commitSha": {
       "type": "string",
@@ -381,13 +381,67 @@
       "type": "string",
       "minLength": 1,
       "description": "Judgment provider name - present on `JudgmentProviderUnavailable` when known (RFC-0049)."
+    },
+    "sessionName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Roster name of the started session - present on `HierarchySessionStarted` (RFC-0051)."
+    },
+    "sessionRole": {
+      "type": "string",
+      "enum": ["planner", "operator-dispatch", "executor"],
+      "description": "Hierarchy tier of the started session - present on `HierarchySessionStarted` (RFC-0051)."
+    },
+    "executor": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Roster name of the executor whose context was cleared - present on `ExecutorContextCleared` (RFC-0051)."
+    },
+    "paneId": {
+      "type": "string",
+      "pattern": "^%[0-9]+$",
+      "description": "tmux pane id the clear keystrokes were sent to - present on `ExecutorContextCleared` (RFC-0051)."
+    },
+    "resumed": {
+      "type": "boolean",
+      "description": "Whether the executor reported back within the settle time after the clear - present on `ExecutorContextCleared` (RFC-0051)."
+    },
+    "settleMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Settle time in milliseconds the clear waited between keystrokes and for the executor to report back - present on `ExecutorContextCleared` (RFC-0051)."
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Decision Catalog id - present on `DecisionRouted` (RFC-0051)."
+    },
+    "route": {
+      "type": "string",
+      "enum": ["operational", "design"],
+      "description": "Decision route - present on `DecisionRouted` (RFC-0051)."
+    },
+    "routedTo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Session name or role that now owns the decision - present on `DecisionRouted` (RFC-0051)."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["rebase-push", "retrigger-ci", "requeue", "escalate"],
+      "description": "Unblocking-playbook action - present on `OperatorPlaybookAction` (RFC-0051)."
+    },
+    "result": {
+      "type": "string",
+      "enum": ["done", "refused", "failed", "escalated"],
+      "description": "What happened to the playbook action - present on `OperatorPlaybookAction` (RFC-0051)."
     }
   },
   "additionalProperties": false,
   "$defs": {
     "OrchestratorEventType": {
       "type": "string",
-      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix. RFC-0049 adds `JudgmentEscalated` (judgmentId, escalateTo, reason) when an enforced judgment escalates and `JudgmentProviderUnavailable` (reason, judgmentId, provider) when a configured judgment provider cannot be used, at most once per process per reason. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix. RFC-0049 adds `JudgmentEscalated` (judgmentId, escalateTo, reason) when an enforced judgment escalates and `JudgmentProviderUnavailable` (reason, judgmentId, provider) when a configured judgment provider cannot be used, at most once per process per reason. RFC-0051 adds `HierarchySessionStarted` (sessionName, sessionRole), `ExecutorContextCleared` (executor, paneId, resumed, settleMs), `DecisionRouted` (decisionId, route, routedTo) and `OperatorPlaybookAction` (taskId, action, result, reason) for the session hierarchy's dispatch loop. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       "enum": [
         "OrchestratorTick",
         "OrchestratorDispatched",
@@ -419,7 +473,11 @@
         "UsageLimitObserved",
         "AllotmentChangeSuspected",
         "JudgmentEscalated",
-        "JudgmentProviderUnavailable"
+        "JudgmentProviderUnavailable",
+        "HierarchySessionStarted",
+        "ExecutorContextCleared",
+        "DecisionRouted",
+        "OperatorPlaybookAction"
       ]
     }
   }

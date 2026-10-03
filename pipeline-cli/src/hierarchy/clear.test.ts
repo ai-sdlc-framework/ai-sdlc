@@ -1,0 +1,329 @@
+/**
+ * Tests for `cli-hierarchy clear`. tmux is a recording fake behind the injected
+ * runner; the roster and board are temp directories; no session is started.
+ */
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { getCapability, readCapabilityState } from '@ai-sdlc/reference';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { claimNext, writeManifest } from '../dispatch/board.js';
+import type { DispatchManifest } from '../dispatch/types.js';
+import { clearExecutor, HIERARCHY_CLEAR_CAPABILITY, type ClearDeps } from './clear.js';
+import type { HierarchyEvent } from './emit.js';
+import { writeRoster } from './roster.js';
+import type { CommandRunner, Roster, RosterEntry } from './types.js';
+
+let tmp: string;
+let board: string;
+let artifacts: string;
+let events: HierarchyEvent[];
+let calls: { file: string; args: string[] }[];
+let screen: string;
+let resumes: boolean;
+let sleeps: number[];
+
+const entry = (over: Partial<RosterEntry> = {}): RosterEntry => ({
+  role: 'executor',
+  name: 'executor-alpha',
+  tmuxSession: 'ai-sdlc-hierarchy',
+  tmuxWindow: 'executor-alpha',
+  paneId: '%7',
+  pid: 4242,
+  model: 'sonnet',
+  permissionMode: 'bypassPermissions',
+  startedAt: '2026-09-30T12:00:00.000Z',
+  status: 'running',
+  ...over,
+});
+
+function seedRoster(...sessions: RosterEntry[]): void {
+  const roster: Roster = { schemaVersion: 'v1', sessions };
+  writeRoster(board, roster);
+}
+
+/** A tmux that knows one window and one pane and records every call. */
+const run: CommandRunner = (file, args) => {
+  calls.push({ file, args: [...args] });
+  const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
+  if (file !== 'tmux') return { status: 1, stdout: '', stderr: 'unexpected binary' };
+  switch (args[0]) {
+    case 'list-windows':
+      return ok('executor-alpha\nexecutor-beta\n');
+    case 'display-message':
+      return ok('%7\n');
+    case 'capture-pane':
+      return ok(screen);
+    case 'send-keys': {
+      const literal = args[args.indexOf('--') + 1];
+      if (args.includes('-l') && literal === '/ai-sdlc executor' && resumes) {
+        // The executor prints its identity line once its loop restarts.
+        screen += "[executor] I am 'executor-alpha'; dispatch session is 'operator-dispatch'\n";
+      }
+      return ok();
+    }
+    default:
+      return { status: 1, stdout: '', stderr: 'unknown' };
+  }
+};
+
+function deps(over: Partial<ClearDeps> = {}): ClearDeps {
+  return {
+    run,
+    boardDir: board,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
+    emit: (e) => events.push(e),
+    artifactsDir: artifacts,
+    ...over,
+  };
+}
+
+const sends = () => calls.filter((c) => c.args[0] === 'send-keys');
+
+const mkManifest = (taskId: string): DispatchManifest => ({
+  schemaVersion: 'v1',
+  taskId,
+  branch: `ai-sdlc/${taskId.toLowerCase()}`,
+  worktree: `.worktrees/${taskId.toLowerCase()}`,
+  baseSha: 'abc1234',
+  workerKind: 'in-session-agent',
+  dispatchedAt: '2026-05-20T10:00:00.000Z',
+  dispatchedBy: 'test',
+  spec: { taskFile: 'backlog/tasks/x.md', verifyCommands: ['pnpm build'] },
+});
+
+beforeEach(() => {
+  tmp = mkdtempSync(path.join(tmpdir(), 'clear-'));
+  board = path.join(tmp, 'dispatch');
+  artifacts = path.join(tmp, 'artifacts');
+  mkdirSync(board, { recursive: true });
+  events = [];
+  calls = [];
+  sleeps = [];
+  screen = "old scrollback\n[executor] I am 'executor-alpha'; dispatch session is 'x'\n";
+  resumes = true;
+  seedRoster(entry(), entry({ name: 'executor-beta', tmuxWindow: 'executor-beta', paneId: '%8' }));
+});
+afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+
+const capability = () => readCapabilityState(artifacts).find((r) => r.id === 'hierarchy.clear');
+
+describe('clearExecutor', () => {
+  it('sends /clear, Enter, waits, then /ai-sdlc executor, Enter, to the executor pane', async () => {
+    const result = await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 1000, pollIntervalMs: 250, taskId: 'AISDLC-1' },
+      deps(),
+    );
+    expect(sends().map((c) => c.args)).toEqual([
+      ['send-keys', '-t', '%7', '-l', '--', '/clear'],
+      ['send-keys', '-t', '%7', 'Enter'],
+      ['send-keys', '-t', '%7', '-l', '--', '/ai-sdlc executor'],
+      ['send-keys', '-t', '%7', 'Enter'],
+    ]);
+    // The settle time passes between the two keystrokes.
+    expect(sleeps[0]).toBe(1000);
+    expect(result).toMatchObject({ executor: 'executor-alpha', paneId: '%7', resumed: true });
+  });
+
+  it('never sends keys to another pane', async () => {
+    await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
+    for (const c of sends()) expect(c.args[2]).toBe('%7');
+  });
+
+  it('records an ExecutorContextCleared event', async () => {
+    await clearExecutor(
+      {
+        executor: 'executor-alpha',
+        settleMs: 500,
+        taskId: 'AISDLC-1',
+        workerId: 'operator-dispatch',
+      },
+      deps(),
+    );
+    expect(events).toEqual([
+      {
+        type: 'ExecutorContextCleared',
+        executor: 'executor-alpha',
+        paneId: '%7',
+        resumed: true,
+        settleMs: 500,
+        taskId: 'AISDLC-1',
+        workerId: 'operator-dispatch',
+      },
+    ]);
+  });
+
+  it('registers hierarchy.clear and reports it live after a clear the executor answered', async () => {
+    expect(getCapability(HIERARCHY_CLEAR_CAPABILITY)).toBeDefined();
+    await clearExecutor({ executor: 'executor-alpha', settleMs: 500 }, deps());
+    expect(capability()?.status).toBe('live');
+  });
+
+  it('reports hierarchy.clear degraded with a reason when the executor does not resume in time', async () => {
+    resumes = false;
+    const result = await clearExecutor({ executor: 'executor-alpha', settleMs: 500 }, deps());
+    expect(result.resumed).toBe(false);
+    // Both keystrokes were still sent.
+    expect(sends()).toHaveLength(4);
+    const row = capability();
+    expect(row?.status).toBe('degraded');
+    expect(row?.lastDegradedReason).toContain('did not report back within 500 ms');
+    expect(events[0]).toMatchObject({ type: 'ExecutorContextCleared', resumed: false });
+  });
+
+  it('refuses an executor that holds an inflight manifest and sends nothing', async () => {
+    writeManifest(board, mkManifest('AISDLC-5'));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-alpha' });
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
+      /holds AISDLC-5, which is still inflight/,
+    );
+    expect(sends()).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('still clears an executor when only another executor holds a task', async () => {
+    writeManifest(board, mkManifest('AISDLC-6'));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-beta' });
+    await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
+    expect(sends().length).toBe(4);
+  });
+
+  it('refuses an invalid name before any tmux call', async () => {
+    for (const bad of ['', 'a b', 'x;y', '../x', 'a\nb', '$(id)']) {
+      await expect(clearExecutor({ executor: bad }, deps())).rejects.toThrow(
+        /not a valid executor name/,
+      );
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a name that is not an executor in the roster before any tmux call', async () => {
+    seedRoster(entry(), entry({ role: 'operator-dispatch', name: 'operator-dispatch' }));
+    await expect(clearExecutor({ executor: 'operator-dispatch' }, deps())).rejects.toThrow(
+      /not an executor in the roster/,
+    );
+    await expect(clearExecutor({ executor: 'executor-zeta' }, deps())).rejects.toThrow(
+      /not an executor in the roster/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses an executor that is not running', async () => {
+    seedRoster(entry({ status: 'starting' }));
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
+      /not running/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a missing or malformed pane id before any tmux call', async () => {
+    seedRoster(entry({ paneId: '' }));
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
+      /no valid pane id/,
+    );
+    // A roster that bypasses the writer, with a pane id that is not '%<digits>'.
+    writeFileSync(
+      path.join(board, 'hierarchy.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        sessions: [{ ...entry(), paneId: '%7; rm -rf /' }],
+      }),
+    );
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
+      /not an executor in the roster/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses an entry that names a tmux session other than the hierarchy session', async () => {
+    writeFileSync(
+      path.join(board, 'hierarchy.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        sessions: [{ ...entry(), tmuxSession: 'work' }],
+      }),
+    );
+    await expect(clearExecutor({ executor: 'executor-alpha' }, deps())).rejects.toThrow(
+      /not an executor in the roster/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses when the executor window is not open, sending nothing', async () => {
+    seedRoster(entry({ name: 'executor-gamma', tmuxWindow: 'executor-gamma', paneId: '%9' }));
+    await expect(clearExecutor({ executor: 'executor-gamma' }, deps())).rejects.toThrow(
+      /window for 'executor-gamma' is not open/,
+    );
+    expect(sends()).toEqual([]);
+  });
+
+  it('validates the settle time and poll interval', async () => {
+    await expect(
+      clearExecutor({ executor: 'executor-alpha', settleMs: -1 }, deps()),
+    ).rejects.toThrow(/settle time/);
+    await expect(
+      clearExecutor({ executor: 'executor-alpha', pollIntervalMs: 0 }, deps()),
+    ).rejects.toThrow(/poll interval/);
+    expect(calls).toEqual([]);
+  });
+
+  it('degrades the capability and stops when /clear cannot be typed', async () => {
+    const failing: CommandRunner = (file, args) =>
+      args[0] === 'send-keys' ? { status: 1, stdout: '', stderr: 'no such pane' } : run(file, args);
+    await expect(
+      clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: failing })),
+    ).rejects.toThrow(/could not send \/clear/);
+    expect(capability()?.status).toBe('degraded');
+    expect(events).toEqual([]);
+  });
+
+  it('degrades the capability when the restart command cannot be typed', async () => {
+    let n = 0;
+    const failSecond: CommandRunner = (file, args) => {
+      if (args[0] === 'send-keys' && ++n > 2) return { status: 1, stdout: '', stderr: 'gone' };
+      return run(file, args);
+    };
+    await expect(
+      clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: failSecond })),
+    ).rejects.toThrow(/could not send \/ai-sdlc executor/);
+    expect(capability()?.status).toBe('degraded');
+  });
+
+  it('degrades when the pane cannot be read, rather than assuming it resumed', async () => {
+    const blind: CommandRunner = (file, args) =>
+      args[0] === 'capture-pane' ? { status: 1, stdout: '', stderr: 'x' } : run(file, args);
+    const result = await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 100, pollIntervalMs: 50 },
+      deps({ run: blind }),
+    );
+    expect(result.resumed).toBe(false);
+    expect(capability()?.status).toBe('degraded');
+  });
+
+  it('uses the window name as the target when tmux says the pane id was recycled', async () => {
+    const recycled: CommandRunner = (file, args) =>
+      args[0] === 'display-message' ? { status: 0, stdout: '%99\n', stderr: '' } : run(file, args);
+    await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: recycled }));
+    for (const c of sends()) expect(c.args[2]).toBe('=ai-sdlc-hierarchy:executor-alpha');
+  });
+
+  it('reports to the log when given one', async () => {
+    const lines: string[] = [];
+    await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 0 },
+      deps({ log: (l) => lines.push(l) }),
+    );
+    expect(lines).toEqual(["cleared 'executor-alpha'"]);
+    resumes = false;
+    await clearExecutor(
+      { executor: 'executor-alpha', settleMs: 0 },
+      deps({ log: (l) => lines.push(l) }),
+    );
+    expect(lines[1]).toContain('did not report back');
+  });
+});

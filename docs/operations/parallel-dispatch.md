@@ -582,6 +582,86 @@ sub-id of its own task. `cli-dispatch next-subid <task-id>` prints the first
 
 ---
 
+## The operator-dispatch loop
+
+The dispatch session runs `/ai-sdlc operator-dispatch` on a wake-up interval (60
+seconds). It owns throughput: it turns briefs into work, keeps the board moving,
+clears each executor between tasks, unblocks what it is allowed to unblock and
+reports to the planner. Each wake-up runs one command:
+
+```bash
+cli-hierarchy tick --worker <dispatch session name>
+```
+
+`--worker` must be the roster name of the running dispatch session; every board
+write the loop makes carries that name. The command prints, as JSON, what it did
+and what the session has to say.
+
+1. **Ingest.** Each new `*.md` file in `.ai-sdlc/dispatch/briefs/` is parsed and
+   enqueued with the same mapping as `cli-dispatch enqueue --from-brief`, then
+   marked ingested in `.ai-sdlc/dispatch/operator-dispatch.state.json`. A later
+   wake-up never enqueues it again. A brief the board refuses is reported and is
+   retried only after the file changes.
+2. **Verdict watch.** Each new verdict in `done/` or `failed/` is handled once. The
+   executor that wrote it is cleared (below), then failures go through the
+   unblocking playbook.
+3. **Reports.** A progress line goes to the planner at the configured cadence
+   (15 minutes by default, `--report-every-ms`), and a summary when every task of
+   an ingested brief has reached a final state.
+
+### The unblocking playbook
+
+Every step is gated by the `operational` list in `spec.governance` of
+`.ai-sdlc/agent-role.yaml` (read, never written, by the loop, and read only from the verified main checkout: the `.git` there must be a real directory, not a symlink, matching the git common dir; any doubt grants nothing) and is recorded as an
+`OperatorPlaybookAction` event. A step the policy does not grant is refused and
+becomes an escalation.
+
+| Failure record | Action | Grant needed |
+| --- | --- | --- |
+| Mechanical conflict shape (`test-additions-overlap`, `prettier-drift`, `pnpm-lock-regen`, `package-json-bin-concat`, `behind-only`) | Rebase the task branch onto `origin/main`, then lease-push to that branch | `rebase-own-branch`, `lease-push-own-branch` |
+| `stale-merge-ref` | Push an empty commit to the task branch | `retrigger-ci` |
+| `stale-heartbeat`, `spawn-rejected`, `quota-exhausted`, `transient`, within the retry limit | `cli-dispatch requeue --task-id <id>` | `requeue` |
+| Anything else | Escalate: the planner is messaged with the task id and the failure. No git action is taken. | none |
+
+The playbook can push to one place: `HEAD:refs/heads/<the task's own branch>`.
+`main`, `master`, any other branch, any forced or deleting push and any other
+refspec form are refused before git is run. A rebase that does not apply cleanly is
+aborted, never resolved by hand.
+
+`cli-dispatch requeue --task-id <id> [--retry-limit <n>]` returns one failed task to
+`queue/` with its retry count incremented. It restores the manifest saved when the
+task failed. It refuses, changing nothing, when the task is not in `failed/`, has no
+saved manifest, is already queued, inflight or blocked, or has used its retries
+(default 2).
+
+### Clearing an executor
+
+```bash
+cli-hierarchy clear <executor-name> [--settle-ms <n>]
+```
+
+Looks up the executor in the roster and sends `/clear` and Enter to its pane, waits
+for the settle time (8000 ms by default), then sends `/ai-sdlc executor` and Enter.
+It refuses, sending nothing, when the name is not a running executor, the name or
+pane id is malformed, the window is not open, or the executor holds an inflight
+task. Keys are sent only to the pane the roster names, and only after tmux confirms
+the pane still belongs to that window. An `ExecutorContextCleared` event records
+the clear.
+
+The `hierarchy.clear` capability is reported `live` when the restart command was
+sent and the executor printed its identity line again within the settle time, and
+`degraded`, with the reason, when it did not or a keystroke could not be sent. A
+degraded clear shows up in `doctor`; check the executor's window with
+`cli-hierarchy status`.
+
+### Events
+
+`HierarchySessionStarted` (from `cli-hierarchy up`), `ExecutorContextCleared`,
+`DecisionRouted` (`cli-hierarchy route-decision`) and `OperatorPlaybookAction` are
+written to the orchestrator events stream.
+
+---
+
 ## Cleanup
 
 ### Cleanup all sessions

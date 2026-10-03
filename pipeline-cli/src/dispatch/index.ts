@@ -116,6 +116,8 @@ export { DEFAULT_VERIFY_COMMANDS, enqueueTasks } from './enqueue.js';
 
 export { completeTask, splitIdList } from './complete.js';
 export type { CompleteOptions, CompleteResult } from './complete.js';
+export { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
+export type { RequeueFailedOptions, RequeueFailedResult } from './requeue.js';
 export { nextSubId } from './subid.js';
 export type { NextSubIdInput } from './subid.js';
 

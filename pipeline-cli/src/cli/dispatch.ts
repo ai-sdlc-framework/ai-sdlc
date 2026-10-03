@@ -43,6 +43,11 @@
  *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
  *     stale inflight manifests to queue/ (retry count incremented), or to
  *     failed/ once past the retry limit.
+ *   - `requeue --task-id <id> [--retry-limit <n>]` — return one failed task to
+ *     queue/ with its retry count incremented, restoring the manifest kept
+ *     when it failed. Exits 1, changing nothing, when the task is not in
+ *     failed/, has no saved manifest, is already active, or is past the retry
+ *     limit (default 2).
  *
  * Executor loop (RFC-0051 section 5):
  *
@@ -120,6 +125,7 @@ import {
   readResumeSignal,
   releaseInflight,
   removeResumeSignal,
+  requeueFailed,
   requeueStaleInflight,
   removeVerdict,
   TASK_ID_RE,
@@ -144,7 +150,7 @@ import type {
   WorkerKind,
 } from '../dispatch/index.js';
 import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
-import { parseBrief } from '../hierarchy/index.js';
+import { briefToEnqueueEntries, parseBrief } from '../hierarchy/index.js';
 import {
   countInFlightBgAgents,
   DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
@@ -754,16 +760,8 @@ export async function runDispatchCli(
       try {
         let entries: EnqueueEntry[];
         if (flags['from-brief']) {
-          entries = parseBrief(
-            readFileSync(path.resolve(flags['from-brief']), 'utf-8'),
-          ).entries.map(
-            (e): EnqueueEntry => ({
-              taskId: e.task,
-              ...(e.after.length > 0 ? { after: e.after } : {}),
-              ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
-              ...(e.priority !== undefined ? { priority: e.priority } : {}),
-              wave: e.wave,
-            }),
+          entries = briefToEnqueueEntries(
+            parseBrief(readFileSync(path.resolve(flags['from-brief']), 'utf-8')),
           );
         } else {
           const ids = argv.flatMap((tok, i) =>
@@ -855,6 +853,28 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'requeue': {
+      const taskId = requireFlag(flags, 'task-id');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch requeue: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      const retryLimit = intFlag(flags, 'retry-limit');
+      if (retryLimit === null) return 2;
+      try {
+        out({
+          ok: true,
+          ...requeueFailed(boardDir, taskId, retryLimit === undefined ? {} : { retryLimit }),
+        });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch requeue: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
     case '':
     case 'help':
     case '--help':
@@ -871,7 +891,8 @@ export async function runDispatchCli(
   }
 }
 
-function resolveBaseSha(workDir: string): string {
+/** Commit the manifests of a batch are based on: `origin/main`, else `HEAD`. */
+export function resolveBaseSha(workDir: string): string {
   for (const ref of ['origin/main', 'HEAD']) {
     try {
       return execFileSync('git', ['rev-parse', ref], { cwd: workDir, encoding: 'utf-8' }).trim();
@@ -882,7 +903,8 @@ function resolveBaseSha(workDir: string): string {
   throw new Error('cannot resolve a base commit; pass --base-sha <sha>');
 }
 
-function findTaskFile(workDir: string, taskId: string): string | undefined {
+/** Repo-relative backlog task file for an id, or undefined. */
+export function findTaskFile(workDir: string, taskId: string): string | undefined {
   const dir = path.join(workDir, 'backlog', 'tasks');
   if (!existsSync(dir)) return undefined;
   const prefix = `${taskId.toLowerCase()} - `;
@@ -983,6 +1005,7 @@ Subcommands:
   board [--json]
   unblock --task-id <id>
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
+  requeue --task-id <id> [--retry-limit <n>]
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]

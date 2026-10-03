@@ -39,7 +39,30 @@ export {
   notifyDispatch,
   type BriefSender,
 } from './brief-notify.js';
+export {
+  clearExecutor,
+  DEFAULT_POLL_INTERVAL_MS,
+  DEFAULT_SETTLE_MS,
+  HIERARCHY_CLEAR_CAPABILITY,
+  type ClearDeps,
+  type ClearOptions,
+  type ClearResult,
+} from './clear.js';
+export {
+  briefToEnqueueEntries,
+  DEFAULT_REPORT_EVERY_MS,
+  LOOP_STATE_FILENAME,
+  readLoopState,
+  runDispatchTick,
+  type ClearReport,
+  type LoopDeps,
+  type LoopState,
+  type PlannerReport,
+  type TickResult,
+  type VerdictReport,
+} from './dispatch-loop.js';
 export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
+export { createStreamEmitter, type EventEmitter, type HierarchyEvent } from './emit.js';
 export { listInflight, type InflightItem } from './inflight.js';
 export {
   checkCrossSessionInbound,
@@ -54,7 +77,33 @@ export {
   type InboundCheck,
   type SettingsView,
 } from './preflight.js';
+export {
+  loadOperational,
+  OPERATIONAL_ACTIONS,
+  parseOperational,
+  type OperationalAction,
+} from './operational.js';
+export {
+  classifyFailure,
+  isOwnTaskBranch,
+  isSafeTaskPush,
+  MECHANICAL_SHAPES,
+  REQUEUEABLE_CAUSES,
+  REQUIRED_GRANTS,
+  runPlaybook,
+  STALE_MERGE_REF_CAUSE,
+  type Classification,
+  type PlaybookAction,
+  type PlaybookDeps,
+  type PlaybookOutcome,
+} from './playbook.js';
 export { findStartedSession, readSessionRegistry } from './registry.js';
+export {
+  mainCheckoutRoot,
+  trustedPolicyRoot,
+  verifiedMainRoot,
+  type GitRunner,
+} from './trusted-root.js';
 export {
   emptyRoster,
   isLegacyLayoutEntry,

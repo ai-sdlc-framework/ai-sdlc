@@ -1,10 +1,16 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { writeRoster, type CommandRunner, type HierarchyDeps } from '../hierarchy/index.js';
+import {
+  renderBriefBlock,
+  writeRoster,
+  type CommandRunner,
+  type HierarchyDeps,
+  type RosterEntry,
+} from '../hierarchy/index.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 
 let tmp: string;
@@ -262,5 +268,171 @@ describe('defaultHierarchyDeps', () => {
       if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
       else process.env.CLAUDE_CONFIG_DIR = prev;
     }
+  });
+});
+
+describe('clear, tick and route-decision', () => {
+  const entry = (role: RosterEntry['role'], name: string): RosterEntry => ({
+    role,
+    name,
+    tmuxSession: 'ai-sdlc-hierarchy',
+    tmuxWindow: name,
+    paneId: '%3',
+    pid: 1,
+    model: 'sonnet',
+    permissionMode: 'bypassPermissions',
+    startedAt: '2026-09-30T12:00:00.000Z',
+    status: 'running',
+  });
+
+  it('clear needs an executor name and a numeric settle time', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['clear'], overrides())).toBe(2);
+    expect(
+      await runHierarchyCli(['clear', 'executor-alpha', '--settle-ms', 'soon'], overrides()),
+    ).toBe(2);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('--settle-ms');
+    expect(calls).toEqual([]);
+  });
+
+  it('clear refuses a name that is not an executor in the roster and sends no keys', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['clear', 'executor-alpha'], overrides())).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('not an executor in the roster');
+    expect(calls.some((a) => a[0] === 'send-keys')).toBe(false);
+  });
+
+  it('clear sends /clear then /ai-sdlc executor to the executor pane', async () => {
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [entry('executor', 'executor-alpha')],
+    });
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'list-windows') return { status: 0, stdout: 'executor-alpha\n', stderr: '' };
+      if (args[0] === 'display-message') return { status: 0, stdout: '%3\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const events: { type: string }[] = [];
+    process.env.ARTIFACTS_DIR = path.join(tmp, 'artifacts');
+    try {
+      expect(
+        await runHierarchyCli(
+          ['clear', 'executor-alpha', '--settle-ms', '0'],
+          overrides({ run, emit: (e) => events.push(e) }),
+        ),
+      ).toBe(0);
+    } finally {
+      delete process.env.ARTIFACTS_DIR;
+    }
+    const typed = calls
+      .filter((a) => a[0] === 'send-keys' && a.includes('-l'))
+      .map((a) => a.at(-1));
+    expect(typed).toEqual(['/clear', '/ai-sdlc executor']);
+    expect(events.map((e) => e.type)).toEqual(['ExecutorContextCleared']);
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({
+      executor: 'executor-alpha',
+      paneId: '%3',
+    });
+  });
+
+  it('tick refuses a worker name that is not the running dispatch session', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['tick'], overrides())).toBe(1);
+    expect(await runHierarchyCli(['tick', '--worker', 'operator-dispatch'], overrides())).toBe(1);
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [entry('executor', 'executor-alpha')],
+    });
+    expect(await runHierarchyCli(['tick', '--worker', 'executor-alpha'], overrides())).toBe(1);
+    expect(String(err.mock.calls[0]?.[0])).toContain('--worker must be the roster name');
+  });
+
+  it('tick ingests a brief once and prints the result as JSON', async () => {
+    const board = path.join(tmp, 'dispatch');
+    writeRoster(board, {
+      schemaVersion: 'v1',
+      sessions: [entry('operator-dispatch', 'operator-dispatch')],
+    });
+    mkdirSync(path.join(board, 'briefs'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'briefs', 'b.md'),
+      renderBriefBlock([{ task: 'AISDLC-1', after: [], wave: 1 }]),
+    );
+    const enqueued: string[] = [];
+    const extras = {
+      operational: new Set<string>(),
+      enqueue: (entries: { taskId: string }[]) => {
+        enqueued.push(...entries.map((e) => e.taskId));
+        return [];
+      },
+    };
+    expect(
+      await runHierarchyCli(['tick', '--worker', 'operator-dispatch'], overrides(), extras),
+    ).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string).ingested).toEqual([
+      { file: 'b.md', tasks: ['AISDLC-1'] },
+    ]);
+    expect(
+      await runHierarchyCli(['tick', '--worker', 'operator-dispatch'], overrides(), extras),
+    ).toBe(0);
+    expect(enqueued).toEqual(['AISDLC-1']);
+  });
+
+  it('tick rejects a malformed numeric flag', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [entry('operator-dispatch', 'operator-dispatch')],
+    });
+    expect(
+      await runHierarchyCli(
+        ['tick', '--worker', 'operator-dispatch', '--retry-limit', 'many'],
+        overrides(),
+      ),
+    ).toBe(2);
+  });
+
+  it('route-decision records a DecisionRouted event', async () => {
+    const events: Record<string, unknown>[] = [];
+    expect(
+      await runHierarchyCli(
+        [
+          'route-decision',
+          '--decision-id',
+          'DEC-0001',
+          '--route',
+          'design',
+          '--to',
+          'planner',
+          '--task-id',
+          'AISDLC-1',
+          '--worker',
+          'operator-dispatch',
+        ],
+        overrides({ emit: (e) => events.push(e) }),
+      ),
+    ).toBe(0);
+    expect(events).toEqual([
+      {
+        type: 'DecisionRouted',
+        decisionId: 'DEC-0001',
+        route: 'design',
+        routedTo: 'planner',
+        taskId: 'AISDLC-1',
+        workerId: 'operator-dispatch',
+      },
+    ]);
+  });
+
+  it('route-decision refuses a missing id or an unknown route', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['route-decision', '--route', 'design'], overrides())).toBe(2);
+    expect(
+      await runHierarchyCli(
+        ['route-decision', '--decision-id', 'DEC-1', '--route', 'sideways', '--to', 'x'],
+        overrides(),
+      ),
+    ).toBe(2);
   });
 });

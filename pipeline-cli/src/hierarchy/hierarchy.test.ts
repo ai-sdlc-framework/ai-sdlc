@@ -1384,3 +1384,30 @@ describe('system runner', () => {
     expect(typeof attachTmuxSession).toBe('function');
   });
 });
+
+describe('hierarchy up events', () => {
+  it('records one HierarchySessionStarted event per started session', async () => {
+    const events: { type: string; sessionName?: unknown; sessionRole?: unknown }[] = [];
+    await hierarchyUp({ ...baseOpts, executors: 1 }, { ...deps, emit: (e) => events.push(e) });
+    expect(events).toEqual([
+      { type: 'HierarchySessionStarted', sessionName: 'planner', sessionRole: 'planner' },
+      {
+        type: 'HierarchySessionStarted',
+        sessionName: 'operator-dispatch',
+        sessionRole: 'operator-dispatch',
+      },
+      {
+        type: 'HierarchySessionStarted',
+        sessionName: 'executor-alpha',
+        sessionRole: 'executor',
+      },
+    ]);
+  });
+
+  it('records nothing for sessions that were already running', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const events: unknown[] = [];
+    await hierarchyUp({ ...baseOpts, executors: 1 }, { ...deps, emit: (e) => events.push(e) });
+    expect(events).toEqual([]);
+  });
+});

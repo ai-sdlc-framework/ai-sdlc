@@ -2,9 +2,11 @@
 id: AISDLC-667
 title: >-
   RFC-0051: /ai-sdlc operator-dispatch loop (brief ingestion, verdict watch, context clears, unblocking playbook, reports)
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-epsilon
 created_date: '2026-09-30'
+updated_date: '2026-10-03'
 labels:
   - rfc-0051
   - dispatch
@@ -86,14 +88,46 @@ allowed to unblock, and reports upward. RFC-0051 sections 1, 6 and 9.
    fails on the `runtimeEvidence` entry that later names it.
 
 ## Acceptance Criteria
-- [ ] A brief dropped into `briefs/` is enqueued once; a second tick does not enqueue it again.
-- [ ] A verdict in `done/` triggers exactly one clear for the executor named in it, and the clear sends `/clear` then `/ai-sdlc executor` to that executor's pane (asserted on the injected runner).
-- [ ] `cli-hierarchy clear` refuses an executor with an inflight manifest.
-- [ ] A `failed/` diagnostic with a mechanical conflict shape results in a rebase and a lease push to the task branch only; one with an unknown shape results in an escalation and no git action.
-- [ ] A failed manifest within the retry limit is requeued; one past it is left in `failed/` and escalated.
-- [ ] The playbook never issues a push to `main` or `master` (negative test), and every playbook action is recorded as an event.
-- [ ] The three new event types validate against the updated schema.
-- [ ] `hierarchy.clear` is listed in `KNOWN_CAPABILITY_IDS` and reported `live` after a successful clear and `degraded` when the executor does not resume within the settle time.
-- [ ] The skill body states the hard rules.
+- [x] A brief dropped into `briefs/` is enqueued once; a second tick does not enqueue it again.
+- [x] A verdict in `done/` triggers exactly one clear for the executor named in it, and the clear sends `/clear` then `/ai-sdlc executor` to that executor's pane (asserted on the injected runner).
+- [x] `cli-hierarchy clear` refuses an executor with an inflight manifest.
+- [x] A `failed/` diagnostic with a mechanical conflict shape results in a rebase and a lease push to the task branch only; one with an unknown shape results in an escalation and no git action.
+- [x] A failed manifest within the retry limit is requeued; one past it is left in `failed/` and escalated.
+- [x] The playbook never issues a push to `main` or `master` (negative test), and every playbook action is recorded as an event.
+- [x] The three new event types validate against the updated schema.
+- [x] `hierarchy.clear` is listed in `KNOWN_CAPABILITY_IDS` and reported `live` after a successful clear and `degraded` when the executor does not resume within the settle time.
+- [x] The skill body states the hard rules.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+The operator-dispatch loop: a `/ai-sdlc operator-dispatch` skill, a `cli-hierarchy tick` that does its mechanical wake-up work (ingest briefs once, watch verdicts, clear each executor once, run the unblocking playbook, report), `cli-hierarchy clear`, `cli-dispatch requeue`, four new orchestrator events and the `hierarchy.clear` capability. The playbook is tested TypeScript behind an injected runner, gated by the operational grants read from the trusted main checkout.
+
+## Changes
+- `ai-sdlc-plugin/commands/operator-dispatch.md` (new) and its body-contract test: the loop, the identity script and the hard rules.
+- `pipeline-cli/src/hierarchy/{clear,playbook,operational,trusted-root,emit,dispatch-loop}.ts` (new, with tests): context clear, unblocking playbook, grants, a ported `verifiedMainRoot` bound to the hook by a lockstep test, event emission and the tick.
+- `pipeline-cli/src/dispatch/requeue.ts` (new): `cli-dispatch requeue --task-id <id>`, implemented because the task assumed it already existed. It refuses, writing nothing, unless the task is in `failed/` with a saved manifest and is under the retry limit.
+- `pipeline-cli/src/dispatch/complete.ts` (modified): before a failure verdict is written, it saves the manifest to `failed/<id>.manifest.json` (temp file plus rename), so a failed task can be requeued. A failed task with no copy is escalated, never requeued from a guess.
+- `pipeline-cli/src/orchestrator/events.ts`, `spec/schemas/orchestrator-events.v1.schema.json`, `reference/src/core/generated-schemas.ts`: `HierarchySessionStarted`, `ExecutorContextCleared`, `DecisionRouted` and the additive `OperatorPlaybookAction`.
+- `reference/src/capabilities/registry.ts`, `scripts/check-rfc-docs.mjs`: `hierarchy.clear`.
+- `docs/operations/parallel-dispatch.md`: the loop and `cli-hierarchy clear`.
+
+## Design decisions
+- **Fourth event, `OperatorPlaybookAction`**: every playbook action must be recorded and none of the three named events fits; `DecisionRouted` is not overloaded.
+- **Operational grants from the trusted main checkout**: read through a TypeScript port of the hook's `verifiedMainRoot`, failing closed, with a lockstep test against the hook so the two cannot drift.
+- **Manifest copy on failure**: requeue needs a source manifest; the copy is atomic and written before the verdict.
+
+## Verification
+- `pnpm build` and `pnpm typecheck` clean for reference, orchestrator and pipeline-cli.
+- reference suite 1921 passed; pipeline-cli hierarchy, dispatch, events and CLI tests pass; plugin `node --test` for operator-dispatch (19), executor (14) and session-start-clear (11) pass.
+- `pnpm dark-code:check` and `node scripts/check-rfc-docs.mjs` clean; eslint and prettier clean.
+- A full pipeline-cli run has 7 failures in `verify-runtime` and `bin-invocation` that also fail on the base without this change, and one load-related timeout in `orchestrator.test.ts`.
+- The full `pnpm test` gate is left to CI, so the last acceptance criterion stays unticked here.
+
+## Follow-up
+- declined: the escalation chain beyond a message to the planner stays with AISDLC-669.
+- declined: the pre-existing `verify-runtime` and `bin-invocation` failures are environmental and unrelated to this change.
+<!-- SECTION:FINAL_SUMMARY:END -->

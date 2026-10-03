@@ -4,6 +4,8 @@
  * Roster schema: spec/schemas/hierarchy-roster.v1.schema.json
  */
 
+import type { EventEmitter } from './emit.js';
+
 /** Tier a session belongs to. */
 export type HierarchyRole = 'planner' | 'operator-dispatch' | 'executor';
 
@@ -103,6 +105,8 @@ export interface HierarchyDeps {
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */
   pollAttempts: number;
   pollIntervalMs: number;
+  /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
+  emit?: EventEmitter;
 }
 
 /**

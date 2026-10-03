@@ -400,6 +400,79 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts HierarchySessionStarted (RFC-0051)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'HierarchySessionStarted',
+      sessionName: 'executor-alpha',
+      sessionRole: 'executor',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'HierarchySessionStarted',
+      sessionName: 'executor-alpha',
+      sessionRole: 'wizard',
+    });
+  });
+
+  it('accepts ExecutorContextCleared (RFC-0051)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'ExecutorContextCleared',
+      executor: 'executor-alpha',
+      paneId: '%12',
+      resumed: true,
+      settleMs: 3000,
+      taskId: 'AISDLC-1',
+      workerId: 'operator-dispatch',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'ExecutorContextCleared',
+      executor: 'executor-alpha',
+      paneId: 'not-a-pane',
+      resumed: true,
+      settleMs: 3000,
+    });
+  });
+
+  it('accepts DecisionRouted (RFC-0051)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'DecisionRouted',
+      decisionId: 'DEC-0001',
+      route: 'design',
+      routedTo: 'planner',
+      taskId: 'AISDLC-1',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'DecisionRouted',
+      decisionId: 'DEC-0001',
+      route: 'sideways',
+      routedTo: 'planner',
+    });
+  });
+
+  it('accepts OperatorPlaybookAction (RFC-0051)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OperatorPlaybookAction',
+      taskId: 'AISDLC-1',
+      action: 'rebase-push',
+      result: 'done',
+      reason: 'prettier-drift',
+      branch: 'ai-sdlc/aisdlc-1-x',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'OperatorPlaybookAction',
+      taskId: 'AISDLC-1',
+      action: 'merge',
+      result: 'done',
+    });
+  });
+
   it('accepts DispatchToMergeCompleted (AISDLC-493) with ciWaitMs', () => {
     expectValid({
       ts: baseTs,

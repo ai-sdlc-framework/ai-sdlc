@@ -119,6 +119,15 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityDefinition[] = [
       'Sessions cannot claim or complete work through the shared board and continue without it.',
     enable: 'Make the board directory readable and writable by every session in the hierarchy.',
   },
+  {
+    id: 'hierarchy.clear',
+    title: 'Hierarchy executor context clear',
+    specifiedBy: 'RFC-0051',
+    fallback:
+      'Executors keep their context between tasks; the dispatch loop skips the clear and the executor is restarted by hand.',
+    enable:
+      'Keep the executor windows open in the ai-sdlc-hierarchy tmux session and the plugin SessionStart hook installed.',
+  },
 ];
 
 for (const def of BUILT_IN_CAPABILITIES) registerCapability(def);
