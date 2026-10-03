@@ -5,6 +5,10 @@
 #      assertions. Deterministic, no LLM, <5s. Cold-start: no-op when no
 #      substrate-contracts/ directory exists (fresh adopter). Skip:
 #      AI_SDLC_SKIP_SUBSTRATE_GATE=1.
+#   0b. Dark-code gate (AISDLC-687) — `node scripts/check-dark-code.mjs`: a newly
+#      unwired module, a grown baseline or a new test double in production code
+#      blocks the push. Static scan, runs before coverage. Skip:
+#      AI_SDLC_SKIP_DARK_CODE_GATE=1.
 #   1. Coverage gate — fails fast on under-tested code so we don't
 #      sign an attestation for a build we'd reject anyway.
 #      NOTE: pnpm test:coverage is known to show transient failures (up to 17
@@ -55,7 +59,7 @@
 # AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
 # AI_SDLC_SKIP_CHANGELOG_CHECK=1, AI_SDLC_SKIP_DOR_GATE=1,
 # AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1, AI_SDLC_SKIP_FOLLOWUP_GATE=1,
-# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1, AI_SDLC_SKIP_DARK_CODE_GATE=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -77,6 +81,9 @@ fi
 PUSH_STDIN="$(cat || true)"
 
 node scripts/check-substrate-contract.mjs
+# AISDLC-687: dark-code static scan (cheap) before the expensive coverage gate. Skip:
+# AI_SDLC_SKIP_DARK_CODE_GATE=1.
+./scripts/check-dark-code-on-push.sh
 ./scripts/check-coverage.sh
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh

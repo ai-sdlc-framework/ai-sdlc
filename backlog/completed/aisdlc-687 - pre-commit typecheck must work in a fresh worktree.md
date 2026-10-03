@@ -42,6 +42,10 @@ gate.
    type-checked, and a package without workspace dependencies is always type-checked.
 3. **Hook wiring:** `.husky/pre-commit` calls the runner instead of `pnpm typecheck`.
 4. **Test gate:** the runner's test is wired into the root `test` script.
+5. **Dark-code gate on push:** `scripts/check-dark-code-on-push.sh` runs `node scripts/check-dark-code.mjs`
+   from `.husky/pre-push`, before the coverage gate. It honours `AI_SDLC_BYPASS_ALL_GATES` and its own
+   `AI_SDLC_SKIP_DARK_CODE_GATE=1`. The Hooks list in `CLAUDE.md` gets one numbered entry for it
+   (the other entries are renumbered).
 
 ## Acceptance Criteria
 - [x] In a fixture workspace with no build output, the runner exits 0, prints one SKIPPED line per skipped package that names the package and the missing build output, and does not report the unresolved sibling import.
@@ -50,6 +54,9 @@ gate.
 - [x] Skipping is transitive: a package depending on a built package that itself depends on an unbuilt one is skipped.
 - [x] `.husky/pre-commit` runs `node scripts/typecheck-workspace.mjs` and no longer runs `pnpm typecheck`.
 - [x] `node --test scripts/typecheck-workspace.test.mjs` covers each of these.
+- [x] A newly dark module makes `scripts/check-dark-code-on-push.sh` exit 1, and a fully wired tree exits 0, in a hermetic fixture repo.
+- [x] The dark-code gate is skipped by `AI_SDLC_SKIP_DARK_CODE_GATE=1` and by `AI_SDLC_BYPASS_ALL_GATES=1`.
+- [x] `.husky/pre-push` runs the dark-code gate before `scripts/check-coverage.sh`, and `CLAUDE.md` lists it as the first pre-push step.
 <!-- SECTION:DESCRIPTION:END -->
 
 <!-- SECTION:FINAL-SUMMARY:BEGIN -->
@@ -60,7 +67,9 @@ The husky pre-commit typecheck no longer fails in a fresh worktree. A new runner
 - `scripts/typecheck-workspace.mjs` (new): the runner (plan, skip notice, per-package tsc).
 - `scripts/typecheck-workspace.test.mjs` (new): hermetic fixture tests.
 - `.husky/pre-commit` (modified): calls the runner instead of `pnpm typecheck`.
-- `package.json` (modified): `test:typecheck-workspace-gate`, chained into `test`.
+- `package.json` (modified): `test:typecheck-workspace-gate` and `test:dark-code-push-gate`, chained into `test`.
+- `scripts/check-dark-code-on-push.sh` and `.test.mjs` (new): the pre-push dark-code gate and its hermetic tests.
+- `.husky/pre-push` and `CLAUDE.md` (modified): the gate runs before coverage; one numbered Hooks entry, the rest renumbered.
 
 ## Design decisions
 - **Skip, not build**: a build takes minutes and writes into the tree from a commit hook; pre-push and CI already build first. Tradeoff: a package is unchecked at commit time until its upstream is built.
@@ -68,6 +77,7 @@ The husky pre-commit typecheck no longer fails in a fresh worktree. A new runner
 ## Verification
 - `node --test scripts/typecheck-workspace.test.mjs`: 11 passed.
 - Real fresh worktree run of the runner: exit 0 with SKIPPED lines.
+- `node --test scripts/check-dark-code-on-push.test.mjs`: see the PR body for counts.
 
 ## Follow-up
 (none)
