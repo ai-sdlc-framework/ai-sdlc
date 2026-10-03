@@ -33,7 +33,7 @@ export interface CompleteOptions {
   decisionIds?: readonly string[];
   notes?: string;
   cause?: string;
-  /** Executor name; defaults to the name recorded on the inflight manifest. */
+  /** Executor name; when given it must equal the name recorded at claim time. */
   workerId?: string;
   now?: () => Date;
 }
@@ -57,7 +57,8 @@ export function splitIdList(raw: string | undefined): string[] {
 /**
  * Write the verdict for a task this executor holds.
  * @throws when the task id or outcome is invalid, a follow-up id is not a
- *   sub-id of the task, or the task is not inflight (nothing to complete).
+ *   sub-id of the task, the task is not inflight (nothing to complete), or the
+ *   supplied worker is not the one that claimed it.
  */
 export function completeTask(boardDir: string, opts: CompleteOptions): CompleteResult {
   if (!TASK_ID_RE.test(opts.taskId)) {
@@ -79,9 +80,19 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   if (!inflight) {
     throw new Error(`${opts.taskId} is not inflight; there is nothing to complete`);
   }
-  const workerId = opts.workerId ?? inflight.workerId;
+  // The caller must be the claim holder: a worker name is required on the
+  // manifest (claim records it), and a supplied name must match it. Never
+  // overwrite the recorded name.
+  const workerId = inflight.workerId;
   if (!workerId) {
-    throw new Error(`${opts.taskId} has no recorded worker; pass the executor name`);
+    throw new Error(
+      `${opts.taskId} has no recorded worker, so its claim holder cannot be verified`,
+    );
+  }
+  if (opts.workerId !== undefined && opts.workerId !== workerId) {
+    throw new Error(
+      `${opts.taskId} is claimed by '${workerId}', not '${opts.workerId}'; only the claim holder can complete it`,
+    );
   }
   const now = opts.now ?? (() => new Date());
   const verdict: DispatchVerdict = {

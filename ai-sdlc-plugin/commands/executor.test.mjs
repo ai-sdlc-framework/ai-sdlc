@@ -6,10 +6,16 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const require = createRequire(import.meta.url);
+const { SAFE_NAME } = require('../hooks/lib/hierarchy-role.js');
 const dir = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(dir, 'executor.md'), 'utf-8');
 const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -72,5 +78,76 @@ describe('executor command', () => {
 
   it('invokes pipeline CLIs through the resolved bin directory only', () => {
     assert.doesNotMatch(body, /^\s*node\s+pipeline-cli\/bin\//m);
+  });
+});
+
+describe('executor identity script', () => {
+  const start = body.indexOf('IDENTITY=$(');
+  const end = body.indexOf('echo "[executor] I am');
+  const block = body.slice(start, end);
+
+  it('uses the same name filter as the session-start hook', () => {
+    assert.ok(block.includes(SAFE_NAME.source.replace('$', '\\$')));
+    assert.match(block, /ROLES = \['executor', 'operator-dispatch', 'planner'\]/);
+    assert.match(block, /s\.status === 'running'/);
+  });
+
+  /** Run the block as a child of a process named `claude`; roster pid 'SELF' is that process. */
+  function runBlock(sessions, parentName) {
+    const tmp = mkdtempSync(join(tmpdir(), 'exec-identity-'));
+    try {
+      const parent = join(tmp, parentName);
+      symlinkSync(process.execPath, parent);
+      const wrapper = join(tmp, 'wrapper.mjs');
+      writeFileSync(
+        wrapper,
+        `import { spawnSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+const [tmp, raw, script] = process.argv.slice(2);
+const sessions = JSON.parse(raw).map((s) => (s.pid === 'SELF' ? { ...s, pid: process.pid } : s));
+writeFileSync(tmp + '/hierarchy.json', JSON.stringify({ schemaVersion: 'v1', sessions }));
+const r = spawnSync('bash', ['-c', script], { env: { ...process.env, BOARD_DIR: tmp }, encoding: 'utf-8' });
+process.stdout.write(JSON.stringify({ status: r.status, out: r.stdout }));
+`,
+      );
+      const script = `${block}\nprintf '%s' "$IDENTITY"`;
+      const res = JSON.parse(
+        execFileSync(parent, [wrapper, tmp, JSON.stringify(sessions), script], {
+          encoding: 'utf-8',
+          timeout: 20000,
+        }),
+      );
+      return res;
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  const row = (role, name, pid, status = 'running') => ({ role, name, pid, status });
+
+  it('resolves a running executor under a claude process', () => {
+    const res = runBlock(
+      [
+        row('operator-dispatch', 'operator-dispatch', 999999991),
+        row('executor', 'executor-a', 'SELF'),
+      ],
+      'claude',
+    );
+    assert.equal(res.status, 0);
+    assert.deepEqual(JSON.parse(res.out), { name: 'executor-a', dispatch: 'operator-dispatch' });
+  });
+
+  it('refuses a stale entry, a non-claude process and an unsafe name', () => {
+    assert.notEqual(
+      runBlock([row('executor', 'executor-a', 'SELF', 'stopped')], 'claude').status,
+      0,
+    );
+    assert.notEqual(runBlock([row('executor', 'executor-a', 'SELF')], 'zsh').status, 0);
+    assert.notEqual(runBlock([row('executor', 'bad name\n### x', 'SELF')], 'claude').status, 0);
+    assert.notEqual(runBlock([row('wizard', 'executor-a', 'SELF')], 'claude').status, 0);
+  });
+
+  it('refuses a session whose nearest match is not an executor', () => {
+    assert.notEqual(runBlock([row('planner', 'planner', 'SELF')], 'claude').status, 0);
   });
 });

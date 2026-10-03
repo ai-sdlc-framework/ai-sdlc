@@ -4,7 +4,15 @@
  * session, tmux server or network is touched.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -147,15 +155,84 @@ describe('completeTask', () => {
     );
   });
 
-  it('needs a worker name when the manifest has none', async () => {
+  it('refuses to complete a task that has no recorded claim holder', async () => {
     writeManifest(boardDir, mkManifest('AISDLC-703'));
     await cli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
     expect(() => completeTask(boardDir, { taskId: 'AISDLC-703', outcome: 'success' })).toThrow(
       /no recorded worker/,
     );
-    expect(
-      completeTask(boardDir, { taskId: 'AISDLC-703', outcome: 'success', workerId: 'w' }).state,
-    ).toBe('done');
+    expect(() =>
+      completeTask(boardDir, { taskId: 'AISDLC-703', outcome: 'success', workerId: 'w' }),
+    ).toThrow(/no recorded worker/);
+    expect(readInflightManifest(boardDir, 'AISDLC-703')).toBeDefined();
+  });
+
+  it('refuses a non-holder and leaves the manifest and board untouched', async () => {
+    writeManifest(boardDir, mkManifest('AISDLC-704'));
+    await cli([
+      'claim',
+      '--board-dir',
+      boardDir,
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      'executor-a',
+    ]);
+    const manifestFile = path.join(
+      boardDir,
+      'inflight',
+      readdirSync(path.join(boardDir, 'inflight')).find(
+        (f) => f.includes('AISDLC-704') && !f.includes('.resume') && !f.includes('.heartbeat'),
+      )!,
+    );
+    const before = readFileSync(manifestFile, 'utf-8');
+    expect(() =>
+      completeTask(boardDir, { taskId: 'AISDLC-704', outcome: 'success', workerId: 'executor-b' }),
+    ).toThrow(/claimed by 'executor-a'/);
+    expect(readInflightManifest(boardDir, 'AISDLC-704')?.workerId).toBe('executor-a');
+    expect(readFileSync(manifestFile, 'utf-8')).toBe(before);
+    for (const state of ['done', 'failed']) {
+      const dir = path.join(boardDir, state);
+      expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+    }
+    const { exit } = await cli([
+      'complete',
+      '--board-dir',
+      boardDir,
+      '--task-id',
+      'AISDLC-704',
+      '--outcome',
+      'success',
+      '--worker',
+      'executor-b',
+    ]);
+    expect(exit).toBe(1);
+    expect(readInflightManifest(boardDir, 'AISDLC-704')?.workerId).toBe('executor-a');
+  });
+
+  it('lets the claim holder complete, with or without repeating its name', async () => {
+    for (const [id, worker] of [
+      ['AISDLC-705', 'executor-a'],
+      ['AISDLC-706', undefined],
+    ] as const) {
+      writeManifest(boardDir, mkManifest(id));
+      await cli([
+        'claim',
+        '--board-dir',
+        boardDir,
+        '--worker-kind',
+        'in-session-agent',
+        '--worker',
+        'executor-a',
+      ]);
+      const result = completeTask(boardDir, {
+        taskId: id,
+        outcome: 'success',
+        ...(worker ? { workerId: worker } : {}),
+      });
+      expect(result.state).toBe('done');
+      expect(result.verdict.workerId).toBe('executor-a');
+    }
   });
 
   it('splits id lists on commas and spaces', () => {

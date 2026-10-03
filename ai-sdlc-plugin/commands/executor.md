@@ -63,7 +63,8 @@ BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 ```
 
 Read the roster to learn **your name** and **the dispatch session's name**. Your
-session is the roster entry whose `pid` is this process or one of its ancestors.
+session is the nearest ancestor process that is a running roster entry and a claude
+process; stale entries and reused pids do not match.
 Use the name exactly as the roster has it, collision suffix included
 (`executor-alpha-2` is not `executor-alpha`).
 
@@ -77,16 +78,27 @@ IDENTITY=$(BOARD_DIR="$BOARD_DIR" node -e "
   if (!doc || doc.schemaVersion !== 'v1' || !Array.isArray(doc.sessions)) {
     console.error('roster has an unexpected shape'); process.exit(1);
   }
-  const pids = new Set();
-  let p = process.ppid;
-  for (let i = 0; i < 16 && p > 1 && !pids.has(p); i++) {
-    pids.add(p);
+  const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\$/;
+  const ROLES = ['executor', 'operator-dispatch', 'planner'];
+  const roster = doc.sessions.filter((s) => s && s.status === 'running' &&
+    typeof s.name === 'string' && SAFE_NAME.test(s.name) && ROLES.includes(s.role));
+  const comm = (pid) => {
+    const r = spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' });
+    return r.status === 0 ? String(r.stdout).trim().split('/').pop() : '';
+  };
+  let self, p = process.ppid;
+  const seen = new Set();
+  for (let i = 0; i < 16 && p > 1 && !seen.has(p) && !self; i++) {
+    seen.add(p);
+    self = roster.find((s) => s.pid === p);
+    if (self) break;
     const r = spawnSync('ps', ['-o', 'ppid=', '-p', String(p)], { encoding: 'utf8' });
     if (r.status !== 0) break;
     p = parseInt(String(r.stdout).trim(), 10);
   }
-  const self = doc.sessions.find((s) => s.role === 'executor' && pids.has(s.pid));
-  const dispatch = doc.sessions.find((s) => s.role === 'operator-dispatch');
+  if (self && !/^claude(-code)?\$/i.test(comm(p))) self = undefined;
+  if (self && self.role !== 'executor') self = undefined;
+  const dispatch = roster.find((s) => s.role === 'operator-dispatch');
   if (!self) { console.error('this session is not an executor in the roster'); process.exit(1); }
   process.stdout.write(JSON.stringify({ name: self.name, dispatch: dispatch ? dispatch.name : '' }));
 ") || { echo "Stop: this session is not an executor in the roster."; exit 1; }
@@ -191,13 +203,15 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete \
   --board-dir "$BOARD_DIR" \
   --task-id "$TASK_ID" \
   --outcome "<success|failed|blocked|quota-exhausted>" \
+  --worker "$MY_NAME" \
   --pr "<number, omit when none>" \
   --follow-ups "<comma-separated sub-ids, omit when none>" \
   --decisions "<comma-separated decision ids, omit when none>" \
   --notes "<one or two sentences>"
 ```
 
-`complete` refuses when the task is not inflight under your claim. If it refuses,
+`complete` refuses when the task is not inflight, or when `--worker` is not the
+name recorded on the task when it was claimed; it never rewrites that name. If it refuses,
 say so in the status line instead of retrying with different values.
 
 ## Step 5 - Tell the dispatch session
