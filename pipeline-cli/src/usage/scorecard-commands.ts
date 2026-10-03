@@ -28,6 +28,7 @@ import {
 } from './scorecard-sources.js';
 import { REPLAY_TASK_ID } from './replay-run.js';
 import { readReplayResults, renderReplayRows, replayRows } from './replay-report.js';
+import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { deriveUnitWeights, describeWeights } from './units.js';
 import { loadUsageConfig } from './usage-config.js';
 import type { UsageIo, UsageViewDeps } from './commands.js';
@@ -91,8 +92,7 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
       const repoRoot = resolve(deps.repoRoot ?? deps.workDir ?? process.cwd());
       const repo = repoNameFor(repoRoot);
       const repoId = repoIdFor(repoRoot);
-      const artifactsDir =
-        deps.artifactsDir ?? process.env.ARTIFACTS_DIR ?? resolve(repoRoot, 'artifacts');
+      const artifactsDir = resolveArtifactsDir(repoRoot, deps.artifactsDir);
 
       const config = (deps.loadConfig ?? loadUsageConfig)({
         dir: deps.usageDir,
@@ -146,6 +146,7 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
         unavailableRecords: selection.unavailable,
       };
 
+      if (argv.format !== 'text') io.err(`Artifacts directory: ${artifactsDir}\n`);
       if (argv.format === 'json') {
         const json = JSON.parse(renderScorecardJson(card)) as Record<string, unknown>;
         const withRepo = {
@@ -160,6 +161,7 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
         io.err(`${card.unitsNote}\n`);
         io.err(`Repository ${repoId ?? `${repo} (no repoId)`}. ${legacy}\n`);
       } else {
+        io.out(`Artifacts directory: ${artifactsDir}\n`);
         io.out(`Repository: ${repoId ?? `${repo} (no repoId)`}\n${legacy ? `${legacy}\n` : ''}`);
         io.out(renderScorecardText(card));
         io.out(renderReplayRows(replay));

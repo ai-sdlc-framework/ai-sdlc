@@ -1,9 +1,22 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+
+/** Default project artifacts directory: `<projectRoot>/.ai-sdlc/artifacts` (gitignored runtime output). */
+export function defaultArtifactsDir(projectRoot: string): string {
+  return join(resolve(projectRoot), '.ai-sdlc', 'artifacts');
+}
+
+/**
+ * The one place the artifacts directory is chosen: explicit, then $ARTIFACTS_DIR,
+ * then the project default. The model resolver, the scorecard and replay all use it.
+ */
+export function resolveArtifactsDir(projectRoot: string, explicit?: string): string {
+  return explicit ?? process.env.ARTIFACTS_DIR ?? defaultArtifactsDir(projectRoot);
+}
 
 /** Artifacts directory for a worktree: explicit, then $ARTIFACTS_DIR, then the worktree's own. */
 export function routingArtifactsDir(worktreePath: string, explicit?: string): string {
-  return explicit ?? process.env.ARTIFACTS_DIR ?? join(worktreePath, '.ai-sdlc', 'artifacts');
+  return resolveArtifactsDir(worktreePath, explicit);
 }
 
 /**

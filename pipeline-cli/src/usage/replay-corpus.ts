@@ -201,7 +201,11 @@ export async function buildCorpus(input: BuildCorpusInput): Promise<CorpusFile> 
 export function writeJsonAtomic(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = join(dirname(path), `.${process.pid}.${Date.now()}.tmp`);
-  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+    flag: 'wx',
+  });
   renameSync(tmp, path);
 }
 
