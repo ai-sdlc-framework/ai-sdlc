@@ -17,8 +17,16 @@
 #   2. Locate the push range from husky's pre-push args ($1 remote, $2 url) via
 #      stdin. Parse lines: `<local-ref> <local-sha> <remote-ref> <remote-sha>`.
 #      Fall back to HEAD~1..HEAD if stdin is empty or all-zeros remote SHA.
-#   3. Scan every commit subject in the range for `(AISDLC-N)` or `(AISDLC-N.M)`
-#      patterns (case-insensitive prefix). For each task ID found:
+#   3. Select exactly ONE task id (AISDLC-683, DEC-0028): the `<worktree>/.active-task`
+#      sentinel id when present (and cited in the range), else from the
+#      `(AISDLC-N[.M])` ids cited in the range: ignore id-less subjects and the
+#      chore ids AISDLC-133 / AISDLC-220, drop any id that is a STRICT ancestor
+#      of another cited id (656 is dropped when 656.1 is cited; 656.1 is not an
+#      ancestor of 656.2), and select the id if exactly one remains. More than
+#      one => do nothing and print the ids seen.
+#      For the selected id:
+#      0. Skip (and print the open children) if `backlog/tasks/aisdlc-N.*`
+#         child tasks exist — an umbrella is never closed implicitly.
 #      a. Skip if `backlog/completed/aisdlc-N - *.md` already exists at HEAD
 #         (move already on HEAD — idempotent path).
 #      b. Skip if `backlog/tasks/aisdlc-N - *.md` does NOT exist (nothing to move).
@@ -114,21 +122,108 @@ fi
 # ── Step 4: scan commit subjects for (AISDLC-N) patterns ─────────────
 # git log range: REMOTE_SHA..LOCAL_SHA (commits that are in LOCAL but not yet
 # in REMOTE, i.e., the commits being pushed).
-TASK_IDS_RAW=$(
-  git log --format='%s' "${REMOTE_SHA}..${LOCAL_SHA}" 2>/dev/null \
-    | grep -oiE '\(AISDLC-[0-9]+(\.[0-9]+)?\)' \
-    | grep -oiE 'AISDLC-[0-9]+(\.[0-9]+)?' \
-    | tr '[:lower:]' '[:upper:]' \
-    | sort -u \
-  || true
-)
+#
+# AISDLC-683: a commit may legitimately CITE other tasks (e.g. a sub-task
+# commit naming its umbrella). Citation therefore does NOT mean "this task is
+# done". Exactly one task is selected for auto-close:
+#   1. the id in the per-worktree `.active-task` sentinel, when present and
+#      well-formed (it must also be cited by at least one commit subject in the
+#      range, so a stale sentinel cannot close an unrelated task); else
+#   2. (DEC-0028) from the ids cited in the range: id-less subjects contribute
+#      nothing, the chore ids below are ignored, and any id that is a STRICT
+#      ancestor of another cited id is dropped (AISDLC-656 when AISDLC-656.1 is
+#      cited; AISDLC-656.1 is NOT an ancestor of AISDLC-656.2). Exactly one id
+#      left => select it; more than one => do nothing and print the ids seen.
+# Ids that the pre-push chore commits themselves carry (sign / auto-close).
+CHORE_IDS="AISDLC-133 AISDLC-220"
 
-if [ -z "$TASK_IDS_RAW" ]; then
+extract_ids() {
+  # stdin: one commit subject; stdout: sorted-unique upper-case task ids.
+  { grep -oiE '\(AISDLC-[0-9]+(\.[0-9]+)?\)' || true; } \
+    | { grep -oiE 'AISDLC-[0-9]+(\.[0-9]+)?' || true; } \
+    | tr '[:lower:]' '[:upper:]' \
+    | sort -u
+}
+
+SUBJECTS=$(git log --format='%s' "${REMOTE_SHA}..${LOCAL_SHA}" 2>/dev/null || true)
+
+ALL_SEEN=""   # union of ids across all subjects (newline separated)
+while IFS= read -r SUBJECT; do
+  [ -z "$SUBJECT" ] && continue
+  SUBJECT_IDS=$(printf '%s\n' "$SUBJECT" | extract_ids)
+  if [ -n "$SUBJECT_IDS" ]; then
+    ALL_SEEN=$(printf '%s\n%s\n' "$ALL_SEEN" "$SUBJECT_IDS" | sed '/^$/d' | sort -u)
+  fi
+done <<< "$SUBJECTS"
+
+if [ -z "$ALL_SEEN" ]; then
   # No (AISDLC-N) references in the push range. Nothing to do.
   exit 0
 fi
 
-# ── Step 5: for each task ID, decide whether to move ─────────────────
+SENTINEL_ID=""
+SENTINEL_FILE="$WT_ROOT/.active-task"
+if [ -f "$SENTINEL_FILE" ]; then
+  SENTINEL_RAW=$(tr -d '[:space:]' < "$SENTINEL_FILE" 2>/dev/null || true)
+  if printf '%s' "$SENTINEL_RAW" | grep -qiE '^AISDLC-[0-9]+(\.[0-9]+)?$'; then
+    SENTINEL_ID=$(printf '%s' "$SENTINEL_RAW" | tr '[:lower:]' '[:upper:]')
+  elif [ -n "$SENTINEL_RAW" ]; then
+    echo "[task-move] WARN: .active-task value '$SENTINEL_RAW' is not an AISDLC task id; ignoring sentinel" >&2
+  fi
+fi
+
+SELECTED_ID=""
+if [ -n "$SENTINEL_ID" ]; then
+  if printf '%s\n' "$ALL_SEEN" | grep -qxF "$SENTINEL_ID"; then
+    SELECTED_ID="$SENTINEL_ID"
+  else
+    echo "[task-move] .active-task is $SENTINEL_ID but no commit subject in the push range cites it — not auto-closing" >&2
+    exit 0
+  fi
+else
+  # Cited ids minus the chore ids.
+  CITED=""
+  while IFS= read -r CAND; do
+    [ -z "$CAND" ] && continue
+    IS_CHORE=0
+    for CHORE in $CHORE_IDS; do
+      if [ "$CAND" = "$CHORE" ]; then IS_CHORE=1; fi
+    done
+    if [ "$IS_CHORE" -eq 1 ]; then continue; fi
+    CITED=$(printf '%s\n%s\n' "$CITED" "$CAND" | sed '/^$/d')
+  done <<< "$ALL_SEEN"
+
+  # Drop any id that is a strict ancestor of another cited id (N is an
+  # ancestor of N.M; N.M is not an ancestor of N.K).
+  LEAVES=""
+  while IFS= read -r CAND; do
+    [ -z "$CAND" ] && continue
+    HAS_DESCENDANT=0
+    while IFS= read -r OTHER; do
+      [ -z "$OTHER" ] && continue
+      case "$OTHER" in
+        "$CAND".*) HAS_DESCENDANT=1 ;;
+      esac
+    done <<< "$CITED"
+    if [ "$HAS_DESCENDANT" -eq 1 ]; then continue; fi
+    LEAVES=$(printf '%s\n%s\n' "$LEAVES" "$CAND" | sed '/^$/d')
+  done <<< "$CITED"
+
+  LEAF_COUNT=$(printf '%s\n' "$LEAVES" | sed '/^$/d' | wc -l | tr -d ' ')
+  if [ "$LEAF_COUNT" -eq 1 ]; then
+    SELECTED_ID=$(printf '%s\n' "$LEAVES" | sed '/^$/d')
+  elif [ "$LEAF_COUNT" -eq 0 ]; then
+    # Only chore ids were cited — nothing to close.
+    exit 0
+  else
+    SEEN_LABEL=$(printf '%s\n' "$LEAVES" | paste -sd ',' - | sed 's/,/, /g')
+    echo "[task-move] cannot pick a single task to auto-close without an .active-task sentinel (ids seen in push range: $SEEN_LABEL) — not auto-closing" >&2
+    exit 0
+  fi
+fi
+TASK_IDS_RAW="$SELECTED_ID"
+
+# ── Step 5: decide whether to move the selected task ─────────────────
 TASKS_TO_MOVE=()
 
 while IFS= read -r TASK_ID; do
@@ -152,11 +247,30 @@ while IFS= read -r TASK_ID; do
     continue
   fi
 
+  # AISDLC-683 open-children guard: never implicitly close an umbrella whose
+  # children (aisdlc-N.M - *.md) are still open. Closing the umbrella stays an
+  # explicit step: `node pipeline-cli/bin/cli-task-complete.mjs AISDLC-N`.
+  OPEN_CHILDREN=""
+  for CHILD_FILE in "$WT_ROOT/backlog/tasks/$TASK_ID_LOWER".[0-9]*" - "*.md; do
+    [ -e "$CHILD_FILE" ] || continue
+    OPEN_CHILDREN="$OPEN_CHILDREN    $(basename "$CHILD_FILE")
+"
+  done
+  if [ -n "$OPEN_CHILDREN" ]; then
+    {
+      echo "[task-move] $TASK_ID still has open child task(s) in backlog/tasks/ — not auto-closing the umbrella:"
+      printf '%s' "$OPEN_CHILDREN"
+      echo "[task-move]   close it explicitly once the last child completes:"
+      echo "[task-move]   node pipeline-cli/bin/cli-task-complete.mjs $TASK_ID"
+    } >&2
+    continue
+  fi
+
   TASKS_TO_MOVE+=("$TASK_ID")
 done <<< "$TASK_IDS_RAW"
 
 if [ "${#TASKS_TO_MOVE[@]}" -eq 0 ]; then
-  # All task files already in completed/, or none exist in tasks/. No-op.
+  # Already in completed/, none in tasks/, or guarded by open children. No-op.
   exit 0
 fi
 

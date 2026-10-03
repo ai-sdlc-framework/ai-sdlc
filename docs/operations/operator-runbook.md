@@ -1012,6 +1012,18 @@ babysitting.
   `pnpm --filter @ai-sdlc/pipeline-cli build` has been run and the dist is
   up to date.
 - Task file is already in `completed/` → hook detects it and skips (idempotent).
+- Exact-id selection (AISDLC-683): the hook closes exactly one task — the id in
+  the worktree's `.active-task` sentinel (it must be cited by a commit subject in
+  the push range), else the ids cited in the push range (DEC-0028): id-less
+  subjects and the chore ids AISDLC-133 / AISDLC-220 are ignored, an id that is a
+  strict ancestor of another cited id (656 when 656.1 is cited) is dropped, and
+  exactly one remaining id is closed. Several remaining ids (e.g. 656.1 and
+  656.2) with no sentinel: nothing is moved and the ids seen are printed. A
+  sub-task commit that also cites its umbrella no longer closes the umbrella.
+- Umbrella guard (AISDLC-683): a task with open children (`backlog/tasks/aisdlc-N.*`)
+  is never auto-closed; the hook prints the open children. Close the umbrella
+  explicitly with `node pipeline-cli/bin/cli-task-complete.mjs AISDLC-N` once the
+  last child is done. `AI_SDLC_SKIP_TASK_MOVE=1` is no longer needed for this.
 - Defer the auto-move for a specific push: `AI_SDLC_SKIP_TASK_MOVE=1 git push`.
   You are then responsible for moving the file manually before or after push.
 
