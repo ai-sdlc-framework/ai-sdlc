@@ -470,8 +470,10 @@ One pass of the loop:
    argument. The pipeline is not modified for executors.
 4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>
    --worker <name> [--pr <n>] [--follow-ups <ids>] [--decisions <ids>]` writes the
-   verdict and removes the task from `inflight/`. `success` and `iterate-needed`
-   land in `done/`; every other outcome lands in `failed/`. The verdict records the
+   verdict. `success` and `iterate-needed` land in `done/`; every other outcome
+   lands in `failed/`. Every outcome except `iterate-needed` also removes the task
+   from `inflight/`; on `iterate-needed` the inflight manifest stays, so the worker
+   keeps the slot across the iteration. The verdict records the
    outcome, the pull request number, the follow-up task ids and the decision ids
    raised. The command refuses when the task is not inflight, when a follow-up id
    is not a sub-id of the task, and when `--worker` is missing or differs from the

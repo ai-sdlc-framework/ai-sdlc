@@ -233,6 +233,67 @@ describe('completeTask', () => {
     expect(result.verdict.workerId).toBe('executor-a');
   });
 
+  it('lands iterate-needed in done/ and keeps the inflight manifest', async () => {
+    writeManifest(boardDir, mkManifest('AISDLC-707'));
+    await cli([
+      'claim',
+      '--board-dir',
+      boardDir,
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      'executor-a',
+    ]);
+    const result = completeTask(boardDir, {
+      taskId: 'AISDLC-707',
+      outcome: 'iterate-needed',
+      workerId: 'executor-a',
+    });
+    expect(result.state).toBe('done');
+    expect(existsSync(result.verdictPath)).toBe(true);
+    expect(readInflightManifest(boardDir, 'AISDLC-707')?.workerId).toBe('executor-a');
+  });
+
+  it('refuses an empty worker name with nothing written, library and cli', async () => {
+    writeManifest(boardDir, mkManifest('AISDLC-708'));
+    await cli([
+      'claim',
+      '--board-dir',
+      boardDir,
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      'executor-a',
+    ]);
+    const inflightDir = path.join(boardDir, 'inflight');
+    const snapshot = (): Record<string, string> =>
+      Object.fromEntries(
+        readdirSync(inflightDir).map((f) => [f, readFileSync(path.join(inflightDir, f), 'utf-8')]),
+      );
+    const before = snapshot();
+    expect(() =>
+      completeTask(boardDir, { taskId: 'AISDLC-708', outcome: 'success', workerId: '' }),
+    ).toThrow(/claimed by 'executor-a'/);
+    await expect(
+      cli([
+        'complete',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-708',
+        '--outcome',
+        'success',
+        '--worker',
+        '',
+      ]),
+    ).rejects.toThrow(/--worker is required/);
+    expect(snapshot()).toEqual(before);
+    for (const state of ['done', 'failed']) {
+      const dir = path.join(boardDir, state);
+      expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+    }
+  });
+
   it('refuses a completion that omits the worker name, library and cli', async () => {
     writeManifest(boardDir, mkManifest('AISDLC-706'));
     await cli([

@@ -3,9 +3,11 @@
  * verdict on the board.
  *
  * The verdict carries the pipeline outcome, the pull request number, the
- * follow-up task ids the executor filed and the decision ids it raised. Landing
- * it moves the task out of `inflight/` into `done/` (success) or `failed/`
- * (every other outcome), through the same writer the other board commands use.
+ * follow-up task ids the executor filed and the decision ids it raised. The
+ * verdict lands in `done/` (success, iterate-needed) or `failed/` (every other
+ * outcome), through the same writer the other board commands use. The task
+ * leaves `inflight/` for every outcome except iterate-needed, where the
+ * manifest stays so the worker keeps the slot across the iteration.
  */
 
 import { readInflightManifest, TASK_ID_RE, writeVerdict } from './board.js';

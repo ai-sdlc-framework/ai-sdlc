@@ -48,8 +48,9 @@
  *
  *   - `complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>]
  *     [--follow-ups <ids>] [--decisions <ids>] [--pr-url <url>] [--notes <s>]`
- *     — write the verdict for the inflight task this executor holds and move
- *     it to done/ (success, iterate-needed) or failed/. --worker is required and
+ *     — write the verdict for the inflight task this executor holds: done/
+ *     (success, iterate-needed) or failed/. The task leaves inflight/ except on
+ *     iterate-needed, which keeps the manifest. --worker is required and
  *     must equal the name recorded at claim time. Exits 1 when the task is not
  *     inflight or the name differs.
  *   - `next-subid <task-id> [--work-dir <path>]` — print the first free

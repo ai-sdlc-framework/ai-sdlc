@@ -64,7 +64,8 @@ BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 
 Read the roster to learn **your name** and **the dispatch session's name**. Your
 session is the nearest ancestor process that is a running roster entry and a claude
-process; stale entries and reused pids do not match.
+process. Entries that are not running are skipped, and a pid is rejected when its
+process is not a claude process.
 Use the name exactly as the roster has it, collision suffix included
 (`executor-alpha-2` is not `executor-alpha`).
 
@@ -195,9 +196,10 @@ in Step 4, and stop. Do not claim another task while blocked.
 
 ## Step 4 - Report the verdict
 
-Write the verdict and move the task off `inflight/` in one command. The outcomes
-`success` and `iterate-needed` land in `done/`; every other outcome lands in
-`failed/`.
+Write the verdict in one command. The outcomes `success` and `iterate-needed`
+land in `done/`; every other outcome lands in `failed/`. For every outcome except
+`iterate-needed` the task also leaves `inflight/`. On `iterate-needed` the
+inflight manifest stays, so the worker keeps the slot across the iteration.
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete \
