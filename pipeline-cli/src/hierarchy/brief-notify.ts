@@ -2,9 +2,11 @@
  * Hand-off: tell the dispatch session a brief is ready.
  *
  * The message goes to the dispatch session's roster entry only, and only after
- * the entry passes the same validation `down` applies: the hierarchy tmux
- * session, a valid window name, a valid pane id that tmux confirms still belongs
- * to that window. Nothing is ever typed into any other tmux target.
+ * the entry passes the same validation `down` applies: a tmux session from the fixed
+ * set of hierarchy names (or a window of the legacy `ai-sdlc-hierarchy` session), a
+ * valid window name, the `@ai-sdlc-hierarchy` ownership marker that `up` sets (not
+ * checked for legacy entries, which predate it), and a pane id that tmux confirms still
+ * belongs to that window. Nothing is ever typed into any other tmux target.
  */
 
 import path from 'node:path';

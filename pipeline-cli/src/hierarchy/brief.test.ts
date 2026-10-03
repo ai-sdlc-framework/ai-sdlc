@@ -515,7 +515,7 @@ describe('tmux sender', () => {
       /refusing to message 'operator-dispatch'.*tmux session 'operator-dispatch'.*@ai-sdlc-hierarchy/,
     );
     expect(calls.filter((c) => c[0] === 'send-keys')).toEqual([]);
-    expect(calls.some((c) => c[0] === 'show-options' && c.includes('=operator-dispatch'))).toBe(
+    expect(calls.some((c) => c[0] === 'show-options' && c.includes('=operator-dispatch:'))).toBe(
       true,
     );
   });
@@ -525,7 +525,7 @@ describe('tmux sender', () => {
     const { run, calls } = runner({ owned: true });
     createTmuxBriefSender(run)(entry, 'hello');
     const show = calls.find((c) => c[0] === 'show-options');
-    expect(show).toEqual(['show-options', '-v', '-t', '=operator-dispatch', '@ai-sdlc-hierarchy']);
+    expect(show).toEqual(['show-options', '-v', '-t', '=operator-dispatch:', '@ai-sdlc-hierarchy']);
     expect(calls.filter((c) => c[0] === 'send-keys')).toHaveLength(2);
   });
 

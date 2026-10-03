@@ -102,7 +102,8 @@ function makeFakeTmux(registryDir: string): FakeTmux {
     const [cmd] = args;
     const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
     const fail = (stderr = '') => ({ status: 1, stdout: '', stderr });
-    const targetOf = () => (args[args.indexOf('-t') + 1] as string).replace(/^=/, '');
+    const targetOf = () =>
+      (args[args.indexOf('-t') + 1] as string).replace(/^=/, '').replace(/:$/, '');
     switch (cmd) {
       case 'has-session':
         return sessionWindows(targetOf()) ? ok() : fail();
@@ -154,6 +155,11 @@ function makeFakeTmux(registryDir: string): FakeTmux {
             if (target.endsWith(`:${w}`)) removeWindow(w);
           }
         }
+        return ok();
+      }
+      case 'kill-pane': {
+        const pane = args[args.indexOf('-t') + 1] as string;
+        for (const [w, p] of paneOf) if (p.startsWith(`${pane} `)) removeWindow(w);
         return ok();
       }
       case 'kill-window': {
@@ -328,12 +334,12 @@ describe('hierarchy up', () => {
 
     // The ownership marker, then the titles, each scoped to its own session.
     for (const n of ['planner', 'executor-beta']) {
-      const opts = fake.calls.filter((c) => c.args[0] === 'set-option' && c.args[2] === `=${n}`);
+      const opts = fake.calls.filter((c) => c.args[0] === 'set-option' && c.args[2] === `=${n}:`);
       expect(opts.map((c) => c.args)).toEqual([
-        ['set-option', '-t', `=${n}`, '@ai-sdlc-hierarchy', '1'],
-        ['set-option', '-t', `=${n}`, 'set-titles', 'on'],
-        ['set-option', '-t', `=${n}`, 'set-titles-string', n],
-        ['set-option', '-t', `=${n}`, 'status-left', `[${n}] `],
+        ['set-option', '-t', `=${n}:`, '@ai-sdlc-hierarchy', '1'],
+        ['set-option', '-t', `=${n}:`, 'set-titles', 'on'],
+        ['set-option', '-t', `=${n}:`, 'set-titles-string', n],
+        ['set-option', '-t', `=${n}:`, 'status-left', `[${n}] `],
       ]);
     }
     // No global or server option, anywhere.
@@ -782,6 +788,67 @@ describe('hierarchy down', () => {
     expect(fake.windows).toEqual(['operator-dispatch']);
   });
 
+  it('closes a confirmed pane by id, not the window by name, after the grace period', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const paneId = readRoster(boardDir).sessions.find((e) => e.name === 'executor-alpha')?.paneId;
+    fake.exitsOnRequest = false;
+    const result = await hierarchyDown({ role: 'executor-alpha' }, deps);
+    expect(result.stopped[0]?.forced).toBe(true);
+    expect(fake.calls.filter((c) => c.args[0] === 'kill-pane').map((c) => c.args)).toEqual([
+      ['kill-pane', '-t', paneId],
+    ]);
+    expect(fake.calls.some((c) => c.args[0] === 'kill-window')).toBe(false);
+  });
+
+  it('re-checks ownership immediately before the forced close: the marker vanishing during the grace period means no kill', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    putInflight('AISDLC-600', 'executor-alpha');
+    fake.exitsOnRequest = false;
+    // The agent never exits; while down waits, the session is replaced by one that is not ours.
+    deps.sleep = async () => {
+      fake.owned.delete('executor-alpha');
+    };
+    const result = await hierarchyDown({ role: 'executor-alpha' }, deps);
+
+    expect(result.stopped).toEqual([]);
+    expect(result.refused.map((r) => r.name)).toEqual(['executor-alpha']);
+    expect(result.refused[0]?.reason).toMatch(/@ai-sdlc-hierarchy/);
+    expect(
+      fake.calls.filter((c) => c.args[0] === 'kill-pane' || c.args[0] === 'kill-window'),
+    ).toEqual([]);
+    expect(fake.windows).toContain('executor-alpha');
+    expect(readRoster(boardDir).sessions.map((e) => e.name)).toContain('executor-alpha');
+    expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-600.dispatch.json'))).toBe(true);
+    expect(logs.some((l) => l.includes("not closing 'executor-alpha'"))).toBe(true);
+    // the exit request had already gone out on the first (passing) gate
+    expect(fake.calls.filter((c) => c.args[0] === 'send-keys')).toHaveLength(1);
+  });
+
+  it('closes a legacy window by name after the grace period (no marker, no pane to confirm)', async () => {
+    fake.legacyWindows = ['executor-alpha'];
+    writeRawRoster([
+      {
+        role: 'executor',
+        name: 'executor-alpha',
+        tmuxSession: 'ai-sdlc-hierarchy',
+        tmuxWindow: 'executor-alpha',
+        paneId: '',
+        pid: 1,
+        model: 'sonnet',
+        permissionMode: 'default',
+        startedAt: NOW.toISOString(),
+        status: 'running',
+      },
+    ]);
+    fake.exitsOnRequest = false;
+    const r = await hierarchyDown({}, deps);
+    expect(r.stopped[0]?.forced).toBe(true);
+    expect(fake.calls.filter((c) => c.args[0] === 'kill-window').map((c) => c.args)).toEqual([
+      ['kill-window', '-t', '=ai-sdlc-hierarchy:executor-alpha'],
+    ]);
+    expect(fake.calls.some((c) => c.args[0] === 'show-options')).toBe(false);
+  });
+
   it('selects every executor by role and every session without a filter', async () => {
     await hierarchyUp(baseOpts, deps);
     const r1 = await hierarchyDown({ role: 'executor' }, deps);
@@ -925,7 +992,7 @@ describe('session ownership marker', () => {
       ['planner', 'operator-dispatch', 'executor-alpha', 'executor-beta'].map((n) => [
         'set-option',
         '-t',
-        `=${n}`,
+        `=${n}:`,
         '@ai-sdlc-hierarchy',
         '1',
       ]),
@@ -975,7 +1042,7 @@ describe('session ownership marker', () => {
       'show-options',
       '-v',
       '-t',
-      '=executor-alpha',
+      '=executor-alpha:',
       '@ai-sdlc-hierarchy',
     ]);
   });
@@ -997,6 +1064,20 @@ describe('session ownership marker', () => {
     expect(r.refused.map((x) => x.name)).toEqual(['executor-alpha']);
     expect(r.stopped.map((x) => x.name).sort()).toEqual(['executor-beta', 'operator-dispatch']);
     expect(readRoster(boardDir).sessions.map((e) => e.name)).toEqual(['executor-alpha']);
+  });
+
+  it('names the session with a trailing colon for every option call, never a bare =name', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    await hierarchyDown({ role: 'executor-alpha' }, deps);
+    const optionCalls = fake.calls.filter(
+      (c) => c.args[0] === 'set-option' || c.args[0] === 'show-options',
+    );
+    // marker + 3 title options per session started, one show-options for the down check
+    expect(optionCalls.length).toBeGreaterThanOrEqual(9);
+    for (const c of optionCalls) {
+      const target = c.args[c.args.indexOf('-t') + 1] as string;
+      expect(target).toMatch(/^=[a-z][a-z0-9-]*:$/);
+    }
   });
 
   it('applies no ownership check to a legacy-layout roster (it predates the marker)', async () => {

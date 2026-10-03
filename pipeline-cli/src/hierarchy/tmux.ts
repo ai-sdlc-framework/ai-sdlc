@@ -47,7 +47,9 @@ export function startSession(
  * @returns the first failing result, or the last successful one.
  */
 export function setSessionTitles(run: CommandRunner, name: string): CommandResult {
-  const target = `=${name}`;
+  // `=name:` (trailing colon) names the session; a bare `=name` is looked up as a window
+  // name in the current session first, and the old layout's windows carry agent names.
+  const target = `=${name}:`;
   const options: string[][] = [
     ['set-titles', 'on'],
     ['set-titles-string', name],
@@ -93,6 +95,11 @@ export function sendExit(run: CommandRunner, target: string): CommandResult {
   return run('tmux', ['send-keys', '-t', target, '/exit', 'Enter']);
 }
 
+/** Close one pane by its id; pane ids are never reused within a tmux server's lifetime. */
+export function killPane(run: CommandRunner, paneId: string): CommandResult {
+  return run('tmux', ['kill-pane', '-t', paneId]);
+}
+
 /** Close a window. */
 export function killWindow(run: CommandRunner, session: string, window: string): CommandResult {
   return run('tmux', ['kill-window', '-t', `=${session}:${window}`]);
@@ -129,12 +136,12 @@ export const OWNER_OPTION = '@ai-sdlc-hierarchy';
 
 /** Mark a session as started by `cli-hierarchy up` (session-scoped, never `-g`). */
 export function markSessionOwned(run: CommandRunner, name: string): CommandResult {
-  return run('tmux', ['set-option', '-t', `=${name}`, OWNER_OPTION, '1']);
+  return run('tmux', ['set-option', '-t', `=${name}:`, OWNER_OPTION, '1']);
 }
 
 /** True when the session carries the ownership marker. */
 export function sessionOwned(run: CommandRunner, session: string): boolean {
-  const r = run('tmux', ['show-options', '-v', '-t', `=${session}`, OWNER_OPTION]);
+  const r = run('tmux', ['show-options', '-v', '-t', `=${session}:`, OWNER_OPTION]);
   return r.status === 0 && r.stdout.trim() === '1';
 }
 
@@ -146,5 +153,5 @@ export function sessionOwned(run: CommandRunner, session: string): boolean {
 export function ownershipRefusal(run: CommandRunner, entry: RosterEntry): string | undefined {
   if (isLegacyLayoutEntry(entry)) return undefined;
   if (sessionOwned(run, entry.tmuxSession)) return undefined;
-  return `tmux session '${entry.tmuxSession}' (roster entry '${entry.name}') does not carry the ${OWNER_OPTION} marker, so cli-hierarchy did not start it; refusing to send keys to it or close it. If it really is a hierarchy agent, mark it with: tmux set-option -t =${entry.tmuxSession} ${OWNER_OPTION} 1`;
+  return `tmux session '${entry.tmuxSession}' (roster entry '${entry.name}') does not carry the ${OWNER_OPTION} marker, so cli-hierarchy did not start it; refusing to send keys to it or close it. Mark a session by hand only if cli-hierarchy created it; marking a personal session lets down and brief --notify type into it and close it: tmux set-option -t =${entry.tmuxSession}: ${OWNER_OPTION} 1`;
 }
