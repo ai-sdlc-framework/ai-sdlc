@@ -145,7 +145,11 @@
                   "unsafe-symbol",
                   "unsafe-revision",
                   "target-missing",
-                  "file-scope-not-enforced"
+                  "file-scope-not-enforced",
+                  "hardlinked-file",
+                  "revision-unresolved",
+                  "path-case-mismatch",
+                  "dependency-query-unavailable"
                 ]
               },
               "target": { "type": "string", "maxLength": 300 }

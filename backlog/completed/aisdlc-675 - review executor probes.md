@@ -48,12 +48,13 @@ returning evidence in a fixed shape. RFC-0052 section 1 (stage 4) and section 3.
    word, and the harness and model that ran it. Register with AJV and regenerate
    generated schemas.
 2. **`review-executor` agent** (`ai-sdlc-plugin/agents/review-executor.md`): model from
-   the routing cell `review-executor` (default `sonnet`); tools by probe type: `read`
-   and `search` get read-only file access; `trace` gets the dependency graph CLI;
-   `run` gets Bash restricted to the allowlisted commands; `compare` gets read-only
-   access to two revisions. No `Write`, no `Edit`, no `git push`, no agent dispatch, no
-   model selection of its own. The prompt restates the output contract after the
-   target content.
+   the routing cell `review-executor` (default `sonnet`); probe agents hold only scoped
+   read-type tools and never Bash: `read` and `search` get read-only file access scoped to
+   tracked files; `trace` and `compare` receive executor-produced output (the dependency
+   query and the diff between the pinned merge-base and head commits) as redacted, fenced
+   data; `run` receives the output of the allowlisted command that the executor itself ran.
+   No `Write`, no `Edit`, no `git push`, no agent dispatch, no model selection of its own.
+   The prompt restates the output contract after the target content.
 3. **Fan-out** `executePlan(plan, spawner, limits)`: runs probes in parallel up to a
    configured width, enforces per-probe and total evidence budgets (an over-budget
    probe's evidence is truncated with a marker, never silently), collects the bundle,
@@ -106,12 +107,14 @@ Ships the review executor as a library: the evidence schema, the `review-executo
 - `backlog/tasks/aisdlc-676 - ...` (modified): the production-adapter scope and acceptance criterion.
 
 ## Design decisions
-- **ProbeSpawner.spawnProbe, not a wider SubagentSpawner**: the probe needs (tools, file scope, harness) are probe-only, the acceptance criterion asserts only the mock's options, and a closed union sits behind three exhaustive tables. A spawner must declare `enforcesFileScope: true` or any probe with a file scope is refused before spawn.
+- **No probe agent holds Bash, on either harness**: the executor produces the committed-blob reads, the merge-base to head diff and the allowlisted command output itself (fixed argv, no shell, scrubbed environment, pinned revisions) and hands them to the probe as redacted, fenced data. Wildcard Bash grants for git and the dependency script were an arbitrary-write and PR-controlled-code path.
+- **ProbeSpawner.spawnProbe, not a wider SubagentSpawner**: the probe needs are probe-only, the acceptance criterion asserts only the mock's options, and a closed union sits behind three exhaustive tables. A spawner must declare `enforcesFileScope: true` or any probe that can read files is refused before spawn.
 - **Run cap counts every run probe**, baseline included, in plan order: the executor cannot trust the plan's baseline flag. The plan validator counts only added run probes, so one baseline plus two added leaves one skipped.
+- **Trace probes are refused when no dependency query is wired** (`dependency-query-unavailable`): the repository has no read-only in-process code-symbol query yet. A refused probe carries no answer, so it never reads as coverage.
 
 ## Verification
 - `pnpm build` clean; `pnpm validate-schemas` clean; `pnpm dark-code:check` clean.
-- review-plan tests 220 passed; agents tests 51 passed; evidence schema tests 3 passed.
+- executor tests 103 passed; review-plan tests 158 passed; agents tests 52 passed; evidence schema tests 3 passed.
 
 ## Follow-up
 - AISDLC-676 carries the production ProbeSpawner adapter.

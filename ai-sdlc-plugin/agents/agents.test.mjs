@@ -638,29 +638,58 @@ describe('review-executor: read-only, tool-restricted probe executor (staged rev
     assert.equal(agents['review-executor.md'].harness, 'claude-code');
   });
 
-  it('review-executor-codex.md declares the codex harness and shells out read-only', () => {
-    assert.equal(agents['review-executor-codex.md'].harness, 'codex');
-    const body = readFileSync(join(__dirname, 'review-executor-codex.md'), 'utf-8');
-    assert.ok(body.includes('codex exec'));
-    assert.ok(body.includes('-s read-only'));
-    assert.ok(body.includes('--skip-git-repo-check'));
-  });
-
-  it('bodies say read-only, forbid git push, and forbid choosing a model', () => {
+  it('no executor agent is granted Bash, and Bash is disallowed on both', () => {
     for (const file of executorFiles) {
-      const body = readFileSync(join(__dirname, file), 'utf-8');
-      assert.ok(/read-only/i.test(body), `${file} must say read-only`);
-      assert.ok(body.includes('git push') || body.includes('push'), `${file} must forbid push`);
-      assert.ok(/model/i.test(body) && /never/i.test(body), `${file} must forbid model choice`);
+      assert.ok(
+        !agents[file].tools.some((t) => t === 'Bash' || t.startsWith('Bash(')),
+        `${file} must not grant Bash`,
+      );
+      assert.ok(agents[file].disallowedTools.includes('Bash'), `${file} must disallow Bash`);
     }
   });
 
-  it('review-executor.md documents the tools by probe type', () => {
+  it('review-executor-codex.md declares the codex harness and does not shell out', () => {
+    assert.equal(agents['review-executor-codex.md'].harness, 'codex');
+    const body = readFileSync(join(__dirname, 'review-executor-codex.md'), 'utf-8');
+    assert.ok(!body.includes('codex exec'), 'the dispatcher runs Codex; the agent must not');
+    assert.ok(body.includes('Read-only, no shell'));
+  });
+
+  it('bodies say read-only and forbid push, any command, and choosing a model', () => {
+    for (const file of executorFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(/read-only/i.test(body), `${file} must say read-only`);
+    }
+    const claude = readFileSync(join(__dirname, 'review-executor.md'), 'utf-8');
+    assert.ok(
+      claude.includes(
+        'You have no shell and must never run a command, in particular never `git push`',
+      ),
+      'review-executor must forbid every command, git push included',
+    );
+    assert.ok(
+      claude.includes('never pick or switch the model you run on'),
+      'review-executor must forbid choosing a model',
+    );
+    const codex = readFileSync(join(__dirname, 'review-executor-codex.md'), 'utf-8');
+    assert.ok(
+      codex.includes('Never write, edit, delete, commit or push, and never run a command'),
+      'review-executor-codex must forbid commit, push and any command',
+    );
+    assert.ok(
+      codex.includes('do not select a model'),
+      'review-executor-codex must forbid choosing a model',
+    );
+  });
+
+  it('review-executor.md documents the data each probe type receives, with no git or cli-deps text', () => {
     const body = readFileSync(join(__dirname, 'review-executor.md'), 'utf-8');
     for (const type of ['`read`', '`search`', '`trace`', '`run`', '`compare`']) {
       assert.ok(body.includes(type), `must document the ${type} probe type`);
     }
-    assert.ok(body.includes('cli-deps'), 'trace probes use the dependency graph CLI');
+    assert.ok(!body.includes('cli-deps'), 'no dependency CLI is granted to a probe');
+    assert.ok(!/git (diff|show)/.test(body), 'no git command is granted to a probe');
+    assert.ok(body.includes('<PROBE_INPUT_...>'), 'documents the per-call random fence tag');
   });
 
   it('bodies restate the output contract after the probe input', () => {
