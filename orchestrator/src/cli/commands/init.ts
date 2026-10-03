@@ -37,6 +37,7 @@ import { detectGitRemote, applyRemoteToPipelineYaml } from './git-remote.js';
 import { resolveVersions, formatVersionBlock } from '../versions.js';
 import {
   RUNTIME_GITIGNORE_SENTINEL,
+  hasSentinelLine,
   insertIntoSentinelBlock,
   missingRuntimeGitignorePaths,
 } from '../../runtime-gitignore.js';
@@ -396,7 +397,7 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
     return;
   }
 
-  if (existing.includes(RUNTIME_GITIGNORE_SENTINEL)) {
+  if (hasSentinelLine(existing)) {
     // An earlier init wrote the block: add the new entries under it, not a second block.
     writeFileSync(gitignorePath, insertIntoSentinelBlock(existing, missing), 'utf-8');
   } else {

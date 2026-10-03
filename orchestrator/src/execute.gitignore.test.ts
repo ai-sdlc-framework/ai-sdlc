@@ -56,6 +56,24 @@ describe('ensureRuntimeGitignore', () => {
     expect(out).toContain('.ai-sdlc/artifacts/');
   });
 
+  it('writes a new block when the sentinel text only appears inside another line', () => {
+    writeFileSync(gitignore(), `dist/ ${SENTINEL}\n# ${SENTINEL}-v0\n`);
+    ensureRuntimeGitignore(dir);
+    const out = readFileSync(gitignore(), 'utf-8');
+    expect(out).toContain(`\n${SENTINEL}\n.ai-sdlc/state.db\n`);
+    expect(out).toContain('.ai-sdlc/artifacts/');
+    // the lines the user wrote are untouched
+    expect(out.startsWith(`dist/ ${SENTINEL}\n# ${SENTINEL}-v0\n`)).toBe(true);
+  });
+
+  it('does not fight a deliberate negation: no duplicate entry, no growth on any run', () => {
+    const negated = `${OLD_BLOCK}.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n`;
+    writeFileSync(gitignore(), negated);
+    ensureRuntimeGitignore(dir);
+    ensureRuntimeGitignore(dir);
+    expect(readFileSync(gitignore(), 'utf-8')).toBe(negated);
+  });
+
   it('leaves a complete .gitignore byte-for-byte alone', () => {
     const complete = `${OLD_BLOCK}.ai-sdlc/artifacts/\n`;
     writeFileSync(gitignore(), complete);

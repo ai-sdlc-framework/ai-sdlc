@@ -33,6 +33,7 @@ import { validateAgentOutput } from './validate-agent-output.js';
 import { createLogger, type Logger } from './logger.js';
 import {
   RUNTIME_GITIGNORE_SENTINEL,
+  hasSentinelLine,
   insertIntoSentinelBlock,
   missingRuntimeGitignorePaths,
 } from './runtime-gitignore.js';
@@ -1692,7 +1693,7 @@ export function ensureRuntimeGitignore(workDir: string): void {
 
     // Write atomically (writeFileSync, not appendFileSync) to avoid race conditions
     // when parallel test processes both read before either writes.
-    if (existing.includes(RUNTIME_GITIGNORE_SENTINEL)) {
+    if (hasSentinelLine(existing)) {
       writeFileSync(gitignorePath, insertIntoSentinelBlock(existing, missing), 'utf-8');
       return;
     }

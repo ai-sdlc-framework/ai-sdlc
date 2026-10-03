@@ -1082,7 +1082,7 @@ describe('checkRuntimeGitignore', () => {
     expect(r.remediation).toBeUndefined();
   });
 
-  it.each(['.ai-sdlc/artifacts', '/.ai-sdlc/artifacts/', '  .ai-sdlc/artifacts/  '])(
+  it.each(['.ai-sdlc/artifacts', '/.ai-sdlc/artifacts/', '.ai-sdlc/artifacts/  '])(
     'accepts the equivalent spelling %j',
     (line) => {
       writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
@@ -1092,6 +1092,13 @@ describe('checkRuntimeGitignore', () => {
 
   it('does not count a different directory or a comment as covering the entry', () => {
     writeFileSync(join(tmpDir, '.gitignore'), '# .ai-sdlc/artifacts/\n.ai-sdlc/artifacts-old/\n');
+    expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
+  });
+
+  it('warns when a later line negates the entry, or the entry is indented', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n');
+    expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
+    writeFileSync(join(tmpDir, '.gitignore'), '  .ai-sdlc/artifacts/\n');
     expect(checkRuntimeGitignore(makeCtx(makeAdapters())).severity).toBe('warn');
   });
 

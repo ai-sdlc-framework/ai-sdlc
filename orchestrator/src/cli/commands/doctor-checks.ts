@@ -961,7 +961,7 @@ export function checkRuntimeGitignore(ctx: DoctorRunContext): DoctorCheckResult 
       gitignore === null
         ? `no .gitignore found: ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results) would be committed`
         : `.gitignore does not ignore ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results would be committed)`,
-    remediation: `Add \`${ARTIFACTS_GITIGNORE_ENTRY}\` to .gitignore (running \`ai-sdlc execute\` appends it to the runtime block).`,
+    remediation: `Add \`${ARTIFACTS_GITIGNORE_ENTRY}\` to .gitignore (running \`ai-sdlc execute\` appends it to the runtime block), and remove any later \`!\` line that re-includes it.`,
     anonymizableEvidence: { gitignorePresent: gitignore !== null },
   };
 }
