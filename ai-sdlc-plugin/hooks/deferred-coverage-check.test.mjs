@@ -12,7 +12,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -86,13 +86,14 @@ bash -c "$SCRIPT"
   return { root, repo, home, shim };
 }
 
-function runHook({ repo, home, shim }) {
+function runHook({ repo, home, shim, root }) {
   const res = spawnSync('node', [HOOK], {
     cwd: repo,
     encoding: 'utf-8',
     env: {
       ...process.env,
       HOME: home,
+      AI_SDLC_COVERAGE_LOCK_DIR: join(root, 'lock'),
       CLAUDE_PROJECT_DIR: repo,
       PATH: `${shim}:${process.env.PATH}`,
     },
@@ -253,5 +254,267 @@ describe('deferred-coverage-check.js — sentinel robustness', () => {
     const after = JSON.parse(readFileSync(sPath, 'utf-8'));
     assert.ok(after.head, 'sentinel should be rewritten with head');
     assert.ok(after.fingerprint, 'sentinel should be rewritten with fingerprint');
+  });
+});
+
+// ── AISDLC-685: single-flight, scoped, group-killed ─────────────────
+
+const LOCK_NAME = 'ai-sdlc-deferred-coverage.lock';
+
+// Workspace fixture: two packages + a recording `pnpm` shim. No real
+// coverage ever runs; the shim logs its args (one line per invocation) and
+// can sleep while holding a grandchild to exercise group killing.
+function setupWorkspace({ maxDurationMs } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-coverage-ws-'));
+  const repo = join(root, 'repo');
+  const home = join(root, 'home');
+  const shim = join(root, 'shim');
+  const lock = join(root, 'lock');
+  for (const d of [repo, home, shim, lock]) mkdirSync(d);
+  sh('git init -q', { cwd: repo });
+  sh('git config user.email test@test.invalid', { cwd: repo });
+  sh('git config user.name Test', { cwd: repo });
+  writeFileSync(join(repo, 'README.md'), '# test\n');
+  writeFileSync(join(repo, 'pnpm-lock.yaml'), 'lockfileVersion: 5.4\n');
+  writeFileSync(join(repo, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+  writeFileSync(
+    join(repo, 'package.json'),
+    JSON.stringify({
+      name: 'ws-root',
+      scripts: { 'test:coverage': 'pnpm -r test:coverage' },
+      devDependencies: { vitest: '^1.0.0', '@vitest/coverage-v8': '^1.0.0' },
+    }),
+  );
+  for (const n of ['a', 'b']) {
+    mkdirSync(join(repo, 'packages', n, 'src'), { recursive: true });
+    writeFileSync(
+      join(repo, 'packages', n, 'package.json'),
+      JSON.stringify({ name: `@t/${n}`, scripts: { 'test:coverage': 'vitest run --coverage' } }),
+    );
+  }
+  if (maxDurationMs) {
+    mkdirSync(join(repo, '.ai-sdlc'));
+    writeFileSync(
+      join(repo, '.ai-sdlc', 'coverage-config.yaml'),
+      `maxDurationMs: ${maxDurationMs}\n`,
+    );
+  }
+  sh('git add -A && git commit -q -m initial', { cwd: repo });
+  const log = join(root, 'shim.log');
+  writeFileSync(
+    join(shim, 'pnpm'),
+    `#!/bin/bash
+echo "$*" >> "${log}"
+echo "WORKERS=$AI_SDLC_VITEST_MAX_WORKERS" >> "${log}.env"
+if [ -n "$SHIM_SLEEP" ]; then
+  sleep 300 &
+  echo $! >> "${log}.gc"
+  sleep "$SHIM_SLEEP"
+fi
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  return { root, repo, home, shim, lock, log };
+}
+
+function hookEnv(w, extra = {}) {
+  return {
+    ...process.env,
+    HOME: w.home,
+    CLAUDE_PROJECT_DIR: w.repo,
+    AI_SDLC_COVERAGE_LOCK_DIR: w.lock,
+    PATH: `${w.shim}:${process.env.PATH}`,
+    ...extra,
+  };
+}
+
+function runWs(w, extra) {
+  return spawnSync('node', [HOOK], {
+    cwd: w.repo,
+    encoding: 'utf-8',
+    env: hookEnv(w, extra),
+    input: '{}', // stdin via pipe, never /dev/stdin
+  });
+}
+
+function startHook(w, extra) {
+  const c = spawn('node', [HOOK], {
+    cwd: w.repo,
+    env: hookEnv(w, extra),
+    stdio: ['pipe', 'ignore', 'ignore'],
+  });
+  c.stdin.end('{}');
+  return new Promise((res) => c.on('exit', (code) => res(code)));
+}
+
+function invocations(w) {
+  return existsSync(w.log) ? readFileSync(w.log, 'utf-8').split('\n').filter(Boolean) : [];
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function deadPid() {
+  return spawnSync('node', ['-e', '']).pid;
+}
+
+describe('deferred-coverage-check.js — single-flight / scope / reaping (AISDLC-685)', () => {
+  let w;
+  afterEach(() => {
+    if (w) {
+      // clean up grandchildren spawned by our own shim
+      const gc = `${w.log}.gc`;
+      if (existsSync(gc)) {
+        for (const p of readFileSync(gc, 'utf-8').split('\n').filter(Boolean)) {
+          try {
+            process.kill(Number(p), 'SIGKILL');
+          } catch {
+            /* gone */
+          }
+        }
+      }
+      rmSync(w.root, { recursive: true, force: true });
+    }
+    w = null;
+  });
+
+  it('two hooks started together result in exactly one coverage run', async () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    const codes = await Promise.all([
+      startHook(w, { SHIM_SLEEP: '1' }),
+      startHook(w, { SHIM_SLEEP: '1' }),
+    ]);
+    assert.deepEqual(codes, [0, 0]);
+    assert.equal(invocations(w).length, 1);
+    assert.equal(existsSync(join(w.lock, LOCK_NAME)), false, 'lock released');
+  });
+
+  it('a live lock holder makes the hook exit 0 silently without running', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    writeFileSync(
+      join(w.lock, LOCK_NAME),
+      JSON.stringify({ pid: process.pid, startedAt: Date.now() }),
+    );
+    const res = runWs(w);
+    assert.equal(res.status, 0);
+    assert.equal(res.stderr, '');
+    assert.equal(invocations(w).length, 0);
+  });
+
+  it('takes over a stale lock (dead pid) and releases it afterwards', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    writeFileSync(
+      join(w.lock, LOCK_NAME),
+      JSON.stringify({ pid: deadPid(), startedAt: Date.now() }),
+    );
+    const res = runWs(w);
+    assert.equal(res.status, 0);
+    assert.equal(invocations(w).length, 1);
+    assert.equal(existsSync(join(w.lock, LOCK_NAME)), false);
+  });
+
+  it('takes over a lock whose pid is alive but far older than the max duration (pid reuse)', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    writeFileSync(
+      join(w.lock, LOCK_NAME),
+      JSON.stringify({ pid: process.pid, startedAt: Date.now() - 3 * 3600 * 1000 }),
+    );
+    assert.equal(runWs(w).status, 0);
+    assert.equal(invocations(w).length, 1);
+  });
+
+  it('two hooks racing over the same stale lock: exactly one proceeds', async () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    writeFileSync(
+      join(w.lock, LOCK_NAME),
+      JSON.stringify({ pid: deadPid(), startedAt: Date.now() }),
+    );
+    await Promise.all([startHook(w, { SHIM_SLEEP: '1' }), startHook(w, { SHIM_SLEEP: '1' })]);
+    assert.equal(invocations(w).length, 1);
+  });
+
+  it('after a forced timeout no process of the group is alive within 5s; lock released', async () => {
+    w = setupWorkspace({ maxDurationMs: 700 });
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    const code = await startHook(w, { SHIM_SLEEP: '120' });
+    assert.equal(code, 0, 'timeout exits 0 (advisory)');
+    const gcs = readFileSync(`${w.log}.gc`, 'utf-8').split('\n').filter(Boolean).map(Number);
+    assert.ok(gcs.length >= 1, 'shim spawned a grandchild');
+    const end = Date.now() + 5000;
+    while (Date.now() < end && gcs.some(alive)) await sleepMs(100);
+    assert.deepEqual(gcs.filter(alive), [], 'grandchildren must be dead');
+    assert.equal(existsSync(join(w.lock, LOCK_NAME)), false, 'lock released after timeout');
+  });
+
+  it('a dirty file in one package runs that package only', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    assert.equal(runWs(w).status, 0);
+    const calls = invocations(w);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /--filter @t\/a /);
+    assert.doesNotMatch(calls[0], /@t\/b/);
+    assert.doesNotMatch(calls[0], /-r\b/);
+  });
+
+  it('dirty files in two packages pass one --filter per package', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    writeFileSync(join(w.repo, 'packages', 'b', 'src', 'y.ts'), 'export const y = 1;\n');
+    assert.equal(runWs(w).status, 0);
+    const calls = invocations(w);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /--filter @t\/a --filter @t\/b /);
+  });
+
+  it('an unmappable dirty path (workspace root file) skips with zero invocations', () => {
+    w = setupWorkspace();
+    mkdirSync(join(w.repo, 'scripts'));
+    writeFileSync(join(w.repo, 'scripts', 'tool.js'), 'module.exports = 1;\n');
+    assert.equal(runWs(w).status, 0);
+    assert.equal(invocations(w).length, 0, 'never falls back to workspace-wide');
+  });
+
+  it('single-package repo (root package, no workspaces) still runs the root command', () => {
+    w = setupWorkspace();
+    rmSync(join(w.repo, 'pnpm-workspace.yaml'));
+    writeFileSync(join(w.repo, 'top.ts'), 'export const t = 1;\n');
+    assert.equal(runWs(w).status, 0);
+    assert.deepEqual(invocations(w), ['test:coverage']);
+  });
+
+  it('AI_SDLC_SKIP_DEFERRED_COVERAGE=1 runs nothing (even without stdin)', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    const res = spawnSync('node', [HOOK], {
+      cwd: w.repo,
+      encoding: 'utf-8',
+      env: hookEnv(w, { AI_SDLC_SKIP_DEFERRED_COVERAGE: '1' }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(res.status, 0);
+    assert.equal(invocations(w).length, 0);
+    assert.equal(existsSync(join(w.lock, LOCK_NAME)), false);
+  });
+
+  it('child env sets AI_SDLC_VITEST_MAX_WORKERS=2', () => {
+    w = setupWorkspace();
+    writeFileSync(join(w.repo, 'packages', 'a', 'src', 'x.ts'), 'export const x = 1;\n');
+    assert.equal(runWs(w, { AI_SDLC_VITEST_MAX_WORKERS: '9' }).status, 0);
+    assert.equal(readFileSync(`${w.log}.env`, 'utf-8').trim(), 'WORKERS=2');
   });
 });
