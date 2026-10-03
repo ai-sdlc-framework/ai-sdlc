@@ -10,17 +10,37 @@
  *   2 = coverage below threshold (blocking — wakes the model)
  */
 
-const { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } = require('fs');
-const { join } = require('path');
-const { execSync } = require('child_process');
+const {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  unlinkSync,
+  openSync,
+  writeSync,
+  closeSync,
+  statSync,
+  lstatSync,
+  rmdirSync,
+  realpathSync,
+} = require('fs');
+const { join, dirname, resolve, sep } = require('path');
+const { execSync, spawn } = require('child_process');
 const { createHash } = require('crypto');
-const { homedir } = require('os');
+const { homedir, tmpdir } = require('os');
+
+// ── Env skip (AISDLC-685) — before reading stdin or spawning anything ─
+
+if (process.env.AI_SDLC_SKIP_DEFERRED_COVERAGE === '1') {
+  process.exit(0);
+}
 
 // ── Read stdin ───────────────────────────────────────────────────────
+// fd 0 (not /dev/stdin) so this also works on Linux when stdin is a pipe.
 
 let input;
 try {
-  const raw = readFileSync('/dev/stdin', 'utf-8');
+  const raw = readFileSync(0, 'utf-8');
   input = JSON.parse(raw);
 } catch {
   process.exit(0);
@@ -97,39 +117,130 @@ if (hasDep('vitest') && !hasDep('@vitest/coverage-v8') && !hasDep('@vitest/cover
 }
 
 // ── Detect coverage command ─────────────────────────────────────────
-// Priority: dedicated test:coverage > -- passthrough with turbo awareness
+// Priority: dedicated test:coverage > -- passthrough with turbo awareness.
+// Only used when the dirty files belong to the root package of a
+// single-package (non-workspace) repository.
 
-let coverageCmd;
-
-if (hasScript('test:coverage')) {
-  // Dedicated script — works with any task runner
-  if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
-    coverageCmd = 'pnpm test:coverage';
+function detectRootCoverageCmd() {
+  let cmd;
+  if (hasScript('test:coverage')) {
+    // Dedicated script — works with any task runner
+    if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
+      cmd = 'pnpm test:coverage';
+    } else if (existsSync(join(projectDir, 'yarn.lock'))) {
+      cmd = 'yarn test:coverage';
+    } else {
+      cmd = 'npm run test:coverage';
+    }
+  } else if (usesTaskRunner()) {
+    // Turbo/nx detected but no test:coverage script — skip rather than fail.
+    // Can't safely pass --coverage through a task runner.
+    return null;
+  } else if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
+    cmd = 'pnpm test -- --coverage';
   } else if (existsSync(join(projectDir, 'yarn.lock'))) {
-    coverageCmd = 'yarn test:coverage';
+    cmd = 'yarn test --coverage';
+  } else if (existsSync(join(projectDir, 'package-lock.json'))) {
+    cmd = 'npm test -- --coverage';
   } else {
-    coverageCmd = 'npm run test:coverage';
+    return null;
   }
-} else if (usesTaskRunner()) {
-  // Turbo/nx detected but no test:coverage script — skip rather than fail.
-  // Can't safely pass --coverage through a task runner.
-  process.exit(0);
-} else if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
-  coverageCmd = 'pnpm test -- --coverage';
-} else if (existsSync(join(projectDir, 'yarn.lock'))) {
-  coverageCmd = 'yarn test --coverage';
-} else if (existsSync(join(projectDir, 'package-lock.json'))) {
-  coverageCmd = 'npm test -- --coverage';
-} else {
-  process.exit(0);
+
+  // Apply workspace exclusions
+  if (excludeWorkspaces.length > 0 && cmd.startsWith('pnpm')) {
+    const filters = excludeWorkspaces.map((ws) => `--filter '!${ws}'`).join(' ');
+    cmd = cmd.replace('pnpm ', `pnpm ${filters} `);
+  }
+  return cmd;
 }
 
-// ── Apply workspace exclusions ──────────────────────────────────────
+function isWorkspaceRoot() {
+  return existsSync(join(projectDir, 'pnpm-workspace.yaml')) || !!readPkg().workspaces;
+}
 
-if (excludeWorkspaces.length > 0 && coverageCmd.startsWith('pnpm')) {
-  // For pnpm workspaces, add --filter to exclude listed packages
-  const filters = excludeWorkspaces.map((ws) => `--filter '!${ws}'`).join(' ');
-  coverageCmd = coverageCmd.replace('pnpm ', `pnpm ${filters} `);
+// Nearest ancestor directory (below projectDir) whose package.json has a
+// "name"; null => the file belongs to the root package (or no package).
+const realProjectDir = (() => {
+  try {
+    return realpathSync(projectDir);
+  } catch {
+    return projectDir;
+  }
+})();
+
+function packageForFile(absFile) {
+  let dir = dirname(absFile);
+  while (dir.startsWith(realProjectDir + sep)) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
+      if (pkg && typeof pkg.name === 'string' && pkg.name) {
+        return {
+          name: pkg.name,
+          dir,
+          hasCoverage: !!(pkg.scripts && pkg.scripts['test:coverage']),
+        };
+      }
+    } catch {
+      // no / unreadable package.json — keep walking up
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function pkgManager() {
+  if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (existsSync(join(projectDir, 'yarn.lock'))) return 'yarn';
+  return 'npm';
+}
+
+function shq(v) {
+  return "'" + String(v).replace(/'/g, "'\\''") + "'";
+}
+
+// Returns the coverage command, or null to skip (never workspace-wide).
+function buildCoverageCmd(sourceFiles) {
+  let top;
+  try {
+    top = realpathSync(
+      execSync('git rev-parse --show-toplevel', { encoding: 'utf-8', cwd: projectDir }).trim(),
+    );
+  } catch {
+    return null;
+  }
+  const root = realProjectDir;
+  const packages = new Map();
+  let touchesRoot = false;
+  for (const f of sourceFiles) {
+    const abs = resolve(top, f);
+    if (abs !== root && !abs.startsWith(root + sep)) continue; // outside project dir
+    const pkg = packageForFile(abs);
+    if (pkg) packages.set(pkg.name, pkg);
+    else touchesRoot = true;
+  }
+  if (packages.size === 0 && !touchesRoot) return null;
+
+  if (touchesRoot) {
+    // Root package files. In a workspace root the root command is
+    // workspace-wide, so refuse; in a single-package repo run it as today.
+    if (isWorkspaceRoot()) return null;
+    return detectRootCoverageCmd();
+  }
+
+  const names = [...packages.values()]
+    .filter((p) => p.hasCoverage && !excludeWorkspaces.includes(p.name))
+    .map((p) => p.name);
+  if (names.length === 0) return null;
+  const pm = pkgManager();
+  if (pm === 'pnpm') {
+    return `pnpm ${names.map((n) => `--filter ${shq(n)}`).join(' ')} test:coverage`;
+  }
+  if (pm === 'yarn') {
+    return names.map((n) => `yarn workspace ${shq(n)} test:coverage`).join(' && ');
+  }
+  return `npm run test:coverage ${names.map((n) => `--workspace ${shq(n)}`).join(' ')}`;
 }
 
 // ── Check if any source code was modified ───────────────────────────
@@ -146,6 +257,7 @@ if (excludeWorkspaces.length > 0 && coverageCmd.startsWith('pnpm')) {
 // `git status --porcelain` shows what's uncommitted right now — i.e. the
 // concrete changes the model made (or chose not to make) this session.
 
+let coverageCmd;
 try {
   // `--untracked-files=all` expands untracked DIRECTORIES into the individual
   // files inside them. Without this flag, an untracked dir like `src/new/`
@@ -186,8 +298,12 @@ try {
   if (sourceFiles.length === 0) {
     process.exit(0);
   }
+  coverageCmd = buildCoverageCmd(sourceFiles);
 } catch {
   process.exit(0);
+}
+if (!coverageCmd) {
+  process.exit(0); // mapping failed / nothing runnable — skip, never workspace-wide
 }
 
 // ── Loop-prevention sentinel ────────────────────────────────────────
@@ -253,21 +369,249 @@ function failureFingerprint(message) {
   return createHash('sha256').update(message).digest('hex').slice(0, 16);
 }
 
+// ── Single-flight lock (machine-wide) ───────────────────────────────
+//
+// One coverage run per machine at a time: several concurrent sessions each
+// running vitest drove the machine to load 91 (AISDLC-685). The lockfile
+// holds {pid, startedAt}; a live holder => exit 0 silently.
+
+const LOCK_GRACE_MS = 30000;
+const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+
+// A shared, world-writable tmpdir (Linux /tmp) lets another local user pre-create the lock
+// (a FIFO that hangs the read, a far-future startedAt, a takeover dir we cannot remove). So the
+// default lock lives in a per-user 0700 directory that must be a real directory owned by us;
+// when it cannot be trusted the hook skips rather than trusting it.
+function privateLockDir() {
+  const dir = join(tmpdir(), `ai-sdlc-coverage-${uid === null ? 'user' : uid}`);
+  try {
+    mkdirSync(dir, { mode: 0o700 });
+  } catch (e) {
+    if (!e || e.code !== 'EEXIST') return null;
+  }
+  try {
+    const st = lstatSync(dir);
+    if (!st.isDirectory() || (uid !== null && st.uid !== uid)) return null;
+    if (uid !== null && (st.mode & 0o077) !== 0) return null;
+  } catch {
+    return null;
+  }
+  return dir;
+}
+
+const lockDir = process.env.AI_SDLC_COVERAGE_LOCK_DIR || privateLockDir();
+if (!lockDir) process.exit(0);
+const lockPath = join(lockDir, 'ai-sdlc-deferred-coverage.lock');
+const takeoverGuard = lockPath + '.takeover';
+
+function readLock() {
+  try {
+    // Never open anything but a regular file we own (a FIFO would block the read).
+    const st = lstatSync(lockPath);
+    if (!st.isFile() || (uid !== null && st.uid !== uid) || st.size > 1024) return null;
+    return JSON.parse(readFileSync(lockPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return !!e && e.code === 'EPERM';
+  }
+}
+
+function lockIsStale() {
+  const info = readLock();
+  if (!info || typeof info.pid !== 'number' || typeof info.startedAt !== 'number') {
+    // Empty / partially written / corrupt: stale only once it has aged.
+    try {
+      return Date.now() - statSync(lockPath).mtimeMs > 10000;
+    } catch {
+      return true; // vanished
+    }
+  }
+  if (!pidAlive(info.pid)) return true;
+  // A start time in the future cannot be a real holder (clock skew allowance of 60 s).
+  if (info.startedAt > Date.now() + 60000) return true;
+  // pid reuse guard: no coverage run legitimately lasts longer than this.
+  return Date.now() - info.startedAt > maxDurationMs + LOCK_GRACE_MS;
+}
+
+function tryCreateLock() {
+  let fd;
+  try {
+    fd = openSync(lockPath, 'wx');
+  } catch (e) {
+    if (e && e.code === 'EEXIST') return false;
+    throw e;
+  }
+  try {
+    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
+  } finally {
+    closeSync(fd);
+  }
+  return true;
+}
+
+function acquireLock() {
+  try {
+    mkdirSync(lockDir, { recursive: true });
+    if (tryCreateLock()) return true;
+    if (!lockIsStale()) return false;
+    // Stale: take over under a mkdir guard so that of N hooks that all saw
+    // the same stale lock exactly one removes + re-creates it.
+    try {
+      mkdirSync(takeoverGuard);
+    } catch (e) {
+      if (e && e.code === 'EEXIST') {
+        try {
+          if (Date.now() - statSync(takeoverGuard).mtimeMs > 10000) rmdirSync(takeoverGuard);
+        } catch {
+          // ignore
+        }
+      }
+      return false;
+    }
+    try {
+      if (!existsSync(lockPath) || lockIsStale()) {
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // already gone
+        }
+        return tryCreateLock();
+      }
+      return false;
+    } finally {
+      try {
+        rmdirSync(takeoverGuard);
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    return false; // cannot lock => do not run (safe default)
+  }
+}
+
+function releaseLock() {
+  try {
+    const info = readLock();
+    if (info && info.pid === process.pid) unlinkSync(lockPath);
+  } catch {
+    // non-fatal
+  }
+}
+
+if (!acquireLock()) {
+  process.exit(0);
+}
+
+// ── Process-group lifecycle ─────────────────────────────────────────
+
+let child = null;
+
+function killGroup() {
+  if (!child || !child.pid) return;
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+  } catch {
+    // group already gone
+  }
+}
+
+function cleanup() {
+  killGroup();
+  releaseLock();
+}
+
+process.on('exit', cleanup);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(sig, () => process.exit(0));
+}
+process.on('uncaughtException', (e) => {
+  process.stderr.write(`AI-SDLC Coverage: hook error: ${e && e.stack}\n`);
+  process.exit(0);
+});
+
 // ── Run coverage ─────────────────────────────────────────────────────
 
-try {
-  execSync(coverageCmd, {
-    cwd: projectDir,
-    encoding: 'utf-8',
-    timeout: maxDurationMs,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+const MAX_BUF = 4 * 1024 * 1024;
+function appendBounded(prev, chunk) {
+  const next = prev + chunk.toString('utf-8');
+  return next.length > MAX_BUF ? next.slice(next.length - MAX_BUF) : next;
+}
 
-  // Tests passed — clear any prior loop-prevention sentinel so the next
-  // genuine failure can wake the model.
-  clearSentinel();
+let finished = false;
+function finish(err, stdout, stderr) {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timeoutTimer);
+  killGroup(); // no child may outlive the hook
+  if (err === null) {
+    // Tests passed — clear any prior loop-prevention sentinel so the next
+    // genuine failure can wake the model.
+    clearSentinel();
+    process.exit(0);
+  }
+  err.stdout = stdout;
+  err.stderr = stderr;
+  handleFailure(err);
+}
+
+let outBuf = '';
+let errBuf = '';
+let exitInfo = null;
+
+child = spawn(coverageCmd, {
+  cwd: projectDir,
+  shell: true,
+  detached: true, // own process group so the whole tree can be reaped
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, AI_SDLC_VITEST_MAX_WORKERS: '2' },
+});
+
+const timeoutTimer = setTimeout(() => {
+  finished = true;
+  killGroup();
+  process.exit(0); // timeout advisory: exit gracefully
+}, maxDurationMs);
+
+child.stdout.on('data', (c) => {
+  outBuf = appendBounded(outBuf, c);
+});
+child.stderr.on('data', (c) => {
+  errBuf = appendBounded(errBuf, c);
+});
+child.on('error', () => {
+  finished = true;
   process.exit(0);
-} catch (err) {
+});
+function settle() {
+  if (!exitInfo) return;
+  const { code, signal } = exitInfo;
+  if (code === 0) return finish(null, outBuf, errBuf);
+  const e = new Error('Command failed');
+  e.status = code;
+  e.signal = signal;
+  finish(e, outBuf, errBuf);
+}
+child.on('exit', (code, signal) => {
+  exitInfo = { code, signal };
+  // Orphaned grandchildren may hold the pipes open; give 'close' a moment,
+  // then settle with what we have (finish() kills the group).
+  setTimeout(settle, 1000).unref();
+});
+child.on('close', (code, signal) => {
+  exitInfo = exitInfo || { code, signal };
+  settle();
+});
+
+function handleFailure(err) {
   const stderr = err.stderr || '';
   const stdout = err.stdout || '';
   const combined = stderr + stdout;
@@ -288,7 +632,7 @@ try {
   }
 
   // ── Timeout — exit gracefully with advisory ────────────────
-  if (err.killed || (err.signal && err.signal === 'SIGTERM')) {
+  if (err.signal === 'SIGTERM') {
     process.exit(0);
   }
 

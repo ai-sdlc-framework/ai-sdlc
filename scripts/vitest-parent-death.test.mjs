@@ -96,6 +96,40 @@ describe('parent-watch setup file', () => {
       }
     }
   });
+
+  it('still kills an orphan when process.exit throws and uncaught errors are swallowed (vitest workers)', async () => {
+    const setup = join(REPO, 'vitest.parent-watch.setup.mjs');
+    // Mimics a vitest 3 worker: process.exit is replaced by a function that throws and the
+    // worker survives uncaught exceptions. A watchdog that calls process.exit(1) would be
+    // swallowed here and the orphan would live on; only a real signal ends it.
+    const body =
+      "process.exit=()=>{throw new Error('exit swallowed')};process.on('uncaughtException',()=>{});setInterval(()=>{},1000)";
+    const r = spawnSync(
+      'bash',
+      [
+        '-c',
+        'node --import "$1" -e "$2" >/dev/null 2>&1 & pid=$!; sleep 1; echo $pid',
+        'bash',
+        pathToFileURL(setup).href,
+        body,
+      ],
+      { encoding: 'utf-8' },
+    );
+    const pid = Number(r.stdout.trim());
+    try {
+      assert.ok(Number.isInteger(pid) && pid > 1);
+      assert.ok(
+        await waitFor(() => !alive(pid), 6000),
+        'orphan survived: watchdog relied on process.exit',
+      );
+    } finally {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* gone */
+      }
+    }
+  });
 });
 
 describe('vitest worker dies with its parent (SIGKILL)', { skip: !vitestBin }, () => {
@@ -138,6 +172,44 @@ test('sleeps', async () => {
       }
     }
     rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // AISDLC-685: vitest swaps process.exit inside workers for a throwing stub,
+  // so the watchdog must SIGKILL itself. The test file keeps the worker BUSY
+  // (CPU-bound chunks that yield to the event loop via setImmediate). It must
+  // yield: a fully synchronous spin blocks the event loop, so no timer
+  // (including the 2 s watchdog interval) could ever fire in that thread.
+  it('kills a worker running a busy test file after the parent is SIGKILLed', async () => {
+    writeFileSync(
+      join(tmp, 'sleep.test.mjs'),
+      `import { writeFileSync } from 'node:fs';
+test('busy', async () => {
+  writeFileSync(${JSON.stringify(join(tmp, 'worker.pid'))}, String(process.pid));
+  const end = Date.now() + 120000;
+  let x = 0;
+  while (Date.now() < end) {
+    const chunk = Date.now() + 50;
+    while (Date.now() < chunk) x += Math.sqrt(x + 1);
+    await new Promise((r) => setImmediate(r));
+  }
+}, 130000);
+`,
+    );
+    main = spawn(
+      process.execPath,
+      [vitestBin, 'run', '--root', tmp, '--config', join(tmp, 'vitest.config.mjs')],
+      {
+        cwd: tmp,
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, AI_SDLC_VITEST_MAX_WORKERS: '1' },
+      },
+    );
+    assert.ok(await waitFor(() => existsSync(pidFile()), 60000), 'worker never started');
+    const workerPid = Number(readFileSync(pidFile(), 'utf-8'));
+    assert.ok(alive(workerPid));
+    process.kill(main.pid, 'SIGKILL');
+    assert.ok(await waitFor(() => !alive(workerPid), 5000), 'busy worker outlived its parent');
   });
 
   it('leaves no worker alive 5s after the parent is SIGKILLed', async () => {
