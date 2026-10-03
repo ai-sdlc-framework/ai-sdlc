@@ -2,10 +2,11 @@
 id: AISDLC-686
 title: >-
   Patch coverage gate: diff from the merge-base, not the base tip (behind-main PRs fail on files they do not touch)
-status: To Do
+status: Done
 assignee:
   - dispatch-executor-delta
 created_date: '2026-10-03'
+updated_date: '2026-10-03'
 labels:
   - ci
   - coverage
@@ -51,6 +52,29 @@ the gate's diff range as the base tip.
 3. Add regression tests to `scripts/check-pr-patch-coverage.test.mjs`.
 
 ## Acceptance Criteria
-- [ ] A regression test where the base tip is ahead of the PR's merge-base, on files the PR doesn't touch, passes with those files excluded.
-- [ ] A PR that genuinely lacks coverage on its own changed file still fails.
-- [ ] `pnpm test:patch-coverage-gate` and `pnpm test:pr-coverage-gate` pass.
+- [x] A regression test where the base tip is ahead of the PR's merge-base, on files the PR doesn't touch, passes with those files excluded.
+- [x] A PR that genuinely lacks coverage on its own changed file still fails.
+- [x] `pnpm test:patch-coverage-gate` and `pnpm test:pr-coverage-gate` pass.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+`scripts/check-pr-patch-coverage.mjs` now diffs from `git merge-base <base> <head>` to `<head>` at both diff sites, so a PR branch that is behind its base no longer fails on files it never touched. When no merge-base resolves (unrelated or shallow history) it falls back to the given base. Shipped in #1167 (merged as aea20edf); this change only closes the task file, which stayed in `backlog/tasks/` because no git hooks ran in the authoring worktree.
+
+## Changes
+- `scripts/check-pr-patch-coverage.mjs` (modified, #1167): merge-base diff in `listChangedFiles` and `changedLinesForFile`, with a fallback to the given base.
+- `scripts/check-pr-patch-coverage.test.mjs` (modified, #1167): regression tests for a base tip ahead of the merge-base and for a PR that lacks coverage on its own changed file.
+- `backlog/completed/aisdlc-686 - patch coverage gate must measure from the merge base.md` (moved from `backlog/tasks/`): status Done, ACs ticked, this summary.
+
+## Design decisions
+- **Fix the script, not the workflow arguments**: `.github/workflows/**` was out of scope, and the script is the one place that knows both refs.
+- **Fall back to the given base when no merge-base resolves**: behaviour is no worse than before for unrelated or shallow history.
+
+## Verification
+- #1167 merged with `Build & Test (Node 22)`, `Coverage` and `ai-sdlc/pr-ready` green on CI.
+- The acceptance criteria were verified by CI on #1167; no local test run was made for this close-out.
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->
