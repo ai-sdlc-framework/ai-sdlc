@@ -4089,6 +4089,23 @@ export const dispatchVerdictV1Schema = {
       items: { type: 'integer', minimum: 1 },
       description: "Indices of the task's acceptance criteria the Worker self-assessed as met.",
     },
+    prNumber: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'Number of the pull request the pipeline opened for this task, when one was opened.',
+    },
+    followUpIds: {
+      type: 'array',
+      items: { type: 'string', pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$' },
+      description:
+        'Task ids the executor filed while working this task. Only sub-ids of the task itself.',
+    },
+    decisionIds: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      description: 'Decision Catalog ids the executor raised while working this task.',
+    },
     notes: {
       type: 'string',
       description: 'Optional Worker-side notes — escalation reason, follow-up tasks, etc.',

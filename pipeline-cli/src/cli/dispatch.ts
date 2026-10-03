@@ -44,6 +44,17 @@
  *     stale inflight manifests to queue/ (retry count incremented), or to
  *     failed/ once past the retry limit.
  *
+ * Executor loop (RFC-0051 section 5):
+ *
+ *   - `complete --task-id <id> --outcome <enum> [--pr <number>]
+ *     [--follow-ups <ids>] [--decisions <ids>] [--pr-url <url>] [--notes <s>]`
+ *     — write the verdict for the inflight task this executor holds and move
+ *     it to done/ (success) or failed/. The worker name is the one recorded at
+ *     claim time. Exits 1 when the task is not inflight.
+ *   - `next-subid <task-id> [--work-dir <path>]` — print the first free
+ *     `<task-id>.<n>` across backlog/, the board and open pull request file
+ *     lists, as `{"subId":"..."}`.
+ *
  * Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
  *
  *   - `write-resume-signal --task-id <id> --feedback <s>` — Conductor writes
@@ -118,6 +129,8 @@ import {
   writeResumeSignal,
   writeVerdict,
 } from '../dispatch/index.js';
+import { completeTask, splitIdList } from '../dispatch/complete.js';
+import { nextSubId } from '../dispatch/subid.js';
 import type {
   BoardEntry,
   EnqueueEntry,
@@ -212,12 +225,32 @@ function out(value: unknown): void {
   process.stdout.write(JSON.stringify(value) + '\n');
 }
 
+/** Collaborators a test can replace so the CLI never reaches the network. */
+export interface DispatchCliDeps {
+  /** File paths touched by open pull requests. Throws when they cannot be listed. */
+  openPrFiles?: () => string[];
+}
+
+/** File paths touched by open pull requests, from the `gh` CLI. */
+function listOpenPrFiles(workDir: string): string[] {
+  const raw = execFileSync(
+    'gh',
+    ['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'files'],
+    { cwd: workDir, encoding: 'utf-8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  const prs = JSON.parse(raw) as { files?: { path?: string }[] }[];
+  return prs.flatMap((pr) =>
+    (pr.files ?? []).map((f) => f.path).filter((p): p is string => typeof p === 'string'),
+  );
+}
+
 /**
  * CLI entry point. Returns the intended exit code (0 = success). Tests
  * invoke this directly with synthetic argv + a fake stdout collector.
  */
 export async function runDispatchCli(
   argv: readonly string[] = process.argv.slice(2),
+  deps: DispatchCliDeps = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
   const boardDir = resolveBoardDir(flags);
@@ -317,6 +350,68 @@ export async function runDispatchCli(
       const target = writeVerdict(boardDir, verdict);
       out({ ok: true, path: target });
       return 0;
+    }
+
+    case 'complete': {
+      const taskId = requireFlag(flags, 'task-id');
+      const outcome = requireFlag(flags, 'outcome');
+      const prRaw = flags['pr'];
+      let prNumber: number | undefined;
+      if (prRaw !== undefined) {
+        if (!/^[0-9]+$/.test(prRaw)) {
+          process.stderr.write(`cli-dispatch complete: --pr must be a number (got '${prRaw}')\n`);
+          return 2;
+        }
+        prNumber = Number.parseInt(prRaw, 10);
+      }
+      try {
+        const result = completeTask(boardDir, {
+          taskId,
+          outcome,
+          ...(prNumber === undefined ? {} : { prNumber }),
+          ...(flags['pr-url'] ? { prUrl: flags['pr-url'] } : {}),
+          followUpIds: splitIdList(flags['follow-ups']),
+          decisionIds: splitIdList(flags['decisions']),
+          ...(flags['notes'] ? { notes: flags['notes'] } : {}),
+          ...(flags['cause'] ? { cause: flags['cause'] } : {}),
+          ...(flags['worker'] ? { workerId: flags['worker'] } : {}),
+        });
+        out({ ok: true, path: result.verdictPath, state: result.state });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch complete: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
+    case 'next-subid': {
+      const parent = argv[1] && !argv[1].startsWith('--') ? argv[1] : flags['task-id'];
+      if (!parent) {
+        process.stderr.write('cli-dispatch next-subid: a task id is required\n');
+        return 2;
+      }
+      const workDir = path.resolve(flags['work-dir'] ?? process.cwd());
+      let openPrFiles: string[] = [];
+      let openPrScan: 'ok' | 'unavailable' = 'ok';
+      try {
+        openPrFiles = (deps.openPrFiles ?? (() => listOpenPrFiles(workDir)))();
+      } catch (err) {
+        openPrScan = 'unavailable';
+        process.stderr.write(
+          `cli-dispatch next-subid: open pull requests could not be listed (${err instanceof Error ? err.message : String(err)}); the id is checked against the backlog and the board only\n`,
+        );
+      }
+      try {
+        out({ subId: nextSubId({ taskId: parent, workDir, boardDir, openPrFiles }), openPrScan });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch next-subid: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 2;
+      }
     }
 
     case 'write-resume-signal': {
@@ -885,6 +980,9 @@ Subcommands:
   board [--json]
   unblock --task-id <id>
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
+  complete --task-id <id> --outcome <enum> [--pr <number>] [--pr-url <url>]
+           [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
+  next-subid <task-id> [--work-dir <path>]
 
 Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
   write-resume-signal --task-id <id> --feedback <s>

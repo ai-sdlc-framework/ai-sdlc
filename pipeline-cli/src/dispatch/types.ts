@@ -106,6 +106,12 @@ export interface DispatchVerdict {
   };
   acceptanceCriteriaMet?: number[];
   notes?: string;
+  /** Pull request the pipeline opened for the task. */
+  prNumber?: number;
+  /** Sub-ids of this task filed as follow-ups while it was worked. */
+  followUpIds?: string[];
+  /** Decision Catalog ids raised while the task was worked. */
+  decisionIds?: string[];
   /**
    * AISDLC-479 — ISO-8601 dispatch anchor copied from the manifest's
    * `dispatchedAt` when the Worker emits a timed verdict (via

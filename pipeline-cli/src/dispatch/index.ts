@@ -114,6 +114,11 @@ export type { BoardEntry, Eligibility, EligibilityContext } from './board.js';
 
 export { DEFAULT_VERIFY_COMMANDS, enqueueTasks } from './enqueue.js';
 
+export { completeTask, splitIdList } from './complete.js';
+export type { CompleteOptions, CompleteResult } from './complete.js';
+export { nextSubId } from './subid.js';
+export type { NextSubIdInput } from './subid.js';
+
 export type { EnqueueDefaults, EnqueueEntry } from './enqueue.js';
 
 export type {

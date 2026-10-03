@@ -2,8 +2,9 @@
 id: AISDLC-666
 title: >-
   RFC-0051: /ai-sdlc executor loop (claim, execute, verdict, status, wait for clear) and SessionStart clear re-injection
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-epsilon
 created_date: '2026-09-30'
 labels:
   - rfc-0051
@@ -74,11 +75,40 @@ and 9.
 5. **Docs** section in `docs/operations/parallel-dispatch.md` describing the loop.
 
 ## Acceptance Criteria
-- [ ] With a fixture board holding one eligible manifest, the skill's claim step produces an inflight manifest whose `workerId` equals the session's roster `name` exactly.
-- [ ] The skill invokes `/ai-sdlc execute <task-id>` with no additional arguments and no modification to `execute.md`.
-- [ ] `cli-dispatch complete` writes a verdict containing outcome, PR number, follow-up ids and decision ids, and moves the manifest to `done/` or `failed/` accordingly.
-- [ ] The `SessionStart` hook injects the role block only on matcher `clear` and only for a session named in the roster; other sessions see no change (hermetic `node --test`).
-- [ ] `cli-dispatch next-subid AISDLC-629` returns the first id not present in the backlog, the board or open PR file lists (fixture).
-- [ ] The skill body states the hard rules (no executor-to-executor messages, no decision answering, sub-ids only, no OQ edits).
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] With a fixture board holding one eligible manifest, the skill's claim step produces an inflight manifest whose `workerId` equals the session's roster `name` exactly.
+- [x] The skill invokes `/ai-sdlc execute <task-id>` with no additional arguments and no modification to `execute.md`.
+- [x] `cli-dispatch complete` writes a verdict containing outcome, PR number, follow-up ids and decision ids, and moves the manifest to `done/` or `failed/` accordingly.
+- [x] The `SessionStart` hook injects the role block only on matcher `clear` and only for a session named in the roster; other sessions see no change (hermetic `node --test`).
+- [x] `cli-dispatch next-subid AISDLC-629` returns the first id not present in the backlog, the board or open PR file lists (fixture).
+- [x] The skill body states the hard rules (no executor-to-executor messages, no decision answering, sub-ids only, no OQ edits).
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Added the executor loop: the `/ai-sdlc executor` command, a `SessionStart` role re-injection on `clear` for roster sessions, and the two board commands the loop needs, `cli-dispatch complete` and `cli-dispatch next-subid`. `execute.md` is unchanged.
+
+## Changes
+- `ai-sdlc-plugin/commands/executor.md` (new): identify from the roster, claim under the roster name, wait on the empty-queue interval, run `/ai-sdlc execute <task-id>` with no extra arguments, report through `complete`, one status line to the dispatch session, then stop. Hard rules stated in the body.
+- `ai-sdlc-plugin/commands/executor.test.mjs` (new): body-contract tests.
+- `ai-sdlc-plugin/hooks/lib/hierarchy-role.js` (new) and `ai-sdlc-plugin/hooks/session-start.js` (modified): role block injected only on source `clear` and only when the session's pid matches a roster entry.
+- `ai-sdlc-plugin/hooks/session-start-clear.test.mjs` (new): hermetic `node --test` coverage.
+- `pipeline-cli/src/dispatch/complete.ts` (new), `subid.ts` (new), `index.ts` and `pipeline-cli/src/cli/dispatch.ts` (modified): `complete` and `next-subid` subcommands, reusing `writeVerdict` and `listBoard`.
+- `pipeline-cli/src/dispatch/executor-loop.test.ts` (new), `schemas.test.ts` (modified): tests.
+- `spec/schemas/dispatch-verdict.v1.schema.json`, `pipeline-cli/src/dispatch/types.ts`, `reference/src/core/generated-schemas.ts`: optional `prNumber`, `followUpIds`, `decisionIds` on the verdict (the schema forbids unknown properties).
+- `docs/operations/parallel-dispatch.md` (modified): "The executor loop" section.
+
+## Design decisions
+- **Session identity by pid ancestry**: the roster records the harness pid, so the hook and the skill match it against the process's ancestors. No new env var or CLI needed.
+- **`complete` refuses when the task is not inflight**: protects against a mistyped id writing a stray verdict.
+- **`next-subid` degrades when open pull requests cannot be listed**: warns and reports `openPrScan: unavailable` rather than failing the loop.
+- **Escalation without `--route`**: `cli-decisions escalate` has no `--route` option yet, so the skill uses the existing command and says to add the option once it exists.
+
+## Verification
+- `vitest` pipeline-cli `src/dispatch` and `src/cli/dispatch.test.ts`: all passing; new modules at 100% line coverage
+- `node --test` session-start, session-start-clear, executor command tests: passing
+- `pnpm dark-code:check`, eslint, prettier, `tsc --noEmit`: clean
+
+## Follow-up
+- AISDLC-669 (decision routing with `--route`)
+<!-- SECTION:FINAL_SUMMARY:END -->

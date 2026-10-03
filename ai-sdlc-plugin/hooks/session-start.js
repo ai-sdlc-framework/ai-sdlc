@@ -17,6 +17,7 @@ const {
   renderSessionStartHardRules,
 } = require('./lib/governance-resolver');
 const { bannerGovernance } = require('./lib/trusted-policy');
+const { buildHierarchyRoleBlock } = require('./lib/hierarchy-role');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -231,6 +232,21 @@ const projectDir =
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 
+// After `/clear`, a session named in the hierarchy roster is told its role again.
+// Computed once; any other source or session yields null and nothing changes.
+const hierarchyRoleBlock = (() => {
+  try {
+    if (input?.source !== 'clear') return null;
+    return buildHierarchyRoleBlock({
+      source: input.source,
+      boardDir: process.env.AI_SDLC_DISPATCH_BOARD_DIR || join(projectDir, '.ai-sdlc', 'dispatch'),
+      pids: ancestorPids(),
+    });
+  } catch {
+    return null;
+  }
+})();
+
 // AISDLC-557: root-cause fix for a marketplace-cache install silently
 // leaving node_modules empty with zero operator-visible signal.
 //
@@ -252,11 +268,14 @@ const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 // fully silently.
 if (!existsSync(agentRolePath)) {
   const runtimeDepsWarning = buildRuntimeDepsWarning();
-  if (runtimeDepsWarning) {
+  if (runtimeDepsWarning || hierarchyRoleBlock) {
+    const parts = [];
+    if (runtimeDepsWarning) parts.push(`### AI-SDLC Setup Warning\n${runtimeDepsWarning}`);
+    if (hierarchyRoleBlock) parts.push(hierarchyRoleBlock);
     const result = {
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: `### AI-SDLC Setup Warning\n${runtimeDepsWarning}`,
+        additionalContext: parts.join('\n\n'),
       },
     };
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -406,6 +425,10 @@ if (warnings.length > 0) {
   context += `\n\n### Setup Warnings\n${warnings.join('\n')}`;
 }
 
+if (hierarchyRoleBlock) {
+  context += `\n\n${hierarchyRoleBlock}`;
+}
+
 // ── Output ───────────────────────────────────────────────────────────
 
 const result = {
@@ -419,6 +442,28 @@ process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 process.exit(0);
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * This process and its ancestors, nearest first. The hook runs as a descendant
+ * of the Claude Code process, whose pid is what the hierarchy roster records.
+ * Bounded depth; stops quietly on any failure.
+ */
+function ancestorPids() {
+  const pids = [process.pid];
+  let current = process.ppid;
+  for (let depth = 0; depth < 16 && Number.isInteger(current) && current > 1; depth += 1) {
+    pids.push(current);
+    const res = spawnSync('ps', ['-o', 'ppid=', '-p', String(current)], {
+      encoding: 'utf-8',
+      timeout: 2000,
+    });
+    if (res.status !== 0) break;
+    const next = Number.parseInt((res.stdout || '').trim(), 10);
+    if (!Number.isInteger(next) || next === current) break;
+    current = next;
+  }
+  return pids;
+}
 
 /**
  * AISDLC-441 / AISDLC-557: builds the runtime-deps install-failure warning

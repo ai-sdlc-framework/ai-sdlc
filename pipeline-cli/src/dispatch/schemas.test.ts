@@ -251,6 +251,18 @@ describe('dispatch-verdict.v1.schema.json (Phase 1.5 outcomes + iteration fields
     expect(validateVerdict(v)).toBe(true);
   });
 
+  it('verdict with prNumber, followUpIds and decisionIds validates', () => {
+    const v: DispatchVerdict = {
+      ...verdictBase,
+      prNumber: 12,
+      followUpIds: ['AISDLC-200.1'],
+      decisionIds: ['DEC-1'],
+    };
+    expect(validateVerdict(v)).toBe(true);
+    expect(validateVerdict({ ...v, prNumber: 0 })).toBe(false);
+    expect(validateVerdict({ ...v, followUpIds: ['not an id'] })).toBe(false);
+  });
+
   it('verdict with sessionId (claude-p-shell capture) validates', () => {
     const v: DispatchVerdict = {
       ...verdictBase,
