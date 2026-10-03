@@ -70,6 +70,9 @@ export function parseRoutingTable(text: string): ParseTableResult {
       if (role === SECURITY_REVIEWER_ROLE && securityCellTooWeak(strength, cell.model)) {
         return { ok: false, reason: 'security-reviewer-weaker-than-default' };
       }
+      if (cell.previousModel !== undefined && !known.has(cell.previousModel)) {
+        return { ok: false, reason: 'model-not-in-strength' };
+      }
       if (cell.candidates) {
         if (role === SECURITY_REVIEWER_ROLE) {
           return { ok: false, reason: 'security-reviewer-candidates' };

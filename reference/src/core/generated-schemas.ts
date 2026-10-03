@@ -5610,6 +5610,20 @@ export const modelRoutingV1Schema = {
           description:
             'Models eligible to receive the exploration share. Never allowed on the security reviewer role.',
         },
+        evidence: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+          description:
+            "Reference (a path or identifier, never content) to the evidence that justified this cell's current model. Written when an approved change is applied.",
+        },
+        previousModel: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            'The model this cell used before the change recorded in `evidence`. Must appear in `strength`. Used to step the cell back to a stronger model.',
+        },
       },
     },
   },

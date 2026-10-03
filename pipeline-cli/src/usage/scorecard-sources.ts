@@ -159,7 +159,7 @@ export function evidenceFileName(row: Pick<ScorecardRow, 'role' | 'model' | 'tas
 }
 
 /** Write through a fresh exclusive temp file, then rename, so a symlink at `path` is replaced, never followed. */
-function writeFileNoFollow(path: string, text: string): void {
+export function writeFileNoFollow(path: string, text: string): void {
   const tmp = `${path}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
   writeFileSync(tmp, text, { flag: 'wx' });
   renameSync(tmp, path);

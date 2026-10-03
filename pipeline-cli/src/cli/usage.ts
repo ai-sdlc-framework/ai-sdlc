@@ -6,6 +6,7 @@
  *   report [--group-by ...] [--format ...]      usage by model, role, task, repo, pool, day, window
  *   window | task <id> | context                fixed views: allotment windows, one task, context overhead
  *   scorecard [--role ...] [--write-evidence d] quality and cost per role, model, task class
+ *   route propose [--dry-run] [--json]          file one Decision for qualifying cheaper-model changes
  *   replay-corpus build [--base-ref r]          label reviewed commits for reviewer replay
  *   replay --role r --model m --max-items n --max-units n --confirm-spend [--dry-run] [--off-peak]
  *                                               replay past reviews against a candidate model
@@ -46,6 +47,7 @@ import { hideBin } from 'yargs/helpers';
 import { writeEvent, type OrchestratorEvent } from '../orchestrator/events.js';
 import { emitPriceChanges } from '../orchestrator/price-refresh.js';
 import { registerReplayCommands, type ReplayDeps } from '../usage/replay-commands.js';
+import { registerRouteCommands, type RouteDeps } from '../usage/route-commands.js';
 import { registerScorecardCommands, type ScorecardDeps } from '../usage/scorecard-commands.js';
 import { registerUsageViewCommands, type UsageViewDeps } from '../usage/commands.js';
 import {
@@ -59,6 +61,7 @@ export interface UsageCliDeps
   extends
     UsageViewDeps,
     Pick<ScorecardDeps, 'repoRoot' | 'artifactsDir' | 'assignmentLogPath'>,
+    Pick<RouteDeps, 'loadTable' | 'decisionsWorkDir' | 'env' | 'readBaseTable' | 'afterPrecheck'>,
     Pick<ReplayDeps, 'git' | 'runner' | 'createSpawner' | 'tmpRoot' | 'handleSignals'> {
   fetch?: FetchFn;
   stdout?: (text: string) => void;
@@ -369,6 +372,21 @@ export function buildUsageCli(
       repoRoot: deps.repoRoot,
       artifactsDir: deps.artifactsDir,
       assignmentLogPath: deps.assignmentLogPath,
+    },
+    io,
+  );
+  registerRouteCommands(
+    cli,
+    {
+      ...viewDeps,
+      repoRoot: deps.repoRoot,
+      artifactsDir: deps.artifactsDir,
+      assignmentLogPath: deps.assignmentLogPath,
+      loadTable: deps.loadTable,
+      decisionsWorkDir: deps.decisionsWorkDir,
+      env: deps.env,
+      readBaseTable: deps.readBaseTable,
+      afterPrecheck: deps.afterPrecheck,
     },
     io,
   );

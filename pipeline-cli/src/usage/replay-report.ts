@@ -90,7 +90,8 @@ export function readReplayResults(paths: readonly string[]): ReplayResults[] | s
       !r ||
       r.schemaVersion !== 'v1' ||
       !(REPLAY_ROLES as readonly unknown[]).includes(r.role) ||
-      !Array.isArray(r.scores)
+      !Array.isArray(r.scores) ||
+      (r.repoId !== undefined && typeof r.repoId !== 'string')
     ) {
       return `Replay results file has an unexpected shape: ${p}`;
     }

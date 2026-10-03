@@ -4,7 +4,7 @@
 **RFC:** [`RFC-0050`](../../spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md) (Usage Ledger and Evidence-Based Model Routing)
 **Companion:** [`usage-ledger.md`](usage-ledger.md) covers the usage data this evidence is built from.
 
-Model routing lets a repository say which model each agent role uses, and gather evidence on whether a cheaper model does the job as well. This document separates what ships today from what does not. The weekly proposal, its approval and the automatic revert are described in [Planned behaviour](#planned-behaviour-not-yet-available); no command for them exists yet.
+Model routing lets a repository say which model each agent role uses, and gather evidence on whether a cheaper model does the job as well. This document separates what ships today from what does not. The weekly proposal (`cli-usage route propose`) ships and is described in [Weekly proposal](#weekly-proposal). Approving a proposal into a pull request and the automatic revert are described in [Planned behaviour](#planned-behaviour-not-yet-available); no command for them exists yet.
 
 Commands are written as `cli-usage` and `ai-sdlc-pipeline`. From a repository checkout, run `node pipeline-cli/bin/cli-usage.mjs` and `node pipeline-cli/bin/ai-sdlc-pipeline.mjs` in their place. The examples use synthetic data.
 
@@ -48,15 +48,17 @@ spec:
       '*': { model: claude-opus-4-6 }
 ```
 
-| Field | Meaning |
-| --- | --- |
-| `strength` | Every model in the table, weakest first. This order defines what "stronger" means. Every model named in a cell or in `candidates` must appear here |
-| `exploreShare` | Share of eligible tasks sent to a candidate instead of the cell's model, from 0 to 1. Default 0 |
-| `salt` | Mixed into the assignment hash. Changing it reshuffles which tasks are explored |
-| `cells` | Role, then task class, then a cell. Use `'*'` as the class to cover every class of that role |
-| `cell.model` | The model for the role and class |
-| `cell.candidates` | Models that may receive the exploration share. Not allowed on `security-reviewer` |
-| `evidence` | Optional notes on what justified a cell, keyed `<role>.<taskClass>` |
+| Field                | Meaning                                                                                                                                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `strength`           | Every model in the table, weakest first. This order defines what "stronger" means. Every model named in a cell or in `candidates` must appear here                                                             |
+| `exploreShare`       | Share of eligible tasks sent to a candidate instead of the cell's model, from 0 to 1. Default 0                                                                                                                |
+| `salt`               | Mixed into the assignment hash. Changing it reshuffles which tasks are explored                                                                                                                                |
+| `cells`              | Role, then task class, then a cell. Use `'*'` as the class to cover every class of that role                                                                                                                   |
+| `cell.model`         | The model for the role and class                                                                                                                                                                               |
+| `cell.candidates`    | Models that may receive the exploration share. Not allowed on `security-reviewer`                                                                                                                              |
+| `evidence`           | Optional notes on what justified a cell, keyed `<role>.<taskClass>`                                                                                                                                            |
+| `cell.evidence`      | Optional reference (a path or identifier, never content, up to 500 characters) to the evidence that justified the cell's current model                                                                         |
+| `cell.previousModel` | Optional. The model the cell used before the change `cell.evidence` records. Must appear in `strength`. Nothing reads it for routing; the weekly proposal uses it to report a change that is no longer cheaper |
 
 Task class is the estimation class in the task's frontmatter `class:` field (`bug`, `feature`, `chore`), or `uncategorized` when none is recorded. The schema is [`model-routing.v1.schema.json`](../../spec/schemas/model-routing.v1.schema.json).
 
@@ -139,7 +141,16 @@ The assignment is deterministic. A hash of the task id, the role and the table's
 Every resolution made with a task id is appended to `$ARTIFACTS_DIR/_routing/assignments.jsonl`, one line each:
 
 ```json
-{"ts":"2026-10-01T16:29:13.882Z","taskId":"DEMO-3","role":"developer","taskClass":"chore","iteration":1,"model":"claude-haiku-4-5","arm":"explore","reason":"explore"}
+{
+  "ts": "2026-10-01T16:29:13.882Z",
+  "taskId": "DEMO-3",
+  "role": "developer",
+  "taskClass": "chore",
+  "iteration": 1,
+  "model": "claude-haiku-4-5",
+  "arm": "explore",
+  "reason": "explore"
+}
 ```
 
 This log is what makes an outcome attributable to a model and separates an explored comparison from a pinned one. Writing it never changes the model that is returned, and a write failure is ignored.
@@ -202,13 +213,13 @@ First-pass approval means every reviewer approved at iteration 1 with no critica
 
 `model_source` says how the row's model was determined: from the assignment log when the task has an entry there, otherwise from the model that made most of the task's calls.
 
-| Flag | Meaning |
-| --- | --- |
-| `--role <name>` | Only this role, for example `developer` |
-| `--since <date>` | Include calls at or after this ISO date |
-| `--format text\|json\|csv` | Output format |
-| `--replay-results <file>` | Add reviewer rows from a replay results file (repeatable) |
-| `--write-evidence <dir>` | Write one JSON evidence file per cell into the directory |
+| Flag                       | Meaning                                                   |
+| -------------------------- | --------------------------------------------------------- |
+| `--role <name>`            | Only this role, for example `developer`                   |
+| `--since <date>`           | Include calls at or after this ISO date                   |
+| `--format text\|json\|csv` | Output format                                             |
+| `--replay-results <file>`  | Add reviewer rows from a replay results file (repeatable) |
+| `--write-evidence <dir>`   | Write one JSON evidence file per cell into the directory  |
 
 `--write-evidence` writes the numbers behind each row, which is what a table change should cite in the table's `evidence` field.
 
@@ -248,18 +259,18 @@ Estimate: no reviewer usage is on record, so no unit estimate is available.
 
 ### 3. Budget flags
 
-| Flag | Meaning |
-| --- | --- |
-| `--role code\|test\|security\|correctness` | Reviewer role to replay (required) |
-| `--model <id>` | Candidate model (required) |
-| `--reference-model <id>` | Also replay a reference model on the same items |
-| `--max-items <n>` | Stop after this many corpus items (required) |
-| `--max-units <n>` | Stop once this many weighted units are spent (required) |
-| `--corpus <file>` | Corpus file (default `<artifacts>/replay/corpus.json`) |
-| `--dry-run` | List the items and an estimate; call no model |
-| `--confirm-spend` | Authorize the printed capped unit cost. Required for a real run |
-| `--off-peak` | Run only inside an off-peak window |
-| `--off-peak-window <TZ@HH-HH[@Day,Day]>` | An off-peak window, repeatable |
+| Flag                                       | Meaning                                                         |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| `--role code\|test\|security\|correctness` | Reviewer role to replay (required)                              |
+| `--model <id>`                             | Candidate model (required)                                      |
+| `--reference-model <id>`                   | Also replay a reference model on the same items                 |
+| `--max-items <n>`                          | Stop after this many corpus items (required)                    |
+| `--max-units <n>`                          | Stop once this many weighted units are spent (required)         |
+| `--corpus <file>`                          | Corpus file (default `<artifacts>/replay/corpus.json`)          |
+| `--dry-run`                                | List the items and an estimate; call no model                   |
+| `--confirm-spend`                          | Authorize the printed capped unit cost. Required for a real run |
+| `--off-peak`                               | Run only inside an off-peak window                              |
+| `--off-peak-window <TZ@HH-HH[@Day,Day]>`   | An off-peak window, repeatable                                  |
 
 Without `--confirm-spend` a run prints the cap and stops:
 
@@ -286,18 +297,57 @@ The residual risk is stated in `cli-usage replay --help`: the session is still a
 
 ---
 
+## Weekly proposal
+
+`cli-usage route propose` evaluates every cell of the table and, when a cheaper model clears the bar, files **one** Decision (RFC-0035) listing every qualifying change. It never edits the table.
+
+```console
+$ cli-usage route propose
+Filed DEC-0007 listing 1 change(s).
+  1. developer / *: claude-sonnet-4-6 -> claude-haiku-4-5. claude-haiku-4-5: 24/30 first-pass approved (80.0%); claude-sonnet-4-6: 32/40 (80.0%); 0.0 points below. Evidence: _routing/evidence/2026-10-05/developer.uncategorized.claude-haiku-4-5.json, _routing/evidence/2026-10-05/developer.uncategorized.claude-sonnet-4-6.json
+```
+
+**The bar.** A candidate listed in a cell's `candidates` qualifies only when all of these hold:
+
+- **Developer cells:** at least 30 compared tasks, and a first-pass approval rate no more than 5 points below the cell's current model over the same scorecard period. Exactly 5 points below is allowed.
+- **Reviewer cells:** from one replay run, recorded for this repository, that scored both models, at least 30 replayed items, recall no more than 5 points lower and false-block rate no more than 5 points higher.
+- **Strictly cheaper** than the current model at current prices, through the unit weights (derived from the active price rows; a `modelFamilies` entry in the usage config takes precedence over the derived weight). A candidate that is equally priced, dearer, or has no price on record never qualifies.
+- **The evidence is attributable to this repository.** Records are selected by the stable repository identity (`repoId`), exactly as `cli-usage scorecard` and its evidence files do, so a checkout of the same directory name elsewhere never contributes. Evidence that includes any record recorded before repository identity existed (`legacyRecords`) or with an identity that could not be determined (`unavailableRecords`) never qualifies, and so does a repository whose own identity cannot be resolved; the output says `evidence not attributable to this repository`. Replay results are attributable only when the results file carries this repository's `repoId`; `cli-usage replay` now writes it. A results file with no `repoId` (older runs must be re-run) or a different one is ignored and the output says `replay evidence not attributable to this repository`. Malformed scores (missing or non-numeric `reviews`, `recall`, `falseBlockRate`, or rates outside 0 to 1) never qualify. There is no cutoff date: a single such record in the window blocks the proposal until it ages out of `--since` or the window excludes it.
+
+The security reviewer never gets candidates. Both numbers can be changed per run with `--min-tasks` (default: the usage config's `scorecardMinTasks`, 30) and `--margin-points` (default 5). Both must be finite numbers of 0 or more, otherwise the run fails; an invalid usage-config `scorecardMinTasks` falls back to 30 with a warning. A run with `--min-tasks` below 30 or `--margin-points` above 5 prints a warning, so the documented bar is not weakened silently.
+
+**One open proposal at a time.** Proposal Decisions carry the scope `routing:model-proposal`. While one is still open (not answered, superseded or archived), a new run files nothing and says so. With nothing qualifying it files nothing and says so. Silence leaves the table unchanged. A declined proposal can be proposed again the following week if the same changes still qualify.
+
+The Decision lists each change with its counts and rates and the evidence files. It holds counts, ids and attribution only: no prompt, response, file content or task id. The evidence files are the scorecard's per-cell files, written under `$ARTIFACTS_DIR/_routing/evidence/<date>/` when a Decision is filed; for a reviewer change it cites the replay results file. The Decision states the `repoId` the evidence was resolved for, in its text and in its machine-readable block (top level and on each change), so the approval step can check it. The block also records `source: framework-calibration` and `by: framework:route-propose`, and is always the LAST fenced `json` block of the body.
+
+**Consumers must verify.** The later apply step must not trust the Decision body: re-derive the evidence (scorecard and replay for the stated `repoId`) and check the Decision's recorded source and actor instead of parsing claims out of the text. Evidence references are emitted only when they are plain relative paths (letters, digits, `.`, `_`, `-`, `/`; no `..`); others are skipped with a warning. The Decision Catalog must be on (`AI_SDLC_DECISION_CATALOG`, on by default); with it off nothing is filed.
+
+| Flag                  | Meaning                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--dry-run`           | Evaluate and print (including `catalog-disabled` and `proposal-open`); file nothing and write no evidence |
+| `--json`              | Print the result as JSON                                                                                  |
+| `--since <date>`      | Include calls at or after this ISO date                                                                   |
+| `--min-tasks <n>`     | Compared tasks or replay items a candidate needs                                                          |
+| `--margin-points <n>` | Allowed gap to the current model, in percentage points                                                    |
+
+The orchestrator tick runs it at most once per ISO calendar week (UTC), recording the week in `$ARTIFACTS_DIR/_routing/proposal-state.json`. A failure is logged as a warning and never stops the tick; the week is recorded when the attempt starts, so a failing run is not retried until next week.
+
+Cells that carry `cell.previousModel` are also checked: when that earlier model is now cheaper than (or as cheap as) the cell's model at current prices, the output lists the cell as information only. Nothing writes `cell.evidence` or `cell.previousModel` yet; edit them by hand if you apply a change yourself.
+
+---
+
 ## Planned behaviour (not yet available)
 
-**This section describes rules from RFC-0050. The commands and automation for them have not shipped, so no command is shown.** Do not expect the table to change by itself, and do not look for a proposal command today. What ships today is the evidence (scorecards, replay), the table, exploration, and the override reader above. Table edits are made by hand, by pull request to the base branch.
+**This section describes rules from RFC-0050 whose automation has not shipped: turning an approved proposal into a pull request, and the automatic revert. No command is shown for them.** Do not expect the table to change by itself. What ships today is the evidence (scorecards, replay), the table, exploration, the override reader and the [weekly proposal](#weekly-proposal). Table edits are made by hand, by pull request to the base branch, even after a proposal is approved.
 
 The rules the RFC sets for changing the table, once that automation exists:
 
 **Moving to a cheaper model: proposed, then approved.**
 
-- A weekly job evaluates each cell's candidates. A candidate qualifies when it has at least **30 compared tasks** and its first-pass approval rate is no more than **5 points** below the cell's current model over the same period. For a reviewer role, replay recall must be no more than 5 points lower and the false-block rate no more than 5 points higher.
-- Every qualifying change goes into one Decision (RFC-0035) with the evidence attached. Approving it produces a pull request that edits the table and records the evidence reference.
+- A weekly job (shipped: see [Weekly proposal](#weekly-proposal)) evaluates each cell's candidates. A candidate qualifies when it has at least **30 compared tasks** and its first-pass approval rate is no more than **5 points** below the cell's current model over the same period. For a reviewer role, replay recall must be no more than 5 points lower and the false-block rate no more than 5 points higher.
+- Every qualifying change goes into one Decision (RFC-0035) with the evidence attached (shipped). Approving it will produce a pull request that edits the table and records the evidence reference (not yet available).
 - **Silence leaves the table unchanged.** A proposal that nobody approves has no effect.
-- The proposal is computed at current prices, and it reports any cell whose applied change is no longer cheaper.
+- The proposal is computed at current prices, and it reports any cell whose applied change is no longer cheaper (shipped, for cells that carry `previousModel`).
 
 **Moving back to a stronger model: automatic.**
 
@@ -306,16 +356,18 @@ The rules the RFC sets for changing the table, once that automation exists:
 
 The 30-task and 5-point values are the defaults, and the RFC makes both configurable.
 
-Until this automation ships, you can do the same by hand: read `cli-usage scorecard`, apply the same bar (30 tasks, 5 points), and commit a table change. To step a cell back, edit the table to the stronger model.
+Until the rest of this automation ships, apply an approved proposal by hand: edit the table (and, if you want the later checks, set `cell.evidence` and `cell.previousModel`) and land it by pull request. You can also read `cli-usage scorecard`, apply the same bar (30 tasks, 5 points), and commit a table change yourself. To step a cell back, edit the table to the stronger model.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| Every role resolves with `arm: default` | No valid table on the base branch | Commit `.ai-sdlc/model-routing.yaml` to `origin/main`, and check it against the rules in [The table](#the-table) |
-| Table edit has no effect on a branch | The table is read from the base branch, not the working tree | Land the change on `origin/main` |
-| No task is ever explored | No `candidates`, `exploreShare` is 0, or the task is not from the backlog | Check the cell, the share and `--source-kind` |
-| An override is ignored | Its model is not in `strength`, or is not stronger than the cell's model | Choose a stronger model that is in `strength` |
+| Symptom                                                             | Cause                                                                                                         | Fix                                                                                                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every role resolves with `arm: default`                             | No valid table on the base branch                                                                             | Commit `.ai-sdlc/model-routing.yaml` to `origin/main`, and check it against the rules in [The table](#the-table)                            |
+| Table edit has no effect on a branch                                | The table is read from the base branch, not the working tree                                                  | Land the change on `origin/main`                                                                                                            |
+| No task is ever explored                                            | No `candidates`, `exploreShare` is 0, or the task is not from the backlog                                     | Check the cell, the share and `--source-kind`                                                                                               |
+| An override is ignored                                              | Its model is not in `strength`, or is not stronger than the cell's model                                      | Choose a stronger model that is in `strength`                                                                                               |
+| `route propose` says `evidence not attributable to this repository` | The usage evidence includes legacy or unavailable-id records, or this repository has no identity (no commits) | Nothing to change in the table; check `cli-usage scorecard` for `legacyRecords` / `unavailableRecords`, or narrow the window with `--since` |
+| `route propose` says a proposal is still open | An earlier proposal Decision has not been answered | Answer it with `cli-decisions`, or leave it: silence changes nothing |
 | Scorecard shows `insufficient` | Fewer than 30 tasks in the cell | Gather more tasks; do not change the table on this evidence |
 | Scorecard shows no explored tasks | The assignment log is in a different directory from the one the scorecard reads, for example `ARTIFACTS_DIR` was set for one command only, or the log is in the old `<project>/artifacts` | Compare the `Artifacts directory:` line with where the log is, and set `ARTIFACTS_DIR` to one directory for every command |
 | `The corpus has no items for role <role>.` | No reviewed commits for that role in the reviews ledger | Build the corpus from a checkout with review history |

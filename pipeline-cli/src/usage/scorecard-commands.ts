@@ -11,7 +11,13 @@ import { readModelCalls, readPriceHistory, type ModelCallRecord } from '@ai-sdlc
 import type { Argv } from 'yargs';
 import { loadAllReviewLedgers } from '../attestation/reviews-ledger.js';
 import { repoNameFor } from './attribution.js';
-import { legacyNote, repoIdFor, selectByRepo } from './repo-id.js';
+import {
+  legacyNote,
+  repoIdFor,
+  selectByRepo,
+  type RepoIdentity,
+  type RepoSelection,
+} from './repo-id.js';
 import {
   buildScorecard,
   deriveOutcomes,
@@ -40,6 +46,28 @@ export interface ScorecardDeps extends UsageViewDeps {
   artifactsDir?: string;
   /** Assignment log path override. */
   assignmentLogPath?: string;
+}
+
+/**
+ * The framework-scope usage records of one repository, selected by `repoId`
+ * with the legacy directory-name fallback and the unavailable-id exclusion
+ * counted. Shared by `scorecard` and `route propose` so both compute the
+ * attribution counts identically.
+ */
+export async function selectScorecardRecords(
+  usageDir: string | undefined,
+  from: Date | undefined,
+  identity: RepoIdentity,
+): Promise<RepoSelection<ModelCallRecord>> {
+  const candidates: ModelCallRecord[] = [];
+  for await (const r of readModelCalls(
+    { scope: 'framework', ...(from ? { from } : {}) },
+    { dir: usageDir },
+  )) {
+    // Replay calls carry the `replay` task id and are not real task cost.
+    if (r.taskId && r.taskId !== REPLAY_TASK_ID) candidates.push(r);
+  }
+  return selectByRepo(candidates, identity);
 }
 
 export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: UsageIo): Argv {
@@ -107,15 +135,10 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
       // task ids from other repositories joined against this one's reviews.
       // Records are matched on `repoId`; only records that predate it fall back to the
       // directory name, and the output says so.
-      const candidates: ModelCallRecord[] = [];
-      for await (const r of readModelCalls(
-        { scope: 'framework', ...(from ? { from } : {}) },
-        { dir: deps.usageDir },
-      )) {
-        // Replay calls carry the `replay` task id and are not real task cost.
-        if (r.taskId && r.taskId !== REPLAY_TASK_ID) candidates.push(r);
-      }
-      const selection = selectByRepo(candidates, { repoId, repoName: repo });
+      const selection = await selectScorecardRecords(deps.usageDir, from, {
+        repoId,
+        repoName: repo,
+      });
       const records = selection.records;
       const legacy = legacyNote(selection);
 

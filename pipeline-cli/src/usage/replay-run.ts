@@ -90,6 +90,12 @@ export interface ReplayResults {
   schemaVersion: 'v1';
   runId: string;
   generatedAt: string;
+  /**
+   * Stable identity of the repository the replay ran against (same repoIdFor
+   * as the scorecard). Absent when none could be resolved and in results
+   * written before this field existed; `route propose` ignores such files.
+   */
+  repoId?: string;
   role: ReplayRole;
   candidate: string;
   reference?: string;

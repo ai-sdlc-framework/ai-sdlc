@@ -36,4 +36,20 @@ describe('ModelRouting schema', () => {
       }).valid,
     ).toBe(false);
   });
+
+  it('accepts the optional per-cell evidence reference and previous model', () => {
+    const withCell = (cell: Record<string, unknown>) => ({
+      ...valid,
+      spec: { ...valid.spec, cells: { developer: { chore: { model: 'haiku', ...cell } } } },
+    });
+    expect(
+      validateModelRouting(withCell({ evidence: 'ev/dev.chore.json', previousModel: 'sonnet' }))
+        .valid,
+    ).toBe(true);
+    expect(validateModelRouting(withCell({ evidence: '' })).valid).toBe(false);
+    expect(validateModelRouting(withCell({ evidence: 'x'.repeat(501) })).valid).toBe(false);
+    expect(validateModelRouting(withCell({ previousModel: '' })).valid).toBe(false);
+    expect(validateModelRouting(withCell({ previousModel: 'x'.repeat(201) })).valid).toBe(false);
+    expect(validateModelRouting(withCell({ evidence: 5 })).valid).toBe(false);
+  });
 });

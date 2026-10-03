@@ -1,0 +1,628 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { appendModelCalls, type ModelCallRecord, type PriceRow } from '@ai-sdlc/reference';
+import { buildUsageCli, type UsageCliDeps } from '../cli/usage.js';
+import {
+  appendDecisionEvent,
+  makeDecisionOpenedEvent,
+  makeOperatorAnsweredEvent,
+  projectAll,
+  readDecisionEvents,
+} from '../decisions/index.js';
+import {
+  ROUTING_PROPOSAL_SCOPE,
+  enumerateCells,
+  findOpenProposal,
+  isSafeReference,
+  parseProposalBlock,
+} from './route-commands.js';
+import { repoIdFor } from './repo-id.js';
+import { defaultUsageConfig } from './usage-config.js';
+
+const T0 = Date.parse('2026-09-10T00:00:00Z');
+
+let root: string;
+let usageDir: string;
+let repo: string;
+let artifacts: string;
+let decisions: string;
+let out: string[];
+let err: string[];
+let exitCode: number | undefined;
+let repoId: string;
+
+/** A real git checkout with one commit, so repoIdFor resolves an identity. */
+function gitInit(dir: string, message: string): string {
+  mkdirSync(dir, { recursive: true });
+  const git = (...a: string[]) =>
+    execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t.invalid', ...a], {
+      stdio: 'ignore',
+      env: { PATH: process.env.PATH ?? '', HOME: root },
+    });
+  git('init', '-q');
+  git('commit', '-q', '--allow-empty', '-m', message);
+  return repoIdFor(dir) as string;
+}
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'route-propose-'));
+  usageDir = join(root, 'usage');
+  repo = join(root, 'repo-a');
+  artifacts = join(root, 'art');
+  decisions = join(root, 'decisions');
+  mkdirSync(join(repo, '.ai-sdlc', 'reviews'), { recursive: true });
+  repoId = gitInit(repo, 'root-a');
+  out = [];
+  err = [];
+  exitCode = undefined;
+  vi.stubEnv('AI_SDLC_USAGE_DIR', usageDir);
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(root, { recursive: true, force: true });
+});
+
+function price(model: string, input: number): PriceRow {
+  return {
+    model,
+    inputPer1M: input,
+    outputPer1M: input * 5,
+    cacheReadPer1M: input * 0.1,
+    cacheWrite5mPer1M: input * 1.25,
+    cacheWrite1hPer1M: input * 2,
+    source: 'test',
+    url: 'https://example.invalid/prices',
+    fetchedAt: '2026-01-01T00:00:00.000Z',
+    effectiveFrom: '2026-01-01',
+    status: 'active',
+  };
+}
+
+const TABLE = `
+apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+spec:
+  strength: [model-haiku-a, model-sonnet-a, model-opus-a]
+  cells:
+    developer:
+      '*': { model: model-sonnet-a, candidates: [model-haiku-a] }
+    code-reviewer:
+      '*': { model: model-sonnet-a, candidates: [model-haiku-a] }
+    security-reviewer:
+      '*': { model: model-opus-a }
+`;
+
+/** `n` tasks for `model`, of which `approved` were approved first pass. */
+function seedTasks(
+  prefix: string,
+  model: string,
+  n: number,
+  approved: number,
+  identity: { repoId?: string; unavailable?: boolean } | 'legacy' = {},
+): void {
+  const id: { repoId?: string; unavailable?: boolean } =
+    identity === 'legacy' ? {} : { repoId, ...identity };
+  const calls: ModelCallRecord[] = [];
+  const lines: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const taskId = `${prefix}-${i}`;
+    calls.push({
+      schemaVersion: 'v1',
+      callId: `${taskId}-c`,
+      ts: new Date(T0).toISOString(),
+      harness: 'claude-code',
+      provider: 'anthropic',
+      model,
+      tokens: { input: 100, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 },
+      billingPool: 'subscription-interactive',
+      sessionId: 's',
+      agentRole: 'ai-sdlc:developer',
+      scope: 'framework',
+      repo: 'repo-a',
+      ...(id.repoId ? { repoId: id.repoId } : {}),
+      ...(id.unavailable ? { repoIdUnavailable: true } : {}),
+      taskId,
+    });
+    const ok = i < approved;
+    lines.push(
+      JSON.stringify({
+        taskId,
+        prNumber: null,
+        commitSha: 'a'.repeat(40),
+        iteration: 1,
+        role: 'code',
+        harness: 'claude-code',
+        timestamp: 't',
+        verdict: ok ? 'approved' : 'rejected',
+        findings: ok ? [] : [{ severity: 'major', summary: 's', title: 't' }],
+      }),
+    );
+  }
+  appendModelCalls(calls, { dir: usageDir });
+  writeFileSync(join(repo, '.ai-sdlc', 'reviews', `${prefix}.jsonl`), `${lines.join('\n')}\n`);
+}
+
+function deps(extra: Partial<UsageCliDeps> = {}): UsageCliDeps {
+  return {
+    usageDir,
+    now: () => new Date(T0 + 3_600_000),
+    stdout: (t) => void out.push(t),
+    stderr: (t) => void err.push(t),
+    setExitCode: (c) => void (exitCode = c),
+    emit: () => {},
+    priceRows: [price('model-sonnet-a', 2), price('model-haiku-a', 1), price('model-opus-a', 10)],
+    loadConfig: () => defaultUsageConfig(),
+    repoRoot: repo,
+    workDir: repo,
+    artifactsDir: artifacts,
+    decisionsWorkDir: decisions,
+    readBaseTable: () => TABLE,
+    ...extra,
+  };
+}
+
+async function run(args: string[], extra: Partial<UsageCliDeps> = {}): Promise<string> {
+  out.length = 0;
+  await buildUsageCli(['route', ...args], deps(extra)).parseAsync();
+  return out.join('');
+}
+
+/** A replay results file where haiku is within the bar of sonnet over 40 items. */
+function writeReplay(name: string, extra: { runId?: string; repoId?: string }): void {
+  mkdirSync(join(artifacts, 'replay'), { recursive: true });
+  const score = (model: string, recall: number, fb: number) => ({
+    model,
+    role: 'code',
+    reviews: 40,
+    errors: 0,
+    knownDefect: { items: 20, blocked: recall * 20 },
+    clean: { items: 20, blocked: fb * 20 },
+    recall,
+    falseBlockRate: fb,
+    unitsTotal: 0,
+    meanUnitsPerReview: null,
+    usageMissing: 0,
+  });
+  writeFileSync(
+    join(artifacts, 'replay', name),
+    JSON.stringify({
+      schemaVersion: 'v1',
+      runId: extra.runId ?? 'run1',
+      generatedAt: 't',
+      ...(extra.repoId !== undefined ? { repoId: extra.repoId } : {}),
+      role: 'code',
+      candidate: 'model-haiku-a',
+      reference: 'model-sonnet-a',
+      stoppedBy: 'completed',
+      limits: { maxItems: 40, maxUnits: 1 },
+      itemsReplayed: 40,
+      skippedUnreachable: 0,
+      scores: [score('model-sonnet-a', 0.9, 0.1), score('model-haiku-a', 0.85, 0.15)],
+      items: [],
+    }),
+  );
+}
+
+const catalog = () => readDecisionEvents({ workDir: decisions }).events;
+
+function seedQualifying(): void {
+  seedTasks('S', 'model-sonnet-a', 40, 32); // 80%
+  seedTasks('H', 'model-haiku-a', 30, 24); // 80%
+}
+
+describe('cli-usage route propose', () => {
+  it('files nothing and says so when no candidate qualifies', async () => {
+    seedTasks('S', 'model-sonnet-a', 40, 32);
+    seedTasks('H', 'model-haiku-a', 29, 24);
+    const text = await run(['propose']);
+    expect(text).toContain('No candidate qualifies');
+    expect(text).toContain('29 compared tasks, 30 needed');
+    expect(catalog()).toHaveLength(0);
+    expect(existsSync(join(artifacts, '_routing', 'evidence'))).toBe(false);
+  });
+
+  it('never qualifies when the evidence is legacy, unavailable or foreign, and says why', async () => {
+    const reason = 'evidence not attributable to this repository';
+    seedTasks('S', 'model-sonnet-a', 40, 32, 'legacy');
+    seedTasks('H', 'model-haiku-a', 30, 24, 'legacy');
+    expect(await run(['propose'])).toContain(reason);
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('a same-named foreign checkout does not influence the counts or the rates', async () => {
+    const foreign = gitInit(join(root, 'other', 'repo-a'), 'root-b');
+    expect(foreign).not.toBe(repoId);
+    // Foreign-only evidence: nothing for this repository, so nothing qualifies.
+    seedTasks('FS', 'model-sonnet-a', 40, 40, { repoId: foreign });
+    seedTasks('FH', 'model-haiku-a', 30, 30, { repoId: foreign });
+    const text = await run(['propose']);
+    expect(text).not.toContain('Filed');
+    expect(catalog()).toHaveLength(0);
+    // Attributed evidence qualifies; the foreign records still do not count.
+    seedQualifying();
+    out.length = 0;
+    const filed = await run(['propose']);
+    expect(filed).toContain('Filed DEC-0001');
+    const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+    expect(body).toContain('24/30 first-pass approved');
+    expect(body).toContain('32/40');
+  });
+
+  it('unavailable-id records block qualification', async () => {
+    seedQualifying();
+    seedTasks('U', 'model-sonnet-a', 1, 1, { unavailable: true });
+    expect(await run(['propose'])).toContain('evidence not attributable to this repository');
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('does not qualify when the repository has no identity', async () => {
+    seedQualifying();
+    const bare = join(root, 'bare', 'repo-a');
+    mkdirSync(join(bare, '.ai-sdlc', 'reviews'), { recursive: true });
+    const text = await run(['propose'], { repoRoot: bare, workDir: bare });
+    expect(text).not.toContain('Filed');
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('dry run lists the change and writes nothing', async () => {
+    seedQualifying();
+    const text = await run(['propose', '--dry-run']);
+    expect(text).toContain('Dry run: would file one Decision listing 1 change');
+    expect(text).toContain('developer / *: model-sonnet-a -> model-haiku-a');
+    expect(catalog()).toHaveLength(0);
+    expect(existsSync(join(artifacts, '_routing'))).toBe(false);
+  });
+
+  it('files exactly one Decision with counts, rates and evidence, and no task ids', async () => {
+    seedQualifying();
+    const text = await run(['propose']);
+    expect(text).toContain('Filed DEC-0001 listing 1 change');
+    const events = catalog();
+    expect(events).toHaveLength(1);
+    const d = projectAll({ workDir: decisions }).decisions.get('DEC-0001');
+    expect(d?.metadata.scope).toBe(ROUTING_PROPOSAL_SCOPE);
+    expect(d?.status.lifecycle).not.toBe('answered');
+    expect(d?.spec.options.map((o) => o.id)).toEqual(['approve-all', 'decline']);
+    const body = d?.spec.body ?? '';
+    expect(body).toContain('24/30 first-pass approved');
+    expect(body).toContain('32/40');
+    expect(body).toContain('"kind": "model-routing-proposal"');
+    expect(body).toContain(repoId);
+    // counts and attribution only: no per-task ids, no source content
+    expect(body).not.toMatch(/\bS-\d+\b|\bH-\d+\b/);
+
+    const machine = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(body)?.[1] ?? '{}');
+    expect(machine.repoId).toBe(repoId);
+    expect(machine.changes[0].repoId).toBe(repoId);
+    expect(machine.changes).toHaveLength(1);
+    const refs: string[] = machine.changes[0].evidence;
+    expect(refs).toHaveLength(2);
+    for (const ref of refs) {
+      expect(ref.startsWith('_routing/evidence/2026-09-10/')).toBe(true);
+      const file = JSON.parse(readFileSync(join(artifacts, ref), 'utf8'));
+      expect(file.scope).toBe('framework');
+    }
+  });
+
+  it('files nothing while a proposal is open, then again once it is answered', async () => {
+    seedQualifying();
+    await run(['propose']);
+    expect(findOpenProposal(decisions)).toBe('DEC-0001');
+    const text = await run(['propose']);
+    expect(text).toContain('DEC-0001) is still open');
+    expect(text).toContain('Silence leaves the table unchanged');
+    expect(catalog()).toHaveLength(1);
+
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({ decisionId: 'DEC-0001', chosenOptionId: 'decline' }),
+      { workDir: decisions },
+    );
+    expect(findOpenProposal(decisions)).toBeUndefined();
+    expect(await run(['propose'])).toContain('Filed DEC-0002');
+    expect(catalog().filter((e) => e.type === 'decision-opened')).toHaveLength(2);
+  });
+
+  it('ignores open Decisions that are not routing proposals', async () => {
+    seedQualifying();
+    await run(['propose', '--dry-run']);
+    appendDecisionEvent(
+      {
+        eventVersion: 'v1',
+        type: 'decision-opened',
+        ts: '2026-09-10T00:00:00.000Z',
+        decisionId: 'DEC-0001',
+        source: 'ad-hoc',
+        scope: 'workspace',
+        summary: 'unrelated',
+        options: [{ id: 'a', description: 'a' }],
+      },
+      { workDir: decisions },
+    );
+    expect(await run(['propose'])).toContain('Filed DEC-0002');
+  });
+
+  it('prints JSON', async () => {
+    seedQualifying();
+    const json = JSON.parse(await run(['propose', '--json']));
+    expect(json.outcome).toBe('filed');
+    expect(json.decisionId).toBe('DEC-0001');
+    expect(json.changes[0]).toMatchObject({
+      role: 'developer',
+      from: 'model-sonnet-a',
+      to: 'model-haiku-a',
+    });
+  });
+
+  it('honours --min-tasks and --margin-points', async () => {
+    seedTasks('S', 'model-sonnet-a', 40, 32);
+    seedTasks('H', 'model-haiku-a', 10, 6); // 60%, 20 points below
+    const args = ['propose', '--min-tasks', '10', '--dry-run', '--margin-points'];
+    expect(await run([...args, '20'])).toContain('Dry run');
+    expect(await run([...args, '19'])).toContain('No candidate qualifies');
+    expect(await run(['propose', '--margin-points', '20', '--dry-run'])).toContain(
+      'No candidate qualifies',
+    );
+  });
+
+  it('reports no usable table', async () => {
+    const text = await run(['propose'], { readBaseTable: () => null });
+    expect(text).toContain('No usable routing table (no-table)');
+    expect(text).toContain('No candidate qualifies');
+  });
+
+  it('respects the Decision Catalog off switch', async () => {
+    seedQualifying();
+    const text = await run(['propose'], { env: { AI_SDLC_DECISION_CATALOG: 'off' } });
+    expect(text).toContain('Decision Catalog is off');
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('rejects a bad --since', async () => {
+    await run(['propose', '--since', 'nope']);
+    expect(exitCode).toBe(1);
+    expect(err.join('')).toContain('Invalid --since');
+  });
+
+  it('proposes a reviewer change from replay results and cites that file', async () => {
+    writeReplay('results-code-run1.json', { repoId });
+    const text = await run(['propose']);
+    expect(text).toContain('Filed DEC-0001');
+    expect(text).toContain('code-reviewer / *: model-sonnet-a -> model-haiku-a');
+    expect(text).toContain('replay of 40 item(s)');
+    const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+    expect(body).toContain(join('replay', 'results-code-run1.json'));
+  });
+
+  it('reads replay results from the default .ai-sdlc/artifacts directory that replay writes to', async () => {
+    const saved = process.env.ARTIFACTS_DIR;
+    delete process.env.ARTIFACTS_DIR;
+    const injected = artifacts;
+    try {
+      // A lookalike in the old <repo>/artifacts location must not be read.
+      artifacts = join(repo, 'artifacts');
+      writeReplay('results-code-stale.json', { runId: 'stale', repoId });
+      artifacts = join(repo, '.ai-sdlc', 'artifacts');
+      writeReplay('results-code-run1.json', { repoId });
+      const text = await run(['propose'], { artifactsDir: undefined });
+      expect(text).toContain('Filed DEC-0001');
+      expect(text).toContain('code-reviewer / *: model-sonnet-a -> model-haiku-a');
+      const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+      expect(body).toContain(join('replay', 'results-code-run1.json'));
+      expect(body).not.toContain('results-code-stale.json');
+      expect(existsSync(join(repo, '.ai-sdlc', 'artifacts', '_routing'))).toBe(true);
+      expect(existsSync(join(repo, 'artifacts'))).toBe(true);
+    } finally {
+      artifacts = injected;
+      if (saved === undefined) delete process.env.ARTIFACTS_DIR;
+      else process.env.ARTIFACTS_DIR = saved;
+    }
+  });
+
+  it('lets ARTIFACTS_DIR override the default artifacts directory for replay results', async () => {
+    const saved = process.env.ARTIFACTS_DIR;
+    const injected = artifacts;
+    try {
+      artifacts = join(root, 'env-art');
+      process.env.ARTIFACTS_DIR = artifacts;
+      writeReplay('results-code-run1.json', { repoId });
+      const text = await run(['propose'], { artifactsDir: undefined });
+      expect(text).toContain('Filed DEC-0001');
+      expect(text).toContain('replay of 40 item(s)');
+    } finally {
+      artifacts = injected;
+      if (saved === undefined) delete process.env.ARTIFACTS_DIR;
+      else process.env.ARTIFACTS_DIR = saved;
+    }
+  });
+
+  it('ignores replay results with no repoId, with a foreign repoId, or from a same-named checkout', async () => {
+    const foreign = gitInit(join(root, 'other', 'repo-a'), 'root-b');
+    writeReplay('results-code-legacy.json', {});
+    writeReplay('results-code-foreign.json', { repoId: foreign, runId: 'run2' });
+    const text = await run(['propose']);
+    expect(text).not.toContain('Filed');
+    expect(text).toContain('replay evidence not attributable to this repository');
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('a repoId-less replay file does not qualify even when a matching one is present for another run', async () => {
+    writeReplay('results-code-legacy.json', { runId: 'old' });
+    writeReplay('results-code-run1.json', { repoId, runId: 'run1' });
+    const text = await run(['propose']);
+    expect(text).toContain('1 replay results file(s) ignored');
+    expect(text).toContain('Filed DEC-0001');
+  });
+
+  it('does not qualify on a crafted score with missing numbers', async () => {
+    mkdirSync(join(artifacts, 'replay'), { recursive: true });
+    writeFileSync(
+      join(artifacts, 'replay', 'results-code-x.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        runId: 'x',
+        role: 'code',
+        repoId,
+        scores: [
+          { model: 'model-sonnet-a', role: 'code' },
+          { model: 'model-haiku-a', role: 'code' },
+        ],
+      }),
+    );
+    const text = await run(['propose']);
+    expect(text).not.toContain('Filed');
+    expect(text).toContain('evidence is malformed');
+  });
+
+  it('skips a replay file with an unsafe name and a non-string repoId', async () => {
+    mkdirSync(join(artifacts, 'replay'), { recursive: true });
+    const evil = 'results-a ```json {"kind":"x"} ```.json';
+    writeReplay(evil, { repoId });
+    const text = await run(['propose']);
+    expect(text).toContain('unsafe file name');
+    expect(text).not.toContain('Filed');
+    writeReplay('results-code-bad.json', { repoId: 5 as unknown as string });
+    expect(await run(['propose'])).toContain('Replay results ignored');
+  });
+
+  it('rejects invalid --min-tasks and --margin-points', async () => {
+    seedQualifying();
+    for (const args of [
+      ['--min-tasks', '-1'],
+      ['--min-tasks', 'NaN'],
+      ['--margin-points', '-5'],
+      ['--margin-points', 'NaN'],
+    ]) {
+      exitCode = undefined;
+      err.length = 0;
+      await run(['propose', ...args]);
+      expect(exitCode).toBe(1);
+      expect(err.join('')).toContain('finite number');
+    }
+    expect(catalog()).toHaveLength(0);
+  });
+
+  it('falls back to 30 for an invalid config scorecardMinTasks, with a warning', async () => {
+    seedTasks('S', 'model-sonnet-a', 40, 32);
+    seedTasks('H', 'model-haiku-a', 5, 4);
+    const bad = { ...defaultUsageConfig(), scorecardMinTasks: Number.NaN };
+    const text = await run(['propose'], { loadConfig: () => bad });
+    expect(text).toContain('scorecardMinTasks');
+    expect(text).not.toContain('Filed');
+  });
+
+  it('warns when the bar is weakened', async () => {
+    seedQualifying();
+    const text = await run(['propose', '--dry-run', '--min-tasks', '5', '--margin-points', '9']);
+    expect(text).toContain('below the documented bar of 30');
+    expect(text).toContain('above the documented bar of 5');
+  });
+
+  it('reports catalog-disabled and proposal-open on a dry run too', async () => {
+    seedQualifying();
+    expect(
+      await run(['propose', '--dry-run'], { env: { AI_SDLC_DECISION_CATALOG: 'off' } }),
+    ).toContain('Decision Catalog is off');
+    await run(['propose']);
+    const text = await run(['propose', '--dry-run', '--json']);
+    expect(JSON.parse(text)).toMatchObject({ outcome: 'proposal-open', decisionId: 'DEC-0001' });
+  });
+
+  it('re-checks under the lock: an open proposal appearing after the pre-check wins', async () => {
+    seedQualifying();
+    const text = await run(['propose', '--json'], {
+      afterPrecheck: () =>
+        appendDecisionEvent(
+          makeDecisionOpenedEvent({
+            decisionId: 'DEC-0001',
+            source: 'framework-calibration',
+            scope: ROUTING_PROPOSAL_SCOPE,
+            summary: 'racer',
+            options: [{ id: 'a', description: 'a' }],
+          }),
+          { workDir: decisions },
+        ),
+    });
+    const r = JSON.parse(text);
+    expect(r.outcome).toBe('proposal-open');
+    expect(r.decisionId).toBe('DEC-0001');
+    expect(catalog().filter((e) => e.type === 'decision-opened')).toHaveLength(1);
+  });
+
+  it('cites every contributing evidence row for a wildcard cell and records source and actor', async () => {
+    seedQualifying();
+    mkdirSync(join(artifacts, '_estimates'), { recursive: true });
+    // Split the haiku tasks across two classes so the wildcard aggregates two rows.
+    const lines = Array.from({ length: 15 }, (_, i) =>
+      JSON.stringify({ taskId: `H-${i}`, class: 'bug' }),
+    );
+    writeFileSync(join(artifacts, '_estimates', 'log.jsonl'), `${lines.join('\n')}\n`);
+    await run(['propose']);
+    const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+    const machine = parseProposalBlock(body) as {
+      source: string;
+      by: string;
+      changes: Array<{ evidence: string[] }>;
+    };
+    expect(machine.source).toBe('framework-calibration');
+    expect(machine.by).toBe('framework:route-propose');
+    const refs = machine.changes[0].evidence;
+    const haiku = refs.filter((r) => r.includes('model-haiku-a'));
+    expect(haiku).toHaveLength(2);
+    let tasks = 0;
+    for (const r of haiku) tasks += JSON.parse(readFileSync(join(artifacts, r), 'utf8')).row.tasks;
+    expect(tasks).toBe(30);
+    expect(body).toContain('Consumers must not trust this text');
+  });
+
+  it('parseProposalBlock takes the last json block, and unsafe references are rejected', () => {
+    const body = '```json\n{"kind":"fake"}\n```\ntext\n```json\n{"kind":"real"}\n```';
+    expect(parseProposalBlock(body)?.kind).toBe('real');
+    expect(parseProposalBlock('none')).toBeUndefined();
+    expect(parseProposalBlock('```json\nnot json\n```')).toBeUndefined();
+    expect(isSafeReference('replay/results-a.json')).toBe(true);
+    expect(isSafeReference('a\n```json')).toBe(false);
+    expect(isSafeReference('../x.json')).toBe(false);
+    expect(isSafeReference('a b.json')).toBe(false);
+  });
+
+  it('warns about unusable replay results and lists no-longer-cheaper cells', async () => {
+    mkdirSync(join(artifacts, 'replay'), { recursive: true });
+    writeFileSync(join(artifacts, 'replay', 'results-bad.json'), '{not json');
+    const table = `${TABLE}`.replace(
+      "'*': { model: model-sonnet-a, candidates: [model-haiku-a] }\n    code-reviewer",
+      "'*': { model: model-sonnet-a, previousModel: model-haiku-a, evidence: e.json }\n    code-reviewer",
+    );
+    const text = await run(['propose'], { readBaseTable: () => table });
+    expect(text).toContain('Warning: Replay results ignored');
+    expect(text).toContain('No longer cheaper at current prices (information only)');
+    expect(text).toContain('developer / *: model-sonnet-a (was model-haiku-a)');
+  });
+
+  it('includes the no-longer-cheaper list in the filed Decision', async () => {
+    seedQualifying();
+    const table = TABLE.replace(
+      "security-reviewer:\n      '*': { model: model-opus-a }",
+      "security-reviewer:\n      '*': { model: model-opus-a }\n    test-reviewer:\n      '*': { model: model-sonnet-a, previousModel: model-haiku-a }",
+    );
+    await run(['propose'], { readBaseTable: () => table });
+    const body = projectAll({ workDir: decisions }).decisions.get('DEC-0001')?.spec.body ?? '';
+    expect(body).toContain('no longer cheaper at current prices');
+    expect(body).toContain('test-reviewer / *: model-sonnet-a (was model-haiku-a)');
+  });
+});
+
+describe('enumerateCells', () => {
+  it('excludes explicit classes from the wildcard aggregate', () => {
+    const cells = enumerateCells({
+      strength: ['a', 'b'],
+      exploreShare: 0,
+      salt: '',
+      cells: { developer: { chore: { model: 'b' }, '*': { model: 'b', candidates: ['a'] } } },
+    });
+    expect(cells.find((c) => c.taskClass === '*')?.excludeClasses).toEqual(['chore']);
+    expect(cells.find((c) => c.taskClass === 'chore')?.excludeClasses).toBeUndefined();
+  });
+});

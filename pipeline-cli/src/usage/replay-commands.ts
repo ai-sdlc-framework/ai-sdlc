@@ -16,6 +16,7 @@ import { ShellClaudePSpawner, type ProcessSpawner } from '../runtime/shell-claud
 import type { Runner } from '../runtime/exec.js';
 import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
 import { repoNameFor } from './attribution.js';
+import { repoIdFor } from './repo-id.js';
 import {
   buildCorpus,
   readCorpus,
@@ -520,7 +521,11 @@ export function registerReplayCommands(y: Argv, deps: ReplayDeps, io: UsageIo): 
             );
             return;
           }
-          writeJsonAtomic(resultsPath, results);
+          const resolvedRepoId = repoIdFor(repoRoot);
+          writeJsonAtomic(resultsPath, {
+            ...results,
+            ...(resolvedRepoId ? { repoId: resolvedRepoId } : {}),
+          });
           io.out(renderReplayResults(results));
           io.out(`Wrote ${resultsPath}\n`);
           io.out(`Reviewer type: ${reviewerTypeFor(role)}; usage recorded under task id replay.\n`);
