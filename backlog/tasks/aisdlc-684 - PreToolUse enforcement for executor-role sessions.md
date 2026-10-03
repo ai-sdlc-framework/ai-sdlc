@@ -58,9 +58,16 @@ roster. This task joins them.
    sessions unaffected; unresolved role unaffected; a repo override that empties the
    list is honoured.
 
+5. **Claim-holder check on `write-verdict`** (carried from the AISDLC-666 review,
+   DEC-0021): `cli-dispatch write-verdict` skips the claim-holder check that
+   `complete` now enforces. Require `--worker`, refuse when the caller does not hold
+   the claim, write nothing on refusal; document it as a mistake-guard, not
+   authentication.
+
 ## Acceptance Criteria
 - [ ] In an executor-role session, `SendMessage` to a non-dispatch recipient, `cli-decisions answer` and top-level `task_create` are denied by the hook with a message that names the rule.
 - [ ] The same calls succeed in planner and dispatch sessions and in a session with no resolvable role.
+- [ ] `write-verdict` without `--worker`, or from a worker that does not hold the claim, is refused with nothing written.
 - [ ] The executor skill's hard-rule text is rendered from the resolved policy; no rule string is duplicated.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
