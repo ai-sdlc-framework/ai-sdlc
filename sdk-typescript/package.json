@@ -120,7 +120,7 @@
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vite": "^6.0.0",
     "vitest": "^4.1.9"
   }
