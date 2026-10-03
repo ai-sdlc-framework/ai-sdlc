@@ -47,8 +47,9 @@ roster. This task joins them.
    `executor`: block `SendMessage` to anything but the dispatch session named in the
    roster, block `cli-decisions answer|resolve|override`, block top-level `task_create`
    (sub-task filing under the executor's own task stays allowed).
-2. **PreToolUse hook:** resolve the role with `hierarchy-role.js` (after AISDLC-666's
-   fix: running entries only, nearest ancestor, process verified as claude), load the
+2. **PreToolUse hook:** resolve the role with `hierarchy-role.js` (as hardened by the
+   executor loop task this depends on: running entries only, nearest ancestor,
+   process verified as claude), load the
    resolved policy, and deny matching tool calls with a message naming the role, the
    rule and the escalation path (ask dispatch).
 3. **Render the narration from the same policy** so the executor skill's hard-rule
