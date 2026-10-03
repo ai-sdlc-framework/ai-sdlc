@@ -13,7 +13,6 @@ dependencies:
   - AISDLC-666
 references:
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
-  - ai-sdlc-plugin/hooks/hierarchy-role.js
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
 priority: medium
 dispatchable: true
@@ -64,8 +63,8 @@ roster. This task joins them.
    the claim, write nothing on refusal; document it as a mistake-guard, not
    authentication.
 
-6. **Role skip for the deferred coverage Stop hook** (deferred from AISDLC-685,
-   DEC-0022): `deferred-coverage-check.js` exits 0 without running when the session
+6. **Role skip for the deferred coverage Stop hook** (deferred from the Stop-hook coverage
+   overload fix, DEC-0022): `deferred-coverage-check.js` exits 0 without running when the session
    holds an RFC-0051 executor or operator-dispatch role, resolved with the same
    `hierarchy-role.js` helper; the pre-push gate covers those sessions.
 
