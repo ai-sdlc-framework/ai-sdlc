@@ -352,17 +352,20 @@ interface Heuristic {
   test(text: string): boolean;
 }
 
-/** Characters `.` does not match; a `.*` bridge never crosses one. */
-const LINE_TERMINATOR = /[\n\r\u2028\u2029]/g;
-
 /**
  * Linear replacement for `A.*B.*C`: literal segments joined by same-line
- * bridges. A chain of `.*` backtracks polynomially (CodeQL js/polynomial-redos);
- * here each segment is searched left to right from the previous segment's
- * end, and a segment found past the end of the current line restarts the
- * chain after that line. Per-segment results are cached while the search
- * start only moves forward, so the whole scan is O(n) per segment. Matches
- * exactly what the equivalent `.*` regex (same flags) matches.
+ * bridges. A chain of `.*` backtracks polynomially (CodeQL js/polynomial-redos).
+ *
+ * Exact semantics: the pattern matches iff there are segment matches
+ * m0..mk with each m(i+1) starting at or after m(i)'s end and no line
+ * terminator (the characters `.` rejects) between them. A segment's own
+ * `\s+` may span terminators, so a greedy leftmost-match walk is NOT
+ * equivalent; instead this is a reachability sweep. For each segment, every
+ * match (at most one per start: segments here have no alternation or
+ * optional parts) is enumerated once, and it is reachable when the nearest
+ * reachable end of the previous segment at or before its start has no
+ * terminator in between. Each segment costs O(n) plus its own match work,
+ * with no backtracking across segments.
  */
 class BridgedPattern implements Heuristic {
   private readonly segments: RegExp[];
@@ -372,38 +375,36 @@ class BridgedPattern implements Heuristic {
   }
 
   test(text: string): boolean {
-    const cache: (RegExpExecArray | null | undefined)[] = [];
-    const next = (i: number, from: number): RegExpExecArray | null => {
-      const hit = cache[i];
-      if (hit === null) return null;
-      if (hit !== undefined && hit.index >= from) return hit;
-      const seg = this.segments[i]!;
-      seg.lastIndex = from;
-      const m = seg.exec(text);
-      cache[i] = m;
-      return m;
-    };
-    let restart = 0;
-    while (restart <= text.length) {
-      let from = restart;
-      let lineEnd = text.length;
-      let crossed = false;
-      for (let i = 0; i < this.segments.length; i++) {
-        const m = next(i, from);
-        if (m === null) return false;
-        if (i > 0 && m.index > lineEnd) {
-          crossed = true;
-          break;
+    let reach: Uint8Array | undefined;
+    for (const seg of this.segments) {
+      const next = new Uint8Array(text.length + 1);
+      let any = false;
+      let p = 0;
+      let lastEnd = -1;
+      let lastTerm = -1;
+      seg.lastIndex = 0;
+      for (let m = seg.exec(text); m !== null; m = seg.exec(text)) {
+        const start = m.index;
+        seg.lastIndex = start + 1;
+        let ok = reach === undefined;
+        if (reach !== undefined) {
+          for (; p < start; p++) {
+            const c = text.charCodeAt(p);
+            if (c === 10 || c === 13 || c === 0x2028 || c === 0x2029) lastTerm = p;
+            if (reach[p]) lastEnd = p;
+          }
+          const end = reach[start] ? start : lastEnd;
+          ok = end >= 0 && lastTerm < end;
         }
-        from = m.index + m[0].length;
-        LINE_TERMINATOR.lastIndex = from;
-        const t = LINE_TERMINATOR.exec(text);
-        lineEnd = t === null ? text.length : t.index;
+        if (ok) {
+          next[start + m[0].length] = 1;
+          any = true;
+        }
       }
-      if (!crossed) return true;
-      restart = lineEnd + 1;
+      if (!any) return false;
+      reach = next;
     }
-    return false;
+    return true;
   }
 }
 
@@ -1025,6 +1026,14 @@ export function classifyFailure(
 // breakdown post-hoc.
 export { scoreSignal as _scoreSignal };
 export { BridgedPattern as _BridgedPattern };
+export const _HEURISTIC_PATTERNS: readonly Heuristic[] = [
+  ...EXTERNAL_DEPENDENCY_PATTERNS,
+  ...CONTRACT_VIOLATION_PATTERNS,
+  ...SWEEP_INCOMPLETE_PATTERNS,
+  ...SILENT_FAILURE_PATTERNS,
+  ...PERF_REGRESSION_PATTERNS,
+  ...OPERATOR_UNDER_DECIDED_PATTERNS,
+];
 export { CONFIDENCE_WEIGHTS as _CONFIDENCE_WEIGHTS };
 export { resolveEffectiveThresholds as _resolveEffectiveThresholds };
 export { bucketForConfidence as _bucketForConfidence };
