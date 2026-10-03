@@ -337,10 +337,80 @@ export interface ClassificationResult {
   effectiveThresholds: ClassifierConfidenceConfig;
 }
 
+// ── Linear-time heuristic matching (AISDLC-682) ──────────────────────
+
+/**
+ * Upper bound on the failure text any heuristic sees (16 KiB). Failure text
+ * comes from agent / tool output and is uncontrolled; for longer inputs the
+ * classification is that of the first 16 KiB. Inputs under the bound are
+ * unaffected.
+ */
+export const MAX_CLASSIFIED_TEXT_LENGTH = 16 * 1024;
+
+/** Anything with a RegExp-shaped `test`; plain RegExps and BridgedPattern both qualify. */
+interface Heuristic {
+  test(text: string): boolean;
+}
+
+/** Characters `.` does not match; a `.*` bridge never crosses one. */
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/g;
+
+/**
+ * Linear replacement for `A.*B.*C`: literal segments joined by same-line
+ * bridges. A chain of `.*` backtracks polynomially (CodeQL js/polynomial-redos);
+ * here each segment is searched left to right from the previous segment's
+ * end, and a segment found past the end of the current line restarts the
+ * chain after that line. Per-segment results are cached while the search
+ * start only moves forward, so the whole scan is O(n) per segment. Matches
+ * exactly what the equivalent `.*` regex (same flags) matches.
+ */
+class BridgedPattern implements Heuristic {
+  private readonly segments: RegExp[];
+
+  constructor(...segments: RegExp[]) {
+    this.segments = segments.map((s) => new RegExp(s.source, 'gi'));
+  }
+
+  test(text: string): boolean {
+    const cache: (RegExpExecArray | null | undefined)[] = [];
+    const next = (i: number, from: number): RegExpExecArray | null => {
+      const hit = cache[i];
+      if (hit === null) return null;
+      if (hit !== undefined && hit.index >= from) return hit;
+      const seg = this.segments[i]!;
+      seg.lastIndex = from;
+      const m = seg.exec(text);
+      cache[i] = m;
+      return m;
+    };
+    let restart = 0;
+    while (restart <= text.length) {
+      let from = restart;
+      let lineEnd = text.length;
+      let crossed = false;
+      for (let i = 0; i < this.segments.length; i++) {
+        const m = next(i, from);
+        if (m === null) return false;
+        if (i > 0 && m.index > lineEnd) {
+          crossed = true;
+          break;
+        }
+        from = m.index + m[0].length;
+        LINE_TERMINATOR.lastIndex = from;
+        const t = LINE_TERMINATOR.exec(text);
+        lineEnd = t === null ? text.length : t.index;
+      }
+      if (!crossed) return true;
+      restart = lineEnd + 1;
+    }
+    return false;
+  }
+}
+
 // ── External-dependency signal patterns ──────────────────────────────
 
 /** Patterns that indicate an external dependency failed (not a framework bug). */
-const EXTERNAL_DEPENDENCY_PATTERNS: RegExp[] = [
+const EXTERNAL_DEPENDENCY_PATTERNS: Heuristic[] = [
   /github\s+api\s+(error|outage|unavailable)/i,
   /anthropic\s+(api|claude)\s+(error|rate.?limit|overloaded)/i,
   /rate.?limit(ed)?/i,
@@ -352,46 +422,46 @@ const EXTERNAL_DEPENDENCY_PATTERNS: RegExp[] = [
 ];
 
 /** Patterns that indicate a framework contract violation. */
-const CONTRACT_VIOLATION_PATTERNS: RegExp[] = [
-  /developer.*returned.*prose/i,
+const CONTRACT_VIOLATION_PATTERNS: Heuristic[] = [
+  new BridgedPattern(/developer/, /returned/, /prose/),
   /JSON\s+envelope\s+required/i,
-  /parse.*developer.*return/i,
-  /invalid.*json.*response/i,
-  /SyntaxError.*JSON/i,
+  new BridgedPattern(/parse/, /developer/, /return/),
+  new BridgedPattern(/invalid/, /json/, /response/),
+  new BridgedPattern(/SyntaxError/, /JSON/),
 ];
 
 /** Patterns that indicate a framework sweep / cleanup failure. */
-const SWEEP_INCOMPLETE_PATTERNS: RegExp[] = [
-  /worktree.*left.*after\s+fail/i,
-  /sentinel.*not.*removed/i,
-  /cleanup.*fail/i,
-  /active.task.*stale/i,
+const SWEEP_INCOMPLETE_PATTERNS: Heuristic[] = [
+  new BridgedPattern(/worktree/, /left/, /after\s+fail/),
+  new BridgedPattern(/sentinel/, /not/, /removed/),
+  new BridgedPattern(/cleanup/, /fail/),
+  new BridgedPattern(/active.task/, /stale/),
 ];
 
 /** Patterns that indicate a silent framework failure. */
-const SILENT_FAILURE_PATTERNS: RegExp[] = [
-  /filter.*throw/i,
-  /pre.dispatch.*fail/i,
-  /swallowed.*error/i,
-  /silently.*dispatch/i,
+const SILENT_FAILURE_PATTERNS: Heuristic[] = [
+  new BridgedPattern(/filter/, /throw/),
+  new BridgedPattern(/pre.dispatch/, /fail/),
+  new BridgedPattern(/swallowed/, /error/),
+  new BridgedPattern(/silently/, /dispatch/),
 ];
 
 /** Patterns that indicate a performance regression. */
-const PERF_REGRESSION_PATTERNS: RegExp[] = [
+const PERF_REGRESSION_PATTERNS: Heuristic[] = [
   /3x\s+baseline/i,
   /took\s+dramatically\s+longer/i,
   /performance\s+regression/i,
-  /timeout.*baseline/i,
+  new BridgedPattern(/timeout/, /baseline/),
 ];
 
 /** Patterns for operator-under-decided failures (DoR gaps). */
-const OPERATOR_UNDER_DECIDED_PATTERNS: RegExp[] = [
+const OPERATOR_UNDER_DECIDED_PATTERNS: Heuristic[] = [
   /AC\s+list\s+missing/i,
-  /open\s+question.*unanswered/i,
+  new BridgedPattern(/open\s+question/, /unanswered/),
   /needs.clarification/i,
   /missing\s+acceptance\s+criteria/i,
-  /DoR.*failed/i,
-  /definition.of.ready.*fail/i,
+  new BridgedPattern(/DoR/, /failed/),
+  new BridgedPattern(/definition.of.ready/, /fail/),
 ];
 
 // ── Vendor-namespace validation (OQ-10) ──────────────────────────────
@@ -439,10 +509,12 @@ export class ClassificationError extends Error {
 // ── Heuristic classification ──────────────────────────────────────────
 
 /** Count how many patterns in a list match the text. */
-function countMatches(text: string, patterns: RegExp[]): number {
+function countMatches(text: string, patterns: Heuristic[]): number {
+  const bounded =
+    text.length > MAX_CLASSIFIED_TEXT_LENGTH ? text.slice(0, MAX_CLASSIFIED_TEXT_LENGTH) : text;
   let n = 0;
   for (const p of patterns) {
-    if (p.test(text)) n++;
+    if (p.test(bounded)) n++;
   }
   return n;
 }
@@ -694,7 +766,7 @@ export function classifyFailure(
   ctx: ClassificationContext = {},
 ): ClassificationResult {
   const ts = (ctx.ts ?? new Date()).toISOString();
-  const stderr = signal.stderr ?? '';
+  const stderr = (signal.stderr ?? '').slice(0, MAX_CLASSIFIED_TEXT_LENGTH);
 
   // Validate custom subclass hint (OQ-10)
   if (ctx.subclassHint) {
@@ -952,6 +1024,7 @@ export function classifyFailure(
 // loop — used by `classification-calibration.ts` to recover the score
 // breakdown post-hoc.
 export { scoreSignal as _scoreSignal };
+export { BridgedPattern as _BridgedPattern };
 export { CONFIDENCE_WEIGHTS as _CONFIDENCE_WEIGHTS };
 export { resolveEffectiveThresholds as _resolveEffectiveThresholds };
 export { bucketForConfidence as _bucketForConfidence };
