@@ -252,6 +252,20 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     expect(gi).toContain('.ai-sdlc/state.db');
     expect(gi).toContain('.ai-sdlc/state/');
     expect(gi).toContain('.ai-sdlc/audit.jsonl');
+    // AISDLC-657.3: the shared runtime output directory is ignored from the first init.
+    expect(gi).toContain('.ai-sdlc/artifacts/');
+  });
+
+  it('adds .ai-sdlc/artifacts/ under the existing runtime block of a repository initialised earlier, once (AISDLC-657.3)', async () => {
+    initBareRepo(tmpDir);
+    const oldBlock =
+      '# ai-sdlc:runtime-gitignore\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n';
+    writeFileSync(join(tmpDir, '.gitignore'), `node_modules/\n\n${oldBlock}`);
+
+    await runInit(['--skip-mcp', '--yes']);
+
+    const gi = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
+    expect(gi).toBe(`node_modules/\n\n${oldBlock}.ai-sdlc/artifacts/\n`);
   });
 
   it('emits the 3-line version provenance block at startup (AISDLC-78 AC #1)', async () => {

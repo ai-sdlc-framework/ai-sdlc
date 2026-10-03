@@ -38,6 +38,7 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { formatOutput } from '../formatters/index.js';
 import { fetchBranchProtectionStatus } from './branch-protection-shared.js';
+import { cleanGitEnv } from '../../runtime/git-env.js';
 import {
   buildProductionCheckAdapters,
   runDoctorChecks,
@@ -122,6 +123,9 @@ export interface DoctorAdapters {
   };
 }
 
+/** Exit code reported when a command could not be run at all (see `runCommand`). */
+export const SPAWN_FAILED_EXIT_CODE = 127;
+
 export function buildProductionDoctorAdapters(): DoctorAdapters {
   return {
     exists: existsSync,
@@ -134,6 +138,9 @@ export function buildProductionDoctorAdapters(): DoctorAdapters {
         const stdout = execFileSync(cmd, args, {
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'pipe'],
+          // git answers about the directory it is given, not the repository a
+          // surrounding hook exported through GIT_DIR / GIT_WORK_TREE.
+          ...(cmd === 'git' ? { env: cleanGitEnv() } : {}),
         });
         return { stdout, exitCode: 0, stderr: '' };
       } catch (err) {
@@ -141,7 +148,10 @@ export function buildProductionDoctorAdapters(): DoctorAdapters {
         return {
           stdout: typeof e.stdout === 'string' ? e.stdout : (e.stdout?.toString() ?? ''),
           stderr: typeof e.stderr === 'string' ? e.stderr : (e.stderr?.toString() ?? ''),
-          exitCode: e.status ?? 1,
+          // No numeric status means the process never ran to an exit (git missing,
+          // killed by a signal). 127 is the shell's "command not found", so a caller
+          // can tell it from a command that ran and exited 1.
+          exitCode: e.status ?? SPAWN_FAILED_EXIT_CODE,
         };
       }
     },

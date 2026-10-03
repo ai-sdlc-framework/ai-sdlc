@@ -53,6 +53,12 @@ import {
   loadJudgmentConfig,
 } from '@ai-sdlc/reference';
 import {
+  ARTIFACTS_GITIGNORE_ENTRY,
+  gitCheckIgnoreArgs,
+  gitignoreCovers,
+  interpretCheckIgnoreExit,
+} from '../../runtime-gitignore.js';
+import {
   buildProductionDoctorAdapters,
   checkAttestationGovernance,
   type DoctorAdapters,
@@ -936,6 +942,43 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
   ];
 }
 
+// ── Runtime artifacts ignore entry ──────────────────────────────────────
+
+/**
+ * `.ai-sdlc/artifacts/` holds the evidence files, assignment logs and replay
+ * results the routing commands write (RFC-0050, AISDLC-657.3). A repository whose
+ * .gitignore lacks the entry would commit them. Warns, not fails: nothing is
+ * broken until someone stages the directory.
+ */
+export function checkRuntimeGitignore(ctx: DoctorRunContext): DoctorCheckResult {
+  const gitignore = ctx.adapters.readFile(join(ctx.projectDir, '.gitignore'));
+  // git is the authority (it sees `artifacts/`, `.ai-sdlc/*` with a later `!`, nested
+  // .gitignore files); the text reading is the fallback when git cannot be asked.
+  const git = interpretCheckIgnoreExit(
+    ctx.adapters.runCommand('git', gitCheckIgnoreArgs(ctx.projectDir, ARTIFACTS_GITIGNORE_ENTRY))
+      .exitCode,
+  );
+  const ignored =
+    git ?? (gitignore !== null && gitignoreCovers(gitignore, ARTIFACTS_GITIGNORE_ENTRY));
+  if (ignored) {
+    return {
+      id: 'runtime-gitignore',
+      severity: 'pass',
+      title: `.gitignore ignores ${ARTIFACTS_GITIGNORE_ENTRY}`,
+    };
+  }
+  return {
+    id: 'runtime-gitignore',
+    severity: 'warn',
+    title:
+      gitignore === null
+        ? `no .gitignore found: ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results) would be committed`
+        : `.gitignore does not ignore ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results would be committed)`,
+    remediation: `Add \`${ARTIFACTS_GITIGNORE_ENTRY}\` to .gitignore (running \`ai-sdlc execute\` appends it to the runtime block), and remove any later \`!\` line that re-includes it.`,
+    anonymizableEvidence: { gitignorePresent: gitignore !== null },
+  };
+}
+
 // ── Judgment layer ──────────────────────────────────────────────────────
 
 /**
@@ -1106,6 +1149,11 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Orphaned vitest workers (parent pid 1, older than 2 minutes) left by killed test runs (AISDLC-681).',
     run: checkOrphanedVitestWorkers,
+  },
+  {
+    id: 'runtime-gitignore',
+    description: '.gitignore ignores the .ai-sdlc/artifacts/ runtime output directory (RFC-0050).',
+    run: checkRuntimeGitignore,
   },
   {
     id: 'judgment-layer',

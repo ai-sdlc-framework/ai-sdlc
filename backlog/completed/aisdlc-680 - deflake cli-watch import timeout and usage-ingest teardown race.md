@@ -72,7 +72,7 @@ Deflaked the two CI failures. `cli-watch.test.ts` now loads the real pipeline-cl
 ## Changes
 - `dogfood/src/cli-watch.test.ts` (modified): `vi.importActual('@ai-sdlc/pipeline-cli')` hoisted out of the per-test mock factory via top-level await; `vi.setConfig({ testTimeout: 30_000 })` for this file only, with a comment naming AISDLC-680.
 - `ai-sdlc-plugin/hooks/usage-ingest.test.mjs` (modified): `fakeBin` records each ingester's pid; the real ingester runs behind a pid-recording wrapper; `settleIngesters()` waits (SIGKILL after 30 s) before `rmSync(root, { recursive, force, maxRetries: 10, retryDelay: 100 })`.
-- `backlog/completed/aisdlc-680 ...md` and `backlog/tasks/aisdlc-657.3 ...md` (new): task files carried over from #1154 so they land with this PR.
+- `backlog/completed/aisdlc-680 ...md` and the AISDLC-657.3 task file, which sat under `backlog/tasks/` at the time (new): task files carried over from #1154 so they land with this PR.
 
 ## Design decisions
 - **Wait on pids, not on `close`**: the hook spawns the ingester detached with ignored stdio and unrefs it, so a test cannot observe its `close` event through the hook; recording the pid from inside the ingester is the only handle. Tradeoff: teardown can in theory SIGKILL a reused pid after the 30 s wait; negligible and noted below.

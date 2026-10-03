@@ -13,6 +13,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { registerJudgmentDefinition, type JudgmentDefinition } from '@ai-sdlc/reference';
 import {
   DOCTOR_CHECKS,
@@ -33,6 +34,7 @@ import {
   checkOrphanedVitestWorkers,
   parseEtimeSeconds,
   checkJudgmentLayer,
+  checkRuntimeGitignore,
   runDoctorChecks,
   runDoctorFixes,
   summarizeDoctorResults,
@@ -40,6 +42,8 @@ import {
   type DoctorCheckAdapters,
   type DoctorRunContext,
 } from './doctor-checks.js';
+import { SPAWN_FAILED_EXIT_CODE, buildProductionDoctorAdapters } from './doctor.js';
+import { cleanGitEnv } from '../../runtime/git-env.js';
 
 let tmpDir: string;
 
@@ -1052,6 +1056,154 @@ describe('checkJudgmentLayer', () => {
     );
     expect(rs[0].title).toMatch(/disabled/);
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('judgment-layer');
+  });
+});
+
+// ── checkRuntimeGitignore ───────────────────────────────────────────────
+
+describe('checkRuntimeGitignore', () => {
+  // exit 128 = git could not answer, so these cases exercise the text fallback
+  const noGit = () => makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 128 }) });
+  const gitSays = (exitCode: number) =>
+    makeAdapters({ runCommand: () => ({ stdout: '', exitCode }) });
+
+  it('warns when .gitignore lacks the artifacts entry, and names the fix', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n.ai-sdlc/state/\n');
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('.ai-sdlc/artifacts/');
+    expect(r.remediation).toContain('.ai-sdlc/artifacts/');
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true });
+  });
+
+  it('warns when there is no .gitignore at all', () => {
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toMatch(/no \.gitignore found/);
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: false });
+  });
+
+  it('is quiet when the entry is present', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '# ai-sdlc:runtime-gitignore\n.ai-sdlc/artifacts/\n');
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
+    expect(r.severity).toBe('pass');
+    expect(r.remediation).toBeUndefined();
+  });
+
+  it.each(['.ai-sdlc/artifacts', '/.ai-sdlc/artifacts/', '.ai-sdlc/artifacts/  '])(
+    'accepts the equivalent spelling %j',
+    (line) => {
+      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
+      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
+    },
+  );
+
+  it('does not count a different directory or a comment as covering the entry', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '# .ai-sdlc/artifacts/\n.ai-sdlc/artifacts-old/\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+  });
+
+  it('warns when a later line negates the entry, or the entry is indented', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+    writeFileSync(join(tmpDir, '.gitignore'), '  .ai-sdlc/artifacts/\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+  });
+
+  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*', '**/artifacts/', '.ai-sdlc/artifacts/*'])(
+    'text fallback: a broader line %j already ignores the directory',
+    (line) => {
+      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
+      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
+    },
+  );
+
+  it('text fallback: `.ai-sdlc/*` then `!.ai-sdlc/artifacts` re-includes it, but `.ai-sdlc/` then the same `!` cannot', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/\n!.ai-sdlc/artifacts\n');
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
+  });
+
+  it('asks git about the project directory and trusts a yes over the text', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n');
+    const calls: string[][] = [];
+    const adapters = makeAdapters({
+      runCommand: (cmd, args) => {
+        calls.push([cmd, ...args]);
+        return { stdout: '', exitCode: 0 };
+      },
+    });
+    expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].slice(0, 3)).toEqual(['git', '-C', tmpDir]);
+    expect(calls[0]).toContain('check-ignore');
+    expect(calls[0].at(-1)).toBe('.ai-sdlc/artifacts/probe');
+  });
+
+  it('trusts git saying not ignored over text that looks covered (a nested rule re-includes it)', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+    expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('warn');
+  });
+
+  it.each([128, SPAWN_FAILED_EXIT_CODE])(
+    'falls back to the text when git cannot answer (exit %i)',
+    (code) => {
+      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('pass');
+      writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('warn');
+    },
+  );
+
+  it('with the production adapter and no git binary on PATH, falls back to the text (no exit status at all)', () => {
+    const savedPath = process.env.PATH;
+    process.env.PATH = join(tmpDir, 'empty-bin');
+    try {
+      const adapters = makeAdapters({ runCommand: buildProductionDoctorAdapters().runCommand });
+      expect(adapters.runCommand('git', ['--version']).exitCode).toBe(SPAWN_FAILED_EXIT_CODE);
+      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
+      writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('warn');
+    } finally {
+      process.env.PATH = savedPath;
+    }
+  });
+
+  it.skipIf(spawnSync('git', ['--version']).status !== 0)(
+    'the production adapter runs git without GIT_DIR / GIT_WORK_TREE from the surrounding environment',
+    () => {
+      const saved = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
+      const gitEnv = cleanGitEnv();
+      const init = spawnSync('git', ['-c', 'init.templateDir=', 'init', '-q', tmpDir], {
+        env: gitEnv,
+      });
+      expect(init.status).toBe(0);
+      process.env.GIT_DIR = join(tmpDir, 'not-a-git-dir');
+      process.env.GIT_WORK_TREE = join(tmpDir, 'not-a-work-tree');
+      try {
+        const r = buildProductionDoctorAdapters().runCommand('git', [
+          '-C',
+          tmpDir,
+          'rev-parse',
+          '--git-dir',
+        ]);
+        expect(r.exitCode).toBe(0);
+      } finally {
+        for (const [key, value] of [
+          ['GIT_DIR', saved.dir],
+          ['GIT_WORK_TREE', saved.tree],
+        ] as const) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    },
+  );
+
+  it('is registered in the check registry', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('runtime-gitignore');
   });
 });
 
