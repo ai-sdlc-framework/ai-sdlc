@@ -12,7 +12,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { buildCorpus, EXIT_CODES } from './quality-classifier-corpus.js';
+import { buildCorpus, EXIT_CODES } from '../../__test-helpers/quality-classifier-corpus.js';
 import {
   _BridgedPattern,
   _HEURISTIC_PATTERNS,
