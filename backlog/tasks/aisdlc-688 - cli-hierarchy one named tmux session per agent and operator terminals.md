@@ -2,8 +2,9 @@
 id: AISDLC-688
 title: >-
   cli-hierarchy: one named tmux session per agent, terminal titles that match the agent name, and an attach / open-terminals surface for the operator
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - dispatch-executor-beta
 created_date: '2026-10-03'
 labels:
   - rfc-0051
