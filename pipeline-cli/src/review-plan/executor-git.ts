@@ -47,13 +47,11 @@ export function dropPartialLine(text: string): string {
  * cannot recognise a block whose END is missing.
  */
 export function dropUnterminatedPem(text: string): string {
-  let from = 0;
-  for (;;) {
-    const begin = text.indexOf('-----BEGIN', from);
-    if (begin < 0) return text;
-    if (text.indexOf('-----END', begin) < 0) return text.slice(0, begin);
-    from = begin + 1;
-  }
+  // A BEGIN with no END after it opens a block the cut left unterminated. Only the last END
+  // matters: every BEGIN after it is unterminated, so cut at the first one. Linear time.
+  const lastEnd = text.lastIndexOf('-----END');
+  const begin = text.indexOf('-----BEGIN', lastEnd < 0 ? 0 : lastEnd);
+  return begin < 0 ? text : text.slice(0, begin);
 }
 
 /** For text cut at a byte cap: drop the partial last line, then any unterminated PEM block. */

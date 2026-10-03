@@ -3,6 +3,7 @@ import {
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -2015,24 +2016,62 @@ describe('executor-git: running commands', () => {
     expect(r.output).not.toContain('MIIE');
   });
 
-  it('resolves on timeout even if a grandchild keeps the output pipes open', async () => {
+  const isAlive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const waitUntil = async (pred: () => boolean, ms: number): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (pred()) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return pred();
+  };
+
+  it('resolves on timeout even if a detached grandchild keeps the output pipes open', async () => {
+    const pidFile = join(tmp('rp-pid-'), 'gc.pid');
     const script =
-      "require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'inherit' }); setInterval(() => {}, 1000)";
+      "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'inherit' }); require('fs').writeFileSync(process.argv[1], String(c.pid)); setInterval(() => {}, 1000)";
     const started = Date.now();
-    const r = await runCommand([process.execPath, '-e', script], opts({ timeoutMs: 400 }));
-    expect(r.timedOut).toBe(true);
-    expect(Date.now() - started).toBeLessThan(10_000);
+    let gc: number | undefined;
+    try {
+      const r = await runCommand(
+        [process.execPath, '-e', script, pidFile],
+        opts({ timeoutMs: 800 }),
+      );
+      expect(r.timedOut).toBe(true);
+      expect(Date.now() - started).toBeLessThan(10_000);
+      gc = Number(readFileSync(pidFile, 'utf8'));
+    } finally {
+      // The detached grandchild leaves the killed group, so the test must reap it itself.
+      if (gc !== undefined && isAlive(gc)) process.kill(gc, 'SIGKILL');
+    }
   });
 
-  it('kills the whole process group on timeout', async () => {
-    const started = Date.now();
-    const r = await runCommand(
-      [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
-      opts({ timeoutMs: 300 }),
-    );
-    expect(r.timedOut).toBe(true);
-    expect(r.exitStatus).toBe(124);
-    expect(Date.now() - started).toBeLessThan(15_000);
+  it('kills the whole process group on timeout, including a grandchild in the same group', async () => {
+    const pidFile = join(tmp('rp-pid-'), 'gc.pid');
+    const script =
+      "const c = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); require('fs').writeFileSync(process.argv[1], String(c.pid)); setInterval(() => {}, 1000)";
+    let gc: number | undefined;
+    try {
+      const r = await runCommand(
+        [process.execPath, '-e', script, pidFile],
+        opts({ timeoutMs: 800 }),
+      );
+      expect(r.timedOut).toBe(true);
+      expect(r.exitStatus).toBe(124);
+      gc = Number(readFileSync(pidFile, 'utf8'));
+      expect(Number.isInteger(gc) && gc > 1).toBe(true);
+      // A kill of only the direct child would leave this grandchild running.
+      expect(await waitUntil(() => !isAlive(gc!), 5000)).toBe(true);
+    } finally {
+      if (gc !== undefined && isAlive(gc)) process.kill(gc, 'SIGKILL');
+    }
   });
 });
 
