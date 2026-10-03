@@ -64,7 +64,28 @@ returning evidence in a fixed shape. RFC-0052 section 1 (stage 4) and section 3.
    harness.
 5. **Transcript capture** per probe as the existing reviewers do.
 
+
+### Hard requirement carried from AISDLC-673 review (DEC-0019, 2026-10-03)
+
+Probe targets are the trust boundary for what the review model sees. The 673
+security review (MEDIUM, declined in 673's Final Summary and accepted for v1 only
+on the condition that 675 closes it) found that read, search and compare targets are
+not limited to git-tracked files, so a gitignored `.env` or other untracked secret is
+reachable. 675 MUST:
+
+- resolve read/search targets from `git ls-files` (tracked) plus the diff's added
+  paths only; a target outside that set is refused before any read;
+- redact evidence with the framework's `redactSecrets` before it enters the bundle;
+- re-check containment at open time with `realpath` and `O_NOFOLLOW` (TOCTOU), not
+  only at plan validation;
+- cap `run` probes per plan (default 2) independently of `maxProbes`, so a plan
+  cannot schedule `maxProbes` full test runs.
+
 ## Acceptance Criteria
+- [ ] A plan naming a gitignored file (fixture `.env`) as a read, search or compare target is refused before any read, and the refusal is recorded in the bundle.
+- [ ] A symlink swapped in between validation and open is refused (realpath + O_NOFOLLOW test).
+- [ ] Evidence containing a fixture secret is redacted in the bundle.
+- [ ] A plan with more `run` probes than the run cap executes only the cap and records the rest as skipped.
 - [ ] Each probe type's agent invocation carries only the tools RFC-0052 permits for that type (asserted on the mock spawner's spawn options).
 - [ ] A `run` probe with a command outside the allowlist is refused before any spawn.
 - [ ] A fixture plan with six probes runs with the configured width and yields a bundle that validates against the evidence schema with one entry per probe.
