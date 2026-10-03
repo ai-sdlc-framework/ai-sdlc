@@ -132,7 +132,7 @@ export async function buildRiskMap(
     {
       hunks: judgmentInputs,
       skipIds: new Set(s0.hunks.filter((h) => h.synthetic).map((h) => h.id)),
-      changedFiles: s0.changedFiles,
+      changedFiles: s0.changedFiles.map((p) => safeText(p, 1024)),
       redactedDiff: redactSecrets(diff),
       acceptanceCriteria: criteriaTexts.map((t) => safeText(t, 2000)),
     },
@@ -145,9 +145,13 @@ export async function buildRiskMap(
   );
 
   // Assemble and rank.
+  const screenClean = s2.injectionScreen.status === 'clean';
   const unranked: Omit<RiskMapHunk, 'rank'>[] = s0.hunks.map((h) => {
     const f = facts.get(h.id);
-    const j = s2.judged.get(h.id);
+    // A diff whose injection screen is not clean (suspicious, or could not be evaluated)
+    // cannot be trusted to have steered its own per-hunk judgment: rank every hunk as
+    // unjudged and high risk.
+    const j = screenClean ? s2.judged.get(h.id) : undefined;
     const structural: RiskMapHunk['structural'] = f
       ? {
           status: 'available',

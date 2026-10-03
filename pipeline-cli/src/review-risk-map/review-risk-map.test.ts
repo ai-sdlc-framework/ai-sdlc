@@ -499,6 +499,74 @@ describe('buildRiskMap', () => {
     expect(map.criteria.every((c) => c.likelyUncovered)).toBe(true);
   });
 
+  it('ranks every hunk as unjudged and high when the injection screen is suspicious', async () => {
+    const fake = new FakeJudgmentProvider();
+    scriptHunk(fake, 'h1', 0);
+    scriptHunk(fake, 'h2', 0);
+    scriptHunk(fake, 'h3', 0);
+    scriptDiffLevel(fake);
+    fake.script('addressesModel', noul(0.95));
+    const { map } = await buildRiskMap(DIFF, {
+      artifactsDir: tmp(),
+      structural: factsProvider,
+      acceptanceCriteria: ['first', 'second'],
+      judgment: ctxFor(fake),
+    });
+    expect(map.injectionScreen.status).toBe('suspicious');
+    expect(map.hunks.every((h) => !h.judged && h.riskScore === 1)).toBe(true);
+    expect(map.hunks.every((h) => h.nouls === undefined)).toBe(true);
+  });
+
+  it('ranks every hunk as unjudged and high when the injection screen is unavailable', async () => {
+    const fake = new FakeJudgmentProvider();
+    scriptHunk(fake, 'h1', 0);
+    scriptHunk(fake, 'h2', 0);
+    scriptHunk(fake, 'h3', 0);
+    fake.script('ac-0', noul(0.9));
+    fake.script('ac-1', noul(0.9));
+    const { map } = await buildRiskMap(DIFF, {
+      artifactsDir: tmp(),
+      structural: factsProvider,
+      acceptanceCriteria: ['first', 'second'],
+      judgment: ctxFor(fake),
+    });
+    expect(map.injectionScreen.status).toBe('unavailable');
+    expect(map.hunks.every((h) => !h.judged && h.riskScore === 1)).toBe(true);
+  });
+
+  it('uses the judged scores when the injection screen is clean', async () => {
+    const fake = new FakeJudgmentProvider();
+    scriptHunk(fake, 'h1', 0);
+    scriptHunk(fake, 'h2', 0);
+    scriptHunk(fake, 'h3', 0);
+    scriptDiffLevel(fake);
+    const { map } = await buildRiskMap(DIFF, {
+      artifactsDir: tmp(),
+      structural: factsProvider,
+      acceptanceCriteria: ['first', 'second'],
+      judgment: ctxFor(fake),
+    });
+    expect(map.injectionScreen.status).toBe('clean');
+    expect(map.hunks.every((h) => h.judged && h.riskScore === 0)).toBe(true);
+  });
+
+  it('redacts a secret-shaped changed file path before the routing request', async () => {
+    const d = [
+      `diff --git a/src/${SECRET}.ts b/src/${SECRET}.ts`,
+      `--- a/src/${SECRET}.ts`,
+      `+++ b/src/${SECRET}.ts`,
+      '@@ -1,1 +1,2 @@',
+      ' x',
+      '+y',
+    ].join('\n');
+    const fake = new FakeJudgmentProvider();
+    scriptHunk(fake, 'h1', 2);
+    scriptDiffLevel(fake);
+    const { map } = await buildRiskMap(d, { artifactsDir: tmp(), judgment: ctxFor(fake) });
+    expect(JSON.stringify(fake.requests)).not.toContain(SECRET);
+    expect(JSON.stringify(map)).not.toContain(SECRET);
+  });
+
   it('marks hunks unjudged when the provider cannot answer', async () => {
     const fake = new FakeJudgmentProvider(); // nothing scripted: every call is a provider error
     const { map } = await buildRiskMap(DIFF, {
