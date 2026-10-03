@@ -2,7 +2,7 @@
 id: AISDLC-689
 title: >-
   secret-redact ReDoS test: assert a growth ratio instead of an absolute wall-clock bound (flakes under coverage)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
