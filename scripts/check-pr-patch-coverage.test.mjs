@@ -25,6 +25,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync, realpathSync 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveDiffBase } from './check-pr-patch-coverage.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'check-pr-patch-coverage.mjs');
@@ -902,5 +903,98 @@ describe('check-pr-patch-coverage — multi-file aggregation', () => {
     assert.equal(parsed.totalChangedLines, 4);
     assert.equal(parsed.coveredLines, 3);
     assert.equal(parsed.patchPct, 75);
+  });
+});
+
+// ── AISDLC-686: measure the patch from the merge-base, not the base tip ──────
+
+function git(repo, ...args) {
+  return execFileSync('git', args, { cwd: repo, encoding: 'utf-8' }).trim();
+}
+
+describe('check-pr-patch-coverage — base tip ahead of the PR merge-base (AISDLC-686)', () => {
+  let repo;
+  let base;
+  let head;
+
+  beforeEach(() => {
+    repo = initRepo();
+    // Fork point: both files exist, neither is touched by the PR.
+    commitFile(repo, 'pkg/src/theirs.ts', 'export const t1 = 1;\n', 'init theirs');
+    commitFile(repo, 'pkg/src/other.ts', 'export const o1 = 1;\n', 'init other');
+    git(repo, 'branch', 'pr');
+    // The base branch moves on after the PR forked: files the PR does not touch.
+    commitFile(
+      repo,
+      'pkg/src/theirs.ts',
+      'export const t1 = 1;\nexport const t2 = 2;\nexport const t3 = 3;\n',
+      'main: change theirs',
+    );
+    base = commitFile(
+      repo,
+      'pkg/src/other.ts',
+      'export const o1 = 1;\nexport const o2 = 2;\n',
+      'main: change other',
+    );
+    git(repo, 'checkout', '-q', 'pr');
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(repo, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
+
+  it('excludes files changed only on the base branch after the fork', () => {
+    head = commitFile(
+      repo,
+      'pkg/src/mine.ts',
+      'export const m1 = 1;\nexport const m2 = 2;\n',
+      'pr: mine',
+    );
+    // Coverage exists only for the PR's own file, as in the real CI run.
+    writeCoverageFile(repo, { 'pkg/src/mine.ts': { lines: { 1: 1, 2: 1 } } });
+
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(r.status, 0, `expected exit 0\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    const parsed = JSON.parse(r.stdout);
+    assert.deepEqual(parsed.changedCodeFiles, ['pkg/src/mine.ts']);
+    assert.equal(parsed.totalChangedLines, 2);
+    assert.equal(parsed.patchPct, 100);
+  });
+
+  it('still fails when the PR lacks coverage on its own changed file', () => {
+    head = commitFile(
+      repo,
+      'pkg/src/mine.ts',
+      'export const m1 = 1;\nexport const m2 = 2;\n',
+      'pr: mine',
+    );
+    writeCoverageFile(repo, { 'pkg/src/mine.ts': { lines: { 1: 0, 2: 0 } } });
+
+    const r = runGate(repo, { base, head });
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.match(r.stdout, /FAIL/);
+    assert.match(r.stdout, /pkg\/src\/mine\.ts/);
+    assert.doesNotMatch(r.stdout, /theirs\.ts|other\.ts/);
+  });
+
+  it('still fails when the PR changes a file with no coverage data at all', () => {
+    head = commitFile(repo, 'pkg/src/mine.ts', 'export const m1 = 1;\n', 'pr: mine');
+    // No coverage-final.json written.
+    const r = runGate(repo, { base, head });
+    assert.equal(r.status, 1, `expected exit 1\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /theirs\.ts|other\.ts/);
+  });
+
+  it('falls back to the given base when no merge-base exists', () => {
+    const orphan = (() => {
+      git(repo, 'checkout', '-q', '--orphan', 'unrelated');
+      git(repo, 'rm', '-rfq', '.');
+      return commitFile(repo, 'pkg/src/x.ts', 'export const x = 1;\n', 'orphan');
+    })();
+    assert.equal(resolveDiffBase({ base, head: orphan, cwd: repo }), base);
   });
 });
