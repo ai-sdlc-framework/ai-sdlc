@@ -60,6 +60,7 @@ const ARTIFACT_SCHEMA_FILES = {
   ModelRouting: 'model-routing.v1.schema.json',
   ReviewPlan: 'review-plan.v1.schema.json',
   ReviewRiskMap: 'review-risk-map.v1.schema.json',
+  ReviewEvidence: 'review-evidence.v1.schema.json',
 } as const;
 
 export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
@@ -272,6 +273,13 @@ export function validateReviewPlan<T = unknown>(data: unknown): ValidationResult
  */
 export function validateReviewRiskMap<T = unknown>(data: unknown): ValidationResult<T> {
   return validateArtifact<T>('ReviewRiskMap', data);
+}
+
+/**
+ * Convenience wrapper for the staged-review evidence bundle shape.
+ */
+export function validateReviewEvidence<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('ReviewEvidence', data);
 }
 
 /**

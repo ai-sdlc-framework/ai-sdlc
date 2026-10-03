@@ -92,6 +92,8 @@ const agentFiles = [
   'test-reviewer-codex.md',
   'ci-conflict-resolver.md',
   'correctness-reviewer.md',
+  'review-executor.md',
+  'review-executor-codex.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const codexReviewerFiles = ['code-reviewer-codex.md', 'test-reviewer-codex.md'];
@@ -190,6 +192,7 @@ describe('agent definition tool restrictions', () => {
       'code-reviewer.md',
       'test-reviewer.md',
       'correctness-reviewer.md',
+      'review-executor.md',
     ];
     for (const file of sonnetRoles) {
       assert.equal(
@@ -210,6 +213,7 @@ describe('agent definition tool restrictions', () => {
       'code-reviewer-codex.md',
       'test-reviewer-codex.md',
       'ci-conflict-resolver.md',
+      'review-executor-codex.md',
     ];
     for (const file of inheritRoles) {
       assert.equal(
@@ -606,5 +610,78 @@ describe('AISDLC-617: correctness-reviewer (opt-in merged code+test reviewer)', 
     assert.ok(body.includes('AISDLC-617'));
     assert.ok(body.includes('AISDLC-616'));
     assert.ok(body.toLowerCase().includes('opt-in'));
+  });
+});
+
+describe('review-executor: read-only, tool-restricted probe executor (staged review stage 4)', () => {
+  const executorFiles = ['review-executor.md', 'review-executor-codex.md'];
+
+  it('has no Write, Edit or agent dispatch in tools, and disallows them', () => {
+    for (const file of executorFiles) {
+      for (const tool of ['Write', 'Edit', 'AgentTool']) {
+        assert.ok(!agents[file].tools.includes(tool), `${file} must not grant ${tool}`);
+        assert.ok(agents[file].disallowedTools.includes(tool), `${file} must disallow ${tool}`);
+      }
+    }
+  });
+
+  it('disallows web access and notebook edits', () => {
+    for (const file of executorFiles) {
+      for (const tool of ['WebFetch', 'WebSearch', 'NotebookEdit']) {
+        assert.ok(agents[file].disallowedTools.includes(tool), `${file} must disallow ${tool}`);
+      }
+    }
+  });
+
+  it('review-executor.md pins model sonnet and the claude-code harness', () => {
+    assert.equal(agents['review-executor.md'].model, 'sonnet');
+    assert.equal(agents['review-executor.md'].harness, 'claude-code');
+  });
+
+  it('review-executor-codex.md declares the codex harness and shells out read-only', () => {
+    assert.equal(agents['review-executor-codex.md'].harness, 'codex');
+    const body = readFileSync(join(__dirname, 'review-executor-codex.md'), 'utf-8');
+    assert.ok(body.includes('codex exec'));
+    assert.ok(body.includes('-s read-only'));
+    assert.ok(body.includes('--skip-git-repo-check'));
+  });
+
+  it('bodies say read-only, forbid git push, and forbid choosing a model', () => {
+    for (const file of executorFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(/read-only/i.test(body), `${file} must say read-only`);
+      assert.ok(body.includes('git push') || body.includes('push'), `${file} must forbid push`);
+      assert.ok(/model/i.test(body) && /never/i.test(body), `${file} must forbid model choice`);
+    }
+  });
+
+  it('review-executor.md documents the tools by probe type', () => {
+    const body = readFileSync(join(__dirname, 'review-executor.md'), 'utf-8');
+    for (const type of ['`read`', '`search`', '`trace`', '`run`', '`compare`']) {
+      assert.ok(body.includes(type), `must document the ${type} probe type`);
+    }
+    assert.ok(body.includes('cli-deps'), 'trace probes use the dependency graph CLI');
+  });
+
+  it('bodies restate the output contract after the probe input', () => {
+    for (const file of executorFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(
+        body.includes('Restated after the probe input'),
+        `${file} must restate the contract`,
+      );
+      assert.ok(body.trimEnd().endsWith('above.'), `${file} must end with the restated contract`);
+      const fields = ['"observations"', '"excerpts"', '"commands"', '"answer"', '"confidence"'];
+      for (const field of fields) {
+        assert.ok(body.includes(field), `${file} must document ${field}`);
+      }
+    }
+  });
+
+  it('bodies carry no internal task ids', () => {
+    for (const file of executorFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(!/AISDLC-\d+/.test(body), `${file} must not carry an internal task id`);
+    }
   });
 });

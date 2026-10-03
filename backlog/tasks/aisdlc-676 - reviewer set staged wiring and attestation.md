@@ -66,6 +66,7 @@ sections 5 and 6, and the OQ-3 resolution.
 5. **Ledger**: `ReviewLedgerRole` gains `staged`; `reviews-analysis` treats the
    synthesizer leaf as the verdict and counts per role as before.
 6. **Independence**: tiers computed per leaf; the set's tier is the weakest leaf.
+7. Production ProbeSpawner adapter(s) for the harnesses Step 7 uses; the adapter must enforce allowedPaths and trackedOnly (deny by default, not only the frontmatter tool ceiling) and declare that it does.
 
 ## Acceptance Criteria
 - [ ] When `buildFallbackPlan` (AISDLC-673) returns `{ ok: false, rejections }`, the staged review does not run and the existing reviewer set handles the change; a test covers the fail-closed path and the rejections are surfaced in the dispatch record.
@@ -75,5 +76,6 @@ sections 5 and 6, and the OQ-3 resolution.
 - [ ] Leaves without `stage` continue to verify unchanged, and a leaf never writes `stage` as null or empty.
 - [ ] The set's independence tier equals its weakest leaf's tier (fixture with one unattested probe).
 - [ ] `cli-reviews analyze` on a ledger containing `staged` rows reports them under that role without changing other roles' counts.
+- [ ] A search probe run through the production adapter cannot read a gitignored fixture .env, and an adapter that cannot enforce file scope causes the probe to be refused.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

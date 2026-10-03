@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/review-evidence.v1.schema.json",
+  "title": "AI-SDLC ReviewEvidence",
+  "description": "The evidence bundle a staged review's executors return: one entry per probe in the plan. Evidence is size-bounded per probe and in total, redacted of secrets before it is recorded, and truncated with an explicit marker, never silently. A probe that was refused or skipped still has an entry, so the bundle accounts for every probe.",
+  "type": "object",
+  "required": ["schemaVersion", "budget", "totalBytes", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "budget": {
+      "type": "object",
+      "required": ["perProbeBytes", "totalBytes"],
+      "additionalProperties": false,
+      "properties": {
+        "perProbeBytes": { "type": "integer", "minimum": 0 },
+        "totalBytes": { "type": "integer", "minimum": 0 }
+      },
+      "description": "The evidence budgets this bundle was built under."
+    },
+    "totalBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sum of every entry's evidenceBytes. Never exceeds budget.totalBytes."
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": [
+        "probeId",
+        "status",
+        "harness",
+        "model",
+        "observations",
+        "excerpts",
+        "commands",
+        "evidenceBytes",
+        "metrics"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "probeId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$" },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "failed", "refused", "skipped"],
+          "description": "ok: the probe ran and returned evidence. failed: it ran but returned nothing usable (timeout, error, malformed output). refused: a target or command was refused before any read or spawn. skipped: the plan exceeded a cap and this probe was not run."
+        },
+        "harness": {
+          "type": "string",
+          "enum": ["claude-code", "codex", "none"],
+          "description": "The harness that ran the probe. 'none' for a probe that never ran."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The model that ran the probe. 'none' for a probe that never ran."
+        },
+        "observations": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 4000 }
+        },
+        "excerpts": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["file", "startLine", "endLine", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "file": { "type": "string", "minLength": 1, "maxLength": 300 },
+              "startLine": { "type": "integer", "minimum": 1 },
+              "endLine": { "type": "integer", "minimum": 1 },
+              "text": { "type": "string", "maxLength": 20000 }
+            }
+          }
+        },
+        "commands": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["command", "exitStatus", "output"],
+            "additionalProperties": false,
+            "properties": {
+              "command": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "exitStatus": { "type": "integer" },
+              "output": {
+                "type": "string",
+                "maxLength": 20000,
+                "description": "Bounded, redacted output. Truncated output carries the truncation marker."
+              }
+            }
+          }
+        },
+        "answer": {
+          "type": "object",
+          "required": ["text", "confidence"],
+          "additionalProperties": false,
+          "properties": {
+            "text": { "type": "string", "maxLength": 4000 },
+            "confidence": { "type": "string", "enum": ["high", "medium", "low"] }
+          },
+          "description": "The probe's own answer to its question. Absent when the probe did not run or returned nothing usable."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when evidence was cut to fit the per-probe or total budget."
+        },
+        "truncation": {
+          "type": "object",
+          "required": ["marker", "omittedBytes"],
+          "additionalProperties": false,
+          "properties": {
+            "marker": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "omittedBytes": { "type": "integer", "minimum": 0 }
+          },
+          "description": "Present exactly when truncated is true."
+        },
+        "refusals": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["reason", "target"],
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "unsafe-path",
+                  "not-tracked",
+                  "symlink-or-escape",
+                  "not-a-regular-file",
+                  "unreadable",
+                  "command-not-allowed",
+                  "unsafe-query",
+                  "unsafe-symbol",
+                  "unsafe-revision",
+                  "target-missing",
+                  "file-scope-not-enforced"
+                ]
+              },
+              "target": { "type": "string", "maxLength": 300 }
+            }
+          },
+          "description": "Targets refused before any read or spawn. Only the refused path or command is recorded, never any content."
+        },
+        "skippedReason": {
+          "type": "string",
+          "enum": ["run-probe-cap"],
+          "description": "Present when status is skipped."
+        },
+        "evidenceBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "UTF-8 bytes of observations, excerpt text, command output and answer text."
+        },
+        "metrics": {
+          "type": "object",
+          "required": ["latencyMs", "transcriptCaptured"],
+          "additionalProperties": false,
+          "properties": {
+            "latencyMs": { "type": "integer", "minimum": 0 },
+            "inputTokens": { "type": "integer", "minimum": 0 },
+            "outputTokens": { "type": "integer", "minimum": 0 },
+            "transcriptCaptured": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}
