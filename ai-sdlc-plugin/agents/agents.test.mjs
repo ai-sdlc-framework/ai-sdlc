@@ -94,6 +94,8 @@ const agentFiles = [
   'correctness-reviewer.md',
   'review-executor.md',
   'review-executor-codex.md',
+  'review-planner.md',
+  'review-synthesizer.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const codexReviewerFiles = ['code-reviewer-codex.md', 'test-reviewer-codex.md'];
@@ -717,5 +719,107 @@ describe('review-executor: read-only, tool-restricted probe executor (staged rev
       const body = readFileSync(join(__dirname, file), 'utf-8');
       assert.ok(!/AISDLC-\d+/.test(body), `${file} must not carry an internal task id`);
     }
+  });
+});
+
+describe('staged review: review-planner and review-synthesizer', () => {
+  const stagedFiles = ['review-planner.md', 'review-synthesizer.md'];
+  const body = (file) => readFileSync(join(__dirname, file), 'utf-8');
+
+  it('both agent files exist', () => {
+    for (const file of stagedFiles) assert.ok(existsSync(join(__dirname, file)), `${file} exists`);
+  });
+
+  it('use a family alias for the default model, never a versioned id', () => {
+    for (const file of stagedFiles) {
+      assert.equal(agents[file].model, 'opus', `${file} default model`);
+      assert.ok(!/\d/.test(agents[file].model), `${file} model must not carry a version`);
+    }
+  });
+
+  it('are read-only: no Bash and no Edit available, Write only for transcripts', () => {
+    for (const file of stagedFiles) {
+      const { tools, disallowedTools } = agents[file];
+      assert.deepEqual(tools, ['Read', 'Grep', 'Glob', 'Write']);
+      for (const t of ['Bash', 'Edit', 'AgentTool']) {
+        assert.ok(disallowedTools.includes(t), `${file} must disallow ${t}`);
+      }
+      assert.ok(body(file).includes('.ai-sdlc/transcripts/'), `${file} writes transcripts only`);
+    }
+  });
+
+  it('declare mandatory transcript capture with an init step and a truncation record', () => {
+    for (const file of stagedFiles) {
+      const text = body(file);
+      assert.ok(text.includes('## Transcript Capture (MANDATORY)'), `${file} capture section`);
+      assert.ok(text.includes('prompt-received'), `${file} init event`);
+      assert.ok(text.includes('truncation-recorded'), `${file} truncation event`);
+      assert.ok(text.includes('UNKNOWN-'), `${file} unique unattributed id`);
+      assert.ok(text.includes('TRUNCATION RECORD'), `${file} truncation block`);
+    }
+  });
+
+  it('restate the output contract after the injection-hardening directive', () => {
+    for (const file of stagedFiles) {
+      const text = body(file);
+      assert.ok(text.includes('<<<UNTRUSTED_PR_DIFF>>>'), `${file} marker`);
+      assert.ok(
+        text.indexOf('## POST - Output Contract Restatement') > text.indexOf('## SYSTEM'),
+        `${file} restates the contract after the system directive`,
+      );
+      if (file === 'review-synthesizer.md') {
+        assert.ok(text.includes('promptInjectionDetected'), `${file} injection flag`);
+      } else {
+        // The planner emits a plan, not a verdict: it is told which hunks the screen flagged.
+        assert.ok(/flagged/i.test(text), `${file} names the hunks the injection screen flagged`);
+      }
+    }
+  });
+
+  it('carry no internal task id in adopter-visible text', () => {
+    for (const file of stagedFiles) {
+      assert.ok(!/AISDLC-\d+/.test(body(file)), `${file} must not name an internal task id`);
+    }
+  });
+
+  it('review-planner cannot drop baseline probes and caps run probes at two in total', () => {
+    const text = body('review-planner.md');
+    assert.ok(text.includes('cannot remove or alter one'));
+    assert.ok(text.includes('at most two `run` probes in total, baseline included'));
+    assert.ok(
+      text.includes('The prompt names the hunks the injection screen flagged'),
+      'planner is told about flagged hunks',
+    );
+  });
+
+  it('review-synthesizer requires evidence on every finding and treats refusals as uncovered', () => {
+    const text = body('review-synthesizer.md');
+    assert.ok(text.includes('"evidence"'));
+    assert.ok(text.includes('probeId'));
+    assert.ok(text.includes('UNCOVERED'));
+    assert.ok(text.includes('A refused baseline probe is a gap, not a pass'));
+    for (const remit of [
+      '## Remit 1: Bugs and Logic',
+      '## Remit 2: Tests',
+      '## Remit 3: Security',
+    ]) {
+      assert.ok(text.includes(remit), `${remit} stated in full`);
+    }
+  });
+
+  it('review-synthesizer never approves an uncovered high-risk hunk as clean', () => {
+    const text = body('review-synthesizer.md');
+    assert.ok(text.includes('do not approve an uncovered high-risk hunk as clean'));
+    assert.ok(
+      !text.includes(
+        '**When in doubt, approve with a suggestion rather than requesting changes.**',
+      ),
+    );
+  });
+
+  it('review-planner says the executor, not validation, enforces the run total', () => {
+    const text = body('review-planner.md');
+    assert.ok(text.includes('The executor enforces two run probes in total at run time'));
+    assert.ok(!text.includes('Validation enforces this'));
   });
 });

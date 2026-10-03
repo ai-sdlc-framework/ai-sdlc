@@ -28,6 +28,9 @@ export * from './review-plan/index.js';
 // Staged review: risk map (deterministic facts, structural facts, judgment request).
 export * from './review-risk-map/index.js';
 
+// Staged review: planner and synthesizer prompts, rank budgets, finding grounding.
+export * from './review-synth/index.js';
+
 // RFC-0015 Phase 1 — autonomous-pipeline orchestrator (AISDLC-169.1).
 export {
   buildOrchestratorStatus,
