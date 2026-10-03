@@ -478,6 +478,54 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     assert.equal(parsed.reason, 'no-instrumentable-changes');
     assert.deepEqual(parsed.changedCodeFiles, []);
   });
+
+  it('exits 0 when only the root vitest.shared.mjs and vitest.parent-watch.setup.mjs changed (AISDLC-681)', () => {
+    // The shared vitest preset and its worker setup file sit at the repo root,
+    // outside every package's src/, so no coverage report can contain them.
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    commitFile(repo, 'vitest.shared.mjs', 'export const preset = {};\n', 'test: add shared preset');
+    const head = commitFile(
+      repo,
+      'vitest.parent-watch.setup.mjs',
+      'export const watch = () => {};\n',
+      'test: add parent watch setup',
+    );
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 for the root vitest preset files, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.reason, 'no-instrumentable-changes');
+    assert.deepEqual(parsed.changedCodeFiles, []);
+  });
+
+  it('does not exclude an unrelated vitest.foo.mjs or a nested vitest.shared.mjs (AISDLC-681)', () => {
+    // The exclusion is exactly the two root filenames, anchored: no wildcard.
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    commitFile(
+      repo,
+      'vitest.foo.mjs',
+      'export const foo = 1;\n',
+      'test: add unrelated vitest file',
+    );
+    const head = commitFile(
+      repo,
+      'pkg/vitest.shared.mjs',
+      'export const nested = 1;\n',
+      'test: add nested shared file',
+    );
+    const r = runGate(repo, { base, head, json: true });
+    assert.notEqual(
+      r.status,
+      0,
+      `expected a non-zero exit (no coverage data) for non-excluded files\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const out = `${r.stdout}\n${r.stderr}`;
+    assert.match(out, /vitest\.foo\.mjs/);
+    assert.match(out, /pkg\/vitest\.shared\.mjs/);
+  });
 });
 
 // ── AC 4: failure with diagnostic when coverage data missing ─────────────────
