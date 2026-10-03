@@ -93,6 +93,7 @@ describe('completeTask', () => {
     const result = completeTask(boardDir, {
       taskId: 'AISDLC-701',
       outcome: 'success',
+      workerId: 'executor-a',
       prNumber: 42,
       prUrl: 'https://example.test/pull/42',
       followUpIds: ['AISDLC-701.1'],
@@ -128,6 +129,7 @@ describe('completeTask', () => {
     const result = completeTask(boardDir, {
       taskId: 'AISDLC-702',
       outcome: 'failed',
+      workerId: 'executor-a',
       cause: 'verification-failed',
     });
     expect(result.state).toBe('failed');
@@ -136,31 +138,32 @@ describe('completeTask', () => {
   });
 
   it('refuses bad input and a task that is not inflight', () => {
-    expect(() => completeTask(boardDir, { taskId: 'nope', outcome: 'success' })).toThrow(
-      /valid task id/,
-    );
-    expect(() => completeTask(boardDir, { taskId: 'AISDLC-1', outcome: 'meh' })).toThrow(/outcome/);
+    const w = 'executor-a';
     expect(() =>
-      completeTask(boardDir, { taskId: 'AISDLC-1', outcome: 'success', prNumber: 0 }),
+      completeTask(boardDir, { taskId: 'nope', outcome: 'success', workerId: w }),
+    ).toThrow(/valid task id/);
+    expect(() =>
+      completeTask(boardDir, { taskId: 'AISDLC-1', outcome: 'meh', workerId: w }),
+    ).toThrow(/outcome/);
+    expect(() =>
+      completeTask(boardDir, { taskId: 'AISDLC-1', outcome: 'success', prNumber: 0, workerId: w }),
     ).toThrow(/positive/);
     expect(() =>
       completeTask(boardDir, {
         taskId: 'AISDLC-1',
         outcome: 'success',
         followUpIds: ['AISDLC-2.1'],
+        workerId: w,
       }),
     ).toThrow(/not a sub-id/);
-    expect(() => completeTask(boardDir, { taskId: 'AISDLC-1', outcome: 'success' })).toThrow(
-      /not inflight/,
-    );
+    expect(() =>
+      completeTask(boardDir, { taskId: 'AISDLC-1', outcome: 'success', workerId: w }),
+    ).toThrow(/not inflight/);
   });
 
   it('refuses to complete a task that has no recorded claim holder', async () => {
     writeManifest(boardDir, mkManifest('AISDLC-703'));
     await cli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
-    expect(() => completeTask(boardDir, { taskId: 'AISDLC-703', outcome: 'success' })).toThrow(
-      /no recorded worker/,
-    );
     expect(() =>
       completeTask(boardDir, { taskId: 'AISDLC-703', outcome: 'success', workerId: 'w' }),
     ).toThrow(/no recorded worker/);
@@ -210,28 +213,56 @@ describe('completeTask', () => {
     expect(readInflightManifest(boardDir, 'AISDLC-704')?.workerId).toBe('executor-a');
   });
 
-  it('lets the claim holder complete, with or without repeating its name', async () => {
-    for (const [id, worker] of [
-      ['AISDLC-705', 'executor-a'],
-      ['AISDLC-706', undefined],
-    ] as const) {
-      writeManifest(boardDir, mkManifest(id));
-      await cli([
-        'claim',
-        '--board-dir',
-        boardDir,
-        '--worker-kind',
-        'in-session-agent',
-        '--worker',
-        'executor-a',
-      ]);
-      const result = completeTask(boardDir, {
-        taskId: id,
+  it('lets the claim holder complete when it passes its recorded name', async () => {
+    writeManifest(boardDir, mkManifest('AISDLC-705'));
+    await cli([
+      'claim',
+      '--board-dir',
+      boardDir,
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      'executor-a',
+    ]);
+    const result = completeTask(boardDir, {
+      taskId: 'AISDLC-705',
+      outcome: 'success',
+      workerId: 'executor-a',
+    });
+    expect(result.state).toBe('done');
+    expect(result.verdict.workerId).toBe('executor-a');
+  });
+
+  it('refuses a completion that omits the worker name, library and cli', async () => {
+    writeManifest(boardDir, mkManifest('AISDLC-706'));
+    await cli([
+      'claim',
+      '--board-dir',
+      boardDir,
+      '--worker-kind',
+      'in-session-agent',
+      '--worker',
+      'executor-a',
+    ]);
+    const inflightDir = path.join(boardDir, 'inflight');
+    const snapshot = (): Record<string, string> =>
+      Object.fromEntries(
+        readdirSync(inflightDir).map((f) => [f, readFileSync(path.join(inflightDir, f), 'utf-8')]),
+      );
+    const before = snapshot();
+    expect(() =>
+      completeTask(boardDir, {
+        taskId: 'AISDLC-706',
         outcome: 'success',
-        ...(worker ? { workerId: worker } : {}),
-      });
-      expect(result.state).toBe('done');
-      expect(result.verdict.workerId).toBe('executor-a');
+      } as unknown as Parameters<typeof completeTask>[1]),
+    ).toThrow(/claimed by 'executor-a', not 'undefined'/);
+    await expect(
+      cli(['complete', '--board-dir', boardDir, '--task-id', 'AISDLC-706', '--outcome', 'success']),
+    ).rejects.toThrow(/--worker is required/);
+    expect(snapshot()).toEqual(before);
+    for (const state of ['done', 'failed']) {
+      const dir = path.join(boardDir, state);
+      expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
     }
   });
 
@@ -259,6 +290,8 @@ describe('completeTask', () => {
       'AISDLC-704',
       '--outcome',
       'success',
+      '--worker',
+      'executor-b',
       '--pr',
       '9',
       '--follow-ups',
@@ -280,6 +313,8 @@ describe('completeTask', () => {
           'AISDLC-704',
           '--outcome',
           'success',
+          '--worker',
+          'executor-b',
         ])
       ).exit,
     ).toBe(1);
@@ -293,6 +328,8 @@ describe('completeTask', () => {
           'AISDLC-704',
           '--outcome',
           'success',
+          '--worker',
+          'executor-b',
           '--pr',
           'x',
         ])

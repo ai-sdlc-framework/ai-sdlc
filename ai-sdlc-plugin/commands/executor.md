@@ -195,14 +195,15 @@ in Step 4, and stop. Do not claim another task while blocked.
 
 ## Step 4 - Report the verdict
 
-Write the verdict and move the task off `inflight/` in one command. A `success`
-outcome lands in `done/`; every other outcome lands in `failed/`.
+Write the verdict and move the task off `inflight/` in one command. The outcomes
+`success` and `iterate-needed` land in `done/`; every other outcome lands in
+`failed/`.
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete \
   --board-dir "$BOARD_DIR" \
   --task-id "$TASK_ID" \
-  --outcome "<success|failed|blocked|quota-exhausted>" \
+  --outcome "<success|iterate-needed|failed|blocked|quota-exhausted>" \
   --worker "$MY_NAME" \
   --pr "<number, omit when none>" \
   --follow-ups "<comma-separated sub-ids, omit when none>" \
@@ -210,9 +211,12 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete \
   --notes "<one or two sentences>"
 ```
 
-`complete` refuses when the task is not inflight, or when `--worker` is not the
-name recorded on the task when it was claimed; it never rewrites that name. If it refuses,
-say so in the status line instead of retrying with different values.
+`--worker` is required. `complete` refuses when the task is not inflight, or when
+`--worker` is not the name recorded on the task when it was claimed; it never
+rewrites that name. The match guards against a mistake, such as a session
+completing the wrong task. It is not authentication: the recorded name is readable
+from the inflight manifest, so anyone who reads it can pass it. If `complete`
+refuses, say so in the status line instead of retrying with different values.
 
 ## Step 5 - Tell the dispatch session
 

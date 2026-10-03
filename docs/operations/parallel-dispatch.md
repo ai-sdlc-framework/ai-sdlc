@@ -468,12 +468,16 @@ One pass of the loop:
    again.
 3. **Execute.** It runs `/ai-sdlc execute <task-id>` with the task id and no other
    argument. The pipeline is not modified for executors.
-4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome> [--pr <n>]
-   [--follow-ups <ids>] [--decisions <ids>]` writes the verdict and removes the task
-   from `inflight/`. `success` lands in `done/`; every other outcome lands in
-   `failed/`. The verdict records the outcome, the pull request number, the
-   follow-up task ids and the decision ids raised. The command refuses when the task
-   is not inflight, and when a follow-up id is not a sub-id of the task.
+4. **Report.** `cli-dispatch complete --task-id <id> --outcome <outcome>
+   --worker <name> [--pr <n>] [--follow-ups <ids>] [--decisions <ids>]` writes the
+   verdict and removes the task from `inflight/`. `success` and `iterate-needed`
+   land in `done/`; every other outcome lands in `failed/`. The verdict records the
+   outcome, the pull request number, the follow-up task ids and the decision ids
+   raised. The command refuses when the task is not inflight, when a follow-up id
+   is not a sub-id of the task, and when `--worker` is missing or differs from the
+   name recorded at claim time. That match guards against a mistake (a session
+   completing the wrong task); it is not authentication, because the recorded name
+   is readable from the inflight manifest.
 5. **Tell the dispatch session.** One status line goes to the dispatch session:
    task, outcome, pull request, decision ids. It carries status only.
 6. **Stop.** The dispatch session sees the verdict, clears the executor's context and

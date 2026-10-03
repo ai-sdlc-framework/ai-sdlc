@@ -46,11 +46,12 @@
  *
  * Executor loop (RFC-0051 section 5):
  *
- *   - `complete --task-id <id> --outcome <enum> [--pr <number>]
+ *   - `complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>]
  *     [--follow-ups <ids>] [--decisions <ids>] [--pr-url <url>] [--notes <s>]`
  *     — write the verdict for the inflight task this executor holds and move
- *     it to done/ (success) or failed/. The worker name is the one recorded at
- *     claim time. Exits 1 when the task is not inflight.
+ *     it to done/ (success, iterate-needed) or failed/. --worker is required and
+ *     must equal the name recorded at claim time. Exits 1 when the task is not
+ *     inflight or the name differs.
  *   - `next-subid <task-id> [--work-dir <path>]` — print the first free
  *     `<task-id>.<n>` across backlog/, the board and open pull request file
  *     lists, as `{"subId":"..."}`.
@@ -355,6 +356,7 @@ export async function runDispatchCli(
     case 'complete': {
       const taskId = requireFlag(flags, 'task-id');
       const outcome = requireFlag(flags, 'outcome');
+      const workerId = requireFlag(flags, 'worker');
       const prRaw = flags['pr'];
       let prNumber: number | undefined;
       if (prRaw !== undefined) {
@@ -374,7 +376,7 @@ export async function runDispatchCli(
           decisionIds: splitIdList(flags['decisions']),
           ...(flags['notes'] ? { notes: flags['notes'] } : {}),
           ...(flags['cause'] ? { cause: flags['cause'] } : {}),
-          ...(flags['worker'] ? { workerId: flags['worker'] } : {}),
+          workerId,
         });
         out({ ok: true, path: result.verdictPath, state: result.state });
         return 0;
@@ -980,7 +982,7 @@ Subcommands:
   board [--json]
   unblock --task-id <id>
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
-  complete --task-id <id> --outcome <enum> [--pr <number>] [--pr-url <url>]
+  complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]
 

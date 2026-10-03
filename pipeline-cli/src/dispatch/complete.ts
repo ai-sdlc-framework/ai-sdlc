@@ -33,8 +33,8 @@ export interface CompleteOptions {
   decisionIds?: readonly string[];
   notes?: string;
   cause?: string;
-  /** Executor name; when given it must equal the name recorded at claim time. */
-  workerId?: string;
+  /** Executor name; must equal the name recorded at claim time. */
+  workerId: string;
   now?: () => Date;
 }
 
@@ -58,7 +58,7 @@ export function splitIdList(raw: string | undefined): string[] {
  * Write the verdict for a task this executor holds.
  * @throws when the task id or outcome is invalid, a follow-up id is not a
  *   sub-id of the task, the task is not inflight (nothing to complete), or the
- *   supplied worker is not the one that claimed it.
+ *   supplied worker name differs from the one recorded at claim time.
  */
 export function completeTask(boardDir: string, opts: CompleteOptions): CompleteResult {
   if (!TASK_ID_RE.test(opts.taskId)) {
@@ -80,18 +80,20 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   if (!inflight) {
     throw new Error(`${opts.taskId} is not inflight; there is nothing to complete`);
   }
-  // The caller must be the claim holder: a worker name is required on the
-  // manifest (claim records it), and a supplied name must match it. Never
-  // overwrite the recorded name.
+  // The supplied worker name must equal the name the claim recorded on the
+  // manifest, and a manifest with no recorded name is refused. This guards
+  // against completing the wrong task by mistake; it is not authentication,
+  // because the recorded name is readable from the inflight manifest. The
+  // recorded name is never overwritten.
   const workerId = inflight.workerId;
   if (!workerId) {
     throw new Error(
       `${opts.taskId} has no recorded worker, so its claim holder cannot be verified`,
     );
   }
-  if (opts.workerId !== undefined && opts.workerId !== workerId) {
+  if (opts.workerId !== workerId) {
     throw new Error(
-      `${opts.taskId} is claimed by '${workerId}', not '${opts.workerId}'; only the claim holder can complete it`,
+      `${opts.taskId} is claimed by '${workerId}', not '${opts.workerId}'; the worker name must match the one recorded at claim time`,
     );
   }
   const now = opts.now ?? (() => new Date());
