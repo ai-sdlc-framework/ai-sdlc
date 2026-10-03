@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateModelRouting } from './validation.js';
+import { validateModelRouting, validateResource } from './validation.js';
 
 const valid = {
   apiVersion: 'ai-sdlc.io/v1alpha1',
@@ -51,5 +51,25 @@ describe('ModelRouting schema', () => {
     expect(validateModelRouting(withCell({ previousModel: '' })).valid).toBe(false);
     expect(validateModelRouting(withCell({ previousModel: 'x'.repeat(201) })).valid).toBe(false);
     expect(validateModelRouting(withCell({ evidence: 5 })).valid).toBe(false);
+  });
+});
+
+describe('validateResource with a ModelRouting document', () => {
+  it('validates the table against its schema instead of skipping it as an unknown kind', () => {
+    const r = validateResource(valid);
+    expect(r.valid).toBe(true);
+    expect(r.skipped).toBeUndefined();
+  });
+
+  it('reports schema errors for an invalid table', () => {
+    const r = validateResource({ ...valid, spec: { cells: {} } });
+    expect(r.valid).toBe(false);
+    expect(r.skipped).toBeUndefined();
+    expect(r.errors?.length).toBeGreaterThan(0);
+  });
+
+  it('still skips a typo of the kind', () => {
+    const r = validateResource({ ...valid, kind: 'ModelRoutng' });
+    expect(r).toEqual({ valid: true, skipped: true });
   });
 });

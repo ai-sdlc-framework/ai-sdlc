@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateUsageConfig } from './validation.js';
+import { validateResource, validateUsageConfig } from './validation.js';
 
 const base = {
   apiVersion: 'ai-sdlc.io/v1alpha1',
@@ -50,5 +50,16 @@ describe('UsageConfig schema', () => {
     ['negative price', { ...base, spec: { plan: { monthlyPriceUsd: -1 } } }],
   ])('rejects %s', (_label, doc) => {
     expect(validateUsageConfig(doc).valid).toBe(false);
+  });
+});
+
+describe('validateResource with a UsageConfig document', () => {
+  it('validates against the usage config schema instead of skipping', () => {
+    const bad = validateResource({ ...base });
+    expect(bad.valid).toBe(false);
+    expect(bad.skipped).toBeUndefined();
+    const good = validateResource({ ...base, spec: {} });
+    expect(good.skipped).toBeUndefined();
+    expect(good.valid).toBe(validateUsageConfig({ ...base, spec: {} }).valid);
   });
 });
