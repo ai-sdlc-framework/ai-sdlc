@@ -2,8 +2,9 @@
 id: AISDLC-682
 title: >-
   Failure classifier heuristics: bound the input length and remove polynomial regular expressions (CodeQL high)
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - dispatch-executor-beta
 created_date: '2026-10-02'
 labels:
   - security
