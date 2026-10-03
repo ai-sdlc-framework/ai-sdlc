@@ -2,8 +2,9 @@
 id: AISDLC-657.3
 title: >-
   RFC-0050 follow-up: the adopter scaffold and runtime gitignore lists include .ai-sdlc/artifacts
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - dispatch-executor-gamma
 created_date: '2026-10-02'
 labels:
   - rfc-0050
