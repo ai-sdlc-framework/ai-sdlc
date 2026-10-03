@@ -49,8 +49,8 @@ phases 2 and 4; not introduced by either PR. Operator-filed 2026-10-02.
    alert id.
 
 ## Acceptance Criteria
-- [ ] Classification outputs on the existing fixture corpus are byte-identical before and after (snapshot test).
-- [ ] A 1 MiB pathological input classifies in under 100 ms.
+- [x] Classification outputs on the existing fixture corpus are byte-identical before and after (snapshot test).
+- [x] A 1 MiB pathological input classifies in under 100 ms.
 - [ ] No heuristic pattern in the file contains nested or overlapping unbounded quantifiers; CodeQL reports no polynomial-regex alert on the branch.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
