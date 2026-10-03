@@ -9,13 +9,13 @@ labels:
   - hooks
   - plugin
   - operations
-dependencies: []
+dependencies:
+  - AISDLC-666
 references:
   - ai-sdlc-plugin/hooks/deferred-coverage-check.js
   - ai-sdlc-plugin/hooks/deferred-coverage-check.test.mjs
   - vitest.parent-watch.setup.mjs
   - scripts/vitest-parent-death.test.mjs
-  - AISDLC-666
   - vitest.shared.mjs
 priority: high
 dispatchable: true
