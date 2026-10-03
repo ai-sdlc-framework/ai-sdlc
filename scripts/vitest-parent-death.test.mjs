@@ -96,6 +96,40 @@ describe('parent-watch setup file', () => {
       }
     }
   });
+
+  it('still kills an orphan when process.exit throws and uncaught errors are swallowed (vitest workers)', async () => {
+    const setup = join(REPO, 'vitest.parent-watch.setup.mjs');
+    // Mimics a vitest 3 worker: process.exit is replaced by a function that throws and the
+    // worker survives uncaught exceptions. A watchdog that calls process.exit(1) would be
+    // swallowed here and the orphan would live on; only a real signal ends it.
+    const body =
+      "process.exit=()=>{throw new Error('exit swallowed')};process.on('uncaughtException',()=>{});setInterval(()=>{},1000)";
+    const r = spawnSync(
+      'bash',
+      [
+        '-c',
+        'node --import "$1" -e "$2" >/dev/null 2>&1 & pid=$!; sleep 1; echo $pid',
+        'bash',
+        pathToFileURL(setup).href,
+        body,
+      ],
+      { encoding: 'utf-8' },
+    );
+    const pid = Number(r.stdout.trim());
+    try {
+      assert.ok(Number.isInteger(pid) && pid > 1);
+      assert.ok(
+        await waitFor(() => !alive(pid), 6000),
+        'orphan survived: watchdog relied on process.exit',
+      );
+    } finally {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* gone */
+      }
+    }
+  });
 });
 
 describe('vitest worker dies with its parent (SIGKILL)', { skip: !vitestBin }, () => {
