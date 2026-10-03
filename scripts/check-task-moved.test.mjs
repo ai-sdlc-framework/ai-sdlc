@@ -313,43 +313,214 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     assert.equal(headAfter, headBefore, 'HEAD must not change when no task ID matched');
   });
 
-  // ── (e) Multiple task IDs in push range ──────────────────────────────
+  // ── (e) Multiple task IDs in push range (AISDLC-683: exact-id selection) ──
 
-  it('(e) multiple task IDs in push range → single chore commit with all moves', () => {
-    // Commit 1: references AISDLC-901.
+  it('(e) multiple candidate ids and NO sentinel → nothing moves, ids printed', () => {
     writeTaskFile(root, 'AISDLC-901');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: first feature (AISDLC-901)'], root);
 
-    // Commit 2: references AISDLC-902.
     writeTaskFile(root, 'AISDLC-902');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: second feature (AISDLC-902)'], root);
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd, logPath } = installFakeCli(root);
+    const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+    assert.equal(
+      r.status,
+      0,
+      `expected 0 (ambiguous, nothing moved), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /AISDLC-901/);
+    assert.match(r.stderr, /AISDLC-902/);
+    assert.equal(existsSync(logPath), false, 'CLI must NOT run when the task is ambiguous');
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore, 'HEAD must not change');
+    assert.equal(
+      existsSync(join(root, 'backlog', 'tasks', 'aisdlc-901 - Test Task for AISDLC-901.md')),
+      true,
+    );
+    assert.equal(
+      existsSync(join(root, 'backlog', 'tasks', 'aisdlc-902 - Test Task for AISDLC-902.md')),
+      true,
+    );
+  });
+
+  it('(e2) .active-task sentinel selects the one task to close from several cited ids', () => {
+    writeTaskFile(root, 'AISDLC-901');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: first feature (AISDLC-901)'], root);
+
+    writeTaskFile(root, 'AISDLC-902');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: second feature (AISDLC-902)'], root);
+    writeFileSync(join(root, '.active-task'), 'AISDLC-902\n');
 
     const { cmd } = installFakeCli(root);
     const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
 
     assert.equal(r.status, 1, `expected 1 (chore commit), got ${r.status}: ${r.stderr}`);
-
-    // Both files must exist in completed/.
-    const filename1 = 'aisdlc-901 - Test Task for AISDLC-901.md';
-    const filename2 = 'aisdlc-902 - Test Task for AISDLC-902.md';
     assert.equal(
-      existsSync(join(root, 'backlog', 'completed', filename1)),
+      existsSync(join(root, 'backlog', 'completed', 'aisdlc-902 - Test Task for AISDLC-902.md')),
       true,
-      'AISDLC-901 must be in completed/',
+      'sentinel task must move',
     );
     assert.equal(
-      existsSync(join(root, 'backlog', 'completed', filename2)),
+      existsSync(join(root, 'backlog', 'tasks', 'aisdlc-901 - Test Task for AISDLC-901.md')),
       true,
-      'AISDLC-902 must be in completed/',
+      'other cited task must stay in tasks/',
     );
+    const subject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(subject, /^chore: auto-close AISDLC-902 /);
+    assert.doesNotMatch(subject, /AISDLC-901/);
+  });
 
-    // Single chore commit (not two separate ones).
-    const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(newSubject, /AISDLC-901/i, 'chore subject must reference AISDLC-901');
-    assert.match(newSubject, /AISDLC-902/i, 'chore subject must reference AISDLC-902');
-    assert.match(newSubject, /^chore: auto-close /, 'must start with chore: auto-close');
+  it('(e3) a sentinel that no commit subject cites does not close anything', () => {
+    writeTaskFile(root, 'AISDLC-901');
+    writeTaskFile(root, 'AISDLC-777');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: feature (AISDLC-901)'], root);
+    writeFileSync(join(root, '.active-task'), 'AISDLC-777\n');
+
+    const { cmd, logPath } = installFakeCli(root);
+    const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+    assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
+    assert.equal(existsSync(logPath), false, 'CLI must NOT run');
+  });
+
+  // ── AISDLC-683: umbrella / sub-task regression ───────────────────────
+
+  describe('umbrella tasks (AISDLC-683)', () => {
+    const f = (id) => `${id.toLowerCase()} - Test Task for ${id}.md`;
+
+    function seedUmbrella() {
+      writeTaskFile(root, 'AISDLC-656');
+      writeTaskFile(root, 'AISDLC-656.1');
+      writeTaskFile(root, 'AISDLC-656.2');
+      git(['add', '.'], root);
+    }
+
+    it('range citing (AISDLC-656) and (AISDLC-656.1) with sentinel 656.1 → only 656.1 moves', () => {
+      seedUmbrella();
+      git(['commit', '-q', '-m', 'feat: sub-task work for (AISDLC-656) (AISDLC-656.1)'], root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-656.1\n');
+
+      const { cmd } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
+      assert.equal(existsSync(join(root, 'backlog', 'completed', f('AISDLC-656.1'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656.2'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'completed', f('AISDLC-656'))), false);
+    });
+
+    it('656 + 656.1 cited with NO sentinel → the umbrella is dropped, only 656.1 moves (DEC-0028)', () => {
+      seedUmbrella();
+      git(['commit', '-q', '-m', 'feat: sub-task work for (AISDLC-656) (AISDLC-656.1)'], root);
+
+      const { cmd } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
+      assert.equal(existsSync(join(root, 'backlog', 'completed', f('AISDLC-656.1'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656.2'))), true);
+    });
+
+    it('656.1 + 656.2 cited with NO sentinel → siblings, neither is an ancestor → nothing moves', () => {
+      seedUmbrella();
+      git(['commit', '-q', '-m', 'feat: sub-task work (AISDLC-656.1) (AISDLC-656.2)'], root);
+      const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+      const { cmd, logPath } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /AISDLC-656\.1/);
+      assert.match(r.stderr, /AISDLC-656\.2/);
+      assert.equal(existsSync(logPath), false);
+      assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656.1'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656.2'))), true);
+    });
+
+    it('an id-less commit plus one task id → that task moves (DEC-0028)', () => {
+      writeTaskFile(root, 'AISDLC-910');
+      git(['add', '.'], root);
+      git(['commit', '-q', '-m', 'feat: the work (AISDLC-910)'], root);
+      writeFileSync(join(root, 'notes.txt'), 'lint\n');
+      git(['add', '.'], root);
+      git(['commit', '-q', '-m', 'fix: lint'], root);
+
+      const { cmd } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
+      assert.equal(existsSync(join(root, 'backlog', 'completed', f('AISDLC-910'))), true);
+    });
+
+    it('a chore id (AISDLC-133 / AISDLC-220) plus one task id → that task moves (DEC-0028)', () => {
+      writeTaskFile(root, 'AISDLC-911');
+      git(['add', '.'], root);
+      git(['commit', '-q', '-m', 'feat: the work (AISDLC-911)'], root);
+      writeFileSync(join(root, 'notes.txt'), 'sign\n');
+      git(['add', '.'], root);
+      git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-911 (AISDLC-133)'], root);
+
+      const { cmd } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
+      assert.equal(existsSync(join(root, 'backlog', 'completed', f('AISDLC-911'))), true);
+    });
+
+    it('range citing only (AISDLC-656) with children open → nothing moves, children printed', () => {
+      seedUmbrella();
+      git(['commit', '-q', '-m', 'docs: umbrella note (AISDLC-656)'], root);
+      const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+      const { cmd, logPath } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /aisdlc-656\.1 - /);
+      assert.match(r.stderr, /aisdlc-656\.2 - /);
+      assert.match(r.stderr, /open child/i);
+      assert.equal(existsSync(logPath), false, 'CLI must NOT run');
+      assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-656'))), true);
+    });
+
+    it('sentinel naming the umbrella does not close it while children are open', () => {
+      seedUmbrella();
+      git(['commit', '-q', '-m', 'docs: umbrella note (AISDLC-656)'], root);
+      writeFileSync(join(root, '.active-task'), 'AISDLC-656\n');
+
+      const { cmd, logPath } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /aisdlc-656\.1 - /);
+      assert.equal(existsSync(logPath), false);
+    });
+
+    it('a childless task with a matching citation still auto-closes (no regression)', () => {
+      writeTaskFile(root, 'AISDLC-656');
+      // A task whose id merely shares a prefix must not count as a child.
+      writeTaskFile(root, 'AISDLC-6560');
+      git(['add', '.'], root);
+      git(['commit', '-q', '-m', 'feat: standalone (AISDLC-656)'], root);
+
+      const { cmd } = installFakeCli(root);
+      const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+      assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
+      assert.equal(existsSync(join(root, 'backlog', 'completed', f('AISDLC-656'))), true);
+      assert.equal(existsSync(join(root, 'backlog', 'tasks', f('AISDLC-6560'))), true);
+    });
   });
 
   // ── (h) cli-task-complete failure path (AISDLC-220 robustness) ───────
@@ -454,10 +625,12 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'chore: seed (AISDLC-901 already done)'], root);
 
-    // AISDLC-902: still in tasks/ (external contributor path).
+    // AISDLC-902: still in tasks/ (external contributor path). The sentinel
+    // names it, so the also-cited AISDLC-901 is ignored (AISDLC-683).
     writeTaskFile(root, 'AISDLC-902');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: two tasks (AISDLC-901) (AISDLC-902)'], root);
+    writeFileSync(join(root, '.active-task'), 'AISDLC-902\n');
 
     const { cmd } = installFakeCli(root);
     const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
