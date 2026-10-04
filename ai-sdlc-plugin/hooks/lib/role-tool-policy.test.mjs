@@ -330,6 +330,69 @@ describe('decision mutations in a command', () => {
     }
   });
 
+  it('sees through command substitution before the subcommand, and inside substitutions', () => {
+    const refused = [
+      'node cli-decisions.mjs --work-dir "$(git rev-parse --show-toplevel)" resolve DEC-1 a',
+      'node cli-decisions.mjs --work-dir "$(pwd)" answer DEC-1 a',
+      'node cli-decisions.mjs --work-dir `pwd` override DEC-1 a',
+      'node cli-decisions.mjs --work-dir "$(cd "$(git rev-parse --show-toplevel)" && pwd)" answer D o',
+      'echo $(node cli-decisions.mjs answer D o)',
+      'echo "$(echo $(node cli-decisions.mjs resolve D))"',
+      'x=`node cli-decisions.mjs override D o`',
+      'node cli-decisions.mjs --work-dir "$(pwd" answer D o', // unbalanced: the rest is the span
+    ];
+    for (const command of refused) assert.ok(decisionMutationIn(command), command);
+    const allowed = [
+      'node cli-decisions.mjs escalate --task-id T-1 --source-worktree "$(pwd)" --summary s --option a:b',
+      'node cli-decisions.mjs list --work-dir "$(git rev-parse --show-toplevel)"',
+      'grep -n cli-decisions "$(pwd)/x"',
+      'echo "$(git rev-parse HEAD)" | grep cli-decisions',
+    ];
+    for (const command of allowed) assert.equal(decisionMutationIn(command), null, command);
+  });
+
+  it('recognises invocations behind reserved words, runners and quoted assignments', () => {
+    const cli = 'node ./pipeline-cli/bin/cli-decisions.mjs';
+    const shapes = (sub) => [
+      `timeout 120 ${cli} ${sub}`,
+      `stdbuf -oL ${cli} ${sub}`,
+      `setsid ${cli} ${sub}`,
+      `flock /tmp/f ${cli} ${sub}`,
+      `nice -n 5 ${cli} ${sub}`,
+      `if true; then ${cli} ${sub}; fi`,
+      `{ ${cli} ${sub}; }`,
+      `! ${cli} ${sub}`,
+      `for x in 1; do ${cli} ${sub}; done`,
+      `while false; do ${cli} ${sub}; done`,
+      `FOO="a b" ${cli} ${sub}`,
+      `FOO='a b' BAR=1 ${cli} ${sub}`,
+      `somewrapper --flag ${cli} ${sub}`,
+    ];
+    for (const sub of ['answer DEC-1 a', 'resolve DEC-1 a', 'override DEC-1 a']) {
+      for (const command of shapes(sub)) assert.ok(decisionMutationIn(command), command);
+    }
+    for (const sub of ['escalate --task-id T-1 --summary s --option a:b', 'list', 'show DEC-1']) {
+      for (const command of shapes(sub)) assert.equal(decisionMutationIn(command), null, command);
+    }
+    for (const command of [
+      'grep -n cli-decisions answer notes.md',
+      'rg cli-decisions resolve',
+      'cat pipeline-cli/bin/cli-decisions.mjs answer',
+      'echo cli-decisions answer',
+      'printf "%s" cli-decisions override',
+      'git grep -n cli-decisions answer',
+      'head -5 cli-decisions.mjs',
+    ]) {
+      assert.equal(decisionMutationIn(command), null, command);
+    }
+  });
+
+  it('the refusal text carries a runnable escalate example', () => {
+    const text = nextStep(DEFAULT_ROLE_BLOCKED_TOOLS.executor[1]);
+    assert.ok(text.includes('--source-worktree "$(pwd)"'), text);
+    assert.match(text, /cli-decisions escalate --task-id <your task id>/);
+  });
+
   it('lists the read-only subcommands in the narration from the same table', () => {
     const text = describeRule(DEFAULT_ROLE_BLOCKED_TOOLS.executor[1]);
     for (const sub of [
@@ -637,6 +700,19 @@ describe('evaluating rules', () => {
       ]) {
         assert.equal(run(command, c), undefined, command);
       }
+    });
+
+    it('caps the scanned length and scans many tokens in linear time', () => {
+      const started = Date.now();
+      const many = `backlog ${'task '.repeat(100000)}create x`;
+      run(many, held());
+      run(`${'backlog '.repeat(8000)}`, held());
+      assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
+      assert.equal(
+        run(`# ${'x'.repeat(70 * 1024)}\nbacklog task list`, held()),
+        'backlog-cli-create',
+      );
+      assert.equal(run('x'.repeat(70 * 1024), held()), undefined);
     });
 
     it('refuses even a --parent create when no task is held', () => {

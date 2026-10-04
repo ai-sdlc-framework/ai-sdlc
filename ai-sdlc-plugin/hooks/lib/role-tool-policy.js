@@ -180,6 +180,78 @@ function normalizeCommand(command) {
   return out.join('');
 }
 
+/** Stands in for a `$(...)` or backtick span inside its own segment, keeping argument positions. */
+const SUBSTITUTION_PLACEHOLDER = 'zzsubstzz';
+const MAX_SUBSTITUTION_DEPTH = 8;
+
+/**
+ * Splits `text` into the main text, with each `$(...)` / backtick span replaced by a
+ * placeholder, and the spans' contents. Parentheses nest. An unbalanced opener is
+ * replaced by the placeholder alone and the text after it stays in the main text.
+ */
+function splitSubstitutions(text) {
+  const n = text.length;
+  // Matching parenthesis for every `(` in one pass (a stack): linear, whatever the input.
+  const close = new Int32Array(n).fill(-1);
+  const stack = [];
+  for (let i = 0; i < n; i += 1) {
+    if (text[i] === '(') stack.push(i);
+    else if (text[i] === ')' && stack.length > 0) close[stack.pop()] = i;
+  }
+  const parts = [];
+  const spans = [];
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === '$' && text[i + 1] === '(') {
+      const end = close[i + 1];
+      parts.push(SUBSTITUTION_PLACEHOLDER);
+      if (end !== -1) {
+        spans.push(text.slice(i + 2, end));
+        i = end + 1;
+      } else {
+        // Unbalanced: only the opener is replaced; the rest stays in place, so a
+        // subcommand after it is still seen (and an unknown word there fails closed).
+        i += 2;
+      }
+    } else if (ch === '`') {
+      const next = text.indexOf('`', i + 1);
+      parts.push(SUBSTITUTION_PLACEHOLDER);
+      if (next === -1) {
+        i += 1;
+      } else {
+        spans.push(text.slice(i + 1, next));
+        i = next + 1;
+      }
+    } else {
+      parts.push(ch);
+      i += 1;
+    }
+  }
+  return { main: parts.join(''), spans };
+}
+
+/**
+ * The normalized command segments of a shell command: the main text with command
+ * substitutions replaced by a placeholder (so an argument keeps its position), plus
+ * every substitution's contents as additional segments, to a bounded depth.
+ */
+function commandSegments(command) {
+  const out = [];
+  const queue = [{ text: String(command), depth: 0 }];
+  while (queue.length > 0) {
+    const { text, depth } = queue.pop();
+    if (depth >= MAX_SUBSTITUTION_DEPTH) {
+      out.push(...splitSegments(normalizeCommand(text)));
+      continue;
+    }
+    const { main, spans } = splitSubstitutions(text);
+    out.push(...splitSegments(normalizeCommand(main)));
+    for (const span of spans) queue.push({ text: span, depth: depth + 1 });
+  }
+  return out;
+}
+
 /** Splits normalized text into segments on shell control operators. */
 function splitSegments(text) {
   return text
@@ -218,7 +290,7 @@ function firstPositional(tokens, from, pairs) {
 }
 
 /** Why a `cli-decisions` invocation (tokens after the CLI name) is refused, or null. */
-function decisionInvocationRefusal(tokens, from) {
+function decisionInvocationRefusal(tokens, from, lenient = false) {
   const pairs = firstPositional(tokens, from, true);
   const flags = firstPositional(tokens, from, false);
   // The flags model only matters when it lands on a real subcommand the pairs model
@@ -226,6 +298,8 @@ function decisionInvocationRefusal(tokens, from) {
   for (const found of [pairs, flags]) {
     if (found && found !== pairs && !DECISION_KNOWN.includes(found.token)) continue;
     if (!found) continue;
+    // Safety-net path (the command word was not recognised): only a real subcommand counts.
+    if (lenient && !DECISION_KNOWN.includes(found.token)) continue;
     const sub = found.token;
     if (DECISION_READ_ONLY.includes(sub) || sub === 'escalate') continue;
     if (sub === 'add') {
@@ -262,6 +336,63 @@ const RUNNER_WORDS = new Set([
   'command',
   'exec',
   'nice',
+  'timeout',
+  'gtimeout',
+  'stdbuf',
+  'setsid',
+  'ionice',
+  'chrt',
+  'flock',
+  'caffeinate',
+  'unbuffer',
+  'script',
+  'watch',
+  'strace',
+]);
+/** Shell reserved words and grouping tokens that may precede the command word. */
+const LEADING_RESERVED = new Set([
+  '{',
+  '}',
+  '!',
+  'if',
+  'then',
+  'else',
+  'elif',
+  'do',
+  'while',
+  'until',
+  'time',
+  'fi',
+  'done',
+  'esac',
+]);
+/** First words of commands that only read or move text/files: a mention is not an invocation. */
+const MENTION_WORDS = new Set([
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'cat',
+  'echo',
+  'printf',
+  'git',
+  'sed',
+  'awk',
+  'head',
+  'tail',
+  'less',
+  'ls',
+  'find',
+  'wc',
+  'bat',
+  'man',
+  'cp',
+  'mv',
+  'rm',
+  'stat',
+  'diff',
+  'cmp',
+  'chmod',
 ]);
 const NODE_WORDS = new Set(['node', 'nodejs', 'bun', 'deno']);
 const SHELL_WORDS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -274,31 +405,32 @@ const SHELL_WORDS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
  */
 function invocationPoint(tokens) {
   let c = 0;
-  while (c < tokens.length && /^[a-z_][a-z0-9_]*=/.test(tokens[c])) c += 1;
+  while (
+    c < tokens.length &&
+    (/^[a-z_][a-z0-9_]*=/.test(tokens[c]) || LEADING_RESERVED.has(tokens[c]))
+  ) {
+    c += 1;
+  }
   const word = tokens[c];
   if (word === undefined) return null;
   const base = word.split('/').pop();
   if (isDecisionsCli(word)) return c + 1;
   const rest = tokens.slice(c + 1);
-  const hasCli = (segmentTokens) => segmentTokens.some((t) => isDecisionsCli(t));
-  if (base === 'eval' || base === 'xargs') {
-    return tokens.some((t) => t.includes('cli-decisions')) ? 'indirect' : null;
-  }
+  const mentionsCli = tokens.some((t) => t.includes('cli-decisions'));
+  if (base === 'eval' || base === 'xargs') return mentionsCli ? 'indirect' : null;
   if (SHELL_WORDS.has(base)) {
-    const dashC = rest.some((t) => /^-[a-z]*c[a-z]*$/.test(t));
-    return dashC && tokens.some((t) => t.includes('cli-decisions')) ? 'indirect' : null;
+    return rest.some((t) => /^-[a-z]*c[a-z]*$/.test(t)) && mentionsCli ? 'indirect' : null;
   }
-  if (NODE_WORDS.has(base)) {
-    if (rest.some((t) => /^(-e|-p|--eval|--print)$/.test(t))) {
-      return tokens.some((t) => t.includes('cli-decisions')) ? 'indirect' : null;
-    }
-    const k = rest.findIndex((t) => isDecisionsCli(t));
-    return k === -1 ? null : c + 1 + k + 1;
+  if (NODE_WORDS.has(base) && rest.some((t) => /^(-e|-p|--eval|--print)$/.test(t))) {
+    return mentionsCli ? 'indirect' : null;
   }
-  if (RUNNER_WORDS.has(base) && hasCli(rest)) {
-    return c + 1 + rest.findIndex((t) => isDecisionsCli(t)) + 1;
-  }
-  return null;
+  // Node, runners and anything else: the first token that IS the CLI is the invocation,
+  // unless the command word is a known reader/mover of text (a mention).
+  const k = rest.findIndex((t) => isDecisionsCli(t));
+  if (k === -1) return null;
+  if (NODE_WORDS.has(base) || RUNNER_WORDS.has(base)) return c + 1 + k + 1;
+  if (MENTION_WORDS.has(base)) return null;
+  return { lenientAt: c + 1 + k + 1 }; // safety net: an unrecognised command word
 }
 
 /**
@@ -321,13 +453,16 @@ function decisionMutationIn(command) {
   const text = normalizeCommand(command);
   if (!text.includes('cli-decisions')) return null;
   if (command.length > MAX_SCANNED_COMMAND) return 'a command too long to inspect';
-  for (const segment of splitSegments(text)) {
+  for (const segment of commandSegments(command)) {
     if (!segment.includes('cli-decisions')) continue;
     const tokens = segment.split(/\s+/).filter(Boolean);
     const at = invocationPoint(tokens);
     if (at === null) continue;
     if (at === 'indirect') return 'an indirect invocation (sh -c, eval, xargs or node -e)';
-    const why = decisionInvocationRefusal(tokens, at);
+    const why =
+      typeof at === 'object'
+        ? decisionInvocationRefusal(tokens, at.lenientAt, true)
+        : decisionInvocationRefusal(tokens, at);
     if (why) return why;
   }
   return null;
@@ -426,7 +561,8 @@ const MATCHERS = Object.freeze({
   }),
   decisionMutation: Object.freeze({
     next:
-      'run `cli-decisions escalate --task-id <your task id> --summary <one line> --option <id>:<description>` ' +
+      'run `cli-decisions escalate --task-id <your task id> --source-worktree "$(pwd)" --summary <one line> ' +
+      '--option <id>:<description>` ' +
       'directly (not through sh -c, eval or xargs, and in a shorter command if it was long), then stop; ' +
       'your dispatch session or the planner answers the decision',
     text:
@@ -528,31 +664,49 @@ const MATCHERS = Object.freeze({
       typeof input.command === 'string' && normalizeCommand(input.command).includes('backlog'),
     test(input, ctx) {
       if (typeof input.command !== 'string') return null;
-      for (const segment of splitSegments(normalizeCommand(input.command))) {
+      if (input.command.length > MAX_SCANNED_COMMAND) {
+        return normalizeCommand(input.command).includes('backlog')
+          ? 'a command too long to inspect'
+          : null;
+      }
+      for (const segment of commandSegments(input.command)) {
+        if (!segment.includes('backlog')) continue;
         const tokens = segment.split(/\s+/).filter(Boolean);
+        // nextWord[i]: index of the first non-option token at or after i (one backward pass).
+        const nextWord = new Array(tokens.length + 1).fill(tokens.length);
+        for (let i = tokens.length - 1; i >= 0; i -= 1) {
+          nextWord[i] = tokens[i].startsWith('-') ? nextWord[i + 1] : i;
+        }
+        let parent;
+        for (let i = 0; i < tokens.length; i += 1) {
+          const t = tokens[i];
+          if (t.startsWith('--parent=')) parent = t.slice('--parent='.length);
+          else if ((t === '--parent' || t === '-p') && i + 1 < tokens.length)
+            parent = tokens[i + 1];
+        }
+        let creates = false;
         for (let k = 0; k < tokens.length; k += 1) {
           const bin = tokens[k].split('/').pop();
           if (bin !== 'backlog' && bin !== 'backlog.md') continue;
-          const words = tokens.slice(k + 1).filter((t) => !t.startsWith('-'));
-          const creates =
-            BACKLOG_CREATE_WORDS.has(words[0]) ||
-            (BACKLOG_TASK_WORDS.has(words[0]) && BACKLOG_CREATE_WORDS.has(words[1]));
-          if (!creates) continue;
-          let parent;
-          for (let i = k + 1; i < tokens.length; i += 1) {
-            const t = tokens[i];
-            if (t.startsWith('--parent=')) parent = t.slice('--parent='.length);
-            else if ((t === '--parent' || t === '-p') && i + 1 < tokens.length)
-              parent = tokens[i + 1];
+          const w0 = nextWord[k + 1];
+          const first = tokens[w0];
+          const second = tokens[nextWord[Math.min(w0 + 1, tokens.length)]];
+          if (
+            BACKLOG_CREATE_WORDS.has(first) ||
+            (BACKLOG_TASK_WORDS.has(first) && BACKLOG_CREATE_WORDS.has(second))
+          ) {
+            creates = true;
+            break;
           }
-          if (!parent) return 'a backlog create command without `--parent`';
-          const own = ownInflightTasks(ctx.boardDir, ctx.name);
-          if (!own || own.length === 0) {
-            return 'this session holds no claimed task, so a sub-task cannot be verified';
-          }
-          if (!own.some((t) => isUnderOwnTask(parent, t))) {
-            return `'${parent}' is not a task this session holds`;
-          }
+        }
+        if (!creates) continue;
+        if (!parent) return 'a backlog create command without `--parent`';
+        const own = ownInflightTasks(ctx.boardDir, ctx.name);
+        if (!own || own.length === 0) {
+          return 'this session holds no claimed task, so a sub-task cannot be verified';
+        }
+        if (!own.some((t) => isUnderOwnTask(parent, t))) {
+          return `'${parent}' is not a task this session holds`;
         }
       }
       return null;

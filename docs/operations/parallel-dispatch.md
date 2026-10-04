@@ -593,6 +593,10 @@ What is enforced is exactly this: the MCP create tools and Write/Edit/MultiEdit 
 enforced by tool matcher, and a differently cased path for a task file counts as a create. The Bash rules are pattern matchers and do not catch every
 way a shell can write a file or run a command.
 
+Enforcement needs the session's process to be named `claude` or `claude-code`: an install
+whose process reports itself as `node` (for example an npm-global one) is not enforced,
+and the hook prints a stderr diagnostic saying so.
+
 A refusal names the role, the rule, a next step the session can take itself (for example
 `cli-decisions escalate`, `cli-dispatch next-subid <task-id>` with `parentTaskId`, or
 `cli-dispatch claim`) and, failing that, escalation to its dispatch session; no refusal ends
