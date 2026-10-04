@@ -455,7 +455,7 @@ export const agentRoleSchema = {
           },
           uniqueItems: true,
           description:
-            'GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. Defaults to `mergeAuthors` when absent; empty means nobody (fail closed). Read only from the file as committed on main.',
+            'GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. REQUIRED and non-empty for the release path: there is no fallback to `mergeAuthors`, so removing or emptying it disables `--source-kind release` (kill switch). Read only from the file as committed on main.',
         },
         releaseMergeRoles: {
           type: 'array',
