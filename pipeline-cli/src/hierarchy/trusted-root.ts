@@ -39,7 +39,7 @@ export const runGit: GitRunner = (args, cwd) => {
   }
 };
 
-function safeReal(p: string): string {
+export function safeReal(p: string): string {
   try {
     return realpathSync(p);
   } catch {
@@ -90,4 +90,19 @@ export function trustedPolicyRoot(
   const cwdRoot = verifiedMainRoot(cwd, run);
   if (!cwdRoot || safeReal(cwdRoot) !== safeReal(projectRoot)) return null;
   return projectRoot;
+}
+
+/**
+ * The main checkout and its dispatch board, taken from git and not from any
+ * flag. The identity roster must be read from here: a path the caller chose is
+ * a path the caller can forge. Null when the checkout cannot be verified.
+ */
+export function resolveTrustedBoard(
+  cwd: string,
+  run: GitRunner = runGit,
+): { root: string; boardDir: string } | null {
+  const root = trustedPolicyRoot(cwd, cwd, run);
+  if (!root) return null;
+  const real = safeReal(root);
+  return { root: real, boardDir: path.join(real, '.ai-sdlc', 'dispatch') };
 }

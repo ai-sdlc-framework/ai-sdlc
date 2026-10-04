@@ -596,7 +596,10 @@ cli-hierarchy tick --worker <dispatch session name>
 The command identifies its caller instead of trusting `--worker`: it finds the nearest
 ancestor process that is a running roster entry and a claude process, and refuses,
 writing and sending nothing, unless that session has the `operator-dispatch` role.
-`--worker` is optional; when given it must equal the caller's own roster name. Every
+`--worker` is optional; when given it must equal the caller's own roster name. The
+roster is read from the main checkout's board, never from a path the caller passes: the
+command also refuses unless `--board-dir` and the working directory are the main
+checkout's. Every
 board write the loop makes carries that name. `cli-hierarchy clear` and
 `cli-hierarchy route-decision` apply the same check. The command prints, as JSON, what
 it did and what the session has to say.

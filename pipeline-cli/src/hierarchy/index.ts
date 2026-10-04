@@ -120,6 +120,8 @@ export {
 export { findStartedSession, readSessionRegistry } from './registry.js';
 export {
   mainCheckoutRoot,
+  resolveTrustedBoard,
+  safeReal,
   trustedPolicyRoot,
   verifiedMainRoot,
   type GitRunner,

@@ -13,7 +13,12 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { mainCheckoutRoot, trustedPolicyRoot, verifiedMainRoot } from './trusted-root.js';
+import {
+  mainCheckoutRoot,
+  resolveTrustedBoard,
+  trustedPolicyRoot,
+  verifiedMainRoot,
+} from './trusted-root.js';
 
 const require = createRequire(import.meta.url);
 const hookLib = require(
@@ -36,7 +41,11 @@ const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, {
     cwd,
     stdio: 'ignore',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' },
+    env: {
+      ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    },
   });
 
 function initRepo(dir: string): string {
@@ -125,5 +134,33 @@ describe('trustedPolicyRoot', () => {
     expect(trustedPolicyRoot(f.main!, f.symlinkedGit!)).toBeNull();
     const other = initRepo(path.join(tmp, 'other'));
     expect(trustedPolicyRoot(f.main!, other)).toBeNull();
+  });
+});
+
+describe('resolveTrustedBoard', () => {
+  it('names the main checkout board from the main checkout and from a worktree of it', () => {
+    const f = fixtures();
+    const expected = { root: f.main!, boardDir: path.join(f.main!, '.ai-sdlc', 'dispatch') };
+    expect(resolveTrustedBoard(f.main!)).toEqual(expected);
+    expect(resolveTrustedBoard(f.worktree!)).toEqual(expected);
+    expect(resolveTrustedBoard(f.subdir!)).toEqual(expected);
+  });
+
+  it('refuses a symlinked, bare or missing repository', () => {
+    const f = fixtures();
+    for (const label of ['symlinkedGit', 'bare', 'plain']) {
+      expect(resolveTrustedBoard(f[label]!), label).toBeNull();
+    }
+  });
+
+  it('never names a board inside a forged directory, whatever its .git file says', () => {
+    // A `.git` file pointing at the real repository resolves to the real main
+    // checkout (as in the hook); the forged directory itself is never the answer.
+    const f = fixtures();
+    const trusted = resolveTrustedBoard(f.forged!);
+    if (trusted !== null) {
+      expect(trusted.root).toBe(f.main);
+      expect(trusted.boardDir.startsWith(f.forged!)).toBe(false);
+    }
   });
 });

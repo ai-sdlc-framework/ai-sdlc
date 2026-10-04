@@ -64,9 +64,11 @@ import {
   hierarchyUp,
   loadOperationalPolicy,
   requireDispatchCaller,
+  resolveTrustedBoard,
   runDispatchTick,
   runPlaybook,
   SAFE_SESSION_NAME,
+  safeReal,
   systemResourceSnapshot,
   type AsyncCommandRunner,
   type CommandRunner,
@@ -225,6 +227,11 @@ export async function runHierarchyCli(
     };
     /** Replaces the roster and process lookups that identify the calling session (tests). */
     identity?: IdentityDeps;
+    /**
+     * Replaces the git lookup of the main checkout and its board (tests). When
+     * `identity` is injected without this, the board-location check is skipped.
+     */
+    trustedBoard?: { root: string; boardDir: string } | null;
     /** Replaces the git runner the unblocking playbook uses (tests). */
     gitRun?: CommandRunner | AsyncCommandRunner;
     /** Replaces the board enqueue (tests). */
@@ -248,12 +255,39 @@ export async function runHierarchyCli(
    * The caller must itself be the dispatch session; `--worker` is only checked
    * against that, never trusted. Runs before anything is read, written or sent.
    */
-  const dispatchCaller = (command: string) =>
-    requireDispatchCaller(
-      extras.identity ?? createSystemIdentity(deps.boardDir),
+  const dispatchCaller = (command: string): ReturnType<typeof requireDispatchCaller> => {
+    const label = `cli-hierarchy ${command}`;
+    const skipLocation = extras.identity !== undefined && extras.trustedBoard === undefined;
+    let identityBoard = deps.boardDir;
+    if (!skipLocation) {
+      // The roster that identifies the caller, the board it acts on and the
+      // repository it pushes to must all be the verified main checkout's: a
+      // path the caller picked is a path the caller can forge.
+      const trusted =
+        extras.trustedBoard !== undefined ? extras.trustedBoard : resolveTrustedBoard(deps.cwd);
+      if (!trusted) {
+        return { ok: false, reason: `${label}: refused; the main checkout could not be verified` };
+      }
+      if (safeReal(deps.boardDir) !== safeReal(trusted.boardDir)) {
+        return {
+          ok: false,
+          reason: `${label}: refused; --board-dir is not the main checkout's dispatch board`,
+        };
+      }
+      if (safeReal(path.resolve(flags['work-dir'] ?? deps.cwd)) !== safeReal(trusted.root)) {
+        return {
+          ok: false,
+          reason: `${label}: refused; the working directory is not the main checkout`,
+        };
+      }
+      identityBoard = trusted.boardDir;
+    }
+    return requireDispatchCaller(
+      extras.identity ?? createSystemIdentity(identityBoard),
       flags.worker,
-      `cli-hierarchy ${command}`,
+      label,
     );
+  };
 
   try {
     switch (subcommand) {

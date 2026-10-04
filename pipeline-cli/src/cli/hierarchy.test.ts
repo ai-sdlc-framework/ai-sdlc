@@ -460,6 +460,63 @@ describe('clear, tick and route-decision', () => {
     expect(boardListing()).toEqual(before);
   });
 
+  describe('board and repository location', () => {
+    const located = (boardDir: string, root: string) => ({
+      ...dispatchCaller,
+      trustedBoard: { boardDir, root },
+      lease,
+      operational: new Set<string>(),
+    });
+
+    it.each([
+      ['tick', ['tick', '--worker', 'operator-dispatch']],
+      ['clear', ['clear', 'executor-alpha', '--settle-ms', '0']],
+      [
+        'route-decision',
+        ['route-decision', '--decision-id', 'DEC-0001', '--route', 'design', '--to', 'planner'],
+      ],
+    ])(
+      '%s refuses a board, a work dir or an unverifiable checkout that is not the main checkout',
+      async (_label, argv) => {
+        seedBoardWithBrief();
+        const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+        const before = boardListing();
+        const events: unknown[] = [];
+        const board = path.join(tmp, 'dispatch');
+        const cases: [string, string[], ReturnType<typeof located> | undefined][] = [
+          ['board', argv, located(path.join(tmp, 'elsewhere', 'dispatch'), tmp)],
+          ['work dir', [...argv, '--work-dir', path.join(tmp, 'elsewhere')], located(board, tmp)],
+          ['unverified', argv, { ...located(board, tmp), trustedBoard: null as never }],
+        ];
+        for (const [label, args, extras] of cases) {
+          const code = await runHierarchyCli(
+            args,
+            overrides({ emit: (e) => events.push(e) }),
+            extras,
+          );
+          expect(code, label).toBe(1);
+          expect(String(err.mock.calls.at(-1)?.[0]), label).toContain('refused');
+        }
+        expect(calls).toEqual([]);
+        expect(events).toEqual([]);
+        expect(logs).toEqual([]);
+        expect(boardListing()).toEqual(before);
+      },
+    );
+
+    it('proceeds when the board and the working directory are the main checkout', async () => {
+      seedBoardWithBrief();
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const code = await runHierarchyCli(
+        ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+        overrides(),
+        { ...located(path.join(tmp, 'dispatch'), tmp), enqueue: () => [] },
+      );
+      expect(String(err.mock.calls.at(-1)?.[0] ?? '')).not.toContain('refused');
+      expect(code).toBeLessThan(2);
+    });
+  });
+
   it('tick refuses a --worker that is not the calling dispatch session own name', async () => {
     seedBoardWithBrief();
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);

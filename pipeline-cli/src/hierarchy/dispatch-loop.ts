@@ -35,7 +35,7 @@ import path from 'node:path';
 import { collectVerdicts, peekQueue, TASK_ID_RE } from '../dispatch/board.js';
 import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
-import { oneLine, sanitizeVerdict } from '../dispatch/verdict-fields.js';
+import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
 import type { ClearResult } from './clear.js';
 import type { PlaybookOutcome } from './playbook.js';
@@ -217,13 +217,14 @@ async function watchVerdicts(
     // from the checked copy: a hand-written verdict file never reaches the model,
     // the planner or a command line in its raw form.
     const { verdict, dropped } = sanitizeVerdict(raw);
+    const validTaskId = TASK_ID_RE.test(String(raw.taskId));
     const report: VerdictReport = {
-      taskId: TASK_ID_RE.test(String(raw.taskId)) ? raw.taskId : oneLine(String(raw.taskId), 40),
+      taskId: validTaskId ? raw.taskId : '(invalid task id)',
       state: verdictState,
       outcome: verdict.outcome,
       workerId: verdict.workerId,
       clear: { status: 'skipped', reason: 'the verdict was not written by a roster executor' },
-      ...(verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
+      ...(validTaskId && verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
       ...(dropped.length > 0 ? { rejectedFields: dropped } : {}),
     };
     if (executors.has(verdict.workerId)) {

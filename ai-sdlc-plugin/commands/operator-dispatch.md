@@ -134,7 +134,9 @@ The command checks who is calling, not what `--worker` says. It finds the neares
 ancestor process that is a running roster entry and a claude process, and exits
 non-zero, writing and sending nothing, unless that session has the
 `operator-dispatch` role. `--worker` is optional; when it is given it must also equal
-the caller's own roster name. `cli-hierarchy clear` and `cli-hierarchy route-decision`
+the caller's own roster name. The roster is read from the main checkout's board, never from a
+path the caller passes: the command also exits non-zero unless `--board-dir` and the
+working directory are the main checkout's. `cli-hierarchy clear` and `cli-hierarchy route-decision`
 run the same check, so `cli-hierarchy clear` is for this session only; a person outside
 the hierarchy empties a pane with tmux directly. Read the JSON; it has five parts.
 
@@ -181,7 +183,7 @@ event. A step the policy does not grant is refused and becomes an escalation.
 | --- | --- |
 | A mechanical conflict shape (test additions overlapping, prettier drift, lockfile regeneration, a `bin` list concatenation, or simply behind `main`) | Rebases the task branch onto `origin/main` and pushes with `--force-with-lease` to that branch only. A rebase that does not apply cleanly is aborted and escalated. |
 | CI stuck on a stale merge ref | Pushes an empty commit to the task branch. |
-| A transient failure (stale heartbeat, spawn rejected, quota exhausted) within the retry limit | Re-queues the task with `cli-dispatch requeue --task-id <id>`. Past the limit the task stays in `failed/` and is escalated. |
+| A transient failure (stale heartbeat, spawn rejected, quota exhausted) within the retry limit | Re-queues the task with `cli-dispatch requeue --task-id "<task-id>"`. Past the limit the task stays in `failed/` and is escalated. |
 | Anything else, including an unknown shape or no cause | Escalates to the planner with the task id and the failure. No git action is taken. |
 
 The playbook can push to a task's own branch and nowhere else. It refuses `main`,
@@ -218,11 +220,11 @@ verdict's notes.
   to park): you may answer it, within the operational list, with
   `node "$PIPELINE_CLI_BIN/cli-decisions.mjs" answer "<decision-id>" "<option-id>"`, then
   return the parked task to the queue with
-  `node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" unblock --task-id <id>`. Record it:
-  `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" route-decision --decision-id "<decision-id>" --route operational --to "$MY_NAME" --task-id <id> --worker "$MY_NAME"`.
+  `node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" unblock --task-id "<task-id>"`. Record it:
+  `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" route-decision --decision-id "<decision-id>" --route operational --to "$MY_NAME" --task-id "<task-id>" --worker "$MY_NAME"`.
 - **Route `design`, or any decision whose route you cannot read:** do not answer it.
   Message the planner with the decision id and the task id, then record it:
-  `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" route-decision --decision-id "<decision-id>" --route design --to "${PLANNER_NAME:-planner}" --task-id <id> --worker "$MY_NAME"`.
+  `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" route-decision --decision-id "<decision-id>" --route design --to "${PLANNER_NAME:-planner}" --task-id "<task-id>" --worker "$MY_NAME"`.
 
 Silence never resolves a decision downward: if the planner has not answered, leave it
 open and say so in the next progress report.

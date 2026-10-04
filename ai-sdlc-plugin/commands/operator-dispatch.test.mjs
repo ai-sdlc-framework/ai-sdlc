@@ -72,7 +72,7 @@ describe('operator-dispatch command', () => {
     assert.match(body, /--force-with-lease/);
     assert.match(body, /origin\/main/);
     assert.match(body, /empty commit/);
-    assert.match(body, /cli-dispatch requeue --task-id <id>/);
+    assert.match(body, /cli-dispatch requeue --task-id "<task-id>"/);
     assert.match(body, /Escalates to the planner/);
     assert.match(body, /operational list/);
     assert.match(body, /recorded as an\s+event/);
