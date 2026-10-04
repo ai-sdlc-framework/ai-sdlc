@@ -121,3 +121,38 @@ describe('resolveSessionRole', () => {
     assert.equal(found.sessions.length, 2);
   });
 });
+
+describe('onMismatch', () => {
+  it('reports a running entry whose matched pid is not claude, without changing the result', () => {
+    const boardDir = boardWith([entry('executor', 'executor-a', 50)]);
+    const seen = [];
+    const res = resolveSessionRole({
+      boardDir,
+      pids: [60, 50],
+      commOf: () => '/bin/zsh',
+      onMismatch: (info) => seen.push(info),
+    });
+    assert.equal(res, null);
+    assert.deepEqual(seen, [{ pid: 50, role: 'executor', name: 'executor-a', comm: '/bin/zsh' }]);
+  });
+
+  it('stays silent for a claude pid, a stale entry or no match, and survives a throwing callback', () => {
+    const seen = [];
+    const onMismatch = (info) => seen.push(info);
+    const running = boardWith([entry('executor', 'executor-a', 50)]);
+    resolveSessionRole({ boardDir: running, pids: [50], commOf: claude, onMismatch });
+    resolveSessionRole({ boardDir: running, pids: [49], commOf: () => 'zsh', onMismatch });
+    const stale = boardWith([entry('executor', 'executor-a', 50, 'stopped')]);
+    resolveSessionRole({ boardDir: stale, pids: [50], commOf: () => 'zsh', onMismatch });
+    assert.deepEqual(seen, []);
+    const res = resolveSessionRole({
+      boardDir: running,
+      pids: [50],
+      commOf: () => 'zsh',
+      onMismatch: () => {
+        throw new Error('boom');
+      },
+    });
+    assert.equal(res, null);
+  });
+});

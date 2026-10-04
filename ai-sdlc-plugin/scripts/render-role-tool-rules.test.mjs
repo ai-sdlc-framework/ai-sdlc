@@ -64,7 +64,10 @@ describe('render-role-tool-rules.mjs', () => {
   it('prints the same defaults when the policy has no roles section', () => {
     const res = render(project('role: coding-agent\ngoal: test\n'), '--role', 'executor');
     assert.equal(res.status, 0, res.stderr);
-    assert.match(res.stdout, /Never answer, resolve or override a decision/);
+    assert.match(
+      res.stdout,
+      /Every other subcommand, answer, resolve and override included, is refused/,
+    );
   });
 
   it('prints what the repo configured: an emptied list', () => {
@@ -91,7 +94,7 @@ describe('render-role-tool-rules.mjs', () => {
     const res = render(dir, '--role', 'executor');
     assert.equal(res.status, 0, res.stderr);
     assert.match(res.stdout, /- No recursive deletes\./);
-    assert.doesNotMatch(res.stdout, /Never answer, resolve or override/);
+    assert.doesNotMatch(res.stdout, /Every other subcommand, answer/);
   });
 
   it('shows the strict defaults, not an empty list, for a malformed override', () => {

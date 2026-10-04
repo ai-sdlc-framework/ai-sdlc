@@ -29,6 +29,7 @@ const {
   decideForSession,
   defaultRoleBlockedTools,
   describeRule,
+  nextStep,
   firstRefusal,
   loadRoleBlockedTools,
   readPolicyText,
@@ -58,10 +59,16 @@ function yamlWith(roleBlock) {
 }
 
 describe('defaults', () => {
-  it('give the executor the three strict rules and the other roles none', () => {
+  it('give the executor the strict rules and the other roles none', () => {
     const resolved = resolveRoleBlockedTools(null);
     assert.deepEqual(ROLES.slice().sort(), ['executor', 'operator-dispatch', 'planner']);
-    assert.deepEqual(DEFAULT_IDS, ['message-non-dispatch', 'decision-mutation', 'top-level-task']);
+    assert.deepEqual(DEFAULT_IDS, [
+      'message-non-dispatch',
+      'decision-mutation',
+      'top-level-task',
+      'new-task-file',
+      'backlog-cli-create',
+    ]);
     assert.deepEqual(ids(resolved.executor), DEFAULT_IDS);
     assert.deepEqual(resolved['operator-dispatch'], []);
     assert.deepEqual(resolved.planner, []);
@@ -232,6 +239,128 @@ describe('decision mutations in a command', () => {
     });
   }
 
+  const refusedSubs = {
+    'unknown subcommand': 'node cli-decisions.mjs frobnicate DEC-1',
+    'auto-expire': 'node cli-decisions.mjs auto-expire',
+    extend: 'node cli-decisions.mjs extend DEC-1 --timebox 2h',
+    'fatigue set': 'node cli-decisions.mjs fatigue set',
+    'fatigue status': 'node cli-decisions.mjs fatigue status',
+    'score-c --auto-apply': 'node cli-decisions.mjs score-c DEC-0001 --auto-apply',
+    'score-c --store': 'node cli-decisions.mjs score-c DEC-0001 --store',
+    'plain score-c': 'node cli-decisions.mjs score-c DEC-0001',
+    'score-a --store': 'node cli-decisions.mjs score-a DEC-0001 --store',
+    'exemplars write': 'node cli-decisions.mjs exemplars promote x',
+    'bare exemplars': 'node cli-decisions.mjs exemplars',
+    corpus: 'node cli-decisions.mjs corpus aggregate',
+    'add --timebox': 'node cli-decisions.mjs add --summary s --scope x --option a:b --timebox 2h',
+    'add --timebox-hours=2':
+      'node cli-decisions.mjs add --summary s --option a:b --timebox-hours=2',
+    'add --timeboxHours': 'node cli-decisions.mjs add --summary s --timeboxHours 2',
+    'add --autonomous-fallback': 'node cli-decisions.mjs add --summary s --autonomous-fallback a',
+    'add --autonomous-fallback=a': 'node cli-decisions.mjs add --summary s --autonomous-fallback=a',
+  };
+  for (const [label, command] of Object.entries(refusedSubs)) {
+    it(`refuses: ${label}`, () => {
+      assert.ok(decisionMutationIn(command), command);
+    });
+  }
+
+  const permittedSubs = {
+    escalate: 'node cli-decisions.mjs escalate --task-id T-1 --summary s --option a:b',
+    'plain add': 'node cli-decisions.mjs add --summary s --scope x --option a:b',
+    list: 'node cli-decisions.mjs list',
+    show: 'node cli-decisions.mjs show DEC-0001',
+    'log-path': 'node cli-decisions.mjs log-path',
+    graph: 'node cli-decisions.mjs graph DEC-0001',
+    coverage: 'node cli-decisions.mjs coverage',
+    research: 'node cli-decisions.mjs research DEC-0001',
+    summary: 'node cli-decisions.mjs summary DEC-0001',
+    'exemplars list': 'node cli-decisions.mjs exemplars list',
+    'work-dir before a read': 'node cli-decisions.mjs --work-dir . list',
+    'no subcommand': 'node cli-decisions.mjs --help',
+    'path only': 'git add pipeline-cli/bin/cli-decisions.mjs',
+    'grep mention': 'grep -n "cli-decisions answer" docs/notes.md',
+    'cat mention': 'cat pipeline-cli/bin/cli-decisions.mjs answer',
+    'rg mention': 'rg cli-decisions resolve pipeline-cli',
+    'echo mention': 'echo cli-decisions answer',
+    'git grep mention': 'git grep -n cli-decisions override',
+    'sed mention': 'sed -n 1,5p cli-decisions.mjs answer',
+    'git commit message mention': 'git commit -m "document cli-decisions answer"',
+  };
+  for (const [label, command] of Object.entries(permittedSubs)) {
+    it(`permits: ${label}`, () => {
+      assert.equal(decisionMutationIn(command), null, command);
+    });
+  }
+
+  const invocationRefused = {
+    'sh -c': 'sh -c "node cli-decisions.mjs answer D o"',
+    'bash -c': "bash -c 'cli-decisions resolve D'",
+    'zsh -c': 'zsh -c "node pipeline-cli/bin/cli-decisions.mjs override D o"',
+    'bash -lc': 'bash -lc "cli-decisions answer D o"',
+    eval: 'eval "node cli-decisions.mjs answer D o"',
+    xargs: 'echo D | xargs node cli-decisions.mjs answer',
+    'node -e': "node -e \"require('child_process').execSync('cli-decisions answer D o')\"",
+    'chained after echo': 'echo ok && node ./pipeline-cli/bin/cli-decisions.mjs resolve x',
+    'env prefixed': 'FOO=1 node ./pipeline-cli/bin/cli-decisions.mjs answer D o',
+    'pnpm cli-decisions': 'pnpm cli-decisions answer D o',
+    'env runner': 'env FOO=1 node cli-decisions.mjs answer D o',
+    'node args before the script': 'node --no-warnings cli-decisions.mjs answer D o',
+    'obfuscated invocation': 'n"o"de cli-\\decisions${X}.mjs  answer D o',
+    'IFS obfuscated': 'FOO=1${IFS}node${IFS}cli-decisions.mjs${IFS}override D o',
+  };
+  for (const [label, command] of Object.entries(invocationRefused)) {
+    it(`refuses an invocation: ${label}`, () => {
+      assert.ok(decisionMutationIn(command), command);
+    });
+  }
+
+  it('allows invocations the allowlist permits, in every invocation form', () => {
+    for (const command of [
+      'FOO=1 node ./pipeline-cli/bin/cli-decisions.mjs list',
+      'pnpm exec cli-decisions escalate --task-id T-1 --summary s --option a:b',
+      'npx cli-decisions show DEC-0001',
+      'pnpm cli-decisions list',
+      'cli-decisions add --summary s --option a:b',
+      'echo ok && node cli-decisions.mjs list',
+      'sh -c "echo hello"',
+      'xargs echo',
+    ]) {
+      assert.equal(decisionMutationIn(command), null, command);
+    }
+  });
+
+  it('lists the read-only subcommands in the narration from the same table', () => {
+    const text = describeRule(DEFAULT_ROLE_BLOCKED_TOOLS.executor[1]);
+    for (const sub of [
+      'escalate',
+      'list',
+      'show',
+      'log-path',
+      'graph',
+      'coverage',
+      'research',
+      'summary',
+    ]) {
+      assert.ok(text.includes(`\`${sub}\``), sub);
+    }
+  });
+
+  it('scans adversarial input in linear time and refuses an over-long mention', () => {
+    const started = Date.now();
+    decisionMutationIn('${'.repeat(300000) + ' node cli-decisions.mjs list');
+    decisionMutationIn('$' + '{IFS'.repeat(100000));
+    decisionMutationIn('${'.repeat(20000) + ' ; node cli-decisions.mjs answer D o');
+    assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
+    // Within the cap an answer behind noise is still found; past it any mention is refused.
+    assert.ok(decisionMutationIn('${'.repeat(20000) + ' ; node cli-decisions.mjs answer D o'));
+    assert.match(
+      decisionMutationIn('# ' + 'x'.repeat(70 * 1024) + '\nnode cli-decisions.mjs list'),
+      /too long to inspect/,
+    );
+    assert.equal(decisionMutationIn('x'.repeat(70 * 1024)), null);
+  });
+
   it('returns null for a non-string command', () => {
     assert.equal(decisionMutationIn(undefined), null);
     assert.equal(decisionMutationIn({ command: 'x' }), null);
@@ -302,47 +431,220 @@ describe('evaluating rules', () => {
     assert.equal(refusal('Read', { file_path: '/x' }), null);
   });
 
-  it('refuses a top-level task and allows a sub-task, for either create tool', () => {
-    for (const tool of ['mcp__backlog__task_create', 'mcp__plugin_ai-sdlc_ai-sdlc__task_create']) {
-      for (const input of [
-        { title: 'x' },
-        { id: 'AISDLC-900', title: 'x' },
-        { id: 'AISDLC-900', parentTaskId: 'AISDLC-684', title: 'x' },
-        { parentTaskId: 'not a task id', title: 'x' },
-      ]) {
-        assert.equal(
-          refusal(tool, input)?.rule.id,
-          'top-level-task',
-          `${tool} ${JSON.stringify(input)}`,
-        );
-      }
-      assert.equal(refusal(tool, { id: 'AISDLC-684.1', title: 'x' }), null);
-      assert.equal(refusal(tool, { id: 'AISDLC-684.1.2', title: 'x' }), null);
-      assert.equal(refusal(tool, { parentTaskId: 'AISDLC-684', title: 'x' }), null);
-    }
-    assert.equal(refusal('mcp__backlog__task_edit', { id: 'AISDLC-900' }), null);
-  });
-
-  it('checks a sub-task against the tasks this session holds when the board records them', () => {
+  /** A board where `worker` holds the given tasks. */
+  function boardHolding(worker, taskIds) {
     const board = tmp('role-policy-board-');
     mkdirSync(join(board, 'inflight'), { recursive: true });
-    const manifest = (taskId, workerId) =>
+    for (const taskId of taskIds) {
       writeFileSync(
         join(board, 'inflight', `${taskId}.dispatch.json`),
-        JSON.stringify({ schemaVersion: 'v1', taskId, workerId }),
+        JSON.stringify({ schemaVersion: 'v1', taskId, workerId: worker }),
       );
-    manifest('AISDLC-684', 'executor-alpha');
-    manifest('AISDLC-700', 'executor-beta');
+    }
     writeFileSync(join(board, 'inflight', 'broken.dispatch.json'), '{not json');
-    const c = ctx(board);
-    const tool = 'mcp__backlog__task_create';
-    assert.equal(refusal(tool, { id: 'AISDLC-684.3', title: 'x' }, c), null);
-    assert.equal(refusal(tool, { id: 'AISDLC-684.3.1', title: 'x' }, c), null);
-    assert.equal(refusal(tool, { parentTaskId: '684', title: 'x' }, c), null);
-    const other = refusal(tool, { id: 'AISDLC-700.1', title: 'x' }, c);
-    assert.equal(other?.rule.id, 'top-level-task');
-    assert.match(other.detail, /not a task this session holds/);
-    assert.equal(refusal(tool, { id: 'AISDLC-999.1', title: 'x' }, c)?.rule.id, 'top-level-task');
+    return board;
+  }
+
+  const PLUGIN = 'mcp__plugin_ai-sdlc_ai-sdlc__task_create';
+  const BACKLOG = 'mcp__backlog__task_create';
+
+  it('binds the identifying field to the task_create tool family', () => {
+    const c = ctx(boardHolding('executor-alpha', ['AISDLC-684', 'AISDLC-700']));
+    const refused = (tool, input) => refusal(tool, input, c)?.rule.id;
+    // Backlog family: parentTaskId under an own task, and NO id key at all.
+    assert.equal(refused(BACKLOG, { parentTaskId: 'AISDLC-684', title: 'x' }), undefined);
+    assert.equal(refused(BACKLOG, { parentTaskId: '684', title: 'x' }), undefined);
+    assert.equal(refused(BACKLOG, { id: 'AISDLC-684.1', title: 'x' }), 'top-level-task');
+    assert.equal(
+      refused(BACKLOG, { id: 'AISDLC-684.1', parentTaskId: 'AISDLC-684', title: 'x' }),
+      'top-level-task',
+    );
+    assert.equal(refused(BACKLOG, { title: 'x' }), 'top-level-task');
+    assert.equal(refused(BACKLOG, { parentTaskId: 'AISDLC-999', title: 'x' }), 'top-level-task');
+    assert.equal(refused(BACKLOG, { parentTaskId: 'not a task id' }), 'top-level-task');
+    assert.equal(
+      refused('mcp__backlog-ent__task_create', { id: 'AISDLC-684.1' }),
+      'top-level-task',
+    );
+    assert.equal(
+      refused('mcp__backlog-io__task_create', { parentTaskId: 'AISDLC-684' }),
+      undefined,
+    );
+    // Plugin tool: a sub-task id under an own task.
+    assert.equal(refused(PLUGIN, { id: 'AISDLC-684.1', title: 'x' }), undefined);
+    assert.equal(refused(PLUGIN, { id: 'AISDLC-684.3.1', title: 'x' }), undefined);
+    assert.equal(refused(PLUGIN, { id: 'AISDLC-900', title: 'x' }), 'top-level-task');
+    assert.equal(refused(PLUGIN, { parentTaskId: 'AISDLC-684', title: 'x' }), 'top-level-task');
+    assert.equal(refused(PLUGIN, { id: 'AISDLC-700.1' }), undefined);
+    assert.equal(refused(PLUGIN, { id: 'AISDLC-999.1' }), 'top-level-task');
+    assert.equal(refused('mcp__backlog__task_edit', { id: 'AISDLC-900' }), undefined);
+  });
+
+  it('refuses every create call when the session holds no claimed task', () => {
+    for (const board of ['/nonexistent', boardHolding('executor-beta', ['AISDLC-684'])]) {
+      const c = ctx(board);
+      assert.equal(refusal(BACKLOG, { parentTaskId: 'AISDLC-684' }, c)?.rule.id, 'top-level-task');
+      assert.equal(refusal(PLUGIN, { id: 'AISDLC-684.1' }, c)?.rule.id, 'top-level-task');
+      assert.match(refusal(PLUGIN, { id: 'AISDLC-684.1' }, c).detail, /holds no claimed task/);
+    }
+  });
+
+  it('refusal text tells each tool family how to file a sub-task', () => {
+    const text = describeRule(DEFAULT_ROLE_BLOCKED_TOOLS.executor[2]);
+    assert.match(text, /plugin `task_create` pass a sub-task id/);
+    assert.match(text, /`parentTaskId`[^.]*no `id`/);
+  });
+
+  describe('new task files', () => {
+    const write = (tool, file, c, extra = {}) =>
+      refusal(tool, { file_path: file, ...extra }, c)?.rule.id;
+
+    function projectWithTask() {
+      const root = tmp('role-policy-files-');
+      mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
+      mkdirSync(join(root, 'backlog', 'drafts'), { recursive: true });
+      mkdirSync(join(root, 'backlog', 'completed'), { recursive: true });
+      writeFileSync(join(root, 'backlog', 'tasks', 'aisdlc-684 - existing.md'), 'x');
+      return root;
+    }
+
+    it('refuses a new top-level task file and allows editing an existing one', () => {
+      const root = projectWithTask();
+      const c = {
+        ...ctx(boardHolding('executor-alpha', ['AISDLC-684'])),
+        projectDir: root,
+        cwd: root,
+      };
+      for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+        assert.equal(
+          write(tool, join(root, 'backlog', 'tasks', 'aisdlc-901 - new.md'), c),
+          'new-task-file',
+          tool,
+        );
+        // Editing an existing task file keeps working (status, notes, criteria).
+        assert.equal(
+          write(tool, join(root, 'backlog', 'tasks', 'aisdlc-684 - existing.md'), c),
+          undefined,
+        );
+      }
+    });
+
+    it('allows a new sub-task file under a held task only', () => {
+      const root = projectWithTask();
+      const c = {
+        ...ctx(boardHolding('executor-alpha', ['AISDLC-684'])),
+        projectDir: root,
+        cwd: root,
+      };
+      assert.equal(
+        write('Write', join(root, 'backlog', 'tasks', 'aisdlc-684.2 - child.md'), c),
+        undefined,
+      );
+      assert.equal(
+        write('Write', join(root, 'backlog', 'drafts', 'aisdlc-684.3 - child.md'), c),
+        undefined,
+      );
+      assert.equal(
+        write('Write', join(root, 'backlog', 'tasks', 'aisdlc-999.1 - other.md'), c),
+        'new-task-file',
+      );
+      assert.equal(write('Write', join(root, 'backlog', 'drafts', 'notes.md'), c), 'new-task-file');
+    });
+
+    it('refuses a new task file when the session holds no claim', () => {
+      const root = projectWithTask();
+      const c = { ...ctx('/nonexistent'), projectDir: root, cwd: root };
+      assert.equal(
+        write('Write', join(root, 'backlog', 'tasks', 'aisdlc-684.2 - child.md'), c),
+        'new-task-file',
+      );
+    });
+
+    it('handles relative paths, .. segments and case, and ignores other directories', () => {
+      const root = projectWithTask();
+      const c = {
+        ...ctx(boardHolding('executor-alpha', ['AISDLC-684'])),
+        projectDir: root,
+        cwd: root,
+      };
+      assert.equal(write('Write', 'backlog/tasks/aisdlc-901 - new.md', c), 'new-task-file');
+      assert.equal(
+        write('Write', './backlog/../backlog/tasks/aisdlc-901 - new.md', c),
+        'new-task-file',
+      );
+      assert.equal(write('Write', 'src/../backlog/tasks/aisdlc-901 - new.md', c), 'new-task-file');
+      assert.equal(write('Write', 'BACKLOG/Tasks/AISDLC-901 - new.md', c), 'new-task-file');
+      assert.equal(write('Write', 'backlog/tasks/aisdlc-684 - existing.md', c), undefined);
+      assert.equal(write('Write', 'backlog/completed/aisdlc-901 - done.md', c), undefined);
+      assert.equal(write('Write', 'src/notes.md', c), undefined);
+      assert.equal(
+        write(
+          'Write',
+          join(root, '.worktrees', 'aisdlc-684', 'backlog', 'tasks', 'aisdlc-902 - n.md'),
+          c,
+        ),
+        'new-task-file',
+      );
+      assert.equal(refusal('Write', { content: 'no path' }, c), null);
+    });
+  });
+
+  it('treats a differently cased path as a create, never as the existing file', () => {
+    const root = tmp('role-policy-case-');
+    mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(root, 'backlog', 'tasks', 'aisdlc-684 - existing.md'), 'x');
+    const c = {
+      ...ctx(boardHolding('executor-alpha', ['AISDLC-684'])),
+      projectDir: root,
+      cwd: root,
+    };
+    const hit = (file) => refusal('Write', { file_path: file }, c)?.rule.id;
+    assert.equal(hit('backlog/tasks/aisdlc-684 - existing.md'), undefined);
+    assert.equal(hit('backlog/tasks/AISDLC-684 - Existing.md'), 'new-task-file');
+    assert.equal(hit('Backlog/Tasks/aisdlc-684 - existing.md'), 'new-task-file');
+  });
+
+  describe('backlog CLI creates', () => {
+    const run = (command, c) => refusal('Bash', { command }, c)?.rule.id;
+    const held = () => ctx(boardHolding('executor-alpha', ['AISDLC-684']));
+
+    it('refuses a create without --parent under a held task', () => {
+      const c = held();
+      for (const command of [
+        'backlog task create "x"',
+        'backlog task new "x"',
+        'backlog create "x"',
+        'backlog draft create "x"',
+        'npx backlog.md task create "x"',
+        'cd x && BACKLOG=1 backlog tasks create x',
+        'backlog task create x --parent AISDLC-999',
+        'backlog task create x --parent=AISDLC-999',
+        'backlog task create x -p 999',
+      ]) {
+        assert.equal(run(command, c), 'backlog-cli-create', command);
+      }
+    });
+
+    it('allows a create with --parent under a held task, and other backlog commands', () => {
+      const c = held();
+      for (const command of [
+        'backlog task create "x" --parent AISDLC-684',
+        'backlog task create "x" --parent=aisdlc-684',
+        'backlog task new x -p AISDLC-684',
+        'backlog task edit 684 --status "In Progress"',
+        'backlog task list',
+        'git status',
+      ]) {
+        assert.equal(run(command, c), undefined, command);
+      }
+    });
+
+    it('refuses even a --parent create when no task is held', () => {
+      assert.equal(
+        run('backlog task create x --parent AISDLC-684', ctx('/nonexistent')),
+        'backlog-cli-create',
+      );
+    });
   });
 
   it('applies repo rules: argument contains (case and quoting tolerant) and blanket tool', () => {
@@ -399,7 +701,7 @@ describe('narration and refusal text', () => {
       assert.equal(text.split(describeRule(r)).length - 1, 1, r.id);
     }
     assert.match(text, /governance\.roles\.executor\.blockedTools/);
-    assert.match(text, /ask the dispatch session/);
+    assert.match(text, /escalate to your dispatch session/);
   });
 
   it('renders a notice for an empty list and uses a repo rule reason', () => {
@@ -414,7 +716,7 @@ describe('narration and refusal text', () => {
     ).planner;
     assert.equal(describeRule(custom), 'no fetching');
     assert.match(renderRoleToolRules('planner', [custom]), /- no fetching/);
-    assert.match(renderRoleToolRules('planner', [custom]), /ask the operator/);
+    assert.match(renderRoleToolRules('planner', [custom]), /cli-decisions escalate/);
   });
 
   it('names the role, the rule and the escalation path in a refusal', () => {
@@ -432,9 +734,12 @@ describe('narration and refusal text', () => {
     const message = refusalMessage('executor', hit);
     assert.match(message, /the executor role/);
     assert.match(message, /decision-mutation/);
-    assert.match(message, /Never answer, resolve or override a decision/);
+    assert.match(
+      message,
+      /Every other subcommand, answer, resolve and override included, is refused/,
+    );
     assert.match(message, /cli-decisions answer/);
-    assert.match(message, /ask the dispatch session/);
+    assert.match(message, /escalate to your dispatch session/);
   });
 });
 
@@ -558,5 +863,160 @@ describe('failing closed for an executor', () => {
       'governance:\n  roles:\n    executor:\n      blockedTools: [\n',
     );
     assert.deepEqual(ids(resolved.executor), DEFAULT_IDS);
+  });
+});
+
+describe('a linked worktree whose main checkout cannot be verified', () => {
+  const relaxed = yamlWith('    executor:\n      blockedTools: []\n');
+
+  it('does not read its own copy: the strict defaults apply (git dir differs from common dir)', () => {
+    const dir = tmp('role-policy-wt-');
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), relaxed);
+    // main root unverifiable (common dir is not `<root>/.git`), git dir differs from common dir
+    const run = (args) =>
+      args.includes('--git-dir') ? '/elsewhere/.git/worktrees/x' : '/elsewhere/other';
+    assert.equal(readPolicyText(dir, run), '');
+    assert.deepEqual(ids(loadRoleBlockedTools(dir, run).executor), DEFAULT_IDS);
+  });
+
+  it('does not read its own copy when `.git` is a file', () => {
+    const dir = tmp('role-policy-wt-');
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), relaxed);
+    writeFileSync(join(dir, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n');
+    assert.equal(
+      readPolicyText(dir, () => null),
+      '',
+    );
+  });
+
+  it('keeps reading the project copy for a directory that is not a linked worktree', () => {
+    const dir = tmp('role-policy-wt-');
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), relaxed);
+    assert.equal(
+      readPolicyText(dir, () => null),
+      relaxed,
+    );
+    const same = (args) => (args.includes('--git-dir') ? '.git' : '.git');
+    assert.equal(readPolicyText(dir, same), relaxed);
+  });
+});
+
+describe('every refusal names a next step the agent can take itself', () => {
+  const NEXT_STEP =
+    /(escalate to your dispatch session|escalate to the planner session|cli-decisions escalate)/;
+  // "operator" is fine only as part of the session name operator-dispatch.
+  const OPERATOR_TARGET = /\boperator(?!-dispatch)\b/i;
+
+  function holding(worker, taskIds) {
+    const board = tmp('role-policy-scan-');
+    mkdirSync(join(board, 'inflight'), { recursive: true });
+    for (const t of taskIds) {
+      writeFileSync(
+        join(board, 'inflight', `${t}.dispatch.json`),
+        JSON.stringify({ schemaVersion: 'v1', taskId: t, workerId: worker }),
+      );
+    }
+    return board;
+  }
+
+  it('across every default rule and matcher outcome, and every role', () => {
+    const root = tmp('role-policy-scan-root-');
+    mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
+    const held = holding('executor-alpha', ['AISDLC-684']);
+    const base = {
+      role: 'executor',
+      name: 'executor-alpha',
+      dispatchName: 'operator-dispatch',
+      projectDir: root,
+      cwd: root,
+    };
+    const withBoard = (boardDir, extra = {}) => ({ ...base, boardDir, ...extra });
+    const file = (name) => join(root, 'backlog', 'tasks', name);
+    const PLUGIN = 'mcp__plugin_ai-sdlc_ai-sdlc__task_create';
+    const BACKLOG = 'mcp__backlog__task_create';
+    const calls = [
+      ['SendMessage', { to: 'executor-beta' }, withBoard(held)],
+      ['SendMessage', {}, withBoard(held)],
+      ['SendMessage', { to: 'x' }, withBoard(held, { dispatchName: null })],
+      ['Bash', { command: 'node cli-decisions.mjs answer D o' }, withBoard(held)],
+      ['Bash', { command: 'node cli-decisions.mjs frobnicate' }, withBoard(held)],
+      ['Bash', { command: 'node cli-decisions.mjs add --summary s --timebox 2h' }, withBoard(held)],
+      ['Bash', { command: 'sh -c "cli-decisions answer D o"' }, withBoard(held)],
+      ['Bash', { command: '# ' + 'x'.repeat(70000) + '\ncli-decisions list' }, withBoard(held)],
+      [PLUGIN, { id: 'AISDLC-900' }, withBoard(held)],
+      [PLUGIN, { id: 'AISDLC-999.1' }, withBoard(held)],
+      [PLUGIN, { id: 'AISDLC-684.1' }, withBoard('/nonexistent')],
+      [BACKLOG, { id: 'AISDLC-684.1' }, withBoard(held)],
+      [BACKLOG, { title: 'x' }, withBoard(held)],
+      [BACKLOG, { parentTaskId: 'AISDLC-999' }, withBoard(held)],
+      [BACKLOG, { parentTaskId: 'AISDLC-684' }, withBoard('/nonexistent')],
+      ['Write', { file_path: file('aisdlc-901 - n.md') }, withBoard(held)],
+      ['Write', { file_path: file('aisdlc-999.1 - n.md') }, withBoard(held)],
+      ['Write', { file_path: file('aisdlc-684.1 - n.md') }, withBoard('/nonexistent')],
+      ['Bash', { command: 'backlog task create x' }, withBoard(held)],
+      ['Bash', { command: 'backlog task create x --parent AISDLC-999' }, withBoard(held)],
+      ['Bash', { command: 'backlog task create x --parent AISDLC-684' }, withBoard('/nonexistent')],
+    ];
+    const messages = [];
+    for (const [tool, input, c] of calls) {
+      const hit = firstRefusal(DEFAULT_ROLE_BLOCKED_TOOLS.executor, tool, input, c);
+      assert.ok(hit, `expected a refusal for ${tool} ${JSON.stringify(input).slice(0, 60)}`);
+      messages.push(refusalMessage('executor', hit));
+    }
+    // Fail-closed policy errors, for the executor.
+    const boom = () => {
+      throw new Error('x');
+    };
+    const executor = { role: 'executor', name: 'n', dispatchName: 'd' };
+    const throwing = {
+      get command() {
+        throw new Error('y');
+      },
+    };
+    messages.push(decideForSession(executor, boom, 'Bash', throwing, '/x'));
+    messages.push(decideForSession(executor, boom, 'SendMessage', { to: 'p' }, '/x'));
+    // Repo rules for every role (a custom argument rule and a blanket tool rule).
+    const custom = resolveRoleBlockedTools(
+      [
+        'governance:',
+        '  roles:',
+        '    planner:',
+        '      blockedTools:',
+        '        - tool: Bash',
+        '          argument: command',
+        '          contains: x',
+        '        - tool: WebFetch',
+        '',
+      ].join('\n'),
+    ).planner;
+    for (const role of ROLES) {
+      for (const [tool, input] of [
+        ['Bash', { command: 'x' }],
+        ['WebFetch', {}],
+      ]) {
+        const hit = firstRefusal(custom, tool, input, { ...base, role, boardDir: held });
+        messages.push(refusalMessage(role, hit));
+      }
+    }
+    for (const message of messages) {
+      assert.match(message, NEXT_STEP, message);
+      assert.doesNotMatch(message, OPERATOR_TARGET, message);
+    }
+    // The rendered narration, for every role, ends in a self-service step too.
+    for (const role of ROLES) {
+      const rules = DEFAULT_ROLE_BLOCKED_TOOLS[role].length
+        ? DEFAULT_ROLE_BLOCKED_TOOLS[role]
+        : custom;
+      const text = renderRoleToolRules(role, rules);
+      assert.match(text, NEXT_STEP);
+      assert.doesNotMatch(text, OPERATOR_TARGET);
+    }
+    // Each default rule's own next step names a command or a status line to dispatch.
+    for (const r of DEFAULT_ROLE_BLOCKED_TOOLS.executor) {
+      assert.match(nextStep(r), /(`cli-[a-z-]+ |`backlog |send your one status line)/, r.id);
+    }
   });
 });

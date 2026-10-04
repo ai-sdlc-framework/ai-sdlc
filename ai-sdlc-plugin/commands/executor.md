@@ -29,7 +29,8 @@ the dispatch session issues again after it clears your context.
 What this role may do with messages, decisions and task ids is policy, not prose.
 A PreToolUse hook enforces it and Step 1 prints the rules, rendered from the same
 resolved policy, so what you read is what is refused. A refused call names its
-rule: do not retry it in another spelling, ask the dispatch session instead.
+rule and the next step to take: do not retry it in another spelling, take that step or
+escalate to your dispatch session instead.
 
 1. **Never edit an RFC's Open Questions.** Never write a resolution marker, never
    reword a question into an answer, never decide one because the answer looks
@@ -176,7 +177,8 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" next-subid "$TASK_ID" --board-dir "$BO
 
 The command prints the first `<task-id>.<n>` that is free in the backlog, on the
 board and in open pull requests' file lists. Use exactly that id, and record it for
-Step 4.
+Step 4. How the sub-task is filed depends on the task tool in use; the tool rules
+printed in Step 1 say how for each.
 
 ### When you are blocked
 

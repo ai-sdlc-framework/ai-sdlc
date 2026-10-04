@@ -565,24 +565,46 @@ process's ancestors.
 
 ### Role tool rules
 
-What an executor may not do with messages, decisions and task ids is enforced, not
-just asked for. A `PreToolUse` hook (`enforce-role-tools`) identifies the session the
-same way the clear hook does (the nearest running roster entry among the hook's
-ancestor processes, and only when that process is a claude process) and refuses a
-call that matches a rule for the session's role. By default an executor is refused:
+What an executor may not do with messages, decisions and task creation is checked by
+a hook, not just asked for. A `PreToolUse` hook (`enforce-role-tools`) identifies the
+session the same way the clear hook does (the nearest running roster entry among the
+hook's ancestor processes, and only when that process is a claude process) and
+refuses a call that matches a rule for the session's role. By default an executor is
+refused:
 
 - `SendMessage` to anyone but the dispatch session named in the roster;
-- `cli-decisions answer`, `resolve` and `override` through Bash (quoting, env
-  prefixes, chained commands, subshells and path variants included);
-- a top-level `task_create` (a sub-task of a task the session holds is allowed).
+- any `cli-decisions` subcommand outside an allowlist: `escalate`, `add` (never with
+  `--autonomous-fallback`, `--timebox` or `--timebox-hours`) and the read-only
+  `list`, `show`, `log-path`, `graph`, `coverage`, `research`, `summary` and
+  `exemplars list`; `answer`, `resolve`, `override`, `auto-expire`, `extend`,
+  `fatigue`, `score-a`, `score-c` and any unknown subcommand are refused;
+- a `task_create` call that is not a sub-task of a task the session has claimed. The
+  plugin's `task_create` must carry a sub-task id (`<task-id>.<n>`); any other
+  `task_create` tool (the backlog server, which assigns ids itself) must carry
+  `parentTaskId` set to a claimed task and no `id` key at all. A session with no
+  claimed task is refused;
+- Write, Edit or MultiEdit that creates a new file under `backlog/tasks/` or
+  `backlog/drafts/` unless its id is a sub-task of a claimed task (an existing file
+  is an edit and is allowed);
+- `backlog task create` (also `task new`, `create`, `draft create`) without
+  `--parent <claimed task>`.
 
-A refusal names the role, the rule and the way out: ask the dispatch session. A
+What is enforced is exactly this: the MCP create tools and Write/Edit/MultiEdit are
+enforced by tool matcher, and a differently cased path for a task file counts as a create. The Bash rules are pattern matchers and do not catch every
+way a shell can write a file or run a command.
+
+A refusal names the role, the rule, a next step the session can take itself (for example
+`cli-decisions escalate`, `cli-dispatch next-subid <task-id>` with `parentTaskId`, or
+`cli-dispatch claim`) and, failing that, escalation to its dispatch session; no refusal ends
+in a human-only exit. A
 session that is not in a hierarchy (no roster) or whose role cannot be resolved (no
-matching entry, a stale entry, a pid that is not a claude process) is treated as the
-operator and is never blocked; the hook spawns nothing at all when there is no
-roster. Once a session resolves to the executor the hook fails closed: an unreadable
-or invalid policy, or an error while evaluating a rule, applies the strict executor
-defaults (it never relaxes them), and a call that cannot be evaluated is refused.
+matching entry, a stale entry, a pid that is not a claude process; the last case also
+prints a one-line stderr diagnostic) is treated as the operator and is never
+blocked; the hook spawns nothing at all when there is no roster. Once a session
+resolves to the executor the hook fails closed: an unreadable or invalid policy, or
+an error while evaluating a rule, applies the strict executor defaults (it never
+relaxes them), and a call that cannot be evaluated is refused. A `cli-decisions`
+command longer than 64 KB is refused.
 
 A repo changes the list under `spec.governance.roles.<role>.blockedTools` in
 `.ai-sdlc/agent-role.yaml`:
@@ -602,11 +624,12 @@ governance:
 ```
 
 `blockedTools: []` disables that role's tool blocks. A non-empty list replaces the role's defaults. Each entry names a `tool` (exact, or
-with `*` wildcards) and optionally a built-in `match` (`notDispatchRecipient`,
-`decisionMutation`, `topLevelTask`) or an `argument` with `contains`, which refuses a
+with `*` wildcards, or several joined with `|`) and optionally a built-in `match` (`notDispatchRecipient`,
+`decisionMutation`, `topLevelTask`, `newTaskFile`, `backlogCliCreate`) or an `argument` with `contains`, which refuses a
 call whose named argument contains the text. A malformed list is ignored and the
 role's defaults apply; malformed input never relaxes a rule. The policy is read from
-the main checkout's copy when it can be verified, so a worktree copy cannot relax it.
+the main checkout's copy when it can be verified, so a worktree copy cannot relax it;
+a linked worktree whose main checkout cannot be verified gets the strict defaults.
 The executor skill prints the resolved rules at the start of each pass
 (`render-role-tool-rules.mjs --role executor`), rendered from the same policy.
 
@@ -621,8 +644,8 @@ and for any session whose role cannot be resolved.
 
 ### Follow-up task ids
 
-An executor never files a top-level task id. A follow-up it discovers is filed as a
-sub-id of its own task. `cli-dispatch next-subid <task-id>` prints the first
+A follow-up an executor discovers is filed as a sub-id of its own task (the role
+rules above refuse the task tools' other forms; see the qualification there). `cli-dispatch next-subid <task-id>` prints the first
 `<task-id>.<n>` that is free in all three places a sub-id can already exist:
 
 - `backlog/` (task files, open and completed),
@@ -633,7 +656,8 @@ sub-id of its own task. `cli-dispatch next-subid <task-id>` prints the first
 ### Rules an executor keeps
 
 - It never messages another executor.
-- It never answers a decision, its own or another task's.
+- It does not answer decisions, its own or another task's (the hook refuses the
+  `cli-decisions` subcommands outside its allowlist).
 - It never edits an RFC's Open Questions.
 - When it is blocked, it records the question with `cli-decisions escalate` and
   stops. The routing of that decision to the dispatch session or the planner is a

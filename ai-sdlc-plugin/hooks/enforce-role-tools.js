@@ -120,7 +120,17 @@ function main() {
   }
   if (!candidates) return;
 
-  const session = resolveSessionRole({ boardDir, pids: ancestorPids() });
+  const session = resolveSessionRole({
+    boardDir,
+    pids: ancestorPids(),
+    onMismatch: ({ pid, role, name, comm }) =>
+      process.stderr.write(
+        `[ai-sdlc] role tool rules NOT enforced: roster entry '${name}' (${role}) matches pid ${pid}, ` +
+          `but that process is '${String(comm)
+            .replace(/[^\x20-\x7e]/g, '?')
+            .slice(0, 64)}', not claude\n`,
+      ),
+  });
   if (!session) return; // unresolved role: treated as the operator
 
   const message = decideForSession(
@@ -129,6 +139,7 @@ function main() {
     toolName,
     toolInput,
     boardDir,
+    { projectDir, cwd: typeof input.cwd === 'string' ? input.cwd : undefined },
   );
   if (message) deny(message);
 }

@@ -369,8 +369,13 @@ spec:
   role is refused by the `enforce-role-tools` PreToolUse hook (roles: `executor`,
   `operator-dispatch`, `planner`; each entry is a `tool` name, exact or with `*`
   wildcards, plus an optional built-in `match` or an `argument` + `contains` pair).
-  Only the executor has defaults: no `SendMessage` to anyone but the dispatch session,
-  no `cli-decisions answer|resolve|override`, no top-level `task_create`. A non-empty
+  Only the executor has defaults: `SendMessage` only to the dispatch session, a
+  `cli-decisions` subcommand allowlist (`escalate`, `add` without autonomous-fallback
+  or timebox flags, and the read-only subcommands), and sub-task-only creation
+  through the `task_create` tools, Write/Edit/MultiEdit of new task files and
+  `backlog task create`. The MCP create tools and Write/Edit/MultiEdit are enforced by
+  tool matcher; the Bash rules are pattern matchers and do not catch every way a
+  shell can write a file. A non-empty
   list replaces the role's defaults, `blockedTools: []` disables that role's tool
   blocks, and a malformed list is ignored (defaults apply). The policy is read from the verified main checkout's copy
   when available. A session whose role cannot be resolved from the roster is treated

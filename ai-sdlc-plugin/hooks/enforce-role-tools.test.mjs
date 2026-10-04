@@ -140,7 +140,8 @@ function assertDenied(res, ruleId) {
   assert.match(reason, /^Blocked by AI-SDLC governance policy: /);
   assert.match(reason, /the executor role/);
   assert.match(reason, new RegExp(`rule ${ruleId}`));
-  assert.match(reason, /ask the dispatch session/);
+  assert.match(reason, /escalate to your dispatch session/);
+  assert.match(reason, /Next step: /);
 }
 
 function assertAllowed(res) {
@@ -228,7 +229,8 @@ describe('an executor session', () => {
     );
   });
 
-  it('may file a sub-task under its own task', () => {
+  /** A project where executor-alpha holds AISDLC-684 and a task file exists for it. */
+  function projectHolding() {
     const dir = project();
     const inflight = join(dir, '.ai-sdlc', 'dispatch', 'inflight');
     mkdirSync(inflight, { recursive: true });
@@ -236,16 +238,99 @@ describe('an executor session', () => {
       join(inflight, 'AISDLC-684.dispatch.json'),
       JSON.stringify({ schemaVersion: 'v1', taskId: 'AISDLC-684', workerId: 'executor-alpha' }),
     );
-    const tool = 'mcp__backlog__task_create';
+    mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(dir, 'backlog', 'tasks', 'aisdlc-684 - existing.md'), 'x');
+    return dir;
+  }
+
+  it('may file a sub-task under its own task, each tool family its own way', () => {
+    const dir = projectHolding();
+    const plugin = 'mcp__plugin_ai-sdlc_ai-sdlc__task_create';
+    const backlog = 'mcp__backlog__task_create';
     assertAllowed(
-      run(dir, { sessions: asExecutor, tool, input: { id: 'AISDLC-684.1', title: 't' } }),
+      run(dir, { sessions: asExecutor, tool: plugin, input: { id: 'AISDLC-684.1', title: 't' } }),
     );
     assertAllowed(
-      run(dir, { sessions: asExecutor, tool, input: { parentTaskId: 'AISDLC-684', title: 't' } }),
+      run(dir, {
+        sessions: asExecutor,
+        tool: backlog,
+        input: { parentTaskId: 'AISDLC-684', title: 't' },
+      }),
+    );
+    // A bare id on the backlog server's tool is refused: the server assigns ids itself.
+    assertDenied(
+      run(dir, { sessions: asExecutor, tool: backlog, input: { id: 'AISDLC-684.1', title: 't' } }),
+      'top-level-task',
     );
     assertDenied(
-      run(dir, { sessions: asExecutor, tool, input: { id: 'AISDLC-999.1', title: 't' } }),
+      run(dir, { sessions: asExecutor, tool: plugin, input: { id: 'AISDLC-999.1', title: 't' } }),
       'top-level-task',
+    );
+  });
+
+  it('is denied a new task file but may edit an existing one', () => {
+    const dir = projectHolding();
+    const fresh = join(dir, 'backlog', 'tasks', 'aisdlc-901 - new.md');
+    const child = join(dir, 'backlog', 'tasks', 'aisdlc-684.1 - child.md');
+    const existing = join(dir, 'backlog', 'tasks', 'aisdlc-684 - existing.md');
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+      assertDenied(
+        run(dir, { sessions: asExecutor, tool, input: { file_path: fresh } }),
+        'new-task-file',
+      );
+      assertAllowed(run(dir, { sessions: asExecutor, tool, input: { file_path: existing } }));
+    }
+    assertAllowed(run(dir, { sessions: asExecutor, tool: 'Write', input: { file_path: child } }));
+    assertDenied(
+      run(dir, {
+        sessions: asExecutor,
+        tool: 'Write',
+        input: { file_path: 'backlog/../backlog/tasks/aisdlc-902 - n.md' },
+      }),
+      'new-task-file',
+    );
+  });
+
+  it('is denied a backlog create without --parent under its own task', () => {
+    const dir = projectHolding();
+    assertDenied(
+      run(dir, {
+        sessions: asExecutor,
+        tool: 'Bash',
+        input: { command: 'backlog task create "x"' },
+      }),
+      'backlog-cli-create',
+    );
+    assertAllowed(
+      run(dir, {
+        sessions: asExecutor,
+        tool: 'Bash',
+        input: { command: 'backlog task create "x" --parent AISDLC-684' },
+      }),
+    );
+  });
+
+  it('is denied cli-decisions subcommands outside the allowlist', () => {
+    const dir = project();
+    for (const command of [
+      'node pipeline-cli/bin/cli-decisions.mjs auto-expire',
+      'node pipeline-cli/bin/cli-decisions.mjs fatigue set',
+      'node pipeline-cli/bin/cli-decisions.mjs add --summary s --timebox 2h',
+      'node pipeline-cli/bin/cli-decisions.mjs frobnicate',
+    ]) {
+      assertDenied(
+        run(dir, { sessions: asExecutor, tool: 'Bash', input: { command } }),
+        'decision-mutation',
+      );
+    }
+    assertAllowed(
+      run(dir, {
+        sessions: asExecutor,
+        tool: 'Bash',
+        input: {
+          command: 'node pipeline-cli/bin/cli-decisions.mjs add --summary s --scope x --option a:b',
+        },
+      }),
     );
   });
 
@@ -262,6 +347,82 @@ describe('an executor session', () => {
       env: { AI_SDLC_DISPATCH_BOARD_DIR: board },
     });
     assertDenied(res, 'message-non-dispatch');
+  });
+});
+
+describe('the documented executor workflow is never refused with nothing configured', () => {
+  function projectHoldingTask() {
+    const dir = project();
+    const inflight = join(dir, '.ai-sdlc', 'dispatch', 'inflight');
+    mkdirSync(inflight, { recursive: true });
+    writeFileSync(
+      join(inflight, 'AISDLC-684.dispatch.json'),
+      JSON.stringify({ schemaVersion: 'v1', taskId: 'AISDLC-684', workerId: 'executor-alpha' }),
+    );
+    mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(join(dir, 'backlog', 'tasks', 'aisdlc-684 - existing.md'), 'x');
+    return dir;
+  }
+
+  it('allows claim, work, verdict, escalate, sub-task filing, task edits and messaging dispatch', () => {
+    const dir = projectHoldingTask();
+    const task = join(dir, 'backlog', 'tasks', 'aisdlc-684 - existing.md');
+    const bash = (command) => ['Bash', { command }];
+    const cli = 'node "$PIPELINE_CLI_BIN/cli-dispatch.mjs"';
+    const table = {
+      claim: bash(
+        `${cli} claim --board-dir "$BOARD_DIR" --worker-kind in-session-agent --worker "$MY_NAME"`,
+      ),
+      heartbeat: bash(
+        `${cli} heartbeat --board-dir "$BOARD_DIR" --task-id AISDLC-684 --worker-id executor-alpha --worker-kind in-session-agent --current-step executing`,
+      ),
+      complete: bash(
+        `${cli} complete --board-dir "$BOARD_DIR" --task-id AISDLC-684 --outcome success --worker "$MY_NAME" --pr 12 --notes done`,
+      ),
+      'write-verdict': bash(
+        `${cli} write-verdict --task-id AISDLC-684 --outcome success --worker executor-alpha`,
+      ),
+      'next-subid': bash(`${cli} next-subid AISDLC-684 --board-dir "$BOARD_DIR"`),
+      escalate: bash(
+        'node "$PIPELINE_CLI_BIN/cli-decisions.mjs" escalate --task-id AISDLC-684 --source-worktree "$(pwd)" --summary "need an answer" --option "a:one" --option "b:two" --body "context"',
+      ),
+      'decisions read': bash('node "$PIPELINE_CLI_BIN/cli-decisions.mjs" show DEC-0001'),
+      'grep mention': bash('grep -rn "cli-decisions answer" docs'),
+      'git work': bash('git add -- src/x.ts && git commit -m "feat: x" && git push origin HEAD'),
+      build: bash('pnpm build && pnpm test'),
+      'backlog edit': bash('backlog task edit 684 --status "In Progress"'),
+      'backlog sub-task': bash('backlog task create "child" --parent AISDLC-684'),
+      'message dispatch': [
+        'SendMessage',
+        {
+          to: 'operator-dispatch',
+          message: 'executor-alpha: AISDLC-684 success, PR 12, decisions none',
+        },
+      ],
+      skill: ['Skill', { skill: 'ai-sdlc:execute', args: 'AISDLC-684' }],
+      read: ['Read', { file_path: task }],
+      'edit own task file': ['Edit', { file_path: task, old_string: 'x', new_string: 'y' }],
+      'write own task file': ['Write', { file_path: task, content: 'y' }],
+      'multiedit own task file': ['MultiEdit', { file_path: task, edits: [] }],
+      'write source': ['Write', { file_path: join(dir, 'src', 'x.ts'), content: 'x' }],
+      'plugin sub-task': [
+        'mcp__plugin_ai-sdlc_ai-sdlc__task_create',
+        { id: 'AISDLC-684.1', title: 'child' },
+      ],
+      'backlog-server sub-task': [
+        'mcp__backlog__task_create',
+        { parentTaskId: 'AISDLC-684', title: 'child' },
+      ],
+      'new sub-task file': [
+        'Write',
+        { file_path: join(dir, 'backlog', 'tasks', 'aisdlc-684.2 - child.md'), content: 'x' },
+      ],
+    };
+    for (const [label, [tool, input]] of Object.entries(table)) {
+      const res = run(dir, { sessions: asExecutor, tool, input });
+      assert.equal(res.status, 0, label);
+      assert.equal(res.stdout.trim(), '', `${label} was refused: ${res.stdout}`);
+    }
   });
 });
 
@@ -300,8 +461,18 @@ describe('a session whose role cannot be resolved', () => {
     );
   });
 
-  it('is treated as the operator when the matched pid is not a claude process', () => {
-    assertAllowed(run(project(), { sessions: asExecutor, tool, input, bin: otherBin }));
+  it('is treated as the operator when the matched pid is not a claude process, and says so on stderr', () => {
+    const res = run(project(), { sessions: asExecutor, tool, input, bin: otherBin });
+    assertAllowed(res);
+    assert.match(res.stderr, /role tool rules NOT enforced/);
+    assert.match(res.stderr, /executor-alpha/);
+    assert.match(res.stderr, /not claude/);
+  });
+
+  it('prints no diagnostic for an ordinary unresolved session', () => {
+    const res = run(project(), { sessions: null, tool, input });
+    assertAllowed(res);
+    assert.equal(res.stderr, '');
   });
 
   it('is treated as the operator when the roster entry is not running', () => {
@@ -369,7 +540,7 @@ describe('repo overrides through governance.roles', () => {
     });
     assert.equal(res.decision?.permissionDecision, 'deny');
     assert.match(res.decision.permissionDecisionReason, /the planner role/);
-    assert.match(res.decision.permissionDecisionReason, /ask the operator/);
+    assert.match(res.decision.permissionDecisionReason, /cli-decisions escalate/);
   });
 
   it('keeps the defaults when the override is malformed', () => {

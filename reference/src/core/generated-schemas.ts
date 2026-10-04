@@ -512,15 +512,21 @@ export const agentRoleSchema = {
       properties: {
         tool: {
           type: 'string',
-          pattern: '^[A-Za-z0-9_.*-]{1,100}$',
+          pattern: '^[A-Za-z0-9_.*|-]{1,100}$',
           description:
-            'Tool name, exact or with `*` wildcards (e.g. `SendMessage`, `mcp__*__task_create`).',
+            'Tool name, exact or with `*` wildcards, or several names joined with `|` (e.g. `SendMessage`, `mcp__*__task_create`, `Write|Edit|MultiEdit`).',
         },
         match: {
           type: 'string',
-          enum: ['notDispatchRecipient', 'decisionMutation', 'topLevelTask'],
+          enum: [
+            'notDispatchRecipient',
+            'decisionMutation',
+            'topLevelTask',
+            'newTaskFile',
+            'backlogCliCreate',
+          ],
           description:
-            'Built-in matcher. `notDispatchRecipient`: the message recipient is not the dispatch session named in the roster. `decisionMutation`: a command runs `cli-decisions answer`, `resolve` or `override`. `topLevelTask`: a task is created that is not a sub-task of a task the session holds.',
+            'Built-in matcher. `notDispatchRecipient`: the message recipient is not the dispatch session named in the roster. `decisionMutation`: a command runs a `cli-decisions` subcommand outside the allowlist (escalate, add without autonomous-fallback or timebox flags, and the read-only reads). `topLevelTask`: a task_create call that is not a sub-task of a task the session holds. `newTaskFile`: Write, Edit or MultiEdit creates a new task file that is not a sub-task of a task the session holds. `backlogCliCreate`: a `backlog task create` style command without `--parent` set to a task the session holds. Bash matchers are pattern matchers and do not catch every way a shell can write a file.',
         },
         argument: {
           type: 'string',

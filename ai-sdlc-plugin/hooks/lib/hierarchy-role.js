@@ -139,9 +139,12 @@ function ancestorPids({ pid = process.pid, ppid = process.ppid, parentOf = paren
  * @param {string} args.boardDir directory holding `hierarchy.json`.
  * @param {number[]} args.pids this process and its ancestors, nearest first.
  * @param {(pid: number) => string} [args.commOf] process command lookup; defaults to `ps`.
+ * @param {(info: { pid: number, role: string, name: string, comm: string }) => void} [args.onMismatch]
+ *   called when a RUNNING roster entry matches an ancestor pid whose process is not claude, so a
+ *   no-op enforcer can be made visible. It never changes the result.
  * @returns {{ self: object, sessions: object[] } | null}
  */
-function resolveSessionSelf({ boardDir, pids, commOf = commOfPid }) {
+function resolveSessionSelf({ boardDir, pids, commOf = commOfPid, onMismatch }) {
   const sessions = readRosterSessions(boardDir);
   if (sessions.length === 0) return null;
   let self;
@@ -154,7 +157,16 @@ function resolveSessionSelf({ boardDir, pids, commOf = commOfPid }) {
       } catch {
         comm = '';
       }
-      if (!isClaudeCommand(comm)) return null;
+      if (!isClaudeCommand(comm)) {
+        if (typeof onMismatch === 'function') {
+          try {
+            onMismatch({ pid, role: self.role, name: self.name, comm });
+          } catch {
+            // a diagnostic must never change the decision
+          }
+        }
+        return null;
+      }
       break;
     }
   }
