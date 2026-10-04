@@ -450,12 +450,12 @@ export const agentRoleSchema = {
           type: 'array',
           items: {
             type: 'string',
-            maxLength: 39,
-            pattern: '^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$',
+            maxLength: 45,
+            pattern: '^[A-Za-z0-9]+(-[A-Za-z0-9]+)*(\\[bot\\])?$',
           },
           uniqueItems: true,
           description:
-            'GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. REQUIRED and non-empty for the release path: there is no fallback to `mergeAuthors`, so removing or emptying it disables `--source-kind release` (kill switch). Read only from the file as committed on main.',
+            'GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. OPTIONAL. Resolution order for the release path only: this key if present (an explicit empty list disables the release path: kill switch), else a non-empty `mergeAuthors`, else the built-in release-please bot logins `github-actions[bot]` and `release-please[bot]`. Bot logins use the REST spelling with the `[bot]` suffix. Never widens who the other source kinds trust. Read only from the file as committed on main.',
         },
         releaseMergeRoles: {
           type: 'array',

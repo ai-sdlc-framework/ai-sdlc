@@ -160,13 +160,26 @@ spec:
   refuses with a message naming the failed check:
   - same-repo PR (not a fork), head ref exactly `release-please--branches--main`,
     base `main`;
-  - the PR author is on `governance.releaseAuthors`. It must be explicitly set
-    and non-empty; there is NO fallback to `mergeAuthors`, so removing or emptying
-    it on `main` is the kill switch for the whole release path. `release.yml` runs release-please with
-    the `AI_SDLC_PAT` token, so past release PRs (#1078, #1105) are authored by the
-    operator account that owns the PAT, not by a distinct bot login, which is why
-    no login is hardcoded. The operator must list that login in `releaseAuthors`
-    on `main` before the path works;
+  - the PR author is in the effective release author set, resolved for the release
+    path ONLY (it never widens the other source kinds): `governance.releaseAuthors`
+    if present (an explicit empty list is the kill switch for the release path),
+    else a non-empty `governance.mergeAuthors`, else the built-in release-please bot
+    logins `github-actions[bot]` and `release-please[bot]` (REST spelling; the
+    `app/<slug>` spelling printed by `gh` compares equal). A refusal names the PR's
+    actual author, the effective set and which tier it came from, and the exact
+    value to add (`governance.releaseAuthors: [<login>]`). `release.yml` runs
+    release-please with the `AI_SDLC_PAT` token (PRs created with the workflow
+    token do not trigger CI, so the workflow stays on the PAT), so past release PRs
+    (#1078, #1105) are authored by the account that owns the PAT, not a bot. In such
+    a repo the author check passes only once that account is in `releaseAuthors` or
+    `mergeAuthors`. **When the release PR is authored by a shared PAT identity that
+    agents also push as, the author check is NOT the control**: anyone holding that
+    identity passes it. The controls are the exact release branch, the content-based
+    (not path-only) file validation, and green required checks. The caller-role
+    guard is a CLI mistake guard (see below), not a hook-level boundary. The release
+    path does not read `allowMerge` (this repo runs `allowMerge: never`, which
+    would otherwise block releases); its kill switch is an explicit empty
+    `releaseAuthors`;
   - every commit on the PR has an author AND committer that is one of those
     logins, or an unlinked identity with the pin-sync job's email
     `release-bot@ai-sdlc.io` (AISDLC-577; that identity has no GitHub login, which

@@ -20,14 +20,17 @@
  *    operator account that owns that PAT (not a distinct bot login). The
  *    AISDLC-577 pin-sync job commits as `AI-SDLC Release Bot
  *    <release-bot@ai-sdlc.io>`, an identity with NO linked GitHub login. So
- *    the allowed authors are: the logins in `governance.releaseAuthors`
- *    (REQUIRED and non-empty; no fallback to `mergeAuthors`, so emptying it is
- *    the kill switch) and that one unlinked release-bot identity. Author AND
- *    committer are checked. The commits on #1078/#1105 are unsigned, so a
- *    verified signature cannot be required: identity is weak metadata, and the
- *    per-file content validation (only version-like values may change) is what
- *    actually bounds what a forged release PR could publish. No login is
- *    hardcoded here.
+ *    the allowed authors resolve (DEC-0050, release path ONLY) from
+ *    `governance.releaseAuthors` if set (explicit empty list = kill switch),
+ *    else a non-empty `mergeAuthors`, else the built-in release-please bot
+ *    logins, plus the one unlinked release-bot identity. Author AND committer
+ *    are checked. **The author check is NOT the control** when the release PR is
+ *    authored by a shared PAT identity that agents also push as: anyone holding
+ *    that identity passes it. The controls are the exact release branch, the
+ *    content-based (not path-only) file validation, green required checks, and
+ *    the hook-level role restriction. The commits on #1078/#1105 are unsigned,
+ *    so signatures cannot be required. No login is hardcoded except the
+ *    documented bot defaults.
  *  - Residual risks: auto-merge armed by `--arm` persists on GitHub; a later push
  *    to the release branch is still gated by `--match-head-commit` at arm time
  *    and by branch protection afterwards, not by this CLI. The base for content
@@ -139,16 +142,46 @@ export interface ReleaseGovernance {
   roles: string[];
   /** GitHub logins allowed as the release PR author and as linked commit authors. */
   authors: string[];
+  /** Which tier produced `authors` (DEC-0050). */
+  authorsSource: ReleaseAuthorsSource;
+}
+
+export type ReleaseAuthorsSource = 'releaseAuthors' | 'mergeAuthors' | 'built-in default';
+
+/**
+ * Built-in default author set (DEC-0050): the bot identities a standard
+ * release-please setup uses with the workflow token. Confirmed against the
+ * GitHub API: `gh api users/github-actions[bot]` -> login `github-actions[bot]`
+ * (id 41898282) and the app `gh api apps/release-please` -> slug
+ * `release-please`, whose bot user is `release-please[bot]` (id 55107282).
+ */
+export const DEFAULT_RELEASE_AUTHORS: readonly string[] = [
+  'github-actions[bot]',
+  'release-please[bot]',
+];
+
+/**
+ * Compare logins case-insensitively. `gh pr view` renders a bot as `app/<slug>`
+ * where the REST API says `<slug>[bot]`; both spellings compare equal.
+ */
+export function loginsEqual(a: string, b: string): boolean {
+  const norm = (l: string) => {
+    const x = l.toLowerCase();
+    return x.startsWith('app/') ? `${x.slice(4)}[bot]` : x;
+  };
+  return norm(a) === norm(b);
 }
 
 const ROLE_RE = /^[A-Za-z][A-Za-z0-9-]{0,39}$/;
-const LOGIN_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+const LOGIN_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?:\[bot\])?$/;
 
 /**
  * Resolve the release governance from committed `agent-role.yaml` text.
- * `releaseMergeRoles` defaults to operator + planner. `releaseAuthors` must be
- * set explicitly (no fallback to `mergeAuthors`). Malformed entries are dropped;
- * an empty author list trusts nobody (fail closed).
+ * `releaseMergeRoles` defaults to operator + planner. The author set resolves
+ * in this order (DEC-0050), and ONLY for the release path (the backlog merge
+ * path keeps reading `mergeAuthors` alone): an explicitly present
+ * `releaseAuthors` wins, including an explicit empty list, which is the kill
+ * switch; else a non-empty `mergeAuthors`; else the built-in bot default.
  */
 export function resolveReleaseGovernance(yamlText: string): ReleaseGovernance {
   const raw = parseGovernanceBlock(yamlText) ?? {};
@@ -164,11 +197,22 @@ export function resolveReleaseGovernance(yamlText: string): ReleaseGovernance {
     return out;
   };
   const roles = clean(raw['releaseMergeRoles'], ROLE_RE, 40) ?? [...DEFAULT_RELEASE_MERGE_ROLES];
-  // Kill switch: an explicit, non-empty `releaseAuthors` is REQUIRED. There is
-  // deliberately no fallback to `mergeAuthors`, so removing/emptying the key on
-  // main disables the whole release path.
-  const authors = clean(raw['releaseAuthors'], LOGIN_RE, 39) ?? [];
-  return { roles: roles.map((r) => r.toLowerCase()), authors };
+  const roleList = roles.map((r) => r.toLowerCase());
+  if (Array.isArray(raw['releaseAuthors'])) {
+    // Explicit always wins, even when empty (kill switch).
+    return {
+      roles: roleList,
+      authors: clean(raw['releaseAuthors'], LOGIN_RE, 45) ?? [],
+      authorsSource: 'releaseAuthors',
+    };
+  }
+  const merge = resolveGovernanceFromYaml(yamlText).mergeAuthors;
+  if (merge.length > 0) return { roles: roleList, authors: merge, authorsSource: 'mergeAuthors' };
+  return {
+    roles: roleList,
+    authors: [...DEFAULT_RELEASE_AUTHORS],
+    authorsSource: 'built-in default',
+  };
 }
 
 /** True when an `.active-task` sentinel exists in `cwd` or any ancestor directory. */
@@ -276,7 +320,7 @@ export async function fetchPrCommits(
  * so this is a weak control; the file-content validation is what bounds impact.
  */
 export function commitAuthorRefusal(commits: PrCommit[], authors: string[]): string | null {
-  const allowed = (l: string) => authors.some((a) => a.toLowerCase() === l.toLowerCase());
+  const allowed = (l: string) => authors.some((a) => loginsEqual(a, l));
   const check = (sha: string, role: string, login: string | null, email: string): string | null => {
     if (login !== null) {
       return allowed(login)
@@ -526,8 +570,11 @@ export function releaseNextStep(reason: string): string {
   if (/caller role ".*" is not allowed/.test(reason)) {
     return `${NEXT_STEP_PREFIX} the dispatch/planner session runs this command, or sets governance.releaseMergeRoles: [operator, planner, <role>] on main.`;
   }
-  if (/releaseAuthors/.test(reason) && /allow-list is configured/.test(reason)) {
-    return `${NEXT_STEP_PREFIX} the dispatch/planner session sets governance.releaseAuthors: [<login that authors the release PR, see release.yml AI_SDLC_PAT owner>] in .ai-sdlc/agent-role.yaml on main, then re-run.`;
+  if (/explicitly empty/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} the release path was disabled on purpose; the dispatch/planner session removes governance.releaseAuthors (or lists the release PR author) on main to re-enable it.`;
+  }
+  if (/check "PR author"/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} if that login is the release workflow's token owner, the dispatch/planner session sets the governance.releaseAuthors value shown above on main and you re-run; otherwise do not merge this PR.`;
   }
   if (/could not (read|re-read|list|fetch)|fetch failed|GitHub refused/.test(reason)) {
     return `${NEXT_STEP_PREFIX} re-run this command once; if it fails again, ${ESCALATE}.`;
@@ -660,8 +707,8 @@ export async function runReleaseMerge(
   }
   if (gov.authors.length === 0) {
     return refuse(
-      'no non-empty governance.releaseAuthors allow-list is configured on main (there is no ' +
-        'fallback to mergeAuthors) — the release path is disabled (fail-closed)',
+      'governance.releaseAuthors is explicitly empty on main — the release path is disabled ' +
+        '(kill switch, fail-closed)',
     );
   }
 
@@ -679,10 +726,12 @@ export async function runReleaseMerge(
   if (snap.baseRefName !== 'main') {
     return refuse(`check "base branch": base is "${snap.baseRefName}", not "main"`);
   }
-  if (!gov.authors.some((a) => a.toLowerCase() === snap.authorLogin.toLowerCase())) {
+  if (!gov.authors.some((a) => loginsEqual(a, snap.authorLogin))) {
     return refuse(
-      `check "PR author": "${snap.authorLogin}" is not on the release author allow-list ` +
-        '(governance.releaseAuthors)',
+      `check "PR author": the PR author is "${snap.authorLogin}", which is not in the effective ` +
+        `release author set [${gov.authors.join(', ')}] (source: ${gov.authorsSource}). To ` +
+        `allow it, set governance.releaseAuthors: [${snap.authorLogin}] ` +
+        'in .ai-sdlc/agent-role.yaml on main',
     );
   }
 
