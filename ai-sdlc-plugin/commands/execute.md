@@ -715,7 +715,7 @@ git worktree add "$WORKTREE_PATH" -b "$BRANCH" origin/main
 
 If `git worktree add` fails because the branch already exists, the operator's prior run left state. Tell them: "Worktree branch `$BRANCH` already exists. Run `/ai-sdlc cleanup $TASK_ID` first, or pick a different task." Then stop.
 
-**Hooks check (AISDLC-693).** A worktree with no git hooks directory runs no pre-commit, commit-msg or pre-push gate, silently. Step 3 does not install dependencies, so install with install scripts enabled (never disable them) and, before the first commit, confirm the hooks directory exists:
+**Hooks check (AISDLC-693).** A worktree with no git hooks directory runs no pre-commit, commit-msg or pre-push gate, silently. The shell commands above do not install dependencies (the TypeScript Step 3 does, with scripts enabled), so install with install scripts enabled (never disable them) and, before the first commit, confirm the hooks directory exists:
 
 ```bash
 HOOKS_DIR=$(git -C "$WORKTREE_PATH" rev-parse --git-path hooks)

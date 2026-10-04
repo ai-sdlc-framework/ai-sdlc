@@ -139,10 +139,61 @@ describe('ensureWorktreeHooks', () => {
     expect(pnpmCalls(fake)).toEqual([]);
   });
 
-  it('with no node_modules fails at once with the install-and-prepare command and runs nothing', async () => {
+  it('with no node_modules installs once with scripts enabled and passes when install generates the hooks', async () => {
+    writeHook(main);
+    const fake = gitRunner().on(
+      (cmd, args) => cmd === 'pnpm' && args.join(' ') === 'install --frozen-lockfile',
+      () => {
+        mkdirSync(join(wt, 'node_modules'));
+        writeHook(wt);
+        return ok();
+      },
+    );
+    const r = await ensureWorktreeHooks({
+      runner: fake.toRunner(),
+      workDir: main,
+      worktreePath: wt,
+    });
+    expect(r.status).toBe('repaired');
+    expect(r.installRuns).toBe(1);
+    expect(r.prepareRuns).toBe(0);
+    expect(pnpmCalls(fake)).toEqual(['install --frozen-lockfile']);
+    expect(fake.calls.find((c) => c.command === 'pnpm')?.opts?.cwd).toBe(wt);
+  });
+
+  it('after an install that leaves the hooks missing, runs prepare exactly once', async () => {
+    writeHook(main);
+    const fake = gitRunner()
+      .on(
+        (cmd, args) => cmd === 'pnpm' && args[0] === 'install',
+        () => {
+          mkdirSync(join(wt, 'node_modules'));
+          return ok();
+        },
+      )
+      .on(
+        (cmd, args) => cmd === 'pnpm' && args.join(' ') === 'run prepare',
+        () => {
+          writeHook(wt);
+          return ok();
+        },
+      );
+    const r = await ensureWorktreeHooks({
+      runner: fake.toRunner(),
+      workDir: main,
+      worktreePath: wt,
+    });
+    expect(r.status).toBe('repaired');
+    expect(pnpmCalls(fake)).toEqual(['install --frozen-lockfile', 'run prepare']);
+  });
+
+  it('an install that fails on an engine check names the active Node, the required range and the fix', async () => {
     writeHook(main);
     writeFileSync(join(main, 'package.json'), JSON.stringify({ engines: { node: '>=22.22.1' } }));
-    const fake = gitRunner();
+    const fake = gitRunner().on(
+      (cmd, args) => cmd === 'pnpm' && args[0] === 'install',
+      fail('ERR_PNPM_UNSUPPORTED_ENGINE  Unsupported environment', 1),
+    );
     const r = await ensureWorktreeHooks({
       runner: fake.toRunner(),
       workDir: main,
@@ -150,15 +201,17 @@ describe('ensureWorktreeHooks', () => {
       activeNodeVersion: 'v22.19.0',
     });
     expect(r.status).toBe('missing');
+    expect(r.installRuns).toBe(1);
     expect(r.prepareRuns).toBe(0);
+    expect(r.message).toContain('ERR_PNPM_UNSUPPORTED_ENGINE');
     expect(r.message).toContain(join(wt, HOOKS_REL));
-    expect(r.message).toContain('pnpm install --frozen-lockfile && pnpm run prepare');
+    expect(r.message).toContain(HOOKS_FIX_COMMAND);
     expect(r.message).toContain('>=22.22.1');
     expect(r.message).toContain('v22.19.0');
-    expect(fake.calls.filter((c) => c.command !== 'git')).toEqual([]);
+    expect(r.message).toContain('nvm install && nvm use');
   });
 
-  it('never runs an install, in any branch', async () => {
+  it('never disables install scripts in any branch', async () => {
     writeHook(main);
     const bare = gitRunner();
     await ensureWorktreeHooks({ runner: bare.toRunner(), workDir: main, worktreePath: wt });
@@ -166,7 +219,7 @@ describe('ensureWorktreeHooks', () => {
     const withModules = gitRunner();
     await ensureWorktreeHooks({ runner: withModules.toRunner(), workDir: main, worktreePath: wt });
     for (const fake of [bare, withModules]) {
-      expect(pnpmCalls(fake).some((c) => c.startsWith('install'))).toBe(false);
+      expect(pnpmCalls(fake).some((c) => c.includes('ignore-scripts'))).toBe(false);
     }
   });
 

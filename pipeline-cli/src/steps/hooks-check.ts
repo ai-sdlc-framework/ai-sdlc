@@ -67,11 +67,14 @@ export interface EnsureWorktreeHooksResult {
   status: 'not-expected' | 'present' | 'repaired' | 'missing';
   hooksDir?: string;
   message?: string;
-  /** How many times `pnpm run prepare` ran (0 or 1). */
+  /** How many times `pnpm run prepare` ran explicitly (0 or 1). */
   prepareRuns: number;
+  /** How many times `pnpm install --frozen-lockfile` ran (0 or 1). */
+  installRuns: number;
 }
 
 const PREPARE_TIMEOUT_MS = 120_000;
+const INSTALL_TIMEOUT_MS = 600_000;
 
 /** Ask git for the hooks directory of the checkout at `root`; `null` when it cannot say. */
 export async function resolveHooksDir(runner: Runner, root: string): Promise<string | null> {
@@ -129,11 +132,13 @@ export const HOOKS_FIX_COMMAND = 'pnpm install --frozen-lockfile && pnpm run pre
 
 /**
  * Verify the worktree's hooks directory holds an executable `pre-push` whenever the
- * main checkout's does. This never installs. When the hook is missing: with a
- * `node_modules` directory it runs `pnpm run prepare` once and re-checks; without
- * one it runs nothing and reports `missing` at once. Never throws on a missing
- * hook; the caller decides. Every `missing` message names the hooks directory, the
- * exact fix command and the Node requirement.
+ * main checkout's does. When the hook is missing: without a `node_modules` directory
+ * (a fresh worktree) it runs `pnpm install --frozen-lockfile` once, with install
+ * scripts ENABLED so husky's `prepare` generates the hooks; then, if the hook is
+ * still missing and dependencies are present, it runs `pnpm run prepare` once.
+ * Never throws on a missing hook; the caller decides. Every `missing` message names
+ * the hooks directory, the exact fix command and the Node requirement, plus the
+ * install or prepare output when one failed (an engine failure shows up there).
  */
 export async function ensureWorktreeHooks(
   opts: EnsureWorktreeHooksOptions,
@@ -143,19 +148,21 @@ export async function ensureWorktreeHooks(
 
   const mainHooksDir = await resolveHooksDir(runner, workDir);
   if (mainHooksDir === null || !hasPrePush(mainHooksDir, fs)) {
-    return { status: 'not-expected', prepareRuns: 0 };
+    return { status: 'not-expected', prepareRuns: 0, installRuns: 0 };
   }
 
   let hooksDir = await resolveHooksDir(runner, worktreePath);
   if (hooksDir !== null && hasPrePush(hooksDir, fs)) {
-    return { status: 'present', hooksDir, prepareRuns: 0 };
+    return { status: 'present', hooksDir, prepareRuns: 0, installRuns: 0 };
   }
 
   let prepareRuns = 0;
+  let installRuns = 0;
   const missing = (detail: string): EnsureWorktreeHooksResult => ({
     status: 'missing',
     hooksDir: hooksDir ?? undefined,
     prepareRuns,
+    installRuns,
     message:
       `Git hooks are missing in worktree ${worktreePath}: hooks directory ` +
       `${hooksDir ?? '(git could not resolve it)'} has no executable pre-push, so no ` +
@@ -169,7 +176,22 @@ export async function ensureWorktreeHooks(
   });
 
   if (!fs.exists(join(worktreePath, 'node_modules'))) {
-    return missing('Dependencies are not installed in the worktree, so `prepare` was not run.');
+    installRuns = 1;
+    const install = await runner('pnpm', ['install', '--frozen-lockfile'], {
+      cwd: worktreePath,
+      timeout: INSTALL_TIMEOUT_MS,
+      allowFailure: true,
+    });
+    hooksDir = await resolveHooksDir(runner, worktreePath);
+    if (hooksDir !== null && hasPrePush(hooksDir, fs)) {
+      return { status: 'repaired', hooksDir, prepareRuns, installRuns };
+    }
+    if (install.code !== 0 || !fs.exists(join(worktreePath, 'node_modules'))) {
+      return missing(
+        `\`pnpm install --frozen-lockfile\` ${install.code !== 0 ? 'failed' : 'left no node_modules'}:\n` +
+          tail(`${install.stdout}\n${install.stderr}`),
+      );
+    }
   }
 
   prepareRuns = 1;
@@ -180,7 +202,7 @@ export async function ensureWorktreeHooks(
   });
   hooksDir = await resolveHooksDir(runner, worktreePath);
   if (hooksDir !== null && hasPrePush(hooksDir, fs)) {
-    return { status: 'repaired', hooksDir, prepareRuns };
+    return { status: 'repaired', hooksDir, prepareRuns, installRuns };
   }
   return missing(
     prepare.code !== 0

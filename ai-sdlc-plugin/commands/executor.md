@@ -149,7 +149,7 @@ worktree without one runs no commit or push gate, silently). If it reports that,
 if you ever find `git -C <worktree> rev-parse --git-path hooks` names a directory
 with no executable `pre-push` while the main checkout has one, run
 `pnpm install --frozen-lockfile && pnpm run prepare` in the worktree (install scripts
-stay enabled, never disabled; Step 3 itself never installs). If the directory is still missing, report the outcome
+stay enabled, never disabled; the TypeScript Step 3 runs the install itself when `node_modules` is missing). If the directory is still missing, report the outcome
 `failed` and stop: never commit from such a worktree. `ai-sdlc doctor` lists
 affected worktrees (check `worktree-hooks`).
 
