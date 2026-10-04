@@ -302,7 +302,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
   });
 
   const RELEASE_YAML =
-    'spec:\n  governance:\n    allowMerge: never\n    releaseAuthors: [deefactorial]\n';
+    'spec:\n  governance:\n    allowMerge: never\n    allowReleaseMerge: true\n    releaseAuthors: [deefactorial]\n';
   const releaseHandlers = (): Record<string, Partial<ExecResult>> => ({
     'gh repo view': { stdout: 'org/repo\n' },
     'api user': { stdout: 'deefactorial\n' },

@@ -35,7 +35,9 @@ import type { ExecResult, Runner } from '../runtime/exec.js';
 
 const HEAD = 'c'.repeat(40);
 const MAIN_SHA = 'd'.repeat(40);
-const YAML = 'spec:\n  governance:\n    allowMerge: never\n    releaseAuthors: [deefactorial]\n';
+const YAML =
+  'spec:\n  governance:\n    allowMerge: never\n    allowReleaseMerge: true\n    releaseAuthors: [deefactorial]\n';
+const G = 'spec:\n  governance:\n    allowReleaseMerge: true\n';
 
 interface Fixture {
   pr?: Record<string, unknown>;
@@ -327,10 +329,7 @@ describe('runReleaseMerge: refusals name the failed check', () => {
   });
 
   it('an explicitly empty author list trusts nobody', async () => {
-    const reason = await refused(
-      {},
-      { policyYaml: 'spec:\n  governance:\n    releaseAuthors: []\n' },
-    );
+    const reason = await refused({}, { policyYaml: G + '    releaseAuthors: []\n' });
     expect(reason).toMatch(/explicitly empty/);
   });
 
@@ -398,12 +397,14 @@ describe('caller role (mistake guard)', () => {
       roles: ['operator', 'planner'],
       authors: ['github-actions[bot]', 'release-please[bot]'],
       authorsSource: 'built-in default',
+      allowReleaseMerge: false,
     });
     expect(resolveReleaseGovernance('spec:\n  governance:\n    mergeAuthors: [octocat]\n')).toEqual(
       {
         roles: ['operator', 'planner'],
         authors: ['octocat'],
         authorsSource: 'mergeAuthors',
+        allowReleaseMerge: false,
       },
     );
     // empty mergeAuthors is "not set": falls through to the built-in default
@@ -419,13 +420,14 @@ describe('caller role (mistake guard)', () => {
       roles: ['operator'],
       authors: ['ok', 'release-please[bot]'],
       authorsSource: 'releaseAuthors',
+      allowReleaseMerge: false,
     });
   });
 
   it('explicit empty releaseAuthors is the kill switch, even with mergeAuthors set', async () => {
     for (const yaml of [
-      'spec:\n  governance:\n    mergeAuthors: [deefactorial]\n    releaseAuthors: []\n',
-      'spec:\n  governance:\n    mergeAuthors: [deefactorial]\n    releaseAuthors:\n',
+      G + '    mergeAuthors: [deefactorial]\n    releaseAuthors: []\n',
+      G + '    mergeAuthors: [deefactorial]\n    releaseAuthors:\n',
     ]) {
       expect(resolveReleaseGovernance(yaml).authors).toEqual([]);
       const r = await run({}, { policyYaml: yaml }).result;
@@ -436,10 +438,7 @@ describe('caller role (mistake guard)', () => {
   });
 
   it('mergeAuthors tier lets a PR from a mergeAuthors login through', async () => {
-    const r = await run(
-      {},
-      { policyYaml: 'spec:\n  governance:\n    mergeAuthors: [deefactorial]\n' },
-    ).result;
+    const r = await run({}, { policyYaml: G + '    mergeAuthors: [deefactorial]\n' }).result;
     expect(r.merged).toBe(true);
   });
 
@@ -450,14 +449,14 @@ describe('caller role (mistake guard)', () => {
           pr: pr({ author: { login } }),
           commits: [{ sha: HEAD, login: 'github-actions[bot]', email: 'b@x.y' }],
         },
-        { policyYaml: '' },
+        { policyYaml: G },
       ).result;
       expect(r.merged, login).toBe(true);
     }
   });
 
   it('NO governance config + non-bot PR author: names key, actual login, and source', async () => {
-    const r = await run({}, { policyYaml: '' }).result;
+    const r = await run({}, { policyYaml: G }).result;
     expect(r.eligibility.eligible).toBe(false);
     const msg = r.eligibility.reason;
     expect(msg).toContain('the PR author is "deefactorial"');
@@ -470,7 +469,7 @@ describe('caller role (mistake guard)', () => {
   it('names the source tier in the author refusal', async () => {
     const m = await run(
       { pr: pr({ author: { login: 'mallory' } }) },
-      { policyYaml: 'spec:\n  governance:\n    mergeAuthors: [octocat]\n' },
+      { policyYaml: G + '    mergeAuthors: [octocat]\n' },
     ).result;
     expect(m.eligibility.reason).toContain('(source: mergeAuthors)');
     expect(m.eligibility.reason).toContain('governance.releaseAuthors: [mallory]');
@@ -634,12 +633,8 @@ describe('every refusal ends with a next step the agent can take (DEC-0048)', ()
     ['unreadable policy', {}, { policyYaml: null }],
     ['role undeterminable', {}, { callerRole: undefined, cwd: mkdtempSync(join(tmpdir(), 'ns-')) }],
     ['role not allowed', {}, { callerRole: 'executor' }],
-    ['no config, non-bot author', {}, { policyYaml: '' }],
-    [
-      'explicit empty releaseAuthors',
-      {},
-      { policyYaml: 'spec:\n  governance:\n    releaseAuthors: []\n' },
-    ],
+    ['no config, non-bot author', {}, { policyYaml: G }],
+    ['explicit empty releaseAuthors', {}, { policyYaml: G + '    releaseAuthors: []\n' }],
     ['non-squash method', {}, { mergeMethod: 'merge' }],
     ['fork', { pr: pr({ isCrossRepository: true }) }, {}],
     ['head ref', { pr: pr({ headRefName: 'x/y' }) }, {}],
@@ -683,6 +678,107 @@ describe('every refusal ends with a next step the agent can take (DEC-0048)', ()
   it('names the sanctioned role exit', async () => {
     const b = await run({}, { callerRole: 'executor' }).result;
     expect(b.eligibility.reason).toMatch(/dispatch\/planner session runs this command/);
+  });
+});
+
+describe('enablement: allowMerge or allowReleaseMerge (DEC-0050 ruling b)', () => {
+  const refusedMsg = async (yaml: string) => {
+    const { result, calls } = run({}, { policyYaml: yaml });
+    const r = await result;
+    expect(r.eligibility.eligible).toBe(false);
+    expect(calls.some((c) => c.includes('pr view') || c.includes('pr merge'))).toBe(false);
+    return r.eligibility.reason;
+  };
+
+  it('allowReleaseMerge defaults to false and is a strict boolean', () => {
+    expect(resolveReleaseGovernance('').allowReleaseMerge).toBe(false);
+    expect(
+      resolveReleaseGovernance('spec:\n  governance:\n    allowReleaseMerge: true\n')
+        .allowReleaseMerge,
+    ).toBe(true);
+    for (const v of ['yes', '1', 'false']) {
+      expect(
+        resolveReleaseGovernance(`spec:\n  governance:\n    allowReleaseMerge: ${v}\n`)
+          .allowReleaseMerge,
+      ).toBe(false);
+    }
+  });
+
+  it('neither set: refused, names both exits with key and value, current values, next step', async () => {
+    for (const yaml of ['', 'spec:\n  governance:\n    allowMerge: never\n']) {
+      const msg = await refusedMsg(yaml);
+      expect(msg).toContain('release merges are not enabled');
+      expect(msg).toContain('currently allowMerge=never, allowReleaseMerge=false');
+      expect(msg).toContain('governance.allowMerge: onGreenClean');
+      expect(msg).toContain('governance.allowReleaseMerge: true');
+      expect(msg).toContain(`${NEXT_STEP_PREFIX} the dispatch/planner session sets`);
+    }
+  });
+
+  it('allowReleaseMerge: true alone enables; allowMerge: onGreenClean alone enables', async () => {
+    expect(
+      (await run({}, { policyYaml: G + '    releaseAuthors: [deefactorial]\n' }).result).merged,
+    ).toBe(true);
+    const only = 'spec:\n  governance:\n    allowMerge: onGreenClean\n';
+    expect(
+      (await run({}, { policyYaml: only + '    releaseAuthors: [deefactorial]\n' }).result).merged,
+    ).toBe(true);
+  });
+
+  it('explicit empty releaseAuthors disables release merges whichever grant is set, in either key order', async () => {
+    for (const yaml of [
+      'spec:\n  governance:\n    allowReleaseMerge: true\n    releaseAuthors: []\n',
+      'spec:\n  governance:\n    releaseAuthors: []\n    allowReleaseMerge: true\n',
+      'spec:\n  governance:\n    releaseAuthors: []\n    allowMerge: onGreenClean\n',
+    ]) {
+      const r = await run({}, { policyYaml: yaml }).result;
+      expect(r.eligibility.eligible).toBe(false);
+      expect(r.eligibility.reason).toMatch(/explicitly empty/);
+    }
+  });
+
+  it('allowReleaseMerge never satisfies the backlog or gh-issue kinds', () => {
+    for (const sourceKind of ['backlog', 'gh-issue', 'release'] as const) {
+      const r = evaluateMergeEligibility({
+        policy: STRICT_DEFAULTS,
+        sourceKind,
+        mergeStateStatus: 'CLEAN',
+        requiredChecks: [{ name: 'a', state: 'SUCCESS' }],
+        allowReleaseMerge: true,
+      });
+      expect(r.eligible, sourceKind).toBe(false);
+      expect(r.reason).toMatch(/allowMerge="never"/);
+    }
+    // the grant only counts for a VERIFIED release kind
+    const ok = evaluateMergeEligibility({
+      policy: STRICT_DEFAULTS,
+      sourceKind: 'release',
+      releaseVerified: true,
+      allowReleaseMerge: true,
+      mergeStateStatus: 'CLEAN',
+      requiredChecks: [{ name: 'a', state: 'SUCCESS' }],
+    });
+    expect(ok.eligible).toBe(true);
+  });
+
+  it('the backlog path still needs allowMerge: onGreenClean even when allowReleaseMerge is true', async () => {
+    const yaml = 'spec:\n  governance:\n    allowReleaseMerge: true\n    mergeAuthors: [x]\n';
+    const runner: Runner = async (_c, a) => {
+      if (a.join(' ').includes('git/ref/heads/main')) {
+        return { stdout: JSON.stringify({ type: 'commit', sha: MAIN_SHA }), stderr: '', code: 0 };
+      }
+      return { stdout: yaml, stderr: '', code: 0 };
+    };
+    const r = await runMergeIfEligible({
+      prNumber: 1,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/tmp',
+      runner,
+      policyYaml: yaml,
+    });
+    expect(r.eligibility.eligible).toBe(false);
+    expect(r.eligibility.reason).toMatch(/allowMerge="never"/);
   });
 });
 

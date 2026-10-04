@@ -63,6 +63,7 @@ spec:
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
+    allowReleaseMerge: false   # narrow grant: lets agents land the release PR only
     mergeAuthors: []           # GitHub logins the merge gate may merge for; empty = nobody
 ```
 
@@ -162,7 +163,7 @@ spec:
     base `main`;
   - the PR author is in the effective release author set, resolved for the release
     path ONLY (it never widens the other source kinds): `governance.releaseAuthors`
-    if present (an explicit empty list is the kill switch for the release path),
+    if present (an explicit empty list disables the release path),
     else a non-empty `governance.mergeAuthors`, else the built-in release-please bot
     logins `github-actions[bot]` and `release-please[bot]` (REST spelling; the
     `app/<slug>` spelling printed by `gh` compares equal). A refusal names the PR's
@@ -175,12 +176,20 @@ spec:
     `mergeAuthors`. **When the release PR is authored by a shared PAT identity that
     agents also push as, the author check is NOT the control**: anyone holding that
     identity passes it. The controls are the exact release branch, the content-based
-    (not path-only) file validation, green required checks, the release kill switch
-    (an explicit empty `releaseAuthors`) and the CLI role mistake guard (DEC-0038,
-    see below). No hook-level control exists yet; a follow-up task adds one. The release
-    path does not read `allowMerge` (this repo runs `allowMerge: never`, which
-    would otherwise block releases); its kill switch is an explicit empty
-    `releaseAuthors`;
+    (not path-only) file validation, green required checks, the enablement grant
+    below, and the CLI role mistake guard (DEC-0038, see below). No hook-level
+    control exists yet; a follow-up task adds one;
+  - **Enablement:** release merges are refused unless `governance.allowMerge:
+    onGreenClean` or `governance.allowReleaseMerge: true` (default `false`). The
+    refusal names both keys and values, what is currently set, and the next step
+    (the dispatch/planner session sets one on `main`). `allowMerge` is the master
+    switch for agent-initiated merges; `allowReleaseMerge` is a narrower grant for
+    release PRs only and never satisfies the backlog or gh-issue kinds; neither
+    affects merges GitHub's own auto-merge performs once a workflow has armed
+    them. To turn off agent release merges leave both unset/false, or set
+    `releaseAuthors: []` (an explicit empty list disables the release path even
+    when a grant is set). There is no separate switch for the sanctioned CLI
+    itself;
   - every commit on the PR has an author AND committer that is one of those
     logins, or an unlinked identity with the pin-sync job's email
     `release-bot@ai-sdlc.io` (AISDLC-577; that identity has no GitHub login, which

@@ -851,6 +851,12 @@ export interface MergeEligibilityContext {
    * is trusted only together with this flag; on its own it is refused.
    */
   releaseVerified?: boolean;
+  /**
+   * AISDLC-702 / DEC-0050(b): `governance.allowReleaseMerge`. Honoured ONLY for
+   * a verified `release` source kind; it never satisfies the policy gate for
+   * `backlog` or any other kind, which still need `allowMerge: onGreenClean`.
+   */
+  allowReleaseMerge?: boolean;
 }
 
 export interface MergeEligibilityResult {
@@ -886,7 +892,8 @@ function isSkippedState(state: string): boolean {
  */
 export function evaluateMergeEligibility(ctx: MergeEligibilityContext): MergeEligibilityResult {
   const releaseTrusted = ctx.sourceKind === 'release' && ctx.releaseVerified === true;
-  if (ctx.policy.allowMerge !== 'onGreenClean') {
+  const releaseGrant = releaseTrusted && ctx.allowReleaseMerge === true;
+  if (ctx.policy.allowMerge !== 'onGreenClean' && !releaseGrant) {
     return {
       eligible: false,
       reason:

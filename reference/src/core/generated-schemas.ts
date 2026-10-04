@@ -490,6 +490,12 @@ export const agentRoleSchema = {
           type: 'boolean',
           description: 'Whether agents may delete branches (`git branch -D`/`-d`). Default false.',
         },
+        allowReleaseMerge: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Narrow grant for `cli-merge-if-eligible --source-kind release`: when true, agents may land the release-please PR even if `allowMerge` is `never`. Never satisfies the backlog or gh-issue kinds, which still need `allowMerge: onGreenClean`. Default false.',
+        },
         allowResetHard: {
           type: 'boolean',
           description:

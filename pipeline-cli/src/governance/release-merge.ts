@@ -28,7 +28,7 @@
  *    authored by a shared PAT identity that agents also push as: anyone holding
  *    that identity passes it. The controls are the exact release branch, the
  *    content-based (not path-only) file validation, green required checks, the
- *    release kill switch (explicit empty `releaseAuthors`), and the CLI role
+ *    enablement grant below, and the CLI role
  *    mistake guard (DEC-0038). No hook-level control exists yet; a follow-up
  *    task adds one. The commits on #1078/#1105 are unsigned,
  *    so signatures cannot be required. No login is hardcoded except the
@@ -42,9 +42,13 @@
  *    operator + planner, executor denied) is a MISTAKE GUARD, not a security
  *    boundary: the role comes from the caller's environment and a same-user CLI
  *    check cannot stop a determined same-user process (DEC-0038).
- *  - The release path has its own gate and does not require
- *    `governance.allowMerge: onGreenClean`; it can only ever merge a PR that
- *    passes every check above, so it widens merge rights to release PRs only.
+ *  - Enablement (DEC-0050 ruling b): release merges are refused unless
+ *    `governance.allowMerge: onGreenClean` (the master switch for agent-initiated
+ *    merges) OR `governance.allowReleaseMerge: true` (a narrower grant for
+ *    release PRs only). `allowReleaseMerge` never satisfies the backlog or
+ *    gh-issue kinds. Neither affects merges GitHub's own auto-merge performs
+ *    once a workflow has armed them. An explicit `releaseAuthors: []` also
+ *    disables the release path. There is no separate switch for the CLI itself.
  *
  * @module governance/release-merge
  */
@@ -146,6 +150,8 @@ export interface ReleaseGovernance {
   authors: string[];
   /** Which tier produced `authors` (DEC-0050). */
   authorsSource: ReleaseAuthorsSource;
+  /** `governance.allowReleaseMerge` (default false): narrow grant for release PRs only. */
+  allowReleaseMerge: boolean;
 }
 
 export type ReleaseAuthorsSource = 'releaseAuthors' | 'mergeAuthors' | 'built-in default';
@@ -200,20 +206,25 @@ export function resolveReleaseGovernance(yamlText: string): ReleaseGovernance {
   };
   const roles = clean(raw['releaseMergeRoles'], ROLE_RE, 40) ?? [...DEFAULT_RELEASE_MERGE_ROLES];
   const roleList = roles.map((r) => r.toLowerCase());
+  const allowReleaseMerge = raw['allowReleaseMerge'] === true; // strict boolean; default false
   if (Array.isArray(raw['releaseAuthors'])) {
     // Explicit always wins, even when empty (kill switch).
     return {
       roles: roleList,
       authors: clean(raw['releaseAuthors'], LOGIN_RE, 45) ?? [],
       authorsSource: 'releaseAuthors',
+      allowReleaseMerge,
     };
   }
   const merge = resolveGovernanceFromYaml(yamlText).mergeAuthors;
-  if (merge.length > 0) return { roles: roleList, authors: merge, authorsSource: 'mergeAuthors' };
+  if (merge.length > 0) {
+    return { roles: roleList, authors: merge, authorsSource: 'mergeAuthors', allowReleaseMerge };
+  }
   return {
     roles: roleList,
     authors: [...DEFAULT_RELEASE_AUTHORS],
     authorsSource: 'built-in default',
+    allowReleaseMerge,
   };
 }
 
@@ -563,6 +574,9 @@ const ESCALATE = 'otherwise escalate to the dispatch/planner session';
  * dispatch/planner session. Never "ask the operator".
  */
 export function releaseNextStep(reason: string): string {
+  if (/release merges are not enabled/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} the dispatch/planner session sets governance.allowReleaseMerge: true (or governance.allowMerge: onGreenClean) on main, then re-run.`;
+  }
   if (/merge method/.test(reason)) {
     return `${NEXT_STEP_PREFIX} re-run with the default or --merge-method squash.`;
   }
@@ -694,6 +708,17 @@ export async function runReleaseMerge(
   const gov = resolveReleaseGovernance(yamlText);
   const { policy } = resolveGovernanceFromYaml(yamlText);
 
+  // Enablement (DEC-0050 ruling b): allowMerge: onGreenClean (master switch) OR
+  // allowReleaseMerge: true (release PRs only). Neither set => refused.
+  if (policy.allowMerge !== 'onGreenClean' && !gov.allowReleaseMerge) {
+    return refuse(
+      'release merges are not enabled: currently ' +
+        `allowMerge=${policy.allowMerge}, allowReleaseMerge=${gov.allowReleaseMerge}. Set ` +
+        'governance.allowMerge: onGreenClean or governance.allowReleaseMerge: true in ' +
+        '.ai-sdlc/agent-role.yaml on main',
+    );
+  }
+
   // Caller-role mistake guard (not a security boundary; see module header).
   if (resolvedRole === null) {
     return refuse(
@@ -797,8 +822,8 @@ export async function runReleaseMerge(
   // Arm and merge need the SAME readiness (all checks green + CLEAN), so there
   // is no window between verification and the merge GitHub performs.
   const eligibility = evaluateMergeEligibility({
-    // The release path has its own gate; evaluate checks under an explicit grant.
-    policy: { ...policy, allowMerge: 'onGreenClean' },
+    policy,
+    allowReleaseMerge: gov.allowReleaseMerge,
     sourceKind: 'release',
     releaseVerified: true,
     mergeStateStatus: snap.mergeStateStatus,
