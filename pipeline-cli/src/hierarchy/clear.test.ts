@@ -305,11 +305,53 @@ describe('clearExecutor', () => {
     expect(capability()?.status).toBe('degraded');
   });
 
-  it('uses the window name as the target when tmux says the pane id was recycled', async () => {
+  it('refuses, sending nothing, when tmux says the recorded pane id was recycled', async () => {
     const recycled: CommandRunner = (file, args) =>
       args[0] === 'display-message' ? { status: 0, stdout: '%99\n', stderr: '' } : run(file, args);
-    await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: recycled }));
-    for (const c of sends()) expect(c.args[2]).toBe('=ai-sdlc-hierarchy:executor-alpha');
+    await expect(
+      clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: recycled })),
+    ).rejects.toThrow(/does not belong to window/);
+    expect(sends()).toEqual([]);
+  });
+
+  describe('one session per agent', () => {
+    const own = () =>
+      seedRoster(entry({ tmuxSession: 'executor-alpha', tmuxWindow: 'executor-alpha' }));
+    const withMarker =
+      (marker: string | null): CommandRunner =>
+      (file, args) => {
+        if (args[0] === 'show-options') {
+          calls.push({ file, args: [...args] });
+          return marker === null
+            ? { status: 1, stdout: '', stderr: 'unknown option' }
+            : { status: 0, stdout: marker, stderr: '' };
+        }
+        return run(file, args);
+      };
+
+    it('refuses a session without the ownership marker and sends nothing', async () => {
+      own();
+      await expect(
+        clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps({ run: withMarker(null) })),
+      ).rejects.toThrow(/does not carry the @ai-sdlc-hierarchy marker/);
+      expect(sends()).toEqual([]);
+      expect(events).toEqual([]);
+    });
+
+    it('clears a session that carries the marker', async () => {
+      own();
+      const result = await clearExecutor(
+        { executor: 'executor-alpha', settleMs: 0 },
+        deps({ run: withMarker('1\n') }),
+      );
+      expect(result.resumed).toBe(true);
+      expect(sends()).toHaveLength(4);
+    });
+
+    it('does not ask a legacy single-session entry for the marker', async () => {
+      await clearExecutor({ executor: 'executor-alpha', settleMs: 0 }, deps());
+      expect(calls.some((c) => c.args[0] === 'show-options')).toBe(false);
+    });
   });
 
   it('reports to the log when given one', async () => {

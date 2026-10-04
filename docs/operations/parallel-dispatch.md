@@ -703,9 +703,13 @@ Looks up the executor in the roster and sends `/clear` and Enter to its pane, wa
 for the settle time (8000 ms by default), then sends `/ai-sdlc executor` and Enter.
 It refuses, sending nothing, when the name is not a running executor, the name or
 pane id is malformed, the window is not open, or the executor holds an inflight
-task. Keys are sent only to the pane the roster names, and only after tmux confirms
-the pane still belongs to that window. An `ExecutorContextCleared` event records
-the clear.
+task, or the executor's tmux session does not carry the `@ai-sdlc-hierarchy` marker
+that `up` sets (a session `cli-hierarchy` did not start is never typed into; sessions
+of the old single-session layout predate the marker and are not checked). Keys are
+sent only to the pane the roster names, and only after tmux confirms the pane still
+belongs to that window; a recorded pane id that no longer belongs to it is refused,
+never replaced by the window name. An `ExecutorContextCleared` event records the
+clear.
 
 The `hierarchy.clear` capability is reported `live` when the restart command was
 sent and the executor printed its identity line again within the settle time, and

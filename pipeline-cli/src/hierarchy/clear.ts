@@ -27,7 +27,7 @@ import { readInflightManifest } from '../dispatch/board.js';
 import type { EventEmitter } from './emit.js';
 import { listInflight } from './inflight.js';
 import { readRosterChecked, unsafeEntryReason } from './roster.js';
-import { listWindows, resolveSendTarget } from './tmux.js';
+import { listWindows, ownershipRefusal, resolveSendTarget } from './tmux.js';
 import type { CommandRunner, RosterEntry } from './types.js';
 
 /** Capability id for the executor context clear. */
@@ -153,6 +153,11 @@ export async function clearExecutor(opts: ClearOptions, deps: ClearDeps): Promis
   if (held) {
     throw new Error(`refusing to clear '${name}': it holds ${held}, which is still inflight`);
   }
+  // A session of the one-session-per-agent layout is typed into only when
+  // `cli-hierarchy up` marked it as its own; a personal session that happens to
+  // share the name is never touched.
+  const unowned = ownershipRefusal(deps.run, entry);
+  if (unowned) throw new Error(`refusing to clear '${name}': ${unowned}`);
   if (!listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow)) {
     throw new Error(`the window for '${name}' is not open; start it with cli-hierarchy up`);
   }

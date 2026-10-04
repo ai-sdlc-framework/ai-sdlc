@@ -350,7 +350,7 @@ export async function runHierarchyCli(
           process.stderr.write(`${caller.reason}\n`);
           return 1;
         }
-        const executor = argv[1] && !argv[1].startsWith('--') ? argv[1] : undefined;
+        const executor = firstPositional(argv);
         if (!executor) {
           process.stderr.write('cli-hierarchy clear: an executor name is required\n');
           return 2;
