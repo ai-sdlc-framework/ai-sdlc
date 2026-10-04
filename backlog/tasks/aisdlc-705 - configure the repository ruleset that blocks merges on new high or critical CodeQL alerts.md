@@ -10,8 +10,7 @@ labels:
   - ci
 dependencies:
   - AISDLC-704
-references:
-  - .github/rulesets/
+references: []
 priority: medium
 dispatchable: true
 ---

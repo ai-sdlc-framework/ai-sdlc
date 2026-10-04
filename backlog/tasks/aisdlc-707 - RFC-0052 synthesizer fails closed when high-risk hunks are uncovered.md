@@ -10,7 +10,7 @@ labels:
 dependencies:
   - AISDLC-674
 references:
-  - spec/rfcs/RFC-0052
+  - spec/rfcs/RFC-0052-staged-review-pipeline.md
   - .ai-sdlc/_decisions/events.jsonl
 priority: medium
 dispatchable: true
