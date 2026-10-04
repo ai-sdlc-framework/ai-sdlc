@@ -22,6 +22,10 @@ The operator chose this ruleset on 2026-10-03 and it was waiting for him to clic
 Under DEC-0039 administration is agent work: configure it through the GitHub API with the
 repository's existing credentials.
 
+Affected surface: the repository ruleset configuration (set through the GitHub API), a new
+exported ruleset file in the .github/rulesets directory, and the operations notes indexed in
+`docs/operations/README.md`.
+
 Sequenced after the task that fixes the two critical alerts (listed under dependencies): the two critical alerts must be fixed first, or the ruleset blocks
 every pull request.
 

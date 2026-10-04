@@ -29,10 +29,10 @@ AISDLC-580 wired a version-aware self-heal into `ai-sdlc-plugin/hooks/session-st
 4. Hermetic test: cache-hit-within-TTL performs no `npm view`; cache-miss/expired does; corrupt cache tolerated.
 
 ## Acceptance Criteria
-- Session start does NOT perform an `npm view` when a fresh (within-TTL) stale-runtime cache entry exists.
-- Cache miss/expiry still detects a stale runtime and triggers the self-heal.
-- Fail-open + corrupt-cache tolerance preserved; hermetic test covering hit/miss/corrupt.
-- `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [ ] Session start does NOT perform an `npm view` when a fresh (within-TTL) stale-runtime cache entry exists.
+- [ ] Cache miss/expiry still detects a stale runtime and triggers the self-heal.
+- [ ] Fail-open + corrupt-cache tolerance preserved; hermetic test covering hit/miss/corrupt.
+- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Note
 Low priority — the current behavior is correct + bounded, this is a latency/UX polish. Surfaced by the security + code reviews of [[aisdlc-580]] (PR #1009). Reuses the [[check-plugin-version]] cache pattern.

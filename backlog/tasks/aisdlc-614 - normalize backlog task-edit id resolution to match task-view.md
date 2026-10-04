@@ -18,6 +18,8 @@ number. Inconsistent id normalization between subcommands; minor friction.
 
 ## Scope
 
+Surface: `ai-sdlc-plugin/mcp-server/src/tools/task-edit.ts` (the plugin task-edit tool) and the backlog id normalization it shares with task view.
+
 - Make `task edit` (and any other id-taking subcommand) accept the SAME id forms
   `task view` accepts: bare number (`595`), prefixed (`LT-595`), and full/exact.
   Route all id-taking subcommands through one shared id-normalization helper so

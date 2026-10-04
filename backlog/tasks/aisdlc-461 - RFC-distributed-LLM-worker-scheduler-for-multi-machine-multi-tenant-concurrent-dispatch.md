@@ -13,7 +13,8 @@ labels:
   - scheduler
   - infrastructure
   - subscription-billing
-dependencies: []
+dependencies:
+  - AISDLC-462
 priority: high
 ---
 
@@ -120,7 +121,7 @@ v1 IssueStateAdapter responsibilities (read):
 
 **Implication for substrate choice (the old OQ-1):** if state lives in the ticket system, the scheduler may NOT need its own queue substrate at all — just an optional local cache for performance. D1/Postgres/Redis become secondary (or unnecessary). The ticket adapter IS the substrate.
 
-**Next step:** Re-run the OQ-1 rubric with this expanded framing after AISDLC-462 ships. Treat the original OQ-1 (substrate choice) as resolved-by-reframing (no longer the deciding question) and let the new OQ-1 (adapter contract + tracker support) drive the design.
+**Next step:** Re-run the OQ-1 rubric with this expanded framing when the AISDLC-462 wrapper has shipped. Treat the original OQ-1 (substrate choice) as resolved-by-reframing (no longer the deciding question) and let the new OQ-1 (adapter contract + tracker support) drive the design.
 
 **Cross-reference:** This insight also affects OQ-2 (worker registration protocol) — workers may register by claiming issues in the tracker, not by registering with a separate scheduler. And OQ-6 (multi-tenant isolation) — the tracker's own project/workspace boundaries become the isolation primitive.
 
