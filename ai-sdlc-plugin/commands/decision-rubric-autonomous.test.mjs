@@ -30,3 +30,10 @@ describe('decision-rubric autonomous mode', () => {
     assert.match(raw, /Class \(c\)[^\n]*never self-decided/);
   });
 });
+
+describe('decision-rubric weakening decisions', () => {
+  it('tags weakening decisions and requires a non-weakening fallback', () => {
+    assert.match(raw, /--governance-change weakening --weakens <option-id>/);
+    assert.match(raw, /non-weakening option/);
+  });
+});

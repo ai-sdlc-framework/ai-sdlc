@@ -2339,3 +2339,100 @@ describe('AISDLC-480 — escalate subcommand (dispatched-session Decision Catalo
     expect(body).toContain('This is operator-supplied context.');
   });
 });
+
+// ── AISDLC-703 — governance-change weakening-fallback rule (DEC-0053) ─────────
+
+describe('AISDLC-703 — weakening-fallback rule', () => {
+  const base = (...extra: string[]) =>
+    setArgv(
+      'add',
+      '--summary',
+      'Loosen a hook',
+      '--scope',
+      'governance',
+      '--option',
+      'loosen:Loosen the hook',
+      '--option',
+      'keep:Keep the hook',
+      '--timebox',
+      'P1D',
+      ...extra,
+      '--format',
+      'json',
+    );
+
+  it('refuses a weakening decision whose fallback weakens, naming both ways forward', async () => {
+    base(
+      '--governance-change',
+      'weakening',
+      '--weakens',
+      'loosen',
+      '--autonomous-fallback',
+      'loosen',
+    );
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/governance-fallback rule/);
+    expect(stderrText()).toMatch(/non-weakening option as the fallback/);
+    expect(stderrText()).toMatch(/no fallback so it stays open/);
+  });
+
+  it('accepts a weakening decision with a non-weakening fallback', async () => {
+    base(
+      '--governance-change',
+      'weakening',
+      '--weakens',
+      'loosen',
+      '--autonomous-fallback',
+      'keep',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ ok: boolean; decision: { spec: { governanceChange: unknown } } }>();
+    expect(r.ok).toBe(true);
+    expect(r.decision.spec.governanceChange).toEqual({
+      kind: 'weakening',
+      weakeningOptionIds: ['loosen'],
+    });
+  });
+
+  it('does not affect a tightening decision, even with the same option as fallback', async () => {
+    base('--governance-change', 'tightening', '--autonomous-fallback', 'loosen');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ ok: boolean }>().ok).toBe(true);
+  });
+
+  it('auto-expire leaves a hand-written weakening fallback unapplied: the control stays', async () => {
+    const past = '2000-01-01T00:00:00.000Z';
+    const logPath = resolveEventLogPath(tmp);
+    mkdirSync(dirname(logPath), { recursive: true });
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        eventVersion: 'v1',
+        type: 'decision-opened',
+        ts: past,
+        decisionId: 'DEC-0001',
+        source: 'ad-hoc',
+        scope: 'governance',
+        summary: 'Loosen a hook',
+        options: [
+          { id: 'loosen', description: 'Loosen' },
+          { id: 'keep', description: 'Keep' },
+        ],
+        timebox: 'PT4H',
+        timeboxExpiresAt: past,
+        autonomousFallbackOptionId: 'loosen',
+        governanceChange: { kind: 'weakening', weakeningOptionIds: ['loosen'] },
+      }) + '\n',
+    );
+    setArgv('auto-expire', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      expired: unknown[];
+      skipped: Array<{ decisionId: string; reason: string }>;
+    }>();
+    expect(r.expired).toEqual([]);
+    expect(r.skipped).toEqual([
+      { decisionId: 'DEC-0001', reason: 'weakening-fallback-control-stays' },
+    ]);
+  });
+});

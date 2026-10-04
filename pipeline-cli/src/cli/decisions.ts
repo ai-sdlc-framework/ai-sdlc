@@ -98,6 +98,11 @@ import {
   type DecisionSupportView,
   type PendingExemplar,
 } from '../decisions/index.js';
+import {
+  checkGovernanceFallback,
+  fallbackWeakensControl,
+  type GovernanceChange,
+} from '../decisions/governance-fallback.js';
 import { renderOperatorDigestMarkdown, runOperatorDigest } from '../decisions/operator-digest.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
@@ -297,6 +302,8 @@ interface AddInputs {
   impactScore?: number;
   /** AISDLC-463 — autonomous-fallback option id (validated against options). */
   autonomousFallbackOptionId?: string;
+  /** AISDLC-703 — governance-change tag (DEC-0053). */
+  governanceChange?: GovernanceChange;
   /** AISDLC-463 — surfacing-context backlink. */
   contextRef?: string;
 }
@@ -493,6 +500,26 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
     }
     inputs.autonomousFallbackOptionId = fb;
   }
+
+  // AISDLC-703 (DEC-0053): governance-change tag and the weakening-fallback rule.
+  if (typeof argv['governance-change'] === 'string' && argv['governance-change']) {
+    const weakens = ([] as unknown[])
+      .concat(argv.weakens ?? [])
+      .map(String)
+      .filter(Boolean);
+    inputs.governanceChange = {
+      kind: String(argv['governance-change']) as GovernanceChange['kind'],
+      weakeningOptionIds: weakens,
+    };
+  } else if (argv.weakens !== undefined) {
+    throw new Error('--weakens needs --governance-change weakening');
+  }
+  const governanceError = checkGovernanceFallback(
+    inputs.governanceChange,
+    options.map((o) => o.id),
+    inputs.autonomousFallbackOptionId,
+  );
+  if (governanceError) throw new Error(governanceError);
 
   if (typeof argv['context-ref'] === 'string' && argv['context-ref']) {
     inputs.contextRef = String(argv['context-ref']);
@@ -715,6 +742,18 @@ export function buildDecisionsCli(): Argv {
             describe:
               'AISDLC-463 — option id auto-selected by `auto-expire` when the timebox lapses unanswered. Must reference a declared --option id.',
           })
+          .option('governance-change', {
+            type: 'string',
+            choices: ['weakening', 'tightening'] as const,
+            describe:
+              'AISDLC-703 — tag a decision that changes a governance control. A weakening decision needs --weakens and its --autonomous-fallback must be a non-weakening option.',
+          })
+          .option('weakens', {
+            type: 'string',
+            array: true,
+            describe:
+              'AISDLC-703 — option id that weakens a control (repeatable). Only with --governance-change weakening.',
+          })
           .option('context-ref', {
             type: 'string',
             describe:
@@ -800,6 +839,9 @@ export function buildDecisionsCli(): Argv {
             ? { autonomousFallbackOptionId: inputs.autonomousFallbackOptionId }
             : {}),
           ...(inputs.contextRef !== undefined ? { contextRef: inputs.contextRef } : {}),
+          ...(inputs.governanceChange !== undefined
+            ? { governanceChange: inputs.governanceChange }
+            : {}),
           now: eventNow,
         });
 
@@ -1823,6 +1865,11 @@ export function buildDecisionsCli(): Argv {
           // than write an invalid answer.
           if (!d.spec.options.some((o) => o.id === fallback)) {
             skipped.push({ decisionId: d.metadata.id, reason: 'fallback-option-missing' });
+            continue;
+          }
+          // AISDLC-703 (DEC-0053): a lapsed timebox never applies a weakening option; the control stays.
+          if (fallbackWeakensControl(d.spec.governanceChange, fallback)) {
+            skipped.push({ decisionId: d.metadata.id, reason: 'weakening-fallback-control-stays' });
             continue;
           }
           const expiresAt = d.status.timeboxExpiresAt ?? now.toISOString();

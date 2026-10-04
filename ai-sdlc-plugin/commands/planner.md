@@ -30,7 +30,7 @@ stop.
 ## Decision authority
 
 The planner role is the author of decision records. A record in the catalog on
-`main` (or on the filing PR that carries the task) is sufficient authority for
+`main` (not one in an unmerged PR) is sufficient authority for
 the other sessions to act, for classes (a) decide-and-proceed and (b) timeboxed
 (see the "Decision authority" section of `CLAUDE.md`). Sessions no longer ask the
 operator's direct word for those. Class (c) stays operator-only: legal and

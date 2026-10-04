@@ -73,3 +73,10 @@ describe('planner decision authority', () => {
     assert.match(match[2], /The\s+Open Questions rule above is unchanged/);
   });
 });
+
+describe('planner authority is a record on main', () => {
+  it('does not accept a record from an unmerged PR', () => {
+    assert.match(match[2], /not one in an unmerged PR/);
+    assert.doesNotMatch(match[2], /filing PR that carries the task/);
+  });
+});

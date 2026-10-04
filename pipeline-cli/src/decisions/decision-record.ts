@@ -13,6 +13,7 @@
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
+import type { GovernanceChange } from './governance-fallback.js';
 export const DECISION_SOURCES = [
   'dor-clarification',
   'rfc-open-question',
@@ -152,6 +153,8 @@ export interface DecisionSpec {
    * pending past expiry (operator must answer manually).
    */
   autonomousFallbackOptionId?: string;
+  /** AISDLC-703 — governance-change tag (DEC-0053); see governance-fallback.ts. */
+  governanceChange?: GovernanceChange;
   /**
    * AISDLC-463 — backlink to the surfacing context (a PR url, `pr:1234`, or
    * a task id like `AISDLC-463`). Recorded for the audit trail so a resolved
@@ -272,6 +275,8 @@ export interface DecisionOpenedEvent extends DecisionEventEnvelope {
   impactScore?: number;
   /** AISDLC-463 — autonomous-fallback option id chosen at timebox expiry. */
   autonomousFallbackOptionId?: string;
+  /** AISDLC-703 — governance-change tag (DEC-0053). */
+  governanceChange?: GovernanceChange;
   /** AISDLC-463 — surfacing-context backlink (PR url / `pr:N` / task id). */
   contextRef?: string;
 }

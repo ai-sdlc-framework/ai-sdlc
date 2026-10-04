@@ -11,6 +11,7 @@ import {
 import type { DecisionEvent } from './decision-record.js';
 import {
   buildOperatorDigest,
+  gitProvenanceResolver,
   classifyDecision,
   renderOperatorDigestMarkdown,
   runOperatorDigest,
@@ -251,6 +252,120 @@ describe('digest flags and marker safety', () => {
       );
       const now = new Date('2026-10-05T00:00:00Z');
       expect(runOperatorDigest({ workDir: dir, now }).since).toBe('2026-10-04T00:00:00.000Z');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('provenance and DEC-0053 flags', () => {
+  const events = [
+    opened('DEC-1', { summary: 'Plain choice', by: 'planner' }),
+    { ...answered('DEC-1', '2026-10-04T12:00:00.000Z'), by: 'planner' } as DecisionEvent,
+  ];
+  const since = '2026-10-03T00:00:00.000Z';
+
+  it('shows PR and merge commit next to the claimed author, and says --by is not authentication', () => {
+    const md = renderOperatorDigestMarkdown(
+      buildOperatorDigest(events, since, NOW, () => ({ commit: 'abcdef1234567890', pr: 1234 })),
+    );
+    expect(md).toContain('PR #1234, commit abcdef12, claimed author planner');
+    expect(md).toContain('--by is not authentication');
+  });
+
+  it('flags a record that is not on main', () => {
+    const d = buildOperatorDigest(events, since, NOW, () => null);
+    expect(d.answered[0]!.flags).toContain('record is not on main, so it is not authority yet');
+    expect(renderOperatorDigestMarkdown(d)).toContain('NOT on main');
+  });
+
+  it('flags an untagged control-surface decision whatever its Class line says', () => {
+    const d = buildOperatorDigest(
+      [
+        opened('DEC-1', {
+          summary: 'Relax the required checks ruleset',
+          body: 'Class: (b)',
+          by: 'planner',
+        }),
+        { ...answered('DEC-1', '2026-10-04T12:00:00.000Z'), by: 'planner' } as DecisionEvent,
+      ],
+      since,
+      NOW,
+    );
+    expect(d.answered[0]!.flags.join(' ')).toContain('carries no --governance-change tag');
+  });
+
+  it('does not flag a tagged decision, and checks the opener of an auto-expired one', () => {
+    const d = buildOperatorDigest(
+      [
+        opened('DEC-1', {
+          summary: 'Relax a hook',
+          by: 'some-executor',
+          governanceChange: { kind: 'weakening', weakeningOptionIds: ['opt-a'] },
+          timeboxExpiresAt: '2026-10-04T06:00:00.000Z',
+        }),
+        answered('DEC-1', '2026-10-04T06:00:01.000Z', 'auto-expired'),
+      ],
+      since,
+      NOW,
+    );
+    expect(d.answered[0]!.flags).toEqual([
+      'author "some-executor" is not a recognised planner or operator identity',
+    ]);
+  });
+
+  it('does not accept a prefix-only author name', () => {
+    const d = buildOperatorDigest(
+      [
+        opened('DEC-1', { by: 'planner-impersonator' }),
+        {
+          ...answered('DEC-1', '2026-10-04T12:00:00.000Z'),
+          by: 'planner-impersonator',
+        } as DecisionEvent,
+      ],
+      since,
+      NOW,
+    );
+    expect(d.answered[0]!.flags.join(' ')).toContain('not a recognised');
+  });
+});
+
+describe('gitProvenanceResolver', () => {
+  it('returns null outside a git repo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-git-'));
+    try {
+      expect(gitProvenanceResolver(dir)('DEC-0001')).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('gitProvenanceResolver in a real repo', () => {
+  it('finds the oldest commit that added the id and parses the PR number', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-repo-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 't');
+      git('config', 'commit.gpgsign', 'false');
+      const logDir = join(dir, '.ai-sdlc', '_decisions');
+      mkdirSync(logDir, { recursive: true });
+      writeFileSync(join(logDir, 'events.jsonl'), '{"decisionId":"DEC-0001"}\n');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'docs: file a decision (#77)');
+      writeFileSync(
+        join(logDir, 'events.jsonl'),
+        '{"decisionId":"DEC-0001"}\n{"decisionId":"DEC-0002"}\n',
+      );
+      git('commit', '-qam', 'docs: later');
+      const found = gitProvenanceResolver(dir, 'HEAD')('DEC-0001');
+      expect(found?.pr).toBe(77);
+      expect(found?.commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(gitProvenanceResolver(dir, 'HEAD')('DEC-0002')?.pr).toBeNull();
+      expect(gitProvenanceResolver(dir, 'HEAD')('DEC-0009')).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

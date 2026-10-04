@@ -134,10 +134,10 @@ Then the AskUserQuestion with four options, recommended first, descriptions nami
 When the operator has delegated decisions (a decision record on `main` authorizes class (a) or (b)) and no operator is present, run the same five parts and replace only the last one:
 
 1. Write the same problem statement, research, 3-4 options, recommendation and steel-manned counter-argument. Autonomous mode lowers the amount of asking, not the rigor.
-2. Classify the decision using the criteria in `CLAUDE.md` "Decision authority": reversibility, blast radius, and whether it changes a trust-chain or governance control. Class (c) (legal and licensing, money, accounts and credentials, actions only the operator's identity can perform) is never self-decided: stop and raise it.
+2. Classify the decision using the criteria in `CLAUDE.md` "Decision authority": reversibility, blast radius, and whether it changes a trust-chain or governance control. Class (c) (legal and licensing, money, accounts and credentials, actions only the operator's identity can perform) is never self-decided: record it with `cli-decisions escalate`, park only that task, and keep working other eligible tasks.
 3. **Do not call AskUserQuestion.** Select the recommendation yourself and record it:
    - class (a): `cli-decisions add --summary ... --scope ... --option "<id>:<description>"` then `cli-decisions answer <id> <option> --rationale "<problem, counter-argument, why it survives>"`, and apply it at once;
-   - class (b): `cli-decisions add ... --timebox P1D --autonomous-fallback <option-id>` (default 24h, `overrideWindowHours` in config) and apply it when the timebox lapses without an override.
+   - class (b): `cli-decisions add ... --timebox P1D --autonomous-fallback <option-id>` (default 24h, `overrideWindowHours` in config) and apply it when the timebox lapses without an override. When the decision weakens a control, also pass `--governance-change weakening --weakens <option-id>`; the fallback must then be a non-weakening option.
 4. Keep the rationale to the compressed form named under "Compose with other patterns", so `cli-decisions operator-digest` shows the operator why.
 
 The operator can override any of these with `cli-decisions answer` or `extend`. Guardrails and hooks are never bypassed by a decision made this way.
