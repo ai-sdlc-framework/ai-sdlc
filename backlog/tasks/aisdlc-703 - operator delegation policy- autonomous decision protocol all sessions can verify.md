@@ -36,7 +36,7 @@ References: DEC-0039, DEC-0038, RFC-0035 (decision catalog), RFC-0051 (session h
 - [ ] The planner, operator-dispatch and executor skill bodies are updated: a decision record in the catalog on main (or on the filing PR that carries the task), authored by the planner role, is sufficient authority for classes (a) and (b); sessions no longer ask for the operator's direct word for those. Relayed chat messages alone still are not authority, and the permission-laundering rules are unchanged.
 - [ ] The decision-rubric skill gains an autonomous mode: when no operator is present it produces the same problem statement, options, recommendation and counter-argument, self-selects the recommendation, records it with `cli-decisions add` plus `answer`, and does not call AskUserQuestion.
 - [ ] An operator digest exists: one command (or a section of the planner skill) that lists decisions made since the last digest with class, chosen option, one-line rationale, and what would be needed to reverse each, plus any timeboxed decisions still inside their window. The operator can override with the existing catalog commands.
-- [ ] docs/operations gains a page describing the protocol, and the "only humans merge" wording in CLAUDE.md is reconciled with AISDLC-702 (release PRs through the sanctioned path) without widening it to other PRs.
+- [ ] docs/operations gains a page describing the protocol, and the "only humans merge" wording in CLAUDE.md is reconciled with the sanctioned release-PR merge path (filed in PR #1186) without widening it to other PRs.
 - [ ] Tests cover any CLI or skill-lint changes; the docs-only parts pass the existing doc gates.
 
 ## Out of scope
