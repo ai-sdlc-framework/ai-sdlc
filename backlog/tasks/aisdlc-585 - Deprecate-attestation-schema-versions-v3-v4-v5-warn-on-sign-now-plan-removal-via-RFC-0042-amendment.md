@@ -35,7 +35,7 @@ Operator (2026-09-06): "mark the previous signing signature versions less than v
 2. Docs: mark v5 opt-out as deprecated in CLAUDE.md's "Review attestations" section + the RFC-0042 status, with a target removal window.
 3. Do NOT change the VERIFIER — it must keep reading v3/v4/v5 for historical auditability until the RFC decides otherwise (Phase B).
 
-### Phase B — Remove support (SEPARATE, needs an RFC-0042 amendment / OQ walkthrough — DO NOT self-resolve)
+### Phase B — Remove support (SEPARATE, goes through an RFC-0042 amendment / OQ walkthrough — DO NOT self-resolve)
 Removing v3/v4/v5 **verify** support directly contradicts OQ-7's retention decision, so it requires an operator-driven RFC-0042 amendment answering: (a) do we drop the legacy SIGN path entirely; (b) do we drop legacy VERIFY, and if so how do we preserve auditability of already-merged legacy PRs (e.g. one-time re-attestation sweep to v6, or an archived verifier); (c) the removal timeline. This is an architectural/audit-trail decision for the operator, not the implementer.
 
 ## Acceptance Criteria (Phase A only)

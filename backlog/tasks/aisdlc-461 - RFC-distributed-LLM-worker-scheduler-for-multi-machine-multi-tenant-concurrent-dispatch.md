@@ -13,7 +13,8 @@ labels:
   - scheduler
   - infrastructure
   - subscription-billing
-dependencies: []
+dependencies:
+  - AISDLC-462
 priority: high
 ---
 

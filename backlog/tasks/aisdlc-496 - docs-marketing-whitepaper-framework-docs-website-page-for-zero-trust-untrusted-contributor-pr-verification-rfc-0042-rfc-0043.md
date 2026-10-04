@@ -83,7 +83,7 @@ Marketing voice and positioning require operator-in-loop iteration. Whitepapers 
 - [ ] #4 Whitepaper cites all 6 RFC-0043 OQ resolutions where the design decisions matter for the narrative
 - [ ] #5 Framework docs page `docs/concepts/zero-trust-untrusted-pr-verification.md` ships with adopter-facing explainer
 - [ ] #6 Framework docs page cross-links to RFC-0042, RFC-0043, AISDLC-502 operator runbook + API reference
-- [ ] #7 Website page lands in `../ai-sdlc-io/` (route TBD by operator; lead-capture surface)
+- [ ] #7 Website page lands in `../ai-sdlc-io/` (route to be chosen by operator; lead-capture surface)
 - [ ] #8 Website page includes the threat-model walk-through as centerpiece
 - [ ] #9 All three artifacts cross-reference each other (whitepaper ↔ docs page ↔ website page)
 - [ ] #10 Operator approves voice + positioning before any artifact ships publicly

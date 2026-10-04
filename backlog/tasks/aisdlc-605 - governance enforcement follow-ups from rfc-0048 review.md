@@ -39,7 +39,7 @@ separate defense-in-depth layer.
    `--auto=false` / `--auto=0` / `--auto=no` as NOT arming (immediate merge → block).
 2. **Only treat `#` as a shell comment at a word boundary** in `stripComment`.
    Today `stripComment` cuts at the FIRST `#`, so a legit arm using the
-   `owner/repo#N` positional form (`gh pr merge owner/repo#42 --auto`) loses its
+   `<repo>#N` positional form (`gh pr merge <repo>#42 --auto`) loses its
    `#42` and is over-blocked despite the positional regex explicitly allowing that
    form. Only strip `#…` when the `#` is preceded by whitespace or start-of-string.
 3. **`permission-check.js` parity** (separate PermissionRequest hook, not touched by
@@ -62,7 +62,7 @@ separate defense-in-depth layer.
 
 ## Acceptance Criteria
 - [ ] `gh pr merge --auto=true` (and `--auto=1`/`--auto=yes`) is ALLOWED; `--auto=false`/`--auto=0` stays BLOCKED.
-- [ ] `gh pr merge owner/repo#42 --auto` is ALLOWED (the `#42` positional is preserved).
+- [ ] `gh pr merge <repo>#42 --auto` is ALLOWED (the `#42` positional is preserved).
 - [ ] `permission-check.js` allows `gh pr merge --auto` arming under a broad `gh pr merge*` policy, and reads stdin from fd 0 (no `/dev/stdin`).
 - [ ] Hermetic `node --test` coverage for each of the above, cross-platform-safe (no `/dev/stdin`, no >128KiB env values).
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
