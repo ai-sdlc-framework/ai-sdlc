@@ -1,0 +1,54 @@
+---
+id: AISDLC-720
+title: >-
+  Internal agents may edit .ai-sdlc config; the config block applies only to untrusted sources
+status: To Do
+assignee: []
+created_date: '2026-10-04'
+labels:
+  - governance
+  - adopter
+  - bug
+dependencies: []
+references:
+  - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
+  - spec/schemas/agent-role.schema.json
+  - .ai-sdlc/agent-role.yaml
+  - docs/api-reference/governance.md
+priority: high
+dispatchable: true
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Operator statement, 2026-10-04 (Dominique Legault, to the planner session): "Why does the framework explicitly disallow agents to modify the .ai-sdlc config ... I never asked for this, the only thing I asked for was that untrusted PRs from external sources like github PRs couldn't make modifications to the config of ai-sdlc, not internal trusted agents operating on my behalf. If I have to manually make changes to the config and commit and push and merge those changes then that dramatically affects developer velocity."
+
+What the code does today (origin/main, 2026-10-04):
+- `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` refuses the Write and Edit tools on any path under `.ai-sdlc/` for every session, as a hardcoded floor that ignores `agent-role.yaml` ("is under .ai-sdlc/, which is never editable — pipeline configuration is out of scope for agent edits regardless of project config"). It checks no role, source kind or fork status. The floor was added by AISDLC-567 (#982) and kept absolute by AISDLC-599 ("the safer governance posture").
+- `spec/schemas/agent-role.schema.json` documents the floor as always-on; this repository's `.ai-sdlc/agent-role.yaml` also lists `.ai-sdlc/**` and `.github/workflows/**` under `constraints.blockedPaths`.
+- Nine agent and command bodies tell agents "Never edit `.ai-sdlc/**`" (`ai-sdlc-plugin/agents/developer.md`, `ci-conflict-resolver.md`, `rebase-resolver.md`, `refinement-reviewer.md`; `ai-sdlc-plugin/commands/execute.md`, `orchestrator-tick.md`, `dispatch-worker.md`, `rebase.md`, `resolve-conflicts.md`).
+- No CI check stops a pull request from an outside contributor from changing `.ai-sdlc/**`; the only protection against the actual threat is CODEOWNERS and the fork handling in `untrusted-pr-gate.yml` and `ai-sdlc-review.yml`.
+- Shell commands are not matched for paths, so the floor blocks the reviewed tools and leaves scripts free; it is not a boundary.
+
+So the rule stops the trusted sessions and does not stop the untrusted source it was meant for. Every one-line config change lands on the operator (examples: the force-push default, `releaseAuthors`, `allowReleaseMerge`).
+
+## Conventions
+- Trust-chain change: the security review runs on opus, and the PR stays a draft until CodeQL is clean.
+- The security reviewer confirms that the untrusted signal cannot be cleared from inside an untrusted run and that the CI check cannot be skipped by a fork.
+
+## Acceptance Criteria
+- [ ] The hardcoded `.ai-sdlc/**` floor for Write and Edit is removed for internal sessions. An internal session is any session that is not marked untrusted; a session is marked untrusted only by an explicit signal set by the workflows that run agents on outside input (fork pull requests, pull requests whose author association is not OWNER, MEMBER or COLLABORATOR, and the `gh-issue` source kind). Name the signal (for example an environment variable set by those workflows) and document it; the default with no signal is internal.
+- [ ] For untrusted runs the block on `.ai-sdlc/**` (and on `.github/workflows/**`) stays, covers Write, Edit, MultiEdit and shell writes as far as a pattern matcher can, and the refusal says the run is untrusted and why.
+- [ ] The real boundary for outside contributions is in CI, derived from GitHub facts: a required check fails any pull request from a fork or from an author without OWNER, MEMBER or COLLABORATOR association that changes governance config (`.ai-sdlc/agent-role.yaml` and the other config files under `.ai-sdlc/`, listed explicitly) or `.github/workflows/**`, and its message says a maintainer must make that change. Same-repository pull requests from the operator's identity or agents are not affected. Tests cover fork, outside author, and internal cases.
+- [ ] Project-level `constraints.blockedPaths` keeps working as an explicit opt-in for repositories that want stricter rules; this repository's `.ai-sdlc/agent-role.yaml` drops `.ai-sdlc/**` and `.github/workflows/**` from it (the workflow-edit rule is external-only per AISDLC-567's own text).
+- [ ] The nine agent and command bodies listed above replace "Never edit `.ai-sdlc/**`" with: edit governance config only when the task names the file and the change; never as a side effect; runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today.
+- [ ] Reviewer prompts (code and security) treat a diff that touches governance config as requiring a matching task or decision record on main, and a change that loosens a control without one as a major finding. The decision digest lists every merged change to governance config with its pull request. This is review and visibility, not a block: no step waits for the operator.
+- [ ] `spec/schemas/agent-role.schema.json` descriptions and `docs/api-reference/governance.md` describe the new model in plain words: who may edit config, what marks a run untrusted, where the CI boundary is.
+- [ ] Bootstrap: sessions run the released plugin's hook until a release ships this change, so the hook still refuses Write and Edit on `.ai-sdlc/**` while this task and backlog task 714 are implemented. For those two tasks only, the executor may apply the named config lines with a small shell edit, quoting the operator statement above in the PR body. This is the operator's stated intent for internal agents, not a general licence to route around hooks.
+- [ ] A happy-path test: an internal session, default configuration, a task that names a config key and value, edits `.ai-sdlc/agent-role.yaml` with the Edit tool and is not refused.
+- [ ] PR body carries a "Velocity impact" section (DEC-0048): the harm the old rule prevented, that it fired on a normal operator workflow with a human-only exit, and the new boundary.
+
+## Out of scope
+- Changing what the config keys mean; merge rights; the release path.
+<!-- SECTION:DESCRIPTION:END -->
