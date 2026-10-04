@@ -146,9 +146,9 @@ const LOGIN_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 
 /**
  * Resolve the release governance from committed `agent-role.yaml` text.
- * `releaseMergeRoles` defaults to operator + planner; `releaseAuthors` falls
- * back to `mergeAuthors`. Malformed entries are dropped; an empty author list
- * trusts nobody (fail closed).
+ * `releaseMergeRoles` defaults to operator + planner. `releaseAuthors` must be
+ * set explicitly (no fallback to `mergeAuthors`). Malformed entries are dropped;
+ * an empty author list trusts nobody (fail closed).
  */
 export function resolveReleaseGovernance(yamlText: string): ReleaseGovernance {
   const raw = parseGovernanceBlock(yamlText) ?? {};
@@ -340,7 +340,7 @@ export function jsonDiffPaths(
   if (isObj(a) && isObj(b)) {
     const out: Array<{ path: Array<string | number>; newValue: Json }> = [];
     for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
-      if (!(k in a) || !(k in b))
+      if (!Object.hasOwn(a, k) || !Object.hasOwn(b, k))
         out.push({ path: [...path, k], newValue: Symbol.for('structural') });
       else out.push(...jsonDiffPaths(a[k], b[k], [...path, k]));
     }
@@ -517,6 +517,9 @@ const ESCALATE = 'otherwise escalate to the dispatch/planner session';
  * dispatch/planner session. Never "ask the operator".
  */
 export function releaseNextStep(reason: string): string {
+  if (/merge method/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} re-run with the default or --merge-method squash.`;
+  }
   if (/caller role could not be determined/.test(reason)) {
     return `${NEXT_STEP_PREFIX} the dispatch/planner session runs this command, or re-run with AI_SDLC_CALLER_ROLE=operator set explicitly.`;
   }
@@ -612,6 +615,13 @@ export async function runReleaseMerge(
       ),
       'refused',
     );
+
+  // Release PRs always land as one squash commit; any other method is refused.
+  if (opts.mergeMethod !== undefined && opts.mergeMethod !== 'squash') {
+    return refuse(
+      `merge method "${opts.mergeMethod}" is not allowed for --source-kind release (squash only)`,
+    );
+  }
 
   // The policy is read from main as GitHub serves it, never from a local copy.
   let yamlText: string | null;
@@ -769,7 +779,7 @@ export async function runReleaseMerge(
   if (reread.mergeStateStatus !== 'CLEAN') {
     return refuse(`mergeStateStatus="${reread.mergeStateStatus}" on the pre-merge re-read`);
   }
-  const method = opts.mergeMethod ?? 'squash';
+  const method = 'squash' as const;
   const res =
     mode === 'arm'
       ? await armPr(opts.prNumber, opts.repoSlug, method, snap.headRefOid, opts.runner, opts.cwd)

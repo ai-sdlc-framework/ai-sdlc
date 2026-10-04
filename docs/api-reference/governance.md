@@ -211,11 +211,15 @@ spec:
     boundary**: the role comes from the caller's own environment, and a same-user
     CLI check cannot stop a determined same-user process (DEC-0038). The
     GitHub-derived PR checks above are the real control.
-  - **Audit:** every attempt (merged, armed, dry-run, refused) appends one JSON
+  - **Merge method:** always squash; any other `--merge-method` is refused.
+  - **Audit:** every attempt that reaches the release path (merged, armed, dry-run,
+    refused) appends one JSON
     line (`sourceKind: release`, caller, gh-authenticated login from `gh api user`,
     caller role, PR, head, whether all commits are verified, outcome, reason) to
     `$ARTIFACTS_DIR/_governance/merge-audit-YYYY-MM-DD.jsonl`. `caller` is `$USER`
-    and advisory only; `ghLogin` is the authenticated identity.
+    and advisory only; `ghLogin` is the authenticated identity. Refusals that
+    happen before the release path runs (no verified main checkout, repository slug
+    not resolvable) are printed but not audited.
 - **What is authoritative (policy trust):** the policy
   (`spec.governance.allowMerge` + `mergeAuthors`), `backlog/config.yml`
   (`task_prefix`) and the task-file existence check are read from GitHub

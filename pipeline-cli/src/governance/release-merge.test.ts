@@ -608,6 +608,20 @@ describe('every refusal ends with a next step the agent can take (DEC-0048)', ()
   });
 });
 
+describe('merge method', () => {
+  it('refuses a non-squash method with a next step and never merges', async () => {
+    for (const m of ['merge', 'rebase'] as const) {
+      const { result, calls } = run({}, { mergeMethod: m });
+      const r = await result;
+      expect(r.eligibility.eligible).toBe(false);
+      expect(r.eligibility.reason).toMatch(/not allowed for --source-kind release \(squash only\)/);
+      expect(r.eligibility.reason).toContain('--merge-method squash');
+      expect(calls.some((c) => c.includes('pr merge'))).toBe(false);
+    }
+    expect((await run({}, { mergeMethod: 'squash' }).result).merged).toBe(true);
+  });
+});
+
 describe('commit identity', () => {
   it('unsigned commits are accepted (real release commits are unsigned) but recorded', async () => {
     const { result, audit } = run({

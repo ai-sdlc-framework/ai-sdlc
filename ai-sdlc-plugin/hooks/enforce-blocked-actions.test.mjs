@@ -828,6 +828,7 @@ blockedActions: []
     const reason = parsed.hookSpecificOutput.permissionDecisionReason;
     assert.match(reason, /allowMerge="never"/);
     assert.match(reason, /cli-merge-if-eligible/);
+    assert.match(reason, /--source-kind release --arm/);
   });
 
   // ── AISDLC-602 security-review regression: raw-merge bypasses ──────────
