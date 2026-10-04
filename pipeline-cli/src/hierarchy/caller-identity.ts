@@ -9,6 +9,10 @@
  * running never match, names and roles must pass the allowlists, and a pid that is
  * not a claude process (reused by a shell, say) is not a session.
  *
+ * This is a mistake guard, not authentication: it stops a session from using the
+ * dispatch commands by accident, and a session running as the same user can still
+ * defeat it.
+ *
  * The roster reader and the process lookups are injected, so tests never read the
  * real process table.
  */
@@ -152,7 +156,10 @@ function psField(field: string, pid: number): string | null {
 }
 
 /** Production dependencies: the roster file on the board and `ps`. */
-export function createSystemIdentity(boardDir: string): IdentityDeps {
+export function createSystemIdentity(
+  boardDir: string,
+  lookup: Partial<Pick<IdentityDeps, 'parentPid' | 'comm' | 'startPid'>> = {},
+): IdentityDeps {
   return {
     readSessions: () => {
       const file = path.join(boardDir, ROSTER_FILENAME);
@@ -171,5 +178,6 @@ export function createSystemIdentity(boardDir: string): IdentityDeps {
     },
     comm: (pid) => psField('comm', pid) ?? '',
     startPid: process.ppid,
+    ...lookup,
   };
 }

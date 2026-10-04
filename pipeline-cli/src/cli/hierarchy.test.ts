@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -6,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   renderBriefBlock,
+  stripGitRedirects,
   writeRoster,
   type CommandRunner,
   type HierarchyDeps,
@@ -464,6 +474,7 @@ describe('clear, tick and route-decision', () => {
     const located = (boardDir: string, root: string) => ({
       ...dispatchCaller,
       trustedBoard: { boardDir, root },
+      installDir: path.join(root, 'pipeline-cli'),
       lease,
       operational: new Set<string>(),
     });
@@ -483,19 +494,34 @@ describe('clear, tick and route-decision', () => {
         const before = boardListing();
         const events: unknown[] = [];
         const board = path.join(tmp, 'dispatch');
-        const cases: [string, string[], ReturnType<typeof located> | undefined][] = [
-          ['board', argv, located(path.join(tmp, 'elsewhere', 'dispatch'), tmp)],
-          ['work dir', [...argv, '--work-dir', path.join(tmp, 'elsewhere')], located(board, tmp)],
-          ['unverified', argv, { ...located(board, tmp), trustedBoard: null as never }],
+        const cases: [string, string[], ReturnType<typeof located> | undefined, string][] = [
+          [
+            'board',
+            argv,
+            located(path.join(tmp, 'elsewhere', 'dispatch'), tmp),
+            "--board-dir is not the main checkout's dispatch board",
+          ],
+          [
+            'work dir',
+            [...argv, '--work-dir', path.join(tmp, 'elsewhere')],
+            located(board, tmp),
+            'the working directory is not the main checkout',
+          ],
+          [
+            'unverified',
+            argv,
+            { ...located(board, tmp), trustedBoard: null as never },
+            'the main checkout could not be verified',
+          ],
         ];
-        for (const [label, args, extras] of cases) {
+        for (const [label, args, extras, reason] of cases) {
           const code = await runHierarchyCli(
             args,
             overrides({ emit: (e) => events.push(e) }),
             extras,
           );
           expect(code, label).toBe(1);
-          expect(String(err.mock.calls.at(-1)?.[0]), label).toContain('refused');
+          expect(String(err.mock.calls.at(-1)?.[0]), label).toContain(`refused; ${reason}`);
         }
         expect(calls).toEqual([]);
         expect(events).toEqual([]);
@@ -507,13 +533,256 @@ describe('clear, tick and route-decision', () => {
     it('proceeds when the board and the working directory are the main checkout', async () => {
       seedBoardWithBrief();
       const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const enqueued: string[] = [];
       const code = await runHierarchyCli(
         ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
         overrides(),
-        { ...located(path.join(tmp, 'dispatch'), tmp), enqueue: () => [] },
+        {
+          ...located(path.join(tmp, 'dispatch'), tmp),
+          enqueue: (entries) => {
+            enqueued.push(...entries.map((e) => e.taskId));
+            return [];
+          },
+        },
       );
-      expect(String(err.mock.calls.at(-1)?.[0] ?? '')).not.toContain('refused');
-      expect(code).toBeLessThan(2);
+      expect(code).toBe(0);
+      expect(err).not.toHaveBeenCalled();
+      expect(enqueued).toEqual(['AISDLC-1']);
+      expect(JSON.parse(logs.at(-1) as string).ingested).toEqual([
+        { file: 'b.md', tasks: ['AISDLC-1'] },
+      ]);
+    });
+  });
+
+  describe('forged roster, end to end (no injected identity or board)', () => {
+    // Only the process lookups are replaced: the roster is read from whatever board
+    // the command trusts, and the main checkout is a real git repository.
+    const lookup = {
+      startPid: 500,
+      parentPid: (pid: number) => (pid === 500 ? 400 : null),
+      comm: (pid: number) => (pid === 400 ? 'claude' : 'zsh'),
+    };
+    const gitEnv = {
+      ...stripGitRedirects(process.env),
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_SYSTEM: '/dev/null',
+    };
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync('git', args, { cwd, stdio: 'ignore', env: gitEnv });
+    const initRepo = (dir: string): string => {
+      mkdirSync(dir, { recursive: true });
+      git(dir, 'init', '-q');
+      git(
+        dir,
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'i',
+      );
+      return dir;
+    };
+    const dispatchAt = (pid: number): RosterEntry => ({
+      ...entry('operator-dispatch', 'operator-dispatch'),
+      pid,
+    });
+    const tickArgv = ['tick', '--worker', 'operator-dispatch'];
+    const clearArgv = ['clear', 'executor-alpha', '--settle-ms', '0'];
+
+    let main: string;
+    let mainBoard: string;
+    let forgedBoard: string;
+    let other: string;
+    let plain: string;
+    let enqueued: string[];
+    let events: unknown[];
+
+    beforeEach(() => {
+      const root = realpathSync(tmp);
+      main = initRepo(path.join(root, 'main'));
+      other = initRepo(path.join(root, 'other'));
+      plain = path.join(root, 'plain');
+      mkdirSync(plain);
+      mainBoard = path.join(main, '.ai-sdlc', 'dispatch');
+      forgedBoard = path.join(root, 'forged', 'dispatch');
+      enqueued = [];
+      events = [];
+      // The real roster does not list the caller (pid 400); the forged one names it
+      // as the dispatch session.
+      writeRoster(mainBoard, { schemaVersion: 'v1', sessions: [dispatchAt(999)] });
+      writeRoster(forgedBoard, { schemaVersion: 'v1', sessions: [dispatchAt(400)] });
+      for (const board of [mainBoard, forgedBoard]) {
+        mkdirSync(path.join(board, 'briefs'), { recursive: true });
+        writeFileSync(
+          path.join(board, 'briefs', 'b.md'),
+          renderBriefBlock([{ task: 'AISDLC-1', after: [], wave: 1 }]),
+        );
+      }
+    });
+
+    const listing = (dir: string) =>
+      existsSync(dir) ? readdirSync(dir, { recursive: true }).map(String).sort() : [];
+
+    /**
+     * Runs the command as a caller whose install directory is inside the main
+     * checkout, unless `installDir` is 'real': then the running module's own
+     * location (this repository) is used, as for a command copied elsewhere.
+     */
+    function run(
+      argv: string[],
+      over: { cwd: string; board: string; installDir?: string | 'real' },
+    ) {
+      return runHierarchyCli(
+        [...argv, '--board-dir', over.board],
+        overrides({ cwd: over.cwd, boardDir: over.board, emit: (e) => events.push(e) }),
+        {
+          processLookup: lookup,
+          ...(over.installDir === 'real'
+            ? {}
+            : { installDir: over.installDir ?? path.join(main, 'pipeline-cli') }),
+          lease,
+          operational: new Set(['clear-executor-context', 'requeue']),
+          enqueue: (entries) => {
+            enqueued.push(...entries.map((e) => e.taskId));
+            return [];
+          },
+        },
+      );
+    }
+
+    it.each([
+      ['tick', tickArgv],
+      ['clear', clearArgv],
+    ])(
+      '%s refuses a forged roster at a --board-dir of the caller own choosing',
+      async (_l, argv) => {
+        const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+        const before = [listing(forgedBoard), listing(mainBoard)];
+        expect(await run(argv, { cwd: main, board: forgedBoard })).toBe(1);
+        expect(String(err.mock.calls.at(-1)?.[0])).toContain(
+          "--board-dir is not the main checkout's dispatch board",
+        );
+        expect([listing(forgedBoard), listing(mainBoard)]).toEqual(before);
+        expect(existsSync(path.join(forgedBoard, 'operator-dispatch.state.json'))).toBe(false);
+        expect(enqueued).toEqual([]);
+        expect(events).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(logs).toEqual([]);
+      },
+    );
+
+    it.each([
+      ['tick', tickArgv],
+      ['clear', clearArgv],
+    ])('%s refuses a --work-dir that is another repository', async (_l, argv) => {
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const before = listing(mainBoard);
+      expect(await run([...argv, '--work-dir', other], { cwd: main, board: mainBoard })).toBe(1);
+      expect(String(err.mock.calls.at(-1)?.[0])).toContain(
+        'the working directory is not the main checkout',
+      );
+      expect(listing(mainBoard)).toEqual(before);
+      expect(enqueued).toEqual([]);
+      expect(calls).toEqual([]);
+    });
+
+    it.each([
+      ['tick', tickArgv],
+      ['clear', clearArgv],
+    ])('%s refuses when the working directory is not a verifiable checkout', async (_l, argv) => {
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const before = [listing(forgedBoard), listing(mainBoard)];
+      expect(await run(argv, { cwd: plain, board: forgedBoard })).toBe(1);
+      expect(String(err.mock.calls.at(-1)?.[0])).toContain(
+        'the main checkout could not be verified',
+      );
+      expect([listing(forgedBoard), listing(mainBoard)]).toEqual(before);
+      expect(enqueued).toEqual([]);
+      expect(calls).toEqual([]);
+    });
+
+    it.each([
+      ['tick', tickArgv],
+      ['clear', clearArgv],
+    ])(
+      '%s refuses on the real board when the real roster does not list the caller',
+      async (_l, argv) => {
+        const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+        const before = listing(mainBoard);
+        expect(await run(argv, { cwd: main, board: mainBoard })).toBe(1);
+        expect(String(err.mock.calls.at(-1)?.[0])).toContain(
+          'the calling session is not a running session in the roster',
+        );
+        expect(listing(mainBoard)).toEqual(before);
+        expect(enqueued).toEqual([]);
+      },
+    );
+
+    /*
+     * The scratch-repository attack: the attacker runs `git init` on a scratch
+     * directory, puts a forged roster naming their pid as the dispatch session and a
+     * forged policy in it, and points the working directory, --board-dir and
+     * --work-dir at it. Every location check passes against the scratch repository.
+     * What refuses it is the install-location check: the command is running from
+     * the real main checkout (the real module location is used here), which is not
+     * inside the scratch repository.
+     *
+     * Residual limit, disclosed: if the attacker copies the CLI into the scratch
+     * repository, the install location is inside it too and this check passes. Only
+     * the hook-level deny of these commands for executor roles closes that; this
+     * guard is a mistake guard, not authentication.
+     */
+    it.each([
+      ['tick', tickArgv],
+      ['clear', clearArgv],
+    ])(
+      '%s refuses a scratch repository the caller built, because the command is not installed in it',
+      async (_l, argv) => {
+        const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+        const scratch = initRepo(path.join(realpathSync(tmp), 'scratch'));
+        const scratchBoard = path.join(scratch, '.ai-sdlc', 'dispatch');
+        writeRoster(scratchBoard, { schemaVersion: 'v1', sessions: [dispatchAt(400)] });
+        mkdirSync(path.join(scratchBoard, 'briefs'), { recursive: true });
+        writeFileSync(
+          path.join(scratchBoard, 'briefs', 'b.md'),
+          renderBriefBlock([{ task: 'AISDLC-1', after: [], wave: 1 }]),
+        );
+        writeFileSync(
+          path.join(scratch, '.ai-sdlc', 'agent-role.yaml'),
+          'spec:\n  governance:\n    allowForcePush: leaseOnOwnBranch\n    operational:\n      - requeue\n      - clear-executor-context\n      - lease-push-own-branch\n',
+        );
+        const before = listing(scratchBoard);
+        const code = await run([...argv, '--work-dir', scratch], {
+          cwd: scratch,
+          board: scratchBoard,
+          installDir: 'real',
+        });
+        expect(code).toBe(1);
+        expect(String(err.mock.calls.at(-1)?.[0])).toContain(
+          "the command is not running from the main checkout's install",
+        );
+        expect(listing(scratchBoard)).toEqual(before);
+        expect(existsSync(path.join(scratchBoard, 'operator-dispatch.state.json'))).toBe(false);
+        expect(enqueued).toEqual([]);
+        expect(events).toEqual([]);
+        expect(calls).toEqual([]);
+        expect(logs).toEqual([]);
+      },
+    );
+
+    it('proceeds on the real board when the real roster lists the caller', async () => {
+      const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      writeRoster(mainBoard, { schemaVersion: 'v1', sessions: [dispatchAt(400)] });
+      expect(await run(tickArgv, { cwd: main, board: mainBoard })).toBe(0);
+      expect(err).not.toHaveBeenCalled();
+      expect(enqueued).toEqual(['AISDLC-1']);
+      expect(JSON.parse(logs.at(-1) as string).ingested).toEqual([
+        { file: 'b.md', tasks: ['AISDLC-1'] },
+      ]);
     });
   });
 

@@ -429,7 +429,11 @@ describe('an untrusted task id', () => {
       calls = [];
       const out = await runPlaybook(verdict({ taskId }), deps());
       expect(out).toMatchObject({ action: 'escalate', result: 'escalated' });
-      expect(out.escalation?.message).not.toMatch(/\n/);
+      expect(out.taskId).toBe('(invalid task id)');
+      expect(out.escalation?.taskId).toBe('(invalid task id)');
+      expect(out.escalation?.message).toBe(
+        'A failure record cannot be handled: the failure record has an invalid task id',
+      );
       expect(calls).toEqual([]);
       expect(requeued).toEqual([]);
     }

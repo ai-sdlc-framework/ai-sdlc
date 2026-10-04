@@ -6,6 +6,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 
+import { stripGitRedirects } from './git-env.js';
 import type { AsyncCommandRunner, CommandResult, CommandRunner } from './types.js';
 
 /** Maximum bytes of output captured from one command. */
@@ -30,28 +31,13 @@ export function createSystemRunner(): CommandRunner {
 /** Default time allowed for one git command, a push or rebase included. */
 export const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 
-/** Variables that point git at a repository, index or configuration other than the working directory's. */
-const GIT_LOCATION_VARS = new Set([
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_INDEX_FILE',
-  'GIT_COMMON_DIR',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-]);
-
 /**
  * The environment a playbook git command runs with: `base` without any variable
- * that redirects git (the repository, work tree, index, or any `GIT_CONFIG*`
- * setting) and with credential prompts turned off. Pure.
+ * that redirects git (see {@link stripGitRedirects}) and with credential prompts
+ * turned off. Pure.
  */
 export function buildGitEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(base)) {
-    const upper = key.toUpperCase();
-    if (GIT_LOCATION_VARS.has(upper) || upper.startsWith('GIT_CONFIG')) continue;
-    env[key] = value;
-  }
+  const env = stripGitRedirects(base);
   env.GIT_TERMINAL_PROMPT = '0';
   return env;
 }

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   mainCheckoutRoot,
+  realpathLoose,
   resolveTrustedBoard,
   trustedPolicyRoot,
   verifiedMainRoot,
@@ -146,6 +147,24 @@ describe('resolveTrustedBoard', () => {
     expect(resolveTrustedBoard(f.subdir!)).toEqual(expected);
   });
 
+  it('is not redirected by GIT_COMMON_DIR or GIT_DIR left in the environment', () => {
+    const f = fixtures();
+    const other = initRepo(path.join(tmp, 'redirect-target'));
+    const expected = { root: f.main!, boardDir: path.join(f.main!, '.ai-sdlc', 'dispatch') };
+    const saved = { common: process.env.GIT_COMMON_DIR, dir: process.env.GIT_DIR };
+    process.env.GIT_COMMON_DIR = path.join(other, '.git');
+    process.env.GIT_DIR = path.join(other, '.git');
+    try {
+      expect(resolveTrustedBoard(f.main!)).toEqual(expected);
+      expect(resolveTrustedBoard(f.worktree!)).toEqual(expected);
+    } finally {
+      if (saved.common === undefined) delete process.env.GIT_COMMON_DIR;
+      else process.env.GIT_COMMON_DIR = saved.common;
+      if (saved.dir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = saved.dir;
+    }
+  });
+
   it('refuses a symlinked, bare or missing repository', () => {
     const f = fixtures();
     for (const label of ['symlinkedGit', 'bare', 'plain']) {
@@ -162,5 +181,38 @@ describe('resolveTrustedBoard', () => {
       expect(trusted.root).toBe(f.main);
       expect(trusted.boardDir.startsWith(f.forged!)).toBe(false);
     }
+  });
+});
+
+describe('realpathLoose', () => {
+  it('resolves a symlinked root and appends a tail that does not exist yet', () => {
+    const real = path.join(tmp, 'real-root');
+    mkdirSync(real);
+    const link = path.join(tmp, 'link-root');
+    symlinkSync(real, link);
+    expect(realpathLoose(link)).toBe(real);
+    expect(realpathLoose(path.join(link, '.ai-sdlc', 'dispatch'))).toBe(
+      path.join(real, '.ai-sdlc', 'dispatch'),
+    );
+    expect(realpathLoose(path.join(real, 'a', '..', 'b'))).toBe(path.join(real, 'b'));
+  });
+
+  it('compares a missing board dir through a symlink with the trusted one', () => {
+    const f = fixtures();
+    const link = path.join(tmp, 'main-link');
+    symlinkSync(f.main!, link);
+    const trusted = resolveTrustedBoard(f.main!)!;
+    // The board directory does not exist yet, and is reached through the symlink.
+    const asGiven = path.join(link, '.ai-sdlc', 'dispatch');
+    expect(realpathSync(f.main!)).toBe(f.main);
+    expect(realpathLoose(asGiven)).toBe(realpathLoose(trusted.boardDir));
+    expect(realpathLoose(link)).toBe(realpathLoose(trusted.root));
+    expect(realpathLoose(path.join(link, '.ai-sdlc', 'other'))).not.toBe(
+      realpathLoose(trusted.boardDir),
+    );
+  });
+
+  it('returns the absolute path when nothing along it exists', () => {
+    expect(realpathLoose('/definitely/not/here')).toBe('/definitely/not/here');
   });
 });

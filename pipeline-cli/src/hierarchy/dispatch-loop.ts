@@ -151,7 +151,7 @@ export interface LoopDeps {
   /** Writes manifests for the entries, or throws without writing any. */
   enqueue: (entries: EnqueueEntry[]) => string[];
   /** Clears one executor's context. */
-  clear: (opts: { executor: string; taskId: string }) => Promise<ClearResult>;
+  clear: (opts: { executor: string; taskId?: string }) => Promise<ClearResult>;
   /** Applies the unblocking playbook to a failure. */
   playbook: (verdict: DispatchVerdict) => PlaybookOutcome | Promise<PlaybookOutcome>;
   /** Actions the policy grants the dispatch role. */
@@ -217,14 +217,13 @@ async function watchVerdicts(
     // from the checked copy: a hand-written verdict file never reaches the model,
     // the planner or a command line in its raw form.
     const { verdict, dropped } = sanitizeVerdict(raw);
-    const validTaskId = TASK_ID_RE.test(String(raw.taskId));
     const report: VerdictReport = {
-      taskId: validTaskId ? raw.taskId : '(invalid task id)',
+      taskId: verdict.taskId,
       state: verdictState,
       outcome: verdict.outcome,
       workerId: verdict.workerId,
       clear: { status: 'skipped', reason: 'the verdict was not written by a roster executor' },
-      ...(validTaskId && verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
+      ...(verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
       ...(dropped.length > 0 ? { rejectedFields: dropped } : {}),
     };
     if (executors.has(verdict.workerId)) {
@@ -246,7 +245,9 @@ async function clearOnce(deps: LoopDeps, verdict: DispatchVerdict): Promise<Clea
     return { status: 'not-permitted', executor, reason: 'clear-executor-context is not granted' };
   }
   try {
-    const r = await deps.clear({ executor, taskId: verdict.taskId });
+    // The task id goes on the clear event only when it is well formed.
+    const taskId = TASK_ID_RE.test(verdict.taskId) ? verdict.taskId : undefined;
+    const r = await deps.clear({ executor, ...(taskId ? { taskId } : {}) });
     return r.resumed
       ? { status: 'cleared', executor }
       : { status: 'degraded', executor, reason: 'the executor did not report back in time' };

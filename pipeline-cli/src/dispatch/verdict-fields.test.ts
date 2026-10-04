@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DispatchVerdict } from './types.js';
 import {
+  INVALID_TASK_ID,
   isValidCause,
   isValidDecisionId,
   MAX_DECISION_IDS,
@@ -100,6 +101,18 @@ describe('sanitizeVerdict', () => {
     expect(verdict.outcome).toBe('unknown');
     expect(verdict.workerId).toBe('unknown');
     expect(dropped).toEqual(['outcome', 'workerId']);
+  });
+
+  it('replaces a malformed task id with a placeholder and forwards no decision ids', () => {
+    for (const taskId of ['AISDLC-9\nx', '../../etc', '', 'x y', 42]) {
+      const { verdict, dropped } = sanitizeVerdict(
+        base({ taskId, decisionIds: ['DEC-0001'], cause: 'transient' }),
+      );
+      expect(verdict.taskId, String(taskId)).toBe(INVALID_TASK_ID);
+      expect(verdict.decisionIds).toBeUndefined();
+      expect(dropped).toEqual(['taskId', 'decisionIds']);
+    }
+    expect(sanitizeVerdict(base({ taskId: 'bad id' })).dropped).toEqual(['taskId']);
   });
 
   it('does not change the input', () => {

@@ -17,7 +17,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runDispatchCli } from '../cli/dispatch.js';
+import { runDispatchCli, type DispatchCliDeps } from '../cli/dispatch.js';
+import type { IdentityDeps } from '../hierarchy/index.js';
 import { claimNext, ensureBoardDirs, writeManifest, writeVerdict } from './board.js';
 import { completeTask } from './complete.js';
 import { FAILED_MANIFEST_SUFFIX, requeueFailed, snapshotFailedManifest } from './requeue.js';
@@ -258,17 +259,34 @@ describe('requeueFailed', () => {
 });
 
 describe('cli-dispatch requeue', () => {
-  async function cli(argv: string[]): Promise<{ exit: number; stdout: string }> {
+  /** A calling session resolved to the given role; no real pid is looked up. */
+  const asCaller = (role: string, name = role): IdentityDeps => ({
+    readSessions: () => [{ name, role, pid: 400, status: 'running' }],
+    parentPid: (pid) => (pid === 500 ? 400 : null),
+    comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+    startPid: 500,
+  });
+  const allowed: DispatchCliDeps = {
+    identity: asCaller('operator-dispatch'),
+    operational: new Set(['requeue']),
+  };
+
+  async function cli(
+    argv: string[],
+    deps: DispatchCliDeps = allowed,
+  ): Promise<{ exit: number; stdout: string; stderr: string }> {
     let stdout = '';
     vi.spyOn(process.stdout, 'write').mockImplementation(((c: string | Uint8Array) => {
       stdout += c.toString();
       return true;
     }) as typeof process.stdout.write);
-    vi.spyOn(process.stderr, 'write').mockImplementation(
-      (() => true) as typeof process.stderr.write,
-    );
-    const exit = await runDispatchCli(argv);
-    return { exit, stdout };
+    let stderr = '';
+    vi.spyOn(process.stderr, 'write').mockImplementation(((c: string | Uint8Array) => {
+      stderr += c.toString();
+      return true;
+    }) as typeof process.stderr.write);
+    const exit = await runDispatchCli(argv, deps);
+    return { exit, stdout, stderr };
   }
 
   it('requeues a failed task and exits 0', async () => {
@@ -318,5 +336,90 @@ describe('cli-dispatch requeue', () => {
         ])
       ).exit,
     ).toBe(2);
+  });
+
+  it('refuses an executor caller, changing nothing', async () => {
+    failTask('AISDLC-915');
+    const before = snapshot();
+    const r = await cli(['requeue', '--board-dir', board, '--task-id', 'AISDLC-915'], {
+      ...allowed,
+      identity: asCaller('executor', 'executor-a'),
+    });
+    expect(r.exit).toBe(1);
+    expect(r.stderr).toContain('only the dispatch session');
+    expect(r.stdout).toBe('');
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('refuses a planner and an unresolvable caller, changing nothing', async () => {
+    failTask('AISDLC-916');
+    const before = snapshot();
+    for (const identity of [
+      asCaller('planner'),
+      { ...asCaller('operator-dispatch'), readSessions: () => [] },
+    ]) {
+      const r = await cli(['requeue', '--board-dir', board, '--task-id', 'AISDLC-916'], {
+        ...allowed,
+        identity,
+      });
+      expect(r.exit).toBe(1);
+      expect(snapshot()).toEqual(before);
+    }
+  });
+
+  it('refuses a dispatch caller whose policy does not grant requeue', async () => {
+    failTask('AISDLC-917');
+    const before = snapshot();
+    const r = await cli(['requeue', '--board-dir', board, '--task-id', 'AISDLC-917'], {
+      ...allowed,
+      operational: new Set(['retrigger-ci']),
+    });
+    expect(r.exit).toBe(1);
+    expect(r.stderr).toContain('does not grant requeue');
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('refuses a retry limit above the default instead of clamping it', async () => {
+    failTask('AISDLC-918');
+    const before = snapshot();
+    const r = await cli([
+      'requeue',
+      '--board-dir',
+      board,
+      '--task-id',
+      'AISDLC-918',
+      '--retry-limit',
+      '3',
+    ]);
+    expect(r.exit).toBe(2);
+    expect(r.stderr).toContain('may not exceed 2');
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('allows the dispatch caller with the grant, up to the default limit', async () => {
+    failTask('AISDLC-919');
+    const r = await cli([
+      'requeue',
+      '--board-dir',
+      board,
+      '--task-id',
+      'AISDLC-919',
+      '--retry-limit',
+      '2',
+    ]);
+    expect(r.exit).toBe(0);
+    expect(JSON.parse(r.stdout.trim())).toMatchObject({ ok: true, retryCount: 1 });
+  });
+
+  it('refuses when the checkout cannot be verified and the identity is not injected', async () => {
+    failTask('AISDLC-920');
+    const before = snapshot();
+    const r = await cli(['requeue', '--board-dir', board, '--task-id', 'AISDLC-920'], {
+      operational: new Set(['requeue']),
+      cwd: root,
+    });
+    expect(r.exit).toBe(1);
+    expect(r.stderr).toContain('main checkout could not be verified');
+    expect(snapshot()).toEqual(before);
   });
 });

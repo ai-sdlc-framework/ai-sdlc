@@ -45,9 +45,13 @@
  *     failed/ once past the retry limit.
  *   - `requeue --task-id <id> [--retry-limit <n>]` — return one failed task to
  *     queue/ with its retry count incremented, restoring the manifest kept
- *     when it failed. Exits 1, changing nothing, when the task is not in
- *     failed/, has no saved manifest, is already active, or is past the retry
- *     limit (default 2).
+ *     when it failed. Meant for the dispatch session only: a mistake guard
+ *     (the one `cli-hierarchy tick` uses; it is not authentication) exits 1,
+ *     changing nothing, unless the calling session is the running dispatch
+ *     session, and the repository policy must grant `requeue`. `--retry-limit` may not exceed the default of 2 (a
+ *     larger value exits 2). Also exits 1, changing nothing, when the task is
+ *     not in failed/, has no saved manifest, is already active, or is past the
+ *     retry limit.
  *
  * Executor loop (RFC-0051 section 5):
  *
@@ -138,6 +142,8 @@ import {
   writeVerdict,
 } from '../dispatch/index.js';
 import { completeTask, splitIdList } from '../dispatch/complete.js';
+import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
+import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
 import type {
   BoardEntry,
@@ -237,6 +243,16 @@ function out(value: unknown): void {
 export interface DispatchCliDeps {
   /** File paths touched by open pull requests. Throws when they cannot be listed. */
   openPrFiles?: () => string[];
+  /** Replaces the roster and process lookups that identify the calling session (`requeue`). */
+  identity?: IdentityDeps;
+  /** Replaces the git lookup of the main checkout and its board (`requeue`). */
+  trustedBoard?: { root: string; boardDir: string } | null;
+  /** Replaces the install directory of the running module (`requeue`). */
+  installDir?: string | null;
+  /** Replaces the policy file as the source of the operational grants (`requeue`). */
+  operational?: ReadonlySet<string>;
+  /** Working directory used to find the main checkout (`requeue`); default the process's. */
+  cwd?: string;
 }
 
 /** File paths touched by open pull requests, from the `gh` CLI. */
@@ -859,8 +875,36 @@ export async function runDispatchCli(
         process.stderr.write(`cli-dispatch requeue: '${taskId}' is not a valid task id\n`);
         return 2;
       }
+      const cwd = deps.cwd ?? process.cwd();
+      const caller = checkDispatchCaller({
+        label: 'cli-dispatch requeue',
+        cwd,
+        boardDir,
+        workDir: flags['work-dir'],
+        worker: flags['worker'],
+        identity: deps.identity,
+        trustedBoard: deps.trustedBoard,
+        installDir: deps.installDir,
+      });
+      if (!caller.ok) {
+        process.stderr.write(`${caller.reason}\n`);
+        return 1;
+      }
+      const granted = deps.operational ?? loadOperational(cwd, cwd);
+      if (!granted.has('requeue')) {
+        process.stderr.write(
+          'cli-dispatch requeue: refused; the repository policy does not grant requeue to the dispatch session\n',
+        );
+        return 1;
+      }
       const retryLimit = intFlag(flags, 'retry-limit');
       if (retryLimit === null) return 2;
+      if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
+        process.stderr.write(
+          `cli-dispatch requeue: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}\n`,
+        );
+        return 2;
+      }
       try {
         out({
           ok: true,
@@ -1005,7 +1049,7 @@ Subcommands:
   board [--json]
   unblock --task-id <id>
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
-  requeue --task-id <id> [--retry-limit <n>]
+  requeue --task-id <id> [--retry-limit <n>]   (meant for the dispatch session; mistake guard, limit at most 2)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]

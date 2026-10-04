@@ -62,6 +62,12 @@ export {
   type VerdictReport,
 } from './dispatch-loop.js';
 export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
+export {
+  checkDispatchCaller,
+  defaultInstallDir,
+  type DispatchCallerInputs,
+} from './dispatch-caller.js';
+export { stripGitRedirects } from './git-env.js';
 export { createStreamEmitter, type EventEmitter, type HierarchyEvent } from './emit.js';
 export { listInflight, type InflightItem } from './inflight.js';
 export {
@@ -120,6 +126,7 @@ export {
 export { findStartedSession, readSessionRegistry } from './registry.js';
 export {
   mainCheckoutRoot,
+  realpathLoose,
   resolveTrustedBoard,
   safeReal,
   trustedPolicyRoot,

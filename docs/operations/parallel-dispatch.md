@@ -593,16 +593,37 @@ reports to the planner. Each wake-up runs one command:
 cli-hierarchy tick --worker <dispatch session name>
 ```
 
-The command identifies its caller instead of trusting `--worker`: it finds the nearest
-ancestor process that is a running roster entry and a claude process, and refuses,
-writing and sending nothing, unless that session has the `operator-dispatch` role.
-`--worker` is optional; when given it must equal the caller's own roster name. The
-roster is read from the main checkout's board, never from a path the caller passes: the
-command also refuses unless `--board-dir` and the working directory are the main
-checkout's. Every
-board write the loop makes carries that name. `cli-hierarchy clear` and
-`cli-hierarchy route-decision` apply the same check. The command prints, as JSON, what
-it did and what the session has to say.
+The command has a mistake guard (see "The caller binding" below): it identifies its
+caller instead of relying on `--worker`. It finds the nearest ancestor process that is a
+running roster entry and a claude process, and refuses, writing and sending nothing,
+unless that session has the `operator-dispatch` role. `--worker` is optional; when given
+it must equal the caller's own roster name. The roster is read from the main checkout's
+board, never from a path the caller passes: the command also refuses unless
+`--board-dir` and the working directory are the main checkout's, and unless the command
+is running from a module installed inside that checkout. Every board write the loop
+makes carries the caller's name. `cli-hierarchy clear` and `cli-hierarchy route-decision`
+apply the same guard, and so does `cli-dispatch requeue`. The command prints, as JSON,
+what it did and what the session has to say.
+
+### The caller binding
+
+The binding is a mistake guard. It stops a session from using the dispatch commands by
+mistake, for example an executor that types `cli-hierarchy tick`, or a `--board-dir`
+that points at the wrong board. It is not authentication and it does not contain a
+hostile or confused session.
+
+A session running as the same user can still defeat it:
+
+- a scratch repository with a forged roster and a forged policy file, used as the
+  working directory, board and `--work-dir`;
+- a copy of the command placed inside that scratch repository, so the install-location
+  check passes;
+- redirecting git with environment variables of the `GIT_COMMON_DIR` kind (the commands
+  strip the ones they know, but a list of names is not a guarantee).
+
+The hook-level deny of `tick`, `clear` and `route-decision` for executor roles is the
+control that closes this. It should be in place before `tick` is enabled with more than
+one executor.
 
 1. **Ingest.** Each new `*.md` file in `.ai-sdlc/dispatch/briefs/` is parsed and
    enqueued with the same mapping as `cli-dispatch enqueue --from-brief`, then
@@ -662,9 +683,9 @@ saved manifest, is already queued, inflight or blocked, or has used its retries
 cli-hierarchy clear <executor-name> [--settle-ms <n>]
 ```
 
-`cli-hierarchy clear` is for the dispatch session only. It resolves the calling session
-from the roster and refuses, sending nothing, for any other caller, including a human
-at a plain shell. A person outside the hierarchy who needs to empty a pane uses tmux
+`cli-hierarchy clear` is meant for the dispatch session only. Its mistake guard resolves
+the calling session from the roster and refuses, sending nothing, for any other caller,
+including a human at a plain shell (it is not authentication; see "The caller binding"). A person outside the hierarchy who needs to empty a pane uses tmux
 directly (`tmux send-keys -t <pane> -l -- /clear`, then `Enter`), after checking with
 `cli-hierarchy status` that the executor holds no inflight task.
 

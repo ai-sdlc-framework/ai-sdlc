@@ -30,10 +30,11 @@
  *
  * All subcommands accept `--board-dir <path>` (default `.ai-sdlc/dispatch`).
  *
- * `clear`, `tick` and `route-decision` act with the dispatch session's authority.
- * They resolve the calling session from the process tree and the roster, and refuse
- * unless it is the running dispatch session; a `--worker` value is only checked
- * against that, never trusted.
+ * `clear`, `tick` and `route-decision` are dispatch-session commands. A mistake
+ * guard keeps other sessions from running them by accident: it finds the calling
+ * session from the process tree and the roster and refuses unless that is the running
+ * dispatch session. A `--worker` value is only compared with that result. The guard is
+ * not authentication; a session running as the same user can defeat it.
  */
 
 import os from 'node:os';
@@ -46,11 +47,11 @@ import { requeueFailed } from '../dispatch/requeue.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
 import {
   attachTmuxSession,
+  checkDispatchCaller,
   checkOwnWorktree,
   clearExecutor,
   createGitRunner,
   createStreamEmitter,
-  createSystemIdentity,
   createSystemRunner,
   createTmuxBriefSender,
   generateBrief,
@@ -63,15 +64,13 @@ import {
   hierarchyTerminals,
   hierarchyUp,
   loadOperationalPolicy,
-  requireDispatchCaller,
-  resolveTrustedBoard,
   runDispatchTick,
   runPlaybook,
   SAFE_SESSION_NAME,
-  safeReal,
   systemResourceSnapshot,
   type AsyncCommandRunner,
   type CommandRunner,
+  type DispatchCallerInputs,
   type ForcePushMode,
   type HierarchyDeps,
   type IdentityDeps,
@@ -129,8 +128,9 @@ Usage for clear:
   cli-hierarchy clear <executor-name> [--settle-ms <n>]
   Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
   then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
-  For the dispatch session only: any other caller, a human at a plain shell included,
-  is refused. Outside the hierarchy, use tmux directly.
+  Meant for the dispatch session only. A mistake guard refuses any other caller, a human
+  at a plain shell included; it is not authentication and a same-user session can defeat
+  it. Outside the hierarchy, use tmux directly.
 
 Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
@@ -227,11 +227,15 @@ export async function runHierarchyCli(
     };
     /** Replaces the roster and process lookups that identify the calling session (tests). */
     identity?: IdentityDeps;
+    /** Replaces only the process lookups; the roster is still read from the trusted board (tests). */
+    processLookup?: DispatchCallerInputs['processLookup'];
     /**
      * Replaces the git lookup of the main checkout and its board (tests). When
      * `identity` is injected without this, the board-location check is skipped.
      */
     trustedBoard?: { root: string; boardDir: string } | null;
+    /** Replaces the install directory of the running module (tests). */
+    installDir?: DispatchCallerInputs['installDir'];
     /** Replaces the git runner the unblocking playbook uses (tests). */
     gitRun?: CommandRunner | AsyncCommandRunner;
     /** Replaces the board enqueue (tests). */
@@ -252,42 +256,22 @@ export async function runHierarchyCli(
   const deps: HierarchyDeps = { ...defaultHierarchyDeps(flags), ...overrides };
 
   /**
-   * The caller must itself be the dispatch session; `--worker` is only checked
-   * against that, never trusted. Runs before anything is read, written or sent.
+   * The mistake guard: the caller should itself be the dispatch session, and
+   * `--worker` is only compared with that result. Runs before anything is read,
+   * written or sent. It is not authentication.
    */
-  const dispatchCaller = (command: string): ReturnType<typeof requireDispatchCaller> => {
-    const label = `cli-hierarchy ${command}`;
-    const skipLocation = extras.identity !== undefined && extras.trustedBoard === undefined;
-    let identityBoard = deps.boardDir;
-    if (!skipLocation) {
-      // The roster that identifies the caller, the board it acts on and the
-      // repository it pushes to must all be the verified main checkout's: a
-      // path the caller picked is a path the caller can forge.
-      const trusted =
-        extras.trustedBoard !== undefined ? extras.trustedBoard : resolveTrustedBoard(deps.cwd);
-      if (!trusted) {
-        return { ok: false, reason: `${label}: refused; the main checkout could not be verified` };
-      }
-      if (safeReal(deps.boardDir) !== safeReal(trusted.boardDir)) {
-        return {
-          ok: false,
-          reason: `${label}: refused; --board-dir is not the main checkout's dispatch board`,
-        };
-      }
-      if (safeReal(path.resolve(flags['work-dir'] ?? deps.cwd)) !== safeReal(trusted.root)) {
-        return {
-          ok: false,
-          reason: `${label}: refused; the working directory is not the main checkout`,
-        };
-      }
-      identityBoard = trusted.boardDir;
-    }
-    return requireDispatchCaller(
-      extras.identity ?? createSystemIdentity(identityBoard),
-      flags.worker,
-      label,
-    );
-  };
+  const dispatchCaller = (command: string): ReturnType<typeof checkDispatchCaller> =>
+    checkDispatchCaller({
+      label: `cli-hierarchy ${command}`,
+      cwd: deps.cwd,
+      boardDir: deps.boardDir,
+      workDir: flags['work-dir'],
+      worker: flags.worker,
+      identity: extras.identity,
+      processLookup: extras.processLookup,
+      trustedBoard: extras.trustedBoard,
+      installDir: extras.installDir,
+    });
 
   try {
     switch (subcommand) {

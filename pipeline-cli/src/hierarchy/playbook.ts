@@ -28,7 +28,12 @@ import path from 'node:path';
 
 import { TASK_ID_RE } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
-import { isValidCause, isValidDecisionId, oneLine } from '../dispatch/verdict-fields.js';
+import {
+  INVALID_TASK_ID,
+  isValidCause,
+  isValidDecisionId,
+  oneLine,
+} from '../dispatch/verdict-fields.js';
 import { isRebaseFixable, type FailureShape } from '../runtime/ci-failure-watcher.js';
 import type { EventEmitter } from './emit.js';
 import { isProtectedBranch, type ForcePushMode } from './lease-policy.js';
@@ -175,14 +180,16 @@ export async function runPlaybook(
   // The id comes from a file on the board; it builds a worktree path and a branch
   // pattern below, so nothing runs for an id that is not a well-formed task id.
   if (typeof taskId !== 'string' || !TASK_ID_RE.test(taskId)) {
-    const shown = oneLine(String(taskId).replace(/[^\x20-\x7e]/g, '?'), 40);
-    const reason = `the failure record has an invalid task id '${shown}'`;
+    const reason = 'the failure record has an invalid task id';
     return {
-      taskId: shown,
+      taskId: INVALID_TASK_ID,
       action: 'escalate',
       result: 'escalated',
       reason,
-      escalation: { taskId: shown, message: `A failure record cannot be handled: ${reason}` },
+      escalation: {
+        taskId: INVALID_TASK_ID,
+        message: `A failure record cannot be handled: ${reason}`,
+      },
     };
   }
 
