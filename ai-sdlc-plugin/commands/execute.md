@@ -715,6 +715,20 @@ git worktree add "$WORKTREE_PATH" -b "$BRANCH" origin/main
 
 If `git worktree add` fails because the branch already exists, the operator's prior run left state. Tell them: "Worktree branch `$BRANCH` already exists. Run `/ai-sdlc cleanup $TASK_ID` first, or pick a different task." Then stop.
 
+**Hooks check (AISDLC-693).** A worktree with no git hooks directory runs no pre-commit, commit-msg or pre-push gate, silently. The shell commands above do not install dependencies (the TypeScript Step 3 does, with scripts enabled), so install with install scripts enabled (never disable them) and, before the first commit, confirm the hooks directory exists:
+
+```bash
+HOOKS_DIR=$(git -C "$WORKTREE_PATH" rev-parse --git-path hooks)
+case "$HOOKS_DIR" in /*) ;; *) HOOKS_DIR="$WORKTREE_PATH/$HOOKS_DIR" ;; esac
+MAIN_HOOKS=$(git rev-parse --git-path hooks)
+if [ -x "$MAIN_HOOKS/pre-push" ] && [ ! -x "$HOOKS_DIR/pre-push" ]; then
+  (cd "$WORKTREE_PATH" && pnpm install --frozen-lockfile && pnpm run prepare)
+  [ -x "$HOOKS_DIR/pre-push" ] || { echo "ERROR: hooks directory $HOOKS_DIR has no pre-push; run: cd $WORKTREE_PATH && pnpm install --frozen-lockfile && pnpm run prepare" >&2; exit 1; }
+fi
+```
+
+Stop if it is still missing. Repositories whose main checkout has no `pre-push` hook skip this check.
+
 ## Step 4 — Flip task to In Progress + write active-task sentinel
 
 Use `mcp__plugin_ai-sdlc_ai-sdlc__task_edit` to set `status: 'In Progress'`. This makes the dashboard reflect that work has started.
@@ -818,7 +832,7 @@ When a developer subagent runs in a **non-interactive / detached session** (tmux
 
 ```bash
 # Pattern for non-interactive AskUserQuestion routing in developer subagents:
-node pipeline-cli/bin/cli-decisions.mjs escalate \
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" escalate \
   --task-id "$TASK_ID" \
   --source-worktree "$(pwd)" \
   --summary "What approach for <question>?" \

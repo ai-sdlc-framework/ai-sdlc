@@ -23,6 +23,7 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
+import { ensureWorktreeHooks, type HooksCheckFs } from './hooks-check.js';
 
 /** Canonical truthy values for feature flags (per CLAUDE.md feature-flag conventions). */
 function isFlagEnabled(value: string | undefined): boolean {
@@ -79,6 +80,10 @@ export interface SetupWorktreeOptions {
    * concurrent worktree ops.
    */
   mutexOpts?: WithWorktreeMutexOptions;
+  /** AISDLC-693 — filesystem reads for the hooks check; tests inject a fake. */
+  hooksCheckFs?: HooksCheckFs;
+  /** AISDLC-693 — active Node version for the engine-failure message (default `process.version`). */
+  activeNodeVersion?: string;
 }
 
 /**
@@ -428,7 +433,7 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
 
   // AISDLC-241 — wrap git worktree add (and any sibling cleanup ops) in the
   // mutex so concurrent ticks cannot race on .git/config.lock.
-  return withWorktreeMutex(async () => {
+  const created = await withWorktreeMutex(async () => {
     const addResult = await runner(
       'git',
       ['worktree', 'add', opts.worktreePath, '-b', opts.branch, 'origin/main'],
@@ -473,6 +478,21 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
 
     return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
   }, opts.mutexOpts);
+
+  // AISDLC-693 — fail closed: a worktree with no hooks directory runs no gate at
+  // all, so nothing may proceed to a commit from it. Runs outside the mutex (it
+  // may install dependencies, which takes minutes and touches no shared git config).
+  const hooks = await ensureWorktreeHooks({
+    runner,
+    workDir: opts.workDir,
+    worktreePath: opts.worktreePath,
+    fs: opts.hooksCheckFs,
+    activeNodeVersion: opts.activeNodeVersion,
+  });
+  if (hooks.status === 'missing') {
+    throw new Error(`Step 3 refused to continue for ${opts.taskId}: ${hooks.message}`);
+  }
+  return created;
 }
 
 /**
