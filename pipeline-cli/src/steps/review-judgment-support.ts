@@ -13,6 +13,7 @@ import {
   type JudgmentSink,
 } from '@ai-sdlc/reference';
 import { classifyPathRisk, type PathRisk } from '../classifier/classifier.js';
+import { diffHeaderPaths } from '../classifier/diff-header.js';
 
 /** True when the context can reach a provider; a disabled layer has none. */
 export function judgmentLayerActive(ctx: EvaluateJudgmentContext | undefined): boolean {
@@ -44,19 +45,21 @@ export function scanReviewPaths(changedFiles: readonly string[], diff: string): 
   }
   for (const line of diff.split('\n')) {
     if (line.startsWith('diff --git ')) {
-      const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+      // A header with several ' b/' whose sides differ is only a guess: fail closed.
+      const pair = diffHeaderPaths(line.slice('diff --git '.length));
       if (
-        !m ||
-        isQuoted(m[1]) ||
-        isQuoted(m[2]) ||
+        !pair ||
+        !pair.exact ||
+        isQuoted(pair.oldPath) ||
+        isQuoted(pair.newPath) ||
         line.includes(' "a/') ||
         line.includes(' "b/')
       ) {
         unparseable = true;
         continue;
       }
-      paths.add(m[1]);
-      paths.add(m[2]);
+      paths.add(pair.oldPath);
+      paths.add(pair.newPath);
       continue;
     }
     const rc = /^(?:rename|copy) (?:from|to) (.*)$/.exec(line);

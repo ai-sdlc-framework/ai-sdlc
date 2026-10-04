@@ -37,6 +37,7 @@ import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import { resolveModel } from '../routing/resolve-model.js';
 import { routingArtifactsDir, routingRecordable } from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
+import { diffHeaderPaths } from '../classifier/diff-header.js';
 
 export interface BuildReviewPromptsOptions {
   taskId: string;
@@ -264,16 +265,20 @@ export function stubBinaryHunks(
   if (diff === '') return { diff, stubbed: false };
   let stubbed = false;
   const sections = diff.split(/^(?=diff --git )/m).map((section) => {
-    const header = /^diff --git a\/(.+) b\/(.+)$/m.exec(section.split('\n', 1)[0]);
+    const headerLine = section.split('\n', 1)[0];
+    const header = headerLine.startsWith('diff --git ')
+      ? diffHeaderPaths(headerLine.slice('diff --git '.length))
+      : undefined;
     // A NUL byte is what git itself treats as binary. A numstat-binary file with no NUL
     // (a `-diff` attribute) keeps its text, unless it is huge.
-    const listed = header !== null && (binaryPaths.has(header[1]) || binaryPaths.has(header[2]));
+    const listed =
+      header !== undefined && (binaryPaths.has(header.oldPath) || binaryPaths.has(header.newPath));
     const binary =
       section.includes('\u0000') || (listed && section.length > MAX_LISTED_BINARY_CHARS);
     if (!binary) return section;
     stubbed = true;
     if (!header) return 'Binary files a/(unreadable) and b/(unreadable) differ\n';
-    return `${section.split('\n', 1)[0]}\nBinary files a/${header[1]} and b/${header[2]} differ\n`;
+    return `${headerLine}\nBinary files a/${header.oldPath} and b/${header.newPath} differ\n`;
   });
   return { diff: sections.join(''), stubbed };
 }

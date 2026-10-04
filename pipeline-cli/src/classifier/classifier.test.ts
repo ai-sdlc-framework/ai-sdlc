@@ -379,6 +379,45 @@ describe('parseUnifiedDiff', () => {
     expect(s.linesRemoved).toBe(1);
   });
 
+  it('reads the post-image path of a rename, of a path containing " b/", and keeps the old guess for an ambiguous header', () => {
+    expect(parseUnifiedDiff('diff --git a/old.ts b/new.ts\nsimilarity index 90%\n').paths).toEqual([
+      'new.ts',
+    ]);
+    expect(parseUnifiedDiff('diff --git a/dir b/x.ts b/dir b/x.ts\n').paths).toEqual([
+      'dir b/x.ts',
+    ]);
+    // sides differ and the path holds " b/": the last split is the best guess, as before
+    expect(parseUnifiedDiff('diff --git a/old b/x.ts b/new.ts\n').paths).toEqual(['new.ts']);
+  });
+
+  it('skips a header holding a line terminator, as the old regex did', () => {
+    for (const t of ['\r', '\u2028', '\u2029']) {
+      expect(parseUnifiedDiff(`diff --git a/x.ts b/x.ts${t}\n`).paths).toEqual([]);
+    }
+  });
+
+  it('skips headers that are not two plain paths', () => {
+    const diff = ['diff --git "a/q.ts" "b/q.ts"', 'diff --git x/a b/a', 'diff --git a/x b/'].join(
+      '\n',
+    );
+    expect(parseUnifiedDiff(diff).paths).toEqual([]);
+  });
+
+  it('parses a hostile header in linear time (the bound is generous)', () => {
+    // The \r tail makes the OLD regex fail to match and backtrack quadratically.
+    const time = (reps: number): number => {
+      const body = `diff --git a/a b/${'a b/a'.repeat(reps)}`;
+      const start = performance.now();
+      for (let i = 0; i < 5; i++) for (const tail of ['\n', '\r\n']) parseUnifiedDiff(body + tail);
+      return performance.now() - start;
+    };
+    const small = Math.max(time(20_000), 20);
+    const large = time(80_000);
+    expect(large / small).toBeLessThan(12);
+    expect(large).toBeLessThan(5000);
+    expect(parseUnifiedDiff(`diff --git a/a b/${'a b/a'.repeat(50_000)}\n`).filesChanged).toBe(1);
+  }, 30000);
+
   it('returns empty summary on empty input', () => {
     expect(parseUnifiedDiff('')).toEqual({
       filesChanged: 0,

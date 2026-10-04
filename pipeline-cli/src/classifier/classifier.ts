@@ -24,6 +24,7 @@
 
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { diffHeaderPaths } from './diff-header.js';
 
 /**
  * Reviewer names used by the classifier. These are the *type* names — the
@@ -346,8 +347,8 @@ export function parseUnifiedDiff(diff: string): DiffSummary {
   for (const raw of diff.split('\n')) {
     if (raw.startsWith('diff --git ')) {
       // diff --git a/<path> b/<path>  → take the b-side path (post-image)
-      const m = raw.match(/^diff --git a\/(.+) b\/(.+)$/);
-      if (m) paths.push(m[2]);
+      const header = diffHeaderPaths(raw.slice('diff --git '.length));
+      if (header) paths.push(header.newPath);
       continue;
     }
     if (raw.startsWith('+++ ') || raw.startsWith('--- ')) continue;
