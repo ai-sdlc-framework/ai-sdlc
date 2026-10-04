@@ -5,6 +5,28 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.22.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.21.1...ai-sdlc-plugin-v0.22.0) (2026-10-04)
+
+
+### Features
+
+* **orchestrator:** claude code transcript ingester and cli-usage ingest (AISDLC-649) ([#1109](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1109)) ([0048523](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0048523839b30b32f2d2527244ea42f8b5f971fc))
+* **orchestrator:** model routing table, resolveModel and deterministic exploration (AISDLC-654) ([#1114](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1114)) ([b0f50e0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b0f50e0767b7edfdd586f65cb01ef838b395b2fd))
+* **orchestrator:** review executor probes with contained, redacted evidence (AISDLC-675) ([#1178](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1178)) ([699f3fe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/699f3fef42c42a5e80dd054a6a2f12b134019f22))
+* **orchestrator:** RFC-0051 executor loop skill, claim-bound complete, next-subid (AISDLC-666) ([#1170](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1170)) ([8a4fbce](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8a4fbce3b16c41ac3c52a00fd718c9b7edda3fe1))
+* RFC-0049 section 9.5: follow-ups in a completed task must cite a filed task, say none, or be explicitly declined (AISDLC-645) ([#1103](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1103)) ([1b02908](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1b029089a3ca1827486a236461fff4a6142005d9))
+* RFC-0051: cli-hierarchy brief generates a dispatch brief with waves and sequence groups from task metadata (AISDLC-668) ([#1120](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1120)) ([a3e2748](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a3e27485789b57c038aaf7abc42042aa8522556b))
+* **spec:** scope force-push to own branch via leaseOnOwnBranch (AISDLC-663) ([#1113](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1113)) ([bf63baf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bf63baf71a41c1bb8561c3a6f462e921f3080ccc))
+
+
+### Bug Fixes
+
+* bind attestation leaves to their own reviewer run (AISDLC-697) ([#1182](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1182)) ([86745fe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86745fe7ed9fc052b66552e28cd6c85aed7947df))
+* **hooks:** coverage gate reaps workers and caps memory; vitest workers die with parent (AISDLC-681) ([#1158](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1158)) ([ce802d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ce802d25ffe657ecbc33c75f8e497f28aa3f1280))
+* **hooks:** single-flight, scoped, group-killed deferred coverage check (AISDLC-685) ([#1166](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1166)) ([d60fca6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d60fca668ba482b598d639ba3e682f006a34d011))
+* **spec:** accept only the explicit refs/heads destination in the lease guard (AISDLC-663.2) ([#1121](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1121)) ([c479b92](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c479b921daf46dc334baa417de59679d8cba8e00))
+* **spec:** harden cli-merge-if-eligible before the allowMerge grant (AISDLC-663.5) ([#1134](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1134)) ([ea6b7da](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea6b7da08bf7c58acb459a43c076be048a20b288))
+
 ## [0.21.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.21.0...ai-sdlc-plugin-v0.21.1) (2026-09-18)
 
 
