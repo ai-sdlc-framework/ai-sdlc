@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { SAFE_NAME } = require('../hooks/lib/hierarchy-role.js');
+const { DEFAULT_ROLE_BLOCKED_TOOLS, describeRule } = require('../hooks/lib/role-tool-policy.js');
 const dir = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(dir, 'executor.md'), 'utf-8');
 const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -63,13 +64,21 @@ describe('executor command', () => {
     assert.match(body, /clears this session's context/);
   });
 
-  it('states the hard rules', () => {
-    assert.match(body, /Never message another executor/);
-    assert.match(body, /Never answer a decision/);
-    assert.match(body, /Never file a top-level task id/);
-    assert.match(body, /next-subid/);
+  it('states the hand-written hard rules', () => {
     assert.match(body, /Never edit an RFC's Open Questions/);
     assert.match(body, /cli-decisions\.mjs" escalate/);
+    assert.match(body, /next-subid/);
+  });
+
+  it('renders the tool rules from the resolved policy instead of restating them', () => {
+    assert.match(body, /render-role-tool-rules\.mjs" --role executor/);
+    // No rule text of the policy appears in the body: it is printed at run time.
+    for (const r of DEFAULT_ROLE_BLOCKED_TOOLS.executor) {
+      assert.ok(!body.includes(describeRule(r)), `rule ${r.id} must not be restated`);
+    }
+    assert.doesNotMatch(body, /Never message another executor/);
+    assert.doesNotMatch(body, /Never answer a decision/);
+    assert.doesNotMatch(body, /Never file a top-level task id/);
   });
 
   it('carries no internal task ids in adopter-visible text', () => {

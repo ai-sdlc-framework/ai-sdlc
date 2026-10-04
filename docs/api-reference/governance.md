@@ -365,6 +365,17 @@ spec:
   rendered into the injected rules only for sessions started with
   `AI_SDLC_HIERARCHY_ROLE=operator-dispatch`, and it does not relax any hook on
   its own (force-push is governed solely by `allowForcePush`).
+- **`roles.<role>.blockedTools`** lists tool calls a hierarchy session holding that
+  role is refused by the `enforce-role-tools` PreToolUse hook (roles: `executor`,
+  `operator-dispatch`, `planner`; each entry is a `tool` name, exact or with `*`
+  wildcards, plus an optional built-in `match` or an `argument` + `contains` pair).
+  Only the executor has defaults: no `SendMessage` to anyone but the dispatch session,
+  no `cli-decisions answer|resolve|override`, no top-level `task_create`. A non-empty
+  list replaces the role's defaults, `blockedTools: []` disables that role's tool
+  blocks, and a malformed list is ignored (defaults apply). The policy is read from the verified main checkout's copy
+  when available. A session whose role cannot be resolved from the roster is treated
+  as the operator and never blocked. See
+  [parallel dispatch](../operations/parallel-dispatch.md#role-tool-rules).
 - **Fail-closed:** any unknown key, unknown preset name, or malformed value
   (wrong type / not in the enumerated set) is ignored — the resolved value
   falls back to whatever the preset/default already produced. Malformed

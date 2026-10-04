@@ -544,7 +544,10 @@ One pass of the loop:
    is not a sub-id of the task, and when `--worker` is missing or differs from the
    name recorded at claim time. That match guards against a mistake (a session
    completing the wrong task); it is not authentication, because the recorded name
-   is readable from the inflight manifest.
+   is readable from the inflight manifest. `cli-dispatch write-verdict` applies the
+   same check when the caller resolves to the executor role in the roster
+   (`--worker` required, the caller must hold the claim, nothing is written on a
+   refusal) and the same caveat; other callers are not checked.
 5. **Tell the dispatch session.** One status line goes to the dispatch session:
    task, outcome, pull request, decision ids. It carries status only.
 6. **Stop.** The dispatch session sees the verdict, clears the executor's context and
@@ -559,6 +562,62 @@ dispatch session's name and the command to run. The hook adds nothing for any ot
 source (`startup`, `resume`, `compact`) and nothing for a session that is not in the
 roster. It finds its session by matching the roster's `pid` against the hook
 process's ancestors.
+
+### Role tool rules
+
+What an executor may not do with messages, decisions and task ids is enforced, not
+just asked for. A `PreToolUse` hook (`enforce-role-tools`) identifies the session the
+same way the clear hook does (the nearest running roster entry among the hook's
+ancestor processes, and only when that process is a claude process) and refuses a
+call that matches a rule for the session's role. By default an executor is refused:
+
+- `SendMessage` to anyone but the dispatch session named in the roster;
+- `cli-decisions answer`, `resolve` and `override` through Bash (quoting, env
+  prefixes, chained commands, subshells and path variants included);
+- a top-level `task_create` (a sub-task of a task the session holds is allowed).
+
+A refusal names the role, the rule and the way out: ask the dispatch session. A
+session that is not in a hierarchy (no roster) or whose role cannot be resolved (no
+matching entry, a stale entry, a pid that is not a claude process) is treated as the
+operator and is never blocked; the hook spawns nothing at all when there is no
+roster. Once a session resolves to the executor the hook fails closed: an unreadable
+or invalid policy, or an error while evaluating a rule, applies the strict executor
+defaults (it never relaxes them), and a call that cannot be evaluated is refused.
+
+A repo changes the list under `spec.governance.roles.<role>.blockedTools` in
+`.ai-sdlc/agent-role.yaml`:
+
+```yaml
+governance:
+  roles:
+    executor:
+      blockedTools: [] # an explicit empty list removes the executor's defaults
+    planner:
+      blockedTools:
+        - tool: WebFetch
+        - tool: Bash
+          argument: command
+          contains: 'rm -rf'
+          reason: 'No recursive deletes from the planner.'
+```
+
+`blockedTools: []` disables that role's tool blocks. A non-empty list replaces the role's defaults. Each entry names a `tool` (exact, or
+with `*` wildcards) and optionally a built-in `match` (`notDispatchRecipient`,
+`decisionMutation`, `topLevelTask`) or an `argument` with `contains`, which refuses a
+call whose named argument contains the text. A malformed list is ignored and the
+role's defaults apply; malformed input never relaxes a rule. The policy is read from
+the main checkout's copy when it can be verified, so a worktree copy cannot relax it.
+The executor skill prints the resolved rules at the start of each pass
+(`render-role-tool-rules.mjs --role executor`), rendered from the same policy.
+
+This is a mistake guard, not a sandbox: a static matcher cannot see `eval`, encoded
+payloads or names built at run time, and text that merely mentions a refused command
+(for example `cli-decisions answer` in a commit message or a `grep` pattern) is
+refused too; describe such text in words or write it with a file tool.
+
+The deferred coverage `Stop` hook does not run in executor or operator-dispatch
+sessions (the pre-push gate covers the work they ship); it still runs for the planner
+and for any session whose role cannot be resolved.
 
 ### Follow-up task ids
 

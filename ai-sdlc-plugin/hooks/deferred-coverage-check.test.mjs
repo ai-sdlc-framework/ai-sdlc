@@ -617,3 +617,122 @@ describe('deferred-coverage-check.js — single-flight / scope / reaping (AISDLC
     assert.equal(readFileSync(`${w.log}.env`, 'utf-8').trim(), 'WORKERS=2');
   });
 });
+
+describe('deferred-coverage-check.js — hierarchy role skip', () => {
+  let toolDir;
+  let claudeBin;
+  let otherBin;
+  let wrapper;
+
+  before(() => {
+    toolDir = mkdtempSync(join(tmpdir(), 'dcc-role-'));
+    claudeBin = join(toolDir, 'claude');
+    otherBin = join(toolDir, 'not-claude');
+    symlinkSync(process.execPath, claudeBin);
+    symlinkSync(process.execPath, otherBin);
+    wrapper = join(toolDir, 'wrapper.mjs');
+    // Runs as a process named after its symlink; `SELF` in the roster is its pid,
+    // the way the real hook finds the Claude Code process among its ancestors.
+    writeFileSync(
+      wrapper,
+      `import { spawnSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const [repo, home, shim, root, board, raw, hook] = process.argv.slice(2);
+if (raw !== 'none') {
+  const sessions = JSON.parse(raw).map((s) => (s.pid === 'SELF' ? { ...s, pid: process.pid } : s));
+  mkdirSync(board, { recursive: true });
+  writeFileSync(join(board, 'hierarchy.json'), JSON.stringify({ schemaVersion: 'v1', sessions }));
+}
+const r = spawnSync('node', [hook], {
+  cwd: repo,
+  encoding: 'utf-8',
+  input: '{}',
+  env: {
+    ...process.env,
+    HOME: home,
+    AI_SDLC_COVERAGE_LOCK_DIR: join(root, 'lock'),
+    CLAUDE_PROJECT_DIR: repo,
+    AI_SDLC_DISPATCH_BOARD_DIR: board,
+    PATH: shim + ':' + process.env.PATH,
+  },
+});
+process.stdout.write(JSON.stringify({ status: r.status, stderr: r.stderr }));
+`,
+    );
+  });
+
+  after(() => {
+    rmSync(toolDir, { recursive: true, force: true });
+  });
+
+  const entry = (role, name, pid, status = 'running') => ({ role, name, pid, status });
+
+  /** Run the hook as a child of `bin`; `sessions` is the roster, or null for no roster file. */
+  function runAs(bin, sessions) {
+    const out = execFileSync(
+      bin,
+      [
+        wrapper,
+        ctx.repo,
+        ctx.home,
+        ctx.shim,
+        ctx.root,
+        join(ctx.root, 'board'),
+        sessions === null ? 'none' : JSON.stringify(sessions),
+        HOOK,
+      ],
+      { encoding: 'utf-8', timeout: 60000 },
+    );
+    return JSON.parse(out);
+  }
+
+  it('skips an executor session without running the coverage command', () => {
+    ctx = setupRepo('low-coverage');
+    const res = runAs(claudeBin, [entry('executor', 'executor-alpha', 'SELF')]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.doesNotMatch(res.stderr, /AI-SDLC Coverage/);
+    assert.equal(
+      existsSync(sentinelPath(ctx.home, ctx.repo)),
+      false,
+      'no coverage run, no sentinel',
+    );
+  });
+
+  it('skips an operator-dispatch session', () => {
+    ctx = setupRepo('low-coverage');
+    const res = runAs(claudeBin, [entry('operator-dispatch', 'operator-dispatch', 'SELF')]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(existsSync(sentinelPath(ctx.home, ctx.repo)), false);
+  });
+
+  it('still runs for a planner session', () => {
+    ctx = setupRepo('low-coverage');
+    const res = runAs(claudeBin, [entry('planner', 'planner', 'SELF')]);
+    assert.equal(res.status, 2, res.stderr);
+    assert.match(res.stderr, /AI-SDLC Coverage: 45/);
+  });
+
+  it('still runs when there is no roster', () => {
+    ctx = setupRepo('low-coverage');
+    assert.equal(runAs(claudeBin, null).status, 2);
+  });
+
+  it('still runs when the session is not in the roster', () => {
+    ctx = setupRepo('low-coverage');
+    const res = runAs(claudeBin, [entry('executor', 'executor-alpha', 999999991)]);
+    assert.equal(res.status, 2, res.stderr);
+  });
+
+  it('still runs when the matching pid is not a claude process', () => {
+    ctx = setupRepo('low-coverage');
+    const res = runAs(otherBin, [entry('executor', 'executor-alpha', 'SELF')]);
+    assert.equal(res.status, 2, res.stderr);
+  });
+
+  it('still runs when the roster entry is not running', () => {
+    ctx = setupRepo('low-coverage');
+    const res = runAs(claudeBin, [entry('executor', 'executor-alpha', 'SELF', 'starting')]);
+    assert.equal(res.status, 2, res.stderr);
+  });
+});

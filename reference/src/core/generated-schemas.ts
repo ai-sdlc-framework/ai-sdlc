@@ -477,6 +477,70 @@ export const agentRoleSchema = {
           description:
             'Whether agents may run destructive git (`git reset --hard`, `git checkout -- .`, `git restore .`). Default false.',
         },
+        roles: {
+          type: 'object',
+          description:
+            "Per-hierarchy-role tool rules (session hierarchy roles `executor`, `operator-dispatch`, `planner`). A role's `blockedTools` list names tool calls a session holding that role is refused by the PreToolUse hook. Absent resolves to the strict defaults: an executor may not message anyone but the dispatch session, may not answer, resolve or override a decision, and may not create a top-level task. Only a session positively identified by the hierarchy roster is ever matched; any other session is treated as the operator and is never blocked.",
+          properties: {
+            executor: { $ref: '#/$defs/RoleGovernance' },
+            'operator-dispatch': { $ref: '#/$defs/RoleGovernance' },
+            planner: { $ref: '#/$defs/RoleGovernance' },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    RoleGovernance: {
+      type: 'object',
+      description: 'Tool rules for one hierarchy role.',
+      properties: {
+        blockedTools: {
+          type: 'array',
+          items: { $ref: '#/$defs/BlockedTool' },
+          description:
+            "Tool calls the role is refused. A non-empty list replaces the role's defaults; an explicit empty list removes them. A malformed list is ignored and the role's defaults apply (malformed input never relaxes a rule).",
+        },
+      },
+      additionalProperties: false,
+    },
+    BlockedTool: {
+      type: 'object',
+      description:
+        'One refused tool call: a tool name plus an optional argument matcher. `match` names a built-in matcher; `argument` and `contains` together refuse calls whose named argument contains the text (case-insensitive); with neither, every call to the tool is refused.',
+      required: ['tool'],
+      properties: {
+        tool: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_.*-]{1,100}$',
+          description:
+            'Tool name, exact or with `*` wildcards (e.g. `SendMessage`, `mcp__*__task_create`).',
+        },
+        match: {
+          type: 'string',
+          enum: ['notDispatchRecipient', 'decisionMutation', 'topLevelTask'],
+          description:
+            'Built-in matcher. `notDispatchRecipient`: the message recipient is not the dispatch session named in the roster. `decisionMutation`: a command runs `cli-decisions answer`, `resolve` or `override`. `topLevelTask`: a task is created that is not a sub-task of a task the session holds.',
+        },
+        argument: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_.-]{1,64}$',
+          description: 'Name of the tool-input field to test; used with `contains`.',
+        },
+        contains: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description:
+            'Text the argument must contain (case-insensitive) for the call to be refused; used with `argument`.',
+        },
+        reason: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 300,
+          description:
+            'Sentence shown to the session when the call is refused and in the rendered rules.',
+        },
       },
       additionalProperties: false,
     },

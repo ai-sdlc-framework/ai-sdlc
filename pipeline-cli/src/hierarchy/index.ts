@@ -127,6 +127,7 @@ export {
   type PlaybookOutcome,
 } from './playbook.js';
 export { findStartedSession, readSessionRegistry } from './registry.js';
+export { resolveCallerRole, type SessionRoleDeps } from './session-role.js';
 export {
   mainCheckoutRoot,
   realpathLoose,

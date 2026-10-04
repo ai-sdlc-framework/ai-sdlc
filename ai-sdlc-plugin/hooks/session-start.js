@@ -17,7 +17,7 @@ const {
   renderSessionStartHardRules,
 } = require('./lib/governance-resolver');
 const { bannerGovernance } = require('./lib/trusted-policy');
-const { buildHierarchyRoleBlock } = require('./lib/hierarchy-role');
+const { buildHierarchyRoleBlock, ancestorPids } = require('./lib/hierarchy-role');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -442,28 +442,6 @@ process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 process.exit(0);
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-/**
- * This process and its ancestors, nearest first. The hook runs as a descendant
- * of the Claude Code process, whose pid is what the hierarchy roster records.
- * Bounded depth; stops quietly on any failure.
- */
-function ancestorPids() {
-  const pids = [process.pid];
-  let current = process.ppid;
-  for (let depth = 0; depth < 16 && Number.isInteger(current) && current > 1; depth += 1) {
-    pids.push(current);
-    const res = spawnSync('ps', ['-o', 'ppid=', '-p', String(current)], {
-      encoding: 'utf-8',
-      timeout: 2000,
-    });
-    if (res.status !== 0) break;
-    const next = Number.parseInt((res.stdout || '').trim(), 10);
-    if (!Number.isInteger(next) || next === current) break;
-    current = next;
-  }
-  return pids;
-}
 
 /**
  * AISDLC-441 / AISDLC-557: builds the runtime-deps install-failure warning

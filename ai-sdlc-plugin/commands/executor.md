@@ -26,19 +26,17 @@ the dispatch session issues again after it clears your context.
 
 ## Hard rules
 
-1. **Never message another executor.** Your only message goes to the dispatch
-   session, and it carries status only.
-2. **Never answer a decision.** Not yours, not another task's. Answers belong to
-   the dispatch session and the planner.
-3. **Never file a top-level task id.** A follow-up you discover is filed as a
-   sub-id of the task you are working: `<task-id>.<n>`, where `<n>` is the first
-   free number from `cli-dispatch next-subid <task-id>`. Never pick `<n>` by hand.
-4. **Never edit an RFC's Open Questions.** Never write a resolution marker, never
+What this role may do with messages, decisions and task ids is policy, not prose.
+A PreToolUse hook enforces it and Step 1 prints the rules, rendered from the same
+resolved policy, so what you read is what is refused. A refused call names its
+rule: do not retry it in another spelling, ask the dispatch session instead.
+
+1. **Never edit an RFC's Open Questions.** Never write a resolution marker, never
    reword a question into an answer, never decide one because the answer looks
    obvious.
-5. **A blocking question goes through `cli-decisions escalate`, then you stop.**
+2. **A blocking question goes through `cli-decisions escalate`, then you stop.**
    See "When you are blocked" below.
-6. Everything `/ai-sdlc execute` forbids still holds: never merge a pull request,
+3. Everything `/ai-sdlc execute` forbids still holds: never merge a pull request,
    never close one, never delete a branch, never force-push except
    `--force-with-lease` to your own task branch, never edit `.ai-sdlc/`, never
    run destructive git commands, never write a CI-skip marker in a commit.
@@ -60,6 +58,13 @@ if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
   }
 fi
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
+```
+
+Print the tool rules for this role and treat the output as authoritative for the
+session:
+
+```bash
+node "$PLUGIN_SCRIPTS_DIR/render-role-tool-rules.mjs" --role executor
 ```
 
 Read the roster to learn **your name** and **the dispatch session's name**. Your
@@ -163,7 +168,7 @@ Keep a note, as the pipeline runs, of three things you will need in Step 4:
 ### Follow-up tasks
 
 When the work surfaces something that deserves its own task, file it as a sub-id
-of this task, never as a new top-level id:
+of this task:
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" next-subid "$TASK_ID" --board-dir "$BOARD_DIR"
@@ -230,7 +235,7 @@ and nothing else:
 ```
 
 If there is no dispatch session in the roster, skip the message and say so in your
-own output. Never send this, or any other message, to another executor.
+own output.
 
 ## Step 6 - Stop and wait
 
