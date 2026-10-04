@@ -265,6 +265,11 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     roster.sessions.push(entry);
     started.push(entry);
     writeRoster(deps.boardDir, roster);
+    deps.emit?.({
+      type: 'HierarchySessionStarted',
+      sessionName: entry.name,
+      sessionRole: entry.role,
+    });
   }
   if (toStart.length === 0 && warnings.length > 0) writeRoster(deps.boardDir, roster);
 

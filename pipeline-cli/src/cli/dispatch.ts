@@ -43,6 +43,15 @@
  *   - `reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]` — return
  *     stale inflight manifests to queue/ (retry count incremented), or to
  *     failed/ once past the retry limit.
+ *   - `requeue --task-id <id> [--retry-limit <n>]` — return one failed task to
+ *     queue/ with its retry count incremented, restoring the manifest kept
+ *     when it failed. Meant for the dispatch session only: a mistake guard
+ *     (the one `cli-hierarchy tick` uses; it is not authentication) exits 1,
+ *     changing nothing, unless the calling session is the running dispatch
+ *     session, and the repository policy must grant `requeue`. `--retry-limit` may not exceed the default of 2 (a
+ *     larger value exits 2). Also exits 1, changing nothing, when the task is
+ *     not in failed/, has no saved manifest, is already active, or is past the
+ *     retry limit.
  *
  * Executor loop (RFC-0051 section 5):
  *
@@ -120,6 +129,7 @@ import {
   readResumeSignal,
   releaseInflight,
   removeResumeSignal,
+  requeueFailed,
   requeueStaleInflight,
   removeVerdict,
   TASK_ID_RE,
@@ -132,6 +142,8 @@ import {
   writeVerdict,
 } from '../dispatch/index.js';
 import { completeTask, splitIdList } from '../dispatch/complete.js';
+import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
+import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
 import type {
   BoardEntry,
@@ -144,7 +156,7 @@ import type {
   WorkerKind,
 } from '../dispatch/index.js';
 import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
-import { parseBrief } from '../hierarchy/index.js';
+import { briefToEnqueueEntries, parseBrief } from '../hierarchy/index.js';
 import {
   countInFlightBgAgents,
   DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
@@ -231,6 +243,16 @@ function out(value: unknown): void {
 export interface DispatchCliDeps {
   /** File paths touched by open pull requests. Throws when they cannot be listed. */
   openPrFiles?: () => string[];
+  /** Replaces the roster and process lookups that identify the calling session (`requeue`). */
+  identity?: IdentityDeps;
+  /** Replaces the git lookup of the main checkout and its board (`requeue`). */
+  trustedBoard?: { root: string; boardDir: string } | null;
+  /** Replaces the install directory of the running module (`requeue`). */
+  installDir?: string | null;
+  /** Replaces the policy file as the source of the operational grants (`requeue`). */
+  operational?: ReadonlySet<string>;
+  /** Working directory used to find the main checkout (`requeue`); default the process's. */
+  cwd?: string;
 }
 
 /** File paths touched by open pull requests, from the `gh` CLI. */
@@ -754,16 +776,8 @@ export async function runDispatchCli(
       try {
         let entries: EnqueueEntry[];
         if (flags['from-brief']) {
-          entries = parseBrief(
-            readFileSync(path.resolve(flags['from-brief']), 'utf-8'),
-          ).entries.map(
-            (e): EnqueueEntry => ({
-              taskId: e.task,
-              ...(e.after.length > 0 ? { after: e.after } : {}),
-              ...(e.sequenceGroup ? { sequenceGroup: e.sequenceGroup } : {}),
-              ...(e.priority !== undefined ? { priority: e.priority } : {}),
-              wave: e.wave,
-            }),
+          entries = briefToEnqueueEntries(
+            parseBrief(readFileSync(path.resolve(flags['from-brief']), 'utf-8')),
           );
         } else {
           const ids = argv.flatMap((tok, i) =>
@@ -855,6 +869,56 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'requeue': {
+      const taskId = requireFlag(flags, 'task-id');
+      if (!TASK_ID_RE.test(taskId)) {
+        process.stderr.write(`cli-dispatch requeue: '${taskId}' is not a valid task id\n`);
+        return 2;
+      }
+      const cwd = deps.cwd ?? process.cwd();
+      const caller = checkDispatchCaller({
+        label: 'cli-dispatch requeue',
+        cwd,
+        boardDir,
+        workDir: flags['work-dir'],
+        worker: flags['worker'],
+        identity: deps.identity,
+        trustedBoard: deps.trustedBoard,
+        installDir: deps.installDir,
+      });
+      if (!caller.ok) {
+        process.stderr.write(`${caller.reason}\n`);
+        return 1;
+      }
+      const granted = deps.operational ?? loadOperational(cwd, cwd);
+      if (!granted.has('requeue')) {
+        process.stderr.write(
+          'cli-dispatch requeue: refused; the repository policy does not grant requeue to the dispatch session\n',
+        );
+        return 1;
+      }
+      const retryLimit = intFlag(flags, 'retry-limit');
+      if (retryLimit === null) return 2;
+      if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
+        process.stderr.write(
+          `cli-dispatch requeue: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}\n`,
+        );
+        return 2;
+      }
+      try {
+        out({
+          ok: true,
+          ...requeueFailed(boardDir, taskId, retryLimit === undefined ? {} : { retryLimit }),
+        });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch requeue: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
     case '':
     case 'help':
     case '--help':
@@ -871,7 +935,8 @@ export async function runDispatchCli(
   }
 }
 
-function resolveBaseSha(workDir: string): string {
+/** Commit the manifests of a batch are based on: `origin/main`, else `HEAD`. */
+export function resolveBaseSha(workDir: string): string {
   for (const ref of ['origin/main', 'HEAD']) {
     try {
       return execFileSync('git', ['rev-parse', ref], { cwd: workDir, encoding: 'utf-8' }).trim();
@@ -882,7 +947,8 @@ function resolveBaseSha(workDir: string): string {
   throw new Error('cannot resolve a base commit; pass --base-sha <sha>');
 }
 
-function findTaskFile(workDir: string, taskId: string): string | undefined {
+/** Repo-relative backlog task file for an id, or undefined. */
+export function findTaskFile(workDir: string, taskId: string): string | undefined {
   const dir = path.join(workDir, 'backlog', 'tasks');
   if (!existsSync(dir)) return undefined;
   const prefix = `${taskId.toLowerCase()} - `;
@@ -983,6 +1049,7 @@ Subcommands:
   board [--json]
   unblock --task-id <id>
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
+  requeue --task-id <id> [--retry-limit <n>]   (meant for the dispatch session; mistake guard, limit at most 2)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]

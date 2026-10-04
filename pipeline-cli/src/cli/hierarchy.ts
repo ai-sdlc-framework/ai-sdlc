@@ -18,17 +18,41 @@
  *     session about it.
  *   - `down [--role <name-or-role>]` — end sessions, return their inflight
  *     manifests to `queue/`, close their windows, update the roster.
+ *   - `clear <executor-name> [--settle-ms <n>]` — empty an executor's context:
+ *     `/clear`, wait, then `/ai-sdlc executor`. Refuses an executor that holds
+ *     an inflight task.
+ *   - `tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-ms <n>]
+ *     [--retry-limit <n>] [--work-dir <path>]` — one wake-up of the dispatch
+ *     loop: ingest briefs, handle new verdicts (clear, unblocking playbook),
+ *     and print the escalations and reports to send, as JSON.
+ *   - `route-decision --decision-id <id> --route operational|design --to <name>`
+ *     — record that a decision was routed to a tier.
  *
  * All subcommands accept `--board-dir <path>` (default `.ai-sdlc/dispatch`).
+ *
+ * `clear`, `tick` and `route-decision` are dispatch-session commands. A mistake
+ * guard keeps other sessions from running them by accident: it finds the calling
+ * session from the process tree and the roster and refuses unless that is the running
+ * dispatch session. A `--worker` value is only compared with that result. The guard is
+ * not authentication; a session running as the same user can defeat it.
  */
 
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-import { DEFAULT_BOARD_DIR } from '../dispatch/board.js';
+import { DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
+import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
+import { requeueFailed } from '../dispatch/requeue.js';
+import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
+import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
 import {
   attachTmuxSession,
+  checkDispatchCaller,
+  checkOwnWorktree,
+  clearExecutor,
+  createGitRunner,
+  createStreamEmitter,
   createSystemRunner,
   createTmuxBriefSender,
   generateBrief,
@@ -40,10 +64,20 @@ import {
   hierarchyStatus,
   hierarchyTerminals,
   hierarchyUp,
+  loadOperationalPolicy,
+  runDispatchTick,
+  runPlaybook,
+  SAFE_SESSION_NAME,
   systemResourceSnapshot,
+  type AsyncCommandRunner,
+  type CommandRunner,
+  type DispatchCallerInputs,
+  type ForcePushMode,
   type HierarchyDeps,
+  type IdentityDeps,
+  type OperationalPolicy,
 } from '../hierarchy/index.js';
-import { parseArgv } from './dispatch.js';
+import { findTaskFile, parseArgv, resolveBaseSha } from './dispatch.js';
 
 const USAGE = `Usage: cli-hierarchy <command> [options]
 
@@ -54,6 +88,9 @@ Commands:
   terminals  Generate editor terminal tasks, one per agent (terminals --vscode)
   brief      Generate a dispatch brief (waves, sequence groups) from task metadata
   down       Stop sessions and return their inflight manifests to the queue
+  clear      Empty an executor's context between tasks and restart its loop
+  tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
+  route-decision  Record that a decision was routed to a tier
 
 Options for up:
   --executors <n>          Number of executors, 0 to 5 (default 5)
@@ -88,9 +125,42 @@ Options for brief:
 Options for down:
   --role <name-or-role>    Stop one session by name (executor-beta) or a role (executor)
 
+Usage for clear:
+  cli-hierarchy clear <executor-name> [--settle-ms <n>]
+  Sends /clear to the executor's pane, waits for the settle time (default 8000 ms),
+  then sends /ai-sdlc executor. Refuses an executor that holds an inflight task.
+  Meant for the dispatch session only. A mistake guard refuses any other caller, a human
+  at a plain shell included; it is not authentication and a same-user session can defeat
+  it. Outside the hierarchy, use tmux directly.
+
+Options for tick:
+  --worker <name>          Optional; when given it must equal the calling session's own roster name
+  --report-every-ms <n>    Spacing of progress reports (default 900000)
+  --settle-ms <n>          Settle time used for clears (default 8000)
+  --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
+  --work-dir <path>        Repository root (default the current directory)
+
+Options for route-decision:
+  --decision-id <id>       Decision Catalog id
+  --route <name>           operational or design
+  --to <name>              Session name or role that now owns the decision
+  --task-id <id>           Task the decision belongs to (optional)
+  --worker <name>          Optional; when given it must equal the calling session's own roster name
+
 Common options:
   --board-dir <path>       Dispatch board directory (default ${DEFAULT_BOARD_DIR})
 `;
+
+/** Parse an optional whole-number flag; null (after writing an error) when malformed. */
+function intFlag(flags: Record<string, string>, name: string): number | undefined | null {
+  const raw = flags[name];
+  if (raw === undefined) return undefined;
+  if (!/^[0-9]+$/.test(raw)) {
+    process.stderr.write(`cli-hierarchy: --${name} must be a whole number (got '${raw}')\n`);
+    return null;
+  }
+  return Number.parseInt(raw, 10);
+}
 
 /** Build the production dependencies. Tests pass overrides instead. */
 export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDeps {
@@ -117,6 +187,7 @@ export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDe
     claudeBin: 'claude',
     pollAttempts: 20,
     pollIntervalMs: 500,
+    emit: createStreamEmitter(),
   };
 }
 
@@ -145,7 +216,32 @@ export function firstPositional(argv: readonly string[]): string | undefined {
 export async function runHierarchyCli(
   argv: readonly string[] = process.argv.slice(2),
   overrides: Partial<HierarchyDeps> = {},
-  extras: { sendBrief?: BriefSender } = {},
+  extras: {
+    sendBrief?: BriefSender;
+    /** Replaces the policy file as the source of the operational grants (tests). */
+    operational?: ReadonlySet<string>;
+    /** Replaces the policy file as the source of the lease-push rules (tests). */
+    lease?: {
+      forcePushMode: ForcePushMode;
+      protectedBranches: readonly string[];
+      ownWorktree: (worktree: string) => string | null;
+    };
+    /** Replaces the roster and process lookups that identify the calling session (tests). */
+    identity?: IdentityDeps;
+    /** Replaces only the process lookups; the roster is still read from the trusted board (tests). */
+    processLookup?: DispatchCallerInputs['processLookup'];
+    /**
+     * Replaces the git lookup of the main checkout and its board (tests). When
+     * `identity` is injected without this, the board-location check is skipped.
+     */
+    trustedBoard?: { root: string; boardDir: string } | null;
+    /** Replaces the install directory of the running module (tests). */
+    installDir?: DispatchCallerInputs['installDir'];
+    /** Replaces the git runner the unblocking playbook uses (tests). */
+    gitRun?: CommandRunner | AsyncCommandRunner;
+    /** Replaces the board enqueue (tests). */
+    enqueue?: (entries: EnqueueEntry[]) => string[];
+  } = {},
 ): Promise<number> {
   const { subcommand, flags } = parseArgv(argv);
   if (
@@ -159,6 +255,24 @@ export async function runHierarchyCli(
     return 0;
   }
   const deps: HierarchyDeps = { ...defaultHierarchyDeps(flags), ...overrides };
+
+  /**
+   * The mistake guard: the caller should itself be the dispatch session, and
+   * `--worker` is only compared with that result. Runs before anything is read,
+   * written or sent. It is not authentication.
+   */
+  const dispatchCaller = (command: string): ReturnType<typeof checkDispatchCaller> =>
+    checkDispatchCaller({
+      label: `cli-hierarchy ${command}`,
+      cwd: deps.cwd,
+      boardDir: deps.boardDir,
+      workDir: flags['work-dir'],
+      worker: flags.worker,
+      identity: extras.identity,
+      processLookup: extras.processLookup,
+      trustedBoard: extras.trustedBoard,
+      installDir: extras.installDir,
+    });
 
   try {
     switch (subcommand) {
@@ -229,6 +343,150 @@ export async function runHierarchyCli(
         const result = await hierarchyDown({ role: flags.role }, deps);
         // A session left alone (not started by `up`, stale pane) is not a success.
         return result.refused.length > 0 ? 1 : 0;
+      }
+      case 'clear': {
+        const caller = dispatchCaller('clear');
+        if (!caller.ok) {
+          process.stderr.write(`${caller.reason}\n`);
+          return 1;
+        }
+        const executor = firstPositional(argv);
+        if (!executor) {
+          process.stderr.write('cli-hierarchy clear: an executor name is required\n');
+          return 2;
+        }
+        const settleMs = intFlag(flags, 'settle-ms');
+        if (settleMs === null) return 2;
+        const result = await clearExecutor(
+          { executor, workerId: caller.name, ...(settleMs === undefined ? {} : { settleMs }) },
+          {
+            run: deps.run,
+            boardDir: deps.boardDir,
+            sleep: deps.sleep,
+            ...(deps.emit ? { emit: deps.emit } : {}),
+            log: deps.log,
+          },
+        );
+        deps.log(JSON.stringify(result));
+        return 0;
+      }
+      case 'tick': {
+        const caller = dispatchCaller('tick');
+        if (!caller.ok) {
+          process.stderr.write(`${caller.reason}\n`);
+          return 1;
+        }
+        const worker = caller.name;
+        const settleMs = intFlag(flags, 'settle-ms');
+        const reportEveryMs = intFlag(flags, 'report-every-ms');
+        const retryLimit = intFlag(flags, 'retry-limit');
+        if (settleMs === null || reportEveryMs === null || retryLimit === null) return 2;
+        // Refused, not clamped; checked after the caller guard, like `cli-dispatch requeue`,
+        // and before anything is read, written or sent.
+        if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
+          process.stderr.write(
+            `cli-hierarchy tick: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}\n`,
+          );
+          return 2;
+        }
+        const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
+        let policy: OperationalPolicy | undefined;
+        const readPolicy = (): OperationalPolicy =>
+          (policy ??= loadOperationalPolicy(repoRoot, deps.cwd));
+        const operational = extras.operational ?? readPolicy().operational;
+        const lease = extras.lease ?? {
+          forcePushMode: readPolicy().forcePushMode,
+          protectedBranches: readPolicy().protectedBranches,
+          ownWorktree: (worktree: string) => checkOwnWorktree(repoRoot, worktree),
+        };
+        const gitRun = extras.gitRun ?? createGitRunner();
+        const emit = deps.emit ?? (() => {});
+        const result = await runDispatchTick({
+          boardDir: deps.boardDir,
+          workerId: worker,
+          now: deps.now,
+          enqueue:
+            extras.enqueue ??
+            ((entries) =>
+              enqueueTasks(deps.boardDir, entries, {
+                baseSha: resolveBaseSha(repoRoot),
+                dispatchedBy: worker,
+                resolveTaskFile: (id) => findTaskFile(repoRoot, id),
+              })),
+          clear: (o) =>
+            clearExecutor(
+              {
+                executor: o.executor,
+                taskId: o.taskId,
+                workerId: worker,
+                ...(settleMs === undefined ? {} : { settleMs }),
+              },
+              { run: deps.run, boardDir: deps.boardDir, sleep: deps.sleep, emit },
+            ),
+          playbook: (verdict) =>
+            runPlaybook(verdict, {
+              run: gitRun,
+              repoRoot,
+              operational,
+              forcePushMode: lease.forcePushMode,
+              protectedBranches: lease.protectedBranches,
+              ownWorktree: lease.ownWorktree,
+              requeue: (id) =>
+                requeueFailed(deps.boardDir, id, retryLimit === undefined ? {} : { retryLimit }),
+              emit,
+              workerId: worker,
+            }),
+          operational,
+          ...(reportEveryMs === undefined ? {} : { reportEveryMs }),
+        });
+        deps.log(JSON.stringify(result));
+        return 0;
+      }
+      case 'route-decision': {
+        const caller = dispatchCaller('route-decision');
+        if (!caller.ok) {
+          process.stderr.write(`${caller.reason}\n`);
+          return 1;
+        }
+        const route = flags.route;
+        const decisionId = flags['decision-id'];
+        const to = flags.to;
+        if (!decisionId || decisionId === 'true' || !to || to === 'true') {
+          process.stderr.write(
+            'cli-hierarchy route-decision: --decision-id and --to are required\n',
+          );
+          return 2;
+        }
+        if (!DECISION_ID_RE.test(decisionId)) {
+          process.stderr.write(
+            'cli-hierarchy route-decision: --decision-id must look like DEC-0000\n',
+          );
+          return 2;
+        }
+        if (flags['task-id'] !== undefined && !TASK_ID_RE.test(flags['task-id'])) {
+          process.stderr.write('cli-hierarchy route-decision: --task-id is not a valid task id\n');
+          return 2;
+        }
+        if (!SAFE_SESSION_NAME.test(to)) {
+          process.stderr.write('cli-hierarchy route-decision: --to is not a valid session name\n');
+          return 2;
+        }
+        if (route !== 'operational' && route !== 'design') {
+          process.stderr.write(
+            'cli-hierarchy route-decision: --route must be operational or design\n',
+          );
+          return 2;
+        }
+        deps.emit?.({
+          type: 'DecisionRouted',
+          decisionId,
+          route,
+          routedTo: to,
+          ...(flags['task-id'] ? { taskId: flags['task-id'] } : {}),
+          workerId: caller.name,
+        });
+        deps.log(JSON.stringify({ ok: true, decisionId, route, routedTo: to }));
+        return 0;
       }
       default:
         process.stderr.write(`cli-hierarchy: unknown command '${subcommand}'\n\n${USAGE}`);

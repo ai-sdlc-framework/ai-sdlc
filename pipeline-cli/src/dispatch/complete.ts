@@ -11,7 +11,9 @@
  */
 
 import { readInflightManifest, TASK_ID_RE, writeVerdict } from './board.js';
+import { snapshotFailedManifest } from './requeue.js';
 import type { DispatchVerdict, VerdictOutcome } from './types.js';
+import { isValidCause, isValidDecisionId, MAX_DECISION_IDS, oneLine } from './verdict-fields.js';
 
 const OUTCOMES: readonly VerdictOutcome[] = [
   'success',
@@ -59,7 +61,7 @@ export function splitIdList(raw: string | undefined): string[] {
 /**
  * Write the verdict for a task this executor holds.
  * @throws when the task id or outcome is invalid, a follow-up id is not a
- *   sub-id of the task, the task is not inflight (nothing to complete), or the
+ *   sub-id of the task, a decision id or the cause is malformed, the task is not inflight (nothing to complete), or the
  *   supplied worker name differs from the one recorded at claim time.
  */
 export function completeTask(boardDir: string, opts: CompleteOptions): CompleteResult {
@@ -77,6 +79,24 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
     if (!TASK_ID_RE.test(id) || !id.startsWith(`${opts.taskId}.`)) {
       throw new Error(`follow-up '${id}' is not a sub-id of ${opts.taskId}`);
     }
+  }
+  // Both reach the dispatch session's model and command lines, so they are
+  // checked here, before anything is read or written.
+  const decisionIds = [...(opts.decisionIds ?? [])];
+  if (decisionIds.length > MAX_DECISION_IDS) {
+    throw new Error(`a verdict may name at most ${MAX_DECISION_IDS} decisions`);
+  }
+  for (const id of decisionIds) {
+    if (!isValidDecisionId(id)) {
+      throw new Error(
+        `'${oneLine(String(id), 40)}' is not a valid decision id (expected DEC-0000)`,
+      );
+    }
+  }
+  if (opts.cause !== undefined && !isValidCause(opts.cause)) {
+    throw new Error(
+      `'${oneLine(String(opts.cause), 40)}' is not a valid cause (lower-case words joined by hyphens, at most 64 characters)`,
+    );
   }
   const inflight = readInflightManifest(boardDir, opts.taskId);
   if (!inflight) {
@@ -110,11 +130,13 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   if (opts.prNumber !== undefined) verdict.prNumber = opts.prNumber;
   if (opts.prUrl) verdict.prUrl = opts.prUrl;
   if (followUpIds.length > 0) verdict.followUpIds = followUpIds;
-  const decisionIds = [...(opts.decisionIds ?? [])];
   if (decisionIds.length > 0) verdict.decisionIds = decisionIds;
   if (opts.notes) verdict.notes = opts.notes;
   if (opts.cause) verdict.cause = opts.cause;
-  const verdictPath = writeVerdict(boardDir, verdict);
   const state = opts.outcome === 'success' || opts.outcome === 'iterate-needed' ? 'done' : 'failed';
+  // The verdict removes the inflight manifest on a failure; keep a copy so the
+  // task can be queued again by id.
+  if (state === 'failed') snapshotFailedManifest(boardDir, inflight);
+  const verdictPath = writeVerdict(boardDir, verdict);
   return { verdictPath, state, verdict };
 }

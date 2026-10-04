@@ -582,6 +582,149 @@ sub-id of its own task. `cli-dispatch next-subid <task-id>` prints the first
 
 ---
 
+## The operator-dispatch loop
+
+The dispatch session runs `/ai-sdlc operator-dispatch` on a wake-up interval (60
+seconds). It owns throughput: it turns briefs into work, keeps the board moving,
+clears each executor between tasks, unblocks what it is allowed to unblock and
+reports to the planner. Each wake-up runs one command:
+
+```bash
+cli-hierarchy tick --worker <dispatch session name>
+```
+
+The command has a mistake guard (see "The caller binding" below): it identifies its
+caller instead of relying on `--worker`. It finds the nearest ancestor process that is a
+running roster entry and a claude process, and refuses, writing and sending nothing,
+unless that session has the `operator-dispatch` role. `--worker` is optional; when given
+it must equal the caller's own roster name. The roster is read from the main checkout's
+board, never from a path the caller passes: the command also refuses unless
+`--board-dir` and the working directory are the main checkout's, and unless the command
+is running from the main checkout's own install when it runs inside a git work tree
+(an installed layout outside any work tree skips that last check). `--retry-limit` may
+not exceed 2; a larger value is refused with exit 2, not clamped. Every board write the loop
+makes carries the caller's name. `cli-hierarchy clear` and `cli-hierarchy route-decision`
+apply the same guard, and so does `cli-dispatch requeue`. The command prints, as JSON,
+what it did and what the session has to say.
+
+1. **Ingest.** Each new `*.md` file in `.ai-sdlc/dispatch/briefs/` is parsed and
+   enqueued with the same mapping as `cli-dispatch enqueue --from-brief`, then
+   marked ingested in `.ai-sdlc/dispatch/operator-dispatch.state.json`. A later
+   wake-up never enqueues it again. A brief the board refuses is reported and is
+   retried only after the file changes.
+2. **Verdict watch.** Each new verdict in `done/` or `failed/` is handled once. The
+   executor that wrote it is cleared (below), then failures go through the
+   unblocking playbook.
+3. **Reports.** A progress line goes to the planner at the configured cadence
+   (15 minutes by default, `--report-every-ms`), and a summary when every task of
+   an ingested brief has reached a final state.
+
+### The caller binding
+
+The binding is a mistake guard. It stops a session from using the dispatch commands by
+mistake, for example an executor that types `cli-hierarchy tick`, or a `--board-dir`
+that points at the wrong board. It is not authentication and it does not contain a
+hostile or confused session.
+
+The install-location check works from the real path of the running command. If that
+path is inside a git work tree, the work tree must be the main checkout, so a copy in a
+task worktree, a scratch repository or any other repository is refused. If it is not
+inside any work tree (a global install, the plugin cache), the check is skipped,
+because there is no checkout to compare against: installed layouts get the weaker
+guard. A path that cannot be resolved, or a git failure other than "not a repository",
+is refused.
+
+A session running as the same user can still defeat the guard:
+
+- a scratch repository with a forged roster and a forged policy file, used as the
+  working directory, board and `--work-dir`, together with a copy of the command placed
+  inside that scratch repository so the install-location check passes;
+- an installed layout, where the install-location check does not apply at all;
+- redirecting git with environment variables of the `GIT_COMMON_DIR` kind (the commands
+  strip the ones they know, but a list of names is not a guarantee).
+
+The hook-level deny of `tick`, `clear` and `route-decision` for executor roles is the
+control that closes this. It should be in place before `tick` is enabled with more than
+one executor.
+
+### The unblocking playbook
+
+Every step is gated by the `operational` list in `spec.governance` of
+`.ai-sdlc/agent-role.yaml` (read, never written, by the loop, and read only from the verified main checkout: the `.git` there must be a real directory, not a symlink, matching the git common dir; any doubt grants nothing) and is recorded as an
+`OperatorPlaybookAction` event. A step the policy does not grant is refused and
+becomes an escalation.
+
+| Failure record | Action | Grant needed |
+| --- | --- | --- |
+| Mechanical conflict shape (`test-additions-overlap`, `prettier-drift`, `pnpm-lock-regen`, `package-json-bin-concat`, `behind-only`) | Rebase the task branch onto `origin/main`, then lease-push to that branch | `rebase-own-branch`, `lease-push-own-branch` |
+| `stale-merge-ref` | Push an empty commit to the task branch | `retrigger-ci` |
+| `stale-heartbeat`, `spawn-rejected`, `quota-exhausted`, `transient`, within the retry limit | `cli-dispatch requeue --task-id <id>` | `requeue` |
+| Anything else | Escalate: the planner is messaged with the task id and the failure. No git action is taken. | none |
+
+The playbook can push to one place: `HEAD:refs/heads/<the task's own branch>`.
+`main`, `master`, any other branch, any forced or deleting push and any other
+refspec form are refused before git is run. A lease push is also refused, with no
+git action, unless the trusted policy sets `allowForcePush: leaseOnOwnBranch`, when
+the branch is on the policy's `protectedBranches` list (or the built-in protected
+names), and when the task's worktree does not verify as a genuine worktree of this
+repository (under `.worktrees/`, registered under the main checkout's
+`.git/worktrees/`, with a consistent `gitdir` back-pointer). Git runs with
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and every `GIT_CONFIG*` variable removed,
+credential prompts off, and a two minute timeout per command, except `git push`, which
+gets thirty minutes because the repository's pre-push hooks run inside it. Git is
+started in its own process group, and on a timeout the whole group is killed so no
+hook worker is left running. A rebase that does not apply cleanly is aborted, never
+resolved by hand.
+
+Decision ids and cause codes read from a verdict are checked before they are passed
+on: a decision id must be `DEC-` followed by four to nine digits and a cause must be lower-case words
+joined by hyphens. Anything else is dropped and listed in the verdict's
+`rejectedFields`; `cli-dispatch complete` refuses such values outright.
+
+`cli-dispatch requeue --task-id <id> [--retry-limit <n>]` returns one failed task to
+`queue/` with its retry count incremented. It restores the manifest saved when the
+task failed. It refuses, changing nothing, when the task is not in `failed/`, has no
+saved manifest, is already queued, inflight or blocked, or has used its retries
+(default 2).
+
+### Clearing an executor
+
+```bash
+cli-hierarchy clear <executor-name> [--settle-ms <n>]
+```
+
+`cli-hierarchy clear` is meant for the dispatch session only. Its mistake guard resolves
+the calling session from the roster and refuses, sending nothing, for any other caller,
+including a human at a plain shell (it is not authentication; see "The caller binding"). A person outside the hierarchy who needs to empty a pane uses tmux
+directly (`tmux send-keys -t <pane> -l -- /clear`, then `Enter`), after checking with
+`cli-hierarchy status` that the executor holds no inflight task.
+
+Looks up the executor in the roster and sends `/clear` and Enter to its pane, waits
+for the settle time (8000 ms by default), then sends `/ai-sdlc executor` and Enter.
+It refuses, sending nothing, when the name is not a running executor, the name or
+pane id is malformed, the window is not open, or the executor holds an inflight
+task, or the executor's tmux session does not carry the `@ai-sdlc-hierarchy` marker
+that `up` sets (a session `cli-hierarchy` did not start is never typed into; sessions
+of the old single-session layout predate the marker and are not checked). Keys are
+sent only to the pane the roster names, and only after tmux confirms the pane still
+belongs to that window; a recorded pane id that no longer belongs to it is refused,
+never replaced by the window name. An `ExecutorContextCleared` event records the
+clear.
+
+The `hierarchy.clear` capability is reported `live` when the restart command was
+sent and the executor printed its identity line again within the settle time, and
+`degraded`, with the reason, when it did not or a keystroke could not be sent. A
+degraded clear shows up in `doctor`; check the executor's window with
+`cli-hierarchy status`.
+
+### Events
+
+`HierarchySessionStarted` (from `cli-hierarchy up`), `ExecutorContextCleared`,
+`DecisionRouted` (`cli-hierarchy route-decision`) and `OperatorPlaybookAction` are
+written to the orchestrator events stream.
+
+---
+
 ## Cleanup
 
 ### Cleanup all sessions

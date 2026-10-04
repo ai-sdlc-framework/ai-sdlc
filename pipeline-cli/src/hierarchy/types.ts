@@ -4,6 +4,8 @@
  * Roster schema: spec/schemas/hierarchy-roster.v1.schema.json
  */
 
+import type { EventEmitter } from './emit.js';
+
 /** Tier a session belongs to. */
 export type HierarchyRole = 'planner' | 'operator-dispatch' | 'executor';
 
@@ -48,6 +50,16 @@ export type CommandRunner = (
   args: readonly string[],
   options?: { cwd?: string },
 ) => CommandResult;
+
+/**
+ * A command runner that waits for the process asynchronously. Used for commands
+ * that can run for a long time and must be killed as a whole process group.
+ */
+export type AsyncCommandRunner = (
+  file: string,
+  args: readonly string[],
+  options?: { cwd?: string },
+) => Promise<CommandResult>;
 
 /** Entry of the harness session registry (one JSON file per live session). */
 export interface RegistrySession {
@@ -103,6 +115,8 @@ export interface HierarchyDeps {
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */
   pollAttempts: number;
   pollIntervalMs: number;
+  /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
+  emit?: EventEmitter;
 }
 
 /**

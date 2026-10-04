@@ -315,7 +315,33 @@ export type OrchestratorEventType =
    * `provider-unavailable`, `availability-check-failed`). Per-event fields:
    * `reason`, `judgmentId`, optional `provider`, optional `taskId`.
    */
-  | 'JudgmentProviderUnavailable';
+  | 'JudgmentProviderUnavailable'
+  /**
+   * RFC-0051 - emitted when a hierarchy session (planner, dispatch or
+   * executor) is started by `cli-hierarchy up`. Per-event fields:
+   * `sessionName` (the roster name), `sessionRole`.
+   */
+  | 'HierarchySessionStarted'
+  /**
+   * RFC-0051 - emitted after the dispatch loop clears an executor's context.
+   * Per-event fields: `executor` (roster name), `paneId`, `resumed` (the
+   * executor reported back within the settle time), `settleMs`; optional
+   * `taskId` (the task whose verdict triggered the clear).
+   */
+  | 'ExecutorContextCleared'
+  /**
+   * RFC-0051 - emitted when a decision is routed to a tier. Per-event fields:
+   * `decisionId`, `route` (`operational` or `design`), `routedTo` (session
+   * name or role that now owns it).
+   */
+  | 'DecisionRouted'
+  /**
+   * RFC-0051 - emitted for every unblocking-playbook action the dispatch loop
+   * takes or refuses. Per-event fields: `taskId`, `action` (`rebase-push`,
+   * `retrigger-ci`, `requeue`, `escalate`), `result` (`done`, `refused`,
+   * `failed`, `escalated`), `reason`; optional `branch`.
+   */
+  | 'OperatorPlaybookAction';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

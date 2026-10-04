@@ -87,7 +87,7 @@ describe('executor identity script', () => {
   const block = body.slice(start, end);
 
   it('uses the same name filter as the session-start hook', () => {
-    assert.ok(block.includes(SAFE_NAME.source.replace('$', '\\$')));
+    assert.ok(block.includes(SAFE_NAME.source.replace(/\$/g, () => '\\$')));
     assert.match(block, /ROLES = \['executor', 'operator-dispatch', 'planner'\]/);
     assert.match(block, /s\.status === 'running'/);
   });

@@ -97,7 +97,7 @@ describe('completeTask', () => {
       prNumber: 42,
       prUrl: 'https://example.test/pull/42',
       followUpIds: ['AISDLC-701.1'],
-      decisionIds: ['DEC-1'],
+      decisionIds: ['DEC-0001'],
       notes: 'ok',
       now: () => new Date('2026-01-01T00:00:00Z'),
     });
@@ -109,7 +109,7 @@ describe('completeTask', () => {
       workerId: 'executor-a',
       prNumber: 42,
       followUpIds: ['AISDLC-701.1'],
-      decisionIds: ['DEC-1'],
+      decisionIds: ['DEC-0001'],
       completedAt: '2026-01-01T00:00:00.000Z',
     });
     expect(readInflightManifest(boardDir, 'AISDLC-701')).toBeUndefined();
@@ -358,7 +358,7 @@ describe('completeTask', () => {
       '--follow-ups',
       'AISDLC-704.1',
       '--decisions',
-      'D-1',
+      'DEC-0001',
       '--notes',
       'n',
     ]);
