@@ -2,15 +2,17 @@
  * Hand-off: tell the dispatch session a brief is ready.
  *
  * The message goes to the dispatch session's roster entry only, and only after
- * the entry passes the same validation `down` applies: the hierarchy tmux
- * session, a valid window name, a valid pane id that tmux confirms still belongs
- * to that window. Nothing is ever typed into any other tmux target.
+ * the entry passes the same validation `down` applies: a tmux session from the fixed
+ * set of hierarchy names (or a window of the legacy `ai-sdlc-hierarchy` session), a
+ * valid window name, the `@ai-sdlc-hierarchy` ownership marker that `up` sets (not
+ * checked for legacy entries, which predate it), and a pane id that tmux confirms still
+ * belongs to that window. Nothing is ever typed into any other tmux target.
  */
 
 import path from 'node:path';
 
 import { unsafeEntryReason } from './roster.js';
-import { listWindows, resolveSendTarget } from './tmux.js';
+import { listWindows, ownershipRefusal, resolveSendTarget } from './tmux.js';
 import type { CommandRunner, RosterEntry } from './types.js';
 
 /** Delivers one line to a roster session. Injected in tests. */
@@ -41,7 +43,16 @@ export function createTmuxBriefSender(run: CommandRunner): BriefSender {
     if (!listWindows(run, entry.tmuxSession).includes(entry.tmuxWindow)) {
       throw new Error(`the window for '${entry.name}' is not open; start it with cli-hierarchy up`);
     }
-    const target = resolveSendTarget(run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
+    const refusal = ownershipRefusal(run, entry);
+    if (refusal) throw new Error(`refusing to message '${entry.name}': ${refusal}`);
+    let target: string;
+    try {
+      target = resolveSendTarget(run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
+    } catch (err) {
+      throw new Error(`refusing to message '${entry.name}': ${(err as Error).message}`, {
+        cause: err,
+      });
+    }
     const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', message]);
     if (typed.status !== 0) throw new Error(`could not type into '${entry.name}': ${typed.stderr}`);
     const sent = run('tmux', ['send-keys', '-t', target, 'Enter']);

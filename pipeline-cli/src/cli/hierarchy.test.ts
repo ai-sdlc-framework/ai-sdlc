@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CommandRunner, HierarchyDeps } from '../hierarchy/index.js';
-import { defaultHierarchyDeps, runHierarchyCli } from './hierarchy.js';
+import { writeRoster, type CommandRunner, type HierarchyDeps } from '../hierarchy/index.js';
+import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 
 let tmp: string;
 let logs: string[];
@@ -82,6 +82,66 @@ describe('runHierarchyCli', () => {
     expect(String(err.mock.calls[0]?.[0])).toContain('could not start');
   });
 
+  it('down exits 1 when it refuses a session that up did not start, and sends nothing', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const boardDir = path.join(tmp, 'dispatch');
+    writeRoster(boardDir, {
+      schemaVersion: 'v1',
+      sessions: [
+        {
+          role: 'executor',
+          name: 'executor-alpha',
+          tmuxSession: 'executor-alpha',
+          tmuxWindow: 'executor-alpha',
+          paneId: '',
+          pid: 1,
+          model: 'sonnet',
+          permissionMode: 'default',
+          startedAt: '2026-10-03T12:00:00.000Z',
+          status: 'running',
+        },
+      ],
+    });
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      // the personal session exists with the agent's window, but has no ownership option
+      if (args[0] === 'list-windows') return { status: 0, stdout: 'executor-alpha\n', stderr: '' };
+      return { status: 1, stdout: '', stderr: 'unknown option' };
+    };
+    expect(await runHierarchyCli(['down'], overrides({ run }))).toBe(1);
+    expect(calls.some((c) => c[0] === 'send-keys' || c[0] === 'kill-window')).toBe(false);
+    expect(logs.some((l) => l.includes("not stopping 'executor-alpha'"))).toBe(true);
+  });
+
+  it('up --attach returns the exit code of the attach', async () => {
+    writeFileSync(
+      path.join(tmp, 'settings.json'),
+      JSON.stringify({ crossSessionInbound: 'accept' }),
+    );
+    let started = false;
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'new-session') started = true;
+      if (args[0] === 'has-session') return { status: started ? 0 : 1, stdout: '', stderr: '' };
+      if (args[0] === 'display-message') return { status: 0, stdout: '%1 4242\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const attached: string[][] = [];
+    const code = await runHierarchyCli(
+      ['up', '--executors', '0', '--no-planner', '--attach'],
+      overrides({
+        run,
+        env: {},
+        attach: (a) => {
+          attached.push([...a]);
+          return 4;
+        },
+      }),
+    );
+    expect(code).toBe(4);
+    expect(attached).toEqual([['attach-session', '-t', '=operator-dispatch']]);
+  });
+
   it('status prints an empty roster as text and json', async () => {
     expect(await runHierarchyCli(['status'], overrides())).toBe(0);
     expect(logs).toEqual(['no sessions in the roster']);
@@ -97,6 +157,92 @@ describe('runHierarchyCli', () => {
 
   it('down with an empty roster succeeds', async () => {
     expect(await runHierarchyCli(['down'], overrides())).toBe(0);
+  });
+});
+
+function seedRoster(): void {
+  writeRoster(path.join(tmp, 'dispatch'), {
+    schemaVersion: 'v1',
+    sessions: [
+      {
+        role: 'planner',
+        name: 'planner',
+        tmuxSession: 'planner',
+        tmuxWindow: 'planner',
+        paneId: '',
+        pid: 1,
+        model: 'fable',
+        permissionMode: 'default',
+        startedAt: '2026-10-03T12:00:00.000Z',
+        status: 'running',
+      },
+    ],
+  });
+}
+
+describe('runHierarchyCli attach and terminals', () => {
+  it('attach runs the interactive command for a roster name and returns its exit code', async () => {
+    seedRoster();
+    const attachCalls: string[][] = [];
+    const run: CommandRunner = (_f, args) => ({
+      status: args[0] === 'has-session' ? 0 : 1,
+      stdout: '',
+      stderr: '',
+    });
+    const over = overrides({
+      run,
+      env: { TMUX: '/tmp/tmux-1/default,1,0' },
+      attach: (a) => {
+        attachCalls.push([...a]);
+        return 0;
+      },
+    });
+    expect(await runHierarchyCli(['attach', 'planner'], over)).toBe(0);
+    // The name may come after flags too.
+    const board = path.join(tmp, 'dispatch');
+    expect(await runHierarchyCli(['attach', '--board-dir', board, 'planner'], over)).toBe(0);
+    expect(attachCalls).toEqual([
+      ['switch-client', '-t', '=planner'],
+      ['switch-client', '-t', '=planner'],
+    ]);
+  });
+
+  it('attach without a name exits 2, with an unknown name exits 1 and lists the roster', async () => {
+    seedRoster();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['attach'], overrides())).toBe(2);
+    expect(await runHierarchyCli(['attach', 'executor-zeta'], overrides())).toBe(1);
+    const last = err.mock.calls[err.mock.calls.length - 1];
+    expect(String(last?.[0])).toContain('valid names: planner');
+  });
+
+  it('terminals needs --vscode, and --vscode --print prints the tasks', async () => {
+    seedRoster();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['terminals'], overrides())).toBe(2);
+    expect(String(err.mock.calls[0]?.[0])).toContain('terminals needs --vscode');
+    expect(await runHierarchyCli(['terminals', '--vscode', '--print'], overrides())).toBe(0);
+    const doc = JSON.parse(logs.join('\n')) as { tasks: { label: string }[] };
+    expect(doc.tasks.map((t) => t.label)).toEqual(['planner', 'hierarchy: open all agents']);
+  });
+
+  it('terminals --vscode --out writes the file and refuses a second write without --force', async () => {
+    seedRoster();
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const out = path.join(tmp, 'out');
+    expect(await runHierarchyCli(['terminals', '--vscode', '--out', out], overrides())).toBe(0);
+    expect(existsSync(path.join(out, 'tasks.json'))).toBe(true);
+    expect(await runHierarchyCli(['terminals', '--vscode', '--out', out], overrides())).toBe(1);
+    expect(
+      await runHierarchyCli(['terminals', '--vscode', '--out', out, '--force'], overrides()),
+    ).toBe(0);
+  });
+
+  it('firstPositional skips flags and their values', () => {
+    expect(firstPositional(['attach', 'planner'])).toBe('planner');
+    expect(firstPositional(['attach', '--board-dir', 'x', 'planner'])).toBe('planner');
+    expect(firstPositional(['attach', '--json', '--x'])).toBeUndefined();
+    expect(firstPositional(['attach'])).toBeUndefined();
   });
 });
 

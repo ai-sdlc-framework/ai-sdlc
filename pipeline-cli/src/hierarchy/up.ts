@@ -1,15 +1,26 @@
 /**
  * `cli-hierarchy up`: start the planner, the dispatch session and N executors
- * as named, model-pinned, permission-mode-pinned Claude Code sessions, one tmux
- * window each, and record them in the roster.
+ * as named, model-pinned, permission-mode-pinned Claude Code sessions, each in its
+ * own detached tmux session (session name == window name == agent name), and
+ * record them in the roster. One session per agent lets two terminals show two
+ * agents; clients attached to one shared session would follow the same window.
  */
 
 import path from 'node:path';
 
+import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
-import { readRosterChecked, writeRoster } from './roster.js';
-import { hasSession, listWindows, paneInfo, startWindow } from './tmux.js';
+import { isLegacyLayoutEntry, readRosterChecked, writeRoster } from './roster.js';
+import {
+  hasSession,
+  markSessionOwned,
+  OWNER_OPTION,
+  paneInfo,
+  setSessionTitles,
+  startSession,
+  windowLive,
+} from './tmux.js';
 import {
   HIERARCHY_TMUX_SESSION,
   type HierarchyDeps,
@@ -45,6 +56,8 @@ export interface UpResult {
   started: RosterEntry[];
   existing: RosterEntry[];
   warnings: string[];
+  /** Exit code of the tmux attach when `--attach` was requested and ran. */
+  attachExitCode?: number;
 }
 
 interface PlannedSession {
@@ -140,18 +153,23 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   const planned = plan(opts, count, plannerMode);
   for (const s of planned) assertSessionName(s.name);
 
-  const session = HIERARCHY_TMUX_SESSION;
-  const sessionExists = hasSession(deps.run, session);
-  const liveWindows = new Set(sessionExists ? listWindows(deps.run, session) : []);
   const warnings: string[] = [];
 
-  // Drop roster entries whose window is gone; they are restarted below if planned.
+  // An old-layout roster (windows in one shared session) is never mixed with the new
+  // layout: refuse before starting anything or writing the roster.
   const { roster: loaded, rejected } = readRosterChecked(deps.boardDir);
+  if (loaded.sessions.some(isLegacyLayoutEntry)) {
+    throw new Error(
+      `the roster uses the old single-session layout ('${HIERARCHY_TMUX_SESSION}'); run 'cli-hierarchy down' first, then run 'cli-hierarchy up' again`,
+    );
+  }
   for (const r of rejected) warnings.push(`${r}; not touched`);
-  const kept = loaded.sessions.filter((e) => liveWindows.has(e.tmuxWindow));
+
+  // Drop roster entries whose session is gone; they are restarted below if planned.
+  const kept = loaded.sessions.filter((e) => windowLive(deps.run, e.tmuxSession, e.tmuxWindow));
   for (const e of loaded.sessions) {
-    if (!liveWindows.has(e.tmuxWindow)) {
-      warnings.push(`roster entry '${e.name}' had no live window and was dropped`);
+    if (!kept.includes(e)) {
+      warnings.push(`roster entry '${e.name}' had no live tmux session and was dropped`);
     }
   }
 
@@ -170,9 +188,9 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     const entry = kept.find((e) => e.tmuxWindow === s.name);
     if (entry) {
       existing.push(entry);
-    } else if (liveWindows.has(s.name)) {
+    } else if (hasSession(deps.run, s.name)) {
       warnings.push(
-        `window '${s.name}' exists but is not in the roster; leaving it alone and not starting a duplicate`,
+        `tmux session '${s.name}' exists but is not in the roster; leaving it alone and not starting a duplicate`,
       );
     } else {
       toStart.push(s);
@@ -204,25 +222,27 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
 
   const roster: Roster = { schemaVersion: 'v1', sessions: [...kept] };
   const started: RosterEntry[] = [];
-  let sessionNowExists = sessionExists;
   for (const s of toStart) {
     const spawnedAt = deps.now();
-    const result = startWindow(
-      deps.run,
-      session,
-      s.name,
-      buildClaudeCommand(deps.claudeBin, s),
-      deps.cwd,
-      sessionNowExists,
-    );
+    const result = startSession(deps.run, s.name, buildClaudeCommand(deps.claudeBin, s), deps.cwd);
     if (result.status !== 0) {
       writeRoster(deps.boardDir, roster);
       throw new Error(
         `could not start '${s.name}': ${result.stderr.trim() || 'tmux failed'} (${started.length} session(s) started before the failure)`,
       );
     }
-    sessionNowExists = true;
-    const pane = paneInfo(deps.run, session, s.name);
+    // Ownership marker: `down` and `brief --notify` act only on sessions that carry it.
+    // A failure leaves the agent running but out of their reach, so say so.
+    if (markSessionOwned(deps.run, s.name).status !== 0) {
+      warnings.push(
+        `could not mark tmux session '${s.name}' with ${OWNER_OPTION}; down and brief --notify will refuse to act on it until it carries that option`,
+      );
+    }
+    // Cosmetic: a failure here must not undo a started agent.
+    if (setSessionTitles(deps.run, s.name).status !== 0) {
+      warnings.push(`could not set the terminal title of tmux session '${s.name}'`);
+    }
+    const pane = paneInfo(deps.run, s.name, s.name);
     const claimed = new Set(roster.sessions.map((e) => e.name));
     const registered = await waitForRegistry(deps, s.name, spawnedAt.getTime(), claimed);
     if (!registered) {
@@ -233,7 +253,7 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     const entry: RosterEntry = {
       role: s.role,
       name: registered?.name ?? s.name,
-      tmuxSession: session,
+      tmuxSession: s.name,
       tmuxWindow: s.name,
       paneId: pane.paneId,
       pid: registered?.pid ?? pane.panePid,
@@ -253,11 +273,25 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     deps.log(
       `started ${e.role} '${e.tmuxWindow}'${renamed} model=${e.model} mode=${e.permissionMode}`,
     );
+    deps.log(`  show it with: cli-hierarchy attach ${e.tmuxWindow}`);
   }
   for (const e of existing)
-    deps.log(`already running ${e.role} '${e.tmuxWindow}' (window left alone)`);
+    deps.log(`already running ${e.role} '${e.tmuxWindow}' (session left alone)`);
   for (const w of warnings) deps.log(`warning: ${w}`);
 
-  if (opts.attach) deps.attach(session);
-  return { started, existing, warnings };
+  let attachExitCode: number | undefined;
+  if (opts.attach) {
+    const target =
+      started.find((e) => e.role === 'planner') ??
+      roster.sessions.find((e) => e.role === 'operator-dispatch');
+    if (target) {
+      try {
+        attachExitCode = attachEntry(target, deps);
+      } catch (err) {
+        deps.log(`warning: could not attach to '${target.tmuxWindow}': ${(err as Error).message}`);
+        attachExitCode = 1;
+      }
+    } else deps.log('warning: no planner or dispatch session to attach to');
+  }
+  return { started, existing, warnings, attachExitCode };
 }

@@ -46,13 +46,13 @@
         },
         "tmuxSession": {
           "type": "string",
-          "const": "ai-sdlc-hierarchy",
-          "description": "tmux session hosting the window. Always the dedicated hierarchy session 'ai-sdlc-hierarchy'; entries naming any other session are never acted on."
+          "pattern": "^[a-z][a-z0-9-]{0,47}$",
+          "description": "tmux session hosting the agent. Equals the agent's requested name (one session per agent). Rosters written by the older single-session layout name 'ai-sdlc-hierarchy' and still validate. The schema only checks the shape; the tools additionally refuse to act on any entry whose session is not 'ai-sdlc-hierarchy' or a default hierarchy name equal to its window."
         },
         "tmuxWindow": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]{0,47}$",
-          "description": "tmux window name. Always the name that was requested, so a later up can recognise its own window."
+          "description": "tmux window name. Always the name that was requested, so a later up can recognise its own window. Equals tmuxSession in the one-session-per-agent layout."
         },
         "paneId": {
           "type": "string",

@@ -8,7 +8,7 @@ import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
 import { readSessionRegistry } from './registry.js';
 import { readRosterChecked } from './roster.js';
-import { listWindows } from './tmux.js';
+import { listWindows, sessionAttached } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** Live state of one roster entry. */
@@ -18,6 +18,8 @@ export type LiveState = 'busy' | 'idle' | 'starting' | 'gone' | 'unknown';
 export interface StatusRow {
   entry: RosterEntry;
   state: LiveState;
+  /** True when a tmux client is attached to the entry's session. */
+  attached: boolean;
   /** Task the session holds in `inflight/`, when its heartbeat names it. */
   inflightTask?: string;
 }
@@ -38,6 +40,15 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     for (const w of listWindows(deps.run, tmuxSession)) windows.add(`${tmuxSession}:${w}`);
   }
   const inflight = listInflight(deps.boardDir);
+  const attachedBySession = new Map<string, boolean>();
+  const isAttached = (tmuxSession: string): boolean => {
+    let v = attachedBySession.get(tmuxSession);
+    if (v === undefined) {
+      v = sessionAttached(deps.run, tmuxSession);
+      attachedBySession.set(tmuxSession, v);
+    }
+    return v;
+  };
 
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
@@ -50,7 +61,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       state = live.status === 'busy' ? 'busy' : live.status === 'idle' ? 'idle' : 'unknown';
     } else state = 'starting';
     const held = inflight.find((i) => i.workerId === entry.name);
-    return { entry, state, inflightTask: held?.taskId };
+    return {
+      entry,
+      state,
+      attached: alive && isAttached(entry.tmuxSession),
+      inflightTask: held?.taskId,
+    };
   });
   return { rows, board: peekQueue(deps.boardDir) };
 }
@@ -58,11 +74,12 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
 /** Render the status result as a plain-text table. */
 export function formatStatus(result: StatusResult): string[] {
   if (result.rows.length === 0) return ['no sessions in the roster'];
-  const header = ['ROLE', 'NAME', 'STATE', 'MODEL', 'MODE', 'INFLIGHT'];
+  const header = ['ROLE', 'NAME', 'STATE', 'ATTACHED', 'MODEL', 'MODE', 'INFLIGHT'];
   const body = result.rows.map((r) => [
     r.entry.role,
     r.entry.name,
     r.state,
+    r.attached ? 'yes' : 'no',
     r.entry.model,
     r.entry.permissionMode,
     r.inflightTask ?? '-',

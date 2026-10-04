@@ -27,8 +27,11 @@ export function createSystemRunner(): CommandRunner {
   };
 }
 
-/** Attach the terminal to a tmux session (inherits stdio); returns the exit code. */
-export function attachTmuxSession(session: string): number {
-  const result = spawnSync('tmux', ['attach-session', '-t', `=${session}`], { stdio: 'inherit' });
+/**
+ * Run an interactive tmux command (`attach-session` or `switch-client`) with the
+ * terminal's stdio inherited; returns the exit code.
+ */
+export function attachTmuxSession(args: readonly string[]): number {
+  const result = spawnSync('tmux', [...args], { stdio: 'inherit' });
   return result.status ?? 1;
 }

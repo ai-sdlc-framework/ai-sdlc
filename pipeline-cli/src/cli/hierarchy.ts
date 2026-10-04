@@ -5,10 +5,14 @@
  *
  *   - `up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
  *     [--executor-model <m>] [--no-planner] [--attach]` — start the planner, the
- *     dispatch session and up to five executors as named tmux windows in the
- *     `ai-sdlc-hierarchy` session and write the roster. Idempotent.
- *   - `status [--json]` — the roster with each session's live state and the
- *     board's inflight task.
+ *     dispatch session and up to five executors, each in its own detached tmux
+ *     session named after the agent, and write the roster. Idempotent.
+ *   - `status [--json]` — the roster with each session's live state, whether a
+ *     client is attached, and the board's inflight task.
+ *   - `attach <name>` — show one agent in this terminal (`switch-client` inside
+ *     tmux, `attach-session` outside).
+ *   - `terminals --vscode [--out <dir>] [--force] [--print]` — generate a VS Code
+ *     `tasks.json` that opens one terminal per agent.
  *   - `brief --tasks <id,...> | --rfc <RFC-NNNN> [--out <path>] [--force] [--notify]` —
  *     write a dispatch brief from task metadata and optionally tell the dispatch
  *     session about it.
@@ -31,8 +35,10 @@ import {
   notifyDispatch,
   type BriefSender,
   formatStatus,
+  hierarchyAttach,
   hierarchyDown,
   hierarchyStatus,
+  hierarchyTerminals,
   hierarchyUp,
   systemResourceSnapshot,
   type HierarchyDeps,
@@ -42,10 +48,12 @@ import { parseArgv } from './dispatch.js';
 const USAGE = `Usage: cli-hierarchy <command> [options]
 
 Commands:
-  up       Start the planner, dispatch session and executors in tmux
-  status   Show the roster with live state and inflight tasks
-  brief    Generate a dispatch brief (waves, sequence groups) from task metadata
-  down     Stop sessions and return their inflight manifests to the queue
+  up         Start the planner, dispatch session and executors, one tmux session each
+  status     Show the roster with live state, attached clients and inflight tasks
+  attach     Show one agent in this terminal: attach <name>
+  terminals  Generate editor terminal tasks, one per agent (terminals --vscode)
+  brief      Generate a dispatch brief (waves, sequence groups) from task metadata
+  down       Stop sessions and return their inflight manifests to the queue
 
 Options for up:
   --executors <n>          Number of executors, 0 to 5 (default 5)
@@ -53,11 +61,21 @@ Options for up:
   --dispatch-model <m>     Dispatch model (default opus)
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
-  --attach                 Attach to the tmux session when done
+  --attach                 Show the planner (or the dispatch session) when done
   --allow-planner-bypass   Allow the planner to start in bypassPermissions mode
 
 Options for status:
   --json                   Print machine-readable output
+
+Options for attach:
+  <name>                   Agent name from the roster (planner, operator-dispatch, executor-alpha, ...)
+                           Uses switch-client when TMUX is set, attach-session otherwise.
+
+Options for terminals:
+  --vscode                 Write a VS Code tasks.json (the only supported target)
+  --out <dir>              Output directory (default ./.vscode)
+  --force                  Replace an existing tasks.json
+  --print                  Print the JSON to stdout instead of writing a file
 
 Options for brief:
   --tasks <id,...>         Task ids to include
@@ -103,6 +121,24 @@ export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDe
 }
 
 /**
+ * First argument after the subcommand that is neither a `--flag` nor a flag's
+ * value (`parseArgv` treats every non-flag token as a value or drops it).
+ */
+export function firstPositional(argv: readonly string[]): string | undefined {
+  const rest = argv.slice(1);
+  for (let i = 0; i < rest.length; i++) {
+    const token = rest[i] as string;
+    if (token.startsWith('--')) {
+      const next = rest[i + 1];
+      if (next !== undefined && !next.startsWith('--')) i++;
+      continue;
+    }
+    return token;
+  }
+  return undefined;
+}
+
+/**
  * CLI entry point. Returns the intended exit code. Tests call this with
  * synthetic argv and injected dependencies.
  */
@@ -127,7 +163,7 @@ export async function runHierarchyCli(
   try {
     switch (subcommand) {
       case 'up': {
-        await hierarchyUp(
+        const result = await hierarchyUp(
           {
             executors: flags.executors ?? '5',
             plannerModel: flags['planner-model'] ?? 'fable',
@@ -139,12 +175,35 @@ export async function runHierarchyCli(
           },
           deps,
         );
-        return 0;
+        return result.attachExitCode ?? 0;
       }
       case 'status': {
         const result = hierarchyStatus(deps);
         if (flags.json === 'true') deps.log(JSON.stringify(result));
         else for (const line of formatStatus(result)) deps.log(line);
+        return 0;
+      }
+      case 'attach': {
+        const name = firstPositional(argv);
+        if (!name) {
+          process.stderr.write(`cli-hierarchy: attach needs an agent name\n\n${USAGE}`);
+          return 2;
+        }
+        return hierarchyAttach(name, deps);
+      }
+      case 'terminals': {
+        if (flags.vscode === undefined) {
+          process.stderr.write(`cli-hierarchy: terminals needs --vscode\n\n${USAGE}`);
+          return 2;
+        }
+        hierarchyTerminals(
+          {
+            out: flags.out === 'true' ? undefined : flags.out,
+            force: flags.force === 'true',
+            print: flags.print === 'true',
+          },
+          deps,
+        );
         return 0;
       }
       case 'brief': {
@@ -167,8 +226,9 @@ export async function runHierarchyCli(
         return 0;
       }
       case 'down': {
-        await hierarchyDown({ role: flags.role }, deps);
-        return 0;
+        const result = await hierarchyDown({ role: flags.role }, deps);
+        // A session left alone (not started by `up`, stale pane) is not a success.
+        return result.refused.length > 0 ? 1 : 0;
       }
       default:
         process.stderr.write(`cli-hierarchy: unknown command '${subcommand}'\n\n${USAGE}`);

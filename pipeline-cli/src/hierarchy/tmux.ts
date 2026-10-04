@@ -3,7 +3,8 @@
  * arguments are argv entries, never shell-interpolated.
  */
 
-import type { CommandResult, CommandRunner } from './types.js';
+import { isLegacyLayoutEntry } from './roster.js';
+import type { CommandResult, CommandRunner, RosterEntry } from './types.js';
 
 /** True when the tmux session exists. */
 export function hasSession(run: CommandRunner, session: string): boolean {
@@ -20,22 +21,54 @@ export function listWindows(run: CommandRunner, session: string): string[] {
     .filter((l) => l.length > 0);
 }
 
+/** True when the session exists and has a window of that name. */
+export function windowLive(run: CommandRunner, session: string, window: string): boolean {
+  return hasSession(run, session) && listWindows(run, session).includes(window);
+}
+
 /**
- * Start `command` in a new window. The first window creates the session
- * detached; later windows are added to it.
+ * Start `command` in its own detached session. Session name and window name are
+ * both `name`: every agent gets a session of its own so two terminals can show
+ * two agents (clients attached to one shared session follow the same window).
  */
-export function startWindow(
+export function startSession(
   run: CommandRunner,
-  session: string,
-  window: string,
+  name: string,
   command: string,
   cwd: string,
-  sessionExists: boolean,
 ): CommandResult {
-  const args = sessionExists
-    ? ['new-window', '-t', `=${session}:`, '-n', window, '-c', cwd, command]
-    : ['new-session', '-d', '-s', session, '-n', window, '-c', cwd, command];
-  return run('tmux', args, { cwd });
+  return run('tmux', ['new-session', '-d', '-s', name, '-n', name, '-c', cwd, command], { cwd });
+}
+
+/**
+ * Label one session so a terminal attached to it is recognisable: the terminal
+ * title and the status line carry the agent name. Every option is scoped to the
+ * session with `-t`; no global or server option is ever set.
+ * @returns the first failing result, or the last successful one.
+ */
+export function setSessionTitles(run: CommandRunner, name: string): CommandResult {
+  // `=name:` (trailing colon) names the session; a bare `=name` is looked up as a window
+  // name in the current session first, and the old layout's windows carry agent names.
+  const target = `=${name}:`;
+  const options: string[][] = [
+    ['set-titles', 'on'],
+    ['set-titles-string', name],
+    ['status-left', `[${name}] `],
+  ];
+  let last: CommandResult = { status: 0, stdout: '', stderr: '' };
+  for (const [key, value] of options) {
+    last = run('tmux', ['set-option', '-t', target, key as string, value as string]);
+    if (last.status !== 0) return last;
+  }
+  return last;
+}
+
+/** True when at least one tmux client is attached to the session; false on any failure. */
+export function sessionAttached(run: CommandRunner, session: string): boolean {
+  const r = run('tmux', ['display-message', '-p', '-t', `=${session}`, '#{session_attached}']);
+  if (r.status !== 0) return false;
+  const n = Number.parseInt(r.stdout.trim(), 10);
+  return Number.isFinite(n) && n > 0;
 }
 
 /** Pane id and pane pid of a window; empty values when they cannot be read. */
@@ -62,6 +95,11 @@ export function sendExit(run: CommandRunner, target: string): CommandResult {
   return run('tmux', ['send-keys', '-t', target, '/exit', 'Enter']);
 }
 
+/** Close one pane by its id; pane ids are never reused within a tmux server's lifetime. */
+export function killPane(run: CommandRunner, paneId: string): CommandResult {
+  return run('tmux', ['kill-pane', '-t', paneId]);
+}
+
 /** Close a window. */
 export function killWindow(run: CommandRunner, session: string, window: string): CommandResult {
   return run('tmux', ['kill-window', '-t', `=${session}:${window}`]);
@@ -69,8 +107,10 @@ export function killWindow(run: CommandRunner, session: string, window: string):
 
 /**
  * Target for keys sent to a roster entry. The recorded pane id is used only when
- * tmux confirms it still belongs to the roster window; otherwise the window is
- * targeted by name so a recycled pane id can never receive the keys.
+ * tmux confirms it still belongs to the roster window. When it does not (or tmux
+ * cannot confirm it) nothing is sent: a stale or recycled pane id never falls back
+ * to targeting the window by name.
+ * @throws when a recorded pane id cannot be confirmed.
  */
 export function resolveSendTarget(
   run: CommandRunner,
@@ -81,5 +121,37 @@ export function resolveSendTarget(
   const windowTarget = `=${session}:${window}`;
   if (!paneId) return windowTarget;
   const r = run('tmux', ['display-message', '-p', '-t', windowTarget, '#{pane_id}']);
-  return r.status === 0 && r.stdout.trim() === paneId ? paneId : windowTarget;
+  if (r.status === 0 && r.stdout.trim() === paneId) return paneId;
+  throw new Error(
+    `the recorded pane ${paneId} does not belong to window '${window}' of tmux session '${session}' any more (the roster entry is stale); refusing to send keys to it or close it`,
+  );
+}
+
+/**
+ * Session-scoped tmux user option that `up` sets on every session it creates. `down` and
+ * `brief --notify` act on a session only when it carries it, so a personal session that
+ * happens to share an agent's name is never typed into or closed.
+ */
+export const OWNER_OPTION = '@ai-sdlc-hierarchy';
+
+/** Mark a session as started by `cli-hierarchy up` (session-scoped, never `-g`). */
+export function markSessionOwned(run: CommandRunner, name: string): CommandResult {
+  return run('tmux', ['set-option', '-t', `=${name}:`, OWNER_OPTION, '1']);
+}
+
+/** True when the session carries the ownership marker. */
+export function sessionOwned(run: CommandRunner, session: string): boolean {
+  const r = run('tmux', ['show-options', '-v', '-t', `=${session}:`, OWNER_OPTION]);
+  return r.status === 0 && r.stdout.trim() === '1';
+}
+
+/**
+ * Why the tool must not send keys to or close this entry's tmux session, or undefined
+ * when it may. Entries of the old layout (windows of the shared `ai-sdlc-hierarchy`
+ * session) predate the marker and carry no ownership check.
+ */
+export function ownershipRefusal(run: CommandRunner, entry: RosterEntry): string | undefined {
+  if (isLegacyLayoutEntry(entry)) return undefined;
+  if (sessionOwned(run, entry.tmuxSession)) return undefined;
+  return `tmux session '${entry.tmuxSession}' (roster entry '${entry.name}') does not carry the ${OWNER_OPTION} marker, so cli-hierarchy did not start it; refusing to send keys to it or close it. Mark a session by hand only if cli-hierarchy created it; marking a personal session lets down and brief --notify type into it and close it: tmux set-option -t =${entry.tmuxSession}: ${OWNER_OPTION} 1`;
 }

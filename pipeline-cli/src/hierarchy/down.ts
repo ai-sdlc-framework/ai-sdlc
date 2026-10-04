@@ -1,12 +1,31 @@
 /**
  * `cli-hierarchy down`: end sessions cleanly, return their inflight manifests
  * to the queue, close their windows and drop them from the roster.
+ *
+ * Targets come from each roster entry's own `tmuxSession` / `tmuxWindow`, so the
+ * same code stops the current layout (one tmux session per agent) and a roster
+ * written by the old layout (windows of the shared `ai-sdlc-hierarchy` session).
+ * Closing an agent's only window ends its session.
+ *
+ * A session is typed into or closed only when it carries the ownership marker that
+ * `up` sets and its recorded pane still belongs to it; both are checked before the
+ * exit request AND again before a forced close. An entry that fails either check is
+ * refused: it stays in the roster, its inflight work is untouched, and `down` goes on
+ * with the others. Entries of the old layout predate the marker and have no ownership
+ * check.
  */
 
 import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
 import { readRosterChecked, writeRoster } from './roster.js';
-import { killWindow, listWindows, resolveSendTarget, sendExit } from './tmux.js';
+import {
+  killPane,
+  killWindow,
+  listWindows,
+  ownershipRefusal,
+  resolveSendTarget,
+  sendExit,
+} from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
 /** What happened to one session. */
@@ -22,6 +41,8 @@ export interface DownOutcome {
 /** Result of `down`. */
 export interface DownResult {
   stopped: DownOutcome[];
+  /** Sessions left alone, with the reason: not started by `up`, or a stale pane id. */
+  refused: { name: string; reason: string }[];
 }
 
 /**
@@ -45,17 +66,46 @@ export async function hierarchyDown(
   }
 
   const stopped: DownOutcome[] = [];
+  const refused: { name: string; reason: string }[] = [];
   for (const entry of selected) {
     const isOpen = () => listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow);
     let forced = false;
+    // Ownership and pane gate: a session `up` started, reached through a pane id that
+    // still belongs to it. Run before the exit request and again before any forced close.
+    const gate = (): { target: string } | { reason: string } => {
+      const refusal = ownershipRefusal(deps.run, entry);
+      if (refusal) return { reason: refusal };
+      try {
+        return {
+          target: resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId),
+        };
+      } catch (err) {
+        return { reason: (err as Error).message };
+      }
+    };
+    const refuse = (verb: string, reason: string) => {
+      refused.push({ name: entry.name, reason });
+      deps.log(`warning: not ${verb} '${entry.name}': ${reason}`);
+    };
     if (isOpen()) {
-      sendExit(
-        deps.run,
-        resolveSendTarget(deps.run, entry.tmuxSession, entry.tmuxWindow, entry.paneId),
-      );
+      const first = gate();
+      if ('reason' in first) {
+        refuse('stopping', first.reason);
+        continue;
+      }
+      sendExit(deps.run, first.target);
       for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
       if (isOpen()) {
-        killWindow(deps.run, entry.tmuxSession, entry.tmuxWindow);
+        // The grace period is seconds long: a session could have been replaced meanwhile,
+        // so check again immediately before the destructive call. A confirmed pane id is
+        // closed by id (never reused); otherwise the window by name.
+        const again = gate();
+        if ('reason' in again) {
+          refuse('closing', again.reason);
+          continue;
+        }
+        if (entry.paneId) killPane(deps.run, again.target);
+        else killWindow(deps.run, entry.tmuxSession, entry.tmuxWindow);
         forced = true;
       }
     }
@@ -70,5 +120,5 @@ export async function hierarchyDown(
       `stopped ${entry.role} '${entry.name}'${forced ? ' (window closed after no exit)' : ''}${requeued ? `; returned ${requeued} to the queue` : ''}`,
     );
   }
-  return { stopped };
+  return { stopped, refused };
 }

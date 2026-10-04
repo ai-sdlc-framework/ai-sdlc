@@ -3,10 +3,11 @@
  * Bin shim for `cli-hierarchy`.
  *
  * Starts, inspects and stops the planner / dispatch / executor session
- * hierarchy as named tmux windows.
+ * hierarchy, one named tmux session per agent.
  *
  * Usage:
  *   node pipeline-cli/bin/cli-hierarchy.mjs up --executors 2
+ *   node pipeline-cli/bin/cli-hierarchy.mjs attach planner
  *   node pipeline-cli/bin/cli-hierarchy.mjs status
  *   node pipeline-cli/bin/cli-hierarchy.mjs down --role executor-beta
  *
