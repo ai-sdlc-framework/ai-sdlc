@@ -1,5 +1,20 @@
 # @ai-sdlc/conformance
 
+## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.26.1...conformance/runner-v0.27.0) (2026-10-04)
+
+
+### Bug Fixes
+
+* **hooks:** coverage gate reaps workers and caps memory; vitest workers die with parent (AISDLC-681) ([#1158](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1158)) ([ce802d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ce802d25ffe657ecbc33c75f8e497f28aa3f1280))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.27.0
+    * @ai-sdlc/orchestrator bumped to 0.27.0
+
 ## [0.26.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.26.0...conformance/runner-v0.26.1) (2026-09-18)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.3.0...sdk-go-v0.4.0) (2026-10-04)
+
+
+### Features
+
+* **spec:** scope force-push to own branch via leaseOnOwnBranch (AISDLC-663) ([#1113](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1113)) ([bf63baf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bf63baf71a41c1bb8561c3a6f462e921f3080ccc))
+
+
+### Bug Fixes
+
+* **spec:** harden cli-merge-if-eligible before the allowMerge grant (AISDLC-663.5) ([#1134](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1134)) ([ea6b7da](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea6b7da08bf7c58acb459a43c076be048a20b288))
+
 ## [0.3.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.2.1...sdk-go-v0.3.0) (2026-09-07)
 
 

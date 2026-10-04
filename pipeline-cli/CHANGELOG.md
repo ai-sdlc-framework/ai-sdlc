@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.26.1...pipeline-cli-v0.27.0) (2026-10-04)
+
+
+### Features
+
+* **orchestrator:** advisory ac-coverage and finding-grounding judgments (AISDLC-637) ([#1131](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1131)) ([aeb2266](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aeb226619e7b6d509bc53935e3e9c262c64eae6b))
+* **orchestrator:** board ordering, requeue reaper, enqueue (AISDLC-665) ([#1115](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1115)) ([c17c875](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c17c875e0e64773d8265b19d54ef06350a23081d))
+* **orchestrator:** claude code transcript ingester and cli-usage ingest (AISDLC-649) ([#1109](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1109)) ([0048523](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0048523839b30b32f2d2527244ea42f8b5f971fc))
+* **orchestrator:** complexity factors, failure class and injection screen judgments (AISDLC-639) ([#1136](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1136)) ([501aa7b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/501aa7b646f9463a441f8657f14856a4282e1960))
+* **orchestrator:** judgment-first DoR Stage B with tighten and relax definitions (AISDLC-636) ([#1144](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1144)) ([d272b47](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d272b474ee004c6112520824ce0cc7d669f66386))
+* **orchestrator:** model routing table, resolveModel and deterministic exploration (AISDLC-654) ([#1114](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1114)) ([b0f50e0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b0f50e0767b7edfdd586f65cb01ef838b395b2fd))
+* **orchestrator:** one tmux session per hierarchy agent, plus attach and terminals (AISDLC-688) ([#1179](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1179)) ([3e67cfb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3e67cfbd3df511c9c99fb11d11a17221dcb92771))
+* **orchestrator:** operator tui usage pane with window view and top consumers (AISDLC-652) ([#1123](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1123)) ([4e9808a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4e9808a5d08a4cbbbcb846104333af7651df2899))
+* **orchestrator:** review executor probes with contained, redacted evidence (AISDLC-675) ([#1178](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1178)) ([699f3fe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/699f3fef42c42a5e80dd054a6a2f12b134019f22))
+* **orchestrator:** review plan schema, baseline checklist and allowlist (AISDLC-673) ([#1164](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1164)) ([618cd8f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/618cd8fc64399ba7d9c7a15f0ebaf2740dd62eb3))
+* **orchestrator:** review routing and per-PR reviewer-set judgments (AISDLC-638) ([#1140](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1140)) ([7109589](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7109589f358168e2c28a2fca1ee157456a050fe5))
+* **orchestrator:** RFC-0051 executor loop skill, claim-bound complete, next-subid (AISDLC-666) ([#1170](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1170)) ([8a4fbce](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8a4fbce3b16c41ac3c52a00fd718c9b7edda3fe1))
+* **orchestrator:** routing bar evaluation and weekly proposal (AISDLC-656.1) ([#1161](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1161)) ([0da3e64](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0da3e645942b5b46ec1de0969102fccc3a93652e))
+* **orchestrator:** stable repoId in the usage ledger (AISDLC-653.1) ([#1150](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1150)) ([bbc2b6b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bbc2b6b521c278f44a2a8904e3be6a8353191d9b))
+* **orchestrator:** usage reports, allotment tracking and usage config (AISDLC-651) ([#1119](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1119)) ([85c1294](https://github.com/ai-sdlc-framework/ai-sdlc/commit/85c1294493952c4de8d531e09ff0183ebef9efca))
+* **reference:** bridge the classifier substrate to the judgment layer (AISDLC-634) ([#1139](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1139)) ([873a8a6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/873a8a66407e717a43c6e435d133edf2dbbfebec))
+* **reference:** cli-judgment doctor/list/ask/eval/replay and live contract test (AISDLC-632) ([#1133](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1133)) ([8c2c6c6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8c2c6c67bff04f4dfebbe8a425b0ddbbd00a1aad))
+* **reference:** evaluateJudgment runtime, catalog, JudgmentConfig and loader (AISDLC-630) ([#1118](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1118)) ([530c712](https://github.com/ai-sdlc-framework/ai-sdlc/commit/530c712f7c9be11afb4ec50f6a5f4cf4f3ac678e))
+* **reference:** judgment log, cache, cost, events and doctor check (AISDLC-631) ([#1129](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1129)) ([468b54d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/468b54d7d73bb81c352d34aed8becaf30e601a27))
+* **reference:** model price feed with dated history and held rows (AISDLC-659) ([#1108](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1108)) ([f70ba22](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f70ba2252252895f8a55c6e7f46659ce1d2ff9d8))
+* **reference:** registration-time safety rules for judgment definitions (AISDLC-630.1) ([#1130](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1130)) ([10725b0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/10725b09ccf0513a1d580a625cc2d474983bb7fc))
+* **reference:** RFC-0049 Group A decision and estimation judgments, conservative form (AISDLC-635) ([#1141](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1141)) ([9c19374](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9c19374edf4b5ba658a16d03363d544abce09684))
+* RFC-0049 section 9.5: follow-ups in a completed task must cite a filed task, say none, or be explicitly declined (AISDLC-645) ([#1103](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1103)) ([1b02908](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1b029089a3ca1827486a236461fff4a6142005d9))
+* RFC-0050 Part A: Codex session ingester and direct usage reporters for API runners and embeddings (AISDLC-650) ([#1107](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1107)) ([26a9c28](https://github.com/ai-sdlc-framework/ai-sdlc/commit/26a9c285b9eebb110883dc49500f0866de9598ca))
+* RFC-0050 Part B: offline reviewer replay (corpus builder, cli-usage replay, budget and off-peak scheduling) (AISDLC-655) ([#1126](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1126)) ([afc8857](https://github.com/ai-sdlc-framework/ai-sdlc/commit/afc88576f02c72762befceea79cff2f32584b80a))
+* RFC-0051: cli-hierarchy brief generates a dispatch brief with waves and sequence groups from task metadata (AISDLC-668) ([#1120](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1120)) ([a3e2748](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a3e27485789b57c038aaf7abc42042aa8522556b))
+* RFC-0051: hierarchy roster schema and cli-hierarchy up/status/down bootstrapping named tmux sessions per role (AISDLC-664) ([#1116](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1116)) ([5963b0b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5963b0b96f1a8b236add11be4cac36903fb9e64d))
+* **spec:** add cli-usage scorecard joining usage to review outcomes (AISDLC-653) ([#1122](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1122)) ([95dc642](https://github.com/ai-sdlc-framework/ai-sdlc/commit/95dc6429b9d48c239a84538490b8a6edfed49c16))
+* **spec:** review risk map stages 0 to 2 behind an injected structural provider (AISDLC-672) ([#1175](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1175)) ([a2e70ff](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a2e70ff56374ffb45a1dac0d29a3aa225450c54a))
+
+
+### Bug Fixes
+
+* bind attestation leaves to their own reviewer run (AISDLC-697) ([#1182](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1182)) ([86745fe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86745fe7ed9fc052b66552e28cd6c85aed7947df))
+* **hooks:** coverage gate reaps workers and caps memory; vitest workers die with parent (AISDLC-681) ([#1158](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1158)) ([ce802d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ce802d25ffe657ecbc33c75f8e497f28aa3f1280))
+* **orchestrator:** add scorecardMinTasks to the usage pane test fixture (AISDLC-652.1) ([#1125](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1125)) ([f1bf3c0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f1bf3c00e8a0754ded3ce55d913edd77acc2d64f))
+* **orchestrator:** align default artifacts dir of resolver, scorecard and replay (AISDLC-657.2) ([#1153](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1153)) ([593e857](https://github.com/ai-sdlc-framework/ai-sdlc/commit/593e857eb38ae6a6b010458635eb10fab7f8a470))
+* **pipeline-cli:** bound and linearise failure classifier heuristics (AISDLC-682) ([#1165](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1165)) ([f619a82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f619a8274e69344020caab0bd41033cfb0171ae2))
+* **reference:** skip judgment cache reads in enforce mode (AISDLC-631.3) ([#1147](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1147)) ([232230f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/232230f4f276a45fc92bc33e283f34922faf7060))
+* **spec:** harden cli-merge-if-eligible before the allowMerge grant (AISDLC-663.5) ([#1134](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1134)) ([ea6b7da](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea6b7da08bf7c58acb459a43c076be048a20b288))
+* **spec:** parse diff headers without backtracking regex (AISDLC-672) ([#1184](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1184)) ([3de7c5f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3de7c5f76f9eca16bef06b5aa0522282c007ab9a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.27.0
+
 ## [0.26.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.26.0...pipeline-cli-v0.26.1) (2026-09-18)
 
 

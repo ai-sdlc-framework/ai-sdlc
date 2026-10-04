@@ -5,6 +5,32 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.26.1...orchestrator-v0.27.0) (2026-10-04)
+
+
+### Features
+
+* **orchestrator:** complexity factors, failure class and injection screen judgments (AISDLC-639) ([#1136](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1136)) ([501aa7b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/501aa7b646f9463a441f8657f14856a4282e1960))
+* **orchestrator:** ignore .ai-sdlc/artifacts in the adopter scaffold and doctor (AISDLC-657.3) ([#1163](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1163)) ([698036a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/698036a433374921b10094934ddbb13b5a42b1c0))
+* **orchestrator:** usage reports, allotment tracking and usage config (AISDLC-651) ([#1119](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1119)) ([85c1294](https://github.com/ai-sdlc-framework/ai-sdlc/commit/85c1294493952c4de8d531e09ff0183ebef9efca))
+* **reference:** evaluateJudgment runtime, catalog, JudgmentConfig and loader (AISDLC-630) ([#1118](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1118)) ([530c712](https://github.com/ai-sdlc-framework/ai-sdlc/commit/530c712f7c9be11afb4ec50f6a5f4cf4f3ac678e))
+* **reference:** judgment log, cache, cost, events and doctor check (AISDLC-631) ([#1129](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1129)) ([468b54d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/468b54d7d73bb81c352d34aed8becaf30e601a27))
+* **reference:** registration-time safety rules for judgment definitions (AISDLC-630.1) ([#1130](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1130)) ([10725b0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/10725b09ccf0513a1d580a625cc2d474983bb7fc))
+* **reference:** usage ledger core with JSONL store and price table (AISDLC-648) ([#1100](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1100)) ([6481737](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6481737f67e87a68330302c52be3db1f72c411bd))
+* RFC-0050 Part A: Codex session ingester and direct usage reporters for API runners and embeddings (AISDLC-650) ([#1107](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1107)) ([26a9c28](https://github.com/ai-sdlc-framework/ai-sdlc/commit/26a9c285b9eebb110883dc49500f0866de9598ca))
+
+
+### Bug Fixes
+
+* **hooks:** coverage gate reaps workers and caps memory; vitest workers die with parent (AISDLC-681) ([#1158](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1158)) ([ce802d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ce802d25ffe657ecbc33c75f8e497f28aa3f1280))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.27.0
+
 ## [0.26.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.26.0...orchestrator-v0.26.1) (2026-09-18)
 
 
