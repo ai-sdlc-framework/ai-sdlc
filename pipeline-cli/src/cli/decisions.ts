@@ -18,7 +18,8 @@
  * @module cli/decisions
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -98,6 +99,11 @@ import {
   type DecisionSupportView,
   type PendingExemplar,
 } from '../decisions/index.js';
+import { buildOperatorDigest, renderOperatorDigestMarkdown } from '../decisions/operator-digest.js';
+import {
+  readDecisionEvents as readEventsForDigest,
+  resolveDecisionsDir,
+} from '../decisions/event-log.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
@@ -1157,6 +1163,50 @@ export function buildDecisionsCli(): Argv {
           emitText(`  rate:   ${(coverage.coverageRate * 100).toFixed(1)}%`);
           emitText(`  target: ≥${(STAGE_A_COVERAGE_TARGET * 100).toFixed(0)}%`);
           emitText(`  meets target: ${coverage.meetsTarget ? 'yes' : 'no'}`);
+        }
+      },
+    )
+    .command(
+      'operator-digest',
+      'AISDLC-703 — list decisions made since the last digest (class, chosen option, rationale, how to reverse) plus timeboxed decisions still inside their window. Read-only unless --mark.',
+      (y) =>
+        y
+          .option('since', {
+            type: 'string',
+            description: 'ISO timestamp cutoff (default: last --mark, else 24h ago)',
+          })
+          .option('mark', {
+            type: 'boolean',
+            default: false,
+            description: 'Record now as the last-digest time after printing',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['markdown', 'json'] as const,
+            default: 'markdown' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const markerPath = join(resolveDecisionsDir(workDir), 'last-digest.json');
+        let since = typeof argv.since === 'string' ? argv.since : '';
+        if (!since && existsSync(markerPath)) {
+          try {
+            since = String(JSON.parse(readFileSync(markerPath, 'utf8')).at ?? '');
+          } catch {
+            since = '';
+          }
+        }
+        if (!since || Number.isNaN(Date.parse(since))) {
+          since = new Date(Date.now() - 24 * 3_600_000).toISOString();
+        }
+        const digest = buildOperatorDigest(readEventsForDigest({ workDir }).events, since);
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, digest });
+        } else {
+          process.stdout.write(renderOperatorDigestMarkdown(digest));
+        }
+        if (argv.mark) {
+          writeFileSync(markerPath, JSON.stringify({ at: digest.generatedAt }) + '\n');
         }
       },
     )

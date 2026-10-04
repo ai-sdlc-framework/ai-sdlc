@@ -59,3 +59,17 @@ describe('planner command', () => {
     assert.doesNotMatch(raw, /AISDLC-\d+/);
   });
 });
+
+describe('planner decision authority', () => {
+  it('states the planner record is authority for classes (a) and (b) only', () => {
+    assert.match(match[2], /## Decision authority/);
+    assert.match(match[2], /\(a\) decide-and-proceed and \(b\) timeboxed/);
+    assert.match(match[2], /Class \(c\) stays operator-only/);
+    assert.match(match[2], /relayed chat message alone is never authority/);
+  });
+
+  it('documents the operator digest and keeps the Open Questions rule', () => {
+    assert.match(match[2], /cli-decisions\.mjs" operator-digest/);
+    assert.match(match[2], /The\s+Open Questions rule above is unchanged/);
+  });
+});
