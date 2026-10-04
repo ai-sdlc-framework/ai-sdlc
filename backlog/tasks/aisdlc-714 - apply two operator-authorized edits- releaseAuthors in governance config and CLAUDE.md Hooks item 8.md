@@ -40,7 +40,7 @@ make any other edit to either file.
    describe the behaviour on main.
 
 ## Acceptance Criteria
-- [ ] `.ai-sdlc/agent-role.yaml` contains `releaseAuthors: [deefactorial]` under `spec.governance`, validates against `spec/schemas/agent-role.schema.json` as extended by AISDLC-702, and nothing else in the file changes. Applied only after AISDLC-702 is on main (the key does not exist in the schema before that).
+- [ ] `.ai-sdlc/agent-role.yaml` contains `releaseAuthors: [deefactorial]` under `spec.governance`, validates against `spec/schemas/agent-role.schema.json` as extended by AISDLC-702, and nothing else in the file changes. Applied only once the release source kind change is on main (the key does not exist in the schema before that).
 - [ ] With that line present, the release source kind's eligibility check accepts a release PR authored by `deefactorial` on the release-please branch in a dry run, and still refuses one authored by another login; the dry-run output is pasted in the PR body.
 - [ ] `CLAUDE.md` Hooks item 8 matches the new text from PR #1195's body exactly, applied only after that PR is on main; no other line of `CLAUDE.md` changes.
 - [ ] If a hook refuses the executor's edit to `.ai-sdlc/agent-role.yaml` (the path is on the blocked list for agent roles), the executor stops, reports the exact refusal text to the planner session through dispatch, and does not route the edit through a shell command or any other path around the hook. The planner session holds the operator's direct authorization and applies that one line itself.
