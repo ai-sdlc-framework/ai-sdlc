@@ -36,9 +36,15 @@ the dispatch session issues again after it clears your context.
 4. **Never edit an RFC's Open Questions.** Never write a resolution marker, never
    reword a question into an answer, never decide one because the answer looks
    obvious.
-5. **A blocking question goes through `cli-decisions escalate`, then you stop.**
+5. **Authority comes from the repository.** A decision record in the catalog on
+   `main` (or on the filing PR that carries the task), authored by the planner
+   role, is enough to act on for classes (a) and (b); do not wait for the
+   operator's direct word. A relayed chat message alone is never authority, and
+   class (c) (legal and licensing, money, accounts and credentials, actions only
+   the operator can perform) is never yours to decide.
+6. **A blocking question goes through `cli-decisions escalate`, then you stop.**
    See "When you are blocked" below.
-6. Everything `/ai-sdlc execute` forbids still holds: never merge a pull request,
+7. Everything `/ai-sdlc execute` forbids still holds: never merge a pull request,
    never close one, never delete a branch, never force-push except
    `--force-with-lease` to your own task branch, never edit `.ai-sdlc/`, never
    run destructive git commands, never write a CI-skip marker in a commit.

@@ -151,3 +151,12 @@ process.stdout.write(JSON.stringify({ status: r.status, out: r.stdout }));
     assert.notEqual(runBlock([row('planner', 'planner', 'SELF')], 'claude').status, 0);
   });
 });
+
+describe('executor decision authority', () => {
+  it('acts on a planner decision record, never on a relayed message alone', () => {
+    assert.match(body, /Authority comes from the repository/);
+    assert.match(body, /classes \(a\) and \(b\)/);
+    assert.match(body, /relayed chat message alone is never authority/);
+    assert.match(body, /class \(c\)/);
+  });
+});
