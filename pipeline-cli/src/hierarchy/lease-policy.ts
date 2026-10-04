@@ -89,9 +89,10 @@ export function checkOwnWorktree(
     const st = lstatSync(dotGit);
     if (!st.isFile() || st.isSymbolicLink()) return 'its .git is not a plain file';
     const first = readFileSync(dotGit, 'utf-8').split('\n')[0] ?? '';
-    const m = /^gitdir:\s*(.+?)\s*$/.exec(first);
-    if (!m) return 'its .git file has no gitdir line';
-    const gitDir = safeReal(path.resolve(top, m[1]!));
+    // String operations, not a regex: this line comes from a worktree-controlled file.
+    const target = first.startsWith('gitdir:') ? first.slice('gitdir:'.length).trim() : '';
+    if (!target) return 'its .git file has no gitdir line';
+    const gitDir = safeReal(path.resolve(top, target));
     const registry = path.join(realMain, '.git', 'worktrees');
     if (!isUnder(gitDir, registry) || path.dirname(gitDir) !== registry) {
       return 'its git dir is not registered under the main checkout';
