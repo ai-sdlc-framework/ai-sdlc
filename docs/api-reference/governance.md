@@ -149,6 +149,46 @@ spec:
   `mergeAuthors: [octocat]`. Absent, empty or malformed means nobody, so every
   merge is refused until the operator sets it. It is read only from the policy
   file on `main` as GitHub serves it.
+- **`--source-kind release` (AISDLC-702)** is the sanctioned path for the rolling
+  release-please PR (`chore: release main`), for example
+  `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm`
+  (merge now with the same command minus `--arm`). It uses squash and its own
+  gate, so it does not need `allowMerge: onGreenClean`; it can only ever land a PR
+  that passes every check below, so it widens merge rights to release PRs only.
+  A release is still cut only on an explicit operator instruction each time.
+  The facts are read from GitHub for the exact head commit, and any failure
+  refuses with a message naming the failed check:
+  - same-repo PR (not a fork), head ref exactly `release-please--branches--main`,
+    base `main`;
+  - the PR author is on `governance.releaseAuthors` (falling back to
+    `mergeAuthors`; empty trusts nobody). `release.yml` runs release-please with
+    the `AI_SDLC_PAT` token, so past release PRs (#1078, #1105) are authored by the
+    operator account that owns the PAT, not by a distinct bot login, which is why
+    no login is hardcoded. The operator must list that login in `releaseAuthors`
+    (or `mergeAuthors`) on `main` before the path works;
+  - every commit on the PR is authored by one of those logins, or is an unlinked
+    commit from the pin-sync job's identity `AI-SDLC Release Bot
+    <release-bot@ai-sdlc.io>` (AISDLC-577);
+  - every changed file (and every rename source) is on a fixed allowlist of release
+    artifacts: the `CHANGELOG.md` files, the `package.json` of the packages
+    release-please bumps, `sdk-python/pyproject.toml`, `.release-please-manifest.json`,
+    `release-please-config.json`, `.claude-plugin/marketplace.json`, and the two
+    plugin manifests `ai-sdlc-plugin/plugin.json` and
+    `ai-sdlc-plugin/.claude-plugin/plugin.json` (the files the AISDLC-577 pin-sync
+    commits). Any other path makes the PR ineligible. File contents are not
+    inspected, only paths;
+  - required checks are green for the head (merge mode), or none has failed
+    (`--arm`, where GitHub then merges only once its own required checks pass).
+  - **Who may call it:** `governance.releaseMergeRoles` (default `operator`,
+    `planner`; executor denied), read from the policy on `main`. The caller role is
+    `AI_SDLC_CALLER_ROLE` when set, else `executor` when `AI_SDLC_ACTIVE_TASK_ID`
+    is set, else `operator`. **This restriction is a mistake guard, not a security
+    boundary**: the role comes from the caller's own environment, and a same-user
+    CLI check cannot stop a determined same-user process (DEC-0038). The
+    GitHub-derived PR checks above are the real control.
+  - **Audit:** every attempt (merged, armed, dry-run, refused) appends one JSON
+    line (`sourceKind: release`, caller, caller role, PR, head, outcome, reason) to
+    `$ARTIFACTS_DIR/_governance/merge-audit-YYYY-MM-DD.jsonl`.
 - **What is authoritative (policy trust):** the policy
   (`spec.governance.allowMerge` + `mergeAuthors`), `backlog/config.yml`
   (`task_prefix`) and the task-file existence check are read from GitHub

@@ -446,6 +446,24 @@ export const agentRoleSchema = {
           description:
             'GitHub logins whose pull requests the deterministic merge gate (`cli-merge-if-eligible`) may merge when `allowMerge: onGreenClean`. Read only from the file as committed on origin/main in the verified main checkout. Logins have no leading, trailing or consecutive hyphens. Absent or empty means nobody: every merge is refused (fail closed).',
         },
+        releaseAuthors: {
+          type: 'array',
+          items: {
+            type: 'string',
+            maxLength: 39,
+            pattern: '^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$',
+          },
+          uniqueItems: true,
+          description:
+            'GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. Defaults to `mergeAuthors` when absent; empty means nobody (fail closed). Read only from the file as committed on main.',
+        },
+        releaseMergeRoles: {
+          type: 'array',
+          items: { type: 'string', maxLength: 40, pattern: '^[A-Za-z][A-Za-z0-9-]*$' },
+          uniqueItems: true,
+          description:
+            "Caller roles allowed to use `cli-merge-if-eligible --source-kind release`. Default: operator, planner (executor denied). The role comes from the caller's environment, so this is a mistake guard, not a security boundary (DEC-0038); the GitHub-derived PR checks are the real control.",
+        },
         operational: {
           type: 'array',
           items: {

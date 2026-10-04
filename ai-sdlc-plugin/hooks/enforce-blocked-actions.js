@@ -347,7 +347,9 @@ function enforceMergeGovernance(trimmed) {
         `(resolved governance allowMerge="${resolvedGovernance.allowMerge}"). Merges go through ` +
         `'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr>' and arming auto-merge goes ` +
         `through 'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --arm'; both enforce the ` +
-        `real policy, fork, author, base, task and head-commit checks.`,
+        `real policy, fork, author, base, task and head-commit checks. The release-please PR ` +
+        `('chore: release main') is landed with ` +
+        `'node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm'.`,
     );
   }
 }

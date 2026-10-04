@@ -414,6 +414,8 @@ The pre-push hook (`scripts/check-changelog-edit.sh`) WARNs when a feature branc
 CHANGELOG.md. If you see that warning, revert the CHANGELOG changes — release-please will
 reconstruct them from your commit messages. See [`docs/operations/release-flow.md`](docs/operations/release-flow.md) for the full flow.
 
+**Landing the release PR.** The governance hook refuses raw `gh` merge commands (including `--auto` arming). When the operator explicitly instructs a release, arm the release-please PR with `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm` (drop `--arm` to merge now). The CLI verifies the PR from GitHub (release branch, same repo, base `main`, release-only files, release authors, green checks), squash-merges, and audits the call; the caller-role restriction is a mistake guard, not a security boundary. Never cut a release without an explicit operator instruction.
+
 ### Package configuration
 
 `.github/workflows/release.yml` runs `pnpm -r publish --no-git-checks` with no `--access` flag. Every non-`"private": true` workspace package MUST carry:
