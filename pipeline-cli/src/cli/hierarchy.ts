@@ -44,6 +44,7 @@ import process from 'node:process';
 import { DEFAULT_BOARD_DIR, TASK_ID_RE } from '../dispatch/board.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
+import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
 import {
   attachTmuxSession,
@@ -136,7 +137,7 @@ Options for tick:
   --worker <name>          Optional; when given it must equal the calling session's own roster name
   --report-every-ms <n>    Spacing of progress reports (default 900000)
   --settle-ms <n>          Settle time used for clears (default 8000)
-  --retry-limit <n>        Re-queues allowed per failed task (default 2)
+  --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
 
 Options for route-decision:
@@ -380,6 +381,14 @@ export async function runHierarchyCli(
         const reportEveryMs = intFlag(flags, 'report-every-ms');
         const retryLimit = intFlag(flags, 'retry-limit');
         if (settleMs === null || reportEveryMs === null || retryLimit === null) return 2;
+        // Refused, not clamped; checked after the caller guard, like `cli-dispatch requeue`,
+        // and before anything is read, written or sent.
+        if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
+          process.stderr.write(
+            `cli-hierarchy tick: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}\n`,
+          );
+          return 2;
+        }
         const repoRoot = path.resolve(flags['work-dir'] ?? deps.cwd);
         let policy: OperationalPolicy | undefined;
         const readPolicy = (): OperationalPolicy =>

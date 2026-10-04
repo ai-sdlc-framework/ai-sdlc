@@ -10,11 +10,21 @@
  * executor roles.
  *
  * What it checks, in order: the working directory is a verifiable main checkout;
- * `--board-dir` and `--work-dir` are that checkout's own; the command is running
- * from a module installed inside that same checkout; and the calling session, found
- * from the roster of that checkout's board, is the running dispatch session.
+ * `--board-dir` and `--work-dir` are that checkout's own; the command's own install
+ * location (see below); and the calling session, found from the roster of that
+ * checkout's board, is the running dispatch session.
+ *
+ * Install location. The real path of the running module is looked up in git. If it
+ * is inside a git work tree, that work tree must be the main checkout, so a copy
+ * in a task worktree, a scratch repository or any other repository is refused. If it
+ * is not inside any work tree (a global install, the plugin cache), the check is
+ * skipped, because there is no checkout to compare against: installed layouts get the
+ * weaker guard. A path that cannot be resolved, or a git failure other than "not a
+ * repository", is refused.
  */
 
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,7 +34,29 @@ import {
   type CallerCheck,
   type IdentityDeps,
 } from './caller-identity.js';
+import { stripGitRedirects } from './git-env.js';
 import { realpathLoose, resolveTrustedBoard } from './trusted-root.js';
+
+/** Result of one git probe: exit status (null when it could not run), stdout and stderr. */
+export interface GitProbe {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Runs git with the given arguments in a directory; injectable for tests. */
+export type InstallGit = (args: readonly string[], cwd: string) => GitProbe;
+
+/** Production probe: argv only, no shell, short timeout, redirect variables stripped, English messages. */
+export const defaultInstallGit: InstallGit = (args, cwd) => {
+  const r = spawnSync('git', [...args], {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 2000,
+    env: { ...stripGitRedirects(process.env), LC_ALL: 'C' },
+  });
+  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+};
 
 /** Inputs of {@link checkDispatchCaller}. */
 export interface DispatchCallerInputs {
@@ -56,6 +88,8 @@ export interface DispatchCallerInputs {
    * determined (tests). Never derived from argv, cwd or the environment.
    */
   installDir?: string | null;
+  /** Replaces the git probe used to find the work tree that contains the install (tests). */
+  installGit?: InstallGit;
 }
 
 /** Directory of this module, or null when it cannot be determined. */
@@ -67,9 +101,26 @@ export function defaultInstallDir(): string | null {
   }
 }
 
-/** True when `child` is `root` or inside it. */
-function isInside(child: string, root: string): boolean {
-  return child === root || child.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
+/**
+ * True when the install location is acceptable: not inside any git work tree (the
+ * check is skipped), or inside exactly the main checkout. False when it cannot be
+ * resolved, git fails for any reason but "not a repository", or the work tree
+ * containing it is some other repository.
+ */
+function installLocationOk(install: string | null, mainRoot: string, git: InstallGit): boolean {
+  if (install === null) return false;
+  let real: string;
+  try {
+    real = realpathSync(install);
+  } catch {
+    return false;
+  }
+  const probe = git(['rev-parse', '--show-toplevel'], real);
+  if (probe.status === 0) {
+    const top = probe.stdout.trim();
+    return top !== '' && realpathLoose(top) === realpathLoose(mainRoot);
+  }
+  return probe.status === 128 && /not a git repository/i.test(probe.stderr);
 }
 
 /** Accept the caller only when the location checks pass and it is the running dispatch session. */
@@ -94,7 +145,7 @@ export function checkDispatchCaller(i: DispatchCallerInputs): CallerCheck {
       };
     }
     const install = i.installDir !== undefined ? i.installDir : defaultInstallDir();
-    if (install === null || !isInside(realpathLoose(install), realpathLoose(trusted.root))) {
+    if (!installLocationOk(install, trusted.root, i.installGit ?? defaultInstallGit)) {
       return {
         ok: false,
         reason: `${i.label}: refused; the command is not running from the main checkout's install`,

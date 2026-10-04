@@ -474,7 +474,12 @@ describe('clear, tick and route-decision', () => {
     const located = (boardDir: string, root: string) => ({
       ...dispatchCaller,
       trustedBoard: { boardDir, root },
-      installDir: path.join(root, 'pipeline-cli'),
+      // Exists, and is in no git work tree, so the install-location check is skipped.
+      installDir: (() => {
+        const dir = path.join(root, 'pipeline-cli');
+        mkdirSync(dir, { recursive: true });
+        return dir;
+      })(),
       lease,
       operational: new Set<string>(),
     });
@@ -607,6 +612,7 @@ describe('clear, tick and route-decision', () => {
       other = initRepo(path.join(root, 'other'));
       plain = path.join(root, 'plain');
       mkdirSync(plain);
+      mkdirSync(path.join(main, 'pipeline-cli'));
       mainBoard = path.join(main, '.ai-sdlc', 'dispatch');
       forgedBoard = path.join(root, 'forged', 'dispatch');
       enqueued = [];
@@ -848,6 +854,29 @@ describe('clear, tick and route-decision', () => {
     expect(
       await runHierarchyCli(['tick', '--worker', 'operator-dispatch'], overrides(), extras),
     ).toBe(0);
+    expect(enqueued).toEqual(['AISDLC-1']);
+  });
+
+  it('tick refuses a --retry-limit above 2, writes nothing, and accepts 2', async () => {
+    seedBoardWithBrief();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const before = boardListing();
+    const enqueued: string[] = [];
+    const extras = {
+      ...dispatchCaller,
+      lease,
+      operational: new Set<string>(),
+      enqueue: (entries: { taskId: string }[]) => {
+        enqueued.push(...entries.map((e) => e.taskId));
+        return [];
+      },
+    };
+    expect(await runHierarchyCli(['tick', '--retry-limit', '3'], overrides(), extras)).toBe(2);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('--retry-limit may not exceed 2');
+    expect(enqueued).toEqual([]);
+    expect(logs).toEqual([]);
+    expect(boardListing()).toEqual(before);
+    expect(await runHierarchyCli(['tick', '--retry-limit', '2'], overrides(), extras)).toBe(0);
     expect(enqueued).toEqual(['AISDLC-1']);
   });
 

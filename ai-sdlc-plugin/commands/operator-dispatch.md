@@ -137,8 +137,10 @@ non-zero, writing and sending nothing, unless that session has the
 `operator-dispatch` role. `--worker` is optional; when it is given it must also equal
 the caller's own roster name. The roster is read from the main checkout's board, never from a path the
 caller passes: the command also exits non-zero unless `--board-dir` and the working
-directory are the main checkout's, and unless the command itself is running from a
-module installed inside that checkout. `cli-hierarchy clear` and
+directory are the main checkout's, and, when the command itself is running inside a git
+work tree, unless that work tree is the main checkout (a global install or the plugin
+cache is in no work tree, so that last check is skipped and the guard is weaker there).
+`cli-hierarchy clear` and
 `cli-hierarchy route-decision` run the same guard, so `cli-hierarchy clear` is meant for
 this session only; a person outside the hierarchy empties a pane with tmux directly.
 

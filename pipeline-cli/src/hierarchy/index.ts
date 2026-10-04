@@ -65,7 +65,10 @@ export { hierarchyDown, type DownOutcome, type DownResult } from './down.js';
 export {
   checkDispatchCaller,
   defaultInstallDir,
+  defaultInstallGit,
   type DispatchCallerInputs,
+  type GitProbe,
+  type InstallGit,
 } from './dispatch-caller.js';
 export { stripGitRedirects } from './git-env.js';
 export { createStreamEmitter, type EventEmitter, type HierarchyEvent } from './emit.js';

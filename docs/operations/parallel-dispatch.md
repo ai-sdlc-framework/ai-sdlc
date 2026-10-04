@@ -600,30 +600,12 @@ unless that session has the `operator-dispatch` role. `--worker` is optional; wh
 it must equal the caller's own roster name. The roster is read from the main checkout's
 board, never from a path the caller passes: the command also refuses unless
 `--board-dir` and the working directory are the main checkout's, and unless the command
-is running from a module installed inside that checkout. Every board write the loop
+is running from the main checkout's own install when it runs inside a git work tree
+(an installed layout outside any work tree skips that last check). `--retry-limit` may
+not exceed 2; a larger value is refused with exit 2, not clamped. Every board write the loop
 makes carries the caller's name. `cli-hierarchy clear` and `cli-hierarchy route-decision`
 apply the same guard, and so does `cli-dispatch requeue`. The command prints, as JSON,
 what it did and what the session has to say.
-
-### The caller binding
-
-The binding is a mistake guard. It stops a session from using the dispatch commands by
-mistake, for example an executor that types `cli-hierarchy tick`, or a `--board-dir`
-that points at the wrong board. It is not authentication and it does not contain a
-hostile or confused session.
-
-A session running as the same user can still defeat it:
-
-- a scratch repository with a forged roster and a forged policy file, used as the
-  working directory, board and `--work-dir`;
-- a copy of the command placed inside that scratch repository, so the install-location
-  check passes;
-- redirecting git with environment variables of the `GIT_COMMON_DIR` kind (the commands
-  strip the ones they know, but a list of names is not a guarantee).
-
-The hook-level deny of `tick`, `clear` and `route-decision` for executor roles is the
-control that closes this. It should be in place before `tick` is enabled with more than
-one executor.
 
 1. **Ingest.** Each new `*.md` file in `.ai-sdlc/dispatch/briefs/` is parsed and
    enqueued with the same mapping as `cli-dispatch enqueue --from-brief`, then
@@ -636,6 +618,34 @@ one executor.
 3. **Reports.** A progress line goes to the planner at the configured cadence
    (15 minutes by default, `--report-every-ms`), and a summary when every task of
    an ingested brief has reached a final state.
+
+### The caller binding
+
+The binding is a mistake guard. It stops a session from using the dispatch commands by
+mistake, for example an executor that types `cli-hierarchy tick`, or a `--board-dir`
+that points at the wrong board. It is not authentication and it does not contain a
+hostile or confused session.
+
+The install-location check works from the real path of the running command. If that
+path is inside a git work tree, the work tree must be the main checkout, so a copy in a
+task worktree, a scratch repository or any other repository is refused. If it is not
+inside any work tree (a global install, the plugin cache), the check is skipped,
+because there is no checkout to compare against: installed layouts get the weaker
+guard. A path that cannot be resolved, or a git failure other than "not a repository",
+is refused.
+
+A session running as the same user can still defeat the guard:
+
+- a scratch repository with a forged roster and a forged policy file, used as the
+  working directory, board and `--work-dir`, together with a copy of the command placed
+  inside that scratch repository so the install-location check passes;
+- an installed layout, where the install-location check does not apply at all;
+- redirecting git with environment variables of the `GIT_COMMON_DIR` kind (the commands
+  strip the ones they know, but a list of names is not a guarantee).
+
+The hook-level deny of `tick`, `clear` and `route-decision` for executor roles is the
+control that closes this. It should be in place before `tick` is enabled with more than
+one executor.
 
 ### The unblocking playbook
 
