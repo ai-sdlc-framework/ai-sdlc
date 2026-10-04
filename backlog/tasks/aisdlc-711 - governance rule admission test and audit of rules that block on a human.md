@@ -12,7 +12,7 @@ dependencies: []
 references:
   - CLAUDE.md
   - CONTRIBUTING.md
-  - .github/pull_request_template.md
+  - .github/PULL_REQUEST_TEMPLATE.md
   - ai-sdlc-plugin/hooks
 priority: high
 dispatchable: true
