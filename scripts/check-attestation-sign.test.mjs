@@ -116,6 +116,9 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   delete env.AI_SDLC_PATCH_ID_EXCLUSIONS_CMD;
+  // AISDLC-694: verifier test hook + the stub verifier's own knobs.
+  delete env.AI_SDLC_VERIFY_ATTESTATION_CMD;
+  delete env.FAKE_VERIFIER_ENVELOPE;
   // Round-5 security review: strip the sentinel too. Otherwise an operator
   // or CI runner with AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 exported would have the
   // gate's own negative test inherit it and never exercise the gate. It fails
@@ -262,6 +265,74 @@ exit 0
   writeFileSync(shimPath, shim);
   chmodSync(shimPath, 0o755);
   return { cmd: `bash ${shimPath}`, logPath };
+}
+
+/**
+ * AISDLC-694: install a stub verifier at `<root>/bin/fake-verifier.mjs`, usable
+ * through AI_SDLC_VERIFY_ATTESTATION_CMD (the hook refuses that override unless
+ * AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 is also set, exactly like the signer one).
+ * The stub models the REAL verifier's contract only — it prints `status=` and
+ * `reason=` — so the hermetic tests never need the orchestrator built. It does
+ * NOT reimplement the verifier's acceptance rules beyond a single "is the
+ * envelope's recorded subject commit an ancestor of PR_HEAD_SHA" probe used by
+ * the `ancestor` mode to make the re-sign round trip observable.
+ *
+ * Modes:
+ *   valid        — status=valid
+ *   invalid      — status=invalid, reason=<reason>
+ *   ancestor     — status=valid iff the envelope at $FAKE_VERIFIER_ENVELOPE
+ *                  (JSON with a `head` field) names a commit that is an
+ *                  ancestor of PR_HEAD_SHA, else status=invalid; status=missing
+ *                  when the file does not exist
+ *   modnotfound  — mimics the real script with orchestrator/dist unbuilt
+ *                  (ERR_MODULE_NOT_FOUND on stderr, exit 1, no status)
+ *   exit2        — mimics the missing-env exit code 2
+ * Every call appends `head=<PR_HEAD_SHA> base=<PR_BASE_SHA>` to verifier.log.
+ */
+function installFakeVerifier(root, { mode = 'valid', reason = 'stub: not valid' } = {}) {
+  const binDir = join(root, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  const logPath = join(root, 'verifier.log');
+  const scriptPath = join(binDir, 'fake-verifier.mjs');
+  const script = `import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const head = process.env.PR_HEAD_SHA;
+const base = process.env.PR_BASE_SHA;
+appendFileSync(${JSON.stringify(logPath)}, 'head=' + head + ' base=' + base + '\\n');
+const mode = ${JSON.stringify(mode)};
+const out = (status, reason) => process.stdout.write('status=' + status + '\\nreason=' + reason + '\\n');
+if (mode === 'modnotfound') {
+  process.stderr.write("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/x/orchestrator/dist/runtime/attestations.js'\\n");
+  process.exit(1);
+}
+if (mode === 'exit2') {
+  process.stderr.write('ERROR: PR_HEAD_SHA and PR_BASE_SHA must be set\\n');
+  process.exit(2);
+}
+if (mode === 'valid') out('valid', 'stub: valid');
+else if (mode === 'invalid') out('invalid', ${JSON.stringify(reason)});
+else if (mode === 'ancestor') {
+  const f = process.env.FAKE_VERIFIER_ENVELOPE;
+  if (!f || !existsSync(f)) out('missing', 'stub: no envelope file');
+  else {
+    const subject = JSON.parse(readFileSync(f, 'utf-8')).head;
+    const r = spawnSync('git', ['merge-base', '--is-ancestor', subject, head]);
+    if (r.status === 0) out('valid', 'stub: subject ' + subject + ' is an ancestor of HEAD');
+    else out('invalid', 'stub: subject ' + subject + ' is not in the pushed history');
+  }
+}
+`;
+  writeFileSync(scriptPath, script);
+  return { cmd: `node ${scriptPath}`, logPath };
+}
+
+/** Env fragment wiring the stub verifier into the hook (adds the signer-override sentinel). */
+function verifierEnv(root, opts = {}, extra = {}) {
+  const { cmd, logPath } = installFakeVerifier(root, opts);
+  return {
+    env: { AI_SDLC_VERIFY_ATTESTATION_CMD: cmd, AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1', ...extra },
+    logPath,
+  };
 }
 
 function writeVerdictFile(root, taskId) {
@@ -432,6 +503,8 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_V6_CUTOVER_ACTIVE: '1',
+      // AISDLC-694: an existing envelope is now verified; the stub accepts it.
+      ...verifierEnv(root, { mode: 'valid' }).env,
     });
     assert.equal(r.status, 0, `expected 0 for idempotent skip, got ${r.status}: ${r.stderr}`);
     assert.equal(
@@ -456,6 +529,8 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_SCHEMA_VERSION: 'v5',
+      // AISDLC-694: an existing envelope is now verified; the stub accepts it.
+      ...verifierEnv(root, { mode: 'valid' }).env,
     });
     assert.equal(r.status, 0, `expected 0 for v5 idempotent skip, got ${r.status}: ${r.stderr}`);
     assert.equal(
@@ -1178,6 +1253,8 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+      // AISDLC-694: an existing envelope is now verified; the stub accepts it.
+      ...verifierEnv(root, { mode: 'valid' }).env,
     });
 
     assert.equal(
@@ -1443,6 +1520,8 @@ describe('AISDLC-618: task-move PR reproduces the same patch-id as the signer', 
     const r = runHook(root, {
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+      // AISDLC-694: an existing envelope is now verified; the stub accepts it.
+      ...verifierEnv(root, { mode: 'valid' }).env,
     });
 
     assert.equal(
@@ -1512,6 +1591,8 @@ describe('AISDLC-618: task-move PR reproduces the same patch-id as the signer', 
       AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
       AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
       AI_SDLC_PATCH_ID_EXCLUSIONS_CMD: `bash ${exclusionsScriptPath}`,
+      // AISDLC-694: an existing envelope is now verified; the stub accepts it.
+      ...verifierEnv(root, { mode: 'valid' }).env,
     });
 
     assert.equal(
@@ -1528,5 +1609,391 @@ describe('AISDLC-618: task-move PR reproduces the same patch-id as the signer', 
     );
     const finalHead = git(['rev-parse', 'HEAD'], root).trim();
     assert.equal(finalHead, signedHead, 'HEAD must not change on idempotent skip');
+  });
+});
+
+// ── AISDLC-694: pre-push runs the verifier CI runs, and re-signs on failure ──
+//
+// Failure mode: the hook treated "an envelope for this patch id exists" as proof
+// nothing needed signing. After a history rewrite the envelope can name a
+// subject commit that is no longer in the pushed history; the hook pushed it and
+// `verify-attestation` failed in CI (#1161). The hook now runs
+// scripts/verify-attestation.mjs (stubbed here via AI_SDLC_VERIFY_ATTESTATION_CMD
+// so the orchestrator need not be built) whenever an envelope exists.
+//
+// HONEST LIMIT: the stub only models the verifier's `status=` / `reason=`
+// contract (plus a single ancestor probe). These tests prove the hook's
+// branching, ordering and blast radius; they do NOT prove the real verifier's
+// acceptance rules, which have their own suite (scripts/verify-attestation.test.mjs).
+
+describe('AISDLC-694: verify an existing envelope; re-sign when the verifier rejects it', () => {
+  let root;
+  const ABSENT_SUBJECT = '1111111111111111111111111111111111111111';
+
+  beforeEach(() => {
+    root = setupRepo();
+    chmodSync(SCRIPT, 0o755);
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  /**
+   * Build: origin/main(baseline) -> feat commit -> "auto-sign" chore commit that
+   * carries an envelope for the CURRENT patch id whose recorded subject is
+   * `subject`, plus an unrelated second envelope that must never be touched.
+   * The sentinel is written after the commits (untracked), like production.
+   */
+  function seedEnvelopeScenario({
+    subject = ABSENT_SUBJECT,
+    taskId = 'AISDLC-694',
+    verdict = true,
+  }) {
+    writeFileSync(join(root, 'source-694.ts'), 'export const a = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: source change (AISDLC-694)'], root);
+    const devHead = git(['rev-parse', 'HEAD'], root).trim();
+    const mergeBase = git(['merge-base', 'origin/main', 'HEAD'], root).trim();
+    const patchId = computeCanonicalPatchId(root, mergeBase);
+    assert.match(patchId, /^[0-9a-f]{40}$/);
+
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    const envPath = join(attDir, `${patchId}.v6.dsse.json`);
+    const envContent = `{"_test":"seeded","head":"${subject}","schemaVersion":"v6"}\n`;
+    writeFileSync(envPath, envContent);
+    const otherPath = join(attDir, `${'f'.repeat(40)}.v6.dsse.json`);
+    const otherContent = '{"_test":"unrelated-envelope","head":"other"}\n';
+    writeFileSync(otherPath, otherContent);
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', `chore: auto-sign attestation for ${taskId} (AISDLC-133)`], root);
+
+    writeFileSync(join(root, '.active-task'), `${taskId}\n`);
+    if (verdict) writeVerdictFile(root, taskId);
+    return {
+      devHead,
+      choreHead: git(['rev-parse', 'HEAD'], root).trim(),
+      mergeBase,
+      patchId,
+      envPath,
+      envContent,
+      otherPath,
+      otherContent,
+    };
+  }
+
+  const commitCount = () => Number(git(['rev-list', '--count', 'HEAD'], root).trim());
+
+  it('AC1: envelope whose subject is not in the pushed history is detected, re-signed (verdict present), and the second push is a no-op', () => {
+    const sc = seedEnvelopeScenario({});
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+    const v = verifierEnv(
+      root,
+      { mode: 'ancestor', reason: 'unused' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        FAKE_VERIFIER_ENVELOPE: sc.envPath,
+      },
+    );
+
+    const r1 = runHook(root, v.env);
+    assert.equal(
+      r1.status,
+      1,
+      `expected 1 (re-sign + re-push required), got ${r1.status}: ${r1.stderr}`,
+    );
+    // The message names the verifier's reason.
+    assert.match(r1.stderr, /rejected by the verifier/);
+    assert.match(r1.stderr, new RegExp(`not in the pushed history`));
+    // Signer ran; a new chore commit sits on top.
+    assert.equal(existsSync(signLog), true, 'the signer must run on the re-sign path');
+    const newHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(newHead, sc.choreHead, 'a replacement chore commit must be added');
+    assert.match(
+      git(['log', '-1', '--format=%s', 'HEAD'], root),
+      /^chore: auto-sign attestation for AISDLC-694/,
+    );
+    // The envelope for the current patch id was REPLACED (subject is now the old chore HEAD).
+    const replaced = git(['show', `HEAD:.ai-sdlc/attestations/${sc.patchId}.v6.dsse.json`], root);
+    assert.notEqual(replaced, sc.envContent, 'the rejected envelope must be replaced');
+    assert.match(replaced, new RegExp(`"head":"${sc.choreHead}"`));
+    // The unrelated envelope is untouched, on disk and in HEAD.
+    assert.equal(readFileSync(sc.otherPath, 'utf-8'), sc.otherContent);
+    assert.equal(
+      git(['show', `HEAD:.ai-sdlc/attestations/${'f'.repeat(40)}.v6.dsse.json`], root),
+      sc.otherContent,
+    );
+    // Verifier was called with local HEAD + the merge base: once before, once after the re-sign.
+    const vlog = readFileSync(v.logPath, 'utf-8').trim().split('\n');
+    assert.equal(vlog[0], `head=${sc.choreHead} base=${sc.mergeBase}`);
+    assert.equal(vlog[1], `head=${newHead} base=${sc.mergeBase}`);
+
+    // Second push: valid now -> no-op, no new commit, signer not re-run.
+    const signLogBefore = readFileSync(signLog, 'utf-8');
+    const countBefore = commitCount();
+    const r2 = runHook(root, v.env);
+    assert.equal(r2.status, 0, `second push must be a no-op, got ${r2.status}: ${r2.stderr}`);
+    assert.equal(commitCount(), countBefore, 'second push must not add a commit');
+    assert.equal(readFileSync(signLog, 'utf-8'), signLogBefore, 'signer must not run again');
+  });
+
+  it('AC1b: re-sign honours AI_SDLC_INTERNAL_NO_EXIT_1 (exit 0 after doing the work, HEAD moved)', () => {
+    const sc = seedEnvelopeScenario({});
+    const { cmd: signCmd } = installFakeSigner(root);
+    const v = verifierEnv(
+      root,
+      { mode: 'ancestor' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        FAKE_VERIFIER_ENVELOPE: sc.envPath,
+        AI_SDLC_INTERNAL_NO_EXIT_1: '1',
+      },
+    );
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 0, `orchestrator mode must exit 0, got ${r.status}: ${r.stderr}`);
+    assert.notEqual(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+    assert.match(r.stderr, /Re-signed/);
+  });
+
+  it('AC2: the same rejected envelope with NO verdict file fails with the verifier reason and creates no commit', () => {
+    const sc = seedEnvelopeScenario({ verdict: false });
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+    const v = verifierEnv(
+      root,
+      { mode: 'invalid', reason: 'subject commit not in history' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      },
+    );
+    const countBefore = commitCount();
+
+    const r = runHook(root, v.env);
+
+    assert.equal(r.status, 2, `expected non-zero (2), got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /subject commit not in history/);
+    assert.match(r.stderr, /Re-run the review/);
+    assert.equal(existsSync(signLog), false, 'must NOT sign without a verdict file');
+    assert.equal(commitCount(), countBefore, 'no commit may be created');
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+    assert.equal(
+      readFileSync(sc.envPath, 'utf-8'),
+      sc.envContent,
+      'the envelope must not be touched',
+    );
+  });
+
+  it('AC2b: no envelope and no verdict file stays a silent no-op (docs-only / chore pushes)', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-694\n');
+    const v = verifierEnv(root, { mode: 'invalid' });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 0, `${r.stderr}`);
+    assert.equal(
+      existsSync(v.logPath),
+      false,
+      'the verifier must not run when there is no envelope',
+    );
+  });
+
+  it('AC3a: a valid envelope (attestation-only descendant: subject IS an ancestor of HEAD) passes with no fixup', () => {
+    const sc = seedEnvelopeScenario({ subject: 'PLACEHOLDER' });
+    // Re-seed the envelope with the real dev commit as subject (an ancestor of HEAD).
+    const content = `{"_test":"seeded","head":"${sc.devHead}","schemaVersion":"v6"}\n`;
+    writeFileSync(sc.envPath, content);
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-694 (AISDLC-133)'], root);
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root, { fail: true });
+    const v = verifierEnv(
+      root,
+      { mode: 'ancestor' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        FAKE_VERIFIER_ENVELOPE: sc.envPath,
+      },
+    );
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 0, `${r.stderr}`);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), headBefore, 'no fixup commit');
+    assert.equal(existsSync(signLog), false, 'signer must not run');
+  });
+
+  it('AC3b: a valid envelope that is not an ancestor (tree-equivalent after a clean rebase) passes with no fixup when the verifier accepts it', () => {
+    // The hook defers entirely to the verifier: the subject is NOT in history
+    // here, yet status=valid (as the real verifier reports for a tree-equivalent
+    // rebase). The hook must not second-guess it.
+    const sc = seedEnvelopeScenario({});
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root, { fail: true });
+    const v = verifierEnv(root, { mode: 'valid' }, { AI_SDLC_SIGN_ATTESTATION_CMD: signCmd });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 0, `${r.stderr}`);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+    assert.equal(existsSync(signLog), false);
+    const vlog = readFileSync(v.logPath, 'utf-8').trim();
+    assert.equal(vlog, `head=${sc.choreHead} base=${sc.mergeBase}`);
+  });
+
+  it('AC3c: a valid envelope with no verdict file also passes (the verdict file is only needed to re-sign)', () => {
+    const sc = seedEnvelopeScenario({ verdict: false });
+    const v = verifierEnv(root, { mode: 'valid' });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 0, `${r.stderr}`);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+  });
+
+  it('AC2c: a rejected envelope with NO active-task sentinel still fails the push (nothing is signed, no commit)', () => {
+    const sc = seedEnvelopeScenario({ verdict: false });
+    rmSync(join(root, '.active-task'), { force: true });
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+    const v = verifierEnv(
+      root,
+      { mode: 'invalid', reason: 'subject commit not in history' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      },
+    );
+    const countBefore = commitCount();
+
+    const r = runHook(root, v.env);
+
+    assert.equal(r.status, 2, `expected 2, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /subject commit not in history/);
+    assert.match(r.stderr, /no active task/);
+    assert.match(r.stderr, /Re-run the review/);
+    assert.equal(existsSync(signLog), false, 'must NOT sign without task context');
+    assert.equal(commitCount(), countBefore, 'no commit may be created');
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+    assert.equal(
+      readFileSync(sc.envPath, 'utf-8'),
+      sc.envContent,
+      'the envelope must not be touched',
+    );
+  });
+
+  it('AC3d: a valid envelope with NO active-task sentinel passes', () => {
+    const sc = seedEnvelopeScenario({ verdict: false });
+    rmSync(join(root, '.active-task'), { force: true });
+    const v = verifierEnv(root, { mode: 'valid' });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 0, `${r.stderr}`);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+  });
+
+  it('AC4: the hook invokes scripts/verify-attestation.mjs and contains none of its acceptance-rule vocabulary', () => {
+    const text = readFileSync(SCRIPT, 'utf-8');
+    assert.ok(
+      text.includes('scripts/verify-attestation.mjs'),
+      'the hook must reference scripts/verify-attestation.mjs',
+    );
+    for (const word of [
+      'isAttestationOnlyDescendant',
+      'isTreeEquivalentModuloAttestation',
+      'verifyV6Envelope',
+      'contentHashV4',
+    ]) {
+      assert.equal(
+        text.includes(word),
+        false,
+        `the hook must not reimplement the verifier (found ${word})`,
+      );
+    }
+  });
+
+  it('AC5a: verifier inputs unbuilt (default path, no orchestrator/dist) with an envelope present fails with the build instruction', () => {
+    const sc = seedEnvelopeScenario({});
+    const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+    // No AI_SDLC_VERIFY_ATTESTATION_CMD: the hook resolves the real verifier,
+    // and the hermetic repo has neither scripts/verify-attestation.mjs nor orchestrator/dist.
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /pnpm --filter @ai-sdlc\/orchestrator build/);
+    assert.equal(existsSync(signLog), false, 'unbuilt verifier must not trigger a re-sign');
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+  });
+
+  it('AC5b: a verifier script that cannot be loaded (module not found) fails with the build instruction', () => {
+    seedEnvelopeScenario({});
+    const r = runHook(root, {
+      AI_SDLC_VERIFY_ATTESTATION_CMD: `node ${join(root, 'does-not-exist', 'verify-attestation.mjs')}`,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /pnpm --filter @ai-sdlc\/orchestrator build/);
+  });
+
+  it('AC5c: ERR_MODULE_NOT_FOUND from the verifier (orchestrator/dist unbuilt) fails with the build instruction', () => {
+    seedEnvelopeScenario({});
+    const v = verifierEnv(root, { mode: 'modnotfound' });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /pnpm --filter @ai-sdlc\/orchestrator build/);
+  });
+
+  it('a verifier exit code 2 (missing env) is reported as a hook bug, not skipped', () => {
+    seedEnvelopeScenario({});
+    const v = verifierEnv(root, { mode: 'exit2' });
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /hook bug/);
+  });
+
+  it('the verifier override is refused unless AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 (a stub cannot silently vouch for an envelope)', () => {
+    const sc = seedEnvelopeScenario({});
+    const { cmd } = installFakeVerifier(root, { mode: 'valid' });
+    const r = runHook(root, { AI_SDLC_VERIFY_ATTESTATION_CMD: cmd });
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_ALLOW_SIGNER_OVERRIDE/);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+  });
+
+  it('a failed re-sign restores the rejected envelope (the tree never loses the envelope it started with)', () => {
+    const sc = seedEnvelopeScenario({});
+    const { cmd: signCmd } = installFakeSigner(root, { fail: true });
+    const v = verifierEnv(
+      root,
+      { mode: 'invalid', reason: 'subject commit not in history' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      },
+    );
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.equal(
+      readFileSync(sc.envPath, 'utf-8'),
+      sc.envContent,
+      'rejected envelope must be restored',
+    );
+    assert.equal(readFileSync(sc.otherPath, 'utf-8'), sc.otherContent);
+    assert.equal(git(['rev-parse', 'HEAD'], root).trim(), sc.choreHead);
+  });
+
+  it('a re-signed envelope that the verifier STILL rejects fails the push (no silent re-sign loop)', () => {
+    const sc = seedEnvelopeScenario({});
+    const { cmd: signCmd } = installFakeSigner(root);
+    const v = verifierEnv(
+      root,
+      { mode: 'invalid', reason: 'subject commit not in history' },
+      {
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+      },
+    );
+    const r = runHook(root, v.env);
+    assert.equal(r.status, 2, `${r.stderr}`);
+    assert.match(r.stderr, /still rejected/);
+    assert.match(r.stderr, /subject commit not in history/);
+    assert.equal(readFileSync(sc.otherPath, 'utf-8'), sc.otherContent);
+  });
+
+  it('AI_SDLC_SKIP_ATTESTATION_SIGN=1 and AI_SDLC_BYPASS_ALL_GATES=1 skip before any verification', () => {
+    seedEnvelopeScenario({});
+    for (const flag of ['AI_SDLC_SKIP_ATTESTATION_SIGN', 'AI_SDLC_BYPASS_ALL_GATES']) {
+      const v = verifierEnv(root, { mode: 'invalid' }, { [flag]: '1' });
+      const r = runHook(root, v.env);
+      assert.equal(r.status, 0, `${flag}: ${r.stderr}`);
+      assert.equal(existsSync(v.logPath), false, `${flag}: verifier must not run`);
+    }
   });
 });

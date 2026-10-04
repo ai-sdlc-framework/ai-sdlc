@@ -75,6 +75,8 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_TASK_COMPLETE_CMD;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
+  // AISDLC-694: verifier test hook (see check-attestation-sign.sh header).
+  delete env.AI_SDLC_VERIFY_ATTESTATION_CMD;
   // Symmetry with the two check-attestation-sign suites (round-6 test review).
   // Inert today — every call site here sets the sentinel explicitly — but a
   // future negative test added to this file would otherwise inherit it from the
@@ -223,6 +225,21 @@ echo '{"fake":"attestation"}' > "\$ATT_FILE"
 exit 0
 `;
   writeFileSync(shimPath, shim);
+  chmodSync(shimPath, 0o755);
+  return `bash ${shimPath}`;
+}
+
+/**
+ * AISDLC-694: stub verifier for AI_SDLC_VERIFY_ATTESTATION_CMD. The attestation
+ * hook now runs the verifier whenever an envelope already exists (i.e. on the
+ * idempotent second push), so tests that reach that state must stub it — the
+ * real one needs the orchestrator built. Always reports status=valid.
+ */
+function installFakeVerifier(root) {
+  const binDir = join(root, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  const shimPath = join(binDir, 'fake-verifier.sh');
+  writeFileSync(shimPath, '#!/usr/bin/env bash\necho "status=valid"\necho "reason=stub: valid"\n');
   chmodSync(shimPath, 0o755);
   return `bash ${shimPath}`;
 }
@@ -477,6 +494,8 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
       AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
       AI_SDLC_V6_CUTOVER_ACTIVE: '1',
       AI_SDLC_SCHEMA_VERSION: 'v5',
+      // AISDLC-694: the second push finds an envelope and runs the verifier.
+      AI_SDLC_VERIFY_ATTESTATION_CMD: installFakeVerifier(root),
     };
 
     // First push: fixups run → exit 1.
