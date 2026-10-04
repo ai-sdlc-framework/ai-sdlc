@@ -43,11 +43,13 @@
  *    boundary: the role comes from the caller's environment and a same-user CLI
  *    check cannot stop a determined same-user process (DEC-0038).
  *  - Enablement (DEC-0050 ruling b): release merges are refused unless
- *    `governance.allowMerge: onGreenClean` (the master switch for agent-initiated
- *    merges) OR `governance.allowReleaseMerge: true` (a narrower grant for
- *    release PRs only). `allowReleaseMerge` never satisfies the backlog or
- *    gh-issue kinds. Neither affects merges GitHub's own auto-merge performs
- *    once a workflow has armed them. An explicit `releaseAuthors: []` also
+ *    `governance.allowMerge: onGreenClean` OR `governance.allowReleaseMerge:
+ *    true` (a narrower grant for release PRs only). `allowMerge: never` does NOT
+ *    stop release merges while `allowReleaseMerge: true`; to stop all agent
+ *    merges also leave it unset/false or set `releaseAuthors: []`.
+ *    `allowReleaseMerge` never satisfies the backlog or gh-issue kinds. Neither
+ *    affects merges GitHub's own auto-merge performs once a workflow has armed
+ *    them. An explicit `releaseAuthors: []` also
  *    disables the release path. There is no separate switch for the CLI itself.
  *
  * @module governance/release-merge
@@ -708,8 +710,9 @@ export async function runReleaseMerge(
   const gov = resolveReleaseGovernance(yamlText);
   const { policy } = resolveGovernanceFromYaml(yamlText);
 
-  // Enablement (DEC-0050 ruling b): allowMerge: onGreenClean (master switch) OR
+  // Enablement (DEC-0050 ruling b): allowMerge: onGreenClean OR
   // allowReleaseMerge: true (release PRs only). Neither set => refused.
+  // runReleaseMerge is the ONLY place that sets ctx.allowReleaseMerge/releaseVerified.
   if (policy.allowMerge !== 'onGreenClean' && !gov.allowReleaseMerge) {
     return refuse(
       'release merges are not enabled: currently ' +

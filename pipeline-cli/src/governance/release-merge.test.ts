@@ -696,12 +696,22 @@ describe('enablement: allowMerge or allowReleaseMerge (DEC-0050 ruling b)', () =
       resolveReleaseGovernance('spec:\n  governance:\n    allowReleaseMerge: true\n')
         .allowReleaseMerge,
     ).toBe(true);
-    for (const v of ['yes', '1', 'false']) {
+    // `True` is not the YAML boolean `true` the shared parser accepts.
+    for (const v of ['yes', '1', 'false', 'True']) {
       expect(
         resolveReleaseGovernance(`spec:\n  governance:\n    allowReleaseMerge: ${v}\n`)
           .allowReleaseMerge,
       ).toBe(false);
     }
+  });
+
+  it('quoted "true": pins the shared parser, which strips quotes (so it reads as true)', () => {
+    // Known leniency of the shared governance parser, not new logic: a quoted
+    // "true" is not distinguished from the bare boolean.
+    expect(
+      resolveReleaseGovernance('spec:\n  governance:\n    allowReleaseMerge: "true"\n')
+        .allowReleaseMerge,
+    ).toBe(true);
   });
 
   it('neither set: refused, names both exits with key and value, current values, next step', async () => {
@@ -930,16 +940,15 @@ describe('regressions: gh-issue refused, backlog unchanged, release never via th
   });
 
   it('runMergeIfEligible refuses release and gh-issue without any PR read', async () => {
+    // Both grants set on purpose: the backlog path must still refuse these kinds.
+    const POLICY =
+      'spec:\n  governance:\n    allowMerge: onGreenClean\n    allowReleaseMerge: true\n    mergeAuthors: [x]\n';
     const calls: string[] = [];
     const runner: Runner = async (c, a) => {
       calls.push(`${c} ${a.join(' ')}`);
       if (a.join(' ').includes('git/ref/heads/main'))
         return { stdout: `${MAIN_SHA}\n`, stderr: '', code: 0 };
-      return {
-        stdout: 'spec:\n  governance:\n    allowMerge: onGreenClean\n    mergeAuthors: [x]\n',
-        stderr: '',
-        code: 0,
-      };
+      return { stdout: POLICY, stderr: '', code: 0 };
     };
     for (const sourceKind of ['release', 'gh-issue'] as const) {
       const r = await runMergeIfEligible({
@@ -948,8 +957,14 @@ describe('regressions: gh-issue refused, backlog unchanged, release never via th
         repoSlug: 'org/repo',
         repoRoot: '/tmp',
         runner,
+        policyYaml: POLICY,
       });
       expect(r.eligibility.eligible).toBe(false);
+      expect(r.eligibility.reason).toMatch(
+        sourceKind === 'release'
+          ? /handled by the release merge path/
+          : /sourceKind="gh-issue" is not trusted/,
+      );
       expect(r.merged).toBe(false);
     }
     expect(calls.some((c) => c.includes('pr view') || c.includes('pr merge'))).toBe(false);

@@ -153,9 +153,10 @@ spec:
 - **`--source-kind release` (AISDLC-702)** is the sanctioned path for the rolling
   release-please PR (`chore: release main`), for example
   `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm`
-  (merge now with the same command minus `--arm`). It uses squash and its own
-  gate, so it does not need `allowMerge: onGreenClean`; it can only ever land a PR
-  that passes every check below, so it widens merge rights to release PRs only.
+  (merge now with the same command minus `--arm`). It uses squash and needs either
+  `allowMerge: onGreenClean` or the narrower `governance.allowReleaseMerge: true`
+  (see Enablement); it can only ever land a PR that passes every check below, so
+  it widens merge rights to release PRs only.
   A release is still cut only on an explicit operator instruction each time.
   The facts are read from GitHub for the exact head commit, and any failure
   refuses with a message naming the failed check:
@@ -182,13 +183,13 @@ spec:
   - **Enablement:** release merges are refused unless `governance.allowMerge:
     onGreenClean` or `governance.allowReleaseMerge: true` (default `false`). The
     refusal names both keys and values, what is currently set, and the next step
-    (the dispatch/planner session sets one on `main`). `allowMerge` is the master
-    switch for agent-initiated merges; `allowReleaseMerge` is a narrower grant for
-    release PRs only and never satisfies the backlog or gh-issue kinds; neither
-    affects merges GitHub's own auto-merge performs once a workflow has armed
-    them. To turn off agent release merges leave both unset/false, or set
-    `releaseAuthors: []` (an explicit empty list disables the release path even
-    when a grant is set). There is no separate switch for the sanctioned CLI
+    (the dispatch/planner session sets one on `main`). `allowReleaseMerge` is a
+    narrower grant for release PRs only and never satisfies the backlog or
+    gh-issue kinds. `allowMerge: never` does NOT stop release merges while
+    `allowReleaseMerge: true`; to stop all agent merges also leave
+    `allowReleaseMerge` unset/false or set `releaseAuthors: []` (an explicit empty
+    list disables the release path even when a grant is set). Neither key affects
+    merges GitHub's own auto-merge performs once a workflow has armed them. There is no separate switch for the sanctioned CLI
     itself;
   - every commit on the PR has an author AND committer that is one of those
     logins, or an unlinked identity with the pin-sync job's email
