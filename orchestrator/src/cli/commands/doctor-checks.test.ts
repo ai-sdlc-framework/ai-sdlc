@@ -10,7 +10,18 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  chmodSync,
+  readdirSync,
+  accessSync,
+  constants as fsConstants,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -35,6 +46,8 @@ import {
   parseEtimeSeconds,
   checkJudgmentLayer,
   checkRuntimeGitignore,
+  checkWorktreeHooks,
+  fixWorktreeHooks,
   runDoctorChecks,
   runDoctorFixes,
   summarizeDoctorResults,
@@ -1392,5 +1405,138 @@ describe('checkOrphanedVitestWorkers', () => {
 
   it('is registered', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('orphaned-vitest-workers');
+  });
+});
+
+// ── worktree-hooks (AISDLC-693) ───────────────────────────────────────
+
+describe('worktree-hooks check', () => {
+  const HOOKS_REL = '.husky/_';
+
+  function writeHook(checkout: string): void {
+    const dir = join(checkout, HOOKS_REL);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'pre-push');
+    writeFileSync(file, '#!/bin/sh\n');
+    chmodSync(file, 0o755);
+  }
+
+  function addWorktree(name: string, opts: { hook?: boolean; nodeModules?: boolean } = {}): string {
+    const wt = join(tmpDir, '.worktrees', name);
+    mkdirSync(wt, { recursive: true });
+    if (opts.hook) writeHook(wt);
+    if (opts.nodeModules) mkdirSync(join(wt, 'node_modules'));
+    return wt;
+  }
+
+  /** Scripted git/test/pnpm over the real tmp fs; `prepared` records `pnpm --dir <wt> run prepare` calls. */
+  function makeHookAdapters(prepared: string[] = []): DoctorCheckAdapters {
+    return makeAdapters({
+      listDir: (p) => {
+        try {
+          return readdirSync(p, { withFileTypes: true })
+            .filter((e) => e.isDirectory())
+            .map((e) => e.name);
+        } catch {
+          return [];
+        }
+      },
+      runCommand: (cmd, args) => {
+        if (cmd === 'git' && args[2] === 'rev-parse')
+          return { stdout: `${HOOKS_REL}\n`, exitCode: 0 };
+        if (cmd === 'test') {
+          try {
+            accessSync(args[1], fsConstants.X_OK);
+            return { stdout: '', exitCode: 0 };
+          } catch {
+            return { stdout: '', exitCode: 1 };
+          }
+        }
+        if (cmd === 'pnpm' && args.join(' ').endsWith('run prepare')) {
+          prepared.push(args[1]);
+          writeHook(args[1]);
+          return { stdout: '', exitCode: 0 };
+        }
+        return { stdout: '', exitCode: 1 };
+      },
+    });
+  }
+
+  it('lists a worktree with no hooks directory and names the main checkout hook', () => {
+    writeHook(tmpDir);
+    addWorktree('aisdlc-1');
+    addWorktree('aisdlc-2', { hook: true });
+    const results = checkWorktreeHooks(makeCtx(makeHookAdapters()));
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('worktree-hooks');
+    expect(results[0].severity).toBe('warn');
+    expect(results[0].title).toContain('aisdlc-1');
+    expect(results[0].title).not.toContain('aisdlc-2');
+    expect(results[0].title).toContain(join(tmpDir, HOOKS_REL));
+  });
+
+  it('is quiet when every worktree has its hook', () => {
+    writeHook(tmpDir);
+    addWorktree('aisdlc-1', { hook: true });
+    expect(checkWorktreeHooks(makeCtx(makeHookAdapters()))).toEqual([]);
+  });
+
+  it('is quiet when the main checkout has no pre-push hook (none expected)', () => {
+    addWorktree('aisdlc-1');
+    expect(checkWorktreeHooks(makeCtx(makeHookAdapters()))).toEqual([]);
+  });
+
+  it('is quiet when git cannot resolve the hooks directory', () => {
+    addWorktree('aisdlc-1');
+    expect(checkWorktreeHooks(makeCtx(makeAdapters()))).toEqual([]);
+  });
+
+  it('--fix runs prepare only where node_modules exists and reports the skipped worktree', () => {
+    writeHook(tmpDir);
+    const withModules = addWorktree('aisdlc-1', { nodeModules: true });
+    addWorktree('aisdlc-2');
+    const prepared: string[] = [];
+    const fix = fixWorktreeHooks(makeCtx(makeHookAdapters(prepared)));
+    expect(prepared).toEqual([withModules]);
+    expect(fix.applied).toBe(true);
+    expect(fix.detail).toContain('prepared: aisdlc-1');
+    expect(fix.detail).toContain('skipped (no node_modules, install first): aisdlc-2');
+  });
+
+  it('--fix is idempotent: a second run finds nothing to prepare', () => {
+    writeHook(tmpDir);
+    addWorktree('aisdlc-1', { nodeModules: true });
+    const prepared: string[] = [];
+    const ctx = makeCtx(makeHookAdapters(prepared));
+    fixWorktreeHooks(ctx);
+    const second = fixWorktreeHooks(ctx);
+    expect(prepared).toHaveLength(1);
+    expect(second.applied).toBe(false);
+    expect(second.detail).toBe('no affected worktrees');
+  });
+
+  it('--fix reports a prepare that did not create the hook', () => {
+    writeHook(tmpDir);
+    addWorktree('aisdlc-1', { nodeModules: true });
+    const adapters = makeHookAdapters();
+    const base = adapters.runCommand;
+    adapters.runCommand = (cmd, args) =>
+      cmd === 'pnpm' ? { stdout: '', exitCode: 1 } : base(cmd, args);
+    const fix = fixWorktreeHooks(makeCtx(adapters));
+    expect(fix.applied).toBe(false);
+    expect(fix.detail).toContain('prepare did not create hooks: aisdlc-1');
+  });
+
+  it('--fix does nothing when no pre-push hook is expected', () => {
+    addWorktree('aisdlc-1', { nodeModules: true });
+    const prepared: string[] = [];
+    const fix = fixWorktreeHooks(makeCtx(makeHookAdapters(prepared)));
+    expect(prepared).toEqual([]);
+    expect(fix.applied).toBe(false);
+  });
+
+  it('is registered with a fix', () => {
+    const c = DOCTOR_CHECKS.find((x) => x.id === 'worktree-hooks');
+    expect(c?.fix).toBeDefined();
   });
 });

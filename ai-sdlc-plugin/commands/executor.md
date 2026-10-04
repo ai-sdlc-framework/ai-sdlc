@@ -144,6 +144,15 @@ Run `/ai-sdlc execute <task-id>` with the task id and **nothing else**: no extra
 arguments, no flags, no wrapper that changes what it does. Invoke the plugin's
 `execute` command with the `Skill` tool, passing `$TASK_ID` as the only argument.
 
+The pipeline fails closed when the task worktree has no git hooks directory (a
+worktree without one runs no commit or push gate, silently). If it reports that, or
+if you ever find `git -C <worktree> rev-parse --git-path hooks` names a directory
+with no executable `pre-push` while the main checkout has one, run
+`pnpm install --frozen-lockfile && pnpm run prepare` in the worktree (install scripts
+stay enabled, never disabled; Step 3 itself never installs). If the directory is still missing, report the outcome
+`failed` and stop: never commit from such a worktree. `ai-sdlc doctor` lists
+affected worktrees (check `worktree-hooks`).
+
 Keep the claim alive while it runs: refresh the heartbeat between pipeline steps.
 
 ```bash
