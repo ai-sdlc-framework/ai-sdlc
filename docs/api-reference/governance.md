@@ -175,8 +175,9 @@ spec:
     `mergeAuthors`. **When the release PR is authored by a shared PAT identity that
     agents also push as, the author check is NOT the control**: anyone holding that
     identity passes it. The controls are the exact release branch, the content-based
-    (not path-only) file validation, and green required checks. The caller-role
-    guard is a CLI mistake guard (see below), not a hook-level boundary. The release
+    (not path-only) file validation, green required checks, the release kill switch
+    (an explicit empty `releaseAuthors`) and the CLI role mistake guard (DEC-0038,
+    see below). No hook-level control exists yet; a follow-up task adds one. The release
     path does not read `allowMerge` (this repo runs `allowMerge: never`, which
     would otherwise block releases); its kill switch is an explicit empty
     `releaseAuthors`;

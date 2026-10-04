@@ -27,8 +27,10 @@
  *    are checked. **The author check is NOT the control** when the release PR is
  *    authored by a shared PAT identity that agents also push as: anyone holding
  *    that identity passes it. The controls are the exact release branch, the
- *    content-based (not path-only) file validation, green required checks, and
- *    the hook-level role restriction. The commits on #1078/#1105 are unsigned,
+ *    content-based (not path-only) file validation, green required checks, the
+ *    release kill switch (explicit empty `releaseAuthors`), and the CLI role
+ *    mistake guard (DEC-0038). No hook-level control exists yet; a follow-up
+ *    task adds one. The commits on #1078/#1105 are unsigned,
  *    so signatures cannot be required. No login is hardcoded except the
  *    documented bot defaults.
  *  - Residual risks: auto-merge armed by `--arm` persists on GitHub; a later push
