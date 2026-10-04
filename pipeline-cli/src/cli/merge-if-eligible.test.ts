@@ -381,7 +381,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
       policyYaml: RELEASE_YAML,
     });
     expect(msg).toBe('process.exit(1)');
-    expect(out.join('')).toMatch(/REFUSED.*could not determine the repository/);
+    expect(out.join('')).toMatch(/REFUSED.*could not determine the repository.*Next step:/);
     expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
   });
 
@@ -395,7 +395,7 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
         fake.runner,
       );
       expect(msg).toBe('process.exit(1)');
-      expect(JSON.parse(out.join('')).reason).toMatch(/verified main checkout/);
+      expect(JSON.parse(out.join('')).reason).toMatch(/verified main checkout.*Next step:/);
       expect(fake.calls).toEqual([]);
     } finally {
       rmSync(plain, { recursive: true, force: true });

@@ -11,6 +11,7 @@ import {
   commitAuthorRefusal,
   defaultAuditWriter,
   hasActiveTaskSentinel,
+  NEXT_STEP_PREFIX,
   jsonContentRefusal,
   jsonDiffPaths,
   tomlContentRefusal,
@@ -418,7 +419,7 @@ describe('caller role (mistake guard)', () => {
     const ok = await run({}, { callerRole: 'planner' }).result;
     expect(ok.merged).toBe(true);
     const denied = await run({}, { callerRole: 'executor' }).result;
-    expect(denied.eligibility.reason).toBe(
+    expect(denied.eligibility.reason).toContain(
       'release PR refused: caller role "executor" is not allowed to use --source-kind release ' +
         '(governance.releaseMergeRoles: operator, planner)',
     );
@@ -550,6 +551,60 @@ describe('file content validation', () => {
   it('jsonDiffPaths flags array length and structural changes', () => {
     expect(jsonDiffPaths({ a: [1] }, { a: [1, 2] }).map((d) => d.path.join('.'))).toEqual(['a']);
     expect(jsonContentRefusal('package/package.json', '{"a":1}', '{"a":1,"b":2}')).toMatch(/"b"/);
+  });
+});
+
+describe('every refusal ends with a next step the agent can take (DEC-0048)', () => {
+  const PLUGIN = 'ai-sdlc-plugin/plugin.json';
+  const scenarios: Array<[string, Fixture, Partial<RunReleaseMergeOptions>]> = [
+    ['unreadable policy', {}, { policyYaml: null }],
+    ['role undeterminable', {}, { callerRole: undefined, cwd: mkdtempSync(join(tmpdir(), 'ns-')) }],
+    ['role not allowed', {}, { callerRole: 'executor' }],
+    ['no releaseAuthors', {}, { policyYaml: 'spec:\n  governance:\n    allowMerge: never\n' }],
+    ['fork', { pr: pr({ isCrossRepository: true }) }, {}],
+    ['head ref', { pr: pr({ headRefName: 'x/y' }) }, {}],
+    ['base', { pr: pr({ baseRefName: 'dev' }) }, {}],
+    ['author', { pr: pr({ author: { login: 'mallory' } }) }, {}],
+    ['commit author', { commits: [{ sha: HEAD, login: 'mallory', email: 'm@x.y' }] }, {}],
+    ['extra file', { files: ['src/evil.ts'] }, {}],
+    ['content', { files: [PLUGIN], blobs: { [PLUGIN]: { head: '{"hooks":1}' } } }, {}],
+    [
+      'symlink',
+      { files: ['CHANGELOG.md'], blobs: { 'CHANGELOG.md': { headType: 'symlink' } } },
+      {},
+    ],
+    ['blob fetch', { files: [PLUGIN], blobs: { [PLUGIN]: { fail: true } } }, {}],
+    [
+      'red check',
+      { shaChecks: [{ name: 'ai-sdlc/pr-ready', status: 'completed', conclusion: 'failure' }] },
+      {},
+    ],
+    ['not clean', { pr: pr({ mergeStateStatus: 'BLOCKED' }) }, {}],
+    ['head moved', { prAfter: pr({ headRefOid: 'e'.repeat(40) }) }, {}],
+    ['github refused', { mergeFails: true }, {}],
+  ];
+  const saved = { ...process.env };
+  it.each(scenarios)('%s', async (_name, fixture, over) => {
+    delete process.env.AI_SDLC_CALLER_ROLE;
+    delete process.env.AI_SDLC_ACTIVE_TASK_ID;
+    try {
+      const r = await run(fixture, over).result;
+      expect(r.eligibility.eligible).toBe(false);
+      expect(r.eligibility.reason).toContain(NEXT_STEP_PREFIX);
+      expect(r.eligibility.reason).not.toMatch(/ask the operator/i);
+      expect(r.eligibility.reason).toMatch(
+        /dispatch\/planner|AI_SDLC_CALLER_ROLE|re-run|gh workflow run/,
+      );
+    } finally {
+      process.env = { ...saved };
+    }
+  });
+
+  it('names the exact key and value for the missing allow-list and the sanctioned role exit', async () => {
+    const a = await run({}, { policyYaml: 'spec:\n  governance:\n    allowMerge: never\n' }).result;
+    expect(a.eligibility.reason).toMatch(/governance\.releaseAuthors: \[<login/);
+    const b = await run({}, { callerRole: 'executor' }).result;
+    expect(b.eligibility.reason).toMatch(/dispatch\/planner session runs this command/);
   });
 });
 

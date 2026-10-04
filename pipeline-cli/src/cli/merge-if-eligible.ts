@@ -22,7 +22,7 @@ import {
   type RunMergeIfEligibleResult,
   type SourceKind,
 } from '../governance/merge-if-eligible.js';
-import { runReleaseMerge } from '../governance/release-merge.js';
+import { NEXT_STEP_PREFIX, runReleaseMerge } from '../governance/release-merge.js';
 
 /**
  * This package's root directory, used to locate the sibling
@@ -192,6 +192,18 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
                   mode,
                   policyYaml: override?.policyYaml,
                 });
+
+        if (sourceKind === 'release' && !result.eligibility.eligible) {
+          const reason = result.eligibility.reason;
+          if (!reason.includes(NEXT_STEP_PREFIX)) {
+            result.eligibility = {
+              ...result.eligibility,
+              reason:
+                `${reason} ${NEXT_STEP_PREFIX} run this from the verified main checkout with ` +
+                'gh authenticated for the repository, or escalate to the dispatch/planner session.',
+            };
+          }
+        }
 
         if (format === 'json') {
           process.stdout.write(renderJsonResult(result));

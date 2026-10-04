@@ -508,6 +508,33 @@ export function defaultAuditWriter(artifactsDir?: string): AuditWriter {
   };
 }
 
+export const NEXT_STEP_PREFIX = 'Next step:';
+const ESCALATE = 'otherwise escalate to the dispatch/planner session';
+
+/**
+ * Every refusal ends with a step the agent can take itself (DEC-0048): a
+ * sanctioned command, a config key and value, or escalation to the
+ * dispatch/planner session. Never "ask the operator".
+ */
+export function releaseNextStep(reason: string): string {
+  if (/caller role could not be determined/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} the dispatch/planner session runs this command, or re-run with AI_SDLC_CALLER_ROLE=operator set explicitly.`;
+  }
+  if (/caller role ".*" is not allowed/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} the dispatch/planner session runs this command, or sets governance.releaseMergeRoles: [operator, planner, <role>] on main.`;
+  }
+  if (/releaseAuthors/.test(reason) && /allow-list is configured/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} the dispatch/planner session sets governance.releaseAuthors: [<login that authors the release PR, see release.yml AI_SDLC_PAT owner>] in .ai-sdlc/agent-role.yaml on main, then re-run.`;
+  }
+  if (/could not (read|re-read|list|fetch)|fetch failed|GitHub refused/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} re-run this command once; if it fails again, ${ESCALATE}.`;
+  }
+  if (/head moved|mergeStateStatus|check "required checks"/.test(reason)) {
+    return `${NEXT_STEP_PREFIX} wait for checks to finish (or retrigger CI) and re-run this command; if a check stays red, ${ESCALATE}.`;
+  }
+  return `${NEXT_STEP_PREFIX} do not merge this PR; if it should be a release PR, regenerate it with \`gh workflow run release.yml --ref main\` and re-run, otherwise ${ESCALATE}.`;
+}
+
 /** gh-authenticated login for the audit record; `caller` ($USER) stays advisory. */
 async function fetchGhLogin(runner: Runner, cwd?: string): Promise<string | null> {
   try {
@@ -577,7 +604,14 @@ export async function runReleaseMerge(
     return result;
   };
   const refuse = (reason: string): RunMergeIfEligibleResult =>
-    finish(refusalResult(opts.prNumber, `release PR refused: ${reason}`, opts.dryRun), 'refused');
+    finish(
+      refusalResult(
+        opts.prNumber,
+        `release PR refused: ${reason} ${releaseNextStep(reason)}`,
+        opts.dryRun,
+      ),
+      'refused',
+    );
 
   // The policy is read from main as GitHub serves it, never from a local copy.
   let yamlText: string | null;

@@ -1365,7 +1365,8 @@ export async function runMergeIfEligible(
     // This backlog path never merges them, whatever the policy says.
     return refusalResult(
       opts.prNumber,
-      'sourceKind="release" is handled by the release merge path, not this one — refusing',
+      'sourceKind="release" is handled by the release merge path, not this one — refusing. ' +
+        'Next step: run `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm`.',
       opts.dryRun,
       policy,
     );
