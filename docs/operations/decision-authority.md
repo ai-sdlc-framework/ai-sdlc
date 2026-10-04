@@ -87,6 +87,8 @@ node pipeline-cli/bin/cli-decisions.mjs operator-digest --format json
 
 The digest lists each decision made since the cutoff with its class, chosen option, a one-line rationale and how to reverse it, then the timeboxed decisions still inside their window with what will be applied and when.
 
+The digest also annotates, and never blocks. It adds a `FLAG` line when a record's author is not a recognised planner or operator identity, or when a class (a) record names a governance or trust-chain surface (hooks, attestation, merge, trusted keys, review). A `--mark` time in the future is ignored. A record added in the same PR as the change that acts on it is not authority for that change.
+
 ## Overriding a decision
 
 The operator keeps every existing catalog command:

@@ -13,6 +13,10 @@
  * @module decisions/operator-digest
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { readDecisionEvents, resolveDecisionsDir } from './event-log.js';
 import type {
   AutoExpiredEvent,
   DecisionEvent,
@@ -32,6 +36,8 @@ export interface DigestAnswered {
   answeredAt: string;
   answeredBy: string;
   reverse: string;
+  /** Detect-and-report notes for the operator; never a block. */
+  flags: string[];
 }
 
 export interface DigestPending {
@@ -42,6 +48,7 @@ export interface DigestPending {
   timeboxExpiresAt: string;
   msRemaining: number;
   extend: string;
+  flags: string[];
 }
 
 export interface OperatorDigest {
@@ -57,6 +64,27 @@ export function classifyDecision(opened: DecisionOpenedEvent): DecisionClass {
   const explicit = opened.body ? CLASS_LINE.exec(opened.body) : null;
   if (explicit) return explicit[1]!.toLowerCase() as DecisionClass;
   return opened.timebox || opened.timeboxExpiresAt ? 'b' : 'a';
+}
+
+const CONTROL_SURFACE =
+  /\b(hooks?|attestation|trusted[- ]reviewers?|signing[- ]key|merge|governance|trust[- ]chain|branch protection|review gate)\b/i;
+const KNOWN_AUTHOR = /^(planner|operator)\b/i;
+
+/**
+ * Detect-and-report flags: a decision that names a governance or trust-chain
+ * surface whatever its stated class, and an author that is not a recognised
+ * planner or operator identity. These annotate the digest; they block nothing.
+ */
+export function digestFlags(o: DecisionOpenedEvent, by: string | undefined): string[] {
+  const flags: string[] = [];
+  const text = [o.summary, o.scope, ...o.options.map((x) => x.description)].join(' ');
+  if (CONTROL_SURFACE.test(text) && classifyDecision(o) === 'a') {
+    flags.push('names a governance or trust-chain surface but is class (a)');
+  }
+  if (by !== undefined && !KNOWN_AUTHOR.test(by)) {
+    flags.push(`author "${by}" is not a recognised planner or operator identity`);
+  }
+  return flags;
 }
 
 function oneLine(text: string | undefined, max = 160): string {
@@ -104,6 +132,7 @@ export function buildOperatorDigest(
       rationale: oneLine(ans.rationale),
       answeredAt: ans.ts,
       answeredBy: ans.type === 'auto-expired' ? 'auto-expired' : (ans.by ?? 'unknown'),
+      flags: digestFlags(o, ans.type === 'auto-expired' ? undefined : (ans.by ?? 'unknown')),
       reverse:
         `cli-decisions answer ${id} ${alt} --rationale "<why>" ` +
         `(then undo what the chosen option applied; ${
@@ -126,6 +155,7 @@ export function buildOperatorDigest(
       fallbackOptionId: o.autonomousFallbackOptionId ?? null,
       timeboxExpiresAt: exp,
       msRemaining: ms,
+      flags: digestFlags(o, o.by),
       extend: `cli-decisions answer ${id} <option> to override now, or cli-decisions extend ${id} --timebox <duration>`,
     });
   }
@@ -144,6 +174,7 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       `  - chose \`${a.chosenOptionId}\`: ${a.chosenDescription} (by ${a.answeredBy})`,
       `  - why: ${a.rationale || '(none recorded)'}`,
       `  - reverse: ${a.reverse}`,
+      ...a.flags.map((f) => `  - FLAG: ${f}`),
     );
   }
   lines.push('', `## Timeboxed, still open (${d.pending.length})`, '');
@@ -154,8 +185,52 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       `- **${p.decisionId}** (class ${p.decisionClass}) ${p.summary}`,
       `  - applies \`${p.fallbackOptionId ?? 'nothing (no fallback)'}\` in about ${hours}h (${p.timeboxExpiresAt})`,
       `  - override: ${p.extend}`,
+      ...p.flags.map((f) => `  - FLAG: ${f}`),
     );
   }
   lines.push('');
   return lines.join('\n');
+}
+
+export interface RunOperatorDigestOpts {
+  workDir: string;
+  /** ISO cutoff; when absent the last --mark time, else 24h before `now`. */
+  since?: string;
+  /** Record `now` as the last-digest time after building the digest. */
+  mark?: boolean;
+  now?: Date;
+}
+
+/** Build the digest from the event log, resolving the cutoff from the marker file. */
+export function runOperatorDigest(opts: RunOperatorDigestOpts): OperatorDigest {
+  const now = opts.now ?? new Date();
+  const dir = resolveDecisionsDir(opts.workDir);
+  const markerPath = join(dir, 'last-digest.json');
+  let since = opts.since ?? '';
+  if (since && Number.isNaN(Date.parse(since))) {
+    throw new Error(`--since "${since}" is not an ISO timestamp, for example 2026-10-01T00:00:00Z`);
+  }
+  if (!since && existsSync(markerPath)) {
+    try {
+      since = String(JSON.parse(readFileSync(markerPath, 'utf8')).at ?? '');
+      // A marker in the future would hide decisions from the next digest: ignore it.
+      if (Date.parse(since) > now.getTime()) since = '';
+    } catch {
+      since = '';
+    }
+  }
+  if (!since || Number.isNaN(Date.parse(since))) {
+    since = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+  }
+  // Read after fixing `now`, so the marker never skips an event appended mid-run.
+  const digest = buildOperatorDigest(
+    readDecisionEvents({ workDir: opts.workDir }).events,
+    since,
+    now,
+  );
+  if (opts.mark) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(markerPath, JSON.stringify({ at: digest.generatedAt }) + '\n');
+  }
+  return digest;
 }

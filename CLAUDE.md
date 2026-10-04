@@ -95,6 +95,8 @@ Derive the class from three questions: can it be undone cheaply, how far does a 
 
 Only class (c) ever waits on a person, and only for legal, money, credentials or the operator's own identity. Every refusal a rule produces must name a next step the agent can take itself: a sanctioned command, a config key and value, or escalation to the dispatch or planner session.
 
+A decision record authorizes only the action it names. Where a record covers filing or dispatching a task, it overrides the "wait for explicit operator authorization" step of the Scope Creep section above; with no such record, that section stands. A record added in the same PR as the change that acts on it is not authority for that change. `cli-decisions operator-digest` flags a record whose author is not a recognised planner or operator identity, and any class (a) record that names a governance or trust-chain surface.
+
 Guardrails and hooks are never bypassed. When a sanctioned path is missing, file a task for it; do not route around the hook. The operator reviews with `cli-decisions operator-digest` and overrides with the existing `answer` and `extend` commands.
 
 ## Code Style

@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  appendDecisionEvent,
+  makeDecisionOpenedEvent,
+  makeOperatorAnsweredEvent,
+  resolveDecisionsDir,
+} from './event-log.js';
 import type { DecisionEvent } from './decision-record.js';
 import {
   buildOperatorDigest,
   classifyDecision,
   renderOperatorDigestMarkdown,
+  runOperatorDigest,
 } from './operator-digest.js';
 
 const opened = (id: string, extra: Record<string, unknown> = {}): DecisionEvent =>
@@ -104,5 +114,145 @@ describe('buildOperatorDigest', () => {
     const md = renderOperatorDigestMarkdown(buildOperatorDigest([], '2026-10-03T00:00:00Z', NOW));
     expect(md).toContain('## Decided (0)');
     expect(md).toContain('None.');
+  });
+});
+
+describe('runOperatorDigest', () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-'));
+    appendDecisionEvent(
+      makeDecisionOpenedEvent({
+        decisionId: 'DEC-0001',
+        source: 'ad-hoc',
+        scope: 'workspace',
+        summary: 's',
+        options: [
+          { id: 'opt-a', description: 'a' },
+          { id: 'opt-b', description: 'b' },
+        ],
+      }),
+      { workDir: dir },
+    );
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({ decisionId: 'DEC-0001', chosenOptionId: 'opt-a' }),
+      { workDir: dir },
+    );
+    return dir;
+  };
+
+  it('defaults to 24h, --since wins, an invalid --since errors', () => {
+    const dir = setup();
+    try {
+      const now = new Date(Date.now() + 3 * 3_600_000);
+      expect(runOperatorDigest({ workDir: dir, now }).answered).toHaveLength(1);
+      const far = new Date(Date.now() + 72 * 3_600_000);
+      expect(runOperatorDigest({ workDir: dir, now: far }).answered).toHaveLength(0);
+      expect(
+        runOperatorDigest({ workDir: dir, now: far, since: '2020-01-01T00:00:00Z' }).answered,
+      ).toHaveLength(1);
+      expect(() => runOperatorDigest({ workDir: dir, since: 'nope' })).toThrow(/ISO timestamp/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('--mark records the cutoff, the next run uses it, and no --mark writes nothing', () => {
+    const dir = setup();
+    try {
+      const marker = join(resolveDecisionsDir(dir), 'last-digest.json');
+      const t1 = new Date(Date.now() + 1000);
+      runOperatorDigest({ workDir: dir, now: t1 });
+      expect(existsSync(marker)).toBe(false);
+      runOperatorDigest({ workDir: dir, now: t1, mark: true });
+      expect(JSON.parse(readFileSync(marker, 'utf8')).at).toBe(t1.toISOString());
+      const next = runOperatorDigest({ workDir: dir, now: new Date(t1.getTime() + 1000) });
+      expect(next.since).toBe(t1.toISOString());
+      expect(next.answered).toHaveLength(0);
+      writeFileSync(marker, 'not json');
+      expect(runOperatorDigest({ workDir: dir, now: t1 }).answered).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the decisions directory when marking on an empty repo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-empty-'));
+    try {
+      runOperatorDigest({ workDir: dir, mark: true });
+      expect(existsSync(join(resolveDecisionsDir(dir), 'last-digest.json'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('buildOperatorDigest edges', () => {
+  it('skips answers without an opened event, ignores the exact cutoff, flags hard-to-reverse', () => {
+    const d = buildOperatorDigest(
+      [
+        answered('DEC-9', '2026-10-04T12:00:00.000Z'),
+        opened('DEC-1', { reversible: false }),
+        answered('DEC-1', '2026-10-03T00:00:00.000Z'),
+        opened('DEC-2', { reversible: false }),
+        answered('DEC-2', '2026-10-04T00:00:00.000Z'),
+        opened('DEC-3', { body: 'Class: a' }),
+      ],
+      '2026-10-03T00:00:00.000Z',
+      NOW,
+    );
+    expect(d.answered.map((a) => a.decisionId)).toEqual(['DEC-2']);
+    expect(d.answered[0]!.reverse).toContain('marked hard to reverse');
+    expect(classifyDecision(opened('DEC-3', { body: 'Class: a' }) as never)).toBe('a');
+  });
+
+  it('says so when a pending decision has no fallback', () => {
+    const md = renderOperatorDigestMarkdown(
+      buildOperatorDigest(
+        [opened('DEC-1', { timeboxExpiresAt: '2026-10-05T10:00:00.000Z' })],
+        '2026-10-03T00:00:00.000Z',
+        NOW,
+      ),
+    );
+    expect(md).toContain('nothing (no fallback)');
+  });
+});
+
+describe('digest flags and marker safety', () => {
+  it('flags control-surface class (a) decisions and unrecognised authors, without blocking', () => {
+    const d = buildOperatorDigest(
+      [
+        opened('DEC-1', { summary: 'Loosen the pre-push hook for executors' }),
+        { ...answered('DEC-1', '2026-10-04T12:00:00.000Z'), by: 'some-executor' } as DecisionEvent,
+      ],
+      '2026-10-03T00:00:00.000Z',
+      NOW,
+    );
+    expect(d.answered).toHaveLength(1);
+    expect(d.answered[0]!.flags).toHaveLength(2);
+    expect(renderOperatorDigestMarkdown(d)).toContain('FLAG: names a governance');
+  });
+
+  it('does not flag a planner-authored routine decision', () => {
+    const d = buildOperatorDigest(
+      [opened('DEC-1'), answered('DEC-1', '2026-10-04T12:00:00.000Z')],
+      '2026-10-03T00:00:00.000Z',
+      NOW,
+    );
+    expect(d.answered[0]!.flags).toEqual([]);
+  });
+
+  it('ignores a marker dated in the future', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-future-'));
+    try {
+      mkdirSync(resolveDecisionsDir(dir), { recursive: true });
+      writeFileSync(
+        join(resolveDecisionsDir(dir), 'last-digest.json'),
+        JSON.stringify({ at: '2999-01-01T00:00:00Z' }),
+      );
+      const now = new Date('2026-10-05T00:00:00Z');
+      expect(runOperatorDigest({ workDir: dir, now }).since).toBe('2026-10-04T00:00:00.000Z');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
