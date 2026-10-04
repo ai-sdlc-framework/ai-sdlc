@@ -2,8 +2,9 @@
 id: AISDLC-694
 title: >-
   Pre-push attestation step runs the same verifier CI runs and re-signs when it fails
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - dispatch-executor-delta
 created_date: '2026-10-03'
 labels:
   - attestation

@@ -15,17 +15,38 @@
 #
 #   1. Honour AI_SDLC_SKIP_ATTESTATION_SIGN=1 (operator deferral / hand-resign).
 #   2. Read the per-worktree active-task sentinel at `<worktree>/.active-task`
-#      (per AISDLC-81). Sentinel absent → exit 0 (chore PRs, ad-hoc commits,
-#      docs-only PRs all push without an attestation).
-#   3. Read the verdict file at `<worktree>/.ai-sdlc/verdicts/<task-id>.json`.
-#      Verdict file absent → exit 0 (reviewers haven't run yet; the verdict
-#      file is the explicit "we're ready to attest" handoff from /ai-sdlc
-#      execute). Note: docs-only PRs are handled entirely by CI (AISDLC-214)
-#      per RFC-0042 Phase 3. The hook does NOT synthesize verdicts for
-#      docs-only changesets — it exits 0 as a no-op, same as any other case
-#      where the verdict file is absent.
-#   4. Idempotency: if `.ai-sdlc/attestations/<head-sha>.dsse.json` already
-#      exists at current HEAD, exit 0 (we already signed this commit).
+#      (per AISDLC-81). Sentinel absent → no task context: nothing can be
+#      signed, but an existing envelope for the current patch id is still
+#      verified (step 4); with no envelope either → exit 0 (chore PRs, ad-hoc
+#      commits, docs-only PRs all push without an attestation).
+#   3. Locate the verdict file at `<worktree>/.ai-sdlc/verdicts/<task-id>.json`.
+#      Verdict file absent AND no envelope for the current patch id → exit 0
+#      (reviewers haven't run yet; the verdict file is the explicit "we're
+#      ready to attest" handoff from /ai-sdlc execute). Note: docs-only PRs are
+#      handled entirely by CI (AISDLC-214) per RFC-0042 Phase 3. The hook does
+#      NOT synthesize verdicts for docs-only changesets — it exits 0 as a
+#      no-op, same as any other case where there is nothing to attest.
+#      AISDLC-694: the no-verdict exit now happens AFTER the envelope check
+#      (step 4) because a push that already carries an envelope must have that
+#      envelope verified even when no verdict file is present.
+#   4. Idempotency + verification (AISDLC-694): if an envelope for the current
+#      patch id already exists, run `scripts/verify-attestation.mjs` — the SAME
+#      verifier CI runs — against local HEAD and the merge base with
+#      origin/main (PR_HEAD_SHA / PR_BASE_SHA). The hook contains NO
+#      acceptance rules of its own; it only consumes the verifier's
+#      `status=` / `reason=` output.
+#        - status=valid → exit 0 (already signed; no fixup).
+#        - not valid + verdict file present → re-sign through steps 5-7
+#          (only the rejected envelope for the current patch id is replaced),
+#          then verify the re-signed result; exit through the normal
+#          "re-run git push" flow. The message names the verifier's reason.
+#        - not valid + no verdict file → exit 2 with the verifier's reason and
+#          the instruction to re-run the review. Nothing is signed and no
+#          commit is created.
+#        - verifier inputs not built (module not found / orchestrator dist
+#          missing) → exit 2 with the build instruction. Never skipped
+#          silently. A verifier exit code 2 (missing env) is a hook bug and
+#          also fails loudly.
 #   5. Invoke the signer (default:
 #      `node ai-sdlc-plugin/scripts/sign-attestation.mjs`; overridable via
 #      AI_SDLC_SIGN_ATTESTATION_CMD for tests).
@@ -53,17 +74,27 @@
 #   so tests can stub it without needing the orchestrator built. The override
 #   is invoked with the same args the real signer accepts and is responsible
 #   for writing `.ai-sdlc/attestations/<head-sha>.dsse.json`.
+#   AI_SDLC_VERIFY_ATTESTATION_CMD="<command>" — (AISDLC-694, TEST HOOK, not a
+#   skip variable) replaces `node scripts/verify-attestation.mjs` so tests can
+#   stub the verifier without building the orchestrator. Same safety contract
+#   as the signer override: it is refused unless AI_SDLC_ALLOW_SIGNER_OVERRIDE=1
+#   is also set, because a substitute verifier that prints `status=valid`
+#   would defeat the check. The command receives PR_HEAD_SHA / PR_BASE_SHA in
+#   its environment and must print `status=<...>` and `reason=<...>` lines.
 #   AI_SDLC_PATCH_ID_EXCLUSIONS_CMD="<command>" — overrides the
 #   `print-patch-id-exclusions` invocation (AISDLC-618) so tests can stub the
 #   exclusion-pathspec source without needing the orchestrator built. The
 #   override must print one pathspec per line to stdout.
 #
 # Exit codes:
-#   0 — nothing to sign (no sentinel, no verdict, or already attested), or
-#       AI_SDLC_SKIP_ATTESTATION_SIGN=1 short-circuit.
+#   0 — nothing to sign (no sentinel, no verdict, or already attested with an
+#       envelope the verifier accepts), or AI_SDLC_SKIP_ATTESTATION_SIGN=1
+#       short-circuit.
 #   1 — signed + committed an attestation; push aborted; operator must
 #       re-run `git push` to send the new chore commit.
-#   2 — signer invocation itself failed (refuses to abort the push silently).
+#   2 — signer invocation itself failed (refuses to abort the push silently),
+#       OR (AISDLC-694) the existing envelope was rejected by the verifier and
+#       cannot be re-signed (no verdict file), OR the verifier could not run.
 
 set -euo pipefail
 
@@ -89,19 +120,20 @@ if [ -z "$WT_ROOT" ]; then
 fi
 
 SENTINEL="$WT_ROOT/.active-task"
-if [ ! -f "$SENTINEL" ]; then
-  # No active task. This is a chore commit, ad-hoc fix, docs-only PR, or
-  # a manual push outside of /ai-sdlc execute — none of these need an
-  # attestation. Exit silently (the verifier will report missing for any
-  # downstream PR that actually needs one and post the fallback comment).
-  exit 0
+TASK_ID=""
+if [ -f "$SENTINEL" ]; then
+  TASK_ID=$(tr -d '[:space:]' < "$SENTINEL")
+  if [ -z "$TASK_ID" ]; then
+    echo "[attestation-sign] WARN: $SENTINEL is empty; no task ID to bind" >&2
+  fi
 fi
-
-TASK_ID=$(tr -d '[:space:]' < "$SENTINEL")
-if [ -z "$TASK_ID" ]; then
-  echo "[attestation-sign] WARN: $SENTINEL is empty; skipping (no task ID to bind)" >&2
-  exit 0
-fi
+# AISDLC-694: an absent or empty sentinel is NO LONGER an immediate exit. With no
+# task context there is nothing to sign (no verdict file can be located), but a
+# push that already carries an envelope for the current patch id must still have
+# that envelope verified, and a rejected one fails the push (Step 4). With no
+# envelope either, Step 4 exits 0: chore commits, ad-hoc fixes, docs-only PRs and
+# manual pushes outside /ai-sdlc execute all push without an attestation, and the
+# verifier reports "missing" in CI for any downstream PR that needs one.
 
 # ── Step 3: locate the verdict file ──────────────────────────────────
 # `/ai-sdlc execute` Step 10 (post-AISDLC-133) writes the aggregated reviewer
@@ -114,22 +146,20 @@ fi
 TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
 VERDICT_DIR="$WT_ROOT/.ai-sdlc/verdicts"
 VERDICT_FILE=""
-for candidate in "$VERDICT_DIR/$TASK_ID_LOWER.json" "$VERDICT_DIR/$TASK_ID.json"; do
-  if [ -f "$candidate" ]; then
-    VERDICT_FILE="$candidate"
-    break
-  fi
-done
-
-if [ -z "$VERDICT_FILE" ]; then
-  # No verdict file — reviewers haven't run yet (or this is a docs-only PR,
-  # chore commit, or ad-hoc push). Docs-only PRs are handled entirely by CI
-  # (AISDLC-214 short-circuits verify-attestation.yml with a direct
-  # `ai-sdlc/attestation: success` status) per RFC-0042 Phase 3. No verdict
-  # synthesis is performed here — exit 0 as a no-op.
-  echo "[attestation-sign] no verdicts file at $VERDICT_DIR/$TASK_ID_LOWER.json — skipping (no attestation needed)" >&2
-  exit 0
+if [ -n "$TASK_ID" ]; then
+  for candidate in "$VERDICT_DIR/$TASK_ID_LOWER.json" "$VERDICT_DIR/$TASK_ID.json"; do
+    if [ -f "$candidate" ]; then
+      VERDICT_FILE="$candidate"
+      break
+    fi
+  done
 fi
+
+# AISDLC-694: an absent verdict file is NO LONGER an immediate exit here. The
+# "no verdict → no attestation needed" no-op still applies, but only when there
+# is also no envelope for the current patch id (decided in Step 4 below, once
+# the envelope path is known). A push that already carries an envelope the
+# verifier rejects must fail rather than slip through silently.
 
 # ── Step 4: idempotency check + stale-envelope detection ─────────────
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo '')
@@ -281,12 +311,142 @@ fi
 # already exists → idempotent skip. Without this change, the hook would fall
 # through to the per-SHA check (ATT_FILE_LEGACY = <new-chore-SHA>.v6.dsse.json),
 # find it missing, and re-sign unconditionally — looping forever.
-if [ -f "$ATT_FILE" ] || { [ -n "$ATT_FILE_LEGACY" ] && [ -f "$ATT_FILE_LEGACY" ]; }; then
-  # Already signed for this content (via patch-id filename) or this exact SHA
-  # (legacy per-SHA fallback when patch-id unavailable). Either the previous
-  # push aborted (this script set exit 1, operator re-pushed, chore commit is
-  # on HEAD with the envelope present), or the operator pre-signed manually.
-  exit 0
+#
+# AISDLC-694: an envelope merely EXISTING is not proof it is acceptable. After a
+# history rewrite its subject commit can be missing from the pushed history, and
+# CI would reject it. So when an envelope exists we run the SAME verifier CI runs
+# (scripts/verify-attestation.mjs) and act only on what it reports. The hook
+# holds no acceptance rules of its own.
+
+# run_attestation_verifier <head-sha> <base-sha>
+# Sets VERIFY_STATUS / VERIFY_REASON. Exits the whole hook (code 2) when the
+# verifier cannot run or crashes; returns normally only when it emitted a
+# `status=` line.
+VERIFY_STATUS=""
+VERIFY_REASON=""
+run_attestation_verifier() {
+  local v_head="$1" v_base="$2"
+  local v_out v_err v_rc=0
+  local -a v_cmd
+  v_cmd=()
+  VERIFY_STATUS=""
+  VERIFY_REASON=""
+
+  if [ -z "$v_base" ] || [ -z "$v_head" ]; then
+    echo "[attestation-sign] ERROR: an attestation envelope exists but the merge base against origin/main" >&2
+    echo "[attestation-sign]   could not be resolved, so it cannot be verified. Run: git fetch origin main" >&2
+    exit 2
+  fi
+
+  if [ -n "${AI_SDLC_VERIFY_ATTESTATION_CMD:-}" ]; then
+    if [ "${AI_SDLC_ALLOW_SIGNER_OVERRIDE:-0}" != "1" ]; then
+      echo "[attestation-sign] ERROR: AI_SDLC_VERIFY_ATTESTATION_CMD is set but" >&2
+      echo "[attestation-sign]   AI_SDLC_ALLOW_SIGNER_OVERRIDE=1 is not. Refusing to run a" >&2
+      echo "[attestation-sign]   substitute verifier. This override exists for tests only." >&2
+      exit 2
+    fi
+    read -r -a v_cmd <<< "$AI_SDLC_VERIFY_ATTESTATION_CMD"
+    if [ ${#v_cmd[@]} -eq 0 ]; then
+      echo "[attestation-sign] ERROR: AI_SDLC_VERIFY_ATTESTATION_CMD is set but empty" >&2
+      exit 2
+    fi
+  else
+    if [ ! -f "$WT_ROOT/scripts/verify-attestation.mjs" ] || [ ! -f "$WT_ROOT/orchestrator/dist/runtime/attestations.js" ]; then
+      echo "[attestation-sign] ERROR: an attestation envelope exists but the verifier inputs are not built" >&2
+      echo "[attestation-sign]   (orchestrator/dist/runtime/attestations.js is missing)." >&2
+      echo "[attestation-sign]   Run: pnpm --filter @ai-sdlc/orchestrator build" >&2
+      exit 2
+    fi
+    v_cmd=(node "$WT_ROOT/scripts/verify-attestation.mjs")
+  fi
+
+  v_out=$(mktemp)
+  v_err=$(mktemp)
+  # GITHUB_OUTPUT is dropped so a hook run inside CI never writes into the
+  # surrounding job's step outputs.
+  ( cd "$WT_ROOT" && env -u GITHUB_OUTPUT PR_HEAD_SHA="$v_head" PR_BASE_SHA="$v_base" "${v_cmd[@]}" ) \
+    >"$v_out" 2>"$v_err" || v_rc=$?
+  local v_stdout v_stderr
+  v_stdout=$(cat "$v_out")
+  v_stderr=$(cat "$v_err")
+  [ -n "$v_out" ] && rm -f "$v_out"
+  [ -n "$v_err" ] && rm -f "$v_err"
+
+  if printf '%s' "$v_stderr" | grep -qE 'ERR_MODULE_NOT_FOUND|Cannot find module|MODULE_NOT_FOUND'; then
+    echo "[attestation-sign] ERROR: an attestation envelope exists but the verifier inputs are not built:" >&2
+    printf '%s\n' "$v_stderr" | head -3 >&2
+    echo "[attestation-sign]   Run: pnpm --filter @ai-sdlc/orchestrator build" >&2
+    exit 2
+  fi
+  if [ "$v_rc" -eq 2 ]; then
+    echo "[attestation-sign] ERROR: verifier exited 2 (PR_HEAD_SHA / PR_BASE_SHA missing) — this is a hook bug:" >&2
+    printf '%s\n' "$v_stderr" >&2
+    exit 2
+  fi
+  if [ "$v_rc" -ne 0 ]; then
+    echo "[attestation-sign] ERROR: verifier crashed (exit $v_rc):" >&2
+    printf '%s\n' "$v_stderr" >&2
+    exit 2
+  fi
+  VERIFY_STATUS=$(printf '%s\n' "$v_stdout" | sed -n 's/^status=//p' | head -1)
+  VERIFY_REASON=$(printf '%s\n' "$v_stdout" | sed -n 's/^reason=//p' | head -1)
+  if [ -z "$VERIFY_STATUS" ]; then
+    echo "[attestation-sign] ERROR: verifier produced no status= line:" >&2
+    printf '%s\n' "$v_stdout" "$v_stderr" >&2
+    exit 2
+  fi
+}
+
+ENVELOPE_PRESENT=0
+REJECTED_ENVELOPE=""
+if [ -f "$ATT_FILE" ]; then
+  ENVELOPE_PRESENT=1
+  REJECTED_ENVELOPE="$ATT_FILE"
+elif [ -n "$ATT_FILE_LEGACY" ] && [ -f "$ATT_FILE_LEGACY" ]; then
+  ENVELOPE_PRESENT=1
+  REJECTED_ENVELOPE="$ATT_FILE_LEGACY"
+fi
+
+RESIGN=0
+VERIFY_REJECTION_REASON=""
+if [ "$ENVELOPE_PRESENT" = "1" ]; then
+  # Same base the patch id above was computed against (MERGE_BASE).
+  run_attestation_verifier "$HEAD_SHA" "$MERGE_BASE"
+  if [ "$VERIFY_STATUS" = "valid" ]; then
+    # Already signed for this content and the verifier accepts it. Either the
+    # previous push aborted (this script set exit 1, operator re-pushed, chore
+    # commit is on HEAD with the envelope present), or the operator pre-signed.
+    exit 0
+  fi
+  VERIFY_REJECTION_REASON="status=$VERIFY_STATUS: $VERIFY_REASON"
+  if [ -z "$VERDICT_FILE" ]; then
+    echo "[attestation-sign] ERROR: the attestation envelope for this change was rejected by" >&2
+    echo "[attestation-sign]   scripts/verify-attestation.mjs ($VERIFY_REJECTION_REASON)" >&2
+    if [ -z "$TASK_ID" ]; then
+      echo "[attestation-sign]   and there is no active task ($SENTINEL is absent or empty)," >&2
+      echo "[attestation-sign]   so it cannot be re-signed. Re-run the review, then push again." >&2
+    else
+      echo "[attestation-sign]   and there is no reviewer verdict file at $VERDICT_DIR/$TASK_ID_LOWER.json," >&2
+      echo "[attestation-sign]   so it cannot be re-signed. Re-run the review for $TASK_ID, then push again." >&2
+    fi
+    exit 2
+  fi
+  RESIGN=1
+  echo "[attestation-sign] existing envelope rejected by the verifier ($VERIFY_REJECTION_REASON) — re-signing" >&2
+else
+  if [ -z "$VERDICT_FILE" ]; then
+    # No envelope and no verdict file — reviewers haven't run yet (or this is a
+    # docs-only PR, chore commit, or ad-hoc push). Docs-only PRs are handled
+    # entirely by CI (AISDLC-214 short-circuits verify-attestation.yml with a
+    # direct `ai-sdlc/attestation: success` status) per RFC-0042 Phase 3. No
+    # verdict synthesis is performed here — exit 0 as a no-op.
+    if [ -z "$TASK_ID" ]; then
+      echo "[attestation-sign] no active task and no envelope for this change — skipping (no attestation needed)" >&2
+    else
+      echo "[attestation-sign] no verdicts file at $VERDICT_DIR/$TASK_ID_LOWER.json — skipping (no attestation needed)" >&2
+    fi
+    exit 0
+  fi
 fi
 
 # ── Step 4c: stale-envelope detection (AISDLC-274) ───────────────────
@@ -309,7 +469,11 @@ fi
 # (same filter as the signer uses) so we only consider files ADDED by the
 # PR, not pre-existing attestations from merged work.
 HEAD_PARENT_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD 2>/dev/null || echo '')
-if [ -n "$HEAD_PARENT_SHA" ]; then
+# AISDLC-694: skipped on the re-sign path. That sweep deletes every PR-added
+# envelope whose basename is not HEAD/HEAD~1, which would remove envelopes other
+# than the one the verifier just rejected. The re-sign path replaces exactly
+# one envelope (Step 5).
+if [ "$RESIGN" != "1" ] && [ -n "$HEAD_PARENT_SHA" ]; then
   PR_ADDED_ENVELOPES=$(git diff --name-only --diff-filter=A "origin/main..HEAD" -- ".ai-sdlc/attestations/" 2>/dev/null || echo '')
   for ENVELOPE_PATH in $PR_ADDED_ENVELOPES; do
     # Extract the SHA from the filename (strip directory prefix and .dsse.json suffix).
@@ -353,7 +517,10 @@ fi
 # fall through with exit 0. The next dev commit on top will not match
 # this prefix and the hook will fire normally.
 LAST_COMMIT_SUBJECT=$(git log -1 --format=%s HEAD 2>/dev/null || echo '')
-if [[ "${LAST_COMMIT_SUBJECT:-}" == "chore: auto-sign attestation for "* ]]; then
+# AISDLC-694: not applied on the re-sign path — there HEAD is typically the
+# (now stale) auto-sign chore commit itself, and the verifier has already
+# decided the envelope on it is not acceptable.
+if [ "$RESIGN" != "1" ] && [[ "${LAST_COMMIT_SUBJECT:-}" == "chore: auto-sign attestation for "* ]]; then
   # HEAD is an auto-sign chore commit from a previous run of this hook.
   # The corresponding envelope was committed AS this commit, so it lives
   # at the PARENT's HEAD-sha — not at the chore commit's own SHA. Skipping
@@ -407,6 +574,27 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ] && [ "${AI_SDLC_ALLOW_SIGNER_OVERR
   exit 2
 fi
 
+# AISDLC-694: on the re-sign path, move ONLY the envelope the verifier just
+# rejected (REJECTED_ENVELOPE, the file for the current patch id) out of the way
+# so the signer writes a fresh one, and put it back if signing fails so a failed
+# re-sign never leaves the tree without the envelope it started with. No other
+# envelope is touched.
+REJECTED_BACKUP=""
+REJECTED_BACKUP_DIR=""
+restore_rejected_envelope() {
+  if [ -n "$REJECTED_BACKUP" ] && [ -f "$REJECTED_BACKUP" ] && [ -n "$REJECTED_ENVELOPE" ]; then
+    mv -f "$REJECTED_BACKUP" "$REJECTED_ENVELOPE"
+  fi
+  if [ -n "$REJECTED_BACKUP_DIR" ] && [ -d "$REJECTED_BACKUP_DIR" ]; then
+    rmdir "$REJECTED_BACKUP_DIR" 2>/dev/null || true
+  fi
+}
+if [ "$RESIGN" = "1" ] && [ -n "$REJECTED_ENVELOPE" ] && [ -f "$REJECTED_ENVELOPE" ]; then
+  REJECTED_BACKUP_DIR=$(mktemp -d)
+  REJECTED_BACKUP="$REJECTED_BACKUP_DIR/rejected-envelope"
+  mv -f "$REJECTED_ENVELOPE" "$REJECTED_BACKUP"
+fi
+
 if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
   # Test override (gated above). Callers pass multi-word commands such as
   # "node /tmp/stub.mjs", so the string must be split into argv SOMEWHERE --
@@ -416,6 +604,7 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
   read -r -a _AI_SDLC_SIGN_CMD <<< "$AI_SDLC_SIGN_ATTESTATION_CMD"
   if [ ${#_AI_SDLC_SIGN_CMD[@]} -eq 0 ]; then
     echo "[attestation-sign] ERROR: AI_SDLC_SIGN_ATTESTATION_CMD is set but empty" >&2
+    restore_rejected_envelope
     exit 2
   fi
   if ! "${_AI_SDLC_SIGN_CMD[@]}" \
@@ -425,6 +614,7 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
       --schema-version "$SCHEMA_VERSION" \
       ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
     echo "[attestation-sign] ERROR: signer invocation (override) failed; aborting push" >&2
+    restore_rejected_envelope
     exit 2
   fi
 else
@@ -436,6 +626,7 @@ else
       ${HARNESS_ARGS[@]+"${HARNESS_ARGS[@]}"}; then
     echo "[attestation-sign] ERROR: sign-attestation.mjs failed; aborting push" >&2
     echo "[attestation-sign]        (run \`pnpm --filter @ai-sdlc/orchestrator build\` if dist is missing)" >&2
+    restore_rejected_envelope
     exit 2
   fi
 fi
@@ -444,7 +635,15 @@ fi
 # AISDLC-398: check primary (patch-id) file; fall back to legacy (SHA) file.
 if [ ! -f "$ATT_FILE" ] && { [ -z "$ATT_FILE_LEGACY" ] || [ ! -f "$ATT_FILE_LEGACY" ]; }; then
   echo "[attestation-sign] ERROR: signer did not produce $ATT_FILE; aborting push" >&2
+  restore_rejected_envelope
   exit 2
+fi
+# Signing succeeded: the rejected envelope's backup is no longer needed.
+if [ -n "$REJECTED_BACKUP" ] && [ -f "$REJECTED_BACKUP" ]; then
+  rm -f "$REJECTED_BACKUP"
+fi
+if [ -n "$REJECTED_BACKUP_DIR" ] && [ -d "$REJECTED_BACKUP_DIR" ]; then
+  rmdir "$REJECTED_BACKUP_DIR" 2>/dev/null || true
 fi
 
 # ── Step 6: stage + commit the chore ─────────────────────────────────
@@ -505,6 +704,20 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>" >&2
   exit 2
 }
 
+# AISDLC-694: after a re-sign, run the same verifier against the NEW HEAD. If it
+# still rejects the fresh envelope, fail now instead of handing the operator a
+# push that CI will reject (and instead of re-signing on every later push).
+if [ "$RESIGN" = "1" ]; then
+  RESIGNED_HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo '')
+  run_attestation_verifier "$RESIGNED_HEAD_SHA" "$MERGE_BASE"
+  if [ "$VERIFY_STATUS" != "valid" ]; then
+    echo "[attestation-sign] ERROR: the re-signed envelope is still rejected by" >&2
+    echo "[attestation-sign]   scripts/verify-attestation.mjs (status=$VERIFY_STATUS: $VERIFY_REASON)." >&2
+    echo "[attestation-sign]   A re-sign chore commit was added at $RESIGNED_HEAD_SHA; aborting push." >&2
+    exit 2
+  fi
+fi
+
 # ── Step 7: re-push required (or orchestrator mode) ──────────────────
 # When AI_SDLC_INTERNAL_NO_EXIT_1=1 is set, the pre-push-fixups.sh
 # orchestrator (AISDLC-386) is managing the exit-1 cycle itself. It invokes
@@ -513,8 +726,15 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>" >&2
 # sub-hook must exit 0 after doing its work so the orchestrator can continue
 # to the next sub-hook. Standalone invocations retain exit-1 for backward compat.
 if [ "${AI_SDLC_INTERNAL_NO_EXIT_1:-0}" = "1" ]; then
+  if [ "$RESIGN" = "1" ]; then
+    echo "[attestation-sign] Re-signed: the previous envelope was rejected by the verifier ($VERIFY_REJECTION_REASON)." >&2
+  fi
   echo "[attestation-sign] fixup done (orchestrator mode — suppressing exit-1)" >&2
   exit 0
+fi
+
+if [ "$RESIGN" = "1" ]; then
+  echo "[attestation-sign] Re-signed: the previous envelope was rejected by the verifier ($VERIFY_REJECTION_REASON)." >&2
 fi
 
 {
