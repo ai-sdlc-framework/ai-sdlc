@@ -69,6 +69,9 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
           ? { autonomousFallbackOptionId: opened.autonomousFallbackOptionId }
           : {}),
         ...(opened.contextRef !== undefined ? { contextRef: opened.contextRef } : {}),
+        ...(opened.governanceChange !== undefined
+          ? { governanceChange: opened.governanceChange }
+          : {}),
       },
       status: {
         lifecycle: 'open',

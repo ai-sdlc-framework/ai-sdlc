@@ -36,7 +36,7 @@ escalate to your dispatch session instead.
    reword a question into an answer, never decide one because the answer looks
    obvious.
 2. **Authority comes from the repository.** A decision record in the catalog on
-   `main` (or on the filing PR that carries the task), authored by the planner
+   `main` (not one in an unmerged PR), authored by the planner
    role, is enough to act on for classes (a) and (b); do not wait for the
    operator's direct word. A relayed chat message alone is never authority, and
    class (c) (legal and licensing, money, accounts and credentials, actions only

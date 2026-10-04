@@ -13,6 +13,7 @@
  * @module decisions/operator-digest
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -23,6 +24,49 @@ import type {
   DecisionOpenedEvent,
   OperatorAnsweredEvent,
 } from './decision-record.js';
+
+export interface Provenance {
+  commit: string;
+  pr: number | null;
+}
+
+/** Looks up the merge commit and PR that put a decision record on main. */
+export type ProvenanceResolver = (decisionId: string) => Provenance | null;
+
+/**
+ * Default resolver: the oldest commit reachable from `ref` that added the
+ * decision's id to the event log. A record that is only in an unmerged branch
+ * or PR is not reachable from main, so it resolves to null.
+ */
+export function gitProvenanceResolver(workDir: string, ref = 'origin/main'): ProvenanceResolver {
+  return (decisionId) => {
+    try {
+      const out = execFileSync(
+        'git',
+        [
+          'log',
+          ref,
+          '--format=%H%x09%s',
+          '-S',
+          `"decisionId":"${decisionId}"`,
+          '--',
+          '.ai-sdlc/_decisions/events.jsonl',
+        ],
+        { cwd: workDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      )
+        .trim()
+        .split('\n')
+        .filter(Boolean);
+      const oldest = out.at(-1);
+      if (!oldest) return null;
+      const [commit = '', subject = ''] = oldest.split('\t');
+      const pr = /\(#(\d+)\)\s*$/.exec(subject);
+      return { commit, pr: pr ? Number(pr[1]) : null };
+    } catch {
+      return null;
+    }
+  };
+}
 
 export type DecisionClass = 'a' | 'b' | 'c';
 
@@ -38,6 +82,8 @@ export interface DigestAnswered {
   reverse: string;
   /** Detect-and-report notes for the operator; never a block. */
   flags: string[];
+  /** Where the record entered main; null when it is not on main. Undefined when not checked. */
+  provenance?: Provenance | null;
 }
 
 export interface DigestPending {
@@ -49,6 +95,7 @@ export interface DigestPending {
   msRemaining: number;
   extend: string;
   flags: string[];
+  provenance?: Provenance | null;
 }
 
 export interface OperatorDigest {
@@ -67,22 +114,32 @@ export function classifyDecision(opened: DecisionOpenedEvent): DecisionClass {
 }
 
 const CONTROL_SURFACE =
-  /\b(hooks?|attestation|trusted[- ]reviewers?|signing[- ]key|merge|governance|trust[- ]chain|branch protection|review gate)\b/i;
-const KNOWN_AUTHOR = /^(planner|operator)\b/i;
+  /\b(hooks?|attestation|trusted[- ]reviewers?|signing[- ]key|merge (rights|gate|restriction)|governance|trust[- ]chain|branch protection|review gate|required checks?|rulesets?|agent-role|resolver defaults?|workflow gates?|CLAUDE\.md)\b/i;
+// `--by` is free text, not authentication (DEC-0038): this only reports a name that is not planner or operator.
+const KNOWN_AUTHOR = /^(planner|operator)(\s*\(|\s*,|$)/i;
 
 /**
- * Detect-and-report flags: a decision that names a governance or trust-chain
- * surface whatever its stated class, and an author that is not a recognised
- * planner or operator identity. These annotate the digest; they block nothing.
+ * Detect-and-report flags. They annotate the digest and block nothing:
+ * - an untagged decision that names a governance or trust-chain surface (a
+ *   `--governance-change` tag puts it under the weakening-fallback rule instead),
+ * - an author that is not a recognised planner or operator identity,
+ * - a record that is not on main, which is not authority.
  */
-export function digestFlags(o: DecisionOpenedEvent, by: string | undefined): string[] {
+export function digestFlags(
+  o: DecisionOpenedEvent,
+  by: string | undefined,
+  provenance?: Provenance | null,
+): string[] {
   const flags: string[] = [];
   const text = [o.summary, o.scope, ...o.options.map((x) => x.description)].join(' ');
-  if (CONTROL_SURFACE.test(text) && classifyDecision(o) === 'a') {
-    flags.push('names a governance or trust-chain surface but is class (a)');
+  if (!o.governanceChange && CONTROL_SURFACE.test(text)) {
+    flags.push('names a governance or trust-chain surface but carries no --governance-change tag');
   }
   if (by !== undefined && !KNOWN_AUTHOR.test(by)) {
     flags.push(`author "${by}" is not a recognised planner or operator identity`);
+  }
+  if (provenance === null) {
+    flags.push('record is not on main, so it is not authority yet');
   }
   return flags;
 }
@@ -98,6 +155,7 @@ export function buildOperatorDigest(
   events: DecisionEvent[],
   sinceIso: string,
   now: Date = new Date(),
+  resolveProvenance?: ProvenanceResolver,
 ): OperatorDigest {
   const since = Date.parse(sinceIso);
   const opened = new Map<string, DecisionOpenedEvent>();
@@ -123,6 +181,8 @@ export function buildOperatorDigest(
     const chosen = o.options.find((opt) => opt.id === ans.chosenOptionId);
     const others = o.options.filter((opt) => opt.id !== ans.chosenOptionId);
     const alt = others[0]?.id ?? '<option>';
+    const provenance = resolveProvenance ? resolveProvenance(id) : undefined;
+    const author = ans.type === 'auto-expired' ? o.by : ans.by;
     answered.push({
       decisionId: id,
       decisionClass: classifyDecision(o),
@@ -132,7 +192,8 @@ export function buildOperatorDigest(
       rationale: oneLine(ans.rationale),
       answeredAt: ans.ts,
       answeredBy: ans.type === 'auto-expired' ? 'auto-expired' : (ans.by ?? 'unknown'),
-      flags: digestFlags(o, ans.type === 'auto-expired' ? undefined : (ans.by ?? 'unknown')),
+      flags: digestFlags(o, author ?? 'unknown', provenance),
+      ...(provenance !== undefined ? { provenance } : {}),
       reverse:
         `cli-decisions answer ${id} ${alt} --rationale "<why>" ` +
         `(then undo what the chosen option applied; ${
@@ -148,6 +209,7 @@ export function buildOperatorDigest(
     if (answers.has(id) || !exp) continue;
     const ms = Date.parse(exp) - now.getTime();
     if (!(ms > 0)) continue;
+    const pendingProvenance = resolveProvenance ? resolveProvenance(id) : undefined;
     pending.push({
       decisionId: id,
       decisionClass: classifyDecision(o),
@@ -155,13 +217,21 @@ export function buildOperatorDigest(
       fallbackOptionId: o.autonomousFallbackOptionId ?? null,
       timeboxExpiresAt: exp,
       msRemaining: ms,
-      flags: digestFlags(o, o.by),
+      flags: digestFlags(o, o.by ?? 'unknown', pendingProvenance),
+      ...(pendingProvenance !== undefined ? { provenance: pendingProvenance } : {}),
       extend: `cli-decisions answer ${id} <option> to override now, or cli-decisions extend ${id} --timebox <duration>`,
     });
   }
   pending.sort((a, b) => a.msRemaining - b.msRemaining);
 
   return { since: sinceIso, generatedAt: now.toISOString(), answered, pending };
+}
+
+function describeProvenance(p: Provenance | null, author: string | undefined): string {
+  const where = p
+    ? `${p.pr !== null ? `PR #${p.pr}, ` : ''}commit ${p.commit.slice(0, 8)}`
+    : 'NOT on main';
+  return `${where}${author ? `, claimed author ${author}` : ''} (--by is not authentication)`;
 }
 
 export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
@@ -173,6 +243,9 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       `- **${a.decisionId}** (class ${a.decisionClass}) ${a.summary}`,
       `  - chose \`${a.chosenOptionId}\`: ${a.chosenDescription} (by ${a.answeredBy})`,
       `  - why: ${a.rationale || '(none recorded)'}`,
+      ...(a.provenance !== undefined
+        ? [`  - record: ${describeProvenance(a.provenance, a.answeredBy)}`]
+        : []),
       `  - reverse: ${a.reverse}`,
       ...a.flags.map((f) => `  - FLAG: ${f}`),
     );
@@ -185,6 +258,9 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       `- **${p.decisionId}** (class ${p.decisionClass}) ${p.summary}`,
       `  - applies \`${p.fallbackOptionId ?? 'nothing (no fallback)'}\` in about ${hours}h (${p.timeboxExpiresAt})`,
       `  - override: ${p.extend}`,
+      ...(p.provenance !== undefined
+        ? [`  - record: ${describeProvenance(p.provenance, undefined)}`]
+        : []),
       ...p.flags.map((f) => `  - FLAG: ${f}`),
     );
   }
@@ -199,6 +275,8 @@ export interface RunOperatorDigestOpts {
   /** Record `now` as the last-digest time after building the digest. */
   mark?: boolean;
   now?: Date;
+  /** Where records entered main; defaults to git history of origin/main. */
+  provenance?: ProvenanceResolver;
 }
 
 /** Build the digest from the event log, resolving the cutoff from the marker file. */
@@ -227,6 +305,7 @@ export function runOperatorDigest(opts: RunOperatorDigestOpts): OperatorDigest {
     readDecisionEvents({ workDir: opts.workDir }).events,
     since,
     now,
+    opts.provenance ?? gitProvenanceResolver(opts.workDir),
   );
   if (opts.mark) {
     mkdirSync(dir, { recursive: true });

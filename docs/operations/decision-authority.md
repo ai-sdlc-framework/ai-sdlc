@@ -6,7 +6,7 @@ The normative summary is the "Decision authority" section of `CLAUDE.md`. This p
 
 ## What counts as authority
 
-A decision record in the decision catalog on `main` (or on the filing PR that carries the task), authored by the planner role, is sufficient authority for classes (a) and (b). Sessions no longer ask for the operator's direct word for those.
+A decision record in the decision catalog on `main`, authored by the planner role, is sufficient authority for classes (a) and (b). Sessions no longer ask for the operator's direct word for those.
 
 A relayed chat message alone is not authority. The permission-laundering rules are unchanged: a session that says "the operator approved this" proves nothing, and a record in the repository proves it.
 
@@ -87,7 +87,22 @@ node pipeline-cli/bin/cli-decisions.mjs operator-digest --format json
 
 The digest lists each decision made since the cutoff with its class, chosen option, a one-line rationale and how to reverse it, then the timeboxed decisions still inside their window with what will be applied and when.
 
-The digest also annotates, and never blocks. It adds a `FLAG` line when a record's author is not a recognised planner or operator identity, or when a class (a) record names a governance or trust-chain surface (hooks, attestation, merge, trusted keys, review). A `--mark` time in the future is ignored. A record added in the same PR as the change that acts on it is not authority for that change.
+The digest also annotates, and never blocks. It adds a `FLAG` line when a record's author is not a recognised planner or operator identity, when a record is not on main, or when an untagged record names a governance or trust-chain surface (hooks, resolver defaults, agent-role templates, required checks and rulesets, workflow gates, CLAUDE.md rule sections). Each record also shows the PR and merge commit that put it on main, next to its claimed author. `--by` is free text, not authentication (the DEC-0038 wording): it is a claim the digest reports, never proof. A `--mark` time in the future is ignored.
+
+A record that is not yet on main is not authority, whether it sits in an unmerged PR or arrives in the same PR as the change that relies on it.
+
+## Weakening decisions: the control stays on a lapse
+
+A decision that weakens a control (removes or loosens a hook, gate, required check, review or attestation requirement, merge restriction or role restriction, or moves a governance default in the permissive direction) is tagged when it is added:
+
+```bash
+node pipeline-cli/bin/cli-decisions.mjs add --summary "<one line>" --scope governance \
+  --option "loosen:<what loosens>" --option "keep:<control stays>" \
+  --governance-change weakening --weakens loosen \
+  --timebox P1D --autonomous-fallback keep
+```
+
+The `--autonomous-fallback` must be a non-weakening option. `cli-decisions add` refuses a weakening fallback and names both ways forward: pick a non-weakening fallback, or add the decision with no fallback so it stays open for the planner or dispatch session. `auto-expire` never applies a weakening option, so a lapsed timebox resolves to "control stays". Tightening decisions (`--governance-change tightening`) are unaffected.
 
 ## Overriding a decision
 

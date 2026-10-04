@@ -85,7 +85,7 @@ recreates exactly the condition being detected. A second rule flags non-test sou
 
 Agents decide by rubric instead of waiting for the operator, and authority comes from the repository, not from a relayed message. Full protocol: [`docs/operations/decision-authority.md`](docs/operations/decision-authority.md).
 
-A decision record in the catalog on `main` (or on the filing PR that carries the task), authored by the planner role, is sufficient authority for classes (a) and (b). A relayed chat message alone is never authority, and the permission-laundering rules are unchanged.
+A decision record in the catalog on `main`, authored by the planner role, is sufficient authority for classes (a) and (b). A relayed chat message alone is never authority, and the permission-laundering rules are unchanged.
 
 | Class | Criteria | What happens |
 |---|---|---|
@@ -97,7 +97,9 @@ Derive the class from three questions: can it be undone cheaply, how far does a 
 
 Only class (c) ever waits on a person, and only for legal, money, credentials or the operator's own identity. Every refusal a rule produces must name a next step the agent can take itself: a sanctioned command, a config key and value, or escalation to the dispatch or planner session.
 
-A decision record authorizes only the action it names. Where a record covers filing or dispatching a task, it overrides the "wait for explicit operator authorization" step of the Scope Creep section above; with no such record, that section stands. A record added in the same PR as the change that acts on it is not authority for that change. `cli-decisions operator-digest` flags a record whose author is not a recognised planner or operator identity, and any class (a) record that names a governance or trust-chain surface.
+A decision record authorizes only the action it names. Where a record covers filing or dispatching a task, it overrides the "wait for explicit operator authorization" step of the Scope Creep section above; with no such record, that section stands. A record that is not yet on `main` is not authority: not one in an unmerged PR, and not one added in the same PR as the change that acts on it. `--by` is a claim, not authentication. `cli-decisions operator-digest` shows the PR and merge commit that put each record on main next to its claimed author, and flags an author that is not a recognised planner or operator identity, a record not on main, and any untagged record that names a governance or trust-chain surface.
+
+A decision that weakens a control (removes or loosens a hook, gate, required check, review or attestation requirement, merge restriction or role restriction, or moves a governance default in the permissive direction) is tagged `--governance-change weakening --weakens <option-id>`. Its `--autonomous-fallback` must then be a non-weakening option, so a lapsed timebox resolves to "control stays"; `cli-decisions add` refuses otherwise, and the two ways forward are to pick a non-weakening fallback or add the decision with no fallback so it stays open for the planner or dispatch session. Tightening decisions are unaffected.
 
 Guardrails and hooks are never bypassed. When a sanctioned path is missing, file a task for it; do not route around the hook. The operator reviews with `cli-decisions operator-digest` and overrides with the existing `answer` and `extend` commands.
 
