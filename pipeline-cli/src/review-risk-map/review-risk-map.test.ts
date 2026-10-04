@@ -23,6 +23,7 @@ import {
   parseDiff,
   runSplitting,
   runStage0,
+  UNPARSEABLE_PATH,
   unavailableStructuralProvider,
   type HunkStructuralFacts,
   type StructuralProvider,
@@ -274,6 +275,59 @@ describe('diff parser', () => {
     const q = parseDiff('diff --git "a/q.ts" "b/q.ts"\n');
     expect(q[0].unparseable).toBe(true);
     expect(runStage0('diff --git "a/q.ts" "b/q.ts"\n').stats.unparseableHeaders).toBe(1);
+  });
+
+  it('reads a path that contains " b/" from the header, and from the rename line', () => {
+    const same = parseDiff(
+      ['diff --git a/dir b/x.ts b/dir b/x.ts', '--- a/dir b/x.ts', '+++ b/dir b/x.ts'].join('\n'),
+    );
+    expect(same[0].path).toBe('dir b/x.ts');
+    expect(same[0].unparseable).toBe(false);
+    const header = parseDiff('diff --git a/dir b/x.ts b/dir b/x.ts\n');
+    expect(header[0].path).toBe('dir b/x.ts');
+    expect(header[0].unparseable).toBe(false);
+    const renamed = parseDiff(
+      [
+        'diff --git a/old b/x.ts b/new b/y.ts',
+        'rename from old b/x.ts',
+        'rename to new b/y.ts',
+      ].join('\n'),
+    );
+    expect(renamed[0].path).toBe('new b/y.ts');
+    expect(renamed[0].unparseable).toBe(false);
+    const ambiguous = parseDiff('diff --git a/old b/x.ts b/new.ts\n');
+    expect(ambiguous[0].unparseable).toBe(true);
+    expect(ambiguous[0].path).toBe(UNPARSEABLE_PATH);
+  });
+
+  it('reads the destination of a copy from the copy-to line', () => {
+    const copied = parseDiff(
+      [
+        'diff --git a/orig.ts b/copy.ts',
+        'similarity index 100%',
+        'copy from orig.ts',
+        'copy to copy.ts',
+      ].join('\n'),
+    );
+    expect(copied[0].path).toBe('copy.ts');
+    expect(copied[0].unparseable).toBe(false);
+    const quoted = parseDiff(['diff --git a/o.ts b/c.ts', 'copy to "c\\303.ts"'].join('\n'));
+    expect(quoted[0].unparseable).toBe(true);
+  });
+
+  it('parses an adversarial header in linear time', () => {
+    const time = (reps: number): number => {
+      const d = `diff --git a/a b/${'a b/a'.repeat(reps)}\n`;
+      const start = performance.now();
+      for (let i = 0; i < 5; i++) parseDiff(d);
+      return performance.now() - start;
+    };
+    const small = Math.max(time(20_000), 5);
+    const large = time(80_000);
+    // 4x the input: a linear parse stays near 4x, a polynomial one is far above.
+    expect(large / small).toBeLessThan(12);
+    expect(large).toBeLessThan(5000);
+    expect(parseDiff(`diff --git a/a b/${'a b/a'.repeat(50_000)}\n`)[0].unparseable).toBe(true);
   });
 
   it('handles a single-line hunk header and a deleted file', () => {

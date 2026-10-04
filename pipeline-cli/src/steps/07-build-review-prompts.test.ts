@@ -728,3 +728,48 @@ describe('Step 7 — judgment-driven reviewer selection', () => {
     }
   });
 });
+
+describe('stubBinaryHunks: diff headers', () => {
+  const NUL = String.fromCharCode(0);
+
+  it('stubs a binary section with the paths of a plain, renamed and " b/" header', () => {
+    for (const [header, oldPath, newPath] of [
+      ['diff --git a/x.bin b/x.bin', 'x.bin', 'x.bin'],
+      ['diff --git a/old.bin b/new.bin', 'old.bin', 'new.bin'],
+      ['diff --git a/dir b/x.bin b/dir b/x.bin', 'dir b/x.bin', 'dir b/x.bin'],
+    ] as const) {
+      const { diff, stubbed } = stubBinaryHunks(`${header}\n+a${NUL}b\n`, new Set());
+      expect(stubbed).toBe(true);
+      expect(diff).toBe(`${header}\nBinary files a/${oldPath} and b/${newPath} differ\n`);
+    }
+  });
+
+  it('stubs an unreadable header without echoing it, and leaves text sections alone', () => {
+    const { diff, stubbed } = stubBinaryHunks(`diff --git x/a y/b\n+a${NUL}b\n`, new Set());
+    expect(stubbed).toBe(true);
+    expect(diff).toBe('Binary files a/(unreadable) and b/(unreadable) differ\n');
+    const text = 'diff --git a/a.ts b/a.ts\n+x\n';
+    expect(stubBinaryHunks(text, new Set())).toEqual({ diff: text, stubbed: false });
+  });
+
+  it('stubs a huge listed-binary file by either of its header paths', () => {
+    const big = 'x'.repeat(200_001);
+    const section = `diff --git a/old.bin b/new.bin\n+${big}\n`;
+    expect(stubBinaryHunks(section, new Set(['old.bin'])).stubbed).toBe(true);
+    expect(stubBinaryHunks(section, new Set(['new.bin'])).stubbed).toBe(true);
+    expect(stubBinaryHunks(section, new Set(['other.bin'])).stubbed).toBe(false);
+  });
+
+  it('handles a hostile header in linear time (the bound is generous)', () => {
+    const time = (reps: number): number => {
+      const d = `diff --git a/a b/${'a b/a'.repeat(reps)}\n+x${NUL}y\n`;
+      const start = performance.now();
+      for (let i = 0; i < 5; i++) stubBinaryHunks(d, new Set());
+      return performance.now() - start;
+    };
+    const small = Math.max(time(20_000), 5);
+    const large = time(80_000);
+    expect(large / small).toBeLessThan(12);
+    expect(large).toBeLessThan(5000);
+  }, 30000);
+});

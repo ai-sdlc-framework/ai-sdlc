@@ -8,6 +8,8 @@
  * @module review-risk-map/diff
  */
 
+import { sameNameHeaderPath } from '../classifier/diff-header.js';
+
 export interface DiffHunk {
   /** The `@@ ... @@ context` line. */
   header: string;
@@ -114,10 +116,12 @@ export function parseDiff(diff: string): DiffFile[] {
 
     if (line.startsWith('diff --git ')) {
       finishFile();
-      const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-      const unparseable = !m || isQuoted(m[1]) || isQuoted(m[2]) || line.includes(' "b/');
+      // The header alone is ambiguous when a path contains ' b/' or the file is renamed;
+      // a later 'rename to' or '+++ b/' line settles it.
+      const same = sameNameHeaderPath(line.slice('diff --git '.length));
+      const unparseable = same === undefined || isQuoted(same);
       file = {
-        path: unparseable || !m ? UNPARSEABLE_PATH : m[2],
+        path: unparseable || same === undefined ? UNPARSEABLE_PATH : same,
         added: 0,
         removed: 0,
         binary: false,
@@ -146,20 +150,34 @@ export function parseDiff(diff: string): DiffFile[] {
       }
       continue;
     }
-    if (/^(?:Binary files .* differ|GIT binary patch)$/.test(line)) {
+    if (
+      (line.startsWith('Binary files ') && line.endsWith(' differ')) ||
+      line === 'GIT binary patch'
+    ) {
       file.binary = true;
       continue;
     }
-    const rename = /^rename to (.+)$/.exec(line);
-    if (rename && !file.unparseable) {
-      if (isQuoted(rename[1])) file.unparseable = true;
-      else file.path = rename[1];
+    // A copy (`git diff -C`) names its destination the same way a rename does.
+    const moved = line.startsWith('rename to ')
+      ? 'rename to '
+      : line.startsWith('copy to ')
+        ? 'copy to '
+        : undefined;
+    if (moved !== undefined && line.length > moved.length) {
+      const to = line.slice(moved.length);
+      if (isQuoted(to)) file.unparseable = true;
+      else {
+        file.path = to;
+        file.unparseable = false;
+      }
       continue;
     }
-    const plus = /^\+\+\+ b\/(.+)$/.exec(line);
-    if (plus && !isQuoted(plus[1])) {
-      file.path = plus[1];
-      file.unparseable = false;
+    if (line.startsWith('+++ b/') && line.length > '+++ b/'.length) {
+      const to = line.slice('+++ b/'.length);
+      if (!isQuoted(to)) {
+        file.path = to;
+        file.unparseable = false;
+      }
     }
   }
   finishFile();
