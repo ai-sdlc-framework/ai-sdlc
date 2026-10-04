@@ -5,7 +5,13 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { loadOperational, OPERATIONAL_ACTIONS, parseOperational } from './operational.js';
+import {
+  loadOperational,
+  loadOperationalPolicy,
+  OPERATIONAL_ACTIONS,
+  parseOperational,
+  parseOperationalPolicy,
+} from './operational.js';
 
 let tmp: string;
 beforeEach(() => {
@@ -114,5 +120,59 @@ describe('loadOperational', () => {
 
   it('grants nothing when the git runner fails', () => {
     expect(loadOperational(tmp, tmp, () => null).size).toBe(0);
+  });
+});
+
+describe('parseOperationalPolicy', () => {
+  const doc = (governance: string) => `spec:\n  governance:\n${governance}`;
+
+  it('reads the force-push mode and the protected branch list', () => {
+    const p = parseOperationalPolicy(
+      doc(
+        '    allowForcePush: leaseOnOwnBranch\n    protectedBranches:\n      - "ai-sdlc/*"\n      - staging\n    operational:\n      - requeue\n',
+      ),
+    );
+    expect(p.forcePushMode).toBe('leaseOnOwnBranch');
+    expect(p.protectedBranches).toEqual(['ai-sdlc/*', 'staging']);
+    expect([...p.operational]).toEqual(['requeue']);
+  });
+
+  it('treats true as the lease mode and everything else as never', () => {
+    expect(parseOperationalPolicy(doc('    allowForcePush: true\n')).forcePushMode).toBe(
+      'leaseOnOwnBranch',
+    );
+    for (const v of ['never', 'false', 'always', '"leaseOnAnyBranch"', '1']) {
+      expect(parseOperationalPolicy(doc(`    allowForcePush: ${v}\n`)).forcePushMode, v).toBe(
+        'never',
+      );
+    }
+    expect(parseOperationalPolicy(doc('    operational:\n      - requeue\n')).forcePushMode).toBe(
+      'never',
+    );
+  });
+
+  it('drops protected branch entries that are not well-formed names', () => {
+    const p = parseOperationalPolicy(
+      doc(
+        '    protectedBranches:\n      - ok/*\n      - "bad name"\n      - "x;y"\n      - 5\n      - "*"\n',
+      ),
+    );
+    expect(p.protectedBranches).toEqual(['ok/*']);
+  });
+
+  it('denies everything for malformed or empty input', () => {
+    for (const text of ['', '::: not yaml :::\n\t- [', 'spec: {}']) {
+      const p = parseOperationalPolicy(text);
+      expect(p.forcePushMode).toBe('never');
+      expect(p.operational.size).toBe(0);
+      expect(p.protectedBranches).toEqual([]);
+    }
+  });
+});
+
+describe('loadOperationalPolicy', () => {
+  it('denies everything outside a verified checkout', () => {
+    const p = loadOperationalPolicy(tmp, tmp, () => null);
+    expect(p).toEqual({ operational: new Set(), forcePushMode: 'never', protectedBranches: [] });
   });
 });

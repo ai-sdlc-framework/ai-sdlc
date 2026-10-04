@@ -17,6 +17,10 @@
  * where `<branch>` is the task's own branch (`ai-sdlc/<task-id>` with an optional
  * `-<slug>` suffix). `main`, `master` and every other ref are unreachable, in any
  * refspec spelling.
+ *
+ * A lease push also needs the trusted policy's `allowForcePush: leaseOnOwnBranch`,
+ * a branch that is not on the policy's protected list, and a worktree that
+ * verifies as a genuine one of this repository (checked before git runs in it).
  */
 
 import { existsSync } from 'node:fs';
@@ -24,10 +28,12 @@ import path from 'node:path';
 
 import { TASK_ID_RE } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
+import { isValidCause, isValidDecisionId, oneLine } from '../dispatch/verdict-fields.js';
 import { isRebaseFixable, type FailureShape } from '../runtime/ci-failure-watcher.js';
 import type { EventEmitter } from './emit.js';
+import { isProtectedBranch, type ForcePushMode } from './lease-policy.js';
 import type { OperationalAction } from './operational.js';
-import type { CommandResult, CommandRunner } from './types.js';
+import type { AsyncCommandRunner, CommandResult, CommandRunner } from './types.js';
 
 /** Steps the playbook can take or refuse. */
 export type PlaybookAction = 'rebase-push' | 'retrigger-ci' | 'requeue' | 'escalate';
@@ -72,7 +78,13 @@ export type Classification =
 export function classifyFailure(verdict: DispatchVerdict): Classification {
   const cause = verdict.cause;
   if (!cause) {
-    return { kind: 'escalate', reason: `the failure record names no cause (${verdict.outcome})` };
+    return {
+      kind: 'escalate',
+      reason: `the failure record names no cause (${oneLine(String(verdict.outcome), 40)})`,
+    };
+  }
+  if (!isValidCause(cause)) {
+    return { kind: 'escalate', reason: 'the failure record has a malformed cause code' };
   }
   if (
     (MECHANICAL_SHAPES as readonly string[]).includes(cause) &&
@@ -82,7 +94,7 @@ export function classifyFailure(verdict: DispatchVerdict): Classification {
   }
   if (cause === STALE_MERGE_REF_CAUSE) return { kind: 'retrigger-ci' };
   if (REQUEUEABLE_CAUSES.includes(cause)) return { kind: 'requeue', cause };
-  return { kind: 'escalate', reason: `unrecognised failure shape '${cause}'` };
+  return { kind: 'escalate', reason: `unrecognised failure shape '${oneLine(cause, 80)}'` };
 }
 
 function escapeRegExp(s: string): string {
@@ -114,12 +126,21 @@ const GIT_SUBCOMMANDS = new Set(['branch', 'fetch', 'status', 'rebase', 'commit'
 
 /** Collaborators of {@link runPlaybook}; every one is injected in tests. */
 export interface PlaybookDeps {
-  /** Runs git. Never given a shell. */
-  run: CommandRunner;
+  /** Runs git. Never given a shell. Either kind of runner is accepted and awaited. */
+  run: CommandRunner | AsyncCommandRunner;
   /** Repository root; task worktrees live under `.worktrees/`. */
   repoRoot: string;
   /** Actions the policy grants the dispatch role. */
   operational: ReadonlySet<string>;
+  /** The trusted policy's `allowForcePush`; a lease push is refused unless `leaseOnOwnBranch`. */
+  forcePushMode: ForcePushMode;
+  /** The trusted policy's extra protected branch names (patterns may end in `*`). */
+  protectedBranches: readonly string[];
+  /**
+   * Checks, without running git, that a worktree is a genuine one of this
+   * repository. Returns null when it is, otherwise the reason it is not.
+   */
+  ownWorktree: (worktree: string) => string | null;
   /** Re-queues a failed task by id; throws when it must not be. */
   requeue: (taskId: string) => { retryCount: number };
   emit: EventEmitter;
@@ -140,17 +161,16 @@ export interface PlaybookOutcome {
   escalation?: { taskId: string; message: string };
 }
 
-function oneLine(text: string | undefined, max: number): string {
-  return (text ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
-}
-
 /**
  * Apply the playbook to one failure.
  *
  * Never throws for a failing step: a step that is refused or fails is recorded
  * and turned into an escalation.
  */
-export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): PlaybookOutcome {
+export async function runPlaybook(
+  verdict: DispatchVerdict,
+  deps: PlaybookDeps,
+): Promise<PlaybookOutcome> {
   const taskId = verdict.taskId;
   // The id comes from a file on the board; it builds a worktree path and a branch
   // pattern below, so nothing runs for an id that is not a well-formed task id.
@@ -186,8 +206,13 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
   const escalate = (reason: string, branch?: string): PlaybookOutcome => {
     record('escalate', 'escalated', reason, branch);
     const detail = oneLine(verdict.notes, 300);
+    const label = !verdict.cause
+      ? oneLine(String(verdict.outcome), 64)
+      : isValidCause(verdict.cause)
+        ? verdict.cause
+        : 'malformed cause';
     const message =
-      `${taskId} failed (${verdict.cause ?? verdict.outcome}) and the dispatch session cannot unblock it: ${reason}` +
+      `${taskId} failed (${label}) and the dispatch session cannot unblock it: ${reason}` +
       (detail ? `. Notes: ${detail}` : '');
     return {
       taskId,
@@ -210,7 +235,7 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
     return escalate(`${action} ${result}: ${reason}`, branch);
   };
 
-  const git = (args: readonly string[], cwd: string): CommandResult => {
+  const git = async (args: readonly string[], cwd: string): Promise<CommandResult> => {
     const sub = args[0];
     if (sub === undefined || !GIT_SUBCOMMANDS.has(sub)) {
       throw new Error(`the playbook does not run 'git ${String(sub)}'`);
@@ -218,19 +243,27 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
     if (args.includes('push') && !isSafeTaskPush(args, taskId)) {
       throw new Error('refusing a push that is not to the task branch');
     }
-    return deps.run('git', args, { cwd });
+    return await deps.run('git', args, { cwd });
   };
 
   /** The worktree and the task branch checked out in it, or the reason there is none. */
-  const locate = (): { worktree: string; branch: string } | { error: string } => {
+  type Located = { worktree: string; branch: string } | { error: string };
+  const locate = async (): Promise<Located> => {
     const worktree = path.join(deps.repoRoot, '.worktrees', taskId.toLowerCase());
     if (!(deps.exists ?? existsSync)(worktree)) {
       return { error: `no worktree at .worktrees/${taskId.toLowerCase()}` };
     }
-    const current = git(['branch', '--show-current'], worktree);
+    // Before git runs in it: a worktree whose .git points elsewhere would make git
+    // read configuration and hooks from a place the agent controls.
+    const notOwn = deps.ownWorktree(worktree);
+    if (notOwn !== null) return { error: `the worktree is not trusted (${oneLine(notOwn, 120)})` };
+    const current = await git(['branch', '--show-current'], worktree);
     const branch = current.status === 0 ? current.stdout.trim() : '';
     if (!isOwnTaskBranch(branch, taskId)) {
       return { error: `the worktree is not on the task's own branch ('${oneLine(branch, 80)}')` };
+    }
+    if (isProtectedBranch(branch, deps.protectedBranches)) {
+      return { error: `the task branch '${oneLine(branch, 80)}' is protected by policy` };
     }
     if (verdict.pushedBranch && verdict.pushedBranch !== branch) {
       return { error: 'the recorded branch differs from the one checked out in the worktree' };
@@ -240,8 +273,11 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
 
   // A task parked on a decision is waiting for an answer, not broken: the
   // decisions step routes it, so there is nothing to message the planner about here.
-  if (verdict.outcome === 'blocked' && (verdict.decisionIds?.length ?? 0) > 0) {
-    const reason = `waiting on decision ${verdict.decisionIds!.join(', ')}; routed by the decisions step`;
+  const parkedOn = (Array.isArray(verdict.decisionIds) ? verdict.decisionIds : []).filter(
+    isValidDecisionId,
+  );
+  if (verdict.outcome === 'blocked' && parkedOn.length > 0) {
+    const reason = `waiting on decision ${parkedOn.join(', ')}; routed by the decisions step`;
     record('escalate', 'escalated', reason);
     return { taskId, action: 'escalate', result: 'escalated', reason };
   }
@@ -255,6 +291,14 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
     return giveUp(c.kind, 'refused', `not permitted by policy (${missing.join(', ')})`);
   }
 
+  if (c.kind === 'rebase-push' && deps.forcePushMode !== 'leaseOnOwnBranch') {
+    return giveUp(
+      c.kind,
+      'refused',
+      'not permitted by policy (allowForcePush is not leaseOnOwnBranch)',
+    );
+  }
+
   if (c.kind === 'requeue') {
     try {
       const r = deps.requeue(taskId);
@@ -266,12 +310,12 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
     }
   }
 
-  const where = locate();
+  const where = await locate();
   if ('error' in where) return giveUp(c.kind, 'refused', where.error);
   const { worktree, branch } = where;
 
   if (c.kind === 'retrigger-ci') {
-    const commit = git(
+    const commit = await git(
       ['commit', '--allow-empty', '-m', 'chore: retrigger CI on a fresh merge ref'],
       worktree,
     );
@@ -279,7 +323,7 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
       const why = `empty commit failed: ${oneLine(commit.stderr, 200)}`;
       return giveUp('retrigger-ci', 'failed', why, branch);
     }
-    const push = git(['push', 'origin', `HEAD:refs/heads/${branch}`], worktree);
+    const push = await git(['push', 'origin', `HEAD:refs/heads/${branch}`], worktree);
     if (push.status !== 0) {
       return giveUp('retrigger-ci', 'failed', `push failed: ${oneLine(push.stderr, 200)}`, branch);
     }
@@ -289,21 +333,21 @@ export function runPlaybook(verdict: DispatchVerdict, deps: PlaybookDeps): Playb
   }
 
   // rebase-push
-  const status = git(['status', '--porcelain'], worktree);
+  const status = await git(['status', '--porcelain'], worktree);
   if (status.status !== 0 || status.stdout.trim() !== '') {
     return giveUp('rebase-push', 'refused', 'the worktree has uncommitted changes', branch);
   }
-  const fetched = git(['fetch', 'origin', 'main'], worktree);
+  const fetched = await git(['fetch', 'origin', 'main'], worktree);
   if (fetched.status !== 0) {
     return giveUp('rebase-push', 'failed', `fetch failed: ${oneLine(fetched.stderr, 200)}`, branch);
   }
-  const rebased = git(['rebase', 'origin/main'], worktree);
+  const rebased = await git(['rebase', 'origin/main'], worktree);
   if (rebased.status !== 0) {
-    git(['rebase', '--abort'], worktree);
+    await git(['rebase', '--abort'], worktree);
     const why = `the rebase onto origin/main did not apply cleanly (${c.shape}); it was aborted`;
     return giveUp('rebase-push', 'failed', why, branch);
   }
-  const pushed = git(
+  const pushed = await git(
     ['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`],
     worktree,
   );

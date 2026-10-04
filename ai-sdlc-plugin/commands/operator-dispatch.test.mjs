@@ -38,6 +38,22 @@ describe('operator-dispatch command', () => {
     assert.match(body, /cli-hierarchy\.mjs" tick[\s\S]*--worker "\$MY_NAME"/);
   });
 
+  it('states exactly what tick checks: the caller own identity, not --worker', () => {
+    assert.match(body, /checks who is calling, not what `--worker` says/);
+    assert.match(body, /unless that session has the\s+`operator-dispatch` role/);
+    assert.match(body, /must also equal\s+the caller's own roster name/);
+    assert.doesNotMatch(body, /when `--worker` is not the running\s+dispatch session/);
+    assert.doesNotMatch(body, /AISDLC-\d+/);
+  });
+
+  it('quotes decision-id placeholders in every command and says ids are validated', () => {
+    assert.match(body, /Decision ids are validated before they reach you/);
+    assert.doesNotMatch(body, /[^"]<decision-id>[^"]/);
+    assert.match(body, /show "<decision-id>"/);
+    assert.match(body, /answer "<decision-id>" "<option-id>"/);
+    assert.match(body, /--decision-id "<decision-id>"/);
+  });
+
   it('ingests briefs through the enqueue mapping and marks each ingested once', () => {
     assert.match(body, /briefs\//);
     assert.match(body, /enqueue --from-brief/);

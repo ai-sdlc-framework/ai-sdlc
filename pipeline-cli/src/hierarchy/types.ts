@@ -51,6 +51,16 @@ export type CommandRunner = (
   options?: { cwd?: string },
 ) => CommandResult;
 
+/**
+ * A command runner that waits for the process asynchronously. Used for commands
+ * that can run for a long time and must be killed as a whole process group.
+ */
+export type AsyncCommandRunner = (
+  file: string,
+  args: readonly string[],
+  options?: { cwd?: string },
+) => Promise<CommandResult>;
+
 /** Entry of the harness session registry (one JSON file per live session). */
 export interface RegistrySession {
   pid: number;

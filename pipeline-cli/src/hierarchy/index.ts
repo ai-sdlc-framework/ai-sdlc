@@ -78,11 +78,31 @@ export {
   type SettingsView,
 } from './preflight.js';
 export {
+  DEFAULT_PROTECTED_BRANCHES,
+  checkOwnWorktree,
+  isProtectedBranch,
+  type ForcePushMode,
+} from './lease-policy.js';
+export {
   loadOperational,
+  loadOperationalPolicy,
   OPERATIONAL_ACTIONS,
   parseOperational,
+  parseOperationalPolicy,
   type OperationalAction,
+  type OperationalPolicy,
 } from './operational.js';
+export {
+  createSystemIdentity,
+  isClaudeCommand,
+  requireDispatchCaller,
+  resolveCaller,
+  SAFE_SESSION_NAME,
+  type CallerCheck,
+  type CallerIdentity,
+  type CallerSession,
+  type IdentityDeps,
+} from './caller-identity.js';
 export {
   classifyFailure,
   isOwnTaskBranch,
@@ -121,9 +141,19 @@ export {
   type StatusResult,
   type StatusRow,
 } from './status.js';
-export { attachTmuxSession, createSystemRunner } from './system-runner.js';
+export {
+  attachTmuxSession,
+  buildGitEnv,
+  createGitRunner,
+  createSystemRunner,
+  DEFAULT_GIT_PUSH_TIMEOUT_MS,
+  DEFAULT_GIT_TIMEOUT_MS,
+  killProcessGroup,
+  type GitRunnerOptions,
+} from './system-runner.js';
 export {
   HIERARCHY_TMUX_SESSION,
+  type AsyncCommandRunner,
   type CommandResult,
   type CommandRunner,
   type HierarchyDeps,

@@ -35,6 +35,7 @@ import path from 'node:path';
 import { collectVerdicts, peekQueue, TASK_ID_RE } from '../dispatch/board.js';
 import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
+import { oneLine, sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { parseBrief, type ParsedBrief } from './brief-format.js';
 import type { ClearResult } from './clear.js';
 import type { PlaybookOutcome } from './playbook.js';
@@ -119,6 +120,10 @@ export interface VerdictReport {
   workerId: string;
   clear: ClearReport;
   playbook?: PlaybookOutcome;
+  /** Decision ids on the verdict that passed validation (never the raw field). */
+  decisionIds?: string[];
+  /** Verdict fields that failed validation and were dropped, never forwarded. */
+  rejectedFields?: string[];
 }
 
 /** One line for the planner. */
@@ -148,7 +153,7 @@ export interface LoopDeps {
   /** Clears one executor's context. */
   clear: (opts: { executor: string; taskId: string }) => Promise<ClearResult>;
   /** Applies the unblocking playbook to a failure. */
-  playbook: (verdict: DispatchVerdict) => PlaybookOutcome;
+  playbook: (verdict: DispatchVerdict) => PlaybookOutcome | Promise<PlaybookOutcome>;
   /** Actions the policy grants the dispatch role. */
   operational: ReadonlySet<string>;
   reportEveryMs?: number;
@@ -201,25 +206,31 @@ async function watchVerdicts(
       .roster.sessions.filter((e) => e.role === 'executor' && e.status === 'running')
       .map((e) => e.name),
   );
-  for (const verdict of collectVerdicts(deps.boardDir)) {
-    const verdictState = stateOf(verdict);
-    const key = `${verdictState}:${verdict.taskId}:${verdict.completedAt}`;
+  for (const raw of collectVerdicts(deps.boardDir)) {
+    const verdictState = stateOf(raw);
+    const key = `${verdictState}:${raw.taskId}:${raw.completedAt}`;
     if (state.handled.includes(key)) continue;
     state.handled.push(key);
     saveState(deps.boardDir, state);
 
+    // Everything below this line, and everything printed for the session, comes
+    // from the checked copy: a hand-written verdict file never reaches the model,
+    // the planner or a command line in its raw form.
+    const { verdict, dropped } = sanitizeVerdict(raw);
     const report: VerdictReport = {
-      taskId: verdict.taskId,
+      taskId: TASK_ID_RE.test(String(raw.taskId)) ? raw.taskId : oneLine(String(raw.taskId), 40),
       state: verdictState,
       outcome: verdict.outcome,
       workerId: verdict.workerId,
       clear: { status: 'skipped', reason: 'the verdict was not written by a roster executor' },
+      ...(verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
+      ...(dropped.length > 0 ? { rejectedFields: dropped } : {}),
     };
     if (executors.has(verdict.workerId)) {
       report.clear = await clearOnce(deps, verdict);
     }
     if (verdictState === 'failed') {
-      const outcome = deps.playbook(verdict);
+      const outcome = await deps.playbook(verdict);
       report.playbook = outcome;
       if (outcome.escalation) out.escalations.push(outcome.escalation);
     }

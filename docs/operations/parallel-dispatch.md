@@ -593,9 +593,13 @@ reports to the planner. Each wake-up runs one command:
 cli-hierarchy tick --worker <dispatch session name>
 ```
 
-`--worker` must be the roster name of the running dispatch session; every board
-write the loop makes carries that name. The command prints, as JSON, what it did
-and what the session has to say.
+The command identifies its caller instead of trusting `--worker`: it finds the nearest
+ancestor process that is a running roster entry and a claude process, and refuses,
+writing and sending nothing, unless that session has the `operator-dispatch` role.
+`--worker` is optional; when given it must equal the caller's own roster name. Every
+board write the loop makes carries that name. `cli-hierarchy clear` and
+`cli-hierarchy route-decision` apply the same check. The command prints, as JSON, what
+it did and what the session has to say.
 
 1. **Ingest.** Each new `*.md` file in `.ai-sdlc/dispatch/briefs/` is parsed and
    enqueued with the same mapping as `cli-dispatch enqueue --from-brief`, then
@@ -625,8 +629,23 @@ becomes an escalation.
 
 The playbook can push to one place: `HEAD:refs/heads/<the task's own branch>`.
 `main`, `master`, any other branch, any forced or deleting push and any other
-refspec form are refused before git is run. A rebase that does not apply cleanly is
-aborted, never resolved by hand.
+refspec form are refused before git is run. A lease push is also refused, with no
+git action, unless the trusted policy sets `allowForcePush: leaseOnOwnBranch`, when
+the branch is on the policy's `protectedBranches` list (or the built-in protected
+names), and when the task's worktree does not verify as a genuine worktree of this
+repository (under `.worktrees/`, registered under the main checkout's
+`.git/worktrees/`, with a consistent `gitdir` back-pointer). Git runs with
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and every `GIT_CONFIG*` variable removed,
+credential prompts off, and a two minute timeout per command, except `git push`, which
+gets thirty minutes because the repository's pre-push hooks run inside it. Git is
+started in its own process group, and on a timeout the whole group is killed so no
+hook worker is left running. A rebase that does not apply cleanly is aborted, never
+resolved by hand.
+
+Decision ids and cause codes read from a verdict are checked before they are passed
+on: a decision id must be `DEC-` followed by four to nine digits and a cause must be lower-case words
+joined by hyphens. Anything else is dropped and listed in the verdict's
+`rejectedFields`; `cli-dispatch complete` refuses such values outright.
 
 `cli-dispatch requeue --task-id <id> [--retry-limit <n>]` returns one failed task to
 `queue/` with its retry count incremented. It restores the manifest saved when the
@@ -639,6 +658,12 @@ saved manifest, is already queued, inflight or blocked, or has used its retries
 ```bash
 cli-hierarchy clear <executor-name> [--settle-ms <n>]
 ```
+
+`cli-hierarchy clear` is for the dispatch session only. It resolves the calling session
+from the roster and refuses, sending nothing, for any other caller, including a human
+at a plain shell. A person outside the hierarchy who needs to empty a pane uses tmux
+directly (`tmux send-keys -t <pane> -l -- /clear`, then `Enter`), after checking with
+`cli-hierarchy status` that the executor holds no inflight task.
 
 Looks up the executor in the roster and sends `/clear` and Enter to its pane, waits
 for the settle time (8000 ms by default), then sends `/ai-sdlc executor` and Enter.

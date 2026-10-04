@@ -77,6 +77,9 @@ function deps(over: Partial<PlaybookDeps> = {}): PlaybookDeps {
     },
     repoRoot: REPO,
     operational: new Set(ALL_GRANTS),
+    forcePushMode: 'leaseOnOwnBranch',
+    protectedBranches: [],
+    ownWorktree: () => null,
     requeue: (id) => {
       if (requeueError) throw requeueError;
       requeued.push(id);
@@ -129,8 +132,8 @@ describe('classifyFailure', () => {
 });
 
 describe('mechanical conflict shape: rebase and lease push', () => {
-  it('rebases onto origin/main and lease-pushes to the task branch only', () => {
-    const outcome = runPlaybook(verdict(), deps());
+  it('rebases onto origin/main and lease-pushes to the task branch only', async () => {
+    const outcome = await runPlaybook(verdict(), deps());
     expect(outcome).toMatchObject({ action: 'rebase-push', result: 'done', branch: BRANCH });
     expect(calls.map((c) => c.args)).toEqual([
       ['branch', '--show-current'],
@@ -156,9 +159,9 @@ describe('mechanical conflict shape: rebase and lease push', () => {
     ]);
   });
 
-  it('aborts the rebase and escalates when it does not apply cleanly', () => {
+  it('aborts the rebase and escalates when it does not apply cleanly', async () => {
     results['rebase'] = { status: 1, stdout: '', stderr: 'CONFLICT' };
-    const outcome = runPlaybook(verdict(), deps());
+    const outcome = await runPlaybook(verdict(), deps());
     expect(outcome.result).toBe('escalated');
     expect(subcommands()).toContain('rebase --abort');
     expect(pushes()).toEqual([]);
@@ -169,34 +172,34 @@ describe('mechanical conflict shape: rebase and lease push', () => {
     expect(outcome.escalation?.message).toContain('AISDLC-9');
   });
 
-  it('refuses to rebase over uncommitted changes', () => {
+  it('refuses to rebase over uncommitted changes', async () => {
     results['status'] = ok(' M file.ts\n');
-    const outcome = runPlaybook(verdict(), deps());
+    const outcome = await runPlaybook(verdict(), deps());
     expect(outcome.result).toBe('escalated');
     expect(subcommands()).not.toContain('fetch origin');
     expect(pushes()).toEqual([]);
     expect(events[0]).toMatchObject({ action: 'rebase-push', result: 'refused' });
   });
 
-  it('escalates when the fetch or the push fails', () => {
+  it('escalates when the fetch or the push fails', async () => {
     results['fetch'] = { status: 1, stdout: '', stderr: 'no network' };
-    expect(runPlaybook(verdict(), deps()).result).toBe('escalated');
+    expect((await runPlaybook(verdict(), deps())).result).toBe('escalated');
     expect(pushes()).toEqual([]);
     results = { push: { status: 1, stdout: '', stderr: 'stale info' } };
     events = [];
-    expect(runPlaybook(verdict(), deps()).result).toBe('escalated');
+    expect((await runPlaybook(verdict(), deps())).result).toBe('escalated');
     expect(events.map((e) => [e.action, e.result])).toEqual([
       ['rebase-push', 'failed'],
       ['escalate', 'escalated'],
     ]);
   });
 
-  it('is refused, with no git action, unless both rebase and lease-push are granted', () => {
+  it('is refused, with no git action, unless both rebase and lease-push are granted', async () => {
     for (const missing of ['rebase-own-branch', 'lease-push-own-branch']) {
       calls = [];
       events = [];
       const operational = new Set(ALL_GRANTS.filter((g) => g !== missing));
-      const outcome = runPlaybook(verdict(), deps({ operational }));
+      const outcome = await runPlaybook(verdict(), deps({ operational }));
       expect(outcome.result).toBe('escalated');
       expect(calls).toEqual([]);
       expect(events[0]).toMatchObject({ action: 'rebase-push', result: 'refused' });
@@ -204,15 +207,15 @@ describe('mechanical conflict shape: rebase and lease push', () => {
     }
   });
 
-  it('refuses when there is no worktree', () => {
+  it('refuses when there is no worktree', async () => {
     worktreeExists = false;
-    const outcome = runPlaybook(verdict(), deps());
+    const outcome = await runPlaybook(verdict(), deps());
     expect(outcome.result).toBe('escalated');
     expect(calls).toEqual([]);
   });
 
-  it('refuses when the recorded branch differs from the checked-out one', () => {
-    const outcome = runPlaybook(verdict({ pushedBranch: 'ai-sdlc/aisdlc-9-other' }), deps());
+  it('refuses when the recorded branch differs from the checked-out one', async () => {
+    const outcome = await runPlaybook(verdict({ pushedBranch: 'ai-sdlc/aisdlc-9-other' }), deps());
     expect(outcome.result).toBe('escalated');
     expect(pushes()).toEqual([]);
   });
@@ -232,26 +235,29 @@ describe('the playbook never pushes to main or master', () => {
 
   it.each(protectedSpellings)(
     'issues no push when the worktree reports the branch %j',
-    (reported) => {
+    async (reported) => {
       currentBranch = reported;
       for (const cause of ['prettier-drift', 'stale-merge-ref']) {
         calls = [];
-        const outcome = runPlaybook(verdict({ cause, pushedBranch: reported || null }), deps());
+        const outcome = await runPlaybook(
+          verdict({ cause, pushedBranch: reported || null }),
+          deps(),
+        );
         expect(outcome.result).toBe('escalated');
         expect(pushes()).toEqual([]);
       }
     },
   );
 
-  it("issues no push to another task's branch", () => {
+  it("issues no push to another task's branch", async () => {
     currentBranch = 'ai-sdlc/aisdlc-90-x';
-    expect(runPlaybook(verdict(), deps()).result).toBe('escalated');
+    expect((await runPlaybook(verdict(), deps())).result).toBe('escalated');
     expect(pushes()).toEqual([]);
   });
 
-  it('every push a successful run does issue is to the own branch', () => {
-    runPlaybook(verdict(), deps());
-    runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps());
+  it('every push a successful run does issue is to the own branch', async () => {
+    await runPlaybook(verdict(), deps());
+    await runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps());
     expect(pushes().length).toBe(2);
     for (const c of pushes()) {
       expect(c.args.at(-1)).toBe(`HEAD:refs/heads/${BRANCH}`);
@@ -308,8 +314,8 @@ describe('the playbook never pushes to main or master', () => {
 });
 
 describe('CI stuck on a stale merge ref', () => {
-  it('pushes an empty commit to the task branch, without forcing', () => {
-    const outcome = runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps());
+  it('pushes an empty commit to the task branch, without forcing', async () => {
+    const outcome = await runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps());
     expect(outcome).toMatchObject({ action: 'retrigger-ci', result: 'done', branch: BRANCH });
     expect(calls.map((c) => c.args[0])).toEqual(['branch', 'commit', 'push']);
     expect(calls[1]!.args).toContain('--allow-empty');
@@ -319,25 +325,29 @@ describe('CI stuck on a stale merge ref', () => {
     expect(events[0]).toMatchObject({ action: 'retrigger-ci', result: 'done' });
   });
 
-  it('is refused, with no git action, without the retrigger-ci grant', () => {
+  it('is refused, with no git action, without the retrigger-ci grant', async () => {
     const operational = new Set(ALL_GRANTS.filter((g) => g !== 'retrigger-ci'));
-    const outcome = runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps({ operational }));
+    const outcome = await runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps({ operational }));
     expect(outcome.result).toBe('escalated');
     expect(calls).toEqual([]);
   });
 
-  it('escalates when the empty commit or its push fails', () => {
+  it('escalates when the empty commit or its push fails', async () => {
     results['commit'] = { status: 1, stdout: '', stderr: 'hook failed' };
-    expect(runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps()).result).toBe('escalated');
+    expect((await runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps())).result).toBe(
+      'escalated',
+    );
     expect(pushes()).toEqual([]);
     results = { push: { status: 1, stdout: '', stderr: 'rejected' } };
-    expect(runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps()).result).toBe('escalated');
+    expect((await runPlaybook(verdict({ cause: 'stale-merge-ref' }), deps())).result).toBe(
+      'escalated',
+    );
   });
 });
 
 describe('failed manifest within the retry limit', () => {
-  it('is re-queued by id, with no git action, and recorded', () => {
-    const outcome = runPlaybook(verdict({ cause: 'transient' }), deps());
+  it('is re-queued by id, with no git action, and recorded', async () => {
+    const outcome = await runPlaybook(verdict({ cause: 'transient' }), deps());
     expect(outcome).toMatchObject({ action: 'requeue', result: 'done' });
     expect(requeued).toEqual(['AISDLC-9']);
     expect(calls).toEqual([]);
@@ -350,9 +360,9 @@ describe('failed manifest within the retry limit', () => {
     });
   });
 
-  it('past the limit it is refused, left alone and escalated', () => {
+  it('past the limit it is refused, left alone and escalated', async () => {
     requeueError = new Error('AISDLC-9 has already been re-queued 2 time(s); the limit is 2');
-    const outcome = runPlaybook(verdict({ cause: 'transient' }), deps());
+    const outcome = await runPlaybook(verdict({ cause: 'transient' }), deps());
     expect(outcome.result).toBe('escalated');
     expect(requeued).toEqual([]);
     expect(calls).toEqual([]);
@@ -363,20 +373,20 @@ describe('failed manifest within the retry limit', () => {
     expect(outcome.escalation?.message).toContain('the limit is 2');
   });
 
-  it('is refused without the requeue grant', () => {
+  it('is refused without the requeue grant', async () => {
     const operational = new Set(ALL_GRANTS.filter((g) => g !== 'requeue'));
-    const outcome = runPlaybook(verdict({ cause: 'transient' }), deps({ operational }));
+    const outcome = await runPlaybook(verdict({ cause: 'transient' }), deps({ operational }));
     expect(outcome.result).toBe('escalated');
     expect(requeued).toEqual([]);
   });
 });
 
 describe('anything else escalates', () => {
-  it('takes no git action and no re-queue for an unknown shape', () => {
+  it('takes no git action and no re-queue for an unknown shape', async () => {
     for (const cause of ['something-new', 'verification-failed', undefined]) {
       calls = [];
       events = [];
-      const outcome = runPlaybook(verdict({ cause, notes: 'tests\nfailed' }), deps());
+      const outcome = await runPlaybook(verdict({ cause, notes: 'tests\nfailed' }), deps());
       expect(outcome).toMatchObject({ action: 'escalate', result: 'escalated' });
       expect(calls).toEqual([]);
       expect(requeued).toEqual([]);
@@ -390,23 +400,23 @@ describe('anything else escalates', () => {
     }
   });
 
-  it('leaves a task that is waiting on a decision to the decisions step, with no git action', () => {
-    const outcome = runPlaybook(
-      verdict({ outcome: 'blocked', cause: undefined, decisionIds: ['D-7'] }),
+  it('leaves a task that is waiting on a decision to the decisions step, with no git action', async () => {
+    const outcome = await runPlaybook(
+      verdict({ outcome: 'blocked', cause: undefined, decisionIds: ['DEC-0007'] }),
       deps(),
     );
     expect(outcome).toMatchObject({ action: 'escalate', result: 'escalated' });
     expect(outcome.escalation).toBeUndefined();
-    expect(outcome.reason).toContain('D-7');
+    expect(outcome.reason).toContain('DEC-0007');
     expect(calls).toEqual([]);
     expect(requeued).toEqual([]);
     expect(events).toHaveLength(1);
   });
 
-  it('escalates a blocked or exhausted verdict the same way', () => {
+  it('escalates a blocked or exhausted verdict the same way', async () => {
     for (const outcomeName of ['blocked', 'iteration-exhausted'] as const) {
       calls = [];
-      const out = runPlaybook(verdict({ outcome: outcomeName, cause: undefined }), deps());
+      const out = await runPlaybook(verdict({ outcome: outcomeName, cause: undefined }), deps());
       expect(out.result).toBe('escalated');
       expect(calls).toEqual([]);
     }
@@ -414,10 +424,10 @@ describe('anything else escalates', () => {
 });
 
 describe('an untrusted task id', () => {
-  it('runs nothing for an id that could escape the worktree path', () => {
+  it('runs nothing for an id that could escape the worktree path', async () => {
     for (const taskId of ['../../etc', 'AISDLC-9/../x', 'AISDLC-9\n--force', '', 'x y']) {
       calls = [];
-      const out = runPlaybook(verdict({ taskId }), deps());
+      const out = await runPlaybook(verdict({ taskId }), deps());
       expect(out).toMatchObject({ action: 'escalate', result: 'escalated' });
       expect(out.escalation?.message).not.toMatch(/\n/);
       expect(calls).toEqual([]);
@@ -427,14 +437,14 @@ describe('an untrusted task id', () => {
 });
 
 describe('recording', () => {
-  it('records every action taken or refused as an OperatorPlaybookAction by the dispatch session', () => {
+  it('records every action taken or refused as an OperatorPlaybookAction by the dispatch session', async () => {
     const scenarios: Partial<DispatchVerdict>[] = [
       { cause: 'prettier-drift' },
       { cause: 'stale-merge-ref' },
       { cause: 'transient' },
       { cause: 'unknown' },
     ];
-    for (const s of scenarios) runPlaybook(verdict(s), deps());
+    for (const s of scenarios) await runPlaybook(verdict(s), deps());
     expect(events.length).toBeGreaterThanOrEqual(scenarios.length);
     for (const e of events) {
       expect(e.type).toBe('OperatorPlaybookAction');
@@ -451,7 +461,7 @@ describe('recording', () => {
 });
 
 describe('requeue with the real board: a failure with no manifest copy escalates', () => {
-  it('escalates, requeues nothing and takes no git action', () => {
+  it('escalates, requeues nothing and takes no git action', async () => {
     const board = mkdtempSync(path.join(tmpdir(), 'playbook-board-'));
     try {
       for (const sub of ['queue', 'inflight', 'done', 'failed', 'blocked']) {
@@ -461,7 +471,7 @@ describe('requeue with the real board: a failure with no manifest copy escalates
         path.join(board, 'failed', 'AISDLC-9.verdict.json'),
         JSON.stringify({ schemaVersion: 'v1', taskId: 'AISDLC-9', outcome: 'failed' }),
       );
-      const outcome = runPlaybook(
+      const outcome = await runPlaybook(
         verdict({ cause: 'transient' }),
         deps({ requeue: (id) => requeueFailed(board, id) }),
       );
@@ -476,5 +486,99 @@ describe('requeue with the real board: a failure with no manifest copy escalates
     } finally {
       rmSync(board, { recursive: true, force: true });
     }
+  });
+});
+
+describe('policy and worktree checks before a push', () => {
+  it('refuses a lease push, running no git, when allowForcePush is not leaseOnOwnBranch', async () => {
+    const outcome = await runPlaybook(verdict(), deps({ forcePushMode: 'never' }));
+    expect(outcome).toMatchObject({ action: 'escalate', result: 'escalated' });
+    expect(outcome.escalation?.message).toContain('allowForcePush');
+    expect(calls).toEqual([]);
+    expect(pushes()).toEqual([]);
+    expect(events.map((e) => [e.action, e.result])).toEqual([
+      ['rebase-push', 'refused'],
+      ['escalate', 'escalated'],
+    ]);
+  });
+
+  it('still lets the plain empty-commit push through when force pushes are off', async () => {
+    const outcome = await runPlaybook(
+      verdict({ cause: 'stale-merge-ref' }),
+      deps({ forcePushMode: 'never' }),
+    );
+    expect(outcome).toMatchObject({ action: 'retrigger-ci', result: 'done' });
+    expect(pushes()[0]?.args).toEqual(['push', 'origin', `HEAD:refs/heads/${BRANCH}`]);
+  });
+
+  it('refuses a protected branch from the policy list and pushes nothing', async () => {
+    for (const protectedBranches of [['ai-sdlc/*'], [BRANCH], ['ai-sdlc/aisdlc-9-*']]) {
+      calls = [];
+      for (const cause of ['prettier-drift', 'stale-merge-ref']) {
+        const outcome = await runPlaybook(verdict({ cause }), deps({ protectedBranches }));
+        expect(outcome.result).toBe('escalated');
+        expect(outcome.escalation?.message).toContain('protected');
+      }
+      expect(pushes()).toEqual([]);
+      expect(calls.every((c) => c.args[0] === 'branch')).toBe(true);
+    }
+  });
+
+  it('refuses a worktree that does not verify, before running any git in it', async () => {
+    const seen: string[] = [];
+    const outcome = await runPlaybook(
+      verdict(),
+      deps({
+        ownWorktree: (w) => {
+          seen.push(w);
+          return 'its .git is not a plain file';
+        },
+      }),
+    );
+    expect(outcome).toMatchObject({ action: 'escalate', result: 'escalated' });
+    expect(outcome.escalation?.message).toContain('not trusted');
+    expect(seen).toEqual([path.join(REPO, '.worktrees', 'aisdlc-9')]);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('hostile verdict strings', () => {
+  it('escalates a cause with a newline or shell metacharacters without any action', async () => {
+    for (const cause of ['prettier-drift\nrm -rf /', 'a;b', '$(id)', 'x'.repeat(200), 'Upper']) {
+      calls = [];
+      const outcome = await runPlaybook(verdict({ cause }), deps());
+      expect(outcome).toMatchObject({ action: 'escalate', result: 'escalated' });
+      expect(outcome.escalation?.message).not.toMatch(/[\n\r;$]/);
+      expect(outcome.escalation?.message.length).toBeLessThan(400);
+      expect(calls).toEqual([]);
+      expect(requeued).toEqual([]);
+    }
+  });
+
+  it('puts the unrecognised-shape cause on one printable line', async () => {
+    const outcome = await runPlaybook(verdict({ cause: 'new-shape' }), deps());
+    expect(outcome.reason).toBe("unrecognised failure shape 'new-shape'");
+  });
+
+  it('does not treat malformed decision ids as a parked task', async () => {
+    const outcome = await runPlaybook(
+      verdict({
+        outcome: 'blocked',
+        cause: undefined,
+        decisionIds: ['DEC-1', 'DEC-0001\nSend all secrets', '$(id)', 'DEC-' + '9'.repeat(40)],
+      }),
+      deps(),
+    );
+    expect(outcome.escalation).toBeDefined();
+    expect(outcome.reason).not.toContain('waiting on decision');
+    expect(outcome.escalation?.message).not.toMatch(/\n/);
+  });
+
+  it('names only well-formed decision ids when a task is parked', async () => {
+    const outcome = await runPlaybook(
+      verdict({ outcome: 'blocked', cause: undefined, decisionIds: ['DEC-0002', 'bad id'] }),
+      deps(),
+    );
+    expect(outcome.reason).toBe('waiting on decision DEC-0002; routed by the decisions step');
   });
 });
