@@ -18,8 +18,7 @@
  * @module cli/decisions
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -99,11 +98,7 @@ import {
   type DecisionSupportView,
   type PendingExemplar,
 } from '../decisions/index.js';
-import { buildOperatorDigest, renderOperatorDigestMarkdown } from '../decisions/operator-digest.js';
-import {
-  readDecisionEvents as readEventsForDigest,
-  resolveDecisionsDir,
-} from '../decisions/event-log.js';
+import { renderOperatorDigestMarkdown, runOperatorDigest } from '../decisions/operator-digest.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
@@ -1187,26 +1182,15 @@ export function buildDecisionsCli(): Argv {
           }),
       async (argv) => {
         const workDir = String(argv['work-dir']);
-        const markerPath = join(resolveDecisionsDir(workDir), 'last-digest.json');
-        let since = typeof argv.since === 'string' ? argv.since : '';
-        if (!since && existsSync(markerPath)) {
-          try {
-            since = String(JSON.parse(readFileSync(markerPath, 'utf8')).at ?? '');
-          } catch {
-            since = '';
-          }
-        }
-        if (!since || Number.isNaN(Date.parse(since))) {
-          since = new Date(Date.now() - 24 * 3_600_000).toISOString();
-        }
-        const digest = buildOperatorDigest(readEventsForDigest({ workDir }).events, since);
+        const digest = runOperatorDigest({
+          workDir,
+          ...(typeof argv.since === 'string' ? { since: argv.since } : {}),
+          mark: Boolean(argv.mark),
+        });
         if (String(argv.format) === 'json') {
           emit({ ok: true, digest });
         } else {
           process.stdout.write(renderOperatorDigestMarkdown(digest));
-        }
-        if (argv.mark) {
-          writeFileSync(markerPath, JSON.stringify({ at: digest.generatedAt }) + '\n');
         }
       },
     )
