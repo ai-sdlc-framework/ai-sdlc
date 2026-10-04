@@ -98,6 +98,15 @@ describe('persist-reviewer-artifacts.sh', () => {
       assert.equal(existsSync(transcriptDest), true);
       assert.equal(existsSync(verdictDest), true);
       assert.equal(readFileSync(transcriptDest, 'utf8'), '{"event":"transcript-line"}\n');
+      // The agent id is recorded next to the transcript so emit-leaf can bind
+      // the leaf to exactly this reviewer run.
+      assert.equal(
+        readFileSync(
+          join(worktree, '.ai-sdlc', 'transcripts', 'aisdlc-599', 'code-reviewer.agent-id'),
+          'utf8',
+        ),
+        'agent-123\n',
+      );
       assert.deepEqual(JSON.parse(readFileSync(verdictDest, 'utf8')), {
         approved: true,
         findings: [],

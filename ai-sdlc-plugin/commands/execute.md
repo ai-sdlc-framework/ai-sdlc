@@ -1177,12 +1177,12 @@ Each returns a verdict JSON: `{ approved, findings, summary }`. When the classif
 ~/.claude/projects/<project-slug>/<session-uuid>/subagents/agent-<agent-id>.jsonl
 ```
 
-Resolve each reviewer's `<agent-id>` from the `SubagentStart`-hook marker the harness already wrote in Step 7b's dispatch, at `$WORKTREE_PATH/.ai-sdlc/subagent-sessions/<agent-id>.json` (`agentType` field records the plugin agent name, e.g. `code-reviewer`, `security-reviewer`, `test-reviewer` / their `-codex` variants). For each reviewer spawned in Step 7b, find the marker whose `agentType` matches the resolved `AGENT_NAME` for that reviewer with the most recent `firedAt` (ties broken by newest — the same disclosed-race heuristic AISDLC-216 already uses for `.active-task` sentinel resolution); its filename (minus `.json`) is the `<agent-id>` to pass to the helper. The helper itself does the final `find ~/.claude/projects -name agent-<id>.jsonl` resolution (newest-mtime wins on ties) so it works even without that marker lookup, as long as the caller can supply a correct agent-id.
+Resolve each reviewer's `<agent-id>` from the `SubagentStart`-hook marker the harness already wrote in Step 7b's dispatch, at `.ai-sdlc/subagent-sessions/<agent-id>.json` under the directory this session was started in — usually the MAIN checkout, not `$WORKTREE_PATH` (`agentType` field records the plugin agent name, possibly with a plugin prefix such as `ai-sdlc:code-reviewer`; the roles are `code-reviewer`, `security-reviewer`, `test-reviewer` / their `-codex` variants). For each reviewer spawned in Step 7b, find the marker whose `agentType` matches the resolved `AGENT_NAME` for that reviewer with the most recent `firedAt` (ties broken by newest — the same disclosed-race heuristic AISDLC-216 already uses for `.active-task` sentinel resolution); its filename (minus `.json`) is the `<agent-id>` to pass to the helper. The helper itself does the final `find ~/.claude/projects -name agent-<id>.jsonl` resolution (newest-mtime wins on ties) so it works even without that marker lookup, as long as the caller can supply a correct agent-id.
 
 **Procedure, per reviewer that actually ran (i.e. every name in `$SELECTED` when `INCR_SKIP` is not `true`):**
 
 1. Compose the verdict JSON `{ approved, findings, summary }` from that reviewer's in-band Agent-tool return (the same object Step 8 aggregates) and write it to a scratch file, e.g. `/tmp/verdict-${TASK_ID}-${AGENT_NAME}.json` — this is NOT under `.ai-sdlc/**`, so the ordinary Write tool is fine here.
-2. Resolve `<agent-id>` for that reviewer. You captured each reviewer's harness `agentId` directly from its Agent-tool spawn result in Step 7b (the harness returns it as `agentId: <hex>`); if you recorded it, use it verbatim. If you did NOT retain it, recover it from the `SubagentStart` markers the harness wrote under `$WORKTREE_PATH/.ai-sdlc/subagent-sessions/<agent-id>.json` (each records `agentId`, `agentType`, `firedAt`) by selecting the newest-`firedAt` marker whose `agentType` equals this reviewer's `$AGENT_NAME`:
+2. Resolve `<agent-id>` for that reviewer. You captured each reviewer's harness `agentId` directly from its Agent-tool spawn result in Step 7b (the harness returns it as `agentId: <hex>`); if you recorded it, use it verbatim. If you did NOT retain it, recover it from the `SubagentStart` markers the harness wrote under `.ai-sdlc/subagent-sessions/<agent-id>.json` (searched in the worktree and in the main checkout) (each records `agentId`, `agentType`, `firedAt`) by selecting the newest-`firedAt` marker whose `agentType` equals this reviewer's `$AGENT_NAME`:
 
    ```bash
    # Prefer the agentId you captured from the Step 7b spawn result. Fallback:
@@ -1190,15 +1190,36 @@ Resolve each reviewer's `<agent-id>` from the `SubagentStart`-hook marker the ha
    RESOLVED_AGENT_ID=$(node -e '
      const { readdirSync, readFileSync } = require("fs");
      const { join } = require("path");
-     const dir = join(process.argv[1], ".ai-sdlc", "subagent-sessions");
+     // The harness writes markers under the directory the SESSION was started
+     // in. That is usually the main checkout, not the task worktree, so look
+     // in both. The recorded agentType may carry a plugin prefix
+     // ("ai-sdlc:code-reviewer"); compare on the bare role.
+     const { execFileSync } = require("child_process");
+     const { dirname, resolve } = require("path");
+     const roots = [process.argv[1]];
+     try {
+       const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: process.argv[1], encoding: "utf8" }).trim();
+       const main = dirname(resolve(process.argv[1], common));
+       if (!roots.includes(main)) roots.push(main);
+     } catch {}
      const want = process.argv[2];
-     let best = null;
-     for (const f of (() => { try { return readdirSync(dir); } catch { return []; } })()) {
-       if (!f.endsWith(".json")) continue;
-       let m; try { m = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
-       if (m.agentType !== want || !m.agentId) continue;
-       if (!best || String(m.firedAt) > String(best.firedAt)) best = m;
+     const bare = (t) => String(t || "").split(":").pop();
+     const found = new Map();
+     for (const root of roots) {
+       const dir = join(root, ".ai-sdlc", "subagent-sessions");
+       for (const f of (() => { try { return readdirSync(dir); } catch { return []; } })()) {
+         if (!f.endsWith(".json")) continue;
+         let m; try { m = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
+         if (bare(m.agentType) !== want || !m.agentId) continue;
+         found.set(m.agentId, m);
+       }
      }
+     // The main checkout is shared by every task run from it. More than one
+     // marker of this role means another task's (or an earlier round's)
+     // reviewer is in there too, and nothing here can tell them apart.
+     // Refuse instead of guessing: use the agentId the Agent tool returned.
+     if (found.size > 1) { process.stderr.write("ambiguous: " + found.size + " SubagentStart markers for agentType=" + want + " (" + [...found.keys()].join(", ") + "); pass the agentId captured from this reviewer's Agent-tool result\n"); process.exit(1); }
+     const best = [...found.values()][0] || null;
      if (!best) { process.stderr.write("no SubagentStart marker for agentType=" + want + "\n"); process.exit(1); }
      process.stdout.write(best.agentId);
    ' "$WORKTREE_PATH" "$AGENT_NAME")
@@ -1214,6 +1235,8 @@ bash ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh \
   --agent-id "$RESOLVED_AGENT_ID" \
   --verdict-file "/tmp/verdict-${TASK_ID}-${AGENT_NAME}.json"
 ```
+
+The helper also records the agent id in `$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.agent-id`. Step 7c's `emit-leaf` reads that file and binds the leaf to exactly this reviewer run: only that agent's `SubagentStart` marker and harness transcript are used. Without it `emit-leaf` matches the marker by reviewer role. Reviewers of one task may therefore run in parallel and their leaves may be emitted back to back; there is no need to stagger them. Always pass the agent id the Agent tool returned for THIS reviewer of THIS task. The main checkout's marker directory is shared by every task run from it, so `emit-leaf` credits a marker found there only when that run's own harness transcript contains this task's diff-binding nonce (the `$PR_NONCE_MARKER` embedded in the reviewer prompt in Step 7b). A wrong id — another reviewer's, or the same reviewer role from another task — yields a `self-authored` leaf with no `harnessTranscriptHash`.
 
 This mkdir's the destination directories, copies the resolved harness transcript to `$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl`, and copies the verdict to `$WORKTREE_PATH/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json` — exactly the paths Step 7c reads. It exits non-zero with an actionable message if no harness transcript is found for the agent-id or the verdict file is missing; treat a non-zero exit as a real failure of this step (not a benign skip) and surface it to the operator before proceeding to Step 7c.
 

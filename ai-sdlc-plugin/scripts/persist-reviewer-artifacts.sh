@@ -167,6 +167,13 @@ VERDICT_DEST="$VERDICT_DEST_DIR/${REVIEWER}-${TASK_ID_LOWER}.json"
 mkdir -p "$TRANSCRIPT_DEST_DIR" "$VERDICT_DEST_DIR"
 cp "$TRANSCRIPT_SRC" "$TRANSCRIPT_DEST"
 cp "$VERDICT_FILE" "$VERDICT_DEST"
+# Record which harness agent run this transcript came from, next to the
+# transcript. `cli-attestation emit-leaf` reads this sidecar to bind the leaf
+# to exactly this reviewer run (its SubagentStart marker and harness
+# transcript) instead of matching by timing, which cross-wired leaves when
+# several reviewers finished within the same window.
+printf '%s\n' "$AGENT_ID" > "$TRANSCRIPT_DEST_DIR/${REVIEWER}.agent-id"
 
 echo "persist-reviewer-artifacts.sh: persisted ${REVIEWER} transcript (from ${TRANSCRIPT_SRC}) -> ${TRANSCRIPT_DEST}"
 echo "persist-reviewer-artifacts.sh: persisted ${REVIEWER} verdict -> ${VERDICT_DEST}"
+echo "persist-reviewer-artifacts.sh: recorded ${REVIEWER} agent id -> ${TRANSCRIPT_DEST_DIR}/${REVIEWER}.agent-id"

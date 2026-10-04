@@ -15,7 +15,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   appendLeaf,
   appendLeafForPatchId,
@@ -28,7 +28,7 @@ import {
   claudeProjectsDir,
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
-import { buildAttestationCli } from './attestation.js';
+import { buildAttestationCli, readAgentIdSidecar } from './attestation.js';
 import { PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
 import {
   loadAttestationRuntime,
@@ -2879,5 +2879,318 @@ describe('cli-attestation independence-policy — exit-code AND-logic', () => {
     // A malformed policy must never be credited as an accidental `pass` —
     // no policyOutcome line should have been printed at all.
     expect(flushStdout()).not.toMatch(/policyOutcome=/);
+  });
+});
+
+// ── emit-leaf: leaf-to-reviewer binding (marker role, agent id, sidecar) ─────
+
+describe('emit-leaf — binds the leaf to its own reviewer run', () => {
+  function writeMarkerFile(name: string, agentType: string, firedAt = new Date()): string {
+    const markerDir = subagentSessionsDir(tmpRoot);
+    mkdirSync(markerDir, { recursive: true });
+    const filePath = join(markerDir, `${name}.json`);
+    writeFileSync(
+      filePath,
+      JSON.stringify({ agentId: name, agentType, firedAt: firedAt.toISOString() }),
+    );
+    return filePath;
+  }
+
+  async function emit(reviewer: string, extra: string[] = []): Promise<void> {
+    makeTranscript('aisdlc-697', reviewer);
+    const verdictPath = writeVerdict(`${reviewer}-aisdlc-697.json`, {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-697',
+      '--reviewer',
+      reviewer,
+      '--transcript-path',
+      join(tmpRoot, '.ai-sdlc', 'transcripts', 'aisdlc-697', `${reviewer}.jsonl`),
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'e'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+      ...extra,
+    ]).parseAsync();
+  }
+
+  it('three reviewers with markers fired seconds apart all get independent leaves, in any emit order', async () => {
+    const now = Date.now();
+    writeMarkerFile('run-sec', 'ai-sdlc:security-reviewer', new Date(now - 6000));
+    writeMarkerFile('run-code', 'ai-sdlc:code-reviewer', new Date(now - 4000));
+    writeMarkerFile('run-test', 'ai-sdlc:test-reviewer', new Date(now - 2000));
+
+    await emit('code-reviewer');
+    await emit('test-reviewer');
+    await emit('security-reviewer');
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves.map((l) => [l.reviewerName, l.verdictClass])).toEqual([
+      ['code-reviewer', 'independent'],
+      ['test-reviewer', 'independent'],
+      ['security-reviewer', 'independent'],
+    ]);
+    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual([]);
+  });
+
+  it("does not use another reviewer's marker: the leaf is self-authored and the marker is kept", async () => {
+    const marker = writeMarkerFile('run-sec', 'security-reviewer');
+    await emit('code-reviewer');
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves[0].verdictClass).toBe('self-authored');
+    expect(leaves[0].independenceTier).toBeUndefined();
+    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['run-sec.json']);
+    expect(readFileSync(marker, 'utf8')).toContain('security-reviewer');
+  });
+
+  it('--agent-id selects exactly that run when the same reviewer has two markers', async () => {
+    const now = Date.now();
+    writeMarkerFile('first-run', 'code-reviewer', new Date(now - 60_000));
+    writeMarkerFile('second-run', 'code-reviewer', new Date(now - 1_000));
+
+    await emit('code-reviewer', ['--agent-id', 'first-run']);
+
+    expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('independent');
+    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
+  });
+
+  it('reads the agent id from the sidecar next to the transcript when --agent-id is omitted', async () => {
+    const now = Date.now();
+    writeMarkerFile('first-run', 'code-reviewer', new Date(now - 60_000));
+    writeMarkerFile('second-run', 'code-reviewer', new Date(now - 1_000));
+    const dir = join(tmpRoot, '.ai-sdlc', 'transcripts', 'aisdlc-697');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'code-reviewer.agent-id'), 'first-run\n');
+
+    await emit('code-reviewer');
+
+    expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('independent');
+    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
+  });
+
+  it('an agent id whose marker belongs to another reviewer yields a self-authored leaf', async () => {
+    writeMarkerFile('run-sec', 'security-reviewer');
+    await emit('code-reviewer', ['--agent-id', 'run-sec']);
+    expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('self-authored');
+    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['run-sec.json']);
+  });
+
+  it('rejects an --agent-id with characters outside the allowed set', async () => {
+    await expect(emit('code-reviewer', ['--agent-id', '../../etc/passwd'])).rejects.toThrow(
+      'process.exit(1)',
+    );
+    expect(flushStderr()).toMatch(/--agent-id may only contain/);
+  });
+});
+
+describe('emit-leaf — worktree layout end to end (markers under the main checkout)', () => {
+  let mainRoot = '';
+  let worktreeRoot = '';
+
+  beforeEach(() => {
+    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'emit-leaf-worktree-home-'));
+    mainRoot = mkdtempSync(join(tmpdir(), 'emit-leaf-main-'));
+    const git = (args: string[], cwd: string): string =>
+      execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git(['init', '-q', '-b', 'main'], mainRoot);
+    git(['config', 'user.email', 'fixture@example.invalid'], mainRoot);
+    git(['config', 'user.name', 'Fixture'], mainRoot);
+    writeFileSync(join(mainRoot, 'README.md'), 'fixture\n');
+    git(['add', '.'], mainRoot);
+    git(['commit', '-q', '-m', 'init'], mainRoot);
+    worktreeRoot = join(mainRoot, '.worktrees', 'task-1');
+    git(['worktree', 'add', '-q', '-b', 'task-1', worktreeRoot], mainRoot);
+    // git may report the realpath (macOS /var -> /private/var); use what git reports.
+    const common = git(['rev-parse', '--git-common-dir'], worktreeRoot).trim();
+    mainRoot = join(common, '..');
+    process.env['REPO_ROOT'] = worktreeRoot;
+  });
+
+  afterEach(() => {
+    rmSync(mainRoot, { recursive: true, force: true });
+    rmSync(fakeHomeDirForHarnessTests, { recursive: true, force: true });
+    fakeHomeDirForHarnessTests = '';
+  });
+
+  function reviewerRun(role: string, agentId: string, nonce: string, firedAt: Date): string {
+    const markerDir = subagentSessionsDir(mainRoot);
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      join(markerDir, `${agentId}.json`),
+      JSON.stringify({ agentId, agentType: `ai-sdlc:${role}`, firedAt: firedAt.toISOString() }),
+    );
+    const subagents = join(
+      claudeProjectsDir(),
+      claudeProjectSlug(resolve(mainRoot)),
+      'session-exec',
+      'subagents',
+    );
+    mkdirSync(subagents, { recursive: true });
+    const content = `${role} review ${nonceMarkerLiteral(nonce)}\n`;
+    writeFileSync(join(subagents, `agent-${agentId}.jsonl`), content);
+    writeFileSync(
+      join(subagents, `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: `ai-sdlc:${role}` }),
+    );
+    return createHash('sha256').update(content).digest('hex');
+  }
+
+  async function emitInWorktree(reviewer: string, nonce: string): Promise<void> {
+    const dir = join(worktreeRoot, '.ai-sdlc', 'transcripts', 'task-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${reviewer}.jsonl`), `{"persisted":"${reviewer}"}\n`);
+    const verdicts = join(worktreeRoot, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdicts, { recursive: true });
+    const verdictPath = join(verdicts, `${reviewer}-task-1.json`);
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+    await buildAttestationCli([
+      'emit-leaf',
+      '--repo-root',
+      worktreeRoot,
+      '--task-id',
+      'TASK-1',
+      '--reviewer',
+      reviewer,
+      '--transcript-path',
+      join(dir, `${reviewer}.jsonl`),
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'f'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--nonce',
+      nonce,
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+  }
+
+  it('three reviewers spawned seconds apart: every leaf is independent and carries its own transcript hash', async () => {
+    const nonce = 'a7'.repeat(32);
+    const now = Date.now();
+    const expected: Record<string, string> = {
+      'security-reviewer': reviewerRun('security-reviewer', 'aaa111', nonce, new Date(now - 6000)),
+      'code-reviewer': reviewerRun('code-reviewer', 'bbb222', nonce, new Date(now - 4000)),
+      'test-reviewer': reviewerRun('test-reviewer', 'ccc333', nonce, new Date(now - 2000)),
+    };
+
+    await emitInWorktree('code-reviewer', nonce);
+    await emitInWorktree('test-reviewer', nonce);
+    await emitInWorktree('security-reviewer', nonce);
+
+    const leaves = loadLeavesUnderTest(worktreeRoot);
+    expect(leaves).toHaveLength(3);
+    for (const leaf of leaves) {
+      expect(leaf.verdictClass, leaf.reviewerName).toBe('independent');
+      expect(leaf.independenceTier, leaf.reviewerName).toBe('attested');
+      expect(leaf.harnessTranscriptHash, leaf.reviewerName).toBe(expected[leaf.reviewerName]);
+    }
+    expect(readdirSync(subagentSessionsDir(mainRoot))).toEqual([]);
+  });
+
+  it("another task's reviewer marker in the main checkout does not make this task's leaf independent", async () => {
+    reviewerRun('code-reviewer', 'other1', 'c9'.repeat(32), new Date());
+    await emitInWorktree('code-reviewer', 'e3'.repeat(32));
+
+    const leaves = loadLeavesUnderTest(worktreeRoot);
+    expect(leaves[0].verdictClass).toBe('self-authored');
+    expect(leaves[0].independenceTier).toBeUndefined();
+    expect(leaves[0].harnessTranscriptHash).toBeNull();
+    expect(readdirSync(subagentSessionsDir(mainRoot))).toEqual(['other1.json']);
+  });
+});
+
+describe('readAgentIdSidecar', () => {
+  it('returns the id for a well-formed sidecar and undefined otherwise', () => {
+    const dir = join(tmpRoot, 'sidecars');
+    mkdirSync(dir, { recursive: true });
+    const transcript = join(dir, 'code-reviewer.jsonl');
+
+    expect(readAgentIdSidecar(transcript)).toBeUndefined();
+
+    writeFileSync(join(dir, 'code-reviewer.agent-id'), 'a1b2c3d4e5f60718\n');
+    expect(readAgentIdSidecar(transcript)).toBe('a1b2c3d4e5f60718');
+
+    writeFileSync(join(dir, 'code-reviewer.agent-id'), 'two words\n');
+    expect(readAgentIdSidecar(transcript)).toBeUndefined();
+
+    writeFileSync(join(dir, 'code-reviewer.agent-id'), '../escape');
+    expect(readAgentIdSidecar(transcript)).toBeUndefined();
+
+    writeFileSync(join(dir, 'code-reviewer.agent-id'), 'x'.repeat(300));
+    expect(readAgentIdSidecar(transcript)).toBeUndefined();
+
+    expect(readAgentIdSidecar(join(dir, 'code-reviewer.txt'))).toBeUndefined();
+  });
+});
+
+describe('cli-attestation verify — self-authored note', () => {
+  let savedExitCode: number | string | null | undefined;
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode;
+    process.exitCode = undefined;
+    vi.mocked(loadAttestationRuntime).mockReset();
+    vi.mocked(loadVerifyCore).mockReset();
+  });
+
+  afterEach(() => {
+    process.exitCode = savedExitCode;
+  });
+
+  async function runVerifyWith(result: Record<string, unknown>): Promise<void> {
+    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
+    vi.mocked(loadVerifyCore).mockResolvedValue({
+      bindRuntime: vi.fn(),
+      runVerifier: vi.fn().mockReturnValue(result),
+    });
+    await buildAttestationCli([
+      'verify',
+      '--head',
+      'a'.repeat(40),
+      '--base',
+      'b'.repeat(40),
+    ]).parseAsync();
+  }
+
+  it('keeps exit 0 for a valid self-authored envelope but says verify does not enforce independence', async () => {
+    await runVerifyWith({ status: 'valid', reason: 'ok', overallVerdictClass: 'self-authored' });
+    expect(process.exitCode).toBe(0);
+    expect(flushStdout()).toMatch(/verdictClass=self-authored/);
+    const err = flushStderr();
+    expect(err).toMatch(/does not enforce independence/);
+    expect(err).toMatch(/independence-policy/);
+  });
+
+  it('prints no note for an independent envelope or an invalid one', async () => {
+    await runVerifyWith({ status: 'valid', reason: 'ok', overallVerdictClass: 'independent' });
+    expect(flushStderr()).not.toMatch(/does not enforce independence/);
+    await runVerifyWith({
+      status: 'invalid',
+      reason: 'bad signature',
+      overallVerdictClass: 'self-authored',
+    });
+    expect(process.exitCode).toBe(1);
+    expect(flushStderr()).not.toMatch(/does not enforce independence/);
   });
 });

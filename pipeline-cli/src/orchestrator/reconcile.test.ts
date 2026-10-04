@@ -836,6 +836,41 @@ describe('runReconcile — orchestration', () => {
     }
   });
 
+  it('passes each reviewer agent id to its own emit-leaf call, and drops a malformed id', () => {
+    writeDevVerdict(boardDir);
+    const emitCalls: string[][] = [];
+    const customSpawn = (
+      file: string,
+      args: readonly string[],
+    ): { status: number | null; stdout: string; stderr: string } => {
+      if (file === 'node' && args[0]?.endsWith('cli-attestation.mjs')) {
+        emitCalls.push([...args]);
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    runReconcile({
+      workDir,
+      taskId,
+      boardDir,
+      worktreePath,
+      reviewerAgentIds: {
+        'code-reviewer': 'aaaaaa111111',
+        'test-reviewer': 'bbbbbb222222',
+        'security-reviewer': '../../not-an-id',
+      },
+      spawn: customSpawn,
+    });
+    expect(emitCalls.length).toBe(3);
+    const idFor = (reviewer: string): string | undefined => {
+      const call = emitCalls.find((c) => c[c.indexOf('--reviewer') + 1] === reviewer);
+      const i = call ? call.indexOf('--agent-id') : -1;
+      return call && i >= 0 ? call[i + 1] : undefined;
+    };
+    expect(idFor('code-reviewer')).toBe('aaaaaa111111');
+    expect(idFor('test-reviewer')).toBe('bbbbbb222222');
+    expect(idFor('security-reviewer')).toBeUndefined();
+  });
+
   it('omits --nonce from emit-leaf when reviewerNonce is not provided (legacy caller)', () => {
     writeDevVerdict(boardDir);
     const emitCalls: string[][] = [];

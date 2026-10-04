@@ -653,6 +653,12 @@ function runReconcileInner(
     if (options.reviewerNonce) {
       emitLeafArgs.push('--nonce', options.reviewerNonce);
     }
+    // Bind the leaf to this reviewer's own run. Without the id, emit-leaf can
+    // only match the SubagentStart marker by reviewer role.
+    const reviewerAgentId = options.reviewerAgentIds?.[reviewer];
+    if (reviewerAgentId && AGENT_ID_PATTERN.test(reviewerAgentId)) {
+      emitLeafArgs.push('--agent-id', reviewerAgentId);
+    }
     // AISDLC-616: record the review-iteration number + PR number (when
     // already known from devVerdict.prUrl) on the reviews ledger record
     // `emit-leaf` appends alongside the Merkle leaf.

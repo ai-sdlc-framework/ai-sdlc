@@ -15,9 +15,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  AGENT_ID_PATTERN,
   MARKER_MAX_AGE_MS,
+  consumeSubagentMarker,
   determineVerdictClass,
   fileMtimeMs,
+  listSubagentMarkerCandidates,
+  selectSubagentMarker,
   stripAgentTypeNamespace,
   subagentSessionsDir,
 } from './verdict-class.js';
@@ -284,5 +288,204 @@ describe('fileMtimeMs', () => {
 
   it('returns null for a missing file', () => {
     expect(fileMtimeMs(join(repoRoot, 'nope.txt'))).toBeNull();
+  });
+});
+
+// ── Identity binding (reviewer name, agent id, extra roots) ─────────────────
+
+describe('determineVerdictClass — bound to the reviewer the leaf is for', () => {
+  it("consumes only the named reviewer's marker and leaves the others for their own leaves", () => {
+    const now = Date.now();
+    const iso = new Date(now).toISOString();
+    const sec = writeMarker(repoRoot, 'a-sec.json', iso, 'ai-sdlc:security-reviewer');
+    const code = writeMarker(repoRoot, 'b-code.json', iso, 'ai-sdlc:code-reviewer');
+    const test = writeMarker(repoRoot, 'c-test.json', iso, 'ai-sdlc:test-reviewer');
+
+    expect(
+      determineVerdictClass({ repoRoot, transcriptMtimeMs: now, reviewerName: 'test-reviewer' }),
+    ).toBe('independent');
+    expect(existsSync(test)).toBe(false);
+    expect(existsSync(sec)).toBe(true);
+    expect(existsSync(code)).toBe(true);
+
+    expect(
+      determineVerdictClass({ repoRoot, transcriptMtimeMs: now, reviewerName: 'code-reviewer' }),
+    ).toBe('independent');
+    expect(
+      determineVerdictClass({
+        repoRoot,
+        transcriptMtimeMs: now,
+        reviewerName: 'security-reviewer',
+      }),
+    ).toBe('independent');
+    expect(readdirSync(subagentSessionsDir(repoRoot))).toEqual([]);
+  });
+
+  it("does not credit a leaf with another reviewer's marker, and does not consume it", () => {
+    const now = Date.now();
+    const sec = writeMarker(repoRoot, 'sec.json', new Date(now).toISOString(), 'security-reviewer');
+    expect(
+      determineVerdictClass({ repoRoot, transcriptMtimeMs: now, reviewerName: 'code-reviewer' }),
+    ).toBe('self-authored');
+    expect(existsSync(sec)).toBe(true);
+  });
+
+  it('a second leaf for the same reviewer is self-authored once the marker is consumed', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'code.json', new Date(now).toISOString(), 'code-reviewer');
+    const opts = { repoRoot, transcriptMtimeMs: now, reviewerName: 'code-reviewer' };
+    expect(determineVerdictClass(opts)).toBe('independent');
+    expect(determineVerdictClass(opts)).toBe('self-authored');
+  });
+
+  it('never credits a marker that lives outside repoRoot (shared directories need the nonce check)', () => {
+    const now = Date.now();
+    const sessionRoot = mkdtempSync(join(tmpdir(), 'verdict-class-session-'));
+    try {
+      const marker = writeMarker(
+        sessionRoot,
+        'code.json',
+        new Date(now).toISOString(),
+        'ai-sdlc:code-reviewer',
+      );
+      expect(
+        determineVerdictClass({ repoRoot, transcriptMtimeMs: now, reviewerName: 'code-reviewer' }),
+      ).toBe('self-authored');
+      expect(existsSync(marker)).toBe(true);
+      // The selector itself can see it when asked to search that root.
+      expect(
+        selectSubagentMarker({
+          roots: [repoRoot, sessionRoot],
+          transcriptMtimeMs: now,
+          reviewerName: 'code-reviewer',
+        })?.filePath,
+      ).toBe(marker);
+    } finally {
+      rmSync(sessionRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('with an agent id, only that agent marker counts, and its role must match the reviewer', () => {
+    const now = Date.now();
+    const iso = new Date(now).toISOString();
+    writeMarker(repoRoot, 'run1.json', iso, 'code-reviewer');
+    writeMarker(repoRoot, 'run2.json', iso, 'security-reviewer');
+
+    expect(
+      determineVerdictClass({
+        repoRoot,
+        transcriptMtimeMs: now,
+        reviewerName: 'code-reviewer',
+        agentId: 'run2',
+      }),
+    ).toBe('self-authored');
+    expect(
+      determineVerdictClass({
+        repoRoot,
+        transcriptMtimeMs: now,
+        reviewerName: 'code-reviewer',
+        agentId: 'missing',
+      }),
+    ).toBe('self-authored');
+    expect(readdirSync(subagentSessionsDir(repoRoot)).sort()).toEqual(['run1.json', 'run2.json']);
+    expect(
+      determineVerdictClass({
+        repoRoot,
+        transcriptMtimeMs: now,
+        reviewerName: 'code-reviewer',
+        agentId: 'run1',
+      }),
+    ).toBe('independent');
+    expect(readdirSync(subagentSessionsDir(repoRoot))).toEqual(['run2.json']);
+  });
+
+  it('a reviewer name that is not a reviewer role is never independent, even with its own marker', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'dev.json', new Date(now).toISOString(), 'developer');
+    expect(
+      determineVerdictClass({ repoRoot, transcriptMtimeMs: now, reviewerName: 'developer' }),
+    ).toBe('self-authored');
+  });
+});
+
+describe('selectSubagentMarker', () => {
+  it('returns null for an empty or malformed reviewer name or agent id', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'code.json', new Date(now).toISOString(), 'code-reviewer');
+    const base = { roots: [repoRoot], transcriptMtimeMs: now };
+    expect(selectSubagentMarker({ ...base, reviewerName: '' })).toBeNull();
+    expect(selectSubagentMarker({ ...base, agentId: '../code' })).toBeNull();
+    expect(selectSubagentMarker({ ...base, agentId: 'a b' })).toBeNull();
+    expect(AGENT_ID_PATTERN.test('a1b2c3d4e5f6')).toBe(true);
+  });
+
+  it('skips empty roots, de-duplicates roots, and survives a root that does not exist', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'code.json', new Date(now).toISOString(), 'code-reviewer');
+    const sel = selectSubagentMarker({
+      roots: ['', join(repoRoot, 'missing'), repoRoot, repoRoot],
+      transcriptMtimeMs: now,
+      reviewerName: 'code-reviewer',
+    });
+    expect(sel?.marker.agentId).toBe('code');
+    expect(sel?.filePath).toBe(join(subagentSessionsDir(repoRoot), 'code.json'));
+  });
+
+  it('prefers a typed marker over an untyped one, then the most recent, then the lower agent id', () => {
+    const now = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    writeMarker(repoRoot, 'untyped.json', iso(now), null);
+    writeMarker(repoRoot, 'old.json', iso(now - 120_000), 'code-reviewer');
+    writeMarker(repoRoot, 'tie-b.json', iso(now - 5_000), 'code-reviewer');
+    writeMarker(repoRoot, 'tie-a.json', iso(now - 5_000), 'code-reviewer');
+    const q = { roots: [repoRoot], transcriptMtimeMs: now, reviewerName: 'code-reviewer' };
+    expect(selectSubagentMarker({ ...q, allowUntyped: true })?.marker.agentId).toBe('tie-a');
+    expect(selectSubagentMarker(q)?.marker.agentId).toBe('tie-a');
+  });
+
+  it('accepts an untyped marker only when asked to, and never a marker outside the window', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'untyped.json', new Date(now).toISOString(), null);
+    writeMarker(
+      repoRoot,
+      'stale.json',
+      new Date(now - MARKER_MAX_AGE_MS - 1000).toISOString(),
+      'code-reviewer',
+    );
+    const q = { roots: [repoRoot], transcriptMtimeMs: now, reviewerName: 'code-reviewer' };
+    expect(selectSubagentMarker(q)).toBeNull();
+    expect(selectSubagentMarker({ ...q, allowUntyped: true })?.marker.agentId).toBe('untyped');
+  });
+
+  it('reviewerRolesOnly rejects a typed non-reviewer role', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'dev.json', new Date(now).toISOString(), 'ai-sdlc:developer');
+    const q = { roots: [repoRoot], transcriptMtimeMs: now };
+    expect(selectSubagentMarker(q)?.marker.agentId).toBe('dev');
+    expect(selectSubagentMarker({ ...q, reviewerRolesOnly: true })).toBeNull();
+  });
+});
+
+describe('listSubagentMarkerCandidates and consumeSubagentMarker', () => {
+  it('lists every qualifying marker best first, and an empty list for a bad query', () => {
+    const now = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    writeMarker(repoRoot, 'older.json', iso(now - 90_000), 'code-reviewer');
+    writeMarker(repoRoot, 'newer.json', iso(now - 1_000), 'code-reviewer');
+    writeMarker(repoRoot, 'sec.json', iso(now), 'security-reviewer');
+    const q = { roots: [repoRoot], transcriptMtimeMs: now, reviewerName: 'code-reviewer' };
+    expect(listSubagentMarkerCandidates(q).map((c) => c.marker.agentId)).toEqual([
+      'newer',
+      'older',
+    ]);
+    expect(listSubagentMarkerCandidates({ ...q, agentId: 'bad id' })).toEqual([]);
+    expect(listSubagentMarkerCandidates({ ...q, reviewerName: '' })).toEqual([]);
+  });
+
+  it('consumeSubagentMarker deletes the file and tolerates a missing one', () => {
+    const marker = writeMarker(repoRoot, 'code.json', new Date().toISOString());
+    consumeSubagentMarker(marker);
+    expect(existsSync(marker)).toBe(false);
+    expect(() => consumeSubagentMarker(marker)).not.toThrow();
   });
 });
