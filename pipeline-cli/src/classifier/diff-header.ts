@@ -6,12 +6,20 @@
  */
 
 /**
+ * A header holding a line terminator is never read. The regexes these helpers replace
+ * could not match across `\r`, U+2028 or U+2029 (`.` excludes them), so such a header was
+ * unreadable and fail-closed callers vetoed it; this keeps that, including for a CRLF diff.
+ */
+const LINE_TERMINATOR = /[\r\u2028\u2029]/;
+
+/**
  * The path of a header whose two sides name the same file (`a/<path> b/<path>`, the rest of
- * the line after `diff --git `), or undefined. Only such a header is unambiguous when a path
- * itself contains ' b/'.
+ * the line after `diff --git `), or undefined. Such a header is exact when a path itself
+ * contains ' b/' (a rename whose two sides happen to be symmetric reads the same way; its
+ * `rename from` / `rename to` lines settle that case).
  */
 export function sameNameHeaderPath(rest: string): string | undefined {
-  if (!rest.startsWith('a/')) return undefined;
+  if (!rest.startsWith('a/') || LINE_TERMINATOR.test(rest)) return undefined;
   const pair = rest.length - 5; // 'a/' + path + ' b/' + path
   if (pair < 2 || pair % 2 !== 0) return undefined;
   const half = pair / 2;
@@ -38,7 +46,7 @@ export interface DiffHeaderPaths {
  * other header splits at the last ' b/' that leaves a non-empty new path.
  */
 export function diffHeaderPaths(rest: string): DiffHeaderPaths | undefined {
-  if (!rest.startsWith('a/')) return undefined;
+  if (!rest.startsWith('a/') || LINE_TERMINATOR.test(rest)) return undefined;
   const same = sameNameHeaderPath(rest);
   if (same !== undefined) return { oldPath: same, newPath: same, exact: true };
   const split = rest.lastIndexOf(' b/', rest.length - 4);

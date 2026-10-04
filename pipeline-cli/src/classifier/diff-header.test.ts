@@ -55,6 +55,16 @@ describe('diffHeaderPaths', () => {
     });
   });
 
+  it('never reads a header holding a line terminator (the old regex could not match across one)', () => {
+    for (const t of ['\r', '\u2028', '\u2029']) {
+      expect(diffHeaderPaths(`a/x b/x${t}`)).toBeUndefined();
+      expect(diffHeaderPaths(`a/docs/x.md b/.github/dependabot.yml${t}`)).toBeUndefined();
+      expect(diffHeaderPaths(`a/k${t}.pem b/k${t}.pem`)).toBeUndefined();
+      expect(sameNameHeaderPath(`a/x b/x${t}`)).toBeUndefined();
+      expect(sameNameHeaderPath(`a/k${t}.pem b/k${t}.pem`)).toBeUndefined();
+    }
+  });
+
   it('is undefined for a header that is not two non-empty paths', () => {
     for (const rest of ['', 'x/a b/a', 'a/only', 'a/ b/x', 'a/x b/', '"a/q" "b/q"', 'a/x "b/y"']) {
       expect(diffHeaderPaths(rest)).toBeUndefined();
@@ -74,6 +84,8 @@ describe('diffHeaderPaths', () => {
         expect(got === undefined ? undefined : [got.oldPath, got.newPath]).toEqual(
           m ? [m[1], m[2]] : undefined,
         );
+        // exact means the header holds exactly one ' b/'
+        if (got) expect(got.exact).toBe(rest.split(' b/').length - 1 === 1);
       }
       checked++;
       if (depth === 0) return;
@@ -84,13 +96,16 @@ describe('diffHeaderPaths', () => {
   });
 
   it('reads a hostile header in linear time (the bound is generous)', () => {
+    // Both a header that matches and one ending in \r: the \r makes the OLD regex fail to
+    // match and backtrack quadratically (about 6s at 20k repetitions), so only a failing
+    // header guards against that coming back.
     const time = (reps: number): number => {
-      const rest = `a/a b/${'a b/a'.repeat(reps)}`;
+      const body = `a/a b/${'a b/a'.repeat(reps)}`;
       const start = performance.now();
-      for (let i = 0; i < 5; i++) diffHeaderPaths(rest);
+      for (let i = 0; i < 5; i++) for (const tail of ['', '\r']) diffHeaderPaths(body + tail);
       return performance.now() - start;
     };
-    const small = Math.max(time(20_000), 5);
+    const small = Math.max(time(20_000), 20);
     const large = time(80_000);
     expect(large / small).toBeLessThan(12);
     expect(large).toBeLessThan(5000);

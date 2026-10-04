@@ -300,6 +300,30 @@ describe('diff parser', () => {
     expect(ambiguous[0].path).toBe(UNPARSEABLE_PATH);
   });
 
+  it('settles the path only from a real destination line', () => {
+    // a quoted header settled by a plain rename-to line
+    const quoted = parseDiff(['diff --git "a/q.ts" "b/q.ts"', 'rename to plain.ts'].join('\n'));
+    expect(quoted[0].path).toBe('plain.ts');
+    expect(quoted[0].unparseable).toBe(false);
+    // an empty rename-to / copy-to line settles nothing
+    for (const line of ['rename to ', 'copy to ']) {
+      const empty = parseDiff(['diff --git a/x b/y', line].join('\n'));
+      expect(empty[0].unparseable).toBe(true);
+      expect(empty[0].path).toBe(UNPARSEABLE_PATH);
+    }
+    // an ambiguous header settled only by the +++ b/ line
+    const plus = parseDiff(
+      ['diff --git a/old b/x.ts b/new.ts', '--- a/old b/x.ts', '+++ b/new.ts'].join('\n'),
+    );
+    expect(plus[0].path).toBe('new.ts');
+    expect(plus[0].unparseable).toBe(false);
+    // a header holding \r, U+2028 or U+2029 is not read
+    for (const t of ['\r', '\u2028', '\u2029']) {
+      const f = parseDiff(`diff --git a/x.ts b/x.ts${t}\n`);
+      expect(f[0].unparseable).toBe(true);
+    }
+  });
+
   it('reads the destination of a copy from the copy-to line', () => {
     const copied = parseDiff(
       [
@@ -316,13 +340,14 @@ describe('diff parser', () => {
   });
 
   it('parses an adversarial header in linear time', () => {
+    // The \r tail makes the OLD regex fail to match and backtrack quadratically.
     const time = (reps: number): number => {
-      const d = `diff --git a/a b/${'a b/a'.repeat(reps)}\n`;
+      const body = `diff --git a/a b/${'a b/a'.repeat(reps)}`;
       const start = performance.now();
-      for (let i = 0; i < 5; i++) parseDiff(d);
+      for (let i = 0; i < 5; i++) for (const tail of ['\n', '\r\n']) parseDiff(body + tail);
       return performance.now() - start;
     };
-    const small = Math.max(time(20_000), 5);
+    const small = Math.max(time(20_000), 20);
     const large = time(80_000);
     // 4x the input: a linear parse stays near 4x, a polynomial one is far above.
     expect(large / small).toBeLessThan(12);

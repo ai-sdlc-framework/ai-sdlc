@@ -266,6 +266,20 @@ describe('selectReviewerSet: path quoting, missing diff and governance vetoes', 
     expect(sel.decidedBy).toBe('veto:path-ci');
   });
 
+  it('an ambiguous header (several " b/", differing sides) is vetoed, not guessed', async () => {
+    const diff = 'diff --git a/.github/workflows/x b/y.ts b/docs/z.md\n';
+    const { sel } = await run({ changedFiles: ['docs/z.md'], diff });
+    expect(sel.decidedBy).toBe('veto:unparseable-path');
+    expect(sel.reviewers).toEqual(THREE);
+  });
+
+  it('a CRLF diff header cannot hide a rename into a sensitive path', async () => {
+    const diff =
+      'diff --git a/docs/x.md b/.github/dependabot.yml\r\nrename to .github/dependabot.yml\r\n';
+    const { sel } = await run({ changedFiles: ['docs/x.md'], diff });
+    expect(sel.decidedBy).toBe('veto:unparseable-path');
+  });
+
   it('a failed or truncated diff read vetoes', async () => {
     expect((await run({ diffUnavailable: true })).sel.decidedBy).toBe('veto:diff-unavailable');
   });

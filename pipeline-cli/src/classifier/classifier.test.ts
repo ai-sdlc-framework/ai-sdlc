@@ -390,6 +390,12 @@ describe('parseUnifiedDiff', () => {
     expect(parseUnifiedDiff('diff --git a/old b/x.ts b/new.ts\n').paths).toEqual(['new.ts']);
   });
 
+  it('skips a header holding a line terminator, as the old regex did', () => {
+    for (const t of ['\r', '\u2028', '\u2029']) {
+      expect(parseUnifiedDiff(`diff --git a/x.ts b/x.ts${t}\n`).paths).toEqual([]);
+    }
+  });
+
   it('skips headers that are not two plain paths', () => {
     const diff = ['diff --git "a/q.ts" "b/q.ts"', 'diff --git x/a b/a', 'diff --git a/x b/'].join(
       '\n',
@@ -398,13 +404,14 @@ describe('parseUnifiedDiff', () => {
   });
 
   it('parses a hostile header in linear time (the bound is generous)', () => {
+    // The \r tail makes the OLD regex fail to match and backtrack quadratically.
     const time = (reps: number): number => {
-      const d = `diff --git a/a b/${'a b/a'.repeat(reps)}\n`;
+      const body = `diff --git a/a b/${'a b/a'.repeat(reps)}`;
       const start = performance.now();
-      for (let i = 0; i < 5; i++) parseUnifiedDiff(d);
+      for (let i = 0; i < 5; i++) for (const tail of ['\n', '\r\n']) parseUnifiedDiff(body + tail);
       return performance.now() - start;
     };
-    const small = Math.max(time(20_000), 5);
+    const small = Math.max(time(20_000), 20);
     const large = time(80_000);
     expect(large / small).toBeLessThan(12);
     expect(large).toBeLessThan(5000);

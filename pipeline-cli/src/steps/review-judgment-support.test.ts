@@ -45,6 +45,16 @@ describe('scanReviewPaths: diff --git headers', () => {
     }
   });
 
+  it('vetoes a header holding \\r, U+2028 or U+2029 (a CRLF diff must not hide a path)', () => {
+    for (const t of ['\r', '\u2028', '\u2029']) {
+      const crlf = scan(
+        `diff --git a/docs/x.md b/.github/dependabot.yml${t}\nrename to .github/dependabot.yml${t}\n`,
+      );
+      expect(crlf.unparseable).toBe(true);
+      expect(scan(`diff --git a/k${t}.pem b/k${t}.pem\n`).unparseable).toBe(true);
+    }
+  });
+
   it('still reads rename and copy lines, and vetoes an empty or quoted one', () => {
     const r = scan(
       [
@@ -73,13 +83,14 @@ describe('scanReviewPaths: diff --git headers', () => {
 
 describe('scanReviewPaths: hostile headers', () => {
   it('scans an adversarial header in linear time', () => {
+    // The \r tail makes the OLD regex fail to match and backtrack quadratically.
     const time = (reps: number): number => {
-      const d = `diff --git a/a b/${'a b/a'.repeat(reps)}\n`;
+      const body = `diff --git a/a b/${'a b/a'.repeat(reps)}`;
       const start = performance.now();
-      for (let i = 0; i < 5; i++) scan(d);
+      for (let i = 0; i < 5; i++) for (const tail of ['\n', '\r\n']) scan(body + tail);
       return performance.now() - start;
     };
-    const small = Math.max(time(20_000), 5);
+    const small = Math.max(time(20_000), 20);
     const large = time(80_000);
     // 4x the input: a linear scan stays near 4x, a polynomial one is far above.
     expect(large / small).toBeLessThan(12);

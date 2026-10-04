@@ -761,13 +761,16 @@ describe('stubBinaryHunks: diff headers', () => {
   });
 
   it('handles a hostile header in linear time (the bound is generous)', () => {
+    // The \r tail makes the OLD regex fail to match and backtrack quadratically.
     const time = (reps: number): number => {
-      const d = `diff --git a/a b/${'a b/a'.repeat(reps)}\n+x${NUL}y\n`;
+      const body = `diff --git a/a b/${'a b/a'.repeat(reps)}`;
       const start = performance.now();
-      for (let i = 0; i < 5; i++) stubBinaryHunks(d, new Set());
+      for (let i = 0; i < 5; i++) {
+        for (const tail of ['\n', '\r\n']) stubBinaryHunks(`${body}${tail}+x${NUL}y\n`, new Set());
+      }
       return performance.now() - start;
     };
-    const small = Math.max(time(20_000), 5);
+    const small = Math.max(time(20_000), 20);
     const large = time(80_000);
     expect(large / small).toBeLessThan(12);
     expect(large).toBeLessThan(5000);
