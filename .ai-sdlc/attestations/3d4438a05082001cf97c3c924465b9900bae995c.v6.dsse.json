@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "v6",
+  "subject": {
+    "digest": {
+      "sha1": "afa44a8b10c7f51f0cdb465da0b3bc2506b653e8"
+    }
+  },
+  "transcriptLeaves": [
+    {
+      "leafIndex": 0,
+      "reviewerName": "code-reviewer",
+      "transcriptHash": "7c81b47f3df02e6ca8a9a0aad21af14d730319dcf6aaf8e4fbc4827891fe5d20",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "7c81b47f3df02e6ca8a9a0aad21af14d730319dcf6aaf8e4fbc4827891fe5d20",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 1,
+      "reviewerName": "test-reviewer",
+      "transcriptHash": "fd4aaae35fdb21cb37b01d6b255f1a75fecee9a5a442bff48daab420c8495129",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "fd4aaae35fdb21cb37b01d6b255f1a75fecee9a5a442bff48daab420c8495129",
+      "independenceTier": "attested"
+    },
+    {
+      "leafIndex": 2,
+      "reviewerName": "security-reviewer",
+      "transcriptHash": "9a92a2b7dca06b0c0decd6d9ba6634c70fdb063379057a990046dacceed49aa8",
+      "verdictClass": "independent",
+      "harnessTranscriptHash": "9a92a2b7dca06b0c0decd6d9ba6634c70fdb063379057a990046dacceed49aa8",
+      "independenceTier": "attested"
+    }
+  ],
+  "merkleProofs": [
+    {
+      "leafIndex": 0,
+      "proof": [
+        "cd607588a8bc2064233eb54c26f5ad0150056b99b012310809ec977e2d717d2e",
+        "69542775b3d23f03395da7d950e197d4e7bb5d9198af871936841f879f7641f7"
+      ]
+    },
+    {
+      "leafIndex": 1,
+      "proof": [
+        "2aa2210b5bdb8b5bd31aac09762ba90c49660cf5df4213977e9520775ea5daf4",
+        "69542775b3d23f03395da7d950e197d4e7bb5d9198af871936841f879f7641f7"
+      ]
+    },
+    {
+      "leafIndex": 2,
+      "proof": [
+        "cd083a36e4331c011c0add9ae0dd0639af6550e780cf3cb8ac9fb21922a5f922",
+        "e11e9329b2b44226baf4a63ba9eb3b9f1903ed79502bc1ee71cdd62bd9209293"
+      ]
+    }
+  ],
+  "rootHash": "c51c1dc8c3cc198581f46b440bc501d267dc3268be6affe3c34749d88d93f6ee",
+  "rootSignature": "9YRZDBsBYsKw+i8EYrOGiAB7KODJUOTgyvY3H3iaNK9okuVLPdpcIn2VBDhWNEDNJokljTKkuIDl5MmsfSemDA==",
+  "nonce": "8fe5cf27f7d85b9b57f0ffa2bb1d8cadc46ab6f0b72de5fe211ab6e6690e8de4",
+  "leafCount": 3,
+  "signedAt": "2026-10-05T08:27:58.413Z",
+  "signerIdentity": "dominique@local:doms-macbook"
+}
