@@ -58,6 +58,29 @@ const projectDir =
     }
   })();
 
+// ── Role skip (RFC-0051 hierarchy sessions) ──────────────────────────
+// An executor or operator-dispatch session does not run this check: the
+// pre-push gate covers the work those sessions ship, and a full coverage run on
+// every Stop of a session that never edits source directly only burns time. The
+// role is resolved from the roster the same way the PreToolUse role hook does
+// (nearest running roster entry among this process's ancestors, claude pid
+// only). A planner session, a session absent from the roster and any failure to
+// resolve all fall through and run the check as before.
+
+try {
+  const { resolveSessionRole, ancestorPids } = require('./lib/hierarchy-role');
+  const boardDir =
+    process.env.AI_SDLC_DISPATCH_BOARD_DIR || join(projectDir, '.ai-sdlc', 'dispatch');
+  if (existsSync(join(boardDir, 'hierarchy.json'))) {
+    const session = resolveSessionRole({ boardDir, pids: ancestorPids() });
+    if (session && (session.role === 'executor' || session.role === 'operator-dispatch')) {
+      process.exit(0);
+    }
+  }
+} catch {
+  // Role resolution is best-effort: on any error the check runs.
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function readPkg() {

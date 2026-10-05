@@ -71,6 +71,15 @@
             "statusMessage": "Checking write policy..."
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-role-tools.sh\"",
+            "statusMessage": "Checking role tool policy..."
+          }
+        ]
       }
     ],
     "PostToolUse": [

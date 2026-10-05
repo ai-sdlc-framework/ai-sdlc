@@ -1281,6 +1281,161 @@ describe('runDispatchCli ordering commands', () => {
     expect(code).toBe(2);
   });
 
+  describe('write-verdict claim-holder check (executor callers only)', () => {
+    async function claim(taskId: string, worker?: string): Promise<void> {
+      dispatchWriteManifest(boardDir, mkManifest(taskId));
+      await runDispatchCli([
+        'claim',
+        '--board-dir',
+        boardDir,
+        '--worker-kind',
+        'in-session-agent',
+        ...(worker === undefined ? [] : ['--worker', worker]),
+      ]);
+    }
+
+    async function writeVerdictAs(
+      role: 'executor' | 'planner' | null,
+      args: string[],
+    ): Promise<{ code: number; err: string }> {
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const code = await runDispatchCli(['write-verdict', '--board-dir', boardDir, ...args], {
+          callerRole: () => role,
+        });
+        return { code, err: err.mock.calls.map((c) => String(c[0])).join('') };
+      } finally {
+        err.mockRestore();
+      }
+    }
+
+    const verdictExists = (taskId: string): boolean =>
+      existsSync(path.join(boardDir, 'done', `${taskId}.verdict.json`)) ||
+      existsSync(path.join(boardDir, 'failed', `${taskId}.verdict.json`));
+    const inflightExists = (taskId: string): boolean =>
+      existsSync(path.join(boardDir, 'inflight', `${taskId}.dispatch.json`));
+
+    it('refuses an executor without --worker and writes nothing', async () => {
+      await claim('AISDLC-5701', 'executor-a');
+      const { code, err } = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5701',
+        '--outcome',
+        'success',
+      ]);
+      expect(code).toBe(2);
+      expect(err).toContain('must pass --worker');
+      expect(verdictExists('AISDLC-5701')).toBe(false);
+      expect(inflightExists('AISDLC-5701')).toBe(true);
+    });
+
+    it('refuses an executor that does not hold the claim, writes nothing, keeps the claim', async () => {
+      await claim('AISDLC-5702', 'executor-a');
+      const { code, err } = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5702',
+        '--outcome',
+        'success',
+        '--worker',
+        'executor-b',
+      ]);
+      expect(code).toBe(1);
+      expect(err).toContain("claimed by 'executor-a', not 'executor-b'");
+      expect(verdictExists('AISDLC-5702')).toBe(false);
+      expect(inflightExists('AISDLC-5702')).toBe(true);
+    });
+
+    it('refuses an executor on a claim with no recorded worker and on a task not inflight', async () => {
+      await claim('AISDLC-5703');
+      const unnamed = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5703',
+        '--outcome',
+        'failed',
+        '--worker',
+        'executor-a',
+      ]);
+      expect(unnamed.code).toBe(1);
+      expect(unnamed.err).toContain('no recorded worker');
+      const missing = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5704',
+        '--outcome',
+        'failed',
+        '--worker',
+        'executor-a',
+      ]);
+      expect(missing.code).toBe(1);
+      expect(missing.err).toContain('is not inflight');
+      expect(verdictExists('AISDLC-5703')).toBe(false);
+      expect(verdictExists('AISDLC-5704')).toBe(false);
+    });
+
+    it('refuses an executor with an empty --worker or a disagreeing --worker-id', async () => {
+      await claim('AISDLC-5705', 'executor-a');
+      const empty = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5705',
+        '--outcome',
+        'success',
+        '--worker',
+        '',
+      ]);
+      expect(empty.code).toBe(2);
+      const disagree = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5705',
+        '--outcome',
+        'success',
+        '--worker',
+        'executor-a',
+        '--worker-id',
+        'executor-b',
+      ]);
+      expect(disagree.code).toBe(2);
+      expect(disagree.err).toContain('disagree');
+      expect(verdictExists('AISDLC-5705')).toBe(false);
+    });
+
+    it('writes the verdict for an executor that holds the claim, under the recorded name', async () => {
+      await claim('AISDLC-5706', 'executor-a');
+      const { code } = await writeVerdictAs('executor', [
+        '--task-id',
+        'AISDLC-5706',
+        '--outcome',
+        'success',
+        '--worker',
+        'executor-a',
+      ]);
+      expect(code).toBe(0);
+      const verdict = JSON.parse(
+        readFileSync(path.join(boardDir, 'done', 'AISDLC-5706.verdict.json'), 'utf-8'),
+      );
+      expect(verdict.workerId).toBe('executor-a');
+      expect(inflightExists('AISDLC-5706')).toBe(false);
+    });
+
+    it('keeps the legacy behaviour for a non-executor or unresolved caller with an unnamed claim', async () => {
+      for (const [i, role] of ([null, 'planner'] as const).entries()) {
+        const id = `AISDLC-571${i}`;
+        await claim(id);
+        const { code } = await writeVerdictAs(role, [
+          '--task-id',
+          id,
+          '--outcome',
+          'success',
+          '--worker-id',
+          'w1',
+        ]);
+        expect(code).toBe(0);
+        const verdict = JSON.parse(
+          readFileSync(path.join(boardDir, 'done', `${id}.verdict.json`), 'utf-8'),
+        );
+        expect(verdict.workerId).toBe('w1');
+      }
+    });
+  });
+
   it('enqueues from a brief file', async () => {
     for (const id of ['tt-1', 'tt-2']) {
       writeFileSync(path.join(root, 'backlog', 'tasks', `${id} - x.md`), '');

@@ -16,9 +16,16 @@
  *     hibernate signal for the Worker loop.)
  *   - `collect-verdicts [--include-failed]` — print all done/+failed/
  *     verdicts as a JSON array, oldest first.
- *   - `write-verdict --task-id <id> --outcome <enum> [other fields]` —
- *     emit a verdict JSON to done/ or failed/ (routed by outcome). Clears
- *     inflight artifacts.
+ *   - `write-verdict --task-id <id> --outcome <enum> [--worker <name>] [other
+ *     fields]` — emit a verdict JSON to done/ or failed/ (routed by outcome).
+ *     Clears inflight artifacts. When the caller resolves to the executor role
+ *     in the hierarchy roster, --worker is required and must equal the name
+ *     recorded when the task was claimed; a task that is not inflight, or whose
+ *     claim recorded no name, is refused, and nothing is written (exit 1, or 2
+ *     when --worker is missing). The match guards against a mistake, such as
+ *     writing the wrong task's verdict; it is not authentication, the recorded
+ *     name being readable from the inflight manifest. Other callers are not
+ *     checked.
  *   - `remove-verdict --task-id <id> [--from done|failed]` — Conductor uses
  *     this after fan-out completes.
  *   - `heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
@@ -141,7 +148,7 @@ import {
   writeResumeSignal,
   writeVerdict,
 } from '../dispatch/index.js';
-import { completeTask, splitIdList } from '../dispatch/complete.js';
+import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
 import { nextSubId } from '../dispatch/subid.js';
@@ -156,7 +163,12 @@ import type {
   WorkerKind,
 } from '../dispatch/index.js';
 import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
-import { briefToEnqueueEntries, parseBrief } from '../hierarchy/index.js';
+import {
+  briefToEnqueueEntries,
+  parseBrief,
+  resolveCallerRole,
+  type HierarchyRole,
+} from '../hierarchy/index.js';
 import {
   countInFlightBgAgents,
   DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
@@ -253,6 +265,8 @@ export interface DispatchCliDeps {
   operational?: ReadonlySet<string>;
   /** Working directory used to find the main checkout (`requeue`); default the process's. */
   cwd?: string;
+  /** Role the calling process holds in the roster; null when it holds none. */
+  callerRole?: () => HierarchyRole | null;
 }
 
 /** File paths touched by open pull requests, from the `gh` CLI. */
@@ -334,7 +348,37 @@ export async function runDispatchCli(
     case 'write-verdict': {
       const taskId = requireFlag(flags, 'task-id');
       const outcome = requireFlag(flags, 'outcome') as VerdictOutcome;
-      const workerId = resolveWorkerId(boardDir, flags, taskId) ?? `worker-${process.pid}`;
+      // An executor caller must name itself and must hold the claim, exactly as
+      // `complete` requires. A mistake-guard, not authentication: the claim's
+      // recorded name is readable from the inflight manifest. Nothing is written
+      // on a refusal. Any other caller (a worker, the conductor, an unresolved
+      // session) keeps the legacy behaviour, unnamed claims included.
+      const role = (deps.callerRole ?? (() => resolveCallerRole(boardDir)))();
+      let workerId: string;
+      if (role === 'executor') {
+        const worker = flags['worker'];
+        if (worker === undefined || worker === '' || worker === 'true') {
+          process.stderr.write(
+            'cli-dispatch write-verdict: an executor must pass --worker, the name recorded when the task was claimed\n',
+          );
+          return 2;
+        }
+        const legacyWorker = flags['worker-id'];
+        if (legacyWorker !== undefined && legacyWorker !== worker) {
+          process.stderr.write('cli-dispatch write-verdict: --worker and --worker-id disagree\n');
+          return 2;
+        }
+        try {
+          workerId = assertClaimHolder(boardDir, taskId, worker);
+        } catch (err) {
+          process.stderr.write(
+            `cli-dispatch write-verdict: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          return 1;
+        }
+      } else {
+        workerId = resolveWorkerId(boardDir, flags, taskId) ?? `worker-${process.pid}`;
+      }
       const verdict: DispatchVerdict = {
         schemaVersion: 'v1',
         taskId,
@@ -1037,7 +1081,8 @@ Subcommands:
   peek
   claim --worker-kind {in-session-agent|claude-p-shell} [--worker <name>]
   collect-verdicts [--include-failed]
-  write-verdict --task-id <id> --outcome <enum> [--commit-sha <s>]
+  write-verdict --task-id <id> --outcome <enum> [--worker <name>; required for executors]
+                [--commit-sha <s>]
                 [--iterations-attempted <n>] [--session-id <uuid>] ...
   remove-verdict --task-id <id> [--from done|failed]
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>

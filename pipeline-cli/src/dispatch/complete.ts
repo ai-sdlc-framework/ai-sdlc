@@ -59,6 +59,34 @@ export function splitIdList(raw: string | undefined): string[] {
 }
 
 /**
+ * Check that `worker` is the name the claim of `taskId` recorded, and return it.
+ *
+ * Shared by `complete` and `write-verdict` so both refuse the same way. This
+ * guards against writing a verdict for the wrong task by mistake; it is not
+ * authentication, because the recorded name is readable from the inflight
+ * manifest and anyone who reads it can supply it. The recorded name is never
+ * overwritten.
+ * @throws when the task is not inflight, the claim recorded no worker (its
+ *   holder cannot be verified), or `worker` differs from the recorded name.
+ */
+export function assertClaimHolder(boardDir: string, taskId: string, worker: string): string {
+  const inflight = readInflightManifest(boardDir, taskId);
+  if (!inflight) {
+    throw new Error(`${taskId} is not inflight; there is nothing to complete`);
+  }
+  const recorded = inflight.workerId;
+  if (!recorded) {
+    throw new Error(`${taskId} has no recorded worker, so its claim holder cannot be verified`);
+  }
+  if (worker !== recorded) {
+    throw new Error(
+      `${taskId} is claimed by '${recorded}', not '${worker}'; the worker name must match the one recorded at claim time`,
+    );
+  }
+  return recorded;
+}
+
+/**
  * Write the verdict for a task this executor holds.
  * @throws when the task id or outcome is invalid, a follow-up id is not a
  *   sub-id of the task, a decision id or the cause is malformed, the task is not inflight (nothing to complete), or the
