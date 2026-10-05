@@ -251,12 +251,7 @@ const LIST_KEYS = new Set([
   'releaseMergeRoles',
   'releaseAuthors',
 ]);
-const BOOLEAN_KEYS = [
-  'allowForcePush',
-  'allowClosePrIssue',
-  'allowBranchDelete',
-  'allowResetHard',
-] as const;
+const BOOLEAN_KEYS = ['allowClosePrIssue', 'allowBranchDelete', 'allowResetHard'] as const;
 const LOGIN_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 
 /** Extract the raw `governance:` block (scalars and the known list keys); null when absent. */
@@ -268,10 +263,16 @@ export function parseGovernanceBlock(yamlText: string): Record<string, unknown> 
 
   for (const line of yamlText.split('\n')) {
     if (govIndent === null) {
-      const m = /^(\s*)governance:\s*$/.exec(line);
+      const m = /^(\s*)governance:(.*)$/.exec(line);
       if (m) {
         govIndent = m[1].length;
         found = true;
+        // Anything after the key other than a trailing comment cannot be parsed
+        // here: fail closed to `never` (AISDLC-710, mirrors the plugin resolver).
+        if (m[2].replace(/^\s*(#.*)?$/, '') !== '') {
+          raw['allowForcePush'] = '<unparseable governance block>';
+          break;
+        }
       }
       continue;
     }
@@ -297,6 +298,11 @@ export function parseGovernanceBlock(yamlText: string): Record<string, unknown> 
     if (!kv) continue;
     const key = kv[1];
     let value = kv[2].replace(/\s+#.*$/, '').trim();
+    if (value === '' && key === 'allowForcePush') {
+      // Present-but-empty is malformed, not absent: resolves to `never`.
+      raw[key] = '';
+      continue;
+    }
     if (value === '') {
       if (LIST_KEYS.has(key)) {
         raw[key] = [];
@@ -330,7 +336,9 @@ export function resolveGovernanceFromYaml(yamlText: string): {
   policy: GovernancePolicy;
   mergeAuthors: string[];
 } {
-  const policy: GovernancePolicy = { ...STRICT_DEFAULTS };
+  // allowForcePush defaults to lease-on-own-branch (AISDLC-710, mirrors the plugin
+  // resolver); it is not consulted by any merge decision here.
+  const policy: GovernancePolicy = { ...STRICT_DEFAULTS, allowForcePush: true };
   const raw = parseGovernanceBlock(yamlText);
   if (!raw) return { policy, mergeAuthors: [] };
 
@@ -341,8 +349,10 @@ export function resolveGovernanceFromYaml(yamlText: string): {
   for (const key of BOOLEAN_KEYS) {
     if (typeof raw[key] === 'boolean') policy[key] = raw[key] as boolean;
   }
-  if (raw['allowForcePush'] === 'leaseOnOwnBranch') policy.allowForcePush = true;
-  else if (raw['allowForcePush'] === 'never') policy.allowForcePush = false;
+  // AISDLC-710: absent keeps the `leaseOnOwnBranch` default (true); an explicit
+  // value wins; any other present value is malformed and fails closed to false.
+  const fp = raw['allowForcePush'];
+  policy.allowForcePush = fp === undefined || fp === true || fp === 'leaseOnOwnBranch';
 
   const mergeAuthors: string[] = [];
   const list = raw['mergeAuthors'];

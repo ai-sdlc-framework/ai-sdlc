@@ -62,6 +62,20 @@ function isUnder(child: string, parent: string): boolean {
   return child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
 }
 
+/** Task id (lower-case) from the worktree's `.active-task`; null when absent or malformed. */
+function readTaskId(worktreeRoot: string): string | null {
+  try {
+    const first = (
+      readFileSync(path.join(worktreeRoot, '.active-task'), 'utf-8').split('\n')[0] ?? ''
+    ).trim();
+    return /^[A-Za-z][A-Za-z0-9]*(-[A-Za-z][A-Za-z0-9]*)*-\d+(\.\d+)*$/.test(first)
+      ? first.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Null when `worktree` is a genuine task worktree of the repository at `repoRoot`,
  * otherwise the reason it is not. All of these must hold:
@@ -107,6 +121,14 @@ export function checkOwnWorktree(
     }
     if (common !== null && safeReal(path.resolve(gitDir, common)) !== path.join(realMain, '.git')) {
       return 'its common dir is not the main checkout';
+    }
+    // Checked last so every structural refusal keeps its specific reason.
+    // A session rooted at the main checkout is bound to ONE task by the env's
+    // AI_SDLC_ACTIVE_TASK_ID (as the hook sees it): the worktree's .active-task must
+    // equal it. No binding, or a sibling worktree => no lease (AISDLC-710).
+    const bound = (process.env['AI_SDLC_ACTIVE_TASK_ID'] || '').toLowerCase();
+    if (!bound || readTaskId(top) !== bound) {
+      return 'the session is not bound to this task (AI_SDLC_ACTIVE_TASK_ID / .active-task)';
     }
     return null;
   } catch {

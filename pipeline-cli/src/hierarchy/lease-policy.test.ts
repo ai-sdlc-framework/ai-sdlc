@@ -28,10 +28,18 @@ const trusted = require(path.join(hooksLib, 'trusted-policy.js')) as {
 };
 
 let tmp: string;
+let savedBinding: string | undefined;
 beforeEach(() => {
   tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'lease-policy-')));
+  // The session binding the hook reads from its own env (AISDLC-710).
+  savedBinding = process.env['AI_SDLC_ACTIVE_TASK_ID'];
+  process.env['AI_SDLC_ACTIVE_TASK_ID'] = 'AISDLC-9';
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
+afterEach(() => {
+  if (savedBinding === undefined) delete process.env['AI_SDLC_ACTIVE_TASK_ID'];
+  else process.env['AI_SDLC_ACTIVE_TASK_ID'] = savedBinding;
+  rmSync(tmp, { recursive: true, force: true });
+});
 
 describe('isProtectedBranch', () => {
   it('protects the defaults and the policy list, and nothing else', () => {
@@ -91,6 +99,7 @@ function fixture(): { main: string; wt: string; gitDir: string } {
   writeFileSync(path.join(wt, '.git'), `gitdir: ${gitDir}\n`);
   writeFileSync(path.join(gitDir, 'gitdir'), `${path.join(wt, '.git')}\n`);
   writeFileSync(path.join(gitDir, 'commondir'), '../..\n');
+  writeFileSync(path.join(wt, '.active-task'), 'AISDLC-9\n');
   return { main, wt, gitDir };
 }
 
@@ -156,6 +165,16 @@ describe('checkOwnWorktree', () => {
     expect(checkOwnWorktree(wt, wt, plainCheckout)).not.toBeNull();
   });
 
+  it('refuses without a session binding or when it names another task (AISDLC-710)', () => {
+    const { main, wt } = fixture();
+    delete process.env['AI_SDLC_ACTIVE_TASK_ID'];
+    expect(checkOwnWorktree(main, wt, plainCheckout)).toMatch(/not bound/);
+    process.env['AI_SDLC_ACTIVE_TASK_ID'] = 'AISDLC-8';
+    expect(checkOwnWorktree(main, wt, plainCheckout)).toMatch(/not bound/);
+    process.env['AI_SDLC_ACTIVE_TASK_ID'] = 'aisdlc-9';
+    expect(checkOwnWorktree(main, wt, plainCheckout)).toBeNull();
+  });
+
   it('refuses a worktree path that does not exist', () => {
     const { main } = fixture();
     const missing = path.join(main, '.worktrees', 'missing');
@@ -189,6 +208,7 @@ describe('checkOwnWorktree lockstep with the hook', () => {
     );
     const good = path.join(main, '.worktrees', 'aisdlc-1');
     git(main, 'worktree', 'add', '-q', '-b', 'ai-sdlc/aisdlc-1', good);
+    writeFileSync(path.join(good, '.active-task'), 'AISDLC-1\n');
 
     // Forged: a directory under .worktrees/ whose .git points at the real main's .git.
     const forgedDir = path.join(main, '.worktrees', 'forged');
@@ -217,6 +237,7 @@ describe('checkOwnWorktree lockstep with the hook', () => {
   }
 
   it('accepts and refuses exactly what the hook does', () => {
+    process.env['AI_SDLC_ACTIVE_TASK_ID'] = 'AISDLC-1';
     for (const [label, { main, wt }] of Object.entries(realFixtures())) {
       let hookAccepts: boolean;
       try {
@@ -228,7 +249,18 @@ describe('checkOwnWorktree lockstep with the hook', () => {
     }
   });
 
+  it('agrees with the hook when the session is unbound or bound to another task', () => {
+    const { main, wt } = realFixtures().genuine!;
+    for (const binding of [undefined, '', 'AISDLC-2']) {
+      if (binding === undefined) delete process.env['AI_SDLC_ACTIVE_TASK_ID'];
+      else process.env['AI_SDLC_ACTIVE_TASK_ID'] = binding;
+      expect(trusted.resolveLeaseWorktree(main, wt), String(binding)).toBeNull();
+      expect(checkOwnWorktree(main, wt), String(binding)).not.toBeNull();
+    }
+  });
+
   it('accepts a genuine git worktree', () => {
+    process.env['AI_SDLC_ACTIVE_TASK_ID'] = 'AISDLC-1';
     const { main, wt } = realFixtures().genuine!;
     expect(checkOwnWorktree(main, wt)).toBeNull();
   });
