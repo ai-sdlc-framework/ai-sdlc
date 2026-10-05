@@ -32,6 +32,15 @@ researchSubagentConfidenceThreshold: 0.6 # default: 0.6
 # window promotes the corpus entry to a positive exemplar.
 overrideWindowHours: 24 # default: 24
 
+# ── Class (b) timebox (AISDLC-703 / DEC-0059) ────────────────────────────────
+# A timeboxed decision lapses after `timeboxWindowCount` windows of
+# `timeboxWindowHours` each: 2 x 5h = 10 hours by default. `cli-decisions add`
+# applies that product as the timebox when a decision names an
+# --autonomous-fallback and no --timebox. A weakening option never applies
+# itself when the timebox lapses.
+timeboxWindowHours: 5 # default: 5
+timeboxWindowCount: 2 # default: 2
+
 # ── Capacity (RFC-0035 §7.1 / Phase 7) ──────────────────────────────────────
 # Per-tier daily decision budgets. Composes with RFC-0016 t-shirt sizing
 # (XS / S / M / L / XL) — Decision Catalog does NOT define a parallel

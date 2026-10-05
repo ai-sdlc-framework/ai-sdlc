@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { checkGovernanceFallback, fallbackWeakensControl } from './governance-fallback.js';
+import {
+  checkGovernanceFallback,
+  deriveGovernanceChange,
+  detectGovernanceSurfaces,
+  fallbackWeakensControl,
+} from './governance-fallback.js';
 
 const OPTS = ['loosen', 'keep'];
 const weak = { kind: 'weakening' as const, weakeningOptionIds: ['loosen'] };
@@ -42,5 +47,41 @@ describe('fallbackWeakensControl', () => {
     expect(fallbackWeakensControl(weak, 'loosen')).toBe(true);
     expect(fallbackWeakensControl(weak, 'keep')).toBe(false);
     expect(fallbackWeakensControl(undefined, 'loosen')).toBe(false);
+  });
+});
+
+describe('detectGovernanceSurfaces / deriveGovernanceChange', () => {
+  it.each([
+    ['ai-sdlc-plugin/hooks/x.js', 'plugin hooks'],
+    ['governance resolver defaults', 'governance resolver and schema defaults'],
+    ['.ai-sdlc/agent-role.yaml', 'agent-role config and templates'],
+    ['the required checks list', 'required checks and rulesets'],
+    ['.github/workflows/ci.yml', 'workflow gates'],
+    ['CLAUDE.md', 'CLAUDE.md rule sections'],
+    ['allowForcePush', 'merge and role restrictions'],
+  ])('%s names %s', (text, surface) => {
+    expect(detectGovernanceSurfaces(text)).toContain(surface);
+  });
+
+  it('finds nothing in ordinary text', () => {
+    expect(detectGovernanceSurfaces('helper naming', undefined, 'pick a name')).toEqual([]);
+  });
+
+  it('returns the authored tag unchanged when nothing matches, and a derived tag otherwise', () => {
+    expect(deriveGovernanceChange(undefined, [])).toBeUndefined();
+    expect(deriveGovernanceChange(weak, [])).toBe(weak);
+    expect(deriveGovernanceChange(undefined, ['workflow gates'])).toEqual({
+      kind: 'weakening',
+      weakeningOptionIds: [],
+      derived: true,
+      surfaces: ['workflow gates'],
+    });
+  });
+
+  it('a derived tag with no declared option refuses a fallback and auto-expire never applies one', () => {
+    const d = deriveGovernanceChange(undefined, ['workflow gates']);
+    expect(checkGovernanceFallback(d, OPTS, 'keep')).toMatch(/tagged automatically/);
+    expect(checkGovernanceFallback(d, OPTS, undefined)).toBeNull();
+    expect(fallbackWeakensControl(d, 'keep')).toBe(true);
   });
 });

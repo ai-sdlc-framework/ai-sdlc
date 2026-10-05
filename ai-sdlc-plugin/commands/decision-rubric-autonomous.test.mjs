@@ -22,7 +22,7 @@ describe('decision-rubric autonomous mode', () => {
   it('records via add plus answer, with timebox and fallback for class (b)', () => {
     assert.match(raw, /cli-decisions add --summary/);
     assert.match(raw, /cli-decisions answer <id> <option>/);
-    assert.match(raw, /--timebox P1D --autonomous-fallback/);
+    assert.match(raw, /--timebox PT10H --autonomous-fallback/);
   });
 
   it('keeps the five parts and never self-decides class (c)', () => {

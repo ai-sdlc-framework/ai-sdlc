@@ -10,6 +10,13 @@
  *
  * Tightening decisions are unaffected.
  *
+ * The tag is also DERIVED (AISDLC-703): `cli-decisions add` applies it when the
+ * decision's scope, context-ref or body names a governance surface (see
+ * `GOVERNANCE_SURFACES`). An author can add the tag but cannot remove a derived
+ * one. A derived tag with no declared weakening option cannot tell which option
+ * loosens the control, so it refuses any `--autonomous-fallback` and `auto-expire`
+ * never applies one: the control stays until the planner or dispatch session answers.
+ *
  * @module decisions/governance-fallback
  */
 
@@ -19,6 +26,61 @@ export interface GovernanceChange {
   kind: GovernanceChangeKind;
   /** Option ids that weaken a control. Required and non-empty when kind is `weakening`. */
   weakeningOptionIds: string[];
+  /** Set when `cli-decisions add` applied the tag itself. Such a tag cannot be removed. */
+  derived?: boolean;
+  /** Names of the governance surfaces the derivation matched. Only present with `derived`. */
+  surfaces?: string[];
+}
+
+/** The one list of governance surfaces. A decision naming any of them is tagged. */
+export const GOVERNANCE_SURFACES: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+  {
+    name: 'plugin hooks',
+    pattern: /ai-sdlc-plugin\/hooks\b|\bPreToolUse\b|enforce-blocked-actions|\.husky\//i,
+  },
+  {
+    name: 'governance resolver and schema defaults',
+    pattern: /governance[-\s/]?(resolver|schema)|resolved-governance|agent-role\.schema/i,
+  },
+  {
+    name: 'agent-role config and templates',
+    pattern: /agent-role(\.yaml|\.schema|[-\s](config|template))/i,
+  },
+  {
+    name: 'required checks and rulesets',
+    pattern: /required[-\s]checks?|branch[-\s]protection|\brulesets?\b|ai-sdlc\/pr-ready/i,
+  },
+  { name: 'workflow gates', pattern: /\.github\/workflows\/|workflow gates?/i },
+  { name: 'CLAUDE.md rule sections', pattern: /CLAUDE\.md/ },
+  {
+    name: 'merge and role restrictions',
+    pattern:
+      /allowForcePush|blockedActions|blocked[-\s]actions|merge restrictions?|role restrictions?|only humans merge/i,
+  },
+];
+
+/** Names of the governance surfaces mentioned in the given texts (scope, context-ref, body). */
+export function detectGovernanceSurfaces(...texts: Array<string | undefined>): string[] {
+  const haystack = texts.filter((t): t is string => typeof t === 'string').join('\n');
+  return GOVERNANCE_SURFACES.filter((s) => s.pattern.test(haystack)).map((s) => s.name);
+}
+
+/**
+ * Merges an author-supplied tag with the derived one. A derived tag is always
+ * present when a surface matches; the author's kind and `--weakens` are kept.
+ * With no author tag the derived tag is a weakening one with no declared option.
+ */
+export function deriveGovernanceChange(
+  authored: GovernanceChange | undefined,
+  surfaces: string[],
+): GovernanceChange | undefined {
+  if (surfaces.length === 0) return authored;
+  return {
+    kind: authored?.kind ?? 'weakening',
+    weakeningOptionIds: authored?.weakeningOptionIds ?? [],
+    derived: true,
+    surfaces,
+  };
 }
 
 /** Returns an error message naming the rule and the ways forward, or null when the input is fine. */
@@ -37,6 +99,14 @@ export function checkGovernanceFallback(
       ? '--weakens is only valid with --governance-change weakening'
       : null;
   }
+  if (change.derived && change.weakeningOptionIds.length === 0) {
+    if (fallback === undefined) return null;
+    return (
+      `governance-fallback rule: this decision names a governance surface (${(change.surfaces ?? []).join(', ')}) so it is tagged automatically, ` +
+      `and --autonomous-fallback "${fallback}" cannot be checked against a declared weakening option. ` +
+      'Either declare --governance-change weakening --weakens <option-id> (or --governance-change tightening) so the fallback can be checked, or add the decision with no fallback so it stays open until the planner or dispatch session answers it.'
+    );
+  }
   if (change.weakeningOptionIds.length === 0) {
     return '--governance-change weakening needs at least one --weakens <option-id> naming the option that weakens the control';
   }
@@ -54,5 +124,7 @@ export function fallbackWeakensControl(
   change: GovernanceChange | undefined,
   optionId: string,
 ): boolean {
-  return change?.kind === 'weakening' && change.weakeningOptionIds.includes(optionId);
+  if (change?.kind !== 'weakening') return false;
+  if (change.derived && change.weakeningOptionIds.length === 0) return true;
+  return change.weakeningOptionIds.includes(optionId);
 }

@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { loadDecisionsConfig, resolveTimeboxConfig } from './decisions-config.js';
 import { readDecisionEvents, resolveDecisionsDir } from './event-log.js';
 import type {
   AutoExpiredEvent,
@@ -103,6 +104,8 @@ export interface OperatorDigest {
   generatedAt: string;
   answered: DigestAnswered[];
   pending: DigestPending[];
+  /** Default class (b) timebox in hours, from config (DEC-0059). */
+  defaultTimeboxHours?: number;
 }
 
 const CLASS_LINE = /^\s*Class:\s*\(?([abc])\)?\b/im;
@@ -236,6 +239,12 @@ function describeProvenance(p: Provenance | null, author: string | undefined): s
 
 export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
   const lines = [`# Operator digest`, ``, `Since ${d.since} (generated ${d.generatedAt})`, ``];
+  if (d.defaultTimeboxHours !== undefined) {
+    lines.push(
+      `Default timebox: ${d.defaultTimeboxHours} hours. A weakening option never applies itself when a timebox lapses.`,
+      ``,
+    );
+  }
   lines.push(`## Decided (${d.answered.length})`, ``);
   if (d.answered.length === 0) lines.push('None.', '');
   for (const a of d.answered) {
@@ -307,6 +316,9 @@ export function runOperatorDigest(opts: RunOperatorDigestOpts): OperatorDigest {
     now,
     opts.provenance ?? gitProvenanceResolver(opts.workDir),
   );
+  digest.defaultTimeboxHours = resolveTimeboxConfig(
+    loadDecisionsConfig({ workDir: opts.workDir }),
+  ).defaultHours;
   if (opts.mark) {
     mkdirSync(dir, { recursive: true });
     writeFileSync(markerPath, JSON.stringify({ at: digest.generatedAt }) + '\n');

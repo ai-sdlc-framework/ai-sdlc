@@ -72,6 +72,7 @@ import {
   renderSubDecisionGraphMermaid,
   resolveDecisionExemplarsPath,
   resolveDecisionsConfig,
+  resolveTimeboxConfig,
   resolveEventLogPath,
   resolveOperatorStatePath,
   resolvePendingExemplarsPath,
@@ -100,6 +101,8 @@ import {
 } from '../decisions/index.js';
 import {
   checkGovernanceFallback,
+  deriveGovernanceChange,
+  detectGovernanceSurfaces,
   fallbackWeakensControl,
   type GovernanceChange,
 } from '../decisions/governance-fallback.js';
@@ -308,6 +311,24 @@ interface AddInputs {
   contextRef?: string;
 }
 
+/**
+ * AISDLC-703: derive the governance-change tag from the decision text, then apply
+ * the weakening-fallback rule. Runs for both the flag and the interactive path.
+ */
+function finalizeGovernanceChange(inputs: AddInputs): void {
+  const derived = deriveGovernanceChange(
+    inputs.governanceChange,
+    detectGovernanceSurfaces(inputs.scope, inputs.contextRef, inputs.body),
+  );
+  if (derived !== undefined) inputs.governanceChange = derived;
+  const governanceError = checkGovernanceFallback(
+    inputs.governanceChange,
+    inputs.options.map((o) => o.id),
+    inputs.autonomousFallbackOptionId,
+  );
+  if (governanceError) throw new Error(governanceError);
+}
+
 async function gatherAddInputsInteractive(): Promise<AddInputs> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
@@ -502,6 +523,9 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
   }
 
   // AISDLC-703 (DEC-0053): governance-change tag and the weakening-fallback rule.
+  // The tag is derived when scope, context-ref or body names a governance surface;
+  // an author can add it but never remove a derived one (--governance-change has
+  // no value that clears the tag, and yargs refuses --no-governance-change).
   if (typeof argv['governance-change'] === 'string' && argv['governance-change']) {
     const weakens = ([] as unknown[])
       .concat(argv.weakens ?? [])
@@ -514,12 +538,6 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
   } else if (argv.weakens !== undefined) {
     throw new Error('--weakens needs --governance-change weakening');
   }
-  const governanceError = checkGovernanceFallback(
-    inputs.governanceChange,
-    options.map((o) => o.id),
-    inputs.autonomousFallbackOptionId,
-  );
-  if (governanceError) throw new Error(governanceError);
 
   if (typeof argv['context-ref'] === 'string' && argv['context-ref']) {
     inputs.contextRef = String(argv['context-ref']);
@@ -719,7 +737,7 @@ export function buildDecisionsCli(): Argv {
           })
           .option('timebox', {
             type: 'string',
-            describe: `AISDLC-447 — operator-authored timebox. ISO-8601 duration (PT4H, P1D, P7D, P30D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). When set, the decision sorts to the top of \`list\` urgency + expires at created+duration.`,
+            describe: `AISDLC-447 — operator-authored timebox. ISO-8601 duration (PT4H, P1D, P7D, P30D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). When set, the decision sorts to the top of \`list\` urgency + expires at created+duration. Default when --autonomous-fallback is given without a timebox: 10 hours (two 5-hour windows, from decisions-config).`,
           })
           .option('timebox-hours', {
             type: 'number',
@@ -794,6 +812,16 @@ export function buildDecisionsCli(): Argv {
               );
             }
             inputs = await gatherAddInputsInteractive();
+          }
+          finalizeGovernanceChange(inputs);
+          // DEC-0059: a decision with an --autonomous-fallback is class (b); without an
+          // explicit timebox it gets the configured default (two 5-hour windows, 10 hours).
+          if (inputs.timebox === undefined && inputs.autonomousFallbackOptionId !== undefined) {
+            inputs.timebox = parseTimebox(
+              hoursToIsoDuration(
+                resolveTimeboxConfig(loadDecisionsConfig({ workDir })).defaultHours,
+              ),
+            ).duration;
           }
         } catch (err) {
           fail((err as Error).message);

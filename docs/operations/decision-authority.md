@@ -18,7 +18,7 @@ A relayed chat message alone is not authority. The permission-laundering rules a
 | (b) timeboxed | Hard to reverse, wide blast radius, or weakens a governance or trust-chain control | Decide by rubric, record with `--timebox` and `--autonomous-fallback`; applied when the timebox lapses without an operator override |
 | (c) operator-only | Legal and licensing, money, accounts and credentials, actions only the operator's identity can perform | Never self-decide. Record it with `cli-decisions escalate`, park only that task, and keep working other eligible tasks |
 
-The default timebox is 24 hours. It is stated in config as `overrideWindowHours` in `.ai-sdlc/decisions-config.yaml` (template: `.ai-sdlc/templates/decisions-config.yaml`).
+The default timebox is 10 hours, as two 5-hour windows (DEC-0059). It is stated in config as `timeboxWindowHours: 5` and `timeboxWindowCount: 2` in `.ai-sdlc/decisions-config.yaml` (template: `.ai-sdlc/templates/decisions-config.yaml`). `cli-decisions add` applies the product (10 hours) as the timebox when a decision names an `--autonomous-fallback` and no `--timebox`; an explicit `--timebox` keeps working and wins. `cli-decisions operator-digest` prints the default at the top. A weakening option never applies itself when the timebox lapses. (`overrideWindowHours`, 24, is the separate Stage C override window and is unchanged.)
 
 ### Deriving the class
 
@@ -28,7 +28,11 @@ Ask three questions, in this order, and take the strictest answer:
 2. **Blast radius.** How many sessions, tasks, adopters or releases does a mistake touch? Wide means at least (b).
 3. **Control change.** Does it change a trust-chain or governance control (hooks, attestation, merge rights, trusted keys, review requirements)? Weakening one is (b). Anything that needs the operator's identity, money, a legal position or credentials is (c).
 
-Class (c) is never derived from the other questions; it is recognised by its subject.
+Class (c) is never derived from the other questions; it is recognised by its subject. Class (c) is short: legal and licensing, money, accounts and credentials, and actions only the operator's identity can perform (merging the release PR, closing or disarming a PR).
+
+**What counts as a weakening.** Only a change that loosens a control beyond what a recorded decision already allows is a weakening. Tightening a control, or applying what a decision on `main` already permits, is class (a).
+
+**Away rule.** No session opens a blocking question prompt to the operator while the operator is away. Questions go to the planner, which decides (a) and (b) and collects (c).
 
 ### Examples
 
@@ -39,6 +43,8 @@ Class (c) is never derived from the other questions; it is recognised by its sub
 | Which of two equivalent file layouts to use | (a) | Cheap to change |
 | Release timing per DEC-0042 | (b), or (a) when the criteria give it | A release is hard to undo, so it is timeboxed unless it is a routine cut the criteria already cover |
 | A change that weakens a governance or trust-chain control | (b) | Control change, even when small |
+| Tightening a control to match a decision already on `main` (AISDLC-720 failing closed) | (a) | The recorded decision already allows it; nothing is loosened |
+| Choosing the option that needs no exception to any hook or rule (AISDLC-721 waits for the hook fix, then uses the Edit tool) | (a) | No control is bypassed or loosened |
 | Subscribing to a paid service | (c) | Money and an account |
 | Accepting a licence for a dependency | (c) | Legal |
 
@@ -65,7 +71,7 @@ node pipeline-cli/bin/cli-decisions.mjs answer DEC-NNNN opt-a --rationale "<why,
 # class (b): hard to reverse, applied when the timebox lapses
 node pipeline-cli/bin/cli-decisions.mjs add --summary "<one line>" --scope <area> \
   --option "opt-a:<description>" --option "opt-b:<description>" \
-  --timebox P1D --autonomous-fallback opt-a
+  --timebox PT10H --autonomous-fallback opt-a
 ```
 
 To make the class visible to the digest, add a line `Class: (a)`, `Class: (b)` or `Class: (c)` to the decision body. Without one, a decision with a timebox reads as (b) and one without reads as (a).
@@ -99,10 +105,12 @@ A decision that weakens a control (removes or loosens a hook, gate, required che
 node pipeline-cli/bin/cli-decisions.mjs add --summary "<one line>" --scope governance \
   --option "loosen:<what loosens>" --option "keep:<control stays>" \
   --governance-change weakening --weakens loosen \
-  --timebox P1D --autonomous-fallback keep
+  --timebox PT10H --autonomous-fallback keep
 ```
 
 The `--autonomous-fallback` must be a non-weakening option. `cli-decisions add` refuses a weakening fallback and names both ways forward: pick a non-weakening fallback, or add the decision with no fallback so it stays open for the planner or dispatch session. `auto-expire` never applies a weakening option, so a lapsed timebox resolves to "control stays". Tightening decisions (`--governance-change tightening`) are unaffected.
+
+`cli-decisions add` also derives the tag. When the decision's scope, context-ref or body names a governance surface (plugin hooks, the governance resolver and schema defaults, agent-role config and templates, required checks and rulesets, workflow gates, CLAUDE.md rule sections, merge and role restrictions; one shared list, `GOVERNANCE_SURFACES` in `pipeline-cli/src/decisions/governance-fallback.ts`), the tag is applied automatically. An author can add the tag or declare `--weakens`, but cannot remove an auto-applied one. With no declared `--weakens` the command cannot tell which option loosens the control, so it refuses any `--autonomous-fallback` (declare `--governance-change weakening --weakens <id>` or `tightening`, or add the decision with no fallback) and `auto-expire` never applies one.
 
 ## Overriding a decision
 

@@ -157,6 +157,23 @@ describe('runOperatorDigest', () => {
     }
   });
 
+  it('states the 10-hour default timebox, and a config of window length and count changes it', () => {
+    const dir = setup();
+    try {
+      const d = runOperatorDigest({ workDir: dir });
+      expect(d.defaultTimeboxHours).toBe(10);
+      expect(renderOperatorDigestMarkdown(d)).toMatch(/Default timebox: 10 hours/);
+      mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(dir, '.ai-sdlc', 'decisions-config.yaml'),
+        'timeboxWindowHours: 3\ntimeboxWindowCount: 4\n',
+      );
+      expect(runOperatorDigest({ workDir: dir }).defaultTimeboxHours).toBe(12);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('--mark records the cutoff, the next run uses it, and no --mark writes nothing', () => {
     const dir = setup();
     try {

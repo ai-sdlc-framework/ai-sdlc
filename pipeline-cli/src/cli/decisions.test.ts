@@ -1813,6 +1813,22 @@ describe('AISDLC-463 — add new flags + backward-compat', () => {
     expect(d.spec.contextRef).toBe('pr:1234');
   });
 
+  it('DEC-0059 — an autonomous fallback with no timebox gets the 10-hour default (two 5-hour windows)', async () => {
+    const d = await addDecision('--autonomous-fallback', 'opt-a');
+    expect(d.spec.timebox).toBe('PT10H');
+    expect(d.status.timeboxExpiresAt).toBeTruthy();
+  });
+
+  it('DEC-0059 — an explicit --timebox wins over the default', async () => {
+    const d = await addDecision('--autonomous-fallback', 'opt-a', '--timebox', 'PT4H');
+    expect(d.spec.timebox).toBe('PT4H');
+  });
+
+  it('DEC-0059 — no fallback means no default timebox', async () => {
+    const d = await addDecision();
+    expect(d.spec.timebox).toBeUndefined();
+  });
+
   it('AC#1 — --timebox-hours maps onto the existing timebox machinery (PT4H)', async () => {
     const d = await addDecision('--timebox-hours', '4');
     expect(d.spec.timebox).toBe('PT4H');
@@ -2434,5 +2450,107 @@ describe('AISDLC-703 — weakening-fallback rule', () => {
     expect(r.skipped).toEqual([
       { decisionId: 'DEC-0001', reason: 'weakening-fallback-control-stays' },
     ]);
+  });
+});
+
+describe('AISDLC-703 — derived governance-change tag', () => {
+  type Added = { ok: boolean; decision: { spec: { governanceChange?: Record<string, unknown> } } };
+  const add = (scope: string, ...extra: string[]) =>
+    setArgv(
+      'add',
+      '--summary',
+      'Change a control',
+      '--scope',
+      scope,
+      '--option',
+      'loosen:Loosen it',
+      '--option',
+      'keep:Keep it',
+      ...extra,
+      '--format',
+      'json',
+    );
+
+  it('auto-tags a decision whose scope names a hook path', async () => {
+    add('ai-sdlc-plugin/hooks/enforce-blocked-actions.js');
+    await buildDecisionsCli().parseAsync();
+    const gc = stdoutJson<Added>().decision.spec.governanceChange;
+    expect(gc).toMatchObject({ kind: 'weakening', derived: true, weakeningOptionIds: [] });
+    expect(gc?.surfaces).toContain('plugin hooks');
+  });
+
+  it('auto-tags a decision whose body names allowForcePush', async () => {
+    add('ops', '--body', 'Set allowForcePush to always for every branch.');
+    await buildDecisionsCli().parseAsync();
+    const gc = stdoutJson<Added>().decision.spec.governanceChange;
+    expect(gc?.derived).toBe(true);
+    expect(gc?.surfaces).toContain('merge and role restrictions');
+  });
+
+  it('auto-tags from the context-ref', async () => {
+    add('ops', '--context-ref', '.github/workflows/ai-sdlc-gate.yml');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<Added>().decision.spec.governanceChange?.surfaces).toContain(
+      'workflow gates',
+    );
+  });
+
+  it('leaves an ordinary decision untagged, fallback included', async () => {
+    add(
+      'naming',
+      '--body',
+      'Pick a name for the helper.',
+      '--timebox',
+      'P1D',
+      '--autonomous-fallback',
+      'loosen',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<Added>();
+    expect(r.ok).toBe(true);
+    expect(r.decision.spec.governanceChange).toBeUndefined();
+  });
+
+  it('refuses a fallback on an auto-tagged decision with no declared weakening option', async () => {
+    add('CLAUDE.md', '--timebox', 'P1D', '--autonomous-fallback', 'loosen');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/governance-fallback rule/);
+    expect(stderrText()).toMatch(/tagged automatically/);
+  });
+
+  it('accepts a declared non-weakening fallback on an auto-tagged decision and keeps the tag derived', async () => {
+    add(
+      'CLAUDE.md',
+      '--governance-change',
+      'weakening',
+      '--weakens',
+      'loosen',
+      '--timebox',
+      'P1D',
+      '--autonomous-fallback',
+      'keep',
+    );
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<Added>().decision.spec.governanceChange).toMatchObject({
+      kind: 'weakening',
+      weakeningOptionIds: ['loosen'],
+      derived: true,
+    });
+  });
+
+  it('cannot remove an auto-applied tag: --no-governance-change is refused by the flag choices', async () => {
+    add('CLAUDE.md', '--no-governance-change');
+    await expect((async () => buildDecisionsCli().parseAsync())()).rejects.toThrow(
+      /process\.exit\(1\)/,
+    );
+  });
+
+  it('cannot remove an auto-applied tag by declaring tightening: the tag stays', async () => {
+    add('CLAUDE.md', '--governance-change', 'tightening');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<Added>().decision.spec.governanceChange).toMatchObject({
+      kind: 'tightening',
+      derived: true,
+    });
   });
 });
