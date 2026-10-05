@@ -1,6 +1,8 @@
 ---
 id: AISDLC-383.5
-title: 'feat(hooks): bypass-all-gates env var for friction relief during RFC-0042 cutover'
+title: >-
+  feat(hooks): bypass-all-gates env var for friction relief during RFC-0042
+  cutover
 status: Done
 assignee: []
 created_date: '2026-05-20'
@@ -15,8 +17,13 @@ references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - scripts/check-coverage.sh
   - scripts/check-task-moved.sh
-  - scripts/check-dor-gate.sh
   - scripts/check-attestation-sign.sh
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-dor-gate.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Scope (RFC-0042 enabler, parallel to Phase 1)

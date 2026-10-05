@@ -12,8 +12,13 @@ dependencies: []
 references:
   - .backlog-drift.yml
   - .github/workflows/ci.yml
-  - scripts/check-backlog-drift.sh
 priority: high
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-backlog-drift.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Description

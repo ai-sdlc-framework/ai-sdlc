@@ -1,7 +1,8 @@
 ---
 id: AISDLC-712
 title: >-
-  The pre-push readiness gate and the local backlog-drift checks are deleted, not repaired
+  The pre-push readiness gate and the local backlog-drift checks are deleted,
+  not repaired
 status: Done
 assignee: []
 created_date: '2026-10-04'
@@ -11,10 +12,14 @@ labels:
   - bug
   - governance
 dependencies: []
-references:
-  - scripts/check-dor-gate.sh
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-dor-gate.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Description

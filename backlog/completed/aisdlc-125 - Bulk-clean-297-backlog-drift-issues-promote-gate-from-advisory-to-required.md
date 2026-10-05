@@ -15,9 +15,14 @@ dependencies: []
 references:
   - .github/workflows/ci.yml
   - CLAUDE.md
-  - scripts/check-backlog-drift.sh
   - docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md
 priority: high
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-backlog-drift.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Description

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-706
 title: >-
-  Backlog drift gate scans tasks the branch does not change; local and CI disagree
+  Backlog drift gate scans tasks the branch does not change; local and CI
+  disagree
 status: Done
 assignee: []
 created_date: '2026-10-03'
@@ -10,10 +11,14 @@ labels:
   - ci
   - bug
 dependencies: []
-references:
-  - scripts/check-backlog-drift-on-push.sh
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-backlog-drift-on-push.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Description
