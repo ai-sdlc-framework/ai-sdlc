@@ -428,6 +428,12 @@ function norm(v) {
     .toLowerCase();
 }
 
+// Fail closed: non-empty and not explicitly falsy.
+function isTruthy(v) {
+  const n = norm(v);
+  return n !== '' && !FALSY.includes(n);
+}
+
 function isUntrustedRun(env = process.env) {
   const raw = norm(env && env.AI_SDLC_UNTRUSTED_RUN);
   // Fail closed: any non-empty value that is not explicitly falsy is untrusted.
@@ -435,9 +441,12 @@ function isUntrustedRun(env = process.env) {
     return { untrusted: true, reason: String((env && env.AI_SDLC_UNTRUSTED_REASON) || '').trim() };
   }
   const internal = norm(env && env.AI_SDLC_INTERNAL_RUN);
-  const hasInternalMarker = internal !== '' && !FALSY.includes(internal);
-  if (norm(env && env.GITHUB_ACTIONS) === 'true' && !hasInternalMarker) {
-    return { untrusted: true, reason: 'GitHub Actions run without an internal-run marker' };
+  const hasInternalMarker = isTruthy(internal);
+  if (isTruthy(env && env.GITHUB_ACTIONS) && !hasInternalMarker) {
+    return {
+      untrusted: true,
+      reason: 'GitHub Actions run without an internal-run marker (AI_SDLC_INTERNAL_RUN)',
+    };
   }
   return { untrusted: false, reason: '' };
 }

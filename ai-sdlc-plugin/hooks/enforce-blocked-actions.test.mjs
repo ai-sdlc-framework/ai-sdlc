@@ -1944,7 +1944,6 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () 
           ...process.env,
           GITHUB_ACTIONS: '',
           CLAUDE_PROJECT_DIR: dir,
-          GITHUB_ACTIONS: '',
           AI_SDLC_UNTRUSTED_RUN: '',
           ...env,
         },
