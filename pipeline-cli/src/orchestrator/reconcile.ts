@@ -67,6 +67,7 @@ import {
   patchDoneVerdict,
   removeVerdict,
 } from '../dispatch/board.js';
+import { DEFAULT_ROLE_MODELS } from '../routing/default-table.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { writeEvent, type WriteEventOpts } from './events.js';
@@ -218,7 +219,7 @@ export interface RunReconcileOptions {
   schemaVersion?: 'v5' | 'v6';
   /**
    * Override the model passed to `cli-attestation emit-leaf`. Defaults to
-   * `claude-sonnet-4-6`.
+   * the routing default for `code-reviewer` (the `sonnet` alias).
    */
   reviewerModel?: string;
   /**
@@ -573,7 +574,7 @@ function runReconcileInner(
 
   const cliAttestationBin =
     options.cliAttestationBin ?? path.join(workDir, 'pipeline-cli', 'bin', 'cli-attestation.mjs');
-  const reviewerModel = options.reviewerModel ?? 'claude-sonnet-4-6';
+  const reviewerModel = options.reviewerModel ?? DEFAULT_ROLE_MODELS['code-reviewer'];
   const harness = options.harness ?? 'claude-code';
 
   // AISDLC-493 — capture reviewer fan-out start/end timestamps for verdict patching.

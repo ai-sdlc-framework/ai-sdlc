@@ -13,6 +13,7 @@
  * - Review policy injected via appendSystemPrompt
  */
 
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import type { TokenUsage } from './types.js';
 import {
   REVIEW_PROMPTS,
@@ -57,7 +58,7 @@ export const DEFAULT_REVIEW_CONFIGS: SdkReviewConfig[] = [
 
 const DEFAULT_REVIEW_BUDGET_USD = 0.5;
 const DEFAULT_REVIEW_MAX_TURNS = 20;
-const DEFAULT_REVIEW_MODEL = 'claude-sonnet-4-6';
+const DEFAULT_REVIEW_MODEL = CLAUDE_SONNET_MODEL_ID;
 
 export interface SdkParallelReviewOptions {
   /** PR diff content. */

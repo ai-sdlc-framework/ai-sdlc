@@ -53,7 +53,7 @@ export function registerTrackUsage(server: McpServer, deps: ServerDeps): void {
     'Record token usage for cost tracking and budget monitoring.',
     {
       sessionId: z.string().optional().describe('Session ID (defaults to active session)'),
-      model: z.string().describe('Model name (e.g. claude-opus-4-6)'),
+      model: z.string().describe('Model name as reported by the harness'),
       inputTokens: z.number().int().min(0).describe('Number of input tokens'),
       outputTokens: z.number().int().min(0).describe('Number of output tokens'),
     },

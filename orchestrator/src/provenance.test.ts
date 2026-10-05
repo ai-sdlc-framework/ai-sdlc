@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import {
   createPipelineProvenance,
   attachProvenanceToPR,
@@ -11,7 +12,7 @@ import {
 describe('Provenance tracking', () => {
   it('creates a provenance record with defaults', () => {
     const prov = createPipelineProvenance({});
-    expect(prov.model).toBe('claude-sonnet-4-5-20250929');
+    expect(prov.model).toBe(CLAUDE_SONNET_MODEL_ID);
     expect(prov.tool).toBe('claude-code');
     expect(prov.promptHash).toBe('no-prompt');
     expect(prov.reviewDecision).toBe('pending');
@@ -48,7 +49,7 @@ describe('Provenance tracking', () => {
     const prov = createPipelineProvenance({ promptText: 'hello' });
     const block = attachProvenanceToPR(prov);
     expect(block).toContain('## Provenance');
-    expect(block).toContain('claude-sonnet-4-5-20250929');
+    expect(block).toContain(CLAUDE_SONNET_MODEL_ID);
     expect(block).toContain('claude-code');
     expect(block).toContain('provenance-annotations');
   });

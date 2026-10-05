@@ -37,6 +37,7 @@
  */
 
 import * as nodeHttp from 'node:http';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import type { Finding, ReviewerVerdict } from './report-validator.js';
 import {
   buildHardenedDiffSection,
@@ -571,7 +572,7 @@ export class InferenceProxyClient implements ModelClient {
   constructor(config: InferenceProxyClientConfig) {
     this.config = {
       provider: 'anthropic',
-      model: process.env['AI_SDLC_REVIEWER_MODEL'] ?? 'claude-sonnet-4-6',
+      model: process.env['AI_SDLC_REVIEWER_MODEL'] ?? CLAUDE_SONNET_MODEL_ID,
       ...config,
     };
   }

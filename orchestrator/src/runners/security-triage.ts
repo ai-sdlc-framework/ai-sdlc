@@ -39,7 +39,7 @@ export interface SecurityTriageConfig {
   apiUrl?: string;
   /** Anthropic API key. Defaults to ANTHROPIC_API_KEY env var. */
   apiKey?: string;
-  /** Model to use. Defaults to claude-sonnet-4-5. */
+  /** Model to use. Defaults to the central Sonnet id. */
   model?: string;
   /** Request timeout in ms. Defaults to 120_000. */
   timeoutMs?: number;

@@ -158,7 +158,7 @@ export function buildCli(): Argv {
             .option('reviewer-model', {
               type: 'string',
               describe:
-                "Override the model passed to `cli-attestation emit-leaf` (default: 'claude-sonnet-4-6').",
+                "Override the model passed to `cli-attestation emit-leaf` (default: the routing default for code-reviewer, the 'sonnet' alias).",
             })
             .option('harness', {
               type: 'string',

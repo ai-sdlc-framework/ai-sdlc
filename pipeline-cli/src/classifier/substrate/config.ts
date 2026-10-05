@@ -42,11 +42,11 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
 /**
  * Substrate's default Haiku-class model identifier. The task brief
  * specifies "Haiku-class" but leaves the exact model id to per-org
- * config. We use `claude-haiku-4-5` as the operator's framework-wide
+ * config. We use the `haiku` family alias (the harness resolves the current release) as the operator's framework-wide
  * baseline (matches the standard subagent model split documented in
  * `feedback_subagent_model_selection.md`).
  */
-export const DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5';
+export const DEFAULT_HAIKU_MODEL = 'haiku';
 
 /**
  * Default per-org daily cap on classifier subscription-token spend.

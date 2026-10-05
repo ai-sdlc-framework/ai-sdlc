@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import {
   ReviewAgentRunner,
   REVIEW_PROMPTS,
@@ -441,7 +442,7 @@ describe('ReviewAgentRunner — large-context escalation', () => {
     const runner = new ReviewAgentRunner({ reviewType: 'critic' });
     await runner.run(makeContext({ issueBody: 'small diff' }));
     const parsed = JSON.parse(captured.body);
-    expect(parsed.model).toBe('claude-sonnet-4-5-20250929');
+    expect(parsed.model).toBe(CLAUDE_SONNET_MODEL_ID);
     expect(captured.headers['anthropic-beta']).toBeUndefined();
   });
 
@@ -460,6 +461,21 @@ describe('ReviewAgentRunner — large-context escalation', () => {
     expect(captured.headers['anthropic-beta']).toBe('context-1m-2025-08-07');
   });
 
+  it('AI_SDLC_REVIEW_LARGE_MODEL overrides the large-context default (AISDLC-690)', async () => {
+    const captured = captureRequest();
+    vi.stubEnv('AI_SDLC_REVIEW_LARGE_MODEL', 'pinned-large-model');
+    vi.resetModules();
+    const mod = await import('./review-agent.js');
+    const runner = new mod.ReviewAgentRunner({
+      reviewType: 'security',
+      largeContextThresholdChars: 100,
+    });
+    await runner.run(makeContext({ issueBody: 'x'.repeat(2000) }));
+    expect(JSON.parse(captured.body).model).toBe('pinned-large-model');
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
   it('falls back to default large-context model when none configured', async () => {
     const captured = captureRequest();
     const runner = new ReviewAgentRunner({
@@ -468,8 +484,8 @@ describe('ReviewAgentRunner — large-context escalation', () => {
     });
     await runner.run(makeContext({ issueBody: 'x'.repeat(2000) }));
     const parsed = JSON.parse(captured.body);
-    // Default falls back to env var or 'claude-opus-4-7'
-    expect(parsed.model).not.toBe('claude-sonnet-4-5-20250929');
+    // Default falls back to env var or the central Opus id
+    expect(parsed.model).not.toBe(CLAUDE_SONNET_MODEL_ID);
     expect(captured.headers['anthropic-beta']).toBe('context-1m-2025-08-07');
   });
 

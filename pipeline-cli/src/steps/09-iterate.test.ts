@@ -201,8 +201,8 @@ describe('Step 9 — iterateReviewLoop', () => {
       if (prev === undefined) delete process.env.ARTIFACTS_DIR;
       else process.env.ARTIFACTS_DIR = prev;
     }
-    expect(seen).toContainEqual(['developer', 'claude-sonnet-4-6']);
-    expect(seen).toContainEqual(['security-reviewer', 'claude-opus-4-6']);
+    expect(seen).toContainEqual(['developer', 'sonnet']);
+    expect(seen).toContainEqual(['security-reviewer', 'opus']);
   });
 
   it('hits cap and flags needsHumanAttention when reviews never approve', async () => {

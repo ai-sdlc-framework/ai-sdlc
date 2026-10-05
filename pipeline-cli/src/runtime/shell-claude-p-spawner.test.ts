@@ -73,7 +73,7 @@ describe('ShellClaudePSpawner', () => {
       const spawner = new ShellClaudePSpawner();
       const argv = spawner.buildArgv(opts({ type: 'code-reviewer', prompt: 'review please' }));
       // AISDLC-349: --model <per-role> is now emitted automatically per
-      // DEFAULT_MODELS (code-reviewer → claude-sonnet-4-6).
+      // DEFAULT_MODELS (code-reviewer → sonnet).
       expect(argv).toEqual([
         '--print',
         '--output-format',
@@ -83,7 +83,7 @@ describe('ShellClaudePSpawner', () => {
         '--agent',
         'code-reviewer',
         '--model',
-        'claude-sonnet-4-6',
+        'sonnet',
         'review please',
       ]);
     });
@@ -107,7 +107,7 @@ describe('ShellClaudePSpawner', () => {
         extraArgs: ['--effort', 'high'],
       });
       const argv = spawner.buildArgv(opts({ prompt: 'X' }));
-      // AISDLC-349: --model claude-sonnet-4-6 (developer default) comes
+      // AISDLC-349: --model sonnet (developer default) comes
       // BEFORE extraArgs but AFTER --agent.
       expect(argv).toEqual([
         '--print',
@@ -118,7 +118,7 @@ describe('ShellClaudePSpawner', () => {
         '--agent',
         'developer',
         '--model',
-        'claude-sonnet-4-6',
+        'sonnet',
         '--effort',
         'high',
         'X',

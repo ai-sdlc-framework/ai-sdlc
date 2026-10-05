@@ -10,12 +10,16 @@
  * @module routing/default-table
  */
 
-/** Per-role model defaults. The single source for the spawner's fixed map. */
+/**
+ * Per-role model defaults. The single source for the spawner's fixed map.
+ * Family aliases, not versioned ids: the harness resolves them to the current
+ * release (AISDLC-690). A routing table cell or override may pin a full id.
+ */
 export const DEFAULT_ROLE_MODELS: Readonly<Record<string, string>> = {
-  developer: 'claude-sonnet-4-6',
-  'code-reviewer': 'claude-sonnet-4-6',
-  'test-reviewer': 'claude-sonnet-4-6',
-  'security-reviewer': 'claude-opus-4-6',
+  developer: 'sonnet',
+  'code-reviewer': 'sonnet',
+  'test-reviewer': 'sonnet',
+  'security-reviewer': 'opus',
 };
 
 /** The role that is never explored and never accepts candidates. */
@@ -46,7 +50,7 @@ export function builtInDefaultTable(): RoutingTable {
     cells[role] = { '*': { model } };
   }
   return {
-    strength: ['claude-sonnet-4-6', 'claude-opus-4-6'],
+    strength: ['sonnet', 'opus'],
     exploreShare: 0,
     salt: '',
     cells,

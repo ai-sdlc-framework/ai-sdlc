@@ -40,8 +40,24 @@ export function readRoutingTableFromBaseRef(workDir: string, baseRef: string): s
  * security model. When that model appears in `strength` the cell must be at
  * or above it; otherwise the cell must be the strongest model in the list.
  */
+/** Model family of an alias or versioned id, or null for an unknown name. */
+function modelFamily(model: string): string | null {
+  return /(haiku|sonnet|opus)/.exec(model)?.[1] ?? null;
+}
+
+/**
+ * Index of the default security model in `strength`. The default is a family
+ * alias, so an entry of the same family (the alias itself or a pinned id)
+ * counts; the lowest such index is the floor. -1 when none is present.
+ */
+function securityFloorIndex(strength: string[]): number {
+  const def = DEFAULT_ROLE_MODELS[SECURITY_REVIEWER_ROLE];
+  const family = modelFamily(def);
+  return strength.findIndex((s) => s === def || (family !== null && modelFamily(s) === family));
+}
+
 function securityCellTooWeak(strength: string[], model: string): boolean {
-  const floor = strength.indexOf(DEFAULT_ROLE_MODELS[SECURITY_REVIEWER_ROLE]);
+  const floor = securityFloorIndex(strength);
   const required = floor >= 0 ? floor : strength.length - 1;
   return strength.indexOf(model) < required;
 }

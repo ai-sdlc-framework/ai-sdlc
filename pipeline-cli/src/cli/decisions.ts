@@ -1195,7 +1195,7 @@ export function buildDecisionsCli(): Argv {
           })
           .option('model', {
             type: 'string',
-            describe: 'Model override (e.g. claude-haiku-4-5).',
+            describe: 'Model override (e.g. haiku, or a pinned model id).',
           })
           .option('format', {
             type: 'string',

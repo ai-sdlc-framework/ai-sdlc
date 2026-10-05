@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import {
   SecurityTriageRunner,
   TRIAGE_SYSTEM_PROMPT,
@@ -407,7 +408,7 @@ describe('SecurityTriageRunner — harness path', () => {
     const call = harness.invoke.mock.calls[0]![0] as HarnessInput;
     expect(call.prompt).toContain(TRIAGE_SYSTEM_PROMPT);
     expect(call.prompt).toContain('real issue body');
-    expect(call.model).toBe('claude-sonnet-4-5-20250929');
+    expect(call.model).toBe(CLAUDE_SONNET_MODEL_ID);
     expect(result.success).toBe(true);
     const verdict = JSON.parse(result.summary) as TriageVerdict;
     expect(verdict.safe).toBe(true);

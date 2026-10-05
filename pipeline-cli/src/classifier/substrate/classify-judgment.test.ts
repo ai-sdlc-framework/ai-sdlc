@@ -309,7 +309,7 @@ describe('classify() with the layer disabled', () => {
       metBehindThreshold: false,
       effectiveThreshold: 0.7,
       corpusEntryId: null,
-      model: 'claude-haiku-4-5',
+      model: 'haiku',
     };
     const viaDisabled = await classify(input, task, {
       repoRoot: repo,

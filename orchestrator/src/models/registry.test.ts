@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  CLAUDE_HAIKU_MODEL_ID,
+  CLAUDE_SONNET_MODEL_ID,
+  CLAUDE_OPUS_1M_MODEL_ID,
+} from '@ai-sdlc/reference';
+import {
   ModelRegistry,
   ModelRemovedError,
   UnknownAliasError,
@@ -24,9 +29,9 @@ describe('ModelRegistry', () => {
     it('returns modelId and an ok event for an active alias', () => {
       const reg = new ModelRegistry();
       const r = reg.resolve('sonnet');
-      expect(r.modelId).toBe('claude-sonnet-4-6');
+      expect(r.modelId).toBe(CLAUDE_SONNET_MODEL_ID);
       expect(r.events).toHaveLength(1);
-      expect(r.events[0]).toEqual({ type: 'ok', alias: 'sonnet', modelId: 'claude-sonnet-4-6' });
+      expect(r.events[0]).toEqual({ type: 'ok', alias: 'sonnet', modelId: CLAUDE_SONNET_MODEL_ID });
     });
 
     it('throws UnknownAliasError on unrecognized alias', () => {
@@ -112,9 +117,9 @@ describe('ModelRegistry', () => {
         { stage: 'plan', alias: 'sonnet' },
         { stage: 'implement', alias: 'opus[1m]' },
       ]);
-      expect(result.get('triage')?.modelId).toBe('claude-haiku-4-5-20251001');
-      expect(result.get('plan')?.modelId).toBe('claude-sonnet-4-6');
-      expect(result.get('implement')?.modelId).toBe('claude-opus-4-7[1m]');
+      expect(result.get('triage')?.modelId).toBe(CLAUDE_HAIKU_MODEL_ID);
+      expect(result.get('plan')?.modelId).toBe(CLAUDE_SONNET_MODEL_ID);
+      expect(result.get('implement')?.modelId).toBe(CLAUDE_OPUS_1M_MODEL_ID);
     });
 
     it('throws on first unknown alias', () => {

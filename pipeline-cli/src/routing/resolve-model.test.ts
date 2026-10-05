@@ -52,10 +52,10 @@ const noTable = { readBaseTable: () => null };
 describe('default behaviour (no table on the base ref)', () => {
   it('matches the spawner fixed map for every role', () => {
     const literal = {
-      developer: 'claude-sonnet-4-6',
-      'code-reviewer': 'claude-sonnet-4-6',
-      'test-reviewer': 'claude-sonnet-4-6',
-      'security-reviewer': 'claude-opus-4-6',
+      developer: 'sonnet',
+      'code-reviewer': 'sonnet',
+      'test-reviewer': 'sonnet',
+      'security-reviewer': 'opus',
     };
     expect(DEFAULT_MODELS).toEqual(literal);
     for (const [role, model] of Object.entries(literal)) {
@@ -86,7 +86,7 @@ describe('default behaviour (no table on the base ref)', () => {
         workDir: dir,
         readBaseTable: () => text,
       });
-      expect(r).toMatchObject({ model: 'claude-opus-4-6', arm: 'default' });
+      expect(r).toMatchObject({ model: 'opus', arm: 'default' });
     }
   });
 
@@ -118,11 +118,24 @@ describe('security reviewer floor', () => {
         record: false,
         readBaseTable: () => text,
       });
-      expect(r).toMatchObject({ model: 'claude-opus-4-6', arm: 'default' });
+      expect(r).toMatchObject({ model: 'opus', arm: 'default' });
     }
   });
 
-  it('compares against the default model when it is in strength', () => {
+  it('accepts an alias-only table and rejects a weaker security cell (AISDLC-690)', () => {
+    const t = (m: string) =>
+      TABLE.replace('[haiku, sonnet, opus]', '[sonnet, opus]')
+        .replace(/model: haiku/g, 'model: sonnet')
+        .replace(/candidates: \[haiku\]/g, 'candidates: [sonnet]')
+        .replace("'*': { model: opus }", `'*': { model: ${m} }`);
+    expect(parseRoutingTable(t('opus')).ok).toBe(true);
+    expect(parseRoutingTable(t('sonnet'))).toEqual({
+      ok: false,
+      reason: 'security-reviewer-weaker-than-default',
+    });
+  });
+
+  it('compares against the default model family when pinned ids are in strength', () => {
     const t = (m: string) =>
       TABLE.replace('[haiku, sonnet, opus]', '[claude-sonnet-4-6, claude-opus-4-6, big]')
         .replace(/model: (sonnet|haiku)/g, 'model: claude-sonnet-4-6')
@@ -189,7 +202,7 @@ describe('base ref only', () => {
     // Uncommitted working-tree table must be ignored.
     writeFileSync(join(dir, '.ai-sdlc', 'model-routing.yaml'), TABLE);
     const r = resolveModel({ role: 'developer', taskClass: 'bug', workDir: dir, record: false });
-    expect(r).toMatchObject({ model: 'claude-sonnet-4-6', arm: 'default' });
+    expect(r).toMatchObject({ model: 'sonnet', arm: 'default' });
     // Once committed on the base ref it is used.
     git('add', '-f', '.ai-sdlc/model-routing.yaml');
     git('commit', '-q', '-m', 'table');
@@ -211,7 +224,7 @@ describe('table resolution', () => {
     ).toMatchObject({ model: 'opus', arm: 'table' });
     // developer has no 'feature' or '*' cell: built-in default.
     expect(resolveModel({ role: 'developer', taskClass: 'feature', ...base })).toMatchObject({
-      model: 'claude-sonnet-4-6',
+      model: 'sonnet',
       arm: 'default',
     });
   });
@@ -219,7 +232,7 @@ describe('table resolution', () => {
   it('parses a valid table', () => {
     const parsed = parseRoutingTable(TABLE);
     expect(parsed.ok).toBe(true);
-    expect(cellModel(builtInDefaultTable(), 'developer', 'bug')).toBe('claude-sonnet-4-6');
+    expect(cellModel(builtInDefaultTable(), 'developer', 'bug')).toBe('sonnet');
     expect(cellModel(builtInDefaultTable(), 'nope', 'bug')).toBeUndefined();
   });
 });
@@ -339,7 +352,7 @@ describe('exploration', () => {
       record: false,
       ...noTable,
     });
-    expect(d.model).toBe('claude-opus-4-6');
+    expect(d.model).toBe('opus');
   });
 
   it('ignores a forged model for another role that is not in the cell or candidates', () => {

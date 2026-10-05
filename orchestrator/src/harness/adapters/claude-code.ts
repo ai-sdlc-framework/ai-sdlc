@@ -7,6 +7,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { probeVersion } from '../version-probe.js';
+import {
+  CLAUDE_HAIKU_MODEL_ID,
+  CLAUDE_SONNET_MODEL_ID,
+  CLAUDE_OPUS_MODEL_ID,
+  CLAUDE_OPUS_1M_MODEL_ID,
+} from '@ai-sdlc/reference';
 import type {
   HarnessAdapter,
   HarnessAvailability,
@@ -20,10 +26,10 @@ import type {
 } from '../types.js';
 
 const DEFAULT_AVAILABLE_MODELS = [
-  'claude-haiku-4-5-20251001',
-  'claude-sonnet-4-6',
-  'claude-opus-4-7',
-  'claude-opus-4-7[1m]',
+  CLAUDE_HAIKU_MODEL_ID,
+  CLAUDE_SONNET_MODEL_ID,
+  CLAUDE_OPUS_MODEL_ID,
+  CLAUDE_OPUS_1M_MODEL_ID,
 ];
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;

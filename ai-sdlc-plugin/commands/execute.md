@@ -1262,8 +1262,8 @@ After all spawned reviewer Agent calls complete and each reviewer's verdict JSON
 # claude-code; code-reviewer/test-reviewer use the codex variant when available).
 #
 # Model is the routed model for the reviewer (resolved without re-logging);
-# AISDLC_REVIEWER_MODEL still wins, and a role with no routed model keeps the
-# previous informational placeholder.
+# AISDLC_REVIEWER_MODEL still wins, and a role with no routed model records an honest
+# label (`codex-default` for codex variants, the `sonnet` alias for correctness-reviewer).
 CODEX_AVAILABLE="false"
 if which codex >/dev/null 2>&1; then
   CODEX_AVAILABLE="true"
@@ -1287,7 +1287,11 @@ for REVIEWER_NAME in $SELECTED; do
   # fall back to a fixed placeholder; a routed model always wins.
   if [ -z "$EMIT_MODEL" ]; then
     case "$AGENT_NAME" in
-      code-reviewer-codex|test-reviewer-codex|correctness-reviewer) EMIT_MODEL="claude-sonnet-4-6" ;;
+      # Codex variants run on whatever model the Codex CLI defaults to; label it
+      # honestly rather than naming a Claude id that did not run (AISDLC-690).
+      code-reviewer-codex|test-reviewer-codex) EMIT_MODEL="codex-default" ;;
+      # correctness-reviewer's agent definition pins the family alias `sonnet`.
+      correctness-reviewer) EMIT_MODEL="sonnet" ;;
       *) EMIT_MODEL="unrouted" ;;
     esac
   fi
