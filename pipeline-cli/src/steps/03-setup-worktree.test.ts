@@ -3,6 +3,7 @@ import { setupWorktree } from './03-setup-worktree.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import { join } from 'node:path';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 import type { ExecResult } from '../runtime/exec.js';
 
@@ -917,5 +918,52 @@ describe('Step 3 — isSafeToAutoClean draft-PR differentiation (AISDLC-273)', (
         process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
       }
     }
+  });
+});
+
+// ── AISDLC-693 — fail closed without git hooks ─────────────────────────
+
+describe('Step 3 — setupWorktree hooks check (AISDLC-693)', () => {
+  function hooksRunner(): FakeRunner {
+    return new FakeRunner()
+      .on(/^git worktree add/, ok())
+      .on(/^git -C .+ rev-parse HEAD/, ok('abc123\n'))
+      .on(/^git -C .+ rev-parse --git-path hooks/, ok('.husky/_\n'));
+  }
+
+  it('throws naming the directory and command when the worktree has no hooks, without committing', async () => {
+    const hooksDir = join(tmp, '.husky', '_');
+    mkdirSync(hooksDir, { recursive: true });
+    writeFileSync(join(hooksDir, 'pre-push'), '#!/bin/sh\n');
+    chmodSync(join(hooksDir, 'pre-push'), 0o755);
+    const wt = join(tmp, '.worktrees', 'aisdlc-693');
+    const fake = hooksRunner();
+    await expect(
+      setupWorktree({
+        taskId: 'AISDLC-693',
+        branch: 'b693',
+        worktreePath: wt,
+        workDir: tmp,
+        runner: fake.toRunner(),
+        skipFetch: true,
+      }),
+    ).rejects.toThrow(new RegExp(`${join(wt, '.husky', '_')}[\\s\\S]*pnpm run prepare`));
+    expect(
+      fake.calls.find((c) => c.command === 'git' && c.args.includes('commit')),
+    ).toBeUndefined();
+  });
+
+  it('passes with no prepare run when the repository has no pre-push hook', async () => {
+    const fake = hooksRunner();
+    const r = await setupWorktree({
+      taskId: 'AISDLC-693',
+      branch: 'b693',
+      worktreePath: join(tmp, '.worktrees', 'aisdlc-693'),
+      workDir: tmp,
+      runner: fake.toRunner(),
+      skipFetch: true,
+    });
+    expect(r.baseSha).toBe('abc123');
+    expect(fake.calls.find((c) => c.command === 'pnpm')).toBeUndefined();
   });
 });

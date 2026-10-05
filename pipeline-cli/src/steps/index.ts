@@ -9,6 +9,7 @@ export * from './00-5-sync-parent.js';
 export * from './01-validate.js';
 export * from './02-compute-branch.js';
 export * from './03-setup-worktree.js';
+export * from './hooks-check.js';
 export * from './04-flip-status.js';
 export * from './05-build-dev-prompt.js';
 export * from './06-parse-dev-return.js';

@@ -58,6 +58,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `marketplace-catalog-drift` | Marketplace catalog cache lags the source-of-truth version — the `/plugin` "already at latest" false negative | — |
 | `npm-dist-tag-reachability` | Every `runtimeDependencies` pin actually resolves on the configured npm registry | — |
 | `orphaned-vitest-workers` | Warns on `vitest` workers with parent pid 1 older than 2 minutes (left by a killed test run) and prints the `kill` command; prints nothing when there are none (AISDLC-681) | `ps` |
+| `worktree-hooks` | Warns on every worktree under `.worktrees/` whose git hooks directory (asked of git with `rev-parse --git-path hooks`, never assumed to be `.husky`) has no executable `pre-push` while the main checkout has one, and names the main checkout's hooks directory. Quiet when all are fine or when the main checkout has no `pre-push` (none expected). `--fix` runs `pnpm run prepare` in each affected worktree that has `node_modules` and reports the ones it skipped for lacking it (AISDLC-693) | `git`, `pnpm` |
 | `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
 
 #### `judgment-layer`
