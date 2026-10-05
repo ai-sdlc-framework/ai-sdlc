@@ -5,10 +5,17 @@
  * (RFC §11.1) so model swaps cannot occur underneath an in-flight pipeline.
  */
 
+import {
+  CLAUDE_HAIKU_MODEL_ID,
+  CLAUDE_SONNET_MODEL_ID,
+  CLAUDE_OPUS_MODEL_ID,
+  CLAUDE_OPUS_1M_MODEL_ID,
+} from '@ai-sdlc/reference';
+
 export interface ModelEntry {
   /** Short alias used in pipeline YAML (e.g., 'haiku'). */
   alias: string;
-  /** Physical model ID dispatched to the harness (e.g., 'claude-haiku-4-5-20251001'). */
+  /** Physical model ID dispatched to the harness (e.g., the central Haiku id). */
   modelId: string;
   /** ISO 8601 date when the vendor announced deprecation; null if active. */
   deprecatedAt: string | null;
@@ -68,7 +75,7 @@ const GRACE_PERIOD_DAYS = 30;
 export const DEFAULT_REGISTRY: readonly ModelEntry[] = [
   {
     alias: 'haiku',
-    modelId: 'claude-haiku-4-5-20251001',
+    modelId: CLAUDE_HAIKU_MODEL_ID,
     deprecatedAt: null,
     removedAt: null,
     replacementAlias: null,
@@ -76,7 +83,7 @@ export const DEFAULT_REGISTRY: readonly ModelEntry[] = [
   },
   {
     alias: 'sonnet',
-    modelId: 'claude-sonnet-4-6',
+    modelId: CLAUDE_SONNET_MODEL_ID,
     deprecatedAt: null,
     removedAt: null,
     replacementAlias: null,
@@ -84,7 +91,7 @@ export const DEFAULT_REGISTRY: readonly ModelEntry[] = [
   },
   {
     alias: 'opus',
-    modelId: 'claude-opus-4-7',
+    modelId: CLAUDE_OPUS_MODEL_ID,
     deprecatedAt: null,
     removedAt: null,
     replacementAlias: null,
@@ -92,7 +99,7 @@ export const DEFAULT_REGISTRY: readonly ModelEntry[] = [
   },
   {
     alias: 'opus[1m]',
-    modelId: 'claude-opus-4-7[1m]',
+    modelId: CLAUDE_OPUS_1M_MODEL_ID,
     deprecatedAt: null,
     removedAt: null,
     replacementAlias: null,

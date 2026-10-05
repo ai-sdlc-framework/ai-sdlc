@@ -98,9 +98,9 @@ describe('Step 7 — buildReviewPrompts', () => {
       artifactsDir: join(tmp, 'arts'),
     });
     expect(r.prompts.map((p) => [p.reviewer, p.model, p.modelArm])).toEqual([
-      ['code-reviewer', 'claude-sonnet-4-6', 'default'],
-      ['test-reviewer', 'claude-sonnet-4-6', 'default'],
-      ['security-reviewer', 'claude-opus-4-6', 'default'],
+      ['code-reviewer', 'sonnet', 'default'],
+      ['test-reviewer', 'sonnet', 'default'],
+      ['security-reviewer', 'opus', 'default'],
     ]);
   });
 

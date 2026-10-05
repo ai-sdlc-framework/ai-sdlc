@@ -7,6 +7,7 @@
  * pattern exactly.
  */
 
+import { CLAUDE_OPUS_MODEL_ID } from '@ai-sdlc/reference';
 import type { AgentRunner, AgentContext, AgentResult, TokenUsage } from './types.js';
 import {
   DEFAULT_ANTHROPIC_API_URL,
@@ -50,13 +51,13 @@ export interface ReviewAgentConfig {
   apiUrl?: string;
   /** Anthropic API key. Defaults to ANTHROPIC_API_KEY env var. */
   apiKey?: string;
-  /** Model to use. Defaults to claude-sonnet-4-5. */
+  /** Model to use. Defaults to the central Sonnet id. */
   model?: string;
   /** Usage ledger directory override. Defaults to the machine-level ledger. */
   usageDir?: string;
   /**
    * Model to escalate to when the input exceeds the large-context threshold.
-   * Defaults to AI_SDLC_REVIEW_LARGE_MODEL env var, then claude-opus-4-7.
+   * Defaults to AI_SDLC_REVIEW_LARGE_MODEL env var, then the central Opus id.
    */
   largeContextModel?: string;
   /**
@@ -80,7 +81,7 @@ export interface ReviewAgentConfig {
  * "PR too large for review" failure on PR #67 happened above this threshold.
  */
 const DEFAULT_LARGE_CONTEXT_THRESHOLD_CHARS = 600_000;
-const DEFAULT_LARGE_CONTEXT_MODEL = process.env.AI_SDLC_REVIEW_LARGE_MODEL ?? 'claude-opus-4-7';
+const DEFAULT_LARGE_CONTEXT_MODEL = process.env.AI_SDLC_REVIEW_LARGE_MODEL ?? CLAUDE_OPUS_MODEL_ID;
 /** Anthropic 1M-context beta header. Required when sending > 200k tokens. */
 const ANTHROPIC_LONG_CONTEXT_BETA = 'context-1m-2025-08-07';
 

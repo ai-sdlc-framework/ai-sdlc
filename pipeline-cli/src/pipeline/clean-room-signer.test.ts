@@ -13,6 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import {
   mkdtempSync,
   mkdirSync,
@@ -1001,6 +1002,38 @@ describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', ()
     expect(reviewerNames).toContain('code-reviewer');
     expect(reviewerNames).toContain('test-reviewer');
     expect(reviewerNames).toContain('security-reviewer');
+  });
+
+  it('leaf model defaults to the central Sonnet id and honours AI_SDLC_REVIEWER_MODEL (AISDLC-690)', () => {
+    const reportPath = join(tmpDir, 'report.json');
+    writeJson(reportPath, VALID_REPORT);
+    const leafModels = (): unknown[] =>
+      readFileSync(join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl'), 'utf8')
+        .split('\n')
+        .filter((l) => l.trim().length > 0)
+        .map((l) => (JSON.parse(l) as Record<string, unknown>)['model']);
+    const run = (): void => {
+      rmSync(join(tmpDir, '.ai-sdlc'), { recursive: true, force: true });
+      runCleanRoomSigner({
+        reportArtifactPath: reportPath,
+        repoRoot: tmpDir,
+        taskId: 'AISDLC-690',
+        headSha: VALID_REPORT.headSha,
+        workDir: tmpDir,
+      });
+    };
+    const saved = process.env['AI_SDLC_REVIEWER_MODEL'];
+    try {
+      delete process.env['AI_SDLC_REVIEWER_MODEL'];
+      run();
+      expect(leafModels()).toEqual(Array(3).fill(CLAUDE_SONNET_MODEL_ID));
+      process.env['AI_SDLC_REVIEWER_MODEL'] = 'pinned-reviewer-model';
+      run();
+      expect(leafModels()).toEqual(Array(3).fill('pinned-reviewer-model'));
+    } finally {
+      if (saved === undefined) delete process.env['AI_SDLC_REVIEWER_MODEL'];
+      else process.env['AI_SDLC_REVIEWER_MODEL'] = saved;
+    }
   });
 
   it('each leaf has taskId, harness, transcriptHash (sha256 hex), and verdictApproved fields', () => {

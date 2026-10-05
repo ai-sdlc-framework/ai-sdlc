@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import * as defaults from './defaults.js';
 
 describe('defaults — env-var-driven timeout overrides', () => {
@@ -95,8 +96,8 @@ describe('defaults — new constants', () => {
     expect(defaults.DEFAULT_ANTHROPIC_API_URL).toBe('https://api.anthropic.com/v1/messages');
   });
 
-  it('DEFAULT_ANTHROPIC_MODEL is claude-sonnet-4-5-20250929', () => {
-    expect(defaults.DEFAULT_ANTHROPIC_MODEL).toBe('claude-sonnet-4-5-20250929');
+  it('DEFAULT_ANTHROPIC_MODEL is the central Sonnet id', () => {
+    expect(defaults.DEFAULT_ANTHROPIC_MODEL).toBe(CLAUDE_SONNET_MODEL_ID);
   });
 
   it('DEFAULT_GENERIC_LLM_MODEL is "default"', () => {

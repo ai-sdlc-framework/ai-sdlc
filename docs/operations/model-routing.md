@@ -14,12 +14,14 @@ No prompt, response, file content or tool output is stored by any of this. The a
 
 ## Without a table
 
-A repository with no `.ai-sdlc/model-routing.yaml` on its base branch behaves as it always has: developer, code reviewer and test reviewer use `claude-sonnet-4-6`, and the security reviewer uses `claude-opus-4-6`. Nothing changes until you commit a table.
+A repository with no `.ai-sdlc/model-routing.yaml` on its base branch behaves as it always has: developer, code reviewer and test reviewer use `sonnet`, and the security reviewer uses `opus`. Nothing changes until you commit a table.
+
+The defaults are the family aliases `sonnet` and `opus`, not versioned ids: the harness resolves an alias to the current release, so a new Sonnet or Opus release is picked up without a code change (AISDLC-690). **To pin a version**, name the full id in a table cell, an override, or the relevant environment variable (for example `AI_SDLC_REVIEWER_MODEL`, `ANTHROPIC_MODEL`, `AI_SDLC_MODEL`); a table may list aliases, pinned ids, or a mix in `strength`, and the security reviewer floor compares by model family. Direct-API paths, which cannot rely on an alias, take their default id from one central module (`reference/src/models/claude-model-ids.ts`). Versioned ids below appear only as recorded evidence.
 
 ```console
 $ ai-sdlc-pipeline resolve-model developer --task-id DEMO-1 --skip-log
 {
-  "model": "claude-sonnet-4-6",
+  "model": "sonnet",
   "arm": "default",
   "reason": "default"
 }
@@ -35,17 +37,17 @@ kind: ModelRouting
 metadata:
   name: model-routing
 spec:
-  strength: [claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-6]
+  strength: [haiku, sonnet, opus]
   exploreShare: 0.5 # 0.10 is a more realistic share; 0.5 lets small examples show both arms
   salt: demo-1
   cells:
     developer:
-      chore: { model: claude-sonnet-4-6, candidates: [claude-haiku-4-5] }
-      '*': { model: claude-sonnet-4-6 }
+      chore: { model: sonnet, candidates: [haiku] }
+      '*': { model: sonnet }
     code-reviewer:
-      '*': { model: claude-sonnet-4-6 }
+      '*': { model: sonnet }
     security-reviewer:
-      '*': { model: claude-opus-4-6 }
+      '*': { model: opus }
 ```
 
 | Field                | Meaning                                                                                                                                                                                                        |
@@ -62,12 +64,12 @@ spec:
 
 Task class is the estimation class in the task's frontmatter `class:` field (`bug`, `feature`, `chore`), or `uncategorized` when none is recorded. The schema is [`model-routing.v1.schema.json`](../../spec/schemas/model-routing.v1.schema.json).
 
-**A broken table is ignored, not half-applied.** If the file is missing, is not valid YAML, fails the schema, names a model that is not in `strength`, puts `candidates` on the security reviewer, or sets the security reviewer to a model weaker than `claude-opus-4-6`, the built-in defaults apply to every role:
+**A broken table is ignored, not half-applied.** If the file is missing, is not valid YAML, fails the schema, names a model that is not in `strength`, puts `candidates` on the security reviewer, or sets the security reviewer to a model weaker than `opus`, the built-in defaults apply to every role:
 
 ```console
 $ ai-sdlc-pipeline resolve-model developer --task-id DEMO-3 --task-class chore --source-kind backlog --skip-log
 {
-  "model": "claude-sonnet-4-6",
+  "model": "sonnet",
   "arm": "default",
   "reason": "default"
 }
@@ -90,7 +92,7 @@ You can ask for any resolution directly:
 ```console
 $ ai-sdlc-pipeline resolve-model developer --task-id DEMO-1 --task-class chore --source-kind backlog
 {
-  "model": "claude-sonnet-4-6",
+  "model": "sonnet",
   "arm": "table",
   "reason": "table"
 }
@@ -105,7 +107,7 @@ A cell with `candidates` sends a share of eligible tasks to a candidate. This is
 ```console
 $ ai-sdlc-pipeline resolve-model developer --task-id DEMO-3 --task-class chore --source-kind backlog
 {
-  "model": "claude-haiku-4-5",
+  "model": "haiku",
   "arm": "explore",
   "reason": "explore"
 }
@@ -124,7 +126,7 @@ The assignment is deterministic. A hash of the task id, the role and the table's
   ```console
   $ ai-sdlc-pipeline resolve-model developer --task-id DEMO-2 --task-class chore --source-kind gh-issue
   {
-    "model": "claude-sonnet-4-6",
+    "model": "sonnet",
     "arm": "table",
     "reason": "table"
   }
@@ -147,7 +149,7 @@ Every resolution made with a task id is appended to `$ARTIFACTS_DIR/_routing/ass
   "role": "developer",
   "taskClass": "chore",
   "iteration": 1,
-  "model": "claude-haiku-4-5",
+  "model": "haiku",
   "arm": "explore",
   "reason": "explore"
 }
@@ -166,23 +168,23 @@ The resolver also reads `$ARTIFACTS_DIR/_routing/overrides.json`:
 ```json
 {
   "version": 1,
-  "overrides": [{ "role": "developer", "taskClass": "chore", "model": "claude-opus-4-6" }]
+  "overrides": [{ "role": "developer", "taskClass": "chore", "model": "opus" }]
 }
 ```
 
-An override can only select a stronger model. It is honoured only when its model is in the table's `strength` list and is strictly stronger than the cell's own model; any other entry is ignored. With the table above, an override of the code reviewer to `claude-haiku-4-5` (weaker than the cell's `claude-sonnet-4-6`) changes nothing, while the developer override to `claude-opus-4-6` takes effect:
+An override can only select a stronger model. It is honoured only when its model is in the table's `strength` list and is strictly stronger than the cell's own model; any other entry is ignored. With the table above, an override of the code reviewer to `haiku` (weaker than the cell's `sonnet`) changes nothing, while the developer override to `opus` takes effect:
 
 ```console
 $ ai-sdlc-pipeline resolve-model developer --task-id DEMO-3 --task-class chore --source-kind backlog --skip-log
 {
-  "model": "claude-opus-4-6",
+  "model": "opus",
   "arm": "override",
   "reason": "override"
 }
 
 $ ai-sdlc-pipeline resolve-model code-reviewer --task-id DEMO-3 --task-class chore --source-kind backlog --skip-log
 {
-  "model": "claude-sonnet-4-6",
+  "model": "sonnet",
   "arm": "table",
   "reason": "table"
 }

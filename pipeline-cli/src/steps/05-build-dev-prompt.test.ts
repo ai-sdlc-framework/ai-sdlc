@@ -101,7 +101,7 @@ describe('Step 5 — buildDeveloperPrompt', () => {
       branch: 'b',
       worktreePath: '/tmp/wt',
     });
-    expect(r.model).toBe('claude-sonnet-4-6');
+    expect(r.model).toBe('sonnet');
     expect(r.modelArm).toBe('default');
   });
 });

@@ -39,3 +39,6 @@ export * from './usage/index.js';
 
 // Judgment layer (closed-set probabilistic questions)
 export * from './judgment/index.js';
+
+// Central Claude model ids for direct-API defaults (AISDLC-690)
+export * from './models/claude-model-ids.js';

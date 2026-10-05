@@ -28,6 +28,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as yamlLoad } from 'js-yaml';
+import { CLAUDE_HAIKU_MODEL_ID } from '@ai-sdlc/reference';
 
 import type { ClassifierTaskType } from './types.js';
 
@@ -42,11 +43,13 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
 /**
  * Substrate's default Haiku-class model identifier. The task brief
  * specifies "Haiku-class" but leaves the exact model id to per-org
- * config. We use `claude-haiku-4-5` as the operator's framework-wide
+ * config. We use the central Haiku id
+ * (`CLAUDE_HAIKU_MODEL_ID`; the model goes to an operator-supplied direct-API
+ * `LlmInvoker`, not the Claude harness, so a bare alias is not safe) as the operator's framework-wide
  * baseline (matches the standard subagent model split documented in
  * `feedback_subagent_model_selection.md`).
  */
-export const DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5';
+export const DEFAULT_HAIKU_MODEL = CLAUDE_HAIKU_MODEL_ID;
 
 /**
  * Default per-org daily cap on classifier subscription-token spend.

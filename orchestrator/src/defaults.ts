@@ -9,7 +9,12 @@
  */
 
 import type { NetworkPolicy, SandboxConstraints } from '@ai-sdlc/reference';
-import { parseDuration } from '@ai-sdlc/reference';
+import {
+  parseDuration,
+  CLAUDE_SONNET_MODEL_ID,
+  CLAUDE_OPUS_MODEL_ID,
+  CLAUDE_HAIKU_MODEL_ID,
+} from '@ai-sdlc/reference';
 
 // ── LLM Model ────────────────────────────────────────────────────────
 
@@ -18,7 +23,7 @@ import { parseDuration } from '@ai-sdlc/reference';
  * Consumers should read `AI_SDLC_MODEL` env var at call time and fall back
  * to this constant, so tests that set env vars at runtime see the override.
  */
-export const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_MODEL = CLAUDE_SONNET_MODEL_ID;
 
 // ── GitHub ───────────────────────────────────────────────────────────
 
@@ -100,7 +105,7 @@ export const DEFAULT_COMMIT_CO_AUTHOR =
 export const DEFAULT_OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 export const DEFAULT_OPENAI_MODEL = 'gpt-4';
 export const DEFAULT_ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_ANTHROPIC_MODEL = CLAUDE_SONNET_MODEL_ID;
 export const DEFAULT_GENERIC_LLM_MODEL = 'default';
 export const DEFAULT_OLLAMA_API_URL = 'http://localhost:11434/v1/chat/completions';
 export const DEFAULT_OLLAMA_API_KEY = 'ollama';
@@ -213,6 +218,12 @@ export const DEFAULT_MODEL_COSTS: Record<
   string,
   { inputPer1M: number; outputPer1M: number; cacheReadPer1M: number }
 > = {
+  // Ids the central module names (reference/src/models/claude-model-ids.ts), priced from
+  // the seed table (reference/src/usage/prices-seed.ts). A model with no entry is reported
+  // as unpriced by the cost tracker, never priced as another model.
+  [CLAUDE_SONNET_MODEL_ID]: { inputPer1M: 2.0, outputPer1M: 10.0, cacheReadPer1M: 0.2 },
+  [CLAUDE_OPUS_MODEL_ID]: { inputPer1M: 4.0, outputPer1M: 20.0, cacheReadPer1M: 0.2 },
+  [CLAUDE_HAIKU_MODEL_ID]: { inputPer1M: 1.0, outputPer1M: 5.0, cacheReadPer1M: 0.1 },
   'claude-opus-4-6': { inputPer1M: 15.0, outputPer1M: 75.0, cacheReadPer1M: 1.5 },
   'claude-sonnet-4-5-20250929': { inputPer1M: 3.0, outputPer1M: 15.0, cacheReadPer1M: 0.3 },
   'claude-haiku-4-5-20251001': { inputPer1M: 0.8, outputPer1M: 4.0, cacheReadPer1M: 0.08 },

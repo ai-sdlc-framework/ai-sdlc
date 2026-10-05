@@ -85,7 +85,7 @@ describe('CLI router', () => {
       tmp,
     );
     await buildCli().parseAsync();
-    expect(stdoutJson()).toEqual({ model: 'claude-opus-4-6', arm: 'default', reason: 'default' });
+    expect(stdoutJson()).toEqual({ model: 'opus', arm: 'default', reason: 'default' });
     expect(readFileSync(join(arts, '_routing', 'assignments.jsonl'), 'utf8')).toContain('AISDLC-1');
   });
 
@@ -112,7 +112,7 @@ describe('CLI router', () => {
   it('resolve-model derives the class from the task file when none is given', async () => {
     setArgv('resolve-model', 'developer', '--task-id', 'GONE-9', '--skip-log', '--work-dir', tmp);
     await buildCli().parseAsync();
-    expect(stdoutJson()).toMatchObject({ model: 'claude-sonnet-4-6', arm: 'default' });
+    expect(stdoutJson()).toMatchObject({ model: 'sonnet', arm: 'default' });
   });
 
   it('build-review-prompts accepts --source-kind and rejects other values', async () => {

@@ -637,7 +637,7 @@ export interface StageCOutput {
   corpusEntryId: string | null;
   /** The effective threshold the substrate compared `confidence` against. */
   effectiveThreshold: number;
-  /** The model identifier the substrate resolved (`'claude-haiku-4-5'` default). */
+  /** The model identifier the substrate resolved (the central Haiku id by default). */
   model: string;
   /** Whether `confidence >= effectiveThreshold` AND no invoker / parse errors. */
   metBehindThreshold: boolean;

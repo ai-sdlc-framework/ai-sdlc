@@ -172,7 +172,7 @@ describe('resolveSpawner', () => {
     // at the spawner level via --model flag (agent files have model:inherit,
     // so without --model the role would inherit session default).
     expect(argv).toContain('--model');
-    expect(argv).toContain('claude-opus-4-6');
+    expect(argv).toContain('opus');
   });
 
   it('per-role model split: developer uses sonnet via --spawner claude (AISDLC-349)', async () => {
@@ -183,7 +183,7 @@ describe('resolveSpawner', () => {
       }
     ).buildArgv({ type: 'developer', prompt: 'noop', cwd: '/tmp' });
     expect(argv).toContain('--model');
-    expect(argv).toContain('claude-sonnet-4-6');
+    expect(argv).toContain('sonnet');
   });
 
   it('returns a CodexHarnessAdapter when kind=codex and CODEX_SPAWN_AGENT_BIN is set (AISDLC-202.2)', async () => {

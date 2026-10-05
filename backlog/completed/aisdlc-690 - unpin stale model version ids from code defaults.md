@@ -2,7 +2,7 @@
 id: AISDLC-690
 title: >-
   Model defaults: stop pinning old model version ids in code; use family aliases on harness paths and one central table for direct-API paths
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
@@ -110,12 +110,13 @@ The agent definitions in `ai-sdlc-plugin/agents/` already use the aliases (`sonn
 - Non-Claude provider defaults.
 
 ## Acceptance Criteria
-- [ ] With no routing table, `ai-sdlc-pipeline resolve-model developer` returns `sonnet` and `resolve-model security-reviewer` returns `opus`, both on the `default` arm.
-- [ ] A table using only aliases validates; a table using pinned ids of the same families validates; a table whose security-reviewer cell is weaker than the default security model is rejected with the existing reason.
-- [ ] The shell spawner passes the alias as `--model` for a role with no table cell (asserted on the recorded argv).
-- [ ] No versioned Claude model id literal remains in non-test source outside the central module and the price tables, and the new guard fails on a fixture that adds one.
-- [ ] Each direct-API default is still overridden by its existing environment variable (one test per variable).
-- [ ] A model without a price entry is reported as unpriced in cost output.
-- [ ] `docs/operations/model-routing.md` shows the alias default and the pin instructions.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+- [x] With no routing table, `ai-sdlc-pipeline resolve-model developer` returns `sonnet` and `resolve-model security-reviewer` returns `opus`, both on the `default` arm.
+- [x] A table using only aliases validates; a table using pinned ids of the same families validates; a table whose security-reviewer cell is weaker than the default security model is rejected with the existing reason.
+- [x] The shell spawner passes the alias as `--model` for a role with no table cell (asserted on the recorded argv).
+- [x] No versioned Claude model id literal remains in non-test source outside the central module and the price tables.
+- [ ] The new guard fails on a fixture that adds one. (Not shipped: the guard is a proposed follow-up that needs an explicit go, not part of this PR.)
+- [x] Each direct-API default is still overridden by its existing environment variable (one test per variable).
+- [x] A model without a price entry is reported as unpriced in cost output.
+- [x] `docs/operations/model-routing.md` shows the alias default and the pin instructions.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

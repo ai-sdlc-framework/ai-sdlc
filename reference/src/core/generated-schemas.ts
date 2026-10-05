@@ -3887,7 +3887,7 @@ export const dispatchManifestV1Schema = {
           type: 'string',
           minLength: 1,
           description:
-            "Optional model override (e.g. 'claude-sonnet-4-6'). When absent the Worker uses its default per-role model.",
+            "Optional model override (e.g. 'sonnet' or a pinned model id). When absent the Worker uses its default per-role model.",
         },
         budgetMs: {
           type: 'integer',

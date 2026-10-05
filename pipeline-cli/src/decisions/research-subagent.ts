@@ -198,7 +198,7 @@ export interface ResearchSubagentResponse {
    * sources were consulted.
    */
   findingsMarkdown: string;
-  /** Model identifier (e.g. `claude-sonnet-4-5`). Drives ledger.model. */
+  /** Model identifier (e.g. `sonnet` or a pinned id). Drives ledger.model. */
   model: string;
   /** Input + output tokens — drive ledger debit. Zero is allowed (caching, retries). */
   inputTokens?: number;

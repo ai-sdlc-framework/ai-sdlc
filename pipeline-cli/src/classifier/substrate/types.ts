@@ -105,9 +105,9 @@ export interface ClassifyOpts {
   /** Corpus directory override (defaults to `.ai-sdlc/classifier-corpus/`). */
   corpusDir?: string;
   /**
-   * The model identifier (e.g. `'claude-haiku-4-5'`). When omitted, the
+   * The model identifier (e.g. a pinned Haiku id). When omitted, the
    * substrate consults per-org config; when no config is found, defaults
-   * to `'claude-haiku-4-5'` (the Haiku-class default per task spec).
+   * to the central Haiku id (the Haiku-class default per task spec).
    */
   model?: string;
   /**
@@ -199,7 +199,7 @@ export interface ClassifierDecision {
  * only job is to call the LLM and return a structured response.
  */
 export interface LlmInvocationRequest {
-  /** Model identifier (e.g. `'claude-haiku-4-5'`). */
+  /** Model identifier (e.g. a pinned Haiku id). */
   model: string;
   /** Fully-resolved prompt text (system + user concatenated by caller). */
   prompt: string;

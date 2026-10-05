@@ -49,6 +49,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import { validateReport } from './report-validator.js';
 import type { UntrustedPrReport } from './report-validator.js';
 import { resolveSigningKeyPath, signAndWriteV6Envelope } from '../attestation/sign-v6.js';
@@ -385,7 +386,7 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
       test: 'test-reviewer',
       security: 'security-reviewer',
     };
-    const reviewerModel = process.env['AI_SDLC_REVIEWER_MODEL'] ?? 'claude-sonnet-4-6';
+    const reviewerModel = process.env['AI_SDLC_REVIEWER_MODEL'] ?? CLAUDE_SONNET_MODEL_ID;
     let leafIndex = 0;
     for (const key of ['code', 'test', 'security'] as const) {
       const rv = report.reviewers[key];

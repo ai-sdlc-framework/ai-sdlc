@@ -558,7 +558,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             .option('model', {
               type: 'string',
               demandOption: true,
-              describe: 'LLM model identifier, e.g. claude-sonnet-4-6.',
+              describe: 'LLM model identifier, e.g. sonnet, or a pinned model id.',
             })
             .option('patch-id', {
               type: 'string',

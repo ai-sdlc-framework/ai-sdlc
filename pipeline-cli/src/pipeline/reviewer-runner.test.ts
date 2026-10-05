@@ -24,6 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -868,7 +869,7 @@ describe('InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var', () => {
     expect(body['model']).toBe('claude-opus-4-9');
   });
 
-  it('defaults to claude-sonnet-4-6 when AI_SDLC_REVIEWER_MODEL is not set', async () => {
+  it('defaults to the central Sonnet id when AI_SDLC_REVIEWER_MODEL is not set', async () => {
     delete process.env['AI_SDLC_REVIEWER_MODEL'];
 
     const client = new InferenceProxyClient({
@@ -885,7 +886,7 @@ describe('InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var', () => {
 
     await client.complete({ systemPrompt: 'sys', userMessage: 'user' });
     const body = JSON.parse(capturedBodies[0]) as Record<string, unknown>;
-    expect(body['model']).toBe('claude-sonnet-4-6');
+    expect(body['model']).toBe(CLAUDE_SONNET_MODEL_ID);
   });
 });
 

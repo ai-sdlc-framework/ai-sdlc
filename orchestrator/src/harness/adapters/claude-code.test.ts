@@ -1,4 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import {
+  CLAUDE_HAIKU_MODEL_ID,
+  CLAUDE_SONNET_MODEL_ID,
+  CLAUDE_OPUS_1M_MODEL_ID,
+} from '@ai-sdlc/reference';
 import type { spawn } from 'node:child_process';
 import { ClaudeCodeAdapter } from './claude-code.js';
 
@@ -76,9 +81,9 @@ describe('ClaudeCodeAdapter', () => {
   it('availableModels returns the canonical Claude model list', async () => {
     const a = new ClaudeCodeAdapter();
     const models = await a.availableModels();
-    expect(models).toContain('claude-haiku-4-5-20251001');
-    expect(models).toContain('claude-sonnet-4-6');
-    expect(models).toContain('claude-opus-4-7[1m]');
+    expect(models).toContain(CLAUDE_HAIKU_MODEL_ID);
+    expect(models).toContain(CLAUDE_SONNET_MODEL_ID);
+    expect(models).toContain(CLAUDE_OPUS_1M_MODEL_ID);
   });
 
   describe('invoke', () => {
