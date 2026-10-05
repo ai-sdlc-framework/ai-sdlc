@@ -13,7 +13,11 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { checkOwnWorktree, isProtectedBranch } from './lease-policy.js';
+import {
+  checkOwnWorktree,
+  checkOwnWorktreeForOperator,
+  isProtectedBranch,
+} from './lease-policy.js';
 
 const require = createRequire(import.meta.url);
 const hooksLib = path.resolve(
@@ -179,6 +183,30 @@ describe('checkOwnWorktree', () => {
     const { main } = fixture();
     const missing = path.join(main, '.worktrees', 'missing');
     expect(checkOwnWorktree(main, missing, plainCheckout)).not.toBeNull();
+  });
+});
+
+describe('checkOwnWorktreeForOperator (cli-hierarchy tick, no session task)', () => {
+  beforeEach(() => {
+    delete process.env['AI_SDLC_ACTIVE_TASK_ID'];
+  });
+
+  it('accepts a registered executor worktree with no session binding', () => {
+    const { main, wt } = fixture();
+    expect(checkOwnWorktreeForOperator(main, wt, plainCheckout)).toBeNull();
+    // ...even when the worktree's .active-task differs from any env value.
+    process.env['AI_SDLC_ACTIVE_TASK_ID'] = 'AISDLC-8';
+    expect(checkOwnWorktreeForOperator(main, wt, plainCheckout)).toBeNull();
+  });
+
+  it('still refuses every structural violation', () => {
+    const { main, wt, gitDir } = fixture();
+    const stray = path.join(tmp, 'stray');
+    mkdirSync(stray);
+    expect(checkOwnWorktreeForOperator(main, stray, plainCheckout)).toMatch(/\.worktrees/);
+    expect(checkOwnWorktreeForOperator(main, wt, () => null)).toMatch(/cannot be verified/);
+    writeFileSync(path.join(gitDir, 'gitdir'), `${path.join(tmp, 'elsewhere', '.git')}\n`);
+    expect(checkOwnWorktreeForOperator(main, wt, plainCheckout)).toMatch(/point back/);
   });
 });
 

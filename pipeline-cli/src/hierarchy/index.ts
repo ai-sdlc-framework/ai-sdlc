@@ -89,6 +89,8 @@ export {
 export {
   DEFAULT_PROTECTED_BRANCHES,
   checkOwnWorktree,
+  checkOwnWorktreeForOperator,
+  checkOwnWorktreeStrict,
   isProtectedBranch,
   type ForcePushMode,
 } from './lease-policy.js';

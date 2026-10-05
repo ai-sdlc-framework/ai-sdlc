@@ -49,7 +49,7 @@ import { DECISION_ID_RE } from '../dispatch/verdict-fields.js';
 import {
   attachTmuxSession,
   checkDispatchCaller,
-  checkOwnWorktree,
+  checkOwnWorktreeForOperator,
   clearExecutor,
   createGitRunner,
   createStreamEmitter,
@@ -397,7 +397,7 @@ export async function runHierarchyCli(
         const lease = extras.lease ?? {
           forcePushMode: readPolicy().forcePushMode,
           protectedBranches: readPolicy().protectedBranches,
-          ownWorktree: (worktree: string) => checkOwnWorktree(repoRoot, worktree),
+          ownWorktree: (worktree: string) => checkOwnWorktreeForOperator(repoRoot, worktree),
         };
         const gitRun = extras.gitRun ?? createGitRunner();
         const emit = deps.emit ?? (() => {});
