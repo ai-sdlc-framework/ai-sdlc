@@ -8,7 +8,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
@@ -87,7 +87,7 @@ function runHookRaw(input, extraEnv = {}) {
     const output = execFileSync('node', [hookScript], {
       input,
       encoding: 'utf-8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: tempDir, ...extraEnv },
+      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: tempDir, ...extraEnv },
       timeout: 5000,
     });
     return { output: output.trim(), exitCode: 0 };
@@ -139,7 +139,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook', () => {
       const output = execFileSync('node', [hookScript], {
         input: 'not valid json at all',
         encoding: 'utf-8',
-        env: { ...process.env, CLAUDE_PROJECT_DIR: tempDir },
+        env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: tempDir },
         timeout: 5000,
       });
       assert.equal(output.trim(), '', 'should produce no output (allow)');
@@ -589,7 +589,7 @@ blockedActions: []
     assert.ok(isDenied(result), 'should deny when project opts in via blockedPaths');
   });
 
-  it('.ai-sdlc/** is refused even when agent-role.yaml is entirely missing', () => {
+  it('AISDLC-720: .ai-sdlc/** is editable by an internal session when agent-role.yaml is entirely missing', () => {
     const noConfigDir = join(tmpdir(), `enforce-blocked-noconfig-${Date.now()}`);
     mkdirSync(noConfigDir, { recursive: true });
     try {
@@ -598,7 +598,7 @@ blockedActions: []
         tool_input: { file_path: join(noConfigDir, '.ai-sdlc', 'foo.yaml') },
       });
       const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: noConfigDir });
-      assert.ok(isDenied(result), 'hardcoded .ai-sdlc/** floor applies even with no config file');
+      assert.ok(!isDenied(result), 'no hardcoded .ai-sdlc/** floor for internal sessions');
     } finally {
       rmSync(noConfigDir, { recursive: true, force: true });
     }
@@ -629,7 +629,10 @@ blockedActions: []
       tool_input: { file_path: join(tempDir, '.AI-SDLC', 'agent-role.yaml') },
     });
     const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: tempDir });
-    assert.ok(isDenied(result), 'mixed-case .AI-SDLC/** must still be refused');
+    assert.ok(
+      isDenied(result),
+      'mixed-case .AI-SDLC/** must still be refused (listed in tempDir blockedPaths)',
+    );
   });
 
   it('refuses an arbitrarily-cased .Ai-Sdlc/ path too', () => {
@@ -641,10 +644,10 @@ blockedActions: []
     assert.ok(isDenied(result), 'mixed-case .Ai-Sdlc/ must still be refused');
   });
 
-  it('fails closed on .ai-sdlc/** when agent-role.yaml is malformed/unparseable', () => {
-    // A syntactically-broken YAML file must not disable the hardcoded
-    // .ai-sdlc/** floor — the hook must fall through to "no config parsed"
-    // (empty blockedPaths/blockedActions) rather than crash or fail open.
+  it('AISDLC-720: malformed agent-role.yaml does not crash the hook; internal .ai-sdlc/** edit allowed', () => {
+    // A syntactically-broken YAML file must not crash the hook: it falls
+    // through to "no config parsed" (empty blockedPaths/blockedActions).
+    // Internal sessions are then allowed; untrusted runs stay blocked.
     const malformedDir = join(tmpdir(), `enforce-blocked-malformed-${Date.now()}`);
     mkdirSync(join(malformedDir, '.ai-sdlc'), { recursive: true });
     try {
@@ -657,7 +660,12 @@ blockedActions: []
         tool_input: { file_path: join(malformedDir, '.ai-sdlc', 'foo.yaml') },
       });
       const result = runHookRaw(input, { CLAUDE_PROJECT_DIR: malformedDir });
-      assert.ok(isDenied(result), '.ai-sdlc/** floor must hold even with malformed config');
+      assert.ok(!isDenied(result), 'internal session is not blocked by a malformed config');
+      const untrusted = runHookRaw(input, {
+        CLAUDE_PROJECT_DIR: malformedDir,
+        AI_SDLC_UNTRUSTED_RUN: '1',
+      });
+      assert.ok(isDenied(untrusted), 'untrusted run is still blocked with malformed config');
     } finally {
       rmSync(malformedDir, { recursive: true, force: true });
     }
@@ -1240,7 +1248,7 @@ blockedActions: []
     const result = spawnSync('node', [hookScript], {
       input: JSON.stringify(payload),
       encoding: 'utf-8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: staleParent, ...env },
+      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: staleParent, ...env },
       timeout: 5000,
     });
     return {
@@ -1629,5 +1637,324 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook — no-bare-stash governan
   it('does not block an unrelated npm/pnpm script whose name contains stash', () => {
     const result = runHook('pnpm run unstash-fixtures');
     assert.ok(!isDenied(result), 'script name containing "stash" must not trigger the guard');
+  });
+});
+
+// ── AISDLC-720 — internal sessions may edit .ai-sdlc; untrusted runs may not ──
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720: trust model)', () => {
+  let dir;
+  const yamlPath = () => join(dir, '.ai-sdlc', 'agent-role.yaml');
+  const UNTRUSTED = { AI_SDLC_UNTRUSTED_RUN: '1' };
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-720-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    // Default configuration: no blockedPaths at all.
+    writeFileSync(yamlPath(), 'role: coding-agent\ngoal: Test agent\nblockedActions: []\n');
+  });
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const run = (toolName, file, env = {}) =>
+    runHookRaw(JSON.stringify({ tool_name: toolName, tool_input: { file_path: file } }), {
+      CLAUDE_PROJECT_DIR: dir,
+      GITHUB_ACTIONS: '',
+      AI_SDLC_UNTRUSTED_RUN: '',
+      ...env,
+    });
+  const bash = (command, env = {}) =>
+    runHookRaw(JSON.stringify({ tool_name: 'Bash', tool_input: { command } }), {
+      CLAUDE_PROJECT_DIR: dir,
+      GITHUB_ACTIONS: '',
+      AI_SDLC_UNTRUSTED_RUN: '',
+      ...env,
+    });
+
+  it('happy path: internal session, default config, Edit of .ai-sdlc/agent-role.yaml is not refused', () => {
+    assert.ok(!isDenied(run('Edit', yamlPath())));
+    assert.ok(!isDenied(run('Write', yamlPath())));
+    assert.ok(!isDenied(run('MultiEdit', yamlPath())));
+  });
+
+  it('reviewers can write their own review transcript / ledger / leaves under .ai-sdlc/', () => {
+    for (const rel of [
+      '.ai-sdlc/reviews/aisdlc-720.jsonl',
+      '.ai-sdlc/transcript-leaves/abc.jsonl',
+      '.ai-sdlc/transcript-leaves.jsonl',
+      '.ai-sdlc/verdicts/aisdlc-720.json',
+    ]) {
+      assert.ok(!isDenied(run('Write', join(dir, rel))), `${rel} must be writable`);
+    }
+  });
+
+  it('internal sessions may run shell writes under .ai-sdlc/ (sanctioned CLIs)', () => {
+    assert.ok(!isDenied(bash('echo x >> .ai-sdlc/reviews/aisdlc-720.jsonl')));
+  });
+
+  it('project blockedPaths still works as explicit opt-in for internal sessions', () => {
+    const optIn = join(tmpdir(), `enforce-blocked-720-optin-${Date.now()}`);
+    mkdirSync(join(optIn, '.ai-sdlc'), { recursive: true });
+    try {
+      writeFileSync(
+        join(optIn, '.ai-sdlc', 'agent-role.yaml'),
+        "role: coding-agent\nblockedPaths:\n  - '.ai-sdlc/**'\n",
+      );
+      const r = runHookRaw(
+        JSON.stringify({
+          tool_name: 'MultiEdit',
+          tool_input: { file_path: join(optIn, '.ai-sdlc', 'x.yaml') },
+        }),
+        { CLAUDE_PROJECT_DIR: optIn, AI_SDLC_UNTRUSTED_RUN: '', GITHUB_ACTIONS: '' },
+      );
+      assert.ok(isDenied(r));
+    } finally {
+      rmSync(optIn, { recursive: true, force: true });
+    }
+  });
+
+  it('untrusted: Write/Edit/MultiEdit on .ai-sdlc/** and .github/workflows/** are refused with the untrusted message', () => {
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+      for (const f of [yamlPath(), join(dir, '.github', 'workflows', 'ci.yml')]) {
+        const r = run(tool, f, { ...UNTRUSTED, AI_SDLC_UNTRUSTED_REASON: 'fork PR' });
+        assert.ok(isDenied(r), `${tool} ${f}`);
+        const reason = JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason;
+        assert.match(reason, /untrusted/);
+        assert.match(reason, /fork PR/);
+        assert.match(reason, /maintainer/);
+      }
+    }
+    assert.ok(!isDenied(run('Write', join(dir, 'src', 'a.ts'), UNTRUSTED)), 'other paths fine');
+  });
+
+  it('AISDLC-720(a): GITHUB_ACTIONS with no signal and no internal marker is refused', () => {
+    const ci = { GITHUB_ACTIONS: 'true' };
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+      const r = run(tool, yamlPath(), ci);
+      assert.ok(isDenied(r), tool);
+      assert.match(JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason, /untrusted/);
+    }
+    assert.ok(isDenied(bash('echo x > .ai-sdlc/agent-role.yaml', ci)));
+    assert.ok(!isDenied(run('Write', join(dir, 'src', 'a.ts'), ci)), 'other paths fine');
+  });
+
+  it('AISDLC-720(a): signal absent and running locally is allowed (GITHUB_ACTIONS unset or not true)', () => {
+    assert.ok(!isDenied(run('Edit', yamlPath(), { GITHUB_ACTIONS: '' })));
+    assert.ok(!isDenied(run('Edit', yamlPath(), { GITHUB_ACTIONS: 'false' })));
+  });
+
+  it('AISDLC-720(a): an explicit internal marker trusts a CI run, but cannot override the untrusted signal', () => {
+    assert.ok(
+      !isDenied(run('Edit', yamlPath(), { GITHUB_ACTIONS: 'true', AI_SDLC_INTERNAL_RUN: '1' })),
+    );
+    assert.ok(
+      isDenied(
+        run('Edit', yamlPath(), {
+          GITHUB_ACTIONS: 'true',
+          AI_SDLC_INTERNAL_RUN: '1',
+          AI_SDLC_UNTRUSTED_RUN: '1',
+        }),
+      ),
+    );
+  });
+
+  it('AISDLC-720(a): the env a gh-issue executePipeline run gives its agents is refused, in CI or locally', () => {
+    // Mirrors UNTRUSTED_SPAWN_ENV in pipeline-cli/src/runtime/untrusted-env.ts.
+    const ghIssue = { AI_SDLC_UNTRUSTED_RUN: '1', AI_SDLC_UNTRUSTED_REASON: 'gh-issue source' };
+    assert.ok(isDenied(run('Edit', yamlPath(), ghIssue)));
+    assert.ok(isDenied(run('Edit', yamlPath(), { ...ghIssue, GITHUB_ACTIONS: 'true' })));
+  });
+
+  it('untrusted: shell writes under .ai-sdlc/ and .github/workflows/ are refused', () => {
+    for (const cmd of [
+      'echo x > .ai-sdlc/agent-role.yaml',
+      'echo x >> .github/workflows/ci.yml',
+      'cat a | tee .ai-sdlc/agent-role.yaml',
+      "sed -i 's/a/b/' .ai-sdlc/agent-role.yaml",
+      'cp /tmp/x .github/workflows/ci.yml',
+      'mv /tmp/x .ai-sdlc/agent-role.yaml',
+      'rm -rf .ai-sdlc/attestations',
+    ]) {
+      const r = bash(cmd, UNTRUSTED);
+      assert.ok(isDenied(r), cmd);
+      assert.match(JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason, /untrusted/);
+    }
+    assert.ok(!isDenied(bash('cat .ai-sdlc/agent-role.yaml', UNTRUSTED)), 'reads are fine');
+  });
+
+  it('untrusted signal cannot be cleared from inside the run', () => {
+    // env assignments / export / unset in the command do not matter: hook reads its own env.
+    for (const cmd of [
+      'AI_SDLC_UNTRUSTED_RUN=0 sh -c "echo x > .ai-sdlc/agent-role.yaml"',
+      'export AI_SDLC_UNTRUSTED_RUN=0; echo x > .ai-sdlc/agent-role.yaml',
+      'unset AI_SDLC_UNTRUSTED_RUN; echo x > .ai-sdlc/agent-role.yaml',
+    ]) {
+      assert.ok(isDenied(bash(cmd, UNTRUSTED)), cmd);
+    }
+    // agent-role.yaml content and .active-task sentinel cannot downgrade it.
+    writeFileSync(
+      yamlPath(),
+      'role: coding-agent\nuntrusted: false\nAI_SDLC_UNTRUSTED_RUN: 0\ntrusted: true\n',
+    );
+    writeFileSync(join(dir, '.active-task'), 'AISDLC-720\n');
+    assert.ok(isDenied(run('Edit', yamlPath(), UNTRUSTED)));
+    assert.ok(isDenied(run('Write', join(dir, '.active-task'), UNTRUSTED)));
+  });
+
+  it('falsy / unset signal values are internal', () => {
+    for (const v of ['', '0', 'false', 'no', 'off']) {
+      assert.ok(!isDenied(run('Edit', yamlPath(), { AI_SDLC_UNTRUSTED_RUN: v })), v);
+    }
+    for (const v of ['1', 'true', 'YES', 'On']) {
+      assert.ok(isDenied(run('Edit', yamlPath(), { AI_SDLC_UNTRUSTED_RUN: v })), v);
+    }
+  });
+});
+
+// ── AISDLC-720 round 2 — hardening ──────────────────────────────────────
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () => {
+  let dir;
+  let outside;
+  const U = { AI_SDLC_UNTRUSTED_RUN: '1' };
+
+  before(() => {
+    dir = join(tmpdir(), `enforce-blocked-720b-${Date.now()}`);
+    outside = join(tmpdir(), `enforce-blocked-720b-out-${Date.now()}`);
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    mkdirSync(join(outside, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(outside, 'plain'), { recursive: true });
+    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), 'role: coding-agent\n');
+  });
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  const run = (tool, file, env = {}, project = dir) =>
+    runHookRaw(JSON.stringify({ tool_name: tool, tool_input: { file_path: file } }), {
+      CLAUDE_PROJECT_DIR: project,
+      GITHUB_ACTIONS: '',
+      AI_SDLC_UNTRUSTED_RUN: '',
+      ...env,
+    });
+  const bash = (command, env = {}) =>
+    runHookRaw(JSON.stringify({ tool_name: 'Bash', tool_input: { command } }), {
+      CLAUDE_PROJECT_DIR: dir,
+      GITHUB_ACTIONS: '',
+      AI_SDLC_UNTRUSTED_RUN: '',
+      ...env,
+    });
+
+  it('#2 untrusted: protected paths OUTSIDE home are refused even if permittedExternalPaths allows them', () => {
+    // permittedExternalPaths for AISDLC-720 is delivered via the task file + env fallback.
+    mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(dir, 'backlog', 'tasks', 'aisdlc-720 - t.md'),
+      `---\nid: AISDLC-720\npermittedExternalPaths:\n  - '${outside}'\n---\n`,
+    );
+    const env = { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-720' };
+    assert.ok(!isDenied(run('Write', join(outside, 'plain', 'a.txt'), env)), 'internal baseline');
+    assert.ok(!isDenied(run('Write', join(outside, 'plain', 'a.txt'), { ...env, ...U })));
+    assert.ok(!isDenied(run('Write', join(outside, '.ai-sdlc', 'x.yaml'), env)), 'internal ok');
+    assert.ok(isDenied(run('Write', join(outside, '.ai-sdlc', 'x.yaml'), { ...env, ...U })));
+    assert.ok(
+      isDenied(run('Edit', join(outside, '.GitHub', 'Workflows', 'ci.yml'), { ...env, ...U })),
+    );
+  });
+
+  it('#2 untrusted: .active-task writes are refused', () => {
+    assert.ok(isDenied(run('Write', join(dir, '.active-task'), U)));
+    assert.ok(!isDenied(run('Write', join(dir, '.active-task'))));
+  });
+
+  it('#3 untrusted: a symlink into a protected area cannot be used to write', () => {
+    symlinkSync(join(dir, '.ai-sdlc'), join(dir, 'src', 'link'));
+    const viaLink = join(dir, 'src', 'link', 'agent-role.yaml');
+    assert.ok(isDenied(run('Write', viaLink, U)), 'file under symlinked dir');
+    assert.ok(isDenied(run('Write', join(dir, 'src', 'link', 'new', 'deep.yaml'), U)), 'new file');
+    assert.ok(!isDenied(run('Write', viaLink)), 'internal sessions unaffected');
+  });
+
+  it('#4 untrusted: .claude, .husky and plugin hooks are protected; internal is not', () => {
+    for (const rel of [
+      '.claude/settings.json',
+      '.husky/pre-push',
+      'ai-sdlc-plugin/hooks/enforce-blocked-actions.js',
+    ]) {
+      assert.ok(isDenied(run('Edit', join(dir, rel), U)), rel);
+      assert.ok(!isDenied(run('Edit', join(dir, rel))), `internal ${rel}`);
+    }
+    assert.ok(isDenied(bash('echo x > .claude/settings.json', U)));
+    assert.ok(isDenied(bash('sed -i s/a/b/ .husky/pre-push', U)));
+  });
+
+  it('#5 both plugin.json copies register MultiEdit on the write matcher', () => {
+    const root = join(__dirname, '..');
+    for (const f of ['plugin.json', join('.claude-plugin', 'plugin.json')]) {
+      const j = JSON.parse(readFileSync(join(root, f), 'utf-8'));
+      const matchers = j.hooks.PreToolUse.map((h) => h.matcher);
+      const m = matchers.find((x) => x.includes('Write'));
+      assert.ok(m && m.split('|').includes('MultiEdit'), `${f}: ${matchers.join(',')}`);
+    }
+  });
+
+  it('#6 unknown non-empty signal values fail closed', () => {
+    assert.ok(
+      isDenied(
+        run('Edit', join(dir, '.ai-sdlc', 'agent-role.yaml'), { AI_SDLC_UNTRUSTED_RUN: 'maybe' }),
+      ),
+    );
+  });
+
+  it('#7 untrusted shell: interpreters, cd+write, tar/unzip, tree rewrites', () => {
+    for (const cmd of [
+      `python3 -c "open('.ai-sdlc/agent-role.yaml','w').write('x')"`,
+      `node -e "require('fs').writeFileSync('.github/workflows/ci.yml','x')"`,
+      'cd .ai-sdlc && echo x > agent-role.yaml',
+      'cd .github/workflows && cp /tmp/x ci.yml',
+      'tar -xf /tmp/a.tar -C .ai-sdlc',
+      'unzip /tmp/a.zip -d .github/workflows',
+      'git switch other',
+      'git am /tmp/p.patch',
+      'git cherry-pick abc123',
+      'git stash apply stash@{0}',
+      'git reset --hard origin/main',
+    ]) {
+      assert.ok(isDenied(bash(cmd, U)), cmd);
+      assert.ok(!isDenied(bash(cmd.replace(/git reset --hard.*/, 'true'))), `internal: ${cmd}`);
+    }
+    assert.ok(!isDenied(bash('node pipeline-cli/bin/cli-x.mjs --help', U)), 'plain node is fine');
+  });
+
+  it('#8 untrusted mixed-case paths and shell commands are refused', () => {
+    assert.ok(isDenied(run('Write', join(dir, '.AI-SDLC', 'agent-role.yaml'), U)));
+    assert.ok(isDenied(run('Edit', join(dir, '.Github', 'WORKFLOWS', 'ci.yml'), U)));
+    assert.ok(isDenied(bash('echo x > .AI-SDLC/agent-role.yaml', U)));
+    assert.ok(isDenied(bash('rm .GITHUB/Workflows/ci.yml', U)));
+  });
+
+  it('#9 untrusted run fails closed (exit 2) on unparseable input; internal does not', () => {
+    const run2 = (env) => {
+      const r = spawnSync('node', [hookScript], {
+        input: 'not json',
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          GITHUB_ACTIONS: '',
+          CLAUDE_PROJECT_DIR: dir,
+          AI_SDLC_UNTRUSTED_RUN: '',
+          ...env,
+        },
+        timeout: 5000,
+      });
+      return r;
+    };
+    const u = run2(U);
+    assert.equal(u.status, 2);
+    assert.match(u.stderr, /untrusted/);
+    const i = run2({});
+    assert.equal(i.status, 0);
   });
 });

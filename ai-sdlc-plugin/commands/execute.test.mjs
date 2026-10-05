@@ -328,7 +328,11 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     // asserted by the dedicated AISDLC-88 tests below.
     assert.match(cmdBody, /Never merge any PR/i, 'must embed never-merge rule');
     assert.match(cmdBody, /Never force-push/i, 'must embed never-force-push rule');
-    assert.match(cmdBody, /Never edit `\.ai-sdlc\/\*\*`/i, 'must embed never-edit-config rule');
+    assert.match(
+      cmdBody,
+      /Edit governance config \(`\.ai-sdlc\/\*\*`\) only when the task names/i,
+      'must embed the governance-config edit rule (AISDLC-720)',
+    );
   });
 
   // ── AISDLC-88: CI-skip marker hygiene ─────────────────────────────

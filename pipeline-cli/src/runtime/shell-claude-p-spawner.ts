@@ -211,7 +211,10 @@ export class ShellClaudePSpawner implements SubagentSpawner {
     return new Promise<SubagentResult>((resolve) => {
       let child: ChildProcess;
       try {
-        child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
+        child = this.processSpawner(this.binary, argv, {
+          cwd: opts.cwd,
+          ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+        });
       } catch (err) {
         const wallClockMs = Date.now() - start;
         const diag: SubprocessDiagnostics = {

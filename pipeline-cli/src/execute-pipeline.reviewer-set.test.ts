@@ -67,12 +67,20 @@ const inlineSpec = {
   filePath: '<inline>',
 };
 
+const spawnEnvs: Array<Record<string, string> | undefined> = [];
+
 async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false, diffFails = false) {
   writeTaskFile(tmp, { id: 'AISDLC-300', title: 'x', status: 'To Do', acceptanceCriteria: ['a'] });
   mkdirSync(join(tmp, '.worktrees', 'aisdlc-300'), { recursive: true });
   const spawner = new MockSpawner({
-    developer: { type: 'developer', output: '', parsed: dev, status: 'success', durationMs: 0 },
-    'code-reviewer': approved('code-reviewer'),
+    developer: (o) => {
+      spawnEnvs.push(o.env);
+      return { type: 'developer', output: '', parsed: dev, status: 'success', durationMs: 0 };
+    },
+    'code-reviewer': (o) => {
+      spawnEnvs.push(o.env);
+      return approved('code-reviewer');
+    },
     'test-reviewer': approved('test-reviewer'),
     'security-reviewer': approved('security-reviewer'),
     'correctness-reviewer': approved('correctness-reviewer'),
@@ -121,6 +129,19 @@ describe('executePipeline reviewer-set wiring', () => {
   it('an inline taskSpec with an explicit backlog sourceKind stays backlog', async () => {
     await run('backlog', true);
     expect(seen[0].sourceKind).toBe('backlog');
+  });
+
+  it('AISDLC-720: gh-issue spawns carry the untrusted-run env; backlog spawns do not', async () => {
+    spawnEnvs.length = 0;
+    await run('gh-issue');
+    expect(spawnEnvs.length).toBeGreaterThanOrEqual(2);
+    for (const e of spawnEnvs) {
+      expect(e?.AI_SDLC_UNTRUSTED_RUN).toBe('1');
+      expect(e?.AI_SDLC_UNTRUSTED_REASON).toBe('gh-issue source');
+    }
+    spawnEnvs.length = 0;
+    await run('backlog');
+    expect(spawnEnvs.every((e) => e === undefined)).toBe(true);
   });
 
   it('gh-issue stays gh-issue', async () => {

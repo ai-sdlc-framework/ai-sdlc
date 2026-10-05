@@ -63,8 +63,8 @@ agents per tick.
    model is identical at the branch tip we never own.
 4. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 5. **Never delete branches.** No `git branch -D` / `-d`.
-6. **Never edit `.ai-sdlc/**`.** PreToolUse hook blocks anyway, but you must
-   not even try. `.github/workflows/**` is only refused when the project's
+6. **Edit governance config (`.ai-sdlc/**`) only when the task names the file and the change; never as a side effect.** Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today. Runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`) are blocked from `.ai-sdlc/**` and `.github/workflows/**` by the hook; ask a maintainer in the PR instead of retrying.
+   `.github/workflows/**` is only refused when the project's
    `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by
    default; check the project's config before editing it.
 7. **Never run destructive git operations** outside the rebase flow.

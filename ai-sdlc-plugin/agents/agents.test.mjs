@@ -259,7 +259,10 @@ describe('agent definition tool restrictions', () => {
     // prompt is belt-and-braces in case the hook ever fails to fire.
     assert.ok(body.includes('Never merge'), 'embed never-merge rule');
     assert.ok(body.includes('Never force-push'), 'embed never-force-push rule');
-    assert.ok(body.includes('Never edit `.ai-sdlc/**`'), 'embed blocked-paths rule');
+    assert.ok(
+      body.includes('Edit governance config (`.ai-sdlc/**`) only when the task names'),
+      'embed governance-config rule',
+    );
   });
 });
 

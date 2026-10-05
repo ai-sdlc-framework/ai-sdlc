@@ -6,9 +6,11 @@
  * 1. **Bash** — checks `tool_input.command` against `blockedActions` patterns.
  * 2. **Write / Edit** — checks `tool_input.file_path` against `blockedPaths` globs
  *    (relative to the agent's "home" — the active worktree when resolvable, else
- *    the project root; see AISDLC-567). `.ai-sdlc/**` is ALWAYS refused, even if
- *    a project's `agent-role.yaml` is missing or doesn't list it — this is a
- *    hardcoded floor, not config-driven. `.github/workflows/**` is NOT blocked
+ *    the project root; see AISDLC-567). AISDLC-720: there is no hardcoded
+ *    `.ai-sdlc/**` floor for internal sessions; `.ai-sdlc/**` and
+ *    `.github/workflows/**` are refused only for UNTRUSTED runs (env signal
+ *    `AI_SDLC_UNTRUSTED_RUN`, see lib/governance-resolver `isUntrustedRun`) or
+ *    when a project lists them in `blockedPaths`. `.github/workflows/**` is NOT blocked
  *    by default; it is refused only when a project's `agent-role.yaml` lists it
  *    (or a matching glob) under `blockedPaths` (AISDLC-567 Part A). Paths outside
  *    the agent's home are denied unless they fall under `permittedExternalPaths`
@@ -73,13 +75,14 @@
  *    layer, not this hook.
  */
 
-const { readFileSync, existsSync, readdirSync } = require('fs');
+const { readFileSync, existsSync, readdirSync, realpathSync } = require('fs');
 const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
 const { execSync } = require('child_process');
 const {
   resolveGovernanceFromYaml,
   resolveGovernanceExtrasFromYaml,
   STRICT_DEFAULTS,
+  isUntrustedRun,
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
 const {
@@ -90,6 +93,20 @@ const {
   resolveLeaseWorktree,
   readTaskId,
 } = require('./lib/trusted-policy');
+
+// AISDLC-720: untrusted runs fail closed (exit 2 = block) on any internal error.
+function failClosed(why) {
+  process.stderr.write(
+    `Blocked by AI-SDLC governance policy: this run is marked untrusted and the hook hit an ` +
+      `internal error (${why}); failing closed. Ask a maintainer in the PR; do not retry.\n`,
+  );
+  process.exit(2);
+}
+process.on('uncaughtException', (err) => {
+  if (isUntrustedRun(process.env).untrusted) failClosed(String((err && err.message) || err));
+  process.stderr.write(String((err && err.stack) || err) + '\n');
+  process.exit(1);
+});
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
@@ -103,6 +120,8 @@ try {
   const raw = readFileSync(0, 'utf-8');
   input = JSON.parse(raw);
 } catch {
+  // AISDLC-720: an untrusted run fails closed when its input cannot be read.
+  if (isUntrustedRun(process.env).untrusted) failClosed('could not read or parse the hook input');
   process.exit(0);
 }
 
@@ -252,11 +271,125 @@ const SAFE_STASH_PATTERN =
   `('git stash apply <ref>'), and only then drop it by that same tag/ref ` +
   `('git stash drop <ref>')`;
 
+// ── AISDLC-720: untrusted-run enforcement ───────────────────────────
+// Signal is read ONCE from this hook process's own environment. Nothing in the
+// tool input (including `VAR=0 cmd`, `export`, `unset`), agent-role.yaml, the
+// .active-task sentinel or project settings can change it.
+const UNTRUSTED = isUntrustedRun(process.env);
+// Governance config, CI workflows, and the enforcement mechanism itself.
+const UNTRUSTED_PROTECTED = [
+  ['.ai-sdlc'],
+  ['.github', 'workflows'],
+  ['.claude'],
+  ['.husky'],
+  ['ai-sdlc-plugin', 'hooks'],
+];
+
+/** Does this POSIX-style path contain a protected segment sequence (case-insensitive)? */
+function isProtectedForUntrusted(p) {
+  const segs = p
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((x) => x.toLowerCase());
+  if (segs[segs.length - 1] === '.active-task') return true;
+  return UNTRUSTED_PROTECTED.some((seq) =>
+    segs.some((_, i) => seq.every((part, j) => segs[i + j] === part)),
+  );
+}
+
+/** realpath of the deepest existing ancestor of `p`, re-joined with the missing tail. */
+function realpathDeepest(p) {
+  let cur = resolve(p);
+  const tail = [];
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...tail.reverse());
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return resolve(p);
+      tail.push(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+function enforceUntrustedPath(absPath, homeAbs) {
+  const inHome = (p, h) => p === h || p.startsWith(h + sep);
+  const check = (p, h) => {
+    // Inside home: judge the home-relative path (home itself may sit under a
+    // `.claude/worktrees/...` dir). Outside home: judge the whole path.
+    const rel = inHome(p, h) ? relative(h, p).split(sep).join('/') : p;
+    return isProtectedForUntrusted(rel) ? rel : null;
+  };
+  let hit = check(absPath, homeAbs);
+  if (!hit) {
+    // Symlink bypass: judge where the path REALLY lands.
+    const realHome = realpathDeepest(homeAbs);
+    hit = check(realpathDeepest(absPath), realHome);
+  }
+  if (hit) deny(untrustedMessage(`path '${hit}'`));
+}
+
+function untrustedMessage(what) {
+  const why = UNTRUSTED.reason ? ` (${UNTRUSTED.reason})` : '';
+  return (
+    `${what} is governance config or enforcement code, and this run is marked untrusted${why} ` +
+    `(AI_SDLC_UNTRUSTED_RUN is set for fork PRs, outside authors, or issue-sourced runs). ` +
+    `Untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
+    `ai-sdlc-plugin/hooks/** or .active-task. Next step: leave a note in the PR ` +
+    `or issue asking a maintainer to make that change; do not retry or route around this.`
+  );
+}
+
+const PROT = String.raw`(?:\.ai-sdlc|\.github\/workflows|\.claude|\.husky|ai-sdlc-plugin\/hooks|\.active-task)`;
+const PROTECTED_SHELL_PATH = new RegExp(
+  String.raw`(?:^|[\s'"=/<>:])${PROT}(?:\/|['"\s;|&]|$)`,
+  'i',
+);
+const SHELL_WRITE_VERB =
+  /(?:^|[\s;&|(])(?:tee|sed\s+(?:-\w*i|--in-place)|cp|mv|rm|ln|touch|chmod|chown|install|truncate|dd|perl\s+-\w*i|patch|rsync|tar|unzip|git\s+(?:apply|checkout|restore|rm|mv|switch|am|cherry-pick))(?=\s)/i;
+const SHELL_ANY_REDIRECT = />>?/;
+const SHELL_REDIRECT_TO_PROTECTED = new RegExp(
+  String.raw`>>?\s*['"]?[^\s;|&'"]*${PROT}(?:\/|['"\s;|&]|$)`,
+  'i',
+);
+const SHELL_INTERPRETER_EVAL =
+  /(?:^|[\s;&|(])(?:python3?|node|perl|ruby)\s+(?:-\w*[ceEp]\b|--eval)/i;
+// Rewrite the working tree wholesale without naming a path.
+const SHELL_TREE_REWRITE =
+  /(?:^|[\s;&|(])git\s+(?:-\S+\s+\S+\s+)*(?:switch|am|cherry-pick|stash\s+apply|reset\s+--hard)(?=\s|$)/i;
+const SHELL_CD_PROTECTED = new RegExp(String.raw`(?:^|[\s;&|(])cd\s+['"]?[^\s;|&'"]*${PROT}`, 'i');
+
+function enforceUntrustedShellWrites(command) {
+  if (!UNTRUSTED.untrusted) return;
+  const msg = untrustedMessage('a shell command writing to a protected path');
+  // Best-effort pattern matching; shell is not a boundary (CI is).
+  if (SHELL_TREE_REWRITE.test(command)) deny(msg);
+  // `cd <protected>` then any write verb or redirect later in the same command.
+  if (
+    SHELL_CD_PROTECTED.test(command) &&
+    (SHELL_WRITE_VERB.test(command) || SHELL_ANY_REDIRECT.test(command))
+  ) {
+    deny(msg);
+  }
+  for (const segment of command.split(/[;&|\n]+/)) {
+    if (!PROTECTED_SHELL_PATH.test(segment)) continue;
+    if (
+      SHELL_WRITE_VERB.test(segment) ||
+      SHELL_REDIRECT_TO_PROTECTED.test(segment) ||
+      SHELL_INTERPRETER_EVAL.test(segment)
+    ) {
+      deny(msg);
+    }
+  }
+  if (SHELL_REDIRECT_TO_PROTECTED.test(command)) deny(msg);
+}
+
 // ── Dispatch by tool ─────────────────────────────────────────────────
 
 if (toolName === 'Bash' || (!toolName && toolInput.command)) {
   enforceBash(toolInput.command);
-} else if (toolName === 'Write' || toolName === 'Edit') {
+} else if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
   enforceWriteEdit(toolInput.file_path);
 }
 
@@ -268,6 +401,9 @@ function enforceBash(command) {
   if (!command || typeof command !== 'string' || !command.trim()) return;
 
   const trimmed = command.trim();
+
+  // AISDLC-720: untrusted runs may not write governance config / workflows via shell.
+  enforceUntrustedShellWrites(trimmed);
 
   // AISDLC-602: merge governance is enforced unconditionally — independent
   // of whatever blockedActions patterns the project has (or hasn't)
@@ -838,21 +974,18 @@ function enforceWriteEdit(filePath) {
   // whatever refs are already cached locally (no network fetch from a hook).
   warnIfStaleBase(homeAbs);
 
+  // AISDLC-720: untrusted runs — protected paths inside OR outside home, before
+  // any permittedExternalPaths allow.
+  if (UNTRUSTED.untrusted) enforceUntrustedPath(absPath, homeAbs);
+
   if (insideHome) {
     // Path is inside the agent's home — check against the hardcoded
     // never-editable floor plus the project's configured blockedPaths globs.
     // Relative path uses POSIX separators because globs do.
     const relPath = relative(homeAbs, absPath).split(sep).join('/');
 
-    // `.ai-sdlc/**` is ALWAYS refused, regardless of agent-role.yaml content
-    // (or its absence) — AISDLC-567 Part A net rule.
-    if (matchGlob('.ai-sdlc/**', relPath) || relPath === '.ai-sdlc') {
-      deny(
-        `path '${relPath}' is under .ai-sdlc/, which is never editable — ` +
-          `pipeline configuration is out of scope for agent edits regardless of project config.`,
-      );
-    }
-
+    // AISDLC-720: no hardcoded `.ai-sdlc/**` floor for internal sessions; untrusted
+    // runs are handled by enforceUntrustedPath() above.
     for (const glob of blockedPaths) {
       if (matchGlob(glob, relPath)) {
         deny(

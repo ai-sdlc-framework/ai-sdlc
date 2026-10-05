@@ -438,7 +438,59 @@ function renderSubagentHardRules(resolved) {
   return [mergeLine, forcePushLine, closeLine, branchDeleteLine, resetHardLine].join('\n');
 }
 
+/**
+ * AISDLC-720: is this run marked untrusted?
+ *
+ * Signals come from the hook PROCESS ENVIRONMENT only. No file, config key,
+ * sentinel (`.active-task` is NOT a trust marker: issue-triggered pipeline runs
+ * have one too) or tool input is consulted, so nothing an agent can write can
+ * downgrade untrusted to internal.
+ *
+ * Untrusted when either:
+ *  1. `AI_SDLC_UNTRUSTED_RUN` is any non-empty value other than 0/false/no/off, or
+ *  2. `GITHUB_ACTIONS=true` and there is no explicit internal marker
+ *     (`AI_SDLC_INTERNAL_RUN` truthy). Fail closed in CI: the issue workflow and
+ *     the external-PR review workflow do not go through executePipeline and set
+ *     no signal. Until the workflow half sets the marker on trusted jobs
+ *     (post-AISDLC-721), every CI run is untrusted for protected-path writes.
+ *
+ * A local run with no signal stays internal (trusted by default, no prompts).
+ *
+ * @param {Record<string,string|undefined>} [env]
+ * @returns {{ untrusted: boolean, reason: string }}
+ */
+const FALSY = ['0', 'false', 'no', 'off'];
+function norm(v) {
+  return String(v || '')
+    .trim()
+    .toLowerCase();
+}
+
+// Fail closed: non-empty and not explicitly falsy.
+function isTruthy(v) {
+  const n = norm(v);
+  return n !== '' && !FALSY.includes(n);
+}
+
+function isUntrustedRun(env = process.env) {
+  const raw = norm(env && env.AI_SDLC_UNTRUSTED_RUN);
+  // Fail closed: any non-empty value that is not explicitly falsy is untrusted.
+  if (raw !== '' && !FALSY.includes(raw)) {
+    return { untrusted: true, reason: String((env && env.AI_SDLC_UNTRUSTED_REASON) || '').trim() };
+  }
+  const internal = norm(env && env.AI_SDLC_INTERNAL_RUN);
+  const hasInternalMarker = isTruthy(internal);
+  if (isTruthy(env && env.GITHUB_ACTIONS) && !hasInternalMarker) {
+    return {
+      untrusted: true,
+      reason: 'GitHub Actions run without an internal-run marker (AI_SDLC_INTERNAL_RUN)',
+    };
+  }
+  return { untrusted: false, reason: '' };
+}
+
 module.exports = {
+  isUntrustedRun,
   STRICT_DEFAULTS,
   parseGovernanceBlock,
   resolveGovernance,

@@ -37,6 +37,7 @@ const execFileAsync = promisify(execFile);
  *     single-quoted YAML emission (security review MINOR).
  *   - Newlines / NUL — prevent fenced-block-injection past the splitter.
  *   - Empty / whitespace-only strings.
+ *   - Any `.ai-sdlc`, `.github`, `.claude` or `.husky` segment (AISDLC-720).
  *
  * Operator-authored backlog task files have ALWAYS been able to declare any
  * `permittedExternalPaths` shape (no upstream validation in pipeline-cli);
@@ -51,6 +52,9 @@ export function isValidExternalPath(p: string): boolean {
   if (trimmed.length === 0) return false;
   if (isAbsolute(trimmed)) return false;
   if (/['\n\r\0]/.test(trimmed)) return false;
+  // AISDLC-720: issue text is outside input; it must never grant write access to
+  // governance config, CI workflows or the agent-enforcement surface.
+  if (/(^|[/\\])(\.ai-sdlc|\.github|\.claude|\.husky)([/\\]|$)/i.test(trimmed)) return false;
   // Allow at most ONE leading `..` segment — the canonical sibling-repo
   // pattern (`../ai-sdlc-io/`). Reject deeper traversal (`../../../etc/`)
   // and mid-path traversal (`foo/../bar`). Operator-vetted backlog tasks

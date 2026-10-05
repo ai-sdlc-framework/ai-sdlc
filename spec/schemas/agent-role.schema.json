@@ -58,7 +58,7 @@
             },
             "blockedPaths": {
               "type": "array",
-              "description": "Glob patterns for paths the agent must not modify (e.g. '.github/workflows/**'). Enforced by the PreToolUse hook (ai-sdlc-plugin/hooks/enforce-blocked-actions.js) on Write/Edit calls, relative to the agent's active worktree (or project root when no worktree is resolvable). `.ai-sdlc/**` is ALWAYS refused by the hook regardless of whether it appears here — it is a hardcoded floor, not config-driven. `.github/workflows/**` is NOT blocked by default; list it here to opt a project's agents OUT of editing its own CI workflows (AISDLC-567).",
+              "description": "Glob patterns for paths the agent must not modify (e.g. '.github/workflows/**'). Enforced by the PreToolUse hook (ai-sdlc-plugin/hooks/enforce-blocked-actions.js) on Write/Edit calls, relative to the agent's active worktree (or project root when no worktree is resolvable). Neither `.ai-sdlc/**` nor `.github/workflows/**` is blocked by default for internal sessions (AISDLC-720): trusted agents may edit governance config when their task names the file and the change. List a path here to opt every session in the project, internal ones included, out of editing it. Runs marked untrusted (the `AI_SDLC_UNTRUSTED_RUN` environment signal, set by workflows for fork PRs, PRs whose author association is not OWNER/MEMBER/COLLABORATOR, and the gh-issue source kind) are always refused `.ai-sdlc/**`, `.github/workflows/**`, `.claude/**`, `.husky/**`, `ai-sdlc-plugin/hooks/**` and the `.active-task` sentinel (symlinks are resolved first), and nothing in this file can turn that off.",
               "items": { "type": "string" }
             },
             "blockedActions": {

@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STRICT_DEFAULTS,
+  isUntrustedRun,
   parseGovernanceBlock,
   resolveGovernance,
   resolveGovernanceFromYaml,
@@ -320,5 +321,60 @@ describe('resolveMergeAuthors (merge-if-eligible allow-list)', () => {
       ...STRICT_DEFAULTS,
       allowMerge: 'onGreenClean',
     });
+  });
+});
+
+describe('isUntrustedRun (AISDLC-720)', () => {
+  it('defaults to internal with no signal', () => {
+    assert.deepEqual(isUntrustedRun({}), { untrusted: false, reason: '' });
+  });
+  it('is untrusted only for truthy values, and carries the reason', () => {
+    for (const v of ['1', 'true', 'YES', ' on ']) {
+      assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, true, v);
+    }
+    for (const v of ['0', 'false', 'No', 'OFF', '', '  ']) {
+      assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, false, v);
+    }
+    // Fail closed: unknown non-empty values are untrusted.
+    for (const v of ['maybe', 'enabled', '2', 'tru']) {
+      assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, true, v);
+    }
+    assert.equal(
+      isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: '1', AI_SDLC_UNTRUSTED_REASON: 'fork PR' }).reason,
+      'fork PR',
+    );
+  });
+  it('AISDLC-720(a): GITHUB_ACTIONS with no internal marker is untrusted', () => {
+    const r = isUntrustedRun({ GITHUB_ACTIONS: 'true' });
+    assert.equal(r.untrusted, true);
+    assert.match(r.reason, /GitHub Actions/);
+    // an explicit falsy untrusted signal is not an internal marker
+    assert.equal(
+      isUntrustedRun({ GITHUB_ACTIONS: 'true', AI_SDLC_UNTRUSTED_RUN: '0' }).untrusted,
+      true,
+    );
+    assert.equal(
+      isUntrustedRun({ GITHUB_ACTIONS: 'true', AI_SDLC_INTERNAL_RUN: '0' }).untrusted,
+      true,
+    );
+  });
+  it('AISDLC-720(a): an explicit internal marker trusts a CI run; the untrusted signal still wins', () => {
+    assert.equal(
+      isUntrustedRun({ GITHUB_ACTIONS: 'true', AI_SDLC_INTERNAL_RUN: '1' }).untrusted,
+      false,
+    );
+    assert.equal(
+      isUntrustedRun({
+        GITHUB_ACTIONS: 'true',
+        AI_SDLC_INTERNAL_RUN: '1',
+        AI_SDLC_UNTRUSTED_RUN: '1',
+      }).untrusted,
+      true,
+    );
+  });
+  it('AISDLC-720(a): a local run with no signal stays internal, even with an internal marker absent', () => {
+    assert.equal(isUntrustedRun({}).untrusted, false);
+    assert.equal(isUntrustedRun({ GITHUB_ACTIONS: '' }).untrusted, false);
+    assert.equal(isUntrustedRun({ GITHUB_ACTIONS: 'false' }).untrusted, false);
   });
 });
