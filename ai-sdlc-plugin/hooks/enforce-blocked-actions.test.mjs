@@ -87,7 +87,7 @@ function runHookRaw(input, extraEnv = {}) {
     const output = execFileSync('node', [hookScript], {
       input,
       encoding: 'utf-8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: tempDir, ...extraEnv },
+      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: tempDir, ...extraEnv },
       timeout: 5000,
     });
     return { output: output.trim(), exitCode: 0 };
@@ -139,7 +139,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook', () => {
       const output = execFileSync('node', [hookScript], {
         input: 'not valid json at all',
         encoding: 'utf-8',
-        env: { ...process.env, CLAUDE_PROJECT_DIR: tempDir },
+        env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: tempDir },
         timeout: 5000,
       });
       assert.equal(output.trim(), '', 'should produce no output (allow)');
@@ -1248,7 +1248,7 @@ blockedActions: []
     const result = spawnSync('node', [hookScript], {
       input: JSON.stringify(payload),
       encoding: 'utf-8',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: staleParent, ...env },
+      env: { ...process.env, GITHUB_ACTIONS: '', CLAUDE_PROJECT_DIR: staleParent, ...env },
       timeout: 5000,
     });
     return {
@@ -1659,12 +1659,14 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720: trust model)'
   const run = (toolName, file, env = {}) =>
     runHookRaw(JSON.stringify({ tool_name: toolName, tool_input: { file_path: file } }), {
       CLAUDE_PROJECT_DIR: dir,
+      GITHUB_ACTIONS: '',
       AI_SDLC_UNTRUSTED_RUN: '',
       ...env,
     });
   const bash = (command, env = {}) =>
     runHookRaw(JSON.stringify({ tool_name: 'Bash', tool_input: { command } }), {
       CLAUDE_PROJECT_DIR: dir,
+      GITHUB_ACTIONS: '',
       AI_SDLC_UNTRUSTED_RUN: '',
       ...env,
     });
@@ -1703,7 +1705,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720: trust model)'
           tool_name: 'MultiEdit',
           tool_input: { file_path: join(optIn, '.ai-sdlc', 'x.yaml') },
         }),
-        { CLAUDE_PROJECT_DIR: optIn, AI_SDLC_UNTRUSTED_RUN: '' },
+        { CLAUDE_PROJECT_DIR: optIn, AI_SDLC_UNTRUSTED_RUN: '', GITHUB_ACTIONS: '' },
       );
       assert.ok(isDenied(r));
     } finally {
@@ -1723,6 +1725,44 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720: trust model)'
       }
     }
     assert.ok(!isDenied(run('Write', join(dir, 'src', 'a.ts'), UNTRUSTED)), 'other paths fine');
+  });
+
+  it('AISDLC-720(a): GITHUB_ACTIONS with no signal and no internal marker is refused', () => {
+    const ci = { GITHUB_ACTIONS: 'true' };
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) {
+      const r = run(tool, yamlPath(), ci);
+      assert.ok(isDenied(r), tool);
+      assert.match(JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason, /untrusted/);
+    }
+    assert.ok(isDenied(bash('echo x > .ai-sdlc/agent-role.yaml', ci)));
+    assert.ok(!isDenied(run('Write', join(dir, 'src', 'a.ts'), ci)), 'other paths fine');
+  });
+
+  it('AISDLC-720(a): signal absent and running locally is allowed (GITHUB_ACTIONS unset or not true)', () => {
+    assert.ok(!isDenied(run('Edit', yamlPath(), { GITHUB_ACTIONS: '' })));
+    assert.ok(!isDenied(run('Edit', yamlPath(), { GITHUB_ACTIONS: 'false' })));
+  });
+
+  it('AISDLC-720(a): an explicit internal marker trusts a CI run, but cannot override the untrusted signal', () => {
+    assert.ok(
+      !isDenied(run('Edit', yamlPath(), { GITHUB_ACTIONS: 'true', AI_SDLC_INTERNAL_RUN: '1' })),
+    );
+    assert.ok(
+      isDenied(
+        run('Edit', yamlPath(), {
+          GITHUB_ACTIONS: 'true',
+          AI_SDLC_INTERNAL_RUN: '1',
+          AI_SDLC_UNTRUSTED_RUN: '1',
+        }),
+      ),
+    );
+  });
+
+  it('AISDLC-720(a): the env a gh-issue executePipeline run gives its agents is refused, in CI or locally', () => {
+    // Mirrors UNTRUSTED_SPAWN_ENV in pipeline-cli/src/runtime/untrusted-env.ts.
+    const ghIssue = { AI_SDLC_UNTRUSTED_RUN: '1', AI_SDLC_UNTRUSTED_REASON: 'gh-issue source' };
+    assert.ok(isDenied(run('Edit', yamlPath(), ghIssue)));
+    assert.ok(isDenied(run('Edit', yamlPath(), { ...ghIssue, GITHUB_ACTIONS: 'true' })));
   });
 
   it('untrusted: shell writes under .ai-sdlc/ and .github/workflows/ are refused', () => {
@@ -1795,12 +1835,14 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () 
   const run = (tool, file, env = {}, project = dir) =>
     runHookRaw(JSON.stringify({ tool_name: tool, tool_input: { file_path: file } }), {
       CLAUDE_PROJECT_DIR: project,
+      GITHUB_ACTIONS: '',
       AI_SDLC_UNTRUSTED_RUN: '',
       ...env,
     });
   const bash = (command, env = {}) =>
     runHookRaw(JSON.stringify({ tool_name: 'Bash', tool_input: { command } }), {
       CLAUDE_PROJECT_DIR: dir,
+      GITHUB_ACTIONS: '',
       AI_SDLC_UNTRUSTED_RUN: '',
       ...env,
     });
@@ -1898,7 +1940,14 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () 
       const r = spawnSync('node', [hookScript], {
         input: 'not json',
         encoding: 'utf-8',
-        env: { ...process.env, CLAUDE_PROJECT_DIR: dir, AI_SDLC_UNTRUSTED_RUN: '', ...env },
+        env: {
+          ...process.env,
+          GITHUB_ACTIONS: '',
+          CLAUDE_PROJECT_DIR: dir,
+          GITHUB_ACTIONS: '',
+          AI_SDLC_UNTRUSTED_RUN: '',
+          ...env,
+        },
         timeout: 5000,
       });
       return r;
