@@ -15,8 +15,8 @@
  *   node "${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}/scripts/render-governance-hard-rules.mjs"
  *
  * With no `governance:` section in `.ai-sdlc/agent-role.yaml` (the common
- * case), the output is byte-identical to the strict-default text — no
- * behavior change for adopters who haven't opted into RFC-0048 governance.
+ * case), every rule renders its strict text except force-push, which renders the
+ * `allowForcePush: leaseOnOwnBranch` default (AISDLC-710).
  *
  * Trust boundary (mirrors governance-resolver.js): resolves the policy from
  * the on-disk project root (`CLAUDE_PROJECT_DIR` or `git rev-parse
@@ -55,7 +55,9 @@ function main() {
     try {
       yaml = readFileSync(agentRolePath, 'utf-8');
     } catch {
-      yaml = ''; // fails closed to STRICT_DEFAULTS below
+      // Unreadable policy: fail closed. An empty string would resolve to the
+      // `leaseOnOwnBranch` default (AISDLC-710), so spell the strict force-push value.
+      yaml = 'spec:\n  governance:\n    allowForcePush: never\n';
     }
   }
 

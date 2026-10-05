@@ -88,7 +88,8 @@ function verdict(command) {
     const out = execFileSync('node', [hookScript], {
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: wt }),
       cwd: wt,
-      env: { ...env, CLAUDE_PROJECT_DIR: repo },
+      // The dispatcher binds a main-checkout-rooted session to its one task.
+      env: { ...env, CLAUDE_PROJECT_DIR: repo, AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1' },
       encoding: 'utf-8',
       timeout: 10000,
     }).trim();
@@ -168,12 +169,10 @@ describe('push spellings prescribed in command / agent / skill bodies', () => {
 
 describe('spellings that must stay denied (so the files above cannot drift back)', () => {
   const denied = [
-    'git push --force-with-lease origin HEAD',
     `git push --force-with-lease origin ${BRANCH}`,
     `git push --force-with-lease -u origin ${BRANCH}`,
+    'git push --force-with-lease origin +HEAD',
     `git push --force-with-lease origin refs/heads/${BRANCH}`,
-    'git push --force-with-lease --set-upstream origin HEAD',
-    'git push --force-with-lease -u origin HEAD',
     `git push --force-with-lease origin HEAD:${BRANCH}`,
     `git push --force-with-lease origin ${BRANCH}:${BRANCH}`,
     'git push --force-with-lease origin HEAD:refs/heads/main',
@@ -192,13 +191,26 @@ describe('spellings that must stay denied (so the files above cannot drift back)
     it(`denies: ${cmd}`, () => assert.equal(verdict(cmd), 'deny', cmd));
   }
 
-  it('control: the canonical spelling is accepted and the no-colon form is refused', () => {
+  it('AISDLC-710: bare HEAD and the omitted remote/refspec forms are refused (git config maps them)', () => {
+    for (const cmd of [
+      'git push --force-with-lease origin HEAD',
+      'git push --force-with-lease --set-upstream origin HEAD',
+      'git push --force-with-lease -u origin HEAD',
+      'git push --force-with-lease origin',
+      'git push --force-with-lease',
+      `git push --force-with-lease=${BRANCH}:0123abcd`,
+    ]) {
+      assert.equal(verdict(cmd), 'deny', cmd);
+    }
+  });
+
+  it('control: the canonical spelling is accepted and the short no-colon form is refused', () => {
     assert.equal(verdict(`git push --force-with-lease origin HEAD:refs/heads/${BRANCH}`), 'allow');
     assert.equal(
       verdict(`git push --force-with-lease -u origin HEAD:refs/heads/${BRANCH}`),
       'allow',
     );
-    // The no-colon form is REFUSED (git maps it through remote.<name>.push / push.default).
+    // The short no-colon form is REFUSED (its remote destination is matched against remote refs).
     assert.equal(verdict(`git push --force-with-lease origin ${BRANCH}`), 'deny');
   });
 });

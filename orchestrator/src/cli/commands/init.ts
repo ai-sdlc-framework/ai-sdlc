@@ -120,6 +120,20 @@ export type AgentRoleTier = 'coding' | 'research' | 'meta';
 
 export const AGENT_ROLE_TIERS: readonly AgentRoleTier[] = ['coding', 'research', 'meta'] as const;
 
+/**
+ * Documents the governance defaults in every scaffolded agent-role.yaml (AISDLC-710).
+ * It is commented out on purpose: unset means the default, and the default is
+ * `allowForcePush: leaseOnOwnBranch`, so a lease push of a dispatched task's own
+ * branch after a rebase is allowed without an operator prompt.
+ */
+export const AGENT_ROLE_GOVERNANCE_COMMENT = `  # Governance (optional; every key defaults when unset). allowForcePush defaults
+  # to leaseOnOwnBranch: \`git push --force-with-lease\` of a dispatched task's own
+  # branch is allowed (never main/master/protected branches, never plain force).
+  # Uncomment to change it; \`never\` makes agents ask before every lease push.
+  # governance:
+  #   allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch
+`;
+
 const AGENT_ROLE_YAML_CODING = `apiVersion: ai-sdlc.io/v1alpha1
 kind: AgentRole
 metadata:
@@ -150,7 +164,7 @@ spec:
     blockedPaths:
       - .github/workflows/**
       - .ai-sdlc/**
-`;
+${AGENT_ROLE_GOVERNANCE_COMMENT}`;
 
 const AGENT_ROLE_YAML_RESEARCH = `apiVersion: ai-sdlc.io/v1alpha1
 kind: AgentRole
@@ -181,7 +195,7 @@ spec:
     blockedPaths:
       - .github/workflows/**
       - .ai-sdlc/**
-`;
+${AGENT_ROLE_GOVERNANCE_COMMENT}`;
 
 const AGENT_ROLE_YAML_META = `apiVersion: ai-sdlc.io/v1alpha1
 kind: AgentRole
@@ -212,7 +226,7 @@ spec:
     blockedPaths:
       - .github/workflows/**
       - .ai-sdlc/**
-`;
+${AGENT_ROLE_GOVERNANCE_COMMENT}`;
 
 const AGENT_ROLE_YAML_BY_TIER: Record<AgentRoleTier, string> = {
   coding: AGENT_ROLE_YAML_CODING,

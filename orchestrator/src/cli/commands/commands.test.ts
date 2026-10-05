@@ -336,6 +336,18 @@ describe('init command — agent-role tiers (AISDLC-79)', () => {
     // Default arg = 'coding'
     expect(mod.getAgentRoleYaml()).toBe(mod.getAgentRoleYaml('coding'));
   });
+
+  it('every tier template documents the allowForcePush default without setting it (AISDLC-710)', async () => {
+    vi.resetModules();
+    const mod = await import('./init.js');
+    for (const tier of mod.AGENT_ROLE_TIERS) {
+      const yaml = mod.getAgentRoleYaml(tier);
+      expect(yaml).toContain('allowForcePush defaults');
+      expect(yaml).toContain('leaseOnOwnBranch');
+      // Documented, not written: an active governance block would pin the value.
+      expect(yaml).not.toMatch(/^\s*governance:/m);
+    }
+  });
 });
 
 // ── run ──────────────────────────────────────────────────────────────

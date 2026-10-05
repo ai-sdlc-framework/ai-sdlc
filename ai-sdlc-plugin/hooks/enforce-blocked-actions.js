@@ -85,6 +85,7 @@ const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guar
 const {
   runGit: gitOut,
   probeRef,
+  readPolicyText,
   loadTrustedExtras,
   resolveLeaseWorktree,
   readTaskId,
@@ -156,24 +157,29 @@ try {
  * Any failure fails closed to `never`.
  */
 function loadLeasePolicy() {
-  const closed = { mode: 'never', protectedBranches: [], cwd: undefined };
+  // `why` says which gate closed the lease so a refusal can name the right fix
+  // (see forcePushRefusal): 'policy-never' = an explicit/malformed `never`.
+  const closed = (why) => ({ mode: 'never', protectedBranches: [], cwd: undefined, why });
   try {
-    const localText = readFileSync(join(projectDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+    // A missing policy file means the repo sets nothing: the default
+    // (`leaseOnOwnBranch`, AISDLC-710) applies. Any other read failure fails closed.
+    const localText = readPolicyText(join(projectDir, '.ai-sdlc', 'agent-role.yaml'));
     if (resolveGovernanceExtrasFromYaml(localText).forcePushMode !== 'leaseOnOwnBranch') {
-      return closed;
+      return closed('policy-never');
     }
     // The lease needs an EXPLICIT, absolute CLAUDE_PROJECT_DIR: the toplevel
     // fallback used for blockedActions would make the own-session binding pass
     // trivially (project dir == whatever the cwd is in).
     const envDir = process.env.CLAUDE_PROJECT_DIR;
-    if (!envDir || !isAbsolute(envDir)) return closed;
+    if (!envDir || !isAbsolute(envDir)) return closed('no-project-dir');
     const cwd = toolCwd || process.cwd();
     const trusted = loadTrustedExtras(projectDir, cwd);
-    if (!trusted || trusted.forcePushMode !== 'leaseOnOwnBranch') return closed;
+    if (!trusted) return closed('trusted-policy-unavailable');
+    if (trusted.forcePushMode !== 'leaseOnOwnBranch') return closed('policy-never');
     // The cwd must be a genuine dispatched worktree under <main>/.worktrees/
     // (realpath), else no lease: operator main-checkout sessions get none.
     const wt = resolveLeaseWorktree(projectDir, cwd);
-    if (!wt) return closed;
+    if (!wt) return closed('not-task-worktree');
     return {
       mode: 'leaseOnOwnBranch',
       protectedBranches: trusted.protectedBranches,
@@ -181,8 +187,34 @@ function loadLeasePolicy() {
       top: wt.top,
     };
   } catch {
-    return closed;
+    return closed('error');
   }
+}
+
+/**
+ * Refusal text for a force push the guard will not allow when the lease policy is
+ * NOT in effect. Always names the config key and the value that allows the push.
+ * Never suggests an exit the guard itself forbids (no skip variable, no hook
+ * bypass flag, no plain force) — the next step is the config or the task worktree.
+ */
+function forcePushRefusal(why) {
+  const key = 'spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml';
+  if (why === 'policy-never') {
+    return (
+      `force-push is refused because ${key} resolves to never (set explicitly in this repo). ` +
+      `Agents must not edit .ai-sdlc/: escalate to the dispatch session and ask the operator to set ` +
+      `spec.governance.allowForcePush to leaseOnOwnBranch, which allows 'git push --force-with-lease ` +
+      `origin HEAD:refs/heads/<own-branch>' on a dispatched task's own branch. Plain force pushes and any ` +
+      `push to main/master or a protected branch are never permitted.`
+    );
+  }
+  return (
+    `force-push is refused here: ${key} = leaseOnOwnBranch (the default) allows a lease push only from a ` +
+    `dispatched task worktree under <repo>/.worktrees/ whose .active-task, directory name and ai-sdlc/<task-id>-* ` +
+    `branch agree, with a trusted policy that can be read (${why}). Push from the task worktree with ` +
+    `'git push --force-with-lease origin HEAD:refs/heads/<own-branch>'. Plain force pushes and any push ` +
+    `to main/master or a protected branch are never permitted.`
+  );
 }
 
 /** Local refs (other than refs/heads/<name>) that git would resolve the short name to. */
@@ -282,12 +314,17 @@ function enforceBash(command) {
     // anchored blockedActions globs miss (`git push origin --force main`,
     // `git push origin -f HEAD:main`, `+refspec`). Runs no git subprocess.
     if (lease.mode !== 'leaseOnOwnBranch' && hasForcePushOption(trimmed)) {
-      deny('force-push is not permitted by the resolved governance policy (allowForcePush: never)');
+      deny(forcePushRefusal(lease.why));
     }
   } catch {
     // A thrown error (or timeout) must not become an allow: deny pushes, ignore the rest.
-    if (looksLikeGitPush(trimmed))
-      deny('could not evaluate the own-branch lease policy for this git push');
+    if (looksLikeGitPush(trimmed)) {
+      deny(
+        'could not evaluate the own-branch lease policy for this git push; ' +
+          'spec.governance.allowForcePush = leaseOnOwnBranch in .ai-sdlc/agent-role.yaml ' +
+          "allows 'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' on the task worktree's own branch",
+      );
+    }
   }
 
   if (blockedActions.length === 0) return;
@@ -308,7 +345,14 @@ function enforceBash(command) {
       continue;
     }
     if (regex.test(trimmed)) {
-      deny(`command matches blockedAction pattern '${pattern}'`);
+      const forceHint =
+        !leasePushAllowed && /^git\s+push\b/i.test(pattern) && hasForcePushOption(trimmed);
+      deny(
+        `command matches blockedAction pattern '${pattern}'` +
+          (forceHint
+            ? ` (a force-with-lease push on a task's own branch is allowed by spec.governance.allowForcePush = leaseOnOwnBranch in .ai-sdlc/agent-role.yaml, when the push is spelled 'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' from the task worktree)`
+            : ''),
+      );
     }
   }
 }

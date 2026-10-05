@@ -52,14 +52,15 @@ of truth for the injected governance hard-rule TEXT — "NEVER merge PRs", "NEVE
 force push", etc. — that Claude Code sessions and subagents see in their
 SessionStart/SubagentStart banners. All keys are optional; an ABSENT
 `governance` section resolves to strict defaults, reproducing the historical
-injected text byte-for-byte:
+injected text byte-for-byte, with ONE exception: `allowForcePush` defaults to
+`leaseOnOwnBranch` (see "Velocity impact" below):
 
 ```yaml
 spec:
   governance:
     preset: strict            # or: operator-trusted (sugar, see below)
     allowMerge: never          # never | onGreenClean
-    allowForcePush: never      # never | leaseOnOwnBranch (booleans: true = leaseOnOwnBranch, false = never)
+    allowForcePush: leaseOnOwnBranch  # never | leaseOnOwnBranch (default when unset; booleans: true = leaseOnOwnBranch, false = never)
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
@@ -346,28 +347,37 @@ spec:
   - **A fake `gh`, `PATH` or proxy** (anything the agent controls in the
     environment that the CLI shells out through) can feed the CLI false answers;
     this is part of the edited-or-copied-CLI residual above.
-- **`allowForcePush: leaseOnOwnBranch`** scopes force-push to the one routine
-  case: after rebasing a dispatched task's branch. The PreToolUse hook then
-  permits a push only when ALL of these hold:
-  - it is a single `git push <configured-remote> --force-with-lease[=<own>[:<sha>]] <refspec>...`
+- **`allowForcePush: leaseOnOwnBranch`** (the DEFAULT when the key is unset,
+  AISDLC-710) scopes force-push to the one routine case: after rebasing a
+  dispatched task's branch. The key is `spec.governance.allowForcePush` in
+  `.ai-sdlc/agent-role.yaml`. An explicit `never` (or boolean `false`) always
+  wins over the default and refuses every lease push; any other present value
+  is malformed and fails closed to `never`. The PreToolUse hook permits a push
+  only when ALL of these hold:
+  - it is a single `git push <configured-remote> --force-with-lease[=<own>[:<sha>]] <refspec>`
     command (no chaining, quoting, wrapper, env prefix, `git -C`/`--git-dir`, or
-    extra flags; plain ASCII only);
-  - every refspec is a colon form whose source is `HEAD` (or the own branch /
-    `refs/heads/<branch>`) and whose destination is spelled exactly
-    `refs/heads/<branch>`, i.e. `HEAD:refs/heads/<branch>`. **The no-colon form
-    (`git push --force-with-lease origin <branch>`) is refused in every case.**
-    Git does not send a no-colon refspec to `refs/heads/<branch>`: it maps it
-    through `remote.<name>.push` and, under `push.default=upstream|tracking`,
-    through `branch.<branch>.merge`. Task branches are created from
-    `origin/main`, so they track `refs/heads/main`, and the "sanctioned" command
-    would force-push the task branch onto main (by accident with
+    flags other than `-u`/`--set-upstream`, `--force-if-includes`, `-q`, `-v`;
+    plain ASCII only; the flag may sit before or after the remote);
+  - the destination provably lands on `refs/heads/<branch>` on a configured
+    remote. The remote and a refspec are both required. Accepted spellings:
+    `HEAD:refs/heads/<branch>`, `<branch>:refs/heads/<branch>`,
+    `refs/heads/<branch>:refs/heads/<branch>`.
+    **Every refspec without a colon (bare `HEAD`, `<branch>`, `refs/heads/<branch>`)
+    and every omitted remote or refspec is refused.**
+    Git does not send such a refspec to `refs/heads/<branch>`: it maps it
+    through `remote.<name>.push`, `push.default` and, under
+    `push.default=upstream|tracking`, `branch.<branch>.merge`. Task branches are
+    created from `origin/main`, so they track `refs/heads/main`, and the "sanctioned"
+    command would force-push the task branch onto main (by accident with
     `push.default=upstream`, or on purpose with one
-    `git config remote.origin.push refs/heads/<branch>:refs/heads/main`); both are
-    reproduced against real git in the tests. An explicit refspec on the command
-    line ignores that configuration. Short destinations such as `HEAD:<branch>`
-    are refused too, because git resolves them against the remote with every rule
-    (tags and notes refs win over heads), as are names such as `heads/x`,
-    `tags/x`, `remotes/x`, `refs/x`;
+    `git config remote.origin.push refs/heads/<branch>:refs/heads/main`). Bare
+    `HEAD` is no safer: a local tag named `HEAD` plus
+    `git config remote.origin.push refs/tags/HEAD:refs/heads/main` overwrites main.
+    All of these are reproduced against real git in the tests, as is the fact
+    that an explicit `HEAD:refs/heads/<branch>` ignores that configuration. Short
+    destinations such as `HEAD:<branch>` are refused too, because git resolves
+    them against the remote with every rule (tags and notes refs win over heads),
+    as are names such as `heads/x`, `tags/x`, `remotes/x`, `refs/x`;
   - `<branch>` is the task's own branch: the worktree has a valid `.active-task`
     (`AISDLC-123`, `AISDLC-100.5`, or the GitHub-issue form `gh-issue-42`), the
     worktree directory is named `<task-id-lower>` (`.worktrees/aisdlc-123`,
@@ -380,8 +390,11 @@ spec:
     resolved) is directly under `<main checkout>/.worktrees/`; the project
     directory (`CLAUDE_PROJECT_DIR`) is either that worktree itself (a session
     rooted in worktree A that changes into sibling worktree B gets no lease from
-    B) or the main checkout (then the worktree must still be a genuine bound
-    `.worktrees/<id>`); the main checkout's `.git` is a real
+    B) or the main checkout, in which case the session must be bound to ONE task
+    by the `AI_SDLC_ACTIVE_TASK_ID` environment variable the hook itself sees
+    (set by the dispatcher; the agent's own commands cannot change it) and the
+    worktree's `.active-task` must equal it, so `cd .worktrees/<sibling>` gets no
+    lease and a main-checkout session without that variable gets none; the main checkout's `.git` is a real
     directory matching the git common dir, and the worktree's own git dir lives
     under `<main>/.git/worktrees/` with a `gitdir` back-pointer to the worktree.
     A forged directory elsewhere (for example `/tmp/x/aisdlc-700`), a symlinked
@@ -395,8 +408,8 @@ spec:
   - **the accepted spelling**: run, as its own standalone command from the
     worktree, `git push --force-with-lease origin HEAD:refs/heads/<branch>` with
     the branch printed by `git branch --show-current` written literally (no
-    variables, quotes, `cd &&`, chaining; `-u` is allowed, bare `HEAD` and
-    `--set-upstream HEAD` are not; a lease value, if given, is
+    variables, quotes, `cd &&`, chaining; `-u` is allowed; bare `HEAD`, `-u origin HEAD`
+    and the omitted-remote / omitted-refspec forms are refused; a lease value, if given, is
     `--force-with-lease=<branch>:<sha>`). The deny message for any other spelling
     names this one. The `/ai-sdlc rebase` command and the rebase/CI-conflict/developer agents use
     this spelling, and a test parses their push lines and runs them through the
@@ -427,16 +440,27 @@ spec:
 
   Policy trust: the lease is granted only when the MAIN checkout of the repo (the
   parent of the git common dir of the project directory, independent of the tool
-  call's cwd) says `leaseOnOwnBranch`. A copy of `agent-role.yaml` edited in a
+  call's cwd) resolves to `leaseOnOwnBranch` (explicitly, or by default: a
+  missing `agent-role.yaml` or an unset key counts as the default, while a file
+  that exists but cannot be read blocks). A copy of `agent-role.yaml` edited in a
   worktree or PR can only tighten: a copy saying `leaseOnOwnBranch` with a trusted
   `never` has no effect, and a copy saying `never` with a trusted lease also
   denies (deliberate, tested). Any failure to determine the trusted policy blocks.
+  An operator session in the main checkout (not a dispatched task worktree) gets
+  no lease under any value.
+
+  When a force push is refused, the message names the config key
+  (`spec.governance.allowForcePush` in `.ai-sdlc/agent-role.yaml`) and the value
+  that allows the push (`leaseOnOwnBranch`), and points at the supported
+  spelling; it never suggests a skip variable, a hook bypass or a plain force.
+  `/ai-sdlc doctor` reports the effective value and whether it is the default or
+  set in the file (check `force-push-policy`).
   The injected SessionStart/SubagentStart rule text is rendered from that same
   trusted source. The legacy `blockedActions` / `blockedPaths` lists are still
   read from the project directory (a PR-tree copy can clear them; this is the
   pre-existing trust model and is unchanged).
 
-  Under `never` (or unset) the hook starts no git subprocess for this check, and
+  Under an explicit `never` the hook starts no git subprocess for this check, and
   additionally blocks force-push shapes the anchored `blockedActions` globs miss,
   such as `git push origin --force main`, `git push origin -f HEAD:main` and
   `+refspec` (including `--force-with-lease` and option abbreviations).
@@ -479,7 +503,19 @@ spec:
 - **Fail-closed:** any unknown key, unknown preset name, or malformed value
   (wrong type / not in the enumerated set) is ignored — the resolved value
   falls back to whatever the preset/default already produced. Malformed
-  config can never accidentally relax a rule.
+  config can never accidentally relax a rule. The one exception to "ignored" is
+  `allowForcePush`, whose default is the lease mode: a PRESENT but malformed
+  value (including an empty one) resolves to `never` instead of the default, so
+  a typo never widens it.
+- **Velocity impact (AISDLC-710).** The `allowForcePush` default changed from
+  `never` to `leaseOnOwnBranch`. This is a behavior change adopters get on
+  upgrade: a repo that sets nothing now lets a dispatched agent
+  `--force-with-lease` its own task branch after the rebase the framework
+  requires, instead of stopping to ask the operator to authorize the push after
+  every rebase. Nothing else relaxes: plain `--force`/`-f`/`+refspec`, any force
+  push to `main`/`master`/a protected branch, and a lease push of a branch the
+  session does not own stay refused. To keep the old behavior, set
+  `spec.governance.allowForcePush: never` in `.ai-sdlc/agent-role.yaml`.
 - **Permanently fixed, not configurable through this schema:** never write
   CI-skip magic tokens; never edit `.ai-sdlc/attestations|verdicts`; the
   `governance` declaration itself is honored only from the repo's trusted

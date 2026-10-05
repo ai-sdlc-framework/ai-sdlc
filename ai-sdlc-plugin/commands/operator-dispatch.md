@@ -198,7 +198,7 @@ event. A step the policy does not grant is refused and becomes an escalation.
 The playbook can push to a task's own branch and nowhere else. It refuses `main`,
 `master`, every other branch, any forced or deleting push, and any refspec that is
 not `HEAD:refs/heads/<own task branch>`. It also refuses a lease push unless the
-trusted policy sets `allowForcePush: leaseOnOwnBranch`, refuses any branch the policy
+trusted policy resolves `allowForcePush` to `leaseOnOwnBranch` (the default when unset), refuses any branch the policy
 lists as protected, and refuses a worktree that does not verify as one of this
 repository's own. Do not try to do by hand what it refused.
 

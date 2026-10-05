@@ -297,8 +297,8 @@ echo "$BRANCH"
 Then run the push as its **own, standalone Bash command** from `$WORKTREE_PATH`
 (the PreToolUse hook reads the tool call's cwd). Write the branch name printed
 above LITERALLY into the command: no variables, no quotes, no `cd &&`, no
-chaining, no `--set-upstream`/`-u` needed. This is the one spelling the
-`leaseOnOwnBranch` policy accepts:
+chaining, no `--set-upstream`/`-u` needed. This is the canonical spelling the
+`leaseOnOwnBranch` policy accepts (the default policy; push without asking the operator):
 
 ```bash
 git push --force-with-lease origin HEAD:refs/heads/<branch>

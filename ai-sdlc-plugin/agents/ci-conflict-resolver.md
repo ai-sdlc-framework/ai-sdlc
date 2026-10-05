@@ -175,7 +175,8 @@ echo "$BRANCH"
 
 Then run the push as its own, standalone Bash command from the worktree, with
 the branch printed above written LITERALLY (no variables, quotes, `cd &&` or
-chaining) — the one spelling the `leaseOnOwnBranch` policy accepts:
+chaining) — the canonical spelling the `leaseOnOwnBranch` policy accepts (allowed
+by default; push without asking the operator):
 
 ```bash
 git push --force-with-lease origin HEAD:refs/heads/<branch>

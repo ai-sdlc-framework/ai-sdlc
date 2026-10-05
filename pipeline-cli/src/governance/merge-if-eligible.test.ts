@@ -850,8 +850,9 @@ describe('evaluatePrTrust (GitHub-derived trust facts)', () => {
 
 describe('resolveGovernanceFromYaml (native)', () => {
   it('fails closed to strict with no authors when the block is absent', () => {
+    // Strict everywhere except allowForcePush, which defaults to lease-on-own-branch (AISDLC-710).
     expect(resolveGovernanceFromYaml('spec:\n  role: x\n')).toEqual({
-      policy: STRICT_DEFAULTS,
+      policy: { ...STRICT_DEFAULTS, allowForcePush: true },
       mergeAuthors: [],
     });
     expect(parseGovernanceBlock('spec:\n  role: x\n')).toBeNull();
@@ -873,6 +874,17 @@ describe('resolveGovernanceFromYaml (native)', () => {
     expect(
       resolveGovernanceFromYaml('governance:\n  allowForcePush: never\n').policy.allowForcePush,
     ).toBe(false);
+    // Present-but-malformed fails closed to never, including a non-comment value on the key line.
+    for (const y of [
+      'governance:\n  allowForcePush: bogus\n',
+      'governance:\n  allowForcePush:\n',
+      'governance: {allowForcePush: true}\n',
+    ]) {
+      expect(resolveGovernanceFromYaml(y).policy.allowForcePush, y).toBe(false);
+    }
+    expect(
+      resolveGovernanceFromYaml('governance: # c\n  allowMerge: never\n').policy.allowForcePush,
+    ).toBe(true);
   });
 
   it('ignores malformed values and drops malformed or duplicate logins', () => {
@@ -881,7 +893,7 @@ describe('resolveGovernanceFromYaml (native)', () => {
         'z'.repeat(40) +
         ']\n  operational:\n    - requeue\n  mergeAuthorsScalar: x\n',
     );
-    expect(r.policy).toEqual(STRICT_DEFAULTS);
+    expect(r.policy).toEqual({ ...STRICT_DEFAULTS, allowForcePush: true });
     expect(r.mergeAuthors).toEqual(['ok']);
     expect(
       resolveGovernanceFromYaml('governance:\n  mergeAuthors: octocat\n').mergeAuthors,
@@ -904,6 +916,10 @@ describe('resolveGovernanceFromYaml (native)', () => {
       'governance:\n  preset: operator-trusted\n  allowMerge: never\n',
       'governance:\n  allowForcePush: true\n  allowBranchDelete: true\n  mergeAuthors:\n    - a\n    - A\n    - b-c\n',
       'governance:\n  allowMerge: bogus\n  mergeAuthors: [-x, y]\n',
+      'governance:\n  allowForcePush: bogus\n',
+      'governance:\n  allowForcePush:\n  allowMerge: onGreenClean\n',
+      'governance: {allowForcePush: true}\n',
+      'governance: # c\n  allowForcePush: never\n',
     ]) {
       const native = resolveGovernanceFromYaml(yaml);
       expect(native.policy).toEqual(plugin.resolveGovernanceFromYaml(yaml));

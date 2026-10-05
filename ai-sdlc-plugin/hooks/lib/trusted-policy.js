@@ -110,6 +110,20 @@ function verifiedMainRoot(dir, run = runGit) {
 }
 
 /**
+ * Policy file text; '' when the file does not exist (a repo that sets nothing
+ * gets the resolver defaults, AISDLC-710). Any OTHER read failure throws so the
+ * caller fails closed.
+ */
+function readPolicyText(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
+/**
  * Reads the policy from the main checkout of the project dir's repo, after
  * checking the tool's cwd belongs to the same repo. Returns the extras
  * ({forcePushMode, operational, protectedBranches}) or null when the trusted
@@ -121,8 +135,9 @@ function loadTrustedExtras(projectDir, cwd, run = runGit) {
     if (!mainRoot) return null;
     const cwdMain = verifiedMainRoot(cwd, run);
     if (!cwdMain || safeReal(cwdMain) !== safeReal(mainRoot)) return null;
-    const text = readFileSync(join(mainRoot, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
-    return resolveGovernanceExtrasFromYaml(text);
+    return resolveGovernanceExtrasFromYaml(
+      readPolicyText(join(mainRoot, '.ai-sdlc', 'agent-role.yaml')),
+    );
   } catch {
     return null;
   }
@@ -159,9 +174,16 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
     if (!isUnder(top, worktreesDir) || dirname(top) !== worktreesDir) return null;
     // Own-session binding: a session whose project dir IS a task worktree may only
     // use the lease from that very worktree (not from a sibling it cd'd into).
-    // A session rooted at the main checkout is bound by the checks above and by
-    // the sentinel / directory / branch agreement the caller verifies.
-    if (realProj !== realMain && realProj !== top) return null;
+    // A session rooted at the main checkout has no worktree of its own, so it is
+    // bound to ONE task by AI_SDLC_ACTIVE_TASK_ID (the hook's own env; the agent's
+    // Bash commands cannot change it): the cwd worktree's .active-task must equal it.
+    // No binding, or a sibling worktree => no lease.
+    if (realProj !== realMain) {
+      if (realProj !== top) return null;
+    } else {
+      const bound = (process.env.AI_SDLC_ACTIVE_TASK_ID || '').toLowerCase();
+      if (!bound || readTaskId(top) !== bound) return null;
+    }
     const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
     if (!gitDirRaw) return null;
     const gitDir = safeReal(resolve(cwd, gitDirRaw));
@@ -214,6 +236,7 @@ module.exports = {
   GIT_TIMEOUT_MS,
   runGit,
   probeRef,
+  readPolicyText,
   safeReal,
   mainCheckoutRoot,
   verifiedMainRoot,

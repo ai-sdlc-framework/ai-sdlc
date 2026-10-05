@@ -53,7 +53,7 @@ export function parseOperational(yamlText: string): Set<OperationalAction> {
 /** The dispatch role's policy as read from the verified main checkout. */
 export interface OperationalPolicy {
   operational: Set<OperationalAction>;
-  /** `allowForcePush`; anything but `true` or `leaseOnOwnBranch` is `never`. */
+  /** `allowForcePush`; unset, `true` or `leaseOnOwnBranch` is `leaseOnOwnBranch`, anything else is `never`. */
   forcePushMode: ForcePushMode;
   /** Extra protected branch names; malformed entries are dropped (never a relaxation of the defaults). */
   protectedBranches: string[];
@@ -78,7 +78,11 @@ export function parseOperationalPolicy(yamlText: string): OperationalPolicy {
   type Governance = { allowForcePush?: unknown; protectedBranches?: unknown };
   const gov = (doc as { spec?: { governance?: Governance } } | null)?.spec?.governance;
   const mode = gov?.allowForcePush;
-  if (mode === true || mode === 'leaseOnOwnBranch') policy.forcePushMode = 'leaseOnOwnBranch';
+  // AISDLC-710: unset (undefined) is the `leaseOnOwnBranch` default, matching the hook's
+  // governance-resolver. An explicit `never`/`false` or any malformed value stays `never`.
+  if (mode === undefined || mode === true || mode === 'leaseOnOwnBranch') {
+    policy.forcePushMode = 'leaseOnOwnBranch';
+  }
   const listed = gov?.protectedBranches;
   if (Array.isArray(listed)) {
     policy.protectedBranches = (listed as unknown[]).filter(

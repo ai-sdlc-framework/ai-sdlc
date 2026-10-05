@@ -39,7 +39,8 @@ escalate to your dispatch session instead.
    See "When you are blocked" below.
 3. Everything `/ai-sdlc execute` forbids still holds: never merge a pull request,
    never close one, never delete a branch, never force-push except
-   `--force-with-lease` to your own task branch, never edit `.ai-sdlc/`, never
+   `--force-with-lease` to your own task branch (allowed by default: push it after a
+   rebase without asking the operator), never edit `.ai-sdlc/`, never
    run destructive git commands, never write a CI-skip marker in a commit.
 
 ## Step 1 - Resolve the CLIs and this session

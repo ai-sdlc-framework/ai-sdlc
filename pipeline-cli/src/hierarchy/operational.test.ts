@@ -146,9 +146,12 @@ describe('parseOperationalPolicy', () => {
         'never',
       );
     }
+    // AISDLC-710: UNSET is the leaseOnOwnBranch default (an explicit setting always wins).
     expect(parseOperationalPolicy(doc('    operational:\n      - requeue\n')).forcePushMode).toBe(
-      'never',
+      'leaseOnOwnBranch',
     );
+    // A present-but-empty value (YAML null) is malformed, not unset.
+    expect(parseOperationalPolicy(doc('    allowForcePush:\n')).forcePushMode).toBe('never');
   });
 
   it('drops protected branch entries that are not well-formed names', () => {
@@ -161,9 +164,18 @@ describe('parseOperationalPolicy', () => {
   });
 
   it('denies everything for malformed or empty input', () => {
-    for (const text of ['', '::: not yaml :::\n\t- [', 'spec: {}']) {
+    for (const text of ['::: not yaml :::\n\t- [']) {
       const p = parseOperationalPolicy(text);
       expect(p.forcePushMode).toBe('never');
+      expect(p.operational.size).toBe(0);
+      expect(p.protectedBranches).toEqual([]);
+    }
+  });
+
+  it('grants nothing operational for empty input, but force-push is the lease default (AISDLC-710)', () => {
+    for (const text of ['', 'spec: {}']) {
+      const p = parseOperationalPolicy(text);
+      expect(p.forcePushMode).toBe('leaseOnOwnBranch');
       expect(p.operational.size).toBe(0);
       expect(p.protectedBranches).toEqual([]);
     }

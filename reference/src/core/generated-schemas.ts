@@ -425,8 +425,9 @@ export const agentRoleSchema = {
         },
         allowForcePush: {
           oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['never', 'leaseOnOwnBranch'] }],
+          default: 'leaseOnOwnBranch',
           description:
-            "Force-push policy. `never` (default; boolean `false`) = no force pushes. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, its directory name under `<repo>/.worktrees/` and the `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push.",
+            "Force-push policy. When unset the default is `leaseOnOwnBranch`. `leaseOnOwnBranch` (boolean `true` is read the same way) = `git push --force-with-lease` is permitted only to the dispatched task's own branch (the worktree's `.active-task`, its directory name under `<repo>/.worktrees/` and the `ai-sdlc/<task-id>-*` branch must agree), never to `main`, `master`, a default deploy branch or a protected branch. Operator sessions without a task sentinel get no lease push. `never` (boolean `false`) = no force pushes; set it explicitly to opt out. Any other value is malformed and fails closed to `never`.",
         },
         protectedBranches: {
           type: 'array',
