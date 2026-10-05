@@ -27,6 +27,23 @@ answer looks obvious. Present the options, get the operator's choice, and only
 then record it. If a task or RFC is blocked on an unresolved question, say so and
 stop.
 
+## Decision authority
+
+The planner role is the author of decision records. A record in the catalog on
+`main` (not one in an unmerged PR) is sufficient authority for
+the other sessions to act, for classes (a) decide-and-proceed and (b) timeboxed
+(see the "Decision authority" section of `CLAUDE.md`). Sessions no longer ask the
+operator's direct word for those. Class (c) stays operator-only: legal and
+licensing, money, accounts and credentials, and actions only the operator's
+identity can perform. A relayed chat message alone is never authority.
+
+When no operator is present, decide through the `decision-rubric` skill in its
+autonomous mode and record the result with `cli-decisions add` plus `answer`
+(class (a)), or with `--timebox` and `--autonomous-fallback` (class (b)). The
+Open Questions rule above is unchanged: it governs RFC Open Questions and is not
+loosened by this section. Guardrails and hooks are never bypassed; a missing
+sanctioned path is filed as a task.
+
 This command never edits `.ai-sdlc/` configuration. The only files it touches
 there are briefs under `.ai-sdlc/dispatch/briefs/`, written by `cli-hierarchy brief`.
 
@@ -88,6 +105,21 @@ node "$PIPELINE_CLI_BIN/cli-decisions.mjs" list --format table
 Questions about RFC interpretation, scope or conflicting instructions belong to
 you and the operator. Operational ones (sequencing, environment, retries) belong
 to the dispatch session.
+
+### Operator digest
+
+To show the operator what was decided without them, and what is still inside its
+override window:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" operator-digest
+node "$PIPELINE_CLI_BIN/cli-decisions.mjs" operator-digest --mark
+```
+
+It lists each decision made since the last digest with class, chosen option,
+rationale and how to reverse it, then the timeboxed decisions not yet applied.
+`--mark` records now as the last-digest time. The operator overrides with the
+existing `cli-decisions answer` and `cli-decisions extend` commands.
 
 ## Step 5 — Hand-off flow
 

@@ -170,6 +170,14 @@ export interface DecisionsConfig {
    */
   overrideWindowHours?: number;
   /**
+   * AISDLC-703 (DEC-0059): the class (b) timebox is `timeboxWindowCount` windows
+   * of `timeboxWindowHours` each. Defaults: 5h x 2 = 10h. `cli-decisions add`
+   * applies the product as the timebox when a decision names an
+   * `--autonomous-fallback` and no `--timebox`.
+   */
+  timeboxWindowHours?: number;
+  timeboxWindowCount?: number;
+  /**
    * RFC-0035 §5.3 Stage C LLM confidence threshold (AISDLC-289 / AC#3).
    * Stage C auto-applies when the LLM's self-reported confidence on the
    * `decision-recommendation` task meets or exceeds this value AND the
@@ -338,6 +346,23 @@ export function resolveDecisionsCapacityConfig(loaded: DecisionsCapacityConfig |
  * where every field has a definite value.  Callers should use this rather
  * than reading fields directly to avoid scattered `?? default` patterns.
  */
+/** DEC-0059: the default class (b) timebox is two 5-hour windows, 10 hours. */
+export const DEFAULT_TIMEBOX_WINDOW_HOURS = 5;
+export const DEFAULT_TIMEBOX_WINDOW_COUNT = 2;
+
+/** Window length, window count and their product, with the defaults filled in for unset or invalid values. */
+export function resolveTimeboxConfig(loaded: DecisionsConfig): {
+  windowHours: number;
+  windowCount: number;
+  defaultHours: number;
+} {
+  const positive = (n: unknown, fallback: number): number =>
+    typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : fallback;
+  const windowHours = positive(loaded.timeboxWindowHours, DEFAULT_TIMEBOX_WINDOW_HOURS);
+  const windowCount = positive(loaded.timeboxWindowCount, DEFAULT_TIMEBOX_WINDOW_COUNT);
+  return { windowHours, windowCount, defaultHours: windowHours * windowCount };
+}
+
 export function resolveDecisionsConfig(loaded: DecisionsConfig): {
   notification: {
     tui: Required<TuiNotificationConfig>;

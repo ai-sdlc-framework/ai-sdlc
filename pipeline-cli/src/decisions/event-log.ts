@@ -16,6 +16,7 @@
  * @module decisions/event-log
  */
 
+import type { GovernanceChange } from './governance-fallback.js';
 import {
   appendFileSync,
   closeSync,
@@ -279,6 +280,8 @@ export interface OpenDecisionInput {
   autonomousFallbackOptionId?: string;
   /** AISDLC-463 — surfacing-context backlink. */
   contextRef?: string;
+  /** AISDLC-703 — governance-change tag (DEC-0053). */
+  governanceChange?: GovernanceChange;
   by?: string;
   now?: Date;
 }
@@ -314,6 +317,7 @@ export function makeDecisionOpenedEvent(input: OpenDecisionInput): DecisionOpene
     event.autonomousFallbackOptionId = input.autonomousFallbackOptionId;
   }
   if (input.contextRef !== undefined) event.contextRef = input.contextRef;
+  if (input.governanceChange !== undefined) event.governanceChange = input.governanceChange;
   if (input.by !== undefined) event.by = input.by;
   return event;
 }

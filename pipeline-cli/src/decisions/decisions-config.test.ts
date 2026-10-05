@@ -13,6 +13,7 @@ import {
   resolveDecisionsConfig,
   resolveDecisionsCapacityConfig,
   resolveFatigueConfig,
+  resolveTimeboxConfig,
   type DecisionsConfig,
 } from './decisions-config.js';
 
@@ -269,5 +270,26 @@ overrideWindowHours: 48
     expect(cfg.fatigue?.overrideRateThreshold).toBe(0.6);
     expect(cfg.fatigue?.measurementWindowHours).toBe(2);
     expect(cfg.overrideWindowHours).toBe(48);
+  });
+});
+
+describe('resolveTimeboxConfig (DEC-0059)', () => {
+  it('defaults to two 5-hour windows, 10 hours', () => {
+    expect(resolveTimeboxConfig({})).toEqual({ windowHours: 5, windowCount: 2, defaultHours: 10 });
+  });
+
+  it('derives the default from the configured window length and count', () => {
+    expect(resolveTimeboxConfig({ timeboxWindowHours: 3, timeboxWindowCount: 4 })).toEqual({
+      windowHours: 3,
+      windowCount: 4,
+      defaultHours: 12,
+    });
+  });
+
+  it('falls back to the defaults for invalid values', () => {
+    expect(
+      resolveTimeboxConfig({ timeboxWindowHours: -1, timeboxWindowCount: 'x' as unknown as number })
+        .defaultHours,
+    ).toBe(10);
   });
 });

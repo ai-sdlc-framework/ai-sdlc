@@ -72,6 +72,7 @@ import {
   renderSubDecisionGraphMermaid,
   resolveDecisionExemplarsPath,
   resolveDecisionsConfig,
+  resolveTimeboxConfig,
   resolveEventLogPath,
   resolveOperatorStatePath,
   resolvePendingExemplarsPath,
@@ -98,6 +99,14 @@ import {
   type DecisionSupportView,
   type PendingExemplar,
 } from '../decisions/index.js';
+import {
+  checkGovernanceFallback,
+  deriveGovernanceChange,
+  detectGovernanceSurfaces,
+  fallbackWeakensControl,
+  type GovernanceChange,
+} from '../decisions/governance-fallback.js';
+import { renderOperatorDigestMarkdown, runOperatorDigest } from '../decisions/operator-digest.js';
 import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { createJudgmentRunner } from '../judgment/runner.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
@@ -296,8 +305,28 @@ interface AddInputs {
   impactScore?: number;
   /** AISDLC-463 — autonomous-fallback option id (validated against options). */
   autonomousFallbackOptionId?: string;
+  /** AISDLC-703 — governance-change tag (DEC-0053). */
+  governanceChange?: GovernanceChange;
   /** AISDLC-463 — surfacing-context backlink. */
   contextRef?: string;
+}
+
+/**
+ * AISDLC-703: derive the governance-change tag from the decision text, then apply
+ * the weakening-fallback rule. Runs for both the flag and the interactive path.
+ */
+function finalizeGovernanceChange(inputs: AddInputs): void {
+  const derived = deriveGovernanceChange(
+    inputs.governanceChange,
+    detectGovernanceSurfaces(inputs.scope, inputs.contextRef, inputs.body),
+  );
+  if (derived !== undefined) inputs.governanceChange = derived;
+  const governanceError = checkGovernanceFallback(
+    inputs.governanceChange,
+    inputs.options.map((o) => o.id),
+    inputs.autonomousFallbackOptionId,
+  );
+  if (governanceError) throw new Error(governanceError);
 }
 
 async function gatherAddInputsInteractive(): Promise<AddInputs> {
@@ -491,6 +520,23 @@ function gatherAddInputsFromFlags(argv: Record<string, unknown>): AddInputs {
       );
     }
     inputs.autonomousFallbackOptionId = fb;
+  }
+
+  // AISDLC-703 (DEC-0053): governance-change tag and the weakening-fallback rule.
+  // The tag is derived when scope, context-ref or body names a governance surface;
+  // an author can add it but never remove a derived one (--governance-change has
+  // no value that clears the tag, and yargs refuses --no-governance-change).
+  if (typeof argv['governance-change'] === 'string' && argv['governance-change']) {
+    const weakens = ([] as unknown[])
+      .concat(argv.weakens ?? [])
+      .map(String)
+      .filter(Boolean);
+    inputs.governanceChange = {
+      kind: String(argv['governance-change']) as GovernanceChange['kind'],
+      weakeningOptionIds: weakens,
+    };
+  } else if (argv.weakens !== undefined) {
+    throw new Error('--weakens needs --governance-change weakening');
   }
 
   if (typeof argv['context-ref'] === 'string' && argv['context-ref']) {
@@ -691,7 +737,7 @@ export function buildDecisionsCli(): Argv {
           })
           .option('timebox', {
             type: 'string',
-            describe: `AISDLC-447 — operator-authored timebox. ISO-8601 duration (PT4H, P1D, P7D, P30D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). When set, the decision sorts to the top of \`list\` urgency + expires at created+duration.`,
+            describe: `AISDLC-447 — operator-authored timebox. ISO-8601 duration (PT4H, P1D, P7D, P30D, ...) or alias (${Object.keys(TIMEBOX_CATEGORICAL_ALIASES).join('|')}). When set, the decision sorts to the top of \`list\` urgency + expires at created+duration. Default when --autonomous-fallback is given without a timebox: 10 hours (two 5-hour windows, from decisions-config).`,
           })
           .option('timebox-hours', {
             type: 'number',
@@ -713,6 +759,18 @@ export function buildDecisionsCli(): Argv {
             type: 'string',
             describe:
               'AISDLC-463 — option id auto-selected by `auto-expire` when the timebox lapses unanswered. Must reference a declared --option id.',
+          })
+          .option('governance-change', {
+            type: 'string',
+            choices: ['weakening', 'tightening'] as const,
+            describe:
+              'AISDLC-703 — tag a decision that changes a governance control. A weakening decision needs --weakens and its --autonomous-fallback must be a non-weakening option.',
+          })
+          .option('weakens', {
+            type: 'string',
+            array: true,
+            describe:
+              'AISDLC-703 — option id that weakens a control (repeatable). Only with --governance-change weakening.',
           })
           .option('context-ref', {
             type: 'string',
@@ -754,6 +812,16 @@ export function buildDecisionsCli(): Argv {
               );
             }
             inputs = await gatherAddInputsInteractive();
+          }
+          finalizeGovernanceChange(inputs);
+          // DEC-0059: a decision with an --autonomous-fallback is class (b); without an
+          // explicit timebox it gets the configured default (two 5-hour windows, 10 hours).
+          if (inputs.timebox === undefined && inputs.autonomousFallbackOptionId !== undefined) {
+            inputs.timebox = parseTimebox(
+              hoursToIsoDuration(
+                resolveTimeboxConfig(loadDecisionsConfig({ workDir })).defaultHours,
+              ),
+            ).duration;
           }
         } catch (err) {
           fail((err as Error).message);
@@ -799,6 +867,9 @@ export function buildDecisionsCli(): Argv {
             ? { autonomousFallbackOptionId: inputs.autonomousFallbackOptionId }
             : {}),
           ...(inputs.contextRef !== undefined ? { contextRef: inputs.contextRef } : {}),
+          ...(inputs.governanceChange !== undefined
+            ? { governanceChange: inputs.governanceChange }
+            : {}),
           now: eventNow,
         });
 
@@ -1157,6 +1228,39 @@ export function buildDecisionsCli(): Argv {
           emitText(`  rate:   ${(coverage.coverageRate * 100).toFixed(1)}%`);
           emitText(`  target: ≥${(STAGE_A_COVERAGE_TARGET * 100).toFixed(0)}%`);
           emitText(`  meets target: ${coverage.meetsTarget ? 'yes' : 'no'}`);
+        }
+      },
+    )
+    .command(
+      'operator-digest',
+      'AISDLC-703 — list decisions made since the last digest (class, chosen option, rationale, how to reverse) plus timeboxed decisions still inside their window. Read-only unless --mark.',
+      (y) =>
+        y
+          .option('since', {
+            type: 'string',
+            description: 'ISO timestamp cutoff (default: last --mark, else 24h ago)',
+          })
+          .option('mark', {
+            type: 'boolean',
+            default: false,
+            description: 'Record now as the last-digest time after printing',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['markdown', 'json'] as const,
+            default: 'markdown' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const digest = runOperatorDigest({
+          workDir,
+          ...(typeof argv.since === 'string' ? { since: argv.since } : {}),
+          mark: Boolean(argv.mark),
+        });
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, digest });
+        } else {
+          process.stdout.write(renderOperatorDigestMarkdown(digest));
         }
       },
     )
@@ -1789,6 +1893,11 @@ export function buildDecisionsCli(): Argv {
           // than write an invalid answer.
           if (!d.spec.options.some((o) => o.id === fallback)) {
             skipped.push({ decisionId: d.metadata.id, reason: 'fallback-option-missing' });
+            continue;
+          }
+          // AISDLC-703 (DEC-0053): a lapsed timebox never applies a weakening option; the control stays.
+          if (fallbackWeakensControl(d.spec.governanceChange, fallback)) {
+            skipped.push({ decisionId: d.metadata.id, reason: 'weakening-fallback-control-stays' });
             continue;
           }
           const expiresAt = d.status.timeboxExpiresAt ?? now.toISOString();
