@@ -1,5 +1,22 @@
 # @ai-sdlc/reference
 
+## [0.28.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.27.0...reference-v0.28.0) (2026-10-05)
+
+
+### Features
+
+* **governance:** internal agents may edit .ai-sdlc config; untrusted runs stay blocked (AISDLC-720) ([#1211](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1211)) ([e07e1c0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e07e1c0e205a33aceec727af1bd82a841aa05040))
+* **orchestrator:** enforce the executor authority matrix with a PreToolUse rule (AISDLC-684) ([#1203](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1203)) ([c80be62](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c80be62b961ea911d2d8fd5f0e39dcb4064bcebb))
+* **orchestrator:** lease push on the agent's own branch is allowed by default (AISDLC-710) ([#1213](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1213)) ([7715d5b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7715d5b5a72285e486df1e0da8f7f8f130bee1c4))
+* **orchestrator:** operator-dispatch loop, executor context clear, requeue (AISDLC-667) ([#1191](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1191)) ([12348c8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/12348c89ce625b43e1ff678f41bdf1b5e078d744))
+* **orchestrator:** project-scoped session names and peer-binding guards (AISDLC-709) ([#1217](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1217)) ([64680f7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/64680f7482b79c7dffc7becab8f347a8ba2a81a9))
+* **orchestrator:** release source kind for cli-merge-if-eligible (AISDLC-702) ([#1196](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1196)) ([79afae6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/79afae6b40bf4d2a930f56e3be3b8bae674e0bc9))
+
+
+### Bug Fixes
+
+* **orchestrator:** use family aliases for model defaults, one central id module (AISDLC-690) ([#1212](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1212)) ([f01fd32](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f01fd3247dcd837642227eb614816a900dd0fd19))
+
 ## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.26.1...reference-v0.27.0) (2026-10-04)
 
 

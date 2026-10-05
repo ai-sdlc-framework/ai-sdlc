@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.4.0...sdk-go-v0.5.0) (2026-10-05)
+
+
+### Features
+
+* **orchestrator:** lease push on the agent's own branch is allowed by default (AISDLC-710) ([#1213](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1213)) ([7715d5b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7715d5b5a72285e486df1e0da8f7f8f130bee1c4))
+
 ## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.3.0...sdk-go-v0.4.0) (2026-10-04)
 
 
