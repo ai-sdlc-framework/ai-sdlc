@@ -20,8 +20,6 @@ references:
   - docs/operations/independence-policy.md
 priority: high
 dispatchable: true
-blocked:
-  reason: "Builds on pull request 1182 (attestation leaf binding); remove this block once it is merged"
 ---
 
 ## Description
@@ -85,4 +83,7 @@ Start this task only once that pull request is on `main`.
 - [ ] The marker lookup script's tests cover the five cases and the age filter, and `execute.md` contains no inline copy of the logic.
 - [ ] No non-test caller of `findMatchingSubagentMarker` remains, or the function is gone.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
+
+## Notes
+Block removed 2026-10-04: #1182 is on main.
 <!-- SECTION:DESCRIPTION:END -->
