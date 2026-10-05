@@ -472,8 +472,8 @@ describe('plugin manifests — hook event registration must not drift (AISDLC-57
     );
   });
 
-  it('PreToolUse Write|Edit matcher is registered in both manifests (AISDLC-571 regression guard)', () => {
-    const expected = 'PreToolUse::Write|Edit::enforce-blocked-actions.sh';
+  it('PreToolUse Write|Edit|MultiEdit matcher is registered in both manifests (AISDLC-571 regression guard)', () => {
+    const expected = 'PreToolUse::Write|Edit|MultiEdit::enforce-blocked-actions.sh';
     assert.ok(topLevelPairs.has(expected), `plugin.json must register ${expected}`);
     assert.ok(
       marketplacePairs.has(expected),
