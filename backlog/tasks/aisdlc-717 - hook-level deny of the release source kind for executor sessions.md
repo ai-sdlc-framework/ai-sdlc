@@ -40,6 +40,7 @@ be able to land a release PR.
 - [ ] Planner and dispatch roles are not affected; `backlog` source kind for the executor's own task PR is not affected; a grep or cat that mentions the command passes. Tests for each.
 - [ ] Admission test recorded in the PR body's "Velocity impact" section (DEC-0048): the harm prevented, that it never fires on the documented executor workflow, the exit, and that the default lets planner-run releases work with nothing configured.
 - [ ] The release path docs (`docs/operations/release-flow.md`) replace "no hook-level control yet" with a description of this rule.
+- [ ] A required CI check on the release-please branch re-runs the release content allowlist on every push, so a release PR that was armed for auto-merge cannot merge content that was not eligible when it was armed; the failure message names the offending path.
 
 ## Out of scope
 - Changing release eligibility checks.
