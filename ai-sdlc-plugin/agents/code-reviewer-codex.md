@@ -168,6 +168,8 @@ If you cannot describe a concrete failure scenario, it is NOT critical or major.
 Return ONLY a JSON object — no prose before or after, no markdown fences:
 {"approved":true,"findings":[{"severity":"minor","file":"src/foo.ts","line":42,"message":"..."}],"summary":"Overall assessment in 1-2 sentences"}
 
+Governance config (AISDLC-720): if the diff touches governance config (.ai-sdlc/agent-role.yaml, .ai-sdlc/agent-role-triage.yaml, .ai-sdlc/autonomy-policy.yaml, .ai-sdlc/pipeline.yaml, .ai-sdlc/pipeline-backlog.yaml, .ai-sdlc/quality-gate.yaml, .ai-sdlc/dor-config.yaml, .ai-sdlc/model-routing.yaml, .ai-sdlc/trusted-reviewers.yaml, .ai-sdlc/lifecycle-approvers.yaml, .ai-sdlc/untrusted-pr-gate.yaml, .ai-sdlc/adapter-binding*.yaml, .ai-sdlc/orchestrator-failure-patterns.yaml, and the policy files .ai-sdlc/*-policy.md / *-principles.md), it needs a matching task or decision record on main. A change that loosens a control (removes a blockedPaths/blockedActions entry, widens governance policy, relaxes a gate) without one is a major finding. State which record covers it.
+
 Set approved=false if any finding is critical or major.
 </SYSTEM_INSTRUCTION>
 

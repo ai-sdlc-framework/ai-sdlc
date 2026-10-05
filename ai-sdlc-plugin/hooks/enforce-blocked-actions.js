@@ -6,9 +6,11 @@
  * 1. **Bash** — checks `tool_input.command` against `blockedActions` patterns.
  * 2. **Write / Edit** — checks `tool_input.file_path` against `blockedPaths` globs
  *    (relative to the agent's "home" — the active worktree when resolvable, else
- *    the project root; see AISDLC-567). `.ai-sdlc/**` is ALWAYS refused, even if
- *    a project's `agent-role.yaml` is missing or doesn't list it — this is a
- *    hardcoded floor, not config-driven. `.github/workflows/**` is NOT blocked
+ *    the project root; see AISDLC-567). AISDLC-720: there is no hardcoded
+ *    `.ai-sdlc/**` floor for internal sessions; `.ai-sdlc/**` and
+ *    `.github/workflows/**` are refused only for UNTRUSTED runs (env signal
+ *    `AI_SDLC_UNTRUSTED_RUN`, see lib/governance-resolver `isUntrustedRun`) or
+ *    when a project lists them in `blockedPaths`. `.github/workflows/**` is NOT blocked
  *    by default; it is refused only when a project's `agent-role.yaml` lists it
  *    (or a matching glob) under `blockedPaths` (AISDLC-567 Part A). Paths outside
  *    the agent's home are denied unless they fall under `permittedExternalPaths`
@@ -80,6 +82,7 @@ const {
   resolveGovernanceFromYaml,
   resolveGovernanceExtrasFromYaml,
   STRICT_DEFAULTS,
+  isUntrustedRun,
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
 const {
@@ -220,11 +223,49 @@ const SAFE_STASH_PATTERN =
   `('git stash apply <ref>'), and only then drop it by that same tag/ref ` +
   `('git stash drop <ref>')`;
 
+// ── AISDLC-720: untrusted-run enforcement ───────────────────────────
+// Signal is read ONCE from this hook process's own environment. Nothing in the
+// tool input (including `VAR=0 cmd`, `export`, `unset`), agent-role.yaml, the
+// .active-task sentinel or project settings can change it.
+const UNTRUSTED = isUntrustedRun(process.env);
+const UNTRUSTED_GLOBS = ['.ai-sdlc/**', '.github/workflows/**'];
+
+function untrustedMessage(what) {
+  const why = UNTRUSTED.reason ? ` (${UNTRUSTED.reason})` : '';
+  return (
+    `${what} is governance config, and this run is marked untrusted${why} ` +
+    `(AI_SDLC_UNTRUSTED_RUN is set by the workflow for fork PRs, outside authors, or issue-sourced runs). ` +
+    `Untrusted runs cannot change .ai-sdlc/** or .github/workflows/**. Next step: leave a note in the PR ` +
+    `or issue asking a maintainer to make that change; do not retry or route around this.`
+  );
+}
+
+const PROTECTED_SHELL_PATH =
+  /(?:^|[\s'"=/<>:])(?:\.ai-sdlc|\.github\/workflows)(?:\/|['"\s;|&]|$)/i;
+const SHELL_WRITE_VERB =
+  /(?:^|[\s;&|(])(?:tee|sed\s+(?:-\w*i|--in-place)|cp|mv|rm|ln|touch|chmod|chown|install|truncate|dd|perl\s+-\w*i|patch|rsync|git\s+(?:apply|checkout|restore|rm|mv))(?=\s)/i;
+const SHELL_REDIRECT_TO_PROTECTED =
+  />>?\s*['"]?[^\s;|&'"]*(?:\.ai-sdlc|\.github\/workflows)(?:\/|['"\s;|&]|$)/i;
+
+function enforceUntrustedShellWrites(command) {
+  if (!UNTRUSTED.untrusted) return;
+  // Best-effort pattern matching; shell is not a boundary (CI is).
+  for (const segment of command.split(/[;&|\n]+/)) {
+    if (!PROTECTED_SHELL_PATH.test(segment)) continue;
+    if (SHELL_WRITE_VERB.test(segment) || SHELL_REDIRECT_TO_PROTECTED.test(segment)) {
+      deny(untrustedMessage('a shell command writing under .ai-sdlc/ or .github/workflows/'));
+    }
+  }
+  if (SHELL_REDIRECT_TO_PROTECTED.test(command)) {
+    deny(untrustedMessage('a shell command writing under .ai-sdlc/ or .github/workflows/'));
+  }
+}
+
 // ── Dispatch by tool ─────────────────────────────────────────────────
 
 if (toolName === 'Bash' || (!toolName && toolInput.command)) {
   enforceBash(toolInput.command);
-} else if (toolName === 'Write' || toolName === 'Edit') {
+} else if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
   enforceWriteEdit(toolInput.file_path);
 }
 
@@ -236,6 +277,9 @@ function enforceBash(command) {
   if (!command || typeof command !== 'string' || !command.trim()) return;
 
   const trimmed = command.trim();
+
+  // AISDLC-720: untrusted runs may not write governance config / workflows via shell.
+  enforceUntrustedShellWrites(trimmed);
 
   // AISDLC-602: merge governance is enforced unconditionally — independent
   // of whatever blockedActions patterns the project has (or hasn't)
@@ -800,13 +844,15 @@ function enforceWriteEdit(filePath) {
     // Relative path uses POSIX separators because globs do.
     const relPath = relative(homeAbs, absPath).split(sep).join('/');
 
-    // `.ai-sdlc/**` is ALWAYS refused, regardless of agent-role.yaml content
-    // (or its absence) — AISDLC-567 Part A net rule.
-    if (matchGlob('.ai-sdlc/**', relPath) || relPath === '.ai-sdlc') {
-      deny(
-        `path '${relPath}' is under .ai-sdlc/, which is never editable — ` +
-          `pipeline configuration is out of scope for agent edits regardless of project config.`,
-      );
+    // AISDLC-720: internal sessions may edit `.ai-sdlc/**` (no hardcoded
+    // floor). Untrusted runs (explicit env signal only) keep the block on
+    // `.ai-sdlc/**` and `.github/workflows/**`.
+    if (UNTRUSTED.untrusted) {
+      for (const g of UNTRUSTED_GLOBS) {
+        if (matchGlob(g, relPath) || relPath === g.replace('/**', '')) {
+          deny(untrustedMessage(`path '${relPath}'`));
+        }
+      }
     }
 
     for (const glob of blockedPaths) {

@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   STRICT_DEFAULTS,
+  isUntrustedRun,
   parseGovernanceBlock,
   resolveGovernance,
   resolveGovernanceFromYaml,
@@ -245,5 +246,23 @@ describe('resolveMergeAuthors (merge-if-eligible allow-list)', () => {
       ...STRICT_DEFAULTS,
       allowMerge: 'onGreenClean',
     });
+  });
+});
+
+describe('isUntrustedRun (AISDLC-720)', () => {
+  it('defaults to internal with no signal', () => {
+    assert.deepEqual(isUntrustedRun({}), { untrusted: false, reason: '' });
+  });
+  it('is untrusted only for truthy values, and carries the reason', () => {
+    for (const v of ['1', 'true', 'YES', ' on ']) {
+      assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, true, v);
+    }
+    for (const v of ['0', 'false', 'no', 'off', '', 'maybe']) {
+      assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, false, v);
+    }
+    assert.equal(
+      isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: '1', AI_SDLC_UNTRUSTED_REASON: 'fork PR' }).reason,
+      'fork PR',
+    );
   });
 });

@@ -38,7 +38,7 @@ same architecture pattern as `/ai-sdlc rebase` and `/ai-sdlc execute`.
    command also refuses at Step 1.
 4. **Never close PRs or issues.**
 5. **Never delete branches.**
-6. **Never edit `.ai-sdlc/**`.** `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
+6. **Edit governance config (`.ai-sdlc/**`) only when the task names the file and the change; never as a side effect.** Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today. Runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`) are blocked from `.ai-sdlc/**` and `.github/workflows/**` by the hook; ask a maintainer in the PR instead of retrying. `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 7. **Never write GitHub Actions CI-skip magic tokens.** (AISDLC-88.)
 
 ## Step 0 — Validate input

@@ -45,6 +45,18 @@ spec:
     maxFilesPerChange: 15
 ```
 
+## Who may edit governance config (AISDLC-720)
+
+Internal sessions (the operator's own agents, run by `/ai-sdlc execute` and the orchestrator) may edit governance config under `.ai-sdlc/` and workflows under `.github/workflows/`, as long as the task names the file and the change. They do not edit config as a side effect of other work. Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs. Reviewers can write their own transcripts and ledgers under `.ai-sdlc/`.
+
+**What marks a run untrusted.** Only an explicit environment signal: `AI_SDLC_UNTRUSTED_RUN` set to `1`, `true`, `yes` or `on`, with an optional `AI_SDLC_UNTRUSTED_REASON` that is shown in the refusal. Workflows set it for fork pull requests, pull requests whose author association is not OWNER, MEMBER or COLLABORATOR, and the `gh-issue` source kind. With no signal a session is internal.
+
+**What untrusted runs cannot do.** The PreToolUse hook refuses Write, Edit and MultiEdit on `.ai-sdlc/**` and `.github/workflows/**`, and refuses shell commands that write there (redirects, `tee`, `sed -i`, `cp`, `mv`, `rm` and similar, matched best-effort). The hook reads the signal from its own process environment, so nothing the run can write (tool input, `agent-role.yaml`, the `.active-task` sentinel, project settings, or `VAR=0 cmd` / `unset` in a command) can clear it. The refusal says the run is untrusted and tells the agent to ask a maintainer in the PR.
+
+**Where the CI boundary is.** The hook is a guard, not a boundary: shell pattern matching can be bypassed. The real boundary for outside contributions is in CI, derived from GitHub facts (fork, author association) plus CODEOWNERS; a required check that fails PRs from forks or outside authors that change governance config is tracked as a follow-up to AISDLC-720 (AISDLC-721).
+
+**Project opt-in.** `constraints.blockedPaths` keeps working for any project that wants stricter rules; it applies to internal sessions too.
+
 ## Per-repo governance hard-rules (RFC-0048 Phase 1)
 
 `spec.governance` (sibling to `spec.constraints`) is the single per-repo source
