@@ -121,20 +121,32 @@ describe('mainCheckoutRoot / loadTrustedExtras with an injected runner', () => {
       assert.equal(e.forcePushMode, 'leaseOnOwnBranch');
       assert.deepEqual(e.operational, ['requeue']);
       rmSync(join(d, '.ai-sdlc', 'agent-role.yaml'));
+      // AISDLC-710: a MISSING policy file means the repo sets nothing -> defaults.
+      assert.equal(loadTrustedExtras(d, d, run).forcePushMode, 'leaseOnOwnBranch');
+      // Any other read failure (here: a directory where the file should be) fails closed.
+      mkdirSync(join(d, '.ai-sdlc', 'agent-role.yaml'));
       assert.equal(loadTrustedExtras(d, d, run), null);
     }));
 });
 
 describe('bannerGovernance', () => {
-  const strict = resolveGovernanceFromYaml('');
+  const NEVER_YAML = 'spec:\n  governance:\n    allowForcePush: never\n';
+  const strict = resolveGovernanceFromYaml(NEVER_YAML);
   it('runs no git for a never copy with no dispatch operational list', () => {
     let calls = 0;
-    const out = bannerGovernance('spec:\n  role: x\n', strict, '/p', '/c', undefined, () => {
+    const out = bannerGovernance(NEVER_YAML, strict, '/p', '/c', undefined, () => {
       calls += 1;
       return null;
     });
     assert.equal(calls, 0);
     assert.equal(out.resolved, strict);
+  });
+
+  it('a copy that sets nothing is the lease default: it must be confirmed by the trusted policy (AISDLC-710)', () => {
+    const unset = resolveGovernanceFromYaml('spec:\n  role: x\n');
+    assert.equal(unset.allowForcePush, true);
+    const out = bannerGovernance('spec:\n  role: x\n', unset, '/p', '/c', undefined, () => null);
+    assert.equal(out.resolved.allowForcePush, false);
   });
 
   it('a lease copy with a failing runner renders never and no operational grants', () => {

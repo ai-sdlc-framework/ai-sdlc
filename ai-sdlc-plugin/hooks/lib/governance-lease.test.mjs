@@ -69,31 +69,25 @@ describe('resolver - allowForcePush enum', () => {
     assert.deepEqual([...OPERATIONAL_ACTIONS], ALL_OPS);
   });
 
-  it('leaseOnOwnBranch and true resolve to lease; everything else fails closed to never', () => {
+  it('leaseOnOwnBranch and true resolve to lease; present-but-malformed fails closed to never; absent is the lease default (AISDLC-710)', () => {
     assert.equal(resolveForcePushMode({ allowForcePush: 'leaseOnOwnBranch' }), 'leaseOnOwnBranch');
     assert.equal(resolveForcePushMode({ allowForcePush: true }), 'leaseOnOwnBranch');
-    for (const v of [
-      false,
-      'never',
-      'yes',
-      'LeaseOnOwnBranch',
-      1,
-      null,
-      undefined,
-      {},
-      [],
-      'true',
-    ]) {
+    for (const v of [false, 'never', 'yes', 'LeaseOnOwnBranch', 1, null, {}, [], 'true']) {
       assert.equal(resolveForcePushMode({ allowForcePush: v }), 'never', String(v));
     }
-    assert.equal(resolveForcePushMode(null), 'never');
-    assert.equal(resolveForcePushMode(undefined), 'never');
-    assert.equal(resolveForcePushMode('x'), 'never');
-    assert.equal(resolveForcePushMode({}), 'never');
+    assert.equal(resolveForcePushMode({ allowForcePush: undefined }), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode(null), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode(undefined), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode('x'), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode({}), 'leaseOnOwnBranch');
   });
 
-  it('a preset never sets the force-push mode', () => {
-    assert.equal(resolveForcePushMode({ preset: 'operator-trusted' }), 'never');
+  it('a preset never sets the force-push mode (it only ever sees the default)', () => {
+    assert.equal(resolveForcePushMode({ preset: 'operator-trusted' }), 'leaseOnOwnBranch');
+    assert.equal(
+      resolveForcePushMode({ preset: 'operator-trusted', allowForcePush: 'never' }),
+      'never',
+    );
   });
 
   it('resolveGovernance keeps its shape; allowForcePush enum maps onto the boolean view', () => {
@@ -112,10 +106,10 @@ describe('resolver - allowForcePush enum', () => {
     assert.equal(resolveGovernanceExtrasFromYaml(q).forcePushMode, 'never');
   });
 
-  it('absent governance / non-string yaml -> strict extras', () => {
+  it('absent governance / non-string yaml -> default extras (lease default, nothing else granted)', () => {
     for (const y of ['spec:\n  role: x\n', '', undefined, null]) {
       assert.deepEqual(resolveGovernanceExtrasFromYaml(y), {
-        forcePushMode: 'never',
+        forcePushMode: 'leaseOnOwnBranch',
         operational: [],
         protectedBranches: [],
       });
@@ -202,8 +196,14 @@ describe('operator snippet (manual step) resolves cleanly', () => {
 
 describe('render text', () => {
   it('never/unset text is unchanged', () => {
-    assert.match(renderSessionStartHardRules({ ...STRICT_DEFAULTS }), /\*\*NEVER force push\.\*\*/);
-    assert.match(renderSubagentHardRules({ ...STRICT_DEFAULTS }), /\*\*Never force-push\*\*/);
+    const never = { ...STRICT_DEFAULTS, allowForcePush: false };
+    assert.match(renderSessionStartHardRules(never), /\*\*NEVER force push\.\*\*/);
+    assert.match(renderSubagentHardRules(never), /\*\*Never force-push\*\*/);
+    // The unset default renders the lease rule (AISDLC-710).
+    assert.match(
+      renderSessionStartHardRules({ ...STRICT_DEFAULTS }),
+      /own branch only; never on main/,
+    );
   });
 
   it('lease text names the own-branch rule in both renderers', () => {
@@ -233,6 +233,8 @@ describe('hooks render the resolved TRUSTED policy', () => {
   let wt;
   let neverMain;
   let neverWt;
+  let unsetMain;
+  let unsetWt;
   let env0;
 
   function git(cwd, ...args) {
@@ -259,8 +261,16 @@ describe('hooks render the resolved TRUSTED policy', () => {
     const leaseRepo = repo('lease', OPERATOR_SNIPPET);
     main = leaseRepo.root;
     wt = leaseRepo.wt;
+    // A repo that sets nothing at all inherits the default (AISDLC-710).
+    const unset = repo('unset', 'spec:\n  role: x\n');
+    unsetMain = unset.root;
+    unsetWt = unset.wt;
     // Trusted main says never; the worktree (PR-tree) copy claims lease + operational.
-    const nv = repo('never', 'spec:\n  role: x\n', OPERATOR_SNIPPET);
+    const nv = repo(
+      'never',
+      'spec:\n  role: x\n  governance:\n    allowForcePush: never\n',
+      OPERATOR_SNIPPET,
+    );
     neverMain = nv.root;
     neverWt = nv.wt;
   });
@@ -297,6 +307,14 @@ describe('hooks render the resolved TRUSTED policy', () => {
         assert.match(dispatch, /Operational actions granted to this dispatch role/);
         for (const op of ALL_OPS) assert.ok(dispatch.includes(`\`${op}\``), op);
         assert.doesNotMatch(runHook(script, input, dir, 'executor'), /Operational actions granted/);
+      }
+    });
+
+    it(`${script}: a repo that sets nothing renders the lease default (AISDLC-710)`, () => {
+      for (const dir of [unsetMain, unsetWt]) {
+        const ctx = runHook(script, input, dir);
+        assert.match(ctx, /own branch only; never on main/);
+        assert.doesNotMatch(ctx, /NEVER force push|Never force-push/);
       }
     });
 

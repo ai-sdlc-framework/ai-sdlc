@@ -48,6 +48,8 @@ import {
   checkRuntimeGitignore,
   checkWorktreeHooks,
   fixWorktreeHooks,
+  checkForcePushPolicy,
+  readForcePushPolicy,
   runDoctorChecks,
   runDoctorFixes,
   summarizeDoctorResults,
@@ -1217,6 +1219,90 @@ describe('checkRuntimeGitignore', () => {
 
   it('is registered in the check registry', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('runtime-gitignore');
+  });
+});
+
+// ── checkForcePushPolicy / readForcePushPolicy (AISDLC-710) ──────────────
+
+describe('readForcePushPolicy', () => {
+  const gov = (line: string) => `spec:\n  governance:\n    ${line}\n  role: x\n`;
+
+  it('unset (no file, no governance block, no key) is the leaseOnOwnBranch default', () => {
+    expect(readForcePushPolicy(null)).toEqual({ mode: 'leaseOnOwnBranch', source: 'default' });
+    expect(readForcePushPolicy('spec:\n  role: x\n').source).toBe('default');
+    expect(readForcePushPolicy(gov('allowMerge: never')).source).toBe('default');
+  });
+
+  it('an explicit value always wins over the default', () => {
+    expect(readForcePushPolicy(gov('allowForcePush: never'))).toEqual({
+      mode: 'never',
+      source: 'explicit',
+      raw: 'never',
+    });
+    expect(readForcePushPolicy(gov('allowForcePush: false')).mode).toBe('never');
+    expect(readForcePushPolicy(gov('allowForcePush: "never" # opt out')).mode).toBe('never');
+    expect(readForcePushPolicy(gov('allowForcePush: leaseOnOwnBranch')).source).toBe('explicit');
+    expect(readForcePushPolicy(gov('allowForcePush: true')).mode).toBe('leaseOnOwnBranch');
+  });
+
+  it('a present but malformed or empty value fails closed to never', () => {
+    for (const v of ['yes', 'always', 'LeaseOnOwnBranch', '']) {
+      const r = readForcePushPolicy(gov(`allowForcePush: ${v}`));
+      expect(r.mode, v).toBe('never');
+      expect(r.source, v).toBe('malformed');
+    }
+  });
+
+  it('ignores an allowForcePush key outside the governance block', () => {
+    expect(
+      readForcePushPolicy(
+        'spec:\n  governance:\n    allowMerge: never\nother:\n  allowForcePush: never\n',
+      ).source,
+    ).toBe('default');
+  });
+});
+
+describe('checkForcePushPolicy', () => {
+  const writeRole = (body: string) => {
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmpDir, '.ai-sdlc', 'agent-role.yaml'), body);
+  };
+
+  it('reports the default and its origin when the repo sets nothing', () => {
+    writeRole('spec:\n  role: x\n');
+    const r = checkForcePushPolicy(makeCtx(makeAdapters()));
+    expect(r.id).toBe('force-push-policy');
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('leaseOnOwnBranch');
+    expect(r.title).toContain('default');
+    expect(r.anonymizableEvidence).toEqual({ effective: 'leaseOnOwnBranch', source: 'default' });
+  });
+
+  it('reports the default when there is no agent-role.yaml', () => {
+    const r = checkForcePushPolicy(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('no .ai-sdlc/agent-role.yaml found');
+  });
+
+  it('reports an explicit never as set in agent-role.yaml and says how to drop the prompt', () => {
+    writeRole('spec:\n  governance:\n    allowForcePush: never\n');
+    const r = checkForcePushPolicy(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(r.title).toContain('never');
+    expect(r.title).toContain('set explicitly in .ai-sdlc/agent-role.yaml');
+    expect(r.remediation).toContain('leaseOnOwnBranch');
+  });
+
+  it('warns on a malformed value and names the accepted ones', () => {
+    writeRole('spec:\n  governance:\n    allowForcePush: sure\n');
+    const r = checkForcePushPolicy(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('failing closed');
+    expect(r.remediation).toContain('leaseOnOwnBranch');
+  });
+
+  it('is registered in the check registry', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('force-push-policy');
   });
 });
 

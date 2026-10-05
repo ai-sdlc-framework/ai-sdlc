@@ -43,6 +43,8 @@ const roleYaml = (governance) =>
 
 const OWN = 'ai-sdlc/aisdlc-1-own';
 const LEASE = `  governance:\n    allowForcePush: leaseOnOwnBranch\n    protectedBranches:\n      - release/*\n`;
+// AISDLC-710: a repo that sets nothing gets leaseOnOwnBranch, so the strict value is explicit.
+const NEVER = `  governance:\n    allowForcePush: never\n`;
 
 let base;
 let gitEnv;
@@ -133,11 +135,11 @@ before(() => {
     GIT_TERMINAL_PROMPT: '0',
   };
   leaseRepo = makeRepo('lease', roleYaml(LEASE));
-  neverRepo = makeRepo('never', roleYaml(''));
+  neverRepo = makeRepo('never', roleYaml(NEVER));
   // Trusted (main checkout) policy = never; PR-tree copy in the worktree = lease.
-  wtCopyRepo = makeRepo('wtcopy', roleYaml(''), roleYaml(LEASE));
-  // Trusted policy = lease; worktree copy tries to turn it off -> still lease.
-  inverseRepo = makeRepo('inverse', roleYaml(LEASE), roleYaml(''));
+  wtCopyRepo = makeRepo('wtcopy', roleYaml(NEVER), roleYaml(LEASE));
+  // Trusted policy = lease; worktree copy sets never -> the copy can only tighten: denied.
+  inverseRepo = makeRepo('inverse', roleYaml(LEASE), roleYaml(NEVER));
 });
 
 after(() => rmSync(base, { recursive: true, force: true }));
@@ -210,7 +212,6 @@ describe('leaseOnOwnBranch - blocked', () => {
     ['--force after args (no blockedAction prefix match)', `git push origin ${OWN} --force`],
     ['+refspec', `git push origin +${OWN}`],
     ['--force-if-includes alone', `git push --force-if-includes origin ${OWN}`],
-    ['no refspec', 'git push --force-with-lease origin'],
     ['raw URL remote', `git push --force-with-lease https://evil.example/x.git ${OWN}`],
     ['unconfigured remote', `git push --force-with-lease evil ${OWN}`],
     ['chained', `${L()} && echo done`],
@@ -266,11 +267,117 @@ describe('never / unset / malformed - behaves exactly as before', () => {
     );
   });
 
-  it('with no agent-role.yaml the default is never: force shapes the globs miss are still blocked', () => {
+  it('with no agent-role.yaml the default (AISDLC-710) is leaseOnOwnBranch: own-branch lease allowed, other force shapes blocked', () => {
     const r = makeRepo('nopolicy', roleYaml(''));
     rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
-    assert.ok(denied(run(`git push origin ${OWN} --force`, { cwd: r.wt, projectDir: r.root })));
-    assert.ok(!denied(run(`git push origin ${OWN}`, { cwd: r.wt, projectDir: r.root })));
+    const o = { cwd: r.wt, projectDir: r.root };
+    assert.ok(!denied(run(L(), o)), 'own-branch lease is the default');
+    assert.ok(denied(run(`git push origin ${OWN} --force`, o)));
+    assert.ok(denied(run('git push --force-with-lease origin HEAD:refs/heads/main', o)));
+    assert.ok(!denied(run(`git push origin ${OWN}`, o)));
+  });
+
+  it('AISDLC-710: a repo that sets nothing (no governance block) inherits leaseOnOwnBranch, scoped to the own branch', () => {
+    const r = makeRepo('unsetgov', roleYaml(''));
+    const o = { cwd: r.wt, projectDir: r.root };
+    assert.ok(!denied(run(L(), o)), 'own branch lease allowed');
+    assert.ok(!denied(run(`git push --force-with-lease origin HEAD`, o)), 'bare HEAD allowed');
+    assert.ok(!denied(run(`git push --force-with-lease`, o)), 'no remote/refspec allowed');
+    for (const cmd of [
+      `git push --force origin HEAD:refs/heads/${OWN}`,
+      `git push -f origin HEAD:refs/heads/${OWN}`,
+      `git push origin +HEAD:refs/heads/${OWN}`,
+      'git push --force-with-lease origin HEAD:refs/heads/main',
+      'git push --force-with-lease origin main',
+      'git push --force origin main',
+      'git push --force-with-lease origin HEAD:refs/heads/ai-sdlc/aisdlc-2-other',
+    ]) {
+      assert.ok(denied(run(cmd, o)), cmd);
+    }
+    // An operator session in the main checkout (not a dispatched worktree) still gets no lease.
+    assert.ok(denied(run(L(), { cwd: r.root, projectDir: r.root })));
+  });
+
+  it('AISDLC-710: a lease push to a branch another session owns is refused under the default', () => {
+    const r = makeRepo('foreign', roleYaml(''));
+    const wtB = addTaskWorktree(r.root, 2);
+    const B = 'ai-sdlc/aisdlc-2-b';
+    // From worktree A (task 1), pushing task 2's branch: not the own branch.
+    assert.ok(
+      denied(
+        run(`git push --force-with-lease origin HEAD:refs/heads/${B}`, {
+          cwd: r.wt,
+          projectDir: r.root,
+        }),
+      ),
+    );
+    // A human-owned branch (no task prefix) checked out in the worktree gets no lease.
+    git(r.wt, 'checkout', '-q', '-b', 'alice/feature');
+    assert.ok(
+      denied(
+        run('git push --force-with-lease origin HEAD:refs/heads/alice/feature', {
+          cwd: r.wt,
+          projectDir: r.root,
+        }),
+      ),
+    );
+    git(r.wt, 'checkout', '-q', OWN);
+    // Each genuine task worktree still gets its own.
+    assert.ok(
+      !denied(
+        run(`git push --force-with-lease origin HEAD:refs/heads/${B}`, {
+          cwd: wtB,
+          projectDir: r.root,
+        }),
+      ),
+    );
+  });
+
+  it('AISDLC-710: explicit never (and false) still refuse every lease push, and the refusal names the fix', () => {
+    for (const [name, gov] of [
+      ['exnever', NEVER],
+      ['exfalse', `  governance:\n    allowForcePush: false\n`],
+    ]) {
+      const r = makeRepo(name, roleYaml(gov));
+      const o = { cwd: r.wt, projectDir: r.root };
+      for (const cmd of [
+        L(),
+        'git push --force-with-lease origin HEAD',
+        'git push --force-with-lease',
+      ]) {
+        const out = run(cmd, o);
+        assert.ok(denied(out), cmd);
+        const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+        assert.match(reason, /spec\.governance\.allowForcePush/);
+        assert.match(reason, /leaseOnOwnBranch/);
+        assert.doesNotMatch(reason, /SKIP_|AI_SDLC_|bypass|--no-verify|--force(?![-\w])/i, reason);
+      }
+    }
+  });
+
+  it('AISDLC-710: refusals from the hook (not-in-worktree, policy never, other branch) never suggest a forbidden exit', () => {
+    const r = makeRepo('refusals', roleYaml(''));
+    const nv = makeRepo('refusals-never', roleYaml(NEVER));
+    const reasons = [
+      run(L(), { cwd: r.root, projectDir: r.root }), // operator checkout: no lease
+      run(L(), { cwd: nv.wt, projectDir: nv.root }), // explicit never
+      run('git push --force-with-lease origin HEAD:refs/heads/main', {
+        cwd: r.wt,
+        projectDir: r.root,
+      }),
+      run(`git push --force origin ${OWN}`, { cwd: r.wt, projectDir: r.root }),
+      run(`git push -f origin ${OWN}`, { cwd: nv.wt, projectDir: nv.root }),
+    ].map((out) => {
+      assert.ok(denied(out), out);
+      return JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+    });
+    for (const reason of reasons) {
+      assert.match(reason, /spec\.governance\.allowForcePush/, reason);
+      assert.match(reason, /leaseOnOwnBranch/, reason);
+      assert.doesNotMatch(reason, /SKIP_|AI_SDLC_|bypass|--no-verify|--mirror/i, reason);
+      assert.doesNotMatch(reason, /--force(?![-\w])/, reason);
+      assert.doesNotMatch(reason, /(^|\s)-f(\s|$)/, reason);
+    }
   });
 
   it('under never, non-prefix force shapes are blocked (strict mode is not bypassable by arg order)', () => {
@@ -470,7 +577,15 @@ describe('fail-closed paths and git-subprocess discipline', () => {
   it('trusted main-checkout policy unreadable while the project-dir copy says lease: denied', () => {
     const r = makeRepo('nomain', roleYaml(LEASE), roleYaml(LEASE));
     rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
+    // A directory where the file should be: unreadable (not "absent"), so fail closed.
+    mkdirSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
     assert.ok(denied(run(L(), { cwd: r.wt, projectDir: r.wt })));
+  });
+
+  it('trusted main-checkout policy MISSING (repo sets nothing): the default lease applies (AISDLC-710)', () => {
+    const r = makeRepo('nomainmissing', roleYaml(LEASE), roleYaml(LEASE));
+    rmSync(join(r.root, '.ai-sdlc', 'agent-role.yaml'));
+    assert.ok(!denied(run(L(), { cwd: r.wt, projectDir: r.wt })));
   });
 
   it('project-dir copy unreadable (directory in its place): no lease, blockedActions behave as before', () => {
@@ -965,11 +1080,28 @@ describe('config-mapped no-colon refspec: why only the explicit destination is a
           assert.ok(denied(out), cmd);
           assert.match(out, /HEAD:refs\/heads\//, 'the deny message names the accepted spelling');
         }
-        // 3. ...while the explicit form ignores the config and touches only the task branch.
-        assert.ok(!denied(run(EXPLICIT, { cwd: wt, projectDir: root })));
-        git(wt, 'push', '--force-with-lease', 'origin', `HEAD:refs/heads/${BR}`);
-        assert.equal(remoteRef('refs/heads/main'), mainSha, 'main untouched by the explicit form');
-        assert.equal(remoteRef(`refs/heads/${BR}`), git(wt, 'rev-parse', 'HEAD'));
+        // 2b. AISDLC-710: the omitted-refspec forms are resolved against the config, so the
+        // ones that WOULD hit main are denied (the unguarded forms are proven to hit main
+        // for the config that maps there; push.default=upstream/tracking maps the same way).
+        if (key === 'remote.origin.push' || value === 'upstream' || value === 'tracking') {
+          for (const cmd of ['git push --force-with-lease origin', 'git push --force-with-lease']) {
+            assert.ok(denied(run(cmd, { cwd: wt, projectDir: root })), `implicit: ${cmd}`);
+          }
+        }
+        // 3. ...while the explicit forms ignore the config and touch only the task branch.
+        // Bare `HEAD` is accepted too (AISDLC-710): git resolves it to the current branch
+        // regardless of remote.<name>.push / push.default, proven here. The other no-colon
+        // spelling, `refs/heads/<own>`, is NOT: git maps it through the config to main (also
+        // proven below), so it stays denied.
+        for (const [cmd, args] of [
+          [EXPLICIT, ['HEAD:refs/heads/' + BR]],
+          [`git push --force-with-lease origin HEAD`, ['HEAD']],
+        ]) {
+          assert.ok(!denied(run(cmd, { cwd: wt, projectDir: root })), cmd);
+          git(wt, 'push', '--force-with-lease', 'origin', ...args);
+          assert.equal(remoteRef('refs/heads/main'), mainSha, `main untouched by: ${cmd}`);
+          assert.equal(remoteRef(`refs/heads/${BR}`), git(wt, 'rev-parse', 'HEAD'));
+        }
       } finally {
         git(wt, 'config', '--unset-all', key);
         resetMain();
@@ -1032,7 +1164,7 @@ describe('config-mapped no-colon refspec: why only the explicit destination is a
   });
 
   it('under never nothing changed: lease pushes stay blocked, no git subprocess runs', () => {
-    const nv = makeRepo('cfgmap-never', roleYaml(''));
+    const nv = makeRepo('cfgmap-never', roleYaml(NEVER));
     const shim = makeGitShim('cfgnever');
     for (const cmd of [NOCOLON, EXPLICIT]) {
       const out = run(cmd, { cwd: nv.wt, projectDir: nv.root, env: shim.env });

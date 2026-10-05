@@ -110,6 +110,39 @@ function verifiedMainRoot(dir, run = runGit) {
 }
 
 /**
+ * Policy file text; '' when the file does not exist (a repo that sets nothing
+ * gets the resolver defaults, AISDLC-710). Any OTHER read failure throws so the
+ * caller fails closed.
+ */
+function readPolicyText(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
+/**
+ * All values of a git config key (`git config --get-all`) as seen from `cwd`.
+ * Returns [] when the key is unset (exit 1) and null on ANY other failure, which
+ * callers must treat as UNKNOWN and fail closed.
+ */
+function configValues(key, cwd) {
+  const r = spawnSync('git', ['config', '--get-all', key], {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: GIT_TIMEOUT_MS,
+    env: gitEnv(),
+  });
+  if (r.error || r.signal) return null;
+  if (r.status === 1) return [];
+  if (r.status !== 0) return null;
+  return r.stdout.split('\n').filter((v) => v !== '');
+}
+
+/**
  * Reads the policy from the main checkout of the project dir's repo, after
  * checking the tool's cwd belongs to the same repo. Returns the extras
  * ({forcePushMode, operational, protectedBranches}) or null when the trusted
@@ -121,8 +154,9 @@ function loadTrustedExtras(projectDir, cwd, run = runGit) {
     if (!mainRoot) return null;
     const cwdMain = verifiedMainRoot(cwd, run);
     if (!cwdMain || safeReal(cwdMain) !== safeReal(mainRoot)) return null;
-    const text = readFileSync(join(mainRoot, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
-    return resolveGovernanceExtrasFromYaml(text);
+    return resolveGovernanceExtrasFromYaml(
+      readPolicyText(join(mainRoot, '.ai-sdlc', 'agent-role.yaml')),
+    );
   } catch {
     return null;
   }
@@ -214,6 +248,8 @@ module.exports = {
   GIT_TIMEOUT_MS,
   runGit,
   probeRef,
+  configValues,
+  readPolicyText,
   safeReal,
   mainCheckoutRoot,
   verifiedMainRoot,

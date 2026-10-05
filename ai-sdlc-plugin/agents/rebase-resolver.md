@@ -177,7 +177,7 @@ if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   exit 1
 fi
 # The push itself is a standalone command, branch written literally, from the
-# dispatched worktree (the only spelling `leaseOnOwnBranch` accepts):
+# dispatched worktree (the canonical spelling; allowed by default, no operator prompt):
 git push --force-with-lease origin HEAD:refs/heads/<branch>
 ```
 

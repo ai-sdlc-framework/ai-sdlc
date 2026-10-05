@@ -1068,6 +1068,99 @@ export function fixWorktreeHooks(ctx: DoctorRunContext): DoctorFixResult {
   };
 }
 
+// ── Force-push policy (AISDLC-710) ──────────────────────────────────────
+
+export type ForcePushPolicySource = 'default' | 'explicit' | 'malformed';
+
+export interface ForcePushPolicyReading {
+  mode: 'leaseOnOwnBranch' | 'never';
+  source: ForcePushPolicySource;
+  /** The raw value as written (undefined when unset). */
+  raw?: string;
+}
+
+/**
+ * Reads `spec.governance.allowForcePush` out of agent-role.yaml text, mirroring
+ * the plugin hook's resolver (`ai-sdlc-plugin/hooks/lib/governance-resolver.js`,
+ * `describeForcePushPolicy`): unset is the `leaseOnOwnBranch` default, an explicit
+ * `leaseOnOwnBranch`/`true` or `never`/`false` wins, anything else present is
+ * malformed and fails closed to `never`. The orchestrator package cannot import the
+ * plugin's CommonJS file (it is not shipped with it), so the few lines of parsing are
+ * duplicated here on purpose; keep the two in step.
+ */
+export function readForcePushPolicy(yamlText: string | null): ForcePushPolicyReading {
+  if (yamlText === null) return { mode: 'leaseOnOwnBranch', source: 'default' };
+  let govIndent: number | null = null;
+  let raw: string | undefined;
+  for (const line of yamlText.split('\n')) {
+    if (govIndent === null) {
+      const m = line.match(/^(\s*)governance:\s*$/);
+      if (m) govIndent = m[1].length;
+      continue;
+    }
+    if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;
+    const indent = (line.match(/^(\s*)/) ?? ['', ''])[1].length;
+    if (indent <= govIndent) break;
+    const kv = line.match(/^\s*allowForcePush:\s*(.*)$/);
+    if (kv) {
+      raw = kv[1]
+        .replace(/\s+#.*$/, '')
+        .trim()
+        .replace(/^['"]/, '')
+        .replace(/['"]$/, '');
+    }
+  }
+  if (raw === undefined) return { mode: 'leaseOnOwnBranch', source: 'default' };
+  if (raw === 'true' || raw === 'leaseOnOwnBranch') {
+    return { mode: 'leaseOnOwnBranch', source: 'explicit', raw };
+  }
+  if (raw === 'false' || raw === 'never') return { mode: 'never', source: 'explicit', raw };
+  return { mode: 'never', source: 'malformed', raw };
+}
+
+/**
+ * Reports the EFFECTIVE `allowForcePush` value and where it came from, so an
+ * adopter can see why a lease push is (or is not) allowed without reading source.
+ * Reads the working-tree copy; the PreToolUse hook enforces the copy in the main
+ * checkout (a worktree copy can only tighten it).
+ */
+export function checkForcePushPolicy(ctx: DoctorRunContext): DoctorCheckResult {
+  const rolePath = join(ctx.projectDir, '.ai-sdlc', 'agent-role.yaml');
+  const text = ctx.adapters.readFile(rolePath);
+  const reading = readForcePushPolicy(text);
+  const where =
+    reading.source === 'default'
+      ? text === null
+        ? 'default; no .ai-sdlc/agent-role.yaml found'
+        : 'default; spec.governance.allowForcePush is not set in .ai-sdlc/agent-role.yaml'
+      : reading.source === 'explicit'
+        ? `set explicitly in .ai-sdlc/agent-role.yaml (allowForcePush: ${reading.raw})`
+        : `malformed value in .ai-sdlc/agent-role.yaml (allowForcePush: ${reading.raw || '<empty>'}), failing closed`;
+  const evidence = { effective: reading.mode, source: reading.source };
+  if (reading.source === 'malformed') {
+    return {
+      id: 'force-push-policy',
+      severity: 'warn',
+      title: `allowForcePush effective value: never (${where})`,
+      remediation:
+        "Set spec.governance.allowForcePush in .ai-sdlc/agent-role.yaml to `leaseOnOwnBranch` (the default; lease push of a task's own branch after a rebase) or `never`.",
+      anonymizableEvidence: evidence,
+    };
+  }
+  return {
+    id: 'force-push-policy',
+    severity: 'pass',
+    title: `allowForcePush effective value: ${reading.mode} (${where})`,
+    ...(reading.mode === 'never'
+      ? {
+          remediation:
+            "Agents are asked to authorize every lease push after a rebase. Remove spec.governance.allowForcePush (or set it to `leaseOnOwnBranch`) in .ai-sdlc/agent-role.yaml to allow a lease push of a task's own branch without a prompt.",
+        }
+      : {}),
+    anonymizableEvidence: evidence,
+  };
+}
+
 // ── Judgment layer ──────────────────────────────────────────────────────
 
 /**
@@ -1250,6 +1343,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
       'Worktrees under .worktrees/ whose git hooks directory has no executable pre-push while the main checkout has one (AISDLC-693).',
     run: checkWorktreeHooks,
     fix: fixWorktreeHooks,
+  },
+  {
+    id: 'force-push-policy',
+    description:
+      'Effective spec.governance.allowForcePush value and whether it is the default or set in agent-role.yaml (AISDLC-710).',
+    run: checkForcePushPolicy,
   },
   {
     id: 'judgment-layer',

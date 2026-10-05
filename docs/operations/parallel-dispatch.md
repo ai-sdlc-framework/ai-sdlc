@@ -751,7 +751,7 @@ becomes an escalation.
 The playbook can push to one place: `HEAD:refs/heads/<the task's own branch>`.
 `main`, `master`, any other branch, any forced or deleting push and any other
 refspec form are refused before git is run. A lease push is also refused, with no
-git action, unless the trusted policy sets `allowForcePush: leaseOnOwnBranch`, when
+git action, unless the trusted policy resolves `allowForcePush` to `leaseOnOwnBranch` (the default when unset, AISDLC-710), when
 the branch is on the policy's `protectedBranches` list (or the built-in protected
 names), and when the task's worktree does not verify as a genuine worktree of this
 repository (under `.worktrees/`, registered under the main checkout's

@@ -11,8 +11,11 @@
  *   governance:
  *     preset: strict | operator-trusted   # sugar layer, see below
  *     allowMerge: never | onGreenClean    # default: never
- *     allowForcePush: never | leaseOnOwnBranch | bool   # default: never
- *                                         # (true = leaseOnOwnBranch, false = never)
+ *     allowForcePush: never | leaseOnOwnBranch | bool   # default: leaseOnOwnBranch
+ *                                         # (true = leaseOnOwnBranch, false = never;
+ *                                         # AISDLC-710: lease push on the agent's OWN
+ *                                         # task branch is the default, an explicit
+ *                                         # `never` always wins, malformed = never)
  *     operational: [..closed set..]       # default: [] (dispatch-role grants)
  *     protectedBranches: [..names..]      # default: [] (adds to main/master)
  *     mergeAuthors: [..github logins..]   # default: [] (empty = nobody; the
@@ -21,9 +24,12 @@
  *     allowBranchDelete: bool             # default: false
  *     allowResetHard: bool                # default: false
  *
- * An ABSENT `governance` section resolves to the strict defaults below —
- * existing adopters with no governance block are byte-for-byte unchanged
- * (RFC-0048 Backward Compatibility).
+ * An ABSENT `governance` section resolves to the defaults below. Every default is
+ * strict EXCEPT `allowForcePush`, which defaults to `leaseOnOwnBranch`
+ * (AISDLC-710): rebasing a task branch and lease-pushing it is the framework's
+ * own required workflow, so refusing it by default blocked the documented happy
+ * path for every adopter. The grant is still scoped to the dispatched task's own
+ * branch by the PreToolUse hook (see lib/lease-push-guard.js).
  *
  * Presets (OQ-5) are pure sugar: `operator-trusted` expands to the exact same
  * resolved shape granular keys could produce
@@ -55,7 +61,8 @@
 
 const STRICT_DEFAULTS = Object.freeze({
   allowMerge: 'never',
-  allowForcePush: false,
+  // AISDLC-710: boolean view of the `leaseOnOwnBranch` default (see resolveForcePushMode).
+  allowForcePush: true,
   allowClosePrIssue: false,
   allowBranchDelete: false,
   allowResetHard: false,
@@ -74,7 +81,7 @@ const OPERATIONAL_ACTIONS = Object.freeze([
 
 const KNOWN_PRESETS = new Set(['strict', 'operator-trusted']);
 const LIST_KEYS = new Set(['operational', 'protectedBranches', 'mergeAuthors']);
-const BOOLEAN_KEYS = ['allowForcePush', 'allowClosePrIssue', 'allowBranchDelete', 'allowResetHard'];
+const BOOLEAN_KEYS = ['allowClosePrIssue', 'allowBranchDelete', 'allowResetHard'];
 
 /**
  * Extracts the raw `spec.governance` block from agent-role.yaml text as a
@@ -133,6 +140,11 @@ function parseGovernanceBlock(yamlText) {
 
     const key = kv[1];
     let value = kv[2].replace(/\s+#.*$/, '').trim();
+    if (value === '' && key === 'allowForcePush') {
+      // A present-but-empty value is malformed, not absent: resolves to `never`.
+      raw[key] = '';
+      continue;
+    }
     if (value === '') {
       // Block list for the two list-valued keys; any other nested map/list is
       // not part of this schema and is skipped.
@@ -202,25 +214,45 @@ function resolveGovernance(rawGovernance) {
     // malformed value (non-boolean): fail closed — ignore.
   }
 
-  // allowForcePush also accepts the enum: leaseOnOwnBranch reads as truthy
-  // (the boolean stays the back-compat view), `never` as false.
-  if (typeof rawGovernance.allowForcePush === 'string') {
-    if (rawGovernance.allowForcePush === 'leaseOnOwnBranch') resolved.allowForcePush = true;
-    else if (rawGovernance.allowForcePush === 'never') resolved.allowForcePush = false;
-  }
+  // allowForcePush is the boolean view of resolveForcePushMode: absent keeps the
+  // `leaseOnOwnBranch` default (AISDLC-710), an explicit value wins, and any
+  // present-but-malformed value fails closed to false (`never`).
+  resolved.allowForcePush = resolveForcePushMode(rawGovernance) === 'leaseOnOwnBranch';
 
   return resolved;
 }
 
 /**
- * Resolves the force-push mode. `leaseOnOwnBranch` and boolean `true` →
- * 'leaseOnOwnBranch'; everything else (absent, `never`, `false`, malformed)
- * → 'never' (fail closed). Presets never influence it.
+ * Resolves the force-push mode. ABSENT (no governance block, or no
+ * `allowForcePush` key) -> 'leaseOnOwnBranch' (AISDLC-710 default). An explicit
+ * `leaseOnOwnBranch` / boolean `true` -> 'leaseOnOwnBranch'; an explicit `never`
+ * / boolean `false` -> 'never'; any other PRESENT value (malformed) fails closed
+ * to 'never'. Presets never influence it.
  */
 function resolveForcePushMode(rawGovernance) {
-  if (!rawGovernance || typeof rawGovernance !== 'object') return 'never';
-  const v = rawGovernance.allowForcePush;
-  return v === true || v === 'leaseOnOwnBranch' ? 'leaseOnOwnBranch' : 'never';
+  return describeForcePushPolicy(rawGovernance).mode;
+}
+
+/**
+ * Same resolution as resolveForcePushMode, plus where the value came from, so
+ * `/ai-sdlc doctor` and refusal messages can say why a mode is in effect.
+ *
+ * @returns {{mode: 'never'|'leaseOnOwnBranch', source: 'default'|'explicit'|'malformed', raw: unknown}}
+ */
+function describeForcePushPolicy(rawGovernance) {
+  const v =
+    rawGovernance && typeof rawGovernance === 'object' ? rawGovernance.allowForcePush : undefined;
+  if (v === undefined) return { mode: 'leaseOnOwnBranch', source: 'default', raw: undefined };
+  if (v === true || v === 'leaseOnOwnBranch') {
+    return { mode: 'leaseOnOwnBranch', source: 'explicit', raw: v };
+  }
+  if (v === false || v === 'never') return { mode: 'never', source: 'explicit', raw: v };
+  return { mode: 'never', source: 'malformed', raw: v };
+}
+
+/** Parse + describe the force-push policy from raw agent-role.yaml text (null/'' = nothing set). */
+function describeForcePushPolicyFromYaml(yamlText) {
+  return describeForcePushPolicy(parseGovernanceBlock(yamlText));
 }
 
 /**
@@ -407,6 +439,8 @@ module.exports = {
   resolveGovernanceFromYaml,
   OPERATIONAL_ACTIONS,
   resolveForcePushMode,
+  describeForcePushPolicy,
+  describeForcePushPolicyFromYaml,
   resolveOperational,
   resolveProtectedBranches,
   resolveMergeAuthors,

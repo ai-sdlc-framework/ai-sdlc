@@ -11,6 +11,8 @@ import {
   parseGovernanceBlock,
   resolveGovernance,
   resolveGovernanceFromYaml,
+  resolveForcePushMode,
+  describeForcePushPolicyFromYaml,
   resolveMergeAuthors,
   resolveMergeAuthorsFromYaml,
   renderSessionStartHardRules,
@@ -66,7 +68,8 @@ describe('resolveGovernance — granular keys', () => {
   it('honors an explicit allowMerge: onGreenClean', () => {
     const resolved = resolveGovernance({ allowMerge: 'onGreenClean' });
     assert.equal(resolved.allowMerge, 'onGreenClean');
-    assert.equal(resolved.allowForcePush, false);
+    // AISDLC-710: unset allowForcePush keeps the leaseOnOwnBranch default.
+    assert.equal(resolved.allowForcePush, true);
   });
 
   it('honors explicit boolean keys', () => {
@@ -90,7 +93,7 @@ describe('resolveGovernance — operator-trusted preset (OQ-5)', () => {
     const resolved = resolveGovernance({ preset: 'operator-trusted' });
     assert.deepEqual(resolved, {
       allowMerge: 'onGreenClean',
-      allowForcePush: false,
+      allowForcePush: true, // AISDLC-710 default (leaseOnOwnBranch), presets never touch it
       allowClosePrIssue: false,
       allowBranchDelete: false,
       allowResetHard: false,
@@ -160,7 +163,7 @@ describe('resolveGovernanceFromYaml', () => {
 
 describe('renderSessionStartHardRules', () => {
   it('renders the strict three-line banner by default', () => {
-    const text = renderSessionStartHardRules({ ...STRICT_DEFAULTS });
+    const text = renderSessionStartHardRules({ ...STRICT_DEFAULTS, allowForcePush: false });
     assert.equal(
       text,
       '**NEVER merge PRs. Only humans merge.**\n**NEVER close issues or PRs.**\n**NEVER force push.**',
@@ -168,7 +171,11 @@ describe('renderSessionStartHardRules', () => {
   });
 
   it('softens the merge line under onGreenClean', () => {
-    const text = renderSessionStartHardRules({ ...STRICT_DEFAULTS, allowMerge: 'onGreenClean' });
+    const text = renderSessionStartHardRules({
+      ...STRICT_DEFAULTS,
+      allowForcePush: false,
+      allowMerge: 'onGreenClean',
+    });
     assert.match(text, /mergeStateStatus == CLEAN/);
     assert.doesNotMatch(text, /NEVER merge PRs/);
     // Other two lines stay strict.
@@ -179,7 +186,7 @@ describe('renderSessionStartHardRules', () => {
 
 describe('renderSubagentHardRules', () => {
   it('renders the strict five-bullet list by default', () => {
-    const text = renderSubagentHardRules({ ...STRICT_DEFAULTS });
+    const text = renderSubagentHardRules({ ...STRICT_DEFAULTS, allowForcePush: false });
     assert.match(text, /Never merge PRs/);
     assert.match(text, /Never force-push/);
     assert.match(text, /Never close PRs or issues/);
@@ -188,7 +195,11 @@ describe('renderSubagentHardRules', () => {
   });
 
   it('softens only the merge bullet under onGreenClean, leaves the other four strict', () => {
-    const text = renderSubagentHardRules({ ...STRICT_DEFAULTS, allowMerge: 'onGreenClean' });
+    const text = renderSubagentHardRules({
+      ...STRICT_DEFAULTS,
+      allowForcePush: false,
+      allowMerge: 'onGreenClean',
+    });
     assert.match(text, /mergeStateStatus == CLEAN/);
     assert.doesNotMatch(text, /Never merge PRs/);
     assert.match(text, /Never force-push/);
@@ -201,6 +212,52 @@ describe('renderSubagentHardRules', () => {
     const text = renderSubagentHardRules({ ...STRICT_DEFAULTS, allowForcePush: true });
     assert.doesNotMatch(text, /Never force-push/);
     assert.match(text, /Force-push is allowed per repo policy/);
+  });
+});
+
+describe('allowForcePush default (AISDLC-710)', () => {
+  it('the default is leaseOnOwnBranch, explicit settings win, malformed fails closed to never', () => {
+    assert.equal(STRICT_DEFAULTS.allowForcePush, true);
+    assert.equal(resolveForcePushMode(null), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode({}), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode({ preset: 'operator-trusted' }), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode({ allowForcePush: 'leaseOnOwnBranch' }), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode({ allowForcePush: true }), 'leaseOnOwnBranch');
+    assert.equal(resolveForcePushMode({ allowForcePush: 'never' }), 'never');
+    assert.equal(resolveForcePushMode({ allowForcePush: false }), 'never');
+    for (const bad of ['yes', 'Never', 'always', '', 1, 0, null, [], {}]) {
+      assert.equal(resolveForcePushMode({ allowForcePush: bad }), 'never', `bad=${String(bad)}`);
+    }
+  });
+
+  it('text with no governance block, or no allowForcePush key, resolves to the default', () => {
+    assert.equal(resolveGovernanceFromYaml('spec:\n  role: x\n').allowForcePush, true);
+    const noKey = 'spec:\n  governance:\n    allowMerge: never\n';
+    assert.equal(resolveGovernanceFromYaml(noKey).allowForcePush, true);
+    assert.deepEqual(describeForcePushPolicyFromYaml(noKey), {
+      mode: 'leaseOnOwnBranch',
+      source: 'default',
+      raw: undefined,
+    });
+    assert.equal(describeForcePushPolicyFromYaml('').source, 'default');
+  });
+
+  it('explicit never / false in yaml text still resolves to never (explicit wins)', () => {
+    for (const v of ['never', 'false', '"never"']) {
+      const yaml = `spec:\n  governance:\n    allowForcePush: ${v}\n`;
+      assert.equal(resolveGovernanceFromYaml(yaml).allowForcePush, false, v);
+      const d = describeForcePushPolicyFromYaml(yaml);
+      assert.equal(d.mode, 'never');
+      assert.equal(d.source, 'explicit');
+    }
+  });
+
+  it('a present-but-empty or garbage value fails closed to never', () => {
+    for (const v of ['', 'sure', 'leaseonownbranch']) {
+      const yaml = `spec:\n  governance:\n    allowForcePush: ${v}\n    allowMerge: never\n`;
+      assert.equal(resolveGovernanceFromYaml(yaml).allowForcePush, false, `v=${v}`);
+      assert.equal(describeForcePushPolicyFromYaml(yaml).source, 'malformed', `v=${v}`);
+    }
   });
 });
 

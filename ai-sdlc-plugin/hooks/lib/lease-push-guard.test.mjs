@@ -22,6 +22,7 @@ const ctx = (over = {}) => ({
   protectedBranches: ['release/*', 'prod'],
   remotes: ['origin', 'fork'],
   aliasLookup: (n) => (n === 'fpush' ? 'push --force' : null),
+  pushConfig: () => [],
   ...over,
 });
 const verdict = (cmd, over) => evaluateLeasePush(cmd, ctx(over)).decision;
@@ -41,6 +42,17 @@ describe('evaluateLeasePush — allowed shapes', () => {
     `git push --force-with-lease origin refs/heads/${OWN}:refs/heads/${OWN}`,
     `git push --force-with-lease fork HEAD:refs/heads/${OWN}`,
     `  git push --force-with-lease origin HEAD:refs/heads/${OWN}  `,
+    // AISDLC-710 widened spellings: destination provably refs/heads/<own>.
+    `git push --force-with-lease origin HEAD`,
+    `git push origin --force-with-lease HEAD`,
+    `git push --force-with-lease`,
+    `git push --force-with-lease origin`,
+    `git push origin --force-with-lease`,
+    `git push --force-with-lease=${OWN}:0123abcd`,
+    `git push --force-with-lease=${OWN}:0123abcd origin`,
+    `git push -u --force-with-lease --force-if-includes origin HEAD`,
+    `git push -q --force-with-lease origin HEAD:refs/heads/${OWN}`,
+    `git push --verbose --force-with-lease origin HEAD:refs/heads/${OWN}`,
   ]) {
     it(`allows: ${cmd.trim()}`, () => assert.equal(verdict(cmd), 'allow'));
   }
@@ -72,8 +84,6 @@ describe('evaluateLeasePush — denied', () => {
     ['--force-if-includes alone', `git push --force-if-includes origin HEAD:refs/heads/${OWN}`],
     ['abbreviated option', `git push --force-w origin HEAD:refs/heads/${OWN}`],
     ['abbrev --forc', `git push --forc origin HEAD:refs/heads/${OWN}`],
-    ['no refspec', 'git push --force-with-lease origin'],
-    ['no remote', 'git push --force-with-lease'],
     ['raw URL remote', `git push --force-with-lease https://evil.example/r.git ${OWN}`],
     ['unconfigured remote name', `git push --force-with-lease evil ${OWN}`],
     [
@@ -332,7 +342,11 @@ describe('evaluateLeasePush - deny reasons steer toward the accepted spelling', 
     ]) {
       const r = evaluateLeasePush(cmd, ctx());
       assert.equal(r.decision, 'deny', cmd);
-      assert.match(r.reason, /--force-with-lease HEAD:refs\/heads\/<own-branch>/, cmd);
+      assert.match(
+        r.reason,
+        /--force-with-lease origin HEAD:refs\/heads\/ai-sdlc\/aisdlc-1-thing/,
+        cmd,
+      );
       assert.doesNotMatch(r.reason, /--force-with-lease <own-branch>/, cmd);
     }
   });
@@ -357,10 +371,9 @@ describe('evaluateLeasePush - short destination / alias hardening', () => {
     }
   });
 
-  it('the no-colon form is refused in every spelling, with the accepted spelling in the message', () => {
+  it('the short bare-name (no-colon) form stays refused, with the accepted spelling in the message', () => {
     for (const cmd of [
       `git push --force-with-lease origin ${OWN}`,
-      `git push --force-with-lease origin refs/heads/${OWN}`,
       `git push --force-with-lease -u origin ${OWN}`,
       `git push -u --force-with-lease origin ${OWN}`,
       `git push --force-with-lease=${OWN} origin ${OWN}`,

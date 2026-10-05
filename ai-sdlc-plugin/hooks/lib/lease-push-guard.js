@@ -14,11 +14,22 @@
  *   { decision: 'deny', reason }    force-ish push that is not positively
  *                                   allowed — block
  *
- * Posture: positively parse or block. The ALLOW shape is deliberately tiny:
- *   git push <configured-remote-name> [--force-with-lease[=<own>[:<sha>]]]
- *       [--force-if-includes] [-u|--set-upstream] <refspec>...
+ * Posture: positively parse or block. The ALLOW shape is deliberately small:
+ *   git push [<configured-remote-name>] [--force-with-lease[=<own>[:<sha>]]]
+ *       [--force-if-includes] [-u|--set-upstream] [-q|-v] [<refspec>...]
  * with no quoting, no shell metacharacters, no wrapper/env prefix, no git
- * global options. Anything else that looks like a force-ish push is denied.
+ * global options. Accepted refspecs are those whose destination is unambiguously
+ * refs/heads/<own>: `HEAD`, `HEAD:refs/heads/<own>`,
+ * `<own>:refs/heads/<own>`, `refs/heads/<own>:refs/heads/<own>`. When the remote
+ * and/or refspec are omitted the REAL destination is resolved from git config
+ * (remote.<name>.push, remote.<name>.mirror, push.default, branch.<own>.merge,
+ * branch.<own>.pushRemote, remote.pushDefault) and the push is allowed only when
+ * that provably lands on refs/heads/<own> on a configured remote (AISDLC-710).
+ * A bare name without a colon (`<own>`, `refs/heads/<own>`) stays refused: git
+ * maps it through the config and it can land on main. A short destination
+ * (`<own>:<own>`) stays refused too: it is matched against remote refs we cannot
+ * see (a tag of that name would win). Anything else that looks like a force-ish
+ * push is denied.
  *
  * ctx (all injected so tests never touch git):
  *   ownRef:            string | null  — FULL ref the worktree has checked out
@@ -36,6 +47,11 @@
  *                                       or trailing `*` prefix)
  *   remotes:           string[]       — configured remote NAMES
  *   aliasLookup:       (name) => string | null — git alias value, if any
+ *   pushConfig:        (key) => string[] | null — every value of a git config
+ *                                       key ([] = unset, null = unknown/error,
+ *                                       which fails closed). Only consulted for
+ *                                       the implicit-remote / implicit-refspec
+ *                                       forms.
  *
  * Like the stash guard, a static matcher cannot defeat a deliberately hostile
  * agent (`X=--force; git push $X` style variable state is treated as
@@ -83,6 +99,22 @@ function isPlainBranchName(name) {
     return false;
   }
   return !AMBIGUOUS_FIRST_SEGMENTS.has(name.split('/')[0]);
+}
+const SAFE_COMPANION_FLAGS = new Set([
+  '--force-if-includes',
+  '-u',
+  '--set-upstream',
+  '-q',
+  '--quiet',
+  '-v',
+  '--verbose',
+]);
+const FALSE_BOOL = new Set(['false', 'no', 'off', '0', '']);
+
+/** Echoes a refused flag, except force/hook-skipping spellings (never repeated back as options). */
+function describeFlag(t) {
+  if (/^--?[A-Za-z-]+$/.test(t) && !/force(?!-)|verify|^-[^-]*f/.test(t)) return `'${t}'`;
+  return '(a plain force or hook-skipping flag)';
 }
 const META_RE = /[;&|<>`$\\()\n\r*?[\]{}!#~'"]/;
 
@@ -186,6 +218,40 @@ function classifySegment(toks, aliasLookup) {
   };
 }
 
+/**
+ * Destination check for a lease push with NO refspec: returns a problem string, or
+ * null when git provably sends the current branch to refs/heads/<own> on `remote`.
+ * Any config lookup that fails (null) is a problem (fail closed).
+ */
+function implicitDestinationProblem(remote, own, full, cfg) {
+  const mirror = cfg(`remote.${remote}.mirror`);
+  if (mirror === null) return 'remote.<name>.mirror could not be read from git config';
+  if (mirror.some((v) => !FALSE_BOOL.has(v.toLowerCase()))) {
+    return `remote '${remote}' is a mirror remote (a push would update every ref)`;
+  }
+  const pushSpecs = cfg(`remote.${remote}.push`);
+  if (pushSpecs === null) return `remote.${remote}.push could not be read from git config`;
+  if (pushSpecs.length > 0) {
+    const ok = new Set([`HEAD:${full}`, `${own}:${full}`, `${full}:${full}`]);
+    const bad = pushSpecs.find((v) => !ok.has(v));
+    return bad === undefined
+      ? null
+      : `remote.${remote}.push maps the push to '${bad}', not only to ${full}`;
+  }
+  const pd = cfg('push.default');
+  if (pd === null) return 'push.default could not be read from git config';
+  const mode = pd.length ? pd[pd.length - 1] : 'simple';
+  if (mode === 'simple' || mode === 'current') return null;
+  if (mode === 'upstream' || mode === 'tracking') {
+    const merge = cfg(`branch.${own}.merge`);
+    if (merge === null) return `branch.${own}.merge could not be read from git config`;
+    return merge.length === 1 && merge[0] === full
+      ? null
+      : `push.default=${mode} sends the branch to its upstream (branch.${own}.merge), not to ${full}`;
+  }
+  return `push.default=${mode} could send this push somewhere other than ${full}`;
+}
+
 function parseAllowedShape(command, ctx) {
   if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
   if (META_RE.test(command)) return 'shell metacharacters, quoting or expansion present';
@@ -230,40 +296,58 @@ function parseAllowedShape(command, ctx) {
       const leaseRef = m[1].replace(/^refs\/heads\//, '');
       if (leaseRef !== own) return 'lease must name the own branch (or none)';
       lease = true;
-    } else if (t === '--force-if-includes' || t === '-u' || t === '--set-upstream') {
+    } else if (SAFE_COMPANION_FLAGS.has(t)) {
       // safe companions
     } else if (t.startsWith('-')) {
-      return `flag '${t}' is not permitted with a lease push`;
+      return `flag ${describeFlag(t)} is not permitted with a lease push`;
     } else {
       positionals.push(t);
     }
   }
   if (!lease) return 'no --force-with-lease';
-  const [remote, ...refspecs] = positionals;
-  if (!remote) return 'no explicit remote (target would be inferred)';
+  const full = `refs/heads/${own}`;
+  const cfg = (key) => (typeof ctx.pushConfig === 'function' ? ctx.pushConfig(key) : null);
+  let [remote, ...refspecs] = positionals;
+  if (!remote) {
+    // No remote given: git picks branch.<own>.pushRemote, then remote.pushDefault,
+    // then branch.<own>.remote, then `origin`. Resolve it the same way.
+    const found = [`branch.${own}.pushRemote`, 'remote.pushDefault', `branch.${own}.remote`].map(
+      cfg,
+    );
+    if (found.some((v) => v === null)) {
+      return 'the push remote could not be resolved from git config';
+    }
+    const first = found.map((v) => v[v.length - 1]).find((v) => v !== undefined);
+    remote = first === undefined ? 'origin' : first;
+  }
   if (!/^[A-Za-z0-9._-]+$/.test(remote) || !(ctx.remotes || []).includes(remote)) {
     return `remote '${remote}' is not a configured remote name`;
   }
-  if (refspecs.length === 0) return 'no explicit refspec (target would be inferred)';
-  const full = `refs/heads/${own}`;
+  if (refspecs.length === 0) {
+    const problem = implicitDestinationProblem(remote, own, full, cfg);
+    if (problem) return problem;
+  }
   for (const spec of refspecs) {
     const parts = spec.split(':');
     if (parts.length > 2) return `refspec '${spec}' is not a simple branch refspec`;
     const [src, dst] = parts;
     if (!src || (parts.length === 2 && !dst)) return `refspec '${spec}' is empty or a delete`;
     if (parts.length === 1) {
-      // The no-colon form is refused in every case. Git does NOT send `<own>` to
-      // refs/heads/<own>: it maps a no-colon refspec through `remote.<name>.push`
-      // and, under push.default=upstream|tracking, through
-      // `branch.<own>.merge`. Task branches are created from origin/main, so
-      // that is refs/heads/main. Only an explicit destination is unambiguous.
+      // Only bare `HEAD` is accepted without a colon: git documents it as "push the
+      // current branch to the same name on the remote" and it resolves locally to the
+      // checked-out branch (verified against real git with push.default=upstream and
+      // remote.<name>.push mapped to main). Any OTHER no-colon name (`<own>`,
+      // `refs/heads/<own>`) is mapped by git through remote.<name>.push /
+      // push.default / branch.<own>.merge, which for a task branch cut from
+      // origin/main is refs/heads/main (also verified against real git), so it stays refused.
+      if (spec === 'HEAD') continue;
       return (
-        `the no-colon refspec '${spec}' is refused (git maps it through remote.<name>.push / ` +
-        `push.default / branch.<own>.merge, not necessarily to refs/heads/${own}); use exactly ` +
-        `'git push --force-with-lease origin HEAD:refs/heads/${own}'`
+        `the no-colon refspec '${spec}' is refused (git may map it through remote.<name>.push / ` +
+        `push.default / branch.<own>.merge to another ref, not necessarily ${full}); spell it ` +
+        `'HEAD' or 'HEAD:${full}'`
       );
     }
-    // Colon form (the only accepted form): git resolves a destination that is not fully qualified
+    // Colon form: git resolves a destination that is not fully qualified
     // against the REMOTE with every rule (`<x>`, refs/<x>, refs/tags/<x>,
     // refs/heads/<x>, ...), tags before heads, so `<own>` could overwrite a
     // remote tag/notes/meta ref of that name. Only the fully-qualified form is
@@ -293,12 +377,16 @@ function evaluateLeasePush(command, ctx) {
   if (!anyForcePush) return { decision: 'none' };
   const why = parseAllowedShape(command, ctx);
   if (why === null) return { decision: 'allow' };
+  const ownName = branchFromRef(ctx.ownRef);
+  const shown = ownName && isPlainBranchName(ownName) ? ownName : '<own-branch>';
   return {
     decision: 'deny',
     reason:
-      `force-push under allowForcePush=leaseOnOwnBranch is limited to a single ` +
-      `'git push <remote> --force-with-lease HEAD:refs/heads/<own-branch>' on this task's own non-protected ` +
-      `branch (${why}).`,
+      `force-push under spec.governance.allowForcePush=leaseOnOwnBranch (.ai-sdlc/agent-role.yaml) ` +
+      `is limited to a 'git push --force-with-lease' on this task's own branch (non-protected) (${why}). ` +
+      `Plain force pushes, +refspecs, pushes to main/master or protected branches, and pushes to a ` +
+      `branch this task does not own are never permitted. From the task worktree, push with ` +
+      `'git push --force-with-lease origin HEAD:refs/heads/${shown}'.`,
   };
 }
 

@@ -59,6 +59,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `npm-dist-tag-reachability` | Every `runtimeDependencies` pin actually resolves on the configured npm registry | — |
 | `orphaned-vitest-workers` | Warns on `vitest` workers with parent pid 1 older than 2 minutes (left by a killed test run) and prints the `kill` command; prints nothing when there are none (AISDLC-681) | `ps` |
 | `worktree-hooks` | Warns on every worktree under `.worktrees/` whose git hooks directory (asked of git with `rev-parse --git-path hooks`, never assumed to be `.husky`) has no executable `pre-push` while the main checkout has one, and names the main checkout's hooks directory. Quiet when all are fine or when the main checkout has no `pre-push` (none expected). `--fix` runs `pnpm run prepare` in each affected worktree that has `node_modules` and reports the ones it skipped for lacking it (AISDLC-693) | `git`, `pnpm` |
+| `force-push-policy` | The effective `spec.governance.allowForcePush` value and where it came from: the `leaseOnOwnBranch` default (key unset or no `agent-role.yaml`), an explicit value in `.ai-sdlc/agent-role.yaml`, or a malformed value that fails closed to `never` (warn). See [governance](../api-reference/governance.md) (AISDLC-710) | — |
 | `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
 
 #### `judgment-layer`

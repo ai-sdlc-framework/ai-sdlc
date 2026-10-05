@@ -7,7 +7,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -53,13 +53,31 @@ describe('render-governance-hard-rules.mjs', () => {
     rmSync(noConfigDir, { recursive: true, force: true });
   });
 
-  it('renders strict defaults when agent-role.yaml has no governance section', () => {
+  it('renders the lease force-push default (AISDLC-710), strict everything else, with no governance section', () => {
     const output = run(strictDir);
     assert.match(output, /Never merge PRs/);
-    assert.match(output, /Never force-push/);
+    assert.doesNotMatch(output, /Never force-push/);
+    assert.match(output, /Force-push is allowed per repo policy/);
+    assert.match(output, /allowForcePush: leaseOnOwnBranch/);
     assert.match(output, /Never close PRs or issues/);
     assert.match(output, /Never delete branches/);
     assert.match(output, /Never run destructive git/);
+  });
+
+  it('an explicit allowForcePush: never renders the strict force-push rule', () => {
+    const neverDir = mkdtempSync(join(tmpdir(), 'render-hard-rules-never-'));
+    mkdirSync(join(neverDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(neverDir, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent\ngovernance:\n  allowForcePush: never\n`,
+    );
+    try {
+      const output = run(neverDir);
+      assert.match(output, /Never force-push/);
+      assert.doesNotMatch(output, /Force-push is allowed per repo policy/);
+    } finally {
+      rmSync(neverDir, { recursive: true, force: true });
+    }
   });
 
   it('renders the onGreenClean merge text when the policy opts in', () => {
