@@ -67,8 +67,10 @@ export function detectGovernanceSurfaces(...texts: Array<string | undefined>): s
 
 /**
  * Merges an author-supplied tag with the derived one. A derived tag is always
- * present when a surface matches; the author's kind and `--weakens` are kept.
- * With no author tag the derived tag is a weakening one with no declared option.
+ * present when a surface matches, and its kind is always `weakening`: an author
+ * cannot declare `tightening` to neutralise it. The author's `--weakens` ids are
+ * kept so a fallback can still be checked against them. With none declared the
+ * derived tag cannot tell which option loosens the control.
  */
 export function deriveGovernanceChange(
   authored: GovernanceChange | undefined,
@@ -76,7 +78,7 @@ export function deriveGovernanceChange(
 ): GovernanceChange | undefined {
   if (surfaces.length === 0) return authored;
   return {
-    kind: authored?.kind ?? 'weakening',
+    kind: 'weakening',
     weakeningOptionIds: authored?.weakeningOptionIds ?? [],
     derived: true,
     surfaces,
@@ -104,7 +106,7 @@ export function checkGovernanceFallback(
     return (
       `governance-fallback rule: this decision names a governance surface (${(change.surfaces ?? []).join(', ')}) so it is tagged automatically, ` +
       `and --autonomous-fallback "${fallback}" cannot be checked against a declared weakening option. ` +
-      'Either declare --governance-change weakening --weakens <option-id> (or --governance-change tightening) so the fallback can be checked, or add the decision with no fallback so it stays open until the planner or dispatch session answers it.'
+      'Either declare --governance-change weakening --weakens <option-id> so the fallback can be checked, or add the decision with no fallback so it stays open until the planner or dispatch session answers it.'
     );
   }
   if (change.weakeningOptionIds.length === 0) {

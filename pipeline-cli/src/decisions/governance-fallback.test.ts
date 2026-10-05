@@ -78,6 +78,17 @@ describe('detectGovernanceSurfaces / deriveGovernanceChange', () => {
     });
   });
 
+  it('a derived tag is always a weakening one, whatever kind the author declared', () => {
+    const tight = { kind: 'tightening' as const, weakeningOptionIds: [] };
+    expect(deriveGovernanceChange(tight, ['workflow gates'])).toMatchObject({
+      kind: 'weakening',
+      derived: true,
+    });
+    const d = deriveGovernanceChange(tight, ['workflow gates']);
+    expect(checkGovernanceFallback(d, OPTS, 'loosen')).toMatch(/tagged automatically/);
+    expect(fallbackWeakensControl(d, 'loosen')).toBe(true);
+  });
+
   it('a derived tag with no declared option refuses a fallback and auto-expire never applies one', () => {
     const d = deriveGovernanceChange(undefined, ['workflow gates']);
     expect(checkGovernanceFallback(d, OPTS, 'keep')).toMatch(/tagged automatically/);

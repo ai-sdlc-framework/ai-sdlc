@@ -12,11 +12,11 @@ A relayed chat message alone is not authority. The permission-laundering rules a
 
 ## The three classes
 
-| Class | Criteria | Handling |
-|---|---|---|
-| (a) decide-and-proceed | Reversible cheaply, small blast radius, touches no trust-chain or governance control | Decide by rubric, record with `cli-decisions add` plus `answer`, apply at once |
-| (b) timeboxed | Hard to reverse, wide blast radius, or weakens a governance or trust-chain control | Decide by rubric, record with `--timebox` and `--autonomous-fallback`; applied when the timebox lapses without an operator override |
-| (c) operator-only | Legal and licensing, money, accounts and credentials, actions only the operator's identity can perform | Never self-decide. Record it with `cli-decisions escalate`, park only that task, and keep working other eligible tasks |
+| Class                  | Criteria                                                                                               | Handling                                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| (a) decide-and-proceed | Reversible cheaply, small blast radius, touches no trust-chain or governance control                   | Decide by rubric, record with `cli-decisions add` plus `answer`, apply at once                                                      |
+| (b) timeboxed          | Hard to reverse, wide blast radius, or weakens a governance or trust-chain control                     | Decide by rubric, record with `--timebox` and `--autonomous-fallback`; applied when the timebox lapses without an operator override |
+| (c) operator-only      | Legal and licensing, money, accounts and credentials, actions only the operator's identity can perform | Never self-decide. Record it with `cli-decisions escalate`, park only that task, and keep working other eligible tasks              |
 
 The default timebox is 10 hours, as two 5-hour windows (DEC-0059). It is stated in config as `timeboxWindowHours: 5` and `timeboxWindowCount: 2` in `.ai-sdlc/decisions-config.yaml` (template: `.ai-sdlc/templates/decisions-config.yaml`). `cli-decisions add` applies the product (10 hours) as the timebox when a decision names an `--autonomous-fallback` and no `--timebox`; an explicit `--timebox` keeps working and wins. `cli-decisions operator-digest` prints the default at the top. A weakening option never applies itself when the timebox lapses. (`overrideWindowHours`, 24, is the separate Stage C override window and is unchanged.)
 
@@ -36,17 +36,17 @@ Class (c) is never derived from the other questions; it is recognised by its sub
 
 ### Examples
 
-| Decision | Class | Why |
-|---|---|---|
-| A CLAUDE.md edit named by a task | (a) | The task already authorizes it; a revert undoes it |
-| Dispatching a planner-filed task | (a) | The filing carries the authority |
-| Which of two equivalent file layouts to use | (a) | Cheap to change |
-| Release timing per DEC-0042 | (b), or (a) when the criteria give it | A release is hard to undo, so it is timeboxed unless it is a routine cut the criteria already cover |
-| A change that weakens a governance or trust-chain control | (b) | Control change, even when small |
-| Tightening a control to match a decision already on `main` (AISDLC-720 failing closed) | (a) | The recorded decision already allows it; nothing is loosened |
-| Choosing the option that needs no exception to any hook or rule (AISDLC-721 waits for the hook fix, then uses the Edit tool) | (a) | No control is bypassed or loosened |
-| Subscribing to a paid service | (c) | Money and an account |
-| Accepting a licence for a dependency | (c) | Legal |
+| Decision                                                                                                                     | Class                                 | Why                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| A CLAUDE.md edit named by a task                                                                                             | (a)                                   | The task already authorizes it; a revert undoes it                                                  |
+| Dispatching a planner-filed task                                                                                             | (a)                                   | The filing carries the authority                                                                    |
+| Which of two equivalent file layouts to use                                                                                  | (a)                                   | Cheap to change                                                                                     |
+| Release timing per DEC-0042                                                                                                  | (b), or (a) when the criteria give it | A release is hard to undo, so it is timeboxed unless it is a routine cut the criteria already cover |
+| A change that weakens a governance or trust-chain control                                                                    | (b)                                   | Control change, even when small                                                                     |
+| Tightening a control to match a decision already on `main` (AISDLC-720 failing closed)                                       | (a)                                   | The recorded decision already allows it; nothing is loosened                                        |
+| Choosing the option that needs no exception to any hook or rule (AISDLC-721 waits for the hook fix, then uses the Edit tool) | (a)                                   | No control is bypassed or loosened                                                                  |
+| Subscribing to a paid service                                                                                                | (c)                                   | Money and an account                                                                                |
+| Accepting a licence for a dependency                                                                                         | (c)                                   | Legal                                                                                               |
 
 ## Velocity: no refusal ends in a person
 
@@ -108,9 +108,9 @@ node pipeline-cli/bin/cli-decisions.mjs add --summary "<one line>" --scope gover
   --timebox PT10H --autonomous-fallback keep
 ```
 
-The `--autonomous-fallback` must be a non-weakening option. `cli-decisions add` refuses a weakening fallback and names both ways forward: pick a non-weakening fallback, or add the decision with no fallback so it stays open for the planner or dispatch session. `auto-expire` never applies a weakening option, so a lapsed timebox resolves to "control stays". Tightening decisions (`--governance-change tightening`) are unaffected.
+The `--autonomous-fallback` must be a non-weakening option. `cli-decisions add` refuses a weakening fallback and names both ways forward: pick a non-weakening fallback, or add the decision with no fallback so it stays open for the planner or dispatch session. `auto-expire` never applies a weakening option, so a lapsed timebox resolves to "control stays". Tightening decisions (`--governance-change tightening`) are unaffected, unless the tag was derived (below).
 
-`cli-decisions add` also derives the tag. When the decision's scope, context-ref or body names a governance surface (plugin hooks, the governance resolver and schema defaults, agent-role config and templates, required checks and rulesets, workflow gates, CLAUDE.md rule sections, merge and role restrictions; one shared list, `GOVERNANCE_SURFACES` in `pipeline-cli/src/decisions/governance-fallback.ts`), the tag is applied automatically. An author can add the tag or declare `--weakens`, but cannot remove an auto-applied one. With no declared `--weakens` the command cannot tell which option loosens the control, so it refuses any `--autonomous-fallback` (declare `--governance-change weakening --weakens <id>` or `tightening`, or add the decision with no fallback) and `auto-expire` never applies one.
+`cli-decisions add` also derives the tag. When the decision's scope, context-ref or body names a governance surface (plugin hooks, the governance resolver and schema defaults, agent-role config and templates, required checks and rulesets, workflow gates, CLAUDE.md rule sections, merge and role restrictions; one shared list, `GOVERNANCE_SURFACES` in `pipeline-cli/src/decisions/governance-fallback.ts`), the tag is applied automatically. An author can add the tag or declare `--weakens`, but cannot remove an auto-applied one, and cannot neutralise it by declaring `tightening`: a derived tag is always a weakening one. With no declared `--weakens` the command cannot tell which option loosens the control, so it refuses any `--autonomous-fallback` (declare `--governance-change weakening --weakens <id>`, or add the decision with no fallback) and `auto-expire` never applies one.
 
 ## Overriding a decision
 

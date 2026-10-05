@@ -2545,12 +2545,26 @@ describe('AISDLC-703 — derived governance-change tag', () => {
     );
   });
 
-  it('cannot remove an auto-applied tag by declaring tightening: the tag stays', async () => {
+  it('cannot neutralise an auto-applied tag by declaring tightening: it stays a weakening tag', async () => {
     add('CLAUDE.md', '--governance-change', 'tightening');
     await buildDecisionsCli().parseAsync();
     expect(stdoutJson<Added>().decision.spec.governanceChange).toMatchObject({
-      kind: 'tightening',
+      kind: 'weakening',
       derived: true,
     });
+  });
+
+  it('refuses a fallback on an auto-tagged decision that declares tightening', async () => {
+    add(
+      'CLAUDE.md',
+      '--governance-change',
+      'tightening',
+      '--timebox',
+      'P1D',
+      '--autonomous-fallback',
+      'loosen',
+    );
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/tagged automatically/);
   });
 });
