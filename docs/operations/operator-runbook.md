@@ -1110,10 +1110,11 @@ When the operator manually invokes `--task-from-file`, those signals are
 either irrelevant (the operator has already weighed the trade-off) or
 covered by other gates:
 
-- **Upstream OQ status** — the pre-push `check-dor-gate.sh` hook still
-  runs `cli-dor-check` against the task file in enforce mode, so an
-  upstream-OQ violation in a worktree-local file blocks the push the same
-  way it blocks an autonomous dispatch.
+- **Upstream OQ status** — the CI check "Evaluate backlog tasks changed by
+  PR" evaluates the task file, so an upstream-OQ violation in a task file
+  is flagged on the pull request the same way it blocks an autonomous
+  dispatch. (The local pre-push DoR hook was removed by AISDLC-712; run
+  `cli-dor-check --task <path>` by hand to check earlier.)
 - **Already in-flight** — the orchestrator's in-flight claim guard (a
   correctness invariant, not a §4.3 filter) continues to fire; a duplicate
   `--task-from-file` while the first is mid-dispatch is rejected.
