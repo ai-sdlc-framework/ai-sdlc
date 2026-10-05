@@ -26,15 +26,11 @@
   "merkleProofs": [
     {
       "leafIndex": 0,
-      "proof": [
-        "fefdd531444eaab56e2c8d34eb27fc9e455b1306df5c6b70e69ea8cac8686d8e"
-      ]
+      "proof": ["fefdd531444eaab56e2c8d34eb27fc9e455b1306df5c6b70e69ea8cac8686d8e"]
     },
     {
       "leafIndex": 1,
-      "proof": [
-        "5fe99667aef8a78c12d5fa8bba57a654caf79e06b6fd8c94adb088f067cc442f"
-      ]
+      "proof": ["5fe99667aef8a78c12d5fa8bba57a654caf79e06b6fd8c94adb088f067cc442f"]
     }
   ],
   "rootHash": "6af9d341923cbc66fa5fc8c03c607094df79fbf56e6869efa36ed5ce3d487e2a",
