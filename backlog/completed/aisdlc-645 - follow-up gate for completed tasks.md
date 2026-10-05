@@ -1,7 +1,8 @@
 ---
 id: AISDLC-645
 title: >-
-  RFC-0049 section 9.5: follow-ups in a completed task must cite a filed task, say none, or be explicitly declined
+  RFC-0049 section 9.5: follow-ups in a completed task must cite a filed task,
+  say none, or be explicitly declined
 status: Done
 assignee: []
 created_date: '2026-09-30'
@@ -15,11 +16,16 @@ dependencies: []
 references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - ai-sdlc-plugin/mcp-server/src/tools/task-complete.ts
-  - scripts/check-dor-gate.sh
   - scripts/check-task-moved.sh
   - CLAUDE.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-dor-gate.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Description

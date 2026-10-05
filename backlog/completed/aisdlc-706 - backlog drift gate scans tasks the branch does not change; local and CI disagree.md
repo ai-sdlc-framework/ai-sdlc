@@ -1,18 +1,24 @@
 ---
 id: AISDLC-706
 title: >-
-  Backlog drift gate scans tasks the branch does not change; local and CI disagree
-status: To Do
+  Backlog drift gate scans tasks the branch does not change; local and CI
+  disagree
+status: Done
 assignee: []
 created_date: '2026-10-03'
+updated_date: '2026-10-05'
 labels:
   - ci
   - bug
 dependencies: []
-references:
-  - scripts/check-backlog-drift-on-push.sh
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-backlog-drift-on-push.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Description
@@ -35,3 +41,22 @@ reach different results for the same commit.
 ## Out of scope
 - Changing what counts as drift.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Closed with AISDLC-712 (DEC-0056 row 3). The local backlog-drift checks this task asked to repair are deleted, so the local-versus-CI disagreement can no longer occur: CI "Backlog Drift" is the single check.
+
+## Changes
+- See AISDLC-712: `scripts/check-backlog-drift-on-push.sh` and `scripts/check-backlog-drift.sh` removed with their tests.
+
+## Design decisions
+- **Superseded, not implemented**: the acceptance criteria describe a repaired local gate that no longer exists; they are intentionally left unchecked.
+
+## Verification
+- Covered by AISDLC-712's verification.
+
+## Follow-up
+(none)
+<!-- SECTION:FINAL_SUMMARY:END -->

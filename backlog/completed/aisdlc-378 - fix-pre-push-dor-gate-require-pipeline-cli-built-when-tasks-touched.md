@@ -1,6 +1,8 @@
 ---
 id: AISDLC-378
-title: 'fix(hooks): pre-push DoR gate must REQUIRE pipeline-cli/dist when push touches backlog tasks (not silently no-op)'
+title: >-
+  fix(hooks): pre-push DoR gate must REQUIRE pipeline-cli/dist when push touches
+  backlog tasks (not silently no-op)
 status: Done
 assignee: []
 created_date: '2026-05-20'
@@ -13,8 +15,13 @@ labels:
 dependencies: []
 priority: critical
 references:
-  - scripts/check-dor-gate.sh
   - pipeline-cli/bin/cli-dor-check.mjs
+drift_log:
+  - date: '2026-10-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-dor-gate.sh'
+    resolution: flagged
+drift_checked: '2026-10-05'
 ---
 
 ## Problem

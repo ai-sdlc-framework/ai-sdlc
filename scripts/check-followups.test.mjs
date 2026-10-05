@@ -215,12 +215,12 @@ describe('range mode and pre-push hook', () => {
     assert.equal(r.status, 1);
   });
 
-  it('is wired into .husky/pre-push after the DoR gate and before the fixups orchestrator', () => {
+  it('is wired into .husky/pre-push after the changelog check and before the fixups orchestrator', () => {
     const text = readFileSync(PRE_PUSH, 'utf-8');
-    const dor = text.indexOf('./scripts/check-dor-gate.sh');
+    const changelog = text.indexOf('./scripts/check-changelog-edit.sh');
     const fu = text.indexOf('./scripts/check-followups-on-push.sh');
     const fix = text.indexOf('./scripts/pre-push-fixups.sh');
-    assert.ok(dor !== -1 && fu > dor && fix > fu);
+    assert.ok(changelog !== -1 && fu > changelog && fix > fu);
     assert.match(text, /AI_SDLC_SKIP_FOLLOWUP_GATE/);
   });
 });
