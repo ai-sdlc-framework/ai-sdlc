@@ -157,6 +157,20 @@ describe('isValidExternalPath (AISDLC-393 round 3 — security)', () => {
     expect(isValidExternalPath('a/b/c')).toBe(true);
   });
 
+  it('AISDLC-720: rejects governance / enforcement paths from issue text', () => {
+    for (const p of [
+      '.ai-sdlc/',
+      '../repo/.ai-sdlc/x',
+      '.github/workflows/',
+      'a/.GitHub/b',
+      '.claude/',
+      '.husky/',
+    ]) {
+      expect(isValidExternalPath(p), p).toBe(false);
+    }
+    expect(isValidExternalPath('../ai-sdlc-io/')).toBe(true);
+  });
+
   it('rejects empty / whitespace-only', () => {
     expect(isValidExternalPath('')).toBe(false);
     expect(isValidExternalPath('   ')).toBe(false);

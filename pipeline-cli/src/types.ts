@@ -666,6 +666,12 @@ export interface SpawnOpts {
    * return it). When absent the spawner resolves the role itself.
    */
   model?: string;
+  /**
+   * AISDLC-720 — extra environment for the spawned agent process (subprocess
+   * spawners only). Used to hand the untrusted-run signal to agents working
+   * on outside input.
+   */
+  env?: Record<string, string>;
 }
 
 /**

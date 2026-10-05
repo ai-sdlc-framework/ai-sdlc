@@ -257,8 +257,12 @@ describe('isUntrustedRun (AISDLC-720)', () => {
     for (const v of ['1', 'true', 'YES', ' on ']) {
       assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, true, v);
     }
-    for (const v of ['0', 'false', 'no', 'off', '', 'maybe']) {
+    for (const v of ['0', 'false', 'No', 'OFF', '', '  ']) {
       assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, false, v);
+    }
+    // Fail closed: unknown non-empty values are untrusted.
+    for (const v of ['maybe', 'enabled', '2', 'tru']) {
+      assert.equal(isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: v }).untrusted, true, v);
     }
     assert.equal(
       isUntrustedRun({ AI_SDLC_UNTRUSTED_RUN: '1', AI_SDLC_UNTRUSTED_REASON: 'fork PR' }).reason,

@@ -32,6 +32,7 @@ import {
 } from './steps/index.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
+import { withUntrustedEnv } from './runtime/untrusted-env.js';
 import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
 import {
   DEFAULT_LOGGER,
@@ -65,6 +66,9 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   // consistently. Defaults to 'backlog' when not provided so legacy callers
   // (and the orchestrator path) keep their existing behaviour.
   const sourceKind: 'backlog' | 'gh-issue' = opts.sourceKind ?? 'backlog';
+  // AISDLC-720: agents working on a gh-issue run with the untrusted-run signal in
+  // their process env, so the governance hook blocks .ai-sdlc/** and workflows.
+  const spawner = sourceKind === 'gh-issue' ? withUntrustedEnv(opts.spawner) : opts.spawner;
   // Review depth may only be relaxed for work the caller says is trusted backlog work.
   // An inline taskSpec with no sourceKind came from outside the backlog: untrusted.
   const reviewSourceKind: 'backlog' | 'gh-issue' | undefined =
@@ -249,7 +253,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     });
 
     // Step 5b — spawn developer (LLM)
-    const devSpawn = await opts.spawner.spawn({
+    const devSpawn = await spawner.spawn({
       type: 'developer',
       prompt: devPrompt,
       cwd: branch.worktreePath,
@@ -271,7 +275,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       },
       initialResult: devSpawn,
       cwd: branch.worktreePath,
-      spawner: opts.spawner,
+      spawner: spawner,
       onRetrySuccess: ({ initialOutputPreview, retryOutputPreview, durationMs }): void => {
         logger.warn(
           `[ai-sdlc] developer subagent re-emitted JSON envelope on retry ` +
@@ -335,7 +339,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     }
 
     // Step 7b — spawn 3 reviewers in parallel
-    const reviewerResults = await opts.spawner.spawnParallel(
+    const reviewerResults = await spawner.spawnParallel(
       reviewBuild.prompts.map((p) => ({
         type: p.reviewer,
         prompt: p.prompt,
@@ -374,7 +378,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       maxIterations: opts.maxReviewIterations ?? 2,
       sourceKind,
       reviewSourceKind,
-      spawner: opts.spawner,
+      spawner: spawner,
       ...(opts.runner ? { runner: opts.runner } : {}),
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry

@@ -75,7 +75,7 @@
  *    layer, not this hook.
  */
 
-const { readFileSync, existsSync, readdirSync } = require('fs');
+const { readFileSync, existsSync, readdirSync, realpathSync } = require('fs');
 const { join, resolve, isAbsolute, relative, sep, dirname, basename } = require('path');
 const { execSync } = require('child_process');
 const {
@@ -93,6 +93,20 @@ const {
   readTaskId,
 } = require('./lib/trusted-policy');
 
+// AISDLC-720: untrusted runs fail closed (exit 2 = block) on any internal error.
+function failClosed(why) {
+  process.stderr.write(
+    `Blocked by AI-SDLC governance policy: this run is marked untrusted and the hook hit an ` +
+      `internal error (${why}); failing closed. Ask a maintainer in the PR; do not retry.\n`,
+  );
+  process.exit(2);
+}
+process.on('uncaughtException', (err) => {
+  if (isUntrustedRun(process.env).untrusted) failClosed(String((err && err.message) || err));
+  process.stderr.write(String((err && err.stack) || err) + '\n');
+  process.exit(1);
+});
+
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
 let input;
@@ -105,6 +119,8 @@ try {
   const raw = readFileSync(0, 'utf-8');
   input = JSON.parse(raw);
 } catch {
+  // AISDLC-720: an untrusted run fails closed when its input cannot be read.
+  if (isUntrustedRun(process.env).untrusted) failClosed('could not read or parse the hook input');
   process.exit(0);
 }
 
@@ -228,37 +244,113 @@ const SAFE_STASH_PATTERN =
 // tool input (including `VAR=0 cmd`, `export`, `unset`), agent-role.yaml, the
 // .active-task sentinel or project settings can change it.
 const UNTRUSTED = isUntrustedRun(process.env);
-const UNTRUSTED_GLOBS = ['.ai-sdlc/**', '.github/workflows/**'];
+// Governance config, CI workflows, and the enforcement mechanism itself.
+const UNTRUSTED_PROTECTED = [
+  ['.ai-sdlc'],
+  ['.github', 'workflows'],
+  ['.claude'],
+  ['.husky'],
+  ['ai-sdlc-plugin', 'hooks'],
+];
+
+/** Does this POSIX-style path contain a protected segment sequence (case-insensitive)? */
+function isProtectedForUntrusted(p) {
+  const segs = p
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map((x) => x.toLowerCase());
+  if (segs[segs.length - 1] === '.active-task') return true;
+  return UNTRUSTED_PROTECTED.some((seq) =>
+    segs.some((_, i) => seq.every((part, j) => segs[i + j] === part)),
+  );
+}
+
+/** realpath of the deepest existing ancestor of `p`, re-joined with the missing tail. */
+function realpathDeepest(p) {
+  let cur = resolve(p);
+  const tail = [];
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...tail.reverse());
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return resolve(p);
+      tail.push(basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+function enforceUntrustedPath(absPath, homeAbs) {
+  const inHome = (p, h) => p === h || p.startsWith(h + sep);
+  const check = (p, h) => {
+    // Inside home: judge the home-relative path (home itself may sit under a
+    // `.claude/worktrees/...` dir). Outside home: judge the whole path.
+    const rel = inHome(p, h) ? relative(h, p).split(sep).join('/') : p;
+    return isProtectedForUntrusted(rel) ? rel : null;
+  };
+  let hit = check(absPath, homeAbs);
+  if (!hit) {
+    // Symlink bypass: judge where the path REALLY lands.
+    const realHome = realpathDeepest(homeAbs);
+    hit = check(realpathDeepest(absPath), realHome);
+  }
+  if (hit) deny(untrustedMessage(`path '${hit}'`));
+}
 
 function untrustedMessage(what) {
   const why = UNTRUSTED.reason ? ` (${UNTRUSTED.reason})` : '';
   return (
-    `${what} is governance config, and this run is marked untrusted${why} ` +
-    `(AI_SDLC_UNTRUSTED_RUN is set by the workflow for fork PRs, outside authors, or issue-sourced runs). ` +
-    `Untrusted runs cannot change .ai-sdlc/** or .github/workflows/**. Next step: leave a note in the PR ` +
+    `${what} is governance config or enforcement code, and this run is marked untrusted${why} ` +
+    `(AI_SDLC_UNTRUSTED_RUN is set for fork PRs, outside authors, or issue-sourced runs). ` +
+    `Untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
+    `ai-sdlc-plugin/hooks/** or .active-task. Next step: leave a note in the PR ` +
     `or issue asking a maintainer to make that change; do not retry or route around this.`
   );
 }
 
-const PROTECTED_SHELL_PATH =
-  /(?:^|[\s'"=/<>:])(?:\.ai-sdlc|\.github\/workflows)(?:\/|['"\s;|&]|$)/i;
+const PROT = String.raw`(?:\.ai-sdlc|\.github\/workflows|\.claude|\.husky|ai-sdlc-plugin\/hooks|\.active-task)`;
+const PROTECTED_SHELL_PATH = new RegExp(
+  String.raw`(?:^|[\s'"=/<>:])${PROT}(?:\/|['"\s;|&]|$)`,
+  'i',
+);
 const SHELL_WRITE_VERB =
-  /(?:^|[\s;&|(])(?:tee|sed\s+(?:-\w*i|--in-place)|cp|mv|rm|ln|touch|chmod|chown|install|truncate|dd|perl\s+-\w*i|patch|rsync|git\s+(?:apply|checkout|restore|rm|mv))(?=\s)/i;
-const SHELL_REDIRECT_TO_PROTECTED =
-  />>?\s*['"]?[^\s;|&'"]*(?:\.ai-sdlc|\.github\/workflows)(?:\/|['"\s;|&]|$)/i;
+  /(?:^|[\s;&|(])(?:tee|sed\s+(?:-\w*i|--in-place)|cp|mv|rm|ln|touch|chmod|chown|install|truncate|dd|perl\s+-\w*i|patch|rsync|tar|unzip|git\s+(?:apply|checkout|restore|rm|mv|switch|am|cherry-pick))(?=\s)/i;
+const SHELL_ANY_REDIRECT = />>?/;
+const SHELL_REDIRECT_TO_PROTECTED = new RegExp(
+  String.raw`>>?\s*['"]?[^\s;|&'"]*${PROT}(?:\/|['"\s;|&]|$)`,
+  'i',
+);
+const SHELL_INTERPRETER_EVAL =
+  /(?:^|[\s;&|(])(?:python3?|node|perl|ruby)\s+(?:-\w*[ceEp]\b|--eval)/i;
+// Rewrite the working tree wholesale without naming a path.
+const SHELL_TREE_REWRITE =
+  /(?:^|[\s;&|(])git\s+(?:-\S+\s+\S+\s+)*(?:switch|am|cherry-pick|stash\s+apply|reset\s+--hard)(?=\s|$)/i;
+const SHELL_CD_PROTECTED = new RegExp(String.raw`(?:^|[\s;&|(])cd\s+['"]?[^\s;|&'"]*${PROT}`, 'i');
 
 function enforceUntrustedShellWrites(command) {
   if (!UNTRUSTED.untrusted) return;
+  const msg = untrustedMessage('a shell command writing to a protected path');
   // Best-effort pattern matching; shell is not a boundary (CI is).
+  if (SHELL_TREE_REWRITE.test(command)) deny(msg);
+  // `cd <protected>` then any write verb or redirect later in the same command.
+  if (
+    SHELL_CD_PROTECTED.test(command) &&
+    (SHELL_WRITE_VERB.test(command) || SHELL_ANY_REDIRECT.test(command))
+  ) {
+    deny(msg);
+  }
   for (const segment of command.split(/[;&|\n]+/)) {
     if (!PROTECTED_SHELL_PATH.test(segment)) continue;
-    if (SHELL_WRITE_VERB.test(segment) || SHELL_REDIRECT_TO_PROTECTED.test(segment)) {
-      deny(untrustedMessage('a shell command writing under .ai-sdlc/ or .github/workflows/'));
+    if (
+      SHELL_WRITE_VERB.test(segment) ||
+      SHELL_REDIRECT_TO_PROTECTED.test(segment) ||
+      SHELL_INTERPRETER_EVAL.test(segment)
+    ) {
+      deny(msg);
     }
   }
-  if (SHELL_REDIRECT_TO_PROTECTED.test(command)) {
-    deny(untrustedMessage('a shell command writing under .ai-sdlc/ or .github/workflows/'));
-  }
+  if (SHELL_REDIRECT_TO_PROTECTED.test(command)) deny(msg);
 }
 
 // ── Dispatch by tool ─────────────────────────────────────────────────
@@ -838,23 +930,18 @@ function enforceWriteEdit(filePath) {
   // whatever refs are already cached locally (no network fetch from a hook).
   warnIfStaleBase(homeAbs);
 
+  // AISDLC-720: untrusted runs — protected paths inside OR outside home, before
+  // any permittedExternalPaths allow.
+  if (UNTRUSTED.untrusted) enforceUntrustedPath(absPath, homeAbs);
+
   if (insideHome) {
     // Path is inside the agent's home — check against the hardcoded
     // never-editable floor plus the project's configured blockedPaths globs.
     // Relative path uses POSIX separators because globs do.
     const relPath = relative(homeAbs, absPath).split(sep).join('/');
 
-    // AISDLC-720: internal sessions may edit `.ai-sdlc/**` (no hardcoded
-    // floor). Untrusted runs (explicit env signal only) keep the block on
-    // `.ai-sdlc/**` and `.github/workflows/**`.
-    if (UNTRUSTED.untrusted) {
-      for (const g of UNTRUSTED_GLOBS) {
-        if (matchGlob(g, relPath) || relPath === g.replace('/**', '')) {
-          deny(untrustedMessage(`path '${relPath}'`));
-        }
-      }
-    }
-
+    // AISDLC-720: no hardcoded `.ai-sdlc/**` floor for internal sessions; untrusted
+    // runs are handled by enforceUntrustedPath() above.
     for (const glob of blockedPaths) {
       if (matchGlob(glob, relPath)) {
         deny(

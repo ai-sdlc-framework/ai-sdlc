@@ -404,7 +404,7 @@ function renderSubagentHardRules(resolved) {
  * AISDLC-720: is this run marked untrusted?
  *
  * The ONLY signal is the hook process environment (`AI_SDLC_UNTRUSTED_RUN`,
- * truthy: 1/true/yes/on), set by the workflows that run agents on outside
+ * any non-empty value other than 0/false/no/off), set by the workflows that run agents on outside
  * input. No file, config key, sentinel or tool input is consulted, so nothing
  * an agent can write can downgrade untrusted to internal. Default = internal.
  *
@@ -415,7 +415,8 @@ function isUntrustedRun(env = process.env) {
   const raw = String((env && env.AI_SDLC_UNTRUSTED_RUN) || '')
     .trim()
     .toLowerCase();
-  const untrusted = ['1', 'true', 'yes', 'on'].includes(raw);
+  // Fail closed: any non-empty value that is not explicitly falsy is untrusted.
+  const untrusted = raw !== '' && !['0', 'false', 'no', 'off'].includes(raw);
   const reason = String((env && env.AI_SDLC_UNTRUSTED_REASON) || '').trim();
   return { untrusted, reason: untrusted ? reason : '' };
 }
