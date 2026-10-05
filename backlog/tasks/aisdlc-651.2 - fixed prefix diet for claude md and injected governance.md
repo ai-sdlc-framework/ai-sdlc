@@ -65,5 +65,6 @@ cache-read tokens and the worst run is 80M over 203 turns.
 - [ ] Both hooks render the governance block in the compact form, with the existing hook tests updated and passing.
 - [ ] The developer agent definition is reduced and still carries its full return contract and hard rules.
 - [ ] Before and after first-call context for a main session and a developer subagent are recorded in the PR body, with the developer prefix reduced by at least half.
+- [ ] Prompt rules of the 'never do X' kind live in one source; each agent and command prompt receives each relevant rule once, as a single line that names the sanctioned alternative and says when a hook enforces it; escalating duplicates are removed; a test fails when a rule appears more than once in a prompt or when an agent file drifts from the source.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->

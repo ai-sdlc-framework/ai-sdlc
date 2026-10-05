@@ -16,7 +16,7 @@ references:
   - spec/rfcs/RFC-0048-per-repo-configurable-governance.md
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
   - ai-sdlc-plugin/hooks/permission-check.js
-priority: medium
+priority: high
 dispatchable: true
 ---
 
@@ -65,6 +65,8 @@ separate defense-in-depth layer.
 - [ ] `gh pr merge <repo>#42 --auto` is ALLOWED (the `#42` positional is preserved).
 - [ ] `permission-check.js` allows `gh pr merge --auto` arming under a broad `gh pr merge*` policy, and reads stdin from fd 0 (no `/dev/stdin`).
 - [ ] Hermetic `node --test` coverage for each of the above, cross-platform-safe (no `/dev/stdin`, no >128KiB env values).
+- [ ] The merge ban applies only when the merge command or merge API call is the command being run, not when the phrase appears in an argument, a heredoc, a grep pattern or an echo; wrappers such as `sh -c` fail closed.
+- [ ] Write and Edit to the session scratch directory and OS temp directories are allowed by default by the worktree-confinement rule; confinement is unchanged for the main checkout, other worktrees and sibling repositories; tests cover both.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 <!-- SECTION:DESCRIPTION:END -->
 
