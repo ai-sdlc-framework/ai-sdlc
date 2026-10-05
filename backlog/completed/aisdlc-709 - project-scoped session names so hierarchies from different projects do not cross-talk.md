@@ -2,7 +2,7 @@
 id: AISDLC-709
 title: >-
   Project-scoped session names so hierarchies from different projects do not cross-talk
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:

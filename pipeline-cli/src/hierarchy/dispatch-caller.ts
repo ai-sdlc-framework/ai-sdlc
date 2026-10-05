@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  CALLER_NEXT_STEP,
   createSystemIdentity,
   requireDispatchCaller,
   type CallerCheck,
@@ -130,25 +131,28 @@ export function checkDispatchCaller(i: DispatchCallerInputs): CallerCheck {
   if (!skipLocation) {
     const trusted = i.trustedBoard !== undefined ? i.trustedBoard : resolveTrustedBoard(i.cwd);
     if (!trusted) {
-      return { ok: false, reason: `${i.label}: refused; the main checkout could not be verified` };
+      return {
+        ok: false,
+        reason: `${i.label}: refused; the main checkout could not be verified; ${CALLER_NEXT_STEP}`,
+      };
     }
     if (realpathLoose(i.boardDir) !== realpathLoose(trusted.boardDir)) {
       return {
         ok: false,
-        reason: `${i.label}: refused; --board-dir is not the main checkout's dispatch board`,
+        reason: `${i.label}: refused; --board-dir is not the main checkout's dispatch board; omit --board-dir, or ${CALLER_NEXT_STEP}`,
       };
     }
     if (realpathLoose(path.resolve(i.workDir ?? i.cwd)) !== realpathLoose(trusted.root)) {
       return {
         ok: false,
-        reason: `${i.label}: refused; the working directory is not the main checkout`,
+        reason: `${i.label}: refused; the working directory is not the main checkout; ${CALLER_NEXT_STEP}`,
       };
     }
     const install = i.installDir !== undefined ? i.installDir : defaultInstallDir();
     if (!installLocationOk(install, trusted.root, i.installGit ?? defaultInstallGit)) {
       return {
         ok: false,
-        reason: `${i.label}: refused; the command is not running from the main checkout's install`,
+        reason: `${i.label}: refused; the command is not running from the main checkout's install; ${CALLER_NEXT_STEP}`,
       };
     }
     identityBoard = trusted.boardDir;

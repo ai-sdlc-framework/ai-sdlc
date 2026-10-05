@@ -18,6 +18,7 @@
 import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
 import { readRosterChecked, writeRoster } from './roster.js';
+import { splitSessionName } from './validate.js';
 import {
   killPane,
   killWindow,
@@ -58,7 +59,12 @@ export async function hierarchyDown(
   for (const r of rejected) deps.log(`warning: ${r}; not touched`);
   const selected: RosterEntry[] = options.role
     ? roster.sessions.filter(
-        (e) => e.name === options.role || e.tmuxWindow === options.role || e.role === options.role,
+        (e) =>
+          e.name === options.role ||
+          e.tmuxWindow === options.role ||
+          e.role === options.role ||
+          // The unqualified role name (`executor-beta`) selects it within this roster only.
+          splitSessionName(e.tmuxWindow)?.bare === options.role,
       )
     : [...roster.sessions];
   if (options.role && selected.length === 0) {

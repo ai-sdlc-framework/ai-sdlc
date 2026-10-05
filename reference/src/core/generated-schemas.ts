@@ -4667,6 +4667,12 @@ export const hierarchyRosterV1Schema = {
           enum: ['planner', 'operator-dispatch', 'executor'],
           description: 'Tier the session belongs to.',
         },
+        project: {
+          type: 'string',
+          pattern: '^[a-z0-9][a-z0-9-]{0,29}$',
+          description:
+            'Project the session belongs to: the repository basename unless cli-hierarchy up was given --project. Session names are qualified with it (<project>-<role>) so hierarchies of different projects on one machine do not collide. Optional for rosters written before project scoping; readers treat a missing value as the repository basename and the next up rewrites it. A mistake guard, not authentication.',
+        },
         name: {
           type: 'string',
           minLength: 1,

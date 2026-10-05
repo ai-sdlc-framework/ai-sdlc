@@ -25,15 +25,20 @@ import {
   HIERARCHY_TMUX_SESSION,
   type HierarchyDeps,
   type HierarchyRole,
+  type RegistrySession,
   type Roster,
   type RosterEntry,
 } from './types.js';
 import {
   assertModel,
   assertPermissionMode,
+  assertProject,
   assertSessionName,
+  bareRoleNames,
   executorNames,
   parseExecutorCount,
+  qualifiedName,
+  sanitizeProject,
   shellQuote,
 } from './validate.js';
 
@@ -45,6 +50,12 @@ export interface UpOptions {
   executorModel: string;
   noPlanner: boolean;
   attach: boolean;
+  /**
+   * Project the session names are qualified with (`<project>-<role>`). Default: the
+   * repository basename. Required (with a distinct value) when sessions with the same
+   * unqualified role names are already running for a different project.
+   */
+  project?: string;
   /** Overrides the planner permission mode; otherwise the operator's own setting is used. */
   plannerPermissionMode?: string;
   /** Allow a planner that would start in bypassPermissions mode. */
@@ -62,7 +73,10 @@ export interface UpResult {
 
 interface PlannedSession {
   role: HierarchyRole;
+  /** Project-qualified name, used as the harness name and the tmux session name. */
   name: string;
+  /** Unqualified role name (`executor-beta`). */
+  bare: string;
   model: string;
   permissionMode: string;
   prompt: string;
@@ -74,7 +88,12 @@ const BYPASS_MODE = 'bypassPermissions';
 export const FALLBACK_PLANNER_MODE = 'default';
 
 /** Build the `claude` command line for one session. */
-export function buildClaudeCommand(bin: string, s: PlannedSession): string {
+export function buildClaudeCommand(
+  bin: string,
+  s: Pick<PlannedSession, 'name' | 'model' | 'permissionMode' | 'prompt'> & {
+    role?: HierarchyRole;
+  },
+): string {
   return [
     shellQuote(bin),
     '--name',
@@ -87,12 +106,18 @@ export function buildClaudeCommand(bin: string, s: PlannedSession): string {
   ].join(' ');
 }
 
-function plan(opts: UpOptions, count: number, plannerMode: string): PlannedSession[] {
+function plan(
+  opts: UpOptions,
+  project: string,
+  count: number,
+  plannerMode: string,
+): PlannedSession[] {
   const sessions: PlannedSession[] = [];
   if (!opts.noPlanner) {
     sessions.push({
       role: 'planner',
-      name: 'planner',
+      name: qualifiedName(project, 'planner'),
+      bare: 'planner',
       model: opts.plannerModel,
       permissionMode: plannerMode,
       prompt: '/ai-sdlc planner',
@@ -100,21 +125,56 @@ function plan(opts: UpOptions, count: number, plannerMode: string): PlannedSessi
   }
   sessions.push({
     role: 'operator-dispatch',
-    name: 'operator-dispatch',
+    name: qualifiedName(project, 'operator-dispatch'),
+    bare: 'operator-dispatch',
     model: opts.dispatchModel,
     permissionMode: BYPASS_MODE,
     prompt: '/ai-sdlc operator-dispatch',
   });
-  for (const name of executorNames(count)) {
+  for (const bare of executorNames(count)) {
     sessions.push({
       role: 'executor',
-      name,
+      name: qualifiedName(project, bare),
+      bare,
       model: opts.executorModel,
       permissionMode: BYPASS_MODE,
       prompt: '/ai-sdlc executor',
     });
   }
   return sessions;
+}
+
+function defaultIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/**
+ * Live harness sessions on this machine that are not part of this hierarchy but could
+ * be reached by, or collide with, its names: a bare role name (`planner`,
+ * `executor-alpha`, from a hierarchy started before project scoping, or by hand) or the
+ * very name this hierarchy is about to use, running in another directory. Sessions
+ * already in this roster (by pid) and sessions started in this checkout are never
+ * foreign.
+ */
+export function findForeignSessions(
+  registry: readonly RegistrySession[],
+  plannedNames: ReadonlySet<string>,
+  ownPids: ReadonlySet<number>,
+  cwd: string,
+  isAlive: (pid: number) => boolean,
+): RegistrySession[] {
+  const bare = new Set(bareRoleNames());
+  return registry.filter((s) => {
+    if (ownPids.has(s.pid) || !isAlive(s.pid)) return false;
+    if (s.cwd !== undefined && path.resolve(s.cwd) === path.resolve(cwd)) return false;
+    return bare.has(s.name) || plannedNames.has(s.name);
+  });
 }
 
 async function waitForRegistry(
@@ -148,16 +208,27 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   assertModel(opts.executorModel, '--executor-model');
   if (opts.plannerPermissionMode) assertPermissionMode(opts.plannerPermissionMode);
 
+  const explicitProject = opts.project !== undefined && opts.project !== '';
+  const project = explicitProject
+    ? (opts.project as string)
+    : sanitizeProject(path.basename(path.resolve(deps.cwd)));
+  if (!project) {
+    throw new Error(
+      `cannot derive a project name from the repository directory '${path.basename(deps.cwd)}'; pass --project <name>`,
+    );
+  }
+  assertProject(project);
+
   const settings = readSettingsView(deps.settingsFiles);
   const plannerMode = opts.plannerPermissionMode ?? settings.defaultMode ?? FALLBACK_PLANNER_MODE;
-  const planned = plan(opts, count, plannerMode);
+  const planned = plan(opts, project, count, plannerMode);
   for (const s of planned) assertSessionName(s.name);
 
   const warnings: string[] = [];
 
   // An old-layout roster (windows in one shared session) is never mixed with the new
   // layout: refuse before starting anything or writing the roster.
-  const { roster: loaded, rejected } = readRosterChecked(deps.boardDir);
+  const { roster: loaded, rejected } = readRosterChecked(deps.boardDir, project);
   if (loaded.sessions.some(isLegacyLayoutEntry)) {
     throw new Error(
       `the roster uses the old single-session layout ('${HIERARCHY_TMUX_SESSION}'); run 'cli-hierarchy down' first, then run 'cli-hierarchy up' again`,
@@ -176,7 +247,13 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   // A second planner is never started, whatever name the first one has.
   const livePlanner = kept.find((e) => e.role === 'planner');
   const wantsPlanner = planned.some((s) => s.role === 'planner');
-  if (wantsPlanner && livePlanner && livePlanner.tmuxWindow !== 'planner') {
+  const plannedPlanner = planned.find((s) => s.role === 'planner');
+  if (
+    wantsPlanner &&
+    livePlanner &&
+    livePlanner.tmuxWindow !== plannedPlanner?.name &&
+    livePlanner.tmuxWindow !== plannedPlanner?.bare
+  ) {
     throw new Error(
       `a planner is already running ('${livePlanner.name}'); refusing to start a second one. Use --no-planner to leave it alone.`,
     );
@@ -185,9 +262,15 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   const existing: RosterEntry[] = [];
   const toStart: PlannedSession[] = [];
   for (const s of planned) {
-    const entry = kept.find((e) => e.tmuxWindow === s.name);
+    // A session started before project scoping keeps its bare name until it is restarted.
+    const entry = kept.find((e) => e.tmuxWindow === s.name || e.tmuxWindow === s.bare);
     if (entry) {
       existing.push(entry);
+      if (entry.tmuxWindow === s.bare) {
+        warnings.push(
+          `'${entry.name}' still has the unqualified name from before project scoping; run 'cli-hierarchy down' then 'cli-hierarchy up' to get '${s.name}'`,
+        );
+      }
     } else if (hasSession(deps.run, s.name)) {
       warnings.push(
         `tmux session '${s.name}' exists but is not in the roster; leaving it alone and not starting a duplicate`,
@@ -208,6 +291,24 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
   }
 
   if (toStart.length > 0) {
+    const foreign = findForeignSessions(
+      readSessionRegistry(deps.registryDir),
+      new Set(planned.map((s) => s.name)),
+      new Set(kept.map((e) => e.pid)),
+      deps.cwd,
+      deps.isAlive ?? defaultIsAlive,
+    );
+    if (foreign.length > 0) {
+      const list = foreign.map((f) => `'${f.name}' (pid ${f.pid})`).join(', ');
+      if (!explicitProject) {
+        throw new Error(
+          `sessions with the same role names are already running on this machine for another project: ${list}. Their bare names could receive this hierarchy's messages. Run again with --project <name> to start this hierarchy under its own name, or stop those sessions first`,
+        );
+      }
+      warnings.push(
+        `sessions with the same role names are already running for another project: ${list}; started under project '${project}' as requested`,
+      );
+    }
     if (toStart.some((s) => s.permissionMode === BYPASS_MODE)) {
       const inbound = checkCrossSessionInbound(
         settings,
@@ -252,6 +353,7 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
     }
     const entry: RosterEntry = {
       role: s.role,
+      project,
       name: registered?.name ?? s.name,
       tmuxSession: s.name,
       tmuxWindow: s.name,
@@ -271,7 +373,10 @@ export async function hierarchyUp(opts: UpOptions, deps: HierarchyDeps): Promise
       sessionRole: entry.role,
     });
   }
-  if (toStart.length === 0 && warnings.length > 0) writeRoster(deps.boardDir, roster);
+  // Also rewrites a roster written before project scoping, now carrying `project`.
+  if (toStart.length === 0 && (warnings.length > 0 || kept.length > 0)) {
+    writeRoster(deps.boardDir, roster);
+  }
 
   for (const e of started) {
     const renamed = e.name === e.tmuxWindow ? '' : ` (registered as '${e.name}')`;

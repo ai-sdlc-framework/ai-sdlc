@@ -25,6 +25,14 @@ import { ROSTER_FILENAME } from './roster.js';
 
 /** Same allowlist as the hook and the skills. */
 export const SAFE_SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/**
+ * Ends every refusal of the caller binding, so the refused session knows what to do
+ * next: the command is the dispatch session's, and a refused session hands the work
+ * to it instead of retrying.
+ */
+export const CALLER_NEXT_STEP =
+  'run it from the dispatch session in the main checkout, or ask the dispatch session to run it';
+
 /** Roles a roster entry may carry. */
 const ROLES: readonly string[] = ['executor', 'operator-dispatch', 'planner'];
 /** Most ancestors examined. */
@@ -125,19 +133,19 @@ export function requireDispatchCaller(
   if (!caller) {
     return {
       ok: false,
-      reason: `${command}: the calling session is not a running session in the roster`,
+      reason: `${command}: the calling session is not a running session in the roster; ${CALLER_NEXT_STEP}`,
     };
   }
   if (caller.role !== 'operator-dispatch') {
     return {
       ok: false,
-      reason: `${command}: only the dispatch session may run this command (the caller's role is ${caller.role})`,
+      reason: `${command}: only the dispatch session may run this command (the caller's role is ${caller.role}); ${CALLER_NEXT_STEP}`,
     };
   }
   if (worker !== undefined && worker !== caller.name) {
     return {
       ok: false,
-      reason: `${command}: --worker does not match the calling session's own roster name`,
+      reason: `${command}: --worker does not match the calling session's own roster name; omit --worker, or ${CALLER_NEXT_STEP}`,
     };
   }
   return { ok: true, name: caller.name };

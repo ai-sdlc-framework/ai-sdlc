@@ -937,7 +937,9 @@ export async function runDispatchCli(
       const granted = deps.operational ?? loadOperational(cwd, cwd);
       if (!granted.has('requeue')) {
         process.stderr.write(
-          'cli-dispatch requeue: refused; the repository policy does not grant requeue to the dispatch session\n',
+          'cli-dispatch requeue: refused; the repository policy does not grant requeue to the dispatch session. ' +
+            'Raise it with `cli-decisions escalate` so the decision is recorded and routed, ' +
+            'and once it is answered the operator adds `requeue` to `spec.governance.operational` in .ai-sdlc/agent-role.yaml\n',
         );
         return 1;
       }
@@ -945,7 +947,7 @@ export async function runDispatchCli(
       if (retryLimit === null) return 2;
       if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
         process.stderr.write(
-          `cli-dispatch requeue: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}\n`,
+          `cli-dispatch requeue: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}; use ${DEFAULT_REQUEUE_RETRY_LIMIT} or less, or escalate with \`cli-decisions escalate\`\n`,
         );
         return 2;
       }
