@@ -83,7 +83,7 @@ export interface EstimateLogStageBRecord {
  */
 export interface EstimateLogRecord {
   ts: string;
-  /** Agent identity. RFC §7.1 — model + harness ("claude-opus-4-7", "stage-a-deterministic", …). */
+  /** Agent identity. RFC §7.1 — model + harness ("opus", "stage-a-deterministic", …). */
   predictedBy: string;
   taskId: string;
   class: TaskClass;

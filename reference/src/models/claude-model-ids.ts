@@ -26,6 +26,3 @@ export const CLAUDE_OPUS_1M_MODEL_ID = `${CLAUDE_OPUS_MODEL_ID}[1m]`;
 
 /** Current Haiku release (direct-API default). */
 export const CLAUDE_HAIKU_MODEL_ID = 'claude-haiku-4-5';
-
-/** Family aliases the harness resolves to the current release. */
-export const CLAUDE_FAMILY_ALIASES = ['haiku', 'sonnet', 'opus'] as const;

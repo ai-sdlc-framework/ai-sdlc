@@ -16,6 +16,7 @@ import {
 import { classify } from './classify.js';
 import { FakeLlmInvoker } from './fake-invoker.js';
 import { readCorpus } from './corpus.js';
+import { DEFAULT_HAIKU_MODEL } from './config.js';
 import { resetInvokerCache } from '../../capture/invoker-loader.js';
 import type { ClassifierInput, ClassifierTaskType } from './types.js';
 
@@ -309,7 +310,7 @@ describe('classify() with the layer disabled', () => {
       metBehindThreshold: false,
       effectiveThreshold: 0.7,
       corpusEntryId: null,
-      model: 'haiku',
+      model: DEFAULT_HAIKU_MODEL,
     };
     const viaDisabled = await classify(input, task, {
       repoRoot: repo,

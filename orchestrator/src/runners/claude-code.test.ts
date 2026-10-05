@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import {
   buildPrompt,
   parseTokenUsage,
@@ -515,6 +516,28 @@ describe('ClaudeCodeRunner', () => {
       const [, args] = spawnMock.mock.calls[0];
       const modelIdx = (args as string[]).indexOf('--model');
       expect((args as string[])[modelIdx + 1]).toBe('claude-opus-4-6');
+    });
+
+    it('defaults --model to the central Sonnet id and honours AI_SDLC_MODEL (AISDLC-690)', async () => {
+      const modelArg = () => {
+        const args = spawnMock.mock.calls.at(-1)![1] as string[];
+        return args[args.indexOf('--model') + 1];
+      };
+      setupSpawn({ stdout: 'done', stderr: '' });
+      setupGitExec(['f.ts']);
+      delete process.env.AI_SDLC_MODEL;
+      await new ClaudeCodeRunner().run(makeCtx());
+      expect(modelArg()).toBe(CLAUDE_SONNET_MODEL_ID);
+
+      vi.stubEnv('AI_SDLC_MODEL', 'pinned-model');
+      try {
+        setupSpawn({ stdout: 'done', stderr: '' });
+        setupGitExec(['f.ts']);
+        await new ClaudeCodeRunner().run(makeCtx());
+        expect(modelArg()).toBe('pinned-model');
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it('uses ctx.allowedTools when provided', async () => {

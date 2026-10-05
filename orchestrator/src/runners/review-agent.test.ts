@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
+import { CLAUDE_OPUS_MODEL_ID, CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
 import {
   ReviewAgentRunner,
   REVIEW_PROMPTS,
@@ -420,6 +420,8 @@ describe('ReviewAgentRunner — large-context escalation', () => {
   });
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   function captureRequest() {
@@ -472,8 +474,6 @@ describe('ReviewAgentRunner — large-context escalation', () => {
     });
     await runner.run(makeContext({ issueBody: 'x'.repeat(2000) }));
     expect(JSON.parse(captured.body).model).toBe('pinned-large-model');
-    vi.unstubAllEnvs();
-    vi.resetModules();
   });
 
   it('falls back to default large-context model when none configured', async () => {
@@ -484,8 +484,7 @@ describe('ReviewAgentRunner — large-context escalation', () => {
     });
     await runner.run(makeContext({ issueBody: 'x'.repeat(2000) }));
     const parsed = JSON.parse(captured.body);
-    // Default falls back to env var or the central Opus id
-    expect(parsed.model).not.toBe(CLAUDE_SONNET_MODEL_ID);
+    expect(parsed.model).toBe(CLAUDE_OPUS_MODEL_ID);
     expect(captured.headers['anthropic-beta']).toBe('context-1m-2025-08-07');
   });
 
