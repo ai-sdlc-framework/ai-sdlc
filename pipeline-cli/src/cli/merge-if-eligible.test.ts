@@ -301,6 +301,125 @@ describe('buildMergeIfEligibleCli — yargs router', () => {
     }
   });
 
+  const RELEASE_YAML =
+    'spec:\n  governance:\n    allowMerge: never\n    allowReleaseMerge: true\n    releaseAuthors: [deefactorial]\n';
+  const releaseHandlers = (): Record<string, Partial<ExecResult>> => ({
+    'gh repo view': { stdout: 'org/repo\n' },
+    'api user': { stdout: 'deefactorial\n' },
+    'git/ref/heads/main': { stdout: JSON.stringify({ type: 'commit', sha: 'c'.repeat(40) }) },
+    'pr view': {
+      stdout: JSON.stringify({
+        headRefOid: HEAD,
+        headRefName: 'release-please--branches--main',
+        baseRefName: 'main',
+        isCrossRepository: false,
+        author: { login: 'deefactorial' },
+        title: 'chore: release main',
+        mergeStateStatus: 'CLEAN',
+        files: [],
+      }),
+    },
+    'pulls/7/commits': {
+      stdout: JSON.stringify({
+        sha: HEAD,
+        login: 'deefactorial',
+        email: 'e@x.y',
+        clogin: 'deefactorial',
+        cemail: 'e@x.y',
+        verified: false,
+      }),
+    },
+    'compare/': { stdout: JSON.stringify({ filename: 'CHANGELOG.md', status: 'modified' }) },
+    'contents/CHANGELOG.md': { stdout: JSON.stringify({ type: 'file', content: 'IyBoaQ==' }) },
+    'pr checks': { stdout: JSON.stringify([{ name: 'ai-sdlc/pr-ready', state: 'SUCCESS' }]) },
+    '/check-runs': {
+      stdout: JSON.stringify({
+        name: 'ai-sdlc/pr-ready',
+        status: 'completed',
+        conclusion: 'success',
+      }),
+    },
+    '/status': { stdout: '' },
+    'pr merge': { stdout: '' },
+  });
+
+  it('--source-kind release routes to runReleaseMerge: arms with squash, pinned, and audits', async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), 'aisdlc-702-art-'));
+    try {
+      process.env['ARTIFACTS_DIR'] = artifacts;
+      process.env['AI_SDLC_CALLER_ROLE'] = 'operator';
+      const fake = makeFakeRunner(releaseHandlers());
+      const msg = await runCli(['7', '--source-kind', 'release', '--arm'], fake.runner, {
+        root: '/main',
+        policyYaml: RELEASE_YAML,
+      });
+      expect(msg).toBe('ok');
+      expect(out.join('')).toMatch(/PR #7 \| ARMED/);
+      const merge = fake.calls.find((c) => c.args.includes('merge'))!;
+      expect(merge.args).toEqual(
+        expect.arrayContaining(['--auto', '--squash', '--match-head-commit', HEAD]),
+      );
+      const file = join(artifacts, '_governance');
+      const { readdirSync, readFileSync } = await import('node:fs');
+      const name = readdirSync(file)[0];
+      const rec = JSON.parse(readFileSync(join(file, name), 'utf8').trim());
+      expect(rec).toMatchObject({
+        sourceKind: 'release',
+        outcome: 'armed',
+        callerRole: 'operator',
+      });
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
+  it('--source-kind release refuses fail-closed when the repository slug cannot be resolved', async () => {
+    process.env['AI_SDLC_CALLER_ROLE'] = 'operator';
+    const fake = makeFakeRunner({ 'gh repo view': { code: 1, stderr: 'no remote' } });
+    const msg = await runCli(['7', '--source-kind', 'release', '--arm'], fake.runner, {
+      root: '/main',
+      policyYaml: RELEASE_YAML,
+    });
+    expect(msg).toBe('process.exit(1)');
+    expect(out.join('')).toMatch(/REFUSED.*could not determine the repository.*Next step:/);
+    expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
+  });
+
+  it('--source-kind release refuses fail-closed with no verified main checkout (zero gh calls)', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'aisdlc-702-cwd-'));
+    try {
+      process.env['AI_SDLC_CALLER_ROLE'] = 'operator';
+      const fake = makeFakeRunner({});
+      const msg = await runCli(
+        ['7', '--source-kind', 'release', '--arm', '--cwd', plain, '--format', 'json'],
+        fake.runner,
+      );
+      expect(msg).toBe('process.exit(1)');
+      expect(JSON.parse(out.join('')).reason).toMatch(/verified main checkout.*Next step:/);
+      expect(fake.calls).toEqual([]);
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  it('--source-kind release is refused for the executor role (exit 1, no merge call)', async () => {
+    const artifacts = mkdtempSync(join(tmpdir(), 'aisdlc-702-art-'));
+    try {
+      process.env['ARTIFACTS_DIR'] = artifacts;
+      process.env['AI_SDLC_CALLER_ROLE'] = 'executor';
+      const fake = makeFakeRunner(releaseHandlers());
+      const msg = await runCli(['7', '--source-kind', 'release', '--arm'], fake.runner, {
+        root: '/main',
+        policyYaml: RELEASE_YAML,
+      });
+      expect(msg).toBe('process.exit(1)');
+      expect(out.join('')).toMatch(/caller role "executor"/);
+      expect(fake.calls.some((c) => c.args.includes('merge'))).toBe(false);
+    } finally {
+      rmSync(artifacts, { recursive: true, force: true });
+    }
+  });
+
   it('--repo-root and --repo no longer exist: yargs rejects them (exit 1) and nothing runs', async () => {
     for (const extra of [
       ['--repo-root', '/tmp/x'],

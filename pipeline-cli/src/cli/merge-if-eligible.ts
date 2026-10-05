@@ -22,6 +22,7 @@ import {
   type RunMergeIfEligibleResult,
   type SourceKind,
 } from '../governance/merge-if-eligible.js';
+import { NEXT_STEP_PREFIX, runReleaseMerge } from '../governance/release-merge.js';
 
 /**
  * This package's root directory, used to locate the sibling
@@ -86,11 +87,12 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
   return yargs(hideBin(process.argv))
     .scriptName('merge-if-eligible')
     .usage(
-      'Usage: $0 <pr> --source-kind <backlog|gh-issue> [options]\n\n' +
+      'Usage: $0 <pr> --source-kind <backlog|gh-issue|release> [options]\n\n' +
         '  merge-if-eligible 176 --source-kind backlog          # merge iff green+CLEAN+trusted\n' +
         '  merge-if-eligible 176 --source-kind backlog --dry-run  # evaluate only, never merge\n' +
         '  merge-if-eligible 176 --source-kind backlog --arm    # arm auto-merge iff trusted (same policy gate)\n' +
-        '  merge-if-eligible 176 --source-kind gh-issue         # always refused (untrusted)',
+        '  merge-if-eligible 176 --source-kind gh-issue         # always refused (untrusted)\n' +
+        '  merge-if-eligible 1105 --source-kind release --arm   # arm the release-please PR (verified from GitHub)',
     )
     .command(
       '$0 <pr>',
@@ -104,11 +106,12 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
           })
           .option('source-kind', {
             type: 'string',
-            choices: ['backlog', 'gh-issue'] as const,
+            choices: ['backlog', 'gh-issue', 'release'] as const,
             demandOption: true,
             describe:
               'Work-item provenance for the OQ-2 trust boundary. Only "backlog" (internal, ' +
-              'dispatched by our own orchestrator) is trusted for agent-initiated merge.',
+              'dispatched by our own orchestrator) and "release" (the release-please PR, verified from ' +
+              'GitHub, caller role restricted by governance) are mergeable by an agent.',
           })
           .option('cwd', {
             type: 'string',
@@ -158,26 +161,49 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
         const repoSlug = trusted.root === null ? null : await resolveRepoSlug(runner, trusted.root);
 
         const result =
-          trusted.root !== null && repoSlug === null
-            ? refusalResult(
+          sourceKind === 'release' && trusted.root !== null && repoSlug !== null
+            ? await runReleaseMerge({
                 prNumber,
-                'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
-                  'main checkout — refusing (fail-closed)',
-                dryRun,
-              )
-            : await runMergeIfEligible({
-                prNumber,
-                sourceKind,
-                repoSlug: repoSlug ?? '',
-                repoRoot: trusted.root,
-                rootRefusal: trusted.reason,
+                repoSlug,
                 runner,
                 cwd,
                 mergeMethod,
                 dryRun,
                 mode,
                 policyYaml: override?.policyYaml,
-              });
+              })
+            : trusted.root !== null && repoSlug === null
+              ? refusalResult(
+                  prNumber,
+                  'could not determine the repository (owner/name) with `gh repo view` in the verified ' +
+                    'main checkout — refusing (fail-closed)',
+                  dryRun,
+                )
+              : await runMergeIfEligible({
+                  prNumber,
+                  sourceKind,
+                  repoSlug: repoSlug ?? '',
+                  repoRoot: trusted.root,
+                  rootRefusal: trusted.reason,
+                  runner,
+                  cwd,
+                  mergeMethod,
+                  dryRun,
+                  mode,
+                  policyYaml: override?.policyYaml,
+                });
+
+        if (sourceKind === 'release' && !result.eligibility.eligible) {
+          const reason = result.eligibility.reason;
+          if (!reason.includes(NEXT_STEP_PREFIX)) {
+            result.eligibility = {
+              ...result.eligibility,
+              reason:
+                `${reason} ${NEXT_STEP_PREFIX} run this from the verified main checkout with ` +
+                'gh authenticated for the repository, or escalate to the dispatch/planner session.',
+            };
+          }
+        }
 
         if (format === 'json') {
           process.stdout.write(renderJsonResult(result));

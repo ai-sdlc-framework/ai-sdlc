@@ -446,6 +446,24 @@ export const agentRoleSchema = {
           description:
             'GitHub logins whose pull requests the deterministic merge gate (`cli-merge-if-eligible`) may merge when `allowMerge: onGreenClean`. Read only from the file as committed on origin/main in the verified main checkout. Logins have no leading, trailing or consecutive hyphens. Absent or empty means nobody: every merge is refused (fail closed).',
         },
+        releaseAuthors: {
+          type: 'array',
+          items: {
+            type: 'string',
+            maxLength: 45,
+            pattern: '^[A-Za-z0-9]+(-[A-Za-z0-9]+)*(\\[bot\\])?$',
+          },
+          uniqueItems: true,
+          description:
+            'GitHub logins allowed as the author of the release-please PR and of its linked commits for `cli-merge-if-eligible --source-kind release`. OPTIONAL. Resolution order for the release path only: this key if present (an explicit empty list disables the release path: kill switch), else a non-empty `mergeAuthors`, else the built-in release-please bot logins `github-actions[bot]` and `release-please[bot]`. Bot logins use the REST spelling with the `[bot]` suffix. Never widens who the other source kinds trust. Read only from the file as committed on main.',
+        },
+        releaseMergeRoles: {
+          type: 'array',
+          items: { type: 'string', maxLength: 40, pattern: '^[A-Za-z][A-Za-z0-9-]*$' },
+          uniqueItems: true,
+          description:
+            "Caller roles allowed to use `cli-merge-if-eligible --source-kind release`. Default: operator, planner (executor denied). The role comes from the caller's environment, so this is a mistake guard, not a security boundary (DEC-0038); the GitHub-derived PR checks are the real control.",
+        },
         operational: {
           type: 'array',
           items: {
@@ -471,6 +489,12 @@ export const agentRoleSchema = {
         allowBranchDelete: {
           type: 'boolean',
           description: 'Whether agents may delete branches (`git branch -D`/`-d`). Default false.',
+        },
+        allowReleaseMerge: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Narrow grant for `cli-merge-if-eligible --source-kind release`: when true, agents may land the release-please PR even if `allowMerge` is `never`. Never satisfies the backlog or gh-issue kinds, which still need `allowMerge: onGreenClean`. Default false.',
         },
         allowResetHard: {
           type: 'boolean',

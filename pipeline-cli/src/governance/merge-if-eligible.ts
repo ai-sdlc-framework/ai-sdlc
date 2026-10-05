@@ -243,7 +243,14 @@ export async function readTaskPrefix(
 
 // ── Native governance resolution (mirrors ai-sdlc-plugin/hooks/lib/governance-resolver.js) ──
 
-const LIST_KEYS = new Set(['operational', 'protectedBranches', 'mergeAuthors']);
+const LIST_KEYS = new Set([
+  'operational',
+  'protectedBranches',
+  'mergeAuthors',
+  // AISDLC-702: release source kind (see release-merge.ts)
+  'releaseMergeRoles',
+  'releaseAuthors',
+]);
 const BOOLEAN_KEYS = [
   'allowForcePush',
   'allowClosePrIssue',
@@ -363,7 +370,7 @@ export function resolveGovernanceFromYaml(yamlText: string): {
  * (external GitHub issue / contributor-authored work) and any unrecognised
  * value are untrusted — fail closed.
  */
-export type SourceKind = 'backlog' | 'gh-issue';
+export type SourceKind = 'backlog' | 'gh-issue' | 'release';
 
 export function isTrustedSourceKind(sourceKind: SourceKind | undefined): boolean {
   return sourceKind === 'backlog';
@@ -838,6 +845,18 @@ export interface MergeEligibilityContext {
    * fetch is NEVER treated as vacuously green (AC-5). Defaults to `false`.
    */
   checksFetchFailed?: boolean;
+  /**
+   * AISDLC-702: set ONLY by `release-merge.ts` after it has verified, from
+   * GitHub, that the PR is a genuine release-please PR. `sourceKind: 'release'`
+   * is trusted only together with this flag; on its own it is refused.
+   */
+  releaseVerified?: boolean;
+  /**
+   * AISDLC-702 / DEC-0050(b): `governance.allowReleaseMerge`. Honoured ONLY for
+   * a verified `release` source kind; it never satisfies the policy gate for
+   * `backlog` or any other kind, which still need `allowMerge: onGreenClean`.
+   */
+  allowReleaseMerge?: boolean;
 }
 
 export interface MergeEligibilityResult {
@@ -872,7 +891,9 @@ function isSkippedState(state: string): boolean {
  * checks set itself (evaluated per `checksSource`).
  */
 export function evaluateMergeEligibility(ctx: MergeEligibilityContext): MergeEligibilityResult {
-  if (ctx.policy.allowMerge !== 'onGreenClean') {
+  const releaseTrusted = ctx.sourceKind === 'release' && ctx.releaseVerified === true;
+  const releaseGrant = releaseTrusted && ctx.allowReleaseMerge === true;
+  if (ctx.policy.allowMerge !== 'onGreenClean' && !releaseGrant) {
     return {
       eligible: false,
       reason:
@@ -882,7 +903,7 @@ export function evaluateMergeEligibility(ctx: MergeEligibilityContext): MergeEli
     };
   }
 
-  if (!isTrustedSourceKind(ctx.sourceKind)) {
+  if (!releaseTrusted && !isTrustedSourceKind(ctx.sourceKind)) {
     return {
       eligible: false,
       reason:
@@ -938,7 +959,7 @@ export function evaluateMergeEligibility(ctx: MergeEligibilityContext): MergeEli
       eligible: true,
       reason:
         `all ${ctx.requiredChecks.length} required check(s) green, mergeStateStatus=CLEAN, ` +
-        'sourceKind=backlog (trusted) — eligible for agent-initiated merge',
+        `sourceKind=${ctx.sourceKind} (trusted) — eligible for agent-initiated merge`,
     };
   }
 
@@ -981,7 +1002,7 @@ export function evaluateMergeEligibility(ctx: MergeEligibilityContext): MergeEli
     eligible: true,
     reason:
       `no branch-protection required contexts configured; all ${relevant.length} check-run(s) ` +
-      'SUCCESS/NEUTRAL (none pending), mergeStateStatus=CLEAN, sourceKind=backlog (trusted) — ' +
+      `SUCCESS/NEUTRAL (none pending), mergeStateStatus=CLEAN, sourceKind=${ctx.sourceKind} (trusted) — ` +
       'eligible for agent-initiated merge (check-run fallback, AISDLC-607)',
   };
 }
@@ -1141,7 +1162,7 @@ export function stateForRequired(name: string, results: RequiredCheckStatus[]): 
   return matches.find((c) => c.state.toUpperCase() !== 'SUCCESS')?.state ?? 'SUCCESS';
 }
 
-interface MergePrResult {
+export interface MergePrResult {
   ok: boolean;
   /** gh stderr (trimmed) when the merge was refused/failed. */
   error: string;
@@ -1154,7 +1175,7 @@ interface MergePrResult {
  * moved after the checks were evaluated cannot be merged. A refusal is
  * returned (not thrown) so the caller can report it and exit non-zero.
  */
-async function mergePr(
+export async function mergePr(
   prNumber: number,
   repoSlug: string,
   mergeMethod: 'squash' | 'merge' | 'rebase',
@@ -1185,7 +1206,7 @@ async function mergePr(
  * caller also re-reads the head just before, so a head that moved is refused
  * even if gh does not enforce the pin for arming. Refusals are returned, not thrown.
  */
-async function armPr(
+export async function armPr(
   prNumber: number,
   repoSlug: string,
   mergeMethod: 'squash' | 'merge' | 'rebase',
@@ -1346,6 +1367,17 @@ export async function runMergeIfEligible(
 
   // Policy gate, then the caller-supplied trust boundary: both can refuse
   // before any network call is spent.
+  if (opts.sourceKind === 'release') {
+    // AISDLC-702: release PRs are handled ONLY by release-merge.ts (own gate).
+    // This backlog path never merges them, whatever the policy says.
+    return refusalResult(
+      opts.prNumber,
+      'sourceKind="release" is handled by the release merge path, not this one — refusing. ' +
+        'Next step: run `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm`.',
+      opts.dryRun,
+      policy,
+    );
+  }
   if (policy.allowMerge !== 'onGreenClean' || !isTrustedSourceKind(opts.sourceKind)) {
     return {
       prNumber: opts.prNumber,

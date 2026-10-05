@@ -63,6 +63,7 @@ spec:
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
+    allowReleaseMerge: false   # narrow grant: lets agents land the release PR only
     mergeAuthors: []           # GitHub logins the merge gate may merge for; empty = nobody
 ```
 
@@ -149,6 +150,100 @@ spec:
   `mergeAuthors: [octocat]`. Absent, empty or malformed means nobody, so every
   merge is refused until the operator sets it. It is read only from the policy
   file on `main` as GitHub serves it.
+- **`--source-kind release` (AISDLC-702)** is the sanctioned path for the rolling
+  release-please PR (`chore: release main`), for example
+  `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm`
+  (merge now with the same command minus `--arm`). It uses squash and needs either
+  `allowMerge: onGreenClean` or the narrower `governance.allowReleaseMerge: true`
+  (see Enablement); it can only ever land a PR that passes every check below, so
+  it widens merge rights to release PRs only.
+  A release is still cut only on an explicit operator instruction each time.
+  The facts are read from GitHub for the exact head commit, and any failure
+  refuses with a message naming the failed check:
+  - same-repo PR (not a fork), head ref exactly `release-please--branches--main`,
+    base `main`;
+  - the PR author is in the effective release author set, resolved for the release
+    path ONLY (it never widens the other source kinds): `governance.releaseAuthors`
+    if present (an explicit empty list disables the release path),
+    else a non-empty `governance.mergeAuthors`, else the built-in release-please bot
+    logins `github-actions[bot]` and `release-please[bot]` (REST spelling; the
+    `app/<slug>` spelling printed by `gh` compares equal). A refusal names the PR's
+    actual author, the effective set and which tier it came from, and the exact
+    value to add (`governance.releaseAuthors: [<login>]`). `release.yml` runs
+    release-please with the `AI_SDLC_PAT` token (PRs created with the workflow
+    token do not trigger CI, so the workflow stays on the PAT), so past release PRs
+    (#1078, #1105) are authored by the account that owns the PAT, not a bot. In such
+    a repo the author check passes only once that account is in `releaseAuthors` or
+    `mergeAuthors`. **When the release PR is authored by a shared PAT identity that
+    agents also push as, the author check is NOT the control**: anyone holding that
+    identity passes it. The controls are the exact release branch, the content-based
+    (not path-only) file validation, green required checks, the enablement grant
+    below, and the CLI role mistake guard (DEC-0038, see below). No hook-level
+    control exists yet; a follow-up task adds one;
+  - **Enablement:** release merges are refused unless `governance.allowMerge:
+    onGreenClean` or `governance.allowReleaseMerge: true` (default `false`). The
+    refusal names both keys and values, what is currently set, and the next step
+    (the dispatch/planner session sets one on `main`). `allowReleaseMerge` is a
+    narrower grant for release PRs only and never satisfies the backlog or
+    gh-issue kinds. `allowMerge: never` does NOT stop release merges while
+    `allowReleaseMerge: true`; to stop all agent merges also leave
+    `allowReleaseMerge` unset/false or set `releaseAuthors: []` (an explicit empty
+    list disables the release path even when a grant is set). Neither key affects
+    merges GitHub's own auto-merge performs once a workflow has armed them. There is no separate switch for the sanctioned CLI
+    itself;
+  - every commit on the PR has an author AND committer that is one of those
+    logins, or an unlinked identity with the pin-sync job's email
+    `release-bot@ai-sdlc.io` (AISDLC-577; that identity has no GitHub login, which
+    is why the unlinked case is allowed). **Weakness, stated plainly:** the
+    release-please and pin-sync commits on #1078 and #1105 are unsigned
+    (`verified: false`), so a verified signature cannot be required; author and
+    committer are metadata that anyone with push access to the branch can set. The
+    content validation below is what bounds the impact. Whether all commits are
+    verified is recorded in the audit line;
+  - every changed file (and every rename source) is on a fixed allowlist of release
+    artifacts: the `CHANGELOG.md` files, the `package.json` of the packages
+    release-please bumps, `sdk-python/pyproject.toml`, `.release-please-manifest.json`,
+    `release-please-config.json`, `.claude-plugin/marketplace.json`, and the two
+    plugin manifests `ai-sdlc-plugin/plugin.json` and
+    `ai-sdlc-plugin/.claude-plugin/plugin.json` (the files the AISDLC-577 pin-sync
+    commits). Any other path makes the PR ineligible;
+  - file CONTENT is validated, not only paths. Removed, renamed or copied files and
+    non-regular entries (symlinks, submodules) are refused. Every allowlisted file
+    except `CHANGELOG.md` (markdown, any content) is fetched at the base (tip of
+    `main`) and at the head and must be identical after parsing except for
+    version-like values: `version` in package and plugin manifests,
+    `plugins[0].version` in the marketplace file, the values in
+    `.release-please-manifest.json`, and the two `runtimeDependencies` pins that
+    the pin-sync writes (`>=X.Y.Z <1.0.0`). Any other key change (for example
+    `hooks`, `mcpServers` or `scripts`), a malformed value, or unparsable content
+    refuses with the file and key named. `sdk-python/pyproject.toml` may change
+    only its `version` line. A blob that cannot be fetched refuses. A `main` that
+    moved one of these files since the release PR was last rebased also refuses
+    (fail-closed) until release-please rebases;
+  - all required checks are green for the head AND `mergeStateStatus` is `CLEAN`,
+    in `--arm` as well as merge mode, so there is no window between verification
+    and the merge. **Residual risk:** auto-merge armed on GitHub persists; a push
+    to the release branch after arming is not re-verified by this CLI (the arm is
+    pinned with `--match-head-commit`, and branch protection and required checks
+    apply afterwards).
+  - **Who may call it:** `governance.releaseMergeRoles` (default `operator`,
+    `planner`; executor denied), read from the policy on `main`. The caller role is
+    `AI_SDLC_CALLER_ROLE` when set explicitly; otherwise `executor` when
+    `AI_SDLC_ACTIVE_TASK_ID` is set or an `.active-task` sentinel exists in the cwd
+    or an ancestor; otherwise the role is undeterminable and the CLI refuses, so an
+    operator running from a plain shell sets `AI_SDLC_CALLER_ROLE=operator`. **This restriction is a mistake guard, not a security
+    boundary**: the role comes from the caller's own environment, and a same-user
+    CLI check cannot stop a determined same-user process (DEC-0038). The
+    GitHub-derived PR checks above are the real control.
+  - **Merge method:** always squash; any other `--merge-method` is refused.
+  - **Audit:** every attempt that reaches the release path (merged, armed, dry-run,
+    refused) appends one JSON
+    line (`sourceKind: release`, caller, gh-authenticated login from `gh api user`,
+    caller role, PR, head, whether all commits are verified, outcome, reason) to
+    `$ARTIFACTS_DIR/_governance/merge-audit-YYYY-MM-DD.jsonl`. `caller` is `$USER`
+    and advisory only; `ghLogin` is the authenticated identity. Refusals that
+    happen before the release path runs (no verified main checkout, repository slug
+    not resolvable) are printed but not audited.
 - **What is authoritative (policy trust):** the policy
   (`spec.governance.allowMerge` + `mergeAuthors`), `backlog/config.yml`
   (`task_prefix`) and the task-file existence check are read from GitHub
