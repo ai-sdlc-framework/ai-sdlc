@@ -1151,21 +1151,65 @@ describe('config-mapped no-colon refspec: why only the explicit destination is a
     });
   }
 
-  it('EXPLOIT (tag named HEAD + remote.origin.push): bare HEAD overwrites main in real git; the guard refuses it', () => {
-    // A local tag named HEAD makes the no-colon `HEAD` resolve to the tag, and the
-    // agent-set remote.origin.push maps that tag to main. An agent can create both.
-    git(wt, 'tag', 'HEAD');
+  it('bare HEAD and omitted-refspec pushes are refused at the hook with no real tag (every git version)', () => {
+    // Needs no tag named HEAD: the refusal is a property of the guard, not of git's ref
+    // resolution, so it is proven the same way on every git version. The agent-set
+    // remote.origin.push is the config the exploit below relies on.
     git(wt, 'config', 'remote.origin.push', 'refs/tags/HEAD:refs/heads/main');
     try {
       const o = { cwd: wt, projectDir: root };
       assert.ok(denied(run('git push --force-with-lease origin HEAD', o)), 'bare HEAD refused');
       assert.ok(denied(run('git push --force-with-lease', o)), 'omitted refspec refused');
-      // Proof the shape was dangerous: unguarded, it really moves origin's main.
-      git(wt, 'push', '--force-with-lease', 'origin', 'HEAD');
-      assert.equal(remoteRef('refs/heads/main'), git(wt, 'rev-parse', 'HEAD'));
+      assert.ok(denied(run('git push --force-with-lease origin', o)), 'omitted refspec refused');
+      assert.ok(!denied(run(`git push --force-with-lease origin HEAD:refs/heads/${BR}`, o)));
     } finally {
       git(wt, 'config', '--unset-all', 'remote.origin.push');
-      git(wt, 'tag', '-d', 'HEAD');
+      resetMain();
+    }
+  });
+
+  it('EXPLOIT (ref named HEAD + remote.origin.push): bare HEAD overwrites main in real git; the guard refuses it', () => {
+    // A local ref refs/tags/HEAD makes the no-colon `HEAD` resolve to it, and the agent-set
+    // remote.origin.push maps it to main. `git tag HEAD` is refused by newer git ("not a
+    // valid tag name"), so the ref is created with update-ref. If a git version refuses
+    // that too, the exploit cannot be set up there: assert that refusal instead of skipping.
+    let created = true;
+    try {
+      git(wt, 'update-ref', 'refs/tags/HEAD', 'HEAD');
+    } catch (err) {
+      created = false;
+      assert.match(String(err.stderr ?? err.message ?? err), /HEAD|refname|invalid|valid/i);
+      assert.equal(
+        git(wt, 'for-each-ref', 'refs/tags/HEAD').trim(),
+        '',
+        'no refs/tags/HEAD exists, so the exploit cannot be set up on this git',
+      );
+    }
+    git(wt, 'config', 'remote.origin.push', 'refs/tags/HEAD:refs/heads/main');
+    try {
+      const o = { cwd: wt, projectDir: root };
+      assert.ok(denied(run('git push --force-with-lease origin HEAD', o)), 'bare HEAD refused');
+      assert.ok(denied(run('git push --force-with-lease', o)), 'omitted refspec refused');
+      if (created) {
+        // Proof the shape was dangerous: unguarded, git either really moves origin's main or
+        // itself refuses the ambiguous name. Both outcomes are asserted; main never stays
+        // unchanged while the push reports success.
+        const before = remoteRef('refs/heads/main');
+        let pushed = true;
+        try {
+          git(wt, 'push', '--force-with-lease', 'origin', 'HEAD');
+        } catch {
+          pushed = false;
+        }
+        if (pushed) {
+          assert.equal(remoteRef('refs/heads/main'), git(wt, 'rev-parse', 'HEAD'));
+        } else {
+          assert.equal(remoteRef('refs/heads/main'), before, 'git refused; main untouched');
+        }
+      }
+    } finally {
+      git(wt, 'config', '--unset-all', 'remote.origin.push');
+      if (created) git(wt, 'update-ref', '-d', 'refs/tags/HEAD');
       resetMain();
     }
   });
