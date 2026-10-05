@@ -14,6 +14,7 @@ running `/ai-sdlc execute AISDLC-N` end-to-end with full Step 0-13 pipeline acce
 - [Activation](#activation)
 - [Monitoring](#monitoring)
 - [Watching the agents](#watching-the-agents)
+- [Running more than one hierarchy on the same machine](#running-more-than-one-hierarchy-on-the-same-machine)
 - [Liveness detection and session reaper](#liveness-detection-and-session-reaper)
 - [Cancel back-channel](#cancel-back-channel)
 - [The executor loop](#the-executor-loop)
@@ -240,7 +241,9 @@ cat .ai-sdlc/dispatch/sessions/aisdlc-462.session.json
 
 `cli-hierarchy up` starts the planner, the dispatch session and the executors as
 **one detached tmux session per agent**. The tmux session name, its window name and
-the agent name are the same (`planner`, `operator-dispatch`, `executor-alpha`, ...),
+the agent name are the same, qualified with the project (`<project>-planner`,
+`<project>-operator-dispatch`, `<project>-executor-alpha`, ...; see
+[the next section](#running-more-than-one-hierarchy-on-the-same-machine)),
 and the roster (`.ai-sdlc/dispatch/hierarchy.json`) records it as `tmuxSession`.
 Agents do not share a session because two terminals attached to one session both
 follow its current window: they can never show two different agents.
@@ -263,8 +266,12 @@ Each session sets its own terminal title to the agent name (`set-titles on` and
 No global tmux option is changed.
 
 Safety: only the default agent names are ever acted on. In the per-agent layout a
-roster entry is accepted only when its session and window are the same default name
-(`planner`, `operator-dispatch`, `executor-alpha` to `executor-epsilon`); `up` cannot
+roster entry is accepted only when its session and window are the same default name,
+bare (`planner`, `operator-dispatch`, `executor-alpha` to `executor-epsilon`, rosters
+from before project scoping) or qualified with the project the entry records
+(`<project>-planner`, ...); a qualified name whose entry does not record that same
+project is ignored, so a personal session that merely ends in `-planner` is not taken for
+one of ours. `up` cannot
 produce any other name, and a hand-written roster entry with another name is ignored by
 `status`, `attach`, `terminals`, `down` and `brief --notify` (it is reported as "not
 touched"). That is deliberate and fails closed; it is not widened without an explicit
@@ -279,6 +286,62 @@ below predate the marker and have no ownership check.
 A roster written by the earlier single-session layout (windows of one
 `ai-sdlc-hierarchy` session) is still reported by `status` and stopped by `down`;
 `up` refuses to start on top of it until `cli-hierarchy down` has been run.
+
+### Running more than one hierarchy on the same machine
+
+Peer messages and the harness session registry are machine-wide, so two projects that
+each ran `cli-hierarchy up` used to have sessions with the same names (`planner`,
+`executor-alpha`, ...), and a message meant for one project's session could reach the
+other's, including a task that was then run and opened a pull request on the wrong
+repository. Session names are therefore qualified with the project.
+
+- **Name format.** `<project>-<role>`, for example `ai-sdlc-executor-beta`. A `/`
+  (`ai-sdlc/executor-beta`) is not usable: the name is also the tmux session name, which
+  the roster schema limits to lowercase letters, digits and hyphens, and the harness name
+  allowlist has no `/`. The hyphen is the one separator both accept. The role is recovered
+  from the fixed role set, so a hyphen inside the project name is not ambiguous, and the
+  project is also recorded on every roster entry (`project` in `hierarchy.json`).
+- **Project.** The repository basename (lowercased, anything but letters and digits turned
+  into a hyphen, at most 30 characters), or `cli-hierarchy up --project <name>`. Two
+  repositories with the same basename on one machine pass distinct `--project` values.
+- **Refusal on collision.** `up` refuses to start when live sessions with the bare role
+  names (`planner`, `executor-alpha`, ...) or with the very names it is about to use are
+  running in another directory. The message lists them and ends with the next step: run
+  `cli-hierarchy up --project <name>` to start under its own name, or stop those sessions
+  first. With `--project` given explicitly it starts and prints the same list as a warning.
+  Nothing is refused when there is no collision, so a second project on the same machine
+  needs no flag.
+- **Who may instruct whom.** Every peer is addressed through an entry of the own roster,
+  never by a bare role name. The executor checks, before acting on an instruction, that
+  the sender is the running dispatch session of its own roster:
+  `cli-hierarchy check-sender --sender-pid <pid> --sender-ref <ref>`, where pid and ref are
+  what the harness reports for the sender, never a name written in the message. When the
+  envelope carries neither, the check fails open with a logged warning naming what was
+  missing (it is a mistake guard, not a security boundary). On a
+  mismatch the executor replies `not my dispatch session` and does nothing else (no claim,
+  no worktree, no pull request). The planner and the dispatch session address only
+  sessions found in their own roster.
+- **Repository check.** Before repository work, `cli-hierarchy check-repo` verifies that the
+  working directory is inside the repository that owns the roster's board (a task worktree
+  resolves to the checkout it came from). A mismatch stops the run and prints both
+  repositories and what to do next.
+- **Migration.** A `hierarchy.json` without `project` is read as the repository basename;
+  the next `cli-hierarchy up` rewrites it with `project` on every entry. Sessions that are
+  still running under a bare name are kept (not duplicated) and reported with a warning;
+  restart them with `cli-hierarchy down` then `up` to get the qualified name. `down` and
+  `attach` also accept the bare role name (`executor-beta`) within the own roster.
+
+These checks are a mistake guard in the DEC-0038 sense, not authentication. They stop a
+session from acting on another project's message or directory by accident. A session
+running as the same user can forge a pid, a ref or a roster.
+
+**Velocity impact.** No extra step in the normal flow: the default project needs no flag,
+and the two checks are one fast local command each. The cost lands only where the old
+behaviour was wrong: a message from a foreign dispatch session is refused instead of being
+run, a session in the wrong repository stops instead of opening a pull request there, and
+`up` stops (with the command to pass) instead of starting a hierarchy whose bare names can
+collide. A hierarchy started before this change keeps working; it only gains the project
+field the next time `up` runs.
 
 ### Optional: one VS Code terminal per agent
 

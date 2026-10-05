@@ -33,13 +33,17 @@ import {
   parseExecutorCount,
   parseMemInfo,
   parseVmStat,
+  PROJECT_SEPARATOR,
+  qualifiedName,
   readRoster,
   readRosterChecked,
   readSessionRegistry,
   readSettingsView,
   roleOfDefaultName,
   rosterPath,
+  sanitizeProject,
   shellQuote,
+  splitSessionName,
   writeRoster,
   type CommandRunner,
   type HierarchyDeps,
@@ -49,6 +53,11 @@ import {
 } from './index.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
+
+/** Project name the tests start under: the basename of `deps.cwd` (`/repo`). */
+const PROJECT = 'repo';
+/** Project-qualified session name for a bare role name. */
+const Q = (bare: string): string => `${PROJECT}-${bare}`;
 
 interface FakeTmux {
   run: CommandRunner;
@@ -240,6 +249,8 @@ beforeEach(() => {
     claudeBin: 'claude',
     pollAttempts: 3,
     pollIntervalMs: 1,
+    // No registry entry is a live foreign process unless a test says so.
+    isAlive: () => false,
   };
 });
 
@@ -302,23 +313,23 @@ describe('hierarchy up', () => {
     const result = await hierarchyUp(baseOpts, deps);
 
     expect(result.started.map((e) => e.name)).toEqual([
-      'planner',
-      'operator-dispatch',
-      'executor-alpha',
-      'executor-beta',
+      Q('planner'),
+      Q('operator-dispatch'),
+      Q('executor-alpha'),
+      Q('executor-beta'),
     ]);
     expect(newWindowCommands()).toEqual([
-      `'claude' --name 'planner' --model 'fable' --permission-mode 'acceptEdits' '/ai-sdlc planner'`,
-      `'claude' --name 'operator-dispatch' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
-      `'claude' --name 'executor-alpha' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
-      `'claude' --name 'executor-beta' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `'claude' --name '${Q('planner')}' --model 'fable' --permission-mode 'acceptEdits' '/ai-sdlc planner'`,
+      `'claude' --name '${Q('operator-dispatch')}' --model 'opus' --permission-mode 'bypassPermissions' '/ai-sdlc operator-dispatch'`,
+      `'claude' --name '${Q('executor-alpha')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
+      `'claude' --name '${Q('executor-beta')}' --model 'sonnet' --permission-mode 'bypassPermissions' '/ai-sdlc executor'`,
     ]);
     // One detached session per agent, named after it; never a shared session or a new window.
     const creates = fake.calls.filter((c) =>
       ['new-session', 'new-window'].includes(c.args[0] as string),
     );
     expect(creates.map((c) => c.args.slice(0, 7))).toEqual(
-      ['planner', 'operator-dispatch', 'executor-alpha', 'executor-beta'].map((n) => [
+      [Q('planner'), Q('operator-dispatch'), Q('executor-alpha'), Q('executor-beta')].map((n) => [
         'new-session',
         '-d',
         '-s',
@@ -333,7 +344,7 @@ describe('hierarchy up', () => {
     expect(fake.calls.some((c) => c.args.includes('ai-sdlc-hierarchy'))).toBe(false);
 
     // The ownership marker, then the titles, each scoped to its own session.
-    for (const n of ['planner', 'executor-beta']) {
+    for (const n of [Q('planner'), Q('executor-beta')]) {
       const opts = fake.calls.filter((c) => c.args[0] === 'set-option' && c.args[2] === `=${n}:`);
       expect(opts.map((c) => c.args)).toEqual([
         ['set-option', '-t', `=${n}:`, '@ai-sdlc-hierarchy', '1'],
@@ -350,21 +361,26 @@ describe('hierarchy up', () => {
     }
 
     // One attach hint per started agent.
-    for (const n of ['planner', 'operator-dispatch', 'executor-alpha', 'executor-beta']) {
+    for (const n of [
+      Q('planner'),
+      Q('operator-dispatch'),
+      Q('executor-alpha'),
+      Q('executor-beta'),
+    ]) {
       expect(logs.filter((l) => l.includes(`cli-hierarchy attach ${n}`))).toHaveLength(1);
     }
 
     const roster = JSON.parse(readFileSync(rosterPath(boardDir), 'utf-8'));
     expect(validateHierarchyRoster(roster).valid).toBe(true);
     expect(roster.sessions).toHaveLength(4);
-    const alpha = roster.sessions.find((s: { name: string }) => s.name === 'executor-alpha');
+    const alpha = roster.sessions.find((s: { name: string }) => s.name === Q('executor-alpha'));
     for (const s of roster.sessions as { name: string; tmuxSession: string }[]) {
       expect(s.tmuxSession).toBe(s.name);
     }
     expect(alpha).toMatchObject({
       role: 'executor',
-      tmuxSession: 'executor-alpha',
-      tmuxWindow: 'executor-alpha',
+      tmuxSession: Q('executor-alpha'),
+      tmuxWindow: Q('executor-alpha'),
       model: 'sonnet',
       permissionMode: 'bypassPermissions',
       status: 'running',
@@ -378,15 +394,15 @@ describe('hierarchy up', () => {
     const r = await hierarchyUp({ ...baseOpts, executors: 2, noPlanner: true }, deps);
     const sessions = fake.calls.filter((c) => c.args[0] === 'new-session');
     expect(sessions.map((c) => c.args[3])).toEqual([
-      'operator-dispatch',
-      'executor-alpha',
-      'executor-beta',
+      Q('operator-dispatch'),
+      Q('executor-alpha'),
+      Q('executor-beta'),
     ]);
     expect(fake.calls.some((c) => c.args[0] === 'new-window')).toBe(false);
     expect(r.started.map((e) => [e.tmuxSession, e.tmuxWindow])).toEqual([
-      ['operator-dispatch', 'operator-dispatch'],
-      ['executor-alpha', 'executor-alpha'],
-      ['executor-beta', 'executor-beta'],
+      [Q('operator-dispatch'), Q('operator-dispatch')],
+      [Q('executor-alpha'), Q('executor-alpha')],
+      [Q('executor-beta'), Q('executor-beta')],
     ]);
   });
 
@@ -413,7 +429,7 @@ describe('hierarchy up', () => {
     fake = makeFakeTmux(registryDir);
     rmSync(rosterPath(boardDir));
     const r = await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    expect(r.started.map((e) => e.name)).toEqual(['operator-dispatch', 'executor-alpha']);
+    expect(r.started.map((e) => e.name)).toEqual([Q('operator-dispatch'), Q('executor-alpha')]);
   });
 
   it('is idempotent: a second up starts nothing and reports the existing windows', async () => {
@@ -432,19 +448,19 @@ describe('hierarchy up', () => {
   it('starts only the missing roles on a later up with more executors', async () => {
     await hierarchyUp(baseOpts, deps);
     const r = await hierarchyUp({ ...baseOpts, executors: 3 }, deps);
-    expect(r.started.map((e) => e.name)).toEqual(['executor-gamma']);
+    expect(r.started.map((e) => e.name)).toEqual([Q('executor-gamma')]);
     expect(readRoster(boardDir).sessions).toHaveLength(5);
   });
 
   it('writes a harness-suffixed name back to the roster', async () => {
-    fake.nameFor = (n) => (n === 'executor-alpha' ? 'executor-alpha-2' : n);
+    fake.nameFor = (n) => (n === Q('executor-alpha') ? `${Q('executor-alpha')}-2` : n);
     // An older session already owns the plain name.
     mkdirSync(registryDir, { recursive: true });
     writeFileSync(
       path.join(registryDir, '1.json'),
       JSON.stringify({
         pid: 1,
-        name: 'executor-alpha',
+        name: Q('executor-alpha'),
         startedAt: NOW.getTime() - 60_000,
         status: 'busy',
       }),
@@ -452,16 +468,16 @@ describe('hierarchy up', () => {
 
     await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
 
-    const alpha = readRoster(boardDir).sessions.find((s) => s.tmuxWindow === 'executor-alpha');
-    expect(alpha?.name).toBe('executor-alpha-2');
+    const alpha = readRoster(boardDir).sessions.find((s) => s.tmuxWindow === Q('executor-alpha'));
+    expect(alpha?.name).toBe(`${Q('executor-alpha')}-2`);
     expect(alpha?.pid).not.toBe(1);
-    expect(logs.some((l) => l.includes("registered as 'executor-alpha-2'"))).toBe(true);
+    expect(logs.some((l) => l.includes(`registered as '${Q('executor-alpha')}-2'`))).toBe(true);
   });
 
   it('keeps the requested name and warns when the registry never lists the session', async () => {
     fake.register = false;
     const r = await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);
-    expect(r.started[0]).toMatchObject({ name: 'operator-dispatch', status: 'starting' });
+    expect(r.started[0]).toMatchObject({ name: Q('operator-dispatch'), status: 'starting' });
     expect(r.started[0]?.pid).toBeGreaterThan(0);
     expect(r.warnings.some((w) => w.includes('registry did not list'))).toBe(true);
   });
@@ -493,15 +509,16 @@ describe('hierarchy up', () => {
   });
 
   it('refuses a second planner when one is already running under another name', async () => {
-    // A planner recorded under a default session name other than 'planner'.
+    // A planner recorded under a default session name other than the usual one.
     writeRoster(boardDir, {
       schemaVersion: 'v1',
       sessions: [
         {
           role: 'planner',
+          project: PROJECT,
           name: 'my-planner',
-          tmuxSession: 'executor-epsilon',
-          tmuxWindow: 'executor-epsilon',
+          tmuxSession: Q('executor-epsilon'),
+          tmuxWindow: Q('executor-epsilon'),
           paneId: '%1',
           pid: 10,
           model: 'fable',
@@ -511,14 +528,14 @@ describe('hierarchy up', () => {
         },
       ],
     });
-    fake.windows = ['executor-epsilon'];
+    fake.windows = [Q('executor-epsilon')];
 
     await expect(hierarchyUp(baseOpts, deps)).rejects.toThrow(/second one/);
     expect(newWindowCommands()).toEqual([]);
 
     // --no-planner leaves it alone and starts the rest.
     const r = await hierarchyUp({ ...baseOpts, noPlanner: true, executors: 0 }, deps);
-    expect(r.started.map((e) => e.name)).toEqual(['operator-dispatch']);
+    expect(r.started.map((e) => e.name)).toEqual([Q('operator-dispatch')]);
   });
 
   it('refuses when the resource gate refuses', async () => {
@@ -528,24 +545,24 @@ describe('hierarchy up', () => {
 
   it('drops roster entries whose window is gone and restarts them', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
-    fake.windows = fake.windows.filter((w) => w !== 'executor-alpha');
+    fake.windows = fake.windows.filter((w) => w !== Q('executor-alpha'));
     const r = await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
-    expect(r.started.map((e) => e.name)).toEqual(['executor-alpha']);
+    expect(r.started.map((e) => e.name)).toEqual([Q('executor-alpha')]);
     expect(r.warnings.some((w) => w.includes('no live tmux session'))).toBe(true);
   });
 
   it('does not duplicate or kill a session that has an agent name but is not in the roster', async () => {
-    fake.windows = ['executor-alpha'];
+    fake.windows = [Q('executor-alpha')];
     const r = await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    expect(r.started.map((e) => e.name)).toEqual(['operator-dispatch']);
+    expect(r.started.map((e) => e.name)).toEqual([Q('operator-dispatch')]);
     expect(r.warnings.some((w) => w.includes('not in the roster'))).toBe(true);
     const verbs = fake.calls.map((c) => c.args[0]);
     expect(verbs).not.toContain('send-keys');
     expect(verbs).not.toContain('kill-window');
     expect(verbs).not.toContain('kill-session');
     const started = fake.calls.filter((c) => c.args[0] === 'new-session').map((c) => c.args[3]);
-    expect(started).toEqual(['operator-dispatch']);
-    expect(fake.windows).toContain('executor-alpha');
+    expect(started).toEqual([Q('operator-dispatch')]);
+    expect(fake.windows).toContain(Q('executor-alpha'));
   });
 
   it('refuses up over a roster with any legacy-layout entry, before touching tmux or the roster', async () => {
@@ -575,19 +592,19 @@ describe('hierarchy up', () => {
   });
 
   it('records progress and reports when a window cannot be created', async () => {
-    fake.failStartFor = 'executor-alpha';
+    fake.failStartFor = Q('executor-alpha');
     await expect(hierarchyUp({ ...baseOpts, executors: 2 }, deps)).rejects.toThrow(
-      /could not start 'executor-alpha'/,
+      /could not start 'repo-executor-alpha'/,
     );
     expect(readRoster(boardDir).sessions.map((s) => s.name)).toEqual([
-      'planner',
-      'operator-dispatch',
+      Q('planner'),
+      Q('operator-dispatch'),
     ]);
   });
 
   it('attaches to the planner when one was started, using the attach/switch rule', async () => {
     await hierarchyUp({ ...baseOpts, executors: 0, attach: true }, deps);
-    expect(attached).toEqual([['attach-session', '-t', '=planner']]);
+    expect(attached).toEqual([['attach-session', '-t', `=${Q('planner')}`]]);
 
     // Inside tmux the same flag switches the client.
     fake = makeFakeTmux(registryDir);
@@ -595,12 +612,12 @@ describe('hierarchy up', () => {
     attached.length = 0;
     deps.env = { TMUX: '/tmp/tmux-1/default,123,0' };
     await hierarchyUp({ ...baseOpts, executors: 0, attach: true }, deps);
-    expect(attached).toEqual([['switch-client', '-t', '=planner']]);
+    expect(attached).toEqual([['switch-client', '-t', `=${Q('planner')}`]]);
   });
 
   it('attaches to the dispatch session when no planner was started', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true, attach: true }, deps);
-    expect(attached).toEqual([['attach-session', '-t', '=operator-dispatch']]);
+    expect(attached).toEqual([['attach-session', '-t', `=${Q('operator-dispatch')}`]]);
   });
 
   it('reports the exit code of the attach, and a warning (not a throw) when it cannot run', async () => {
@@ -619,14 +636,14 @@ describe('hierarchy up', () => {
     fake.run = (f, a, o) => {
       if (a[0] === 'new-session') started = true;
       // has-session on the planner is only asked again by attach, after the start
-      if (started && a[0] === 'has-session' && a.includes('=planner')) {
+      if (started && a[0] === 'has-session' && a.includes(`=${Q('planner')}`)) {
         return { status: 1, stdout: '', stderr: 'gone' };
       }
       return realRun(f, a, o);
     };
     const r2 = await hierarchyUp({ ...baseOpts, executors: 0, attach: true }, deps);
     expect(r2.attachExitCode).toBe(1);
-    expect(logs.some((l) => l.includes("could not attach to 'planner'"))).toBe(true);
+    expect(logs.some((l) => l.includes(`could not attach to '${Q('planner')}'`))).toBe(true);
   });
 
   it('has no attach exit code when --attach was not requested', async () => {
@@ -648,7 +665,7 @@ describe('hierarchy up', () => {
 describe('hierarchy status', () => {
   it('prints every roster entry with live state and inflight task', async () => {
     await hierarchyUp(baseOpts, deps);
-    putInflight('AISDLC-100', 'executor-alpha');
+    putInflight('AISDLC-100', Q('executor-alpha'));
     // beta is busy in the registry; the others stay idle.
     for (const f of ['4003.json']) {
       const file = path.join(registryDir, f);
@@ -656,19 +673,22 @@ describe('hierarchy status', () => {
       writeFileSync(file, JSON.stringify({ ...doc, status: 'busy' }));
     }
     // dispatch window dies.
-    fake.windows = fake.windows.filter((w) => w !== 'operator-dispatch');
+    fake.windows = fake.windows.filter((w) => w !== Q('operator-dispatch'));
     rmSync(path.join(registryDir, '4001.json'));
 
     const result = hierarchyStatus(deps);
     const byName = Object.fromEntries(result.rows.map((r) => [r.entry.name, r]));
-    expect(byName['executor-alpha']).toMatchObject({ state: 'idle', inflightTask: 'AISDLC-100' });
-    expect(byName['executor-beta']).toMatchObject({ state: 'busy' });
-    expect(byName['executor-beta']?.inflightTask).toBeUndefined();
-    expect(byName['operator-dispatch']?.state).toBe('gone');
+    expect(byName[Q('executor-alpha')]).toMatchObject({
+      state: 'idle',
+      inflightTask: 'AISDLC-100',
+    });
+    expect(byName[Q('executor-beta')]).toMatchObject({ state: 'busy' });
+    expect(byName[Q('executor-beta')]?.inflightTask).toBeUndefined();
+    expect(byName[Q('operator-dispatch')]?.state).toBe('gone');
     expect(result.board.inflight).toBe(1);
 
     const text = formatStatus(result).join('\n');
-    expect(text).toContain('executor-alpha');
+    expect(text).toContain(Q('executor-alpha'));
     expect(text).toContain('AISDLC-100');
     expect(text).toContain('busy');
     expect(text).toContain('board: 0 queued, 1 inflight');
@@ -682,8 +702,8 @@ describe('hierarchy status', () => {
 
   it('reports gone when the window is dead even if a registry file exists', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    fake.windows = fake.windows.filter((w) => w !== 'executor-alpha');
-    const row = hierarchyStatus(deps).rows.find((r) => r.entry.name === 'executor-alpha');
+    fake.windows = fake.windows.filter((w) => w !== Q('executor-alpha'));
+    const row = hierarchyStatus(deps).rows.find((r) => r.entry.name === Q('executor-alpha'));
     expect(row?.state).toBe('gone');
   });
 
@@ -702,31 +722,31 @@ describe('hierarchy status', () => {
 
   it('shows an ATTACHED column per session, yes only when a client is attached', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    fake.attachedClients['executor-alpha'] = 1;
+    fake.attachedClients[Q('executor-alpha')] = 1;
     const result = hierarchyStatus(deps);
     const byName = Object.fromEntries(result.rows.map((r) => [r.entry.name, r.attached]));
-    expect(byName).toEqual({ 'operator-dispatch': false, 'executor-alpha': true });
+    expect(byName).toEqual({ [Q('operator-dispatch')]: false, [Q('executor-alpha')]: true });
     const json = JSON.parse(JSON.stringify(result)) as { rows: { attached: boolean }[] };
     expect(json.rows.map((r) => r.attached)).toEqual([false, true]);
 
     const lines = formatStatus(result);
     expect(lines[0]).toMatch(/STATE\s+ATTACHED\s+MODEL/);
-    expect(lines.find((l) => l.includes('executor-alpha'))).toMatch(/\byes\b/);
-    expect(lines.find((l) => l.includes('operator-dispatch'))).toMatch(/\bno\b/);
+    expect(lines.find((l) => l.includes(Q('executor-alpha')))).toMatch(/\byes\b/);
+    expect(lines.find((l) => l.includes(Q('operator-dispatch')))).toMatch(/\bno\b/);
     // The query is session-scoped and read-only.
     const q = fake.calls.filter((c) => c.args.includes('#{session_attached}'));
     expect(q.map((c) => c.args)).toEqual([
-      ['display-message', '-p', '-t', '=operator-dispatch', '#{session_attached}'],
-      ['display-message', '-p', '-t', '=executor-alpha', '#{session_attached}'],
+      ['display-message', '-p', '-t', `=${Q('operator-dispatch')}`, '#{session_attached}'],
+      ['display-message', '-p', '-t', `=${Q('executor-alpha')}`, '#{session_attached}'],
     ]);
   });
 
   it('reports not attached when tmux fails or the entry is gone', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    fake.attachedClients['executor-alpha'] = 2;
-    fake.windows = fake.windows.filter((w) => w !== 'executor-alpha');
+    fake.attachedClients[Q('executor-alpha')] = 2;
+    fake.windows = fake.windows.filter((w) => w !== Q('executor-alpha'));
     const rows = hierarchyStatus(deps).rows;
-    expect(rows.find((r) => r.entry.name === 'executor-alpha')).toMatchObject({
+    expect(rows.find((r) => r.entry.name === Q('executor-alpha'))).toMatchObject({
       state: 'gone',
       attached: false,
     });
@@ -761,22 +781,26 @@ describe('hierarchy status', () => {
 describe('hierarchy down', () => {
   it('returns only the named executor manifest to the queue and removes only its window and entry', async () => {
     await hierarchyUp(baseOpts, deps);
-    putInflight('AISDLC-200', 'executor-alpha');
-    putInflight('AISDLC-201', 'executor-beta');
+    putInflight('AISDLC-200', Q('executor-alpha'));
+    putInflight('AISDLC-201', Q('executor-beta'));
 
     const result = await hierarchyDown({ role: 'executor-beta' }, deps);
 
     expect(result.stopped).toEqual([
-      { name: 'executor-beta', role: 'executor', requeued: 'AISDLC-201', forced: false },
+      { name: Q('executor-beta'), role: 'executor', requeued: 'AISDLC-201', forced: false },
     ]);
     expect(existsSync(path.join(boardDir, 'queue', 'AISDLC-201.dispatch.json'))).toBe(true);
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-201.dispatch.json'))).toBe(false);
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-200.dispatch.json'))).toBe(true);
-    expect(fake.windows.sort()).toEqual(['executor-alpha', 'operator-dispatch', 'planner']);
+    expect(fake.windows.sort()).toEqual([
+      Q('executor-alpha'),
+      Q('operator-dispatch'),
+      Q('planner'),
+    ]);
     expect(readRoster(boardDir).sessions.map((s) => s.name)).toEqual([
-      'planner',
-      'operator-dispatch',
-      'executor-alpha',
+      Q('planner'),
+      Q('operator-dispatch'),
+      Q('executor-alpha'),
     ]);
   });
 
@@ -785,12 +809,14 @@ describe('hierarchy down', () => {
     fake.exitsOnRequest = false;
     const result = await hierarchyDown({ role: 'executor-alpha' }, deps);
     expect(result.stopped[0]?.forced).toBe(true);
-    expect(fake.windows).toEqual(['operator-dispatch']);
+    expect(fake.windows).toEqual([Q('operator-dispatch')]);
   });
 
   it('closes a confirmed pane by id, not the window by name, after the grace period', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    const paneId = readRoster(boardDir).sessions.find((e) => e.name === 'executor-alpha')?.paneId;
+    const paneId = readRoster(boardDir).sessions.find(
+      (e) => e.name === Q('executor-alpha'),
+    )?.paneId;
     fake.exitsOnRequest = false;
     const result = await hierarchyDown({ role: 'executor-alpha' }, deps);
     expect(result.stopped[0]?.forced).toBe(true);
@@ -802,24 +828,24 @@ describe('hierarchy down', () => {
 
   it('re-checks ownership immediately before the forced close: the marker vanishing during the grace period means no kill', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    putInflight('AISDLC-600', 'executor-alpha');
+    putInflight('AISDLC-600', Q('executor-alpha'));
     fake.exitsOnRequest = false;
     // The agent never exits; while down waits, the session is replaced by one that is not ours.
     deps.sleep = async () => {
-      fake.owned.delete('executor-alpha');
+      fake.owned.delete(Q('executor-alpha'));
     };
     const result = await hierarchyDown({ role: 'executor-alpha' }, deps);
 
     expect(result.stopped).toEqual([]);
-    expect(result.refused.map((r) => r.name)).toEqual(['executor-alpha']);
+    expect(result.refused.map((r) => r.name)).toEqual([Q('executor-alpha')]);
     expect(result.refused[0]?.reason).toMatch(/@ai-sdlc-hierarchy/);
     expect(
       fake.calls.filter((c) => c.args[0] === 'kill-pane' || c.args[0] === 'kill-window'),
     ).toEqual([]);
-    expect(fake.windows).toContain('executor-alpha');
-    expect(readRoster(boardDir).sessions.map((e) => e.name)).toContain('executor-alpha');
+    expect(fake.windows).toContain(Q('executor-alpha'));
+    expect(readRoster(boardDir).sessions.map((e) => e.name)).toContain(Q('executor-alpha'));
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-600.dispatch.json'))).toBe(true);
-    expect(logs.some((l) => l.includes("not closing 'executor-alpha'"))).toBe(true);
+    expect(logs.some((l) => l.includes(`not closing '${Q('executor-alpha')}'`))).toBe(true);
     // the exit request had already gone out on the first (passing) gate
     expect(fake.calls.filter((c) => c.args[0] === 'send-keys')).toHaveLength(1);
   });
@@ -852,9 +878,9 @@ describe('hierarchy down', () => {
   it('selects every executor by role and every session without a filter', async () => {
     await hierarchyUp(baseOpts, deps);
     const r1 = await hierarchyDown({ role: 'executor' }, deps);
-    expect(r1.stopped.map((s) => s.name)).toEqual(['executor-alpha', 'executor-beta']);
+    expect(r1.stopped.map((s) => s.name)).toEqual([Q('executor-alpha'), Q('executor-beta')]);
     const r2 = await hierarchyDown({}, deps);
-    expect(r2.stopped.map((s) => s.name)).toEqual(['planner', 'operator-dispatch']);
+    expect(r2.stopped.map((s) => s.name)).toEqual([Q('planner'), Q('operator-dispatch')]);
     expect(readRoster(boardDir).sessions).toEqual([]);
   });
 
@@ -866,15 +892,19 @@ describe('hierarchy down', () => {
 
   it('still cleans up a session whose window is already gone', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    putInflight('AISDLC-300', 'executor-alpha');
-    fake.windows = fake.windows.filter((w) => w !== 'executor-alpha');
+    putInflight('AISDLC-300', Q('executor-alpha'));
+    fake.windows = fake.windows.filter((w) => w !== Q('executor-alpha'));
     const r = await hierarchyDown({ role: 'executor-alpha' }, deps);
     expect(r.stopped[0]?.requeued).toBe('AISDLC-300');
   });
 });
 
 function craftedEntry(over: Record<string, unknown>) {
+  // A project-qualified session name must record its project (see unsafeEntryReason).
+  const qualified =
+    typeof over.tmuxSession === 'string' && over.tmuxSession.startsWith(`${PROJECT}-`);
   return {
+    ...(qualified ? { project: PROJECT } : {}),
     role: 'executor',
     name: 'victim',
     tmuxSession: 'main',
@@ -899,11 +929,14 @@ describe('untrusted roster entries', () => {
     ['another tmux session', { tmuxSession: 'main' }],
     ['another window name', { tmuxSession: 'ai-sdlc-hierarchy', tmuxWindow: 'a;b' }],
     ['a malformed pane id', { tmuxSession: 'ai-sdlc-hierarchy', paneId: '%1; rm' }],
-    ['a session and window that differ', { tmuxSession: 'planner', tmuxWindow: 'executor-alpha' }],
+    [
+      'a session and window that differ',
+      { tmuxSession: Q('planner'), tmuxWindow: Q('executor-alpha') },
+    ],
     ['a non-default session named after its window', { tmuxSession: 'editor' }],
     [
       'a malformed pane id in the new layout',
-      { tmuxSession: 'planner', tmuxWindow: 'planner', paneId: '%1; rm' },
+      { tmuxSession: Q('planner'), tmuxWindow: Q('planner'), paneId: '%1; rm' },
     ],
   ])('down never sends keys to or kills an entry naming %s', async (_n, over) => {
     fake.windows = ['editor'];
@@ -924,15 +957,15 @@ describe('untrusted roster entries', () => {
     const r = await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);
     expect(r.warnings.some((w) => w.includes('ignored'))).toBe(true);
     expect(readRosterChecked(boardDir).roster.sessions.map((s) => s.name)).toEqual([
-      'operator-dispatch',
+      Q('operator-dispatch'),
     ]);
   });
 
   it('refuses, sending nothing, when the recorded pane id is stale', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    putInflight('AISDLC-400', 'executor-alpha');
+    putInflight('AISDLC-400', Q('executor-alpha'));
     const roster = readRoster(boardDir);
-    const alpha = roster.sessions.find((s) => s.name === 'executor-alpha');
+    const alpha = roster.sessions.find((s) => s.name === Q('executor-alpha'));
     if (alpha) alpha.paneId = '%999';
     writeRoster(boardDir, roster);
 
@@ -940,16 +973,18 @@ describe('untrusted roster entries', () => {
 
     expect(r.stopped).toEqual([]);
     expect(r.refused).toHaveLength(1);
-    expect(r.refused[0]?.name).toBe('executor-alpha');
-    expect(r.refused[0]?.reason).toMatch(/pane %999 does not belong to window 'executor-alpha'/);
+    expect(r.refused[0]?.name).toBe(Q('executor-alpha'));
+    expect(r.refused[0]?.reason).toMatch(
+      /pane %999 does not belong to window 'repo-executor-alpha'/,
+    );
     expect(
       fake.calls.filter((c) => c.args[0] === 'send-keys' || c.args[0] === 'kill-window'),
     ).toEqual([]);
-    expect(fake.windows).toContain('executor-alpha');
+    expect(fake.windows).toContain(Q('executor-alpha'));
     // left in the roster, inflight work untouched
-    expect(readRoster(boardDir).sessions.map((e) => e.name)).toContain('executor-alpha');
+    expect(readRoster(boardDir).sessions.map((e) => e.name)).toContain(Q('executor-alpha'));
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-400.dispatch.json'))).toBe(true);
-    expect(logs.some((l) => l.includes("not stopping 'executor-alpha'"))).toBe(true);
+    expect(logs.some((l) => l.includes(`not stopping '${Q('executor-alpha')}'`))).toBe(true);
   });
 
   it('uses the pane id when it still belongs to the roster window', async () => {
@@ -960,9 +995,9 @@ describe('untrusted roster entries', () => {
   });
 
   it('matches inflight manifests by session name only, not window', async () => {
-    fake.nameFor = (n) => (n === 'executor-alpha' ? 'executor-alpha-2' : n);
+    fake.nameFor = (n) => (n === Q('executor-alpha') ? `${Q('executor-alpha')}-2` : n);
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    putInflight('AISDLC-400', 'executor-alpha');
+    putInflight('AISDLC-400', Q('executor-alpha'));
     const r = await hierarchyDown({ role: 'executor-alpha' }, deps);
     expect(r.stopped[0]?.requeued).toBeUndefined();
     expect(hierarchyStatus(deps).rows.every((x) => x.inflightTask === undefined)).toBe(true);
@@ -971,7 +1006,8 @@ describe('untrusted roster entries', () => {
 
 describe('session ownership marker', () => {
   const personal = (name: string) => ({
-    role: name === 'planner' ? 'planner' : 'executor',
+    project: PROJECT,
+    role: name.endsWith('planner') ? 'planner' : 'executor',
     name,
     tmuxSession: name,
     tmuxWindow: name,
@@ -989,7 +1025,7 @@ describe('session ownership marker', () => {
       (c) => c.args[0] === 'set-option' && c.args.includes('@ai-sdlc-hierarchy'),
     );
     expect(marks.map((c) => c.args)).toEqual(
-      ['planner', 'operator-dispatch', 'executor-alpha', 'executor-beta'].map((n) => [
+      [Q('planner'), Q('operator-dispatch'), Q('executor-alpha'), Q('executor-beta')].map((n) => [
         'set-option',
         '-t',
         `=${n}:`,
@@ -998,42 +1034,42 @@ describe('session ownership marker', () => {
       ]),
     );
     expect([...fake.owned].sort()).toEqual(
-      ['executor-alpha', 'executor-beta', 'operator-dispatch', 'planner'].sort(),
+      [Q('executor-alpha'), Q('executor-beta'), Q('operator-dispatch'), Q('planner')].sort(),
     );
     expect(marks.every((c) => !c.args.includes('-g'))).toBe(true);
   });
 
   it('warns, and keeps the agent, when a session cannot be marked; down then refuses it', async () => {
-    fake.failMarkFor = 'executor-alpha';
+    fake.failMarkFor = Q('executor-alpha');
     const r = await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
-    expect(r.started.map((e) => e.name)).toContain('executor-alpha');
+    expect(r.started.map((e) => e.name)).toContain(Q('executor-alpha'));
     expect(
-      r.warnings.some((w) => w.includes("'executor-alpha'") && w.includes('@ai-sdlc-hierarchy')),
+      r.warnings.some((w) => w.includes(Q('executor-alpha')) && w.includes('@ai-sdlc-hierarchy')),
     ).toBe(true);
 
     const down = await hierarchyDown({ role: 'executor-alpha' }, deps);
     expect(down.stopped).toEqual([]);
-    expect(down.refused.map((x) => x.name)).toEqual(['executor-alpha']);
+    expect(down.refused.map((x) => x.name)).toEqual([Q('executor-alpha')]);
   });
 
   it('down refuses a personal session with a default name and no marker: zero send-keys, nothing closed, roster and inflight kept', async () => {
-    fake.windows = ['executor-alpha'];
-    writeRawRoster([personal('executor-alpha')]);
-    putInflight('AISDLC-500', 'executor-alpha');
+    fake.windows = [Q('executor-alpha')];
+    writeRawRoster([personal(Q('executor-alpha'))]);
+    putInflight('AISDLC-500', Q('executor-alpha'));
 
     const r = await hierarchyDown({}, deps);
 
     expect(r.stopped).toEqual([]);
     expect(r.refused).toHaveLength(1);
     expect(r.refused[0]?.reason).toMatch(
-      /tmux session 'executor-alpha'.*@ai-sdlc-hierarchy.*did not start it/,
+      /tmux session 'repo-executor-alpha'.*@ai-sdlc-hierarchy.*did not start it/,
     );
     expect(
       fake.calls.filter((c) => c.args[0] === 'send-keys' || c.args[0] === 'kill-window'),
     ).toEqual([]);
-    expect(fake.windows).toEqual(['executor-alpha']);
+    expect(fake.windows).toEqual([Q('executor-alpha')]);
     expect(readRosterChecked(boardDir).roster.sessions.map((e) => e.name)).toEqual([
-      'executor-alpha',
+      Q('executor-alpha'),
     ]);
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-500.dispatch.json'))).toBe(true);
     // the check reads the session option of that exact session, before anything else is sent
@@ -1042,28 +1078,31 @@ describe('session ownership marker', () => {
       'show-options',
       '-v',
       '-t',
-      '=executor-alpha:',
+      `=${Q('executor-alpha')}:`,
       '@ai-sdlc-hierarchy',
     ]);
   });
 
   it('down proceeds once the marker is present', async () => {
-    fake.windows = ['executor-alpha'];
-    fake.owned.add('executor-alpha');
-    writeRawRoster([personal('executor-alpha')]);
+    fake.windows = [Q('executor-alpha')];
+    fake.owned.add(Q('executor-alpha'));
+    writeRawRoster([personal(Q('executor-alpha'))]);
     const r = await hierarchyDown({}, deps);
     expect(r.refused).toEqual([]);
-    expect(r.stopped.map((x) => x.name)).toEqual(['executor-alpha']);
+    expect(r.stopped.map((x) => x.name)).toEqual([Q('executor-alpha')]);
     expect(fake.windows).toEqual([]);
   });
 
   it('down keeps going after a refusal: it stops the owned sessions and reports the rest', async () => {
     await hierarchyUp({ ...baseOpts, executors: 2, noPlanner: true }, deps);
-    fake.owned.delete('executor-alpha');
+    fake.owned.delete(Q('executor-alpha'));
     const r = await hierarchyDown({}, deps);
-    expect(r.refused.map((x) => x.name)).toEqual(['executor-alpha']);
-    expect(r.stopped.map((x) => x.name).sort()).toEqual(['executor-beta', 'operator-dispatch']);
-    expect(readRoster(boardDir).sessions.map((e) => e.name)).toEqual(['executor-alpha']);
+    expect(r.refused.map((x) => x.name)).toEqual([Q('executor-alpha')]);
+    expect(r.stopped.map((x) => x.name).sort()).toEqual([
+      Q('executor-beta'),
+      Q('operator-dispatch'),
+    ]);
+    expect(readRoster(boardDir).sessions.map((e) => e.name)).toEqual([Q('executor-alpha')]);
   });
 
   it('names the session with a trailing colon for every option call, never a bare =name', async () => {
@@ -1219,7 +1258,7 @@ describe('planner bypass guard', () => {
       permissions: { defaultMode: 'bypassPermissions' },
     });
     const r = await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
-    expect(r.existing.map((e) => e.name)).toContain('planner');
+    expect(r.existing.map((e) => e.name)).toContain(Q('planner'));
     expect(r.started).toEqual([]);
   });
 });
@@ -1390,15 +1429,15 @@ describe('hierarchy up events', () => {
     const events: { type: string; sessionName?: unknown; sessionRole?: unknown }[] = [];
     await hierarchyUp({ ...baseOpts, executors: 1 }, { ...deps, emit: (e) => events.push(e) });
     expect(events).toEqual([
-      { type: 'HierarchySessionStarted', sessionName: 'planner', sessionRole: 'planner' },
+      { type: 'HierarchySessionStarted', sessionName: Q('planner'), sessionRole: 'planner' },
       {
         type: 'HierarchySessionStarted',
-        sessionName: 'operator-dispatch',
+        sessionName: Q('operator-dispatch'),
         sessionRole: 'operator-dispatch',
       },
       {
         type: 'HierarchySessionStarted',
-        sessionName: 'executor-alpha',
+        sessionName: Q('executor-alpha'),
         sessionRole: 'executor',
       },
     ]);
@@ -1409,5 +1448,223 @@ describe('hierarchy up events', () => {
     const events: unknown[] = [];
     await hierarchyUp({ ...baseOpts, executors: 1 }, { ...deps, emit: (e) => events.push(e) });
     expect(events).toEqual([]);
+  });
+});
+
+describe('project-scoped session names', () => {
+  /** A harness registry file for a session started by something else. */
+  function foreignRegistryEntry(file: string, over: Record<string, unknown>): void {
+    mkdirSync(registryDir, { recursive: true });
+    writeFileSync(
+      path.join(registryDir, file),
+      JSON.stringify({
+        pid: 9001,
+        name: 'planner',
+        startedAt: NOW.getTime() - 60_000,
+        status: 'idle',
+        cwd: '/somewhere/else',
+        ...over,
+      }),
+    );
+  }
+
+  it('qualifies every session with the project and records it in the roster', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const roster = JSON.parse(readFileSync(rosterPath(boardDir), 'utf-8'));
+    expect(validateHierarchyRoster(roster).valid).toBe(true);
+    expect(roster.sessions.map((s: { name: string }) => s.name)).toEqual([
+      'repo-planner',
+      'repo-operator-dispatch',
+      'repo-executor-alpha',
+      'repo-executor-beta',
+    ]);
+    for (const s of roster.sessions as { project: string; tmuxSession: string; name: string }[]) {
+      expect(s.project).toBe('repo');
+      expect(s.tmuxSession).toBe(s.name);
+    }
+    expect(newWindowCommands()[0]).toContain("--name 'repo-planner'");
+  });
+
+  it('uses --project instead of the repository basename', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true, project: 'proj-x' }, deps);
+    const sessions = readRoster(boardDir).sessions;
+    expect(sessions.map((s) => s.name)).toEqual([
+      'proj-x-operator-dispatch',
+      'proj-x-executor-alpha',
+    ]);
+    expect(sessions.every((s) => s.project === 'proj-x')).toBe(true);
+  });
+
+  it('rejects an invalid --project before touching tmux, and says what to pass', async () => {
+    await expect(hierarchyUp({ ...baseOpts, project: 'Bad Name' }, deps)).rejects.toThrow(
+      /invalid project 'Bad Name'.*--project <name>/,
+    );
+    await expect(hierarchyUp({ ...baseOpts, project: 'a'.repeat(31) }, deps)).rejects.toThrow(
+      /invalid project/,
+    );
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('asks for --project when the repository directory gives no usable name', async () => {
+    await expect(hierarchyUp(baseOpts, { ...deps, cwd: '/___' })).rejects.toThrow(
+      /--project <name>/,
+    );
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('two hierarchies on one machine with the same role names get distinct names', async () => {
+    const otherBoard = path.join(tmp, 'other-dispatch');
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const second = await hierarchyUp(
+      { ...baseOpts, executors: 1 },
+      { ...deps, cwd: '/other-project', boardDir: otherBoard },
+    );
+    expect(second.started.map((e) => e.name)).toEqual([
+      'other-project-planner',
+      'other-project-operator-dispatch',
+      'other-project-executor-alpha',
+    ]);
+    const first = readRoster(boardDir).sessions.map((s) => s.name);
+    const other = readRoster(otherBoard).sessions.map((s) => s.name);
+    expect(first.filter((n) => other.includes(n))).toEqual([]);
+    // No tmux session was created twice, and none was closed to make room.
+    const created = fake.calls.filter((c) => c.args[0] === 'new-session').map((c) => c.args[3]);
+    expect(new Set(created).size).toBe(created.length);
+    expect(
+      fake.calls.some((c) => c.args[0] === 'kill-window' || c.args[0] === 'kill-session'),
+    ).toBe(false);
+  });
+
+  it('refuses to start while sessions with the same bare role names run for another project', async () => {
+    foreignRegistryEntry('9001.json', { name: 'planner' });
+    foreignRegistryEntry('9002.json', { pid: 9002, name: 'executor-alpha' });
+    deps.isAlive = () => true;
+    const err = await hierarchyUp(baseOpts, deps).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toContain("'planner' (pid 9001)");
+    expect(message).toContain("'executor-alpha' (pid 9002)");
+    // Ends with the next step: pass --project, or stop the other sessions.
+    expect(message).toContain('--project <name>');
+    expect(message).not.toMatch(/SKIP_|bypass|--no-verify/i);
+    expect(newWindowCommands()).toEqual([]);
+    expect(existsSync(rosterPath(boardDir))).toBe(false);
+  });
+
+  it('with an explicit --project it warns loudly and starts', async () => {
+    foreignRegistryEntry('9001.json', { name: 'planner' });
+    deps.isAlive = () => true;
+    const r = await hierarchyUp({ ...baseOpts, executors: 0, project: 'mine' }, deps);
+    expect(r.started.map((e) => e.name)).toEqual(['mine-planner', 'mine-operator-dispatch']);
+    expect(r.warnings.some((w) => w.includes('another project') && w.includes("'planner'"))).toBe(
+      true,
+    );
+  });
+
+  it('ignores a dead session, and a session started in this same checkout', async () => {
+    foreignRegistryEntry('9001.json', { name: 'planner' });
+    deps.isAlive = () => false;
+    await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
+
+    rmSync(rosterPath(boardDir));
+    fake = makeFakeTmux(registryDir);
+    rmSync(registryDir, { recursive: true, force: true });
+    foreignRegistryEntry('9001.json', { name: 'planner', cwd: '/repo' });
+    deps.isAlive = () => true;
+    const r = await hierarchyUp({ ...baseOpts, executors: 0 }, deps);
+    expect(r.started.map((e) => e.name)).toContain('repo-planner');
+  });
+
+  it('migrates a roster without project: read as the repository basename, rewritten by up', async () => {
+    fake.windows = ['executor-alpha'];
+    fake.owned.add('executor-alpha');
+    writeRawRoster([
+      craftedEntry({
+        role: 'executor',
+        name: 'executor-alpha',
+        tmuxSession: 'executor-alpha',
+        tmuxWindow: 'executor-alpha',
+        paneId: '%1',
+      }),
+    ]);
+    expect(readFileSync(rosterPath(boardDir), 'utf-8')).not.toContain('"project"');
+    expect(readRosterChecked(boardDir, 'repo').roster.sessions[0]?.project).toBe('repo');
+
+    const r = await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+
+    // The running session is kept under its old name, not duplicated, and is flagged.
+    expect(r.existing.map((e) => e.name)).toEqual(['executor-alpha']);
+    expect(r.started.map((e) => e.name)).toEqual(['repo-operator-dispatch']);
+    expect(
+      r.warnings.some((w) => w.includes('unqualified') && w.includes('repo-executor-alpha')),
+    ).toBe(true);
+    const raw = JSON.parse(readFileSync(rosterPath(boardDir), 'utf-8'));
+    expect(validateHierarchyRoster(raw).valid).toBe(true);
+    expect(raw.sessions.map((s: { project: string }) => s.project)).toEqual(['repo', 'repo']);
+  });
+
+  it('rewrites a roster without project even when nothing needs starting', async () => {
+    fake.windows = ['operator-dispatch'];
+    fake.owned.add('operator-dispatch');
+    writeRawRoster([
+      craftedEntry({
+        role: 'operator-dispatch',
+        name: 'operator-dispatch',
+        tmuxSession: 'operator-dispatch',
+        tmuxWindow: 'operator-dispatch',
+        paneId: '%1',
+      }),
+    ]);
+    await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, deps);
+    expect(readRoster(boardDir).sessions[0]?.project).toBe('repo');
+  });
+
+  it('does not take a foreign session named like a role for one of ours', () => {
+    // `my-planner` ends in a role name but records no project.
+    expect(
+      unsafeEntryReason(
+        craftedEntry({
+          role: 'planner',
+          tmuxSession: 'my-planner',
+          tmuxWindow: 'my-planner',
+        }) as RosterEntry,
+      ),
+    ).toMatch(/not one of the default hierarchy session names/);
+    // A qualified name must record the same project.
+    const qualified = craftedEntry({
+      role: 'planner',
+      tmuxSession: 'repo-planner',
+      tmuxWindow: 'repo-planner',
+    }) as RosterEntry;
+    expect(unsafeEntryReason({ ...qualified, project: 'repo' })).toBeUndefined();
+    expect(unsafeEntryReason({ ...qualified, project: 'other' })).toMatch(
+      /records project 'other'/,
+    );
+  });
+
+  it('down accepts the unqualified role name within the own roster', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    const down = await hierarchyDown({ role: 'executor-alpha' }, deps);
+    expect(down.stopped.map((s) => s.name)).toEqual(['repo-executor-alpha']);
+  });
+
+  it('name helpers: qualify, split, sanitise and keep roles recoverable', () => {
+    expect(PROJECT_SEPARATOR).toBe('-');
+    expect(qualifiedName('ai-sdlc', 'executor-beta')).toBe('ai-sdlc-executor-beta');
+    expect(splitSessionName('ai-sdlc-executor-beta')).toEqual({
+      project: 'ai-sdlc',
+      bare: 'executor-beta',
+    });
+    expect(splitSessionName('planner')).toEqual({ project: undefined, bare: 'planner' });
+    expect(splitSessionName('x-operator-dispatch')?.bare).toBe('operator-dispatch');
+    expect(splitSessionName('something-else')).toBeUndefined();
+    expect(roleOfDefaultName('ai-sdlc-executor-beta')).toBe('executor');
+    expect(roleOfDefaultName('ai-sdlc-planner')).toBe('planner');
+    expect(roleOfDefaultName('ai-sdlc-nothing')).toBeUndefined();
+    expect(sanitizeProject('My_Project.v2')).toBe('my-project-v2');
+    expect(sanitizeProject('___')).toBe('');
+    expect(sanitizeProject('a'.repeat(50))).toHaveLength(30);
+    // Longest name still fits the 48 character session-name limit.
+    expect(isValidSessionName(qualifiedName('a'.repeat(30), 'operator-dispatch'))).toBe(true);
   });
 });

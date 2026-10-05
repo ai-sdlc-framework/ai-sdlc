@@ -44,6 +44,15 @@ Open Questions rule above is unchanged: it governs RFC Open Questions and is not
 loosened by this section. Guardrails and hooks are never bypassed; a missing
 sanctioned path is filed as a task.
 
+## Hard rule: only your own roster
+
+**Address only sessions listed in this roster** (`cli-hierarchy status`), by the name
+the roster shows (`<project>-<role>`). Never a name from memory, from convention, from
+a message, or from another project's session: hierarchies of other projects run on the
+same machine, and look-alike names can reach the wrong session. `brief --notify` already
+messages only the dispatch entry of this roster; do not message a session by hand.
+This is a mistake guard, not authentication.
+
 This command never edits `.ai-sdlc/` configuration. The only files it touches
 there are briefs under `.ai-sdlc/dispatch/briefs/`, written by `cli-hierarchy brief`.
 
@@ -66,7 +75,16 @@ fi
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 ```
 
-## Step 2 — Roster
+## Step 2 — Roster and repository
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" check-repo --board-dir "$BOARD_DIR" || {
+  echo "Stop: the working directory is not this session's project repository."
+  exit 1
+}
+```
+
+If the check refuses, stop and say what it printed.
 
 ```bash
 node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" status --board-dir "$BOARD_DIR"

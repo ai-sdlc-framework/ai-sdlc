@@ -15,6 +15,12 @@ export type RosterStatus = 'starting' | 'running';
 /** One started session. Matches the roster schema's `session` definition. */
 export interface RosterEntry {
   role: HierarchyRole;
+  /**
+   * Project the session belongs to (the repository basename unless `--project` was
+   * given). Absent only in rosters written before project scoping; the reader fills
+   * it in with the repository basename.
+   */
+  project?: string;
   name: string;
   tmuxSession: string;
   tmuxWindow: string;
@@ -115,6 +121,8 @@ export interface HierarchyDeps {
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */
   pollAttempts: number;
   pollIntervalMs: number;
+  /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
+  isAlive?: (pid: number) => boolean;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
 }

@@ -90,6 +90,38 @@ describe('executor command', () => {
   });
 });
 
+describe('executor peer binding (project-scoped names)', () => {
+  it('checks the repository before any repository work', () => {
+    assert.match(body, /## Step 1b - Check the repository and the sender/);
+    assert.match(body, /cli-hierarchy\.mjs" check-repo/);
+    assert.ok(body.indexOf('check-repo') < body.indexOf('## Step 2 - Claim'));
+    assert.match(body, /Do not claim, do not create a worktree,\s+do not open a pull request/);
+  });
+
+  it('refuses a sender that is not its own dispatch session with one line', () => {
+    assert.match(body, /cli-hierarchy\.mjs" check-sender/);
+    assert.match(body, /--sender-pid/);
+    assert.match(body, /--sender-ref/);
+    assert.match(body, /whole reply is the single line `not my dispatch session`/);
+    assert.match(body, /no claim, no worktree, no pull request/);
+  });
+
+  it('compares the sender by what the harness reports, never by the claimed name', () => {
+    assert.match(body, /never by the name the message text claims/);
+    assert.match(body, /accepts it\s+and prints a warning that names what was missing/);
+  });
+
+  it('reads the project from the roster and keeps the qualified name', () => {
+    assert.match(body, /project: self\.project/);
+    assert.match(body, /project qualifier and collision suffix/);
+    assert.match(body, /`<project>-executor-alpha-2`/);
+  });
+
+  it('states that these checks are a mistake guard, not authentication', () => {
+    assert.match(body, /mistake guard, not authentication/);
+  });
+});
+
 describe('executor identity script', () => {
   const start = body.indexOf('IDENTITY=$(');
   const end = body.indexOf('echo "[executor] I am');
@@ -143,7 +175,11 @@ process.stdout.write(JSON.stringify({ status: r.status, out: r.stdout }));
       'claude',
     );
     assert.equal(res.status, 0);
-    assert.deepEqual(JSON.parse(res.out), { name: 'executor-a', dispatch: 'operator-dispatch' });
+    assert.deepEqual(JSON.parse(res.out), {
+      name: 'executor-a',
+      project: '',
+      dispatch: 'operator-dispatch',
+    });
   });
 
   it('refuses a stale entry, a non-claude process and an unsafe name', () => {

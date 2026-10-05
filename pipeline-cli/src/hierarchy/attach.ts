@@ -9,7 +9,7 @@
 import { isLegacyLayoutEntry, readRosterChecked, unsafeEntryReason } from './roster.js';
 import { hasSession } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
-import { assertSessionName } from './validate.js';
+import { assertSessionName, splitSessionName } from './validate.js';
 
 /** True when the current process runs inside a tmux client. */
 export function insideTmux(env: NodeJS.ProcessEnv): boolean {
@@ -59,7 +59,9 @@ export function hierarchyAttach(name: string, deps: HierarchyDeps): number {
   for (const r of rejected) deps.log(`warning: ${r}; not touched`);
   const entry =
     roster.sessions.find((e) => e.tmuxWindow === name) ??
-    roster.sessions.find((e) => e.name === name);
+    roster.sessions.find((e) => e.name === name) ??
+    // The unqualified role name (`executor-beta`) selects it within this roster only.
+    roster.sessions.find((e) => splitSessionName(e.tmuxWindow)?.bare === name);
   if (!entry) {
     const names = roster.sessions.map((e) => e.tmuxWindow);
     throw new Error(

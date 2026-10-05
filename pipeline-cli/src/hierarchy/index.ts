@@ -108,6 +108,7 @@ export {
   isClaudeCommand,
   requireDispatchCaller,
   resolveCaller,
+  CALLER_NEXT_STEP,
   SAFE_SESSION_NAME,
   type CallerCheck,
   type CallerIdentity,
@@ -128,6 +129,16 @@ export {
   type PlaybookDeps,
   type PlaybookOutcome,
 } from './playbook.js';
+export {
+  checkDispatchSender,
+  checkRepoMatch,
+  NOT_MY_DISPATCH,
+  SENDER_UNVERIFIED_WARNING,
+  rosterProject,
+  type RepoCheck,
+  type SenderCheck,
+  type SenderIdentity,
+} from './peer-guard.js';
 export { findStartedSession, readSessionRegistry } from './registry.js';
 export { resolveCallerRole, type SessionRoleDeps } from './session-role.js';
 export {
@@ -143,6 +154,7 @@ export {
   emptyRoster,
   isLegacyLayoutEntry,
   readRoster,
+  defaultProjectForBoard,
   readRosterChecked,
   ROSTER_FILENAME,
   rosterPath,
@@ -182,6 +194,7 @@ export {
 export {
   buildClaudeCommand,
   FALLBACK_PLANNER_MODE,
+  findForeignSessions,
   hierarchyUp,
   type UpOptions,
   type UpResult,
@@ -193,6 +206,10 @@ export {
   isValidTaskId,
   MAX_EXECUTORS,
   parseExecutorCount,
+  PROJECT_SEPARATOR,
+  qualifiedName,
   roleOfDefaultName,
+  sanitizeProject,
   shellQuote,
+  splitSessionName,
 } from './validate.js';

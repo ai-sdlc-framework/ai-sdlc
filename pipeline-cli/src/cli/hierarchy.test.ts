@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -22,6 +23,7 @@ import {
   type IdentityDeps,
   type RosterEntry,
 } from '../hierarchy/index.js';
+import { sanitizeProject } from '../hierarchy/validate.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 
 let tmp: string;
@@ -156,7 +158,9 @@ describe('runHierarchyCli', () => {
       }),
     );
     expect(code).toBe(4);
-    expect(attached).toEqual([['attach-session', '-t', '=operator-dispatch']]);
+    // Names are qualified with the project: the basename of the working directory.
+    const project = sanitizeProject(path.basename(process.cwd()));
+    expect(attached).toEqual([['attach-session', '-t', `=${project}-operator-dispatch`]]);
   });
 
   it('status prints an empty roster as text and json', async () => {
@@ -969,5 +973,285 @@ describe('clear, tick and route-decision', () => {
       expect(await run(bad), JSON.stringify(bad)).toBe(2);
     }
     expect(events).toEqual([]);
+  });
+});
+
+/** A roster entry of a project-qualified hierarchy (`<project>-<role>`). */
+function projectEntry(
+  project: string,
+  role: RosterEntry['role'],
+  bare: string,
+  pid: number,
+): RosterEntry {
+  const name = `${project}-${bare}`;
+  return {
+    role,
+    project,
+    name,
+    tmuxSession: name,
+    tmuxWindow: name,
+    paneId: '%3',
+    pid,
+    model: 'sonnet',
+    permissionMode: 'bypassPermissions',
+    startedAt: '2026-10-04T12:00:00.000Z',
+    status: 'running',
+  };
+}
+
+describe('refusal messages name their next step', () => {
+  const asCaller = (role: RosterEntry['role'], name: string): IdentityDeps => ({
+    readSessions: () => [{ name, role, pid: 400, status: 'running' }],
+    parentPid: (pid) => (pid === 500 ? 400 : null),
+    comm: (pid) => (pid === 400 ? 'claude' : 'zsh'),
+    startPid: 500,
+  });
+  const lease = {
+    forcePushMode: 'never' as const,
+    protectedBranches: [] as string[],
+    ownWorktree: () => null,
+  };
+  const extras = (identity: IdentityDeps) => ({
+    identity,
+    lease,
+    operational: new Set<string>(),
+    enqueue: () => [],
+  });
+  /** A refusal must not point at a bypass: no skip variable, no hook-skipping flag. */
+  const noBypass = (message: string) => {
+    expect(message).not.toMatch(/SKIP_|bypass|--no-verify|AI_SDLC_/i);
+  };
+
+  it('caller binding: a non-dispatch caller is told to use the dispatch session', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(
+      ['tick'],
+      overrides(),
+      extras(asCaller('executor', 'p-executor-alpha')),
+    );
+    expect(code).toBe(1);
+    const message = String(err.mock.calls.at(-1)?.[0]);
+    expect(message).toContain('only the dispatch session');
+    expect(message).toContain(
+      'run it from the dispatch session in the main checkout, or ask the dispatch session to',
+    );
+    noBypass(message);
+  });
+
+  it('caller binding: an unknown caller and a mismatched --worker are told the same', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const nobody: IdentityDeps = {
+      readSessions: () => [],
+      parentPid: () => null,
+      comm: () => '',
+      startPid: 500,
+    };
+    expect(await runHierarchyCli(['tick'], overrides(), extras(nobody))).toBe(1);
+    const unknown = String(err.mock.calls.at(-1)?.[0]);
+    expect(unknown).toContain('not a running session in the roster');
+    expect(unknown).toContain(
+      'run it from the dispatch session in the main checkout, or ask the dispatch session to',
+    );
+
+    expect(
+      await runHierarchyCli(
+        ['tick', '--worker', 'someone-else'],
+        overrides(),
+        extras(asCaller('operator-dispatch', 'p-operator-dispatch')),
+      ),
+    ).toBe(1);
+    const mismatch = String(err.mock.calls.at(-1)?.[0]);
+    expect(mismatch).toContain('--worker does not match');
+    expect(mismatch).toContain(
+      'run it from the dispatch session in the main checkout, or ask the dispatch session to',
+    );
+    noBypass(unknown + mismatch);
+  });
+
+  it('caller binding: every location refusal ends with the next step', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const identity = asCaller('operator-dispatch', 'p-operator-dispatch');
+    const cases: { trustedBoard: { root: string; boardDir: string } | null; flags: string[] }[] = [
+      { trustedBoard: null, flags: [] },
+      { trustedBoard: { root: tmp, boardDir: path.join(tmp, 'elsewhere') }, flags: [] },
+      {
+        trustedBoard: { root: path.join(tmp, 'other'), boardDir: path.join(tmp, 'dispatch') },
+        flags: [],
+      },
+    ];
+    for (const c of cases) {
+      expect(
+        await runHierarchyCli(['tick', ...c.flags], overrides({ cwd: tmp }), {
+          ...extras(identity),
+          trustedBoard: c.trustedBoard,
+          installDir: null,
+        }),
+      ).toBe(1);
+      const message = String(err.mock.calls.at(-1)?.[0]);
+      expect(message).toContain(
+        'run it from the dispatch session in the main checkout, or ask the dispatch session to',
+      );
+      noBypass(message);
+    }
+  });
+
+  it('retry limit: a limit above 2 is told to use 2 or less, or escalate', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const code = await runHierarchyCli(
+      ['tick', '--retry-limit', '3'],
+      overrides(),
+      extras(asCaller('operator-dispatch', 'p-operator-dispatch')),
+    );
+    expect(code).toBe(2);
+    const message = String(err.mock.calls.at(-1)?.[0]);
+    expect(message).toContain('--retry-limit may not exceed 2');
+    expect(message).toContain('use 2 or less, or escalate');
+    expect(message).toContain('cli-decisions escalate');
+    noBypass(message);
+  });
+});
+
+describe('peer binding: two hierarchies on one machine', () => {
+  const dirA = () => path.join(tmp, 'a', '.ai-sdlc', 'dispatch');
+  const dirB = () => path.join(tmp, 'b', '.ai-sdlc', 'dispatch');
+
+  /** Both projects use the same unqualified role names; only the project differs. */
+  function seedBoth(): void {
+    writeRoster(dirA(), {
+      schemaVersion: 'v1',
+      sessions: [
+        projectEntry('proj-a', 'operator-dispatch', 'operator-dispatch', 700),
+        projectEntry('proj-a', 'executor', 'executor-alpha', 701),
+      ],
+    });
+    writeRoster(dirB(), {
+      schemaVersion: 'v1',
+      sessions: [
+        projectEntry('proj-b', 'operator-dispatch', 'operator-dispatch', 800),
+        projectEntry('proj-b', 'executor', 'executor-alpha', 801),
+      ],
+    });
+  }
+
+  it('the generated names carry the project, so the two rosters share no name', () => {
+    seedBoth();
+    const names = (dir: string): string[] =>
+      JSON.parse(readFileSync(path.join(dir, 'hierarchy.json'), 'utf-8')).sessions.map(
+        (s: { name: string }) => s.name,
+      );
+    expect(names(dirA())).toEqual(['proj-a-operator-dispatch', 'proj-a-executor-alpha']);
+    expect(names(dirB())).toEqual(['proj-b-operator-dispatch', 'proj-b-executor-alpha']);
+    expect(names(dirA()).some((n) => names(dirB()).includes(n))).toBe(false);
+  });
+
+  it('check-sender accepts the own dispatch session by pid and by ref', async () => {
+    seedBoth();
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-pid', '700'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(0);
+    expect(logs.at(-1)).toContain('proj-a-operator-dispatch');
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-ref', 'proj-a-operator-dispatch'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(0);
+  });
+
+  it('check-sender fails open with a logged warning when the envelope has no sender id', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(await runHierarchyCli(['check-sender'], overrides({ boardDir: dirA() }))).toBe(0);
+    const lines = err.mock.calls.map((c) => String(c[0]));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/no sender pid and no sender session ref/);
+    expect(logs).toEqual([JSON.stringify({ ok: true, verified: false })]);
+  });
+
+  it('check-sender refuses the foreign dispatch session with one line and nothing else', async () => {
+    seedBoth();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    logs.length = 0;
+    // The foreign dispatch session (pid 800, ref proj-b-...) messages the proj-a executor.
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-pid', '800'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(1);
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-ref', 'proj-b-operator-dispatch'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(1);
+    // The own executor is not the dispatch session either.
+    expect(
+      await runHierarchyCli(
+        ['check-sender', '--sender-pid', '701'],
+        overrides({ boardDir: dirA() }),
+      ),
+    ).toBe(1);
+    const lines = err.mock.calls.map((c) => String(c[0]));
+    expect(lines).toEqual(Array(3).fill('not my dispatch session\n'));
+    expect(logs).toEqual([]);
+  });
+
+  it('check-repo stops a session whose working directory is another project repository', async () => {
+    seedBoth();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const repoA = path.join(tmp, 'a');
+    const repoB = path.join(tmp, 'b');
+    const gitIn = (root: string) => (_args: readonly string[]) => path.join(root, '.git');
+
+    // Own repository: accepted.
+    expect(
+      await runHierarchyCli(['check-repo'], overrides({ boardDir: dirA(), cwd: repoA }), {
+        repoGit: gitIn(repoA),
+      }),
+    ).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string)).toEqual({ ok: true, project: 'proj-a' });
+
+    // The proj-a session sitting in the proj-b repository: stopped, with the next step.
+    expect(
+      await runHierarchyCli(['check-repo'], overrides({ boardDir: dirA(), cwd: repoB }), {
+        repoGit: gitIn(repoB),
+      }),
+    ).toBe(1);
+    const message = String(err.mock.calls.at(-1)?.[0]);
+    expect(message).toContain("belongs to project 'proj-a'");
+    expect(message).toContain('no repository work was started');
+    expect(message).toContain('Change to');
+    expect(message).not.toMatch(/SKIP_|bypass|--no-verify/i);
+
+    // Not a git repository at all.
+    expect(
+      await runHierarchyCli(['check-repo'], overrides({ boardDir: dirA(), cwd: tmp }), {
+        repoGit: () => null,
+      }),
+    ).toBe(1);
+  });
+
+  it('check-repo refuses a roster that records no project or mixes projects', async () => {
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    writeRoster(dirA(), {
+      schemaVersion: 'v1',
+      sessions: [
+        projectEntry('proj-a', 'operator-dispatch', 'operator-dispatch', 700),
+        projectEntry('proj-b', 'executor', 'executor-alpha', 801),
+      ],
+    });
+    expect(
+      await runHierarchyCli(
+        ['check-repo'],
+        overrides({ boardDir: dirA(), cwd: path.join(tmp, 'a') }),
+        {
+          repoGit: () => path.join(tmp, 'a', '.git'),
+        },
+      ),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('mixes projects');
   });
 });

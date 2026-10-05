@@ -12,7 +12,12 @@ import path from 'node:path';
 import { validateHierarchyRoster } from '@ai-sdlc/reference';
 
 import { HIERARCHY_TMUX_SESSION, type Roster, type RosterEntry } from './types.js';
-import { isValidSessionName, roleOfDefaultName } from './validate.js';
+import {
+  isValidSessionName,
+  roleOfDefaultName,
+  sanitizeProject,
+  splitSessionName,
+} from './validate.js';
 
 /** Roster filename under the dispatch board directory. */
 export const ROSTER_FILENAME = 'hierarchy.json';
@@ -20,6 +25,15 @@ export const ROSTER_FILENAME = 'hierarchy.json';
 /** Full path of the roster for a board directory. */
 export function rosterPath(boardDir: string): string {
   return path.join(boardDir, ROSTER_FILENAME);
+}
+
+/**
+ * Project a roster is read as when an entry has no `project` field (a roster written
+ * before project scoping): the basename of the repository that holds the board
+ * (`<repo>/.ai-sdlc/dispatch`), sanitised. Empty when nothing usable is left.
+ */
+export function defaultProjectForBoard(boardDir: string): string {
+  return sanitizeProject(path.basename(path.resolve(boardDir, '..', '..')));
 }
 
 /** An empty roster. */
@@ -107,6 +121,14 @@ export function unsafeEntryReason(entry: RosterEntry): string | undefined {
     if (roleOfDefaultName(entry.tmuxSession) === undefined) {
       return `names tmux session '${entry.tmuxSession}', which is not one of the default hierarchy session names`;
     }
+    // A project-qualified name must record the same project, so a session that merely
+    // ends in a role name (`my-planner`) is not taken for one of ours.
+    const split = splitSessionName(entry.tmuxSession);
+    if (split?.project !== undefined && entry.project !== split.project) {
+      return entry.project === undefined
+        ? `names tmux session '${entry.tmuxSession}', which is not one of the default hierarchy session names`
+        : `names tmux session '${entry.tmuxSession}' but records project '${entry.project}'`;
+    }
   }
   if (typeof entry.paneId !== 'string' || !/^(%[0-9]+)?$/.test(entry.paneId)) {
     return `has an invalid pane id '${String(entry.paneId)}'`;
@@ -118,9 +140,11 @@ export function unsafeEntryReason(entry: RosterEntry): string | undefined {
  * Read the roster, keeping only entries that pass validation. Entries that fail
  * the schema or name a tmux target outside the hierarchy session are returned
  * as `rejected` messages and are never acted on.
+ * An entry without a `project` is read as `defaultProject` (default: the repository
+ * basename, see {@link defaultProjectForBoard}); `up` writes it back.
  * @throws when the file is not valid JSON or its envelope is malformed.
  */
-export function readRosterChecked(boardDir: string): CheckedRoster {
+export function readRosterChecked(boardDir: string, defaultProject?: string): CheckedRoster {
   const file = rosterPath(boardDir);
   if (!existsSync(file)) return { roster: emptyRoster(), rejected: [] };
   let parsed: unknown;
@@ -153,7 +177,10 @@ export function readRosterChecked(boardDir: string): CheckedRoster {
       rejected.push(`${label} ('${entry.name}') ignored, it ${reason}`);
       return;
     }
-    sessions.push(entry);
+    const fallback = defaultProject ?? defaultProjectForBoard(boardDir);
+    sessions.push(
+      entry.project === undefined && fallback ? { ...entry, project: fallback } : entry,
+    );
   });
   return { roster: { schemaVersion: 'v1', sessions }, rejected };
 }

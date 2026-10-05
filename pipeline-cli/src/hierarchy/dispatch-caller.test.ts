@@ -71,6 +71,9 @@ const dirAt = (...parts: string[]): string => {
   return dir;
 };
 
+const NEXT_STEP =
+  '; run it from the dispatch session in the main checkout, or ask the dispatch session to run it';
+
 describe('install location', () => {
   it('passes when the command is installed inside the main checkout', () => {
     const main = initRepo(path.join(tmp, 'main'));
@@ -96,7 +99,7 @@ describe('install location', () => {
     const check = checkDispatchCaller(inputs(main, dirAt(wt, 'pipeline-cli')));
     expect(check).toEqual({
       ok: false,
-      reason: "cli-test: refused; the command is not running from the main checkout's install",
+      reason: `cli-test: refused; the command is not running from the main checkout's install${NEXT_STEP}`,
     });
   });
 
@@ -145,7 +148,7 @@ describe('install location', () => {
 
   it('refuses when the install directory cannot be determined or resolved', () => {
     const main = initRepo(path.join(tmp, 'main'));
-    const reason = "cli-test: refused; the command is not running from the main checkout's install";
+    const reason = `cli-test: refused; the command is not running from the main checkout's install${NEXT_STEP}`;
     expect(checkDispatchCaller(inputs(main, null))).toEqual({ ok: false, reason });
     expect(checkDispatchCaller(inputs(main, '/definitely/not/here'))).toEqual({
       ok: false,

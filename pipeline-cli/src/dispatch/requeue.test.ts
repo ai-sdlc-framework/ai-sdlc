@@ -347,6 +347,10 @@ describe('cli-dispatch requeue', () => {
     });
     expect(r.exit).toBe(1);
     expect(r.stderr).toContain('only the dispatch session');
+    // The refusal ends with the next step, never at a dead end.
+    expect(r.stderr).toContain(
+      'run it from the dispatch session in the main checkout, or ask the dispatch session to',
+    );
     expect(r.stdout).toBe('');
     expect(snapshot()).toEqual(before);
   });
@@ -376,6 +380,10 @@ describe('cli-dispatch requeue', () => {
     });
     expect(r.exit).toBe(1);
     expect(r.stderr).toContain('does not grant requeue');
+    // Names the way forward (record the decision) and the grant to change, and no bypass.
+    expect(r.stderr).toContain('cli-decisions escalate');
+    expect(r.stderr).toContain('spec.governance.operational');
+    expect(r.stderr).not.toMatch(/SKIP_|bypass|--no-verify|AI_SDLC_/i);
     expect(snapshot()).toEqual(before);
   });
 
@@ -393,6 +401,7 @@ describe('cli-dispatch requeue', () => {
     ]);
     expect(r.exit).toBe(2);
     expect(r.stderr).toContain('may not exceed 2');
+    expect(r.stderr).toContain('use 2 or less, or escalate');
     expect(snapshot()).toEqual(before);
   });
 

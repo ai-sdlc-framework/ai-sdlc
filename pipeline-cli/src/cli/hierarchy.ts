@@ -25,6 +25,13 @@
  *     [--retry-limit <n>] [--work-dir <path>]` — one wake-up of the dispatch
  *     loop: ingest briefs, handle new verdicts (clear, unblocking playbook),
  *     and print the escalations and reports to send, as JSON.
+ *   - `check-sender [--sender-pid <n>] [--sender-ref <ref>]` — exit 0 only when the
+ *     sender is this roster's running dispatch session (compared by pid or harness ref,
+ *     never by a name written in a message); otherwise print `not my dispatch session`
+ *     and exit 1. When the harness reports neither a pid nor a ref it fails open: a warning
+ *     on stderr, exit 0. Used by the executor skill before acting on an instruction.
+ *   - `check-repo` — exit 0 only when the working directory is in the repository that
+ *     owns this roster's board; otherwise print why and exit 1.
  *   - `route-decision --decision-id <id> --route operational|design --to <name>`
  *     — record that a decision was routed to a tier.
  *
@@ -65,6 +72,10 @@ import {
   hierarchyTerminals,
   hierarchyUp,
   loadOperationalPolicy,
+  checkDispatchSender,
+  checkRepoMatch,
+  readRosterChecked,
+  rosterProject,
   runDispatchTick,
   runPlaybook,
   SAFE_SESSION_NAME,
@@ -73,6 +84,7 @@ import {
   type CommandRunner,
   type DispatchCallerInputs,
   type ForcePushMode,
+  type GitRunner,
   type HierarchyDeps,
   type IdentityDeps,
   type OperationalPolicy,
@@ -91,6 +103,8 @@ Commands:
   clear      Empty an executor's context between tasks and restart its loop
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   route-decision  Record that a decision was routed to a tier
+  check-sender    Exit 0 only when a message sender is this roster's dispatch session
+  check-repo      Exit 0 only when the working directory is this roster's repository
 
 Options for up:
   --executors <n>          Number of executors, 0 to 5 (default 5)
@@ -98,6 +112,10 @@ Options for up:
   --dispatch-model <m>     Dispatch model (default opus)
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
+  --project <name>         Project the session names are qualified with: <project>-<role>
+                           (default the repository basename). Needed, with a distinct
+                           value, when sessions with the same role names already run
+                           for another project on this machine.
   --attach                 Show the planner (or the dispatch session) when done
   --allow-planner-bypass   Allow the planner to start in bypassPermissions mode
 
@@ -139,6 +157,11 @@ Options for tick:
   --settle-ms <n>          Settle time used for clears (default 8000)
   --retry-limit <n>        Re-queues allowed per failed task (default 2; a larger value is refused)
   --work-dir <path>        Repository root (default the current directory)
+
+Options for check-sender:
+  --sender-pid <n>         Pid the harness reports for the sender
+  --sender-ref <ref>       Session ref the harness reports for the sender
+  (a name written in the message text is never used)
 
 Options for route-decision:
   --decision-id <id>       Decision Catalog id
@@ -239,6 +262,8 @@ export async function runHierarchyCli(
     installDir?: DispatchCallerInputs['installDir'];
     /** Replaces the git runner the unblocking playbook uses (tests). */
     gitRun?: CommandRunner | AsyncCommandRunner;
+    /** Replaces the git lookup `check-repo` uses for the working directory's repository (tests). */
+    repoGit?: GitRunner;
     /** Replaces the board enqueue (tests). */
     enqueue?: (entries: EnqueueEntry[]) => string[];
   } = {},
@@ -285,6 +310,9 @@ export async function runHierarchyCli(
             executorModel: flags['executor-model'] ?? 'sonnet',
             noPlanner: flags['no-planner'] === 'true',
             attach: flags.attach === 'true',
+            ...(flags.project === undefined
+              ? {}
+              : { project: flags.project === 'true' ? '' : flags.project }),
             allowPlannerBypass: flags['allow-planner-bypass'] === 'true',
           },
           deps,
@@ -385,7 +413,7 @@ export async function runHierarchyCli(
         // and before anything is read, written or sent.
         if (retryLimit !== undefined && retryLimit > DEFAULT_REQUEUE_RETRY_LIMIT) {
           process.stderr.write(
-            `cli-hierarchy tick: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}\n`,
+            `cli-hierarchy tick: --retry-limit may not exceed ${DEFAULT_REQUEUE_RETRY_LIMIT}; use ${DEFAULT_REQUEUE_RETRY_LIMIT} or less, or escalate with \`cli-decisions escalate\`\n`,
           );
           return 2;
         }
@@ -440,6 +468,44 @@ export async function runHierarchyCli(
           ...(reportEveryMs === undefined ? {} : { reportEveryMs }),
         });
         deps.log(JSON.stringify(result));
+        return 0;
+      }
+      case 'check-sender': {
+        const pid = intFlag(flags, 'sender-pid');
+        if (pid === null) return 2;
+        const ref = flags['sender-ref'] === 'true' ? undefined : flags['sender-ref'];
+        const { roster } = readRosterChecked(deps.boardDir);
+        const check = checkDispatchSender(roster.sessions, { pid, ref });
+        if (!check.ok) {
+          process.stderr.write(`${check.reason}\n`);
+          return 1;
+        }
+        if (check.warning !== undefined) {
+          process.stderr.write(`cli-hierarchy check-sender: ${check.warning}\n`);
+          deps.log(JSON.stringify({ ok: true, verified: false }));
+          return 0;
+        }
+        deps.log(JSON.stringify({ ok: true, dispatch: check.name }));
+        return 0;
+      }
+      case 'check-repo': {
+        const { roster } = readRosterChecked(deps.boardDir);
+        const project = rosterProject(roster.sessions);
+        if (!project.ok) {
+          process.stderr.write(`cli-hierarchy check-repo: ${project.reason}\n`);
+          return 1;
+        }
+        const check = checkRepoMatch({
+          cwd: deps.cwd,
+          boardDir: deps.boardDir,
+          project: project.project,
+          ...(extras.repoGit ? { git: extras.repoGit } : {}),
+        });
+        if (!check.ok) {
+          process.stderr.write(`cli-hierarchy check-repo: ${check.reason}\n`);
+          return 1;
+        }
+        deps.log(JSON.stringify({ ok: true, project: check.project }));
         return 0;
       }
       case 'route-decision': {

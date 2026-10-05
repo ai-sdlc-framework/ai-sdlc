@@ -80,3 +80,15 @@ describe('planner authority is a record on main', () => {
     assert.doesNotMatch(match[2], /filing PR that carries the task/);
   });
 });
+
+describe('planner peer binding', () => {
+  it('addresses only sessions in its own roster', () => {
+    assert.match(match[2], /Address only sessions listed in this roster/);
+    assert.match(match[2], /mistake guard, not authentication/);
+  });
+
+  it('checks the repository against its roster before printing it', () => {
+    assert.match(match[2], /cli-hierarchy\.mjs" check-repo/);
+    assert.ok(match[2].indexOf('check-repo') < match[2].indexOf('cli-hierarchy.mjs" status'));
+  });
+});
