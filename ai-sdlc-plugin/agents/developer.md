@@ -137,18 +137,14 @@ grep -rl "old/path/to/file.md" backlog/
 ```
 If any backlog tasks reference the old path, update them in the same commit as the rename. Use `npx backlog-drift fix --task <TASK-ID>` to auto-fix a specific task.
 
-**Step 2 — run the pre-push drift check locally before pushing.**
+**Step 2 — run the drift check by hand before pushing.**
 After making your changes (especially any rename/move/delete), run:
 ```bash
 npx backlog-drift check
 ```
-If it reports any `error`-severity issues (`✗ Referenced file no longer exists: ...`), fix them BEFORE pushing. The pre-push gate (`scripts/check-backlog-drift-on-push.sh`) will catch these automatically and block the push, but running it manually as part of your verify step surfaces the issue faster:
-```bash
-# Manual pre-flight (the pre-push gate runs this automatically):
-./scripts/check-backlog-drift-on-push.sh < /dev/null  # no-op when stdin empty
-```
+If it reports any `error`-severity issues (`✗ Referenced file no longer exists: ...`), fix them BEFORE pushing. There is no local pre-push or pre-commit drift gate (AISDLC-712, DEC-0056); the Backlog Drift CI check is the gate that blocks merge, so running this by hand is how you find the problem in seconds rather than minutes.
 
-**Escape (emergency only):** `AI_SDLC_SKIP_BACKLOG_DRIFT_PUSH_GATE=1 git push` skips the local pre-push gate but does NOT bypass CI — the Backlog Drift CI gate is still required for merge.
+You may also run the Definition-of-Ready check by hand on a task file you changed: `node pipeline-cli/bin/cli-dor-check.mjs --task <path>`.
 
 **Motivating incident (AISDLC-486):** PR #789 renamed `ai-sdlc-plugin/commands/review.md` → `review-pr.md`. The backlog task AISDLC-71 referenced the old path. The rename was correct, but the missing reference update caused `backlog-drift check` to fail with `✗ Referenced file no longer exists`, blocking the PR until manually corrected. This rule exists to prevent that class of failure.
 
