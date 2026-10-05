@@ -2,7 +2,7 @@
 id: AISDLC-720
 title: >-
   Internal agents may edit .ai-sdlc config; the config block applies only to untrusted sources
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
