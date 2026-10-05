@@ -1253,6 +1253,21 @@ describe('readForcePushPolicy', () => {
     }
   });
 
+  it('a governance key with an unparseable inline value is malformed (never), not the default', () => {
+    for (const head of ['governance: {allowForcePush: never}', 'governance: *anchor']) {
+      const r = readForcePushPolicy(`spec:\n  ${head}\n    allowForcePush: leaseOnOwnBranch\n`);
+      expect(r.mode, head).toBe('never');
+      expect(r.source, head).toBe('malformed');
+    }
+    expect(
+      readForcePushPolicy('spec:\n  governance:   # note\n    allowForcePush: never\n'),
+    ).toEqual({
+      mode: 'never',
+      source: 'explicit',
+      raw: 'never',
+    });
+  });
+
   it('ignores an allowForcePush key outside the governance block', () => {
     expect(
       readForcePushPolicy(

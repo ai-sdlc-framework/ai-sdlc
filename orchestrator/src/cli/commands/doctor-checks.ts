@@ -1094,8 +1094,14 @@ export function readForcePushPolicy(yamlText: string | null): ForcePushPolicyRea
   let raw: string | undefined;
   for (const line of yamlText.split('\n')) {
     if (govIndent === null) {
-      const m = line.match(/^(\s*)governance:\s*$/);
-      if (m) govIndent = m[1].length;
+      const m = line.match(/^(\s*)governance:(.*)$/);
+      if (m) {
+        govIndent = m[1].length;
+        // Inline value (`governance: {..}`, `*anchor`) is unparseable here: fail closed.
+        if (m[2].replace(/^\s*(#.*)?$/, '') !== '') {
+          return { mode: 'never', source: 'malformed', raw: '<unparseable governance block>' };
+        }
+      }
       continue;
     }
     if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;

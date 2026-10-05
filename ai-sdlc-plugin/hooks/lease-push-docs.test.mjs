@@ -88,7 +88,8 @@ function verdict(command) {
     const out = execFileSync('node', [hookScript], {
       input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: wt }),
       cwd: wt,
-      env: { ...env, CLAUDE_PROJECT_DIR: repo },
+      // The dispatcher binds a main-checkout-rooted session to its one task.
+      env: { ...env, CLAUDE_PROJECT_DIR: repo, AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1' },
       encoding: 'utf-8',
       timeout: 10000,
     }).trim();
@@ -190,7 +191,7 @@ describe('spellings that must stay denied (so the files above cannot drift back)
     it(`denies: ${cmd}`, () => assert.equal(verdict(cmd), 'deny', cmd));
   }
 
-  it('AISDLC-710: the widened spellings are accepted (remote/refspec omitted, bare HEAD, full own ref)', () => {
+  it('AISDLC-710: bare HEAD and the omitted remote/refspec forms are refused (git config maps them)', () => {
     for (const cmd of [
       'git push --force-with-lease origin HEAD',
       'git push --force-with-lease --set-upstream origin HEAD',
@@ -199,7 +200,7 @@ describe('spellings that must stay denied (so the files above cannot drift back)
       'git push --force-with-lease',
       `git push --force-with-lease=${BRANCH}:0123abcd`,
     ]) {
-      assert.equal(verdict(cmd), 'allow', cmd);
+      assert.equal(verdict(cmd), 'deny', cmd);
     }
   });
 

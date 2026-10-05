@@ -104,10 +104,16 @@ function parseGovernanceBlock(yamlText) {
 
   for (const line of lines) {
     if (govIndent === null) {
-      const m = line.match(/^(\s*)governance:\s*$/);
+      const m = line.match(/^(\s*)governance:(.*)$/);
       if (m) {
         govIndent = m[1].length;
         found = true;
+        // Anything after the key other than a trailing comment (`governance: {..}`,
+        // `governance: *anchor`) cannot be parsed here: fail closed, never default.
+        if (m[2].replace(/^\s*(#.*)?$/, '') !== '') {
+          raw.allowForcePush = '<unparseable governance block>';
+          break;
+        }
       }
       continue;
     }

@@ -85,7 +85,6 @@ const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guar
 const {
   runGit: gitOut,
   probeRef,
-  configValues,
   readPolicyText,
   loadTrustedExtras,
   resolveLeaseWorktree,
@@ -203,8 +202,9 @@ function forcePushRefusal(why) {
   if (why === 'policy-never') {
     return (
       `force-push is refused because ${key} resolves to never (set explicitly in this repo). ` +
-      `Set it to leaseOnOwnBranch (the default when unset) to allow 'git push --force-with-lease origin ` +
-      `HEAD:refs/heads/<own-branch>' on a dispatched task's own branch. Plain force pushes and any ` +
+      `Agents must not edit .ai-sdlc/: escalate to the dispatch session and ask the operator to set ` +
+      `spec.governance.allowForcePush to leaseOnOwnBranch, which allows 'git push --force-with-lease ` +
+      `origin HEAD:refs/heads/<own-branch>' on a dispatched task's own branch. Plain force pushes and any ` +
       `push to main/master or a protected branch are never permitted.`
     );
   }
@@ -306,7 +306,6 @@ function enforceBash(command) {
         taskId: top ? readTaskId(top) : null,
         worktreeName: top ? basename(top) : null,
         refAliasState: (name) => refAliasState(name, lease.cwd),
-        pushConfig: (key) => configValues(key, lease.cwd),
       });
       if (verdict.decision === 'deny') deny(verdict.reason);
       leasePushAllowed = verdict.decision === 'allow';
@@ -323,7 +322,7 @@ function enforceBash(command) {
       deny(
         'could not evaluate the own-branch lease policy for this git push; ' +
           'spec.governance.allowForcePush = leaseOnOwnBranch in .ai-sdlc/agent-role.yaml ' +
-          "allows a lease push on the task worktree's own branch",
+          "allows 'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' on the task worktree's own branch",
       );
     }
   }
@@ -346,7 +345,8 @@ function enforceBash(command) {
       continue;
     }
     if (regex.test(trimmed)) {
-      const forceHint = /^git\s+push\b/i.test(pattern) && hasForcePushOption(trimmed);
+      const forceHint =
+        !leasePushAllowed && /^git\s+push\b/i.test(pattern) && hasForcePushOption(trimmed);
       deny(
         `command matches blockedAction pattern '${pattern}'` +
           (forceHint

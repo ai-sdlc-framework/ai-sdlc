@@ -22,7 +22,6 @@ const ctx = (over = {}) => ({
   protectedBranches: ['release/*', 'prod'],
   remotes: ['origin', 'fork'],
   aliasLookup: (n) => (n === 'fpush' ? 'push --force' : null),
-  pushConfig: () => [],
   ...over,
 });
 const verdict = (cmd, over) => evaluateLeasePush(cmd, ctx(over)).decision;
@@ -42,15 +41,6 @@ describe('evaluateLeasePush — allowed shapes', () => {
     `git push --force-with-lease origin refs/heads/${OWN}:refs/heads/${OWN}`,
     `git push --force-with-lease fork HEAD:refs/heads/${OWN}`,
     `  git push --force-with-lease origin HEAD:refs/heads/${OWN}  `,
-    // AISDLC-710 widened spellings: destination provably refs/heads/<own>.
-    `git push --force-with-lease origin HEAD`,
-    `git push origin --force-with-lease HEAD`,
-    `git push --force-with-lease`,
-    `git push --force-with-lease origin`,
-    `git push origin --force-with-lease`,
-    `git push --force-with-lease=${OWN}:0123abcd`,
-    `git push --force-with-lease=${OWN}:0123abcd origin`,
-    `git push -u --force-with-lease --force-if-includes origin HEAD`,
     `git push -q --force-with-lease origin HEAD:refs/heads/${OWN}`,
     `git push --verbose --force-with-lease origin HEAD:refs/heads/${OWN}`,
   ]) {
@@ -60,6 +50,12 @@ describe('evaluateLeasePush — allowed shapes', () => {
 
 describe('evaluateLeasePush — denied', () => {
   const denied = [
+    // AISDLC-710: git maps no-colon refspecs and omitted remote/refspec through config.
+    ['bare HEAD', 'git push --force-with-lease origin HEAD'],
+    ['bare HEAD, flag first', 'git push origin --force-with-lease HEAD'],
+    ['no remote or refspec', 'git push --force-with-lease'],
+    ['no refspec', 'git push --force-with-lease origin'],
+    ['lease value, no remote or refspec', `git push --force-with-lease=${OWN}:0123abcd`],
     ['lease to other branch', 'git push --force-with-lease origin other'],
     ['refspec local:other', `git push --force-with-lease origin ${OWN}:other`],
     ['HEAD:other', 'git push --force-with-lease origin HEAD:other'],

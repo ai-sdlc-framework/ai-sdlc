@@ -15,20 +15,17 @@
  *                                   allowed — block
  *
  * Posture: positively parse or block. The ALLOW shape is deliberately small:
- *   git push [<configured-remote-name>] [--force-with-lease[=<own>[:<sha>]]]
- *       [--force-if-includes] [-u|--set-upstream] [-q|-v] [<refspec>...]
+ *   git push <configured-remote-name> [--force-with-lease[=<own>[:<sha>]]]
+ *       [--force-if-includes] [-u|--set-upstream] [-q|-v] <refspec>...
  * with no quoting, no shell metacharacters, no wrapper/env prefix, no git
- * global options. Accepted refspecs are those whose destination is unambiguously
- * refs/heads/<own>: `HEAD`, `HEAD:refs/heads/<own>`,
- * `<own>:refs/heads/<own>`, `refs/heads/<own>:refs/heads/<own>`. When the remote
- * and/or refspec are omitted the REAL destination is resolved from git config
- * (remote.<name>.push, remote.<name>.mirror, push.default, branch.<own>.merge,
- * branch.<own>.pushRemote, remote.pushDefault) and the push is allowed only when
- * that provably lands on refs/heads/<own> on a configured remote (AISDLC-710).
- * A bare name without a colon (`<own>`, `refs/heads/<own>`) stays refused: git
- * maps it through the config and it can land on main. A short destination
- * (`<own>:<own>`) stays refused too: it is matched against remote refs we cannot
- * see (a tag of that name would win). Anything else that looks like a force-ish
+ * global options. The remote and a refspec are both required. Accepted refspecs have
+ * a fully qualified destination: `HEAD:refs/heads/<own>`, `<own>:refs/heads/<own>`,
+ * `refs/heads/<own>:refs/heads/<own>`. Every no-colon refspec (bare `HEAD`, `<own>`,
+ * `refs/heads/<own>`) is refused: git maps it through remote.<name>.push /
+ * push.default / branch.<own>.merge (or a local ref named HEAD) and it can land on
+ * main. An omitted remote or refspec is refused for the same reason. A short
+ * destination (`<own>:<own>`) is refused too: it is matched against remote refs we
+ * cannot see (a tag of that name would win). Anything else that looks like a force-ish
  * push is denied.
  *
  * ctx (all injected so tests never touch git):
@@ -47,11 +44,6 @@
  *                                       or trailing `*` prefix)
  *   remotes:           string[]       — configured remote NAMES
  *   aliasLookup:       (name) => string | null — git alias value, if any
- *   pushConfig:        (key) => string[] | null — every value of a git config
- *                                       key ([] = unset, null = unknown/error,
- *                                       which fails closed). Only consulted for
- *                                       the implicit-remote / implicit-refspec
- *                                       forms.
  *
  * Like the stash guard, a static matcher cannot defeat a deliberately hostile
  * agent (`X=--force; git push $X` style variable state is treated as
@@ -109,7 +101,6 @@ const SAFE_COMPANION_FLAGS = new Set([
   '-v',
   '--verbose',
 ]);
-const FALSE_BOOL = new Set(['false', 'no', 'off', '0', '']);
 
 /** Echoes a refused flag, except force/hook-skipping spellings (never repeated back as options). */
 function describeFlag(t) {
@@ -218,40 +209,6 @@ function classifySegment(toks, aliasLookup) {
   };
 }
 
-/**
- * Destination check for a lease push with NO refspec: returns a problem string, or
- * null when git provably sends the current branch to refs/heads/<own> on `remote`.
- * Any config lookup that fails (null) is a problem (fail closed).
- */
-function implicitDestinationProblem(remote, own, full, cfg) {
-  const mirror = cfg(`remote.${remote}.mirror`);
-  if (mirror === null) return 'remote.<name>.mirror could not be read from git config';
-  if (mirror.some((v) => !FALSE_BOOL.has(v.toLowerCase()))) {
-    return `remote '${remote}' is a mirror remote (a push would update every ref)`;
-  }
-  const pushSpecs = cfg(`remote.${remote}.push`);
-  if (pushSpecs === null) return `remote.${remote}.push could not be read from git config`;
-  if (pushSpecs.length > 0) {
-    const ok = new Set([`HEAD:${full}`, `${own}:${full}`, `${full}:${full}`]);
-    const bad = pushSpecs.find((v) => !ok.has(v));
-    return bad === undefined
-      ? null
-      : `remote.${remote}.push maps the push to '${bad}', not only to ${full}`;
-  }
-  const pd = cfg('push.default');
-  if (pd === null) return 'push.default could not be read from git config';
-  const mode = pd.length ? pd[pd.length - 1] : 'simple';
-  if (mode === 'simple' || mode === 'current') return null;
-  if (mode === 'upstream' || mode === 'tracking') {
-    const merge = cfg(`branch.${own}.merge`);
-    if (merge === null) return `branch.${own}.merge could not be read from git config`;
-    return merge.length === 1 && merge[0] === full
-      ? null
-      : `push.default=${mode} sends the branch to its upstream (branch.${own}.merge), not to ${full}`;
-  }
-  return `push.default=${mode} could send this push somewhere other than ${full}`;
-}
-
 function parseAllowedShape(command, ctx) {
   if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
   if (META_RE.test(command)) return 'shell metacharacters, quoting or expansion present';
@@ -306,26 +263,15 @@ function parseAllowedShape(command, ctx) {
   }
   if (!lease) return 'no --force-with-lease';
   const full = `refs/heads/${own}`;
-  const cfg = (key) => (typeof ctx.pushConfig === 'function' ? ctx.pushConfig(key) : null);
-  let [remote, ...refspecs] = positionals;
-  if (!remote) {
-    // No remote given: git picks branch.<own>.pushRemote, then remote.pushDefault,
-    // then branch.<own>.remote, then `origin`. Resolve it the same way.
-    const found = [`branch.${own}.pushRemote`, 'remote.pushDefault', `branch.${own}.remote`].map(
-      cfg,
-    );
-    if (found.some((v) => v === null)) {
-      return 'the push remote could not be resolved from git config';
-    }
-    const first = found.map((v) => v[v.length - 1]).find((v) => v !== undefined);
-    remote = first === undefined ? 'origin' : first;
+  // The remote and an explicit refspec are both required: with either omitted git
+  // resolves the destination through config (remote.<name>.push, push.default,
+  // branch.<own>.pushRemote ...) which a static check cannot bound.
+  const [remote, ...refspecs] = positionals;
+  if (!remote || refspecs.length === 0) {
+    return 'the remote and an explicit refspec are required (git resolves an omitted one through git config)';
   }
   if (!/^[A-Za-z0-9._-]+$/.test(remote) || !(ctx.remotes || []).includes(remote)) {
     return `remote '${remote}' is not a configured remote name`;
-  }
-  if (refspecs.length === 0) {
-    const problem = implicitDestinationProblem(remote, own, full, cfg);
-    if (problem) return problem;
   }
   for (const spec of refspecs) {
     const parts = spec.split(':');
@@ -333,18 +279,12 @@ function parseAllowedShape(command, ctx) {
     const [src, dst] = parts;
     if (!src || (parts.length === 2 && !dst)) return `refspec '${spec}' is empty or a delete`;
     if (parts.length === 1) {
-      // Only bare `HEAD` is accepted without a colon: git documents it as "push the
-      // current branch to the same name on the remote" and it resolves locally to the
-      // checked-out branch (verified against real git with push.default=upstream and
-      // remote.<name>.push mapped to main). Any OTHER no-colon name (`<own>`,
-      // `refs/heads/<own>`) is mapped by git through remote.<name>.push /
-      // push.default / branch.<own>.merge, which for a task branch cut from
-      // origin/main is refs/heads/main (also verified against real git), so it stays refused.
-      if (spec === 'HEAD') continue;
+      // No-colon refspecs (`HEAD`, `<own>`, `refs/heads/<own>`) are mapped by git
+      // through remote.<name>.push / push.default / branch.<own>.merge, so they can
+      // land on another ref (even main) via config or a local ref named like HEAD.
       return (
-        `the no-colon refspec '${spec}' is refused (git may map it through remote.<name>.push / ` +
-        `push.default / branch.<own>.merge to another ref, not necessarily ${full}); spell it ` +
-        `'HEAD' or 'HEAD:${full}'`
+        `the no-colon refspec '${spec}' is refused (git may map it through git config to another ` +
+        `ref, not necessarily ${full}); spell it 'HEAD:${full}'`
       );
     }
     // Colon form: git resolves a destination that is not fully qualified

@@ -354,34 +354,27 @@ spec:
   wins over the default and refuses every lease push; any other present value
   is malformed and fails closed to `never`. The PreToolUse hook permits a push
   only when ALL of these hold:
-  - it is a single `git push [<configured-remote>] --force-with-lease[=<own>[:<sha>]] [<refspec>...]`
+  - it is a single `git push <configured-remote> --force-with-lease[=<own>[:<sha>]] <refspec>`
     command (no chaining, quoting, wrapper, env prefix, `git -C`/`--git-dir`, or
     flags other than `-u`/`--set-upstream`, `--force-if-includes`, `-q`, `-v`;
     plain ASCII only; the flag may sit before or after the remote);
   - the destination provably lands on `refs/heads/<branch>` on a configured
-    remote. Accepted spellings: `HEAD`, `HEAD:refs/heads/<branch>`,
-    `<branch>:refs/heads/<branch>`, `refs/heads/<branch>:refs/heads/<branch>`,
-    and the forms with the remote and/or the refspec omitted
-    (`git push --force-with-lease`, `git push --force-with-lease origin`). For
-    the omitted forms the hook resolves the real destination from git config
-    instead of guessing: the remote comes from `branch.<branch>.pushRemote`,
-    then `remote.pushDefault`, then `branch.<branch>.remote`, then `origin`; the
-    push is accepted only when `remote.<name>.mirror` is not set, every
-    `remote.<name>.push` entry maps only to `refs/heads/<branch>`, and
-    `push.default` is `simple`/`current` (or `upstream`/`tracking` with
-    `branch.<branch>.merge` equal to `refs/heads/<branch>`). `matching`,
-    `nothing`, an unknown value, or a config lookup that fails is refused.
-    **A bare name without a colon (`git push --force-with-lease origin <branch>`
-    or `... origin refs/heads/<branch>`) is refused in every case.**
+    remote. The remote and a refspec are both required. Accepted spellings:
+    `HEAD:refs/heads/<branch>`, `<branch>:refs/heads/<branch>`,
+    `refs/heads/<branch>:refs/heads/<branch>`.
+    **Every refspec without a colon (bare `HEAD`, `<branch>`, `refs/heads/<branch>`)
+    and every omitted remote or refspec is refused.**
     Git does not send such a refspec to `refs/heads/<branch>`: it maps it
-    through `remote.<name>.push` and, under `push.default=upstream|tracking`,
-    through `branch.<branch>.merge`. Task branches are created from
-    `origin/main`, so they track `refs/heads/main`, and the "sanctioned" command
-    would force-push the task branch onto main (by accident with
+    through `remote.<name>.push`, `push.default` and, under
+    `push.default=upstream|tracking`, `branch.<branch>.merge`. Task branches are
+    created from `origin/main`, so they track `refs/heads/main`, and the "sanctioned"
+    command would force-push the task branch onto main (by accident with
     `push.default=upstream`, or on purpose with one
-    `git config remote.origin.push refs/heads/<branch>:refs/heads/main`); both are
-    reproduced against real git in the tests, as is the fact that bare `HEAD`
-    and an explicit `HEAD:refs/heads/<branch>` ignore that configuration. Short
+    `git config remote.origin.push refs/heads/<branch>:refs/heads/main`). Bare
+    `HEAD` is no safer: a local tag named `HEAD` plus
+    `git config remote.origin.push refs/tags/HEAD:refs/heads/main` overwrites main.
+    All of these are reproduced against real git in the tests, as is the fact
+    that an explicit `HEAD:refs/heads/<branch>` ignores that configuration. Short
     destinations such as `HEAD:<branch>` are refused too, because git resolves
     them against the remote with every rule (tags and notes refs win over heads),
     as are names such as `heads/x`, `tags/x`, `remotes/x`, `refs/x`;
@@ -397,8 +390,11 @@ spec:
     resolved) is directly under `<main checkout>/.worktrees/`; the project
     directory (`CLAUDE_PROJECT_DIR`) is either that worktree itself (a session
     rooted in worktree A that changes into sibling worktree B gets no lease from
-    B) or the main checkout (then the worktree must still be a genuine bound
-    `.worktrees/<id>`); the main checkout's `.git` is a real
+    B) or the main checkout, in which case the session must be bound to ONE task
+    by the `AI_SDLC_ACTIVE_TASK_ID` environment variable the hook itself sees
+    (set by the dispatcher; the agent's own commands cannot change it) and the
+    worktree's `.active-task` must equal it, so `cd .worktrees/<sibling>` gets no
+    lease and a main-checkout session without that variable gets none; the main checkout's `.git` is a real
     directory matching the git common dir, and the worktree's own git dir lives
     under `<main>/.git/worktrees/` with a `gitdir` back-pointer to the worktree.
     A forged directory elsewhere (for example `/tmp/x/aisdlc-700`), a symlinked
@@ -412,8 +408,8 @@ spec:
   - **the accepted spelling**: run, as its own standalone command from the
     worktree, `git push --force-with-lease origin HEAD:refs/heads/<branch>` with
     the branch printed by `git branch --show-current` written literally (no
-    variables, quotes, `cd &&`, chaining; `-u` is allowed, bare `HEAD` and
-    `--set-upstream HEAD` are not; a lease value, if given, is
+    variables, quotes, `cd &&`, chaining; `-u` is allowed; bare `HEAD`, `-u origin HEAD`
+    and the omitted-remote / omitted-refspec forms are refused; a lease value, if given, is
     `--force-with-lease=<branch>:<sha>`). The deny message for any other spelling
     names this one. The `/ai-sdlc rebase` command and the rebase/CI-conflict/developer agents use
     this spelling, and a test parses their push lines and runs them through the

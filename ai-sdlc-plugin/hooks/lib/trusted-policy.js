@@ -124,25 +124,6 @@ function readPolicyText(path) {
 }
 
 /**
- * All values of a git config key (`git config --get-all`) as seen from `cwd`.
- * Returns [] when the key is unset (exit 1) and null on ANY other failure, which
- * callers must treat as UNKNOWN and fail closed.
- */
-function configValues(key, cwd) {
-  const r = spawnSync('git', ['config', '--get-all', key], {
-    cwd,
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: GIT_TIMEOUT_MS,
-    env: gitEnv(),
-  });
-  if (r.error || r.signal) return null;
-  if (r.status === 1) return [];
-  if (r.status !== 0) return null;
-  return r.stdout.split('\n').filter((v) => v !== '');
-}
-
-/**
  * Reads the policy from the main checkout of the project dir's repo, after
  * checking the tool's cwd belongs to the same repo. Returns the extras
  * ({forcePushMode, operational, protectedBranches}) or null when the trusted
@@ -193,9 +174,16 @@ function resolveLeaseWorktree(projectDir, cwd, run = runGit) {
     if (!isUnder(top, worktreesDir) || dirname(top) !== worktreesDir) return null;
     // Own-session binding: a session whose project dir IS a task worktree may only
     // use the lease from that very worktree (not from a sibling it cd'd into).
-    // A session rooted at the main checkout is bound by the checks above and by
-    // the sentinel / directory / branch agreement the caller verifies.
-    if (realProj !== realMain && realProj !== top) return null;
+    // A session rooted at the main checkout has no worktree of its own, so it is
+    // bound to ONE task by AI_SDLC_ACTIVE_TASK_ID (the hook's own env; the agent's
+    // Bash commands cannot change it): the cwd worktree's .active-task must equal it.
+    // No binding, or a sibling worktree => no lease.
+    if (realProj !== realMain) {
+      if (realProj !== top) return null;
+    } else {
+      const bound = (process.env.AI_SDLC_ACTIVE_TASK_ID || '').toLowerCase();
+      if (!bound || readTaskId(top) !== bound) return null;
+    }
     const gitDirRaw = run(['rev-parse', '--git-dir'], cwd);
     if (!gitDirRaw) return null;
     const gitDir = safeReal(resolve(cwd, gitDirRaw));
@@ -248,7 +236,6 @@ module.exports = {
   GIT_TIMEOUT_MS,
   runGit,
   probeRef,
-  configValues,
   readPolicyText,
   safeReal,
   mainCheckoutRoot,

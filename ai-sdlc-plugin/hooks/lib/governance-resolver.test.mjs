@@ -259,6 +259,24 @@ describe('allowForcePush default (AISDLC-710)', () => {
       assert.equal(describeForcePushPolicyFromYaml(yaml).source, 'malformed', `v=${v}`);
     }
   });
+
+  it('a governance key with an unparseable inline value fails closed (never the default)', () => {
+    for (const head of ['governance: {allowForcePush: never}', 'governance: *anchor']) {
+      const yaml = `spec:\n  ${head}\n    allowForcePush: leaseOnOwnBranch\n`;
+      assert.equal(resolveGovernanceFromYaml(yaml).allowForcePush, false, head);
+      assert.equal(describeForcePushPolicyFromYaml(yaml).source, 'malformed', head);
+    }
+  });
+
+  it('a trailing comment after the governance key is parsed normally', () => {
+    const yaml = 'spec:\n  governance:   # note\n    allowForcePush: never\n';
+    assert.equal(describeForcePushPolicyFromYaml(yaml).source, 'explicit');
+    assert.equal(
+      describeForcePushPolicyFromYaml('spec:\n  governance: # note\n    allowMerge: never\n')
+        .source,
+      'default',
+    );
+  });
 });
 
 describe('resolveMergeAuthors (merge-if-eligible allow-list)', () => {
