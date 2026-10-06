@@ -1146,6 +1146,10 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     mkdirSync(join(fakePlugin, 'scripts'), { recursive: true });
     const stagedHelper = join(fakePlugin, 'scripts', 'sign-attestation.mjs');
     writeFileSync(stagedHelper, readFileSync(helperPath, 'utf-8'));
+    writeFileSync(
+      join(fakePlugin, 'scripts', 'format-envelope-json.mjs'),
+      readFileSync(join(__dirname, 'format-envelope-json.mjs'), 'utf-8'),
+    );
     writeRuntimeShim(installedRuntimePath(fakePlugin));
 
     const res = spawnSync(process.execPath, [stagedHelper, '--print-content-hash'], {
