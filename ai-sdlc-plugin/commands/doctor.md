@@ -55,6 +55,27 @@ echo "ai-sdlc doctor: could not locate the orchestrator CLI. Run \`ai-sdlc-plugi
 exit 1
 ```
 
+## Resolved pipeline-cli build (AISDLC-716)
+
+Before running the audit, report which pipeline-cli build this session resolves
+and its version, so a stale plugin cache shadowing the repo's own build is
+visible. The resolver prefers the repository's own `pipeline-cli` build over the
+plugin cache and warns on stderr (with the rebuild command
+`pnpm --filter @ai-sdlc/pipeline-cli build`) when that build is stale or missing:
+
+```bash
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/scripts}"
+PLUGIN_SCRIPTS_DIR="${PLUGIN_SCRIPTS_DIR:-$(pwd)/ai-sdlc-plugin/scripts}"
+if RESOLVED_BIN="$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh")"; then
+  RESOLVED_VERSION="$(node -p "require('$RESOLVED_BIN/../package.json').version" 2>/dev/null || echo unknown)"
+  echo "pipeline-cli build: $RESOLVED_BIN (version $RESOLVED_VERSION)"
+else
+  echo "pipeline-cli build: NOT RESOLVED (see resolver output above)"
+fi
+```
+
+Include that `pipeline-cli build:` line in the doctor output.
+
 ## When to run this
 
 - After `ai-sdlc init`, to confirm the scaffold landed cleanly.

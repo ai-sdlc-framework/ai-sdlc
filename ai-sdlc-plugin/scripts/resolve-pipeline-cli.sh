@@ -6,6 +6,13 @@
 #
 # Resolution order (first match wins):
 #
+#   0. AISDLC-716: the current repository contains the pipeline-cli workspace
+#      package itself (dogfood) → use THAT repo's build, never the plugin cache:
+#      the worktree's pipeline-cli (dist present and not older than src), else
+#      the main checkout's, else fall through to 1-6 with a stderr warning that
+#      names the rebuild command. Adopter repos have no such workspace and skip
+#      this step entirely.
+#
 #   1. CLAUDE_PLUGIN_DIR set + node_modules/@ai-sdlc/pipeline-cli/bin exists
 #      → Standard marketplace install with bundled deps. Use it.
 #
@@ -89,6 +96,51 @@ _deps_complete() {
   local plugin_dir="$1"
   _is_usable "$plugin_dir/$PIPELINE_CLI_REL" && _mcp_usable "$plugin_dir"
 }
+
+# ── Topology 0 (AISDLC-716): the repo's own pipeline-cli build ──────────────
+# A fix merged to main must be visible to executor sessions without waiting for
+# a plugin release, so inside a repo that ships the pipeline-cli workspace the
+# repo's own build beats the plugin cache. Everything diagnostic goes to stderr;
+# stdout stays path-only. Never fails the script (safe under set -e).
+_is_pipeline_cli_workspace() {
+  local pkg="$1/pipeline-cli/package.json"
+  [ -f "$pkg" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"@ai-sdlc/pipeline-cli"' "$pkg"
+}
+
+# 0 when pipeline-cli/dist exists and no source file is newer than its newest output.
+_repo_build_fresh() {
+  local cli="$1/pipeline-cli" newest
+  [ -d "$cli/dist" ] || return 1
+  newest="$(find "$cli/dist" -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1 || true)"
+  [ -n "$newest" ] || return 1
+  [ -z "$(find "$cli/src" "$cli/package.json" -type f \( -name '*.ts' -o -name package.json \) ! -name '*.test.ts' -newer "$newest" -print -quit 2>/dev/null)" ]
+}
+
+REPO_WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_ROOT"; then
+  REPO_MAIN_ROOT=""
+  GIT_COMMON="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$GIT_COMMON" ]; then
+    GIT_COMMON="$(cd "$GIT_COMMON" 2>/dev/null && pwd || true)"
+    [ "$(basename "$GIT_COMMON")" = ".git" ] && REPO_MAIN_ROOT="$(dirname "$GIT_COMMON")"
+  fi
+  REBUILD_HINT="run: pnpm --filter @ai-sdlc/pipeline-cli build"
+  REPO_WARN=""
+  for entry in "worktree:$REPO_WORKTREE_ROOT" "main checkout:$REPO_MAIN_ROOT"; do
+    LABEL="${entry%%:*}"
+    ROOT="${entry#*:}"
+    [ -n "$ROOT" ] || continue
+    [ "$LABEL" = "main checkout" ] && [ "$ROOT" = "$REPO_WORKTREE_ROOT" ] && continue
+    _is_pipeline_cli_workspace "$ROOT" || continue
+    if _is_usable "$ROOT/pipeline-cli/bin" && _repo_build_fresh "$ROOT"; then
+      echo "resolve-pipeline-cli.sh: using this repo's own pipeline-cli build ($LABEL: $ROOT/pipeline-cli), not the plugin cache" >&2
+      printf '%s' "$ROOT/pipeline-cli/bin"
+      exit 0
+    fi
+    REPO_WARN="${REPO_WARN:+$REPO_WARN; }$LABEL build at $ROOT/pipeline-cli is missing or older than its sources"
+  done
+  echo "resolve-pipeline-cli.sh: WARNING — $REPO_WARN; falling back to the plugin install, which may be older than this repo's sources ($REBUILD_HINT)" >&2
+fi
 
 # ── Topology 1: CLAUDE_PLUGIN_DIR set + deps bundled ────────────────────────
 if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
