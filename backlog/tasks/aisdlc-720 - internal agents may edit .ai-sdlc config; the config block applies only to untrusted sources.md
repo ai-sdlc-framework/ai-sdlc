@@ -9,8 +9,7 @@ labels:
   - governance
   - adopter
   - bug
-dependencies:
-  - AISDLC-721
+dependencies: []
 references:
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
   - spec/schemas/agent-role.schema.json
@@ -63,5 +62,5 @@ The hook and resolver half shipped in PR #1211 and plugin 0.23.0 (fail-closed: a
 - (c) Add a test or lint that fails if `AI_SDLC_INTERNAL_RUN` appears at job or workflow level or in a `$GITHUB_ENV` write.
 - (d) The task file moves to completed only when this half merges (the task-move skip is pre-approved for that PR).
 
-The workflow edit depends on AISDLC-721 being on main (it removes `.github/workflows/**` from `blockedPaths`).
+The workflow edit needs the planner-tracked blockedPaths change (task 721, which removes `.github/workflows/**` from `blockedPaths`) on main first.
 <!-- SECTION:DESCRIPTION:END -->
