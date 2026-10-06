@@ -309,6 +309,11 @@ jobs:
     permissions:
       statuses: write
       pull-requests: read
+    # AISDLC-720.1: this job takes outside input, so mark it untrusted
+    # explicitly (defense in depth; fail-closed already applies under
+    # GITHUB_ACTIONS). AI_SDLC_INTERNAL_RUN must never be set here.
+    env:
+      AI_SDLC_UNTRUSTED_RUN: '1'
     outputs:
       report_artifact: ${{ steps.sandbox.outputs.report_artifact }}
       sandbox_available: ${{ steps.check-sandbox.outputs.available }}

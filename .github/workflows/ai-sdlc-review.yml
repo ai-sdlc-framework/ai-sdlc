@@ -416,6 +416,11 @@ jobs:
     # in the `report` job (which already has `pull-requests: write`).
     permissions:
       pull-requests: read
+    # AISDLC-720.1: this job takes outside input, so mark it untrusted
+    # explicitly (defense in depth; fail-closed already applies under
+    # GITHUB_ACTIONS). AI_SDLC_INTERNAL_RUN must never be set here.
+    env:
+      AI_SDLC_UNTRUSTED_RUN: '1'
     outputs:
       testing: ${{ steps.review.outputs.testing }}
       critic: ${{ steps.review.outputs.critic }}

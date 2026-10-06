@@ -58,6 +58,11 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    # AISDLC-720.1: this job takes outside input, so mark it untrusted
+    # explicitly (defense in depth; fail-closed already applies under
+    # GITHUB_ACTIONS). AI_SDLC_INTERNAL_RUN must never be set here.
+    env:
+      AI_SDLC_UNTRUSTED_RUN: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
