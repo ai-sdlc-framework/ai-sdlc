@@ -2,7 +2,7 @@
 id: AISDLC-730
 title: >-
   Untrusted-run signal: make it survive child agents and cover every outside-triggered path
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-05'
 labels:
@@ -41,14 +41,14 @@ Finding 2026-10-05: the blocked-actions hook reads the policy from the main chec
 - Hermetic tests; temporary directories from `mkdtemp`.
 
 ## Acceptance Criteria
-- [ ] Design chosen and justified in the PR body: the untrusted state cannot be cleared by a descendant process (for example a marker outside the environment that the hook re-derives, rather than an environment variable a child can unset).
-- [ ] Every entry path that takes outside input sets the signal, with one test per path: gh-issue execution, rework-pr, inline taskSpec, the issue workflow, and the external-PR review workflow.
-- [ ] The issue workflow runs the Orchestrator path with the signal set, shown by a test over `.github/workflows/ai-sdlc.yml`.
-- [ ] Workflow side: `AI_SDLC_INTERNAL_RUN` appears only in step-level `env` and never via `$GITHUB_ENV`; a workflow test asserts both. Applied once the blockedPaths change is in.
-- [ ] A child agent started with the environment cleared is still treated as untrusted (test).
-- [ ] Regression test: local operator and executor sessions keep editing `.ai-sdlc/` with zero prompts.
-- [ ] Item 4 decided: either other CI systems are detected, or the limit stays documented with the reason.
-- [ ] `docs/api-reference/governance.md` updated.
+- [x] Design chosen and justified in the PR body: the untrusted state cannot be cleared by a descendant process (for example a marker outside the environment that the hook re-derives, rather than an environment variable a child can unset).
+- [x] Every entry path that takes outside input sets the signal, with one test per path: gh-issue execution, rework-pr, inline taskSpec, the issue workflow, and the external-PR review workflow.
+- [x] The issue workflow runs the Orchestrator path with the signal set, shown by a test over `.github/workflows/ai-sdlc.yml`.
+- [x] Workflow side: `AI_SDLC_INTERNAL_RUN` appears only in step-level `env` and never via `$GITHUB_ENV`; a workflow test asserts both. Applied once the blockedPaths change is in.
+- [x] A child agent started with the environment cleared is still treated as untrusted (test).
+- [x] Regression test: local operator and executor sessions keep editing `.ai-sdlc/` with zero prompts.
+- [x] Item 4 decided: either other CI systems are detected, or the limit stays documented with the reason.
+- [x] `docs/api-reference/governance.md` updated.
 
 ## Velocity impact
 Prevents an outside-triggered run from regaining the right to edit `.ai-sdlc/` config by dropping or clearing its own signal. The happy path (operator and executor sessions) gets zero new prompts, asserted by the regression test. When refused, the agent gets a message naming the blocked path and the fact that the run is marked untrusted; it should stop, report, and not retry with a modified environment.

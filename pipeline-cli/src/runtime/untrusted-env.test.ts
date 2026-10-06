@@ -1,8 +1,16 @@
 /** AISDLC-720 — producer of the untrusted-run signal. */
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import { UNTRUSTED_SPAWN_ENV, withUntrustedEnv } from './untrusted-env.js';
+import {
+  UNTRUSTED_MARKER_FILE,
+  UNTRUSTED_SPAWN_ENV,
+  withUntrustedEnv,
+  writeUntrustedMarker,
+} from './untrusted-env.js';
 import { ShellClaudePSpawner } from './shell-claude-p-spawner.js';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 
@@ -63,5 +71,47 @@ describe('ShellClaudePSpawner env passthrough', () => {
     await sp.spawn({ type: 'developer', prompt: 'p', cwd: '/x' });
     expect(envs[0]?.AI_SDLC_UNTRUSTED_RUN).toBe('1');
     expect(envs[1]).toBeUndefined();
+  });
+});
+
+describe('writeUntrustedMarker (AISDLC-730)', () => {
+  it('writes into a .git dir, follows a gitdir file, and returns null with no git dir', () => {
+    const d = mkdtempSync(join(tmpdir(), 'untrusted-marker-'));
+    try {
+      mkdirSync(join(d, 'plain', '.git'), { recursive: true });
+      const a = writeUntrustedMarker(join(d, 'plain'), 'why');
+      expect(a).toBe(join(d, 'plain', '.git', UNTRUSTED_MARKER_FILE));
+      expect(readFileSync(a!, 'utf8')).toBe('why\n');
+
+      mkdirSync(join(d, 'gd'));
+      mkdirSync(join(d, 'wt'));
+      writeFileSync(join(d, 'wt', '.git'), `gitdir: ${join(d, 'gd')}\n`);
+      expect(writeUntrustedMarker(join(d, 'wt'), 'x')).toBe(join(d, 'gd', UNTRUSTED_MARKER_FILE));
+
+      mkdirSync(join(d, 'rel-gd'));
+      mkdirSync(join(d, 'rel'));
+      writeFileSync(join(d, 'rel', '.git'), 'gitdir: ../rel-gd\n');
+      expect(writeUntrustedMarker(join(d, 'rel'), 'x')).toBe(
+        join(d, 'rel-gd', UNTRUSTED_MARKER_FILE),
+      );
+
+      writeFileSync(join(d, 'bad'), '');
+      mkdirSync(join(d, 'badwt'));
+      writeFileSync(join(d, 'badwt', '.git'), 'garbage');
+      expect(writeUntrustedMarker(join(d, 'badwt'), 'x')).toBeNull();
+      expect(writeUntrustedMarker(join(d, 'missing'), 'x')).toBeNull();
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('uses a custom reason in the spawn env', async () => {
+    const { seen, inner } = recorder();
+    await withUntrustedEnv(inner, 'rework-pr source').spawn({
+      type: 'developer',
+      prompt: 'p',
+      cwd: '/x',
+    });
+    expect(seen[0].env?.AI_SDLC_UNTRUSTED_REASON).toBe('rework-pr source');
   });
 });

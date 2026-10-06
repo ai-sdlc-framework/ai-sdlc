@@ -83,6 +83,7 @@ const {
   resolveGovernanceExtrasFromYaml,
   STRICT_DEFAULTS,
   isUntrustedRun,
+  UNTRUSTED_MARKER_FILE,
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
 const {
@@ -103,7 +104,8 @@ function failClosed(why) {
   process.exit(2);
 }
 process.on('uncaughtException', (err) => {
-  if (isUntrustedRun(process.env).untrusted) failClosed(String((err && err.message) || err));
+  if (isUntrustedRun(process.env, process.cwd()).untrusted)
+    failClosed(String((err && err.message) || err));
   process.stderr.write(String((err && err.stack) || err) + '\n');
   process.exit(1);
 });
@@ -121,7 +123,8 @@ try {
   input = JSON.parse(raw);
 } catch {
   // AISDLC-720: an untrusted run fails closed when its input cannot be read.
-  if (isUntrustedRun(process.env).untrusted) failClosed('could not read or parse the hook input');
+  if (isUntrustedRun(process.env, process.cwd()).untrusted)
+    failClosed('could not read or parse the hook input');
   process.exit(0);
 }
 
@@ -275,7 +278,9 @@ const SAFE_STASH_PATTERN =
 // Signal is read ONCE from this hook process's own environment. Nothing in the
 // tool input (including `VAR=0 cmd`, `export`, `unset`), agent-role.yaml, the
 // .active-task sentinel or project settings can change it.
-const UNTRUSTED = isUntrustedRun(process.env);
+// AISDLC-730: also re-derived from the untrusted marker file found by walking up from the
+// hook's cwd, so a child agent that cleared its environment is still untrusted.
+const UNTRUSTED = isUntrustedRun(process.env, toolCwd || process.cwd());
 // Governance config, CI workflows, and the enforcement mechanism itself.
 const UNTRUSTED_PROTECTED = [
   ['.ai-sdlc'],
@@ -292,6 +297,8 @@ function isProtectedForUntrusted(p) {
     .filter(Boolean)
     .map((x) => x.toLowerCase());
   if (segs[segs.length - 1] === '.active-task') return true;
+  // AISDLC-730: the untrusted marker itself (in the git dir) is not removable by an untrusted run.
+  if (segs[segs.length - 1] === UNTRUSTED_MARKER_FILE) return true;
   return UNTRUSTED_PROTECTED.some((seq) =>
     segs.some((_, i) => seq.every((part, j) => segs[i + j] === part)),
   );
@@ -334,7 +341,7 @@ function untrustedMessage(what) {
   const why = UNTRUSTED.reason ? ` (${UNTRUSTED.reason})` : '';
   return (
     `${what} is governance config or enforcement code, and this run is marked untrusted${why} ` +
-    `(AI_SDLC_UNTRUSTED_RUN is set for fork PRs, outside authors, or issue-sourced runs). ` +
+    `(AI_SDLC_UNTRUSTED_RUN or the git-dir untrusted marker is set for fork PRs, outside authors, or issue-sourced runs). ` +
     `Untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
     `ai-sdlc-plugin/hooks/** or .active-task. Next step: leave a note in the PR ` +
     `or issue asking a maintainer to make that change; do not retry or route around this. ` +
@@ -344,7 +351,7 @@ function untrustedMessage(what) {
   );
 }
 
-const PROT = String.raw`(?:\.ai-sdlc|\.github\/workflows|\.claude|\.husky|ai-sdlc-plugin\/hooks|\.active-task)`;
+const PROT = String.raw`(?:\.ai-sdlc|\.github\/workflows|\.claude|\.husky|ai-sdlc-plugin\/hooks|\.active-task|ai-sdlc-untrusted)`;
 const PROTECTED_SHELL_PATH = new RegExp(
   String.raw`(?:^|[\s'"=/<>:])${PROT}(?:\/|['"\s;|&]|$)`,
   'i',

@@ -30,6 +30,7 @@
  */
 
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { withUntrustedEnv, writeUntrustedMarker } from '../runtime/untrusted-env.js';
 import {
   aggregateVerdicts,
   buildDeveloperPrompt,
@@ -248,6 +249,12 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
   });
   const worktreePath = branchResult.worktreePath;
 
+  // AISDLC-730: reviewer findings come from PR comments (outside input), so the
+  // rework developer runs untrusted: env signal on every spawn + a file marker the
+  // hook re-derives even if a child agent clears its environment.
+  const spawner = withUntrustedEnv(opts.spawner, 'rework-pr source');
+  writeUntrustedMarker(worktreePath, 'rework-pr source');
+
   // 4. Fetch reviewer findings from PR comments
   logger.progress('rework-pr', `fetching reviewer findings from PR #${opts.prNumber}`);
   const findingsComments = await fetchReviewerFindings(opts.prNumber, opts.workDir, runner);
@@ -282,7 +289,7 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
 
   // 6. Spawn developer for rework
   logger.progress('rework-pr', `dispatching developer for rework`);
-  const devSpawn = await opts.spawner.spawn({
+  const devSpawn = await spawner.spawn({
     type: 'developer',
     prompt: reworkDevPrompt,
     cwd: worktreePath,
@@ -291,7 +298,7 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
   const parsedDev = await parseDeveloperReturnWithRetry({
     initialResult: devSpawn,
     cwd: worktreePath,
-    spawner: opts.spawner,
+    spawner,
   });
 
   if (!parsedDev.ok || !parsedDev.developer) {
@@ -316,7 +323,7 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
     runner,
   });
 
-  const reviewerResults = await opts.spawner.spawnParallel(
+  const reviewerResults = await spawner.spawnParallel(
     reviewBuild.prompts.map((p) => ({
       type: p.reviewer,
       prompt: p.prompt,
@@ -341,7 +348,7 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
     initialDeveloperReturn: initialDev,
     initialVerdict,
     maxIterations: maxReworkIterations,
-    spawner: opts.spawner,
+    spawner,
     onIteration: (_iteration, verdict) => {
       try {
         writer({ taskId, worktreePath, iteration: _iteration, verdict });

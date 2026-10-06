@@ -32,7 +32,7 @@ import {
 } from './steps/index.js';
 import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
-import { withUntrustedEnv } from './runtime/untrusted-env.js';
+import { withUntrustedEnv, writeUntrustedMarker } from './runtime/untrusted-env.js';
 import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
 import {
   DEFAULT_LOGGER,
@@ -68,7 +68,14 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   const sourceKind: 'backlog' | 'gh-issue' = opts.sourceKind ?? 'backlog';
   // AISDLC-720: agents working on a gh-issue run with the untrusted-run signal in
   // their process env, so the governance hook blocks .ai-sdlc/** and workflows.
-  const spawner = sourceKind === 'gh-issue' ? withUntrustedEnv(opts.spawner) : opts.spawner;
+  // AISDLC-730: an inline taskSpec with no sourceKind also came from outside the backlog.
+  const untrustedReason =
+    sourceKind === 'gh-issue'
+      ? 'gh-issue source'
+      : opts.taskSpec && opts.sourceKind === undefined
+        ? 'inline taskSpec source'
+        : null;
+  const spawner = untrustedReason ? withUntrustedEnv(opts.spawner, untrustedReason) : opts.spawner;
   // Review depth may only be relaxed for work the caller says is trusted backlog work.
   // An inline taskSpec with no sourceKind came from outside the backlog: untrusted.
   const reviewSourceKind: 'backlog' | 'gh-issue' | undefined =
@@ -212,6 +219,17 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
         : undefined,
     });
     worktreeCreated = true;
+
+    // AISDLC-730: persist the untrusted marker outside the agent's environment so a
+    // child agent that clears its env is still untrusted (hook re-derives it).
+    if (untrustedReason) {
+      const marker = writeUntrustedMarker(branch.worktreePath, untrustedReason);
+      if (!marker) {
+        logger.info(
+          `[ai-sdlc] untrusted-marker: no git dir at ${branch.worktreePath}; env signal only`,
+        );
+      }
+    }
 
     // Step 4 — AISDLC-199: beginTask now patches the worktree-local copy of
     // the task file (the fresh Step 3 checkout from origin/main) rather than
