@@ -1068,6 +1068,58 @@ export function fixWorktreeHooks(ctx: DoctorRunContext): DoctorFixResult {
   };
 }
 
+// ── Parent checkout state (AISDLC-708) ──────────────────────────────────
+
+/** Tracked paths whose index or working-tree content differs from HEAD, unique and sorted. */
+function readDivergedPaths(ctx: DoctorRunContext): string[] {
+  const paths = new Set<string>();
+  for (const extra of [[], ['--cached']]) {
+    const r = ctx.adapters.runCommand('git', [
+      '-C',
+      ctx.projectDir,
+      'diff',
+      '--name-only',
+      ...extra,
+      'HEAD',
+    ]);
+    if (r.exitCode !== 0) continue;
+    for (const line of r.stdout.split('\n')) if (line.trim() !== '') paths.add(line.trim());
+  }
+  return [...paths].sort();
+}
+
+/**
+ * The orchestrator parent checkout sits on `main` and is read-only by contract, so
+ * its index and working tree should equal HEAD. A divergence means something moved
+ * HEAD without moving the index/tree (the AISDLC-708 symptom: every path between the
+ * old and new main shows as a staged change) and consumers of the local checkout read
+ * mismatched files. Report-only: resetting could discard changes the pipeline did not
+ * make, so the remediation names the manual command. Quiet when the checkout is not on
+ * `main` (a feature worktree legitimately has local changes) or is clean.
+ */
+export function checkParentCheckoutState(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const branch = ctx.adapters.runCommand('git', [
+    '-C',
+    ctx.projectDir,
+    'symbolic-ref',
+    '--short',
+    'HEAD',
+  ]);
+  if (branch.exitCode !== 0 || branch.stdout.trim() !== 'main') return [];
+  const paths = readDivergedPaths(ctx);
+  if (paths.length === 0) return [];
+  const shown = paths.slice(0, 5).join(', ');
+  return [
+    {
+      id: 'parent-checkout-state',
+      severity: 'warn',
+      title: `parent checkout index/working tree differs from HEAD in ${paths.length} path(s): ${shown}${paths.length > 5 ? ', ...' : ''}`,
+      remediation: `Inspect with \`git -C ${ctx.projectDir} status\`. If the changes are not yours, run \`git -C ${ctx.projectDir} reset --hard origin/main\` (the parent is read-only by contract). Stale pipeline-cli/dist may need \`pnpm --filter @ai-sdlc/pipeline-cli build\` afterwards.`,
+      anonymizableEvidence: { divergedPathCount: paths.length },
+    },
+  ];
+}
+
 // ── Force-push policy (AISDLC-710) ──────────────────────────────────────
 
 export type ForcePushPolicySource = 'default' | 'explicit' | 'malformed';
@@ -1349,6 +1401,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
       'Worktrees under .worktrees/ whose git hooks directory has no executable pre-push while the main checkout has one (AISDLC-693).',
     run: checkWorktreeHooks,
     fix: fixWorktreeHooks,
+  },
+  {
+    id: 'parent-checkout-state',
+    description:
+      'Orchestrator parent checkout on main whose index or working tree differs from HEAD, with the path count (AISDLC-708).',
+    run: checkParentCheckoutState,
   },
   {
     id: 'force-push-policy',

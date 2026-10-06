@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# AISDLC-137: orchestrator-repo state hardening.
+# AISDLC-137 + AISDLC-358: orchestrator-repo state hardening.
 #
-# Idempotent self-heal for the parent repo's bare-flag + main-branch staleness.
-# Runs at the start of every /ai-sdlc execute dispatch (Step 0) so the
-# orchestrator state is correct before any worktree is created.
+# Idempotent self-heal for the parent repo's branch + bare-flag + main-branch
+# staleness. Runs at the start of every /ai-sdlc execute dispatch (Step 0) AND
+# at the entry of every autonomous orchestrator tick so the orchestrator state
+# is correct before any worktree is created or frontier work begins.
 #
 # Pattern C contract (memory: project_orchestrator_repo_layout.md):
 #   - Parent dir = non-bare, has main checked out
 #   - Parent's working tree on main is READ-ONLY by contract
 #   - All edits happen in .worktrees/<task-id>/
+#
+# Hard guards (AISDLC-358):
+#   1. Parent MUST be on `main`. If not:
+#      - Clean working tree → auto-checkout main + reset hard. Log recovery.
+#      - Dirty working tree → REFUSE (exit 1). Print branch + dirty paths + fix cmd.
+#   2. core.bare MUST be false (AISDLC-137). Auto-correct if true.
+#   3. Parent main ref MUST match origin/main. Reset --hard if clean + stale.
 #
 # Because parent is read-only, it's safe to git-reset --hard to origin/main
 # whenever a sync is needed — but only when the working tree is verifiably
@@ -43,7 +51,58 @@ fi
 PARENT_ROOT=$(dirname "$GIT_COMMON_DIR_ABS")
 cd "$PARENT_ROOT"
 
-# 1. Auto-correct core.bare if it's true. Some local editor extensions / tools
+# AISDLC-363: skip the orchestrator state check when running inside a GH
+# merge-queue read-only probe branch or a shallow CI clone. These run BEFORE
+# the AISDLC-358 parent-on-main guard because the queue probe IS a non-main
+# branch by design (sanctioned ephemeral state) and the guard would otherwise
+# try (and fail) to recover.
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [[ "$CURRENT_BRANCH" == gh-readonly-queue/* ]]; then
+  echo "[orchestrator-state] skipping: running inside GH merge-queue probe branch (${CURRENT_BRANCH})"
+  exit 0
+fi
+
+# Detect shallow clone: if git rev-parse refs/heads/main fails, we're likely
+# in a shallow checkout without a local main ref.
+if ! git rev-parse refs/heads/main >/dev/null 2>&1; then
+  echo "[orchestrator-state] skipping: local refs/heads/main not present — likely a shallow CI clone"
+  exit 0
+fi
+
+# 1a. AISDLC-358: Pattern-C contract — parent MUST be on main.
+#     Read the symbolic HEAD ref. If it's detached or on a feature branch,
+#     auto-recover (clean tree) or refuse (dirty tree).
+if [ -z "$CURRENT_BRANCH" ]; then
+  echo "[orchestrator-state] WARN: parent HEAD is detached; skipping branch check (manual recovery needed)"
+elif [ "$CURRENT_BRANCH" != "main" ]; then
+  # Parent is on the wrong branch. Inspect working tree cleanliness.
+  DIRTY_TRACKED_BRANCH=$(git status --porcelain 2>/dev/null | grep -vE "^\?\?" | head -1 || true)
+  if [ -n "$DIRTY_TRACKED_BRANCH" ]; then
+    # Dirty — cannot auto-recover safely. Refuse with clear instructions.
+    echo "[orchestrator-state] ERROR: parent working tree is on branch '$CURRENT_BRANCH' (expected 'main') AND has uncommitted tracked changes."
+    echo "[orchestrator-state]       Dirty paths:"
+    git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Recovery: stash or commit your changes, then run:"
+    echo "[orchestrator-state]   git -C \"${PARENT_ROOT}\" checkout main"
+    echo "[orchestrator-state]   git -C \"${PARENT_ROOT}\" reset --hard origin/main"
+    exit 1
+  else
+    # Clean tree — auto-recover: checkout main + reset to origin/main.
+    echo "[orchestrator-state] auto-recovering parent from '${CURRENT_BRANCH}' to main"
+    if ! git checkout main; then
+      echo "[orchestrator-state] ERROR: git checkout main failed in ${PARENT_ROOT}" >&2
+      exit 1
+    fi
+    if ! git reset --hard origin/main; then
+      echo "[orchestrator-state] ERROR: git reset --hard origin/main failed in ${PARENT_ROOT}" >&2
+      exit 1
+    fi
+    echo "[orchestrator-state] auto-recovered parent from '${CURRENT_BRANCH}' to main at $(git rev-parse --short HEAD)"
+    exit 0
+  fi
+fi
+
+# 1b. (AISDLC-137) Auto-correct core.bare if it's true. Some local editor extensions / tools
 #    flip this back periodically; we re-correct it on every dispatch.
 BARE=$(git config --get core.bare 2>/dev/null || echo "false")
 if [ "$BARE" = "true" ]; then
@@ -69,8 +128,26 @@ if [ -z "$ORIGIN_MAIN" ]; then
   exit 0
 fi
 
-# Already up-to-date — nothing to do.
+# AISDLC-708: the index/working tree can differ from HEAD even when HEAD is
+# current (something moved HEAD alone). Count tracked paths that diverge and warn
+# loudly; never auto-reset here, because the changes are not provably ours.
+DIVERGED_PATHS=$(
+  { git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached HEAD 2>/dev/null; } \
+  | sort -u | grep -v '^$' || true
+)
+DIVERGED_COUNT=0
+if [ -n "$DIVERGED_PATHS" ]; then
+  DIVERGED_COUNT=$(printf '%s\n' "$DIVERGED_PATHS" | wc -l | tr -d ' ')
+fi
+
+# Already up-to-date — nothing to sync.
 if [ "$HEAD_SHA" = "$ORIGIN_MAIN" ]; then
+  if [ "$DIVERGED_COUNT" -gt 0 ]; then
+    echo "[orchestrator-state] WARN: parent index/working tree differs from HEAD in ${DIVERGED_COUNT} path(s)"
+    printf '%s\n' "$DIVERGED_PATHS" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Inspect: git -C \"${PARENT_ROOT}\" status"
+    echo "[orchestrator-state] If the changes are not yours: git -C \"${PARENT_ROOT}\" reset --hard origin/main"
+  fi
   exit 0
 fi
 
@@ -80,11 +157,58 @@ fi
 #    in-flight backlog task drafts.
 DIRTY_TRACKED=$(git status --porcelain 2>/dev/null | grep -vE "^\?\?" | head -1 || true)
 if [ -n "$DIRTY_TRACKED" ]; then
-  echo "[orchestrator-state] WARN: parent working tree has uncommitted tracked changes; skipping reset"
-  echo "[orchestrator-state]       ${PARENT_ROOT}"
-  git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]         /'
-  echo "[orchestrator-state] Resolve manually: stash, commit, or discard. Then re-run."
-  exit 0
+  # AISDLC-369: "behind on main with no local edits" can manifest as tracked
+  # modifications when the only dirty paths are backlog task lifecycle files
+  # (backlog/tasks/*.md or backlog/completed/*.md) that were moved by a
+  # pipeline run or pre-push hook and staged/modified in the parent instead
+  # of the worktree. These modifications WILL be resolved by reset --hard to
+  # origin/main (because origin/main already has the correct state). We detect
+  # this case and proceed with the reset rather than refusing.
+  #
+  # Safety check: all dirty tracked paths must match the backlog task pattern.
+  # We use `git diff --name-only HEAD` + `git diff --name-only --cached HEAD`
+  # to enumerate changed paths without relying on porcelain's quoted-path
+  # format (which uses C-style quoting for filenames with spaces).
+  # If ANY changed path is outside backlog/{tasks,completed}/, we still refuse.
+  ALL_DIRTY_PATHS=$(
+    { git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached HEAD 2>/dev/null; } \
+    | sort -u
+  )
+  NON_BACKLOG=$(echo "$ALL_DIRTY_PATHS" | grep -vE '^backlog/(tasks|completed)/' | grep -v '^$' | head -1 || true)
+  if [ -n "$NON_BACKLOG" ]; then
+    echo "[orchestrator-state] WARN: parent working tree has uncommitted tracked changes; skipping reset"
+    echo "[orchestrator-state]       ${PARENT_ROOT}"
+    git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Resolve manually: stash, commit, or discard. Then re-run."
+    exit 0
+  fi
+  # AISDLC-708: resetting is only harmless when every dirty path already holds
+  # exactly what origin/main has (or is absent in both). Anything else is a local
+  # change we did not create: refuse instead of resetting over it.
+  UNSAFE_PATHS=""
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    if git cat-file -e "${ORIGIN_MAIN}:${p}" 2>/dev/null; then
+      # Present on origin/main: index and working tree must both match it.
+      if ! git diff --quiet "$ORIGIN_MAIN" -- "$p" 2>/dev/null \
+        || ! git diff --quiet --cached "$ORIGIN_MAIN" -- "$p" 2>/dev/null; then
+        UNSAFE_PATHS="${UNSAFE_PATHS}${p}"$'\n'
+      fi
+    else
+      # Gone on origin/main: only harmless if also gone from index and tree.
+      if git ls-files --error-unmatch -- "$p" >/dev/null 2>&1 || [ -e "$p" ]; then
+        UNSAFE_PATHS="${UNSAFE_PATHS}${p}"$'\n'
+      fi
+    fi
+  done <<< "$ALL_DIRTY_PATHS"
+  if [ -n "$UNSAFE_PATHS" ]; then
+    echo "[orchestrator-state] WARN: parent has backlog changes that differ from origin/main (not created by this check); skipping reset"
+    printf '%s' "$UNSAFE_PATHS" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Resolve manually: git -C \"${PARENT_ROOT}\" status, then stash/commit, or discard with reset --hard origin/main if they are not yours."
+    exit 0
+  fi
+  echo "[orchestrator-state] auto-recovering: dirty paths are backlog task lifecycle files identical to origin/main (will be resolved by reset)"
+  git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]   staging: /'
 fi
 
 # Reset HEAD + working tree in one op (also moves refs/heads/main since HEAD
@@ -92,5 +216,15 @@ fi
 echo "[orchestrator-state] resetting parent working tree: $HEAD_SHA -> $ORIGIN_MAIN"
 git reset --hard "$ORIGIN_MAIN" >/dev/null
 echo "[orchestrator-state] parent now at $(git rev-parse --short HEAD)"
+
+# AISDLC-708: built output is untracked, so a reset leaves it stale. Warn (no
+# auto-build) when a package's sources changed and its dist exists.
+for pkg_spec in "pipeline-cli:@ai-sdlc/pipeline-cli" "orchestrator:@ai-sdlc/orchestrator"; do
+  pkg_dir="${pkg_spec%%:*}"
+  pkg_name="${pkg_spec#*:}"
+  if [ -d "${pkg_dir}/dist" ] && [ -n "$(git diff --name-only "$HEAD_SHA" "$ORIGIN_MAIN" -- "${pkg_dir}/src" 2>/dev/null | head -1)" ]; then
+    echo "[orchestrator-state] WARN: ${pkg_dir}/dist is stale (sources changed in this sync). Rebuild: pnpm --filter ${pkg_name} build"
+  fi
+done
 
 exit 0

@@ -6,6 +6,15 @@
 # the cheapest moment to also update the orchestrator parent's local
 # refs/heads/main to match — avoiding the "main 10↓" stale state in editors.
 #
+# AISDLC-708: this NEVER touches a refs/heads/main the parent has checked out.
+# A bare `update-ref` on a checked-out branch moves HEAD alone, leaving the
+# index and working tree at the old commit, so `git status` in the parent shows
+# every path between old and new main as a staged change. The sanctioned sync
+# for a parent on main is scripts/check-orchestrator-state.sh, which resets
+# HEAD + index + tree together on a clean tree. This hook only advances main
+# when the parent is on another branch (nothing to desync) and only as a
+# fast-forward.
+#
 # Non-blocking: if the parent's ref update fails (e.g. concurrent op, parent
 # missing) we log but don't fail the rebase.
 
@@ -42,7 +51,18 @@ if [ "$LOCAL_MAIN" = "$ORIGIN_MAIN" ]; then
   exit 0  # already current
 fi
 
-# Update — fast-forward only via update-ref (atomic).
+# AISDLC-708: parent has main checked out -> leave it to check-orchestrator-state.sh.
+PARENT_HEAD=$(git -C "$PARENT_ROOT" symbolic-ref -q HEAD 2>/dev/null || echo "")
+if [ "$PARENT_HEAD" = "refs/heads/main" ]; then
+  exit 0
+fi
+
+# Fast-forward only: LOCAL_MAIN must be an ancestor of ORIGIN_MAIN.
+if [ -n "$LOCAL_MAIN" ] && ! git -C "$PARENT_ROOT" merge-base --is-ancestor "$LOCAL_MAIN" "$ORIGIN_MAIN" 2>/dev/null; then
+  exit 0
+fi
+
+# Update via update-ref (atomic).
 if git -C "$PARENT_ROOT" update-ref refs/heads/main "$ORIGIN_MAIN" 2>/dev/null; then
   echo "[post-rewrite] parent refs/heads/main updated: ${LOCAL_MAIN:0:7} -> ${ORIGIN_MAIN:0:7}"
 fi
