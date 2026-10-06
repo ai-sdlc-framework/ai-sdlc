@@ -43,7 +43,7 @@ Every PR automatically receives an `ai-sdlc/issue-link` status check that scans 
 - GitHub-issue keywords: `Closes #N`, `Fixes #N`, `Resolves #N`, or cross-repo `org/repo#N`
 - Backlog-task references (for backlog-track PRs): `References AISDLC-N`, `Closes AISDLC-N`, or hierarchical `AISDLC-N.M`
 
-- **Success** — a reference was found, or the PR carries the `ci:no-issue-required` label.
+- **Success** — a reference was found, the PR is tied to a backlog task (it adds, changes or moves a file under `backlog/`, or its title carries an existing task id as `(AISDLC-N)`; this is how maintainers' pull requests link work instead of a GitHub issue), or the PR carries the `ci:no-issue-required` label.
 - **Failure** — no reference found. The check is informational; it will NOT block your PR from merging unless a maintainer has made it required in branch protection settings.
 
 The bypass label `ci:no-issue-required` is intended for:
