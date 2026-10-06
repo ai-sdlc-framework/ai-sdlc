@@ -44,11 +44,36 @@ jobs:
           fi
           echo "number=$PR" >> "$GITHUB_OUTPUT"
 
+      # SECURITY (AISDLC-704, code-scanning alert 173): the privileged checkout
+      # is the TRUSTED default branch (no `ref:`), which supplies the tooling
+      # (pnpm install/build of the fix-ci pipeline) with the write PAT in scope.
+      # The PR branch is fetched as DATA into a separate `pr-work/` worktree by
+      # the next step and is never installed/built in the secret-holding root.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pr.outputs.number
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
-          token: ${{ secrets.AI_SDLC_PAT }}
+          # No PAT here and credentials are NOT persisted: the pr-work worktree
+          # shares this repo's .git/config, so anything persisted would be
+          # readable by PR-branch code (install scripts, tests). The PAT is
+          # injected only into the pipeline step's process env below.
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Fetch PR branch into separate pr-work/ worktree (DATA, not tooling)
+        if: steps.pr.outputs.number
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Job token scoped to this single command via -c; nothing is written
+          # to .git/config.
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags origin "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+          git worktree add -B "$HEAD_BRANCH" pr-work "refs/remotes/origin/${HEAD_BRANCH}"
+          git -C pr-work branch --set-upstream-to="origin/${HEAD_BRANCH}" "$HEAD_BRANCH"
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         if: steps.pr.outputs.number
@@ -65,6 +90,15 @@ jobs:
       - run: pnpm build
         if: steps.pr.outputs.number
 
+      # PR worktree deps (no secrets in env, no persisted git credentials) so
+      # the agent's validation can run against the PR branch inside pr-work/.
+      # --ignore-scripts: PR-controlled lifecycle scripts (preinstall/prepare)
+      # never run; the pipeline only needs the installed modules for tests.
+      - name: Install PR worktree dependencies
+        if: steps.pr.outputs.number
+        working-directory: pr-work
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
       - name: Install Claude Code CLI
         if: steps.pr.outputs.number
         run: npm install -g @anthropic-ai/claude-code
@@ -74,6 +108,8 @@ jobs:
         run: |
           git config user.name "ai-sdlc[bot]"
           git config user.email "ai-sdlc-bot@users.noreply.github.com"
+          git -C pr-work config user.name "ai-sdlc[bot]"
+          git -C pr-work config user.email "ai-sdlc-bot@users.noreply.github.com"
 
       - name: Run fix-CI pipeline
         if: steps.pr.outputs.number
@@ -88,7 +124,20 @@ jobs:
           # script-injection (CodeQL actions/code-injection, issue #780).
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          # The pipeline operates on the PR branch worktree; tooling runs from
+          # the trusted checkout (AISDLC-704).
+          AI_SDLC_FIX_CI_WORKDIR: ${{ github.workspace }}/pr-work
         run: |
+          # The pipeline's final `git push origin <branch>` (orchestrator
+          # fix-ci.ts) needs write auth. Supply the PAT as process-scoped git
+          # config via env (GIT_CONFIG_*), never persisted to .git/config.
+          # Residual: the pipeline process (and the agent it spawns in pr-work)
+          # holds the PAT in its environment for the duration of this step.
+          AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH"
           pnpm --filter @ai-sdlc/dogfood fix-ci --pr "$PR_NUMBER" --run-id "$WORKFLOW_RUN_ID"
 
       - name: Collect pipeline artifacts
@@ -96,6 +145,7 @@ jobs:
         run: |
           mkdir -p .ai-sdlc
           cp /tmp/ai-sdlc-diagnostics-audit.jsonl .ai-sdlc/diagnostics-audit.jsonl 2>/dev/null || true
+          cp pr-work/.ai-sdlc/diagnostics-audit.jsonl .ai-sdlc/pr-work-diagnostics-audit.jsonl 2>/dev/null || true
 
       - name: Upload pipeline artifacts
         if: always() && steps.pr.outputs.number

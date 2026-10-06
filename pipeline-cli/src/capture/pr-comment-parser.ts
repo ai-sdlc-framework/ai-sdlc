@@ -72,7 +72,7 @@ export function parsePrCommentMarker(commentBody: string): ParsedPrMarker {
 
     // Extract key=value attributes from the comment tag.
     // Pattern: <!-- ai-sdlc:capture key=value key=value ... -->
-    const attrSection = trimmed.replace(/^<!--\s*ai-sdlc:capture\s*/, '').replace(/\s*-->$/, '');
+    const attrSection = trimmed.replace(/^<!--\s*ai-sdlc:capture\s*/, '').replace(/\s*--!?>$/, '');
 
     for (const token of attrSection.split(/\s+/)) {
       const [key, val] = token.split('=');

@@ -23,16 +23,18 @@ name: AI-SDLC PR Review
 #    pipeline-cli CLIs, the @ai-sdlc/dogfood review subagent) execute
 #    from main's checkout — NEVER from fork content.
 #
-# 2. Fork PR content is checked out into a sandboxed `pr-content/`
-#    subdirectory for READ-ONLY DATA access. The workflow:
+# 2. Fork PR content is NEVER checked out into the working tree (the
+#    former `pr-content/` sandbox checkout was removed in AISDLC-704).
+#    The fork HEAD SHA is fetched into the main git object store as DATA
+#    only. The workflow:
 #      - Reads PR diff via `git diff <base>...<head>` (operates on git
 #        objects after `git fetch <fork-clone-url> +<sha>:fork/<sha>`)
 #      - Reads PR comments via `gh pr view --json comments` (target API)
 #      - Reads docs-only filenames via `git diff --name-only` (objects)
 #    None of these consume fork-controlled SHELL or NODE code.
 #
-# 3. NEVER `pnpm install` / `pnpm build` / script execution from the
-#    `pr-content/` sandbox. The analyze job's `pnpm install --frozen-lockfile`
+# 3. NEVER `pnpm install` / `pnpm build` / script execution against fork
+#    content (there is no fork checkout). The analyze job's `pnpm install --frozen-lockfile`
 #    + `pnpm build` operate on MAIN's `package.json` + `pnpm-lock.yaml`
 #    only. A fork-PR `package.json` `preinstall` hook cannot run.
 #
@@ -152,13 +154,18 @@ jobs:
     steps:
       - name: Resolve event-driven SHA + range
         id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "merge_group" ]; then
-            echo "head_sha=${{ github.event.merge_group.head_sha }}" >> "${GITHUB_OUTPUT}"
-            echo "base_sha=${{ github.event.merge_group.base_sha }}" >> "${GITHUB_OUTPUT}"
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "head_sha=${MG_HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+            echo "base_sha=${MG_BASE_SHA}" >> "${GITHUB_OUTPUT}"
             echo "is_merge_group=true" >> "${GITHUB_OUTPUT}"
           else
-            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "${GITHUB_OUTPUT}"
+            echo "head_sha=${PR_HEAD_SHA}" >> "${GITHUB_OUTPUT}"
             echo "is_merge_group=false" >> "${GITHUB_OUTPUT}"
           fi
 
@@ -287,52 +294,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      # AISDLC-381 Safety guard #2: sandboxed fork checkout for DATA-only
-      # envelope access. NEVER `npm/pnpm install` against this directory,
-      # never `cd` into it, never `uses: ./pr-content/...`.
-      # AISDLC-381 iter-2 MAJOR fix: explicit `repository:` so this
-      # resolves against the fork (where the head SHA actually lives),
-      # not the target repo (where the fork-only SHA is unreachable).
-      # For same-repo PRs head.repo.full_name == github.repository so
-      # the same step works for both same-repo and fork PRs.
-      - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: pr-content
-          persist-credentials: false
-          # AISDLC-592: actions/checkout v7.0.1 added a hard refusal for checking
-          # out a fork PR's head SHA under `pull_request_target` (see
-          # https://gh.io/securely-using-pull_request_target) unless this flag is
-          # set. Acceptable here because AISDLC-381 safety guards #1/#2 already
-          # contain the risk: this checkout is DATA-only, lands solely in the
-          # sandboxed `pr-content/` subdirectory, never persists credentials, and
-          # no fork-controlled script from it is ever executed by this job.
-          allow-unsafe-pr-checkout: true
-
-      # AISDLC-381 Safety guard #2 (continued): stage the envelope from
-      # the sandbox into main's working tree so the verifier finds it at
-      # the expected `.ai-sdlc/attestations/<head-sha>.dsse.json` path.
-      - name: Stage fork envelope for verifier (DATA-ONLY copy)
+      # AISDLC-381 Safety guard #2 (AISDLC-704 revision): the fork's head is
+      # NEVER checked out in this pull_request_target job (Scorecard
+      # DangerousWorkflow alert 174). The only fork content the verifier needs
+      # is the signed envelope, which is fetched as DATA through the GitHub
+      # contents API with the head repo/sha bound to env vars, written straight
+      # to the path the verifier reads, and never executed.
+      - name: Stage fork envelope for verifier (DATA-ONLY API fetch)
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
           mkdir -p .ai-sdlc/attestations
-          if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
-            # No globs, no shell expansion. $HEAD_SHA is server-validated 40-char hex.
-            cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" \
-                  ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
+          case "$HEAD_SHA" in
+            *[!0-9a-f]*|"") echo "::error::unexpected head sha"; exit 1 ;;
+          esac
+          ENVELOPE_PATH=".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
+          if gh api -H "Accept: application/vnd.github.raw" \
+              "repos/${HEAD_REPO_FULL}/contents/${ENVELOPE_PATH}?ref=${HEAD_SHA}" \
+              > "${ENVELOPE_PATH}.tmp" 2>/dev/null; then
+            mv -- "${ENVELOPE_PATH}.tmp" "${ENVELOPE_PATH}"
             echo "[attestation-precheck] staged envelope for $HEAD_SHA"
           else
+            rm -f -- "${ENVELOPE_PATH}.tmp"
             echo "[attestation-precheck] no envelope present; verifier will report missing"
           fi
           # Fetch the fork HEAD SHA into main's git store for git diff ops.
-          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "${{ github.repository }}" ]; then
+          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
             FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
             if [ -n "$FORK_URL" ]; then
               git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null || true
@@ -463,9 +454,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "${{ github.repository }}" ]; then
+          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
             FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
             if [ -n "$FORK_URL" ]; then
               git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null \
@@ -482,7 +474,7 @@ jobs:
 
       # AISDLC-381 Safety guard #3: pnpm install + pnpm build operate on
       # MAIN's lockfile + package.json only. No fork-controlled lifecycle
-      # script can run here (no `node` invocation against pr-content/, and
+      # script can run here (no `node` invocation against fork content, and
       # the working tree is main's only).
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -573,6 +565,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # AISDLC-146 Layer 2 defense-in-depth: HMAC-SHA256 secret used by
           # cli-incremental-decide to verify v2 marker signatures. When set,
           # the CLI accepts v2 markers (rejecting any with mismatched HMAC);
@@ -710,7 +703,7 @@ jobs:
           # step above + pipeline-cli/README.md "Invoking from CI" section.
           INCREMENTAL_JSON=$(node pipeline-cli/bin/cli-incremental-decide.mjs decide \
             --comments-json-file /tmp/pr-comments.json \
-            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --base-ref "$PR_BASE_SHA" \
             --head-ref HEAD \
             --repo-root . \
             --numstat-file /tmp/pr-delta-numstat.txt \

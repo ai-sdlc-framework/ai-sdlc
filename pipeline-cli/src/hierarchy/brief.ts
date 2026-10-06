@@ -86,7 +86,7 @@ const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-
 
 /** Collapse control characters to a space and neutralise backticks (inline text). */
 function mdText(value: string): string {
-  return value.replace(UNSAFE_TEXT, ' ').replace(/`/g, '\\`').trim();
+  return value.replace(UNSAFE_TEXT, ' ').replace(/\\/g, '\\\\').replace(/`/g, '\\`').trim();
 }
 
 /** Same as {@link mdText} for text inside a code span, where a backslash cannot escape. */

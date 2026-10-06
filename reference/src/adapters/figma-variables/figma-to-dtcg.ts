@@ -102,10 +102,14 @@ function nameToParts(name: string): string[] {
   return name.split('/').map((p) => p.trim().replace(/\s+/g, '-').toLowerCase());
 }
 
+const UNSAFE_PATH_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Set a nested value in a DesignTokenSet using a path array.
  */
 function setNestedToken(target: DesignTokenSet, parts: string[], token: DesignToken): void {
+  // Guard against prototype pollution via Figma-controlled variable names.
+  if (parts.some((part) => UNSAFE_PATH_KEYS.has(part))) return;
   let current: DesignTokenSet = target;
   for (let i = 0; i < parts.length - 1; i++) {
     const key = parts[i];

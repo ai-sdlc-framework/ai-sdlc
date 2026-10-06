@@ -729,6 +729,17 @@ describe('untrusted text in the brief', () => {
   });
 });
 
+describe('backslash escaping in untrusted text', () => {
+  it('escapes backslashes before backticks so an escape cannot be neutralised', () => {
+    const tasks = [
+      { ...base('NS-1'), title: 'tail\\`x', references: ['dir/same.ts'] },
+      { ...base('NS-2'), references: ['dir/same.ts'] },
+    ];
+    const md = renderBriefOf(planBrief(tasks, () => true));
+    expect(md).toContain('tail\\\\\\`x');
+  });
+});
+
 function renderBriefOf(plan: ReturnType<typeof planBrief>): string {
   return renderBrief(plan, { title: 'T', generatedAt: NOW.toISOString() });
 }
