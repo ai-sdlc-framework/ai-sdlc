@@ -337,7 +337,10 @@ function untrustedMessage(what) {
     `(AI_SDLC_UNTRUSTED_RUN is set for fork PRs, outside authors, or issue-sourced runs). ` +
     `Untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
     `ai-sdlc-plugin/hooks/** or .active-task. Next step: leave a note in the PR ` +
-    `or issue asking a maintainer to make that change; do not retry or route around this.`
+    `or issue asking a maintainer to make that change; do not retry or route around this. ` +
+    `A trusted CI job (not one that takes outside input) that legitimately needs this sets ` +
+    `AI_SDLC_INTERNAL_RUN=1 in the step-level env: of that step only, never at job or workflow ` +
+    `level and never via $GITHUB_ENV.`
   );
 }
 

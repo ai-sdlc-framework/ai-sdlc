@@ -1720,6 +1720,8 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720: trust model)'
         assert.ok(isDenied(r), `${tool} ${f}`);
         const reason = JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason;
         assert.match(reason, /untrusted/);
+        assert.match(reason, /step-level env:/, 'refusal names the step-level form of the marker');
+        assert.match(reason, /AI_SDLC_INTERNAL_RUN/);
         assert.match(reason, /fork PR/);
         assert.match(reason, /maintainer/);
       }

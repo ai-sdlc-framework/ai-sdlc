@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,6 +13,7 @@ import type { DecisionEvent } from './decision-record.js';
 import {
   buildOperatorDigest,
   gitProvenanceResolver,
+  gitGovernanceChangeResolver,
   classifyDecision,
   renderOperatorDigestMarkdown,
   runOperatorDigest,
@@ -383,6 +385,50 @@ describe('gitProvenanceResolver in a real repo', () => {
       expect(found?.commit).toMatch(/^[0-9a-f]{40}$/);
       expect(gitProvenanceResolver(dir, 'HEAD')('DEC-0002')?.pr).toBeNull();
       expect(gitProvenanceResolver(dir, 'HEAD')('DEC-0009')).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('governance config changes in the digest (AISDLC-720.1)', () => {
+  it('lists merged governance config changes with their PR, ignoring runtime artifacts', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'op-digest-gov-'));
+    try {
+      const git = (...a: string[]) =>
+        execFileSync('git', a, { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 't');
+      git('config', 'commit.gpgsign', 'false');
+      const commit = (file: string, msg: string) => {
+        mkdirSync(join(dir, file, '..'), { recursive: true });
+        writeFileSync(join(dir, file), msg);
+        git('add', '-A');
+        git('commit', '-q', '-m', msg);
+      };
+      commit('.ai-sdlc/agent-role.yaml', 'chore: loosen role (#41)');
+      commit('.ai-sdlc/attestations/x.json', 'chore: attestation (#42)');
+      commit('.github/workflows/ci.yml', 'ci: edit workflow (#43)');
+      commit('src/a.ts', 'feat: unrelated (#44)');
+
+      const changes = gitGovernanceChangeResolver(dir, 'main')('2000-01-01T00:00:00Z');
+      expect(changes.map((c) => c.pr).sort()).toEqual([41, 43]);
+      expect(changes.find((c) => c.pr === 41)?.files).toEqual(['.ai-sdlc/agent-role.yaml']);
+
+      const digest = runOperatorDigest({
+        workDir: dir,
+        since: '2000-01-01T00:00:00Z',
+        provenance: () => null,
+        governanceChanges: gitGovernanceChangeResolver(dir, 'main'),
+      });
+      expect(digest.governanceChanges).toHaveLength(2);
+      const md = renderOperatorDigestMarkdown(digest);
+      expect(md).toContain('## Governance config changes merged (2)');
+      expect(md).toContain('PR #41');
+      expect(md).toContain('PR #43');
+      expect(md).not.toContain('PR #42');
+      expect(md).not.toContain('PR #44');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

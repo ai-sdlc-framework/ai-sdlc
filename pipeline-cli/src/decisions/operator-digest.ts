@@ -69,6 +69,68 @@ export function gitProvenanceResolver(workDir: string, ref = 'origin/main'): Pro
   };
 }
 
+/** A merged change to governance config (AISDLC-720.1). */
+export interface GovernanceChange {
+  commit: string;
+  pr: number | null;
+  subject: string;
+  files: string[];
+  mergedAt: string;
+}
+
+/** Lists merged commits that touched governance config since an ISO cutoff. */
+export type GovernanceChangeResolver = (sinceIso: string) => GovernanceChange[];
+
+/** Governance config pathspecs: `.ai-sdlc/` config files and the workflows. Runtime artifacts excluded. */
+export const GOVERNANCE_PATHSPECS = [
+  '.ai-sdlc/*.yaml',
+  '.ai-sdlc/*-policy.md',
+  '.ai-sdlc/*-principles.md',
+  '.github/workflows',
+];
+
+/** Default resolver: commits on `ref` since the cutoff that touched governance config, with their PR. */
+export function gitGovernanceChangeResolver(
+  workDir: string,
+  ref = 'origin/main',
+): GovernanceChangeResolver {
+  return (sinceIso) => {
+    try {
+      const out = execFileSync(
+        'git',
+        [
+          'log',
+          ref,
+          `--since=${sinceIso}`,
+          '--format=%x01%H%x09%cI%x09%s',
+          '--name-only',
+          '--',
+          ...GOVERNANCE_PATHSPECS,
+        ],
+        { cwd: workDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      return out
+        .split('\x01')
+        .filter((c) => c.trim())
+        .map((chunk) => {
+          const [head = '', ...rest] = chunk.split('\n');
+          const [commit = '', mergedAt = '', ...subj] = head.split('\t');
+          const subject = subj.join('\t');
+          const pr = /\(#(\d+)\)\s*$/.exec(subject);
+          return {
+            commit,
+            mergedAt,
+            subject,
+            pr: pr ? Number(pr[1]) : null,
+            files: rest.map((f) => f.trim()).filter(Boolean),
+          };
+        });
+    } catch {
+      return [];
+    }
+  };
+}
+
 export type DecisionClass = 'a' | 'b' | 'c';
 
 export interface DigestAnswered {
@@ -104,6 +166,8 @@ export interface OperatorDigest {
   generatedAt: string;
   answered: DigestAnswered[];
   pending: DigestPending[];
+  /** Every merged change to governance config in the window, with its PR (visibility only). */
+  governanceChanges?: GovernanceChange[];
   /** Default class (b) timebox in hours, from config (DEC-0059). */
   defaultTimeboxHours?: number;
 }
@@ -259,6 +323,16 @@ export function renderOperatorDigestMarkdown(d: OperatorDigest): string {
       ...a.flags.map((f) => `  - FLAG: ${f}`),
     );
   }
+  if (d.governanceChanges !== undefined) {
+    lines.push('', `## Governance config changes merged (${d.governanceChanges.length})`, '');
+    if (d.governanceChanges.length === 0) lines.push('None.');
+    for (const g of d.governanceChanges) {
+      lines.push(
+        `- ${g.pr !== null ? `PR #${g.pr}` : 'no PR'}, commit ${g.commit.slice(0, 8)}: ${g.subject}`,
+        `  - files: ${g.files.join(', ')}`,
+      );
+    }
+  }
   lines.push('', `## Timeboxed, still open (${d.pending.length})`, '');
   if (d.pending.length === 0) lines.push('None.', '');
   for (const p of d.pending) {
@@ -286,6 +360,8 @@ export interface RunOperatorDigestOpts {
   now?: Date;
   /** Where records entered main; defaults to git history of origin/main. */
   provenance?: ProvenanceResolver;
+  /** Merged governance-config changes; defaults to git history of origin/main. */
+  governanceChanges?: GovernanceChangeResolver;
 }
 
 /** Build the digest from the event log, resolving the cutoff from the marker file. */
@@ -319,6 +395,9 @@ export function runOperatorDigest(opts: RunOperatorDigestOpts): OperatorDigest {
   digest.defaultTimeboxHours = resolveTimeboxConfig(
     loadDecisionsConfig({ workDir: opts.workDir }),
   ).defaultHours;
+  digest.governanceChanges = (opts.governanceChanges ?? gitGovernanceChangeResolver(opts.workDir))(
+    since,
+  );
   if (opts.mark) {
     mkdirSync(dir, { recursive: true });
     writeFileSync(markerPath, JSON.stringify({ at: digest.generatedAt }) + '\n');
