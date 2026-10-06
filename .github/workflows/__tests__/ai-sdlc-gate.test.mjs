@@ -81,6 +81,7 @@ function loadYaml(path) {
 //   - build-test, coverage, integration: skip on docs-only PRs
 //   - attestation-gate: skips on docs-only PRs (paths-ignore in verify-attestation.yml)
 //   - dependency-review-gate: skips on non-dep PRs (detect.outputs.deps == false)
+//   - dor-readiness-gate: skips on PRs that touch no backlog/tasks/*.md file (AISDLC-712.1)
 //
 // The incorrect comment "skipped → pass by default" was the root cause of
 // the PR #794 regression (2026-05-31): adding dependency-review-gate to
@@ -94,6 +95,7 @@ const ALLOWED_SKIPS = new Set([
   'attestation-gate',
   'independence-policy-gate',
   'dependency-review-gate',
+  'dor-readiness-gate',
 ]);
 
 function allsGreenDecision(needs) {
@@ -154,7 +156,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
-  it('declares all seven required jobs by canonical names (AC #3)', () => {
+  it('declares all required jobs by canonical names (AC #3)', () => {
     // AISDLC-388: attestation-gate added — re-introduces machine enforcement
     // of ai-sdlc/attestation for code PRs (skipped on docs-only) via the
     // rollup layer, after AISDLC-388 removed it from branch protection.
@@ -167,6 +169,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'attestation-gate',
       'independence-policy-gate',
       'dependency-review-gate',
+      'dor-readiness-gate',
       'pr-ready',
     ];
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());
@@ -205,6 +208,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'attestation-gate',
       'independence-policy-gate',
       'dependency-review-gate',
+      'dor-readiness-gate',
     ]) {
       assert.ok(needs.includes(required), `pr-ready needs: ${required}`);
     }
@@ -237,6 +241,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'attestation-gate',
       'independence-policy-gate',
       'dependency-review-gate',
+      'dor-readiness-gate',
     ]) {
       assert.ok(
         allowedSkips.includes(job),
@@ -289,6 +294,77 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.ok(
       enforceStep,
       'independence-policy-gate must run `cli-attestation independence-policy`',
+    );
+  });
+
+  it('AISDLC-712.1: dor-readiness-gate runs only for task-file PRs and waits on the dor-ingress check', () => {
+    const job = workflow.jobs['dor-readiness-gate'];
+    assert.ok(job, 'dor-readiness-gate job must exist');
+    // Conditional wiring: no task file changed → job skipped (no new run, no wait).
+    assert.match(
+      job.if,
+      /needs\.detect\.outputs\.tasks\s*==\s*'true'/,
+      'must only run when the PR changes a backlog task file',
+    );
+    assert.match(job.if, /draft\s*==\s*false/, 'must skip draft PRs like every other gate job');
+    const needs = Array.isArray(job.needs) ? job.needs : [job.needs];
+    assert.ok(needs.includes('detect'), 'must declare needs: [detect]');
+    assert.equal(job.permissions?.checks, 'read', 'needs checks: read to poll the check run');
+
+    // detect exposes the output, and its filter is EXACTLY dor-ingress's trigger
+    // paths, so the gate fires iff the check it waits for will exist.
+    const detect = workflow.jobs['detect'];
+    assert.match(String(detect.outputs?.tasks ?? ''), /tasks-filter\.outputs\.tasks/);
+    const filterStep = detect.steps.find((s) => s.id === 'tasks-filter');
+    assert.ok(filterStep, 'detect must have a tasks-filter step');
+    const dor = loadYaml(join(REPO_ROOT, '.github', 'workflows', 'dor-ingress.yml'));
+    const dorPaths = (dor.on ?? dor[true]).pull_request.paths;
+    assert.deepEqual(dorPaths, ['backlog/tasks/*.md']);
+    for (const p of dorPaths) {
+      assert.ok(
+        String(filterStep.with.filters).includes(`'${p}'`),
+        `tasks-filter must match dor-ingress trigger path ${p}`,
+      );
+    }
+
+    // The check it mirrors is the evaluate-pr-tasks job, by exact name.
+    const checkName = dor.jobs['evaluate-pr-tasks'].name;
+    assert.equal(checkName, 'Evaluate backlog tasks changed by PR');
+    const waitStep = job.steps.find((s) => s.env?.CHECK_NAME);
+    assert.ok(waitStep, 'must have a wait step carrying CHECK_NAME');
+    assert.equal(waitStep.env.CHECK_NAME, checkName);
+    // Untrusted event data must not be interpolated into the script body.
+    assert.ok(
+      !/\$\{\{/.test(waitStep.run),
+      'wait script must read expressions through env, not interpolate them',
+    );
+  });
+
+  it('AISDLC-712.1: task-file PR needs the DoR check; no-task PR and docs-only filing PR pass', () => {
+    const base = {
+      detect: { result: 'success' },
+      lint: { result: 'success' },
+      'build-test': { result: 'skipped' },
+      coverage: { result: 'skipped' },
+      integration: { result: 'skipped' },
+      'attestation-gate': { result: 'skipped' },
+      'independence-policy-gate': { result: 'skipped' },
+      'dependency-review-gate': { result: 'skipped' },
+    };
+    // docs-only filing PR, DoR check passed → passes.
+    assert.equal(
+      allsGreenDecision({ ...base, 'dor-readiness-gate': { result: 'success' } }).passed,
+      true,
+    );
+    // PR with no task file: gate skipped → unaffected.
+    assert.equal(
+      allsGreenDecision({ ...base, 'dor-readiness-gate': { result: 'skipped' } }).passed,
+      true,
+    );
+    // DoR check failed → rollup fails.
+    assert.equal(
+      allsGreenDecision({ ...base, 'dor-readiness-gate': { result: 'failure' } }).passed,
+      false,
     );
   });
 

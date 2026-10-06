@@ -96,6 +96,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.filter.outputs.docs_only }}
       deps: ${{ steps.deps-filter.outputs.deps }}
+      tasks: ${{ steps.tasks-filter.outputs.tasks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: filter
@@ -130,6 +131,16 @@ jobs:
               - 'yarn.lock'
               - '.github/workflows/**'
               - '.github/actions/**'
+      # Third filter (AISDLC-712.1): true when the PR adds or edits a task file.
+      # The pattern is EXACTLY the `paths:` trigger of dor-ingress.yml, so this
+      # output is true if and only if the "Evaluate backlog tasks changed by PR"
+      # check is going to run. Drives the dor-readiness-gate job.
+      - id: tasks-filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            tasks:
+              - 'backlog/tasks/*.md'
 
   # ── Lint & Format (always required) ─────────────────────────────────────
   # Runs on every PR archetype. Cheap (~1 min) and catches the long tail of
@@ -352,6 +363,60 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
 
+  # ── DoR readiness gate (AISDLC-712.1, DEC-0056 row 3) ───────────────────
+  # The Definition-of-Ready check moved out of the pre-push hook into CI: the
+  # "Evaluate backlog tasks changed by PR" job in dor-ingress.yml. This job
+  # makes that check part of the `ai-sdlc/pr-ready` rollup, ONLY for PRs that
+  # add or edit a `backlog/tasks/*.md` file (`detect.outputs.tasks`). PRs that
+  # touch no task file skip this job entirely: no new run, no wait.
+  #
+  # It does not re-run the evaluation. It waits for the dor-ingress check run
+  # on the PR head SHA to complete and mirrors its conclusion. dor-ingress runs
+  # concurrently with this workflow and its install + build is shorter than the
+  # build-test / coverage jobs, so the wait is normally hidden behind them.
+  # A missing check run after the timeout fails closed.
+  dor-readiness-gate:
+    name: DoR readiness (task-file PRs)
+    needs: detect
+    if: >-
+      needs.detect.outputs.tasks == 'true' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      checks: read
+    steps:
+      - name: Wait for the DoR ingress check on the PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHECK_NAME: Evaluate backlog tasks changed by PR
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 15 * 60 ))
+          while :; do
+            # Newest run of the check on this SHA (a cancelled superseded run
+            # has a lower id than its replacement).
+            run=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" --paginate \
+              --jq ".check_runs[] | select(.name == env.CHECK_NAME) | [.id, .status, (.conclusion // \"\")] | @tsv" \
+              | sort -n | tail -1 || true)
+            status=$(printf '%s' "$run" | cut -f2)
+            conclusion=$(printf '%s' "$run" | cut -f3)
+            if [ "$status" = "completed" ]; then
+              echo "DoR ingress check concluded: ${conclusion}"
+              [ "$conclusion" = "success" ] && exit 0
+              echo "::error::'${CHECK_NAME}' concluded '${conclusion}'; resolve its findings (see the PR comment)."
+              exit 1
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::'${CHECK_NAME}' did not complete within 15 minutes (status: ${status:-not started})."
+              exit 1
+            fi
+            sleep 20
+          done
+
   # ── Independence policy gate (RFC-0046 Phase 4, AISDLC-591) ─────────────
   # Enforces the repo's per-repo `.ai-sdlc/independence-policy.yaml`
   # `requiredTier` (default `none` — no behavior change) against the
@@ -431,6 +496,7 @@ jobs:
         attestation-gate,
         independence-policy-gate,
         dependency-review-gate,
+        dor-readiness-gate,
       ]
     # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
     # (per their own draft guards), `re-actors/alls-green` treats all-skipped
@@ -463,6 +529,8 @@ jobs:
           #   - attestation-gate: skips on docs-only PRs (paths-ignore)
           #   - independence-policy-gate: skips on docs-only PRs (AISDLC-591)
           #   - dependency-review-gate: skips on non-dep PRs (deps==false)
+          #   - dor-readiness-gate: skips on PRs that touch no backlog/tasks/*.md
+          #     file (AISDLC-712.1); on task-file PRs it must be success
           #
           # The skipped-job deadlock bug (discovered 2026-05-31): alls-green
           # treats skipped as FAILURE for jobs not in allowed-skips. Adding
@@ -475,4 +543,5 @@ jobs:
             integration,
             attestation-gate,
             independence-policy-gate,
-            dependency-review-gate
+            dependency-review-gate,
+            dor-readiness-gate

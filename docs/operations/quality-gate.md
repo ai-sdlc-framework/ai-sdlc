@@ -46,7 +46,7 @@ This is the same pattern shipped in production by **aiohttp**, **attrs**, **cond
 
 ## What the aggregator checks
 
-`.github/workflows/ai-sdlc-gate.yml` runs six jobs:
+`.github/workflows/ai-sdlc-gate.yml` runs these jobs (the `Detect Changes` filters drive the conditional ones):
 
 | Job | Always required | Required for code/mixed PRs only |
 |---|---|---|
@@ -56,6 +56,7 @@ This is the same pattern shipped in production by **aiohttp**, **attrs**, **cond
 | `Build & Test (Node 22)` | — | yes |
 | `Coverage` (`pnpm test:coverage`) | — | yes |
 | `Integration Tests` (`pnpm --filter @ai-sdlc/reference test`) | — | yes |
+| `DoR readiness (task-file PRs)` (see below) | — | only when the PR changes `backlog/tasks/*.md` |
 | `ai-sdlc/pr-ready` (the aggregator itself) | yes | yes |
 
 Per-archetype gating decisions:
@@ -63,6 +64,18 @@ Per-archetype gating decisions:
 - **docs-only PRs** (every changed file matches `spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, or root `*.md`) skip the four code-gated jobs. `re-actors/alls-green` treats `skipped` as `success`, so the aggregator passes cleanly without paying ~10 minutes of compute on a typo fix.
 - **code or mixed PRs** require all six jobs to pass. The `predicate-quantifier: every` setting on the path filter ensures a PR with one docs file plus one code file correctly resolves to "code/mixed", not "docs-only".
 - **Integration tests** additionally skip on PRs originating from forks (which lack the repo secrets needed to talk to the reference adapter). Same predicate as `ci.yml`'s `integration` job — kept in sync deliberately.
+
+## DoR readiness for task-file PRs (AISDLC-712.1)
+
+The Definition-of-Ready check is no longer a local hook (AISDLC-712, DEC-0056 row 3). It runs in CI as the `Evaluate backlog tasks changed by PR` job in `.github/workflows/dor-ingress.yml`, and the `ai-sdlc/pr-ready` rollup requires it through one conditional job, `dor-readiness-gate` in `ai-sdlc-gate.yml`.
+
+- **Conditional.** `Detect Changes` has a third path filter, `tasks`, matching `backlog/tasks/*.md`. That is exactly the `paths:` trigger of `dor-ingress.yml`, so the filter is true if and only if the DoR check will run. The path is narrower than "anything under `backlog/`" on purpose: a PR that only moves a file into `backlog/completed/` starts no DoR run, and a gate waiting for a check that never starts would block it.
+- **No task file, no cost.** When `tasks` is false the job is skipped, and `dor-readiness-gate` is in `allowed-skips`, so the rollup passes with no new run and no wait.
+- **What it does.** It does not repeat the evaluation. It polls the check run on the PR head SHA (REST `check-runs`, 20 s interval, 15 minute cap) and mirrors its conclusion: `success` passes; `failure`, `cancelled` or no completed run by the deadline fails the gate. The DoR job runs concurrently with the build and coverage jobs and finishes first, so on a mixed PR the wait is hidden.
+- **Docs-only filing PRs.** A PR that only adds task files still passes the rollup when the DoR check passes. The docs-only archetype skips the code jobs as before and still runs this gate.
+- **Overrides are unchanged.** A task with `blocked.reason` in its frontmatter is not counted as a violation by `dor-pr-has-violations`, so the DoR check passes and so does the gate.
+
+Hermetic coverage: `.github/workflows/__tests__/ai-sdlc-gate.test.mjs` (`AISDLC-712.1` cases) asserts the filter equals dor-ingress's trigger, the check name matches the job, and the rollup decision for task-file, no-task and docs-only PRs.
 
 ## Historical workaround — `ai-sdlc/attestation: FAILURE` after a cancelled verify-attestation run (AISDLC-412)
 
