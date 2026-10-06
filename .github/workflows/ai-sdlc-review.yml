@@ -23,16 +23,18 @@ name: AI-SDLC PR Review
 #    pipeline-cli CLIs, the @ai-sdlc/dogfood review subagent) execute
 #    from main's checkout — NEVER from fork content.
 #
-# 2. Fork PR content is checked out into a sandboxed `pr-content/`
-#    subdirectory for READ-ONLY DATA access. The workflow:
+# 2. Fork PR content is NEVER checked out into the working tree (the
+#    former `pr-content/` sandbox checkout was removed in AISDLC-704).
+#    The fork HEAD SHA is fetched into the main git object store as DATA
+#    only. The workflow:
 #      - Reads PR diff via `git diff <base>...<head>` (operates on git
 #        objects after `git fetch <fork-clone-url> +<sha>:fork/<sha>`)
 #      - Reads PR comments via `gh pr view --json comments` (target API)
 #      - Reads docs-only filenames via `git diff --name-only` (objects)
 #    None of these consume fork-controlled SHELL or NODE code.
 #
-# 3. NEVER `pnpm install` / `pnpm build` / script execution from the
-#    `pr-content/` sandbox. The analyze job's `pnpm install --frozen-lockfile`
+# 3. NEVER `pnpm install` / `pnpm build` / script execution against fork
+#    content (there is no fork checkout). The analyze job's `pnpm install --frozen-lockfile`
 #    + `pnpm build` operate on MAIN's `package.json` + `pnpm-lock.yaml`
 #    only. A fork-PR `package.json` `preinstall` hook cannot run.
 #
@@ -447,6 +449,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO_FULL: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "$BASE_REPO_FULL" ]; then
@@ -466,7 +469,7 @@ jobs:
 
       # AISDLC-381 Safety guard #3: pnpm install + pnpm build operate on
       # MAIN's lockfile + package.json only. No fork-controlled lifecycle
-      # script can run here (no `node` invocation against pr-content/, and
+      # script can run here (no `node` invocation against fork content, and
       # the working tree is main's only).
       - run: pnpm install --frozen-lockfile
       - run: pnpm build

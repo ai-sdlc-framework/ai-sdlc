@@ -52,15 +52,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.pr.outputs.number
         with:
-          token: ${{ secrets.AI_SDLC_PAT }}
+          # No PAT here and credentials are NOT persisted: the pr-work worktree
+          # shares this repo's .git/config, so anything persisted would be
+          # readable by PR-branch code (install scripts, tests). The PAT is
+          # injected only into the pipeline step's process env below.
+          persist-credentials: false
+          fetch-depth: 0
 
       - name: Fetch PR branch into separate pr-work/ worktree (DATA, not tooling)
         if: steps.pr.outputs.number
         env:
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
+          # Job token scoped to this single command via -c; nothing is written
+          # to .git/config.
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" \
+            fetch --no-tags origin "+refs/heads/${HEAD_BRANCH}:refs/remotes/origin/${HEAD_BRANCH}"
           git worktree add -B "$HEAD_BRANCH" pr-work "refs/remotes/origin/${HEAD_BRANCH}"
           git -C pr-work branch --set-upstream-to="origin/${HEAD_BRANCH}" "$HEAD_BRANCH"
 
@@ -79,12 +90,14 @@ jobs:
       - run: pnpm build
         if: steps.pr.outputs.number
 
-      # PR worktree deps (no secrets in env for this step) so the agent's
-      # validation can run against the PR branch inside pr-work/.
+      # PR worktree deps (no secrets in env, no persisted git credentials) so
+      # the agent's validation can run against the PR branch inside pr-work/.
+      # --ignore-scripts: PR-controlled lifecycle scripts (preinstall/prepare)
+      # never run; the pipeline only needs the installed modules for tests.
       - name: Install PR worktree dependencies
         if: steps.pr.outputs.number
         working-directory: pr-work
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install Claude Code CLI
         if: steps.pr.outputs.number
@@ -115,6 +128,16 @@ jobs:
           # the trusted checkout (AISDLC-704).
           AI_SDLC_FIX_CI_WORKDIR: ${{ github.workspace }}/pr-work
         run: |
+          # The pipeline's final `git push origin <branch>` (orchestrator
+          # fix-ci.ts) needs write auth. Supply the PAT as process-scoped git
+          # config via env (GIT_CONFIG_*), never persisted to .git/config.
+          # Residual: the pipeline process (and the agent it spawns in pr-work)
+          # holds the PAT in its environment for the duration of this step.
+          AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH"
           pnpm --filter @ai-sdlc/dogfood fix-ci --pr "$PR_NUMBER" --run-id "$WORKFLOW_RUN_ID"
 
       - name: Collect pipeline artifacts

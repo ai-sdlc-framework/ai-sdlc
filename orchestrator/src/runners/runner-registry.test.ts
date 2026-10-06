@@ -132,6 +132,14 @@ describe('RunnerRegistry', () => {
       expect(runner.getConfig().apiUrl).toBe('http://127.0.0.1:11500/v1/chat/completions');
     });
 
+    it('ollama trims all trailing slashes from OLLAMA_HOST', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ OLLAMA_MODEL: 'gemma4:31b', OLLAMA_HOST: 'http://h///' });
+
+      const runner = registry.get('ollama') as GenericLLMRunner;
+      expect(runner.getConfig().apiUrl).toBe('http://h/v1/chat/completions');
+    });
+
     it('copilot unavailable without GH_TOKEN', () => {
       const registry = new RunnerRegistry();
       registry.discoverFromEnv({});
