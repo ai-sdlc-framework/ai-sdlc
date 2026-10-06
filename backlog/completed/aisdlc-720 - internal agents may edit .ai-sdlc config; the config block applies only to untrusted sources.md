@@ -2,7 +2,7 @@
 id: AISDLC-720
 title: >-
   Internal agents may edit .ai-sdlc config; the config block applies only to untrusted sources
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
@@ -38,13 +38,13 @@ So the rule stops the trusted sessions and does not stop the untrusted source it
 - The security reviewer confirms that the untrusted signal cannot be cleared from inside an untrusted run and that the CI check cannot be skipped by a fork.
 
 ## Acceptance Criteria
-- [ ] The hardcoded `.ai-sdlc/**` floor for Write and Edit is removed for internal sessions. An internal session is any session that is not marked untrusted; a session is marked untrusted only by an explicit signal set by the workflows that run agents on outside input (fork pull requests, pull requests whose author association is not OWNER, MEMBER or COLLABORATOR, and the `gh-issue` source kind). Name the signal (for example an environment variable set by those workflows) and document it; the default with no signal is internal.
-- [ ] For untrusted runs the block on `.ai-sdlc/**` (and on `.github/workflows/**`) stays, covers Write, Edit, MultiEdit and shell writes as far as a pattern matcher can, and the refusal says the run is untrusted and why.
+- [x] The hardcoded `.ai-sdlc/**` floor for Write and Edit is removed for internal sessions. An internal session is any session that is not marked untrusted; a session is marked untrusted only by an explicit signal set by the workflows that run agents on outside input (fork pull requests, pull requests whose author association is not OWNER, MEMBER or COLLABORATOR, and the `gh-issue` source kind). Name the signal (for example an environment variable set by those workflows) and document it; the default with no signal is internal.
+- [x] For untrusted runs the block on `.ai-sdlc/**` (and on `.github/workflows/**`) stays, covers Write, Edit, MultiEdit and shell writes as far as a pattern matcher can, and the refusal says the run is untrusted and why.
 - [ ] The real boundary for outside contributions is in CI, derived from GitHub facts: a required check fails any pull request from a fork or from an author without OWNER, MEMBER or COLLABORATOR association that changes governance config (`.ai-sdlc/agent-role.yaml` and the other config files under `.ai-sdlc/`, listed explicitly) or `.github/workflows/**`, and its message says a maintainer must make that change. Same-repository pull requests from the operator's identity or agents are not affected. Tests cover fork, outside author, and internal cases.
 - [ ] Project-level `constraints.blockedPaths` keeps working as an explicit opt-in for repositories that want stricter rules; this repository's `.ai-sdlc/agent-role.yaml` drops `.ai-sdlc/**` and `.github/workflows/**` from it, applied after the release that ships the hook change and made with the Edit tool (the workflow-edit rule is external-only per AISDLC-567's own text).
-- [ ] The nine agent and command bodies listed above replace "Never edit `.ai-sdlc/**`" with: edit governance config only when the task names the file and the change; never as a side effect; runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today.
+- [x] The nine agent and command bodies listed above replace "Never edit `.ai-sdlc/**`" with: edit governance config only when the task names the file and the change; never as a side effect; runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today.
 - [ ] Reviewer prompts (code and security) treat a diff that touches governance config as requiring a matching task or decision record on main, and a change that loosens a control without one as a major finding. The decision digest lists every merged change to governance config with its pull request. This is review and visibility, not a block: no step waits for the operator.
-- [ ] `spec/schemas/agent-role.schema.json` descriptions and `docs/api-reference/governance.md` describe the new model in plain words: who may edit config, what marks a run untrusted, where the CI boundary is.
+- [x] `spec/schemas/agent-role.schema.json` descriptions and `docs/api-reference/governance.md` describe the new model in plain words: who may edit config, what marks a run untrusted, where the CI boundary is.
 - [ ] Bootstrap: sessions run the installed plugin's hook, not the one on main, so the hook keeps refusing Write and Edit under `.ai-sdlc/` until a plugin release ships this change and sessions pick it up. Config edits that depend on this change wait for that release and are then made with the Edit tool. No executor routes a config edit through a shell command to get around the hook; the operator's authorization covers the content of a change, not a bypass. This task's own change to this repository's `.ai-sdlc/agent-role.yaml` (dropping the two blockedPaths entries) is therefore delivered as a follow-up step after the release, and the task's notes say so.
 - [ ] A happy-path test: an internal session, default configuration, a task that names a config key and value, edits `.ai-sdlc/agent-role.yaml` with the Edit tool and is not refused.
 - [ ] Reviewer agents can write their own review transcript and ledger files under `.ai-sdlc/` through the Write tool or the sanctioned CLI without a refusal (44 of 46 `.ai-sdlc` refusals in a five-day sample were reviewers blocked from writing their own transcript); a test covers it.
@@ -64,3 +64,7 @@ The hook and resolver half shipped in PR #1211 and plugin 0.23.0 (fail-closed: a
 
 The workflow edit needs the planner-tracked blockedPaths change (task 721, which removes `.github/workflows/**` from `blockedPaths`) on main first.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Resolution (2026-10-05)
+
+The hook and resolver half merged in PR #1211 and shipped in plugin 0.23.0. The workflow half is tracked as AISDLC-720.1 (CI trust marker, criterion 3 workflow work and the marker wiring). Criteria 1, 2, 5 and 7 are ticked as delivered by #1211. Criteria 3 (CI boundary check) and 4 (this repository's `blockedPaths` edit, filed as AISDLC-721) and the decision-digest part of criterion 6 were open when #1211 merged and are carried by AISDLC-720.1 and AISDLC-721. Criteria 8 to 11 are left unticked here and were not re-verified when closing this file.
