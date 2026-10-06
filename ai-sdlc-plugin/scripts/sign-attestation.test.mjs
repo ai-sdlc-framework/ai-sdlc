@@ -51,6 +51,16 @@ before(() => {
   }
 });
 
+// Mirrors .prettierrc (printWidth 100); the fixture repos live outside the checkout.
+const PRETTIER_ARGS = [
+  '--no-config',
+  '--print-width',
+  '100',
+  '--single-quote',
+  '--trailing-comma',
+  'all',
+];
+
 function cleanEnv(extra = {}) {
   const inherited = { ...process.env };
   // AISDLC-554: these steer the signer's runtime resolution (candidates 3-4),
@@ -285,6 +295,34 @@ describe('sign-attestation.mjs', () => {
       printedPath.endsWith('.dsse.json') && existsSync(printedPath),
       `stdout should print a valid written .dsse.json path, got: ${printedPath}`,
     );
+  });
+
+  it('AISDLC-732: a freshly signed envelope is already prettier-formatted', () => {
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify(
+        ['code-reviewer', 'test-reviewer', 'security-reviewer'].map((agentId) => ({
+          agentId,
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        })),
+      ),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--schema-version', 'v5'],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    const envelopePath = res.stdout.trim();
+    const prettierBin = join(repoRoot, 'node_modules', '.bin', 'prettier');
+    const check = spawnSync(prettierBin, PRETTIER_ARGS.concat(['--check', envelopePath]), {
+      encoding: 'utf8',
+    });
+    assert.equal(check.status, 0, `prettier --check failed: ${check.stdout}${check.stderr}`);
   });
 
   // ── AISDLC-409: v6 default cutover (RFC-0042 Phase 3) ─────────────────
@@ -1284,5 +1322,52 @@ describe('sign-attestation.mjs — adopter runtime resolution (AISDLC-554)', () 
     // emit nothing at all rather than an envelope the real verifier rejects.
     assert.notEqual(res.status, 0);
     assert.equal(res.stdout.trim(), '');
+  });
+});
+
+describe('format-envelope-json (AISDLC-732)', () => {
+  it('matches prettier for the shapes envelopes contain (single-element arrays collapse)', async () => {
+    const { formatEnvelopeJson } = await import('./format-envelope-json.mjs');
+    const h = 'a'.repeat(64);
+    const value = {
+      single: [h],
+      pair: [h, h],
+      empty: [],
+      obj: {},
+      leaves: [{ leafIndex: 0, proof: [h] }],
+      nested: [
+        [1, 2],
+        [3, 4],
+      ],
+    };
+    const dir = mkdtempSync(join(repoRoot, '.fmt-732-'));
+    try {
+      const file = join(dir, 'x.json');
+      writeFileSync(file, formatEnvelopeJson(value));
+      const check = spawnSync(
+        join(repoRoot, 'node_modules', '.bin', 'prettier'),
+        PRETTIER_ARGS.concat(['--check', file]),
+        { encoding: 'utf8' },
+      );
+      assert.equal(check.status, 0, `${check.stdout}${check.stderr}`);
+      assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), value);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('round-trips envelopes signed before the change without altering their content', async () => {
+    const { formatEnvelopeJson } = await import('./format-envelope-json.mjs');
+    const dir = join(repoRoot, '.ai-sdlc', 'attestations');
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith('.dsse.json'))
+      .slice(0, 25);
+    assert.ok(files.length > 0, 'expected existing envelopes to test against');
+    for (const f of files) {
+      const text = readFileSync(join(dir, f), 'utf8');
+      // Verifiers JSON.parse the envelope and check the signed payload, never the
+      // outer whitespace, so identical parsed content means identical verification.
+      assert.deepEqual(JSON.parse(formatEnvelopeJson(JSON.parse(text))), JSON.parse(text));
+    }
   });
 });

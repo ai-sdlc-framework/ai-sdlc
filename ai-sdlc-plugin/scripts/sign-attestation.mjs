@@ -88,6 +88,7 @@ import { execFileSync } from 'node:child_process';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join, resolve, dirname, parse as parsePath } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { formatEnvelopeJson } from './format-envelope-json.mjs';
 
 function fail(msg, code = 1) {
   process.stderr.write(`ERROR: ${msg}\n`);
@@ -839,7 +840,7 @@ async function main() {
     }
   }
 
-  const envelopeJson = JSON.stringify(envelope, null, 2) + '\n';
+  const envelopeJson = formatEnvelopeJson(envelope);
 
   // Primary: content-addressed filename (AISDLC-398)
   const primaryOutPath = patchId

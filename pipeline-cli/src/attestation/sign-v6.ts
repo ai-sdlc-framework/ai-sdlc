@@ -34,6 +34,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { computeMerkleRoot, generateNonce, loadLeaves, loadLeavesForPatchId } from './merkle.js';
 import type { TranscriptLeaf } from './merkle.js';
+import { formatEnvelopeJson } from './format-json.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -398,7 +399,7 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
     signerIdentity,
   });
 
-  const serialized = JSON.stringify(envelope, null, 2) + '\n';
+  const serialized = formatEnvelopeJson(envelope);
   const outDir = join(repoRoot, '.ai-sdlc', 'attestations');
   mkdirSync(outDir, { recursive: true });
 
