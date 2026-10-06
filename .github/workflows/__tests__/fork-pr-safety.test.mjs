@@ -478,8 +478,44 @@ describe('AISDLC-704: privileged workflows never check out untrusted refs or int
     const fetchStep = steps.find((s) => /pr-work/.test(s.run ?? '') && /worktree add/.test(s.run));
     assert.ok(fetchStep, 'PR branch must be fetched into a separate pr-work worktree');
     assert.equal(fetchStep.env.HEAD_BRANCH, '${{ github.event.workflow_run.head_branch }}');
-    const run = steps.find((s) => /fix-ci/.test(s.run ?? ''));
+    const run = steps.find((s) => /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''));
+    assert.ok(run, 'fix-ci pipeline step must exist');
     assert.match(run.env.AI_SDLC_FIX_CI_WORKDIR, /pr-work$/);
+  });
+
+  it('ai-sdlc-fix-ci.yml: PAT is not persisted; PR code installs without scripts or credentials', () => {
+    const wf = loadYaml('ai-sdlc-fix-ci.yml');
+    const steps = wf.jobs['fix-ci'].steps;
+    const checkout = steps.find(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
+    );
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.equal(checkout.with.token, undefined, 'root checkout must not receive the PAT');
+    // The PAT may appear ONLY in the pipeline step's env.
+    for (const step of steps) {
+      const isPipeline = /pnpm --filter \S+ fix-ci\b/.test(step.run ?? '');
+      const blob = JSON.stringify({ env: step.env, with: step.with });
+      if (!isPipeline) {
+        assert.ok(
+          !/secrets\.AI_SDLC_PAT/.test(blob),
+          `step '${step.name ?? step.uses ?? step.run}' must not receive the PAT`,
+        );
+      }
+    }
+    const pipeline = steps.find((s) => /pnpm --filter \S+ fix-ci\b/.test(s.run ?? ''));
+    assert.match(pipeline.env.GITHUB_TOKEN, /secrets\.AI_SDLC_PAT/);
+    assert.match(pipeline.run, /GIT_CONFIG_VALUE_0/);
+    // Nothing writes credentials into the shared .git/config.
+    for (const step of steps) {
+      assert.ok(
+        !/git(\s+-C\s+\S+)?\s+config\s+[^\n]*extraheader/.test(step.run ?? ''),
+        'extraheader must not be persisted via git config',
+      );
+    }
+    const prInstall = steps.find(
+      (s) => s['working-directory'] === 'pr-work' && /pnpm install/.test(s.run ?? ''),
+    );
+    assert.match(prInstall.run, /--ignore-scripts/);
   });
 });
 
@@ -785,4 +821,39 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
     const triggers = getTriggers(wf);
     assert.ok(!('merge_group' in triggers), 'must NOT trigger on merge_group post-AISDLC-400');
   });
+});
+
+describe('AISDLC-704: every $VAR in a run: block of the changed workflows is declared in that step', () => {
+  // Names the runner provides or that are conventional shell/GitHub built-ins.
+  const BUILTIN = /^(GITHUB_|RUNNER_|HOME$|PATH$|PWD$|CI$|TMPDIR$|USER$|IFS$|RANDOM$)/;
+  for (const name of ['ai-sdlc-review.yml', 'ai-sdlc-fix-ci.yml']) {
+    it(`${name}: no unbound env references`, () => {
+      const wf = loadYaml(name);
+      for (const { jobId, step } of allSteps(wf)) {
+        if (typeof step.run !== 'string') continue;
+        const declared = new Set(Object.keys(step.env ?? {}));
+        for (const m of step.run.matchAll(
+          /(?:^|[\s;(])(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=/gm,
+        )) {
+          declared.add(m[1]);
+        }
+        for (const m of step.run.matchAll(/\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b/g)) {
+          declared.add(m[1]);
+        }
+        for (const m of step.run.matchAll(/\bread\s+(?:-\w+\s+)*([A-Za-z_][A-Za-z0-9_]*)/g)) {
+          declared.add(m[1]);
+        }
+        // Job-level / workflow-level env also count.
+        for (const k of Object.keys(wf.env ?? {})) declared.add(k);
+        for (const k of Object.keys(wf.jobs[jobId].env ?? {})) declared.add(k);
+        for (const m of step.run.matchAll(/\$\{?([A-Z][A-Z0-9_]*)\b/g)) {
+          const v = m[1];
+          if (BUILTIN.test(v) || declared.has(v)) continue;
+          assert.fail(
+            `${name} job ${jobId} step '${step.name ?? ''}': $${v} is not declared in env`,
+          );
+        }
+      }
+    });
+  }
 });
