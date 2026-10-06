@@ -33,6 +33,8 @@ Follow-up to AISDLC-720 (merged, PR #1211). AISDLC-720 treats a run as untrusted
 
 This task closes 1 to 3 and decides what to do about 4 (detect further CI systems, or keep the documented limit with the reason).
 
+Finding 2026-10-05: the blocked-actions hook reads the policy from the main checkout's WORKING COPY of `.ai-sdlc/agent-role.yaml`, not from a committed revision, so an uncommitted local edit changes what agents may touch; assess whether the hook should read the committed policy (HEAD) for trust decisions.
+
 ## Conventions
 - The workflow side sets `AI_SDLC_INTERNAL_RUN` only in step-level `env`, never through `$GITHUB_ENV`, and sets the untrusted signal explicitly on jobs that take outside input.
 - The workflow edits in this task need the repository's blockedPaths change (the operator's agent-role.yaml edit that the planner tracks as the second item of DEC-0057; it has no task file on main yet, so it is not listed in `dependencies`) applied first. The rest can land before it.

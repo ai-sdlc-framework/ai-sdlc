@@ -52,4 +52,15 @@ So the rule stops the trusted sessions and does not stop the untrusted source it
 
 ## Out of scope
 - Changing what the config keys mean; merge rights; the release path.
+
+## Remaining scope (2026-10-05)
+
+The hook and resolver half shipped in PR #1211 and plugin 0.23.0 (fail-closed: a run is untrusted when `AI_SDLC_UNTRUSTED_RUN` is truthy, or when `GITHUB_ACTIONS` is truthy and `AI_SDLC_INTERNAL_RUN` is not truthy). Do NOT redo it. Only the workflow half remains:
+
+- (a) In `.github/workflows`, set `AI_SDLC_INTERNAL_RUN` only in step-level `env:` on steps of trusted jobs, never via `$GITHUB_ENV` or job-level or workflow-level `env:`, because a later step could inherit it (Opus security finding on #1211).
+- (b) Set `AI_SDLC_UNTRUSTED_RUN` explicitly on every job that takes outside input (external PR review, issue-triggered runs).
+- (c) Add a test or lint that fails if `AI_SDLC_INTERNAL_RUN` appears at job or workflow level or in a `$GITHUB_ENV` write.
+- (d) The task file moves to completed only when this half merges (the task-move skip is pre-approved for that PR).
+
+The workflow edit needs the planner-tracked blockedPaths change (task 721, which removes `.github/workflows/**` from `blockedPaths`) on main first.
 <!-- SECTION:DESCRIPTION:END -->
