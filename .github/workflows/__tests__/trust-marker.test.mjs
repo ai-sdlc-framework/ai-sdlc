@@ -70,3 +70,17 @@ for (const [file, jobId] of [
     assert.equal(String(doc.jobs[jobId].env?.AI_SDLC_UNTRUSTED_RUN), '1');
   });
 }
+
+test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout, env-bound', () => {
+  const src = readFileSync(join(WORKFLOWS, 'untrusted-pr-gate.yml'), 'utf8');
+  const doc = yaml.load(src);
+  const job = doc.jobs['governance-boundary'];
+  assert.ok(job, 'governance-boundary job exists');
+  assert.equal(job.if, undefined, 'not behind the UCVG feature flag');
+  assert.equal(String(job.env?.AI_SDLC_UNTRUSTED_RUN), '1');
+  assert.ok(!job.steps.some((s) => s.with?.ref), 'never checks out PR content');
+  for (const s of job.steps) {
+    assert.ok(!/\$\{\{\s*github\.event/.test(String(s.run ?? '')), 'no github.event in run:');
+  }
+  assert.match(JSON.stringify(job.steps), /check-governance-boundary\.mjs/);
+});

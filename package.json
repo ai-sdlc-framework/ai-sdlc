@@ -66,7 +66,7 @@
     "test:release-please-config": "node --test .github/workflows/__tests__/release-please-config.test.mjs .github/workflows/__tests__/release-yml-pin-sync.test.mjs",
     "test:require-issue-link": "node --test .github/workflows/__tests__/require-issue-link.test.mjs",
     "test:supply-chain-hardening": "node --test .github/workflows/__tests__/action-pinning.test.mjs .github/workflows/__tests__/no-new-pr-gate.test.mjs",
-    "test:trust-marker-workflow": "node --test .github/workflows/__tests__/trust-marker.test.mjs",
+    "test:trust-marker-workflow": "node --test .github/workflows/__tests__/trust-marker.test.mjs scripts/check-governance-boundary.test.mjs",
     "test:untrusted-pr-gate-workflow": "node --test .github/workflows/__tests__/untrusted-pr-gate.test.mjs",
     "test:substrate-contract-gate": "node --test scripts/check-substrate-contract.test.mjs",
     "test:substrate-contract-conformance": "node --test scripts/check-substrate-contract.conformance.test.mjs",

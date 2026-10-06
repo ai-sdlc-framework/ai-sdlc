@@ -903,3 +903,45 @@ jobs:
               context: 'ai-sdlc/untrusted-pr-gate',
               description: 'Skipped: author is trusted; existing review path applies',
             });
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # AISDLC-720.1: governance boundary. NOT behind the UCVG feature flag and NOT
+  # classified by trusted-reviewers.yaml: derived only from GitHub facts (fork
+  # flag + author_association). Fails a PR from a fork, or from an author who is
+  # not OWNER/MEMBER/COLLABORATOR, that changes governance config or workflows.
+  # Runs under pull_request_target so the logic comes from main, not the PR; the
+  # changed-file list is read from the API and no PR content is checked out.
+  # Configure the check name `Governance boundary` as a required status check
+  # (branch protection is an operator-side setting, not edited here).
+  # ────────────────────────────────────────────────────────────────────────────
+  governance-boundary:
+    name: Governance boundary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      AI_SDLC_UNTRUSTED_RUN: '1'
+    steps:
+      - name: Checkout target main (script comes from main, never from the PR)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: List changed files from the API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/changed-files.txt"
+
+      - name: Enforce governance boundary
+        env:
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+        run: node scripts/check-governance-boundary.mjs --files "${RUNNER_TEMP}/changed-files.txt"
