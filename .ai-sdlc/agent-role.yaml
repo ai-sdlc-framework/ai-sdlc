@@ -32,8 +32,6 @@ spec:
     maxFilesPerChange: 15
     requireTests: true
     blockedPaths:
-      - '.github/workflows/**'
-      - '.ai-sdlc/**'
       # OpenCode governance + config (AISDLC-660): the agent-writable worktree
       # must not be able to rewrite its own governance plugin or permissions.
       - 'opencode.json'

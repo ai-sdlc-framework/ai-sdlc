@@ -46,8 +46,12 @@ describe('loadConfig()', () => {
     const constraints = config.agentRole!.spec.constraints!;
     expect(constraints.maxFilesPerChange).toBe(15);
     expect(constraints.requireTests).toBe(true);
-    expect(constraints.blockedPaths).toContain('.github/workflows/**');
-    expect(constraints.blockedPaths).toContain('.ai-sdlc/**');
+    // AISDLC-721: '.github/workflows/**' and '.ai-sdlc/**' were removed from the repo's
+    // blockedPaths (internal agents may edit them via reviewed PRs); assert entries that remain.
+    expect(constraints.blockedPaths).toContain('opencode.json');
+    expect(constraints.blockedPaths).toContain('.opencode/**');
+    expect(constraints.blockedPaths).not.toContain('.github/workflows/**');
+    expect(constraints.blockedPaths).not.toContain('.ai-sdlc/**');
   });
 
   it('returns correct quality gates', () => {
