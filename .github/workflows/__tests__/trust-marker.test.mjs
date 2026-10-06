@@ -11,7 +11,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
@@ -31,12 +31,25 @@ function findViolations(name, source) {
       out.push(`${name}: ${MARKER} at job-level env of '${jobId}'. ${FIX}`);
     for (const step of job?.steps ?? []) {
       const run = String(step?.run ?? '');
+      const script = String(step?.with?.script ?? '');
+      if (script.includes(MARKER) && /exportVariable/.test(script)) {
+        out.push(`${name}: ${MARKER} exported via core.exportVariable in job '${jobId}'. ${FIX}`);
+      }
       if (run.includes(MARKER) && /GITHUB_ENV/.test(run)) {
         out.push(`${name}: ${MARKER} written to $GITHUB_ENV in job '${jobId}'. ${FIX}`);
       }
     }
   }
   return out;
+}
+
+const ACTIONS = join(WORKFLOWS, '..', 'actions');
+
+/** Any mention of the marker inside a composite/local action definition is a violation. */
+function findActionViolations(name, source) {
+  return source.includes(MARKER)
+    ? [`${name}: ${MARKER} appears in an action definition. ${FIX}`]
+    : [];
 }
 
 const files = readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f));
@@ -55,6 +68,29 @@ test('detector flags job-level, workflow-level and $GITHUB_ENV forms and names t
   for (const m of v) assert.match(m, /step-level `env:`/);
 });
 
+test('detector flags core.exportVariable in github-script and marker in action.yml', () => {
+  const wf = `jobs:\n  a:\n    steps:\n      - uses: actions/github-script@v7\n        with:\n          script: core.exportVariable('${MARKER}', '1')\n`;
+  const v = findViolations('x.yml', wf);
+  assert.equal(v.length, 1);
+  assert.match(v[0], /exportVariable/);
+  assert.equal(findActionViolations('a/action.yml', `env:\n  ${MARKER}: '1'`).length, 1);
+  assert.deepEqual(findActionViolations('a/action.yml', 'runs: {}'), []);
+});
+
+test('no local action definition mentions AI_SDLC_INTERNAL_RUN', () => {
+  if (!existsSync(ACTIONS)) return;
+  const out = [];
+  for (const d of readdirSync(ACTIONS, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    for (const f of ['action.yml', 'action.yaml']) {
+      const p = join(ACTIONS, d.name, f);
+      if (existsSync(p))
+        out.push(...findActionViolations(`${d.name}/${f}`, readFileSync(p, 'utf8')));
+    }
+  }
+  assert.deepEqual(out, []);
+});
+
 test('detector allows step-level env', () => {
   const wf = `jobs:\n  a:\n    steps:\n      - run: echo hi\n        env:\n          ${MARKER}: '1'\n`;
   assert.deepEqual(findViolations('x.yml', wf), []);
@@ -71,6 +107,11 @@ for (const [file, jobId] of [
   });
 }
 
+test('untrusted-pr-gate.yml triggers on edited so a base change re-runs the check', () => {
+  const doc = yaml.load(readFileSync(join(WORKFLOWS, 'untrusted-pr-gate.yml'), 'utf8'));
+  assert.ok(doc.on.pull_request_target.types.includes('edited'));
+});
+
 test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout, env-bound', () => {
   const src = readFileSync(join(WORKFLOWS, 'untrusted-pr-gate.yml'), 'utf8');
   const doc = yaml.load(src);
@@ -83,4 +124,6 @@ test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout,
     assert.ok(!/\$\{\{\s*github\.event/.test(String(s.run ?? '')), 'no github.event in run:');
   }
   assert.match(JSON.stringify(job.steps), /check-governance-boundary\.mjs/);
+  const env = job.steps.find((s) => s.env?.PR_CHANGED_FILES)?.env;
+  assert.match(env.PR_CHANGED_FILES, /github\.event\.pull_request\.changed_files/);
 });

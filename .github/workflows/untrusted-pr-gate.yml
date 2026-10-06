@@ -47,7 +47,7 @@ name: Untrusted-Contributor PR Verification Gate
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
     branches: [main]
 
 # Workflow-level permissions: read-only default per Scorecard TokenPermissionsID.
@@ -935,12 +935,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          # One row per line: filename[TAB previous_filename]. A failed API call fails the step.
           gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
-            --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/changed-files.txt"
+            --jq '.[] | [.filename, (.previous_filename // empty)] | join("\t")' > "${RUNNER_TEMP}/changed-files.txt"
 
       - name: Enforce governance boundary
         env:
           PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
           PR_AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
           PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
           PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
