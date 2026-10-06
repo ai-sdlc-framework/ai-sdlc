@@ -1220,6 +1220,40 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     );
   });
 
+  it('AISDLC-543 AC#3: a stale head-sha-named v6 envelope (PR #912 squash-after-re-sign) is removed even when named HEAD~1', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-543\n');
+    writeVerdictFile(root, 'AISDLC-543');
+
+    // X = the head the automation signed for; the squash then produced Y on
+    // top, which still carries `<X>.v6.dsse.json` (the name equals HEAD~1, so
+    // the pre-AISDLC-543 sweep kept it and the verifier's filename check failed).
+    writeFileSync(join(root, 'feature.txt'), 'dev work\n');
+    git(['add', 'feature.txt'], root);
+    git(['commit', '-q', '-m', 'feat: dev work'], root);
+    const x = git(['rev-parse', 'HEAD'], root).trim();
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    const staleEnvPath = join(attDir, `${x}.v6.dsse.json`);
+    writeFileSync(staleEnvPath, '{"_test":"stale-head-named"}\n');
+    writeFileSync(join(root, 'feature2.txt'), 'more dev work\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: squashed work'], root);
+
+    const { cmd } = installFakeSigner(root);
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
+    assert.equal(r.status, 1, `expected 1 (signed fresh), got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /removed stale envelope/i);
+    assert.equal(existsSync(staleEnvPath), false, 'head-sha-named v6 envelope must be dropped');
+    const remaining = readdirSync(attDir).filter((f) => f.endsWith('.v6.dsse.json'));
+    assert.ok(
+      remaining.length === 1 && remaining[0] !== `${x}.v6.dsse.json`,
+      `only the patch-id-named envelope may remain (found: ${remaining.join(', ')})`,
+    );
+  });
+
   // ── AISDLC-475 (Fix B): patch-id idempotency — eliminate re-sign loop ────
   //
   // AC#5 end-to-end: a chore commit on top of a signed dev commit must NOT

@@ -3827,6 +3827,8 @@ describe('verifyV6Envelope (unit)', () => {
       });
       assert.equal(result.status, 'invalid');
       assert.match(result.reason, /subject\.digest\.sha1.*does not match head SHA/);
+      // AISDLC-543 / AISDLC-545 AC#4: unreachable subject names the remediation.
+      assert.match(result.reason, /unreachable in this clone.*re-sign at HEAD/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -3852,6 +3854,9 @@ describe('verifyV6Envelope (unit)', () => {
       });
       assert.equal(result.status, 'invalid');
       assert.match(result.reason, /envelope filename.*does not match expected/i);
+      // AISDLC-543 AC#2: states the stale-event-rerun trap + the remediation.
+      assert.match(result.reason, /re-run of an older workflow run.*stale/s);
+      assert.match(result.reason, /push a fresh synchronize event/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

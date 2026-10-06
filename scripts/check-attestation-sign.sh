@@ -498,7 +498,21 @@ if [ "$RESIGN" != "1" ] && [ -n "$HEAD_PARENT_SHA" ]; then
       ENVELOPE_SHA="${ENVELOPE_FILE%.dsse.json}"
     fi
     # Only remove if it's neither the current HEAD SHA nor the parent SHA.
-    if [ "$ENVELOPE_SHA" != "$HEAD_SHA" ] && [ "$ENVELOPE_SHA" != "$HEAD_PARENT_SHA" ]; then
+    #
+    # AISDLC-543 AC#3: the v6 signer writes ONLY patch-id-named envelopes
+    # (AISDLC-475 Fix B). When a patch-id is available, a PR-added
+    # `<sha>.v6.dsse.json` that is not that patch-id is a stale head-sha-named
+    # envelope (PR #912: named for a head the automation's own squash then
+    # rewrote) and hard-fails the verifier's filename check, so it is removed
+    # even when its name equals HEAD / HEAD~1.
+    STALE_HEAD_NAMED=0
+    if [ "$SCHEMA_VERSION" = "v6" ] && [ -n "$PATCH_ID" ] \
+       && [ "$ENVELOPE_FILE" != "$ENVELOPE_SHA" ] \
+       && [ "${ENVELOPE_FILE}" = "${ENVELOPE_SHA}.v6.dsse.json" ] \
+       && [ "$ENVELOPE_SHA" != "$PATCH_ID" ]; then
+      STALE_HEAD_NAMED=1
+    fi
+    if { [ "$ENVELOPE_SHA" != "$HEAD_SHA" ] && [ "$ENVELOPE_SHA" != "$HEAD_PARENT_SHA" ]; } || [ "$STALE_HEAD_NAMED" = "1" ]; then
       STALE_ABS="$WT_ROOT/$ENVELOPE_PATH"
       [ -n "$STALE_ABS" ] || { echo "[attestation-sign] refusing rm: STALE_ABS empty" >&2; continue; }
       if [ -f "$STALE_ABS" ]; then

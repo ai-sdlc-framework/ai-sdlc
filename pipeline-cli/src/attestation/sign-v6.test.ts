@@ -17,15 +17,26 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createPublicKey, generateKeyPairSync, verify as cryptoVerify } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLeaf, appendLeafForPatchId, type TranscriptLeaf } from './merkle.js';
 import {
   buildV6Envelope,
   formatV6Envelope,
+  assertSubjectIsHead,
   resolveSigningKeyPath,
   signAndWriteV6Envelope,
+  writeEnvelopeAtomic,
   type AttestationEnvelopeV6,
 } from './sign-v6.js';
 
@@ -804,5 +815,65 @@ describe('signAndWriteV6Envelope — leaves under a stale patch-id (AISDLC-734)'
         patchId: 'e'.repeat(40),
       }),
     ).toThrow('No transcript leaves found for taskId');
+  });
+});
+
+// ── AISDLC-543 / AISDLC-545: subject binding + atomic envelope writes ─────────
+
+describe('assertSubjectIsHead (AISDLC-545 AC#1)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'sign-v6-head-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const git = (...a: string[]): string =>
+    execFileSync('git', a, { cwd: dir, encoding: 'utf8' }).trim();
+
+  it('passes for the current HEAD and throws for an older (orphan-able) commit', () => {
+    git('init', '-q');
+    git('config', 'user.email', 't@example.com');
+    git('config', 'user.name', 'T');
+    git('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(dir, 'a'), '1');
+    git('add', 'a');
+    git('commit', '-q', '-m', 'one');
+    const first = git('rev-parse', 'HEAD');
+    writeFileSync(join(dir, 'a'), '2');
+    git('commit', '-q', '-am', 'two');
+    const head = git('rev-parse', 'HEAD');
+
+    expect(() => assertSubjectIsHead(dir, head)).not.toThrow();
+    expect(() => assertSubjectIsHead(dir, first)).toThrow(/not the current HEAD.*Re-sign at HEAD/s);
+  });
+
+  it('is a no-op outside a git repository', () => {
+    expect(() => assertSubjectIsHead(dir, 'f'.repeat(40))).not.toThrow();
+  });
+});
+
+describe('writeEnvelopeAtomic (AISDLC-543 AC#4, PR #912 corrupted-envelope sequence)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'sign-v6-atomic-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('replaces a truncated/unparsable envelope with a complete one and leaves no temp files', () => {
+    const target = join(dir, 'abc.v6.dsse.json');
+    writeFileSync(target, '{"payloadType":"app'); // the unparsable state left by a racing writer
+    writeEnvelopeAtomic(target, '{"ok":true}\n');
+    expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ ok: true });
+    expect(readdirSync(dir)).toEqual(['abc.v6.dsse.json']);
+  });
+
+  it('a failed write never touches the existing envelope and cleans up its temp file', () => {
+    const target = join(dir, 'sub', 'abc.v6.dsse.json'); // parent dir missing -> write fails
+    expect(() => writeEnvelopeAtomic(target, '{}')).toThrow();
+    mkdirSync(join(dir, 'sub'));
+    writeFileSync(target, '{"keep":1}');
+    expect(() => writeEnvelopeAtomic(join(dir, 'sub', 'nope', 'x.json'), '{}')).toThrow();
+    expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ keep: 1 });
+    expect(readdirSync(join(dir, 'sub'))).toEqual(['abc.v6.dsse.json']);
   });
 });
