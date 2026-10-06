@@ -67,5 +67,9 @@ Reproduced items 1 and 3 first, then fixed them. Real behaviour: (1) CONFIRMED. 
 - `pnpm build`, `pnpm lint`, `pnpm format:check` clean; targeted vitest and node:test suites pass (see PR notes).
 
 ## Follow-up
-- `scripts/verify-attestation.mjs` is a blocked path for the executor; no change was needed there (the logic lives in `verify-core.mjs`). declined: nothing further.
+- declined: no change to scripts/verify-attestation.mjs was needed, the verifier logic lives in verify-core.mjs and was changed there.
+- declined: an exact patch-id-named envelope that fails to qualify can hide a newer qualifying one; unlikely because a re-sign overwrites the same filename and the per-SHA bridge files are gone, and verification of the chosen envelope is unchanged.
+- declined: name AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES in the fail-closed reason, and add a 40-hex check on the current patch-id in the refusal text; cosmetic, no trust impact.
+- declined: prune consumed markers with a future firedAt via an absolute-value age check; needs the same local access a coordinator already has, so no new attack.
+- declined: the 3 verify-runtime and 3 plugin adopter-runtime-resolution test failures depend on the worktree living under .worktrees of the parent checkout and also fail on origin/main; not caused by this change.
 <!-- SECTION:FINAL_SUMMARY:END -->
