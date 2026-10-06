@@ -66,10 +66,19 @@ above; the watchdog-avoidance framing has been removed.
 ## Path resolution
 
 ```bash
+# AISDLC-716: resolve through the shared resolver so the repo's own build wins over the plugin cache.
 if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
-  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+  PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_DIR/scripts"
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_ROOT/scripts"
 else
-  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+  PLUGIN_SCRIPTS_DIR="$(pwd)/ai-sdlc-plugin/scripts"
+fi
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || {
+    echo "ERROR: cannot resolve @ai-sdlc/pipeline-cli (see resolver output above)." >&2
+    exit 1
+  }
 fi
 BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 WORKER_ID="${AI_SDLC_WORKER_ID:-worker-$$-$(date +%s)}"

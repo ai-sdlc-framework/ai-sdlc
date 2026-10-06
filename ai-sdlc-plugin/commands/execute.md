@@ -205,9 +205,10 @@ if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
       exit 1
     }
   else
-    # Fallback for the dogfood monorepo where PLUGIN_SCRIPTS_DIR contains resolve-pipeline-cli.sh
-    # but we haven't shipped that script yet (upgrade in place). Use the old two-case logic.
-    if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
+    # Resolver script not shipped (upgrade in place): prefer this repo's own build (AISDLC-716).
+    if [ -d "$(pwd)/pipeline-cli/bin" ]; then
+      PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+    elif [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
       PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
     else
       PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"

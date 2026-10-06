@@ -29,6 +29,7 @@ import {
   realpathSync,
   copyFileSync,
   chmodSync,
+  utimesSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -629,5 +630,94 @@ process.stdout.write('@ai-sdlc/pipeline-cli 0.20.0 0.20.1 ^0.20.1\\n');
 
     assert.equal(exitCode, 0, 'must resolve via the fast path with no scripts/ dir present at all');
     assert.equal(normPath(stdout), normPath(join(pluginDir, PIPELINE_CLI_REL)));
+  });
+});
+
+// ── AISDLC-716: repo's own pipeline-cli build beats the plugin cache ─────────
+
+function git(cwd, ...args) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf-8' });
+  assert.equal(r.status, 0, `git ${args.join(' ')} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** Create a git repo that contains the pipeline-cli workspace, optionally with a fresh dist. */
+function makeDogfoodRepo(root, { dist }) {
+  mkdirSync(join(root, 'pipeline-cli', 'src'), { recursive: true });
+  writeFileSync(
+    join(root, 'pipeline-cli', 'package.json'),
+    JSON.stringify({ name: '@ai-sdlc/pipeline-cli', version: '9.9.9' }),
+  );
+  writeFileSync(join(root, 'pipeline-cli', 'src', 'a.ts'), 'export const a = 1;\n');
+  createFakePipelineBin(join(root, 'pipeline-cli', 'bin'));
+  git(root, 'init', '-q');
+  if (dist) {
+    mkdirSync(join(root, 'pipeline-cli', 'dist'), { recursive: true });
+    const out = join(root, 'pipeline-cli', 'dist', 'a.js');
+    writeFileSync(out, 'export const a = 1;\n');
+    // dist strictly newer than sources
+    const t = new Date(Date.now() + 5000);
+    utimesSync(out, t, t);
+  }
+}
+
+describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
+  function cacheHome(base) {
+    const home = join(base, 'home');
+    createFakePipelineBin(join(home, '.claude/plugins/cache/mp/ai-sdlc/1.0.0', PIPELINE_CLI_REL));
+    return home;
+  }
+
+  it('returns the worktree build when dist is fresh, ignoring the plugin cache', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-716-fresh-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: true });
+    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, repo);
+    assert.equal(exitCode, 0);
+    assert.equal(normPath(stdout), normPath(join(repo, 'pipeline-cli', 'bin')));
+    assert.match(stderr, /this repo's own pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('stale dist: warns with the rebuild command and falls back to the plugin cache', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-716-stale-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: true });
+    const t = new Date(Date.now() + 60000);
+    utimesSync(join(repo, 'pipeline-cli', 'src', 'a.ts'), t, t);
+    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, repo);
+    assert.equal(exitCode, 0);
+    assert.match(stdout, /plugins\/cache\/mp\/ai-sdlc\/1\.0\.0/);
+    assert.match(stderr, /WARNING/);
+    assert.match(stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('worktree without dist uses the main checkout fresh build', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-716-wt-'));
+    const main = join(base, 'main');
+    makeDogfoodRepo(main, { dist: true });
+    git(main, 'add', '-A');
+    git(main, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'init');
+    const wt = join(base, 'wt');
+    git(main, 'worktree', 'add', '-q', wt, '-b', 'feature');
+    // worktree has sources + bin (tracked) but no dist (untracked in main)
+    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, wt);
+    assert.equal(exitCode, 0);
+    assert.equal(normPath(stdout), normPath(join(main, 'pipeline-cli', 'bin')));
+    assert.match(stderr, /main checkout/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('adopter repo (no pipeline-cli workspace) resolves exactly as before: plugin cache, no repo warning', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-716-adopter-'));
+    const repo = join(base, 'adopter');
+    mkdirSync(repo, { recursive: true });
+    git(repo, 'init', '-q');
+    const { stdout, stderr, exitCode } = runScript({ HOME: cacheHome(base) }, repo);
+    assert.equal(exitCode, 0);
+    assert.match(stdout, /plugins\/cache\/mp\/ai-sdlc\/1\.0\.0/);
+    assert.doesNotMatch(stderr, /WARNING|own pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
   });
 });

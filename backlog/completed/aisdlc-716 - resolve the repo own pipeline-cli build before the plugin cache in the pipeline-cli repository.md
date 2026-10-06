@@ -2,7 +2,7 @@
 id: AISDLC-716
 title: >-
   In a repository that contains the pipeline-cli workspace, resolve the repo's own build before the plugin cache
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
@@ -33,12 +33,12 @@ The attestation could not be signed and a review round was repeated.
   `/tmp` path.
 
 ## Acceptance Criteria
-- [ ] When the current repository (the worktree, or its main checkout) contains the pipeline-cli workspace package itself, the resolver returns that repository's build: the worktree's `pipeline-cli/dist` if present and not older than its sources, else the main checkout's, else the plugin cache with a one-line warning on stderr naming which build was chosen and why.
-- [ ] Adopter repositories (no pipeline-cli workspace) resolve exactly as today: a project-local `node_modules` install, then the plugin cache. A test covers both layouts and the stale-dist fallback.
-- [ ] A stale or missing repo build is reported with the command that rebuilds it; the resolver never silently runs an older build than the one the repository's sources describe.
-- [ ] Every plugin command, hook and script that invokes pipeline-cli goes through the resolver (list them in the PR; fix the ones that hardcode the cache path).
-- [ ] `/ai-sdlc doctor` (`ai-sdlc-plugin/commands/doctor.md`) reports which pipeline-cli build the session resolves and its version.
-- [ ] PR body carries a "Velocity impact" section (DEC-0048).
+- [x] When the current repository (the worktree, or its main checkout) contains the pipeline-cli workspace package itself, the resolver returns that repository's build: the worktree's `pipeline-cli/dist` if present and not older than its sources, else the main checkout's, else the plugin cache with a one-line warning on stderr naming which build was chosen and why.
+- [x] Adopter repositories (no pipeline-cli workspace) resolve exactly as today: a project-local `node_modules` install, then the plugin cache. A test covers both layouts and the stale-dist fallback.
+- [x] A stale or missing repo build is reported with the command that rebuilds it; the resolver never silently runs an older build than the one the repository's sources describe.
+- [x] Every plugin command, hook and script that invokes pipeline-cli goes through the resolver (list them in the PR; fix the ones that hardcode the cache path).
+- [x] `/ai-sdlc doctor` (`ai-sdlc-plugin/commands/doctor.md`) reports which pipeline-cli build the session resolves and its version.
+- [x] PR body carries a "Velocity impact" section (DEC-0048).
 
 ## Out of scope
 - Changing how adopters install the CLI.
