@@ -207,7 +207,7 @@ describe('executeFixCI()', () => {
 
   it('enforces guardrails — rejects blocked paths', async () => {
     const runner = makeMockRunner({
-      filesChanged: ['.github/workflows/ci.yml', 'src/fix.test.ts'],
+      filesChanged: ['opencode.json', 'src/fix.test.ts'],
     });
     const auditLog = makeMockAuditLog();
 

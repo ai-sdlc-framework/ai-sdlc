@@ -245,7 +245,9 @@ describe('executePipeline()', () => {
           requireTests: true,
           // AISDLC-380 fix #3: added verifier scripts to blockedPaths — use arrayContaining
           // so the test doesn't need to enumerate every entry (forward-compatible).
-          blockedPaths: expect.arrayContaining(['.github/workflows/**', '.ai-sdlc/**']),
+          // AISDLC-721: workflows and .ai-sdlc are no longer in the repo's agent-role
+          // blockedPaths; assert entries that remain.
+          blockedPaths: expect.arrayContaining(['opencode.json', '.opencode/**']),
         }),
       }),
     );
@@ -256,7 +258,7 @@ describe('executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner({
-      filesChanged: ['.github/workflows/ci.yml', 'src/fix.test.ts'],
+      filesChanged: ['opencode.json', 'src/fix.test.ts'],
     });
     const auditLog = makeMockAuditLog();
 
@@ -520,12 +522,12 @@ describe('executePipeline()', () => {
       auditLog,
     });
 
-    // Both agent role and autonomy policy have .github/workflows/** and .ai-sdlc/**
-    // Merged + deduped should still include both
+    // AISDLC-721: the agent role no longer lists .github/workflows/** or .ai-sdlc/**, so the
+    // merged + deduped list is asserted on an entry the agent role still carries.
     expect(runner.run).toHaveBeenCalledWith(
       expect.objectContaining({
         constraints: expect.objectContaining({
-          blockedPaths: expect.arrayContaining(['.github/workflows/**', '.ai-sdlc/**']),
+          blockedPaths: expect.arrayContaining(['opencode.json']),
         }),
       }),
     );

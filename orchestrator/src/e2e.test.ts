@@ -182,12 +182,12 @@ describe('E2E: executePipeline()', () => {
     expect(sc.createPR).not.toHaveBeenCalled();
   });
 
-  it('post-agent blocked path rejection — agent modifies .ai-sdlc/ files', async () => {
+  it('post-agent blocked path rejection — agent modifies opencode.json (AISDLC-721: .ai-sdlc/ no longer blocked)', async () => {
     const issue = makeIssue();
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner({
-      filesChanged: ['.ai-sdlc/pipeline.yaml', 'src/fix.test.ts'],
+      filesChanged: ['opencode.json', 'src/fix.test.ts'],
     });
     const auditLog = makeMockAuditLog();
 
