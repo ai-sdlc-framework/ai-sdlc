@@ -32,6 +32,7 @@
  *   1. Resolve worktree + verify dev verdict present
  *   2. Salvage reviewer transcripts from /private/tmp if missing in
  *      `<worktree>/.ai-sdlc/transcripts/` (AC #3)
+ *   2b. git fetch + rebase onto the target branch (AISDLC-543: BEFORE signing)
  *   3. Emit one transcript leaf per reviewer (v6 prereq)
  *   4. Sign attestation via `ai-sdlc-plugin/scripts/sign-attestation.mjs`
  *   5. Force-push the chore commit on top of the dev's branch
@@ -462,10 +463,13 @@ export function runReconcile(options: RunReconcileOptions): ReconcileResult {
   })();
   // Count steps that indicate a rebase was performed.
   const rebased = result.steps.some((s) => s.name === 'git-rebase' && s.status === 'success');
-  // Count steps that indicate a re-sign was performed.
-  const reSignCount = result.steps.filter(
-    (s) => s.name === 'sign-attestation' && s.status === 'success',
-  ).length;
+  // AISDLC-543: the first successful sign is the PR's one expected signature;
+  // only signs beyond it are re-signs. With fetch -> rebase -> sign -> push a
+  // clean drain signs exactly once, so reSignCount stays 0.
+  const reSignCount = Math.max(
+    0,
+    result.steps.filter((s) => s.name === 'sign-attestation' && s.status === 'success').length - 1,
+  );
   const reconcileEventPayload: Parameters<typeof writeEvent>[0] = {
     ts: '',
     type: 'ReconcileCompleted',
@@ -572,6 +576,41 @@ function runReconcileInner(
     };
   }
 
+  // -------------------------------------------------------------------------
+  // Step 0.5 (AISDLC-543 AC#1): fetch + rebase BEFORE emitting leaves and
+  // signing. The envelope subject must be the commit that gets pushed. When
+  // origin/<target> moved after the dev's last rebase, rebasing AFTER signing
+  // rewrites the signed subject into an orphan CI cannot resolve
+  // (`contentHashV4 mismatch`, PR #909 / #912). Order:
+  // fetch -> rebase -> emit-leaves -> sign -> push.
+  // -------------------------------------------------------------------------
+  let signHeadSha = headSha;
+  if (!options.skipPush) {
+    // AISDLC-606 — fetch + rebase onto the resolved integration branch
+    // instead of a hardcoded `main`. Defaults to `'main'` when
+    // `spec.branching.targetBranch` is unset.
+    const targetBranch = resolveTargetBranch(workDir);
+    const fetch = spawn('git', ['fetch', 'origin', targetBranch], { cwd: worktreePath });
+    steps.push({
+      name: 'git-fetch',
+      status: fetch.status === 0 ? 'success' : 'failed',
+      output: trimOutput(fetch.stdout + (fetch.stderr ? `\n[stderr] ${fetch.stderr}` : '')),
+    });
+    if (fetch.status !== 0) return finalizeResult(taskId, devVerdict, steps);
+    const rebase = spawn('git', ['rebase', `origin/${targetBranch}`], { cwd: worktreePath });
+    steps.push({
+      name: 'git-rebase',
+      status: rebase.status === 0 ? 'success' : 'failed',
+      output: trimOutput(rebase.stdout + (rebase.stderr ? `\n[stderr] ${rebase.stderr}` : '')),
+    });
+    if (rebase.status !== 0) return finalizeResult(taskId, devVerdict, steps);
+    // The rebase may have rewritten the dev's commit; leaves + signature bind
+    // to the post-rebase HEAD, not the verdict's (possibly orphaned) SHA.
+    const rev = spawn('git', ['rev-parse', 'HEAD'], { cwd: worktreePath });
+    const rebasedHead = (rev.stdout || '').trim();
+    if (rev.status === 0 && /^[0-9a-f]{40}$/i.test(rebasedHead)) signHeadSha = rebasedHead;
+  }
+
   const cliAttestationBin =
     options.cliAttestationBin ?? path.join(workDir, 'pipeline-cli', 'bin', 'cli-attestation.mjs');
   const reviewerModel = options.reviewerModel ?? DEFAULT_ROLE_MODELS['code-reviewer'];
@@ -643,7 +682,7 @@ function runReconcileInner(
       '--verdict-path',
       verdictPath,
       '--head-sha',
-      headSha,
+      signHeadSha,
       '--harness',
       harness,
       '--model',
@@ -724,37 +763,6 @@ function runReconcileInner(
   // Step 3: force-push the chore commit on top of the dev's branch.
   // -------------------------------------------------------------------------
   if (!options.skipPush) {
-    // AISDLC-606 — fetch + rebase onto the resolved integration branch
-    // instead of a hardcoded `main`. Defaults to `'main'` when
-    // `spec.branching.targetBranch` is unset (byte-identical to
-    // pre-AISDLC-606 behavior).
-    const targetBranch = resolveTargetBranch(workDir);
-    const fetch = spawn('git', ['fetch', 'origin', targetBranch], { cwd: worktreePath });
-    steps.push({
-      name: 'git-fetch',
-      status: fetch.status === 0 ? 'success' : 'failed',
-      output: trimOutput(fetch.stdout + (fetch.stderr ? `\n[stderr] ${fetch.stderr}` : '')),
-    });
-    if (fetch.status !== 0) {
-      return finalizeResult(taskId, devVerdict, steps, undefined, {
-        reviewerStartedAt,
-        reviewerCompletedAt,
-        signedAt,
-      });
-    }
-    const rebase = spawn('git', ['rebase', `origin/${targetBranch}`], { cwd: worktreePath });
-    steps.push({
-      name: 'git-rebase',
-      status: rebase.status === 0 ? 'success' : 'failed',
-      output: trimOutput(rebase.stdout + (rebase.stderr ? `\n[stderr] ${rebase.stderr}` : '')),
-    });
-    if (rebase.status !== 0) {
-      return finalizeResult(taskId, devVerdict, steps, undefined, {
-        reviewerStartedAt,
-        reviewerCompletedAt,
-        signedAt,
-      });
-    }
     const push = spawn('git', ['push', '--force-with-lease'], { cwd: worktreePath });
     steps.push({
       name: 'git-push',
@@ -762,6 +770,13 @@ function runReconcileInner(
       output: trimOutput(push.stdout + (push.stderr ? `\n[stderr] ${push.stderr}` : '')),
     });
     if (push.status !== 0) {
+      // AISDLC-543 AC#4: a rejected lease means another writer (a second
+      // signer, the auto-rebase bot) moved the branch. Re-read the remote
+      // state and report it; never re-sign over a writer whose commits we
+      // have not rebased onto.
+      steps.push(
+        inspectConcurrentWriter(spawn, worktreePath, devVerdict.pushedBranch ?? undefined),
+      );
       return finalizeResult(taskId, devVerdict, steps, undefined, {
         reviewerStartedAt,
         reviewerCompletedAt,
@@ -924,6 +939,51 @@ function finalizeResult(
   if (timings?.signedAt) result.signedAt = timings.signedAt;
   if (timings?.prOpenedAt) result.prOpenedAt = timings.prOpenedAt;
   return result;
+}
+
+/**
+ * AISDLC-543 AC#4: after a rejected lease push, re-read the branch's remote
+ * state. When the remote tip is not an ancestor of local HEAD another writer
+ * landed commits we have not rebased onto; the caller must rebase + re-sign
+ * from that state instead of overwriting it.
+ */
+function inspectConcurrentWriter(
+  spawn: NonNullable<RunReconcileOptions['spawn']>,
+  worktreePath: string,
+  branch: string | undefined,
+): ReconcileStep {
+  if (!branch) {
+    return {
+      name: 'concurrent-writer-check',
+      status: 'skipped',
+      output: 'no pushedBranch on the verdict; cannot re-read remote branch state',
+    };
+  }
+  const fetch = spawn('git', ['fetch', 'origin', branch], { cwd: worktreePath });
+  if (fetch.status !== 0) {
+    return {
+      name: 'concurrent-writer-check',
+      status: 'failed',
+      output: `could not re-read origin/${branch}: ${trimOutput(fetch.stderr)}`,
+    };
+  }
+  const anc = spawn('git', ['merge-base', '--is-ancestor', `origin/${branch}`, 'HEAD'], {
+    cwd: worktreePath,
+  });
+  if (anc.status === 0) {
+    return {
+      name: 'concurrent-writer-check',
+      status: 'success',
+      output: `origin/${branch} is an ancestor of HEAD; push was rejected for another reason`,
+    };
+  }
+  return {
+    name: 'concurrent-writer-check',
+    status: 'failed',
+    output:
+      `another writer moved origin/${branch} (not an ancestor of HEAD). ` +
+      `Not overwriting: rebase onto origin/${branch}, re-emit leaves, re-sign, then push.`,
+  };
 }
 
 /** Default shell-out shim — `spawnSync` with stdout/stderr captured as utf-8 strings. */

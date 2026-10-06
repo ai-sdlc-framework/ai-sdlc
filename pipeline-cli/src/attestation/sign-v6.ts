@@ -28,8 +28,9 @@
  * @module attestation/sign-v6
  */
 
+import { spawnSync } from 'node:child_process';
 import { sign as cryptoSign } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -380,6 +381,11 @@ export function findOrphanedLeafFiles(
 export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): string {
   const { repoRoot, headSha, taskId, privateKeyPem, signerIdentity, patchId } = opts;
 
+  // AISDLC-543 (folded from AISDLC-545): subject.sha1 MUST be the commit being
+  // pushed. A subject older than HEAD can be orphaned by a rebase and is
+  // unreachable in CI's shallow clone. Skipped when repoRoot is not a git repo.
+  assertSubjectIsHead(repoRoot, headSha);
+
   // AISDLC-421: per-patch-id-first read with shared-file fallback.
   // `prLeaves` is the per-PR leaf set (the Merkle tree is built from these
   // ONLY — no cross-PR shared root anymore).
@@ -482,13 +488,52 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
   // always get back a written file path).
   if (patchId) {
     const primaryPath = join(outDir, `${patchId}.v6.dsse.json`);
-    writeFileSync(primaryPath, serialized, { encoding: 'utf8' });
+    writeEnvelopeAtomic(primaryPath, serialized);
     return primaryPath;
   }
 
   const legacyPath = join(outDir, `${headSha}.v6.dsse.json`);
-  writeFileSync(legacyPath, serialized, { encoding: 'utf8' });
+  writeEnvelopeAtomic(legacyPath, serialized);
   return legacyPath;
+}
+
+/**
+ * AISDLC-543: write via temp file + rename so a concurrent reader or a second
+ * writer racing this one never observes (or leaves behind) a truncated,
+ * unparsable envelope (PR #912 sequence). rename(2) is atomic on one volume.
+ */
+export function writeEnvelopeAtomic(target: string, content: string): void {
+  const tmp = `${target}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, content, { encoding: 'utf8' });
+    renameSync(tmp, target);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // temp file never created or already gone
+    }
+    throw err;
+  }
+}
+
+/**
+ * AISDLC-543 / AISDLC-545 AC#1: throw when `headSha` is not the repo's current
+ * HEAD. No-op when HEAD cannot be resolved (non-git directory).
+ */
+export function assertSubjectIsHead(repoRoot: string, headSha: string): void {
+  const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+  if (r.status !== 0) return;
+  const head = (r.stdout ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(head)) return;
+  if (head !== headSha.toLowerCase()) {
+    throw new Error(
+      `[sign-v6] subject.sha1 (${headSha}) is not the current HEAD (${head}). ` +
+        `A subject that is not the pushed commit can be orphaned by a rebase and become ` +
+        `unreachable in CI. Re-sign at HEAD.`,
+    );
+  }
+  process.stderr.write(`[sign-v6] subject.sha1 bound to current HEAD ${head}\n`);
 }
 
 // ── Pretty-print (inspect-v6) ─────────────────────────────────────────────────

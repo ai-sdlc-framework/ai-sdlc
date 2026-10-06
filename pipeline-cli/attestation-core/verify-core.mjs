@@ -207,6 +207,30 @@ export function computePatchIdForVerifier(base, head, repoRoot) {
 }
 
 /**
+ * AISDLC-543: appended to filename-mismatch failures. `gh run rerun` re-reads
+ * the ORIGINAL pull_request event payload, so after a force-push the rerun can
+ * name envelope files that no longer exist in the tree.
+ */
+const STALE_EVENT_RERUN_HINT =
+  ' — if this is a re-run of an older workflow run, the original event payload is stale ' +
+  '(a force-push changed the branch since); do not re-run: push a fresh synchronize event ' +
+  '(a new commit or a force-push of the current head) so the check evaluates the current branch state';
+
+/**
+ * AISDLC-543 (folded from AISDLC-545 AC#4): when the envelope subject commit is
+ * absent from this clone (orphaned by a rebase, or outside a shallow clone) say
+ * so and name the remediation. Empty string when the subject is present.
+ */
+function subjectUnreachableHint(subjectSha, repoRoot) {
+  const r = spawnSync('git', ['cat-file', '-e', `${subjectSha}^{commit}`], {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+  });
+  if (r.status === 0) return '';
+  return ` — subject SHA ${subjectSha.slice(0, 7)} is unreachable in this clone (orphaned by a rebase or outside a shallow clone); re-sign at HEAD`;
+}
+
+/**
  * AISDLC-419: detect "attestation-only descendant" relationship.
  *
  * Returns true iff `subjectSha` is an ancestor of `headSha` AND the only
@@ -1206,7 +1230,7 @@ export function verifyV6Envelope({
   if (fileNameMismatch && !subjectMismatch) {
     return {
       status: 'invalid',
-      reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}`,
+      reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}${STALE_EVENT_RERUN_HINT}`,
     };
   }
   if (subjectMismatch) {
@@ -1236,12 +1260,12 @@ export function verifyV6Envelope({
     } else if (fileNameMismatch) {
       return {
         status: 'invalid',
-        reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}`,
+        reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}${STALE_EVENT_RERUN_HINT}`,
       };
     } else {
       return {
         status: 'invalid',
-        reason: `v6: envelope.subject.digest.sha1 '${envelopeSubjectSha.slice(0, 7)}' does not match head SHA '${headSha.slice(0, 7)}' (possible replay)`,
+        reason: `v6: envelope.subject.digest.sha1 '${envelopeSubjectSha.slice(0, 7)}' does not match head SHA '${headSha.slice(0, 7)}' (possible replay)${subjectUnreachableHint(envelopeSubjectSha, repoRoot)}`,
       };
     }
   }
