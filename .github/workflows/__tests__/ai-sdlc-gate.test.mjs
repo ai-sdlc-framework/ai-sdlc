@@ -333,6 +333,11 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     const waitStep = job.steps.find((s) => s.env?.CHECK_NAME);
     assert.ok(waitStep, 'must have a wait step carrying CHECK_NAME');
     assert.equal(waitStep.env.CHECK_NAME, checkName);
+    // Stale draft-time `skipped` and superseded `cancelled` runs must not be
+    // treated as the final answer on the draft-to-ready flip.
+    assert.match(waitStep.run, /conclusion != "skipped" and \.conclusion != "cancelled"/);
+    assert.match(waitStep.run, /\.app\.slug == "github-actions"/);
+    assert.ok(!/\|\|\s*true/.test(waitStep.run), 'API errors must be logged, not swallowed');
     // Untrusted event data must not be interpolated into the script body.
     assert.ok(
       !/\$\{\{/.test(waitStep.run),

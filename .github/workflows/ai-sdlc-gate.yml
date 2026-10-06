@@ -397,11 +397,18 @@ jobs:
           set -euo pipefail
           deadline=$(( $(date +%s) + 15 * 60 ))
           while :; do
-            # Newest run of the check on this SHA (a cancelled superseded run
-            # has a lower id than its replacement).
-            run=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" --paginate \
-              --jq ".check_runs[] | select(.name == env.CHECK_NAME) | [.id, .status, (.conclusion // \"\")] | @tsv" \
-              | sort -n | tail -1 || true)
+            # Newest run of the check on this SHA, created by GitHub Actions
+            # (not another app), that can be a final answer.
+            # `skipped` (the draft-time run: evaluate-pr-tasks has a draft
+            # guard) and `cancelled` (a run superseded by a concurrency
+            # restart) are stale on the draft-to-ready flip; treat them as
+            # "not started" and keep polling for the real run.
+            if ! out=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" --paginate \
+              --jq '.check_runs[] | select(.name == env.CHECK_NAME and .app.slug == "github-actions") | select(.conclusion != "skipped" and .conclusion != "cancelled") | [.id, .status, (.conclusion // "")] | @tsv' 2>&1); then
+              echo "::warning::gh api check-runs failed (will retry): ${out}"
+              out=""
+            fi
+            run=$(printf '%s\n' "$out" | sort -n | tail -1)
             status=$(printf '%s' "$run" | cut -f2)
             conclusion=$(printf '%s' "$run" | cut -f3)
             if [ "$status" = "completed" ]; then
