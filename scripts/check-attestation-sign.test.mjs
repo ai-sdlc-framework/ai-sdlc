@@ -113,6 +113,12 @@ function cleanEnv(extra = {}) {
   delete env.GIT_INDEX_FILE;
   // Don't inherit stale overrides from the host env.
   delete env.AI_SDLC_BYPASS_ALL_GATES;
+  // AISDLC-734: the task env fallback must not leak in from a dispatched session;
+  // only a value a test passes explicitly counts.
+  delete env.AI_SDLC_ACTIVE_TASK_ID;
+  if (extra.AI_SDLC_ACTIVE_TASK_ID !== undefined) {
+    env.AI_SDLC_ACTIVE_TASK_ID = extra.AI_SDLC_ACTIVE_TASK_ID;
+  }
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   delete env.AI_SDLC_PATCH_ID_EXCLUSIONS_CMD;
@@ -469,6 +475,40 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     // through silently so chore PRs and docs-only commits push cleanly.
     const r = runHook(root);
     assert.equal(r.status, 0, `expected 0, got ${r.status}: stderr=${r.stderr}`);
+  });
+
+  it('AISDLC-734: no sentinel and no env says what to run to sign (not a bare skip)', () => {
+    const r = runHook(root);
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /no active task/);
+    assert.match(r.stderr, /echo <TASK-ID> > .*\.active-task/);
+    assert.match(r.stderr, /AI_SDLC_ACTIVE_TASK_ID/);
+  });
+
+  it('AISDLC-734: AI_SDLC_ACTIVE_TASK_ID signs when the worktree has no sentinel', () => {
+    writeVerdictFile(root, 'AISDLC-734');
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd } = installFakeSigner(root);
+    const r = runHook(root, {
+      AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-734',
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+    });
+    assert.equal(r.status, 1, `expected 1 (re-push required), got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /using AI_SDLC_ACTIVE_TASK_ID=AISDLC-734/);
+    assert.equal(
+      existsSync(join(root, '.ai-sdlc', 'attestations', `${head}.v6.dsse.json`)),
+      true,
+      'envelope must be written from the env-supplied task id',
+    );
+  });
+
+  it('AISDLC-734: the sentinel wins over AI_SDLC_ACTIVE_TASK_ID', () => {
+    writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
+    const r = runHook(root, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-734' });
+    assert.equal(r.status, 0);
+    assert.doesNotMatch(r.stderr, /using AI_SDLC_ACTIVE_TASK_ID/);
+    assert.match(r.stderr, /aisdlc-133\.json/);
   });
 
   it('exits 0 when the sentinel file exists but is empty (defensive)', () => {

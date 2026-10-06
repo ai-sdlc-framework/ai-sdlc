@@ -52,6 +52,11 @@ import {
   v6VerifyInclusion,
   v6LoadLeaves,
   verifyV6Envelope,
+  DEFAULT_VERIFIER_SCAN_BUDGET_MS,
+  describeRequiredReviewerSet,
+  resolveScanBudgetMs,
+  resolveScanMaxCandidates,
+  computePatchIdForVerifier,
 } from './verify-attestation.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -6076,6 +6081,202 @@ describe('verifyV6Envelope (AISDLC-448 — orphan-ancestor relaxation)', () => {
       );
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('AISDLC-734: bounded scan + required reviewer set', () => {
+  it('resolveScanBudgetMs accepts a positive integer and defaults otherwise', () => {
+    assert.equal(resolveScanBudgetMs('2500'), 2500);
+    assert.equal(resolveScanBudgetMs(' 90 '), 90);
+    for (const bad of [undefined, '', '0', '-5', '1.5', 'abc']) {
+      assert.equal(resolveScanBudgetMs(bad), DEFAULT_VERIFIER_SCAN_BUDGET_MS, String(bad));
+    }
+  });
+
+  it('describeRequiredReviewerSet names all three roles and their codex variants', () => {
+    const line = describeRequiredReviewerSet();
+    assert.match(line, /^required reviewers: /);
+    assert.match(line, /code-reviewer \(or code-reviewer-codex\)/);
+    assert.match(line, /test-reviewer \(or test-reviewer-codex\)/);
+    assert.match(line, /security-reviewer/);
+  });
+});
+
+describe('runVerifier (AISDLC-734 — bounded v6 candidate walk)', () => {
+  let fixture;
+  let keys;
+  const ENV_KEYS = ['AI_SDLC_VERIFIER_SCAN_BUDGET_MS', 'AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES'];
+  let savedEnv;
+  const NAMED = `${'a'.repeat(40)}.v6.dsse.json`;
+
+  const attPath = (name) => join(fixture.root, '.ai-sdlc', 'attestations', name);
+  function attDirMove(from, to) {
+    const body = readFileSync(attPath(from), 'utf-8');
+    rmSync(attPath(from));
+    writeFileSync(attPath(to), body);
+  }
+  /** Copy the valid envelope under `name`, overriding fields. */
+  function plant(name, overrides) {
+    const base = JSON.parse(readFileSync(attPath(NAMED), 'utf-8'));
+    writeFileSync(attPath(name), JSON.stringify({ ...base, ...overrides }));
+  }
+  const run = (extra = {}) =>
+    runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+      ...extra,
+    });
+  function captureStderr(fn) {
+    const orig = process.stderr.write;
+    let text = '';
+    process.stderr.write = (chunk) => {
+      text += String(chunk);
+      return true;
+    };
+    try {
+      return { out: fn(), text };
+    } finally {
+      process.stderr.write = orig;
+    }
+  }
+  // First call = scan start; every later call is far past any budget.
+  const exhaustedClock = () => {
+    let calls = 0;
+    return () => (calls++ === 0 ? 0 : 10_000_000);
+  };
+
+  beforeEach(() => {
+    savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+    for (const k of ENV_KEYS) delete process.env[k];
+    fixture = setupFixture();
+    keys = genV6KeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, keys.privateKeyPem);
+    // Arbitrary 40-hex name: found only by the walk (subject.sha1 = head qualifies
+    // via the ancestor relaxation).
+    attDirMove(`${fixture.headSha}.v6.dsse.json`, NAMED);
+    // Attestation-only chore commit on top: the envelope's subject is then an
+    // attestation-only ancestor of HEAD (the production shape).
+    execFileSync('git', ['add', '.ai-sdlc/attestations/', '.ai-sdlc/transcript-leaves.jsonl'], {
+      cwd: fixture.root,
+    });
+    execFileSync('git', ['commit', '-q', '-m', 'chore: sign v6 attestation'], {
+      cwd: fixture.root,
+    });
+    fixture.headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: fixture.root,
+      encoding: 'utf-8',
+    }).trim();
+  });
+
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('(a) the newest-first walk picks the newest qualifying envelope, as the old filter-then-sort did', () => {
+    assert.equal(run().status, 'valid');
+    // A newer qualifying envelope with a broken signature wins over the older valid one.
+    plant(`${'b'.repeat(40)}.v6.dsse.json`, {
+      signedAt: '2026-06-01T00:00:00.000Z',
+      rootSignature: Buffer.from('not a signature').toString('base64'),
+    });
+    assert.equal(run().status, 'invalid');
+    // A newer NON-qualifying envelope (subject unreachable) is skipped; the walk
+    // continues to the next qualifying one, which is the broken 'b' again.
+    plant(`${'c'.repeat(40)}.v6.dsse.json`, {
+      signedAt: '2026-07-01T00:00:00.000Z',
+      subject: { digest: { sha1: '9'.repeat(40) } },
+    });
+    assert.equal(run().status, 'invalid');
+    // Remove the broken one: the skipped non-qualifier does not hide the valid one.
+    rmSync(attPath(`${'b'.repeat(40)}.v6.dsse.json`));
+    assert.equal(run().status, 'valid');
+  });
+
+  it('(b) wall-clock budget exhaustion fails closed naming AI_SDLC_VERIFIER_SCAN_BUDGET_MS', () => {
+    const out = run({ now: exhaustedClock() });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /AI_SDLC_VERIFIER_SCAN_BUDGET_MS/);
+    assert.match(out.reason, /scan budget/);
+  });
+
+  it('(b2) the candidate-count cap fails closed the same way, independent of the clock', () => {
+    process.env.AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES = '1';
+    // A newer non-qualifying envelope occupies the single allowed slot.
+    plant(`${'c'.repeat(40)}.v6.dsse.json`, {
+      signedAt: '2030-01-01T00:00:00.000Z',
+      subject: { digest: { sha1: '9'.repeat(40) } },
+    });
+    const out = run();
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /AI_SDLC_VERIFIER_SCAN_BUDGET_MS/);
+    process.env.AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES = '2';
+    assert.equal(run().status, 'valid');
+  });
+
+  it('(c) the legacy walk stops at the budget and fails closed', () => {
+    rmSync(attPath(NAMED));
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    // Control: with the real clock the legacy envelope verifies.
+    assert.equal(run().status, 'valid');
+    const { out, text } = captureStderr(() => run({ now: exhaustedClock() }));
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /AI_SDLC_VERIFIER_SCAN_BUDGET_MS/);
+    assert.match(text, /stopped scanning legacy envelopes/);
+  });
+
+  it('(d) prints the required reviewer set on stderr', () => {
+    const { text } = captureStderr(() => run());
+    assert.match(
+      text,
+      /\[verify-attestation\] required reviewers: code-reviewer \(or code-reviewer-codex\); test-reviewer \(or test-reviewer-codex\); security-reviewer/,
+    );
+  });
+
+  it('fast path: the exact patch-id-named envelope is found before the timed walk', () => {
+    const patchId = computePatchIdForVerifier(fixture.baseSha, fixture.headSha, fixture.root);
+    assert.match(patchId ?? '', /^[0-9a-f]{40}$/);
+    attDirMove(NAMED, `${patchId}.v6.dsse.json`);
+    const base = JSON.parse(readFileSync(attPath(`${patchId}.v6.dsse.json`), 'utf-8'));
+    // Decoys with far-future unsigned signedAt values that would fill any walk.
+    for (const c of ['1', '2', '3']) {
+      writeFileSync(
+        attPath(`${c.repeat(40)}.v6.dsse.json`),
+        JSON.stringify({
+          ...base,
+          signedAt: '2099-01-01T00:00:00.000Z',
+          subject: { digest: { sha1: '9'.repeat(40) } },
+        }),
+      );
+    }
+    process.env.AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES = '1';
+    const out = run({ now: exhaustedClock() });
+    assert.equal(out.status, 'valid', `expected valid via fast path, got: ${out.reason}`);
+  });
+
+  it('resolveScanMaxCandidates accepts a positive integer and defaults otherwise', () => {
+    assert.equal(resolveScanMaxCandidates('7'), 7);
+    for (const bad of [undefined, '', '0', '-1', 'x']) {
+      assert.equal(resolveScanMaxCandidates(bad), 300, String(bad));
     }
   });
 });

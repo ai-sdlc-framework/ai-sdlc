@@ -71,6 +71,12 @@ function cleanEnv(extra = {}) {
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
   delete env.AI_SDLC_BYPASS_ALL_GATES;
+  // AISDLC-734: the task env fallback must not leak in from a dispatched session;
+  // only a value a test passes explicitly counts.
+  delete env.AI_SDLC_ACTIVE_TASK_ID;
+  if (extra.AI_SDLC_ACTIVE_TASK_ID !== undefined) {
+    env.AI_SDLC_ACTIVE_TASK_ID = extra.AI_SDLC_ACTIVE_TASK_ID;
+  }
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   delete env.AI_SDLC_ALLOW_SIGNER_OVERRIDE;
@@ -403,6 +409,30 @@ describe('sign-attestation-if-consumer.sh (AISDLC-598)', () => {
       const r = runScript(root);
       assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
       assert.match(r.stderr, /nothing to sign/i);
+    });
+
+    it('AISDLC-734: names the exact command to run when no task is known', () => {
+      installConsumerPushPath(root);
+      const r = runScript(root);
+      assert.equal(r.status, 0);
+      assert.match(r.stderr, /echo <TASK-ID> > .*\.active-task/);
+      assert.match(r.stderr, /AI_SDLC_ACTIVE_TASK_ID/);
+    });
+
+    it('AISDLC-734: honours AI_SDLC_ACTIVE_TASK_ID when the worktree has no sentinel', () => {
+      installConsumerPushPath(root);
+      writeVerdictFile(root, 'AISDLC-734');
+      const { cmd: signCmd, logPath: signLog } = installFakeSigner(root);
+      const { cmd: verifyCmd } = installFakeVerifier(root, { valid: true });
+      const r = runScript(root, {
+        AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-734',
+        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
+        AI_SDLC_ALLOW_SIGNER_OVERRIDE: '1',
+        AI_SDLC_VERIFY_ATTESTATION_CMD: verifyCmd,
+      });
+      assert.equal(r.status, 0, `expected 0, got ${r.status}: ${r.stderr}`);
+      assert.match(r.stderr, /using AI_SDLC_ACTIVE_TASK_ID=AISDLC-734/);
+      assert.equal(existsSync(signLog), true, 'signer must run for the env-supplied task');
     });
 
     it('exits 0 no-op when sentinel present but verdict file is absent', () => {

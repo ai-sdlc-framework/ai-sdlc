@@ -12,7 +12,15 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+} from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -29,6 +37,13 @@ import {
   nonceMarkerLiteral,
 } from '../attestation/harness-transcript.js';
 import { buildAttestationCli, readAgentIdSidecar } from './attestation.js';
+
+/** AISDLC-734: markers are bound to their leaf, not deleted; list the ones still free. */
+function unconsumedMarkers(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .filter((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')).consumedFor === undefined);
+}
 import { PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
 import {
   loadAttestationRuntime,
@@ -2295,7 +2310,7 @@ describe('emit-leaf — harnessTranscriptHash positive path through real verdict
 
     // The marker was consumed (real determineVerdictClass semantics
     // preserved) — but only AFTER computeHarnessTranscriptHash read it.
-    expect(readdirSync(markerDir)).toHaveLength(0);
+    expect(unconsumedMarkers(markerDir)).toHaveLength(0);
 
     expect(stderrChunks.join('')).toMatch(/harnessTranscriptHash=[0-9a-f]{16}\.\.\./);
   });
@@ -2924,6 +2939,44 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
     ]).parseAsync();
   }
 
+  it('AISDLC-734: a second emit for the same reviewer run and head keeps `independent`', async () => {
+    writeMarkerFile('run-code', 'ai-sdlc:code-reviewer');
+
+    await emit('code-reviewer');
+    // The transcript changed, so this is a new leaf rather than the
+    // idempotent skip; the run behind it is the same one.
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-697',
+      'code-reviewer.jsonl',
+    );
+    appendFileSync(transcriptPath, '\n{"note":"re-run"}\n');
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-697',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      join(tmpRoot, '.ai-sdlc', 'verdicts', 'code-reviewer-aisdlc-697.json'),
+      '--head-sha',
+      'e'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+      '--patch-id',
+      TEST_PATCH_ID,
+    ]).parseAsync();
+
+    const leaves = loadLeavesUnderTest(tmpRoot);
+    expect(leaves.map((l) => l.verdictClass)).toEqual(['independent', 'independent']);
+  });
+
   it('three reviewers with markers fired seconds apart all get independent leaves, in any emit order', async () => {
     const now = Date.now();
     writeMarkerFile('run-sec', 'ai-sdlc:security-reviewer', new Date(now - 6000));
@@ -2940,7 +2993,7 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
       ['test-reviewer', 'independent'],
       ['security-reviewer', 'independent'],
     ]);
-    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual([]);
+    expect(unconsumedMarkers(subagentSessionsDir(tmpRoot))).toEqual([]);
   });
 
   it("does not use another reviewer's marker: the leaf is self-authored and the marker is kept", async () => {
@@ -2962,7 +3015,7 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
     await emit('code-reviewer', ['--agent-id', 'first-run']);
 
     expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('independent');
-    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
+    expect(unconsumedMarkers(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
   });
 
   it('reads the agent id from the sidecar next to the transcript when --agent-id is omitted', async () => {
@@ -2976,7 +3029,7 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
     await emit('code-reviewer');
 
     expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('independent');
-    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
+    expect(unconsumedMarkers(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
   });
 
   it('an agent id whose marker belongs to another reviewer yields a self-authored leaf', async () => {
@@ -3105,7 +3158,7 @@ describe('emit-leaf — worktree layout end to end (markers under the main check
       expect(leaf.independenceTier, leaf.reviewerName).toBe('attested');
       expect(leaf.harnessTranscriptHash, leaf.reviewerName).toBe(expected[leaf.reviewerName]);
     }
-    expect(readdirSync(subagentSessionsDir(mainRoot))).toEqual([]);
+    expect(unconsumedMarkers(subagentSessionsDir(mainRoot))).toEqual([]);
   });
 
   it("another task's reviewer marker in the main checkout does not make this task's leaf independent", async () => {

@@ -29,10 +29,16 @@
  */
 
 import { sign as cryptoSign } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { computeMerkleRoot, generateNonce, loadLeaves, loadLeavesForPatchId } from './merkle.js';
+import {
+  computeMerkleRoot,
+  generateNonce,
+  loadLeaves,
+  loadLeavesForPatchId,
+  loadLeavesFromFile,
+} from './merkle.js';
 import type { TranscriptLeaf } from './merkle.js';
 import { formatEnvelopeJson } from './format-json.js';
 
@@ -317,6 +323,38 @@ export interface SignAndWriteV6EnvelopeOptions {
 }
 
 /**
+ * Leaf files for `taskId` stored under a patch-id other than `currentPatchId`.
+ * Read-only; unreadable files are skipped. Used only to explain a refusal.
+ */
+export function findOrphanedLeafFiles(
+  taskId: string,
+  currentPatchId: string,
+  repoRoot: string,
+): Array<{ patchId: string; reviewers: string[] }> {
+  const dir = join(repoRoot, '.ai-sdlc', 'transcript-leaves');
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => /^[0-9a-f]{40}\.jsonl$/i.test(f));
+  } catch {
+    return [];
+  }
+  const out: Array<{ patchId: string; reviewers: string[] }> = [];
+  for (const f of files) {
+    const id = f.slice(0, 40).toLowerCase();
+    if (id === currentPatchId.toLowerCase()) continue;
+    try {
+      const mine = loadLeavesFromFile(join(dir, f)).filter(
+        (l) => l.taskId.toLowerCase() === taskId.toLowerCase(),
+      );
+      if (mine.length > 0) out.push({ patchId: id, reviewers: mine.map((l) => l.reviewerName) });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+/**
  * Load leaves from the per-patch-id file (AISDLC-421) with a one-release-window
  * fallback to the legacy shared `.ai-sdlc/transcript-leaves.jsonl`, then build
  * + sign the v6 envelope and write it to
@@ -372,6 +410,27 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
   }
 
   if (prLeaves.length === 0) {
+    const orphaned = patchId ? findOrphanedLeafFiles(taskId, patchId, repoRoot) : [];
+    if (orphaned.length > 0) {
+      // Leaf content is attacker-influenceable; only safe tokens reach the Fix: text.
+      const names = [...new Set(orphaned.flatMap((o) => o.reviewers))]
+        .filter((n) => /^[A-Za-z0-9:_-]+$/.test(n))
+        .sort();
+      const safeTaskId = /^[A-Za-z][A-Za-z0-9]*-[0-9]+(\.[0-9]+)*$/.test(taskId)
+        ? taskId
+        : '<task-id>';
+      throw new Error(
+        `[sign-v6] No transcript leaves for taskId '${safeTaskId}' at patch-id ${patchId}, but leaves for ` +
+          `this task exist under a different patch-id (${orphaned.map((o) => o.patchId).join(', ')}). ` +
+          `The reviewed diff changed after emit-leaf ran (a commit outside the excluded paths ` +
+          `.ai-sdlc/attestations/, .ai-sdlc/transcript-leaves/, .ai-sdlc/reviews/, backlog/tasks/, ` +
+          `backlog/completed/). Leaves are bound to the diff they reviewed and are never relabeled. ` +
+          `Fix: re-run the reviewers on the current head and run ` +
+          `\`cli-attestation emit-leaf --task-id ${safeTaskId} --head-sha ${/^[0-9a-f]{40}$/i.test(headSha) ? headSha : '<head-sha>'} --reviewer <name> ...\` ` +
+          `once per reviewer (seen: ${names.join(', ') || 'none'}); or, if the change since emit was ` +
+          `unintended, restore the reviewed diff.`,
+      );
+    }
     throw new Error(
       `[sign-v6] No transcript leaves found for taskId '${taskId}'` +
         (patchId ? ` (patch-id ${patchId.slice(0, 12)}...)` : '') +

