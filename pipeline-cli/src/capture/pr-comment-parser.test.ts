@@ -10,6 +10,12 @@ import {
 } from './pr-comment-parser.js';
 
 describe('parsePrCommentMarker', () => {
+  it('accepts the --!> comment end tag as well as -->', () => {
+    const result = parsePrCommentMarker('<!-- ai-sdlc:capture severity=major --!>\nbody');
+    expect(result.found).toBe(true);
+    expect(result.severity).toBe('major');
+  });
+
   it('returns found=false when no marker is present', () => {
     const result = parsePrCommentMarker('This is a normal PR comment without a marker.');
     expect(result.found).toBe(false);

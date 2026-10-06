@@ -424,25 +424,62 @@ describe('AISDLC-381: AC #4 (safety guard #2) — fork checkouts are sandboxed u
     );
   });
 
-  it('ai-sdlc-review.yml attestation-precheck fork checkout uses path: pr-content', () => {
+  it('ai-sdlc-review.yml attestation-precheck never checks out the PR head (AISDLC-704, alert 174)', () => {
     const wf = loadYaml('ai-sdlc-review.yml');
     const job = wf.jobs['attestation-precheck'];
-    const checkouts = (job.steps ?? [])
-      .filter((s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'))
-      .map((s) => s.with ?? {});
-    const forkCheckout = checkouts.find(
-      (w) => typeof w.ref === 'string' && w.ref.includes('head.sha'),
+    const checkouts = (job.steps ?? []).filter(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
     );
-    assert.ok(
-      forkCheckout,
-      'attestation-precheck must include a fork-HEAD checkout for envelope access',
+    for (const c of checkouts) {
+      assert.equal(c.with?.ref, undefined, 'attestation-precheck checkout must not set ref');
+      assert.equal(c.with?.repository, undefined, 'attestation-precheck must not check out a fork');
+      assert.equal(c.with?.['allow-unsafe-pr-checkout'], undefined);
+    }
+  });
+});
+
+describe('AISDLC-704: privileged workflows never check out untrusted refs or interpolate event data into run:', () => {
+  const UNTRUSTED_REF =
+    /github\.event\.(pull_request\.head\.(sha|ref)|workflow_run\.head_(branch|sha))/;
+
+  for (const name of ['ai-sdlc-review.yml', 'ai-sdlc-fix-ci.yml']) {
+    it(`${name}: no actions/checkout uses an untrusted head ref`, () => {
+      const wf = loadYaml(name);
+      for (const { jobId, step } of allSteps(wf)) {
+        if (typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@')) {
+          assert.ok(
+            !UNTRUSTED_REF.test(String(step.with?.ref ?? '')),
+            `${name} job ${jobId}: checkout must not use an untrusted head ref`,
+          );
+        }
+      }
+    });
+
+    it(`${name}: no run: block interpolates \${{ github.event.* }}`, () => {
+      const wf = loadYaml(name);
+      for (const { jobId, step } of allSteps(wf)) {
+        if (typeof step.run === 'string') {
+          assert.ok(
+            !/\$\{\{\s*github\.event\./.test(step.run),
+            `${name} job ${jobId} step '${step.name ?? ''}': bind github.event.* to env: instead`,
+          );
+        }
+      }
+    });
+  }
+
+  it('ai-sdlc-fix-ci.yml privileged root checkout is the default branch; PR branch goes to pr-work/', () => {
+    const wf = loadYaml('ai-sdlc-fix-ci.yml');
+    const steps = wf.jobs['fix-ci'].steps;
+    const checkout = steps.find(
+      (s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout@'),
     );
-    assert.equal(forkCheckout.path, 'pr-content', 'fork checkout MUST be sandboxed in pr-content/');
-    assert.equal(
-      forkCheckout['persist-credentials'],
-      false,
-      'fork checkout MUST disable persist-credentials',
-    );
+    assert.equal(checkout.with.ref, undefined);
+    const fetchStep = steps.find((s) => /pr-work/.test(s.run ?? '') && /worktree add/.test(s.run));
+    assert.ok(fetchStep, 'PR branch must be fetched into a separate pr-work worktree');
+    assert.equal(fetchStep.env.HEAD_BRANCH, '${{ github.event.workflow_run.head_branch }}');
+    const run = steps.find((s) => /fix-ci/.test(s.run ?? ''));
+    assert.match(run.env.AI_SDLC_FIX_CI_WORKDIR, /pr-work$/);
   });
 });
 
@@ -453,11 +490,7 @@ describe('AISDLC-592: allow-unsafe-pr-checkout is set on EVERY sandboxed fork ch
   // lock in both directions: present on every pr-content checkout, absent
   // on every trusted main checkout. Dropping the flag on any one workflow
   // silently reproduces the ~6-week fork-PR outage this task fixed.
-  const FORK_CONTENT_WORKFLOWS = [
-    'untrusted-pr-gate.yml',
-    'ai-sdlc-review.yml',
-    'verify-attestation.yml',
-  ];
+  const FORK_CONTENT_WORKFLOWS = ['untrusted-pr-gate.yml', 'verify-attestation.yml'];
 
   for (const name of FORK_CONTENT_WORKFLOWS) {
     it(`${name}: every path: pr-content checkout sets allow-unsafe-pr-checkout: true + persist-credentials: false`, () => {

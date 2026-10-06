@@ -58,6 +58,44 @@ const mockFigmaResponse: FigmaVariablesResponse = {
 };
 
 describe('figmaVariablesToDtcg', () => {
+  it('does not pollute Object.prototype via __proto__/constructor path segments', () => {
+    const evil: FigmaVariablesResponse = {
+      status: 200,
+      error: false,
+      meta: {
+        variables: {
+          'var-x': {
+            id: 'var-x',
+            name: '__proto__/polluted',
+            key: 'k',
+            resolvedType: 'FLOAT',
+            valuesByMode: { 'mode-1': 4 },
+            description: '',
+          },
+          'var-y': {
+            id: 'var-y',
+            name: 'constructor/prototype/polluted2',
+            key: 'k2',
+            resolvedType: 'FLOAT',
+            valuesByMode: { 'mode-1': 4 },
+            description: '',
+          },
+        },
+        variableCollections: {
+          'col-1': {
+            id: 'col-1',
+            name: 'Tokens',
+            modes: [{ modeId: 'mode-1', name: 'Default' }],
+            variableIds: ['var-x', 'var-y'],
+          },
+        },
+      },
+    };
+    figmaVariablesToDtcg(evil);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(({} as Record<string, unknown>).polluted2).toBeUndefined();
+  });
+
   it('converts Figma colors to hex', () => {
     const tokens = figmaVariablesToDtcg(mockFigmaResponse);
     const colorPrimary = tokens.color as Record<string, unknown>;
