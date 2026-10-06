@@ -45,7 +45,9 @@ function parseArgs(argv: string[]): { prNumber: number; runId: number } {
 async function main(): Promise<void> {
   const { prNumber, runId } = parseArgs(process.argv);
 
-  const workDir = await resolveRepoRoot();
+  // AISDLC-704: the privileged workflow runs tooling from a trusted checkout and
+  // points the pipeline at the PR branch worktree via this env var.
+  const workDir = process.env.AI_SDLC_FIX_CI_WORKDIR || (await resolveRepoRoot());
   const registry = createPipelineAdapterRegistry();
   const infra = resolveInfrastructure(registry, { workDir });
   const security = createPipelineSecurity({ sandbox: infra.sandbox });

@@ -35,7 +35,10 @@ function resolveOllamaApiUrl(env: Record<string, string | undefined>): string {
     const host = /^https?:\/\//.test(env.OLLAMA_HOST)
       ? env.OLLAMA_HOST
       : `http://${env.OLLAMA_HOST}`;
-    return `${host.replace(/\/+$/, '')}/v1/chat/completions`;
+    // Linear trailing-slash trim (a /\/+$/ regex backtracks quadratically).
+    let end = host.length;
+    while (end > 0 && host.charCodeAt(end - 1) === 47) end--;
+    return `${host.slice(0, end)}/v1/chat/completions`;
   }
   return DEFAULT_OLLAMA_API_URL;
 }
