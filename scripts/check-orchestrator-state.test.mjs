@@ -268,7 +268,18 @@ describe('check-orchestrator-state.sh', () => {
     );
     sh(`git -C "${sibling}" push -q origin main`);
 
-    // Dirty ONLY a backlog task file (simulate pipeline run that left a staged/modified task file)
+    // AISDLC-708: the backlog file is what origin/main already has (the stale-index
+    // symptom: HEAD moved, index holds the new tree), so the reset is harmless.
+    sh(
+      `git -C "${sibling}" mkdir -p backlog/tasks 2>/dev/null || mkdir -p "${sibling}/backlog/tasks"`,
+    );
+    writeFileSync(
+      join(sibling, 'backlog', 'tasks', 'aisdlc-test - test-task.md'),
+      '---\nid: AISDLC-TEST\n---\n',
+    );
+    sh(`git -C "${sibling}" add backlog && git -C "${sibling}" commit -q -m backlog-file`);
+    sh(`git -C "${sibling}" push -q origin main`);
+    sh(`git -C "${env.local}" fetch -q origin main`);
     mkdirSync(join(env.local, 'backlog', 'tasks'), { recursive: true });
     writeFileSync(
       join(env.local, 'backlog', 'tasks', 'aisdlc-test - test-task.md'),
@@ -320,5 +331,60 @@ describe('check-orchestrator-state.sh', () => {
     assert.match(r.stdout, /uncommitted tracked changes; skipping reset/);
     // README.md must NOT be reverted
     assert.equal(sh(`cat "${join(env.local, 'README.md')}"`), 'local edit to README');
+  });
+
+  function advanceOrigin(name, files) {
+    const sibling = join(env.root, name);
+    sh(`git clone -q "${env.remote}" "${sibling}"`);
+    sh(`git -C "${sibling}" config user.email s@s.s && git -C "${sibling}" config user.name s`);
+    sh(`git -C "${sibling}" config commit.gpgsign false`);
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(sibling, rel)), { recursive: true });
+      writeFileSync(join(sibling, rel), content);
+    }
+    sh(`git -C "${sibling}" add -A && git -C "${sibling}" commit -q -m advance`);
+    sh(`git -C "${sibling}" push -q origin main`);
+  }
+
+  it('[AISDLC-708] stale index under a current HEAD is reported with the path count and not reset', () => {
+    advanceOrigin('adv-stale', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
+    // Reproduce the desync: move HEAD alone (what post-rewrite's update-ref did).
+    sh(`git -C "${env.local}" fetch -q origin main`);
+    sh(`git -C "${env.local}" update-ref refs/heads/main origin/main`);
+    assert.match(sh(`git -C "${env.local}" status --porcelain`), /^D {2}a\.txt/m);
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /index\/working tree differs from HEAD in 2 path\(s\)/);
+    assert.match(r.stdout, /reset --hard origin\/main/);
+    // Not auto-reset: still divergent.
+    assert.ok(sh(`git -C "${env.local}" status --porcelain`).length > 0);
+  });
+
+  it('[AISDLC-708] dirty backlog path that differs from origin/main is refused (no reset)', () => {
+    advanceOrigin('adv-refuse', { 'other.txt': 'o\n' });
+    mkdirSync(join(env.local, 'backlog', 'tasks'), { recursive: true });
+    const f = join(env.local, 'backlog', 'tasks', 'aisdlc-x - local-draft.md');
+    writeFileSync(f, 'my local draft\n');
+    sh(`git -C "${env.local}" add backlog/tasks/`);
+    const head = sh(`git -C "${env.local}" rev-parse HEAD`);
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /differ from origin\/main .*skipping reset/);
+    assert.match(r.stdout, /local-draft/);
+    assert.equal(sh(`git -C "${env.local}" rev-parse HEAD`), head);
+    assert.equal(sh(`cat "${f}"`), 'my local draft');
+  });
+
+  it('[AISDLC-708] reset that changes pipeline-cli/src warns about stale pipeline-cli/dist', () => {
+    mkdirSync(join(env.local, 'pipeline-cli', 'src'), { recursive: true });
+    writeFileSync(join(env.local, 'pipeline-cli', 'src', 'x.ts'), '1\n');
+    sh(`git -C "${env.local}" add pipeline-cli && git -C "${env.local}" commit -q -m cli`);
+    sh(`git -C "${env.local}" push -q origin main`);
+    mkdirSync(join(env.local, 'pipeline-cli', 'dist'), { recursive: true });
+    advanceOrigin('adv-dist', { 'pipeline-cli/src/x.ts': '2\n' });
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /pipeline-cli\/dist is stale/);
+    assert.match(r.stdout, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
   });
 });

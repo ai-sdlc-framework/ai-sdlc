@@ -47,6 +47,7 @@ import {
   checkJudgmentLayer,
   checkRuntimeGitignore,
   checkWorktreeHooks,
+  checkParentCheckoutState,
   fixWorktreeHooks,
   checkForcePushPolicy,
   readForcePushPolicy,
@@ -1639,5 +1640,48 @@ describe('worktree-hooks check', () => {
   it('is registered with a fix', () => {
     const c = DOCTOR_CHECKS.find((x) => x.id === 'worktree-hooks');
     expect(c?.fix).toBeDefined();
+  });
+});
+
+// ── parent-checkout-state (AISDLC-708) ────────────────────────────────
+
+describe('parent-checkout-state check', () => {
+  function gitAdapters(opts: { branch?: string; unstaged?: string; staged?: string }) {
+    return makeAdapters({
+      runCommand: (cmd, args) => {
+        if (cmd !== 'git') return { stdout: '', exitCode: 1 };
+        if (args.includes('symbolic-ref'))
+          return { stdout: `${opts.branch ?? 'main'}\n`, exitCode: 0 };
+        if (args.includes('--cached')) return { stdout: opts.staged ?? '', exitCode: 0 };
+        return { stdout: opts.unstaged ?? '', exitCode: 0 };
+      },
+    });
+  }
+
+  it('reports the unique count of diverged paths across index and working tree', () => {
+    const results = checkParentCheckoutState(
+      makeCtx(gitAdapters({ unstaged: 'a.ts\nb.ts\n', staged: 'b.ts\nc.ts\n' })),
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('parent-checkout-state');
+    expect(results[0].severity).toBe('warn');
+    expect(results[0].title).toContain('3 path(s)');
+    expect(results[0].remediation).toContain('reset --hard origin/main');
+  });
+
+  it('is quiet when the checkout is clean', () => {
+    expect(checkParentCheckoutState(makeCtx(gitAdapters({})))).toEqual([]);
+  });
+
+  it('is quiet when not on main (feature worktrees have local changes)', () => {
+    expect(
+      checkParentCheckoutState(makeCtx(gitAdapters({ branch: 'feat/x', staged: 'a.ts\n' }))),
+    ).toEqual([]);
+  });
+
+  it('is registered and report-only', () => {
+    const c = DOCTOR_CHECKS.find((x) => x.id === 'parent-checkout-state');
+    expect(c).toBeDefined();
+    expect(c?.fix).toBeUndefined();
   });
 });

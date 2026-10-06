@@ -128,8 +128,26 @@ if [ -z "$ORIGIN_MAIN" ]; then
   exit 0
 fi
 
-# Already up-to-date — nothing to do.
+# AISDLC-708: the index/working tree can differ from HEAD even when HEAD is
+# current (something moved HEAD alone). Count tracked paths that diverge and warn
+# loudly; never auto-reset here, because the changes are not provably ours.
+DIVERGED_PATHS=$(
+  { git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached HEAD 2>/dev/null; } \
+  | sort -u | grep -v '^$' || true
+)
+DIVERGED_COUNT=0
+if [ -n "$DIVERGED_PATHS" ]; then
+  DIVERGED_COUNT=$(printf '%s\n' "$DIVERGED_PATHS" | wc -l | tr -d ' ')
+fi
+
+# Already up-to-date — nothing to sync.
 if [ "$HEAD_SHA" = "$ORIGIN_MAIN" ]; then
+  if [ "$DIVERGED_COUNT" -gt 0 ]; then
+    echo "[orchestrator-state] WARN: parent index/working tree differs from HEAD in ${DIVERGED_COUNT} path(s)"
+    printf '%s\n' "$DIVERGED_PATHS" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Inspect: git -C \"${PARENT_ROOT}\" status"
+    echo "[orchestrator-state] If the changes are not yours: git -C \"${PARENT_ROOT}\" reset --hard origin/main"
+  fi
   exit 0
 fi
 
@@ -164,8 +182,32 @@ if [ -n "$DIRTY_TRACKED" ]; then
     echo "[orchestrator-state] Resolve manually: stash, commit, or discard. Then re-run."
     exit 0
   fi
-  # All dirty paths are backlog task lifecycle files — safe to proceed with reset.
-  echo "[orchestrator-state] auto-recovering: dirty paths are backlog task lifecycle files (will be resolved by reset)"
+  # AISDLC-708: resetting is only harmless when every dirty path already holds
+  # exactly what origin/main has (or is absent in both). Anything else is a local
+  # change we did not create: refuse instead of resetting over it.
+  UNSAFE_PATHS=""
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    if git cat-file -e "${ORIGIN_MAIN}:${p}" 2>/dev/null; then
+      # Present on origin/main: index and working tree must both match it.
+      if ! git diff --quiet "$ORIGIN_MAIN" -- "$p" 2>/dev/null \
+        || ! git diff --quiet --cached "$ORIGIN_MAIN" -- "$p" 2>/dev/null; then
+        UNSAFE_PATHS="${UNSAFE_PATHS}${p}"$'\n'
+      fi
+    else
+      # Gone on origin/main: only harmless if also gone from index and tree.
+      if git ls-files --error-unmatch -- "$p" >/dev/null 2>&1 || [ -e "$p" ]; then
+        UNSAFE_PATHS="${UNSAFE_PATHS}${p}"$'\n'
+      fi
+    fi
+  done <<< "$ALL_DIRTY_PATHS"
+  if [ -n "$UNSAFE_PATHS" ]; then
+    echo "[orchestrator-state] WARN: parent has backlog changes that differ from origin/main (not created by this check); skipping reset"
+    printf '%s' "$UNSAFE_PATHS" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Resolve manually: git -C \"${PARENT_ROOT}\" status, then stash/commit, or discard with reset --hard origin/main if they are not yours."
+    exit 0
+  fi
+  echo "[orchestrator-state] auto-recovering: dirty paths are backlog task lifecycle files identical to origin/main (will be resolved by reset)"
   git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]   staging: /'
 fi
 
@@ -174,5 +216,15 @@ fi
 echo "[orchestrator-state] resetting parent working tree: $HEAD_SHA -> $ORIGIN_MAIN"
 git reset --hard "$ORIGIN_MAIN" >/dev/null
 echo "[orchestrator-state] parent now at $(git rev-parse --short HEAD)"
+
+# AISDLC-708: built output is untracked, so a reset leaves it stale. Warn (no
+# auto-build) when a package's sources changed and its dist exists.
+for pkg_spec in "pipeline-cli:@ai-sdlc/pipeline-cli" "orchestrator:@ai-sdlc/orchestrator"; do
+  pkg_dir="${pkg_spec%%:*}"
+  pkg_name="${pkg_spec#*:}"
+  if [ -d "${pkg_dir}/dist" ] && [ -n "$(git diff --name-only "$HEAD_SHA" "$ORIGIN_MAIN" -- "${pkg_dir}/src" 2>/dev/null | head -1)" ]; then
+    echo "[orchestrator-state] WARN: ${pkg_dir}/dist is stale (sources changed in this sync). Rebuild: pnpm --filter ${pkg_name} build"
+  fi
+done
 
 exit 0

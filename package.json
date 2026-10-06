@@ -46,7 +46,7 @@
     "test:governance-resolver-gate": "node --test ai-sdlc-plugin/hooks/lib/governance-resolver.test.mjs ai-sdlc-plugin/hooks/lib/governance-lease.test.mjs ai-sdlc-plugin/hooks/lib/trusted-policy.test.mjs ai-sdlc-plugin/hooks/lib/lease-push-guard.test.mjs ai-sdlc-plugin/hooks/enforce-lease-push.test.mjs ai-sdlc-plugin/hooks/lease-push-docs.test.mjs ai-sdlc-plugin/hooks/session-start.test.mjs ai-sdlc-plugin/hooks/subagent-start.test.mjs ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs ai-sdlc-plugin/scripts/render-governance-hard-rules.test.mjs ai-sdlc-plugin/hooks/lib/hierarchy-role.test.mjs ai-sdlc-plugin/hooks/lib/role-tool-policy.test.mjs ai-sdlc-plugin/hooks/enforce-role-tools.test.mjs ai-sdlc-plugin/scripts/render-role-tool-rules.test.mjs",
     "test:verify-attestation-gate": "node --test scripts/verify-attestation.test.mjs",
     "test:verify-attestation-plugin-gate": "node --test ai-sdlc-plugin/scripts/verify-attestation.test.mjs",
-    "test:orchestrator-state-gate": "node --test scripts/check-orchestrator-state.test.mjs",
+    "test:orchestrator-state-gate": "node --test scripts/check-orchestrator-state.test.mjs scripts/post-rewrite-hook.test.mjs ai-sdlc-plugin/scripts/check-orchestrator-state.parity.test.mjs",
     "test:prepush-dash-safe": "node --test scripts/check-prepush-dash-safe.test.mjs",
     "test:gate-workflow": "node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs",
     "test:review-workflow": "node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs",
