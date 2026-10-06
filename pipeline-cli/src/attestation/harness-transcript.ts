@@ -608,6 +608,8 @@ export interface ComputeHarnessTranscriptHashOptions {
   agentId?: string;
   /** AISDLC-734: head the leaf is for; lets the same run re-emit for the same head. */
   headSha?: string;
+  /** AISDLC-734: task the leaf is for; part of the marker claim. */
+  taskId?: string;
 }
 
 export interface ComputeHarnessTranscriptHashResult {
@@ -724,7 +726,7 @@ function markerCandidates(opts: ComputeHarnessTranscriptHashOptions): SubagentMa
     // Legacy markers carry no role; hashForMarker then checks the harness's
     // own `.meta.json` role claim before trusting the transcript.
     allowUntyped: true,
-    claim: buildMarkerClaim(opts.headSha, opts.reviewerName),
+    claim: buildMarkerClaim(opts.headSha, opts.reviewerName, opts.taskId),
   });
 }
 
@@ -746,6 +748,16 @@ function findNonceVerifiedMarker(opts: ComputeHarnessTranscriptHashOptions): {
   let firstFailure: ComputeHarnessTranscriptHashResult | null = null;
   for (const selection of candidates) {
     const result = hashForMarker(selection.marker, opts);
+    // A marker already bound to a transcript is re-usable only for that same
+    // transcript: a different one for the same head and reviewer is not the run.
+    const boundHash = selection.marker.consumedFor?.transcriptHash;
+    if (boundHash && result.harnessTranscriptHash && boundHash !== result.harnessTranscriptHash) {
+      firstFailure ??= {
+        harnessTranscriptHash: null,
+        reason: 'marker already bound to a different transcript',
+      };
+      continue;
+    }
     if (result.harnessTranscriptHash) return { selection, result };
     firstFailure ??= result;
   }
@@ -810,9 +822,10 @@ export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions)
     const typedReviewer =
       role !== null && HARNESS_REVIEWER_AGENT_TYPES.includes(role as HarnessReviewerAgentType);
     if (typedReviewer) {
+      const claim = buildMarkerClaim(opts.headSha, opts.reviewerName, opts.taskId);
       consumeSubagentMarker(
         found.selection.filePath,
-        buildMarkerClaim(opts.headSha, opts.reviewerName),
+        claim ? { ...claim, transcriptHash: found.result.harnessTranscriptHash } : claim,
       );
       return { ...found.result, verdictClass: 'independent' };
     }
@@ -830,6 +843,7 @@ export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions)
       reviewerName: opts.reviewerName,
       agentId: opts.agentId,
       headSha: opts.headSha,
+      taskId: opts.taskId,
     }),
   };
 }

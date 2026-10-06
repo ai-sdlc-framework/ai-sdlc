@@ -157,7 +157,7 @@ export const ATTESTATION_PATH_EXCLUSIONS = [
  * Used by the verifier to resolve the content-addressed envelope filename
  * before falling back to the legacy per-SHA filename.
  */
-function computePatchIdForVerifier(base, head, repoRoot) {
+export function computePatchIdForVerifier(base, head, repoRoot) {
   if (!/^[0-9a-f]{40}$/i.test(base) || !/^[0-9a-f]{40}$/i.test(head)) {
     return null;
   }
@@ -2515,6 +2515,22 @@ function resolveAgentDefinitionDir(repoRoot, injectedAgentDir) {
 /** Default wall-clock budget (ms) for the v6 candidate scan in {@link runVerifier}. */
 export const DEFAULT_VERIFIER_SCAN_BUDGET_MS = 60_000;
 
+/**
+ * Default cap on how many v6 envelopes the candidate walk examines. A count
+ * cap does not depend on runner load, and bounds what an attacker can force by
+ * planting envelopes with far-future unsigned `signedAt` values.
+ */
+export const DEFAULT_VERIFIER_SCAN_MAX_CANDIDATES = 300;
+
+/** Parse AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES; anything not a positive integer uses the default. */
+export function resolveScanMaxCandidates(raw) {
+  if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw.trim())) {
+    return DEFAULT_VERIFIER_SCAN_MAX_CANDIDATES;
+  }
+  const n = Number(raw.trim());
+  return n > 0 ? n : DEFAULT_VERIFIER_SCAN_MAX_CANDIDATES;
+}
+
 /** Parse AI_SDLC_VERIFIER_SCAN_BUDGET_MS; anything not a positive integer uses the default. */
 export function resolveScanBudgetMs(raw) {
   if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw.trim())) {
@@ -2582,7 +2598,14 @@ function buildExpectedAgentFileHashes(agentDir, agentIds) {
   return hashes;
 }
 
-export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentDir } = {}) {
+export function runVerifier({
+  headSha,
+  baseSha,
+  repoRoot = process.cwd(),
+  agentDir,
+  // AISDLC-734: clock seam so the scan budget is testable without timing races.
+  now = Date.now,
+} = {}) {
   // --- Load trusted reviewers + ACCEPTED_SCHEMA_VERSIONS first ---------
   // We need the schema-version allowlist for the predicate-content match,
   // and we need trustedReviewers anyway for the signature step.
@@ -2692,27 +2715,41 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
       return a.fileName.localeCompare(b.fileName);
     });
   const scanBudgetMs = resolveScanBudgetMs(process.env.AI_SDLC_VERIFIER_SCAN_BUDGET_MS);
-  const scanStartedAt = Date.now();
+  const scanMaxCandidates = resolveScanMaxCandidates(
+    process.env.AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES,
+  );
+  const scanStartedAt = now();
   let scannedV6 = 0;
   let scanBudgetExceeded = false;
   let chosenV6 = null;
-  for (const entry of v6ByRecency) {
-    if (Date.now() - scanStartedAt > scanBudgetMs) {
-      scanBudgetExceeded = true;
-      break;
-    }
-    scannedV6 += 1;
-    if (qualifiesAsV6Candidate(entry)) {
-      chosenV6 = entry;
-      break;
+  // Fast path: the content-addressed envelope for THIS diff is found by exact
+  // filename, before any timed walk, so planted envelopes with future
+  // `signedAt` values cannot push it out of the bounded scan. Acceptance is
+  // still decided by verifyV6Envelope below.
+  const exactV6 = v6PatchIdFilename
+    ? v6ByRecency.find((entry) => entry.fileName.toLowerCase() === v6PatchIdFilename)
+    : undefined;
+  if (exactV6) {
+    chosenV6 = exactV6;
+  } else {
+    for (const entry of v6ByRecency) {
+      if (scannedV6 >= scanMaxCandidates || now() - scanStartedAt > scanBudgetMs) {
+        scanBudgetExceeded = true;
+        break;
+      }
+      scannedV6 += 1;
+      if (qualifiesAsV6Candidate(entry)) {
+        chosenV6 = entry;
+        break;
+      }
     }
   }
   const v6Envelopes = chosenV6 ? [chosenV6] : [];
   if (scanBudgetExceeded) {
     process.stderr.write(
       `[verify-attestation] AISDLC-734: stopped scanning v6 envelopes after ${scanBudgetMs}ms ` +
-        `(${scannedV6} of ${v6ByRecency.length} checked, none matched). Raise ` +
-        `AI_SDLC_VERIFIER_SCAN_BUDGET_MS to scan further; the envelope for this change is normally the newest.\n`,
+        `or ${scanMaxCandidates} candidates (${scannedV6} of ${v6ByRecency.length} checked, none matched). Raise ` +
+        `AI_SDLC_VERIFIER_SCAN_BUDGET_MS / AI_SDLC_VERIFIER_SCAN_MAX_CANDIDATES to scan further; the envelope for this change is normally the newest.\n`,
     );
   }
   if (v6Envelopes.length > 0) {
@@ -2866,6 +2903,12 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
     return {
       status: 'invalid',
       reason: `no envelope present at ${shortSha(lowerHead)} (no .ai-sdlc/attestations/*.dsse.json on PR branch — push via /ai-sdlc execute to generate one)`,
+    };
+  }
+  if (legacyAll.length === 0 && scanBudgetExceeded) {
+    return {
+      status: 'invalid',
+      reason: `no matching envelope found within the ${scanBudgetMs}ms scan budget (set AI_SDLC_VERIFIER_SCAN_BUDGET_MS higher to scan more)`,
     };
   }
   if (legacyAll.length === 0) {
@@ -3042,7 +3085,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
   });
   let scannedLegacy = 0;
   for (const entry of legacyByRecency) {
-    if (Date.now() - scanStartedAt > scanBudgetMs) {
+    if (now() - scanStartedAt > scanBudgetMs) {
       process.stderr.write(
         `[verify-attestation] AISDLC-734: stopped scanning legacy envelopes after ${scanBudgetMs}ms ` +
           `(${scannedLegacy} of ${legacyByRecency.length} checked). Raise ` +

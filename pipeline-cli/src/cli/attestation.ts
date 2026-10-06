@@ -923,6 +923,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             reviewerName,
             agentId,
             headSha,
+            taskId,
           });
           process.stderr.write(
             `[cli-attestation] emit-leaf: harnessTranscriptHash=${

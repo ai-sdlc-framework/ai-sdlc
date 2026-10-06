@@ -59,9 +59,9 @@ Reproduced items 1 and 3 first, then fixed them. Real behaviour: (1) CONFIRMED. 
 - Tests: `verdict-class-reemit.test.ts` (new), additions to `sign-v6.test.ts`, `attestation.test.ts`, `check-attestation-sign.test.mjs`, `sign-attestation-if-consumer.test.mjs`, `verify-attestation.test.mjs`.
 
 ## Design decisions
-- **Bind the marker instead of deleting it**: keeps the relabeling protection (a different head or role never matches) while making same-run re-emit idempotent; no skip variable.
+- **Bind the marker instead of deleting it**: keeps the relabeling protection (a different head, role or task never matches; the head must be a full 40-hex SHA) while making same-run re-emit idempotent; no skip variable. A bound marker is re-matchable only while its `firedAt` is within the age window of wall-clock time, and, when a harness transcript backed the leaf, only for that same transcript hash.
 - **Refuse, do not adopt, leaves under a different patch-id**: leaves are bound to the diff they reviewed; the error prints the fix command.
-- **Budget on the verifier scan**: bounded time with a fail-closed reason; the signed case is O(1).
+- **Budget on the verifier scan**: the exact patch-id-named envelope is found by filename before any timed walk (planted far-future `signedAt` envelopes cannot push it out); the walk is bounded by both wall-clock and a candidate-count cap, failing closed with a reason that names the env vars.
 
 ## Verification
 - `pnpm build`, `pnpm lint`, `pnpm format:check` clean; targeted vitest and node:test suites pass (see PR notes).

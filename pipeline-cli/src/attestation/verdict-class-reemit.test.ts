@@ -11,13 +11,16 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { PATCH_ID_EXCLUSIONS } from './patch-id.js';
 
 import {
   buildMarkerClaim,
   consumeSubagentMarker,
   determineVerdictClass,
   listSubagentMarkerCandidates,
+  MARKER_MAX_AGE_MS,
   subagentSessionsDir,
 } from './verdict-class.js';
 
@@ -72,7 +75,7 @@ describe('AISDLC-734 idempotent re-emit', () => {
     });
     expect(existsSync(file)).toBe(true);
     const marker = JSON.parse(readFileSync(file, 'utf8'));
-    expect(marker.consumedFor).toEqual({ headSha: HEAD_A, reviewer: 'code-reviewer' });
+    expect(marker.consumedFor).toEqual({ headSha: HEAD_A, reviewer: 'code-reviewer', taskId: '' });
     expect(marker.agentType).toBe('code-reviewer');
   });
 
@@ -166,6 +169,95 @@ describe('buildMarkerClaim', () => {
     expect(buildMarkerClaim(HEAD_A.toUpperCase(), undefined)).toEqual({
       headSha: HEAD_A,
       reviewer: '',
+      taskId: '',
     });
+  });
+
+  it('rejects a head that is not a full 40-hex SHA', () => {
+    expect(buildMarkerClaim('abc123', 'code-reviewer')).toBeNull();
+    expect(buildMarkerClaim(`${HEAD_A}0`, 'code-reviewer')).toBeNull();
+    expect(buildMarkerClaim('z'.repeat(40), 'code-reviewer')).toBeNull();
+  });
+});
+
+describe('AISDLC-734 round 2 constraints', () => {
+  it('the claim reviewer component alone separates claims (role filter not applied)', () => {
+    const file = writeMarker('agent-1.json', 'code-reviewer');
+    consumeSubagentMarker(file, buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-1'));
+    // No reviewerName: the role filter cannot reject; only claim.reviewer differs.
+    const query = { roots: [repoRoot], transcriptMtimeMs: Date.now(), allowUntyped: true };
+    expect(
+      listSubagentMarkerCandidates({
+        ...query,
+        claim: buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-1'),
+      }),
+    ).toHaveLength(1);
+    expect(
+      listSubagentMarkerCandidates({
+        ...query,
+        claim: buildMarkerClaim(HEAD_A, 'test-reviewer', 'AISDLC-1'),
+      }),
+    ).toHaveLength(0);
+  });
+
+  it('the claim task id separates claims', () => {
+    const file = writeMarker('agent-1.json');
+    consumeSubagentMarker(file, buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-1'));
+    const query = { roots: [repoRoot], transcriptMtimeMs: Date.now(), allowUntyped: true };
+    expect(
+      listSubagentMarkerCandidates({
+        ...query,
+        claim: buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-2'),
+      }),
+    ).toHaveLength(0);
+    expect(
+      listSubagentMarkerCandidates({
+        ...query,
+        claim: buildMarkerClaim(HEAD_A, 'code-reviewer', 'aisdlc-1'),
+      }),
+    ).toHaveLength(1);
+  });
+
+  it('a consumed marker older than the age window against wall-clock time is pruned', () => {
+    const old = new Date(Date.now() - MARKER_MAX_AGE_MS - 60_000);
+    const file = writeMarker('agent-old.json', 'code-reviewer', old);
+    const claim = buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-1');
+    consumeSubagentMarker(file, claim);
+    // transcriptMtime forged to look recent relative to firedAt.
+    const query = { roots: [repoRoot], transcriptMtimeMs: old.getTime(), claim };
+    expect(listSubagentMarkerCandidates({ ...query, allowUntyped: true })).toHaveLength(0);
+  });
+
+  it('keeps a transcript hash in the claim', () => {
+    const file = writeMarker('agent-1.json');
+    const claim = buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-1');
+    consumeSubagentMarker(file, claim && { ...claim, transcriptHash: 'f'.repeat(64) });
+    const [sel] = listSubagentMarkerCandidates({
+      roots: [repoRoot],
+      transcriptMtimeMs: Date.now(),
+      claim,
+    });
+    expect(sel?.marker.consumedFor?.transcriptHash).toBe('f'.repeat(64));
+  });
+
+  it('falls back to deleting the marker (with a breadcrumb) when the in-place bind fails', () => {
+    const file = writeMarker('agent-1.json');
+    writeFileSync(file, '{not json');
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c) => {
+      writes.push(String(c));
+      return true;
+    });
+    try {
+      consumeSubagentMarker(file, buildMarkerClaim(HEAD_A, 'code-reviewer', 'AISDLC-1'));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(existsSync(file)).toBe(false);
+    expect(writes.join('')).toContain('could not bind marker');
+  });
+
+  it('PATCH_ID_EXCLUSIONS covers .ai-sdlc/reviews/', () => {
+    expect(PATCH_ID_EXCLUSIONS.some((e) => e.includes('.ai-sdlc/reviews'))).toBe(true);
   });
 });
