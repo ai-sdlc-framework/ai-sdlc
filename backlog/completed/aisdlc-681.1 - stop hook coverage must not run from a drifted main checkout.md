@@ -2,7 +2,7 @@
 id: AISDLC-681.1
 title: >-
   Stop-hook deferred coverage check ignores index-only drift and never runs workspace coverage from a hierarchy main checkout
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:
@@ -19,6 +19,10 @@ references:
 priority: high
 dispatchable: true
 ---
+
+## Resolution
+
+Superseded by AISDLC-726 per DEC-0056 (planner, 2026-10-06).
 
 ## Description
 

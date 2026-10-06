@@ -14,12 +14,14 @@ labels:
   - dispatch
 dependencies: []
 references: []
-priority: medium
+priority: low
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 
 ## Context
 

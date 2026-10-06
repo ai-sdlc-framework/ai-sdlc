@@ -13,13 +13,15 @@ references:
   - ai-sdlc-plugin/hooks/lib/governance-resolver.js
   - .husky/pre-push
   - docs/api-reference/governance.md
-priority: medium
+priority: low
 dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Parked: do not start without a planner go.
 
 Two limits that predate AISDLC-720 and were disclosed in PR #1211:

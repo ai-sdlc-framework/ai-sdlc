@@ -2,7 +2,7 @@
 id: AISDLC-698
 title: >-
   Pre-push coverage gate: ignore coverage summaries it did not just produce, and do not pass when it measured nothing for a changed package
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
@@ -16,6 +16,10 @@ references:
 priority: high
 dispatchable: true
 ---
+
+## Resolution
+
+Superseded by AISDLC-726 per DEC-0056 (planner, 2026-10-06).
 
 ## Description
 

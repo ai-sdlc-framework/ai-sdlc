@@ -16,13 +16,15 @@ references:
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.test.mjs
   - pipeline-cli/src/governance/merge-if-eligible.ts
   - docs/operations/release-flow.md
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 The release merge path (backlog task 702) restricts which roles may use
 `--source-kind release` with a check inside the CLI. Per DEC-0038 a check performed by a
 CLI that the agent itself invokes is a mistake guard, not a boundary; the boundary belongs

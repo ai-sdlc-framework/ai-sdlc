@@ -21,6 +21,8 @@ priority: low
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 The follow-up gate shipped with RFC-0049 section 9.5 is a hygiene check, and the
 security review of that change found four ways past it that were judged acceptable
 for the first version. Each lets prose sit under a `Follow-up` heading without being

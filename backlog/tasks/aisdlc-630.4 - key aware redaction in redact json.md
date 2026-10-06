@@ -15,13 +15,15 @@ references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - reference/src/judgment/redact-json.ts
   - reference/src/security/secret-redact.ts
-priority: high
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Follow-up filed from the security review of AISDLC-630.2 (#1143), approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM, hermetic
 tests, fixtures only ever contain fake secrets). AISDLC-641 depends on this task, so no

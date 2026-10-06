@@ -16,13 +16,15 @@ references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - reference/src/judgment/openai-compatible-provider.ts
   - docs/operations/judgment-layer.md
-priority: high
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Security-reviewer findings parked from AISDLC-633.1 (PR #1149), operator-approved
 for filing 2026-10-02. They close before any adopter configures a real
 `openai-compatible` provider.

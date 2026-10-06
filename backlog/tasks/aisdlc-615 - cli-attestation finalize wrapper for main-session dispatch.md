@@ -9,6 +9,8 @@ labels:
 created: 2026-09-14
 ---
 
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 ## Context
 
 LOW-7 from the local-trades LT-595 report: for a main-session (non-orchestrator)

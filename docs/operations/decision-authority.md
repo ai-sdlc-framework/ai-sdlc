@@ -122,3 +122,7 @@ node pipeline-cli/bin/cli-decisions.mjs extend DEC-NNNN --timebox P3D           
 ```
 
 Overriding a class (a) decision that was already applied means undoing what it applied; the digest's reverse line says what that is.
+
+## Tasks that ship in halves
+
+The executor's stale-dispatch check keys on a merged commit carrying the task id, so a task cannot be re-dispatched for a remaining half once any commit for it has merged. A task that will ship in halves is split into sub-tasks (`<id>.1`, `<id>.2`) when it is filed, each with its own acceptance criteria. A remaining half discovered after a merge gets a new sub-task, not a "remaining scope" note on the original (example: AISDLC-720 and AISDLC-720.1 on 2026-10-05).

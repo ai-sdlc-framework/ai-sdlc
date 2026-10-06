@@ -18,13 +18,15 @@ references:
   - ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh
   - ai-sdlc-plugin/commands/execute.md
   - docs/operations/independence-policy.md
-priority: high
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Pull request 1182 binds each attestation leaf to its own reviewer run: the harness
 marker is selected by reviewer role and agent id, and a marker found in a directory
 shared between tasks counts only when that run's harness transcript contains the leaf's

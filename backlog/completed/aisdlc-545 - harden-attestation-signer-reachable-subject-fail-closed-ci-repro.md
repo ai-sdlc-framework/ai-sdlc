@@ -3,7 +3,7 @@ id: AISDLC-545
 title: >-
   fix(attestation): guarantee a CI-reachable subject + fail-closed local
   CI-repro before push (stop orphan-subject attestation gate failures)
-status: To Do
+status: Done
 assignee: []
 labels:
   - bug
@@ -18,6 +18,10 @@ references:
   - scripts/check-attestation-sign.sh
   - scripts/verify-attestation.mjs
 ---
+
+## Resolution
+
+Folded into AISDLC-543 (planner, 2026-10-06).
 
 ## Description
 

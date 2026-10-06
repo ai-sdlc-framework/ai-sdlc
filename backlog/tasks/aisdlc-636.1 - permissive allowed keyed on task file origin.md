@@ -16,13 +16,15 @@ references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - pipeline-cli/src/dor/ingress-claude.ts
   - pipeline-cli/src/dor/composite.ts
-priority: high
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Follow-up filed from an executor or reviewer report on the parent task, approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM,
 hermetic tests, no writes under `.ai-sdlc/` by the developer agent, no edits to RFC
