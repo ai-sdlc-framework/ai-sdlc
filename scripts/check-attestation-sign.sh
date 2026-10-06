@@ -127,6 +127,18 @@ if [ -f "$SENTINEL" ]; then
     echo "[attestation-sign] WARN: $SENTINEL is empty; no task ID to bind" >&2
   fi
 fi
+# AISDLC-734: a worktree without the sentinel used to skip signing with no way
+# to say which task to sign for. Honour AI_SDLC_ACTIVE_TASK_ID (the same env
+# fallback the PreToolUse hook and the MCP server use) when the sentinel gives
+# no task.
+if [ -z "$TASK_ID" ] && [ -n "${AI_SDLC_ACTIVE_TASK_ID:-}" ]; then
+  TASK_ID=$(printf '%s' "$AI_SDLC_ACTIVE_TASK_ID" | tr -d '[:space:]')
+  if [ -n "$TASK_ID" ]; then
+    echo "[attestation-sign] no usable $SENTINEL; using AI_SDLC_ACTIVE_TASK_ID=$TASK_ID" >&2
+  fi
+fi
+# Shown wherever the hook skips because no task is known.
+NO_TASK_HINT="to sign, run: echo <TASK-ID> > $SENTINEL (or export AI_SDLC_ACTIVE_TASK_ID=<TASK-ID>) and push again"
 # AISDLC-694: an absent or empty sentinel is NO LONGER an immediate exit. With no
 # task context there is nothing to sign (no verdict file can be located), but a
 # push that already carries an envelope for the current patch id must still have
@@ -423,8 +435,9 @@ if [ "$ENVELOPE_PRESENT" = "1" ]; then
     echo "[attestation-sign] ERROR: the attestation envelope for this change was rejected by" >&2
     echo "[attestation-sign]   scripts/verify-attestation.mjs ($VERIFY_REJECTION_REASON)" >&2
     if [ -z "$TASK_ID" ]; then
-      echo "[attestation-sign]   and there is no active task ($SENTINEL is absent or empty)," >&2
-      echo "[attestation-sign]   so it cannot be re-signed. Re-run the review, then push again." >&2
+      echo "[attestation-sign]   and there is no active task ($SENTINEL is absent or empty and" >&2
+      echo "[attestation-sign]   AI_SDLC_ACTIVE_TASK_ID is unset), so it cannot be re-signed." >&2
+      echo "[attestation-sign]   Re-run the review, then $NO_TASK_HINT." >&2
     else
       echo "[attestation-sign]   and there is no reviewer verdict file at $VERDICT_DIR/$TASK_ID_LOWER.json," >&2
       echo "[attestation-sign]   so it cannot be re-signed. Re-run the review for $TASK_ID, then push again." >&2
@@ -441,7 +454,7 @@ else
     # direct `ai-sdlc/attestation: success` status) per RFC-0042 Phase 3. No
     # verdict synthesis is performed here — exit 0 as a no-op.
     if [ -z "$TASK_ID" ]; then
-      echo "[attestation-sign] no active task and no envelope for this change — skipping (no attestation needed)" >&2
+      echo "[attestation-sign] no active task and no envelope for this change — skipping (no attestation needed; $NO_TASK_HINT)" >&2
     else
       echo "[attestation-sign] no verdicts file at $VERDICT_DIR/$TASK_ID_LOWER.json — skipping (no attestation needed)" >&2
     fi

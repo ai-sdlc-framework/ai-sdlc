@@ -169,14 +169,23 @@ echo "[sign-attestation-if-consumer] consumer-style push path detected (no attes
 
 # ── Step 2: locate the active-task sentinel ───────────────────────────
 SENTINEL="$WT_ROOT/.active-task"
-if [ ! -f "$SENTINEL" ]; then
-  echo "[sign-attestation-if-consumer] no .active-task sentinel — nothing to sign, skipping" >&2
-  exit 0
+TASK_ID=""
+if [ -f "$SENTINEL" ]; then
+  TASK_ID=$(tr -d '[:space:]' < "$SENTINEL")
+  if [ -z "$TASK_ID" ]; then
+    echo "[sign-attestation-if-consumer] WARN: $SENTINEL is empty; no task ID from the sentinel" >&2
+  fi
 fi
-
-TASK_ID=$(tr -d '[:space:]' < "$SENTINEL")
+# AISDLC-734: fall back to AI_SDLC_ACTIVE_TASK_ID when the sentinel gives no task.
+if [ -z "$TASK_ID" ] && [ -n "${AI_SDLC_ACTIVE_TASK_ID:-}" ]; then
+  TASK_ID=$(printf '%s' "$AI_SDLC_ACTIVE_TASK_ID" | tr -d '[:space:]')
+  if [ -n "$TASK_ID" ]; then
+    echo "[sign-attestation-if-consumer] no usable $SENTINEL; using AI_SDLC_ACTIVE_TASK_ID=$TASK_ID" >&2
+  fi
+fi
 if [ -z "$TASK_ID" ]; then
-  echo "[sign-attestation-if-consumer] WARN: $SENTINEL is empty; skipping (no task ID to bind)" >&2
+  echo "[sign-attestation-if-consumer] no active task (no $SENTINEL, AI_SDLC_ACTIVE_TASK_ID unset) — nothing to sign, skipping." >&2
+  echo "[sign-attestation-if-consumer]   To sign: echo <TASK-ID> > $SENTINEL (or export AI_SDLC_ACTIVE_TASK_ID=<TASK-ID>), then re-run this script." >&2
   exit 0
 fi
 

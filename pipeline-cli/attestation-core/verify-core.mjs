@@ -539,6 +539,7 @@ let computeContentHashV5;
 let isAttestationEnvelopePath;
 let isIgnoredForContentHash;
 let validateTrustedReviewers;
+let REVIEWER_ROLE_EQUIVALENCES;
 
 /**
  * Bind the `@ai-sdlc/orchestrator` runtime module this core needs. MUST be
@@ -558,6 +559,8 @@ export function bindRuntime(mod) {
     isAttestationEnvelopePath,
     isIgnoredForContentHash,
     validateTrustedReviewers,
+    // AISDLC-734: optional so an older installed runtime still binds.
+    REVIEWER_ROLE_EQUIVALENCES,
   } = mod);
 }
 
@@ -2509,6 +2512,31 @@ function resolveAgentDefinitionDir(repoRoot, injectedAgentDir) {
   return null;
 }
 
+/** Default wall-clock budget (ms) for the v6 candidate scan in {@link runVerifier}. */
+export const DEFAULT_VERIFIER_SCAN_BUDGET_MS = 60_000;
+
+/** Parse AI_SDLC_VERIFIER_SCAN_BUDGET_MS; anything not a positive integer uses the default. */
+export function resolveScanBudgetMs(raw) {
+  if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw.trim())) {
+    return DEFAULT_VERIFIER_SCAN_BUDGET_MS;
+  }
+  const n = Number(raw.trim());
+  return n > 0 ? n : DEFAULT_VERIFIER_SCAN_BUDGET_MS;
+}
+
+/**
+ * One line naming the reviewer roles an attestation must carry, with the
+ * variants that satisfy each (AISDLC-734). Empty string when the bound
+ * runtime does not export the equivalence map.
+ */
+export function describeRequiredReviewerSet() {
+  if (!REVIEWER_ROLE_EQUIVALENCES) return '';
+  const parts = Object.entries(REVIEWER_ROLE_EQUIVALENCES).map(([role, variants]) =>
+    variants.length > 1 ? `${role} (or ${variants.filter((v) => v !== role).join(', ')})` : role,
+  );
+  return `required reviewers: ${parts.join('; ')}`;
+}
+
 /**
  * AISDLC-583 — build the `expectedAgentFileHashes` map from a resolved
  * agent-definition directory (or `null` when unresolved), tolerating
@@ -2600,6 +2628,8 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
   // Fallback to v3/v5 legacy verifier for older envelopes.
   // Preference order: v6 > v5 > v4 > v3 (per AC#3 — legacy fallback indefinitely).
   const all = loadAllAttestations(repoRoot);
+  const requiredSetLine = describeRequiredReviewerSet();
+  if (requiredSetLine) process.stderr.write(`[verify-attestation] ${requiredSetLine}\n`);
 
   // AISDLC-398: check patch-id-named v6 envelope first, then SHA-named.
   // AISDLC-419 (follow-up): also accept envelopes whose subject.sha1 is an
@@ -2612,8 +2642,15 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
   // (added by AISDLC-419 inside verifyV6Envelope) defends the binding;
   // this widens the candidate set so that defense actually runs.
   const v6PatchIdFilename = contentPatchId ? `${contentPatchId}.v6.dsse.json` : null;
-  const v6Envelopes = all.filter((entry) => {
-    if (!entry.isV6) return false;
+  // AISDLC-734: newest first (the order the old filter-then-sort picked from),
+  // then stop at the first qualifying envelope. The old code ran the two git
+  // relaxation probes below against EVERY v6 envelope in the directory
+  // (hundreds on this repository, minutes of subprocesses) only to take the
+  // newest qualifier. Walking newest-first and stopping at the first match
+  // yields exactly that envelope, and the PR's own freshly signed envelope is
+  // normally first. The walk is bounded by a time budget so a PR with no
+  // envelope fails with a reason instead of hanging.
+  const qualifiesAsV6Candidate = (entry) => {
     const lowerName = entry.fileName.toLowerCase();
     // Patch-id filename (AISDLC-398 preferred)
     if (v6PatchIdFilename && lowerName === v6PatchIdFilename) return true;
@@ -2646,14 +2683,39 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
       }
     }
     return false;
-  });
-  if (v6Envelopes.length > 0) {
-    // Use the most-recent v6 envelope when multiple are present (tie-break by filename).
-    v6Envelopes.sort((a, b) => {
+  };
+  const v6ByRecency = all
+    .filter((entry) => entry.isV6)
+    .sort((a, b) => {
       const cmp = isoTimeCmp(a.envelope.signedAt ?? '', b.envelope.signedAt ?? '');
       if (cmp !== 0) return -cmp; // descending = most recent first
       return a.fileName.localeCompare(b.fileName);
     });
+  const scanBudgetMs = resolveScanBudgetMs(process.env.AI_SDLC_VERIFIER_SCAN_BUDGET_MS);
+  const scanStartedAt = Date.now();
+  let scannedV6 = 0;
+  let scanBudgetExceeded = false;
+  let chosenV6 = null;
+  for (const entry of v6ByRecency) {
+    if (Date.now() - scanStartedAt > scanBudgetMs) {
+      scanBudgetExceeded = true;
+      break;
+    }
+    scannedV6 += 1;
+    if (qualifiesAsV6Candidate(entry)) {
+      chosenV6 = entry;
+      break;
+    }
+  }
+  const v6Envelopes = chosenV6 ? [chosenV6] : [];
+  if (scanBudgetExceeded) {
+    process.stderr.write(
+      `[verify-attestation] AISDLC-734: stopped scanning v6 envelopes after ${scanBudgetMs}ms ` +
+        `(${scannedV6} of ${v6ByRecency.length} checked, none matched). Raise ` +
+        `AI_SDLC_VERIFIER_SCAN_BUDGET_MS to scan further; the envelope for this change is normally the newest.\n`,
+    );
+  }
+  if (v6Envelopes.length > 0) {
     const chosen = v6Envelopes[0];
     // AISDLC-398 fix (Finding #2): for content-addressed (patch-id-named)
     // envelopes the verifier must validate against the ACTUAL outer PR head SHA
@@ -2969,7 +3031,26 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
   // doesn't correspond to anything reachable from PR HEAD → mismatch.
   const matched = []; // { entry, subjectSha, source }
   const mismatches = []; // { entry, reason }
-  for (const entry of legacyAll) {
+  // AISDLC-734: newest first, and stop at the shared scan budget. Every
+  // iteration spawns git processes, and a repository with hundreds of old
+  // envelopes made a local verify run for minutes. The loop's result does not
+  // depend on iteration order (matches and mismatches are sorted below).
+  const legacyByRecency = [...legacyAll].sort((a, b) => {
+    const cmp = isoTimeCmp(a.predicate?.signedAt ?? '', b.predicate?.signedAt ?? '');
+    if (cmp !== 0) return -cmp;
+    return a.fileName.localeCompare(b.fileName);
+  });
+  let scannedLegacy = 0;
+  for (const entry of legacyByRecency) {
+    if (Date.now() - scanStartedAt > scanBudgetMs) {
+      process.stderr.write(
+        `[verify-attestation] AISDLC-734: stopped scanning legacy envelopes after ${scanBudgetMs}ms ` +
+          `(${scannedLegacy} of ${legacyByRecency.length} checked). Raise ` +
+          `AI_SDLC_VERIFIER_SCAN_BUDGET_MS to scan further.\n`,
+      );
+      break;
+    }
+    scannedLegacy += 1;
     const resolution = resolveSubjectShaForEnvelope({
       envelope: entry.envelope,
       predicate: entry.predicate,
@@ -3075,6 +3156,14 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd(), agentD
     //
     // "Closest" = lowest mismatch rank = matched the most fields before
     // diverging. Tie-break by envelope filename for determinism.
+    if (mismatches.length === 0) {
+      // AISDLC-734: the scan budget ran out before any envelope was examined.
+      // Fail closed with the fix instead of reading an empty list.
+      return {
+        status: 'invalid',
+        reason: `no matching envelope found within the ${scanBudgetMs}ms scan budget (set AI_SDLC_VERIFIER_SCAN_BUDGET_MS higher to scan more)`,
+      };
+    }
     mismatches.sort((a, b) => {
       const ra = rankMismatch(a.reason.field);
       const rb = rankMismatch(b.reason.field);

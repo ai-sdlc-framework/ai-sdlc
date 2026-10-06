@@ -79,7 +79,15 @@
  * @module attestation/verdict-class
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /** The two trust classes a transcript leaf can be assigned. */
@@ -158,6 +166,37 @@ export interface SubagentStartMarker {
   agentType: string | null;
   /** ISO-8601 timestamp of when the SubagentStart hook fired. */
   firedAt: string;
+  /**
+   * AISDLC-734: set when a leaf has been emitted from this run. The marker is
+   * no longer deleted on first use; it is bound to the (head, reviewer) it
+   * backed, so re-emitting for the SAME head and reviewer keeps its class,
+   * while any other head or reviewer cannot use it (no relabeling).
+   */
+  consumedFor?: MarkerClaim;
+}
+
+/** What a consumed marker is bound to. */
+export interface MarkerClaim {
+  /** Head commit the leaf was emitted for. */
+  headSha: string;
+  /** Reviewer role the leaf was emitted for (namespace stripped), or '' when unknown. */
+  reviewer: string;
+}
+
+/** Build a claim from emit-time knowledge; `null` when the head is unknown. */
+export function buildMarkerClaim(
+  headSha: string | undefined,
+  reviewerName: string | undefined,
+): MarkerClaim | null {
+  if (!headSha) return null;
+  return {
+    headSha: headSha.toLowerCase(),
+    reviewer: (reviewerName !== undefined ? stripAgentTypeNamespace(reviewerName) : null) ?? '',
+  };
+}
+
+function claimsEqual(a: MarkerClaim, b: MarkerClaim): boolean {
+  return a.headSha === b.headSha && a.reviewer === b.reviewer;
 }
 
 /** Resolve the absolute path of the subagent-sessions marker directory. */
@@ -194,6 +233,13 @@ export interface SubagentMarkerQuery {
   allowUntyped?: boolean;
   /** Accept only markers whose role is one of `REVIEWER_AGENT_TYPES`. Default false. */
   reviewerRolesOnly?: boolean;
+  /**
+   * AISDLC-734: the (head, reviewer) this lookup is for. A marker already
+   * consumed for a DIFFERENT claim never matches; one consumed for this exact
+   * claim matches again (idempotent re-emit). Without a claim, any consumed
+   * marker is skipped.
+   */
+  claim?: MarkerClaim | null;
 }
 
 export interface SubagentMarkerSelection {
@@ -240,7 +286,9 @@ export function listSubagentMarkerCandidates(
 
   const seenRoots = new Set<string>();
   const seenFiles = new Set<string>();
-  const candidates: Array<SubagentMarkerSelection & { firedAtMs: number; typed: boolean }> = [];
+  const candidates: Array<
+    SubagentMarkerSelection & { firedAtMs: number; typed: boolean; reused: boolean }
+  > = [];
 
   for (const root of query.roots) {
     if (typeof root !== 'string' || root.length === 0) continue;
@@ -271,6 +319,12 @@ export function listSubagentMarkerCandidates(
 
         if (query.agentId !== undefined && marker.agentId !== query.agentId) continue;
 
+        const consumedFor = readClaim(marker.consumedFor);
+        if (marker.consumedFor !== undefined) {
+          // Malformed claim data fails safe: treated as consumed for someone else.
+          if (!consumedFor || !query.claim || !claimsEqual(consumedFor, query.claim)) continue;
+        }
+
         const role =
           typeof marker.agentType === 'string' ? stripAgentTypeNamespace(marker.agentType) : null;
         if (role === null) {
@@ -290,10 +344,12 @@ export function listSubagentMarkerCandidates(
             agentId: marker.agentId,
             agentType: typeof marker.agentType === 'string' ? marker.agentType : null,
             firedAt: marker.firedAt,
+            ...(consumedFor ? { consumedFor } : {}),
           },
           filePath,
           firedAtMs,
           typed: role !== null,
+          reused: consumedFor !== null,
         });
       } catch {
         continue;
@@ -302,6 +358,8 @@ export function listSubagentMarkerCandidates(
   }
 
   candidates.sort((a, b) => {
+    // The run that already backed this exact claim is the same run: first.
+    if (a.reused !== b.reused) return a.reused ? -1 : 1;
     if (a.typed !== b.typed) return a.typed ? -1 : 1;
     if (a.firedAtMs !== b.firedAtMs) return b.firedAtMs - a.firedAtMs;
     if (a.marker.agentId !== b.marker.agentId) return a.marker.agentId < b.marker.agentId ? -1 : 1;
@@ -310,11 +368,35 @@ export function listSubagentMarkerCandidates(
   return candidates.map((c) => ({ marker: c.marker, filePath: c.filePath }));
 }
 
+function readClaim(value: unknown): MarkerClaim | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Partial<MarkerClaim>;
+  if (typeof v.headSha !== 'string' || v.headSha.length === 0) return null;
+  if (typeof v.reviewer !== 'string') return null;
+  return { headSha: v.headSha, reviewer: v.reviewer };
+}
+
 /**
- * Consume (delete) a marker so it cannot legitimize a second leaf.
- * Best-effort: a failed deletion is not an error for the caller.
+ * Consume a marker so it cannot legitimize a leaf for another head or role.
+ *
+ * With a `claim` (AISDLC-734) the marker is kept and bound to that (head,
+ * reviewer): the SAME run may re-emit its leaf for the same head and keep its
+ * class, but no other head can use it, so an old run still cannot be
+ * relabeled onto new code. Without a claim the marker is deleted (the earlier
+ * behaviour). Best-effort: a failure is not an error for the caller.
  */
-export function consumeSubagentMarker(filePath: string): void {
+export function consumeSubagentMarker(filePath: string, claim?: MarkerClaim | null): void {
+  if (claim) {
+    try {
+      const marker = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+      const tmp = `${filePath}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ ...marker, consumedFor: claim }), 'utf8');
+      renameSync(tmp, filePath);
+      return;
+    } catch {
+      // Could not bind in place; fall through to deletion, which is the safe side.
+    }
+  }
   try {
     unlinkSync(filePath);
   } catch {
@@ -356,7 +438,10 @@ export function determineVerdictClass(opts: {
   transcriptMtimeMs: number;
   reviewerName?: string;
   agentId?: string;
+  /** AISDLC-734: head the leaf is for; enables idempotent re-emit (see {@link consumeSubagentMarker}). */
+  headSha?: string;
 }): VerdictClass {
+  const claim = buildMarkerClaim(opts.headSha, opts.reviewerName);
   let selection: SubagentMarkerSelection | null;
   try {
     selection = selectSubagentMarker({
@@ -366,12 +451,13 @@ export function determineVerdictClass(opts: {
       agentId: opts.agentId,
       allowUntyped: false,
       reviewerRolesOnly: true,
+      claim,
     });
   } catch {
     return 'self-authored';
   }
   if (!selection) return 'self-authored';
-  consumeSubagentMarker(selection.filePath);
+  consumeSubagentMarker(selection.filePath, claim);
   return 'independent';
 }
 

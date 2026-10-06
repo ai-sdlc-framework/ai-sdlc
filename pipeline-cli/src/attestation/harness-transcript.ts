@@ -110,6 +110,7 @@ import {
   REVIEWER_AGENT_TYPES,
   consumeSubagentMarker,
   determineVerdictClass,
+  buildMarkerClaim,
   listSubagentMarkerCandidates,
   selectSubagentMarker,
   stripAgentTypeNamespace,
@@ -605,6 +606,8 @@ export interface ComputeHarnessTranscriptHashOptions {
   reviewerName?: string;
   /** Harness agent id of the reviewer run, when the caller has it. */
   agentId?: string;
+  /** AISDLC-734: head the leaf is for; lets the same run re-emit for the same head. */
+  headSha?: string;
 }
 
 export interface ComputeHarnessTranscriptHashResult {
@@ -721,6 +724,7 @@ function markerCandidates(opts: ComputeHarnessTranscriptHashOptions): SubagentMa
     // Legacy markers carry no role; hashForMarker then checks the harness's
     // own `.meta.json` role claim before trusting the transcript.
     allowUntyped: true,
+    claim: buildMarkerClaim(opts.headSha, opts.reviewerName),
   });
 }
 
@@ -806,7 +810,10 @@ export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions)
     const typedReviewer =
       role !== null && HARNESS_REVIEWER_AGENT_TYPES.includes(role as HarnessReviewerAgentType);
     if (typedReviewer) {
-      consumeSubagentMarker(found.selection.filePath);
+      consumeSubagentMarker(
+        found.selection.filePath,
+        buildMarkerClaim(opts.headSha, opts.reviewerName),
+      );
       return { ...found.result, verdictClass: 'independent' };
     }
     // An untyped (legacy) marker backs the hash through the harness's own
@@ -822,6 +829,7 @@ export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions)
       transcriptMtimeMs: opts.transcriptMtimeMs,
       reviewerName: opts.reviewerName,
       agentId: opts.agentId,
+      headSha: opts.headSha,
     }),
   };
 }

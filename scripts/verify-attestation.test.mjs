@@ -52,6 +52,9 @@ import {
   v6VerifyInclusion,
   v6LoadLeaves,
   verifyV6Envelope,
+  DEFAULT_VERIFIER_SCAN_BUDGET_MS,
+  describeRequiredReviewerSet,
+  resolveScanBudgetMs,
 } from './verify-attestation.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -6077,5 +6080,23 @@ describe('verifyV6Envelope (AISDLC-448 — orphan-ancestor relaxation)', () => {
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('AISDLC-734: bounded scan + required reviewer set', () => {
+  it('resolveScanBudgetMs accepts a positive integer and defaults otherwise', () => {
+    assert.equal(resolveScanBudgetMs('2500'), 2500);
+    assert.equal(resolveScanBudgetMs(' 90 '), 90);
+    for (const bad of [undefined, '', '0', '-5', '1.5', 'abc']) {
+      assert.equal(resolveScanBudgetMs(bad), DEFAULT_VERIFIER_SCAN_BUDGET_MS, String(bad));
+    }
+  });
+
+  it('describeRequiredReviewerSet names all three roles and their codex variants', () => {
+    const line = describeRequiredReviewerSet();
+    assert.match(line, /^required reviewers: /);
+    assert.match(line, /code-reviewer \(or code-reviewer-codex\)/);
+    assert.match(line, /test-reviewer \(or test-reviewer-codex\)/);
+    assert.match(line, /security-reviewer/);
   });
 });
