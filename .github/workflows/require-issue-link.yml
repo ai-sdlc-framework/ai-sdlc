@@ -78,9 +78,11 @@ jobs:
 
           # Changed paths from the API (adds, modifies, moves — renames list
           # both the new and previous path). PR text stays in env vars above.
-          PR_FILES=$(gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files" \
-            --jq '.[] | .filename, (.previous_filename // empty)')
-          export PR_FILES
+          # Passed by file path: a large PR's list can exceed the env size limit.
+          PR_FILES_FILE="$RUNNER_TEMP/pr-files.txt"
+          gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$PR_FILES_FILE"
+          export PR_FILES_FILE
 
           # scripts/issue-link-decision.mjs owns every rule (bypass label, linked
           # issue, backlog task by diff, backlog task by title id) and is unit

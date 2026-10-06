@@ -15,7 +15,7 @@
  *   4. the title carries a task id in the commit-convention form `(AISDLC-N)`
  *      and that task exists as a file on the base ref or in the PR's diff
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -101,12 +101,28 @@ function listBaseTaskFiles(root) {
   return out;
 }
 
+function parseLabels(raw) {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+// PR_FILES_FILE (a path) is preferred: a large PR's file list can exceed the
+// per-variable environment size limit.
+function readChangedFiles(env) {
+  const raw = env.PR_FILES_FILE ? readFileSync(env.PR_FILES_FILE, 'utf8') : (env.PR_FILES ?? '');
+  return raw.split('\n').filter(Boolean);
+}
+
 function main(env) {
   const decision = decide({
     title: env.PR_TITLE ?? '',
     body: env.PR_BODY ?? '',
-    labels: JSON.parse(env.PR_LABELS || '[]'),
-    changedFiles: (env.PR_FILES ?? '').split('\n').filter(Boolean),
+    labels: parseLabels(env.PR_LABELS),
+    changedFiles: readChangedFiles(env),
     baseTaskFiles: listBaseTaskFiles(env.BASE_ROOT || process.cwd()),
   });
   process.stdout.write(

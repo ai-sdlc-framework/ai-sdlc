@@ -149,4 +149,19 @@ describe('CLI: PR text is data, never shell', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('PR_FILES_FILE is read in preference to PR_FILES; malformed labels are tolerated', () => {
+    const root = mkdtempSync(join(tmpdir(), 'issue-link-'));
+    try {
+      const list = join(root, 'files.txt');
+      writeFileSync(list, 'a.ts\nbacklog/completed/aisdlc-2 - x.md\n');
+      const r = run(
+        { PR_TITLE: 't', PR_BODY: '', PR_LABELS: 'not json', PR_FILES_FILE: list, PR_FILES: '' },
+        root,
+      );
+      assert.deepEqual([r.state, r.rule], ['success', 'backlog-task']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

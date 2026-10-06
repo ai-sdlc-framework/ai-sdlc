@@ -2,7 +2,7 @@
 id: AISDLC-700
 title: >-
   require-issue-link: a pull request tied to a backlog task passes without a GitHub issue
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
@@ -13,6 +13,22 @@ references:
   - .github/workflows/require-issue-link.yml
   - CONTRIBUTING.md
 priority: low
+finalSummary: |-
+  ## Summary
+  The require-issue-link check now passes a pull request tied to a backlog task. The decision logic lives in scripts/issue-link-decision.mjs (tested under pnpm test); the workflow runs it from the base checkout with PR text only via env.
+
+  ## Changes
+  - `scripts/issue-link-decision.mjs` (new): bypass, linked issue, backlog task by diff, backlog task by title id.
+  - `scripts/issue-link-decision.test.mjs` (new): each case, plus shell-metacharacter title.
+  - `.github/workflows/require-issue-link.yml` (modified): sparse base checkout, API file list, delegates to the script.
+  - `CONTRIBUTING.md` (modified): one sentence on the backlog-task rule.
+
+  ## Verification
+  - `pnpm test:require-issue-link` - 58 pass
+  - `pnpm lint`, `pnpm format:check`, dark-code check - clean
+
+  ## Follow-up
+  (none)
 dispatchable: true
 ---
 
@@ -48,9 +64,9 @@ The check exists for external contributors (issue-first workflow). That purpose 
    backlog task instead.
 
 ## Acceptance Criteria
-- [ ] A pull request that only adds a file under `backlog/tasks/` passes with a description naming the backlog-task rule.
-- [ ] A pull request whose title carries an existing task id passes; one whose title carries an id with no task file fails.
-- [ ] A pull request with `Closes #N` passes as before, and the bypass label still works.
-- [ ] A pull request with none of these fails as before.
-- [ ] The decision script has tests for each case, including a title containing shell metacharacters, and they run under `pnpm test`.
+- [x] A pull request that only adds a file under `backlog/tasks/` passes with a description naming the backlog-task rule.
+- [x] A pull request whose title carries an existing task id passes; one whose title carries an id with no task file fails.
+- [x] A pull request with `Closes #N` passes as before, and the bypass label still works.
+- [x] A pull request with none of these fails as before.
+- [x] The decision script has tests for each case, including a title containing shell metacharacters, and they run under `pnpm test`.
 <!-- SECTION:DESCRIPTION:END -->
