@@ -26,7 +26,7 @@ Why this is its own task: the executor's stale-dispatch check stops on any task 
 
 AISDLC-712 deleted the pre-push readiness gate and the local drift checks per DEC-0056 row 3. Its acceptance criterion 2, adding the "Evaluate backlog tasks changed by PR" check (job `evaluate-pr-tasks` in `.github/workflows/dor-ingress.yml`) to the required `ai-sdlc/pr-ready` rollup (job in `.github/workflows/ai-sdlc-gate.yml`) for pull requests that change task files, was declined in that PR because it edits `.github/workflows/**`, blocked until AISDLC-721.
 
-Depends on AISDLC-721 (workflow edits allowed once its PR merges).
+Sequencing: AISDLC-721 merges first; workflow edits are allowed after that.
 
 ## Acceptance Criteria
 - [ ] The `ai-sdlc/pr-ready` rollup requires the "Evaluate backlog tasks changed by PR" check for pull requests that change files under `backlog/`.

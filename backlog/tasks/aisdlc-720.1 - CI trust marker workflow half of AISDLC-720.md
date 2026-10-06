@@ -33,7 +33,7 @@ Workflows involved: `.github/workflows/ai-sdlc-review.yml` and `.github/workflow
 - Set `AI_SDLC_UNTRUSTED_RUN` explicitly on every job that takes outside input (external PR review, issue-triggered runs).
 - Add a test or lint that fails if `AI_SDLC_INTERNAL_RUN` appears at job or workflow level or in a `$GITHUB_ENV` write.
 
-The workflow edit needs AISDLC-721 (which removes `.github/workflows/**` from `blockedPaths`) merged on main first.
+Sequencing: AISDLC-721 (which removes `.github/workflows/**` from `blockedPaths`) merges first, and the workflow edit follows.
 
 ## Conventions
 - Trust-chain change: the security review runs on opus, and the PR stays a draft until CodeQL is clean.
