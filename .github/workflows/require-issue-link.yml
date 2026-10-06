@@ -2,8 +2,12 @@
 #
 # Posts `ai-sdlc/issue-link` as a status check on every PR.
 # Status is SUCCESS when the PR body or title contains a GitHub-linked-issue
-# reference (Closes/Fixes/Resolves #N, or cross-repo org/repo#N form).
-# Status is FAILURE when no such reference is found.
+# reference (Closes/Fixes/Resolves #N, or cross-repo org/repo#N form), or when
+# the PR is tied to a backlog task (AISDLC-700): its diff touches a file under
+# backlog/tasks/ or backlog/completed/, or its title carries an existing task
+# id as `(AISDLC-N)`. The description names which rule passed.
+# Status is FAILURE when none of these is found. The decision logic lives in
+# scripts/issue-link-decision.mjs.
 #
 # BYPASS: label `ci:no-issue-required` on the PR skips the check
 # (status posts SUCCESS immediately). Intended for:
@@ -48,7 +52,18 @@ jobs:
     # Skip when the PR is a draft — informational only on draft PRs.
     if: github.event.pull_request.draft == false
     steps:
-      - name: Check for linked issue or bypass label
+      # pull_request_target checks out the BASE ref, never PR code. Only the
+      # decision script and the task-file listing are needed (AISDLC-700).
+      - name: Checkout base (decision script + task listing)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/issue-link-decision.mjs
+            backlog/tasks
+            backlog/completed
+          persist-credentials: false
+
+      - name: Check for linked issue, backlog task or bypass label
         id: check
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -61,62 +76,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ── Bypass label check ────────────────────────────────────────────
-          # If the PR carries the `ci:no-issue-required` label, post success
-          # immediately and exit — no issue link needed.
-          if echo "$PR_LABELS" | grep -qi 'ci:no-issue-required'; then
-            echo "result=bypass" >> "$GITHUB_OUTPUT"
-            echo "[require-issue-link] bypass label present → posting success"
-            gh api \
-              --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/$REPO/statuses/$SHA" \
-              -f state=success \
-              -f context="ai-sdlc/issue-link" \
-              -f description="bypass: ci:no-issue-required label present" \
-              -f target_url="https://github.com/$REPO/pull/$PR_NUMBER"
-            exit 0
-          fi
+          # Changed paths from the API (adds, modifies, moves — renames list
+          # both the new and previous path). PR text stays in env vars above.
+          # Passed by file path: a large PR's list can exceed the env size limit.
+          PR_FILES_FILE="$RUNNER_TEMP/pr-files.txt"
+          gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$PR_FILES_FILE"
+          export PR_FILES_FILE
 
-          # ── Linked-issue regex ────────────────────────────────────────────
-          # Matches:
-          #   Closes #123
-          #   Fixes #45
-          #   Resolves #7
-          #   closes org/repo#123       (cross-repo)
-          #   FIXES #99
-          #   References AISDLC-393      (backlog-task track, AISDLC-477)
-          #   Closes AISDLC-100.5        (hierarchical backlog sub-task)
-          # Case-insensitive. Scans both PR title and PR body.
-          # AISDLC-477: the backlog-task track references AISDLC-N (not a GH
-          # issue #N), so the pattern accepts both the `#N` GitHub form and the
-          # `AISDLC-N[.M]` backlog form, plus the `references` keyword used by
-          # backlog PR bodies.
-          PATTERN='(closes|fixes|resolves|references)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+|AISDLC-[0-9]+(\.[0-9]+)?)'
+          # scripts/issue-link-decision.mjs owns every rule (bypass label, linked
+          # issue, backlog task by diff, backlog task by title id) and is unit
+          # tested under `pnpm test`.
+          DECISION=$(node scripts/issue-link-decision.mjs)
+          STATE=$(printf '%s' "$DECISION" | jq -r '.state')
+          RULE=$(printf '%s' "$DECISION" | jq -r '.rule')
+          DESCRIPTION=$(printf '%s' "$DECISION" | jq -r '.description')
+          TARGET_URL=$(printf '%s' "$DECISION" | jq -r '.targetUrl')
+          [ -n "$TARGET_URL" ] || TARGET_URL="https://github.com/$REPO/pull/$PR_NUMBER"
 
-          COMBINED="$PR_TITLE
-          $PR_BODY"
-
-          if echo "$COMBINED" | grep -Eiq "$PATTERN"; then
-            echo "result=success" >> "$GITHUB_OUTPUT"
-            echo "[require-issue-link] linked issue reference found → posting success"
-            gh api \
-              --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/$REPO/statuses/$SHA" \
-              -f state=success \
-              -f context="ai-sdlc/issue-link" \
-              -f description="linked issue reference found" \
-              -f target_url="https://github.com/$REPO/pull/$PR_NUMBER"
-          else
-            echo "result=failure" >> "$GITHUB_OUTPUT"
-            echo "[require-issue-link] no linked issue reference found → posting failure"
-            gh api \
-              --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/$REPO/statuses/$SHA" \
-              -f state=failure \
-              -f context="ai-sdlc/issue-link" \
-              -f description="add Closes/Fixes/Resolves #N to link an issue" \
-              -f target_url="https://github.com/$REPO/blob/main/CONTRIBUTING.md#issue-first-workflow"
-          fi
+          echo "result=$STATE" >> "$GITHUB_OUTPUT"
+          echo "[require-issue-link] rule=$RULE state=$STATE ($DESCRIPTION)"
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$REPO/statuses/$SHA" \
+            -f state="$STATE" \
+            -f context="ai-sdlc/issue-link" \
+            -f description="$DESCRIPTION" \
+            -f target_url="$TARGET_URL"

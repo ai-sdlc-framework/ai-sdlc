@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decide } from '../../../scripts/issue-link-decision.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_PATH = resolve(__dirname, '..', 'require-issue-link.yml');
@@ -40,27 +41,12 @@ function loadYaml(path) {
   return JSON.parse(json);
 }
 
-// ── Pure-JS port of the workflow's linked-issue regex ────────────────────
-// Mirrors the grep -Eiq pattern from the workflow's check step (AISDLC-477):
-//   (closes|fixes|resolves|references)[[:space:]]+(([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)?#[0-9]+|AISDLC-[0-9]+(\.[0-9]+)?)
-// Applied to a combined string of PR title + PR body (newline separated).
-function hasLinkedIssue(title, body) {
-  const combined = `${title}\n${body}`;
-  const pattern =
-    /(closes|fixes|resolves|references)\s+(([a-zA-Z0-9_.\-]+\/[a-zA-Z0-9_.\-]+)?#[0-9]+|AISDLC-[0-9]+(\.[0-9]+)?)/i;
-  return pattern.test(combined);
-}
-
-// ── Bypass label check (mirrors grep -qi 'ci:no-issue-required') ─────────
-function hasBypassLabel(labels) {
-  return labels.some((l) => l.toLowerCase() === 'ci:no-issue-required');
-}
-
-// ── Decision oracle (mirrors the full workflow script logic) ─────────────
+// ── Decision oracle: the real decision script (AISDLC-700) ───────────────
+// The workflow's rules live in scripts/issue-link-decision.mjs; the oracle
+// below calls it directly instead of mirroring a regex port.
 function checkResult(title, body, labels) {
-  if (hasBypassLabel(labels)) return 'bypass';
-  if (hasLinkedIssue(title, body)) return 'success';
-  return 'failure';
+  const r = decide({ title, body, labels });
+  return r.rule === 'bypass' ? 'bypass' : r.state;
 }
 
 // ── Flatten all steps from all jobs ──────────────────────────────────────
@@ -305,83 +291,49 @@ describe('require-issue-link.yml — bypass label: ci:no-issue-required → succ
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// 3. Workflow body sanity — the grep pattern in the script must match what
-//    the oracle tests above describe. We read the raw YAML and verify the
-//    grep pattern is present in the run script (structure-level assertion).
+// 3. Workflow body sanity — the run script delegates every rule to
+//    scripts/issue-link-decision.mjs (AISDLC-700) and posts its result.
 // ─────────────────────────────────────────────────────────────────────────
 
 describe('require-issue-link.yml — script body sanity (AC #2, #5)', () => {
-  it('check step run script contains the linked-issue grep pattern', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    assert.ok(checkStep, 'check step must exist');
-    const run = String(checkStep.run ?? '');
-    assert.match(
-      run,
-      /closes|fixes|resolves/i,
-      'run script must contain the closes/fixes/resolves keyword pattern',
-    );
-    assert.match(run, /#[0-9]/, 'run script must reference the #N issue number pattern');
+  const runScript = () => String((checkJob.steps ?? []).find((s) => s.id === 'check')?.run ?? '');
+
+  it('check step delegates the decision to scripts/issue-link-decision.mjs', () => {
+    assert.match(runScript(), /node scripts\/issue-link-decision\.mjs/);
   });
 
-  // AISDLC-477: verify the extended pattern is present in the workflow script
-  it('check step run script contains references keyword (AISDLC-477, AC #1)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    assert.match(
-      run,
-      /references/i,
-      'run script must contain the "references" keyword (AISDLC-477)',
+  it('workflow checks out the base ref sparsely and never persists credentials', () => {
+    const checkout = (checkJob.steps ?? []).find((s) =>
+      String(s.uses ?? '').startsWith('actions/checkout@'),
+    );
+    assert.ok(checkout, 'a checkout step must provide the decision script');
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.match(checkout.with['sparse-checkout'], /scripts\/issue-link-decision\.mjs/);
+    assert.equal(
+      checkout.with.ref,
+      undefined,
+      'pull_request_target must keep the default base ref',
     );
   });
 
-  it('check step run script contains AISDLC backlog-ref pattern (AISDLC-477, AC #1)', () => {
+  it('PR text reaches the script only through env, never interpolated into run:', () => {
     const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    assert.match(run, /AISDLC/, 'run script must reference the AISDLC-N backlog pattern');
+    assert.ok(checkStep.env.PR_TITLE && checkStep.env.PR_BODY && checkStep.env.PR_LABELS);
+    assert.doesNotMatch(runScript(), /\$\{\{/, 'run script must not interpolate expressions');
   });
 
-  it('check step run script contains bypass label grep for ci:no-issue-required (AC #3)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    assert.match(
-      run,
-      /ci:no-issue-required/i,
-      'run script must check for bypass label "ci:no-issue-required"',
-    );
+  it('check step lists changed files via the API', () => {
+    assert.match(runScript(), /pulls\/\$PR_NUMBER\/files/);
   });
 
-  it('check step posts ai-sdlc/issue-link as the status context (AC #2)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    assert.match(
-      run,
-      /ai-sdlc\/issue-link/,
-      'run script must post status context exactly "ai-sdlc/issue-link"',
-    );
-  });
-
-  it('check step posts both success and failure states (AC #2)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    assert.match(run, /state=success/, 'run script must post state=success on match');
-    assert.match(run, /state=failure/, 'run script must post state=failure on no match');
+  it('check step posts ai-sdlc/issue-link with the script-chosen state and description', () => {
+    const run = runScript();
+    assert.match(run, /context="ai-sdlc\/issue-link"/);
+    assert.match(run, /state="\$STATE"/);
+    assert.match(run, /description="\$DESCRIPTION"/);
   });
 
   it('check step uses gh api to post statuses (not curl — leverages GITHUB_TOKEN auth)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    assert.match(
-      run,
-      /gh api/,
-      'run script must use "gh api" to post statuses (auto-uses GITHUB_TOKEN)',
-    );
-  });
-
-  it('check step scans both title and body (AC #5 — title references)', () => {
-    const checkStep = (checkJob.steps ?? []).find((s) => s.id === 'check');
-    const run = String(checkStep.run ?? '');
-    // The combined variable should reference both PR_TITLE and PR_BODY.
-    assert.match(run, /PR_TITLE/, 'run script must reference PR_TITLE');
-    assert.match(run, /PR_BODY/, 'run script must reference PR_BODY');
+    assert.match(runScript(), /gh api/);
   });
 });
