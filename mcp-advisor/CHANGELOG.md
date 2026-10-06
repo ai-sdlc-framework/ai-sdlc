@@ -1,5 +1,19 @@
 # @ai-sdlc/mcp-advisor
 
+## [0.28.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.27.0...mcp-advisor-v0.28.0) (2026-10-05)
+
+
+### Bug Fixes
+
+* **orchestrator:** use family aliases for model defaults, one central id module (AISDLC-690) ([#1212](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1212)) ([f01fd32](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f01fd3247dcd837642227eb614816a900dd0fd19))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.28.0
+
 ## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.26.1...mcp-advisor-v0.27.0) (2026-10-04)
 
 

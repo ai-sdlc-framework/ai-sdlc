@@ -5,6 +5,26 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.28.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.27.0...orchestrator-v0.28.0) (2026-10-05)
+
+
+### Features
+
+* fail worktree setup closed without git hooks, pin Node, add doctor check (AISDLC-693) ([#1185](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1185)) ([f2816f2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f2816f2235081eb63090074e7650276066359631))
+* **orchestrator:** lease push on the agent's own branch is allowed by default (AISDLC-710) ([#1213](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1213)) ([7715d5b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7715d5b5a72285e486df1e0da8f7f8f130bee1c4))
+
+
+### Bug Fixes
+
+* **orchestrator:** use family aliases for model defaults, one central id module (AISDLC-690) ([#1212](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1212)) ([f01fd32](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f01fd3247dcd837642227eb614816a900dd0fd19))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.28.0
+
 ## [0.27.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.26.1...orchestrator-v0.27.0) (2026-10-04)
 
 
