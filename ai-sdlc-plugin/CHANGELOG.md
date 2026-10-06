@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.24.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.23.0...ai-sdlc-plugin-v0.24.0) (2026-10-06)
+
+
+### Features
+
+* **ci:** mark untrusted workflow jobs and lint INTERNAL_RUN placement (AISDLC-720.1) ([#1229](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1229)) ([fe6c699](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fe6c699dbd65860b7d00d2c4bcba445dfce68e01))
+
+
+### Bug Fixes
+
+* **orchestrator:** idempotent leaf re-emit, signer task env fallback, bounded verify (AISDLC-734) ([#1226](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1226)) ([7839425](https://github.com/ai-sdlc-framework/ai-sdlc/commit/783942530119bb73f02f9dcf6c25f814877af849))
+* **orchestrator:** stop post-rewrite desyncing the parent checkout (AISDLC-708) ([#1233](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1233)) ([b698b0b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b698b0b62b13eb35eb175cead697a745741d309c))
+* **orchestrator:** write prettier-formatted envelope JSON (AISDLC-732) ([#1219](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1219)) ([912a91c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/912a91c2165860913d6b5037365bce325531482e))
+* resolve repo's own pipeline-cli build before plugin cache (AISDLC-716) ([#1230](https://github.com/ai-sdlc-framework/ai-sdlc/issues/1230)) ([80759c1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/80759c112f4fe7403900249eeff90fcc3070343c))
+
 ## [0.23.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.22.0...ai-sdlc-plugin-v0.23.0) (2026-10-05)
 
 
