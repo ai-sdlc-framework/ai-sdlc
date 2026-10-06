@@ -17,7 +17,7 @@ references:
   - spec/rfcs/RFC-0046-attested-reviewer-independence.md
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
   - spec/rfcs/RFC-0047-re-derivable-isolated-anchor.md
-priority: high
+priority: low
 dispatchable: false
 dispatchableReason: 'BLOCKED on RFC-0047 anchor design — do not re-dispatch until OQs resolved'
 blocked:
@@ -36,6 +36,8 @@ blocked:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 RFC-0046 Phase 3 — the load-bearing `isolated` independence tier. Generalize RFC-0043's sandbox-isolated reviewer fan-out + clean-room signer (built for untrusted contributors) to the INTERNAL review path, so an opt-in internal review can be produced in an isolation boundary the coordinator process cannot reach. This is the tier that actually satisfies RFC-0046 OQ-1 (defend against a determined same-machine coordinator) with an OQ-2 re-derivable anchor.
 
 ## Scope

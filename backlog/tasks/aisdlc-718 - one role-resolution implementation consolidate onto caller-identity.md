@@ -14,13 +14,15 @@ references:
   - pipeline-cli/src/hierarchy/caller-identity.test.ts
   - ai-sdlc-plugin/hooks/lib/hierarchy-role.js
   - pipeline-cli/src/cli/complete-task.ts
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Session role is resolved in three places (`session-role.ts`, `hierarchy-role.js`, and
 `caller-identity.ts`), and `completeTask` carries its own inline claim check. They were
 written at different times against different review findings and can disagree, so a guard

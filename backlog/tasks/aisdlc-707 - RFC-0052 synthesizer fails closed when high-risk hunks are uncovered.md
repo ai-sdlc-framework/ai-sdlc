@@ -12,13 +12,15 @@ dependencies:
 references:
   - spec/rfcs/RFC-0052-staged-review-pipeline.md
   - .ai-sdlc/_decisions/events.jsonl
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 AISDLC-674 names high-risk hunks that no reviewer covered but leaves the verdict
 unchanged. Per DEC-0040 the synthesizer must not approve in that case.
 

@@ -8,8 +8,7 @@ created_date: '2026-10-05'
 labels:
   - gates
   - friction
-dependencies:
-  - AISDLC-645
+dependencies: []
 references:
   - scripts/check-followups-on-push.sh
   - scripts/check-followups.test.mjs

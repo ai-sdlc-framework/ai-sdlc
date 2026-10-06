@@ -12,13 +12,15 @@ dependencies: []
 references:
   - .github/workflows/ai-sdlc-gate.yml
   - docs/operations/quality-gate.md
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Follow-up approved by the operator on 2026-10-01. Merge skew between two green PRs
 broke `tsc --noEmit` on `main` while every per-PR check stayed green: no PR check runs
 the workspace typecheck. Internal workflow edits are authorized for this task.

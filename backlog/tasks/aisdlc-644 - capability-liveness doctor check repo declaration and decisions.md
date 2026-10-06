@@ -24,13 +24,15 @@ references:
   - pipeline-cli/bin/cli-decisions.mjs
   - docs/operations/README.md
   - docs/operations/fail-soft-at-the-adopter-boundary.md
-priority: high
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Makes a degraded capability visible to the operator without blocking anything.
 RFC-0049 section 9.3 and the OQ-7 resolution: doctor reports `fail`, the orchestrator
 tick files a Decision, and no tick or PR check is ever refused because a capability is

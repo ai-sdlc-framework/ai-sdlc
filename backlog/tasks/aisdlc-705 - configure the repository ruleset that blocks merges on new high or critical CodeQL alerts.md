@@ -11,13 +11,15 @@ labels:
 dependencies:
   - AISDLC-704
 references: []
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 The operator chose this ruleset on 2026-10-03 and it was waiting for him to click it.
 Under DEC-0039 administration is agent work: configure it through the GitHub API with the
 repository's existing credentials.

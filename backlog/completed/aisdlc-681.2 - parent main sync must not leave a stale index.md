@@ -2,7 +2,7 @@
 id: AISDLC-681.2
 title: >-
   Pipeline sync of the parent checkout's main updates the index and working tree, never only the ref
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02'
 labels:
@@ -18,6 +18,10 @@ references:
 priority: medium
 dispatchable: true
 ---
+
+## Resolution
+
+Duplicate of AISDLC-708 (planner, 2026-10-06).
 
 ## Description
 

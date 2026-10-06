@@ -2,12 +2,14 @@
 id: AISDLC-613
 title: Harden command-prefix bypass (sudo/env/nice) in stash + merge governance guards
 status: To Do
-priority: medium
+priority: low
 labels:
   - security
   - hooks
 created: 2026-09-14
 ---
+
+Parked (planner, 2026-10-06): do not start without a planner go.
 
 ## Context
 

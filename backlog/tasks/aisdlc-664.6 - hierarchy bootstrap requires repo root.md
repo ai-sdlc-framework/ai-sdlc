@@ -14,13 +14,15 @@ dependencies:
 references:
   - spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md
   - docs/operations/parallel-dispatch.md
-priority: medium
-dispatchable: true
+priority: low
+dispatchable: false
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 Follow-up filed from executor and reviewer reports on the parent task, approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM,
 hermetic tests, no writes under `.ai-sdlc/` by the developer agent, no edits to RFC

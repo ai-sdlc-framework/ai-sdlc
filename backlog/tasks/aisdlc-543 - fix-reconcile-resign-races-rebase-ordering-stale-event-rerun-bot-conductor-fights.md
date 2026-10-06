@@ -17,6 +17,8 @@ references:
   - pipeline-cli/src/orchestrator/reconcile.ts
   - scripts/verify-attestation.mjs
   - .github/workflows/auto-rebase-open-prs.yml
+  - ai-sdlc-plugin/scripts/sign-attestation.mjs
+  - scripts/check-attestation-sign.sh
 ---
 
 ## Description
@@ -63,6 +65,22 @@ The dispatch→merge instrumentation that landed with the profiling work
 (`ReconcileCompleted.reSignCount`) should make this class of churn visible in
 the corpus aggregator — add a regression assertion that reSignCount stays at
 0 for clean drains once these fixes land.
+
+## Folded in from AISDLC-545 (2026-10-06)
+
+Scope (the tactical guard half of preventing the orphan-subject v6 attestation failure class; the architectural half is Decision Catalog DEC-0011, scope `attestation`). Incident 2026-06-12: PR #912 (AISDLC-538) failed the CI `ai-sdlc/attestation` gate because the envelope's `subject.sha1` pointed at an orphaned pre-rebase commit. The verifier's AISDLC-448 tree-equivalence relaxation accepts an orphaned subject only when its tree is available, true locally but not in CI's shallow clone, so local `verify-attestation` reports valid while CI fails.
+
+1. Signer always binds a current, reachable subject: `sign-attestation.mjs` sets `subject.sha1` to the current `HEAD` (the commit being pushed), never an older commit that could be orphaned; add an explicit assertion/log if it already does.
+2. Pre-push fail-closed CI-repro: in `scripts/check-attestation-sign.sh`, run the same verification CI runs (`verify-attestation.mjs` with `PR_BASE_SHA=origin/main`, `PR_HEAD_SHA=HEAD`) and assert the envelope's `subject.sha1` is reachable from the branch tip being pushed; if it is an orphan or the CI-repro would fail, re-sign at HEAD (preferred) or block the push with an actionable "re-sign required" message.
+3. Optional CI-side diagnostic: improve the `verify-attestation.mjs` failure message for the unreachable-subject case.
+
+Acceptance criteria (verbatim from AISDLC-545):
+- [ ] #1 `sign-attestation.mjs` binds `subject.sha1` to the current HEAD (the commit being pushed); an assertion/log makes this explicit and a test pins it.
+- [ ] #2 `check-attestation-sign.sh` runs a local CI-repro (`verify-attestation.mjs` with `PR_BASE_SHA=origin/main`, `PR_HEAD_SHA=HEAD`) before allowing the push, and asserts the envelope's `subject.sha1` is reachable from the branch tip.
+- [ ] #3 When the subject is an orphan / the CI-repro would fail, the hook auto-re-signs at HEAD (preferred) or blocks the push with an actionable "re-sign required" message — never a local-pass/CI-fail push.
+- [ ] #4 `verify-attestation.mjs` emits a clear "subject SHA unreachable in this clone — re-sign at HEAD" diagnostic for the unreachable-subject case.
+- [ ] #5 Hermetic test reproduces the orphan-subject scenario (sign at commit X, rebase to orphan X, attempt push) and proves the guard catches it (auto-re-sign or block), not a local-pass/CI-fail.
+- [ ] #6 `pnpm test` + the attestation-sign-gate hermetic tests + lint pass; no regression to the normal (non-rebased) sign+push path.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

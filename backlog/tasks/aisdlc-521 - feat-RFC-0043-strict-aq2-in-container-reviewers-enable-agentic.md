@@ -13,12 +13,14 @@ dependencies:
   - AISDLC-520
 references:
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
-priority: medium
+priority: low
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+Parked (planner, 2026-10-06): do not start without a planner go.
+
 AISDLC-520 wired the inference.local proxy but runs the Stage-3 reviewers **host-side**
 (on the runner, which holds the provider key + open internet). That is acceptable for the
 current **plain-completion** reviewers (one model call, diff-as-text in, verdict-JSON out,
