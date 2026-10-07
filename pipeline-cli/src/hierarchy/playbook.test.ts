@@ -34,6 +34,7 @@ const ALL_GRANTS = [
   'file-subid-followups',
   'answer-operational-decisions',
   'clear-executor-context',
+  'mark-ready-after-codeql',
 ];
 
 interface Call {

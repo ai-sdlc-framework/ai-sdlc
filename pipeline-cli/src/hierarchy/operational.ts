@@ -25,6 +25,7 @@ export const OPERATIONAL_ACTIONS = [
   'file-subid-followups',
   'answer-operational-decisions',
   'clear-executor-context',
+  'mark-ready-after-codeql',
 ] as const;
 
 /** One operational action. */

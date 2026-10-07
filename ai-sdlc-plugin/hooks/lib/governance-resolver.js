@@ -84,6 +84,7 @@ const OPERATIONAL_ACTIONS = Object.freeze([
   'file-subid-followups',
   'answer-operational-decisions',
   'clear-executor-context',
+  'mark-ready-after-codeql',
 ]);
 
 const KNOWN_PRESETS = new Set(['strict', 'operator-trusted']);

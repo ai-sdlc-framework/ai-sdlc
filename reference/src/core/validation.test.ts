@@ -303,6 +303,7 @@ describe('AgentRole spec.governance (RFC-0048 / AISDLC-601)', () => {
         'file-subid-followups',
         'answer-operational-decisions',
         'clear-executor-context',
+        'mark-ready-after-codeql',
       ],
     };
     expect(validateResource(doc).valid).toBe(true);

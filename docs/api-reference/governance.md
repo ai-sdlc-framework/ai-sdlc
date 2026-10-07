@@ -502,7 +502,7 @@ spec:
 - **`operational`** is a closed list granted to the dispatch role:
   `rebase-own-branch`, `lease-push-own-branch`, `retrigger-ci`, `requeue`,
   `file-subid-followups`, `answer-operational-decisions`,
-  `clear-executor-context`. Unknown entries are dropped, not granted. It is
+  `clear-executor-context`, `mark-ready-after-codeql` (mark a draft PR ready with `gh pr ready` once its body says draft until CodeQL is clean and every Analyze job on the head passed; never a superseded or DIRTY PR). Unknown entries are dropped, not granted. It is
   rendered into the injected rules only for sessions started with
   `AI_SDLC_HIERARCHY_ROLE=operator-dispatch`, and it does not relax any hook on
   its own (force-push is governed solely by `allowForcePush`).

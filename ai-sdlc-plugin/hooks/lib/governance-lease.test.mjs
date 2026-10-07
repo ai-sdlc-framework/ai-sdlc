@@ -38,6 +38,7 @@ const ALL_OPS = [
   'file-subid-followups',
   'answer-operational-decisions',
   'clear-executor-context',
+  'mark-ready-after-codeql',
 ];
 
 // The exact snippet the operator commits to .ai-sdlc/agent-role.yaml (shown in
@@ -59,13 +60,14 @@ spec:
       - file-subid-followups
       - answer-operational-decisions
       - clear-executor-context
+      - mark-ready-after-codeql
   constraints:
     blockedActions:
       - 'git push --force*'
 `;
 
 describe('resolver - allowForcePush enum', () => {
-  it('closed operational set matches the documented seven', () => {
+  it('closed operational set matches the documented eight', () => {
     assert.deepEqual([...OPERATIONAL_ACTIONS], ALL_OPS);
   });
 
@@ -127,6 +129,19 @@ describe('resolver - operational list', () => {
     );
   });
 
+  it('grants mark-ready-after-codeql when listed and drops a misspelling (AISDLC-736)', () => {
+    assert.deepEqual(
+      resolveOperational({
+        operational: [
+          'mark-ready-after-codeql',
+          'mark-ready-after-codeqls',
+          'mark-ready-after-code-ql',
+        ],
+      }),
+      ['mark-ready-after-codeql'],
+    );
+  });
+
   it('non-array values yield an empty list', () => {
     for (const v of ['requeue', 5, {}, null, undefined, true]) {
       assert.deepEqual(resolveOperational({ operational: v }), []);
@@ -181,7 +196,7 @@ describe('resolver - protectedBranches', () => {
 });
 
 describe('operator snippet (manual step) resolves cleanly', () => {
-  it('resolves to leaseOnOwnBranch + all seven operational entries with no unknown keys or values', () => {
+  it('resolves to leaseOnOwnBranch + all eight operational entries with no unknown keys or values', () => {
     const raw = parseGovernanceBlock(OPERATOR_SNIPPET);
     assert.deepEqual(Object.keys(raw).sort(), ['allowForcePush', 'operational']);
     assert.equal(raw.operational.length, ALL_OPS.length);
