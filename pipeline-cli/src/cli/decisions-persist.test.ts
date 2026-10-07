@@ -36,7 +36,11 @@ beforeEach(() => {
   savedEnv = {
     flag: process.env.AI_SDLC_DECISION_CATALOG,
     off: process.env.AI_SDLC_DECISIONS_NO_REMOTE_PERSIST,
+    u: process.env.AI_SDLC_UNTRUSTED_RUN,
+    g: process.env.GITHUB_ACTIONS,
   };
+  delete process.env.AI_SDLC_UNTRUSTED_RUN;
+  delete process.env.GITHUB_ACTIONS;
   process.env.AI_SDLC_DECISION_CATALOG = 'experimental';
   delete process.env.AI_SDLC_DECISIONS_NO_REMOTE_PERSIST;
   root = mkdtempSync(join(tmpdir(), 'cli-dec-persist-'));
@@ -71,6 +75,13 @@ afterEach(() => {
   if (savedEnv.flag === undefined) delete process.env.AI_SDLC_DECISION_CATALOG;
   else process.env.AI_SDLC_DECISION_CATALOG = savedEnv.flag;
   if (savedEnv.off !== undefined) process.env.AI_SDLC_DECISIONS_NO_REMOTE_PERSIST = savedEnv.off;
+  for (const [k, v] of [
+    ['AI_SDLC_UNTRUSTED_RUN', savedEnv.u],
+    ['GITHUB_ACTIONS', savedEnv.g],
+  ] as const) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -123,6 +134,12 @@ describe('cli-decisions remote persistence (AISDLC-546)', () => {
     await run(...ADD);
     // simulate a parent reset wiping the local append; origin still holds DEC-0001
     rmSync(join(parent, '.ai-sdlc', '_decisions', 'events.jsonl'), { force: true });
+    const errs: string[] = [];
+    process.stderr.write = ((c: string | Uint8Array) => {
+      errs.push(String(c));
+      return true;
+    }) as typeof process.stderr.write;
     await expect(run(...ADD, '--id', 'DEC-0001')).rejects.toThrow('process.exit(1)');
+    expect(errs.join('')).toMatch(/refusing to reuse a consumed decision number/);
   });
 });

@@ -2,7 +2,14 @@
  * AISDLC-546 — hermetic tests: a local bare repo is `origin`; `gh` is injected (no network).
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -34,6 +41,11 @@ let origin: string;
 let parent: string;
 const ghCalls: string[][] = [];
 let openPrUrl = '';
+let savedTrust: Record<string, string | undefined>;
+const restore = (k: string, v: string | undefined): void => {
+  if (v === undefined) delete process.env[k];
+  else process.env[k] = v;
+};
 const runner: GitRunner = (cmd, args, opts) => {
   if (cmd === 'gh') {
     ghCalls.push(args);
@@ -62,6 +74,14 @@ beforeEach(() => {
   ghCalls.length = 0;
   openPrUrl = '';
   delete process.env.AI_SDLC_DECISIONS_NO_REMOTE_PERSIST;
+  savedTrust = {
+    u: process.env.AI_SDLC_UNTRUSTED_RUN,
+    g: process.env.GITHUB_ACTIONS,
+    i: process.env.AI_SDLC_INTERNAL_RUN,
+  };
+  delete process.env.AI_SDLC_UNTRUSTED_RUN;
+  delete process.env.GITHUB_ACTIONS;
+  delete process.env.AI_SDLC_INTERNAL_RUN;
   root = mkdtempSync(join(tmpdir(), 'dec-persist-'));
   origin = join(root, 'origin.git');
   parent = join(root, 'parent');
@@ -75,7 +95,12 @@ beforeEach(() => {
   git(parent, 'commit', '-m', 'init');
   git(parent, 'push', '-u', 'origin', 'HEAD:main');
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  restore('AI_SDLC_UNTRUSTED_RUN', savedTrust.u);
+  restore('GITHUB_ACTIONS', savedTrust.g);
+  restore('AI_SDLC_INTERNAL_RUN', savedTrust.i);
+  rmSync(root, { recursive: true, force: true });
+});
 
 describe('persistDecisionLog (AISDLC-546)', () => {
   it('add -> parent hard reset -> decision survives on origin and number is not reused', () => {
@@ -99,7 +124,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(() => assertDecisionIdFree('DEC-0002', { workDir: parent, runner })).not.toThrow();
   });
 
-  it('accumulates across adds (union, no drops) and reuses the open PR', () => {
+  it('accumulates across adds (union, no drops)', () => {
     addDec(parent, 'DEC-0001');
     persistDecisionLog({ workDir: parent, runner });
     addDec(parent, 'DEC-0002');
@@ -189,5 +214,40 @@ describe('persistDecisionLog (AISDLC-546)', () => {
       env: { ...process.env, AI_SDLC_DECISIONS_NO_REMOTE_PERSIST: '1' },
     });
     expect(r2).toEqual({ persisted: false, reason: 'disabled' });
+  });
+
+  it('untrusted run (process env) does not push; local append retained', () => {
+    addDec(parent, 'DEC-0001');
+    process.env.AI_SDLC_UNTRUSTED_RUN = '1';
+    const warns: string[] = [];
+    // a caller-supplied env must not be able to downgrade the signal
+    const r = persistDecisionLog({
+      workDir: parent,
+      runner,
+      env: { ...process.env, AI_SDLC_UNTRUSTED_RUN: '0' },
+      warn: (m) => warns.push(m),
+    });
+    expect(r).toEqual({ persisted: false, reason: 'untrusted run' });
+    expect(warns.join('')).toMatch(/untrusted/);
+    expect(git(origin, 'branch', '--list', DECISIONS_SYNC_BRANCH)).toBe('');
+    expect(readFileSync(resolveEventLogPath(parent), 'utf8')).toContain('DEC-0001');
+  });
+
+  it('drops invalid ledger lines before the union merge', () => {
+    addDec(parent, 'DEC-0001');
+    appendFileSync(resolveEventLogPath(parent), 'not json\n{"type":"bogus"}\n');
+    const warns: string[] = [];
+    expect(
+      persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) }).persisted,
+    ).toBe(true);
+    const remote = git(
+      parent,
+      'show',
+      `origin/${DECISIONS_SYNC_BRANCH}:.ai-sdlc/_decisions/events.jsonl`,
+    );
+    expect(remote).toContain('DEC-0001');
+    expect(remote).not.toContain('not json');
+    expect(remote).not.toContain('bogus');
+    expect(warns.filter((w) => /invalid ledger line/.test(w))).toHaveLength(2);
   });
 });

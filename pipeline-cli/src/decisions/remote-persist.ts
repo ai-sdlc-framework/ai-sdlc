@@ -21,6 +21,9 @@
  * `AI_SDLC_DECISIONS_NO_REMOTE_PERSIST=1`. The runner is injectable so tests never touch
  * the network.
  *
+ * Untrusted runs (AI_SDLC_UNTRUSTED_RUN, process env only) never push: the sync PR is
+ * review/attestation-exempt, so untrusted input must not ride into it.
+ *
  * The sync push uses `--no-verify`: the commit is machine-generated, touches only the
  * attestation-exempt `_decisions` path, and lands on a dedicated ref, so the dev-branch
  * pre-push gates (coverage, attestation) do not apply.
@@ -63,6 +66,24 @@ export interface DurableOpts {
   env?: NodeJS.ProcessEnv;
   /** Warning sink (defaults to stderr). */
   warn?: (msg: string) => void;
+}
+
+const FALSY = ['0', 'false', 'no', 'off'];
+const norm = (v: string | undefined): string => (v ?? '').trim().toLowerCase();
+const truthy = (v: string | undefined): boolean => {
+  const n = norm(v);
+  return n !== '' && !FALSY.includes(n);
+};
+
+/**
+ * Same rule as ai-sdlc-plugin/hooks/lib/governance-resolver.js `isUntrustedRun` (mirrored, as
+ * pipeline-cli does not import plugin code). Reads ONLY process.env: never a caller-supplied env
+ * or the ledger, so an untrusted run cannot downgrade itself.
+ */
+export function isUntrustedProcess(): boolean {
+  const env = process.env;
+  if (truthy(env.AI_SDLC_UNTRUSTED_RUN)) return true;
+  return truthy(env.GITHUB_ACTIONS) && !truthy(env.AI_SDLC_INTERNAL_RUN);
 }
 
 export function isRemotePersistDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -125,7 +146,12 @@ function fetchRefs(ctx: Ctx): boolean {
   if (sync.status !== 0) {
     // The sync PR may have merged and its branch been deleted: a stale tracking ref would
     // otherwise become the push lease and be rejected forever. Confirm absence, then drop it.
-    const remote = ctx.run('git', ['ls-remote', '--heads', 'origin', DECISIONS_SYNC_BRANCH]);
+    const remote = ctx.run('git', [
+      'ls-remote',
+      '--heads',
+      'origin',
+      `refs/heads/${DECISIONS_SYNC_BRANCH}`,
+    ]);
     if (remote.status === 0 && remote.stdout.trim() === '') {
       ctx.run('git', ['update-ref', '-d', syncRef]);
     }
@@ -146,6 +172,14 @@ function idsOf(ls: string[]): Set<string> {
     }
   }
   return out;
+}
+
+function isValidEventLine(l: string): boolean {
+  try {
+    return validateDecisionEvent(JSON.parse(l) as unknown) === null;
+  } catch {
+    return false;
+  }
 }
 
 function localLines(workDir: string): string[] {
@@ -202,6 +236,12 @@ export interface PersistResult {
 export function persistDecisionLog(opts: DurableOpts): PersistResult {
   const warn = opts.warn ?? ((m: string) => process.stderr.write(m + '\n'));
   if (isRemotePersistDisabled(opts.env)) return { persisted: false, reason: 'disabled' };
+  if (isUntrustedProcess()) {
+    warn(
+      '[decisions] WARN: untrusted run; decision kept locally only (not pushed to the sync branch)',
+    );
+    return { persisted: false, reason: 'untrusted run' };
+  }
   try {
     const ctx = makeCtx(opts);
     if (!ctx) return { persisted: false, reason: 'no git remote' };
@@ -215,6 +255,11 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
     const seen = new Set(merged);
     for (const l of [...showRef(ctx, syncRef), ...localLines(opts.workDir)]) {
       if (!seen.has(l)) {
+        if (!isValidEventLine(l)) {
+          warn(`[decisions] WARN: dropping invalid ledger line before sync: ${l.slice(0, 80)}`);
+          seen.add(l);
+          continue;
+        }
         seen.add(l);
         merged.push(l);
       }

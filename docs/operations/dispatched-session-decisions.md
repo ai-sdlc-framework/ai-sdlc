@@ -107,6 +107,16 @@ the decision.
 - Offline / no `origin` / no `gh`: a warning goes to stderr, the exit code is unchanged and the local
   append is kept (the next successful `add`/`answer` pushes everything).
 - Opt out (tests, air-gapped use): `AI_SDLC_DECISIONS_NO_REMOTE_PERSIST=1`.
+- The sync push is a programmatic `--no-verify` lease-protected force push to a hard-coded,
+  non-configurable dedicated ref (`ai-sdlc/decisions-sync`). This is a documented exception for a
+  machine-generated, attestation-exempt commit, not a general pattern for other pushes.
+- Untrusted runs (`AI_SDLC_UNTRUSTED_RUN`, or GitHub Actions without `AI_SDLC_INTERNAL_RUN`, read from
+  the process environment only) do not persist: a warning is printed and the local append is kept, so
+  untrusted input cannot ride into the review-exempt sync PR.
+- Each ledger line is validated before the union merge; invalid lines are dropped with a warning.
+- Because merging only adds lines, removing a bad record requires cleaning the sync branch AND every
+  local ledger (and `origin/main` if it already landed); cleaning one copy alone lets the others
+  restore it.
 - Merging the sync PR lands the ledger on `main`. Manual ledger syncing is retired; use it only as a
   fallback when the warning above appeared and the remote stayed unreachable.
 
