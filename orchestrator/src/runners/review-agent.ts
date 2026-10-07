@@ -402,12 +402,11 @@ export class ReviewAgentRunner implements AgentRunner {
   }
 
   parseVerdict(text: string): ReviewVerdict {
-    // Strip markdown fences if the model wraps the JSON. Horizontal-whitespace
-    // classes ([ \t\r]) instead of \s so the trailing-whitespace group can't
-    // overlap the \n the anchors already consume — avoids polynomial
-    // backtracking on adversarial model output (CodeQL js/polynomial-redos).
+    // Strip markdown fences if the model wraps the JSON. Linear string scan
+    // (no regex) so adversarial model output can't trigger polynomial
+    // backtracking (CodeQL js/polynomial-redos).
     // JSON.parse tolerates the leading/trailing newline left behind.
-    const cleaned = text.replace(/^```(?:json)?[ \t\r]*/m, '').replace(/[ \t\r]*```$/m, '');
+    const cleaned = stripFences(text);
 
     try {
       const parsed = JSON.parse(cleaned);
@@ -469,3 +468,39 @@ export class ReviewAgentRunner implements AgentRunner {
 // ── Exported prompts for testing ─────────────────────────────────────
 
 export { REVIEW_PROMPTS };
+
+const isLineTerminator = (c: string | undefined): boolean =>
+  c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+const isHorizontalSpace = (c: string | undefined): boolean => c === ' ' || c === '\t' || c === '\r';
+
+/**
+ * Linear replacement for the former pair of multiline regexes (a fence opener
+ * at line start, then a fence closer at line end).
+ *
+ * removes the first fence opening at a line start and the first fence closing
+ * at a line end (with adjacent horizontal whitespace).
+ */
+function stripFences(text: string): string {
+  let result = text;
+  for (let i = 0; i < result.length; i++) {
+    if ((i === 0 || isLineTerminator(result[i - 1])) && result.startsWith('```', i)) {
+      let end = i + 3;
+      if (result.startsWith('json', end)) end += 4;
+      while (isHorizontalSpace(result[end])) end++;
+      result = result.slice(0, i) + result.slice(end);
+      break;
+    }
+  }
+  for (let i = 0; i + 3 <= result.length; i++) {
+    if (
+      result.startsWith('```', i) &&
+      (i + 3 === result.length || isLineTerminator(result[i + 3]))
+    ) {
+      let start = i;
+      while (start > 0 && isHorizontalSpace(result[start - 1])) start--;
+      result = result.slice(0, start) + result.slice(i + 3);
+      break;
+    }
+  }
+  return result;
+}

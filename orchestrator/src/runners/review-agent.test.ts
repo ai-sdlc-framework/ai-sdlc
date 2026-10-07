@@ -180,6 +180,21 @@ describe('ReviewAgentRunner', () => {
     expect(verdict.approved).toBe(true);
   });
 
+  it('strips fences with trailing whitespace and handles pathological input in linear time', () => {
+    const runner = new ReviewAgentRunner({ reviewType: 'testing' });
+    const json = '{"approved":true,"findings":[],"summary":"ok"}';
+    expect(runner.parseVerdict('```json \t\r\n' + json + '\n  ```').approved).toBe(true);
+    expect(runner.parseVerdict('```\n' + json + '\n```').approved).toBe(true);
+
+    const start = Date.now();
+    const verdict = runner.parseVerdict(' \t'.repeat(50_000) + 'x');
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(verdict.approved).toBe(false);
+    const start2 = Date.now();
+    runner.parseVerdict('```'.repeat(50_000) + ' \t'.repeat(50_000) + 'x');
+    expect(Date.now() - start2).toBeLessThan(500);
+  });
+
   it('returns not-approved on invalid JSON', () => {
     const runner = new ReviewAgentRunner({ reviewType: 'testing' });
     const verdict = runner.parseVerdict('not json at all');

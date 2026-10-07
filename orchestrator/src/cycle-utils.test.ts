@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { checkAndHandleCycle, createCycleDetectorFromConfig } from './cycle-utils.js';
+import {
+  checkAndHandleCycle,
+  createCycleDetectorFromConfig,
+  sanitizeTemplate,
+} from './cycle-utils.js';
 import { PipelineCycleDetector, createStageMarker } from './pipeline-cycle-detector.js';
 import type { IssueTracker } from '@ai-sdlc/reference';
 
@@ -423,5 +427,27 @@ describe('PipelineCycleDetector.detectCycle() with IssueTracker', () => {
 
     expect(result.cycleDetected).toBe(false);
     expect(result.loopingStages).toHaveLength(0);
+  });
+});
+
+describe('sanitizeTemplate()', () => {
+  it('strips tags and is a fixed point for nested tag fragments', () => {
+    expect(sanitizeTemplate('a<b>c')).toBe('ac');
+    expect(sanitizeTemplate('<scr<script>ipt>x')).not.toContain('<script>');
+    const once = sanitizeTemplate('<<a>>b<c<d>e>');
+    expect(sanitizeTemplate(once)).toBe(once);
+  });
+
+  it('keeps an unclosed < as-is and truncates to 2000 chars', () => {
+    expect(sanitizeTemplate('a < b')).toBe('a < b');
+    expect(sanitizeTemplate('x'.repeat(3000))).toHaveLength(2000);
+  });
+
+  it('handles 100k repeated < in linear time', () => {
+    const input = '<'.repeat(100_000);
+    const start = Date.now();
+    const out = sanitizeTemplate(input);
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(out).toBe('<'.repeat(2000));
   });
 });
