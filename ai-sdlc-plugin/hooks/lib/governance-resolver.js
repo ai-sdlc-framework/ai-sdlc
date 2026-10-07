@@ -457,8 +457,8 @@ function renderSubagentHardRules(resolved) {
  *     no signal. Until the workflow half sets the marker on trusted jobs
  *     (post-AISDLC-721), every CI run is untrusted for protected-path writes.
  *
- * 3. (AISDLC-730) a marker file `<gitdir>/ai-sdlc-untrusted` exists for the checkout
- *    containing `cwd`. Checked first and independent of the environment, so a child
+ * 3. (AISDLC-730) a marker file `<gitdir>/ai-sdlc-untrusted` exists for ANY checkout
+ *    enclosing `cwd` (every `.git` up to the filesystem root). Checked first and independent of the environment, so a child
  *    agent that clears its env is still untrusted. The marker lives outside the
  *    working tree and the hook refuses an untrusted run's writes to it.
  *
@@ -486,37 +486,96 @@ function isTruthy(v) {
 const UNTRUSTED_MARKER_FILE = 'ai-sdlc-untrusted';
 
 /**
- * Walk up from `startDir` to the first `.git` entry and return the marker's
- * reason (a non-empty string) when `<gitdir>/ai-sdlc-untrusted` exists, else null.
- * Any read error other than "not found" fails closed (treated as marked).
+ * Read `<gitDir>/ai-sdlc-untrusted`. Returns the reason string when present,
+ * null when absent; any other read error fails closed (treated as marked).
+ */
+function readMarker(gitDir) {
+  try {
+    return fs.readFileSync(path.join(gitDir, UNTRUSTED_MARKER_FILE), 'utf8').trim() || 'marker';
+  } catch (e) {
+    return e && e.code === 'ENOENT' ? null : 'untrusted marker unreadable (fail closed)';
+  }
+}
+
+/**
+ * Collect markers from EVERY enclosing `.git` from `startDir` up to the filesystem
+ * root (not only the nearest one: the run can create or overwrite the nearest `.git`,
+ * e.g. `git init x && cd x`). Returns the first marker reason found, else null.
+ *
+ * A `.git` pointer file whose gitdir is missing or not a directory is treated as
+ * INCONCLUSIVE, never as untrusted by itself (a broken pointer in an ordinary trusted
+ * checkout must not lock that session out). Instead the marker is recovered through
+ * git's own back-pointer: each enclosing repo's `.git/worktrees/<id>/gitdir` names the
+ * worktree `.git` file it belongs to, so a worktree whose pointer was overwritten still
+ * resolves to its admin dir and marker. Residual: a worktree outside every enclosing
+ * repo with an overwritten pointer cannot be recovered (best-effort; see governance docs).
  */
 function findUntrustedMarker(startDir) {
   if (!startDir) return null;
   let cur = path.resolve(startDir);
+  const enclosingGitDirs = [];
+  const brokenPointers = [];
   for (;;) {
     const dotGit = path.join(cur, '.git');
-    let gitDir = null;
     try {
       const st = fs.statSync(dotGit);
-      if (st.isDirectory()) gitDir = dotGit;
-      else {
+      let gitDir = null;
+      if (st.isDirectory()) {
+        gitDir = dotGit;
+        enclosingGitDirs.push(dotGit);
+      } else {
         const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'));
-        if (m) gitDir = path.resolve(cur, m[1].trim());
+        if (m) {
+          const target = path.resolve(cur, m[1].trim());
+          let ok = false;
+          try {
+            ok = fs.statSync(target).isDirectory();
+          } catch (e) {
+            if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) {
+              return 'untrusted marker lookup failed (fail closed)';
+            }
+          }
+          if (ok) gitDir = target;
+          else brokenPointers.push(dotGit);
+        } else {
+          brokenPointers.push(dotGit);
+        }
+      }
+      if (gitDir) {
+        const marker = readMarker(gitDir);
+        if (marker !== null) return marker;
       }
     } catch (e) {
-      if (!e || e.code !== 'ENOENT') return 'untrusted marker lookup failed (fail closed)';
-    }
-    if (gitDir) {
-      try {
-        return fs.readFileSync(path.join(gitDir, UNTRUSTED_MARKER_FILE), 'utf8').trim() || 'marker';
-      } catch (e) {
-        return e && e.code === 'ENOENT' ? null : 'untrusted marker unreadable (fail closed)';
+      if (!e || (e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) {
+        return 'untrusted marker lookup failed (fail closed)';
       }
     }
     const parent = path.dirname(cur);
-    if (parent === cur) return null;
+    if (parent === cur) break;
     cur = parent;
   }
+  for (const broken of brokenPointers) {
+    for (const gd of enclosingGitDirs) {
+      const wtRoot = path.join(gd, 'worktrees');
+      let ids = [];
+      try {
+        ids = fs.readdirSync(wtRoot);
+      } catch {
+        continue;
+      }
+      for (const id of ids) {
+        try {
+          const back = fs.readFileSync(path.join(wtRoot, id, 'gitdir'), 'utf8').trim();
+          if (path.resolve(back) !== broken) continue;
+        } catch {
+          continue;
+        }
+        const marker = readMarker(path.join(wtRoot, id));
+        if (marker !== null) return marker;
+      }
+    }
+  }
+  return null;
 }
 
 function isUntrustedRun(env = process.env, cwd = null) {

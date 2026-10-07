@@ -288,6 +288,8 @@ const UNTRUSTED_PROTECTED = [
   ['.claude'],
   ['.husky'],
   ['ai-sdlc-plugin', 'hooks'],
+  // AISDLC-730: worktree admin dirs hold the untrusted marker.
+  ['.git', 'worktrees'],
 ];
 
 /** Does this POSIX-style path contain a protected segment sequence (case-insensitive)? */
@@ -299,6 +301,9 @@ function isProtectedForUntrusted(p) {
   if (segs[segs.length - 1] === '.active-task') return true;
   // AISDLC-730: the untrusted marker itself (in the git dir) is not removable by an untrusted run.
   if (segs[segs.length - 1] === UNTRUSTED_MARKER_FILE) return true;
+  // AISDLC-730: a `.git` entry (pointer file or dir) anchors the marker lookup; an untrusted
+  // run must not overwrite or create one.
+  if (segs[segs.length - 1] === '.git') return true;
   return UNTRUSTED_PROTECTED.some((seq) =>
     segs.some((_, i) => seq.every((part, j) => segs[i + j] === part)),
   );
@@ -351,7 +356,14 @@ function untrustedMessage(what) {
   );
 }
 
-const PROT = String.raw`(?:\.ai-sdlc|\.github\/workflows|\.claude|\.husky|ai-sdlc-plugin\/hooks|\.active-task|ai-sdlc-untrusted)`;
+const PROT = String.raw`(?:\.ai-sdlc|\.github\/workflows|\.claude|\.husky|ai-sdlc-plugin\/hooks|\.active-task|ai-sdlc-unt[^\s'"\/;|&]*|\.git\/worktrees)`;
+// AISDLC-730: a `.git` entry itself (not `.git/<x>`) as the target of a write verb or redirect.
+const DOTGIT_ENTRY = String.raw`(?:^|[\s'"=/<>:])\.git(?=['"\s;|&]|$)`;
+const SHELL_DOTGIT_TARGET = new RegExp(DOTGIT_ENTRY, 'i');
+const SHELL_REDIRECT_TO_DOTGIT = new RegExp(
+  String.raw`>>?\s*['"]?(?:[^\s;|&'"]*\/)?\.git(?=['"\s;|&]|$)`,
+  'i',
+);
 const PROTECTED_SHELL_PATH = new RegExp(
   String.raw`(?:^|[\s'"=/<>:])${PROT}(?:\/|['"\s;|&]|$)`,
   'i',
@@ -373,7 +385,8 @@ const SHELL_CD_PROTECTED = new RegExp(String.raw`(?:^|[\s;&|(])cd\s+['"]?[^\s;|&
 function enforceUntrustedShellWrites(command) {
   if (!UNTRUSTED.untrusted) return;
   const msg = untrustedMessage('a shell command writing to a protected path');
-  // Best-effort pattern matching; shell is not a boundary (CI is).
+  // Best-effort pattern matching; shell is not a boundary (CI is). Glob, variable and
+  // eval forms of the protected names can still evade it.
   if (SHELL_TREE_REWRITE.test(command)) deny(msg);
   // `cd <protected>` then any write verb or redirect later in the same command.
   if (
@@ -383,6 +396,12 @@ function enforceUntrustedShellWrites(command) {
     deny(msg);
   }
   for (const segment of command.split(/[;&|\n]+/)) {
+    if (
+      SHELL_DOTGIT_TARGET.test(segment) &&
+      (SHELL_WRITE_VERB.test(segment) || SHELL_REDIRECT_TO_DOTGIT.test(segment))
+    ) {
+      deny(msg);
+    }
     if (!PROTECTED_SHELL_PATH.test(segment)) continue;
     if (
       SHELL_WRITE_VERB.test(segment) ||
@@ -392,7 +411,8 @@ function enforceUntrustedShellWrites(command) {
       deny(msg);
     }
   }
-  if (SHELL_REDIRECT_TO_PROTECTED.test(command)) deny(msg);
+  if (SHELL_REDIRECT_TO_PROTECTED.test(command) || SHELL_REDIRECT_TO_DOTGIT.test(command))
+    deny(msg);
 }
 
 // ── Dispatch by tool ─────────────────────────────────────────────────

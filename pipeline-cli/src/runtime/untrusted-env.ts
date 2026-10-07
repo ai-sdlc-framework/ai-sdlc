@@ -12,7 +12,7 @@
  * spawners such as `ShellClaudePSpawner`.
  */
 
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { SpawnOpts, SubagentResult, SubagentSpawner } from '../types.js';
 
@@ -72,4 +72,19 @@ export function writeUntrustedMarker(worktreePath: string, reason: string): stri
   const file = join(gitDir, UNTRUSTED_MARKER_FILE);
   writeFileSync(file, `${reason}\n`, 'utf8');
   return file;
+}
+
+/**
+ * AISDLC-730 — remove the untrusted marker. Called by the pipeline process (not
+ * subject to the hook) when an untrusted run ends, and when a trusted run starts
+ * in the same worktree, so a stale marker can never lock out a trusted session.
+ * Returns true when a marker was removed, false when there was none (or no git dir).
+ */
+export function clearUntrustedMarker(worktreePath: string): boolean {
+  const gitDir = resolveGitDir(worktreePath);
+  if (!gitDir) return false;
+  const file = join(gitDir, UNTRUSTED_MARKER_FILE);
+  if (!existsSync(file)) return false;
+  rmSync(file, { force: true });
+  return true;
 }

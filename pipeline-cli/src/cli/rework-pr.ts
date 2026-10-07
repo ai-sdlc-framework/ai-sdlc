@@ -30,7 +30,11 @@
  */
 
 import { defaultRunner, type Runner } from '../runtime/exec.js';
-import { withUntrustedEnv, writeUntrustedMarker } from '../runtime/untrusted-env.js';
+import {
+  clearUntrustedMarker,
+  withUntrustedEnv,
+  writeUntrustedMarker,
+} from '../runtime/untrusted-env.js';
 import {
   aggregateVerdicts,
   buildDeveloperPrompt,
@@ -161,6 +165,29 @@ export interface ReworkPrResult {
  * blocks from PR comments as additional rework context.
  */
 export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult> {
+  const state: { markedWorktree?: string } = {};
+  try {
+    return await runReworkPrInner(opts, state);
+  } finally {
+    // AISDLC-730: the untrusted run is over (success, failure or throw): remove the marker.
+    if (state.markedWorktree) {
+      try {
+        clearUntrustedMarker(state.markedWorktree);
+      } catch (err) {
+        (opts.logger ?? DEFAULT_LOGGER).warn(
+          `[ai-sdlc] rework-pr: untrusted-marker cleanup failed (a later trusted run clears it): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
+}
+
+async function runReworkPrInner(
+  opts: ReworkPrOptions,
+  state: { markedWorktree?: string },
+): Promise<ReworkPrResult> {
   const logger = opts.logger ?? DEFAULT_LOGGER;
   const runner = opts.runner ?? defaultRunner;
   const writer = opts.verdictWriter ?? writeVerdictFile;
@@ -249,11 +276,17 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
   });
   const worktreePath = branchResult.worktreePath;
 
-  // AISDLC-730: reviewer findings come from PR comments (outside input), so the
-  // rework developer runs untrusted: env signal on every spawn + a file marker the
-  // hook re-derives even if a child agent clears its environment.
+  // AISDLC-730: reviewer findings come from PR comments (outside input), and rework-pr
+  // cannot tell whether the PR author is internal, so the rework developer runs untrusted:
+  // env signal on every spawn + a file marker the hook re-derives even if a child agent
+  // clears its environment. The marker is removed when this run ends (see runReworkPr).
   const spawner = withUntrustedEnv(opts.spawner, 'rework-pr source');
-  writeUntrustedMarker(worktreePath, 'rework-pr source');
+  state.markedWorktree = worktreePath;
+  if (!writeUntrustedMarker(worktreePath, 'rework-pr source')) {
+    logger.warn(
+      `[ai-sdlc] rework-pr: untrusted-marker: no git dir at ${worktreePath}; env signal only`,
+    );
+  }
 
   // 4. Fetch reviewer findings from PR comments
   logger.progress('rework-pr', `fetching reviewer findings from PR #${opts.prNumber}`);

@@ -422,6 +422,49 @@ describe('AISDLC-730: untrusted marker file', () => {
       rmSync(d, { recursive: true, force: true });
     }
   });
+  it('collects markers from EVERY enclosing .git, not only the nearest', () => {
+    const d = mk();
+    try {
+      mkdirSync(join(d, '.git'));
+      writeFileSync(join(d, '.git', UNTRUSTED_MARKER_FILE), 'outer\n');
+      mkdirSync(join(d, 'x', '.git'), { recursive: true }); // `git init x && cd x`
+      assert.equal(findUntrustedMarker(join(d, 'x')), 'outer');
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+  it('a .git pointer to a missing gitdir is inconclusive (never untrusted by itself)', () => {
+    const d = mk();
+    try {
+      mkdirSync(join(d, 'wt'));
+      writeFileSync(join(d, 'wt', '.git'), `gitdir: ${join(d, 'gone')}\n`);
+      assert.equal(findUntrustedMarker(join(d, 'wt')), null);
+      assert.equal(isUntrustedRun({}, join(d, 'wt')).untrusted, false);
+      writeFileSync(join(d, 'wt', '.git'), 'garbage');
+      assert.equal(findUntrustedMarker(join(d, 'wt')), null);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+  it('recovers the marker of a worktree whose .git pointer was overwritten, via git back-pointer', () => {
+    const d = mk();
+    try {
+      const admin = join(d, '.git', 'worktrees', 'w1');
+      mkdirSync(admin, { recursive: true });
+      mkdirSync(join(d, '.worktrees', 'w1'), { recursive: true });
+      const ptr = join(d, '.worktrees', 'w1', '.git');
+      writeFileSync(join(admin, 'gitdir'), `${ptr}\n`);
+      writeFileSync(join(admin, UNTRUSTED_MARKER_FILE), 'rework-pr source\n');
+      writeFileSync(ptr, `gitdir: ${join(d, 'nonexistent')}\n`);
+      assert.equal(findUntrustedMarker(join(d, '.worktrees', 'w1')), 'rework-pr source');
+      // a different worktree with a broken pointer is NOT marked
+      mkdirSync(join(d, '.worktrees', 'w2'), { recursive: true });
+      writeFileSync(join(d, '.worktrees', 'w2', '.git'), `gitdir: ${join(d, 'nonexistent')}\n`);
+      assert.equal(findUntrustedMarker(join(d, '.worktrees', 'w2')), null);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
   it('no cwd or no checkout means no marker', () => {
     assert.equal(findUntrustedMarker(null), null);
     assert.equal(isUntrustedRun({}).untrusted, false);

@@ -1,11 +1,13 @@
 /** AISDLC-720 — producer of the untrusted-run signal. */
 import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import {
+  clearUntrustedMarker,
   UNTRUSTED_MARKER_FILE,
   UNTRUSTED_SPAWN_ENV,
   withUntrustedEnv,
@@ -113,5 +115,59 @@ describe('writeUntrustedMarker (AISDLC-730)', () => {
       cwd: '/x',
     });
     expect(seen[0].env?.AI_SDLC_UNTRUSTED_REASON).toBe('rework-pr source');
+  });
+});
+
+describe('clearUntrustedMarker + hook lockstep (AISDLC-730)', () => {
+  it('removes the marker, and is a no-op when there is none or no git dir', () => {
+    const d = mkdtempSync(join(tmpdir(), 'untrusted-clear-'));
+    try {
+      mkdirSync(join(d, 'p', '.git'), { recursive: true });
+      expect(clearUntrustedMarker(join(d, 'p'))).toBe(false);
+      const f = writeUntrustedMarker(join(d, 'p'), 'why')!;
+      expect(clearUntrustedMarker(join(d, 'p'))).toBe(true);
+      expect(existsSync(f)).toBe(false);
+      expect(clearUntrustedMarker(join(d, 'nope'))).toBe(false);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('a write failure on a resolvable git dir throws (fail closed), not null', () => {
+    const d = mkdtempSync(join(tmpdir(), 'untrusted-fail-'));
+    try {
+      mkdirSync(join(d, 'wt'));
+      writeFileSync(join(d, 'wt', '.git'), `gitdir: ${join(d, 'missing-gitdir')}\n`);
+      expect(() => writeUntrustedMarker(join(d, 'wt'), 'x')).toThrow();
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('producer and the hook resolver agree on the marker filename and gitdir resolution', () => {
+    const req = createRequire(import.meta.url);
+    const hook = req('../../../ai-sdlc-plugin/hooks/lib/governance-resolver.js') as {
+      UNTRUSTED_MARKER_FILE: string;
+      findUntrustedMarker: (dir: string) => string | null;
+    };
+    expect(hook.UNTRUSTED_MARKER_FILE).toBe(UNTRUSTED_MARKER_FILE);
+    const d = mkdtempSync(join(tmpdir(), 'untrusted-lockstep-'));
+    try {
+      mkdirSync(join(d, 'plain', '.git'), { recursive: true });
+      mkdirSync(join(d, 'gd'));
+      mkdirSync(join(d, 'wt'));
+      writeFileSync(join(d, 'wt', '.git'), `gitdir: ${join(d, 'gd')}\n`);
+      mkdirSync(join(d, 'rel-gd'));
+      mkdirSync(join(d, 'rel'));
+      writeFileSync(join(d, 'rel', '.git'), 'gitdir: ../rel-gd\n');
+      for (const w of ['plain', 'wt', 'rel']) {
+        writeUntrustedMarker(join(d, w), `reason-${w}`);
+        expect(hook.findUntrustedMarker(join(d, w))).toBe(`reason-${w}`);
+        clearUntrustedMarker(join(d, w));
+        expect(hook.findUntrustedMarker(join(d, w))).toBeNull();
+      }
+    } finally {
+      rmSync(d, { recursive: true, force: true });
+    }
   });
 });

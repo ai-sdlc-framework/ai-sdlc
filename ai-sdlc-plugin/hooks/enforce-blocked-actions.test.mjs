@@ -2015,6 +2015,32 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-730: untrusted mar
     assert.ok(isDenied(call('Bash', { command: 'rm -f ../gitdirs/wt/ai-sdlc-untrusted' }, wt)));
   });
 
+  it('AISDLC-730: a nested .git created inside the marked checkout does not hide the marker', () => {
+    const wt = join(repo, 'wt');
+    const nested = join(wt, 'nested');
+    mkdirSync(join(nested, '.git'), { recursive: true });
+    assert.ok(isDenied(call('Write', { file_path: join(wt, '.ai-sdlc', 'x.yaml') }, nested)));
+  });
+
+  it('AISDLC-730: an untrusted run cannot write, replace or create a .git entry or worktree admin dir', () => {
+    const wt = join(repo, 'wt');
+    assert.ok(isDenied(call('Write', { file_path: join(wt, '.git') }, wt)));
+    assert.ok(isDenied(call('Edit', { file_path: join(wt, 'x', '.git') }, wt)));
+    assert.ok(
+      isDenied(call('Write', { file_path: join(repo, '.git', 'worktrees', 'w', 'gitdir') }, wt)),
+    );
+    assert.ok(isDenied(call('Bash', { command: 'echo "gitdir: /nonexistent" > .git' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm -f .git' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'mv .git .git.bak' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm -rf ../.git/worktrees/wt' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'mv ../gitdirs/wt/ai-sdlc-unt* /tmp/x' }, wt)));
+    assert.ok(isDenied(call('Bash', { command: 'rm ../gitdirs/wt/ai-sdlc-unt?usted' }, wt)));
+    // ordinary git use and unrelated files stay allowed
+    assert.ok(!isDenied(call('Bash', { command: 'git status && ls .git' }, wt)));
+    assert.ok(!isDenied(call('Bash', { command: 'git remote add o https://x/y.git' }, wt)));
+    assert.ok(!isDenied(call('Write', { file_path: join(wt, 'repo.github', 'a.ts') }, wt)));
+  });
+
   it('regression: a trusted local session (no signal, no marker) edits .ai-sdlc with zero prompts', () => {
     const trusted = join(repo, 'trusted');
     mkdirSync(join(trusted, '.git'), { recursive: true });

@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const seen: { sourceKind?: string }[] = [];
@@ -69,6 +69,8 @@ const inlineSpec = {
 
 const markerPath = () => join(tmp, '.worktrees', 'aisdlc-300', '.git', 'ai-sdlc-untrusted');
 const spawnEnvs: Array<Record<string, string> | undefined> = [];
+const markerDuringDev: boolean[] = [];
+let devThrows = false;
 
 async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false, diffFails = false) {
   writeTaskFile(tmp, { id: 'AISDLC-300', title: 'x', status: 'To Do', acceptanceCriteria: ['a'] });
@@ -76,6 +78,8 @@ async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false, diffFail
   const spawner = new MockSpawner({
     developer: (o) => {
       spawnEnvs.push(o.env);
+      markerDuringDev.push(existsSync(markerPath()));
+      if (devThrows) throw new Error('developer exploded');
       return { type: 'developer', output: '', parsed: dev, status: 'success', durationMs: 0 };
     },
     'code-reviewer': (o) => {
@@ -147,20 +151,44 @@ describe('executePipeline reviewer-set wiring', () => {
 
   it('AISDLC-730: an inline taskSpec with no sourceKind spawns untrusted and writes the marker', async () => {
     spawnEnvs.length = 0;
+    markerDuringDev.length = 0;
     await run(undefined, true);
     expect(spawnEnvs.length).toBeGreaterThanOrEqual(2);
     for (const e of spawnEnvs) {
       expect(e?.AI_SDLC_UNTRUSTED_RUN).toBe('1');
       expect(e?.AI_SDLC_UNTRUSTED_REASON).toBe('inline taskSpec source');
     }
-    expect(markerPath()).toSatisfy((p: string) => existsSync(p));
+    expect(markerDuringDev).toEqual([true]);
+    // the marker is removed when the untrusted run ends
+    expect(existsSync(markerPath())).toBe(false);
   });
 
-  it('AISDLC-730: gh-issue writes the marker; a plain backlog run does not', async () => {
+  it('AISDLC-730: gh-issue writes the marker during the run; a plain backlog run never does', async () => {
+    markerDuringDev.length = 0;
     await run('gh-issue');
-    expect(readFileSync(markerPath(), 'utf8')).toContain('gh-issue source');
-    rmSync(markerPath(), { force: true });
+    expect(markerDuringDev).toEqual([true]);
+    expect(existsSync(markerPath())).toBe(false);
+    markerDuringDev.length = 0;
     await run('backlog');
+    expect(markerDuringDev).toEqual([false]);
+  });
+
+  it('AISDLC-730: the marker is removed when the untrusted run throws', async () => {
+    devThrows = true;
+    try {
+      await run('gh-issue');
+    } finally {
+      devThrows = false;
+    }
+    expect(existsSync(markerPath())).toBe(false);
+  });
+
+  it('AISDLC-730: a trusted run clears a stale marker before it starts', async () => {
+    markerDuringDev.length = 0;
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-300', '.git'), { recursive: true });
+    writeFileSync(markerPath(), 'gh-issue source\n');
+    await run('backlog');
+    expect(markerDuringDev).toEqual([false]);
     expect(existsSync(markerPath())).toBe(false);
   });
 
