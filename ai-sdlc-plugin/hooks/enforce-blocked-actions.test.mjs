@@ -1170,6 +1170,69 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
       assert.ok(isDenied(run(policy, 'gh pr merge acme/widgets#42 --squash')));
     });
 
+    it(`fail-closed: reserved words, unlisted wrappers, stdin executors and quoted # are denied under ${policy} (AISDLC-605 round 2)`, () => {
+      for (const bad of [
+        // reserved words / function bodies
+        'if true; then gh pr merge 42 --auto; fi',
+        'while true; do gh pr merge 42 --auto; done',
+        'if false; then echo x; else gh pr merge 42 --auto; fi',
+        'f() { gh pr merge 42 --auto; }; f',
+        '{ gh pr merge 42 --auto; }',
+        '( gh pr merge 42 --auto )',
+        'coproc gh pr merge 42 --auto',
+        // wrappers that run their args but are not shells
+        'pnpm exec gh pr merge 42 --auto',
+        'npm exec -- gh pr merge 42',
+        'caffeinate -i gh pr merge 42 --auto',
+        'stdbuf -o0 gh pr merge 42 --auto',
+        'setsid gh pr merge 42 --auto',
+        'flock /tmp/l gh pr merge 42 --auto',
+        'arch -arm64 gh pr merge 42 --auto',
+        'unbuffer gh pr merge 42 --auto',
+        "git -c 'alias.m=!gh pr merge 42 --auto' m",
+        // stdin executors behind a wrapper or interpreter
+        "echo 'gh pr merge 42 --auto' | env bash",
+        "echo 'gh pr merge 42 --auto' | sudo sh",
+        "echo 'gh pr merge 42 --auto' | command sh",
+        "echo 'gh pr merge 42 --auto' | nohup sh",
+        "echo 'gh pr merge 42 --auto' | python3",
+        "echo 'gh pr merge 42 --auto' | perl",
+        "echo 'gh pr merge 42 --auto' | ruby",
+        "echo 'gh pr merge 42 --auto' | node",
+        "echo 'gh pr merge 42 --auto' |& bash",
+        "echo 'gh pr merge 42 --auto' | tee >(sh)",
+        "echo 'gh pr merge 42 --auto' > >(sh)",
+        // quoted # must not hide the rest of the segment
+        `bash -c 'echo " #"; gh pr merge 42 --auto'`,
+        `sh -c "echo ' #'; gh pr merge 42"`,
+        // heredocs fed to non-inert openers keep their bodies in view
+        'pnpm exec sh <<EOF\ngh pr merge 42 --auto\nEOF',
+        'osascript <<EOF\ngh pr merge 42\nEOF',
+        'make -f - <<EOF\ngh pr merge 42\nEOF',
+        'docker exec -i c sh <<EOF\ngh pr merge 42\nEOF',
+        'if true; then bash <<EOF\ngh pr merge 42 --auto\nEOF\nfi',
+        // API variants
+        'if true; then gh api -X PUT repos/o/r/pulls/1/merge; fi',
+        'if true; then gh api graphql -f query=\'mutation{enablePullRequestAutoMerge(input:{pullRequestId:"x"}){clientMutationId}}\'; fi',
+        'pnpm exec gh api -X PUT repos/o/r/pulls/1/merge',
+        'echo repos/o/r/pulls/1/merge | env xargs gh api -X PUT',
+        'echo repos/o/r/pulls/1/merge | sudo xargs gh api -X PUT',
+        'caffeinate gh api -X PUT repos/o/r/pulls/1/merge',
+      ]) {
+        assert.ok(isDenied(run(policy, bad)), `expected deny: ${JSON.stringify(bad)}`);
+      }
+      for (const ok of [
+        'echo "gh pr merge 42" | grep merge',
+        'echo " #"; echo gh pr merge 42',
+        'if true; then echo gh pr merge 42; fi',
+        'git commit -m "docs: gh pr merge note"',
+        'gh pr comment 42 --body "do not gh pr merge"',
+        'echo repos/o/r/pulls/1/merge | cat',
+      ]) {
+        assert.ok(!isDenied(run(policy, ok)), `expected allow: ${JSON.stringify(ok)}`);
+      }
+    });
+
     it(`API-merge deny message no longer claims arming stays allowed under ${policy}`, () => {
       const result = run(policy, 'gh api repos/acme/widgets/pulls/42/merge -X PUT');
       const reason = JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason;
@@ -2156,6 +2219,18 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (scratch dirs, AISDLC-605)
       assert.ok(isDenied(write(tool, join(otherWt, 'src', 'a.ts'))), 'other worktree');
       assert.ok(isDenied(write(tool, join(scratchRepo, 'a.ts'))), 'sibling repo in a temp dir');
       assert.ok(isDenied(write(tool, join(homedir(), 'aisdlc-605-nonexistent', 'a.ts'))));
+    });
+  }
+
+  for (const tool of ['Write', 'Edit']) {
+    it(`${tool} through a symlink in a temp dir that points outside scratch is denied`, () => {
+      const target = join('/usr', 'local', 'aisdlc-605-symlink-target-nonexistent');
+      const link = join(scratchPlain, `escape-link-${tool}`);
+      symlinkSync(target, link);
+      assert.ok(isDenied(write(tool, join(link, 'index.ts'))), 'link to a non-scratch dir');
+      const repoLink = join(scratchPlain, `repo-link-${tool}`);
+      symlinkSync(scratchRepo, repoLink);
+      assert.ok(isDenied(write(tool, join(repoLink, 'src', 'index.ts'))), 'link to a sibling repo');
     });
   }
 

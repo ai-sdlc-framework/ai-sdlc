@@ -19,6 +19,44 @@ describe('stripComment', () => {
   });
 });
 
+describe('stripComment (quote-aware)', () => {
+  it('does not cut at a quoted # and keeps the rest of the segment', () => {
+    assert.equal(m.stripComment(`bash -c 'echo " #"; x'`), `bash -c 'echo " #"; x'`);
+    assert.equal(m.stripComment('echo "a #b" # real'), 'echo "a #b"');
+  });
+});
+
+describe('isInertSegment / pipelines', () => {
+  it('classifies inert vs unknown command words', () => {
+    for (const c of [
+      'echo x',
+      'then echo x',
+      'grep -r y .',
+      'git commit -m z',
+      'gh pr comment 1',
+    ]) {
+      assert.equal(m.isInertSegment(c), true, c);
+    }
+    for (const c of [
+      'env bash',
+      'sudo sh',
+      'then bash',
+      'git -c a=b c',
+      'tee >(sh)',
+      'pnpm exec x',
+    ]) {
+      assert.equal(m.isInertSegment(c), false, c);
+    }
+  });
+  it('marks pipe-fed stages', () => {
+    const segs = m.splitShellSegmentsEx('a | b |& c && d');
+    assert.deepEqual(
+      segs.map((s) => s.pipe),
+      [false, true, true, false],
+    );
+  });
+});
+
 describe('splitShellSegments', () => {
   it('splits on unquoted operators only', () => {
     assert.deepEqual(m.splitShellSegments('a && b; c | d\ne'), ['a', 'b', 'c', 'd', 'e']);
