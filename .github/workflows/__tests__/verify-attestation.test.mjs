@@ -226,3 +226,63 @@ describe('AISDLC-445: verify-attestation.yml stages per-patch-id transcript-leav
     );
   });
 });
+
+describe('AISDLC-747: approve job posts an approving review on a verified envelope', () => {
+  const wf = loadYaml('verify-attestation.yml');
+  const job = wf.jobs.approve;
+
+  it('declares an approve job that needs verify', () => {
+    assert.ok(job, 'approve job must exist');
+    assert.equal(job.needs, 'verify');
+  });
+
+  it('holds pull-requests: write only on the approve job', () => {
+    assert.equal(job.permissions['pull-requests'], 'write');
+    assert.equal(wf.permissions['pull-requests'], undefined);
+    assert.notEqual(wf.jobs.verify.permissions['pull-requests'], 'write');
+  });
+
+  it('gates on each required clause in the if condition', () => {
+    const clauses = String(job.if)
+      .split('&&')
+      .map((c) => c.trim());
+    assert.deepEqual(clauses, [
+      "needs.verify.result == 'success'",
+      "needs.verify.outputs.status == 'valid'",
+      "github.event_name == 'pull_request_target'",
+      'github.event.pull_request.head.repo.full_name == github.repository',
+    ]);
+  });
+
+  it('never runs on pull_request or merge_group', () => {
+    assert.ok(!/event_name\s*!=\s*'merge_group'/.test(String(job.if)));
+    assert.ok(!/== 'pull_request'(?!_target)/.test(String(job.if)));
+  });
+
+  it('concurrency group is keyed by event name', () => {
+    assert.match(wf.concurrency.group, /github\.event_name/);
+  });
+
+  it('verify job exposes status and reason outputs', () => {
+    assert.ok(wf.jobs.verify.outputs.status);
+    assert.ok(wf.jobs.verify.outputs.reason);
+  });
+
+  it('checks out the default branch explicitly with no persisted credentials', () => {
+    const checkout = job.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
+    assert.ok(checkout, 'approve job must have a checkout step');
+    assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}');
+    assert.equal(checkout.with['persist-credentials'], false);
+    assert.equal(checkout.with['allow-unsafe-pr-checkout'], undefined);
+  });
+
+  it('runs the script and skips with a notice when it is absent (bootstrap)', () => {
+    const step = job.steps.find((st) => /post-attestation-review\.mjs/.test(String(st.run ?? '')));
+    assert.ok(step, 'script step must exist');
+    const run = String(step.run);
+    assert.match(run, /\[ ! -f scripts\/post-attestation-review\.mjs \]/);
+    assert.match(run, /::notice::/);
+    assert.match(run, /exit 0/);
+    assert.match(run, /node scripts\/post-attestation-review\.mjs/);
+  });
+});
