@@ -107,6 +107,7 @@ import {
   fallbackWeakensControl,
   type GovernanceChange,
 } from '../decisions/governance-fallback.js';
+import { migrateLegacyEventLog, resolveEventsDir } from '../decisions/event-log.js';
 import {
   assertDecisionIdFree,
   nextDecisionIdDurable,
@@ -1162,6 +1163,14 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
       },
     )
     .command(
+      'migrate',
+      'Split the legacy events.jsonl into one file per event under .ai-sdlc/_decisions/events/ (AISDLC-719). Keeps ids and order; idempotent.',
+      (y) => y,
+      async (argv) => {
+        emit({ ok: true, ...migrateLegacyEventLog({ workDir: String(argv['work-dir']) }) });
+      },
+    )
+    .command(
       'log-path',
       'Print the resolved event-log path (no read or write).',
       (y) => y,
@@ -1171,6 +1180,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         emit({
           ok: true,
           path,
+          eventsDir: resolveEventsDir(workDir),
           exists: existsSync(path),
           sizeBytes: existsSync(path) ? readFileSync(path, 'utf8').length : 0,
         });

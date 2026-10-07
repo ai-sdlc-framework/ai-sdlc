@@ -52,6 +52,7 @@ export function gitProvenanceResolver(workDir: string, ref = 'origin/main'): Pro
           `"decisionId":"${decisionId}"`,
           '--',
           '.ai-sdlc/_decisions/events.jsonl',
+          '.ai-sdlc/_decisions/events',
         ],
         { cwd: workDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
       )

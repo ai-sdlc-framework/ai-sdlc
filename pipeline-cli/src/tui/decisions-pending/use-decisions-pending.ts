@@ -1,7 +1,7 @@
 /**
  * useDecisionsPending React hook — RFC-0035 Phase 8 / AISDLC-292 AC#1.
  *
- * Reads the RFC-0035 Decision event log (`.ai-sdlc/_decisions/events.jsonl`),
+ * Reads the RFC-0035 Decision event log (`.ai-sdlc/_decisions/events/`, plus legacy `events.jsonl`),
  * projects the current state of all Decisions, and returns only the
  * `open` (pending) ones sorted by priority signal descending.
  *

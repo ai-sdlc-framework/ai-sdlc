@@ -29,11 +29,16 @@
  * pre-push gates (coverage, attestation) do not apply.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { basename, dirname, join, relative } from 'node:path';
 
 import { formatDecisionId, validateDecisionEvent } from './decision-record.js';
-import { resolveEventLogPath } from './event-log.js';
+import {
+  eventContentHash,
+  eventFileName,
+  resolveEventLogPath,
+  resolveEventsDir,
+} from './event-log.js';
 
 export const DECISIONS_SYNC_BRANCH = 'ai-sdlc/decisions-sync';
 const LEDGER_REL = '.ai-sdlc/_decisions/events.jsonl';
@@ -94,6 +99,8 @@ export function isRemotePersistDisabled(env: NodeJS.ProcessEnv = process.env): b
 interface Ctx {
   root: string;
   ledgerRel: string;
+  /** Repo-relative per-event directory (AISDLC-719). */
+  eventsRel: string;
   run: (
     cmd: string,
     args: string[],
@@ -119,6 +126,7 @@ function makeCtx(opts: DurableOpts): Ctx | null {
   return {
     root,
     ledgerRel: ledgerRel || LEDGER_REL,
+    eventsRel: `${dirname(ledgerRel || LEDGER_REL)}/events`,
     run: (cmd, args, extra) =>
       runner(cmd, args, { cwd: root, env: extra?.env ?? opts.env, input: extra?.input }),
   };
@@ -131,6 +139,39 @@ function lines(text: string): string[] {
 function showRef(ctx: Ctx, ref: string): string[] {
   const r = ctx.run('git', ['show', `${ref}:${ctx.ledgerRel}`]);
   return r.status === 0 ? lines(r.stdout) : [];
+}
+
+/** A per-event file (or a legacy line) found on a ref or locally. */
+interface EventEntry {
+  name: string;
+  line: string;
+}
+
+/** Legacy ledger lines plus per-event files on a ref, as uniform entries. */
+function entriesAtRef(ctx: Ctx, ref: string): EventEntry[] {
+  const out: EventEntry[] = [];
+  for (const line of showRef(ctx, ref)) out.push({ name: legacyEntryName(line), line });
+  const ls = ctx.run('git', ['ls-tree', '-r', '--name-only', ref, '--', ctx.eventsRel]);
+  if (ls.status === 0) {
+    for (const path of lines(ls.stdout)) {
+      const r = ctx.run('git', ['show', `${ref}:${path}`]);
+      if (r.status === 0) out.push({ name: basename(path), line: r.stdout.trim() });
+    }
+  }
+  return out;
+}
+
+/** Name a legacy ledger line would get as a per-event file (invalid lines keep a hash-only name). */
+function legacyEntryName(line: string): string {
+  try {
+    const evt = JSON.parse(line) as unknown;
+    if (validateDecisionEvent(evt) === null) {
+      return eventFileName(evt as Parameters<typeof eventFileName>[0], line);
+    }
+  } catch {
+    /* fall through */
+  }
+  return `invalid__${eventContentHash(line)}.json`;
 }
 
 function fetchRefs(ctx: Ctx): boolean {
@@ -182,9 +223,49 @@ function isValidEventLine(l: string): boolean {
   }
 }
 
-function localLines(workDir: string): string[] {
+function localEntries(workDir: string): EventEntry[] {
+  const out: EventEntry[] = [];
   const p = resolveEventLogPath(workDir);
-  return existsSync(p) ? lines(readFileSync(p, 'utf8')) : [];
+  if (existsSync(p)) {
+    for (const line of lines(readFileSync(p, 'utf8'))) {
+      out.push({ name: legacyEntryName(line), line });
+    }
+  }
+  const dir = resolveEventsDir(workDir);
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+      out.push({ name, line: readFileSync(join(dir, name), 'utf8').trim() });
+    }
+  }
+  return out;
+}
+
+/**
+ * Best-effort: decision ids carried by OPEN pull requests (per-event file names
+ * `<ts>__DEC-NNNN__...` under the events dir). Two open PRs therefore cannot pick the
+ * same number. Silent no-op without `gh`, auth, or network.
+ */
+export function openPrDecisionIds(ctx: { run: Ctx['run']; eventsRel: string }): Set<string> {
+  const out = new Set<string>();
+  const r = ctx.run('gh', [
+    'pr',
+    'list',
+    '--state',
+    'open',
+    '--limit',
+    '200',
+    '--json',
+    'files',
+    '--jq',
+    '.[].files[].path',
+  ]);
+  if (r.status !== 0) return out;
+  for (const path of lines(r.stdout)) {
+    if (!path.startsWith(`${ctx.eventsRel}/`)) continue;
+    const m = path.match(/__(DEC-\d+)__/);
+    if (m) out.add(m[1]);
+  }
+  return out;
 }
 
 /** Every decision id known to origin/main or the sync branch (empty when no remote). */
@@ -193,10 +274,14 @@ export function remoteDecisionIds(opts: DurableOpts): Set<string> {
   const ctx = makeCtx(opts);
   if (!ctx) return new Set();
   fetchRefs(ctx);
-  return idsOf([
-    ...showRef(ctx, 'refs/remotes/origin/main'),
-    ...showRef(ctx, `refs/remotes/origin/${DECISIONS_SYNC_BRANCH}`),
-  ]);
+  const ids = idsOf(
+    [
+      ...entriesAtRef(ctx, 'refs/remotes/origin/main'),
+      ...entriesAtRef(ctx, `refs/remotes/origin/${DECISIONS_SYNC_BRANCH}`),
+    ].map((e) => e.line),
+  );
+  for (const id of openPrDecisionIds(ctx)) ids.add(id);
+  return ids;
 }
 
 /**
@@ -204,7 +289,10 @@ export function remoteDecisionIds(opts: DurableOpts): Set<string> {
  * A number consumed anywhere durable can never be reissued.
  */
 export function nextDecisionIdDurable(opts: DurableOpts): string {
-  const ids = new Set<string>([...idsOf(localLines(opts.workDir)), ...remoteDecisionIds(opts)]);
+  const ids = new Set<string>([
+    ...idsOf(localEntries(opts.workDir).map((e) => e.line)),
+    ...remoteDecisionIds(opts),
+  ]);
   let max = 0;
   for (const id of ids) {
     const m = id.match(/^DEC-(\d+)$/);
@@ -250,35 +338,38 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
       return { persisted: false, reason: 'fetch failed' };
     }
     const syncRef = `refs/remotes/origin/${DECISIONS_SYNC_BRANCH}`;
-    const main = showRef(ctx, 'refs/remotes/origin/main');
-    const merged = [...main];
-    const seen = new Set(merged);
-    for (const l of [...showRef(ctx, syncRef), ...localLines(opts.workDir)]) {
-      if (!seen.has(l)) {
-        if (!isValidEventLine(l)) {
-          warn(`[decisions] WARN: dropping invalid ledger line before sync: ${l.slice(0, 80)}`);
-          seen.add(l);
-          continue;
-        }
-        seen.add(l);
-        merged.push(l);
+    // Hashes already on main (either layout) need no commit; everything else
+    // from the sync branch and the local tree is added as a per-event file.
+    const onMain = new Set(
+      entriesAtRef(ctx, 'refs/remotes/origin/main').map((e) => eventContentHash(e.line)),
+    );
+    const additions = new Map<string, EventEntry>();
+    for (const e of [...entriesAtRef(ctx, syncRef), ...localEntries(opts.workDir)]) {
+      const h = eventContentHash(e.line);
+      if (onMain.has(h) || additions.has(h)) continue;
+      if (!isValidEventLine(e.line)) {
+        warn(`[decisions] WARN: dropping invalid ledger line before sync: ${e.line.slice(0, 80)}`);
+        continue;
       }
+      additions.set(h, e);
     }
-    if (merged.length === main.length) return { persisted: true, reason: 'already on main' };
-
-    const blob = ctx.run('git', ['hash-object', '-w', '--stdin'], {
-      input: merged.join('\n') + '\n',
-    });
-    if (blob.status !== 0) throw new Error(`hash-object: ${blob.stderr.trim()}`);
+    if (additions.size === 0) return { persisted: true, reason: 'already on main' };
 
     const gitDir = ctx.run('git', ['rev-parse', '--absolute-git-dir']).stdout.trim();
     const idx = join(gitDir, `decisions-sync-index-${process.pid}`);
     const env = { ...(opts.env ?? process.env), GIT_INDEX_FILE: idx };
     try {
-      const steps: string[][] = [
-        ['read-tree', 'refs/remotes/origin/main'],
-        ['update-index', '--add', '--cacheinfo', `100644,${blob.stdout.trim()},${ctx.ledgerRel}`],
-      ];
+      const steps: string[][] = [['read-tree', 'refs/remotes/origin/main']];
+      for (const e of additions.values()) {
+        const blob = ctx.run('git', ['hash-object', '-w', '--stdin'], { input: e.line + '\n' });
+        if (blob.status !== 0) throw new Error(`hash-object: ${blob.stderr.trim()}`);
+        steps.push([
+          'update-index',
+          '--add',
+          '--cacheinfo',
+          `100644,${blob.stdout.trim()},${ctx.eventsRel}/${e.name}`,
+        ]);
+      }
       for (const s of steps) {
         const r = ctx.run('git', s, { env });
         if (r.status !== 0) throw new Error(`${s[0]}: ${r.stderr.trim()}`);
