@@ -80,8 +80,10 @@ The attestation is a required signal, not a replacement for people:
 
 - A maintainer can review any PR and request changes; unaddressed changes-requested
   blocks merge.
-- Only a human merges. Agents never merge PRs, and the one sanctioned exception is the
-  release-please rolling PR through its dedicated path.
+- Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`; when it permits
+  an agent to merge, the only path is `cli-merge-if-eligible`, which requires green checks
+  and a CLEAN merge state. The release-please rolling PR lands only on an explicit
+  operator instruction.
 - A maintainer can hold, close or revert any PR, and can raise `main`'s required approvals
   at any time. Emergency gate bypass is operator-only and documented in
   [`emergency-bypass.md`](emergency-bypass.md); every use is recorded in the PR body.
