@@ -8,7 +8,10 @@
  * The rule lives in pipeline-cli (`src/backlog/followup-rule.ts`) and is shared
  * with the plugin's `task_complete` tool; this script only does file/range
  * plumbing. Range mode checks files added or modified under backlog/completed/
- * within the range, so tasks completed before the gate are never re-checked.
+ * within the range, and within those files only the follow-up items the range
+ * adds or changes: an item that already violated at the range base is the
+ * branch's inheritance, not its work, so touching a completed task for another
+ * reason (a dead script reference) never re-judges its old prose (AISDLC-733).
  *
  * Fails closed: a missing build, unreadable file or git error exits non-zero.
  * Exit codes: 0 pass, 1 violation or error, 2 usage.
@@ -53,13 +56,35 @@ function parseArgs(argv) {
   return out;
 }
 
+/** Files added, modified or renamed under backlog/completed/ as `{ path, basePath }`. */
 function completedFilesInRange(range) {
   const raw = execFileSync(
     'git',
-    ['diff', '--name-only', '--diff-filter=AMR', range, '--', 'backlog/completed/'],
+    ['diff', '--name-status', '-M', '--diff-filter=AMR', range, '--', 'backlog/completed/'],
     { encoding: 'utf-8' },
   );
-  return raw.split('\n').filter((f) => f.endsWith('.md'));
+  const out = [];
+  for (const line of raw.split('\n')) {
+    const [status, a, b] = line.split('\t');
+    if (!status) continue;
+    const path = status.startsWith('R') ? b : a;
+    if (path && path.endsWith('.md')) out.push({ path, basePath: a });
+  }
+  return out;
+}
+
+/** Content of `file` at the range base, or null when the base has no such file (added). */
+function readAtRangeBase(range, file) {
+  const base = range.split('..')[0];
+  try {
+    return execFileSync('git', ['show', `${base}:${file}`], {
+      encoding: 'utf-8',
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** Content of `file` as of the range tip (what is being pushed), not the working tree. */
@@ -74,7 +99,9 @@ function readAtRangeTip(range, file) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = process.cwd();
-  const files = args.task ? [args.task] : completedFilesInRange(args.range);
+  const files = args.task
+    ? [{ path: args.task, basePath: undefined }]
+    : completedFilesInRange(args.range);
   if (files.length === 0) return 0;
 
   if (!existsSync(RULE_DIST)) {
@@ -86,16 +113,25 @@ async function main() {
   const taskPrefix = readTaskPrefix(root);
 
   let blocked = 0;
-  for (const file of files) {
+  for (const { path: file, basePath } of files) {
     const text = args.task
       ? readFileSync(resolve(root, file), 'utf-8')
       : readAtRangeTip(args.range, file);
     const result = checkFollowups(text, { taskPrefix });
-    if (!result.ok) {
+    let violations = result.violations;
+    if (!args.task && violations.length > 0) {
+      // Judge only items the range adds or changes: drop those already failing at the base.
+      const baseText = readAtRangeBase(args.range, basePath);
+      if (baseText !== null) {
+        const inherited = new Set(
+          checkFollowups(baseText, { taskPrefix }).violations.map((v) => v.item),
+        );
+        violations = violations.filter((v) => !inherited.has(v.item));
+      }
+    }
+    if (violations.length > 0) {
       blocked++;
-      process.stderr.write(
-        `${formatFollowupViolations(result.violations, { file, taskPrefix })}\n\n`,
-      );
+      process.stderr.write(`${formatFollowupViolations(violations, { file, taskPrefix })}\n\n`);
     }
   }
   return blocked > 0 ? 1 : 0;

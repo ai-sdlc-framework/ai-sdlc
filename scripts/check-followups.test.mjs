@@ -224,3 +224,93 @@ describe('range mode and pre-push hook', () => {
     assert.match(text, /AI_SDLC_SKIP_FOLLOWUP_GATE/);
   });
 });
+
+describe('range mode judges only follow-up items the push changes (AISDLC-733)', () => {
+  let repo;
+
+  const commit = (msg) => {
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', msg], repo);
+    return git(['rev-parse', 'HEAD'], repo).trim();
+  };
+  const completed = (name) => join(repo, 'backlog', 'completed', name);
+  const check = (a, b) => run(['--staged', '--push-range', `${a}..${b}`], repo);
+
+  before(() => {
+    repo = mkdtempSync(join(tmpdir(), 'followup-delta-'));
+    git(['init', '-q', '-b', 'main'], repo);
+    git(['config', 'user.email', 'test@example.com'], repo);
+    git(['config', 'user.name', 'test'], repo);
+    git(['config', 'commit.gpgsign', 'false'], repo);
+    mkdirSync(join(repo, 'backlog', 'completed'), { recursive: true });
+  });
+  after(() => rmSync(repo, { recursive: true, force: true }));
+
+  it('passes a completed task touched outside its Follow-up section', () => {
+    writeFileSync(completed('legacy.md'), task(PROSE).replace('Shipped.', 'Ran scripts/old.sh.'));
+    const base = commit('legacy task with prose follow-up');
+    writeFileSync(completed('legacy.md'), task(PROSE).replace('Shipped.', 'Ran scripts/new.sh.'));
+    const tip = commit('fix dead script reference');
+    const r = check(base, tip);
+    assert.equal(r.status, 0, r.stderr);
+  });
+
+  it('judges a follow-up item the push adds to an existing task', () => {
+    const base = git(['rev-parse', 'HEAD'], repo).trim();
+    writeFileSync(
+      completed('legacy.md'),
+      `${task(PROSE)}- Someone should also refactor the loader\n`,
+    );
+    const tip = commit('add a prose follow-up');
+    const r = check(base, tip);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /"Someone should also refactor the loader"/);
+    assert.doesNotMatch(r.stderr, /inject the adapter/);
+  });
+
+  it('judges a follow-up item the push changes', () => {
+    writeFileSync(completed('edit.md'), task('\n### Follow-up\n- Wire it (AISDLC-70)\n'));
+    const base = commit('tracked follow-up');
+    writeFileSync(completed('edit.md'), task('\n### Follow-up\n- Wire it later\n'));
+    const tip = commit('drop the id');
+    const r = check(base, tip);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /"Wire it later"/);
+  });
+
+  it('judges every item of a newly added completed task', () => {
+    const base = git(['rev-parse', 'HEAD'], repo).trim();
+    writeFileSync(completed('fresh.md'), task(PROSE));
+    const tip = commit('new completed task');
+    const r = check(base, tip);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /fresh\.md/);
+  });
+
+  it('compares a renamed task against its old path', () => {
+    writeFileSync(completed('before-rename.md'), task(PROSE));
+    const base = commit('task to rename');
+    execFileSync(
+      'git',
+      ['mv', 'backlog/completed/before-rename.md', 'backlog/completed/after-rename.md'],
+      {
+        cwd: repo,
+        env: env(),
+      },
+    );
+    const tip = commit('rename completed task');
+    const r = check(base, tip);
+    assert.equal(r.status, 0, r.stderr);
+  });
+
+  it('names the offending item and the accepted fixes in the refusal', () => {
+    const base = git(['rev-parse', 'HEAD'], repo).trim();
+    writeFileSync(completed('fresh2.md'), task('\n### Follow-up\n- Tidy the cache layer\n'));
+    const tip = commit('another prose item');
+    const r = check(base, tip);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /"Tidy the cache layer"/);
+    assert.match(r.stderr, /cite a task id/);
+    assert.match(r.stderr, /declined:/);
+  });
+});
