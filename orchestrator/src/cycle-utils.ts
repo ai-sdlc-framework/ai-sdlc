@@ -41,14 +41,23 @@ export interface CycleCheckResult {
  * substring is eliminated on the next pass — making the sanitization
  * demonstrably idempotent.
  */
-function sanitizeTemplate(text: string): string {
-  let prev: string;
-  let current = text;
-  do {
-    prev = current;
-    current = prev.replace(/<[^>]*>/g, '');
-  } while (current !== prev);
-  return current.slice(0, 2000);
+export function sanitizeTemplate(text: string): string {
+  // Single linear scan removing every `<...>` span (from a `<` through the
+  // first following `>`). After one pass no `<` that has a later `>` survives,
+  // so the result is already a fixed point (idempotent) — no loop-until-stable
+  // needed, and no regex backtracking (CodeQL js/polynomial-redos).
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf('<', i);
+    if (open === -1) break;
+    const close = text.indexOf('>', open + 1);
+    if (close === -1) break; // unclosed `<`: keep the remainder as-is
+    out += text.slice(i, open);
+    i = close + 1;
+  }
+  out += text.slice(i);
+  return out.slice(0, 2000);
 }
 
 /**
