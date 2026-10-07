@@ -342,7 +342,7 @@ function extractTaskIdFromBranch(branch: string): string | null {
   const m = branch.match(/^ai-sdlc\/(aisdlc-\d+(?:\.\d+)*)/i);
   if (!m) return null;
   // Normalize to uppercase canonical form: aisdlc-231 → AISDLC-231
-  return m[1].toUpperCase().replace(/^AISDLC-/, 'AISDLC-');
+  return m[1].toUpperCase();
 }
 
 // ── Blast-radius file-set computation ────────────────────────────────────────
