@@ -26,6 +26,9 @@ The fallback is the bare binary, from the repository root:
 node pipeline-cli/bin/cli-hierarchy.mjs <command> [options]
 ```
 
+The planner session can show a live context meter with compact, clear and hand-off actions:
+see [`context-meter.md`](context-meter.md).
+
 The examples below use the bare `cli-hierarchy` name for brevity; the plugin form takes
 the same commands and options.
 
