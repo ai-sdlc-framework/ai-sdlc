@@ -72,7 +72,8 @@ function skipBlanks(line: string, from: number): number {
  * Capture the text after `pos`: blanks, then (when `withSeparator`) one
  * optional `—`, `-` or `:`, then blanks, then the rest of the line. When
  * nothing is left, the last consumed character becomes the capture, as the
- * backtracking regex did. Null when `pos` is the end of the line.
+ * backtracking regex did. Returns '' when `pos` is the end of the line, and null
+ * when the tail holds a line terminator (the old regex never matched those).
  */
 function captureTail(line: string, pos: number, withSeparator: boolean): string | null {
   let i = skipBlanks(line, pos);
@@ -82,7 +83,7 @@ function captureTail(line: string, pos: number, withSeparator: boolean): string 
   const rest = line.slice(i);
   if (LINE_TERMINATOR_RE.test(rest)) return null;
   if (rest.length > 0) return rest;
-  return line.length > pos ? line.slice(-1) : null;
+  return line.length > pos ? line.slice(-1) : '';
 }
 
 interface TaskLineMatch {
@@ -94,7 +95,8 @@ function matchTaskLine(prefixRe: RegExp, line: string): TaskLineMatch | null {
   const prefix = prefixRe.exec(line);
   if (!prefix) return null;
   const title = captureTail(line, prefix[0].length, true);
-  if (title !== null) return { taskId: prefix[1], title };
+  if (title === null) return null;
+  if (title !== '') return { taskId: prefix[1], title };
   // Nothing follows the id: the old regex gave its last digit back as the title.
   if (/\d{2}$/.test(prefix[1])) {
     return { taskId: prefix[1].slice(0, -1), title: prefix[1].slice(-1) };
@@ -108,7 +110,7 @@ const matchCheckbox = (line: string): TaskLineMatch | null =>
 
 function matchAcLine(line: string): string | null {
   const prefix = AC_PREFIX_RE.exec(line);
-  return prefix ? captureTail(line, prefix[0].length, false) : null;
+  return prefix ? captureTail(line, prefix[0].length, false) || null : null;
 }
 const TASKS_SECTION_RE = /^##\s+Tasks\s*$/i;
 
