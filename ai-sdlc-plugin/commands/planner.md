@@ -176,3 +176,11 @@ never carry assignments.
 
 Print the roster, briefs and decisions, summarize them in a few lines for the
 operator, and wait for their direction.
+
+## Context ceiling
+
+Hand off and `/clear` when the status line's context indicator reaches 15% of the
+window (150k tokens), without exception. The handoff is the dated handoff memory
+file; keep it current as rulings happen, not at the end, so a clear at any moment
+loses nothing. Never run review rounds or orchestration loops in the planner context
+when they can be delegated to the dispatch session or an executor.

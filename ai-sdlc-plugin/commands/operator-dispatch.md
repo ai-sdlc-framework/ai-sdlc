@@ -140,6 +140,15 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" check-repo --board-dir "$BOARD_DIR" |
 }
 ```
 
+## Step 1.5 - Read the handoff file
+
+Before the tick, when it exists, read the dispatch handoff file,
+`operator-dispatch-handoff.md` in the auto-memory directory
+(`.claude/memory/operator-dispatch-handoff.md` of the project). It carries the queue,
+the standing rules and the open-PR list that the self-clear at the end of every tick
+discards. Whenever the queue, the standing rules or the open-PR list changed, refresh
+it before the self-clear in Step 5. When it does not exist, continue without it.
+
 ## Step 2 - Run one wake-up
 
 One command does the mechanical work and prints what you have to say as JSON:
@@ -261,8 +270,31 @@ verdict's notes.
 Silence never resolves a decision downward: if the planner has not answered, leave it
 open and say so in the next progress report.
 
-## Step 5 - Wake up again
+## Step 5 - Hand off, self-clear and resume
 
-Schedule the next wake-up with `ScheduleWakeup` for 60 seconds with the prompt
-`/ai-sdlc operator-dispatch`, then stop this turn. Do not busy-loop, and do not run
-the wake-up twice in one turn.
+Every tick ends with a clear, so each tick starts from the context floor instead of a
+context that grows without bound.
+
+1. If anything changed this tick (the queue, a standing rule, the open-PR list), refresh
+   the handoff file (Step 1.5) first.
+2. Schedule the self-clear. This is the last Bash call of the tick:
+
+```bash
+if [ -n "${TMUX_PANE:-}" ]; then
+  node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" clear --self --resume-after 60 \
+    --board-dir "$BOARD_DIR" --worker "$MY_NAME"
+else
+  echo "[operator-dispatch] TMUX_PANE unset: no self-clear, falling back to ScheduleWakeup 60s"
+fi
+```
+
+`clear --self` runs the same caller guard as `tick`, then resolves this session's own
+pane from its own roster entry (never a pane you name) and refuses when `TMUX_PANE`
+disagrees with it. It returns at once; a detached process types `/clear` about 20
+seconds later, then `/ai-sdlc operator-dispatch` 60 seconds after that. End the turn
+with one line saying so. Do not call `ScheduleWakeup` on this path.
+
+Only when `TMUX_PANE` is unset, schedule `ScheduleWakeup` for 60 seconds with the prompt
+`/ai-sdlc operator-dispatch` and say in the tick line that the fallback was used (the
+context is not cleared on that path). Do not busy-loop, and do not run the wake-up twice
+in one turn.
