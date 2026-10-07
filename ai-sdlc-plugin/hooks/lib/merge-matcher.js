@@ -1,81 +1,85 @@
 /**
- * Shared shell-text matcher for merge governance (AISDLC-605).
+ * Shell-text matcher for merge governance (AISDLC-605), FAIL-CLOSED design.
  *
- * Both PreToolUse (`enforce-blocked-actions.js`) and PermissionRequest
- * (`permission-check.js`) hooks use this so the two cannot drift.
+ * Used by the PreToolUse hook (`enforce-blocked-actions.js`) for both the raw
+ * merge phrase and the merge-API checks so they cannot drift.
  *
- * Contract: the merge ban applies only when `gh pr merge` (or a merge API call)
- * is the command BEING RUN, not when the phrase is text inside an argument, a
- * heredoc body, a grep pattern or an echo. Wrappers that execute their text
- * (`sh -c`, `eval`, `xargs`, interpreters, `sudo`/`env` prefixes) and command
- * substitution FAIL CLOSED: the phrase anywhere in such a segment blocks.
+ * Contract: when the dangerous text (the raw merge phrase, a merge API path or
+ * mutation) appears in a segment, the command is DENIED unless that segment's
+ * effective command word is on a short POSITIVE allowlist of inert commands
+ * (echo, grep, cat, git commit, ...) AND every later stage of its pipeline is
+ * inert too. Anything unknown (shells, interpreters, `env`, `pnpm exec`, `sudo`,
+ * `xargs`, substitutions, unclassifiable words) therefore denies.
  * Best-effort text matching, not a sandbox: branch protection is the backstop.
  */
 
-// Commands that execute (part of) their arguments or stdin as another command.
-const EXEC_WRAPPERS = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'dash',
-  'ksh',
-  'fish',
-  'csh',
-  'tcsh',
-  'eval',
-  'xargs',
-  'source',
-  '.',
-  'exec',
-  'env',
-  'sudo',
-  'doas',
-  'su',
-  'nohup',
-  'time',
-  'command',
-  'builtin',
-  'nice',
-  'ionice',
-  'timeout',
-  'watch',
-  'ssh',
-  'parallel',
-  'find',
-  'script',
-  'node',
-  'nodejs',
-  'deno',
-  'bun',
-  'ruby',
-  'perl',
-  'php',
-  'awk',
-  'gawk',
-  'busybox',
-  'cmd',
-  'powershell',
-  'pwsh',
+const INERT_WORDS = new Set([
+  'echo',
+  'printf',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'cat',
+  'tee',
+  'head',
+  'tail',
+  'less',
+  'more',
+  'wc',
+  'sort',
+  'uniq',
+  'true',
+  'false',
+  ':',
 ]);
-
-function isWrapperWord(word) {
-  // A variable/substitution as the command word (`${SHELL} <<EOF`) cannot be resolved: fail closed.
-  return EXEC_WRAPPERS.has(word) || /^python[0-9.]*$/.test(word) || /^[$`]/.test(word);
-}
+const INERT_GIT = new Set(['commit', 'log', 'show', 'diff', 'tag', 'status', 'add']);
+const INERT_GH = new Set(['create', 'comment', 'edit', 'view', 'list', 'review', 'checks', 'diff']);
+// Reserved words that merely introduce another command (skipped when finding the command word).
+const RESERVED = new Set([
+  'if',
+  'then',
+  'else',
+  'elif',
+  'do',
+  'while',
+  'until',
+  '{',
+  '}',
+  '(',
+  '!',
+]);
 
 /**
  * Quote- and escape-aware split on shell control operators (`&&`, `||`, `;`,
- * `|`, `&`, newline). Unbalanced quotes fall back to a naive split (fail
- * closed: more, smaller segments).
+ * `|`, `|&`, `&`, newline). Returns `{ text, pipe }` where `pipe` is true when
+ * the segment is fed by the previous one through a pipe. Unbalanced quotes fall
+ * back to a naive split (fail closed: more, smaller segments).
  */
-function splitShellSegments(command) {
-  const naive = () =>
-    command
-      .split(/(?:&&|\|\||;|\||&|\n)/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+function splitShellSegmentsEx(command) {
   const out = [];
   let cur = '';
+  let gapPipe = false;
+  const flush = (isPipe) => {
+    const text = cur.trim();
+    cur = '';
+    if (text) {
+      out.push({ text, pipe: out.length > 0 && gapPipe });
+      gapPipe = false;
+    }
+    if (isPipe) gapPipe = true;
+  };
+  const naive = () => {
+    out.length = 0;
+    cur = '';
+    gapPipe = false;
+    for (const part of command.split(/(&&|\|\||;|\||&|\n)/)) {
+      if (/^(&&|\|\||;|\||&|\n)$/.test(part)) flush(part === '|');
+      else cur = part;
+    }
+    flush(false);
+    return out;
+  };
   let quote = null;
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
@@ -98,21 +102,53 @@ function splitShellSegments(command) {
       continue;
     }
     if (c === '&' || c === '|' || c === ';' || c === '\n') {
-      if ((c === '&' || c === '|') && command[i + 1] === c) i++;
-      out.push(cur);
-      cur = '';
+      let isPipe = c === '|';
+      if ((c === '&' || c === '|') && command[i + 1] === c) {
+        i++;
+        isPipe = false;
+      } else if (c === '|' && command[i + 1] === '&') {
+        i++; // `|&`
+      }
+      flush(isPipe);
       continue;
     }
     cur += c;
   }
   if (quote) return naive();
-  out.push(cur);
-  return out.map((s) => s.trim()).filter(Boolean);
+  flush(false);
+  return out;
 }
 
-/** Cuts an unquoted shell comment: `#` only counts at start-of-string or after whitespace. */
+function splitShellSegments(command) {
+  return splitShellSegmentsEx(command).map((s) => s.text);
+}
+
+/**
+ * Cuts an unquoted shell comment: `#` only counts outside quotes AND at
+ * start-of-string or after whitespace. An unbalanced quote means no cut (fail closed).
+ */
 function stripComment(segment) {
-  return segment.replace(/(^|\s)#.*$/, '$1').trimEnd();
+  let quote = null;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (quote) {
+      if (c === '\\' && quote === '"') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      continue;
+    }
+    if (c === '#' && (i === 0 || /\s/.test(segment[i - 1]))) {
+      return segment.slice(0, i).trimEnd();
+    }
+  }
+  return segment.trimEnd();
 }
 
 /** Removes an unquoted trailing shell comment and all quote characters. */
@@ -126,30 +162,58 @@ function tokenizeShellish(segment) {
 }
 
 /**
- * Command word of a segment: skips leading `VAR=value` assignments and
- * grouping characters, returns the lowercase basename. `''` when none.
+ * Effective command tokens of a segment: leading `VAR=value` assignments,
+ * reserved words (`then`, `do`, `{`, ...), `name()` function headers and
+ * grouping characters are skipped.
  */
-function commandWord(segment) {
+function effectiveTokens(segment) {
   const tokens = tokenizeShellish(segment);
-  for (let tok of tokens) {
-    tok = tok.replace(/^[({!\\]+/, '');
-    if (!tok) continue;
+  let i = 0;
+  for (; i < tokens.length; i++) {
+    const tok = tokens[i].replace(/^[({!]+/, '');
+    if (!tok || RESERVED.has(tok)) continue;
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tok)) continue;
-    const base = tok
-      .split('/')
-      .pop()
-      .toLowerCase()
-      .replace(/\.exe$/, '');
-    return base;
+    if (/^[A-Za-z_][A-Za-z0-9_-]*\(\)$/.test(tok)) continue;
+    break;
   }
-  return '';
+  return tokens.slice(i).map((t, idx) => (idx === 0 ? t.replace(/^[({!]+/, '') : t));
 }
 
-/**
- * Removes heredoc bodies EXCEPT where the opener line feeds an executing
- * wrapper (`bash <<EOF`, `cat <<EOF | sh`, `xargs`, ...): those bodies stay
- * so the matcher still sees them (fail closed).
- */
+function commandWord(segment) {
+  const t = effectiveTokens(segment);
+  if (!t.length) return '';
+  return t[0]
+    .split('/')
+    .pop()
+    .toLowerCase()
+    .replace(/\.exe$/, '');
+}
+
+function hasSubstitution(segment) {
+  return /\$\(|`|<\(|>\(|\$\{/.test(segment);
+}
+
+/** True when the segment is a known-inert command (positive allowlist). */
+function isInertSegment(segment) {
+  if (hasSubstitution(segment)) return false;
+  const t = effectiveTokens(segment);
+  if (!t.length) return false;
+  const word = commandWord(segment);
+  if (word === 'rg') return !t.some((x) => /^--pre(=|$)/.test(x));
+  if (INERT_WORDS.has(word)) return true;
+  const rest = t.slice(1).map((x) => x.toLowerCase());
+  if (word === 'git') {
+    // `git -c alias.x=!cmd x` can run a command: only direct subcommands (or -C <dir>) are inert.
+    const i = rest[0] === '-c' ? -1 : rest[0] === '-C' ? 1 : 0;
+    return i >= 0 && INERT_GIT.has(rest[i] || '');
+  }
+  if (word === 'gh') {
+    return (rest[0] === 'pr' || rest[0] === 'issue') && INERT_GH.has(rest[1] || '');
+  }
+  return false;
+}
+
+/** Finds an unquoted `<<MARKER` heredoc opener on a line, or null. */
 function findHeredocOpener(line) {
   // Fail closed: arithmetic `$((` may hide `<<` as a shift, so never treat as heredoc.
   if (line.includes('$((')) return null;
@@ -182,6 +246,12 @@ function findHeredocOpener(line) {
   return null;
 }
 
+/**
+ * Removes heredoc bodies ONLY where the opener line is made solely of inert
+ * commands (`cat <<EOF`, `git commit -F - <<EOF`, `gh pr create --body-file - <<EOF`).
+ * Any other opener (shells, interpreters, wrappers, unknown tools) keeps its
+ * body so the matcher still sees it.
+ */
 function stripInertHeredocBodies(command) {
   const lines = command.split('\n');
   const kept = [];
@@ -193,10 +263,11 @@ function stripInertHeredocBodies(command) {
     i++;
     if (!opener) continue;
     const { marker, dashed } = opener;
-    const executes = splitShellSegments(line).some((s) => isWrapperWord(commandWord(s)));
+    const segs = splitShellSegments(line);
+    const inert = segs.length > 0 && segs.every(isInertSegment);
     while (i < lines.length) {
       const body = dashed ? lines[i].replace(/^\t+/, '') : lines[i];
-      if (executes) kept.push(lines[i]);
+      if (!inert) kept.push(lines[i]);
       i++;
       if (body === marker) break;
     }
@@ -204,87 +275,44 @@ function stripInertHeredocBodies(command) {
   return kept.join('\n');
 }
 
+/**
+ * True when `matches(text)` hits a segment that is NOT inert, or an inert
+ * segment whose pipeline feeds a non-inert later stage. The matcher sees the
+ * comment-stripped segment both with quotes retained and with quotes removed.
+ */
+function commandHasUninertMatch(command, matches) {
+  const segs = splitShellSegmentsEx(stripInertHeredocBodies(command));
+  for (let i = 0; i < segs.length; i++) {
+    const clean = stripComment(segs[i].text);
+    if (!matches(clean) && !matches(clean.replace(/['"]/g, ''))) continue;
+    if (!isInertSegment(segs[i].text)) return true;
+    for (let j = i + 1; j < segs.length && segs[j].pipe; j++) {
+      if (!isInertSegment(segs[j].text)) return true;
+    }
+  }
+  return false;
+}
+
 const GH_PR_MERGE = /\bgh(?:\.exe)?\s+pr\s+merge\b/i;
 
-function hasSubstitution(segment) {
-  return /\$\(|`|<\(|>\(/.test(segment);
+function matchesGhPrMerge(text) {
+  return GH_PR_MERGE.test(text) || GH_PR_MERGE.test(text.replace(/\\/g, ''));
 }
 
-/** True when this segment RUNS `gh pr merge` (see module contract). */
-function segmentRunsGhPrMerge(segment) {
-  const text = stripCommentAndQuotes(segment);
-  if (!GH_PR_MERGE.test(text)) return false;
-  if (hasSubstitution(segment)) return true; // $(gh pr merge) runs even inside echo
-  const word = commandWord(segment);
-  if (word === 'gh') {
-    const t = tokenizeShellish(segment).map((x) => x.toLowerCase());
-    for (let i = 0; i + 1 < t.length; i++) if (t[i] === 'pr' && t[i + 1] === 'merge') return true;
-    return false;
-  }
-  return isWrapperWord(word);
-}
-
-/** True when any segment of the command runs `gh pr merge`. */
+/** True when the command runs (or could run) the raw merge command (see module contract). */
 function commandRunsGhPrMerge(command) {
-  const segments = splitShellSegments(stripInertHeredocBodies(command));
-  if (segments.some(segmentRunsGhPrMerge)) return true;
-  // `echo 'gh pr merge 5' | sh`: an earlier pipe stage feeds code to a stdin executor.
-  return (
-    segments.length > 1 &&
-    segments.some(segmentConsumesStdinAsCode) &&
-    segments.some((s) => GH_PR_MERGE.test(stripCommentAndQuotes(s)))
-  );
-}
-
-const API_TOOLS = new Set([
-  'gh',
-  'curl',
-  'wget',
-  'http',
-  'https',
-  'xh',
-  'httpie',
-  'nodejs',
-  'deno',
-  'bun',
-  'ruby',
-  'perl',
-  'php',
-  'bash',
-  'sh',
-  'zsh',
-  'eval',
-  'xargs',
-  'env',
-  'sudo',
-  'exec',
-  'nohup',
-  'time',
-]);
-
-/** True when the command word reads executable text from stdin (so an earlier pipe stage can feed it). */
-function segmentConsumesStdinAsCode(segment) {
-  return /^(xargs|sh|bash|zsh|dash|ksh|eval|source|\.)$/.test(commandWord(segment));
-}
-
-/** True when the segment's command word can send an API request (or wraps something that can). */
-function segmentIsApiCapable(segment) {
-  if (hasSubstitution(segment)) return true;
-  const word = commandWord(segment);
-  return API_TOOLS.has(word) || isWrapperWord(word);
+  return commandHasUninertMatch(command, matchesGhPrMerge);
 }
 
 module.exports = {
-  EXEC_WRAPPERS,
-  isWrapperWord,
   splitShellSegments,
+  splitShellSegmentsEx,
   stripComment,
   stripCommentAndQuotes,
   tokenizeShellish,
   commandWord,
+  isInertSegment,
   stripInertHeredocBodies,
-  segmentRunsGhPrMerge,
+  commandHasUninertMatch,
   commandRunsGhPrMerge,
-  segmentIsApiCapable,
-  segmentConsumesStdinAsCode,
 };
