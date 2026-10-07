@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,6 +29,8 @@ before(() => {
   mkdirSync(aiSdlcDir, { recursive: true });
   mkdirSync(tasksDir, { recursive: true });
   mkdirSync(siblingDir, { recursive: true });
+  // A sibling repository (AISDLC-605: plain temp dirs are scratch space, git repos are not).
+  mkdirSync(join(siblingDir, '.git'), { recursive: true });
   writeFileSync(
     join(aiSdlcDir, 'agent-role.yaml'),
     `role: coding-agent
@@ -211,7 +213,7 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (Write/Edit)', () => {
   });
 
   it('blocks Write outside the project root when active task does not list the path', () => {
-    const otherSibling = join(tmpdir(), 'some-other-dir');
+    const otherSibling = join(homedir(), 'aisdlc-605-some-other-dir');
     const result = runHookFile('Write', join(otherSibling, 'foo.txt'), {
       AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-99',
     });
@@ -339,8 +341,8 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (per-worktree sentinel, AI
 
     mkdirSync(aiSdlcDir, { recursive: true });
     mkdirSync(tasksDir, { recursive: true });
-    mkdirSync(siblingA, { recursive: true });
-    mkdirSync(siblingB, { recursive: true });
+    mkdirSync(join(siblingA, '.git'), { recursive: true });
+    mkdirSync(join(siblingB, '.git'), { recursive: true });
     mkdirSync(worktreeA, { recursive: true });
     mkdirSync(worktreeB, { recursive: true });
     mkdirSync(join(worktreeA, 'src'), { recursive: true });
@@ -1094,9 +1096,6 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
         'bash -s <<EOF',
         'cat <<EOF | sh',
         'cat <<EOF | bash',
-        'cat <<EOF > x.sh',
-        'cat <<EOF',
-        "cat <<'EOF'",
         'python3 - <<EOF',
         'python <<EOF',
         'node - <<EOF',
@@ -1108,8 +1107,6 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
         'source /dev/stdin <<EOF',
         '. /dev/stdin <<EOF',
         '${SHELL} <<EOF',
-        'git commit -F - <<EOF',
-        'tee note.txt <<EOF',
       ];
       for (const cmd of commands) {
         for (const opener of fakeOpeners) {
@@ -1125,17 +1122,52 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (API-merge governance)', (
       }
     });
 
-    it(`documentation quoting the command in a heredoc is also denied (accepted false denial) under ${policy}`, () => {
-      assert.ok(isDenied(run(policy, "cat <<'EOF'\ngh pr merge 42 --auto\nEOF")));
+    it(`documentation quoting the command in an inert heredoc is allowed under ${policy} (AISDLC-605)`, () => {
+      assert.ok(!isDenied(run(policy, "cat <<'EOF'\ngh pr merge 42 --auto\nEOF")));
       assert.ok(
-        isDenied(
+        !isDenied(
           run(policy, 'git commit -F - <<EOF\nnote: never run gh pr merge --auto here\nEOF'),
         ),
       );
-      // Prose that does not contain the command text is unaffected.
-      assert.ok(
-        !isDenied(run(policy, 'git commit -F - <<EOF\nnote: use the merge helper instead\nEOF')),
-      );
+      assert.ok(!isDenied(run(policy, 'tee note.txt <<EOF\ngh pr merge 42\nEOF')));
+      assert.ok(!isDenied(run(policy, 'cat <<EOF > x.sh\ngh pr merge 42\nEOF')));
+      // The same body fed to an executor is still denied.
+      assert.ok(isDenied(run(policy, 'cat <<EOF | sh\ngh pr merge 42\nEOF')));
+      assert.ok(isDenied(run(policy, 'bash <<EOF\ngh pr merge 42\nEOF')));
+    });
+
+    it(`merge text that is only an argument is allowed; executed forms are denied under ${policy} (AISDLC-605)`, () => {
+      for (const ok of [
+        'echo gh pr merge 42',
+        'echo "run: gh pr merge 42; then stop"',
+        'grep -rn "gh pr merge" docs/',
+        "grep 'gh api repos/o/r/pulls/42/merge' notes.md",
+        'git commit -m "docs: mention gh pr merge 42"',
+        'echo "gh api repos/o/r/pulls/42/merge -X PUT"',
+      ]) {
+        assert.ok(!isDenied(run(policy, ok)), `expected allow: ${ok}`);
+      }
+      for (const bad of [
+        'sh -c "gh pr merge 42"',
+        "bash -c 'gh pr merge 42'",
+        'eval "gh pr merge 42"',
+        'echo $(gh pr merge 42)',
+        'echo `gh pr merge 42`',
+        'echo ok && gh pr merge 42',
+        'echo "x" | xargs gh pr merge',
+        'echo "gh pr merge 42" | sh',
+        'sudo gh pr merge 42',
+        'env GH_TOKEN=x gh pr merge 42',
+        'echo "<<X"\ngh pr merge 42',
+      ]) {
+        assert.ok(isDenied(run(policy, bad)), `expected deny: ${bad}`);
+      }
+    });
+
+    it(`a #N positional keeps its number and arming stays denied under ${policy} (AISDLC-605)`, () => {
+      // # is a comment only at a word boundary: <repo>#42 is a positional, not a comment.
+      assert.ok(isDenied(run(policy, 'gh pr merge acme/widgets#42 --auto')));
+      assert.ok(isDenied(run(policy, 'gh pr merge acme/widgets#42 --squash')));
     });
 
     it(`API-merge deny message no longer claims arming stays allowed under ${policy}`, () => {
@@ -2064,5 +2096,70 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-730: untrusted mar
     }
     const sh = call('Bash', { command: 'echo x >> .ai-sdlc/reviews/aisdlc-730.jsonl' }, trusted);
     assert.equal(sh.output, '');
+  });
+});
+
+// ── AISDLC-605: scratch / temp directories under worktree confinement ──
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (scratch dirs, AISDLC-605)', () => {
+  let proj;
+  let wt;
+  let otherWt;
+  let scratchPlain;
+  let scratchRepo;
+
+  before(() => {
+    proj = join(tmpdir(), `enforce-blocked-605-proj-${Date.now()}`);
+    wt = join(proj, '.worktrees', 'aisdlc-605');
+    otherWt = join(proj, '.worktrees', 'aisdlc-606');
+    scratchPlain = join(tmpdir(), `enforce-blocked-605-scratch-${Date.now()}`);
+    scratchRepo = join(tmpdir(), `enforce-blocked-605-repo-${Date.now()}`);
+    mkdirSync(join(proj, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(proj, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(wt, { recursive: true });
+    mkdirSync(otherWt, { recursive: true });
+    mkdirSync(scratchPlain, { recursive: true });
+    mkdirSync(join(scratchRepo, '.git'), { recursive: true });
+    writeFileSync(join(wt, '.active-task'), 'AISDLC-605\n');
+    writeFileSync(
+      join(proj, '.ai-sdlc', 'agent-role.yaml'),
+      `role: coding-agent\ngoal: Test agent\nblockedPaths:\n  - '.github/workflows/**'\nblockedActions: []\n`,
+    );
+  });
+
+  after(() => {
+    for (const d of [proj, scratchPlain, scratchRepo]) rmSync(d, { recursive: true, force: true });
+  });
+
+  function write(toolName, file_path, extraEnv = {}) {
+    return runHookRaw(JSON.stringify({ tool_name: toolName, tool_input: { file_path }, cwd: wt }), {
+      CLAUDE_PROJECT_DIR: proj,
+      ...extraEnv,
+    });
+  }
+
+  for (const tool of ['Write', 'Edit']) {
+    it(`${tool} to an OS temp directory is allowed by default`, () => {
+      assert.ok(!isDenied(write(tool, join(scratchPlain, 'notes.txt'))));
+      assert.ok(!isDenied(write(tool, join(scratchPlain, 'deep', 'er', 'notes.txt'))));
+    });
+
+    it(`${tool} to the session scratch directory (CLAUDE_SCRATCHPAD_DIR) is allowed`, () => {
+      const scratch = join(tmpdir(), `enforce-blocked-605-session-${Date.now()}`, 'scratchpad');
+      assert.ok(
+        !isDenied(write(tool, join(scratch, 'x.json'), { CLAUDE_SCRATCHPAD_DIR: scratch })),
+      );
+    });
+
+    it(`${tool} confinement is unchanged for the main checkout, other worktrees and sibling repos`, () => {
+      assert.ok(isDenied(write(tool, join(proj, 'README.md'))), 'main checkout');
+      assert.ok(isDenied(write(tool, join(otherWt, 'src', 'a.ts'))), 'other worktree');
+      assert.ok(isDenied(write(tool, join(scratchRepo, 'a.ts'))), 'sibling repo in a temp dir');
+      assert.ok(isDenied(write(tool, join(homedir(), 'aisdlc-605-nonexistent', 'a.ts'))));
+    });
+  }
+
+  it('a project root that itself lives under a temp dir gains no scratch allowance', () => {
+    assert.ok(isDenied(write('Write', join(proj, 'backlog', 'tasks', 'x.md'))));
   });
 });

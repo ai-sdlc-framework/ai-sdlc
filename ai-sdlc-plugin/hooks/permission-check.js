@@ -12,12 +12,14 @@
 const { readFileSync } = require('fs');
 const { join } = require('path');
 const { execSync } = require('child_process');
+const { readStdinSync } = require('./lib/read-stdin');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
 let input;
 try {
-  const raw = readFileSync('/dev/stdin', 'utf-8');
+  // fd 0 with the EAGAIN retry loop (AISDLC-605); never '/dev/stdin'.
+  const raw = readStdinSync();
   input = JSON.parse(raw);
 } catch {
   process.exit(0);
