@@ -596,7 +596,7 @@ export const initCommand = new Command('init')
   )
   .option(
     '--no-branch-protection',
-    'Skip branch protection and the client-side merge-gate fallback (default: init enforces, by detected capability)',
+    'Skip the branch-protection API call and the init-time client-side fallback notice (cli-merge-if-eligible and the hook still apply)',
   )
   // ── AISDLC-261 workflow scaffold flags ──────────────────────────────
   .option(
