@@ -172,6 +172,8 @@ These keywords:
 
 ## Review Process
 
+Code PRs in this repository are reviewed by the signed three-reviewer attestation described in the [review policy](docs/operations/review-policy.md); the steps below describe spec/RFC review.
+
 1. **Author** submits a pull request with a clear description of the change
 2. **Reviewers** provide feedback within 7 days (normative changes) or 3 days (editorial)
 3. **Maintainers** approve (2 required for normative, 1 for editorial)

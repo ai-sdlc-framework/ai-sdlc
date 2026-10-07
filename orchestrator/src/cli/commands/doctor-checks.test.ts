@@ -56,6 +56,8 @@ import {
   runDoctorFixes,
   summarizeDoctorResults,
   renderFullDoctorReport,
+  REVIEW_POLICY_DOC,
+  REVIEW_POLICY_INIT_LINE,
   type DoctorCheckAdapters,
   type DoctorRunContext,
 } from './doctor-checks.js';
@@ -1404,6 +1406,13 @@ describe('runDoctorChecks + summarizeDoctorResults', () => {
 });
 
 describe('renderFullDoctorReport', () => {
+  it('doctor and init text name the review policy page (AISDLC-746)', () => {
+    const lines = renderFullDoctorReport(runDoctorChecks(makeCtx(makeAdapters())));
+    expect(lines).toContain(`Review policy: ${REVIEW_POLICY_DOC}`);
+    expect(REVIEW_POLICY_INIT_LINE).toContain('docs/operations/review-policy.md');
+    expect(existsSync(join(__dirname, '../../../../', REVIEW_POLICY_DOC))).toBe(true);
+  });
+
   it('renders every result with its severity glyph and a trailing summary line', () => {
     const results = runDoctorChecks(makeCtx(makeAdapters()));
     const lines = renderFullDoctorReport(results);

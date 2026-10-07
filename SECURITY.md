@@ -6,6 +6,10 @@
 | --------- | --------- |
 | v1alpha1  | Yes       |
 
+## Code Review Policy
+
+Main requires 0 human approvals; the review signal is a signed three-reviewer attestation verified by the required `ai-sdlc/pr-ready` check. See the [review policy](docs/operations/review-policy.md).
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in this project, please report it responsibly.

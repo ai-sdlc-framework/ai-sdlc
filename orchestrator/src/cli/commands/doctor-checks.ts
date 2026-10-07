@@ -1563,6 +1563,10 @@ export function describeResolvedPluginInstall(install: ResolvedPluginInstall | u
   return `Auditing: ${install.path} (${INSTALL_SOURCE_LABEL[install.source]}${versionSuffix})`;
 }
 
+/** Review policy page (AISDLC-746, DEC-0065); named by `ai-sdlc init` and `ai-sdlc doctor`. */
+export const REVIEW_POLICY_DOC = 'docs/operations/review-policy.md';
+export const REVIEW_POLICY_INIT_LINE = `Review policy (attestation-based review): ${REVIEW_POLICY_DOC}`;
+
 export function renderFullDoctorReport(
   results: DoctorCheckResult[],
   install?: ResolvedPluginInstall,
@@ -1583,6 +1587,7 @@ export function renderFullDoctorReport(
   lines.push(
     `${summary.pass} pass, ${summary.warn} warn, ${summary.fail} fail (${summary.total} checks)`,
   );
+  lines.push(`Review policy: ${REVIEW_POLICY_DOC}`);
 
   return lines;
 }
