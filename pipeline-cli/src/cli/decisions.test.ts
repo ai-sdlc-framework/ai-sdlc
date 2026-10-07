@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { buildDecisionsCli } from './decisions.js';
-import { resolveEventLogPath } from '../decisions/event-log.js';
+import { readEventLogText, resolveEventLogPath } from '../decisions/event-log.js';
 import type { Decision } from '../decisions/decision-record.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
@@ -145,8 +145,7 @@ describe('AC#4 — add subcommand (flag-driven path)', () => {
     expect(r.decision.status.routing?.assignedActor).toBe('operator@example.com');
 
     // AC#5 — verify event-log file landed at the documented path.
-    const logPath = resolveEventLogPath(tmp);
-    const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+    const lines = readEventLogText(tmp).trim().split('\n');
     expect(lines).toHaveLength(1);
     const evt = JSON.parse(lines[0]);
     expect(evt.type).toBe('decision-opened');
@@ -560,8 +559,7 @@ describe('score-c subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
   it('--store persists the stage-c-completed event even on fall-open', async () => {
     setArgv('score-c', 'DEC-0001', '--force', '--store', '--format', 'json');
     await buildDecisionsCli().parseAsync();
-    const logPath = resolveEventLogPath(tmp);
-    const raw = readFileSync(logPath, 'utf8');
+    const raw = readEventLogText(tmp);
     expect(raw).toMatch(/"type":"stage-c-completed"/);
     // Fall-open path does NOT also emit operator-answered (because
     // isStageCAutoApplyEligible returned false).
@@ -1303,8 +1301,7 @@ describe('AISDLC-447 — add --timebox flag', () => {
       'json',
     );
     await buildDecisionsCli().parseAsync();
-    const logPath = resolveEventLogPath(tmp);
-    const evt = JSON.parse(readFileSync(logPath, 'utf8').trim());
+    const evt = JSON.parse(readEventLogText(tmp).trim());
     expect(evt.type).toBe('decision-opened');
     expect(evt.timebox).toBe('PT2H');
     expect(typeof evt.timeboxExpiresAt).toBe('string');
@@ -1987,7 +1984,7 @@ describe('AISDLC-463 — resolve subcommand', () => {
     expect(r.ok).toBe(true);
     expect(r.chosenOptionId).toBe('opt-b');
 
-    const lines = readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n');
+    const lines = readEventLogText(tmp).trim().split('\n');
     const evt = JSON.parse(lines.at(-1) as string);
     expect(evt.type).toBe('operator-answered');
     expect(evt.chosenOptionId).toBe('opt-b');
@@ -2001,7 +1998,7 @@ describe('AISDLC-463 — resolve subcommand', () => {
     const id = await seed('--context-ref', 'AISDLC-463');
     setArgv('resolve', id, '--option', 'opt-a', '--format', 'json');
     await buildDecisionsCli().parseAsync();
-    const lines = readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n');
+    const lines = readEventLogText(tmp).trim().split('\n');
     const evt = JSON.parse(lines.at(-1) as string);
     expect(evt.contextRef).toBe('AISDLC-463');
   });
@@ -2061,7 +2058,7 @@ describe('AISDLC-463 — auto-expire subcommand', () => {
     expect(r.expired).toEqual([
       expect.objectContaining({ decisionId: 'DEC-0001', chosenOptionId: 'opt-b' }),
     ]);
-    const lines = readFileSync(resolveEventLogPath(tmp), 'utf8').trim().split('\n');
+    const lines = readEventLogText(tmp).trim().split('\n');
     const evt = JSON.parse(lines.at(-1) as string);
     expect(evt.type).toBe('auto-expired');
     expect(evt.by).toBe('auto-expired');
@@ -2092,7 +2089,7 @@ describe('AISDLC-463 — auto-expire subcommand', () => {
     const r = stdoutJson<{ expired: unknown[] }>();
     expect(r.expired).toEqual([]);
     // Only ONE auto-expired event total.
-    const events = readFileSync(resolveEventLogPath(tmp), 'utf8')
+    const events = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
@@ -2107,7 +2104,7 @@ describe('AISDLC-463 — auto-expire subcommand', () => {
     expect(r.dryRun).toBe(true);
     expect(r.expired).toEqual([expect.objectContaining({ decisionId: 'DEC-0001' })]);
     // No auto-expired event was appended.
-    const events = readFileSync(resolveEventLogPath(tmp), 'utf8')
+    const events = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
@@ -2152,8 +2149,7 @@ describe('AISDLC-480 — escalate subcommand (dispatched-session Decision Catalo
     expect(r.sourceWorktree).toBe('/tmp/worktrees/aisdlc-480');
 
     // Verify the event log was written.
-    const logPath = resolveEventLogPath(tmp);
-    const events = readFileSync(logPath, 'utf8')
+    const events = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
@@ -2228,8 +2224,7 @@ describe('AISDLC-480 — escalate subcommand (dispatched-session Decision Catalo
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow('process.exit(1)');
 
     // Verify the record WAS written despite the exit.
-    const logPath = resolveEventLogPath(tmp);
-    const events = readFileSync(logPath, 'utf8')
+    const events = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
@@ -2317,8 +2312,7 @@ describe('AISDLC-480 — escalate subcommand (dispatched-session Decision Catalo
       'json',
     );
     await buildDecisionsCli().parseAsync();
-    const logPath = resolveEventLogPath(tmp);
-    const events = readFileSync(logPath, 'utf8')
+    const events = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));
@@ -2343,8 +2337,7 @@ describe('AISDLC-480 — escalate subcommand (dispatched-session Decision Catalo
       'json',
     );
     await buildDecisionsCli().parseAsync();
-    const logPath = resolveEventLogPath(tmp);
-    const events = readFileSync(logPath, 'utf8')
+    const events = readEventLogText(tmp)
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l));

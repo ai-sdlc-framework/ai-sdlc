@@ -272,6 +272,6 @@ describe('AC#3 — operator answers resolve Decisions', () => {
     const { decisionIds } = emitDorDecisions(verdict, { workDir, env: FLAG_ON });
     const r = resolveDorDecision(decisionIds[0]!, 'provide-answer', { workDir, env: FLAG_ON });
     expect(r.enabled).toBe(true);
-    expect(r.path).toMatch(/events\.jsonl$/);
+    expect(r.path).toMatch(/_decisions\/events\/.*\.json$/);
   });
 });

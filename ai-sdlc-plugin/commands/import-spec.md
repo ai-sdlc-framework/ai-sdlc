@@ -63,6 +63,6 @@ Decision + clarification task and decides next steps.
 
 ## Notes
 
-- The Decision Catalog feature flag (`AI_SDLC_DECISION_CATALOG`) is default-ON; events land in `.ai-sdlc/_decisions/events.jsonl`.
+- The Decision Catalog feature flag (`AI_SDLC_DECISION_CATALOG`) is default-ON; events land as one file per event under `.ai-sdlc/_decisions/events/` (the legacy `events.jsonl` is still read).
 - Generated backlog tasks use the `IMP-N` prefix to avoid collision with `AISDLC-N`. Clarification tasks use `IMPCLARIFY-N`.
 - Per-org config: `.ai-sdlc/adopter-authoring.yaml`'s `import.*` keys (see RFC-0036 §14.1). Defaults match the strict-and-non-blocking outcomes documented above.
