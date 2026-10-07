@@ -2,7 +2,7 @@
 id: AISDLC-605
 title: >-
   Governance enforcement follow-ups from RFC-0048 review (merge-matcher polish + permission-check.js parity)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-07'
 labels:
