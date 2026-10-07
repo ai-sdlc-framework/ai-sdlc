@@ -2,7 +2,7 @@
 id: AISDLC-752
 title: >-
   Every hierarchy session starts in bypassPermissions by default, planner included
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-07'
 labels:
@@ -42,9 +42,9 @@ Change the default so the planner behaves like the other tiers:
 
 ## Acceptance Criteria
 
-- [ ] `cli-hierarchy up --executors 1` with no other flags starts planner, dispatch and executor-alpha, and `cli-hierarchy status` shows `bypassPermissions` for all three; `hierarchy.json` records the same.
-- [ ] `--allow-planner-bypass` is accepted with a deprecation line and changes nothing; `--planner-permission-mode default` still yields a prompting planner.
-- [ ] The operator's `defaultMode` setting no longer influences the planner mode (test with a settings view whose `defaultMode` is `plan` or `default`).
-- [ ] `hierarchy.test.ts` asserts the `--permission-mode bypassPermissions` argument for every role by default and the planner-only override; the former refusal test is removed or inverted.
-- [ ] Help text, `docs/operations/cli-hierarchy.md`, `parallel-dispatch.md` and the plugin `hierarchy.md` recipes agree, and `docs-parity.test.ts` passes.
-- [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.
+- [x] `cli-hierarchy up --executors 1` with no other flags starts planner, dispatch and executor-alpha, and `cli-hierarchy status` shows `bypassPermissions` for all three; `hierarchy.json` records the same.
+- [x] `--allow-planner-bypass` is accepted with a deprecation line and changes nothing; `--planner-permission-mode default` still yields a prompting planner.
+- [x] The operator's `defaultMode` setting no longer influences the planner mode (test with a settings view whose `defaultMode` is `plan` or `default`).
+- [x] `hierarchy.test.ts` asserts the `--permission-mode bypassPermissions` argument for every role by default and the planner-only override; the former refusal test is removed or inverted.
+- [x] Help text, `docs/operations/cli-hierarchy.md`, `parallel-dispatch.md` and the plugin `hierarchy.md` recipes agree, and `docs-parity.test.ts` passes.
+- [x] `pnpm build && pnpm test && pnpm lint && pnpm format:check` and `pnpm dark-code:check` pass apart from the pre-existing pipeline-cli failures (verify-runtime, bin-invocation, TUI timeouts), disclosed in the PR body.

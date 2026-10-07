@@ -259,6 +259,11 @@ and the roster (`.ai-sdlc/dispatch/hierarchy.json`) records it as `tmuxSession`.
 Agents do not share a session because two terminals attached to one session both
 follow its current window: they can never show two different agents.
 
+Every session starts in `bypassPermissions`, the planner included; hooks, not prompts,
+are the control surface. Pass `--planner-permission-mode <m>` to give the planner a
+different mode (for a prompting planner, `default`). The operator's own `defaultMode`
+setting does not influence the hierarchy.
+
 `up` prints one line per started agent with the command that shows it, and
 `cli-hierarchy status` has an `ATTACHED` column (yes or no per session).
 

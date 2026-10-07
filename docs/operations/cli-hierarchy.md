@@ -109,7 +109,8 @@ only the missing ones are started.
 ```bash
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
                  [--executor-model <m>] [--no-planner] [--project <name>]
-                 [--attach] [--allow-planner-bypass] [--no-vscode-tasks]
+                 [--attach] [--planner-permission-mode <m>] [--allow-planner-bypass]
+                 [--no-vscode-tasks]
 ```
 
 | Option                   | Meaning                                                                      |
@@ -121,7 +122,8 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | `--no-planner`           | Do not start a planner.                                                      |
 | `--project <name>`       | Project the names are qualified with (default the repository basename).      |
 | `--attach`               | Show the planner (or the dispatch session when there is none) when done.     |
-| `--allow-planner-bypass` | Allow the planner to start in `bypassPermissions` mode (refused by default). |
+| `--planner-permission-mode <m>` | Planner permission mode (default `bypassPermissions`); `default` gives a prompting planner. |
+| `--allow-planner-bypass` | Deprecated, no effect (prints a deprecation line); every session starts in `bypassPermissions`. |
 | `--no-vscode-tasks`      | Do not regenerate `.vscode/tasks.json` (see below).                          |
 
 **VS Code tasks file (AISDLC-754).** After writing the roster, when at least one session was
@@ -135,8 +137,11 @@ operators who manage the file themselves. When `up` runs in a VS Code terminal
 (`TERM_PROGRAM=vscode` or `VSCODE_GIT_IPC_HANDLE` set) it ends with one line:
 `VS Code: run task "hierarchy: open all agents" (Terminal > Run Task) to open one terminal per agent`.
 
-The planner starts in the permission mode from the operator's settings (falling back to
-`default`); dispatch and executors start in `bypassPermissions`.
+Every session, the planner included, starts in `bypassPermissions` (the mode
+`claude --dangerously-skip-permissions` selects): the hierarchy is unattended for most of the
+day and hooks, not prompts, are the control surface. `--planner-permission-mode <m>`
+overrides the planner only. The operator's own `defaultMode` setting does not influence it.
+An operator who relied on a prompting planner must now pass `--planner-permission-mode default`.
 
 Every session is started with `AI_SDLC_HIERARCHY_SESSION=<qualified name>` and
 `AI_SDLC_HIERARCHY_ROLE=<planner|operator-dispatch|executor>` in its environment, so the
@@ -155,11 +160,9 @@ after the plugin upgrade that ships this.
 
 Preflight, all before anything starts:
 
-- **Settings.** When any bypass session is to start, the effective `crossSessionInbound`
+- **Settings.** Because every session starts in bypass mode, the effective `crossSessionInbound`
   setting must be `accept` (user settings, `.claude/settings.json`, `.claude/settings.local.json`),
   or lower-tier messages are not delivered. `up` refuses with the exact fix otherwise.
-- **Planner mode.** A planner that would start in `bypassPermissions` is refused unless
-  `--allow-planner-bypass` is given.
 - **Resource gate.** At least 4 GiB of memory available and a 1-minute load average below the
   core count; `AI_SDLC_EXECUTE_PARALLEL_SKIP_RESOURCE_GATE=1` overrides it (testing only).
 - **Foreign sessions.** Live sessions on the machine with the same role names for another

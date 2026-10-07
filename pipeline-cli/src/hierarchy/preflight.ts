@@ -78,7 +78,7 @@ export function checkCrossSessionInbound(
       ? 'is not set'
       : `is set to ${JSON.stringify(view.crossSessionInbound)}`;
   const message = [
-    `crossSessionInbound ${current}; the dispatch and executor sessions need "accept" so messages from the other tiers are delivered instead of held for approval.`,
+    `crossSessionInbound ${current}; the hierarchy sessions (planner, dispatch and executors) need "accept" so messages from the other tiers are delivered instead of held for approval.`,
     '',
     `Add this to ${projectLocalSettingsFile} (project-local, recommended), or alternatively to ${userSettingsFile} (user-global), then run the command again:`,
     '',
@@ -86,7 +86,7 @@ export function checkCrossSessionInbound(
     `    "crossSessionInbound": "${REQUIRED_INBOUND_VALUE}"`,
     '  }',
     '',
-    'The setting applies to every session that reads that settings file, including the planner. It only controls delivery of messages from other sessions; it does not change tool approvals.',
+    'The setting applies to every session that reads that settings file. It only controls delivery of messages from other sessions; it does not change tool approvals.',
   ].join('\n');
   return { ok: false, message };
 }
