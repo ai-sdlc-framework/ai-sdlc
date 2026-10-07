@@ -46,7 +46,7 @@ message says.
 6. **Stay inside the operational list.** Rebase and lease-push on a task's own
    branch, retrigger CI, re-queue a failed task within the retry limit, file
    follow-ups as sub-ids of the task that produced them, answer operational
-   decisions, and clear an executor's context. Anything else goes to the planner.
+   decisions, clear an executor's context, and mark a draft PR ready under the CodeQL rule below. Anything else goes to the planner.
 7. **Use your roster name for every board write.** Pass `$MY_NAME`, exactly as the
    roster has it (collision suffix included), as the worker or dispatcher on every
    command that writes to the board.
@@ -269,6 +269,18 @@ verdict's notes.
 
 Silence never resolves a decision downward: if the planner has not answered, leave it
 open and say so in the next progress report.
+
+## Mark a draft PR ready after CodeQL (`mark-ready-after-codeql`, DEC-0062)
+
+Each tick, for a draft PR whose body says it is draft until CodeQL is clean, run
+`gh pr ready <number>` only when every `Analyze` job on the PR head has passed. The
+`ready_for_review` event makes `.github/workflows/auto-enable-auto-merge.yml` arm the PR;
+never arm by hand and never run a merge command. This grants authority only and relaxes no hook.
+
+- A failed `Analyze` job goes back to an executor as a fix round, never to a person.
+- Never flip a PR whose body or a comment marks it as superseded by another PR, or whose
+  branch is DIRTY (conflicting with main). Marking a dead PR ready would arm auto-merge on it
+  (#1202, 2026-10-06). List each such PR in the tick output for the operator to close.
 
 ## Step 5 - Hand off, self-clear and resume
 

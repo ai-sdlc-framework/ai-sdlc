@@ -38,6 +38,12 @@ describe('parseOperational', () => {
     ]);
   });
 
+  it('grants mark-ready-after-codeql when listed and drops a misspelling (AISDLC-736)', () => {
+    expect([
+      ...parseOperational(yaml(['mark-ready-after-codeql', 'mark-ready-after-codeqls'])),
+    ]).toEqual(['mark-ready-after-codeql']);
+  });
+
   it('grants nothing for a missing, malformed or non-list value', () => {
     expect(parseOperational('spec: {}').size).toBe(0);
     expect(parseOperational('spec:\n  governance:\n    operational: requeue\n').size).toBe(0);
@@ -54,6 +60,7 @@ describe('parseOperational', () => {
       'file-subid-followups',
       'answer-operational-decisions',
       'clear-executor-context',
+      'mark-ready-after-codeql',
     ]);
   });
 });

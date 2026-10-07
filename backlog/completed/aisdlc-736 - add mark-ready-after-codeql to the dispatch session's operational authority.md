@@ -2,7 +2,7 @@
 id: AISDLC-736
 title: >-
   Add mark-ready-after-codeql to the dispatch session's operational authority
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-06'
 labels:
@@ -36,10 +36,10 @@ Sequencing: the entry grants authority only. It does not relax any hook, and arm
 Out of scope: any other change to `spec.operational`, to hooks, or to the auto-merge workflow.
 
 ## Acceptance Criteria
-- [ ] The entry `mark-ready-after-codeql` is added to `spec.operational` in `.ai-sdlc/agent-role.yaml`, next to the existing entries, and to every mirror of the closed set listed above, each with a one-line description (where the file carries descriptions).
-- [ ] `ai-sdlc-plugin/commands/operator-dispatch.md` names the rule in its tick: mark a draft PR ready only when its body says draft until CodeQL is clean and every Analyze job on the head passed; a failed Analyze job goes back to an executor as a fix round; never arm by hand.
-- [ ] The schema enum and the resolver list accept the entry, and a test covers it (`pipeline-cli/src/hierarchy/operational.test.ts` and the governance resolver or schema validation test): the entry is granted when listed and still dropped when misspelled.
-- [ ] The rule never flips a PR whose body or a comment marks it as superseded by another PR, or whose branch is DIRTY (conflicting with main); such PRs are listed in the tick output for the operator to close. Reason: marking a dead PR ready would arm auto-merge on it (#1202 on 2026-10-06).
-- [ ] No skip variable and no hook exception is used to make the edit; if the installed hook refuses an edit, the refusal text goes in the PR body and the task stops.
-- [ ] Velocity impact paragraph in the PR body: zero prompts, removes a wait on a person.
+- [x] The entry `mark-ready-after-codeql` is added to `spec.operational` in `.ai-sdlc/agent-role.yaml`, next to the existing entries, and to every mirror of the closed set listed above, each with a one-line description (where the file carries descriptions).
+- [x] `ai-sdlc-plugin/commands/operator-dispatch.md` names the rule in its tick: mark a draft PR ready only when its body says draft until CodeQL is clean and every Analyze job on the head passed; a failed Analyze job goes back to an executor as a fix round; never arm by hand.
+- [x] The schema enum and the resolver list accept the entry, and a test covers it (`pipeline-cli/src/hierarchy/operational.test.ts` and the governance resolver or schema validation test): the entry is granted when listed and still dropped when misspelled.
+- [x] The rule never flips a PR whose body or a comment marks it as superseded by another PR, or whose branch is DIRTY (conflicting with main); such PRs are listed in the tick output for the operator to close. Reason: marking a dead PR ready would arm auto-merge on it (#1202 on 2026-10-06).
+- [x] No skip variable and no hook exception is used to make the edit; if the installed hook refuses an edit, the refusal text goes in the PR body and the task stops.
+- [x] Velocity impact paragraph in the PR body: zero prompts, removes a wait on a person.
 <!-- SECTION:DESCRIPTION:END -->

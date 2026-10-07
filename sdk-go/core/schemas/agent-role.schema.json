@@ -254,7 +254,8 @@
               "requeue",
               "file-subid-followups",
               "answer-operational-decisions",
-              "clear-executor-context"
+              "clear-executor-context",
+              "mark-ready-after-codeql"
             ]
           },
           "uniqueItems": true,

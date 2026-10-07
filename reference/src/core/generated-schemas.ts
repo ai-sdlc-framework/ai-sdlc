@@ -477,6 +477,7 @@ export const agentRoleSchema = {
               'file-subid-followups',
               'answer-operational-decisions',
               'clear-executor-context',
+              'mark-ready-after-codeql',
             ],
           },
           uniqueItems: true,
