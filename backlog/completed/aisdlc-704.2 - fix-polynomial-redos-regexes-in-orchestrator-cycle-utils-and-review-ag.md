@@ -49,5 +49,5 @@ Replaced the polynomial-ReDoS regexes in `sanitizeTemplate` (cycle-utils) and `p
 ## Follow-up
 - declined: stale doc comment above `sanitizeTemplate` still describes the old loop-until-stable approach (comment-only, minor reviewer suggestion).
 - declined: additional fence edge-case tests (reviewer minor suggestion).
-- AC2 (alerts 168 and 134 read fixed) can only be confirmed after merge.
+- declined: AC2 (alerts 168 and 134 read fixed) can only be confirmed after merge, by the code-scanning rescan.
 <!-- SECTION:FINAL_SUMMARY:END -->
