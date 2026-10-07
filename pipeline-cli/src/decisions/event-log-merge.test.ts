@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   appendDecisionEvent,
+  eventFileName,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
   migrateLegacyEventLog,
@@ -199,8 +200,20 @@ describe('open-PR id reservation', () => {
     appendDecisionEvent(ev('DEC-0001', '2026-01-01T00:00:00.000Z'), { workDir: parent });
 
     let prPaths = '';
+    let cross = false;
+    let ghStatus = 0;
+    const prJson = (): string =>
+      JSON.stringify([
+        {
+          isCrossRepository: cross,
+          files: prPaths
+            .split('\n')
+            .filter(Boolean)
+            .map((path) => ({ path })),
+        },
+      ]);
     const runner: GitRunner = (cmd, args, opts) => {
-      if (cmd === 'gh') return { status: 0, stdout: prPaths, stderr: '' };
+      if (cmd === 'gh') return { status: ghStatus, stdout: prJson(), stderr: '' };
       return defaultRunner(cmd, args, opts);
     };
 
@@ -210,5 +223,29 @@ describe('open-PR id reservation', () => {
       '.ai-sdlc/_decisions/events/2026-01-05T00-00-00.000Z__DEC-0002__decision-opened__abcdef012345.json\n' +
       'unrelated/file.ts\n';
     expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0003');
+
+    // A cross-repo (fork) PR never reserves an id.
+    cross = true;
+    expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
+
+    // An over-long digit id is ignored (no throw, no Infinity).
+    cross = false;
+    prPaths = `.ai-sdlc/_decisions/events/x__DEC-${'9'.repeat(400)}__y.json\n`;
+    expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
+
+    // A failing gh falls back to the empty set.
+    prPaths = '.ai-sdlc/_decisions/events/x__DEC-0007__y.json\n';
+    ghStatus = 1;
+    expect(nextDecisionIdDurable({ workDir: parent, runner })).toBe('DEC-0002');
+  });
+});
+
+describe('eventFileName ts hardening', () => {
+  it('rejects a ts carrying path characters', () => {
+    const good = ev('DEC-0001', '2026-01-01T00:00:00.000Z');
+    expect(eventFileName(good)).toMatch(/^2026-01-01T00-00-00\.000Z__DEC-0001__/);
+    for (const bad of ['../x', 'a/b', 'a\\b']) {
+      expect(() => eventFileName({ ...good, ts: bad })).toThrow(/path characters/);
+    }
   });
 });

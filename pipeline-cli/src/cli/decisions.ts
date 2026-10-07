@@ -6,7 +6,7 @@
  *   show <id>            — render one decision with full event history
  *   add                  — author a new Decision (interactive or via flags)
  *
- * Storage: `.ai-sdlc/_decisions/events.jsonl` (event-sourced per OQ-1).
+ * Storage: `.ai-sdlc/_decisions/events/` (one file per event; legacy events.jsonl still read).
  *
  * Feature flag: `AI_SDLC_DECISION_CATALOG`. **Default-ON since AISDLC-392**
  * (operator promotion 2026-05-22). To opt out, set the var to
@@ -560,7 +560,7 @@ export function buildDecisionsCli(): Argv {
     .option('work-dir', {
       alias: 'w',
       describe:
-        'Project root (defaults to cwd). Resolves the event log under <work-dir>/.ai-sdlc/_decisions/events.jsonl.',
+        'Project root (defaults to cwd). Resolves the event log under <work-dir>/.ai-sdlc/_decisions/events/.',
       type: 'string',
       default: process.cwd(),
     })
@@ -1081,7 +1081,7 @@ export function buildDecisionsCli(): Argv {
     )
     .command(
       'log-path',
-      'Print the resolved event-log path (no read or write).',
+      'Print the resolved per-event directory and legacy events.jsonl path (no read or write).',
       (y) => y,
       async (argv) => {
         const workDir = String(argv['work-dir']);

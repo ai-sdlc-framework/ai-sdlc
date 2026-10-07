@@ -214,6 +214,9 @@ export function eventContentHash(line: string): string {
  * same event idempotent. Colons are replaced for filesystem portability.
  */
 export function eventFileName(event: DecisionEvent, line: string = JSON.stringify(event)): string {
+  if (/[\\/]|\.\./.test(event.ts)) {
+    throw new Error(`[decisions] refusing event ts with path characters: ${event.ts}`);
+  }
   const ts = event.ts.replace(/:/g, '-');
   return `${ts}__${event.decisionId}__${event.type}__${eventContentHash(line)}.json`;
 }

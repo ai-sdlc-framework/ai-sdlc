@@ -51,7 +51,7 @@ export interface RunResult {
 export type GitRunner = (
   cmd: string,
   args: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv; input?: string },
+  opts: { cwd: string; env?: NodeJS.ProcessEnv; input?: string; timeoutMs?: number },
 ) => RunResult;
 
 export const defaultRunner: GitRunner = (cmd, args, opts) => {
@@ -59,6 +59,7 @@ export const defaultRunner: GitRunner = (cmd, args, opts) => {
     cwd: opts.cwd,
     env: opts.env ?? process.env,
     input: opts.input,
+    timeout: opts.timeoutMs,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -104,7 +105,7 @@ interface Ctx {
   run: (
     cmd: string,
     args: string[],
-    extra?: { env?: NodeJS.ProcessEnv; input?: string },
+    extra?: { env?: NodeJS.ProcessEnv; input?: string; timeoutMs?: number },
   ) => RunResult;
 }
 
@@ -128,7 +129,12 @@ function makeCtx(opts: DurableOpts): Ctx | null {
     ledgerRel: ledgerRel || LEDGER_REL,
     eventsRel: `${dirname(ledgerRel || LEDGER_REL)}/events`,
     run: (cmd, args, extra) =>
-      runner(cmd, args, { cwd: root, env: extra?.env ?? opts.env, input: extra?.input }),
+      runner(cmd, args, {
+        cwd: root,
+        env: extra?.env ?? opts.env,
+        input: extra?.input,
+        timeoutMs: extra?.timeoutMs,
+      }),
   };
 }
 
@@ -247,23 +253,35 @@ function localEntries(workDir: string): EventEntry[] {
  */
 export function openPrDecisionIds(ctx: { run: Ctx['run']; eventsRel: string }): Set<string> {
   const out = new Set<string>();
-  const r = ctx.run('gh', [
-    'pr',
-    'list',
-    '--state',
-    'open',
-    '--limit',
-    '200',
-    '--json',
-    'files',
-    '--jq',
-    '.[].files[].path',
-  ]);
+  let r: RunResult;
+  try {
+    r = ctx.run(
+      'gh',
+      ['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'files,isCrossRepository'],
+      { env: { ...process.env, GH_PROMPT_DISABLED: '1' }, timeoutMs: 10_000 },
+    );
+  } catch {
+    return out;
+  }
   if (r.status !== 0) return out;
-  for (const path of lines(r.stdout)) {
-    if (!path.startsWith(`${ctx.eventsRel}/`)) continue;
-    const m = path.match(/__(DEC-\d+)__/);
-    if (m) out.add(m[1]);
+  let prs: unknown;
+  try {
+    prs = JSON.parse(r.stdout);
+  } catch {
+    return out;
+  }
+  if (!Array.isArray(prs)) return out;
+  for (const pr of prs as Array<{
+    files?: Array<{ path?: unknown }>;
+    isCrossRepository?: unknown;
+  }>) {
+    // Fork / outside-author PRs are untrusted input: never let them reserve ids.
+    if (!pr || pr.isCrossRepository !== false || !Array.isArray(pr.files)) continue;
+    for (const f of pr.files) {
+      if (typeof f?.path !== 'string' || !f.path.startsWith(`${ctx.eventsRel}/`)) continue;
+      const m = f.path.match(/__(DEC-\d{4,6})__/);
+      if (m) out.add(m[1]);
+    }
   }
   return out;
 }
@@ -296,7 +314,9 @@ export function nextDecisionIdDurable(opts: DurableOpts): string {
   let max = 0;
   for (const id of ids) {
     const m = id.match(/^DEC-(\d+)$/);
-    if (m) max = Math.max(max, Number.parseInt(m[1], 10));
+    if (!m) continue;
+    const n = Number.parseInt(m[1], 10);
+    if (Number.isSafeInteger(n) && n < 1_000_000) max = Math.max(max, n);
   }
   return formatDecisionId(max + 1);
 }
