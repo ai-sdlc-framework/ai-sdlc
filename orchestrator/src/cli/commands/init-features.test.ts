@@ -15,6 +15,8 @@
  * complementary instead of duplicative.
  */
 
+import { ADOPTER_TEMPLATE_POSTS_APPROVAL } from './init-templates.js';
+import { buildBranchProtectionBody } from './branch-protection-shared.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -728,7 +730,8 @@ describe('applyBranchProtection', () => {
     const result = await applyBranchProtection('/proj', { ...baseFlags, dryRun: true }, adapters);
     expect(result.applied).toBe(false);
     expect(result.bodyJson).toContain('"ai-sdlc/pr-ready"');
-    expect(result.bodyJson).toContain('"codecov/patch"');
+    expect(result.bodyJson).toContain('"ai-sdlc/pr-ready"');
+    expect(result.bodyJson).not.toContain('codecov/patch');
     // `gh` should NOT have been invoked in dry-run.
     expect(state.runCommandCalls.length).toBe(0);
     // The JSON must have been logged.
@@ -804,6 +807,59 @@ describe('applyBranchProtection', () => {
     }
   });
 
+  it('AISDLC-748: adopter template currently ships no verifying approver', () => {
+    expect(ADOPTER_TEMPLATE_POSTS_APPROVAL).toBe(false);
+  });
+
+  it.each([
+    [false, 0, 'not yet enabled'],
+    [true, 1, '1 approving review'],
+  ])(
+    'AISDLC-748 200 path, templatePostsApproval=%s: requires %i approving reviews',
+    async (flag, count, phrase) => {
+      const { state, adapters } = makeStub({
+        runResponses: new Map([
+          ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+          ['gh api', { stdout: '{}', exitCode: 0 }],
+        ]),
+      });
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpflag-'));
+      try {
+        const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
+        expect(result.mode).toBe('server');
+        const body = JSON.parse(result.bodyJson);
+        expect(body.required_pull_request_reviews.required_approving_review_count).toBe(count);
+        expect(body.required_status_checks.contexts).toContain('ai-sdlc/pr-ready');
+        const out = state.log.join('\n');
+        expect(out).toContain(phrase);
+        expect(out).toContain('--no-branch-protection');
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([[false], [true]])(
+    'AISDLC-748 403 path, templatePostsApproval=%s: client-side fallback unchanged',
+    async (flag) => {
+      const { state, adapters } = makeStub({
+        runResponses: new Map([
+          ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+          ['gh api', { stdout: 'HTTP 403: Upgrade to GitHub Pro', exitCode: 1 }],
+        ]),
+      });
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bp403flag-'));
+      try {
+        const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
+        expect(result.mode).toBe('client-side');
+        expect(result.error).toBeUndefined();
+        expect(state.log.join('\n')).toContain('client-side enforcement');
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('round-2 MAJOR fix: handles projectDir with a literal space without word-splitting', async () => {
     // Reviewer flagged that the prior `execSync(\`${cmd} ${args.join(' ')}\`)`
     // form ran the command through `/bin/sh -c`, which word-splits on
@@ -847,7 +903,9 @@ describe('applyBranchProtection', () => {
       // the implementation writes it via writeFileSync (not through the
       // adapter). Reads it back to ensure no path corruption.
       const written = readFileSync(tmpPathArg, 'utf-8');
-      expect(JSON.parse(written)).toEqual(RECOMMENDED_BRANCH_PROTECTION_BODY);
+      expect(JSON.parse(written)).toEqual(
+        buildBranchProtectionBody(ADOPTER_TEMPLATE_POSTS_APPROVAL),
+      );
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
     }
