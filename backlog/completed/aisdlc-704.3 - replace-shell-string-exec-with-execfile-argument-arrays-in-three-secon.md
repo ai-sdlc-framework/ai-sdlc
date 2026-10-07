@@ -44,4 +44,5 @@ Hardened the three flagged git call sites against second-order option injection:
 - 3 parallel reviews approved (codex quota exhausted; Claude-native code/test reviewers used)
 
 ## Follow-up
-Alerts 180, 176, 167 read `fixed` only after a CodeQL re-scan post-merge. declined: broadening the denylist to abbreviations (minor, backstop only).
+- declined: broadening the denylist to abbreviations; minor backstop-only finding, the `--` separator is the primary defense.
+- declined: alerts 180, 176 and 167 read fixed only after a CodeQL re-scan once merged; that is automatic, no task needed.
