@@ -4,11 +4,13 @@ import type { Register } from 'claude-code';
 import type { MeterAction, Totals } from '../types';
 import {
   EMPTY_TOTALS,
+  IDLE_HANDOFF,
   LEVEL_COLOR,
   addUsage,
   bar,
   costWeight,
   formatTokens,
+  handoffStep,
   levelFor,
   percentOfWindow,
   resolveThresholds,
@@ -16,10 +18,8 @@ import {
 
 const totalsAtom = atom({ plugin: 'context-meter', key: 'totals' } as const, EMPTY_TOTALS);
 const confirmAtom = atom({ plugin: 'context-meter', key: 'confirm' } as const, null);
-const clearAfterHandoff = atom(
-  { plugin: 'context-meter', key: 'clearAfterHandoff' } as const,
-  false,
-);
+const handoffAtom = atom({ plugin: 'context-meter', key: 'handoff' } as const, IDLE_HANDOFF);
+const noteAtom = atom({ plugin: 'context-meter', key: 'note' } as const, null);
 
 const HANDOFF_PROMPT =
   'Write your dated handoff memory file now (state, open work, next steps; index it in MEMORY.md), ' +
@@ -39,18 +39,38 @@ export const register: Register = (on, options) => {
       await update($, totalsAtom, (t: Totals) => addUsage(t, e.usage!));
     }
 
-    if (await read($, clearAfterHandoff)) {
-      await update($, clearAfterHandoff, () => false);
-      if (e.reason === 'answer') {
-        void $.command.run({ command: 'clear' });
-      }
+    // A pending confirmation does not outlive the turn it was asked in.
+    await update($, confirmAtom, () => null);
+
+    const step = handoffStep(
+      await read($, handoffAtom),
+      { kind: 'turn.complete', turnId: e.turnId, reason: e.reason, agentId: e.agentId },
+      HANDOFF_PROMPT,
+    );
+    await update($, handoffAtom, () => step.state);
+    if (step.clear) {
+      void $.command.run({ command: 'clear' });
     }
 
     return next(e);
   });
 
+  // Only the handoff prompt's own turn arms the clear; match it by its text.
+  on('turn.start', async ($, e, next) => {
+    const step = handoffStep(
+      await read($, handoffAtom),
+      { kind: 'turn.start', turnId: e.turnId, text: e.text },
+      HANDOFF_PROMPT,
+    );
+    await update($, handoffAtom, () => step.state);
+    return next(e);
+  });
+
   // /clear starts a fresh session: totals count from there.
   on('session.end', async ($, e, next) => {
+    await update($, confirmAtom, () => null);
+    await update($, handoffAtom, () => IDLE_HANDOFF);
+    await update($, noteAtom, () => null);
     if (e.reason === 'clear') {
       await update($, totalsAtom, () => EMPTY_TOTALS);
     }
@@ -83,6 +103,7 @@ export const register: Register = (on, options) => {
     }
 
     const confirm = await read($, confirmAtom);
+    const note = await read($, noteAtom);
     const level = levelFor(percent, thresholds);
     const color = LEVEL_COLOR[level];
     const { Box, Button, Text } = $.ui.resolve(e);
@@ -106,6 +127,11 @@ export const register: Register = (on, options) => {
             {usd === undefined ? '' : ` · $${usd.toFixed(2)}`}{' '}
           </Text>
         </Box>
+        {note === null ? null : (
+          <Box>
+            <Text color="red">{note}</Text>
+          </Box>
+        )}
         {confirm === null ? (
           <Box>
             <Button
@@ -132,13 +158,25 @@ export const register: Register = (on, options) => {
               label="Yes"
               onPress={async () => {
                 await update($, confirmAtom, () => null);
-                if (confirm === 'compact') {
-                  await $.session.compact();
-                } else if (confirm === 'clear') {
-                  await $.command.run({ command: 'clear' });
-                } else {
-                  await update($, clearAfterHandoff, () => true);
-                  await $.prompt.submit({ text: HANDOFF_PROMPT });
+                await update($, noteAtom, () => null);
+                try {
+                  if (confirm === 'compact') {
+                    await $.session.compact();
+                  } else if (confirm === 'clear') {
+                    await $.command.run({ command: 'clear' });
+                  } else {
+                    const armed = handoffStep(IDLE_HANDOFF, { kind: 'submit' }, HANDOFF_PROMPT);
+                    await update($, handoffAtom, () => armed.state);
+                    try {
+                      await $.prompt.submit({ text: HANDOFF_PROMPT });
+                    } catch (err) {
+                      await update($, handoffAtom, () => IDLE_HANDOFF);
+                      throw err;
+                    }
+                  }
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  await update($, noteAtom, () => `${LABELS[confirm]} failed: ${msg}`);
                 }
               }}
             />

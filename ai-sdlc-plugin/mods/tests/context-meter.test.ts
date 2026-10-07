@@ -8,6 +8,8 @@ import {
   bar,
   costWeight,
   formatTokens,
+  handoffStep,
+  IDLE_HANDOFF,
   levelFor,
   percentOfWindow,
   resolveThresholds,
@@ -87,4 +89,53 @@ test('formatting and bar', () => {
   assert.equal(bar(15), '█'.repeat(20));
   assert.equal(bar(99), '█'.repeat(20));
   assert.equal(bar(7.5), '█'.repeat(10) + '░'.repeat(10));
+});
+
+const HT = 'handoff prompt';
+
+test('handoff: an earlier in-flight turn completing while armed does not clear', () => {
+  let r = handoffStep(IDLE_HANDOFF, { kind: 'submit' }, HT);
+  r = handoffStep(r.state, { kind: 'turn.complete', turnId: 'old', reason: 'answer' }, HT);
+  assert.equal(r.clear, false);
+  assert.deepEqual(r.state, { phase: 'armed' });
+});
+
+test('handoff: a different turn starting does not bind the flag', () => {
+  let r = handoffStep(IDLE_HANDOFF, { kind: 'submit' }, HT);
+  r = handoffStep(r.state, { kind: 'turn.start', turnId: 'other', text: 'hello' }, HT);
+  assert.deepEqual(r.state, { phase: 'armed' });
+});
+
+test('handoff: answer on the handoff turn clears once; other turns and agents never consume it', () => {
+  let r = handoffStep(IDLE_HANDOFF, { kind: 'submit' }, HT);
+  r = handoffStep(r.state, { kind: 'turn.start', turnId: 't1', text: HT }, HT);
+  assert.deepEqual(r.state, { phase: 'running', turnId: 't1' });
+  r = handoffStep(r.state, { kind: 'turn.complete', turnId: 'x', reason: 'answer' }, HT);
+  assert.equal(r.clear, false);
+  r = handoffStep(
+    r.state,
+    { kind: 'turn.complete', turnId: 't1', reason: 'answer', agentId: 'a' },
+    HT,
+  );
+  assert.equal(r.clear, false);
+  r = handoffStep(r.state, { kind: 'turn.complete', turnId: 't1', reason: 'answer' }, HT);
+  assert.equal(r.clear, true);
+  assert.deepEqual(r.state, IDLE_HANDOFF);
+});
+
+test('handoff: a handoff turn that ends without an answer disarms without clearing', () => {
+  let r = handoffStep(IDLE_HANDOFF, { kind: 'submit' }, HT);
+  r = handoffStep(r.state, { kind: 'turn.start', turnId: 't1', text: HT }, HT);
+  r = handoffStep(r.state, { kind: 'turn.complete', turnId: 't1', reason: 'aborted' }, HT);
+  assert.equal(r.clear, false);
+  assert.deepEqual(r.state, IDLE_HANDOFF);
+});
+
+test('resolveThresholds: all-or-nothing when the trio is unordered', () => {
+  assert.deepEqual(resolveThresholds({ amberAtPercent: 20 }), DEFAULT_THRESHOLDS);
+  assert.deepEqual(resolveThresholds({ amberAtPercent: 5, hotAtPercent: 'x' }), {
+    amber: 5,
+    hot: 13,
+    red: 15,
+  });
 });
