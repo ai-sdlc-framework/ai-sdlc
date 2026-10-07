@@ -383,9 +383,15 @@ const SHELL_TREE_REWRITE =
   /(?:^|[\s;&|(])git\s+(?:-\S+\s+\S+\s+)*(?:switch|am|cherry-pick|stash\s+apply|reset\s+--hard)(?=\s|$)/i;
 const SHELL_CD_PROTECTED = new RegExp(String.raw`(?:^|[\s;&|(])cd\s+['"]?[^\s;|&'"]*${PROT}`, 'i');
 
+// AISDLC-740: GITHUB_ENV / GITHUB_PATH / GITHUB_OUTPUT writes persist into later steps, which
+// is how an untrusted step would smuggle AI_SDLC_INTERNAL_RUN=1 past the step-level rule.
+const SHELL_GITHUB_ENV_WRITE =
+  /(?:>>?\s*['"]?\$\{?GITHUB_(?:ENV|PATH)\b|\btee\b[^;&|\n]*\$\{?GITHUB_(?:ENV|PATH)\b)/i;
+
 function enforceUntrustedShellWrites(command) {
   if (!UNTRUSTED.untrusted) return;
   const msg = untrustedMessage('a shell command writing to a protected path');
+  if (SHELL_GITHUB_ENV_WRITE.test(command)) deny(msg);
   // Best-effort pattern matching; shell is not a boundary (CI is). Glob, variable and
   // eval forms of the protected names can still evade it.
   if (SHELL_TREE_REWRITE.test(command)) deny(msg);

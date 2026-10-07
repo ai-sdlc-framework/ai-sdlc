@@ -2,18 +2,17 @@
 /**
  * AISDLC-720.1: CI boundary for outside contributions.
  *
- * Fails a pull request that changes governance config or workflow files when it
- * comes from a fork, or from an author whose author_association is not OWNER,
- * MEMBER or COLLABORATOR. Decided purely from GitHub facts passed in by the
- * workflow (never from the PR's own content).
+ * Fails a pull request that changes governance config or workflow files when its
+ * head repository is a fork (head.repo.full_name != base.repo.full_name).
+ * AISDLC-740: trust is NOT keyed on author_association: GitHub reported a maintainer
+ * as CONTRIBUTOR on a same-repo PR, and a same-repo branch requires write access anyway.
+ * Decided purely from GitHub facts passed in by the workflow (never from the PR's content).
  *
  * CLI: node scripts/check-governance-boundary.mjs --files <file-with-one-path-per-line>
- * Env: PR_IS_FORK ('true'|'false'), PR_AUTHOR_ASSOCIATION, PR_AUTHOR_LOGIN, PR_AUTHOR_TYPE
+ * Env: PR_IS_FORK ('true'|'false'; anything but 'false' is treated as a fork), PR_CHANGED_FILES
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-
-export const TRUSTED_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR'];
 
 /**
  * Covered paths. Prefix entries end in '/'; the rest are exact paths or single-level
@@ -29,6 +28,15 @@ export const GOVERNANCE_PATTERNS = [
   '.ai-sdlc/templates/',
   '.ai-sdlc/schemas/',
   'scripts/verify-attestation.mjs',
+  // AISDLC-740: scripts that run in trusted CI/hook context must cover themselves.
+  'scripts/check-governance-boundary.mjs',
+  'scripts/is-docs-only-changeset.mjs',
+  'scripts/check-pr-patch-coverage.mjs',
+  'scripts/post-attestation-review.mjs',
+  'scripts/check-attestation-sign.sh',
+  'scripts/check-skip-ci-marker.sh',
+  'scripts/pre-push-fixups.sh',
+  'scripts/check-dark-code.mjs',
   '.ai-sdlc/dark-code-baseline.json',
   '.ai-sdlc/*.yaml', // adapter-binding*, agent-role*, pipeline*, quality-gate, ...
   '.ai-sdlc/*-policy.md',
@@ -79,32 +87,21 @@ export function checkFileListComplete({ declared, rows }) {
 }
 
 /**
- * @param {{isFork: boolean, authorAssociation?: string, authorLogin?: string,
- *          authorType?: string, changedFiles: string[]}} input
+ * @param {{isFork: boolean, changedFiles: string[]}} input
  * @returns {{ok: boolean, offending: string[], message: string}}
  */
-export function evaluateGovernanceBoundary({
-  isFork,
-  authorAssociation = '',
-  authorLogin = '',
-  authorType = '',
-  changedFiles,
-}) {
+export function evaluateGovernanceBoundary({ isFork, changedFiles }) {
   const offending = changedFiles.filter(isGovernancePath);
-  // Dependabot is GitHub's own bot identity and only ever pushes same-repository branches.
-  const isDependabot = authorLogin === 'dependabot[bot]' && authorType === 'Bot' && !isFork;
-  const trusted = !isFork && (TRUSTED_ASSOCIATIONS.includes(authorAssociation) || isDependabot);
-  if (trusted || offending.length === 0) return { ok: true, offending: [], message: 'ok' };
-  const who = isFork ? 'a fork' : `an author with association ${authorAssociation || 'NONE'}`;
+  // Same-repo head => the author had write access to push the branch => trusted.
+  // Dependabot also pushes same-repo branches, so it needs no special case.
+  if (!isFork || offending.length === 0) return { ok: true, offending: [], message: 'ok' };
   return {
     ok: false,
     offending,
     message:
-      `This pull request is from ${who} and changes governance config or workflows ` +
+      'This pull request is from a fork and changes governance config or workflows ' +
       `(${offending.join(', ')}). A maintainer must make that change: ask a maintainer to ` +
-      'open the change from a branch in this repository. GitHub may report private ' +
-      'organization members as CONTRIBUTOR or NONE; if that is you, a maintainer must ' +
-      'make or re-push the change.',
+      'open the change from a branch in this repository.',
   };
 }
 
@@ -127,9 +124,6 @@ export function main(argv = process.argv, env = process.env) {
   const changedFiles = lines.flatMap((l) => l.split('\t').filter(Boolean));
   const r = evaluateGovernanceBoundary({
     isFork: env.PR_IS_FORK !== 'false',
-    authorAssociation: env.PR_AUTHOR_ASSOCIATION,
-    authorLogin: env.PR_AUTHOR_LOGIN,
-    authorType: env.PR_AUTHOR_TYPE,
     changedFiles,
   });
   if (!r.ok)

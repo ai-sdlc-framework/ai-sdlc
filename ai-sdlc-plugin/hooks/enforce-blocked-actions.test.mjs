@@ -1784,6 +1784,19 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720: trust model)'
     assert.ok(!isDenied(bash('cat .ai-sdlc/agent-role.yaml', UNTRUSTED)), 'reads are fine');
   });
 
+  it('AISDLC-740: untrusted shell writes to $GITHUB_ENV / $GITHUB_PATH are refused', () => {
+    for (const cmd of [
+      'echo AI_SDLC_INTERNAL_RUN=1 >> $GITHUB_ENV',
+      'echo AI_SDLC_INTERNAL_RUN=1 >> "$GITHUB_ENV"',
+      'echo x >> ${GITHUB_PATH}',
+      'echo AI_SDLC_INTERNAL_RUN=1 | tee -a "$GITHUB_ENV"',
+    ]) {
+      const r = bash(cmd, UNTRUSTED);
+      assert.ok(isDenied(r), cmd);
+    }
+    assert.ok(!isDenied(bash('echo $GITHUB_ENV', UNTRUSTED)), 'reading the name is fine');
+  });
+
   it('untrusted signal cannot be cleared from inside the run', () => {
     // env assignments / export / unset in the command do not matter: hook reads its own env.
     for (const cmd of [

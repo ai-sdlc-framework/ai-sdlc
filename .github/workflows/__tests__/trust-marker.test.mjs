@@ -124,8 +124,20 @@ test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout,
     assert.ok(!/\$\{\{\s*github\.event/.test(String(s.run ?? '')), 'no github.event in run:');
   }
   assert.match(JSON.stringify(job.steps), /check-governance-boundary\.mjs/);
-  const env = job.steps.find((s) => s.env?.PR_CHANGED_FILES)?.env;
-  assert.match(env.PR_CHANGED_FILES, /github\.event\.pull_request\.changed_files/);
+  // AISDLC-740: trust keys on fork vs same-repo head, never author_association.
+  const env = job.steps.find((s) => s.env?.PR_IS_FORK)?.env;
+  assert.match(
+    env.PR_IS_FORK,
+    /head\.repo\.full_name != github\.event\.pull_request\.base\.repo\.full_name/,
+  );
+  assert.ok(!/author_association/.test(JSON.stringify(job)), 'no author_association in the job');
+  // Race: files come from the compare API at head.sha, not the event's changed_files.
+  const steps = JSON.stringify(job.steps);
+  assert.match(steps, /compare\/\$\{BASE_SHA\}\.\.\.\$\{HEAD_SHA\}/);
+  assert.ok(!/event\.pull_request\.changed_files/.test(steps), 'not the event changed_files');
+  // Check-name collision: published under a unique commit-status context.
+  assert.match(steps, /ai-sdlc\/governance-boundary/);
+  assert.equal(job.permissions.statuses, 'write');
 });
 
 // AISDLC-730: the issue workflow runs the Orchestrator class path (not executePipeline), so the
